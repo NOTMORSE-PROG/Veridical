@@ -1,0 +1,11 @@
+# Summary: imperative mood, <72 chars, reference the ticket (V-###)
+# e.g. "Add rubric decomposition parser (V-010)"
+#
+# Body (optional): plain language, wrap at ~72 chars. Say WHAT changed
+# and WHY. The matching entry in context/CHANGELOG.md carries the
+# detail; the pre-commit hook checks it exists for code changes.
+#
+# Rules:
+# - One logical change per commit
+# - Code commits require a context/CHANGELOG.md entry (local, untracked)
+# - Reference tickets as V-### wherever relevant

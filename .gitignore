@@ -1,0 +1,48 @@
+# ── Internal docs: local-only by project policy ─────────────────
+# The project's working memory (AI charter, context brain, ticket board,
+# design sources) is deliberately NOT committed. Only public docs
+# (README.md, FEATURES.md) and code are tracked. See README.md.
+/*.md
+!/README.md
+!/FEATURES.md
+context/
+tickets/
+design/
+*.pdf
+
+# ── Secrets / environment ────────────────────────────────────────
+.env
+.env.*
+*.key
+config/secrets.yaml
+config/keys.yaml
+
+# ── Python ───────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+dist/
+build/
+*.egg-info/
+
+# ── Node / frontend ──────────────────────────────────────────────
+node_modules/
+frontend/dist/
+.vite/
+
+# ── Runtime data (anchored: keeps src/**/data importable) ────────
+/data/
+*.log
+
+# ── OS / editor ──────────────────────────────────────────────────
+Thumbs.db
+Desktop.ini
+.DS_Store
+.idea/
+.vscode/

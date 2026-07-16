@@ -1,0 +1,10 @@
+# Normalize line endings to LF in the repo; checkout as-is where safe.
+* text=auto eol=lf
+
+# Binary files: never normalize
+*.png binary
+*.jpg binary
+*.ico binary
+*.pdf binary
+*.woff binary
+*.woff2 binary

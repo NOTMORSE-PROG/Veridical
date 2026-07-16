@@ -1,0 +1,3 @@
+#!/bin/sh
+# Copy me to .git/hooks/pre-commit (see tools/check_changelog.py docstring)
+python "$(git rev-parse --show-toplevel)/tools/check_changelog.py"
