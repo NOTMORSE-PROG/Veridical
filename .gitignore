@@ -13,6 +13,7 @@ design/
 # ── Secrets / environment ────────────────────────────────────────
 .env
 .env.*
+!.env.example
 *.key
 config/secrets.yaml
 config/keys.yaml

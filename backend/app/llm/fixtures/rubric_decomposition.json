@@ -1,0 +1,18 @@
+{
+  "prompt_type": "rubric_decomposition",
+  "note": "Placeholder shape — the real prompt/parser contract is defined in V-010 (F2.1).",
+  "criteria": [
+    {
+      "text": "Manuscript contains an abstract of at most 250 words",
+      "type": "structural",
+      "evidence": "Abstract section, word count",
+      "weight": 5
+    },
+    {
+      "text": "Chapter 1 states the research problem and its significance",
+      "type": "semantic",
+      "evidence": "Chapter 1 sections 1.1-1.2",
+      "weight": 10
+    }
+  ]
+}

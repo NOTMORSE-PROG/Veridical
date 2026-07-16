@@ -1,0 +1,36 @@
+services:
+  db:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_USER: veridical
+      POSTGRES_PASSWORD: veridical
+      POSTGRES_DB: veridical
+    # Host port 5433: dev machines often run a native Postgres on 5432
+    # (the owner's does), which silently shadows the container from the
+    # host side. Inside the compose network the API still uses db:5432.
+    ports:
+      - "5433:5432"
+    volumes:
+      - veridical-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U veridical -d veridical"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  api:
+    build: ./backend
+    ports:
+      - "8000:8000"
+    environment:
+      DATABASE_URL: postgresql://veridical:veridical@db:5432/veridical
+      # Fake-LLM by default: compose runs burn zero quota and need no keys.
+      VERIDICAL_FAKE_LLM: ${VERIDICAL_FAKE_LLM:-1}
+      VERIDICAL_ENV: ${VERIDICAL_ENV:-dev}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+    depends_on:
+      db:
+        condition: service_healthy
+
+volumes:
+  veridical-pgdata:

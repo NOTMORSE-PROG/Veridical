@@ -30,7 +30,34 @@ Internal working documents — planning notes, decision logs, the ticket board (
 git clone <repo>
 cd Veridical
 git config commit.template .gitmessage
-# backend/frontend setup instructions land with milestone V0 (see FEATURES.md §8 roadmap)
+```
+
+### Backend (FastAPI + Postgres/pgvector)
+
+Requires Docker (or Python 3.12 + [uv](https://docs.astral.sh/uv/) for bare-metal dev).
+
+```bash
+docker compose up --build      # Postgres 16 + pgvector, then the API on :8000
+curl http://localhost:8000/health
+```
+
+The compose Postgres is published on host port **5433** (not 5432, which is
+frequently occupied by a native Postgres install) — the backend's default
+`DATABASE_URL` already points there.
+
+The compose stack defaults to **fake-LLM mode** (`VERIDICAL_FAKE_LLM=1`): the
+Gemini client is swapped for a fixture-backed stub, so no API keys and no
+quota are needed. To configure anything, `cp .env.example .env` and edit —
+every variable is documented there. `.env` is never committed.
+
+Bare-metal dev loop:
+
+```bash
+cd backend
+uv sync                        # install deps (creates .venv)
+uv run pytest                  # tests — no DB or keys required
+uv run ruff check .            # lint
+uv run uvicorn app.main:app --reload
 ```
 
 ## Commit conventions

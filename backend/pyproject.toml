@@ -1,0 +1,34 @@
+[project]
+name = "veridical-backend"
+version = "0.1.0"
+description = "VERIDICAL API — defense-readiness checks for capstone manuscripts"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.139",
+    "uvicorn[standard]>=0.30",
+    "pydantic-settings>=2.6",
+    "asyncpg>=0.30",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8",
+    "pytest-asyncio>=0.25",
+    "httpx>=0.27",
+    "ruff>=0.8",
+]
+
+[tool.uv]
+package = false
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "SIM"]
