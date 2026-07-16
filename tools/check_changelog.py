@@ -28,6 +28,14 @@ CHANGELOG = REPO_ROOT / "context" / "CHANGELOG.md"
 ENFORCED_PREFIXES = ("backend/", "frontend/", "src/", "tools/")
 ENFORCED_FILES = ("pyproject.toml", "package.json", "uv.lock", "run.py")
 
+# Owner's rule (D-007): internal working files are NEVER committed.
+# .gitignore normally handles this, but `git add -f` can bypass it; this
+# hard-blocks the commit if any internal path is staged. Root markdown
+# files are internal unless whitelisted below.
+PUBLIC_ROOT_MD = ("README.md", "FEATURES.md")
+INTERNAL_PREFIXES = ("context/", "tickets/", "design/")
+INTERNAL_SUFFIXES = (".pdf",)
+
 
 def staged_files() -> list[str]:
     out = subprocess.run(
@@ -54,8 +62,33 @@ def changelog_has_entry_for_today() -> bool:
     return bool(re.search(rf"^##\s+{re.escape(today)}\b", head, re.MULTILINE))
 
 
+def staged_internal(paths: list[str]) -> list[str]:
+    hits = []
+    for p in paths:
+        norm = p.replace("\\", "/")
+        root_internal_md = ("/" not in norm and norm.endswith(".md")
+                            and norm not in PUBLIC_ROOT_MD)
+        if (norm.startswith(INTERNAL_PREFIXES)
+                or root_internal_md
+                or norm.lower().endswith(INTERNAL_SUFFIXES)):
+            hits.append(norm)
+    return hits
+
+
 def main() -> int:
     paths = staged_files()
+
+    leaked = staged_internal(paths)
+    if leaked:
+        sys.stderr.write(
+            "\nCOMMIT BLOCKED by tools/check_changelog.py\n"
+            "Internal (local-only) files are staged — these are NEVER\n"
+            "committed by owner's rule (D-007):\n\n"
+            + "".join(f"  {p}\n" for p in leaked)
+            + "\nUnstage them:  git restore --staged " + " ".join(leaked) + "\n"
+        )
+        return 1
+
     if not touches_enforced(paths):
         return 0
     if changelog_has_entry_for_today():
