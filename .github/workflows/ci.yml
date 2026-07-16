@@ -42,3 +42,26 @@ jobs:
         env:
           VERIDICAL_FAKE_LLM: "1"
           DATABASE_URL: postgresql://veridical:veridical@localhost:5432/veridical
+
+  frontend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install dependencies
+        run: npm ci
+      - name: Lint (oxlint)
+        run: npm run lint
+      - name: Tests (vitest)
+        run: npm test
+      - name: Build (tsc + vite)
+        run: npm run build
+      - name: Token purge guard
+        run: npm run check:css

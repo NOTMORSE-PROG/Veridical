@@ -1,0 +1,94 @@
+/*
+ * VERIDICAL design tokens — the single source for every color, font, radius
+ * and shadow in the UI (DESIGN.md is the authority; wireframes are the visual
+ * reference). Tailwind v4's @theme emits BOTH the CSS custom properties and
+ * the utility classes from this one block, so nothing is duplicated.
+ * Components must not carry raw values (charter rule 7 / ENGINEERING.md §8).
+ * Type sizes are the wireframe values scaled ~1.15x (DESIGN.md §1 density note).
+ */
+
+@theme {
+  /*
+   * Wipe Tailwind's default palette: only VERIDICAL color tokens exist, so
+   * a non-token color utility (e.g. bg-red-500) simply does not compile —
+   * a mechanical guard for the tokens-only rule (D-010).
+   */
+  --color-*: initial;
+
+  /* Brand & text */
+  --color-primary: #2456a8;
+  --color-primary-hover: #1d4587;
+  --color-on-primary: #ffffff;
+  --color-ink: #1c1e21;
+  --color-ink-soft: #5a6270;
+  --color-ink-faint: #8a919c;
+  --color-placeholder: #9aa1ab;
+
+  /* Surfaces & borders */
+  --color-page: #f4f7fc;
+  --color-panel: #ffffff;
+  --color-border: #e0e7f2;
+  --color-border-soft: #edf1f8;
+  --color-border-input: #d3dcea;
+  --color-border-button: #c6d2e5;
+  --color-table-head: #7d8aa3;
+  --color-table-head-bg: #eef3fb;
+
+  /* Status pills — exact bg/text pairs from DESIGN.md §1 */
+  --color-status-ok-bg: #e5f1ea;
+  --color-status-ok-text: #1e6b43;
+  --color-status-warn-bg: #f9f0dd;
+  --color-status-warn-text: #8a5b10;
+  --color-status-bad-bg: #f9e8e5;
+  --color-status-bad-text: #a13a2c;
+  --color-status-processing-bg: #e7eefa;
+  --color-status-processing-text: #2456a8;
+  --color-status-queued-bg: #edeff2;
+  --color-status-queued-text: #5a6270;
+
+  /* Severity (dots; tags reuse the pill palettes) */
+  --color-severity-high: #bf4b36;
+  --color-severity-medium: #c98a1e;
+  --color-severity-low: #98a0aa;
+
+  /* Steppers */
+  --color-step-done: #2e7d52;
+  --color-step-pending-border: #c9cdd4;
+  --color-step-pending-text: #98a0aa;
+
+  /* Info banner, evidence excerpt, modal chrome */
+  --color-info-bg: #eef4fb;
+  --color-info-border: #d4e3f7;
+  --color-info-text: #2b5687;
+  --color-excerpt-text: #3d434c;
+  --color-backdrop: #e8ecf3;
+  --color-modal-border: #dbe3ef;
+
+  /* Type — wireframe px × ~1.15, hierarchy preserved */
+  --font-sans: "Helvetica Neue", Helvetica, Arial, system-ui, sans-serif;
+  --text-2xs: 11.5px; /* wireframe 10px — uppercase table/section headers, tags */
+  --text-2xs--line-height: 1.3;
+  --text-xs: 12.5px; /* wireframe 11px — notes, pills, chips */
+  --text-xs--line-height: 1.35;
+  --text-sm: 13px; /* wireframe 11.5px — info banners, excerpts */
+  --text-sm--line-height: 1.4;
+  --text-base: 14px; /* wireframe 12px — body */
+  --text-base--line-height: 1.45;
+  --text-md: 15px; /* wireframe 13px — panel/modal titles */
+  --text-md--line-height: 1.35;
+  --text-lg: 18px; /* wireframe 16px — page titles */
+  --text-lg--line-height: 1.25;
+  --text-xl: 21px; /* wireframe 18px — KPI numbers */
+  --text-xl--line-height: 1.15;
+
+  --tracking-header: 0.08em;
+
+  /* Shape */
+  --radius-panel: 8px;
+  --radius-control: 6px; /* buttons, inputs */
+  --radius-tag: 4px;
+  --radius-modal: 10px;
+  --radius-pill: 999px;
+
+  --shadow-modal: 0 8px 24px rgba(28, 42, 64, 0.12);
+}
