@@ -27,7 +27,8 @@ jobs:
           --health-retries 10
     steps:
       - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v8
+      # No floating major tag exists for setup-uv v8+ — pin the release SHA.
+      - uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
         with:
           enable-cache: true
       - name: Install dependencies
