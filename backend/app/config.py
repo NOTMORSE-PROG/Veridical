@@ -30,6 +30,12 @@ class Settings(BaseSettings):
     # Per-attempt timeout for the /health DB probe. Generous because Neon
     # free tier autosuspends and needs time to wake (ENGINEERING.md §7).
     db_health_timeout: float = 5.0
+    # Dimensionality of manuscript_archive.embedding. Provisional until the
+    # embedding model is chosen (V-036); must stay ≤ 2000 or the HNSW index
+    # can't be built (pgvector limit, verified 2026-07-17). The value is
+    # baked into the DB column at migration time — changing it later means
+    # a new migration, not just an env edit.
+    embedding_dim: int = 768
 
 
 @lru_cache

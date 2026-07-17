@@ -1,8 +1,22 @@
-"""Database access. V-001 scope: connectivity check only (schema is V-003)."""
+"""Database access: connectivity check (V-001) + SQLAlchemy URL helper (V-003)."""
 
 import asyncio
 
 import asyncpg
+
+
+def sqlalchemy_url(dsn: str) -> str:
+    """Name the async driver in a plain-postgres DSN.
+
+    DATABASE_URL stays a standard `postgresql://` DSN (asyncpg and psql
+    read it directly); SQLAlchemy needs the driver spelled out, and
+    asyncpg is the only one installed. `postgres://` is accepted too —
+    some hosts (Neon among them) still issue the legacy scheme.
+    """
+    for scheme in ("postgresql://", "postgres://"):
+        if dsn.startswith(scheme):
+            return "postgresql+asyncpg://" + dsn.removeprefix(scheme)
+    return dsn
 
 
 async def check_connectivity(dsn: str, timeout: float = 5.0) -> tuple[bool, str]:

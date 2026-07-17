@@ -1,0 +1,105 @@
+"""One pipeline execution and everything it produces.
+
+check_run is explicit (not implicit in manuscript) so re-runs under a new
+rubric version are first-class (Flow E) and every result/flag/report hangs
+off exactly one execution.
+"""
+
+import uuid
+from datetime import datetime
+from decimal import Decimal
+from typing import Any
+
+from sqlalchemy import BigInteger, Boolean, DateTime, Enum, ForeignKey, Numeric, Text, Uuid
+from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.orm import Mapped, mapped_column, relationship
+
+from app.models.base import Base, PkCreatedMixin
+from app.models.enums import (
+    CheckKind,
+    CheckRunStatus,
+    FlagSeverity,
+    ReadinessStatus,
+    ReportDecision,
+    ResultOutcome,
+)
+
+
+class CheckRun(Base, PkCreatedMixin):
+    __tablename__ = "check_run"
+
+    manuscript_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("manuscript.id"), index=True)
+    rubric_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("rubric.id"), index=True)
+    status: Mapped[CheckRunStatus] = mapped_column(
+        Enum(CheckRunStatus, native_enum=False), server_default=CheckRunStatus.queued
+    )
+    # Per-stage progress + failure taxonomy state, rendered by screens 4f–4g;
+    # stage granularity is what makes quota-exhausted runs resumable (D-001).
+    stage_status: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    results: Mapped[list["CheckResult"]] = relationship(back_populates="check_run")
+    report: Mapped["ReadinessReport | None"] = relationship(back_populates="check_run")
+
+
+class CheckResult(Base, PkCreatedMixin):
+    __tablename__ = "check_result"
+
+    check_run_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("check_run.id", ondelete="CASCADE"), index=True
+    )
+    # NULL for integrity checks (F4–F7) — they aren't rubric criteria.
+    criterion_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("criterion.id"), index=True
+    )
+    kind: Mapped[CheckKind] = mapped_column(Enum(CheckKind, native_enum=False))
+    outcome: Mapped[ResultOutcome] = mapped_column(Enum(ResultOutcome, native_enum=False))
+    score: Mapped[Decimal | None] = mapped_column(Numeric(5, 2))
+    detail: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+
+    check_run: Mapped["CheckRun"] = relationship(back_populates="results")
+    flags: Mapped[list["Flag"]] = relationship(back_populates="check_result")
+
+
+class Flag(Base, PkCreatedMixin):
+    """A possible inconsistency, never an accusation (charter rule 3).
+
+    evidence_excerpt and page_anchor are NOT NULL by design: a flag the
+    instructor can't verify in 10 seconds is a bad flag even when correct
+    (charter judgment rule 1).
+    """
+
+    __tablename__ = "flag"
+
+    check_result_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("check_result.id", ondelete="CASCADE"), index=True
+    )
+    severity: Mapped[FlagSeverity] = mapped_column(Enum(FlagSeverity, native_enum=False))
+    # Agreement score from self-consistency voting (D-006); NULL for
+    # deterministic checks where confidence isn't a meaningful concept.
+    confidence: Mapped[Decimal | None] = mapped_column(Numeric(4, 3))
+    evidence_excerpt: Mapped[str] = mapped_column(Text)
+    # Where to look: page/section locator; DOCX has no pages, so free-form.
+    page_anchor: Mapped[str] = mapped_column(Text)
+    annotation: Mapped[str | None] = mapped_column(Text)
+    overridden: Mapped[bool] = mapped_column(Boolean, server_default="false")
+    override_reason: Mapped[str | None] = mapped_column(Text)
+
+    check_result: Mapped["CheckResult"] = relationship(back_populates="flags")
+
+
+class ReadinessReport(Base, PkCreatedMixin):
+    __tablename__ = "readiness_report"
+
+    check_run_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("check_run.id", ondelete="CASCADE"), unique=True
+    )
+    composite_score: Mapped[Decimal] = mapped_column(Numeric(5, 2))
+    status: Mapped[ReadinessStatus] = mapped_column(Enum(ReadinessStatus, native_enum=False))
+    # The human decision (F8.5) — VERIDICAL itself never sets this.
+    decision: Mapped[ReportDecision | None] = mapped_column(Enum(ReportDecision, native_enum=False))
+    # Revocable read-only sharing (F8.7): revoke = set NULL, re-share = new UUID.
+    share_token: Mapped[uuid.UUID | None] = mapped_column(Uuid, unique=True)
+
+    check_run: Mapped["CheckRun"] = relationship(back_populates="report")
