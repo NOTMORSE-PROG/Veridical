@@ -1,0 +1,46 @@
+{
+  "_comment": [
+    "Section/heading detection patterns — DATA, not code (charter rule 7).",
+    "An instructor-facing format that numbers or names sections differently",
+    "is accommodated by editing this file (or pointing INGEST_PATTERNS_FILE",
+    "at a copy), never by changing logic. Regexes are Python `re` syntax;",
+    "`chapter`, `caption`, `toc_line_suffix` and list entries are matched",
+    "case-insensitively; `top_numbered` is case-sensitive on purpose (its",
+    "uppercase-start requirement filters numbered list items)."
+  ],
+  "chapter": "^chapter\\s+(?P<num>\\d+|[ivxlcdm]+)\\b\\.?\\s*(?P<title>.*)$",
+  "numbered": "^(?P<num>\\d+(?:\\.\\d+)+)\\.?\\s+(?P<title>\\S.*)$",
+  "top_numbered": "^(?P<num>\\d+)[.)]?\\s+(?P<title>[^a-z\\d\\W].*)$",
+  "unnumbered_sections": [
+    "abstract",
+    "acknowledgment",
+    "acknowledgments",
+    "acknowledgement",
+    "acknowledgements",
+    "dedication",
+    "approval sheet",
+    "executive summary",
+    "table of contents",
+    "list of figures",
+    "list of tables",
+    "list of abbreviations",
+    "definition of terms",
+    "references",
+    "bibliography",
+    "glossary",
+    "appendix",
+    "appendices"
+  ],
+  "caption": "^(?:table|figure|fig\\.)\\s+\\d",
+  "toc_titles": [
+    "table of contents",
+    "contents",
+    "list of figures",
+    "list of tables"
+  ],
+  "furniture": [
+    "^\\d{1,4}$",
+    "^page\\s+\\d+(\\s+of\\s+\\d+)?$"
+  ],
+  "toc_line_suffix": "[.\\u2026\\s]*\\d{1,4}\\s*$"
+}

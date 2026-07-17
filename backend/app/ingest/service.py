@@ -1,0 +1,71 @@
+"""Ingestion orchestration: file → extraction → DB row + raw store.
+
+The ingest stage of the pipeline (ENGINEERING.md §4). Extraction itself is
+CPU-bound and runs in the default threadpool; this module owns the status
+transitions on the manuscript row and the raw-store write.
+"""
+
+import asyncio
+from collections.abc import Callable
+from pathlib import Path
+
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app import messages
+from app.config import Settings, get_settings
+from app.errors import FileMalformedError
+from app.ingest import pdf
+from app.ingest.schemas import ExtractionResult
+from app.models.enums import IngestStatus
+from app.models.manuscript import Manuscript
+
+# One extractor per supported suffix; V-005 adds ".docx". Each is a sync
+# callable executed off the event loop.
+EXTRACTORS: dict[str, Callable[[str, Settings], ExtractionResult]] = {
+    ".pdf": pdf.extract_document,
+}
+
+
+def raw_store_path(settings: Settings, manuscript_id: int) -> Path:
+    return settings.data_dir / f"{manuscript_id}.extraction.json"
+
+
+async def ingest_manuscript(
+    session: AsyncSession,
+    manuscript: Manuscript,
+    file_path: Path,
+    settings: Settings | None = None,
+) -> ExtractionResult:
+    settings = settings or get_settings()
+    extractor = EXTRACTORS.get(file_path.suffix.lower())
+    if extractor is None:
+        raise FileMalformedError(
+            messages.UNSUPPORTED_FILE_TYPE.format(
+                suffix=file_path.suffix, supported=", ".join(sorted(EXTRACTORS))
+            )
+        )
+
+    manuscript.ingest_status = IngestStatus.processing
+    await session.commit()
+    loop = asyncio.get_running_loop()
+    try:
+        result = await loop.run_in_executor(None, extractor, str(file_path), settings)
+        await loop.run_in_executor(
+            None, _write_raw_store, result, raw_store_path(settings, manuscript.id)
+        )
+    except Exception:
+        # Stage boundary (CODING.md §2): the failure is recorded on the row,
+        # then propagates — run-level stage bookkeeping arrives with V-018.
+        manuscript.ingest_status = IngestStatus.failed
+        await session.commit()
+        raise
+
+    manuscript.section_tree = result.section_tree.model_dump()
+    manuscript.ingest_status = IngestStatus.done
+    await session.commit()
+    return result
+
+
+def _write_raw_store(result: ExtractionResult, path: Path) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(result.model_dump_json(), encoding="utf-8")

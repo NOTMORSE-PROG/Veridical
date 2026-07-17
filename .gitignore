@@ -39,6 +39,9 @@ frontend/dist/
 
 # ── Runtime data (anchored: keeps src/**/data importable) ────────
 /data/
+# Raw extraction store (holds manuscript text — never committed);
+# backend/app/ingest/data/ (pattern files) stays tracked.
+/backend/data/
 *.log
 
 # ── OS / editor ──────────────────────────────────────────────────

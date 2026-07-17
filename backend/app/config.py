@@ -6,6 +6,7 @@ and nothing secret is required unless a live integration is actually used.
 """
 
 from functools import lru_cache
+from pathlib import Path
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -36,6 +37,40 @@ class Settings(BaseSettings):
     # baked into the DB column at migration time — changing it later means
     # a new migration, not just an env edit.
     embedding_dim: int = 768
+
+    # --- ingestion (V-004) ---------------------------------------------------
+    # Local store for raw extraction results (page-anchored blocks, images,
+    # geometry). The upload itself is referenced by manuscript.file_ref;
+    # this dir holds the derived <manuscript_id>.extraction.json.
+    data_dir: Path = Path("./data")
+    # Override the packaged heading-patterns data file (section-name
+    # synonyms, numbering regexes) without a code change; empty = packaged
+    # default (app/ingest/data/heading_patterns.json).
+    ingest_patterns_file: Path | None = None
+    # A line longer than this is prose, not a heading.
+    ingest_heading_max_chars: int = 120
+    # Share of a line's characters that must be bold for the line to count
+    # as bold (styled runs inside prose stay below it).
+    ingest_bold_ratio_min: float = 0.8
+    # Points above body size for a line to count as oversized. Bold is the
+    # primary signal — the demo document's headings are body-sized bold.
+    ingest_heading_size_delta: float = 1.0
+    # Embedded-TOC outlines with fewer entries than this aren't evidence.
+    ingest_toc_min_entries: int = 4
+    # Minimum share of embedded-TOC entries that must be findable on their
+    # destination page, or the outline is discarded as stale/foreign.
+    ingest_toc_match_min_ratio: float = 0.5
+    # A page continues a TOC region while at least this share of its lines
+    # end in page numbers / dot leaders.
+    ingest_toc_line_ratio: float = 0.25
+    # Top/bottom fraction of the page height scanned for running
+    # headers/footers, and how widely a line must repeat to be furniture.
+    ingest_furniture_band_ratio: float = 0.12
+    ingest_furniture_page_ratio: float = 0.4
+    ingest_furniture_min_pages: int = 3
+    # Below this many selectable chars per page the file is treated as a
+    # scan: image_only state, limited checks — NOT an error (F1.7).
+    ingest_image_only_chars_per_page: int = 50
 
 
 @lru_cache
