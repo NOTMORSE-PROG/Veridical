@@ -9,6 +9,9 @@ context/
 tickets/
 design/
 *.pdf
+# ...except the synthetic ingestion fixtures — they ARE the CI gate
+# (V-008; real manuscripts stay uncommittable, D-007).
+!backend/tests/fixtures/ingest/*.pdf
 
 # ── Secrets / environment ────────────────────────────────────────
 .env

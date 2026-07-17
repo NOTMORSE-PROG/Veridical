@@ -35,6 +35,10 @@ ENFORCED_FILES = ("pyproject.toml", "package.json", "uv.lock", "run.py")
 PUBLIC_ROOT_MD = ("README.md", "FEATURES.md")
 INTERNAL_PREFIXES = ("context/", "tickets/", "design/")
 INTERNAL_SUFFIXES = (".pdf",)
+# The ONLY sanctioned committed PDFs: synthetic ingestion fixtures — they
+# are the CI regression gate (V-008). Real manuscripts/proposals never
+# live under this path; .gitignore carries the matching whitelist.
+COMMITTABLE_PDF_PREFIX = "backend/tests/fixtures/ingest/"
 
 
 def staged_files() -> list[str]:
@@ -68,9 +72,11 @@ def staged_internal(paths: list[str]) -> list[str]:
         norm = p.replace("\\", "/")
         root_internal_md = ("/" not in norm and norm.endswith(".md")
                             and norm not in PUBLIC_ROOT_MD)
+        blocked_suffix = (norm.lower().endswith(INTERNAL_SUFFIXES)
+                          and not norm.startswith(COMMITTABLE_PDF_PREFIX))
         if (norm.startswith(INTERNAL_PREFIXES)
                 or root_internal_md
-                or norm.lower().endswith(INTERNAL_SUFFIXES)):
+                or blocked_suffix):
             hits.append(norm)
     return hits
 
