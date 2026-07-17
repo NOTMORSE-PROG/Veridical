@@ -16,9 +16,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app import messages
 from app.config import Settings, get_settings
 from app.errors import FileMalformedError
-from app.ingest import docx, pdf, references
+from app.ingest import docx, pdf, references, vision
 from app.ingest.patterns import load_patterns
 from app.ingest.schemas import ExtractionResult
+from app.llm import LLMNotConfiguredError, get_llm_client
 from app.models.citation import Citation
 from app.models.enums import IngestStatus
 from app.models.manuscript import Manuscript
@@ -63,6 +64,16 @@ async def ingest_manuscript(
         result = await loop.run_in_executor(None, extractor, str(file_path), settings)
         patterns = load_patterns(settings.ingest_patterns_file)
         drafts = await loop.run_in_executor(None, references.extract_references, result, patterns)
+        try:
+            # Vision pass (F1.3) merges image tables/equations into result
+            # BEFORE the raw store is written, so the store is complete.
+            await vision.read_images(
+                result, file_path, get_llm_client(settings), patterns, settings
+            )
+        except LLMNotConfiguredError:
+            # No client (real mode before V-009): image content stays
+            # unread — an honest state, never an ingestion failure.
+            result.vision_status = "unavailable"
         await loop.run_in_executor(
             None, _write_raw_store, result, raw_store_path(settings, manuscript.id)
         )

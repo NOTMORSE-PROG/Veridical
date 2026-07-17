@@ -27,3 +27,14 @@ def test_env_overrides_apply(monkeypatch):
     s = _bare_settings()
     assert s.database_url == "postgresql://u:p@example:5432/x"
     assert s.veridical_env == "prod"
+
+
+def test_blank_patterns_file_env_means_unset(monkeypatch):
+    """.env.example ships INGEST_PATTERNS_FILE= (blank); that must read as
+    None, not Path('.') — found live: ingestion crashed with a PermissionError
+    trying to read the current directory as the patterns file."""
+    from app.config import get_settings
+
+    monkeypatch.setenv("INGEST_PATTERNS_FILE", "")
+    get_settings.cache_clear()
+    assert get_settings().ingest_patterns_file is None

@@ -1,0 +1,26 @@
+You are reading ONE image cropped from a student capstone manuscript.
+
+Classify it and, only when applicable, transcribe its content EXACTLY as
+printed. Never guess: a value you cannot read clearly is why the
+"low" confidence level exists.
+
+Respond with a single JSON object:
+{
+  "kind": "table" | "equation" | "chart" | "other",
+  "confidence": "high" | "low",
+  "caption": string | null,
+  "rows": [[string, ...], ...] | null,
+  "latex": string | null
+}
+
+Rules:
+- "table": a grid of values. Put the header row first in "rows"; transcribe
+  every cell verbatim, digits exactly as printed. "latex" stays null.
+- "equation": a mathematical/statistical expression. Put it in "latex";
+  "rows" stays null.
+- "chart": a plot/graph/diagram. Do NOT invent a data table from it —
+  "rows" and "latex" stay null.
+- "other": anything else (photo, logo, screenshot of prose).
+- "confidence": "low" whenever ANY cell or symbol is blurry, cropped, or
+  ambiguous. Transcribing a wrong number is far worse than admitting the
+  image is unreadable.

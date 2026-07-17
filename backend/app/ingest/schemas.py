@@ -59,12 +59,28 @@ class ImageBlock(BaseModel):
 
 
 class TableBlock(BaseModel):
-    """A native table with rows/cells intact (F1.2). PDF-embedded tables
-    that are images go through V-007 instead."""
+    """A table with rows/cells intact. `native` = read directly from the
+    file (DOCX, F1.2); `vision` = recovered from an embedded image by the
+    multimodal model (F1.3). Vision tables the model itself was not sure
+    about carry `low_confidence` — F6's hard checks must skip those and
+    the report says the image could not be reliably read."""
 
     page: int | None = None
     paragraph: int | None = None
     rows: list[list[str]]
+    source: Literal["native", "vision"] = "native"
+    low_confidence: bool = False
+    caption: str | None = None
+
+
+class EquationBlock(BaseModel):
+    """An equation/statistical expression recovered from an embedded image
+    (F1.3) — input for the F6 statistics extraction."""
+
+    page: int | None = None
+    paragraph: int | None = None
+    latex: str
+    low_confidence: bool = False
 
 
 class PageGeometry(BaseModel):
@@ -115,4 +131,9 @@ class ExtractionResult(BaseModel):
     blocks: list[TextBlock]
     images: list[ImageBlock]
     tables: list[TableBlock] = Field(default_factory=list)
+    equations: list[EquationBlock] = Field(default_factory=list)
     geometry: list[PageGeometry] = Field(default_factory=list)
+    # F1.3 vision pass over embedded images: "none" = no images selected,
+    # "done" = ran, "unavailable" = no LLM client configured (honest state
+    # — ingestion continues, image content simply stays unread).
+    vision_status: Literal["none", "done", "unavailable"] = "none"

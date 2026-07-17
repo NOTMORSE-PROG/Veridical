@@ -50,6 +50,15 @@
     "works cited",
     "literature cited"
   ],
+  "vision_priority_sections": [
+    "results",
+    "analysis",
+    "findings",
+    "discussion",
+    "testing",
+    "evaluation",
+    "methodology"
+  ],
   "furniture": [
     "^\\d{1,4}$",
     "^page\\s+\\d+(\\s+of\\s+\\d+)?$"

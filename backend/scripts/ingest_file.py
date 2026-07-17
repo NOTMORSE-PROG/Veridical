@@ -63,6 +63,13 @@ async def run(path: Path, group_label: str) -> None:
         f"image_only: {result.image_only}"
     )
     print(f"raw store: {raw_store_path(settings, manuscript.id)}")
+    vision_tables = [t for t in result.tables if t.source == "vision"]
+    print(
+        f"vision: {result.vision_status}   tables: {len(result.tables)} "
+        f"({len(vision_tables)} from images, "
+        f"{sum(1 for t in vision_tables if t.low_confidence)} low-confidence)   "
+        f"equations: {len(result.equations)}"
+    )
     print(f"section tree (source: {result.section_tree.source}):")
     _print_tree(result.section_tree.nodes)
     parsed = sum(1 for c in citations if c.parse_status == "parsed")

@@ -8,6 +8,7 @@ and nothing secret is required unless a live integration is actually used.
 from functools import lru_cache
 from pathlib import Path
 
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -71,6 +72,24 @@ class Settings(BaseSettings):
     # Below this many selectable chars per page the file is treated as a
     # scan: image_only state, limited checks — NOT an error (F1.7).
     ingest_image_only_chars_per_page: int = 50
+    # --- vision pass over embedded images (F1.3 / V-007) --------------------
+    # Hard cap on Gemini vision calls per manuscript (quota is the currency,
+    # D-001: cap × ~20 groups/day must stay well inside the free-tier RPD).
+    ingest_vision_max_images: int = 12
+    # Embedded images smaller than this (PDF bbox area, square points) are
+    # decorative — icons, bullets, logos — and never worth a call.
+    # 5000 pt² ≈ a 1in × 1in figure.
+    ingest_vision_min_area_pts: float = 5000.0
+    # Rendering DPI for the cropped image sent to the model.
+    ingest_vision_crop_dpi: int = 150
+
+    @field_validator("ingest_patterns_file", mode="before")
+    @classmethod
+    def _blank_path_is_none(cls, value: object) -> object:
+        # `INGEST_PATTERNS_FILE=` (blank, as .env.example ships it) must
+        # mean "unset": Path("") normalizes to Path(".") which is truthy,
+        # so without this the loader would try to read a directory.
+        return None if value == "" else value
 
 
 @lru_cache

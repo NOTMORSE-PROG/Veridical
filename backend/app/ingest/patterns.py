@@ -26,6 +26,9 @@ class HeadingPatterns:
     toc_style_prefixes: tuple[str, ...]
     # Section titles that hold the reference list (F1.5).
     reference_titles: frozenset[str]
+    # Chapter-title keywords whose images get vision priority (F1.3):
+    # where result tables/statistics live. Substring match, casefolded.
+    vision_priority_sections: tuple[str, ...]
     furniture: tuple[re.Pattern[str], ...]
     toc_line_suffix: re.Pattern[str]
 
@@ -44,6 +47,7 @@ def load_patterns(path: Path | None = None) -> HeadingPatterns:
         toc_titles=frozenset(s.casefold() for s in raw["toc_titles"]),
         toc_style_prefixes=tuple(s.casefold() for s in raw["toc_style_prefixes"]),
         reference_titles=frozenset(s.casefold() for s in raw["reference_titles"]),
+        vision_priority_sections=tuple(s.casefold() for s in raw["vision_priority_sections"]),
         furniture=tuple(re.compile(p, ci) for p in raw["furniture"]),
         toc_line_suffix=re.compile(raw["toc_line_suffix"]),
     )
