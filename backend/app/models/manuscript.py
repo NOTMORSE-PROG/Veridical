@@ -10,6 +10,7 @@ from app.models.base import Base, PkCreatedMixin
 from app.models.enums import IngestStatus
 
 if TYPE_CHECKING:
+    from app.models.citation import Citation
     from app.models.instructor import Instructor
 
 
@@ -32,6 +33,7 @@ class Manuscript(Base, PkCreatedMixin):
 
     instructor: Mapped["Instructor"] = relationship(back_populates="manuscripts")
     archive: Mapped["ManuscriptArchive | None"] = relationship(back_populates="manuscript")
+    citations: Mapped[list["Citation"]] = relationship(back_populates="manuscript")
 
 
 class ManuscriptArchive(Base, PkCreatedMixin):

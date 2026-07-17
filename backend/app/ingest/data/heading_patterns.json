@@ -43,6 +43,13 @@
     "table of figures",
     "tof"
   ],
+  "reference_titles": [
+    "references",
+    "reference list",
+    "bibliography",
+    "works cited",
+    "literature cited"
+  ],
   "furniture": [
     "^\\d{1,4}$",
     "^page\\s+\\d+(\\s+of\\s+\\d+)?$"

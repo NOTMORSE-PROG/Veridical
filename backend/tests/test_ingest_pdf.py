@@ -93,6 +93,16 @@ def _thesis_pdf(tmp_path: Path) -> Path:
         b.line(str(pno), y=760)  # bare page number in the bottom band
         b.line("A Study of Things - Draft", y=775)  # running footer
     b.page and b.image()
+    b.new_page().line("REFERENCES", bold=True)
+    b.line("Reyes, J. P., & Cruz, M. A. (2023). Assessing capstone readiness in state")
+    b.page.insert_text(
+        (100, b.y),
+        "universities. Philippine Journal of Education, 12(3), 45–67.",
+        fontsize=11,
+        fontname="helv",
+    )
+    b.y += LINE_STEP
+    b.line("Garcia, L. (2020). Understanding rubric design (2nd ed.). Academic Press.")
     return b.save(tmp_path / "thesis.pdf")
 
 
@@ -364,6 +374,21 @@ def test_service_persists_tree_and_status(tmp_path, monkeypatch, ingest_scratch_
             assert len(stored.section_tree["nodes"]) == len(result.section_tree.nodes)
             raw = raw_store_path(settings, manuscript.id)
             assert raw.exists() and raw.stat().st_size > 0
+
+            # Citations persisted (V-006) — and re-ingest replaces, not appends.
+            from app.models import Citation
+
+            for _ in range(2):
+                await ingest_manuscript(session, manuscript, pdf_path, settings)
+                rows = (
+                    await session.scalars(
+                        select(Citation)
+                        .where(Citation.manuscript_id == manuscript.id)
+                        .order_by(Citation.order_index)
+                    )
+                ).all()
+                assert [c.authors[0] for c in rows] == ["Reyes, J. P.", "Garcia, L."]
+                assert all(c.parse_status == "parsed" for c in rows)
 
             # Malformed upload: failed status recorded, taxonomy error raised.
             bad = tmp_path / "bad.pdf"

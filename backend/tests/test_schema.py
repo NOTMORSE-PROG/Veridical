@@ -34,6 +34,7 @@ EXPECTED_TABLES = {
     "readiness_report",
     "manuscript_archive",
     "audit_log",
+    "citation",  # V-006 (migration 0002)
 }
 
 
@@ -45,7 +46,7 @@ def test_sqlalchemy_url_names_the_async_driver():
     assert sqlalchemy_url("postgresql+asyncpg://u@h/db") == "postgresql+asyncpg://u@h/db"
 
 
-def test_metadata_declares_exactly_the_v1_tables():
+def test_metadata_declares_exactly_the_expected_tables():
     assert set(Base.metadata.tables) == EXPECTED_TABLES
 
 

@@ -24,6 +24,8 @@ class HeadingPatterns:
     # Word paragraph-style name prefixes that mark TOC/list-of-figures
     # content (DOCX path) — a listing of headings, not structure.
     toc_style_prefixes: tuple[str, ...]
+    # Section titles that hold the reference list (F1.5).
+    reference_titles: frozenset[str]
     furniture: tuple[re.Pattern[str], ...]
     toc_line_suffix: re.Pattern[str]
 
@@ -41,6 +43,7 @@ def load_patterns(path: Path | None = None) -> HeadingPatterns:
         caption=re.compile(raw["caption"], ci),
         toc_titles=frozenset(s.casefold() for s in raw["toc_titles"]),
         toc_style_prefixes=tuple(s.casefold() for s in raw["toc_style_prefixes"]),
+        reference_titles=frozenset(s.casefold() for s in raw["reference_titles"]),
         furniture=tuple(re.compile(p, ci) for p in raw["furniture"]),
         toc_line_suffix=re.compile(raw["toc_line_suffix"]),
     )

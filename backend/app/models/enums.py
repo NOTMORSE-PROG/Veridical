@@ -63,6 +63,14 @@ class ResultOutcome(StrEnum):
     quota_exhausted = "quota_exhausted"
 
 
+class CitationParseStatus(StrEnum):
+    """F1.5: a reference entry either parsed into structured fields or is
+    preserved raw — never silently dropped."""
+
+    parsed = "parsed"
+    parse_failed = "parse_failed"
+
+
 class FlagSeverity(StrEnum):
     high = "high"
     med = "med"

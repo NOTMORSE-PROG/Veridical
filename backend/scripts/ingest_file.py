@@ -20,7 +20,7 @@ from app.config import get_settings
 from app.db import sqlalchemy_url
 from app.ingest.schemas import SectionNode
 from app.ingest.service import ingest_manuscript, raw_store_path
-from app.models import Instructor, Manuscript
+from app.models import Citation, Instructor, Manuscript
 from scripts.seed_dev import DEMO_EMAIL
 
 
@@ -46,6 +46,13 @@ async def run(path: Path, group_label: str) -> None:
         session.add(manuscript)
         await session.commit()
         result = await ingest_manuscript(session, manuscript, path)
+        citations = (
+            await session.scalars(
+                select(Citation)
+                .where(Citation.manuscript_id == manuscript.id)
+                .order_by(Citation.order_index)
+            )
+        ).all()
     await engine.dispose()
     elapsed = time.perf_counter() - started
 
@@ -58,6 +65,11 @@ async def run(path: Path, group_label: str) -> None:
     print(f"raw store: {raw_store_path(settings, manuscript.id)}")
     print(f"section tree (source: {result.section_tree.source}):")
     _print_tree(result.section_tree.nodes)
+    parsed = sum(1 for c in citations if c.parse_status == "parsed")
+    print(f"citations: {len(citations)} ({parsed} parsed, {len(citations) - parsed} kept raw)")
+    for c in citations[:5]:
+        first = (c.authors or ["?"])[0]
+        print(f"  [{c.parse_status}] {first} ({c.year}) — {(c.title or c.raw_text)[:60]}")
     print(f"elapsed: {elapsed:.2f}s")
 
 
