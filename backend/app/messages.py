@@ -15,3 +15,13 @@ FILE_UNREADABLE = (
 FILE_ENCRYPTED = (
     "The file is password-protected, so its text cannot be read. Please upload an unlocked copy."
 )
+
+FILE_TOO_LARGE = (
+    "The file is larger than the {limit_mb} MB upload limit. "
+    "Please export a smaller copy (e.g. compress embedded images)."
+)
+
+IMAGE_ONLY_NOTE = (
+    "This document contains little or no selectable text (it may be a "
+    "scanned copy). Checks that need the text will be limited."
+)

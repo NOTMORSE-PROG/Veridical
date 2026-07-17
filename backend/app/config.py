@@ -82,6 +82,10 @@ class Settings(BaseSettings):
     ingest_vision_min_area_pts: float = 5000.0
     # Rendering DPI for the cropped image sent to the model.
     ingest_vision_crop_dpi: int = 150
+    # Upload size ceiling, enforced while streaming (reject early — a
+    # 200MB "manuscript" should never reach the parser). Real capstone
+    # PDFs run 5–25 MB.
+    max_upload_mb: int = 40
 
     @field_validator("ingest_patterns_file", mode="before")
     @classmethod

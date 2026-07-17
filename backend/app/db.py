@@ -1,8 +1,18 @@
-"""Database access: connectivity check (V-001) + SQLAlchemy URL helper (V-003)."""
+"""Database access: connectivity check (V-001), SQLAlchemy URL helper
+(V-003), request-scoped session dependency (V-008)."""
 
 import asyncio
+from collections.abc import AsyncIterator
 
 import asyncpg
+from sqlalchemy.ext.asyncio import (
+    AsyncEngine,
+    AsyncSession,
+    async_sessionmaker,
+    create_async_engine,
+)
+
+from app.config import get_settings
 
 
 def sqlalchemy_url(dsn: str) -> str:
@@ -17,6 +27,26 @@ def sqlalchemy_url(dsn: str) -> str:
         if dsn.startswith(scheme):
             return "postgresql+asyncpg://" + dsn.removeprefix(scheme)
     return dsn
+
+
+_engine: AsyncEngine | None = None
+
+
+def get_engine() -> AsyncEngine:
+    """Process-wide lazy engine — created on first use, never at import
+    (Neon suspends when idle; connecting eagerly at boot would stall
+    startup, ENGINEERING.md §7)."""
+    global _engine
+    if _engine is None:
+        _engine = create_async_engine(sqlalchemy_url(get_settings().database_url))
+    return _engine
+
+
+async def get_session() -> AsyncIterator[AsyncSession]:
+    """FastAPI dependency: one session per request (CODING.md §2)."""
+    factory = async_sessionmaker(get_engine(), expire_on_commit=False)
+    async with factory() as session:
+        yield session
 
 
 async def check_connectivity(dsn: str, timeout: float = 5.0) -> tuple[bool, str]:

@@ -1,15 +1,29 @@
 """VERIDICAL API entry point."""
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
 
 from app import db
 from app.config import get_settings
+from app.errors import HTTP_STATUS, VeridicalError
+from app.ingest.router import router as ingest_router
 
 app = FastAPI(
     title="VERIDICAL API",
     version="0.1.0",
     description="Defense-readiness checks for capstone manuscripts.",
 )
+app.include_router(ingest_router)
+
+
+@app.exception_handler(VeridicalError)
+async def veridical_error_handler(request: Request, exc: VeridicalError) -> JSONResponse:
+    """The ONE place taxonomy exceptions become HTTP (CODING.md §2/§4):
+    consistent envelope, never a bare 500 for a user-fixable state."""
+    return JSONResponse(
+        status_code=HTTP_STATUS.get(exc.code, 500),
+        content={"error": {"code": exc.code, "message": str(exc)}},
+    )
 
 
 @app.get("/health")

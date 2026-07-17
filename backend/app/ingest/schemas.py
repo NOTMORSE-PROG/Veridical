@@ -120,6 +120,27 @@ class SectionTree(BaseModel):
     nodes: list[SectionNode] = Field(default_factory=list)
 
 
+class IngestSummary(BaseModel):
+    """Response body of POST /manuscripts/ingest — what the upload screen
+    (4c/4f) needs to show; the full extraction lives in the raw store."""
+
+    manuscript_id: int
+    ingest_status: str
+    page_count: int
+    anchor_kind: Literal["page", "paragraph"]
+    image_only: bool
+    text_chars: int
+    images: int
+    tables: int
+    equations: int
+    citations: int
+    vision_status: Literal["none", "done", "unavailable"]
+    section_tree: "SectionTree"
+    # User-facing notes (message templates) — e.g. the limited-checks note
+    # for scans. Honest states, not errors.
+    notes: list[str] = Field(default_factory=list)
+
+
 class ExtractionResult(BaseModel):
     page_count: int  # DOCX: 0 — pages don't exist before rendering
     anchor_kind: Literal["page", "paragraph"]

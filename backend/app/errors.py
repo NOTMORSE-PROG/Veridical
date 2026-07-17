@@ -39,7 +39,25 @@ class NotApplicableError(VeridicalError):
     code = "not_applicable"
 
 
+class FileTooLargeError(VeridicalError):
+    """Upload exceeds the configured limit — rejected early, user-fixable."""
+
+    code = "too_large"
+
+
 class UnverifiableError(VeridicalError):
     """Source can't be checked — manual review, NOT an accusation."""
 
     code = "unverifiable"
+
+
+# HTTP mapping for the one exception handler (main.py). Codes absent here
+# are result STATES (not_applicable, unverifiable) that must never be
+# raised to HTTP; if one ever is, the handler still answers with the
+# structured envelope (and 500 signals the programming error it is).
+HTTP_STATUS: dict[str, int] = {
+    "file_malformed": 422,
+    "too_large": 413,
+    "quota_exhausted": 429,
+    "api_down": 502,
+}
