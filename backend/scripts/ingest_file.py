@@ -26,7 +26,8 @@ from scripts.seed_dev import DEMO_EMAIL
 
 def _print_tree(nodes: list[SectionNode], indent: int = 0) -> None:
     for node in nodes:
-        print(f"{'  ' * indent}- {node.title}  (p{node.page})")
+        anchor = f"p{node.page}" if node.page is not None else f"para {node.paragraph}"
+        print(f"{'  ' * indent}- {node.title}  ({anchor})")
         _print_tree(node.children, indent + 1)
 
 

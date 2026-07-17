@@ -14,20 +14,33 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app import messages
 from app.config import Settings, get_settings
 from app.errors import FileMalformedError
-from app.ingest import pdf
+from app.ingest import docx, pdf
 from app.ingest.schemas import ExtractionResult
 from app.models.enums import IngestStatus
 from app.models.manuscript import Manuscript
 
-# One extractor per supported suffix; V-005 adds ".docx". Each is a sync
-# callable executed off the event loop.
+# One extractor per supported suffix. Each is a sync callable executed off
+# the event loop. Legacy .doc is deliberately absent: rejected with a clear
+# user-fixable message (V-005 edge case).
 EXTRACTORS: dict[str, Callable[[str, Settings], ExtractionResult]] = {
     ".pdf": pdf.extract_document,
+    ".docx": docx.extract_document,
 }
 
 
 def raw_store_path(settings: Settings, manuscript_id: int) -> Path:
     return settings.data_dir / f"{manuscript_id}.extraction.json"
+
+
+def select_extractor(suffix: str) -> Callable[[str, Settings], ExtractionResult]:
+    extractor = EXTRACTORS.get(suffix.lower())
+    if extractor is None:
+        raise FileMalformedError(
+            messages.UNSUPPORTED_FILE_TYPE.format(
+                suffix=suffix or "(none)", supported=", ".join(sorted(EXTRACTORS))
+            )
+        )
+    return extractor
 
 
 async def ingest_manuscript(
@@ -37,13 +50,7 @@ async def ingest_manuscript(
     settings: Settings | None = None,
 ) -> ExtractionResult:
     settings = settings or get_settings()
-    extractor = EXTRACTORS.get(file_path.suffix.lower())
-    if extractor is None:
-        raise FileMalformedError(
-            messages.UNSUPPORTED_FILE_TYPE.format(
-                suffix=file_path.suffix, supported=", ".join(sorted(EXTRACTORS))
-            )
-        )
+    extractor = select_extractor(file_path.suffix)
 
     manuscript.ingest_status = IngestStatus.processing
     await session.commit()

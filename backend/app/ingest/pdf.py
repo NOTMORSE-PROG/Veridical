@@ -95,6 +95,7 @@ def _extract_open_document(
 
     return ExtractionResult(
         page_count=page_count,
+        anchor_kind="page",
         image_only=image_only,
         text_chars=text_chars,
         section_tree=tree,

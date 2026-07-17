@@ -21,6 +21,9 @@ class HeadingPatterns:
     unnumbered_sections: frozenset[str]
     caption: re.Pattern[str]
     toc_titles: frozenset[str]
+    # Word paragraph-style name prefixes that mark TOC/list-of-figures
+    # content (DOCX path) — a listing of headings, not structure.
+    toc_style_prefixes: tuple[str, ...]
     furniture: tuple[re.Pattern[str], ...]
     toc_line_suffix: re.Pattern[str]
 
@@ -37,6 +40,7 @@ def load_patterns(path: Path | None = None) -> HeadingPatterns:
         unnumbered_sections=frozenset(s.casefold() for s in raw["unnumbered_sections"]),
         caption=re.compile(raw["caption"], ci),
         toc_titles=frozenset(s.casefold() for s in raw["toc_titles"]),
+        toc_style_prefixes=tuple(s.casefold() for s in raw["toc_style_prefixes"]),
         furniture=tuple(re.compile(p, ci) for p in raw["furniture"]),
         toc_line_suffix=re.compile(raw["toc_line_suffix"]),
     )

@@ -38,6 +38,11 @@
     "list of figures",
     "list of tables"
   ],
+  "toc_style_prefixes": [
+    "toc",
+    "table of figures",
+    "tof"
+  ],
   "furniture": [
     "^\\d{1,4}$",
     "^page\\s+\\d+(\\s+of\\s+\\d+)?$"

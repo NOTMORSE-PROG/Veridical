@@ -27,11 +27,15 @@ from app.ingest.schemas import Line, SectionNode, SectionTree
 
 
 @dataclass
-class _Candidate:
+class Candidate:
+    """A heading nominee before tree assembly — shared by the PDF and DOCX
+    extractors (one anchor field set per format, matching schemas.py)."""
+
     level: int
     title: str
-    page: int
-    numbering: str | None
+    page: int | None = None
+    paragraph: int | None = None
+    numbering: str | None = None
 
 
 def build_section_tree(
@@ -46,11 +50,11 @@ def build_section_tree(
     if len(toc_candidates) >= settings.ingest_toc_min_entries and _toc_matches_document(
         toc_candidates, page_keys, settings
     ):
-        return SectionTree(source="embedded_toc", nodes=_assemble(toc_candidates))
+        return SectionTree(source="embedded_toc", nodes=assemble(toc_candidates))
 
     heuristic = _heading_candidates(lines_by_page, patterns, settings)
     if heuristic:
-        return SectionTree(source="heuristics", nodes=_assemble(heuristic))
+        return SectionTree(source="heuristics", nodes=assemble(heuristic))
     return SectionTree(source="none", nodes=[])
 
 
@@ -59,11 +63,11 @@ def build_section_tree(
 
 def _clean_embedded_toc(
     toc: list[tuple[int, str, int]], patterns: HeadingPatterns
-) -> list[_Candidate]:
+) -> list[Candidate]:
     """Outline metadata is authored by tools and people — treat it as dirty
     input: drop blank titles, caption entries (figures/tables are not
     sections), bad page numbers, and consecutive duplicates."""
-    out: list[_Candidate] = []
+    out: list[Candidate] = []
     seen: set[tuple[str, int]] = set()
     for level, raw_title, page in toc:
         title = normalize(raw_title)
@@ -74,17 +78,17 @@ def _clean_embedded_toc(
             continue
         seen.add(key)
         out.append(
-            _Candidate(
+            Candidate(
                 level=max(1, level),
                 title=title,
                 page=page,
-                numbering=_numbering_of(title, patterns),
+                numbering=numbering_of(title, patterns),
             )
         )
     return out
 
 
-def _numbering_of(title: str, patterns: HeadingPatterns) -> str | None:
+def numbering_of(title: str, patterns: HeadingPatterns) -> str | None:
     for pat in (patterns.chapter, patterns.numbered):
         m = pat.match(title)
         if m:
@@ -93,7 +97,7 @@ def _numbering_of(title: str, patterns: HeadingPatterns) -> str | None:
 
 
 def _toc_matches_document(
-    candidates: list[_Candidate], page_keys: dict[int, str], settings: Settings
+    candidates: list[Candidate], page_keys: dict[int, str], settings: Settings
 ) -> bool:
     """Quoted evidence must exist (PLAYBOOK §5): an outline entry counts as
     verified only if its text occurs on the page it points to."""
@@ -148,10 +152,10 @@ def _body_font_size(lines_by_page: dict[int, list[Line]]) -> float:
 
 def _heading_candidates(
     lines_by_page: dict[int, list[Line]], patterns: HeadingPatterns, settings: Settings
-) -> list[_Candidate]:
+) -> list[Candidate]:
     body_size = _body_font_size(lines_by_page)
     skip_pages = toc_page_numbers(lines_by_page, patterns, settings)
-    out: list[_Candidate] = []
+    out: list[Candidate] = []
 
     def styled(ln: Line) -> bool:
         oversized = ln.max_size >= body_size + settings.ingest_heading_size_delta
@@ -196,6 +200,13 @@ def _chapter_has_title(text: str, patterns: HeadingPatterns) -> bool:
     return bool(m and m.group("title").strip())
 
 
+def classify_heading(text: str, patterns: HeadingPatterns) -> tuple[int, str | None] | None:
+    """(level, numbering) for a heading-shaped text, else None — the shared
+    classifier the DOCX extractor uses for documents without Word styles."""
+    c = _classify_text(text, 0, patterns)
+    return (c.level, c.numbering) if c else None
+
+
 def heading_shaped(text: str, patterns: HeadingPatterns) -> bool:
     """Whether a line's text matches any heading pattern — used by the
     furniture detector to avoid eating one-off headings that sit in the
@@ -203,32 +214,32 @@ def heading_shaped(text: str, patterns: HeadingPatterns) -> bool:
     return _classify_text(text, 0, patterns) is not None
 
 
-def _classify(ln: Line, patterns: HeadingPatterns) -> "_Candidate | None":
+def _classify(ln: Line, patterns: HeadingPatterns) -> "Candidate | None":
     return _classify_text(ln.text, ln.page, patterns)
 
 
-def _classify_text(text: str, page: int, patterns: HeadingPatterns) -> "_Candidate | None":
+def _classify_text(text: str, page: int, patterns: HeadingPatterns) -> "Candidate | None":
     """Assign a level from numbering/keywords; typography alone never
     qualifies a line (bold names on a title page are not sections)."""
     m = patterns.chapter.match(text)
     if m:
-        return _Candidate(level=1, title=text, page=page, numbering=m.group("num"))
+        return Candidate(level=1, title=text, page=page, numbering=m.group("num"))
     m = patterns.numbered.match(text)
     if m:
         num = m.group("num")
-        return _Candidate(level=num.count(".") + 1, title=text, page=page, numbering=num)
+        return Candidate(level=num.count(".") + 1, title=text, page=page, numbering=num)
     if normalize(text).casefold() in patterns.unnumbered_sections:
-        return _Candidate(level=1, title=text, page=page, numbering=None)
+        return Candidate(level=1, title=text, page=page, numbering=None)
     m = patterns.top_numbered.match(text)
     if m:
-        return _Candidate(level=1, title=text, page=page, numbering=m.group("num"))
+        return Candidate(level=1, title=text, page=page, numbering=m.group("num"))
     return None
 
 
 # --- shared tree assembly ----------------------------------------------------
 
 
-def _assemble(candidates: list[_Candidate]) -> list[SectionNode]:
+def assemble(candidates: list[Candidate]) -> list[SectionNode]:
     """Stack-based nesting; level jumps are clamped to parent+1 so a noisy
     outline can never produce an orphaned depth."""
     roots: list[SectionNode] = []
@@ -237,7 +248,13 @@ def _assemble(candidates: list[_Candidate]) -> list[SectionNode]:
         while stack and stack[-1][0] >= c.level:
             stack.pop()
         level = stack[-1][0] + 1 if stack else 1
-        node = SectionNode(title=c.title, level=level, page=c.page, numbering=c.numbering)
+        node = SectionNode(
+            title=c.title,
+            level=level,
+            page=c.page,
+            paragraph=c.paragraph,
+            numbering=c.numbering,
+        )
         if stack:
             stack[-1][1].children.append(node)
         else:
