@@ -214,7 +214,17 @@ Combines everything into one explainable output (Objective 4, Fig. 3.12).
 
 **Total cost: still ₱0.00** — every change keeps the zero-budget constraint while making the claims in Chapter 3 actually achievable.
 
-> 📌 **Action for the paper:** update Table 3.2 (APIs), Table 3.4 (software), and §3.2 ingestion tools to reflect this column, so the documentation and the build don't diverge.
+### Amendment (2026-07-20): the LLM-last cascade
+
+To stay comfortably inside free-tier quota during defense season and to strengthen the hybrid-system claim, VERIDICAL grades through a **three-tier cascade** rather than LLM-first:
+
+1. **Tier 0 — deterministic signals**: structural rules plus a linguistic signal layer for semantic criteria (readability, length/vocabulary diversity, citation density, section coherence) — grounded in validated automated-essay-scoring research showing such features correlate r ≥ 0.6 with human grades, and that hybrid feature+LLM scoring beats LLM-only.
+2. **Tier 1 — local lightweight models** (CPU, in-process, free): static sentence embeddings (Model2Vec-class, ~8MB at ~90% of MiniLM quality) for similarity work, and a small quantized NLI cross-encoder for entailment/contradiction.
+3. **Tier 2 — Gemini as the arbiter**: called only where lower tiers are inconclusive or the criterion is irreducibly judgmental — batched, cached by input hash (re-runs cost ~0 calls), self-consistency as 2 passes + tie-break.
+
+Each tier escalates only its uncertain residue upward, ending at the instructor — the same human-in-the-loop principle, applied uniformly at every level. Estimated effect: worst-case ~103 Gemini calls/manuscript drops to ~17 (≈340/day at 20 groups — 4.4× headroom under the daily budget). Every verdict is labeled with its basis (rule / signal / local model / AI) in the report.
+
+> 📌 **Action for the paper:** update Table 3.2 (APIs), Table 3.4 (software), and §3.2 ingestion tools to reflect this column, so the documentation and the build don't diverge. The cascade amendment above strengthens Chapter 2's hybrid-system argument (rule-then-AI literature) and gives Chapter 3 a defensible quota-feasibility analysis.
 
 ---
 
