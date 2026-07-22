@@ -2,6 +2,7 @@
 // primitive (DESIGN.md §2) with all variants for side-by-side comparison
 // against design/wireframes.html. Not a product screen (no wireframe ID).
 import type { ReactNode } from "react";
+import { ApiStatus } from "../components/ApiStatus";
 import { Button } from "../components/Button";
 import { KpiCard } from "../components/KpiCard";
 import { Modal, ModalBackdrop } from "../components/Modal";
@@ -31,6 +32,10 @@ export function GalleryPage() {
           design/wireframes.html
         </p>
       </header>
+
+      <Section title="API smoke check (V-048)">
+        <ApiStatus />
+      </Section>
 
       <Section title="Buttons">
         <div className="flex flex-wrap items-center gap-2">

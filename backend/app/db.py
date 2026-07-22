@@ -3,6 +3,7 @@
 
 import asyncio
 from collections.abc import AsyncIterator
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 import asyncpg
 from sqlalchemy.ext.asyncio import (
@@ -22,11 +23,32 @@ def sqlalchemy_url(dsn: str) -> str:
     read it directly); SQLAlchemy needs the driver spelled out, and
     asyncpg is the only one installed. `postgres://` is accepted too —
     some hosts (Neon among them) still issue the legacy scheme.
+
+    Neon's pooled DSN adds `sslmode=require&channel_binding=require` (libpq
+    query params). SQLAlchemy's asyncpg dialect forwards every query param
+    verbatim as a kwarg to `asyncpg.connect()` (it does no libpq
+    translation), and asyncpg accepts neither key directly — found live
+    against the Neon DSN: `TypeError: connect() got an unexpected keyword
+    argument 'sslmode'`. `channel_binding` has no asyncpg equivalent and is
+    dropped; `sslmode` becomes asyncpg's own `ssl` parameter, which does
+    accept the same value strings (require/verify-ca/verify-full/...).
     """
     for scheme in ("postgresql://", "postgres://"):
         if dsn.startswith(scheme):
-            return "postgresql+asyncpg://" + dsn.removeprefix(scheme)
-    return dsn
+            dsn = "postgresql+asyncpg://" + dsn.removeprefix(scheme)
+            break
+    else:
+        return dsn
+
+    parts = urlsplit(dsn)
+    if not parts.query:
+        return dsn
+    query = dict(parse_qsl(parts.query))
+    sslmode = query.pop("sslmode", None)
+    query.pop("channel_binding", None)
+    if sslmode is not None:
+        query["ssl"] = sslmode
+    return urlunsplit(parts._replace(query=urlencode(query)))
 
 
 _engine: AsyncEngine | None = None

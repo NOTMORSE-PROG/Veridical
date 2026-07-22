@@ -46,6 +46,17 @@ def test_sqlalchemy_url_names_the_async_driver():
     assert sqlalchemy_url("postgresql+asyncpg://u@h/db") == "postgresql+asyncpg://u@h/db"
 
 
+def test_sqlalchemy_url_translates_neon_libpq_query_params():
+    """V-048: Neon's pooled DSN adds sslmode=require&channel_binding=require.
+
+    SQLAlchemy's asyncpg dialect forwards query params verbatim as connect()
+    kwargs (no libpq translation) — found live: `TypeError: connect() got an
+    unexpected keyword argument 'sslmode'`. channel_binding has no asyncpg
+    equivalent (dropped); sslmode becomes asyncpg's own `ssl` param."""
+    url = sqlalchemy_url("postgresql://u:p@h/db?sslmode=require&channel_binding=require")
+    assert url == "postgresql+asyncpg://u:p@h/db?ssl=require"
+
+
 def test_metadata_declares_exactly_the_expected_tables():
     assert set(Base.metadata.tables) == EXPECTED_TABLES
 

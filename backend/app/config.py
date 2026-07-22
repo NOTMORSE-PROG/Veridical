@@ -87,6 +87,19 @@ class Settings(BaseSettings):
     # PDFs run 5–25 MB.
     max_upload_mb: int = 40
 
+    # --- CORS (V-048) --------------------------------------------------------
+    # Comma-separated origins allowed to call the API from a browser. Empty
+    # in dev (no browser cross-origin caller yet); production sets it to
+    # exactly the Vercel production origin (dashboard env var, never hardcoded
+    # per rule 7 — a wildcard would defeat the purpose of an allowlist). Kept
+    # as a raw string (not list[str]): pydantic-settings JSON-decodes complex
+    # env fields before any validator runs, which breaks on a plain CSV value.
+    cors_allowed_origins: str = ""
+
+    @property
+    def cors_allowed_origins_list(self) -> list[str]:
+        return [origin.strip() for origin in self.cors_allowed_origins.split(",") if origin.strip()]
+
     @field_validator("ingest_patterns_file", mode="before")
     @classmethod
     def _blank_path_is_none(cls, value: object) -> object:

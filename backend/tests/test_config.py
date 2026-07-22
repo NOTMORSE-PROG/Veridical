@@ -38,3 +38,13 @@ def test_blank_patterns_file_env_means_unset(monkeypatch):
     monkeypatch.setenv("INGEST_PATTERNS_FILE", "")
     get_settings.cache_clear()
     assert get_settings().ingest_patterns_file is None
+
+
+def test_blank_cors_origins_means_no_origins():
+    assert _bare_settings().cors_allowed_origins_list == []
+
+
+def test_cors_origins_split_on_comma_and_trimmed(monkeypatch):
+    monkeypatch.setenv("CORS_ALLOWED_ORIGINS", "https://a.example, https://b.example ,")
+    s = _bare_settings()
+    assert s.cors_allowed_origins_list == ["https://a.example", "https://b.example"]

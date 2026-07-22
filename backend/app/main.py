@@ -1,6 +1,7 @@
 """VERIDICAL API entry point."""
 
 from fastapi import FastAPI, Request
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from app import db
@@ -14,6 +15,15 @@ app = FastAPI(
     description="Defense-readiness checks for capstone manuscripts.",
 )
 app.include_router(ingest_router)
+
+_cors_origins = get_settings().cors_allowed_origins_list
+if _cors_origins:
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=_cors_origins,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
 
 
 @app.exception_handler(VeridicalError)
