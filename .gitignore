@@ -47,6 +47,9 @@ frontend/dist/
 /backend/data/
 *.log
 
+# ── Tooling artifacts ─────────────────────────────────────────────
+.playwright-mcp/
+
 # ── OS / editor ──────────────────────────────────────────────────
 Thumbs.db
 Desktop.ini
