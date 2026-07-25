@@ -8,6 +8,7 @@ from app.models.audit import AuditLog
 from app.models.base import Base
 from app.models.citation import Citation
 from app.models.instructor import Instructor
+from app.models.llm import LLMQuotaCounter, LLMResponseCache
 from app.models.manuscript import Manuscript, ManuscriptArchive
 from app.models.rubric import Criterion, Rubric
 from app.models.run import CheckResult, CheckRun, Flag, ReadinessReport
@@ -21,6 +22,8 @@ __all__ = [
     "Criterion",
     "Flag",
     "Instructor",
+    "LLMQuotaCounter",
+    "LLMResponseCache",
     "Manuscript",
     "ManuscriptArchive",
     "ReadinessReport",

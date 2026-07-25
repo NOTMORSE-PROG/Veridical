@@ -35,6 +35,8 @@ EXPECTED_TABLES = {
     "manuscript_archive",
     "audit_log",
     "citation",  # V-006 (migration 0002)
+    "llm_quota_counter",  # V-009 (migration 0003)
+    "llm_response_cache",  # V-009 (migration 0003)
 }
 
 

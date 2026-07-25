@@ -87,6 +87,26 @@ class Settings(BaseSettings):
     # PDFs run 5–25 MB.
     max_upload_mb: int = 40
 
+    # --- LLM queue (V-009, ENGINEERING §3) -----------------------------------
+    # Pinned model id (not the "-latest" alias): golden-set comparisons
+    # (TESTING §2) are meaningless across silently-changing models. Verified
+    # 2026-07-25 live against this project's key: gemini-2.5-flash and
+    # gemini-2.5-flash-lite 404 ("no longer available to new users");
+    # gemini-3.5-flash responds.
+    gemini_model: str = "gemini-3.5-flash"
+    gemini_temperature: float = 0.0
+    # Per-attempt network timeout for a Gemini call.
+    gemini_request_timeout_seconds: float = 60.0
+    # RESEARCH.md §1 (2026-07-16, re-verified 2026-07-25): Gemini Flash free
+    # tier is ~10-15 req/min, ~1,500 req/day, reset at midnight Pacific.
+    # Governor stays under both with headroom for the burst-safety margin.
+    llm_rpm: int = 12
+    llm_daily_quota: int = 1400
+    # Timezone Gemini resets against — NOT local time (ticket V-009 edge case).
+    llm_quota_reset_timezone: str = "America/Los_Angeles"
+    llm_max_retries: int = 3
+    llm_retry_base_seconds: float = 1.0
+
     # --- CORS (V-048) --------------------------------------------------------
     # Comma-separated origins allowed to call the API from a browser. Empty
     # in dev (no browser cross-origin caller yet); production sets it to

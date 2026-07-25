@@ -29,7 +29,7 @@ def test_factory_returns_fake_when_enabled():
     assert isinstance(get_llm_client(settings), FakeLLMClient)
 
 
-def test_factory_refuses_real_mode_until_v009():
-    settings = Settings(_env_file=None, veridical_fake_llm=False)
-    with pytest.raises(LLMNotConfiguredError, match="V-009"):
+def test_factory_refuses_real_mode_without_api_key():
+    settings = Settings(_env_file=None, veridical_fake_llm=False, gemini_api_key=None)
+    with pytest.raises(LLMNotConfiguredError, match="GEMINI_API_KEY"):
         get_llm_client(settings)

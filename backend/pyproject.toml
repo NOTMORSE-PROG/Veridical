@@ -14,6 +14,10 @@ dependencies = [
     "pymupdf>=1.28.0",
     "python-docx>=1.2.0",
     "python-multipart>=0.0.32",
+    "google-genai>=1.0",
+    # stdlib zoneinfo has no data on Windows (and some minimal Linux images)
+    # without this — needed for the quota governor's Pacific-midnight reset.
+    "tzdata>=2025.1",
 ]
 
 [dependency-groups]

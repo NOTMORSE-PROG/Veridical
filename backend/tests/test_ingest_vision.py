@@ -157,15 +157,21 @@ class _StubSession:
 
 
 def test_ingestion_survives_missing_llm_client(tmp_path, monkeypatch):
-    """Real mode before V-009: vision 'unavailable' is a recorded state,
-    never an ingestion failure (ticket edge case, ENGINEERING honesty)."""
+    """Real mode with no GEMINI_API_KEY configured: vision 'unavailable' is
+    a recorded state, never an ingestion failure (ticket edge case,
+    ENGINEERING honesty). V-009 makes real mode work WITH a key — this
+    test pins down the "requested real mode, key missing" branch, which
+    stays reachable (a deploy can still misconfigure the key)."""
+    import app.llm as llm_module
     from app.ingest.service import ingest_manuscript
     from app.models import Manuscript
     from app.models.enums import IngestStatus
 
     monkeypatch.setenv("VERIDICAL_FAKE_LLM", "0")
+    monkeypatch.setenv("GEMINI_API_KEY", "")
     monkeypatch.setenv("DATA_DIR", str(tmp_path / "data"))
     get_settings.cache_clear()
+    llm_module._real_client = None
     path = _pdf_with_images(tmp_path, n_results_images=1)
     manuscript = Manuscript(instructor_id=1, group_label="G", file_ref=str(path))
     manuscript.id = 999  # no DB in this test; only the raw-store name uses it

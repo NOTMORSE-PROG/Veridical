@@ -25,5 +25,13 @@ class LLMClient(ABC):
     """
 
     @abstractmethod
-    async def complete(self, prompt_type: str, prompt: str, **context: Any) -> dict[str, Any]:
-        """Return the model's structured (JSON) response for this prompt."""
+    async def complete(
+        self, prompt_type: str, prompt: str, *, prompt_version: str = "unversioned", **context: Any
+    ) -> dict[str, Any]:
+        """Return the model's structured (JSON) response for this prompt.
+
+        `prompt_version` is pinned per call (CODING.md §2, TESTING.md §2):
+        the real client (V-009) tags it onto the audit_log row and folds it
+        into the response-cache key; the fake client accepts and ignores it
+        so callers never special-case fixture mode.
+        """

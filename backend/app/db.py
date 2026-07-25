@@ -64,10 +64,15 @@ def get_engine() -> AsyncEngine:
     return _engine
 
 
+def get_session_factory() -> async_sessionmaker[AsyncSession]:
+    """Session factory for callers that outlive a single request (the LLM
+    queue, V-009) and must open/close their own short-lived sessions."""
+    return async_sessionmaker(get_engine(), expire_on_commit=False)
+
+
 async def get_session() -> AsyncIterator[AsyncSession]:
     """FastAPI dependency: one session per request (CODING.md §2)."""
-    factory = async_sessionmaker(get_engine(), expire_on_commit=False)
-    async with factory() as session:
+    async with get_session_factory()() as session:
         yield session
 
 

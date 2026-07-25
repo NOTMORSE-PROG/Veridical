@@ -17,7 +17,9 @@ class FakeLLMClient(LLMClient):
     def __init__(self, fixtures_dir: Path = FIXTURES_DIR):
         self._fixtures_dir = fixtures_dir
 
-    async def complete(self, prompt_type: str, prompt: str, **context: Any) -> dict[str, Any]:
+    async def complete(
+        self, prompt_type: str, prompt: str, *, prompt_version: str = "unversioned", **context: Any
+    ) -> dict[str, Any]:
         fixture = self._fixtures_dir / f"{prompt_type}.json"
         if not fixture.is_file():
             available = sorted(p.stem for p in self._fixtures_dir.glob("*.json"))
