@@ -127,15 +127,34 @@ def _vote_detail(
     return detail
 
 
-async def _vote_batch(
-    session: AsyncSession,
-    check_run_id: int,
+@dataclass(frozen=True)
+class VotedCriterion:
+    """One criterion's complete voting outcome, before persistence — the
+    reusable core both the pipeline (persists via `_vote_batch`) and
+    `tools/golden_harness.py` (V-025, never persists — golden excerpts
+    aren't real check_run rows) build on, so the harness grades through
+    the EXACT SAME production code path, never a reimplementation."""
+
+    criterion: Any
+    vote: VoteResult
+    outcome: ResultOutcome
+    detail: dict[str, Any]
+
+
+async def vote_batch(
     batch: SemanticBatch,
     batch_criteria: list[Any],
     llm: LLMClient,
     settings: Settings,
     anchor_kind: str,
-) -> list[CheckResult]:
+    *,
+    check_run_id: int | None = None,
+) -> list[VotedCriterion]:
+    """Grades every criterion in a batch with V-022's N=2+tie-break voting
+    and V-023's escalation gate — no DB writes, no `check_run_id` required
+    (`None` is a valid, harness-only value; it only ever rides along in
+    LLM-call audit rows and cache keys, never a persisted foreign key
+    here)."""
     pass_1 = await grade_batch_verdicts(
         batch, batch_criteria, llm, check_run_id, anchor_kind, consistency_pass=PASS_1
     )
@@ -144,7 +163,7 @@ async def _vote_batch(
     )
     shadow_detail = shadow_signals_as_detail(compute_shadow_signals(batch.context_text, settings))
 
-    results: list[CheckResult] = []
+    voted: list[VotedCriterion] = []
     for criterion in batch_criteria:
         vote = await _vote_for_criterion(
             criterion,
@@ -159,8 +178,25 @@ async def _vote_batch(
         detail = _vote_detail(batch, vote, shadow_detail)
         if score is not None:
             detail["score"] = score
-        results.append(await _persist(session, check_run_id, criterion, outcome, detail))
-    return results
+        voted.append(VotedCriterion(criterion, vote, outcome, detail))
+    return voted
+
+
+async def _vote_batch(
+    session: AsyncSession,
+    check_run_id: int,
+    batch: SemanticBatch,
+    batch_criteria: list[Any],
+    llm: LLMClient,
+    settings: Settings,
+    anchor_kind: str,
+) -> list[CheckResult]:
+    voted = await vote_batch(
+        batch, batch_criteria, llm, settings, anchor_kind, check_run_id=check_run_id
+    )
+    return [
+        await _persist(session, check_run_id, v.criterion, v.outcome, v.detail) for v in voted
+    ]
 
 
 async def run_semantic_checks_with_consistency(
