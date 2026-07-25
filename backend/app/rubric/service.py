@@ -10,16 +10,19 @@ from collections.abc import AsyncIterator
 from decimal import Decimal
 from pathlib import Path
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.config import Settings, get_settings
+from app.errors import NotFoundError
 from app.ingest.service import detect_format, save_upload, select_extractor
 from app.llm.base import LLMClient
 from app.models.enums import CriterionType, RubricParseStatus
 from app.models.instructor import Instructor
 from app.models.rubric import Criterion, Rubric
 from app.rubric.decompose import raw_text_for_decomposition
+from app.rubric.schemas import UpdateCriteriaRequest
 from app.rubric.validate import attempt_decomposition
 
 
@@ -91,3 +94,63 @@ async def create_rubric_from_upload(
     await session.commit()
     await session.refresh(rubric, attribute_names=["criteria"])
     return rubric
+
+
+async def get_rubric(session: AsyncSession, rubric_id: int) -> Rubric:
+    rubric = await session.scalar(
+        select(Rubric).where(Rubric.id == rubric_id).options(selectinload(Rubric.criteria))
+    )
+    if rubric is None:
+        raise NotFoundError(f"No rubric with id {rubric_id}.")
+    return rubric
+
+
+async def update_criteria(
+    session: AsyncSession, rubric_id: int, body: UpdateCriteriaRequest
+) -> Rubric:
+    """Screen 4d's Save/Confirm action (F2.3): replaces the full criteria
+    set (edits, additions, deletions) in one transaction, and — only when
+    the instructor explicitly confirms — activates the rubric. Nothing
+    runs against a rubric before that flip (charter rule 1: the human
+    confirms the parse)."""
+    rubric = await get_rubric(session, rubric_id)
+    existing = {c.id: c for c in rubric.criteria}
+    incoming_ids = {c.id for c in body.criteria if c.id is not None}
+
+    unknown_ids = incoming_ids - existing.keys()
+    if unknown_ids:
+        raise NotFoundError(f"Criteria {sorted(unknown_ids)} do not belong to rubric {rubric_id}.")
+
+    stale_ids = existing.keys() - incoming_ids
+    if stale_ids:
+        await session.execute(delete(Criterion).where(Criterion.id.in_(stale_ids)))
+
+    for position, criterion_in in enumerate(body.criteria):
+        if criterion_in.id is None:
+            session.add(
+                Criterion(
+                    rubric_id=rubric_id,
+                    type=CriterionType(criterion_in.type),
+                    text=criterion_in.text,
+                    evidence=criterion_in.evidence,
+                    weight=Decimal(str(criterion_in.weight)),
+                    position=position,
+                )
+            )
+        else:
+            row = existing[criterion_in.id]
+            row.type = CriterionType(criterion_in.type)
+            row.text = criterion_in.text
+            row.evidence = criterion_in.evidence
+            row.weight = Decimal(str(criterion_in.weight))
+            row.position = position
+
+    if body.confirm:
+        # A confirmed rubric is, by definition, no longer "needs manual
+        # completion" — the instructor's review IS the resolution (HITL).
+        rubric.is_active = True
+        rubric.parse_status = RubricParseStatus.parsed
+        rubric.parse_issues = None
+
+    await session.commit()
+    return await get_rubric(session, rubric_id)

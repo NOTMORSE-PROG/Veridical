@@ -1,11 +1,15 @@
 // Screen 4b — Dashboard, first-run empty state (F8, F9.2). Populated state
-// (4e, KPI cards) is V-021; "Upload required format" opens the parse
-// modal (4c) wired up in V-012.
+// (4e, KPI cards, "does an active rubric exist") is V-021 — this ticket
+// only builds the empty-state screen and the upload trigger (V-012 wires
+// what "Upload required format" opens: the parse modal, screen 4c).
+import { useState } from "react";
 import { useMe } from "../auth/useAuth";
 import { Chip } from "../components/Chip";
+import { UploadRubricModal } from "../rubric/UploadRubricModal";
 
 export function DashboardPage() {
   const { data: me } = useMe();
+  const [uploadOpen, setUploadOpen] = useState(false);
 
   return (
     <div className="flex flex-col gap-3 p-4">
@@ -33,11 +37,14 @@ export function DashboardPage() {
         </p>
         <button
           type="button"
+          onClick={() => setUploadOpen(true)}
           className="mt-1 rounded-control border border-primary bg-primary px-3.5 py-1.5 text-base font-medium text-on-primary"
         >
           Upload required format
         </button>
       </div>
+
+      {uploadOpen && <UploadRubricModal onClose={() => setUploadOpen(false)} />}
 
       <div className="flex items-center justify-center gap-2">
         <Chip>

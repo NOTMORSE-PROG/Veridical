@@ -4,6 +4,7 @@ from typing import TYPE_CHECKING, Any
 
 from sqlalchemy import (
     BigInteger,
+    Boolean,
     Enum,
     ForeignKey,
     Numeric,
@@ -47,6 +48,11 @@ class Rubric(Base, PkCreatedMixin):
         Enum(RubricParseStatus, native_enum=False), server_default=RubricParseStatus.parsed.value
     )
     parse_issues: Mapped[list[Any] | None] = mapped_column(JSONB)
+    # F2.3: nothing runs against a rubric until the instructor confirms
+    # (V-012). V-013 generalizes this to "exactly one active version per
+    # family" when re-uploads exist; V-012 only ever has one version to
+    # activate.
+    is_active: Mapped[bool] = mapped_column(Boolean, server_default="false")
 
     instructor: Mapped["Instructor"] = relationship(back_populates="rubrics")
     criteria: Mapped[list["Criterion"]] = relationship(

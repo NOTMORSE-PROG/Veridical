@@ -9,6 +9,28 @@ export interface Instructor {
   display_name: string;
 }
 
+export type CriterionType = "structural" | "semantic";
+
+export interface Criterion {
+  id: number;
+  type: CriterionType;
+  text: string;
+  evidence: string | null;
+  weight: number;
+  position: number;
+}
+
+export interface Rubric {
+  id: number;
+  rubric_family_id: string;
+  version: number;
+  title: string;
+  parse_status: "parsed" | "needs_review";
+  parse_issues: string[] | null;
+  is_active: boolean;
+  criteria: Criterion[];
+}
+
 export interface QuotaStatus {
   mode: "fake" | "live";
   quota_day: string;

@@ -58,6 +58,13 @@ class UnauthenticatedError(VeridicalError):
     code = "unauthenticated"
 
 
+class NotFoundError(VeridicalError):
+    """The requested resource (rubric, manuscript, ...) doesn't exist —
+    user-fixable (bad id, stale link), never a generic 500."""
+
+    code = "not_found"
+
+
 # HTTP mapping for the one exception handler (main.py). Codes absent here
 # are result STATES (not_applicable, unverifiable) that must never be
 # raised to HTTP; if one ever is, the handler still answers with the
@@ -68,6 +75,7 @@ HTTP_STATUS: dict[str, int] = {
     "quota_exhausted": 429,
     "api_down": 502,
     "unauthenticated": 401,
+    "not_found": 404,
     # A rubric-decomposition parse that failed schema validation (V-010) —
     # user-actionable (re-review/re-upload); V-011 wraps this in a retry
     # loop so it only ever reaches HTTP after repeated failure.

@@ -16,10 +16,13 @@ export class ApiError extends Error {
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  // A FormData body (file upload) must NOT get a manual Content-Type —
+  // the browser sets the multipart boundary itself.
+  const isFormData = init?.body instanceof FormData;
   const res = await fetch(`${BASE_URL}${path}`, {
     ...init,
     credentials: "include",
-    headers: { "Content-Type": "application/json", ...init?.headers },
+    headers: isFormData ? init?.headers : { "Content-Type": "application/json", ...init?.headers },
   });
   if (!res.ok) {
     const body = (await res.json().catch(() => null)) as
@@ -40,6 +43,8 @@ export const api = {
   post: <T>(path: string, body?: unknown): Promise<T> =>
     request<T>(path, {
       method: "POST",
-      body: body === undefined ? undefined : JSON.stringify(body),
+      body: body instanceof FormData ? body : body === undefined ? undefined : JSON.stringify(body),
     }),
+  put: <T>(path: string, body: unknown): Promise<T> =>
+    request<T>(path, { method: "PUT", body: JSON.stringify(body) }),
 };

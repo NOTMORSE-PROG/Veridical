@@ -53,6 +53,39 @@ class RubricOut(BaseModel):
     # why, over whatever partial criteria list came back.
     parse_status: Literal["parsed", "needs_review"]
     parse_issues: list[str] | None
+    # F2.3 (V-012): nothing runs against a rubric until the instructor
+    # confirms — this flips true only via PUT /rubrics/{id}/criteria
+    # {confirm: true}.
+    is_active: bool
     criteria: list[CriterionOut]
 
     model_config = {"from_attributes": True}
+
+
+class CriterionIn(BaseModel):
+    """One row of the editable criteria table (screen 4d). `id` present =
+    update an existing criterion; `id` absent/null = a new one the
+    instructor added by hand."""
+
+    id: int | None = None
+    type: Literal["structural", "semantic"]
+    text: str = Field(min_length=1)
+    evidence: str | None = None
+    weight: float = Field(gt=0)
+
+    @field_validator("text")
+    @classmethod
+    def _not_blank(cls, value: str) -> str:
+        stripped = value.strip()
+        if not stripped:
+            raise ValueError("criterion text must not be blank")
+        return stripped
+
+
+class UpdateCriteriaRequest(BaseModel):
+    """PUT /rubrics/{id}/criteria body: the full edited criteria set
+    (replace, not patch — the review table always saves its whole
+    state) and whether this save also confirms the rubric."""
+
+    criteria: list[CriterionIn] = Field(min_length=1)
+    confirm: bool = False

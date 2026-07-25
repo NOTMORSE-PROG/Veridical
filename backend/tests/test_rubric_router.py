@@ -70,6 +70,59 @@ def test_post_rubrics_returns_persisted_criteria(client, tmp_path):
     body = resp.json()
     assert body["title"] == "Demo Rubric"
     assert body["version"] == 1
+    assert body["is_active"] is False
     assert len(body["criteria"]) >= 1
     assert {c["type"] for c in body["criteria"]} <= {"structural", "semantic"}
     assert sum(c["weight"] for c in body["criteria"]) == pytest.approx(100.0)
+
+
+def _upload(client, tmp_path, *, title="Demo Rubric"):
+    path = _rubric_pdf(tmp_path)
+    with path.open("rb") as fh:
+        resp = client.post(
+            "/rubrics",
+            params={"title": title},
+            files={"file": ("rubric.pdf", fh, "application/pdf")},
+        )
+    assert resp.status_code == 200, resp.text
+    return resp.json()
+
+
+def test_get_rubric_returns_the_uploaded_rubric(client, tmp_path):
+    uploaded = _upload(client, tmp_path)
+    resp = client.get(f"/rubrics/{uploaded['id']}")
+    assert resp.status_code == 200
+    assert resp.json()["id"] == uploaded["id"]
+
+
+def test_get_rubric_404s_on_an_unknown_id(client):
+    resp = client.get("/rubrics/999999")
+    assert resp.status_code == 404
+    assert resp.json()["error"]["code"] == "not_found"
+
+
+def test_put_criteria_edit_and_confirm_round_trips_through_http(client, tmp_path):
+    uploaded = _upload(client, tmp_path)
+    edited = [
+        {**c, "weight": 60.0, "type": "semantic" if c["type"] == "structural" else "structural"}
+        for c in uploaded["criteria"]
+    ]
+    resp = client.put(
+        f"/rubrics/{uploaded['id']}/criteria", json={"criteria": edited, "confirm": True}
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["is_active"] is True
+
+    reloaded = client.get(f"/rubrics/{uploaded['id']}").json()
+    assert reloaded["is_active"] is True
+    assert all(c["weight"] == 60.0 for c in reloaded["criteria"])
+
+
+def test_put_criteria_rejects_an_empty_list(client, tmp_path):
+    """Server-side backstop for 'deleting all criteria -> confirm disabled'
+    (the frontend disables the button; the API also refuses to persist
+    zero criteria as defense in depth)."""
+    uploaded = _upload(client, tmp_path)
+    resp = client.put(f"/rubrics/{uploaded['id']}/criteria", json={"criteria": [], "confirm": True})
+    assert resp.status_code == 422

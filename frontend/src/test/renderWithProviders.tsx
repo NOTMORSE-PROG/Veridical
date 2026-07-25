@@ -3,16 +3,22 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render } from "@testing-library/react";
 import type { ReactElement } from "react";
-import { MemoryRouter } from "react-router";
+import { MemoryRouter, Route, Routes } from "react-router";
 import { vi } from "vitest";
 
-export function renderWithProviders(ui: ReactElement, { route = "/" }: { route?: string } = {}) {
+export function renderWithProviders(
+  ui: ReactElement,
+  { route = "/", path }: { route?: string; path?: string } = {},
+) {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   });
+  // `path` matches a dynamic segment (e.g. "/rubric/:rubricId/review") so
+  // useParams() resolves inside the test, same as the real router does.
+  const routed = path ? <Routes><Route path={path} element={ui} /></Routes> : ui;
   return render(
     <QueryClientProvider client={queryClient}>
-      <MemoryRouter initialEntries={[route]}>{ui}</MemoryRouter>
+      <MemoryRouter initialEntries={[route]}>{routed}</MemoryRouter>
     </QueryClientProvider>,
   );
 }

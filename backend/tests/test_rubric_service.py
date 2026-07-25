@@ -10,6 +10,7 @@ import pytest
 from sqlalchemy import select
 
 from app.config import get_settings
+from app.errors import NotFoundError
 from app.llm.base import LLMClient
 from app.models.rubric import Criterion, Rubric
 from tests.test_ingest_pdf import PdfBuilder
@@ -160,3 +161,125 @@ async def test_repeated_upload_starts_a_new_family_not_a_new_version(
 
     assert first.rubric_family_id != second.rubric_family_id
     assert first.version == second.version == 1
+
+
+async def _seeded_rubric_id(session_factory, tmp_path, monkeypatch) -> int:
+    monkeypatch.setenv("DATA_DIR", str(tmp_path / "data"))
+    get_settings.cache_clear()
+    settings = get_settings()
+    path = _rubric_pdf(tmp_path)
+    async with session_factory() as session:
+        from app.rubric.service import create_rubric_from_upload
+
+        rubric = await create_rubric_from_upload(
+            session,
+            _chunks(path),
+            "rubric.pdf",
+            "Oral Defense Rubric",
+            SpyLLM(SCRIPTED_RESPONSE),
+            settings,
+        )
+        return rubric.id
+
+
+async def test_get_rubric_returns_criteria_ordered_by_position(
+    session_factory, tmp_path, monkeypatch
+):
+    from app.rubric.service import get_rubric
+
+    rubric_id = await _seeded_rubric_id(session_factory, tmp_path, monkeypatch)
+    async with session_factory() as session:
+        rubric = await get_rubric(session, rubric_id)
+    assert [c.position for c in rubric.criteria] == [0, 1]
+    assert rubric.is_active is False  # not confirmed yet
+
+
+async def test_get_rubric_raises_not_found_for_unknown_id(session_factory):
+    from app.rubric.service import get_rubric
+
+    async with session_factory() as session:
+        with pytest.raises(NotFoundError):
+            await get_rubric(session, 999999)
+
+
+async def test_update_criteria_edit_round_trip_persists(session_factory, tmp_path, monkeypatch):
+    """V-012 AC: change type + weight, confirm, reload -> persisted."""
+    from app.rubric.schemas import CriterionIn, UpdateCriteriaRequest
+    from app.rubric.service import get_rubric, update_criteria
+
+    rubric_id = await _seeded_rubric_id(session_factory, tmp_path, monkeypatch)
+    async with session_factory() as session:
+        original = await get_rubric(session, rubric_id)
+        edited = [
+            CriterionIn(
+                id=c.id,
+                type="semantic" if c.type == "structural" else "structural",
+                text=c.text + " (edited)",
+                evidence=c.evidence,
+                weight=42.0,
+            )
+            for c in original.criteria
+        ]
+        await update_criteria(
+            session, rubric_id, UpdateCriteriaRequest(criteria=edited, confirm=True)
+        )
+
+    # Reload with a FRESH session — proves it's persisted, not just in-memory.
+    async with session_factory() as session:
+        reloaded = await get_rubric(session, rubric_id)
+    assert reloaded.is_active is True
+    assert [c.type for c in reloaded.criteria] == ["semantic", "structural"]
+    assert all(c.text.endswith("(edited)") for c in reloaded.criteria)
+    assert all(float(c.weight) == 42.0 for c in reloaded.criteria)
+
+
+async def test_update_criteria_adds_and_deletes_rows(session_factory, tmp_path, monkeypatch):
+    from app.rubric.schemas import CriterionIn, UpdateCriteriaRequest
+    from app.rubric.service import get_rubric, update_criteria
+
+    rubric_id = await _seeded_rubric_id(session_factory, tmp_path, monkeypatch)
+    async with session_factory() as session:
+        original = await get_rubric(session, rubric_id)
+        kept = original.criteria[0]
+        new_list = [
+            CriterionIn(
+                id=kept.id, type=kept.type, text=kept.text, evidence=kept.evidence, weight=50.0
+            ),
+            CriterionIn(
+                id=None, type="semantic", text="A brand new hand-added criterion", weight=50.0
+            ),
+        ]
+        await update_criteria(session, rubric_id, UpdateCriteriaRequest(criteria=new_list))
+
+    async with session_factory() as session:
+        reloaded = await get_rubric(session, rubric_id)
+    assert len(reloaded.criteria) == 2  # the 2nd original was deleted, 1 new was added
+    assert reloaded.criteria[1].text == "A brand new hand-added criterion"
+    assert reloaded.is_active is False  # confirm defaults to False — save draft, not activate
+
+
+async def test_update_criteria_rejects_a_criterion_id_from_another_rubric(
+    session_factory, tmp_path, monkeypatch
+):
+    from app.rubric.schemas import CriterionIn, UpdateCriteriaRequest
+    from app.rubric.service import update_criteria
+
+    rubric_a = await _seeded_rubric_id(session_factory, tmp_path, monkeypatch)
+    rubric_b = await _seeded_rubric_id(session_factory, tmp_path, monkeypatch)
+
+    async with session_factory() as session:
+        from app.rubric.service import get_rubric
+
+        b_criterion_id = (await get_rubric(session, rubric_b)).criteria[0].id
+
+    async with session_factory() as session:
+        with pytest.raises(NotFoundError):
+            await update_criteria(
+                session,
+                rubric_a,
+                UpdateCriteriaRequest(
+                    criteria=[
+                        CriterionIn(id=b_criterion_id, type="structural", text="x", weight=1.0)
+                    ]
+                ),
+            )
