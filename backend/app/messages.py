@@ -25,3 +25,15 @@ IMAGE_ONLY_NOTE = (
     "This document contains little or no selectable text (it may be a "
     "scanned copy). Checks that need the text will be limited."
 )
+
+# --- criterion routing (F3.1, V-015) ----------------------------------------
+
+STRUCTURAL_RULE_UNIMPLEMENTED = (
+    "No implemented structural rule matches this criterion yet, so it will "
+    "be graded semantically instead."
+)
+
+CRITERION_TYPE_UNRECOGNIZED = (
+    "This criterion's type could not be recognized, so it could not be "
+    "checked automatically. It needs manual review."
+)
