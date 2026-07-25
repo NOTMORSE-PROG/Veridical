@@ -4,7 +4,7 @@
 // pass/fail (taxonomy honesty, charter rule 9) — never dressed up as a
 // finding.
 import { useState } from "react";
-import { useParams } from "react-router";
+import { Link, useParams } from "react-router";
 import { ApiError } from "../api/client";
 import type { CriterionResultOut, ReportOut } from "../api/types";
 import { Pill, type PillStatus } from "../components/Pill";
@@ -137,6 +137,12 @@ export function ReportPage() {
         {report.composite_score !== null && (
           <span className="text-lg font-bold text-ink">{report.composite_score}%</span>
         )}
+        <Link
+          to={`/audit?check_run_id=${report.check_run_id}`}
+          className="text-xs text-primary hover:underline"
+        >
+          View audit trail
+        </Link>
       </div>
 
       <p className="rounded-control bg-info-bg px-3 py-2 text-xs text-info-text">

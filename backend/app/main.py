@@ -9,6 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from app import db
+from app.audit.router import router as audit_router
 from app.auth.router import router as auth_router
 from app.config import get_settings
 from app.dashboard.router import router as dashboard_router
@@ -42,6 +43,7 @@ app = FastAPI(
     description="Defense-readiness checks for capstone manuscripts.",
     lifespan=_lifespan,
 )
+app.include_router(audit_router)
 app.include_router(auth_router)
 app.include_router(dashboard_router)
 app.include_router(ingest_router)

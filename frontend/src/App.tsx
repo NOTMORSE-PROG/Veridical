@@ -2,6 +2,7 @@
 // AppShell; /gallery stays the ungated V-002 component review page.
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Navigate, Route, Routes } from "react-router";
+import { AuditLogPage } from "./audit/AuditLog";
 import { RequireAuth } from "./auth/RequireAuth";
 import { CheckProgressPage } from "./check/Progress";
 import { GalleryPage } from "./gallery/GalleryPage";
@@ -67,6 +68,16 @@ export default function App() {
               <RequireAuth>
                 <AppShell>
                   <ReportPage />
+                </AppShell>
+              </RequireAuth>
+            }
+          />
+          <Route
+            path="/audit"
+            element={
+              <RequireAuth>
+                <AppShell>
+                  <AuditLogPage />
                 </AppShell>
               </RequireAuth>
             }

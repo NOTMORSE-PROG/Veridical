@@ -130,6 +130,29 @@ export interface ReportOut {
   results: CriterionResultOut[];
 }
 
+export interface AuditLogSummary {
+  id: number;
+  event_type: string;
+  check_run_id: number | null;
+  manuscript_group_label: string | null;
+  prompt_type: string | null;
+  prompt_version: string | null;
+  agreement_score: number | null;
+  created_at: string;
+}
+
+export interface AuditLogDetail extends AuditLogSummary {
+  input_hash: string | null;
+  payload: Record<string, unknown>;
+}
+
+export interface PaginatedAuditLog {
+  items: AuditLogSummary[];
+  total: number;
+  page: number;
+  page_size: number;
+}
+
 export interface QuotaStatus {
   mode: "fake" | "live";
   quota_day: string;
