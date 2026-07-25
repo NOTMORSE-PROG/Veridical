@@ -1,0 +1,32 @@
+You are grading a capstone manuscript against a rubric's criteria.
+Grading one criterion per call would waste quota, so you are given a
+BATCH of criteria that all apply to the SAME excerpt of the manuscript
+below. Grade each criterion independently, using only the document text
+given — never outside knowledge, never an assumption about what a
+"typical" thesis contains.
+
+For each criterion, output a verdict:
+- "pass": the criterion is clearly satisfied by the document text.
+- "partial": the criterion is partially satisfied, or satisfied with
+  notable weaknesses.
+- "fail": the criterion is not satisfied by the document text.
+
+Every verdict MUST be backed by "evidence_quotes": a list of one or more
+short excerpts copied EXACTLY, character-for-character, from the document
+text below. Do not paraphrase. Do not summarize. Do not add ellipses or
+combine non-adjacent sentences into one quote. If you cannot find an
+exact quote that supports your verdict, that itself is evidence the
+criterion is not clearly satisfied — grade accordingly rather than
+inventing a quote.
+
+"reasoning" is one or two sentences explaining the verdict in plain
+language suitable for a Capstone Instructor to read directly.
+
+Respond with ONLY a JSON object of this exact shape, no other text:
+{"verdicts": [{"index": 0, "verdict": "pass", "reasoning": "...", "evidence_quotes": ["..."]}]}
+
+--- CRITERIA ---
+{criteria_list}
+
+--- DOCUMENT TEXT ({context_label}) ---
+{context_text}

@@ -25,7 +25,10 @@ REQUIRED_SECTION_RULE_ID = "required_section_present"
 SECTION_ORDER_RULE_ID = "section_order"
 
 
-def _walk(tree: SectionTree) -> Iterator[SectionNode]:
+def walk_sections(tree: SectionTree) -> Iterator[SectionNode]:
+    """Depth-first, document-reading order — reused by V-017's semantic
+    context builder to slice section text spans, not just by this rule."""
+
     def _walk_nodes(nodes: list[SectionNode]) -> Iterator[SectionNode]:
         for node in nodes:
             yield node
@@ -34,7 +37,11 @@ def _walk(tree: SectionTree) -> Iterator[SectionNode]:
     yield from _walk_nodes(tree.nodes)
 
 
-def _target_section(criterion) -> str | None:
+def identify_target_section(criterion) -> str | None:
+    """Which section (by ingestion's own synonym vocabulary, or a
+    "chapter N" reference) a criterion's wording is talking about, if any.
+    Shared by `required_section_present` (this rule) and V-017's semantic
+    context builder — one identification mechanism, not two."""
     text = full_text(criterion)
     lowered = text.lower()
     for synonym in _HEADING_PATTERNS.unnumbered_sections:
@@ -46,8 +53,19 @@ def _target_section(criterion) -> str | None:
     return None
 
 
+def find_section_node(target: str, tree: SectionTree) -> SectionNode | None:
+    """First node whose title matches `target` (substring either
+    direction, casefolded) — the actual lookup the required-section rule
+    runs, and what V-017 uses to locate a criterion's text span."""
+    for node in walk_sections(tree):
+        title = node.title.casefold()
+        if target in title or title in target:
+            return node
+    return None
+
+
 def _matches_required_section(criterion) -> bool:
-    return _target_section(criterion) is not None
+    return identify_target_section(criterion) is not None
 
 
 def _node_anchor(node: SectionNode) -> str:
@@ -59,21 +77,20 @@ def _node_anchor(node: SectionNode) -> str:
 
 
 def _run_required_section(criterion, ctx: RuleContext) -> RuleOutcome:
-    target = _target_section(criterion)
+    target = identify_target_section(criterion)
     if target is None:
         return RuleOutcome(
             outcome=ResultOutcome.not_applicable,
             anchor="document",
             detail={"reason": "Could not identify which section this criterion refers to."},
         )
-    for node in _walk(ctx.section_tree):
-        title = node.title.casefold()
-        if target in title or title in target:
-            return RuleOutcome(
-                outcome=ResultOutcome.passed,
-                anchor=_node_anchor(node),
-                detail={"target": target, "matched_title": node.title},
-            )
+    node = find_section_node(target, ctx.section_tree)
+    if node is not None:
+        return RuleOutcome(
+            outcome=ResultOutcome.passed,
+            anchor=_node_anchor(node),
+            detail={"target": target, "matched_title": node.title},
+        )
     return RuleOutcome(
         outcome=ResultOutcome.failed,
         anchor="not found in document structure",
