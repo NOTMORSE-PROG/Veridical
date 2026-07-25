@@ -60,4 +60,8 @@ HTTP_STATUS: dict[str, int] = {
     "too_large": 413,
     "quota_exhausted": 429,
     "api_down": 502,
+    # A rubric-decomposition parse that failed schema validation (V-010) —
+    # user-actionable (re-review/re-upload); V-011 wraps this in a retry
+    # loop so it only ever reaches HTTP after repeated failure.
+    "parse_failed": 422,
 }

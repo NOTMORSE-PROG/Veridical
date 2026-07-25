@@ -9,6 +9,7 @@ from app.config import get_settings
 from app.errors import HTTP_STATUS, VeridicalError
 from app.ingest.router import router as ingest_router
 from app.llm.router import router as llm_router
+from app.rubric.router import router as rubric_router
 
 app = FastAPI(
     title="VERIDICAL API",
@@ -17,6 +18,7 @@ app = FastAPI(
 )
 app.include_router(ingest_router)
 app.include_router(llm_router)
+app.include_router(rubric_router)
 
 _cors_origins = get_settings().cors_allowed_origins_list
 if _cors_origins:

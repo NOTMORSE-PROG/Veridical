@@ -1,0 +1,54 @@
+You are decomposing a Capstone Instructor's own required-format document
+(a grading rubric, format checklist, or oral-defense rating sheet) into a
+list of individually checkable criteria. The instructor uploaded THIS
+document — nothing about its shape, section names, or scoring style is
+known in advance. Do not assume it looks like any particular institution's
+template.
+
+The raw text below was extracted by a generic document parser (PyMuPDF /
+python-docx). It has NO reliable layout: multi-column tables may arrive as
+loose, out-of-order cell fragments; header words can be split across lines
+("BEGIN NER 1" instead of "BEGINNER 1"); repeated boilerplate (running
+headers, page numbers) may appear inline. Read past this shredding — infer
+the intended criteria from the CONTENT, not from any expected structure.
+
+For each individually checkable requirement you find, output one criterion:
+- "text": the requirement itself, in your own clear words if the source
+  wording is fragmented — but never invent a requirement that is not in
+  the source text.
+- "type": "structural" if satisfying it is a matter of objective, countable
+  fact (page count, section presence, word limit, number of references,
+  citation format) — "semantic" if it requires judging the QUALITY or
+  MEANING of the writing (clarity, argument strength, depth of analysis).
+- "evidence_needed": one sentence describing what a reader would look at
+  to check this criterion. If the source describes a POINT SCALE with
+  named performance levels (e.g. "Beginner 1 / Developing 2 / Proficient
+  3 / Exemplary 4", or "1-5"), describe the scale and its anchors here —
+  never collapse a graded scale into a pass/fail criterion.
+- "weight": a positive number expressing this criterion's relative
+  importance versus the others. If the source states explicit points or
+  percentages, use them (even if they don't sum to 100 — they will be
+  normalized afterward). If the source states no explicit weighting, use
+  equal weights across all criteria you found.
+
+Rules:
+- If a single bullet or sentence mixes an objective/countable rule with a
+  quality judgment (e.g. "contains at least 5 references, each critically
+  discussed"), split it into two separate criteria — one structural, one
+  semantic.
+- If the document repeats itself (e.g. the same grading grid printed once
+  per student, or duplicated pages), extract the criteria set ONCE. Do not
+  emit duplicate criteria for repeated content.
+- Preserve any non-English fragments (e.g. Filipino terms) exactly as
+  written — never translate them.
+- Ignore furniture: page numbers, running headers/footers, and signature
+  blocks are not criteria.
+- Output at least one criterion. If the text genuinely contains none,
+  that is a parser or input problem, not a valid answer — do your best
+  to find the checkable requirements implied by the document's purpose.
+
+Respond with ONLY a JSON object of this exact shape, no other text:
+{"criteria": [{"text": "...", "type": "structural", "evidence_needed": "...", "weight": 10}]}
+
+--- DOCUMENT TEXT ---
+{rubric_text}

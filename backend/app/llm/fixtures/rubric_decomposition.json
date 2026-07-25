@@ -1,17 +1,27 @@
 {
-  "prompt_type": "rubric_decomposition",
-  "note": "Placeholder shape — the real prompt/parser contract is defined in V-010 (F2.1).",
   "criteria": [
     {
       "text": "Manuscript contains an abstract of at most 250 words",
       "type": "structural",
-      "evidence": "Abstract section, word count",
+      "evidence_needed": "Abstract section, word count",
+      "weight": 5
+    },
+    {
+      "text": "Reference list has at least five major sources, no more than two internet-only sites",
+      "type": "structural",
+      "evidence_needed": "Reference list, source-type count",
       "weight": 5
     },
     {
       "text": "Chapter 1 states the research problem and its significance",
       "type": "semantic",
-      "evidence": "Chapter 1 sections 1.1-1.2",
+      "evidence_needed": "Chapter 1, sections 1.1-1.2 — clarity and depth of the problem statement",
+      "weight": 10
+    },
+    {
+      "text": "Findings are discussed with reference to prior literature, on a Beginner(1)-Developing(2)-Proficient(3)-Exemplary(4) scale",
+      "type": "semantic",
+      "evidence_needed": "Chapter 4 discussion; scale: 1=no comparison, 4=thorough critical comparison",
       "weight": 10
     }
   ]
