@@ -107,6 +107,33 @@ class Settings(BaseSettings):
     llm_max_retries: int = 3
     llm_retry_base_seconds: float = 1.0
 
+    # --- Structural check engine (V-016, F3.2) -------------------------------
+    # Override the packaged criterion-matching keyword lists / bound-phrase
+    # patterns without a code change; empty = packaged default.
+    structural_keywords_file: Path | None = None
+    structural_bound_patterns_file: Path | None = None
+    # A PDF/DOCX-declared margin within this many points of the criterion's
+    # stated value still counts as meeting it (real documents are never
+    # pixel-exact; ~1/12 inch).
+    structural_margin_tolerance_pts: float = 6.0
+    # Share of reference-list entries that must show the APA-ish
+    # year-in-parentheses pattern before the citation-style rule passes.
+    structural_citation_style_min_ratio: float = 0.7
+    # Share of tables that must carry a caption before the table-
+    # formatting rule passes.
+    structural_table_caption_min_ratio: float = 0.8
+
+    # --- Tier-0 signal layer (V-016, D-011 shadow mode) ----------------------
+    # Flesch Reading Ease band a graduate-level capstone chapter is expected
+    # to fall within. SHADOW ONLY (D-012): recorded on every semantic
+    # check_result for future promotion evaluation (V-025); never decides an
+    # outcome until a criterion class is explicitly promoted.
+    signal_readability_flesch_min: float = 0.0
+    signal_readability_flesch_max: float = 70.0
+    # Type-token ratio (unique words / total words) floor — very low
+    # diversity often means repetitive/boilerplate prose.
+    signal_vocab_diversity_min: float = 0.25
+
     # --- Rubric decomposition validation gate (V-011, F2.2) ------------------
     # Total attempts = this + 1 (the first attempt isn't a "retry"). Each
     # retry appends the previous failure's reasons to the prompt.
@@ -148,7 +175,12 @@ class Settings(BaseSettings):
     def cors_allowed_origins_list(self) -> list[str]:
         return [origin.strip() for origin in self.cors_allowed_origins.split(",") if origin.strip()]
 
-    @field_validator("ingest_patterns_file", mode="before")
+    @field_validator(
+        "ingest_patterns_file",
+        "structural_keywords_file",
+        "structural_bound_patterns_file",
+        mode="before",
+    )
     @classmethod
     def _blank_path_is_none(cls, value: object) -> object:
         # `INGEST_PATTERNS_FILE=` (blank, as .env.example ships it) must

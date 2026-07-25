@@ -1,0 +1,19 @@
+{
+  "_comment": [
+    "Keyword lists used to MATCH a structural criterion to an implemented",
+    "rule family (charter rule 7: instructor-facing wording, not code,",
+    "decides which rule a criterion is talking about). Matching a rubric's",
+    "own section-name vocabulary reuses app/ingest/data/heading_patterns.json",
+    "directly (same synonyms that drove heading detection) rather than",
+    "duplicating it here."
+  ],
+  "citation_styles": ["apa", "mla", "chicago", "ieee", "vancouver", "harvard", "turabian"],
+  "reference_nouns": ["reference", "references", "citation", "citations", "source", "sources"],
+  "page_nouns": ["page", "pages", "pp"],
+  "margin_nouns": ["margin", "margins"],
+  "spacing_nouns": ["spacing", "spaced"],
+  "table_nouns": ["table", "tables"],
+  "table_format_nouns": ["caption", "captioned", "format", "formatted", "numbered", "labeled", "labelled"],
+  "order_nouns": ["order", "sequence", "ordering"],
+  "section_reference_nouns": ["chapter", "section"]
+}

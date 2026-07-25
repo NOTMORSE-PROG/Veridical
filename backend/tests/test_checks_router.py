@@ -9,9 +9,19 @@ from dataclasses import dataclass
 import pytest
 
 from app.checks.router import route_criteria, route_criterion
-from app.checks.rules import RuleSpec, _clear_registry_for_tests, register_rule
+from app.checks.rules import (
+    RuleSpec,
+    _clear_registry_for_tests,
+    _restore_registry,
+    _snapshot_registry,
+    register_rule,
+)
 from app.messages import CRITERION_TYPE_UNRECOGNIZED, STRUCTURAL_RULE_UNIMPLEMENTED
 from app.models.enums import CheckKind
+
+
+def _noop_run(criterion, ctx):  # pragma: no cover - never invoked in these routing-only tests
+    raise NotImplementedError
 
 
 @dataclass
@@ -24,9 +34,15 @@ class FakeCriterion:
 
 @pytest.fixture(autouse=True)
 def clean_registry():
+    """These tests exercise ROUTING in isolation (an empty registry is the
+    honest pre-V-016 baseline the snapshot test documents) — snapshot the
+    real V-016 rules first and restore them afterward so later test
+    modules still see the production registry, not a permanently-cleared
+    one (test isolation, not just this file's own correctness)."""
+    snapshot = _snapshot_registry()
     _clear_registry_for_tests()
     yield
-    _clear_registry_for_tests()
+    _restore_registry(snapshot)
 
 
 def test_semantic_criterion_always_routes_semantic():
@@ -53,6 +69,7 @@ def test_structural_criterion_matching_a_registered_rule_routes_structural():
             rule_id="required_section_present",
             description="test rule",
             matches=lambda crit: "abstract" in crit.text.lower(),
+            run=_noop_run,
         )
     )
     c = FakeCriterion(id=3, type="structural", text="Manuscript must include an Abstract")
@@ -69,6 +86,7 @@ def test_structural_criterion_not_matching_any_registered_rule_still_degrades():
             rule_id="required_section_present",
             description="test rule",
             matches=lambda crit: "abstract" in crit.text.lower(),
+            run=_noop_run,
         )
     )
     c = FakeCriterion(id=4, type="structural", text="References must use APA style")
@@ -103,6 +121,7 @@ def test_full_coverage_invariant_holds_for_arbitrary_criteria_sets():
             rule_id="required_section_present",
             description="test rule",
             matches=lambda crit: "abstract" in crit.text.lower(),
+            run=_noop_run,
         )
     )
     rng = random.Random(1234)
@@ -128,10 +147,12 @@ def test_full_coverage_invariant_holds_for_arbitrary_criteria_sets():
 
 
 def test_fixture_rubric_routes_exactly_as_expected_snapshot():
-    """Fixture rubric snapshot test (ticket QA step): a small realistic
-    rubric with an empty registry (no rules implemented yet, honest
-    baseline before V-016 lands) routes every structural criterion to a
-    degraded semantic decision, and semantic criteria route directly."""
+    """Fixture rubric snapshot test (ticket QA step): with NO rules
+    registered (this file's `clean_registry` fixture isolates routing
+    tests from the real V-016 registry on purpose), a small realistic
+    rubric routes every structural criterion to a degraded semantic
+    decision (honest fallback, proven independent of which real rules
+    exist), and semantic criteria route directly."""
     criteria = [
         FakeCriterion(id=1, type="structural", text="Has an abstract"),
         FakeCriterion(id=2, type="structural", text="Bibliography uses APA format"),

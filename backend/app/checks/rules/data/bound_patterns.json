@@ -1,0 +1,15 @@
+{
+  "_comment": [
+    "Phrase patterns for extracting a numeric bound (min/max/exact/range)",
+    "from a criterion's own wording, e.g. 'at least 15 references' or",
+    "'must not exceed 100 pages'. Data, not code (charter rule 7) — a",
+    "rubric phrased differently is accommodated by editing this file.",
+    "Tried in this order: range, min, max, exact, bare (a lone number next",
+    "to a recognized unit word, with no comparison phrase at all)."
+  ],
+  "range": "(?:between|from)\\s+(?P<num1>\\d+(?:\\.\\d+)?)\\s*(?:and|to|-|–)\\s*(?P<num2>\\d+(?:\\.\\d+)?)\\s*(?P<unit>[a-zA-Z]*)",
+  "min": "(?:at least|minimum(?: of)?|no (?:less|fewer) than|not less than|>=|≥)\\s*(?P<num1>\\d+(?:\\.\\d+)?)\\s*(?P<unit>[a-zA-Z]*)",
+  "max": "(?:at most|maximum(?: of)?|no more than|not (?:exceed|more than)|must not exceed|<=|≤|up to)\\s*(?P<num1>\\d+(?:\\.\\d+)?)\\s*(?P<unit>[a-zA-Z]*)",
+  "exact": "(?:exactly|must be)\\s+(?P<num1>\\d+(?:\\.\\d+)?)\\s*(?P<unit>[a-zA-Z]*)",
+  "bare": "(?P<num1>\\d+(?:\\.\\d+)?)\\s*(?P<unit>inch(?:es)?|in|cm|mm|pt|points?|pages?|pp|references?|citations?|sources?)\\b"
+}

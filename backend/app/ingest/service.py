@@ -196,3 +196,12 @@ async def ingest_upload(
 def _write_raw_store(result: ExtractionResult, path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(result.model_dump_json(), encoding="utf-8")
+
+
+def load_raw_store(settings: Settings, manuscript_id: int) -> ExtractionResult:
+    """Reads back what `_write_raw_store` wrote — the structural check
+    engine (V-016) is the first consumer of the full extraction (blocks,
+    tables, geometry) beyond the ingestion pass itself."""
+    return ExtractionResult.model_validate_json(
+        raw_store_path(settings, manuscript_id).read_text(encoding="utf-8")
+    )
