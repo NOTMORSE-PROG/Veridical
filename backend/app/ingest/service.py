@@ -16,7 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app import messages
 from app.config import Settings, get_settings
-from app.errors import FileMalformedError, FileTooLargeError
+from app.errors import ApiDownError, FileMalformedError, FileTooLargeError, QuotaExhaustedError
 from app.ingest import docx, pdf, references, vision
 from app.ingest.patterns import load_patterns
 from app.ingest.schemas import ExtractionResult, ManuscriptListItem, PaginatedManuscripts
@@ -124,9 +124,17 @@ async def ingest_manuscript(
             await vision.read_images(
                 result, file_path, get_llm_client(settings), patterns, settings
             )
-        except LLMNotConfiguredError:
-            # No client (real mode before V-009): image content stays
-            # unread — an honest state, never an ingestion failure.
+        except (LLMNotConfiguredError, ApiDownError, QuotaExhaustedError):
+            # No client (real mode before V-009), or the queue's own
+            # retries were exhausted, or the daily quota ran out: image
+            # content stays unread — an honest state (F1.7), never an
+            # ingestion failure. Found live (V2 milestone demo,
+            # 2026-07-25): a real Gemini vision-call outage previously
+            # propagated through the outer `except Exception` below and
+            # failed the WHOLE manuscript — the text/structure/references
+            # this stage already extracted are still perfectly good and
+            # must not be thrown away over an unrelated image-reading
+            # problem.
             result.vision_status = "unavailable"
         await loop.run_in_executor(
             None, _write_raw_store, result, raw_store_path(settings, manuscript.id)

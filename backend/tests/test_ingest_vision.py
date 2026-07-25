@@ -180,3 +180,55 @@ def test_ingestion_survives_missing_llm_client(tmp_path, monkeypatch):
     assert result.vision_status == "unavailable"
     assert manuscript.ingest_status == IngestStatus.done
     assert [t for t in result.tables if t.source == "vision"] == []
+
+
+class _FailingLLM(LLMClient):
+    """Simulates a real Gemini vision call that's exhausted its own
+    retries (V-009's queue raises exactly these two types) — never
+    `LLMNotConfiguredError`, which is a different failure entirely."""
+
+    def __init__(self, exc: Exception):
+        self._exc = exc
+
+    async def complete(self, prompt_type: str, prompt: str, **context: Any) -> dict[str, Any]:
+        raise self._exc
+
+
+def test_ingestion_survives_a_real_vision_api_failure(tmp_path, monkeypatch):
+    """Regression test: found live during the V2 milestone demo
+    (2026-07-25) — a real Gemini vision-call outage (`ApiDownError`)
+    propagated through `ingest_manuscript`'s outer `except Exception` and
+    failed the WHOLE manuscript, even though the text/structure/
+    references this stage already extracted were perfectly good. A
+    vision outage must degrade the same honest way a missing client
+    already does: `vision_status="unavailable"`, ingestion still `done`."""
+    from app.errors import ApiDownError, QuotaExhaustedError
+    from app.ingest.service import ingest_manuscript
+    from app.models import Manuscript
+    from app.models.enums import IngestStatus
+
+    monkeypatch.setenv("DATA_DIR", str(tmp_path / "data"))
+    get_settings.cache_clear()
+    path = _pdf_with_images(tmp_path, n_results_images=1)
+
+    failures = (
+        ApiDownError("Gemini did not respond after 3 attempts."),
+        QuotaExhaustedError("out"),
+    )
+    for exc in failures:
+        manuscript = Manuscript(instructor_id=1, group_label="G", file_ref=str(path))
+        manuscript.id = 999
+        settings = get_settings()
+
+        async def scenario(exc=exc, manuscript=manuscript, settings=settings):
+            import app.ingest.service as service_module
+
+            monkeypatch.setattr(
+                service_module, "get_llm_client", lambda _settings: _FailingLLM(exc)
+            )
+            return await ingest_manuscript(_StubSession(), manuscript, path, settings)
+
+        result = asyncio.run(scenario())
+        assert result.vision_status == "unavailable"
+        assert manuscript.ingest_status == IngestStatus.done
+        assert [t for t in result.tables if t.source == "vision"] == []
