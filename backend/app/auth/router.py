@@ -1,0 +1,59 @@
+"""Auth HTTP surface (F9.1): login, logout, me."""
+
+from typing import Annotated
+
+from fastapi import APIRouter, Depends, Request, Response
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.auth.dependencies import get_current_instructor
+from app.auth.schemas import InstructorOut, LoginRequest
+from app.auth.service import RateLimitedError, authenticate, create_session, delete_session
+from app.config import get_settings
+from app.db import get_session
+from app.errors import UnauthenticatedError
+from app.models.instructor import Instructor
+
+router = APIRouter(prefix="/auth", tags=["auth"])
+
+
+@router.post("/login", response_model=InstructorOut)
+async def login(
+    body: LoginRequest, response: Response, session: Annotated[AsyncSession, Depends(get_session)]
+) -> InstructorOut:
+    settings = get_settings()
+    try:
+        instructor = await authenticate(session, body.email, body.password, settings)
+    except RateLimitedError as exc:
+        raise UnauthenticatedError(
+            "Too many failed sign-in attempts. Please try again in a few minutes."
+        ) from exc
+    if instructor is None:
+        raise UnauthenticatedError("Incorrect email or password.")
+
+    row = await create_session(session, instructor, settings)
+    response.set_cookie(
+        settings.session_cookie_name,
+        row.token,
+        max_age=settings.session_ttl_hours * 3600,
+        httponly=True,
+        secure=settings.session_cookie_secure,
+        samesite="lax",
+    )
+    return InstructorOut.model_validate(instructor)
+
+
+@router.post("/logout")
+async def logout(
+    request: Request, response: Response, session: Annotated[AsyncSession, Depends(get_session)]
+) -> dict[str, bool]:
+    settings = get_settings()
+    token = request.cookies.get(settings.session_cookie_name)
+    if token is not None:
+        await delete_session(session, token)
+    response.delete_cookie(settings.session_cookie_name)
+    return {"ok": True}
+
+
+@router.get("/me", response_model=InstructorOut)
+async def me(instructor: Annotated[Instructor, Depends(get_current_instructor)]) -> InstructorOut:
+    return InstructorOut.model_validate(instructor)

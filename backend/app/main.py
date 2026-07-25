@@ -5,6 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from app import db
+from app.auth.router import router as auth_router
 from app.config import get_settings
 from app.errors import HTTP_STATUS, VeridicalError
 from app.ingest.router import router as ingest_router
@@ -16,6 +17,7 @@ app = FastAPI(
     version="0.1.0",
     description="Defense-readiness checks for capstone manuscripts.",
 )
+app.include_router(auth_router)
 app.include_router(ingest_router)
 app.include_router(llm_router)
 app.include_router(rubric_router)
@@ -27,6 +29,11 @@ if _cors_origins:
         allow_origins=_cors_origins,
         allow_methods=["*"],
         allow_headers=["*"],
+        # The session cookie (V-014) rides on `credentials: "include"` —
+        # browsers refuse the response without this, found live testing
+        # V-014's sign-in flow (V-048's CORS setup predates any
+        # cookie-based auth, so nothing exercised this gap until now).
+        allow_credentials=True,
     )
 
 

@@ -122,6 +122,19 @@ class Settings(BaseSettings):
     # a criterion's text/evidence for that line to count as "covered".
     rubric_coverage_word_overlap_ratio: float = 0.3
 
+    # --- Auth (V-014, F9.1) ---------------------------------------------------
+    session_cookie_name: str = "veridical_session"
+    session_ttl_hours: int = 12
+    # False in dev (plain http://localhost — browsers drop Secure cookies
+    # over http); production sets this true (Render terminates TLS on
+    # every service automatically, verified 2026-07-25, render.com/docs/tls).
+    session_cookie_secure: bool = False
+    # Failed-login throttle, keyed by email (in-process — resets on
+    # restart; acceptable for a single-institution v1, revisit if this
+    # becomes multi-tenant, ENGINEERING §7-style honest limitation).
+    login_rate_limit_max_attempts: int = 5
+    login_rate_limit_window_seconds: float = 300.0
+
     # --- CORS (V-048) --------------------------------------------------------
     # Comma-separated origins allowed to call the API from a browser. Empty
     # in dev (no browser cross-origin caller yet); production sets it to

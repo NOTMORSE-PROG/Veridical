@@ -12,6 +12,7 @@ from app.models.llm import LLMQuotaCounter, LLMResponseCache
 from app.models.manuscript import Manuscript, ManuscriptArchive
 from app.models.rubric import Criterion, Rubric
 from app.models.run import CheckResult, CheckRun, Flag, ReadinessReport
+from app.models.session import Session
 
 __all__ = [
     "AuditLog",
@@ -28,4 +29,5 @@ __all__ = [
     "ManuscriptArchive",
     "ReadinessReport",
     "Rubric",
+    "Session",
 ]

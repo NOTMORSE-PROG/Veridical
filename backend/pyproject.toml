@@ -15,6 +15,9 @@ dependencies = [
     "python-docx>=1.2.0",
     "python-multipart>=0.0.32",
     "google-genai>=1.0",
+    # OWASP's first-choice password hashing algorithm (2026-07-25,
+    # cheatsheetseries.owasp.org/cheatsheets/Password_Storage_Cheat_Sheet.html).
+    "argon2-cffi>=23.1",
     # stdlib zoneinfo has no data on Windows (and some minimal Linux images)
     # without this — needed for the quota governor's Pacific-midnight reset.
     "tzdata>=2025.1",

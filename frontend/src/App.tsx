@@ -1,32 +1,35 @@
-// Route shell — placeholder until the real app shell/nav lands (V-014,
-// screens 4a–4b). /gallery is the V-002 component review page.
-import { BrowserRouter, Link, Route, Routes } from "react-router";
+// Route shell (V-014): auth-gated app routes render inside the one
+// AppShell; /gallery stays the ungated V-002 component review page.
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { BrowserRouter, Navigate, Route, Routes } from "react-router";
+import { RequireAuth } from "./auth/RequireAuth";
 import { GalleryPage } from "./gallery/GalleryPage";
+import { DashboardPage } from "./pages/Dashboard";
+import { SignInPage } from "./pages/SignIn";
+import { AppShell } from "./shell/AppShell";
 
-function IndexPage() {
-  return (
-    <main className="p-8">
-      <h1 className="text-lg font-bold">VERIDICAL</h1>
-      <p className="text-ink-soft">
-        Frontend scaffold.{" "}
-        <Link
-          className="text-primary hover:text-primary-hover hover:underline"
-          to="/gallery"
-        >
-          Component gallery
-        </Link>
-      </p>
-    </main>
-  );
-}
+const queryClient = new QueryClient();
 
 export default function App() {
   return (
-    <BrowserRouter>
-      <Routes>
-        <Route path="/" element={<IndexPage />} />
-        <Route path="/gallery" element={<GalleryPage />} />
-      </Routes>
-    </BrowserRouter>
+    <QueryClientProvider client={queryClient}>
+      <BrowserRouter>
+        <Routes>
+          <Route path="/" element={<Navigate to="/dashboard" replace />} />
+          <Route path="/signin" element={<SignInPage />} />
+          <Route
+            path="/dashboard"
+            element={
+              <RequireAuth>
+                <AppShell>
+                  <DashboardPage />
+                </AppShell>
+              </RequireAuth>
+            }
+          />
+          <Route path="/gallery" element={<GalleryPage />} />
+        </Routes>
+      </BrowserRouter>
+    </QueryClientProvider>
   );
 }
