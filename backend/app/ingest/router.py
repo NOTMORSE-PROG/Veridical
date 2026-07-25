@@ -12,9 +12,11 @@ from fastapi import APIRouter, Depends, UploadFile
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app import messages
+from app.auth.dependencies import get_current_instructor
 from app.db import get_session
-from app.ingest.schemas import IngestSummary
-from app.ingest.service import ingest_upload
+from app.ingest.schemas import IngestSummary, ManuscriptListItem
+from app.ingest.service import ingest_upload, list_manuscripts
+from app.models.instructor import Instructor
 
 router = APIRouter(tags=["ingestion"])
 
@@ -51,3 +53,12 @@ async def ingest_manuscript_upload(
         section_tree=result.section_tree,
         notes=notes,
     )
+
+
+@router.get("/manuscripts", response_model=list[ManuscriptListItem])
+async def list_manuscripts_route(
+    session: Annotated[AsyncSession, Depends(get_session)],
+    instructor: Annotated[Instructor, Depends(get_current_instructor)],
+) -> list[ManuscriptListItem]:
+    manuscripts = await list_manuscripts(session, instructor.id)
+    return [ManuscriptListItem.model_validate(m) for m in manuscripts]

@@ -3,6 +3,7 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Navigate, Route, Routes } from "react-router";
 import { RequireAuth } from "./auth/RequireAuth";
+import { CheckProgressPage } from "./check/Progress";
 import { GalleryPage } from "./gallery/GalleryPage";
 import { DashboardPage } from "./pages/Dashboard";
 import { SignInPage } from "./pages/SignIn";
@@ -45,6 +46,16 @@ export default function App() {
               <RequireAuth>
                 <AppShell>
                   <ReviewCriteriaPage />
+                </AppShell>
+              </RequireAuth>
+            }
+          />
+          <Route
+            path="/checks/:checkRunId"
+            element={
+              <RequireAuth>
+                <AppShell>
+                  <CheckProgressPage />
                 </AppShell>
               </RequireAuth>
             }

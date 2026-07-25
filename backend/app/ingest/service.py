@@ -198,6 +198,21 @@ def _write_raw_store(result: ExtractionResult, path: Path) -> None:
     path.write_text(result.model_dump_json(), encoding="utf-8")
 
 
+async def list_manuscripts(session: AsyncSession, instructor_id: int) -> list[Manuscript]:
+    """Minimal listing for the New Check modal's manuscript picker
+    (V-018) — no pagination yet; V-021 (dashboard) extends this same
+    query with pagination and KPI aggregation."""
+    return list(
+        (
+            await session.scalars(
+                select(Manuscript)
+                .where(Manuscript.instructor_id == instructor_id)
+                .order_by(Manuscript.created_at.desc())
+            )
+        ).all()
+    )
+
+
 def load_raw_store(settings: Settings, manuscript_id: int) -> ExtractionResult:
     """Reads back what `_write_raw_store` wrote — the structural check
     engine (V-016) is the first consumer of the full extraction (blocks,

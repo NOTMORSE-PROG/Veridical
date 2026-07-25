@@ -165,6 +165,19 @@ class Settings(BaseSettings):
     scoring_flag_deduction_low: float = 3.0
     scoring_flag_deduction_cap: float = 40.0
 
+    # --- Check-run orchestration (V-018, ENGINEERING §4) ---------------------
+    # How often the background worker polls for the next runnable
+    # check_run when it isn't actively advancing one (simplest job runner
+    # per the ticket's own research note — no paid queue infrastructure).
+    pipeline_worker_poll_seconds: float = 5.0
+    # An api_down stage doesn't have a precise reset time the way quota
+    # does (D-001) — retry after a fixed backoff instead.
+    pipeline_api_down_retry_seconds: float = 300.0
+    # Off by default so importing the FastAPI app (every TestClient-based
+    # test) never starts a real polling loop against whatever DATABASE_URL
+    # happens to be configured; production (Render) turns this on.
+    pipeline_worker_autostart: bool = False
+
     # --- Auth (V-014, F9.1) ---------------------------------------------------
     session_cookie_name: str = "veridical_session"
     session_ttl_hours: int = 12

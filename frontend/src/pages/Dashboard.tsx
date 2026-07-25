@@ -2,14 +2,24 @@
 // (4e, KPI cards, "does an active rubric exist") is V-021 — this ticket
 // only builds the empty-state screen and the upload trigger (V-012 wires
 // what "Upload required format" opens: the parse modal, screen 4c).
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useMe } from "../auth/useAuth";
+import { NewCheckModal } from "../check/NewCheck";
 import { Chip } from "../components/Chip";
+import { useRubricFamilies } from "../rubric/useRubric";
 import { UploadRubricModal } from "../rubric/UploadRubricModal";
 
 export function DashboardPage() {
   const { data: me } = useMe();
+  const { data: families } = useRubricFamilies();
   const [uploadOpen, setUploadOpen] = useState(false);
+  const [newCheckOpen, setNewCheckOpen] = useState(false);
+
+  // "New check" (screen 4f) only makes sense once at least one rubric is
+  // confirmed & active — V-021 replaces this whole empty-state screen
+  // with the populated dashboard (4e); this ticket only unlocks the entry
+  // point once its own precondition is real, not a placeholder.
+  const hasActiveRubric = useMemo(() => (families ?? []).some((f) => f.is_active), [families]);
 
   return (
     <div className="flex flex-col gap-3 p-4">
@@ -21,13 +31,16 @@ export function DashboardPage() {
         <span className="flex-1" />
         <button
           type="button"
-          disabled
-          title="Upload a required format to enable checks"
-          className="rounded-control border border-border-button bg-panel px-3.5 py-1.5 text-base font-medium text-ink opacity-45"
+          disabled={!hasActiveRubric}
+          onClick={() => setNewCheckOpen(true)}
+          title={hasActiveRubric ? undefined : "Upload a required format to enable checks"}
+          className="rounded-control border border-border-button bg-panel px-3.5 py-1.5 text-base font-medium text-ink disabled:opacity-45"
         >
           New check
         </button>
       </div>
+
+      {newCheckOpen && <NewCheckModal onClose={() => setNewCheckOpen(false)} />}
 
       <div className="flex flex-col items-center gap-2 rounded-panel border-2 border-dashed border-border-button bg-page p-7">
         <b className="text-md text-ink">No required format yet</b>

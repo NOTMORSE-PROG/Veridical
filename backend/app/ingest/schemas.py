@@ -13,6 +13,7 @@ branches on file format.
 """
 
 from dataclasses import dataclass, field
+from datetime import datetime
 from typing import Literal
 
 from pydantic import BaseModel, Field
@@ -139,6 +140,20 @@ class IngestSummary(BaseModel):
     # User-facing notes (message templates) — e.g. the limited-checks note
     # for scans. Honest states, not errors.
     notes: list[str] = Field(default_factory=list)
+
+
+class ManuscriptListItem(BaseModel):
+    """One row of a manuscript picker/list (screens 4e/4f). Minimal on
+    purpose — V-018 needs just enough for the New Check modal's
+    manuscript selector; V-021 extends this same endpoint with
+    pagination and KPI aggregation for the full dashboard."""
+
+    id: int
+    group_label: str
+    ingest_status: str
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
 
 
 class ExtractionResult(BaseModel):

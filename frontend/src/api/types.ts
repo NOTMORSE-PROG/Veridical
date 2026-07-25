@@ -43,6 +43,46 @@ export interface RubricListItem {
   report_count: number;
 }
 
+export interface ManuscriptListItem {
+  id: number;
+  group_label: string;
+  ingest_status: "pending" | "processing" | "done" | "failed";
+  created_at: string;
+}
+
+export type CheckRunStatus =
+  | "queued"
+  | "ingesting"
+  | "structural"
+  | "semantic"
+  | "integrity"
+  | "aggregating"
+  | "done"
+  | "failed";
+
+export interface StageEntry {
+  status: string;
+  [key: string]: unknown;
+}
+
+export interface StageStatus {
+  stages?: Record<string, StageEntry>;
+  blocked?: { code: string; message: string; resume_at: string | null };
+  failed?: { code: string; message: string };
+}
+
+export interface CheckRun {
+  id: number;
+  manuscript_id: number;
+  rubric_id: number;
+  status: CheckRunStatus;
+  stage_status: StageStatus | null;
+  queue_position: number | null;
+  started_at: string | null;
+  finished_at: string | null;
+  created_at: string;
+}
+
 export interface QuotaStatus {
   mode: "fake" | "live";
   quota_day: string;

@@ -1,5 +1,9 @@
 """VERIDICAL API entry point."""
 
+import asyncio
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -10,16 +14,36 @@ from app.config import get_settings
 from app.errors import HTTP_STATUS, VeridicalError
 from app.ingest.router import router as ingest_router
 from app.llm.router import router as llm_router
+from app.pipeline.router import router as pipeline_router
+from app.pipeline.worker import worker_loop
 from app.rubric.router import router as rubric_router
+
+
+@asynccontextmanager
+async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
+    # Gated by settings (default off, V-018): every TestClient-based test
+    # imports this module, and a real polling loop must never start
+    # against a test's DATABASE_URL by surprise. Production (Render)
+    # turns this on — the "simplest job runner" the ticket's own research
+    # note asked for, no paid queue infrastructure.
+    task = None
+    if get_settings().pipeline_worker_autostart:
+        task = asyncio.create_task(worker_loop())
+    yield
+    if task is not None:
+        task.cancel()
+
 
 app = FastAPI(
     title="VERIDICAL API",
     version="0.1.0",
     description="Defense-readiness checks for capstone manuscripts.",
+    lifespan=_lifespan,
 )
 app.include_router(auth_router)
 app.include_router(ingest_router)
 app.include_router(llm_router)
+app.include_router(pipeline_router)
 app.include_router(rubric_router)
 
 _cors_origins = get_settings().cors_allowed_origins_list
