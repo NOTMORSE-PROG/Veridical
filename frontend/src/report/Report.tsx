@@ -8,6 +8,7 @@ import { Link, useParams } from "react-router";
 import { ApiError } from "../api/client";
 import type { CriterionResultOut, ReportOut } from "../api/types";
 import { Pill, type PillStatus } from "../components/Pill";
+import { EscalatedPanel } from "./EscalatedPanel";
 import { useReport } from "./useReport";
 
 const STATUS_LABELS: Record<ReportOut["status"], string> = {
@@ -114,6 +115,8 @@ export function ReportPage() {
   }
   if (!report) return null;
 
+  const decidedResults = report.results.filter((row) => row.outcome !== "escalated");
+
   const thresholdExplainer =
     report.status === "ready"
       ? `Ready because the score is ${report.composite_score}% (≥ ${report.thresholds.ready_min_score}%) with no unresolved high-severity flags.`
@@ -149,17 +152,28 @@ export function ReportPage() {
         {thresholdExplainer}
       </p>
 
+      <EscalatedPanel checkRunId={report.check_run_id} />
+
       <div className="rounded-panel border border-border">
         <div className="flex items-center gap-2.5 border-b border-border-soft bg-table-head-bg px-3.5 py-2 text-2xs font-semibold tracking-header text-table-head uppercase">
           <span className="w-8 flex-none">Wt.</span>
           <span className="flex-1">Criterion</span>
           <span>Result</span>
         </div>
-        {report.results.map((row) => (
+        {/* Escalated rows have their own dedicated resolution UI above
+            (EscalatedPanel) — shown here too would duplicate the same
+            criterion with no action available, so they're skipped until
+            resolved, at which point they reappear here as a normal row. */}
+        {decidedResults.map((row) => (
           <ResultRow key={row.criterion_id} row={row} />
         ))}
         {report.results.length === 0 && (
           <p className="px-3.5 py-3 text-xs text-ink-faint">No criteria results yet.</p>
+        )}
+        {report.results.length > 0 && decidedResults.length === 0 && (
+          <p className="px-3.5 py-3 text-xs text-ink-faint">
+            Every criterion is awaiting your review above.
+          </p>
         )}
       </div>
     </div>

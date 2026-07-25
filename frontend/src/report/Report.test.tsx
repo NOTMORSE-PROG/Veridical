@@ -57,6 +57,19 @@ const READY_REPORT = {
   ],
 };
 
+const ESCALATED_ITEMS = [
+  {
+    check_result_id: 3,
+    criterion_id: 3,
+    criterion_text: "The Glossary defines all key terms",
+    weight: 40,
+    agreement: 0.333,
+    votes: ["pass", "fail", "partial"],
+    ai_majority_verdict: null,
+    reason: "Could not verify the quoted evidence after a retry.",
+  },
+];
+
 const NEEDS_REVIEW_REPORT = {
   ...READY_REPORT,
   status: "needs_review",
@@ -69,24 +82,44 @@ describe("ReportPage", () => {
   afterEach(() => vi.unstubAllGlobals());
 
   it("renders the status pill and composite score", async () => {
-    vi.stubGlobal("fetch", stubFetchByPath({ "/check-runs/1/report": READY_REPORT }));
+    vi.stubGlobal(
+      "fetch",
+      stubFetchByPath({
+        "/check-runs/1/report": READY_REPORT,
+        "/check-runs/1/escalated": ESCALATED_ITEMS,
+      }),
+    );
     renderWithProviders(<ReportPage />, { route: "/report/1", path: "/report/:checkRunId" });
     expect(await screen.findByText("Ready")).toBeInTheDocument();
     expect(screen.getByText("92.5%")).toBeInTheDocument();
   });
 
-  it("shows Pass/Partial/Escalated distinctly, never conflating escalated with fail", async () => {
-    vi.stubGlobal("fetch", stubFetchByPath({ "/check-runs/1/report": READY_REPORT }));
+  it("shows Pass/Partial distinctly in the table, and Escalated in its own review panel", async () => {
+    vi.stubGlobal(
+      "fetch",
+      stubFetchByPath({
+        "/check-runs/1/report": READY_REPORT,
+        "/check-runs/1/escalated": ESCALATED_ITEMS,
+      }),
+    );
     renderWithProviders(<ReportPage />, { route: "/report/1", path: "/report/:checkRunId" });
     await screen.findByText("Ready");
     expect(screen.getByText("Pass")).toBeInTheDocument();
     expect(screen.getByText("Partial")).toBeInTheDocument();
-    expect(screen.getByText("Escalated")).toBeInTheDocument();
     expect(screen.queryByText("Fail")).not.toBeInTheDocument();
+    // Never silently shown as a normal table row with no action available:
+    expect(await screen.findByText("Needs your review (1)")).toBeInTheDocument();
+    expect(screen.getByText('"The Glossary defines all key terms"')).toBeInTheDocument();
   });
 
   it("shows the evidence anchor next to its quote", async () => {
-    vi.stubGlobal("fetch", stubFetchByPath({ "/check-runs/1/report": READY_REPORT }));
+    vi.stubGlobal(
+      "fetch",
+      stubFetchByPath({
+        "/check-runs/1/report": READY_REPORT,
+        "/check-runs/1/escalated": ESCALATED_ITEMS,
+      }),
+    );
     renderWithProviders(<ReportPage />, { route: "/report/1", path: "/report/:checkRunId" });
     await screen.findByText("Ready");
     expect(screen.getByText("The real evidence sentence.")).toBeInTheDocument();
@@ -94,7 +127,13 @@ describe("ReportPage", () => {
   });
 
   it("shows the threshold explainer", async () => {
-    vi.stubGlobal("fetch", stubFetchByPath({ "/check-runs/1/report": READY_REPORT }));
+    vi.stubGlobal(
+      "fetch",
+      stubFetchByPath({
+        "/check-runs/1/report": READY_REPORT,
+        "/check-runs/1/escalated": ESCALATED_ITEMS,
+      }),
+    );
     renderWithProviders(<ReportPage />, { route: "/report/1", path: "/report/:checkRunId" });
     expect(await screen.findByText(/Ready because the score is 92.5%/)).toBeInTheDocument();
   });

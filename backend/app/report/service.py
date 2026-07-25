@@ -11,13 +11,20 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.checks.escalation import EscalatedItem, list_escalated, resolve_escalation
 from app.config import Settings, get_settings
 from app.errors import ConflictError, NotFoundError
 from app.models.enums import CheckRunStatus
 from app.models.manuscript import Manuscript
 from app.models.rubric import Criterion, Rubric
 from app.models.run import CheckResult, CheckRun, Flag, ReadinessReport
-from app.report.schemas import CriterionResultOut, EvidenceItem, ReportOut
+from app.report.schemas import (
+    CriterionResultOut,
+    EscalatedItemOut,
+    EvidenceItem,
+    ReportOut,
+    ResolveEscalationOut,
+)
 from app.report.scoring import (
     ScorableFlag,
     ScorableResult,
@@ -121,11 +128,9 @@ def _to_criterion_result(result: CheckResult, criterion: Criterion) -> Criterion
     )
 
 
-async def get_report(session: AsyncSession, check_run_id: int, instructor_id: int) -> ReportOut:
-    """Screen 4h's data source (F8.1-F8.2): read-only in V2 (annotation/
-    override arrive V-026, decision V-038). A run must have finished
-    (`done`) before there's anything real to show — never a partial or
-    guessed report."""
+async def _owned_check_run(
+    session: AsyncSession, check_run_id: int, instructor_id: int
+) -> CheckRun:
     check_run = await session.scalar(
         select(CheckRun)
         .join(Manuscript, Manuscript.id == CheckRun.manuscript_id)
@@ -133,6 +138,16 @@ async def get_report(session: AsyncSession, check_run_id: int, instructor_id: in
     )
     if check_run is None:
         raise NotFoundError(f"No check run with id {check_run_id}.")
+    return check_run
+
+
+async def get_report(session: AsyncSession, check_run_id: int, instructor_id: int) -> ReportOut:
+    """Screen 4h's data source (F8.1-F8.2): read-only in V2, gains
+    escalation resolution in V-023 (this module's own
+    `resolve_escalation_for_run`) and flag annotation/override in V-026.
+    A run must have finished (`done`) before there's anything real to
+    show — never a partial or guessed report."""
+    check_run = await _owned_check_run(session, check_run_id, instructor_id)
     if check_run.status != CheckRunStatus.done:
         raise ConflictError("This check hasn't finished yet — its report isn't ready.")
 
@@ -166,4 +181,53 @@ async def get_report(session: AsyncSession, check_run_id: int, instructor_id: in
         thresholds=scoring_payload["thresholds"],
         reason=scoring_payload["reason"],
         results=results,
+    )
+
+
+def _to_escalated_out(item: EscalatedItem) -> EscalatedItemOut:
+    return EscalatedItemOut(
+        check_result_id=item.check_result_id,
+        criterion_id=item.criterion_id,
+        criterion_text=item.criterion_text,
+        weight=item.weight,
+        agreement=item.agreement,
+        votes=item.votes,
+        ai_majority_verdict=item.detail.get("verdict"),
+        reason=item.reason,
+    )
+
+
+async def list_escalated_for_run(
+    session: AsyncSession, check_run_id: int, instructor_id: int
+) -> list[EscalatedItemOut]:
+    """The escalated panel's data source (V-023, screen 4h, "AI wasn't
+    sure — review these")."""
+    await _owned_check_run(session, check_run_id, instructor_id)
+    items = await list_escalated(session, check_run_id)
+    return [_to_escalated_out(item) for item in items]
+
+
+async def resolve_escalation_for_run(
+    session: AsyncSession,
+    check_run_id: int,
+    check_result_id: int,
+    instructor_id: int,
+    resolution: str,
+    reason: str,
+) -> ResolveEscalationOut:
+    """Resolves one escalated criterion, then recomputes the composite
+    score/status LIVE (ticket AC: "resolution updates score + status
+    live") — the response carries the fresh `ReportOut` so the frontend
+    never has to guess whether a follow-up fetch is needed."""
+    await _owned_check_run(session, check_run_id, instructor_id)
+    result = await resolve_escalation(
+        session, check_run_id, check_result_id, instructor_id, resolution, reason
+    )
+    await aggregate_and_score(session, check_run_id)
+    report = await get_report(session, check_run_id, instructor_id)
+    return ResolveEscalationOut(
+        check_result_id=result.id,
+        outcome=result.outcome.value,
+        score=float(result.score) if result.score is not None else None,
+        report=report,
     )

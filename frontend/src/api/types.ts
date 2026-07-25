@@ -153,6 +153,31 @@ export interface PaginatedAuditLog {
   page_size: number;
 }
 
+export interface EscalatedItemOut {
+  check_result_id: number;
+  criterion_id: number;
+  criterion_text: string;
+  weight: number;
+  agreement: number | null;
+  votes: (string | null)[];
+  ai_majority_verdict: string | null;
+  reason: string | null;
+}
+
+export type EscalationResolution = "accept_majority" | "mark_pass" | "mark_fail";
+
+export interface ResolveEscalationIn {
+  resolution: EscalationResolution;
+  reason: string;
+}
+
+export interface ResolveEscalationOut {
+  check_result_id: number;
+  outcome: string;
+  score: number | null;
+  report: ReportOut;
+}
+
 export interface QuotaStatus {
   mode: "fake" | "live";
   quota_day: string;
