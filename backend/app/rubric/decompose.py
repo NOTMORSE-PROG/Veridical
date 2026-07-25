@@ -48,15 +48,28 @@ def _normalize_weights(criteria: list[ParsedCriterion]) -> list[ParsedCriterion]
     return criteria
 
 
-async def decompose_rubric(raw_text: str, llm: LLMClient) -> list[ParsedCriterion]:
+async def decompose_rubric(
+    raw_text: str, llm: LLMClient, *, feedback: str | None = None
+) -> list[ParsedCriterion]:
     """Format-agnostic by construction: the prompt carries no assumption
     about section names, numbering, or scoring style (charter rule 7 at
-    maximum stakes — this is the product's whole thesis)."""
+    maximum stakes — this is the product's whole thesis).
+
+    `feedback`: V-011's retry loop passes the previous attempt's failure
+    reasons here — the prompt text changes, so the response cache (D-011)
+    correctly treats a retry as a fresh call rather than replaying the
+    same bad answer.
+    """
     # Plain substitution, not str.format(): the prompt's own JSON example
     # is full of literal `{`/`}` that .format() would try to parse as
     # fields.
     template = _PROMPT_FILE.read_text(encoding="utf-8")
     prompt = template.replace(_PLACEHOLDER, raw_text)
+    if feedback:
+        prompt = (
+            f"{prompt}\n\n--- YOUR PREVIOUS ATTEMPT FAILED VALIDATION ---\n"
+            f"{feedback}\nFix this and answer again with ONLY the JSON object."
+        )
 
     response = await llm.complete(PROMPT_TYPE, prompt, prompt_version=PROMPT_VERSION)
     try:

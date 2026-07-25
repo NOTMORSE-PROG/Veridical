@@ -27,13 +27,13 @@ SCRIPTED_RESPONSE = {
         {
             "text": "Has an abstract",
             "type": "structural",
-            "evidence_needed": "Abstract present",
+            "evidence_needed": "Manuscript must include an abstract section",
             "weight": 5,
         },
         {
             "text": "Argument is well developed",
             "type": "semantic",
-            "evidence_needed": "Ch. 4",
+            "evidence_needed": "Chapter 4 argument well developed",
             "weight": 15,
         },
     ]
@@ -79,8 +79,11 @@ def session_factory(rubric_scratch_url):
 
 
 def _rubric_pdf(tmp_path):
+    # Title kept under the 20-char coverage-line floor (config default) so
+    # it doesn't count as an uncovered "requirement" — it's a heading, not
+    # a checkable rule.
     b = PdfBuilder()
-    b.new_page().line("REQUIRED FORMAT CHECKLIST", bold=True)
+    b.new_page().line("FORMAT CHECKLIST", bold=True)
     b.line("The manuscript must include an abstract.")
     b.line("The argument in Chapter 4 must be well developed.")
     return b.save(tmp_path / "rubric.pdf")

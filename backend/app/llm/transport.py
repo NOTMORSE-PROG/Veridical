@@ -53,4 +53,13 @@ class GeminiTransport:
         text = response.text
         if not text:
             raise TransportServerError("Gemini returned an empty response.")
-        return json.loads(text)
+        try:
+            return json.loads(text)
+        except json.JSONDecodeError as exc:
+            # response_mime_type="application/json" asks for JSON but
+            # doesn't guarantee syntactically valid JSON every time (seen
+            # live: a truncated/malformed response on a long rubric
+            # decomposition, V-011) — treat it as a retryable transport
+            # failure like a 5xx, not an unhandled crash bypassing the
+            # queue's retry/backoff entirely.
+            raise TransportServerError(f"Gemini response was not valid JSON: {exc}") from exc

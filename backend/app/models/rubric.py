@@ -1,6 +1,6 @@
 import uuid
 from decimal import Decimal
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from sqlalchemy import (
     BigInteger,
@@ -13,10 +13,11 @@ from sqlalchemy import (
     Uuid,
     func,
 )
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base, PkCreatedMixin
-from app.models.enums import CriterionType
+from app.models.enums import CriterionType, RubricParseStatus
 
 if TYPE_CHECKING:
     from app.models.instructor import Instructor
@@ -38,6 +39,14 @@ class Rubric(Base, PkCreatedMixin):
     title: Mapped[str] = mapped_column(String(300))
     # Reference to the stored source document (path/object key), not content.
     source_file: Mapped[str | None] = mapped_column(String(1024))
+    # F2.2 validation gate outcome (V-011): "needs_review" means the parse
+    # exhausted its retries — `criteria` may be a partial set, never a
+    # failed upload. `parse_issues` carries the last attempt's reasons
+    # (coverage ratio, duplicates) so the review screen can explain why.
+    parse_status: Mapped[RubricParseStatus] = mapped_column(
+        Enum(RubricParseStatus, native_enum=False), server_default=RubricParseStatus.parsed.value
+    )
+    parse_issues: Mapped[list[Any] | None] = mapped_column(JSONB)
 
     instructor: Mapped["Instructor"] = relationship(back_populates="rubrics")
     criteria: Mapped[list["Criterion"]] = relationship(

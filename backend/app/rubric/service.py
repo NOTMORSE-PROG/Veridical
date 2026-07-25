@@ -16,10 +16,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import Settings, get_settings
 from app.ingest.service import detect_format, save_upload, select_extractor
 from app.llm.base import LLMClient
-from app.models.enums import CriterionType
+from app.models.enums import CriterionType, RubricParseStatus
 from app.models.instructor import Instructor
 from app.models.rubric import Criterion, Rubric
-from app.rubric.decompose import decompose_rubric, raw_text_for_decomposition
+from app.rubric.decompose import raw_text_for_decomposition
+from app.rubric.validate import attempt_decomposition
 
 
 async def _get_or_create_demo_instructor(session: AsyncSession) -> Instructor:
@@ -65,7 +66,12 @@ async def create_rubric_from_upload(
     result = await loop.run_in_executor(None, extractor, str(dest), settings)
     raw_text = raw_text_for_decomposition(result.blocks)
 
-    parsed = await decompose_rubric(raw_text, llm)
+    # Never raises (V-011): a persistent failure comes back as a
+    # needs_review outcome, not an exception — the upload always succeeds
+    # and lands the instructor on a reviewable rubric (charter rule 1).
+    outcome = await attempt_decomposition(
+        session, rubric.id, result.blocks, raw_text, llm, settings
+    )
 
     session.add_all(
         Criterion(
@@ -76,8 +82,12 @@ async def create_rubric_from_upload(
             weight=Decimal(str(criterion.weight)),
             position=position,
         )
-        for position, criterion in enumerate(parsed)
+        for position, criterion in enumerate(outcome.criteria)
     )
+    rubric.parse_status = (
+        RubricParseStatus.needs_review if outcome.needs_review else RubricParseStatus.parsed
+    )
+    rubric.parse_issues = outcome.issues or None
     await session.commit()
     await session.refresh(rubric, attribute_names=["criteria"])
     return rubric

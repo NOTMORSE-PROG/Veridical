@@ -63,6 +63,16 @@ class ResultOutcome(StrEnum):
     quota_exhausted = "quota_exhausted"
 
 
+class RubricParseStatus(StrEnum):
+    """F2.2: a rubric decomposition either passed the validation gate, or
+    exhausted its retries and needs manual completion in the review
+    screen — never a dead-end error (charter rule 1: escalate, don't
+    guess)."""
+
+    parsed = "parsed"
+    needs_review = "needs_review"
+
+
 class CitationParseStatus(StrEnum):
     """F1.5: a reference entry either parsed into structured fields or is
     preserved raw — never silently dropped."""

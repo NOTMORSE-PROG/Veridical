@@ -48,6 +48,11 @@ class RubricOut(BaseModel):
     rubric_family_id: uuid.UUID
     version: int
     title: str
+    # F2.2 (V-011): "needs_review" means retries were exhausted — the
+    # review screen (V-012) shows `parse_issues` as the banner explaining
+    # why, over whatever partial criteria list came back.
+    parse_status: Literal["parsed", "needs_review"]
+    parse_issues: list[str] | None
     criteria: list[CriterionOut]
 
     model_config = {"from_attributes": True}

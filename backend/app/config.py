@@ -107,6 +107,21 @@ class Settings(BaseSettings):
     llm_max_retries: int = 3
     llm_retry_base_seconds: float = 1.0
 
+    # --- Rubric decomposition validation gate (V-011, F2.2) ------------------
+    # Total attempts = this + 1 (the first attempt isn't a "retry"). Each
+    # retry appends the previous failure's reasons to the prompt.
+    rubric_parse_max_retries: int = 2
+    # Fraction of substantive source lines that must be traceable (by word
+    # overlap) into some parsed criterion, or the gate fails — catches an
+    # answer that quietly ignores half the rubric (ticket edge case).
+    rubric_coverage_min_ratio: float = 0.6
+    # A source line shorter than this is a fragment/label, not a
+    # requirement statement, and is excluded from the coverage count.
+    rubric_coverage_min_line_chars: int = 20
+    # Share of a line's significant (4+ letter) words that must appear in
+    # a criterion's text/evidence for that line to count as "covered".
+    rubric_coverage_word_overlap_ratio: float = 0.3
+
     # --- CORS (V-048) --------------------------------------------------------
     # Comma-separated origins allowed to call the API from a browser. Empty
     # in dev (no browser cross-origin caller yet); production sets it to
