@@ -12,8 +12,12 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import Settings, get_settings
-from app.models.rubric import Criterion
-from app.models.run import CheckResult, Flag, ReadinessReport
+from app.errors import ConflictError, NotFoundError
+from app.models.enums import CheckRunStatus
+from app.models.manuscript import Manuscript
+from app.models.rubric import Criterion, Rubric
+from app.models.run import CheckResult, CheckRun, Flag, ReadinessReport
+from app.report.schemas import CriterionResultOut, EvidenceItem, ReportOut
 from app.report.scoring import (
     ScorableFlag,
     ScorableResult,
@@ -96,3 +100,70 @@ async def build_report_payload(
     results = await _load_scorable_results(session, check_run_id)
     flags = await _load_scorable_flags(session, check_run_id)
     return scoring_result_as_dict(score_check_run(results, flags, settings))
+
+
+def _to_criterion_result(result: CheckResult, criterion: Criterion) -> CriterionResultOut:
+    detail = result.detail or {}
+    evidence = [EvidenceItem(**item) for item in detail.get("evidence", [])]
+    return CriterionResultOut(
+        criterion_id=criterion.id,
+        text=criterion.text,
+        type=criterion.type.value,
+        weight=float(criterion.weight),
+        kind=result.kind.value,
+        outcome=result.outcome.value,
+        score=float(result.score) if result.score is not None else None,
+        basis=detail.get("basis"),
+        anchor=detail.get("anchor"),
+        reasoning=detail.get("reasoning"),
+        reason=detail.get("reason"),
+        evidence=evidence,
+    )
+
+
+async def get_report(session: AsyncSession, check_run_id: int, instructor_id: int) -> ReportOut:
+    """Screen 4h's data source (F8.1-F8.2): read-only in V2 (annotation/
+    override arrive V-026, decision V-038). A run must have finished
+    (`done`) before there's anything real to show — never a partial or
+    guessed report."""
+    check_run = await session.scalar(
+        select(CheckRun)
+        .join(Manuscript, Manuscript.id == CheckRun.manuscript_id)
+        .where(CheckRun.id == check_run_id, Manuscript.instructor_id == instructor_id)
+    )
+    if check_run is None:
+        raise NotFoundError(f"No check run with id {check_run_id}.")
+    if check_run.status != CheckRunStatus.done:
+        raise ConflictError("This check hasn't finished yet — its report isn't ready.")
+
+    manuscript = await session.get(Manuscript, check_run.manuscript_id)
+    rubric = await session.get(Rubric, check_run.rubric_id)
+    report = await session.scalar(
+        select(ReadinessReport).where(ReadinessReport.check_run_id == check_run_id)
+    )
+
+    rows = (
+        await session.execute(
+            select(CheckResult, Criterion)
+            .join(Criterion, Criterion.id == CheckResult.criterion_id)
+            .where(CheckResult.check_run_id == check_run_id)
+            .order_by(Criterion.position)
+        )
+    ).all()
+    results = [_to_criterion_result(result, criterion) for result, criterion in rows]
+
+    scoring_payload = await build_report_payload(session, check_run_id)
+    return ReportOut(
+        check_run_id=check_run_id,
+        manuscript_group_label=manuscript.group_label,
+        rubric_title=rubric.title,
+        status=report.status.value if report is not None else scoring_payload["status"],
+        composite_score=(
+            float(report.composite_score)
+            if report is not None and report.composite_score is not None
+            else None
+        ),
+        thresholds=scoring_payload["thresholds"],
+        reason=scoring_payload["reason"],
+        results=results,
+    )

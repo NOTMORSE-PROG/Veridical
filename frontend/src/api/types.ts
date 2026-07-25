@@ -83,6 +83,44 @@ export interface CheckRun {
   created_at: string;
 }
 
+export interface EvidenceItem {
+  quote: string;
+  anchor: string;
+}
+
+export interface CriterionResultOut {
+  criterion_id: number;
+  text: string;
+  type: CriterionType;
+  weight: number;
+  kind: string;
+  outcome:
+    | "passed"
+    | "failed"
+    | "escalated"
+    | "not_applicable"
+    | "unverifiable"
+    | "api_down"
+    | "quota_exhausted";
+  score: number | null;
+  basis: string | null;
+  anchor: string | null;
+  reasoning: string | null;
+  reason: string | null;
+  evidence: EvidenceItem[];
+}
+
+export interface ReportOut {
+  check_run_id: number;
+  manuscript_group_label: string;
+  rubric_title: string;
+  status: "ready" | "conditionally_ready" | "not_ready" | "needs_review";
+  composite_score: number | null;
+  thresholds: { ready_min_score: number; not_ready_max_score: number };
+  reason: string | null;
+  results: CriterionResultOut[];
+}
+
 export interface QuotaStatus {
   mode: "fake" | "live";
   quota_day: string;

@@ -7,6 +7,7 @@ import { CheckProgressPage } from "./check/Progress";
 import { GalleryPage } from "./gallery/GalleryPage";
 import { DashboardPage } from "./pages/Dashboard";
 import { SignInPage } from "./pages/SignIn";
+import { ReportPage } from "./report/Report";
 import { ManageRubricPage } from "./rubric/Manage";
 import { ReviewCriteriaPage } from "./rubric/ReviewCriteria";
 import { AppShell } from "./shell/AppShell";
@@ -56,6 +57,16 @@ export default function App() {
               <RequireAuth>
                 <AppShell>
                   <CheckProgressPage />
+                </AppShell>
+              </RequireAuth>
+            }
+          />
+          <Route
+            path="/report/:checkRunId"
+            element={
+              <RequireAuth>
+                <AppShell>
+                  <ReportPage />
                 </AppShell>
               </RequireAuth>
             }

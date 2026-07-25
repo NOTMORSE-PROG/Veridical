@@ -16,6 +16,7 @@ from app.ingest.router import router as ingest_router
 from app.llm.router import router as llm_router
 from app.pipeline.router import router as pipeline_router
 from app.pipeline.worker import worker_loop
+from app.report.router import router as report_router
 from app.rubric.router import router as rubric_router
 
 
@@ -44,6 +45,7 @@ app.include_router(auth_router)
 app.include_router(ingest_router)
 app.include_router(llm_router)
 app.include_router(pipeline_router)
+app.include_router(report_router)
 app.include_router(rubric_router)
 
 _cors_origins = get_settings().cors_allowed_origins_list
