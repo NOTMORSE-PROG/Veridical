@@ -149,6 +149,22 @@ class Settings(BaseSettings):
     # a criterion's text/evidence for that line to count as "covered".
     rubric_coverage_word_overlap_ratio: float = 0.3
 
+    # --- Aggregation & scoring (V-019, F8.1, ENGINEERING §5) -----------------
+    # Three-way status thresholds — VISIBLE in the report payload, never a
+    # black box (ticket AC). Defaults per ENGINEERING.md §5.
+    scoring_ready_min_score: float = 85.0
+    scoring_not_ready_max_score: float = 60.0
+    # Capped severity deductions applied for each UNRESOLVED (not
+    # overridden) flag against the composite score, and the total cap so
+    # a pile of low-severity flags can't sink a score unboundedly. Not
+    # exercised by any real check yet (integrity checks arrive V4/V5) —
+    # the mechanism is built and tested now so those tickets only need to
+    # start producing flags, not invent the scoring interaction.
+    scoring_flag_deduction_high: float = 15.0
+    scoring_flag_deduction_med: float = 8.0
+    scoring_flag_deduction_low: float = 3.0
+    scoring_flag_deduction_cap: float = 40.0
+
     # --- Auth (V-014, F9.1) ---------------------------------------------------
     session_cookie_name: str = "veridical_session"
     session_ttl_hours: int = 12

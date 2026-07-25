@@ -95,7 +95,10 @@ class ReadinessReport(Base, PkCreatedMixin):
     check_run_id: Mapped[int] = mapped_column(
         BigInteger, ForeignKey("check_run.id", ondelete="CASCADE"), unique=True
     )
-    composite_score: Mapped[Decimal] = mapped_column(Numeric(5, 2))
+    # NULL means "no real number exists" (V-019 edge case: an all-escalated
+    # run, or a rubric whose decidable weight sum is zero) — never a
+    # fabricated 0 or 100 (charter rule 9).
+    composite_score: Mapped[Decimal | None] = mapped_column(Numeric(5, 2))
     status: Mapped[ReadinessStatus] = mapped_column(Enum(ReadinessStatus, native_enum=False))
     # The human decision (F8.5) — VERIDICAL itself never sets this.
     decision: Mapped[ReportDecision | None] = mapped_column(Enum(ReportDecision, native_enum=False))

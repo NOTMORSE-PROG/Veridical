@@ -91,6 +91,10 @@ class ReadinessStatus(StrEnum):
     ready = "ready"
     conditionally_ready = "conditionally_ready"
     not_ready = "not_ready"
+    # F8.1/V-019 edge case: nothing was auto-decidable (all criteria
+    # escalated, or the decidable weight sum is zero) — an honest state,
+    # never a fabricated number (charter rule 9: N/A is not "passed").
+    needs_review = "needs_review"
 
 
 class ReportDecision(StrEnum):
