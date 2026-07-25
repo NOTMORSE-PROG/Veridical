@@ -6,6 +6,7 @@ import { RequireAuth } from "./auth/RequireAuth";
 import { GalleryPage } from "./gallery/GalleryPage";
 import { DashboardPage } from "./pages/Dashboard";
 import { SignInPage } from "./pages/SignIn";
+import { ManageRubricPage } from "./rubric/Manage";
 import { ReviewCriteriaPage } from "./rubric/ReviewCriteria";
 import { AppShell } from "./shell/AppShell";
 
@@ -24,6 +25,16 @@ export default function App() {
               <RequireAuth>
                 <AppShell>
                   <DashboardPage />
+                </AppShell>
+              </RequireAuth>
+            }
+          />
+          <Route
+            path="/rubric"
+            element={
+              <RequireAuth>
+                <AppShell>
+                  <ManageRubricPage />
                 </AppShell>
               </RequireAuth>
             }

@@ -47,4 +47,5 @@ export const api = {
     }),
   put: <T>(path: string, body: unknown): Promise<T> =>
     request<T>(path, { method: "PUT", body: JSON.stringify(body) }),
+  delete: (path: string): Promise<void> => request<void>(path, { method: "DELETE" }),
 };

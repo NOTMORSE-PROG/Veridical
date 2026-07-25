@@ -10,7 +10,14 @@ import { ApiError } from "../api/client";
 import { Modal, ModalBackdrop } from "../components/Modal";
 import { useUploadRubric } from "./useRubric";
 
-export function UploadRubricModal({ onClose }: { onClose: () => void }) {
+interface UploadRubricModalProps {
+  onClose: () => void;
+  /** Set when uploading a NEW VERSION of an existing family (screen 4m's
+   * "Upload new format") — omitted for a brand-new format (screen 4b). */
+  familyId?: string;
+}
+
+export function UploadRubricModal({ onClose, familyId }: UploadRubricModalProps) {
   const [file, setFile] = useState<File | null>(null);
   const [fieldError, setFieldError] = useState<string | null>(null);
   const upload = useUploadRubric();
@@ -23,7 +30,7 @@ export function UploadRubricModal({ onClose }: { onClose: () => void }) {
       return;
     }
     upload.mutate(
-      { file, title: file.name },
+      { file, title: file.name, familyId },
       { onSuccess: (rubric) => navigate(`/rubric/${rubric.id}/review`) },
     );
   }
@@ -39,7 +46,7 @@ export function UploadRubricModal({ onClose }: { onClose: () => void }) {
   return (
     <ModalBackdrop>
       <Modal
-        title="Upload required format"
+        title={familyId ? "Upload new format version" : "Upload required format"}
         onClose={upload.isPending ? undefined : onClose}
         footer={
           <>

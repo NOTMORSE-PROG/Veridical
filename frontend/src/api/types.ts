@@ -28,7 +28,19 @@ export interface Rubric {
   parse_status: "parsed" | "needs_review";
   parse_issues: string[] | null;
   is_active: boolean;
+  is_latest_version: boolean;
   criteria: Criterion[];
+}
+
+export interface RubricListItem {
+  id: number;
+  rubric_family_id: string;
+  version: number;
+  title: string;
+  is_active: boolean;
+  created_at: string;
+  criteria_count: number;
+  report_count: number;
 }
 
 export interface QuotaStatus {

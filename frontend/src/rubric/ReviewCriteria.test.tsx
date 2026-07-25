@@ -12,6 +12,7 @@ const RUBRIC: Rubric = {
   parse_status: "parsed",
   parse_issues: null,
   is_active: false,
+  is_latest_version: true,
   criteria: [
     { id: 1, type: "structural", text: "Has an abstract", evidence: "Abstract present", weight: 40, position: 0 },
     { id: 2, type: "semantic", text: "Argument is well developed", evidence: "Ch. 4", weight: 60, position: 1 },
@@ -133,5 +134,24 @@ describe("ReviewCriteriaPage", () => {
     expect(screen.getByText("Weights total 20%")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Normalize to 100%" }));
     expect(await screen.findByText("Weights total 100%")).toBeInTheDocument();
+  });
+
+  it("renders read-only when a newer version supersedes this one (V-013 F2.4)", async () => {
+    const superseded: Rubric = { ...RUBRIC, is_latest_version: false };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(JSON.stringify(superseded), { status: 200 })),
+    );
+    renderWithProviders(<ReviewCriteriaPage />, {
+      route: "/rubric/5/review",
+      path: "/rubric/:rubricId/review",
+    });
+
+    const textInput = await screen.findByDisplayValue("Has an abstract");
+    expect(textInput).toBeDisabled();
+    expect(screen.getByText(/read-only history/)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Save draft" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Confirm & activate rubric" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Delete criterion 1" })).not.toBeInTheDocument();
   });
 });

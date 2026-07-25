@@ -7,13 +7,12 @@ import { useLogout, useMe } from "../auth/useAuth";
 import { Chip } from "../components/Chip";
 import { cx } from "../components/cx";
 
-// Only "Dashboard" routes anywhere yet — the rest are future tickets
-// (V-012/V-013 Rubric, V7 Submissions, V-024 Audit log, V-042 Archive/
-// Settings). Rendered inactive rather than linking to a page that
-// doesn't exist.
+// "Dashboard" and "Rubric" route now; the rest are future tickets (V7
+// Submissions, V-024 Audit log, V-042 Archive/Settings) — rendered
+// inactive rather than linking to a page that doesn't exist.
 const NAV_ITEMS: ReadonlyArray<{ label: string; to: string | null }> = [
   { label: "Dashboard", to: "/dashboard" },
-  { label: "Rubric", to: null },
+  { label: "Rubric", to: "/rubric" },
   { label: "Submissions", to: null },
   { label: "Archive", to: null },
   { label: "Audit log", to: null },

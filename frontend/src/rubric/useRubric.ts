@@ -1,8 +1,8 @@
-// Rubric data layer (F2.1/F2.3): upload, fetch, and the criteria-review
-// save/confirm mutation (screens 4c/4d).
+// Rubric data layer (F2.1/F2.3/F2.4): upload, fetch, the criteria-review
+// save/confirm mutation, and versioning (screens 4c/4d/4m).
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ApiError, api } from "../api/client";
-import type { CriterionType, Rubric } from "../api/types";
+import type { CriterionType, Rubric, RubricListItem } from "../api/types";
 
 export function rubricQueryKey(id: number) {
   return ["rubric", id] as const;
@@ -19,10 +19,18 @@ const BASE_URL = (import.meta.env.VITE_API_BASE_URL as string | undefined) ?? ""
 
 export function useUploadRubric() {
   return useMutation({
-    mutationFn: async ({ file, title }: { file: File; title: string }) => {
+    mutationFn: async ({
+      file,
+      title,
+      familyId,
+    }: {
+      file: File;
+      title: string;
+      familyId?: string;
+    }) => {
       const form = new FormData();
       form.append("file", file);
-      const query = new URLSearchParams({ title });
+      const query = new URLSearchParams({ title, ...(familyId ? { family_id: familyId } : {}) });
       const res = await fetch(`${BASE_URL}/rubrics?${query.toString()}`, {
         method: "POST",
         credentials: "include",
@@ -59,5 +67,48 @@ export function useSaveCriteria(rubricId: number) {
     onSuccess: (rubric) => {
       queryClient.setQueryData(rubricQueryKey(rubricId), rubric);
     },
+  });
+}
+
+export function useRubricFamilies() {
+  return useQuery({
+    queryKey: ["rubric-families"],
+    queryFn: () => api.get<RubricListItem[]>("/rubric-families"),
+  });
+}
+
+export function rubricVersionsQueryKey(familyId: string) {
+  return ["rubric-versions", familyId] as const;
+}
+
+export function useRubricVersions(familyId: string | undefined) {
+  return useQuery({
+    queryKey: rubricVersionsQueryKey(familyId ?? ""),
+    queryFn: () => api.get<RubricListItem[]>(`/rubric-families/${familyId}/versions`),
+    enabled: familyId !== undefined,
+  });
+}
+
+function useInvalidateVersionLists() {
+  const queryClient = useQueryClient();
+  return () => {
+    queryClient.invalidateQueries({ queryKey: ["rubric-families"] });
+    queryClient.invalidateQueries({ queryKey: ["rubric-versions"] });
+  };
+}
+
+export function useActivateRubric() {
+  const invalidate = useInvalidateVersionLists();
+  return useMutation({
+    mutationFn: (rubricId: number) => api.post<Rubric>(`/rubrics/${rubricId}/activate`),
+    onSuccess: invalidate,
+  });
+}
+
+export function useDeleteRubric() {
+  const invalidate = useInvalidateVersionLists();
+  return useMutation({
+    mutationFn: (rubricId: number) => api.delete(`/rubrics/${rubricId}`),
+    onSuccess: invalidate,
   });
 }

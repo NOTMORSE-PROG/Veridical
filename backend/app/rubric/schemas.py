@@ -3,6 +3,7 @@ shape, and the persisted-criteria shape the API returns.
 """
 
 import uuid
+from datetime import datetime
 from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator
@@ -55,11 +56,31 @@ class RubricOut(BaseModel):
     parse_issues: list[str] | None
     # F2.3 (V-012): nothing runs against a rubric until the instructor
     # confirms — this flips true only via PUT /rubrics/{id}/criteria
-    # {confirm: true}.
+    # {confirm: true} or POST /rubrics/{id}/activate.
     is_active: bool
+    # F2.4 (V-013): false means a NEWER version exists in this rubric's
+    # family — the review screen renders read-only for it (history is
+    # immutable). A freshly uploaded, not-yet-confirmed rubric is always
+    # its own family's only (hence latest) version, so this never blocks
+    # the first-time confirm flow (V-012).
+    is_latest_version: bool
     criteria: list[CriterionOut]
 
     model_config = {"from_attributes": True}
+
+
+class RubricListItem(BaseModel):
+    """One row of a version list (screen 4m) — no full criteria payload,
+    just what the list needs."""
+
+    id: int
+    rubric_family_id: uuid.UUID
+    version: int
+    title: str
+    is_active: bool
+    created_at: datetime
+    criteria_count: int
+    report_count: int
 
 
 class CriterionIn(BaseModel):

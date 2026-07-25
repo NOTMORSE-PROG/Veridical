@@ -55,8 +55,18 @@ class Rubric(Base, PkCreatedMixin):
     is_active: Mapped[bool] = mapped_column(Boolean, server_default="false")
 
     instructor: Mapped["Instructor"] = relationship(back_populates="rubrics")
+    # cascade="all, delete-orphan" + passive_deletes=True: deleting a
+    # Rubric deletes its criteria too, via Postgres's own ON DELETE
+    # CASCADE (the FK below) rather than SQLAlchemy first UPDATE-ing
+    # each child's FK to NULL in Python — which fails outright since
+    # rubric_id is NOT NULL. `passive_deletes` alone (no delete cascade)
+    # still tried the NULL-out for any already-loaded children; found
+    # live deleting a rubric via delete_rubric (V-013).
     criteria: Mapped[list["Criterion"]] = relationship(
-        back_populates="rubric", order_by="Criterion.position"
+        back_populates="rubric",
+        order_by="Criterion.position",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
     )
 
 

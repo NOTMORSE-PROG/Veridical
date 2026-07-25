@@ -80,9 +80,15 @@ export function ReviewCriteriaPage() {
     });
   }
 
+  // F2.4 (V-013): a version another version has superseded is history —
+  // read-only, never silently mutated. A freshly uploaded, not-yet-
+  // confirmed rubric is always its OWN family's only (hence latest)
+  // version, so this never blocks the first-time confirm flow (V-012).
+  const readOnly = !rubric.is_latest_version;
+
   const weightSum = rows.reduce((sum, r) => sum + r.weight, 0);
   const weightsBalanced = Math.abs(weightSum - 100) < 0.1;
-  const canConfirm = rows.length > 0 && rows.every((r) => r.text.trim().length > 0);
+  const canConfirm = !readOnly && rows.length > 0 && rows.every((r) => r.text.trim().length > 0);
 
   function toEdits(): CriterionEdit[] {
     return rows!.map((r) => ({
@@ -111,9 +117,16 @@ export function ReviewCriteriaPage() {
         <Chip>{rows.length} criteria</Chip>
       </div>
 
-      <p className="rounded-control bg-info-bg px-3 py-2 text-xs text-info-text">
-        Nothing runs until you confirm. Re-type, re-weight, delete, or add criteria.
-      </p>
+      {readOnly ? (
+        <p className="rounded-control bg-page px-3 py-2 text-xs text-ink-soft">
+          A newer version of this format exists — this version is read-only history. Old reports
+          stay pinned to it for comparability.
+        </p>
+      ) : (
+        <p className="rounded-control bg-info-bg px-3 py-2 text-xs text-info-text">
+          Nothing runs until you confirm. Re-type, re-weight, delete, or add criteria.
+        </p>
+      )}
 
       {rubric.parse_status === "needs_review" && (
         <div className="rounded-control bg-status-warn-bg px-3 py-2 text-xs text-status-warn-text">
@@ -146,21 +159,24 @@ export function ReviewCriteriaPage() {
             <span className="text-ink-faint">{index + 1}</span>
             <input
               value={row.text}
+              disabled={readOnly}
               onChange={(event) => updateRow(row.key, { text: event.target.value })}
               placeholder="Criterion text"
-              className="rounded-control border border-border-input px-2 py-1 text-xs"
+              className="rounded-control border border-border-input px-2 py-1 text-xs disabled:bg-page disabled:text-ink-soft"
             />
             <SegmentedToggle
               value={row.type}
               options={["structural", "semantic"] as const}
               labels={TYPE_LABELS}
+              disabled={readOnly}
               onChange={(type) => updateRow(row.key, { type })}
             />
             <input
               value={row.evidence}
+              disabled={readOnly}
               onChange={(event) => updateRow(row.key, { evidence: event.target.value })}
               placeholder="What evidence satisfies this?"
-              className="rounded-control border border-border-input px-2 py-1 text-xs text-ink-soft"
+              className="rounded-control border border-border-input px-2 py-1 text-xs text-ink-soft disabled:bg-page"
             />
             <span className="flex items-center gap-1">
               <input
@@ -168,63 +184,68 @@ export function ReviewCriteriaPage() {
                 min={0}
                 step={0.1}
                 value={row.weight}
+                disabled={readOnly}
                 onChange={(event) => updateRow(row.key, { weight: Number(event.target.value) || 0 })}
-                className="w-16 rounded-control border border-border-input px-1.5 py-1 text-xs"
+                className="w-16 rounded-control border border-border-input px-1.5 py-1 text-xs disabled:bg-page disabled:text-ink-soft"
               />
               <span className="text-ink-faint">%</span>
             </span>
-            <button
-              type="button"
-              onClick={() => deleteRow(row.key)}
-              aria-label={`Delete criterion ${index + 1}`}
-              className="text-ink-faint hover:text-status-bad-text"
-            >
-              ×
-            </button>
+            {!readOnly && (
+              <button
+                type="button"
+                onClick={() => deleteRow(row.key)}
+                aria-label={`Delete criterion ${index + 1}`}
+                className="text-ink-faint hover:text-status-bad-text"
+              >
+                ×
+              </button>
+            )}
           </div>
         ))}
       </div>
 
-      <div className="flex items-center gap-2">
-        <button type="button" onClick={addRow} className="text-xs text-primary hover:underline">
-          + Add criterion
-        </button>
-        <span className="flex-1" />
-        <button
-          type="button"
-          onClick={normalizeWeights}
-          className="rounded-control border border-border-button bg-panel px-2.5 py-1 text-xs text-ink"
-        >
-          Normalize to 100%
-        </button>
-        <span
-          className={
-            weightsBalanced
-              ? "inline-flex items-center rounded-pill border border-modal-border px-2.5 py-0.5 text-xs text-status-ok-text"
-              : "inline-flex items-center rounded-pill border border-modal-border px-2.5 py-0.5 text-xs text-status-warn-text"
-          }
-        >
-          Weights total {Math.round(weightSum * 10) / 10}%
-        </span>
-        <button
-          type="button"
-          disabled={rows.length === 0 || save.isPending}
-          onClick={() => handleSave(false)}
-          className="rounded-control border border-border-button bg-panel px-3.5 py-1.5 text-base font-medium text-ink disabled:opacity-45"
-        >
-          Save draft
-        </button>
-        <button
-          type="button"
-          disabled={!canConfirm || save.isPending}
-          title={rows.length === 0 ? "Add at least one criterion before confirming" : undefined}
-          onClick={() => handleSave(true)}
-          className="rounded-control border border-primary bg-primary px-3.5 py-1.5 text-base font-medium text-on-primary disabled:opacity-45"
-        >
-          Confirm &amp; activate rubric
-        </button>
-      </div>
-      {rows.length === 0 && (
+      {!readOnly && (
+        <div className="flex items-center gap-2">
+          <button type="button" onClick={addRow} className="text-xs text-primary hover:underline">
+            + Add criterion
+          </button>
+          <span className="flex-1" />
+          <button
+            type="button"
+            onClick={normalizeWeights}
+            className="rounded-control border border-border-button bg-panel px-2.5 py-1 text-xs text-ink"
+          >
+            Normalize to 100%
+          </button>
+          <span
+            className={
+              weightsBalanced
+                ? "inline-flex items-center rounded-pill border border-modal-border px-2.5 py-0.5 text-xs text-status-ok-text"
+                : "inline-flex items-center rounded-pill border border-modal-border px-2.5 py-0.5 text-xs text-status-warn-text"
+            }
+          >
+            Weights total {Math.round(weightSum * 10) / 10}%
+          </span>
+          <button
+            type="button"
+            disabled={rows.length === 0 || save.isPending}
+            onClick={() => handleSave(false)}
+            className="rounded-control border border-border-button bg-panel px-3.5 py-1.5 text-base font-medium text-ink disabled:opacity-45"
+          >
+            Save draft
+          </button>
+          <button
+            type="button"
+            disabled={!canConfirm || save.isPending}
+            title={rows.length === 0 ? "Add at least one criterion before confirming" : undefined}
+            onClick={() => handleSave(true)}
+            className="rounded-control border border-primary bg-primary px-3.5 py-1.5 text-base font-medium text-on-primary disabled:opacity-45"
+          >
+            Confirm &amp; activate rubric
+          </button>
+        </div>
+      )}
+      {!readOnly && rows.length === 0 && (
         <p className="text-xs text-status-bad-text">
           Add at least one criterion before saving or confirming — an empty rubric can't check
           anything.

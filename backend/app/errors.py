@@ -65,6 +65,15 @@ class NotFoundError(VeridicalError):
     code = "not_found"
 
 
+class ConflictError(VeridicalError):
+    """The action can't complete because of existing dependent state
+    (e.g. deleting/editing a rubric version that has reports pinned to
+    it) — history is immutable (F2.4); the fix is a new version, not a
+    mutation."""
+
+    code = "conflict"
+
+
 # HTTP mapping for the one exception handler (main.py). Codes absent here
 # are result STATES (not_applicable, unverifiable) that must never be
 # raised to HTTP; if one ever is, the handler still answers with the
@@ -76,6 +85,7 @@ HTTP_STATUS: dict[str, int] = {
     "api_down": 502,
     "unauthenticated": 401,
     "not_found": 404,
+    "conflict": 409,
     # A rubric-decomposition parse that failed schema validation (V-010) —
     # user-actionable (re-review/re-upload); V-011 wraps this in a retry
     # loop so it only ever reaches HTTP after repeated failure.

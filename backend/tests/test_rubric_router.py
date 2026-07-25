@@ -6,6 +6,7 @@ import os
 
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy import text
 
 from app.config import get_settings
 from tests.test_ingest_pdf import PdfBuilder
@@ -49,6 +50,38 @@ def client(api_scratch_url, tmp_path, monkeypatch):
     with TestClient(app) as c:
         yield c
     db._engine = None
+
+
+@pytest.fixture(autouse=True)
+def _clean_tables(api_scratch_url):
+    """Every test shares the same demo instructor (fixed email) in this
+    module-scoped scratch DB — family-list assertions need a clean slate.
+    Uses its OWN disposable engine, never `app.db.get_engine()` — that
+    one is bound to whichever event loop first touches it, and mixing it
+    with a separate `asyncio.run()` call corrupted it across loops on
+    Windows before (same bug fixed in test_auth_router.py's `seeded`)."""
+    import asyncio
+
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
+    from app.db import sqlalchemy_url
+
+    async def _truncate():
+        engine = create_async_engine(sqlalchemy_url(api_scratch_url))
+        try:
+            async with async_sessionmaker(engine)() as session:
+                await session.execute(
+                    text(
+                        "TRUNCATE check_run, criterion, rubric, manuscript, instructor "
+                        "RESTART IDENTITY CASCADE"
+                    )
+                )
+                await session.commit()
+        finally:
+            await engine.dispose()
+
+    asyncio.run(_truncate())
+    yield
 
 
 def _rubric_pdf(tmp_path):
@@ -126,3 +159,79 @@ def test_put_criteria_rejects_an_empty_list(client, tmp_path):
     uploaded = _upload(client, tmp_path)
     resp = client.put(f"/rubrics/{uploaded['id']}/criteria", json={"criteria": [], "confirm": True})
     assert resp.status_code == 422
+
+
+def _confirm(client, rubric_id, criteria):
+    resp = client.put(
+        f"/rubrics/{rubric_id}/criteria", json={"criteria": criteria, "confirm": True}
+    )
+    assert resp.status_code == 200, resp.text
+    return resp.json()
+
+
+def test_reupload_with_family_id_creates_v2_over_http(client, tmp_path):
+    v1 = _upload(client, tmp_path, title="V1")
+    _confirm(client, v1["id"], v1["criteria"])
+
+    path = _rubric_pdf(tmp_path)
+    with path.open("rb") as fh:
+        resp = client.post(
+            "/rubrics",
+            params={"title": "V2", "family_id": v1["rubric_family_id"]},
+            files={"file": ("rubric.pdf", fh, "application/pdf")},
+        )
+    assert resp.status_code == 200, resp.text
+    v2 = resp.json()
+    assert v2["rubric_family_id"] == v1["rubric_family_id"]
+    assert v2["version"] == 2
+    assert v2["is_active"] is False
+
+    v1_reloaded = client.get(f"/rubrics/{v1['id']}").json()
+    assert v1_reloaded["version"] == 1
+    assert v1_reloaded["is_latest_version"] is False  # superseded by v2
+
+
+def test_activate_switches_which_version_is_active(client, tmp_path):
+    v1 = _upload(client, tmp_path, title="V1")
+    _confirm(client, v1["id"], v1["criteria"])
+    path = _rubric_pdf(tmp_path)
+    with path.open("rb") as fh:
+        v2 = client.post(
+            "/rubrics",
+            params={"title": "V2", "family_id": v1["rubric_family_id"]},
+            files={"file": ("rubric.pdf", fh, "application/pdf")},
+        ).json()
+
+    resp = client.post(f"/rubrics/{v2['id']}/activate")
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["is_active"] is True
+
+    v1_after = client.get(f"/rubrics/{v1['id']}").json()
+    assert v1_after["is_active"] is False
+
+
+def test_delete_rubric_succeeds_when_no_reports_exist(client, tmp_path):
+    uploaded = _upload(client, tmp_path)
+    resp = client.delete(f"/rubrics/{uploaded['id']}")
+    assert resp.status_code == 204
+    assert client.get(f"/rubrics/{uploaded['id']}").status_code == 404
+
+
+def test_list_rubric_families_and_versions(client, tmp_path):
+    v1 = _upload(client, tmp_path, title="V1")
+    _confirm(client, v1["id"], v1["criteria"])
+    path = _rubric_pdf(tmp_path)
+    with path.open("rb") as fh:
+        client.post(
+            "/rubrics",
+            params={"title": "V2", "family_id": v1["rubric_family_id"]},
+            files={"file": ("rubric.pdf", fh, "application/pdf")},
+        )
+
+    families = client.get("/rubric-families").json()
+    assert len(families) == 1
+    assert families[0]["rubric_family_id"] == v1["rubric_family_id"]
+    assert families[0]["is_active"] is True  # v1, still active — v2 not confirmed yet
+
+    versions = client.get(f"/rubric-families/{v1['rubric_family_id']}/versions").json()
+    assert [v["version"] for v in versions] == [2, 1]
