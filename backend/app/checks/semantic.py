@@ -217,9 +217,21 @@ def _verify_quotes(
     return anchors
 
 
-async def _call_grade(prompt: str, llm: LLMClient, check_run_id: int | None) -> GradeBatchResponse:
+async def _call_grade(
+    prompt: str, llm: LLMClient, check_run_id: int | None, *, consistency_pass: str = "single"
+) -> GradeBatchResponse:
+    # `consistency_pass` rides in **context: it differentiates the response-
+    # cache key (D-011) so two independent voting passes over the SAME
+    # batch/criteria are two real samples, not a cache hit of each other,
+    # while a genuine re-run (Flow E, same pass) still hits cache for free.
+    # The fake client (V-022) uses it to select a per-pass fixture so tests
+    # can script a deterministic disagreement.
     response = await llm.complete(
-        PROMPT_TYPE, prompt, prompt_version=PROMPT_VERSION, check_run_id=check_run_id
+        PROMPT_TYPE,
+        prompt,
+        prompt_version=PROMPT_VERSION,
+        check_run_id=check_run_id,
+        consistency_pass=consistency_pass,
     )
     try:
         return GradeBatchResponse.model_validate(response)
@@ -228,13 +240,20 @@ async def _call_grade(prompt: str, llm: LLMClient, check_run_id: int | None) -> 
 
 
 async def _grade_single_criterion(
-    criterion: Any, batch: SemanticBatch, llm: LLMClient, check_run_id: int | None, anchor_kind: str
+    criterion: Any,
+    batch: SemanticBatch,
+    llm: LLMClient,
+    check_run_id: int | None,
+    anchor_kind: str,
+    *,
+    consistency_pass: str = "single",
 ) -> tuple[GradeVerdict, list[str]] | None:
     """One-criterion retry, same context — used both when the batch
-    response omitted a criterion and when its quotes failed containment."""
+    response omitted a criterion and when its quotes failed containment,
+    and (V-022) as the single-criterion tie-break call on a voting split."""
     prompt = _build_prompt(batch, [criterion])
     try:
-        parsed = await _call_grade(prompt, llm, check_run_id)
+        parsed = await _call_grade(prompt, llm, check_run_id, consistency_pass=consistency_pass)
     except SemanticGradeError:
         return None
     verdict = next((v for v in parsed.verdicts if v.index == 0), None)
@@ -244,6 +263,77 @@ async def _grade_single_criterion(
     if anchors is None:
         return None
     return verdict, anchors
+
+
+@dataclass(frozen=True)
+class GradedVerdict:
+    """One criterion's outcome from a single grading PASS, before any
+    voting (V-022) or persistence happens — `verdict is None` means this
+    pass could not produce a verifiable verdict even after its own
+    single-criterion retry (`escalation_reason` explains why)."""
+
+    criterion_id: int
+    verdict: str | None
+    reasoning: str | None
+    quotes: list[str] | None
+    anchors: list[str] | None
+    escalation_reason: str | None
+
+
+async def grade_batch_verdicts(
+    batch: SemanticBatch,
+    batch_criteria: list[Any],
+    llm: LLMClient,
+    check_run_id: int | None,
+    anchor_kind: str,
+    *,
+    consistency_pass: str = "single",
+) -> dict[int, GradedVerdict]:
+    """Grades one batch ONCE (whole-batch retry + per-criterion retry ladder
+    already in place for hallucinated/missing verdicts) and returns the
+    verdict per criterion id WITHOUT persisting anything — the reusable
+    core both `run_semantic_checks` (single-pass, V2) and
+    `app.checks.consistency` (N-pass voting, V-022) build on, per this
+    module's original design note."""
+    prompt = _build_prompt(batch, batch_criteria)
+    parsed: GradeBatchResponse | None = None
+    for _attempt in range(2):  # one try, one whole-batch retry (ticket: "retry once")
+        try:
+            parsed = await _call_grade(prompt, llm, check_run_id, consistency_pass=consistency_pass)
+            break
+        except SemanticGradeError:
+            continue
+
+    if parsed is None:
+        reason = "Grading response could not be validated after a retry."
+        return {
+            c.id: GradedVerdict(c.id, None, None, None, None, reason) for c in batch_criteria
+        }
+
+    by_index = {v.index: v for v in parsed.verdicts}
+    out: dict[int, GradedVerdict] = {}
+    for i, criterion in enumerate(batch_criteria):
+        verdict = by_index.get(i)
+        anchors = (
+            _verify_quotes(verdict.evidence_quotes, batch.blocks, anchor_kind) if verdict else None
+        )
+        if verdict is None or anchors is None:
+            retry = await _grade_single_criterion(
+                criterion, batch, llm, check_run_id, anchor_kind, consistency_pass=consistency_pass
+            )
+            if retry is None:
+                reason = (
+                    "Could not verify the quoted evidence after a retry."
+                    if verdict is not None
+                    else "No verdict was returned for this criterion, even after a retry."
+                )
+                out[criterion.id] = GradedVerdict(criterion.id, None, None, None, None, reason)
+                continue
+            verdict, anchors = retry
+        out[criterion.id] = GradedVerdict(
+            criterion.id, verdict.verdict, verdict.reasoning, verdict.evidence_quotes, anchors, None
+        )
+    return out
 
 
 async def _persist(
@@ -275,72 +365,42 @@ async def _grade_batch(
     settings: Settings,
     anchor_kind: str,
 ) -> list[CheckResult]:
-    prompt = _build_prompt(batch, batch_criteria)
-    parsed: GradeBatchResponse | None = None
-    for _attempt in range(2):  # one try, one whole-batch retry (ticket: "retry once")
-        try:
-            parsed = await _call_grade(prompt, llm, check_run_id)
-            break
-        except SemanticGradeError:
-            continue
-
-    if parsed is None:
-        return [
-            await _persist(
-                session,
-                check_run_id,
-                criterion,
-                ResultOutcome.escalated,
-                {
-                    "basis": "llm",
-                    "reason": "Grading response could not be validated after a retry.",
-                    "prompt_version": PROMPT_VERSION,
-                },
-            )
-            for criterion in batch_criteria
-        ]
-
-    by_index = {v.index: v for v in parsed.verdicts}
+    graded = await grade_batch_verdicts(
+        batch, batch_criteria, llm, check_run_id, anchor_kind, consistency_pass="single"
+    )
     shadow_detail = shadow_signals_as_detail(compute_shadow_signals(batch.context_text, settings))
     results: list[CheckResult] = []
-    for i, criterion in enumerate(batch_criteria):
-        verdict = by_index.get(i)
-        anchors = (
-            _verify_quotes(verdict.evidence_quotes, batch.blocks, anchor_kind) if verdict else None
-        )
-        if verdict is None or anchors is None:
-            retry = await _grade_single_criterion(criterion, batch, llm, check_run_id, anchor_kind)
-            if retry is None:
-                reason = (
-                    "Could not verify the quoted evidence after a retry."
-                    if verdict is not None
-                    else "No verdict was returned for this criterion, even after a retry."
+    for criterion in batch_criteria:
+        g = graded[criterion.id]
+        if g.verdict is None:
+            results.append(
+                await _persist(
+                    session,
+                    check_run_id,
+                    criterion,
+                    ResultOutcome.escalated,
+                    {
+                        "basis": "llm",
+                        "reason": g.escalation_reason,
+                        "prompt_version": PROMPT_VERSION,
+                    },
                 )
-                results.append(
-                    await _persist(
-                        session,
-                        check_run_id,
-                        criterion,
-                        ResultOutcome.escalated,
-                        {"basis": "llm", "reason": reason, "prompt_version": PROMPT_VERSION},
-                    )
-                )
-                continue
-            verdict, anchors = retry
+            )
+            continue
         results.append(
             await _persist(
                 session,
                 check_run_id,
                 criterion,
-                _OUTCOME_BY_VERDICT[verdict.verdict],
+                _OUTCOME_BY_VERDICT[g.verdict],
                 {
-                    "score": _SCORE_BY_VERDICT[verdict.verdict],
+                    "score": _SCORE_BY_VERDICT[g.verdict],
                     "basis": "llm",
-                    "verdict": verdict.verdict,
-                    "reasoning": verdict.reasoning,
+                    "verdict": g.verdict,
+                    "reasoning": g.reasoning,
                     "evidence": [
                         {"quote": q, "anchor": a}
-                        for q, a in zip(verdict.evidence_quotes, anchors, strict=True)
+                        for q, a in zip(g.quotes, g.anchors, strict=True)
                     ],
                     "context_label": batch.label,
                     "prompt_version": PROMPT_VERSION,

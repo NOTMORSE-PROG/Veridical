@@ -21,9 +21,9 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.checks.consistency import run_semantic_checks_with_consistency
 from app.checks.router import RouteDecision, apply_routing, route_criteria
 from app.checks.rules.context import build_rule_context
-from app.checks.semantic import run_semantic_checks
 from app.checks.structural import run_structural_check
 from app.config import Settings, get_settings
 from app.errors import ApiDownError, FileMalformedError, QuotaExhaustedError
@@ -224,7 +224,9 @@ async def _run_semantic_stage(
     if pending:
         extraction = load_raw_store(settings, manuscript.id)
         try:
-            await run_semantic_checks(session, check_run.id, pending, extraction, llm, settings)
+            await run_semantic_checks_with_consistency(
+                session, check_run.id, pending, extraction, llm, settings
+            )
         except QuotaExhaustedError as exc:
             raise PipelineBlockedError(
                 StageBlock(

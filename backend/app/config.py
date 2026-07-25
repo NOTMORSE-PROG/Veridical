@@ -187,6 +187,27 @@ class Settings(BaseSettings):
     # yet, an honest gap, not implemented here.
     escalation_budget: float = 0.20
 
+    # --- Self-consistency voting & confidence gate (V-022/V-023, D-006/D-011, F3.4-3.5) ---
+    # The ONLY confidence mechanism (D-006 — never a second ad-hoc score).
+    # Agreement below this fraction escalates to the instructor instead of
+    # auto-scoring, even when a 2-of-3 majority verdict exists. Default 1.0
+    # means ANY disagreement escalates (ticket: "start strict, loosen with
+    # golden evidence") — V-025's golden-set agreement numbers are what
+    # justify lowering it later, never a guess.
+    escalation_agreement_threshold: float = 1.0
+
+    # --- Accuracy gates: tier promotion + override alarm (V-025, D-012) ------
+    # A shadow Tier 0/1 signal class only starts auto-deciding once its
+    # agreement against ground truth clears this bar over at least this many
+    # shadow samples (D-012 mechanism #1) — the promotion table records WHY,
+    # dated, per criterion class; nothing is promoted on thin data.
+    tier_promotion_agreement: float = 0.90
+    tier_promotion_min_n: int = 20
+    # Instructor override rate per check type above this share triggers a
+    # dashboard accuracy alarm (D-012 mechanism #3) — overrides are a
+    # labeled ground-truth signal, not just a UI action.
+    override_alert_rate: float = 0.15
+
     # --- Auth (V-014, F9.1) ---------------------------------------------------
     session_cookie_name: str = "veridical_session"
     session_ttl_hours: int = 12

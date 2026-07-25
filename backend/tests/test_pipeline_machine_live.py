@@ -252,8 +252,10 @@ async def test_integrity_stage_is_honestly_skipped_not_faked(
 
 
 class _FlakyThenFineLLM:
-    """Simulates the process dying/quota running out mid-run: the FIRST
-    batch call succeeds normally, the SECOND raises QuotaExhaustedError —
+    """Simulates the process dying/quota running out mid-run: the first
+    criterion's FULL self-consistency vote (V-022: pass_1 + pass_2, no
+    tie-break needed since the plain fake fixture agrees with itself)
+    succeeds normally, then the NEXT call raises QuotaExhaustedError —
     exactly what a real exhausted daily quota looks like from the
     orchestrator's point of view (V-009's queue raises the same type)."""
 
@@ -274,7 +276,9 @@ async def test_quota_exhausted_parks_the_run_then_resumes_without_duplicate_call
 ):
     check_run_id, criterion_ids, settings = await _seed(session_factory, tmp_path, monkeypatch)
 
-    flaky = _FlakyThenFineLLM(fail_after=1)
+    # 2 calls (pass_1 + pass_2) complete the FIRST criterion's vote; the
+    # 3rd call (second criterion's pass_1) is where "quota" runs out.
+    flaky = _FlakyThenFineLLM(fail_after=2)
     async with session_factory() as session:
         check_run = await session.get(CheckRun, check_run_id)
         await run_check_run(session, check_run, settings, flaky)

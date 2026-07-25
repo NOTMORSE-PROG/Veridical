@@ -20,11 +20,24 @@ class FakeLLMClient(LLMClient):
     async def complete(
         self, prompt_type: str, prompt: str, *, prompt_version: str = "unversioned", **context: Any
     ) -> dict[str, Any]:
-        fixture = self._fixtures_dir / f"{prompt_type}.json"
-        if not fixture.is_file():
+        # A per-pass fixture (`<type>__<consistency_pass>.json`) lets V-022's
+        # self-consistency voting be exercised deterministically in fake
+        # mode (ticket AC) — e.g. `semantic_grading__pass_2.json` can script
+        # a disagreement with `semantic_grading__pass_1.json`. Falls back to
+        # the plain fixture when no per-pass file exists, so every other
+        # prompt type (and single-pass callers) is unaffected.
+        consistency_pass = context.get("consistency_pass")
+        candidates = (
+            [self._fixtures_dir / f"{prompt_type}__{consistency_pass}.json"]
+            if consistency_pass
+            else []
+        )
+        candidates.append(self._fixtures_dir / f"{prompt_type}.json")
+        fixture = next((f for f in candidates if f.is_file()), None)
+        if fixture is None:
             available = sorted(p.stem for p in self._fixtures_dir.glob("*.json"))
             raise UnknownPromptTypeError(
                 f"No fixture for prompt type {prompt_type!r}. "
-                f"Available: {available}. Add {fixture.name} to {self._fixtures_dir}."
+                f"Available: {available}. Add {candidates[-1].name} to {self._fixtures_dir}."
             )
         return json.loads(fixture.read_text(encoding="utf-8"))

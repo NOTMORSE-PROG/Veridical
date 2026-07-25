@@ -165,6 +165,8 @@ class LLMQueue:
                     input_hash=input_hash,
                     check_run_id=check_run_id,
                     response=cached,
+                    context=context,
+                    prompt=prompt,
                 )
                 await session.commit()
                 return cached
@@ -186,6 +188,8 @@ class LLMQueue:
                     input_hash=input_hash,
                     check_run_id=check_run_id,
                     response={"error": str(exc)},
+                    context=context,
+                    prompt=prompt,
                 )
                 await session.commit()
             raise
@@ -199,6 +203,8 @@ class LLMQueue:
                 input_hash=input_hash,
                 check_run_id=check_run_id,
                 response=response,
+                context=context,
+                prompt=prompt,
             )
             await self._write_cache(
                 session, input_hash=input_hash, prompt_version=prompt_version, response=response
@@ -301,7 +307,18 @@ class LLMQueue:
         input_hash: str,
         check_run_id: int | None,
         response: dict[str, Any],
+        context: dict[str, Any] | None = None,
+        prompt: str = "",
     ) -> None:
+        # `prompt`/`context` (e.g. V-022's `consistency_pass`) are stored
+        # alongside the response so `tools/replay_call.py` (V-024) can
+        # reconstruct the EXACT call byte-for-byte — together with
+        # model/temperature they're exactly the inputs `_input_hash` folded
+        # in, so a replay can re-hash them and prove nothing drifted.
+        # Compression: JSONB columns this large are TOASTed by Postgres
+        # automatically (pglz, transparent, no app code) — "store
+        # compressed" (V-024 edge case) without hand-rolling it; only the
+        # UI's PREVIEW is capped (AuditLog.tsx), never the stored value.
         session.add(
             AuditLog(
                 event_type=event_type,
@@ -312,6 +329,8 @@ class LLMQueue:
                     "prompt_type": prompt_type,
                     "model": self._model,
                     "temperature": self._temperature,
+                    "context": context or {},
+                    "prompt": prompt,
                     "response": response,
                 },
             )
