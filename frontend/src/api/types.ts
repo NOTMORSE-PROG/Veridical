@@ -178,6 +178,26 @@ export interface ResolveEscalationOut {
   report: ReportOut;
 }
 
+export interface FlagOut {
+  id: number;
+  check_result_id: number;
+  check_kind: string;
+  criterion_text: string | null;
+  severity: "high" | "med" | "low";
+  confidence: number | null;
+  evidence_excerpt: string;
+  page_anchor: string;
+  annotation: string | null;
+  overridden: boolean;
+  override_reason: string | null;
+  ai_verdict_summary: string | null;
+  ai_reasoning: string | null;
+}
+
+export interface OverrideFlagOut extends FlagOut {
+  report: ReportOut;
+}
+
 export interface QuotaStatus {
   mode: "fake" | "live";
   quota_day: string;

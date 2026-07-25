@@ -5,6 +5,7 @@ import { BrowserRouter, Navigate, Route, Routes } from "react-router";
 import { AuditLogPage } from "./audit/AuditLog";
 import { RequireAuth } from "./auth/RequireAuth";
 import { CheckProgressPage } from "./check/Progress";
+import { FlagDetailPage } from "./flags/FlagDetail";
 import { GalleryPage } from "./gallery/GalleryPage";
 import { DashboardPage } from "./pages/Dashboard";
 import { SignInPage } from "./pages/SignIn";
@@ -68,6 +69,16 @@ export default function App() {
               <RequireAuth>
                 <AppShell>
                   <ReportPage />
+                </AppShell>
+              </RequireAuth>
+            }
+          />
+          <Route
+            path="/flags/:flagId"
+            element={
+              <RequireAuth>
+                <AppShell>
+                  <FlagDetailPage />
                 </AppShell>
               </RequireAuth>
             }
