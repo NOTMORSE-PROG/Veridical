@@ -178,6 +178,15 @@ class Settings(BaseSettings):
     # happens to be configured; production (Render) turns this on.
     pipeline_worker_autostart: bool = False
 
+    # --- Dashboard accuracy self-reporting (V-021, D-012) --------------------
+    # Above this share of criteria escalated, the run/dashboard is flagged
+    # "system underperforming" — escalation spam is OUR failure to fix
+    # (better thresholds, more Tier-2), never workload dumped on the
+    # instructor (D-012 mechanism #2). Override-rate alerting (mechanism
+    # #3) needs V-026's override feature to exist first — not computable
+    # yet, an honest gap, not implemented here.
+    escalation_budget: float = 0.20
+
     # --- Auth (V-014, F9.1) ---------------------------------------------------
     session_cookie_name: str = "veridical_session"
     session_ttl_hours: int = 12

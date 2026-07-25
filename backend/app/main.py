@@ -11,6 +11,7 @@ from fastapi.responses import JSONResponse
 from app import db
 from app.auth.router import router as auth_router
 from app.config import get_settings
+from app.dashboard.router import router as dashboard_router
 from app.errors import HTTP_STATUS, VeridicalError
 from app.ingest.router import router as ingest_router
 from app.llm.router import router as llm_router
@@ -42,6 +43,7 @@ app = FastAPI(
     lifespan=_lifespan,
 )
 app.include_router(auth_router)
+app.include_router(dashboard_router)
 app.include_router(ingest_router)
 app.include_router(llm_router)
 app.include_router(pipeline_router)

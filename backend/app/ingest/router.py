@@ -14,7 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app import messages
 from app.auth.dependencies import get_current_instructor
 from app.db import get_session
-from app.ingest.schemas import IngestSummary, ManuscriptListItem
+from app.ingest.schemas import IngestSummary, PaginatedManuscripts
 from app.ingest.service import ingest_upload, list_manuscripts
 from app.models.instructor import Instructor
 
@@ -55,10 +55,11 @@ async def ingest_manuscript_upload(
     )
 
 
-@router.get("/manuscripts", response_model=list[ManuscriptListItem])
+@router.get("/manuscripts", response_model=PaginatedManuscripts)
 async def list_manuscripts_route(
     session: Annotated[AsyncSession, Depends(get_session)],
     instructor: Annotated[Instructor, Depends(get_current_instructor)],
-) -> list[ManuscriptListItem]:
-    manuscripts = await list_manuscripts(session, instructor.id)
-    return [ManuscriptListItem.model_validate(m) for m in manuscripts]
+    page: int = 1,
+    page_size: int = 50,
+) -> PaginatedManuscripts:
+    return await list_manuscripts(session, instructor.id, page=page, page_size=page_size)

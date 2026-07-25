@@ -3,12 +3,16 @@
 // screen's polling query.
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api/client";
-import type { CheckRun, ManuscriptListItem } from "../api/types";
+import type { CheckRun, PaginatedManuscripts } from "../api/types";
 
+/** The New Check modal just wants "everything ingested" — requests one
+ * generously large page rather than needing its own picker pagination
+ * (V-021's dashboard table owns real pagination for 100+ manuscripts). */
 export function useManuscripts() {
   return useQuery({
-    queryKey: ["manuscripts"],
-    queryFn: () => api.get<ManuscriptListItem[]>("/manuscripts"),
+    queryKey: ["manuscripts", "picker"],
+    queryFn: () => api.get<PaginatedManuscripts>("/manuscripts?page=1&page_size=200"),
+    select: (data) => data.items,
   });
 }
 

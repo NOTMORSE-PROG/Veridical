@@ -19,12 +19,13 @@ from app.config import Settings, get_settings
 from app.errors import FileMalformedError, FileTooLargeError
 from app.ingest import docx, pdf, references, vision
 from app.ingest.patterns import load_patterns
-from app.ingest.schemas import ExtractionResult
+from app.ingest.schemas import ExtractionResult, ManuscriptListItem, PaginatedManuscripts
 from app.llm import LLMNotConfiguredError, get_llm_client
 from app.models.citation import Citation
 from app.models.enums import IngestStatus
 from app.models.instructor import Instructor
 from app.models.manuscript import Manuscript
+from app.models.run import CheckRun
 
 # One extractor per supported suffix. Each is a sync callable executed off
 # the event loop. Legacy .doc is deliberately absent: rejected with a clear
@@ -198,19 +199,65 @@ def _write_raw_store(result: ExtractionResult, path: Path) -> None:
     path.write_text(result.model_dump_json(), encoding="utf-8")
 
 
-async def list_manuscripts(session: AsyncSession, instructor_id: int) -> list[Manuscript]:
-    """Minimal listing for the New Check modal's manuscript picker
-    (V-018) — no pagination yet; V-021 (dashboard) extends this same
-    query with pagination and KPI aggregation."""
-    return list(
-        (
+async def list_manuscripts(
+    session: AsyncSession, instructor_id: int, *, page: int = 1, page_size: int = 50
+) -> PaginatedManuscripts:
+    """Server-paginated listing (V-021 edge case: 100+ manuscripts in
+    defense season) for both the dashboard table (4e) and the New Check
+    modal's manuscript picker (V-018, which just requests a generously
+    large page). Each row carries its own latest check_run id/status so
+    the dashboard can link "view progress"/"open report" with zero extra
+    per-row requests."""
+    total = await session.scalar(
+        select(func.count())
+        .select_from(Manuscript)
+        .where(Manuscript.instructor_id == instructor_id)
+    )
+    manuscripts = (
+        await session.scalars(
+            select(Manuscript)
+            .where(Manuscript.instructor_id == instructor_id)
+            .order_by(Manuscript.created_at.desc())
+            .offset((page - 1) * page_size)
+            .limit(page_size)
+        )
+    ).all()
+
+    manuscript_ids = [m.id for m in manuscripts]
+    latest_by_manuscript: dict[int, CheckRun] = {}
+    if manuscript_ids:
+        runs = (
             await session.scalars(
-                select(Manuscript)
-                .where(Manuscript.instructor_id == instructor_id)
-                .order_by(Manuscript.created_at.desc())
+                select(CheckRun)
+                .where(CheckRun.manuscript_id.in_(manuscript_ids))
+                .order_by(CheckRun.manuscript_id, CheckRun.created_at.desc())
             )
         ).all()
-    )
+        for run in runs:
+            # First one seen per manuscript is the latest (rows arrive
+            # ordered newest-first within each manuscript_id group).
+            latest_by_manuscript.setdefault(run.manuscript_id, run)
+
+    def _latest_id(manuscript_id: int) -> int | None:
+        run = latest_by_manuscript.get(manuscript_id)
+        return run.id if run is not None else None
+
+    def _latest_status(manuscript_id: int) -> str | None:
+        run = latest_by_manuscript.get(manuscript_id)
+        return run.status.value if run is not None else None
+
+    items = [
+        ManuscriptListItem(
+            id=m.id,
+            group_label=m.group_label,
+            ingest_status=m.ingest_status.value,
+            created_at=m.created_at,
+            latest_check_run_id=_latest_id(m.id),
+            latest_check_run_status=_latest_status(m.id),
+        )
+        for m in manuscripts
+    ]
+    return PaginatedManuscripts(items=items, total=total or 0, page=page, page_size=page_size)
 
 
 def load_raw_store(settings: Settings, manuscript_id: int) -> ExtractionResult:

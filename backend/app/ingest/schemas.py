@@ -143,17 +143,29 @@ class IngestSummary(BaseModel):
 
 
 class ManuscriptListItem(BaseModel):
-    """One row of a manuscript picker/list (screens 4e/4f). Minimal on
-    purpose — V-018 needs just enough for the New Check modal's
-    manuscript selector; V-021 extends this same endpoint with
-    pagination and KPI aggregation for the full dashboard."""
+    """One row of a manuscript picker/list (screens 4e/4f)."""
 
     id: int
     group_label: str
     ingest_status: str
     created_at: datetime
+    # None until a check has been run against this manuscript at least
+    # once; lets the dashboard table (V-021) link "view progress"/"open
+    # report" without a second request per row.
+    latest_check_run_id: int | None = None
+    latest_check_run_status: str | None = None
 
     model_config = {"from_attributes": True}
+
+
+class PaginatedManuscripts(BaseModel):
+    """Server-side pagination from day one (V-021 edge case: 100+
+    manuscripts in defense season) — never a single unbounded list."""
+
+    items: list[ManuscriptListItem]
+    total: int
+    page: int
+    page_size: int
 
 
 class ExtractionResult(BaseModel):

@@ -48,6 +48,15 @@ export interface ManuscriptListItem {
   group_label: string;
   ingest_status: "pending" | "processing" | "done" | "failed";
   created_at: string;
+  latest_check_run_id: number | null;
+  latest_check_run_status: CheckRunStatus | null;
+}
+
+export interface PaginatedManuscripts {
+  items: ManuscriptListItem[];
+  total: number;
+  page: number;
+  page_size: number;
 }
 
 export type CheckRunStatus =

@@ -1,13 +1,63 @@
-// Screen 4b — Dashboard, first-run empty state (F8, F9.2). Populated state
-// (4e, KPI cards, "does an active rubric exist") is V-021 — this ticket
-// only builds the empty-state screen and the upload trigger (V-012 wires
-// what "Upload required format" opens: the parse modal, screen 4c).
+// Screens 4b (empty) / 4e (populated) — Dashboard (F8.8 first slice,
+// F9.2). Empty-state (4b) shows until a rubric is confirmed & active
+// (V-012); once one exists, 4e's KPI cards + manuscripts table take over
+// (V-021). The quota meter (V-009) already lives in AppShell's top bar
+// for every screen, so it isn't duplicated here.
 import { useMemo, useState } from "react";
 import { useMe } from "../auth/useAuth";
 import { NewCheckModal } from "../check/NewCheck";
 import { Chip } from "../components/Chip";
+import { KpiCards } from "../dashboard/KpiCards";
+import { ManuscriptsTable } from "../dashboard/ManuscriptsTable";
+import { useDashboardStats } from "../dashboard/useDashboard";
 import { useRubricFamilies } from "../rubric/useRubric";
 import { UploadRubricModal } from "../rubric/UploadRubricModal";
+
+function EmptyState({ onUpload }: { onUpload: () => void }) {
+  return (
+    <>
+      <div className="flex flex-col items-center gap-2 rounded-panel border-2 border-dashed border-border-button bg-page p-7">
+        <b className="text-md text-ink">No required format yet</b>
+        <p className="max-w-sm text-center text-xs text-ink-faint">
+          Upload the rubric or format document (PDF / DOCX). VERIDICAL parses it into checkable
+          criteria for your review — nothing runs until you confirm.
+        </p>
+        <button
+          type="button"
+          onClick={onUpload}
+          className="mt-1 rounded-control border border-primary bg-primary px-3.5 py-1.5 text-base font-medium text-on-primary"
+        >
+          Upload required format
+        </button>
+      </div>
+      <div className="flex items-center justify-center gap-2">
+        <Chip>
+          <b>1</b> Upload format
+        </Chip>
+        <span className="text-xs text-ink-faint">→</span>
+        <Chip>
+          <b>2</b> Review parsed criteria
+        </Chip>
+        <span className="text-xs text-ink-faint">→</span>
+        <Chip>
+          <b>3</b> Check manuscripts
+        </Chip>
+      </div>
+      <p className="text-xs text-ink-faint">— "New check" stays disabled until a rubric is active</p>
+    </>
+  );
+}
+
+function PopulatedDashboard() {
+  const { data: stats } = useDashboardStats();
+  const [page, setPage] = useState(1);
+  return (
+    <>
+      {stats && <KpiCards stats={stats} />}
+      <ManuscriptsTable page={page} onPageChange={setPage} />
+    </>
+  );
+}
 
 export function DashboardPage() {
   const { data: me } = useMe();
@@ -16,9 +66,8 @@ export function DashboardPage() {
   const [newCheckOpen, setNewCheckOpen] = useState(false);
 
   // "New check" (screen 4f) only makes sense once at least one rubric is
-  // confirmed & active — V-021 replaces this whole empty-state screen
-  // with the populated dashboard (4e); this ticket only unlocks the entry
-  // point once its own precondition is real, not a placeholder.
+  // confirmed & active — same precondition that switches the whole
+  // screen from the empty state (4b) to the populated one (4e).
   const hasActiveRubric = useMemo(() => (families ?? []).some((f) => f.is_active), [families]);
 
   return (
@@ -41,40 +90,13 @@ export function DashboardPage() {
       </div>
 
       {newCheckOpen && <NewCheckModal onClose={() => setNewCheckOpen(false)} />}
-
-      <div className="flex flex-col items-center gap-2 rounded-panel border-2 border-dashed border-border-button bg-page p-7">
-        <b className="text-md text-ink">No required format yet</b>
-        <p className="max-w-sm text-center text-xs text-ink-faint">
-          Upload the rubric or format document (PDF / DOCX). VERIDICAL parses it into checkable
-          criteria for your review — nothing runs until you confirm.
-        </p>
-        <button
-          type="button"
-          onClick={() => setUploadOpen(true)}
-          className="mt-1 rounded-control border border-primary bg-primary px-3.5 py-1.5 text-base font-medium text-on-primary"
-        >
-          Upload required format
-        </button>
-      </div>
-
       {uploadOpen && <UploadRubricModal onClose={() => setUploadOpen(false)} />}
 
-      <div className="flex items-center justify-center gap-2">
-        <Chip>
-          <b>1</b> Upload format
-        </Chip>
-        <span className="text-xs text-ink-faint">→</span>
-        <Chip>
-          <b>2</b> Review parsed criteria
-        </Chip>
-        <span className="text-xs text-ink-faint">→</span>
-        <Chip>
-          <b>3</b> Check manuscripts
-        </Chip>
-      </div>
-      <p className="text-xs text-ink-faint">
-        — "New check" stays disabled until a rubric is active
-      </p>
+      {hasActiveRubric ? (
+        <PopulatedDashboard />
+      ) : (
+        <EmptyState onUpload={() => setUploadOpen(true)} />
+      )}
     </div>
   );
 }

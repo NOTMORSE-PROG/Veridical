@@ -3,10 +3,29 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { renderWithProviders, stubFetchByPath } from "../test/renderWithProviders";
 import { NewCheckModal } from "./NewCheck";
 
-const MANUSCRIPTS = [
-  { id: 1, group_label: "G-11", ingest_status: "done", created_at: "2026-01-01T00:00:00Z" },
-  { id: 2, group_label: "G-12 (still processing)", ingest_status: "processing", created_at: "2026-01-02T00:00:00Z" },
-];
+const MANUSCRIPTS = {
+  items: [
+    {
+      id: 1,
+      group_label: "G-11",
+      ingest_status: "done",
+      created_at: "2026-01-01T00:00:00Z",
+      latest_check_run_id: null,
+      latest_check_run_status: null,
+    },
+    {
+      id: 2,
+      group_label: "G-12 (still processing)",
+      ingest_status: "processing",
+      created_at: "2026-01-02T00:00:00Z",
+      latest_check_run_id: null,
+      latest_check_run_status: null,
+    },
+  ],
+  total: 2,
+  page: 1,
+  page_size: 200,
+};
 
 const ONE_ACTIVE_FAMILY = [
   {
