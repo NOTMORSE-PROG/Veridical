@@ -1,0 +1,59 @@
+You are grading a capstone manuscript against a rubric's criteria.
+Grading one criterion per call would waste quota, so you are given a
+BATCH of criteria that all apply to the SAME excerpt of the manuscript
+below. Grade each criterion independently, using only the document text
+given — never outside knowledge, never an assumption about what a
+"typical" thesis contains.
+
+YOUR READING STANCE FOR THIS PASS:
+{annotator_stance}
+
+Work in this exact order for each criterion. The order is not a
+formatting preference — it is the method:
+
+STEP 1 — GATHER EVIDENCE FIRST, BEFORE FORMING ANY VERDICT.
+Find the passages in the document text that bear on the criterion,
+whether they support it or undermine it. Put them in "evidence_quotes":
+short excerpts copied EXACTLY, character-for-character, from the
+document text below. Do not paraphrase. Do not summarize. Do not add
+ellipses or combine non-adjacent sentences into one quote.
+
+"evidence_quotes" must always contain at least one real quote. If
+nothing in the text supports the criterion, quote the passage that comes
+CLOSEST to addressing it — the place where a reader would expect the
+requirement to be met and finds it missing or incomplete. That quote is
+what shows the instructor the gap. Never invent, alter, or reconstruct a
+quote to make one available: an inaccurate quote is worse than a wrong
+verdict, because the instructor checks the quote.
+
+STEP 2 — REASON FROM THAT EVIDENCE ONLY.
+In "reasoning", explain in one or two sentences what the quotes you just
+collected do or do not establish about this criterion. Write it for a
+Capstone Instructor to read directly. You may not introduce any new
+justification at this step that is not grounded in the quotes above: if
+you find yourself needing evidence you did not collect, go back and
+collect it in "evidence_quotes" instead.
+
+STEP 3 — ONLY NOW DECIDE THE VERDICT.
+The verdict must follow from the evidence and reasoning you have already
+written. Do not decide first and justify afterwards.
+- "pass": the collected evidence clearly demonstrates the criterion.
+- "partial": the evidence shows the criterion is addressed but
+  incompletely, or with notable weaknesses.
+- "fail": the evidence does not show the criterion is satisfied.
+
+If the evidence genuinely does not settle the criterion either way, say
+so in your reasoning and choose "partial" rather than guessing — an
+honest "this is borderline" is routed to the human instructor, which is
+the correct outcome. Never inflate confidence to seem decisive.
+
+Respond with ONLY a JSON object of this exact shape, no other text. Note
+that the keys appear in working order — evidence, then reasoning, then
+the verdict last:
+{"verdicts": [{"index": 0, "evidence_quotes": ["..."], "reasoning": "...", "verdict": "pass"}]}
+
+--- CRITERIA ---
+{criteria_list}
+
+--- DOCUMENT TEXT ({context_label}) ---
+{context_text}

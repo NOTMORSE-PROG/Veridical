@@ -1,0 +1,54 @@
+{
+  "_readme": [
+    "Simulated annotator perspectives (V-054, D-017).",
+    "",
+    "WHY THESE EXIST. Our self-consistency passes used to be the SAME model,",
+    "same prompt, at temperature 0.0 — a near-deterministic sample repeated.",
+    "The literature is blunt about this: at T=0 self-consistency is",
+    "meaningless, because the second sample carries no new information. Since",
+    "the agreement score between passes is this product's ONLY confidence",
+    "signal (D-006), that made the signal close to decorative.",
+    "",
+    "The fix is NOT temperature noise and NOT a multi-model jury. Raising",
+    "temperature buys diversity by degrading each individual judgement, and",
+    "panel research shows nine frontier judges collapse to ~2.2 effective",
+    "independent votes because their errors correlate — the single best judge",
+    "matched or beat the full panel on every dataset tested.",
+    "",
+    "Instead these condition ONE model on genuinely different reading",
+    "stances, the way a real defense panel differs: one examiner wants the",
+    "requirement demonstrated in the text, another credits substance that is",
+    "present but imperfectly worded. Disagreement between them is real",
+    "information about the manuscript being borderline — exactly what should",
+    "reach the instructor — rather than sampling jitter.",
+    "",
+    "These are DATA, not code (ground rule 7): an instructor may reasonably",
+    "disagree with how a stance is worded, and changing one must never need a",
+    "code change. Changing ANY text here changes what the agreement score",
+    "means, so it is a measurement change: bump semantic_grading's",
+    "prompt_version and re-run the golden harness (TESTING §2).",
+    "",
+    "Order matters — `passes` are taken in listed order, and `tie_break` is",
+    "spent only when the first two disagree (D-011's quota rule)."
+  ],
+  "perspectives": [
+    {
+      "id": "evidence_first",
+      "label": "Evidence-first reader",
+      "role": "pass_1",
+      "stance": "You are the examiner who asks to be SHOWN. A criterion is satisfied only if specific text in this document demonstrates it. Where the document gestures at a requirement without actually carrying it out, say so plainly. Do not credit intent, and do not fill gaps with what a capstone of this kind usually contains."
+    },
+    {
+      "id": "charitable_reader",
+      "label": "Charitable reader",
+      "role": "pass_2",
+      "stance": "You are the examiner who reads for substance. Students often satisfy a requirement in their own words, out of the expected order, or under a different heading — credit that when the text genuinely does the work, even if the wording is clumsy or the terminology is non-standard. Do not credit something that is merely implied or absent."
+    },
+    {
+      "id": "adjudicator",
+      "label": "Adjudicator",
+      "role": "tie_break",
+      "stance": "Two examiners disagreed on this criterion. Weigh only what the document text can support: decide whether the requirement is genuinely demonstrated in the text, or whether the case for it depends on assumption. If the evidence is genuinely balanced, say so rather than forcing a confident verdict."
+    }
+  ]
+}

@@ -18,6 +18,12 @@ from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.checks.annotators import (
+    ROLE_PASS_1,
+    ROLE_PASS_2,
+    ROLE_TIE_BREAK,
+    perspective_for,
+)
 from app.checks.escalation import gate_vote
 from app.checks.semantic import (
     PROMPT_VERSION,
@@ -34,6 +40,17 @@ from app.ingest.schemas import ExtractionResult
 from app.llm.base import LLMClient
 from app.models.enums import ResultOutcome
 from app.models.run import CheckResult
+
+
+def _stance(role: str, prompt_version: str) -> str:
+    """The stance text for one voting role — empty for prompt versions that
+    have no stance slot (v1), so an A/B run can grade both versions through
+    this same path without the older prompt silently gaining a new variable.
+    """
+    if prompt_version == "v1":
+        return ""
+    return perspective_for(role).stance
+
 
 PASS_1 = "pass_1"
 PASS_2 = "pass_2"
@@ -70,6 +87,8 @@ async def _vote_for_criterion(
     anchor_kind: str,
     g1: GradedVerdict,
     g2: GradedVerdict,
+    *,
+    prompt_version: str = PROMPT_VERSION,
 ) -> VoteResult:
     if g1.verdict is None or g2.verdict is None:
         reasons = [g.escalation_reason for g in (g1, g2) if g.escalation_reason]
@@ -81,7 +100,14 @@ async def _vote_for_criterion(
     # Disagreement: spend exactly one tie-break call (D-011), scoped to
     # this single criterion only — the rest of the batch is unaffected.
     tie = await _grade_single_criterion(
-        criterion, batch, llm, check_run_id, anchor_kind, consistency_pass=TIE_BREAK
+        criterion,
+        batch,
+        llm,
+        check_run_id,
+        anchor_kind,
+        consistency_pass=TIE_BREAK,
+        prompt_version=prompt_version,
+        annotator_stance=_stance(ROLE_TIE_BREAK, prompt_version),
     )
     if tie is None:
         return VoteResult(
@@ -153,17 +179,37 @@ async def vote_batch(
     anchor_kind: str,
     *,
     check_run_id: int | None = None,
+    prompt_version: str = PROMPT_VERSION,
 ) -> list[VotedCriterion]:
     """Grades every criterion in a batch with V-022's N=2+tie-break voting
     and V-023's escalation gate — no DB writes, no `check_run_id` required
     (`None` is a valid, harness-only value; it only ever rides along in
     LLM-call audit rows and cache keys, never a persisted foreign key
     here)."""
+    # Each pass reads the SAME text under a genuinely different stance
+    # (V-054/D-017). Before this, both passes were the same model, same
+    # prompt, at temperature 0 — a repeated near-deterministic sample, so
+    # their agreement carried almost no information even though that
+    # agreement IS the confidence signal (D-006).
     pass_1 = await grade_batch_verdicts(
-        batch, batch_criteria, llm, check_run_id, anchor_kind, consistency_pass=PASS_1
+        batch,
+        batch_criteria,
+        llm,
+        check_run_id,
+        anchor_kind,
+        consistency_pass=PASS_1,
+        prompt_version=prompt_version,
+        annotator_stance=_stance(ROLE_PASS_1, prompt_version),
     )
     pass_2 = await grade_batch_verdicts(
-        batch, batch_criteria, llm, check_run_id, anchor_kind, consistency_pass=PASS_2
+        batch,
+        batch_criteria,
+        llm,
+        check_run_id,
+        anchor_kind,
+        consistency_pass=PASS_2,
+        prompt_version=prompt_version,
+        annotator_stance=_stance(ROLE_PASS_2, prompt_version),
     )
     shadow_detail = shadow_signals_as_detail(compute_shadow_signals(batch.context_text, settings))
 
@@ -177,6 +223,7 @@ async def vote_batch(
             anchor_kind,
             pass_1[criterion.id],
             pass_2[criterion.id],
+            prompt_version=prompt_version,
         )
         outcome, score = gate_vote(vote.majority_verdict, vote.agreement, settings)
         detail = _vote_detail(batch, vote, shadow_detail)

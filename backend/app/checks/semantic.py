@@ -148,10 +148,27 @@ def _criteria_listing(criteria: list[Any]) -> str:
     return "\n".join(lines)
 
 
-def _build_prompt(batch: SemanticBatch, criteria: list[Any]) -> str:
-    template = _PROMPT_FILE.read_text(encoding="utf-8")
+def prompt_file_for(prompt_version: str) -> Path:
+    return Path(__file__).parent / "prompts" / f"{PROMPT_TYPE}_{prompt_version}.txt"
+
+
+def _build_prompt(
+    batch: SemanticBatch,
+    criteria: list[Any],
+    *,
+    prompt_version: str = PROMPT_VERSION,
+    annotator_stance: str = "",
+) -> str:
+    """`prompt_version` is a parameter (not just the module constant) so an
+    A/B run can grade the SAME items under two prompts in one process and
+    compare them with a paired test (V-054). `annotator_stance` is empty for
+    v1, which has no stance slot — replacing an absent placeholder is a no-op,
+    so both versions build correctly from the same call site.
+    """
+    template = prompt_file_for(prompt_version).read_text(encoding="utf-8")
     return (
-        template.replace("{criteria_list}", _criteria_listing(criteria))
+        template.replace("{annotator_stance}", annotator_stance)
+        .replace("{criteria_list}", _criteria_listing(criteria))
         .replace("{context_label}", batch.label)
         .replace("{context_text}", batch.context_text)
     )
@@ -218,7 +235,12 @@ def _verify_quotes(
 
 
 async def _call_grade(
-    prompt: str, llm: LLMClient, check_run_id: int | None, *, consistency_pass: str = "single"
+    prompt: str,
+    llm: LLMClient,
+    check_run_id: int | None,
+    *,
+    consistency_pass: str = "single",
+    prompt_version: str = PROMPT_VERSION,
 ) -> GradeBatchResponse:
     # `consistency_pass` rides in **context: it differentiates the response-
     # cache key (D-011) so two independent voting passes over the SAME
@@ -229,14 +251,35 @@ async def _call_grade(
     response = await llm.complete(
         PROMPT_TYPE,
         prompt,
-        prompt_version=PROMPT_VERSION,
+        prompt_version=prompt_version,
         check_run_id=check_run_id,
         consistency_pass=consistency_pass,
     )
     try:
-        return GradeBatchResponse.model_validate(response)
+        return GradeBatchResponse.model_validate(_unwrap_verdicts(response))
     except ValidationError as exc:
         raise SemanticGradeError(f"Semantic grading response failed validation: {exc}") from exc
+
+
+def _unwrap_verdicts(response: Any) -> Any:
+    """Accept a bare verdict LIST as well as the documented
+    `{"verdicts": [...]}` envelope.
+
+    Found live (V-054) via the audit log: Gemini intermittently drops the
+    wrapper and returns the array directly, for the same prompt that produced
+    a correctly wrapped response moments earlier. Strict parsing turned that
+    into a failed pass, which the voting layer then reported as low
+    confidence — so a parser quirk was surfacing to the instructor as "the AI
+    wasn't sure", inflating the escalation rate with a cause that has nothing
+    to do with the manuscript (charter rule 9: states must stay distinct).
+
+    This is unambiguous to repair rather than a guess: a top-level list can
+    only be the verdicts array, and every element still has to validate
+    against `GradeVerdict`, so nothing is loosened about the contract itself.
+    """
+    if isinstance(response, list):
+        return {"verdicts": response}
+    return response
 
 
 async def _grade_single_criterion(
@@ -247,13 +290,23 @@ async def _grade_single_criterion(
     anchor_kind: str,
     *,
     consistency_pass: str = "single",
+    prompt_version: str = PROMPT_VERSION,
+    annotator_stance: str = "",
 ) -> tuple[GradeVerdict, list[str]] | None:
     """One-criterion retry, same context — used both when the batch
     response omitted a criterion and when its quotes failed containment,
     and (V-022) as the single-criterion tie-break call on a voting split."""
-    prompt = _build_prompt(batch, [criterion])
+    prompt = _build_prompt(
+        batch, [criterion], prompt_version=prompt_version, annotator_stance=annotator_stance
+    )
     try:
-        parsed = await _call_grade(prompt, llm, check_run_id, consistency_pass=consistency_pass)
+        parsed = await _call_grade(
+            prompt,
+            llm,
+            check_run_id,
+            consistency_pass=consistency_pass,
+            prompt_version=prompt_version,
+        )
     except SemanticGradeError:
         return None
     verdict = next((v for v in parsed.verdicts if v.index == 0), None)
@@ -288,6 +341,8 @@ async def grade_batch_verdicts(
     anchor_kind: str,
     *,
     consistency_pass: str = "single",
+    prompt_version: str = PROMPT_VERSION,
+    annotator_stance: str = "",
 ) -> dict[int, GradedVerdict]:
     """Grades one batch ONCE (whole-batch retry + per-criterion retry ladder
     already in place for hallucinated/missing verdicts) and returns the
@@ -295,11 +350,19 @@ async def grade_batch_verdicts(
     core both `run_semantic_checks` (single-pass, V2) and
     `app.checks.consistency` (N-pass voting, V-022) build on, per this
     module's original design note."""
-    prompt = _build_prompt(batch, batch_criteria)
+    prompt = _build_prompt(
+        batch, batch_criteria, prompt_version=prompt_version, annotator_stance=annotator_stance
+    )
     parsed: GradeBatchResponse | None = None
     for _attempt in range(2):  # one try, one whole-batch retry (ticket: "retry once")
         try:
-            parsed = await _call_grade(prompt, llm, check_run_id, consistency_pass=consistency_pass)
+            parsed = await _call_grade(
+                prompt,
+                llm,
+                check_run_id,
+                consistency_pass=consistency_pass,
+                prompt_version=prompt_version,
+            )
             break
         except SemanticGradeError:
             continue

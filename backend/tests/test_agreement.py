@@ -130,3 +130,64 @@ def test_perfect_agreement_on_a_balanced_set_is_kappa_one():
 def test_mismatched_label_lengths_is_an_error_not_a_silent_truncation():
     with pytest.raises(ValueError):
         compute_agreement(human_labels=["pass"], judge_labels=["pass", "fail"])
+
+
+# --- V-054: paired comparison of two grading configurations ------------------
+
+
+def test_mcnemar_matches_hand_computed_exact_binomial():
+    """b=8, c=1 → two-sided exact p = 2 * P(X<=1 | n=9, p=0.5)
+    = 2 * (1 + 9)/512 = 20/512 = 0.0390625."""
+    from app.checks.agreement import PairedComparison, mcnemar_exact
+
+    result = mcnemar_exact(
+        PairedComparison(both_correct=20, only_a_correct=8, only_b_correct=1, both_wrong=1)
+    )
+    assert result.p_value == pytest.approx(20 / 512)
+    assert result.significant
+
+
+def test_mcnemar_ignores_concordant_items_entirely():
+    """Items both configurations got right carry no information about which is
+    better — the test must depend ONLY on the discordant cells."""
+    from app.checks.agreement import PairedComparison, mcnemar_exact
+
+    few = mcnemar_exact(
+        PairedComparison(both_correct=5, only_a_correct=6, only_b_correct=0, both_wrong=0)
+    )
+    many = mcnemar_exact(
+        PairedComparison(both_correct=500, only_a_correct=6, only_b_correct=0, both_wrong=99)
+    )
+    assert few.p_value == many.p_value
+
+
+def test_no_discordant_items_reports_indistinguishable_not_equivalent():
+    from app.checks.agreement import PairedComparison, mcnemar_exact
+
+    result = mcnemar_exact(
+        PairedComparison(both_correct=11, only_a_correct=0, only_b_correct=0, both_wrong=0)
+    )
+    assert result.p_value is None
+    assert result.significant is False
+    assert "cannot distinguish" in result.note
+
+
+def test_underpowered_run_is_flagged_rather_than_read_as_no_difference():
+    from app.checks.agreement import PairedComparison, mcnemar_exact
+
+    result = mcnemar_exact(
+        PairedComparison(both_correct=8, only_a_correct=3, only_b_correct=0, both_wrong=0)
+    )
+    assert not result.significant
+    assert "directional, not conclusive" in result.note
+
+
+def test_required_discordant_pairs_is_the_floor_for_a_meaningful_ab_run():
+    """At 5 discordant items the BEST attainable two-sided p is 0.0625 — the
+    experiment cannot reach significance however the data falls. Knowing this
+    before running is what stops a null result being over-read."""
+    from app.checks.agreement import required_discordant_pairs
+
+    assert required_discordant_pairs(0.05) == 6
+    assert 2 * (0.5**5) > 0.05
+    assert 2 * (0.5**6) < 0.05

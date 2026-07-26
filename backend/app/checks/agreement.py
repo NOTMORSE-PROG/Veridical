@@ -75,6 +75,102 @@ def wilson_interval(successes: int, n: int, z: float = Z_95) -> Interval | None:
 
 
 @dataclass(frozen=True)
+class PairedComparison:
+    """Two grading configurations run over the SAME items (V-054).
+
+    `b` and `c` are the DISCORDANT counts — items where exactly one of the two
+    configurations was right. They are the whole test: items both got right
+    (or both got wrong) carry no information about which is better, which is
+    why a paired test is far more sensitive than comparing two accuracy
+    percentages side by side.
+    """
+
+    both_correct: int
+    only_a_correct: int  # b
+    only_b_correct: int  # c
+    both_wrong: int
+
+    @property
+    def n(self) -> int:
+        return self.both_correct + self.only_a_correct + self.only_b_correct + self.both_wrong
+
+    @property
+    def n_discordant(self) -> int:
+        return self.only_a_correct + self.only_b_correct
+
+
+@dataclass(frozen=True)
+class McNemarResult:
+    comparison: PairedComparison
+    p_value: float | None
+    significant: bool
+    note: str
+
+
+def mcnemar_exact(comparison: PairedComparison, alpha: float = 0.05) -> McNemarResult:
+    """Exact (binomial) McNemar test for two graders on the same items.
+
+    The EXACT test, not the chi-square approximation: with fewer than ~25
+    discordant pairs the approximation is unreliable, and our sample sizes
+    live far below that. Under the null ("the two configurations are equally
+    accurate"), each discordant item is a fair coin, so the p-value is a
+    two-sided binomial tail — computable exactly, no dependency, no
+    approximation to defend.
+
+    A non-significant result is reported as exactly that: "no detectable
+    difference", NEVER as "the two are equivalent". Absence of evidence at
+    n=11 is not evidence of absence, and `required_discordant_pairs` exists
+    to say how much evidence would have been needed.
+    """
+    b, c = comparison.only_a_correct, comparison.only_b_correct
+    n_disc = b + c
+    if n_disc == 0:
+        return McNemarResult(
+            comparison=comparison,
+            p_value=None,
+            significant=False,
+            note=(
+                "No discordant items: the two configurations made identical "
+                "decisions on every item, so this data cannot distinguish them."
+            ),
+        )
+
+    # Two-sided exact binomial p-value at p=0.5.
+    k = min(b, c)
+    tail = sum(math.comb(n_disc, i) for i in range(k + 1)) / (2**n_disc)
+    p_value = min(1.0, 2 * tail)
+
+    note = ""
+    if n_disc < 10:
+        note = (
+            f"Only {n_disc} discordant item(s) — below the usual minimum of 10. "
+            f"Treat this as directional, not conclusive."
+        )
+    return McNemarResult(
+        comparison=comparison,
+        p_value=p_value,
+        significant=p_value < alpha,
+        note=note,
+    )
+
+
+def required_discordant_pairs(alpha: float = 0.05) -> int:
+    """Smallest number of discordant items that COULD reach significance, even
+    if every one of them favours the same configuration.
+
+    This is the honesty check to run BEFORE an A/B run: at 5 discordant items
+    the best attainable two-sided p-value is 2*(1/2)^5 = 0.0625, so the
+    experiment cannot produce a significant result no matter how the data
+    falls. Reporting "no significant difference" from such a run would be
+    meaningless — the run was incapable of finding one.
+    """
+    n = 1
+    while 2 * (0.5**n) >= alpha:
+        n += 1
+    return n
+
+
+@dataclass(frozen=True)
 class ConfusionMatrix:
     """Binary confusion of judge vs human, with the HUMAN as ground truth.
 

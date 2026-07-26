@@ -307,3 +307,35 @@ async def test_no_semantic_criteria_makes_no_llm_call():
     results = await run_semantic_checks(session, 1, [], extraction, llm)
     assert results == []
     assert llm.calls == []
+
+
+def test_bare_verdict_list_is_accepted_not_treated_as_low_confidence():
+    """REGRESSION (V-054, found live in the audit log): Gemini intermittently
+    returns the verdicts array WITHOUT the documented {"verdicts": ...}
+    wrapper. Strict parsing turned that into a failed pass, which the voting
+    layer reported to the instructor as "the AI wasn't sure" — a parser quirk
+    masquerading as a confidence signal about the manuscript.
+    """
+    from app.checks.schemas import GradeBatchResponse
+    from app.checks.semantic import _unwrap_verdicts
+
+    bare = [{"index": 0, "verdict": "fail", "reasoning": "r", "evidence_quotes": ["q"]}]
+    wrapped = {"verdicts": bare}
+
+    assert GradeBatchResponse.model_validate(_unwrap_verdicts(bare)).verdicts[0].index == 0
+    # The documented shape must keep working untouched.
+    assert GradeBatchResponse.model_validate(_unwrap_verdicts(wrapped)).verdicts[0].index == 0
+
+
+def test_unwrapping_does_not_loosen_the_verdict_contract():
+    """A bare list is re-enveloped, never waved through: each element still
+    has to satisfy GradeVerdict (here: no evidence quotes)."""
+    import pytest
+    from pydantic import ValidationError
+
+    from app.checks.schemas import GradeBatchResponse
+    from app.checks.semantic import _unwrap_verdicts
+
+    bad = [{"index": 0, "verdict": "fail", "reasoning": "r", "evidence_quotes": []}]
+    with pytest.raises(ValidationError):
+        GradeBatchResponse.model_validate(_unwrap_verdicts(bad))
