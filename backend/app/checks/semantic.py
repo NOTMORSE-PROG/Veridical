@@ -334,6 +334,40 @@ async def grade_batch_verdicts(
     return out
 
 
+async def record_ungraded(
+    session: AsyncSession,
+    check_run_id: int,
+    criteria: list[Any],
+    *,
+    outcome: ResultOutcome,
+    reason: str,
+) -> list[CheckResult]:
+    """Record criteria the AI never got to grade, as an honest STATE rather
+    than a verdict (V-050, availability floor).
+
+    Used when the day's AI budget is spent or the API is unreachable: the
+    run finishes and hands these to the instructor instead of stalling until
+    the quota resets, which could be after the defense. `outcome` stays
+    `quota_exhausted`/`api_down` — never `escalated`, which would claim the
+    AI looked and was unsure — and the scoring engine already excludes both
+    from the composite rather than counting them as passes (F8.1).
+
+    Tier-0 shadow signals are still computed and attached: they are free,
+    local, and give the instructor something concrete to look at even when no
+    LLM ran. They never decide the outcome (D-012).
+    """
+    return [
+        await _persist(
+            session,
+            check_run_id,
+            criterion,
+            outcome,
+            {"basis": "not-graded", "reason": reason},
+        )
+        for criterion in criteria
+    ]
+
+
 async def _persist(
     session: AsyncSession,
     check_run_id: int,

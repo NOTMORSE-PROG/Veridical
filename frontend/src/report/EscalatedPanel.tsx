@@ -7,7 +7,12 @@ import { ApiError } from "../api/client";
 import type { EscalatedItemOut, EscalationResolution } from "../api/types";
 import { useEscalatedItems, useResolveEscalation } from "./useReport";
 
+// Two different facts land in this panel and must never read alike (V-050):
+// the AI graded it and hesitated, or the AI never ran at all. Claiming "no
+// votes recorded" for something that was never sent would imply a judgement
+// that does not exist.
 function agreementLabel(item: EscalatedItemOut): string {
+  if (item.review_reason === "not_graded") return "Not graded by AI";
   if (item.votes.length === 0) return "No votes recorded";
   if (item.ai_majority_verdict === null) return `No majority (${item.votes.length} passes)`;
   const agreeing = item.votes.filter((v) => v === item.ai_majority_verdict).length;

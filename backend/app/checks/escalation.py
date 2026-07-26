@@ -38,6 +38,28 @@ RESOLUTION_MARK_PASS = "mark_pass"
 RESOLUTION_MARK_FAIL = "mark_fail"
 _VALID_RESOLUTIONS = {RESOLUTION_ACCEPT_MAJORITY, RESOLUTION_MARK_PASS, RESOLUTION_MARK_FAIL}
 
+# Outcomes that mean "a human still has to decide this one". They are NOT
+# interchangeable — see `list_escalated` — but they share a workflow: shown
+# in the review panel, excluded from the composite, resolvable by the
+# instructor (V-050).
+NEEDS_REVIEW_OUTCOMES = (
+    ResultOutcome.escalated,
+    ResultOutcome.quota_exhausted,
+    ResultOutcome.api_down,
+)
+
+# Why an item is in the panel, as a stable code the UI can label. The
+# instructor must be able to tell "the AI looked and hesitated" from "the AI
+# never looked" — they justify very different amounts of trust.
+REVIEW_REASON_LOW_CONFIDENCE = "low_confidence"
+REVIEW_REASON_NOT_GRADED = "not_graded"
+
+
+def review_reason_for(outcome: ResultOutcome) -> str:
+    if outcome == ResultOutcome.escalated:
+        return REVIEW_REASON_LOW_CONFIDENCE
+    return REVIEW_REASON_NOT_GRADED
+
 
 def gate_vote(
     majority_verdict: str | None, agreement: float, settings: Settings | None = None
@@ -70,19 +92,33 @@ class EscalatedItem:
     votes: list[str | None]
     reason: str | None
     detail: dict[str, Any]
+    # "low_confidence" (AI graded, wasn't sure) vs "not_graded" (AI never
+    # ran — quota spent or API down). Same panel, different amount of
+    # evidence behind the row.
+    review_reason: str
 
 
 async def list_escalated(session: AsyncSession, check_run_id: int) -> list[EscalatedItem]:
-    """Screen 4h's "AI wasn't sure — review these" panel: every semantic
-    criterion still sitting at `escalated` for this run, oldest first so
-    the panel order is stable across reloads."""
+    """Screen 4h's "needs your review" panel: every semantic criterion this
+    run could not decide on its own, oldest first so the panel order is
+    stable across reloads.
+
+    TWO distinct reasons land here and are kept distinguishable (V-050) —
+    conflating them would be exactly the dishonesty the taxonomy exists to
+    prevent (TESTING §5):
+    - `escalated`: the AI graded it and was not confident enough (D-006).
+    - `quota_exhausted` / `api_down`: the AI never graded it at all. Nothing
+      was judged; the item is here so the run stays USABLE without pretending
+      an opinion exists.
+    Both are the instructor's to resolve, and neither ever scores itself.
+    """
     rows = (
         await session.execute(
             select(CheckResult, Criterion)
             .join(Criterion, Criterion.id == CheckResult.criterion_id)
             .where(
                 CheckResult.check_run_id == check_run_id,
-                CheckResult.outcome == ResultOutcome.escalated,
+                CheckResult.outcome.in_(NEEDS_REVIEW_OUTCOMES),
             )
             .order_by(CheckResult.created_at)
         )
@@ -100,6 +136,7 @@ async def list_escalated(session: AsyncSession, check_run_id: int) -> list[Escal
                 votes=detail.get("votes", []),
                 reason=detail.get("reason"),
                 detail=detail,
+                review_reason=review_reason_for(result.outcome),
             )
         )
     return items
@@ -132,14 +169,18 @@ async def resolve_escalation(
     result = await session.get(CheckResult, check_result_id)
     if result is None or result.check_run_id != check_run_id:
         raise NotFoundError(f"No check result {check_result_id} on check run {check_run_id}.")
-    if result.outcome != ResultOutcome.escalated:
-        raise ConflictError("This criterion isn't escalated — nothing to resolve.")
+    if result.outcome not in NEEDS_REVIEW_OUTCOMES:
+        raise ConflictError("This criterion isn't awaiting review — nothing to resolve.")
 
     detail = dict(result.detail or {})
     majority_verdict = detail.get("verdict")
 
     if resolution == RESOLUTION_ACCEPT_MAJORITY:
         if majority_verdict is None:
+            # Covers both "the vote genuinely tied" and "the AI never ran at
+            # all" (V-050). Either way there is no AI opinion to accept, and
+            # inventing one would be the exact failure this system exists to
+            # prevent.
             raise ConflictError(
                 "The AI never reached a majority verdict on this criterion — "
                 "choose mark_pass or mark_fail instead."

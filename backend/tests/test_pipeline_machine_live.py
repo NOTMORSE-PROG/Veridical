@@ -16,7 +16,13 @@ from app.checks.rules.sections import identify_target_section
 from app.config import get_settings
 from app.errors import QuotaExhaustedError
 from app.llm.fake import FakeLLMClient
-from app.models.enums import CheckKind, CheckRunStatus, IngestStatus, ReadinessStatus
+from app.models.enums import (
+    CheckKind,
+    CheckRunStatus,
+    IngestStatus,
+    ReadinessStatus,
+    ResultOutcome,
+)
 from app.models.instructor import Instructor
 from app.models.manuscript import Manuscript
 from app.models.rubric import Criterion, Rubric
@@ -274,7 +280,13 @@ class _FlakyThenFineLLM:
 async def test_quota_exhausted_parks_the_run_then_resumes_without_duplicate_calls(
     session_factory, tmp_path, monkeypatch
 ):
+    """The pre-V-050 contract, still supported behind
+    `pipeline_degrade_on_quota=False`: park and resume with no duplicate
+    calls. The DEFAULT is now to finish the run instead (see the
+    availability-floor tests below) — parking is opt-in because waiting for
+    midnight Pacific can mean waiting past the defense."""
     check_run_id, criterion_ids, settings = await _seed(session_factory, tmp_path, monkeypatch)
+    settings = settings.model_copy(update={"pipeline_degrade_on_quota": False})
 
     # 2 calls (pass_1 + pass_2) complete the FIRST criterion's vote; the
     # 3rd call (second criterion's pass_1) is where "quota" runs out.
@@ -376,3 +388,87 @@ async def test_routing_only_persists_once_across_multiple_advances(
             .all()
         )
         assert len(routing_rows) == 1
+
+
+async def test_quota_exhausted_still_produces_a_finished_run(
+    session_factory, tmp_path, monkeypatch
+):
+    """AVAILABILITY FLOOR (V-050, D-015) — the permanent guarantee.
+
+    The free AI budget resets at midnight Pacific, which can fall AFTER the
+    defense. So a spent budget must never mean the instructor gets nothing:
+    the run completes, every deterministic check stands, and the criteria the
+    AI never reached are handed over as an honest state.
+    """
+    check_run_id, criterion_ids, settings = await _seed(session_factory, tmp_path, monkeypatch)
+
+    # Quota dies before ANY semantic criterion is graded — the worst case.
+    async with session_factory() as session:
+        check_run = await session.get(CheckRun, check_run_id)
+        await run_check_run(session, check_run, settings, _FlakyThenFineLLM(fail_after=0))
+
+        assert check_run.status == CheckRunStatus.done, "the run must finish, not stall"
+        assert "blocked" not in check_run.stage_status
+        assert "degraded" in check_run.stage_status["stages"]["semantic"]["note"]
+
+    async with session_factory() as verify:
+        results = (
+            (
+                await verify.execute(
+                    select(CheckResult).where(
+                        CheckResult.check_run_id == check_run_id,
+                        CheckResult.kind == CheckKind.semantic,
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        # Both SEMANTIC criteria (the third seeded criterion is structural and
+        # was decided deterministically, with no AI involved at all — which is
+        # precisely why the run can still finish).
+        assert len(results) == 2
+        for result in results:
+            # NOT `escalated` (which would claim the AI looked and hesitated)
+            # and NOT `passed` (which would invent a grade) — charter rule 9.
+            assert result.outcome == ResultOutcome.quota_exhausted
+            assert result.score is None
+            assert result.detail["basis"] == "not-graded"
+
+
+async def test_degraded_run_is_reviewable_and_scores_nothing_by_itself(
+    session_factory, tmp_path, monkeypatch
+):
+    """The degraded run must be USABLE: the ungraded criteria appear in the
+    instructor's review panel, labelled as never-graded rather than as a
+    low-confidence AI verdict, and they contribute nothing to the score
+    until a human decides them."""
+    from app.checks.escalation import (
+        RESOLUTION_MARK_PASS,
+        REVIEW_REASON_NOT_GRADED,
+        list_escalated,
+        resolve_escalation,
+    )
+
+    check_run_id, _, settings = await _seed(session_factory, tmp_path, monkeypatch)
+    async with session_factory() as session:
+        check_run = await session.get(CheckRun, check_run_id)
+        await run_check_run(session, check_run, settings, _FlakyThenFineLLM(fail_after=0))
+
+    async with session_factory() as session:
+        instructor_id = (await session.execute(select(Instructor.id))).scalars().first()
+        items = await list_escalated(session, check_run_id)
+        assert len(items) == 2
+        assert {item.review_reason for item in items} == {REVIEW_REASON_NOT_GRADED}
+
+        # And the instructor can actually act on one (the whole point of
+        # finishing the run instead of parking it).
+        resolved = await resolve_escalation(
+            session,
+            check_run_id,
+            items[0].check_result_id,
+            instructor_id,
+            RESOLUTION_MARK_PASS,
+            "Checked this section by hand before the defense.",
+        )
+        assert resolved.outcome == ResultOutcome.passed

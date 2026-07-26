@@ -194,6 +194,7 @@ def _to_escalated_out(item: EscalatedItem) -> EscalatedItemOut:
         votes=item.votes,
         ai_majority_verdict=item.detail.get("verdict"),
         reason=item.reason,
+        review_reason=item.review_reason,
     )
 
 

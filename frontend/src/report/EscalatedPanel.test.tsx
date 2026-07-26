@@ -12,6 +12,21 @@ const ITEM_WITH_MAJORITY = {
   votes: ["pass", "fail", "pass"],
   ai_majority_verdict: "pass",
   reason: null,
+  review_reason: "low_confidence",
+};
+
+// The AI never ran on this one (daily capacity spent) — a different fact
+// from "the AI was unsure", and the panel must not blur them (V-050).
+const ITEM_NOT_GRADED = {
+  ...ITEM_WITH_MAJORITY,
+  check_result_id: 5,
+  criterion_id: 5,
+  criterion_text: "Results are discussed against the literature",
+  agreement: null,
+  votes: [],
+  ai_majority_verdict: null,
+  reason: "Not graded by AI — today's free AI capacity was reached.",
+  review_reason: "not_graded",
 };
 
 const ITEM_WITHOUT_MAJORITY = {
@@ -32,6 +47,16 @@ describe("EscalatedPanel", () => {
     const { container } = renderWithProviders(<EscalatedPanel checkRunId={1} />);
     await new Promise((r) => setTimeout(r, 0));
     expect(container).toBeEmptyDOMElement();
+  });
+
+  it("labels a never-graded item as such instead of implying the AI voted", async () => {
+    vi.stubGlobal("fetch", stubFetchByPath({ "/check-runs/1/escalated": [ITEM_NOT_GRADED] }));
+    renderWithProviders(<EscalatedPanel checkRunId={1} />);
+    expect(await screen.findByText(/Not graded by AI · Semantic/)).toBeInTheDocument();
+    // "No votes recorded" would suggest a vote was attempted and came back
+    // empty; nothing was ever sent.
+    expect(screen.queryByText(/No votes recorded/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Agreement/)).not.toBeInTheDocument();
   });
 
   it("shows the agreement fraction and criterion text", async () => {

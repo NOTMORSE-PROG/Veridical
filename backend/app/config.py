@@ -181,6 +181,19 @@ class Settings(BaseSettings):
     # An api_down stage doesn't have a precise reset time the way quota
     # does (D-001) — retry after a fixed backoff instead.
     pipeline_api_down_retry_seconds: float = 300.0
+    # AVAILABILITY FLOOR (V-050, D-015). When the day's AI budget is spent,
+    # FINISH the run — deterministic checks stand, and the criteria the AI
+    # never reached go to the instructor as an honest `quota_exhausted`
+    # state — instead of parking it until midnight Pacific, which can fall
+    # after the defense. Set false to restore the old park-and-resume
+    # behaviour (the run then produces nothing until quota returns).
+    pipeline_degrade_on_quota: bool = True
+    # Instructor-facing wording for those criteria. Honest and non-accusatory
+    # per charter rule 3: it describes OUR limit, never the manuscript.
+    pipeline_quota_degraded_reason: str = (
+        "Not graded by AI — today's free AI capacity was reached. "
+        "Needs your review, or re-run this check after the daily reset."
+    )
     # Off by default so importing the FastAPI app (every TestClient-based
     # test) never starts a real polling loop against whatever DATABASE_URL
     # happens to be configured; production (Render) turns this on.

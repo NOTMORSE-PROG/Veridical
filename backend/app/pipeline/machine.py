@@ -24,6 +24,7 @@ from sqlalchemy.orm import selectinload
 from app.checks.consistency import run_semantic_checks_with_consistency
 from app.checks.router import RouteDecision, apply_routing, route_criteria
 from app.checks.rules.context import build_rule_context
+from app.checks.semantic import record_ungraded
 from app.checks.structural import run_structural_check
 from app.config import Settings, get_settings
 from app.errors import ApiDownError, FileMalformedError, QuotaExhaustedError
@@ -32,7 +33,7 @@ from app.llm import get_llm_client
 from app.llm.base import LLMClient
 from app.llm.queue import next_reset_for
 from app.models.audit import AuditLog
-from app.models.enums import CheckKind, CheckRunStatus, IngestStatus
+from app.models.enums import CheckKind, CheckRunStatus, IngestStatus, ResultOutcome
 from app.models.manuscript import Manuscript
 from app.models.rubric import Rubric
 from app.models.run import CheckResult, CheckRun
@@ -228,13 +229,39 @@ async def _run_semantic_stage(
                 session, check_run.id, pending, extraction, llm, settings
             )
         except QuotaExhaustedError as exc:
-            raise PipelineBlockedError(
-                StageBlock(
-                    code="quota_exhausted",
-                    message=str(exc),
-                    resume_at=next_reset_for(settings.llm_quota_reset_timezone),
-                )
-            ) from exc
+            # AVAILABILITY FLOOR (V-050): the day's AI budget resets at
+            # midnight Pacific, which can be AFTER the defense. Parking the
+            # run here means the instructor gets nothing at all, so instead
+            # the run FINISHES: everything deterministic is already done, and
+            # the criteria the AI never reached are handed to the instructor
+            # as an honest `quota_exhausted` state (never a pass, never a
+            # guess — charter rules 1 and 9). Re-running later fills the AI
+            # grades in for free, since completed criteria are skipped and
+            # cached responses cost no quota (D-011).
+            if not settings.pipeline_degrade_on_quota:
+                raise PipelineBlockedError(
+                    StageBlock(
+                        code="quota_exhausted",
+                        message=str(exc),
+                        resume_at=next_reset_for(settings.llm_quota_reset_timezone),
+                    )
+                ) from exc
+            ungraded = await _degrade_pending_semantic(
+                session,
+                check_run,
+                criteria_by_id,
+                semantic_criterion_ids,
+                outcome=ResultOutcome.quota_exhausted,
+                reason=settings.pipeline_quota_degraded_reason,
+            )
+            _record_stage(
+                check_run,
+                CheckRunStatus.semantic,
+                status="done",
+                n_criteria=len(semantic_criterion_ids),
+                note=f"degraded: {ungraded} criteria not AI-graded ({exc})",
+            )
+            return
         except ApiDownError as exc:
             retry_seconds = settings.pipeline_api_down_retry_seconds
             resume_at = datetime.now(UTC) + timedelta(seconds=retry_seconds)
@@ -244,6 +271,25 @@ async def _run_semantic_stage(
     _record_stage(
         check_run, CheckRunStatus.semantic, status="done", n_criteria=len(semantic_criterion_ids)
     )
+
+
+async def _degrade_pending_semantic(
+    session: AsyncSession,
+    check_run: CheckRun,
+    criteria_by_id: dict[int, Any],
+    semantic_criterion_ids: list[int],
+    *,
+    outcome: ResultOutcome,
+    reason: str,
+) -> int:
+    """Write an honest non-verdict for every semantic criterion still without
+    a result. Re-queried (not reused) because the grading pass may have
+    persisted some results before the budget ran out — those keep their real
+    AI grades."""
+    done_ids = await _existing_result_criterion_ids(session, check_run.id, CheckKind.semantic)
+    pending = [criteria_by_id[cid] for cid in semantic_criterion_ids if cid not in done_ids]
+    await record_ungraded(session, check_run.id, pending, outcome=outcome, reason=reason)
+    return len(pending)
 
 
 def _run_integrity_stage(check_run: CheckRun) -> None:

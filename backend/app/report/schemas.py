@@ -43,8 +43,8 @@ class ReportOut(BaseModel):
 
 
 class EscalatedItemOut(BaseModel):
-    """One row of the "AI wasn't sure — review these" panel (V-023,
-    rendered FIRST on screen 4h — never a silent score contribution)."""
+    """One row of the "needs your review" panel (V-023, rendered FIRST on
+    screen 4h — never a silent score contribution)."""
 
     check_result_id: int
     criterion_id: int
@@ -54,6 +54,10 @@ class EscalatedItemOut(BaseModel):
     votes: list[str | None]
     ai_majority_verdict: str | None
     reason: str | None
+    # "low_confidence" = the AI graded it and hesitated; "not_graded" = the
+    # AI never ran (quota spent / API down). The instructor must be able to
+    # tell these apart (V-050) — they carry very different evidence.
+    review_reason: str = "low_confidence"
 
 
 class ResolveEscalationIn(BaseModel):

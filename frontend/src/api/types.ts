@@ -162,6 +162,10 @@ export interface EscalatedItemOut {
   votes: (string | null)[];
   ai_majority_verdict: string | null;
   reason: string | null;
+  /** "low_confidence" = AI graded it and hesitated; "not_graded" = the AI
+   * never ran (daily capacity spent or API down). Different evidence, so
+   * the panel must label them differently (V-050). */
+  review_reason: "low_confidence" | "not_graded";
 }
 
 export type EscalationResolution = "accept_majority" | "mark_pass" | "mark_fail";
