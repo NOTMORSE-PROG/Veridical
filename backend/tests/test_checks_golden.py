@@ -115,35 +115,115 @@ def test_disagreements_carry_enough_detail_to_review():
 
 def test_class_below_min_n_never_promotes_even_at_perfect_agreement():
     settings = get_settings()
-    stats = [
-        ShadowClassStats("readability", "tier0", n=settings.tier_promotion_min_n - 1, agreement=1.0)
-    ]
+    n = settings.tier_promotion_min_n - 1
+    stats = [ShadowClassStats("readability", "tier0", n=n, agreement=1.0, n_agree=n)]
     assert evaluate_promotions(stats, dated="2026-07-25", settings=settings) == []
 
 
 def test_class_below_agreement_bar_never_promotes_even_with_enough_samples():
     settings = get_settings()
-    stats = [
-        ShadowClassStats(
-            "readability",
-            "tier0",
-            n=settings.tier_promotion_min_n,
-            agreement=settings.tier_promotion_agreement - 0.01,
-        )
-    ]
+    n = settings.tier_promotion_min_n
+    n_agree = int(n * (settings.tier_promotion_agreement - 0.01))
+    stats = [ShadowClassStats("readability", "tier0", n=n, agreement=n_agree / n, n_agree=n_agree)]
     assert evaluate_promotions(stats, dated="2026-07-25", settings=settings) == []
 
 
 def test_class_clearing_both_bars_promotes():
     settings = get_settings()
-    stats = [
-        ShadowClassStats(
-            "readability",
-            "tier0",
-            n=settings.tier_promotion_min_n,
-            agreement=settings.tier_promotion_agreement,
-        )
-    ]
+    n = settings.tier_promotion_min_n
+    stats = [ShadowClassStats("readability", "tier0", n=n, agreement=1.0, n_agree=n)]
     promotions = evaluate_promotions(stats, dated="2026-07-25", settings=settings)
     assert len(promotions) == 1
     assert promotions[0].class_name == "readability"
+    assert promotions[0].agreement_lower_bound >= settings.tier_promotion_agreement
+
+
+def test_observed_rate_at_the_bar_is_NOT_enough_when_the_interval_is_wide():
+    """V-053, the whole point of the change. 90% observed over 20 samples is
+    consistent with a true rate near 70% — the old point-estimate gate handed
+    out permanent autonomy on exactly that evidence."""
+    settings = get_settings().model_copy(update={"tier_promotion_min_n": 20})
+    stats = [ShadowClassStats("readability", "tier0", n=20, agreement=0.90, n_agree=18)]
+    assert evaluate_promotions(stats, dated="2026-07-26", settings=settings) == []
+
+
+def test_missing_success_count_refuses_to_promote_rather_than_guessing():
+    """No `n_agree` means no interval. Falling back to the observed rate
+    would silently restore the weaker rule this replaced."""
+    settings = get_settings()
+    stats = [
+        ShadowClassStats(
+            "readability", "tier0", n=settings.tier_promotion_min_n, agreement=1.0, n_agree=None
+        )
+    ]
+    assert evaluate_promotions(stats, dated="2026-07-26", settings=settings) == []
+
+
+# --- V-053: the report must not let a small sample look like a baseline ------
+
+
+def _pred(item_id, golden, predicted, escalated=False):
+    from app.checks.golden import GoldenItem, GoldenPrediction
+
+    item = GoldenItem(
+        id=item_id,
+        criterion_text="Chapter 1 states the research problem",
+        criterion_type="semantic",
+        excerpt="...",
+        instructor_grade=golden,
+        reason="",
+        source="test",
+    )
+    return GoldenPrediction(
+        item=item,
+        escalated=escalated,
+        predicted=None if escalated else predicted,
+        agreement=1.0,
+        votes=["pass", "pass"],
+    )
+
+
+def test_report_marks_a_small_sample_as_indicative_not_a_baseline():
+    """The V-025 run reported 'agreement 1.0' off ONE item. The same data
+    must now announce its own inadequacy BEFORE the number."""
+    from app.checks.golden import report_as_markdown
+
+    markdown = report_as_markdown(
+        score_golden_set([_pred("g001", "pass", "pass")]),
+        title="t",
+        provisional_note="_n_",
+    )
+    assert "INDICATIVE ONLY" in markdown
+    assert "not a baseline" in markdown
+    # And the interval must be present and honest: 1/1 spans almost everything.
+    assert "20.7%" in markdown
+    assert markdown.index("INDICATIVE ONLY") < markdown.index("Selective accuracy")
+
+
+def test_report_carries_kappa_coverage_and_confusion_not_just_accuracy():
+    from app.checks.golden import report_as_markdown
+
+    predictions = [
+        _pred("g1", "pass", "pass"),
+        _pred("g2", "fail", "fail"),
+        _pred("g3", "pass", "fail"),
+        _pred("g4", "fail", None, escalated=True),
+    ]
+    markdown = report_as_markdown(score_golden_set(predictions), title="t", provisional_note="_n_")
+    for required in ("Cohen's", "Gwet's AC1", "MCC", "Confusion", "Coverage", "Prevalence"):
+        assert required in markdown, f"report must show {required}"
+    # Abstention mode named explicitly — accuracy over a covered subset is
+    # meaningless without it.
+    assert "EXCLUDE" in markdown
+
+
+def test_degenerate_set_reports_na_rather_than_zero_agreement():
+    """One label only => chance-corrected coefficients are undefined. Zero
+    would read as 'no better than chance', which is a different claim."""
+    from app.checks.golden import report_as_markdown
+
+    predictions = [_pred("g1", "pass", "pass"), _pred("g2", "pass", "pass")]
+    report = score_golden_set(predictions)
+    assert report.stats.is_degenerate
+    markdown = report_as_markdown(report, title="t", provisional_note="_n_")
+    assert "undefined" in markdown

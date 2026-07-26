@@ -222,8 +222,22 @@ class Settings(BaseSettings):
     # agreement against ground truth clears this bar over at least this many
     # shadow samples (D-012 mechanism #1) — the promotion table records WHY,
     # dated, per criterion class; nothing is promoted on thin data.
+    # D-012 promotion bar. Since V-053 this is compared against the LOWER
+    # BOUND of the 95% Wilson interval, not the observed rate: autonomy is a
+    # one-way door (a promoted class stops asking the instructor, so its
+    # errors become invisible), and it should be granted on the pessimistic
+    # estimate, not the flattering one.
     tier_promotion_agreement: float = 0.90
-    tier_promotion_min_n: int = 20
+    # Raised 20 -> 35 (V-053). Not a preference — arithmetic: a 0.90 lower
+    # bound is unreachable below n=35 even at 100% observed agreement
+    # (n=20 perfect gives only 0.839), so leaving it at 20 would advertise a
+    # bar that cannot be cleared. 35 also lands inside the 30-50 "minimum
+    # viable golden set" range the LLM-judge literature recommends
+    # independently — see RESEARCH.md §9.
+    tier_promotion_min_n: int = 35
+    # Below this, the harness reports its numbers as indicative only and
+    # refuses to call them a baseline (same 30-50 guidance).
+    golden_min_viable_n: int = 30
     # Instructor override rate per check type above this share triggers a
     # dashboard accuracy alarm (D-012 mechanism #3) — overrides are a
     # labeled ground-truth signal, not just a UI action.

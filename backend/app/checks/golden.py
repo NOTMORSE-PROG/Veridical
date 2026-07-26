@@ -13,6 +13,9 @@ from collections import defaultdict
 from dataclasses import dataclass
 from typing import Literal
 
+from app.checks.agreement import AgreementStats, compute_agreement
+from app.config import Settings, get_settings
+
 Verdict = Literal["pass", "fail"]
 
 
@@ -72,6 +75,11 @@ class GoldenReport:
     by_criterion: list[ClassBreakdown]
     disagreements: list[GoldenPrediction]
     errored: list[GoldenPrediction]
+    # V-053: the full judge-vs-human picture. `agreement_rate` above is a
+    # SELECTIVE accuracy over the non-escalated subset and is not reportable
+    # on its own — it needs its interval, a chance-corrected coefficient, and
+    # the coverage it was achieved at.
+    stats: AgreementStats | None = None
 
 
 def score_golden_set(predictions: list[GoldenPrediction]) -> GoldenReport:
@@ -105,6 +113,16 @@ def score_golden_set(predictions: list[GoldenPrediction]) -> GoldenReport:
 
     disagreements = [p for p in decided if p.predicted != p.item.instructor_grade]
 
+    stats = (
+        compute_agreement(
+            human_labels=[p.item.instructor_grade for p in decided],
+            judge_labels=[p.predicted for p in decided if p.predicted is not None],
+            n_abstained=n_escalated,
+        )
+        if decided
+        else None
+    )
+
     return GoldenReport(
         n_total=n_total,
         n_errored=len(errored),
@@ -116,10 +134,87 @@ def score_golden_set(predictions: list[GoldenPrediction]) -> GoldenReport:
         by_criterion=by_criterion,
         disagreements=disagreements,
         errored=errored,
+        stats=stats,
     )
 
 
-def report_as_markdown(report: GoldenReport, *, title: str, provisional_note: str) -> str:
+def _statistics_section(report: GoldenReport, *, settings: Settings) -> list[str]:
+    """The panel-facing statistics block (V-053).
+
+    Deliberately leads with sample adequacy: a reader who sees the headline
+    number first has already formed an impression before reaching the
+    caveat, so the caveat goes first.
+    """
+    lines = ["## Agreement statistics (judge vs instructor)", ""]
+    stats = report.stats
+    if stats is None:
+        lines.append("Nothing was decided, so there is no agreement to measure.")
+        lines.append("")
+        return lines
+
+    n = stats.matrix.n
+    if n < settings.golden_min_viable_n:
+        lines.append(
+            f"> ⚠️ **INDICATIVE ONLY — not a baseline.** {n} decided item(s) is below "
+            f"the {settings.golden_min_viable_n}-item minimum for a viable golden set "
+            f"(30–50 is the published floor; 100–200 for production). Every figure "
+            f"below is real, but the interval is what it means — read the interval, "
+            f"not the point estimate."
+        )
+        lines.append("")
+
+    accuracy = f"{stats.accuracy:.1%}" if stats.accuracy is not None else "N/A"
+    interval = stats.accuracy_ci.as_percent() if stats.accuracy_ci else "N/A"
+    lines.append(f"- **Selective accuracy**: {accuracy} — 95% CI (Wilson) **{interval}**")
+    lines.append(
+        f"- **Coverage**: {stats.coverage:.1%} "
+        f"({n} decided, {stats.n_abstained} escalated). Abstention mode: EXCLUDE — "
+        f"escalated items are withheld, not scored, so the accuracy above is over "
+        f"the covered subset ONLY."
+        if stats.coverage is not None
+        else "- Coverage: N/A"
+    )
+
+    def fmt(value: float | None) -> str:
+        return f"{value:.3f}" if value is not None else "N/A (degenerate — one label only)"
+
+    lines.append(f"- **Cohen's κ** (chance-corrected): {fmt(stats.kappa)}")
+    lines.append(f"- **Gwet's AC1** (paradox-resistant): {fmt(stats.ac1)}")
+    lines.append(f"- **MCC / φ**: {fmt(stats.mcc)}")
+    matrix = stats.matrix
+    lines.append(
+        f"- **Confusion** (instructor = truth): "
+        f"TP {matrix.tp} · FP {matrix.fp} · TN {matrix.tn} · FN {matrix.fn}"
+    )
+    if matrix.human_positive_rate is not None:
+        lines.append(
+            f"- **Prevalence** (instructor pass-rate): {matrix.human_positive_rate:.1%} "
+            f"— κ is unstable when this is extreme, which is why AC1 is beside it."
+        )
+    if matrix.leniency is not None:
+        direction = "LENIENT" if matrix.leniency > 0 else "HARSH" if matrix.leniency < 0 else "even"
+        lines.append(
+            f"- **Bias**: {direction} ({matrix.leniency:+.1%} vs the instructor). "
+            f"A wrong FAIL is a wrong accusation, so FN is the costly cell here."
+        )
+    if stats.is_degenerate:
+        lines.append(
+            "- ⚠️ Chance-corrected coefficients are **undefined** on this set (every "
+            "item shares one label, or the judge never varied). Marked N/A rather "
+            "than 0 — 'no information' is not 'no correlation'."
+        )
+    lines.append("")
+    return lines
+
+
+def report_as_markdown(
+    report: GoldenReport,
+    *,
+    title: str,
+    provisional_note: str,
+    settings: Settings | None = None,
+) -> str:
+    settings = settings or get_settings()
     lines = [f"# {title}", "", provisional_note, ""]
     lines.append(f"- Items: {report.n_total}")
     if report.n_errored:
@@ -140,6 +235,7 @@ def report_as_markdown(report: GoldenReport, *, title: str, provisional_note: st
             f"({report.agreement_rate:.1%})"
         )
     lines.append("")
+    lines.extend(_statistics_section(report, settings=settings))
     lines.append("## Per-criterion breakdown")
     for c in report.by_criterion:
         rate = f"{c.agreement_rate:.1%}" if c.agreement_rate is not None else "N/A"
