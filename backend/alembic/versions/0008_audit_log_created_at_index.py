@@ -21,9 +21,7 @@ depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
-    op.create_index(
-        "ix_audit_log_created_at", "audit_log", ["created_at"], unique=False
-    )
+    op.create_index("ix_audit_log_created_at", "audit_log", ["created_at"], unique=False)
 
 
 def downgrade() -> None:

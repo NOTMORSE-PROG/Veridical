@@ -11,9 +11,15 @@ from app.checks.promotion import ShadowClassStats, evaluate_promotions
 from app.config import get_settings
 
 _ITEMS = [
-    GoldenItem(id=f"g{i}", criterion_text=f"C{i % 3}", criterion_type="semantic",
-               excerpt="...", instructor_grade="pass" if i % 2 == 0 else "fail",
-               reason="", source="synthetic-control")
+    GoldenItem(
+        id=f"g{i}",
+        criterion_text=f"C{i % 3}",
+        criterion_type="semantic",
+        excerpt="...",
+        instructor_grade="pass" if i % 2 == 0 else "fail",
+        reason="",
+        source="synthetic-control",
+    )
     for i in range(6)
 ]  # pass, fail, pass, fail, pass, fail
 
@@ -110,9 +116,7 @@ def test_disagreements_carry_enough_detail_to_review():
 def test_class_below_min_n_never_promotes_even_at_perfect_agreement():
     settings = get_settings()
     stats = [
-        ShadowClassStats(
-            "readability", "tier0", n=settings.tier_promotion_min_n - 1, agreement=1.0
-        )
+        ShadowClassStats("readability", "tier0", n=settings.tier_promotion_min_n - 1, agreement=1.0)
     ]
     assert evaluate_promotions(stats, dated="2026-07-25", settings=settings) == []
 
@@ -121,7 +125,9 @@ def test_class_below_agreement_bar_never_promotes_even_with_enough_samples():
     settings = get_settings()
     stats = [
         ShadowClassStats(
-            "readability", "tier0", n=settings.tier_promotion_min_n,
+            "readability",
+            "tier0",
+            n=settings.tier_promotion_min_n,
             agreement=settings.tier_promotion_agreement - 0.01,
         )
     ]
@@ -132,7 +138,9 @@ def test_class_clearing_both_bars_promotes():
     settings = get_settings()
     stats = [
         ShadowClassStats(
-            "readability", "tier0", n=settings.tier_promotion_min_n,
+            "readability",
+            "tier0",
+            n=settings.tier_promotion_min_n,
             agreement=settings.tier_promotion_agreement,
         )
     ]

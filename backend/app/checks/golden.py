@@ -103,9 +103,7 @@ def score_golden_set(predictions: list[GoldenPrediction]) -> GoldenReport:
             )
         )
 
-    disagreements = [
-        p for p in decided if p.predicted != p.item.instructor_grade
-    ]
+    disagreements = [p for p in decided if p.predicted != p.item.instructor_grade]
 
     return GoldenReport(
         n_total=n_total,

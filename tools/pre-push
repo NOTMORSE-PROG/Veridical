@@ -1,0 +1,4 @@
+#!/bin/sh
+# Copy me to .git/hooks/pre-push (see tools/check_quality.py docstring).
+# Runs CI's own checks locally so a red push never leaves the machine.
+python "$(git rev-parse --show-toplevel)/tools/check_quality.py"

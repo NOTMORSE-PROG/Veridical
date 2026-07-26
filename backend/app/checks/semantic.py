@@ -306,9 +306,7 @@ async def grade_batch_verdicts(
 
     if parsed is None:
         reason = "Grading response could not be validated after a retry."
-        return {
-            c.id: GradedVerdict(c.id, None, None, None, None, reason) for c in batch_criteria
-        }
+        return {c.id: GradedVerdict(c.id, None, None, None, None, reason) for c in batch_criteria}
 
     by_index = {v.index: v for v in parsed.verdicts}
     out: dict[int, GradedVerdict] = {}
@@ -399,8 +397,7 @@ async def _grade_batch(
                     "verdict": g.verdict,
                     "reasoning": g.reasoning,
                     "evidence": [
-                        {"quote": q, "anchor": a}
-                        for q, a in zip(g.quotes, g.anchors, strict=True)
+                        {"quote": q, "anchor": a} for q, a in zip(g.quotes, g.anchors, strict=True)
                     ],
                     "context_label": batch.label,
                     "prompt_version": PROMPT_VERSION,

@@ -54,10 +54,7 @@ def session_factory(scratch_url):
 async def _clean_tables(session_factory):
     async with session_factory() as session:
         await session.execute(
-            text(
-                "TRUNCATE check_run, rubric, manuscript, instructor "
-                "RESTART IDENTITY CASCADE"
-            )
+            text("TRUNCATE check_run, rubric, manuscript, instructor RESTART IDENTITY CASCADE")
         )
         await session.commit()
     yield
@@ -84,9 +81,7 @@ async def test_pagination_never_returns_more_than_a_page(session_factory):
         assert len(page3.items) == 5
         # No overlap between pages.
         ids = (
-            {i.id for i in page1.items}
-            | {i.id for i in page2.items}
-            | {i.id for i in page3.items}
+            {i.id for i in page1.items} | {i.id for i in page2.items} | {i.id for i in page3.items}
         )
         assert len(ids) == 25
 

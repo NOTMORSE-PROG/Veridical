@@ -33,11 +33,17 @@ jobs:
           enable-cache: true
       - name: Install dependencies
         run: uv sync --frozen
+      # `if: always()` on every check: a lint failure must NEVER hide the test
+      # result. Eight pushes (V-018..V-026) went red on formatting alone, and
+      # because pytest ran after it, the suite was silently skipped each time.
       - name: Lint (ruff)
+        if: always()
         run: uv run ruff check .
       - name: Format check (ruff)
+        if: always()
         run: uv run ruff format --check .
       - name: Tests (pytest)
+        if: always()
         run: uv run pytest -v
         env:
           VERIDICAL_FAKE_LLM: "1"
@@ -57,11 +63,16 @@ jobs:
           cache-dependency-path: frontend/package-lock.json
       - name: Install dependencies
         run: npm ci
+      # Same rule as the backend job: every check reports, none masks another.
       - name: Lint (oxlint)
+        if: always()
         run: npm run lint
       - name: Tests (vitest)
+        if: always()
         run: npm test
       - name: Build (tsc + vite)
+        if: always()
         run: npm run build
       - name: Token purge guard
+        if: always()
         run: npm run check:css

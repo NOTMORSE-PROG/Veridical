@@ -13,7 +13,6 @@ already excludes from the severity deduction once set (V-019, unchanged
 by this ticket).
 """
 
-
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 

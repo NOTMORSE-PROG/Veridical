@@ -93,8 +93,12 @@ async def _vote_for_criterion(
         )
     tie_verdict, tie_anchors = tie
     g3 = GradedVerdict(
-        criterion.id, tie_verdict.verdict, tie_verdict.reasoning, tie_verdict.evidence_quotes,
-        tie_anchors, None,
+        criterion.id,
+        tie_verdict.verdict,
+        tie_verdict.reasoning,
+        tie_verdict.evidence_quotes,
+        tie_anchors,
+        None,
     )
     votes = [g1.verdict, g2.verdict, g3.verdict]
     majority, agreement = _tally(votes)
@@ -194,9 +198,7 @@ async def _vote_batch(
     voted = await vote_batch(
         batch, batch_criteria, llm, settings, anchor_kind, check_run_id=check_run_id
     )
-    return [
-        await _persist(session, check_run_id, v.criterion, v.outcome, v.detail) for v in voted
-    ]
+    return [await _persist(session, check_run_id, v.criterion, v.outcome, v.detail) for v in voted]
 
 
 async def run_semantic_checks_with_consistency(

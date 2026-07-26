@@ -292,12 +292,17 @@ async def test_quota_exhausted_parks_the_run_then_resumes_without_duplicate_call
     # batch that succeeded before the "quota" ran out).
     async with session_factory() as verify:
         semantic_results = (
-            await verify.execute(
-                select(CheckResult).where(
-                    CheckResult.check_run_id == check_run_id, CheckResult.kind == CheckKind.semantic
+            (
+                await verify.execute(
+                    select(CheckResult).where(
+                        CheckResult.check_run_id == check_run_id,
+                        CheckResult.kind == CheckKind.semantic,
+                    )
                 )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
         assert len(semantic_results) == 1
 
     # "Restart the process": fresh LLM client, call run_check_run again.
@@ -309,12 +314,17 @@ async def test_quota_exhausted_parks_the_run_then_resumes_without_duplicate_call
 
     async with session_factory() as verify:
         semantic_results = (
-            await verify.execute(
-                select(CheckResult).where(
-                    CheckResult.check_run_id == check_run_id, CheckResult.kind == CheckKind.semantic
+            (
+                await verify.execute(
+                    select(CheckResult).where(
+                        CheckResult.check_run_id == check_run_id,
+                        CheckResult.kind == CheckKind.semantic,
+                    )
                 )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
         # Both semantic criteria now have results — the resumed run did
         # NOT re-call the LLM for the one that already succeeded.
         assert {r.criterion_id for r in semantic_results} == {criterion_ids[1], criterion_ids[2]}
@@ -354,11 +364,15 @@ async def test_routing_only_persists_once_across_multiple_advances(
 
     async with session_factory() as verify:
         routing_rows = (
-            await verify.execute(
-                select(AuditLog).where(
-                    AuditLog.check_run_id == check_run_id,
-                    AuditLog.event_type == "criterion_routing",
+            (
+                await verify.execute(
+                    select(AuditLog).where(
+                        AuditLog.check_run_id == check_run_id,
+                        AuditLog.event_type == "criterion_routing",
+                    )
                 )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
         assert len(routing_rows) == 1
