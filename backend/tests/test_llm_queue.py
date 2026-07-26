@@ -12,7 +12,13 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.db import sqlalchemy_url
 from app.errors import ApiDownError, QuotaExhaustedError
-from app.llm.queue import LLMQueue, TransportRateLimited, TransportServerError
+from app.llm.pool import ModelSpec
+from app.llm.queue import (
+    LLMQueue,
+    TransportDailyQuotaExhausted,
+    TransportRateLimited,
+    TransportServerError,
+)
 from app.models.audit import AuditLog
 
 live = pytest.mark.skipif(
@@ -102,6 +108,10 @@ def _make_queue(session_factory, transport, **overrides: Any) -> LLMQueue:
         sleep=_instant_sleep,
     )
     kwargs.update(overrides)
+    if kwargs.get("pool"):
+        # Pool form and single-model form are alternatives, not additions.
+        for single_model_only in ("model", "rpm", "daily_quota"):
+            kwargs.pop(single_model_only, None)
     return LLMQueue(**kwargs)
 
 
@@ -192,6 +202,162 @@ async def test_cache_hit_skips_transport_and_quota_but_is_still_audited(session_
             await session.execute(select(AuditLog).where(AuditLog.event_type == "llm_cache_hit"))
         ).scalar_one()
     assert hit.prompt_version == "v1"
+
+
+def _pool(*specs: tuple[str, int, int]) -> tuple[ModelSpec, ...]:
+    return tuple(
+        ModelSpec(model=model, rpm=100, daily_quota=quota, vision=vision == 1)
+        for model, quota, vision in specs
+    )
+
+
+class PerModelTransport:
+    """Transport double that can declare specific models "done for the day",
+    the way the real API does with a per-DAY 429."""
+
+    def __init__(self, *, daily_exhausted: set[str] | None = None) -> None:
+        self.calls: list[str] = []
+        self._exhausted = daily_exhausted or set()
+
+    async def generate(
+        self, *, model: str, prompt: str, temperature: float, **context: Any
+    ) -> dict[str, Any]:
+        self.calls.append(model)
+        if model in self._exhausted:
+            raise TransportDailyQuotaExhausted(
+                "429 RESOURCE_EXHAUSTED quotaId: "
+                "GenerateRequestsPerDayPerProjectPerModel-FreeTier quotaValue: '20'"
+            )
+        return {"served_by": model}
+
+
+async def test_pool_fails_over_to_the_next_model_when_an_island_is_spent(session_factory):
+    """The blocker this pool exists for: the head model's day is 20 calls
+    long, but the key still has other islands to spend."""
+    transport = PerModelTransport()
+    queue = _make_queue(
+        session_factory,
+        transport,
+        pool=_pool(("small", 1, 1), ("big", 50, 1)),
+    )
+
+    first = await queue.submit(prompt_type="t", prompt="one", prompt_version="v1")
+    second = await queue.submit(prompt_type="t", prompt="two", prompt_version="v1")
+
+    assert first == {"served_by": "small"}
+    assert second == {"served_by": "big"}, "the second call must not die on the spent island"
+    assert transport.calls == ["small", "big"]
+
+
+async def test_a_per_day_429_closes_that_island_instead_of_being_retried(session_factory):
+    """A per-day 429 is not a transient failure: retrying it burns the retry
+    budget and then reports `api_down`, which is a lie about what happened
+    (charter rule 9). It must fail over, and stop re-asking that model."""
+    transport = PerModelTransport(daily_exhausted={"stale"})
+    queue = _make_queue(
+        session_factory,
+        transport,
+        pool=_pool(("stale", 50, 1), ("healthy", 50, 1)),
+        max_retries=3,
+    )
+
+    response = await queue.submit(prompt_type="t", prompt="one", prompt_version="v1")
+    assert response == {"served_by": "healthy"}
+    assert transport.calls == ["stale", "healthy"], "a daily cap must never be retried"
+
+    # The queue believed "stale" had 50 calls left; the API said otherwise.
+    # Reality wins, and the island stays closed for the rest of the day.
+    await queue.submit(prompt_type="t", prompt="two", prompt_version="v1")
+    assert transport.calls == ["stale", "healthy", "healthy"]
+
+    status = await queue.get_quota_status()
+    stale = next(entry for entry in status["models"] if entry["model"] == "stale")
+    assert stale["exhausted"] is True
+    assert stale["calls_remaining"] == 0
+
+
+async def test_quota_exhausted_only_when_every_island_is_spent(session_factory):
+    transport = PerModelTransport()
+    queue = _make_queue(
+        session_factory,
+        transport,
+        pool=_pool(("a", 1, 1), ("b", 1, 1)),
+    )
+
+    await queue.submit(prompt_type="t", prompt="one", prompt_version="v1")
+    await queue.submit(prompt_type="t", prompt="two", prompt_version="v1")
+    with pytest.raises(QuotaExhaustedError, match="Every model in the pool"):
+        await queue.submit(prompt_type="t", prompt="three", prompt_version="v1")
+
+    assert transport.calls == ["a", "b"]  # the third submit never reached the transport
+
+
+async def test_quota_status_reports_the_pool_total_not_one_model(session_factory):
+    """Every capacity claim (D-001/D-014, the paper) is priced against this
+    number, so it must be the sum of the islands."""
+    queue = _make_queue(
+        session_factory,
+        PerModelTransport(),
+        pool=_pool(("a", 20, 1), ("b", 180, 1)),
+    )
+
+    await queue.submit(prompt_type="t", prompt="one", prompt_version="v1")
+    status = await queue.get_quota_status()
+
+    assert status["daily_limit"] == 200
+    assert status["calls_used"] == 1
+    assert status["calls_remaining"] == 199
+    assert [entry["model"] for entry in status["models"]] == ["a", "b"]
+
+
+async def test_image_calls_never_fail_over_onto_a_text_only_model(session_factory):
+    """The V-007 vision pass on a text-only model would silently drop the
+    images and answer confidently about nothing."""
+    transport = PerModelTransport()
+    queue = _make_queue(
+        session_factory,
+        transport,
+        pool=_pool(("text-only", 50, 0), ("multimodal", 50, 1)),
+    )
+
+    response = await queue.submit(
+        prompt_type="image_table_extraction",
+        prompt="read this table",
+        prompt_version="v1",
+        images=[b"fake-png-bytes"],
+    )
+    assert response == {"served_by": "multimodal"}
+    assert transport.calls == ["multimodal"]
+
+    # Raw PNG bytes must not reach the JSONB payload (they are not JSON
+    # serializable — this crashed the audit write before V-049 and had never
+    # fired only because the vision pass had only ever run in fake mode).
+    async with session_factory() as session:
+        row = (
+            await session.execute(select(AuditLog).where(AuditLog.event_type == "llm_call"))
+        ).scalar_one()
+    (image,) = row.payload["context"]["images"]
+    assert image["__bytes__"] == len(b"fake-png-bytes")
+    assert len(image["sha256"]) == 64
+
+
+async def test_audit_row_records_the_model_that_actually_served_the_call(session_factory):
+    """A verdict's provenance is the model that produced it — the pool head
+    is not evidence (V-024 replay must reconstruct the real call)."""
+    transport = PerModelTransport(daily_exhausted={"head"})
+    queue = _make_queue(
+        session_factory,
+        transport,
+        pool=_pool(("head", 50, 1), ("reserve", 50, 1)),
+    )
+
+    await queue.submit(prompt_type="t", prompt="one", prompt_version="v1")
+
+    async with session_factory() as session:
+        row = (
+            await session.execute(select(AuditLog).where(AuditLog.event_type == "llm_call"))
+        ).scalar_one()
+    assert row.payload["model"] == "reserve"
 
 
 async def test_check_run_id_is_excluded_from_the_cache_key(session_factory):

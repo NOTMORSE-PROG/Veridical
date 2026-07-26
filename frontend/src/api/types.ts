@@ -198,9 +198,23 @@ export interface OverrideFlagOut extends FlagOut {
   report: ReportOut;
 }
 
+/** One model's own daily allowance. The Gemini free tier meters per model,
+ * so the quota meter's totals are sums over these islands (V-049). */
+export interface ModelQuotaStatus {
+  model: string;
+  calls_used: number;
+  daily_limit: number;
+  calls_remaining: number;
+  cache_hits_today: number;
+  rpm_limit: number;
+  vision: boolean;
+  exhausted: boolean;
+}
+
 export interface QuotaStatus {
   mode: "fake" | "live";
   quota_day: string;
+  /** Aggregated across the whole model pool. */
   calls_used: number;
   daily_limit: number;
   calls_remaining: number;
@@ -208,4 +222,5 @@ export interface QuotaStatus {
   cache_hit_rate: number;
   reset_at: string;
   rpm_limit: number;
+  models?: ModelQuotaStatus[];
 }

@@ -7,7 +7,23 @@ from google import genai
 from google.genai import errors as genai_errors
 from google.genai import types as genai_types
 
-from app.llm.queue import TransportRateLimited, TransportServerError
+from app.llm.queue import (
+    TransportDailyQuotaExhausted,
+    TransportRateLimited,
+    TransportServerError,
+)
+
+# Google returns BOTH per-minute and per-day caps as a 429; only the
+# `quotaId` distinguishes them (verified live 2026-07-26 against this
+# project's key: `GenerateRequestsPerDayPerProjectPerModel-FreeTier`,
+# quotaValue "20", vs `GenerateRequestsPerMinutePerProjectPerModel-FreeTier`,
+# quotaValue "5"). Protocol constants, not tunables — a per-day 429 must
+# never be retried like a per-minute one.
+_DAILY_QUOTA_MARKERS = ("PerDay", "RequestsPerDay", "GenerateRequestsPerDayPerProjectPerModel")
+
+
+def _is_daily_quota_error(exc: Exception) -> bool:
+    return any(marker in str(exc) for marker in _DAILY_QUOTA_MARKERS)
 
 
 class GeminiTransport:
@@ -45,6 +61,8 @@ class GeminiTransport:
             )
         except genai_errors.APIError as exc:
             if exc.code == 429:
+                if _is_daily_quota_error(exc):
+                    raise TransportDailyQuotaExhausted(str(exc)) from exc
                 raise TransportRateLimited(str(exc)) from exc
             if exc.code is not None and exc.code >= 500:
                 raise TransportServerError(str(exc)) from exc

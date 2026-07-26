@@ -97,11 +97,19 @@ class Settings(BaseSettings):
     gemini_temperature: float = 0.0
     # Per-attempt network timeout for a Gemini call.
     gemini_request_timeout_seconds: float = 60.0
-    # RESEARCH.md §1 (2026-07-16, re-verified 2026-07-25): Gemini Flash free
-    # tier is ~10-15 req/min, ~1,500 req/day, reset at midnight Pacific.
-    # Governor stays under both with headroom for the burst-safety margin.
-    llm_rpm: int = 12
-    llm_daily_quota: int = 1400
+    # Override the packaged model-pool file (app/llm/data/model_pool.json)
+    # without a code change; empty = packaged default. The pool is the
+    # ordered list of models the queue may spend, each with its OWN measured
+    # per-day/per-minute limits — see app/llm/pool.py for why per-model.
+    llm_model_pool_file: Path | None = None
+    # Fallback limits, used ONLY for the single-model form (a caller that
+    # pins one model explicitly). The pool file carries the real per-model
+    # numbers. MEASURED 2026-07-26 against this project's key (V-049,
+    # tools/probe_gemini_quota.py) — the previously documented ~1,500/day
+    # was wrong for this model by 70x: gemini-3.5-flash allows exactly 20
+    # requests/day on the free tier.
+    llm_rpm: int = 10
+    llm_daily_quota: int = 20
     # Timezone Gemini resets against — NOT local time (ticket V-009 edge case).
     llm_quota_reset_timezone: str = "America/Los_Angeles"
     llm_max_retries: int = 3
@@ -238,6 +246,7 @@ class Settings(BaseSettings):
         "ingest_patterns_file",
         "structural_keywords_file",
         "structural_bound_patterns_file",
+        "llm_model_pool_file",
         mode="before",
     )
     @classmethod

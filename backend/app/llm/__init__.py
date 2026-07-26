@@ -5,6 +5,7 @@ from app.config import Settings
 from app.llm.base import LLMClient, LLMNotConfiguredError
 from app.llm.client import GeminiLLMClient
 from app.llm.fake import FakeLLMClient
+from app.llm.pool import load_model_pool
 from app.llm.queue import LLMQueue
 
 __all__ = [
@@ -13,6 +14,7 @@ __all__ = [
     "FakeLLMClient",
     "GeminiLLMClient",
     "get_llm_client",
+    "load_model_pool",
 ]
 
 # Process-wide singleton: the RateGovernor's sliding window must persist
@@ -37,10 +39,8 @@ def _build_real_client(settings: Settings) -> GeminiLLMClient:
     queue = LLMQueue(
         transport=transport,
         session_factory=db.get_session_factory(),
-        model=settings.gemini_model,
+        pool=load_model_pool(settings.llm_model_pool_file),
         temperature=settings.gemini_temperature,
-        rpm=settings.llm_rpm,
-        daily_quota=settings.llm_daily_quota,
         max_retries=settings.llm_max_retries,
         retry_base_seconds=settings.llm_retry_base_seconds,
         reset_timezone=settings.llm_quota_reset_timezone,

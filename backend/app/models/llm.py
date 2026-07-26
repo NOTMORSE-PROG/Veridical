@@ -6,7 +6,7 @@ in-memory counter would silently reset the daily budget (ENGINEERING §3).
 
 from typing import Any
 
-from sqlalchemy import DateTime, Integer, String, func
+from sqlalchemy import DateTime, Integer, String, UniqueConstraint, func
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -14,16 +14,26 @@ from app.models.base import Base, PkCreatedMixin
 
 
 class LLMQuotaCounter(Base, PkCreatedMixin):
-    """One row per Pacific calendar day (Gemini's own reset boundary).
+    """One row per (Pacific calendar day, model) — Gemini's own reset
+    boundary, and its own metering granularity.
 
-    `call_count` gates the daily budget; `cache_hit_count` is tracked
+    Per-MODEL, not per-day-globally (V-049): the free tier's 429 names the
+    model in its `quotaDimensions`, so each model carries an independent
+    daily allowance. A single global counter can only ever describe one
+    model's island and would mis-report the pool's real remaining capacity.
+
+    `call_count` gates that island's budget; `cache_hit_count` is tracked
     separately so the quota meter can show cache-hit rate (D-011) without
     it counting against the real quota.
     """
 
     __tablename__ = "llm_quota_counter"
+    __table_args__ = (
+        UniqueConstraint("quota_day", "model", name="uq_llm_quota_counter_day_model"),
+    )
 
-    quota_day: Mapped[str] = mapped_column(String(10), unique=True)
+    quota_day: Mapped[str] = mapped_column(String(10))
+    model: Mapped[str] = mapped_column(String(100))
     call_count: Mapped[int] = mapped_column(Integer, server_default="0")
     cache_hit_count: Mapped[int] = mapped_column(Integer, server_default="0")
     updated_at: Mapped[Any] = mapped_column(

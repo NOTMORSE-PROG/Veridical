@@ -1,0 +1,77 @@
+{
+  "_readme": [
+    "The ordered list of Gemini models the LLM queue may spend, each with its",
+    "OWN daily allowance. The free tier meters",
+    "GenerateRequestsPerDayPerProjectPerModel-FreeTier — the 429 names the model",
+    "in its quotaDimensions — so these are independent quota islands and the",
+    "key's real daily capacity is their SUM (V-049, D-014).",
+    "",
+    "ORDER IS FAILOVER ORDER, biggest island first. That is deliberate: a small",
+    "head model would switch models partway through a normal day, and 'the same",
+    "manuscript graded twice agrees' (V3's exit checkpoint) must not be broken by",
+    "our own routing. Reserves exist so a busy day degrades instead of stopping.",
+    "",
+    "EVERY number here was MEASURED against a real key on 2026-07-26 with",
+    "tools/probe_gemini_quota.py — not read off documentation, which was wrong",
+    "by 70x for gemini-3.5-flash. daily_quota values are proven FLOORS (the probe",
+    "was budget-capped, so the true ceiling may be higher); re-probe to raise one.",
+    "Configuring a value above the real cap is safe but wasteful of wall-clock:",
+    "the queue closes an island the moment the API returns a per-day 429.",
+    "",
+    "Admission rules for this file (both verified before adding a model):",
+    "  1. It must honor responseMimeType=application/json. gemma-4-31b-it and",
+    "     gemma-4-26b-a4b-it are EXCLUDED for failing this — they have large",
+    "     quotas but return prose, and capacity that cannot be parsed is not",
+    "     capacity.",
+    "  2. vision:true only if an image call was actually verified to work —",
+    "     the queue refuses to send the V-007 vision pass to a text-only model.",
+    "No '-latest' aliases: they can silently change model behind a pinned id and",
+    "may share another entry's island, double-counting capacity that isn't there."
+  ],
+  "verified_on": "2026-07-26",
+  "verified_with": "tools/probe_gemini_quota.py",
+  "models": [
+    {
+      "model": "gemini-3.5-flash-lite",
+      "rpm": 15,
+      "daily_quota": 200,
+      "vision": true,
+      "note": "Workhorse. Measured 2026-07-26: ~227 successful calls in one Pacific day with NO per-day 429 (200-call probe ran to completion; the probe was capped, the quota was not exhausted) at 15/min. Configured at 200 — a proven floor with margin, not a ceiling. JSON mode and an image call both verified live."
+    },
+    {
+      "model": "gemini-3.1-flash-lite",
+      "rpm": 10,
+      "daily_quota": 20,
+      "vision": true,
+      "note": "First reserve. JSON mode and an image call verified live 2026-07-26; RPD not measured, so it carries a deliberately conservative floor."
+    },
+    {
+      "model": "gemini-3.5-flash",
+      "rpm": 10,
+      "daily_quota": 20,
+      "vision": true,
+      "note": "The former sole model. Measured EXACTLY 20 requests/day (quotaValue '20') on 2026-07-26 — the blocker that produced D-014. Highest quality of the pool, so it is kept as a reserve rather than dropped."
+    },
+    {
+      "model": "gemini-3.1-flash-lite-preview",
+      "rpm": 10,
+      "daily_quota": 20,
+      "vision": false,
+      "note": "JSON mode verified live 2026-07-26; RPD and image support not measured — text-only until they are."
+    },
+    {
+      "model": "gemini-3-flash-preview",
+      "rpm": 5,
+      "daily_quota": 20,
+      "vision": false,
+      "note": "JSON mode verified live 2026-07-26; RPD and image support not measured — text-only until they are."
+    },
+    {
+      "model": "gemini-3.6-flash",
+      "rpm": 5,
+      "daily_quota": 20,
+      "vision": false,
+      "note": "Newest Flash. RPM measured at exactly 5/min (quotaValue '5') on 2026-07-26 — hence the low rpm. JSON verified; RPD and image support not measured."
+    }
+  ]
+}
