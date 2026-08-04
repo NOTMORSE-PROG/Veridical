@@ -1,0 +1,39 @@
+name: Production smoke test
+
+# QA layer 2 (TESTING.md §7): proves the DEPLOY works, not just the code.
+# NOT a keep-warm/uptime ping (that's V-043's decision to make, D-004) —
+# this checks twice a day, far too sparse to prevent Render's 15-min
+# idle spin-down. Dispatch manually when closing a ticket that reaches
+# deployed code (TESTING.md DoD §4.11).
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 2,14 * * *" # twice daily, diagnostic only
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    env:
+      # Config over hardcoding (charter rule 7): override via repo Settings
+      # -> Actions -> Variables. Fallback is the current known-good URL
+      # (V-048 evidence, 2026-07-22).
+      API_URL: ${{ vars.PROD_API_URL || 'https://veridical-api.onrender.com' }}
+      WEB_URL: ${{ vars.PROD_WEB_URL || 'https://veridical-app.vercel.app' }}
+    steps:
+      - name: Backend health (allows for cold start, ~43s measured worst case)
+        run: |
+          body="$(curl -sS --retry 2 --retry-delay 5 --max-time 60 "$API_URL/health")"
+          echo "$body"
+          echo "$body" | grep -q '"status":"ok"' || {
+            echo "::error::Backend health check failed at $API_URL/health"
+            exit 1
+          }
+      - name: Frontend reachable
+        run: |
+          code="$(curl -sS -o /dev/null -w '%{http_code}' --retry 2 --retry-delay 5 --max-time 60 "$WEB_URL")"
+          echo "HTTP $code from $WEB_URL"
+          [ "$code" = "200" ] || {
+            echo "::error::Frontend not reachable at $WEB_URL (HTTP $code)"
+            exit 1
+          }
