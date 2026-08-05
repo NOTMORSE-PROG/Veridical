@@ -1,4 +1,7 @@
 @import "tailwindcss";
+@import "@fontsource/public-sans/400.css";
+@import "@fontsource/public-sans/500.css";
+@import "@fontsource/public-sans/700.css";
 @import "./tokens.css";
 
 @layer base {
@@ -8,5 +11,23 @@
     font-family: var(--font-sans);
     font-size: var(--text-base);
     line-height: var(--text-base--line-height);
+  }
+
+  /*
+   * System-wide focus ring (V-055): the solid inner ring is the
+   * compliance-bearing layer (measured >=3:1 against both light and dark
+   * fills) and uses `outline`, which survives Windows forced-colors mode.
+   * The TIP-yellow outer halo is brand identity only (1.71:1 alone, fails
+   * WCAG 1.4.11 by itself) via `box-shadow`, which may disappear under
+   * forced-colors — the ring itself must not depend on it.
+   */
+  :focus-visible {
+    outline: var(--border-width-lg) solid var(--color-focus-inner);
+    outline-offset: 2px;
+    box-shadow: 0 0 0 5px var(--color-accent);
+  }
+
+  .on-dark:focus-visible {
+    outline-color: var(--color-focus-inner-on-dark);
   }
 }
