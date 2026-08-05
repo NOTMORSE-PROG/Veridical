@@ -53,6 +53,11 @@ export interface ManuscriptListItem {
   created_at: string;
   latest_check_run_id: number | null;
   latest_check_run_status: CheckRunStatus | null;
+  // The latest DONE run specifically -- can differ from
+  // latest_check_run_id when a newer re-run failed or is still running,
+  // so a valid prior report never goes unreachable (backend-critic
+  // finding on BUG-012, V-055).
+  latest_done_check_run_id: number | null;
 }
 
 export interface PaginatedManuscripts {

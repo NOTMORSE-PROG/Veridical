@@ -38,6 +38,7 @@ const MANUSCRIPTS_PAGE = {
       created_at: "2026-01-01T00:00:00Z",
       latest_check_run_id: 7,
       latest_check_run_status: "done",
+      latest_done_check_run_id: 7,
     },
   ],
   total: 1,

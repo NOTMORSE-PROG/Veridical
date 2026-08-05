@@ -108,29 +108,41 @@ function IngestFailurePanel({ row }: { row: ManuscriptListItem }) {
   );
 }
 
+const linkClass =
+  "inline-flex min-h-6 items-center text-xs text-link underline hover:text-link-hover sm:min-h-11";
+
 function RowActions({ row }: { row: ManuscriptListItem }) {
   const running = row.latest_check_run_status
     ? RUNNING_STATUSES.has(row.latest_check_run_status)
     : false;
 
+  // A prior DONE run's report must stay reachable even when a newer
+  // re-run supersedes it (still running, or failed) -- backend-critic
+  // finding on BUG-012, V-055: the table used to follow the absolute-
+  // latest run only, so a failed/in-flight re-run silently made a
+  // perfectly valid earlier report unreachable from this screen.
+  const priorReportLink =
+    row.latest_done_check_run_id && row.latest_done_check_run_id !== row.latest_check_run_id ? (
+      <Link to={`/report/${row.latest_done_check_run_id}`} className={linkClass}>
+        Open prior report
+      </Link>
+    ) : null;
+
   if (row.latest_check_run_status === "done" && row.latest_check_run_id) {
     return (
-      <Link
-        to={`/report/${row.latest_check_run_id}`}
-        className="inline-flex min-h-6 items-center text-xs text-link underline hover:text-link-hover sm:min-h-11"
-      >
+      <Link to={`/report/${row.latest_check_run_id}`} className={linkClass}>
         Open report
       </Link>
     );
   }
   if (running && row.latest_check_run_id) {
     return (
-      <Link
-        to={`/checks/${row.latest_check_run_id}`}
-        className="inline-flex min-h-6 items-center text-xs text-link underline hover:text-link-hover sm:min-h-11"
-      >
-        View progress
-      </Link>
+      <div className="flex flex-col items-end gap-1 sm:flex-row sm:items-center sm:gap-3">
+        <Link to={`/checks/${row.latest_check_run_id}`} className={linkClass}>
+          View progress
+        </Link>
+        {priorReportLink}
+      </div>
     );
   }
   // A check-run failure (distinct from an ingestion failure) already has
@@ -140,12 +152,12 @@ function RowActions({ row }: { row: ManuscriptListItem }) {
   // ticket.
   if (row.latest_check_run_status === "failed" && row.latest_check_run_id) {
     return (
-      <Link
-        to={`/checks/${row.latest_check_run_id}`}
-        className="inline-flex min-h-6 items-center text-xs text-link underline hover:text-link-hover sm:min-h-11"
-      >
-        Why did this fail?
-      </Link>
+      <div className="flex flex-col items-end gap-1 sm:flex-row sm:items-center sm:gap-3">
+        <Link to={`/checks/${row.latest_check_run_id}`} className={linkClass}>
+          Why did this fail?
+        </Link>
+        {priorReportLink}
+      </div>
     );
   }
   return (

@@ -157,6 +157,14 @@ class ManuscriptListItem(BaseModel):
     # report" without a second request per row.
     latest_check_run_id: int | None = None
     latest_check_run_status: str | None = None
+    # The latest DONE run specifically, which can differ from
+    # latest_check_run_id if a newer re-run failed or is still in
+    # progress — lets the UI always link to the last known-good report
+    # instead of it going dark under a superseding run (backend-critic
+    # finding on BUG-012, V-055: the two "latest run" definitions used to
+    # diverge silently between this endpoint and the dashboard's KPI
+    # aggregation).
+    latest_done_check_run_id: int | None = None
 
     model_config = {"from_attributes": True}
 

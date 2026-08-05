@@ -26,6 +26,7 @@ describe("ManuscriptsTable", () => {
             created_at: "2026-01-01T00:00:00Z",
             latest_check_run_id: 7,
             latest_check_run_status: "done",
+            latest_done_check_run_id: 7,
           },
         ]),
       }),
@@ -50,6 +51,7 @@ describe("ManuscriptsTable", () => {
             created_at: "2026-01-01T00:00:00Z",
             latest_check_run_id: 8,
             latest_check_run_status: "semantic",
+            latest_done_check_run_id: null,
           },
         ]),
       }),
@@ -59,6 +61,58 @@ describe("ManuscriptsTable", () => {
     const links = screen.getAllByRole("link", { name: "View progress" });
     expect(links).toHaveLength(2);
     for (const link of links) expect(link).toHaveAttribute("href", "/checks/8");
+  });
+
+  it("backend-critic finding (BUG-012): a prior report stays reachable when a newer re-run is still running", async () => {
+    vi.stubGlobal(
+      "fetch",
+      stubFetchByPath({
+        "/manuscripts": page([
+          {
+            id: 6,
+            group_label: "G-16",
+            ingest_status: "done",
+            ingest_failure_reason: null,
+            created_at: "2026-01-01T00:00:00Z",
+            latest_check_run_id: 20, // the newer, still-running re-run
+            latest_check_run_status: "semantic",
+            latest_done_check_run_id: 9, // the OLDER, still-valid report
+          },
+        ]),
+      }),
+    );
+    renderWithProviders(<ManuscriptsTable page={1} onPageChange={() => {}} />);
+    await screen.findAllByText("Checking");
+    const progressLinks = screen.getAllByRole("link", { name: "View progress" });
+    for (const link of progressLinks) expect(link).toHaveAttribute("href", "/checks/20");
+    const priorReportLinks = screen.getAllByRole("link", { name: "Open prior report" });
+    expect(priorReportLinks).toHaveLength(2);
+    for (const link of priorReportLinks) expect(link).toHaveAttribute("href", "/report/9");
+  });
+
+  it("backend-critic finding (BUG-012): a prior report stays reachable when a newer re-run failed", async () => {
+    vi.stubGlobal(
+      "fetch",
+      stubFetchByPath({
+        "/manuscripts": page([
+          {
+            id: 7,
+            group_label: "G-17",
+            ingest_status: "done",
+            ingest_failure_reason: null,
+            created_at: "2026-01-01T00:00:00Z",
+            latest_check_run_id: 21, // the newer, FAILED re-run
+            latest_check_run_status: "failed",
+            latest_done_check_run_id: 10, // the OLDER, still-valid report
+          },
+        ]),
+      }),
+    );
+    renderWithProviders(<ManuscriptsTable page={1} onPageChange={() => {}} />);
+    await screen.findAllByText("Check failed");
+    const priorReportLinks = screen.getAllByRole("link", { name: "Open prior report" });
+    expect(priorReportLinks).toHaveLength(2);
+    for (const link of priorReportLinks) expect(link).toHaveAttribute("href", "/report/10");
   });
 
   it("shows 'Not checked yet' for an ingested manuscript with no check run", async () => {
@@ -74,6 +128,7 @@ describe("ManuscriptsTable", () => {
             created_at: "2026-01-01T00:00:00Z",
             latest_check_run_id: null,
             latest_check_run_status: null,
+            latest_done_check_run_id: null,
           },
         ]),
       }),
@@ -97,6 +152,7 @@ describe("ManuscriptsTable", () => {
             created_at: "2026-01-01T00:00:00Z",
             latest_check_run_id: 7,
             latest_check_run_status: "done",
+            latest_done_check_run_id: 7,
           },
         ]),
       }),
@@ -121,6 +177,7 @@ describe("ManuscriptsTable", () => {
             created_at: "2026-01-01T00:00:00Z",
             latest_check_run_id: null,
             latest_check_run_status: null,
+            latest_done_check_run_id: null,
           },
         ]),
       }),
@@ -147,6 +204,7 @@ describe("ManuscriptsTable", () => {
             created_at: "2026-01-01T00:00:00Z",
             latest_check_run_id: null,
             latest_check_run_status: null,
+            latest_done_check_run_id: null,
           },
         ]),
       }),

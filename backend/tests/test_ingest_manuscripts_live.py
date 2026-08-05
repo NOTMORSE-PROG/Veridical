@@ -110,6 +110,37 @@ async def test_latest_check_run_is_surfaced_per_manuscript(session_factory):
         page = await list_manuscripts(session, instructor.id)
         assert page.items[0].latest_check_run_id == newer.id
         assert page.items[0].latest_check_run_status == "semantic"
+        # backend-critic finding on BUG-012: the absolute-latest run
+        # (still running) must not hide the older DONE run's valid
+        # report -- the two are tracked separately.
+        assert page.items[0].latest_done_check_run_id == older.id
+
+
+async def test_a_failed_rerun_does_not_hide_an_earlier_done_runs_report(session_factory):
+    async with session_factory() as session:
+        instructor = Instructor(email="rerun-failed@demo.local", display_name="Rerun Test")
+        session.add(instructor)
+        await session.commit()
+        manuscript = Manuscript(instructor_id=instructor.id, group_label="G", file_ref="x.pdf")
+        rubric = Rubric(instructor_id=instructor.id, title="Format", source_file="r.pdf")
+        session.add_all([manuscript, rubric])
+        await session.commit()
+
+        older = CheckRun(
+            manuscript_id=manuscript.id, rubric_id=rubric.id, status=CheckRunStatus.done
+        )
+        session.add(older)
+        await session.commit()
+        newer_failed = CheckRun(
+            manuscript_id=manuscript.id, rubric_id=rubric.id, status=CheckRunStatus.failed
+        )
+        session.add(newer_failed)
+        await session.commit()
+
+        page = await list_manuscripts(session, instructor.id)
+        assert page.items[0].latest_check_run_id == newer_failed.id
+        assert page.items[0].latest_check_run_status == "failed"
+        assert page.items[0].latest_done_check_run_id == older.id
 
 
 async def test_manuscript_with_no_check_run_has_null_latest_fields(session_factory):
@@ -123,3 +154,4 @@ async def test_manuscript_with_no_check_run_has_null_latest_fields(session_facto
         page = await list_manuscripts(session, instructor.id)
         assert page.items[0].latest_check_run_id is None
         assert page.items[0].latest_check_run_status is None
+        assert page.items[0].latest_done_check_run_id is None
