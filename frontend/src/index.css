@@ -32,6 +32,17 @@
   }
 
   /*
+   * 4c: focus lands on the visually-hidden native file input (`sr-only`
+   * can't itself be the visible focus target); mirror the ring onto its
+   * visible label sibling, same tokens as the base rule.
+   */
+  .file-trigger-input:focus-visible + label {
+    outline: var(--border-width-lg) solid var(--color-focus-inner);
+    outline-offset: 2px;
+    box-shadow: 0 0 0 5px var(--color-accent);
+  }
+
+  /*
    * WCAG 2.4.11 Focus Not Obscured (V-055): AppShell's header is sticky
    * (visibility-of-system-status for a long manuscripts table), so every
    * focusable element inside <main> needs enough scroll-margin to clear
