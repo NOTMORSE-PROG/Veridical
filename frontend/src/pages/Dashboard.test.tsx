@@ -34,6 +34,7 @@ const MANUSCRIPTS_PAGE = {
       id: 1,
       group_label: "G-11",
       ingest_status: "done",
+      ingest_failure_reason: null,
       created_at: "2026-01-01T00:00:00Z",
       latest_check_run_id: 7,
       latest_check_run_status: "done",
@@ -50,10 +51,15 @@ describe("DashboardPage", () => {
   it("renders the first-run empty state (screen 4b) with the 3-step guide", async () => {
     vi.stubGlobal(
       "fetch",
-      stubFetchByPath({ "/auth/me": { id: 1, email: "a@b.com", display_name: "Demo Instructor" } }),
+      stubFetchByPath({
+        "/auth/me": { id: 1, email: "a@b.com", display_name: "Demo Instructor" },
+        "/rubric-families": [],
+      }),
     );
     renderWithProviders(<DashboardPage />);
-    expect(screen.getByText("No required format yet")).toBeInTheDocument();
+    // Staged reveal: nothing paints until `families` resolves (avoids a
+    // flash of the wrong screen), so this is asynchronous now.
+    expect(await screen.findByText("No required format yet")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Upload required format" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "New check" })).toBeDisabled();
     await waitFor(() => expect(screen.getByText("Demo Instructor")).toBeInTheDocument());
@@ -70,11 +76,10 @@ describe("DashboardPage", () => {
       }),
     );
     renderWithProviders(<DashboardPage />);
-    expect(await screen.findByText("Manuscripts checked")).toBeInTheDocument();
+    expect(await screen.findByText("3 manuscripts checked, by readiness status")).toBeInTheDocument();
     expect(screen.queryByText("No required format yet")).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "New check" })).toBeEnabled();
-    expect(screen.getByText("3")).toBeInTheDocument();
-    expect(await screen.findByText("G-11")).toBeInTheDocument();
-    expect(screen.getByText("System underperforming", { exact: false })).toBeInTheDocument();
+    expect((await screen.findAllByText("G-11")).length).toBeGreaterThan(0);
+    expect(screen.getByText("System underperforming.")).toBeInTheDocument();
   });
 });

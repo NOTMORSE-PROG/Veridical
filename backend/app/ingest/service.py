@@ -22,7 +22,7 @@ from app.ingest.patterns import load_patterns
 from app.ingest.schemas import ExtractionResult, ManuscriptListItem, PaginatedManuscripts
 from app.llm import LLMNotConfiguredError, get_llm_client
 from app.models.citation import Citation
-from app.models.enums import IngestStatus
+from app.models.enums import IngestFailureReason, IngestStatus
 from app.models.manuscript import Manuscript
 from app.models.run import CheckRun
 
@@ -138,10 +138,17 @@ async def ingest_manuscript(
         await loop.run_in_executor(
             None, _write_raw_store, result, raw_store_path(settings, manuscript.id)
         )
-    except Exception:
+    except FileMalformedError:
         # Stage boundary (CODING.md §2): the failure is recorded on the row,
         # then propagates — run-level stage bookkeeping arrives with V-018.
+        # BUG-016: the row must say why, not just that it failed.
         manuscript.ingest_status = IngestStatus.failed
+        manuscript.ingest_failure_reason = IngestFailureReason.unreadable_format
+        await session.commit()
+        raise
+    except Exception:
+        manuscript.ingest_status = IngestStatus.failed
+        manuscript.ingest_failure_reason = IngestFailureReason.extraction_failed
         await session.commit()
         raise
 
@@ -181,6 +188,7 @@ async def ingest_upload(
         await save_upload(chunks, dest, settings)
     except FileTooLargeError:
         manuscript.ingest_status = IngestStatus.failed
+        manuscript.ingest_failure_reason = IngestFailureReason.file_too_large
         await session.commit()
         raise
     manuscript.file_ref = str(dest)
@@ -254,6 +262,9 @@ async def list_manuscripts(
             id=m.id,
             group_label=m.group_label,
             ingest_status=m.ingest_status.value,
+            ingest_failure_reason=(
+                m.ingest_failure_reason.value if m.ingest_failure_reason else None
+            ),
             created_at=m.created_at,
             latest_check_run_id=_latest_id(m.id),
             latest_check_run_status=_latest_status(m.id),

@@ -400,6 +400,56 @@ def test_service_persists_tree_and_status(tmp_path, monkeypatch, ingest_scratch_
                 await ingest_manuscript(session, broken, bad, settings)
             await session.refresh(broken)
             assert broken.ingest_status == IngestStatus.failed
+            # BUG-016: a failed row must say why, not dead-end silently.
+            from app.models.enums import IngestFailureReason
+
+            assert broken.ingest_failure_reason == IngestFailureReason.unreadable_format
+        await engine.dispose()
+
+    asyncio.run(scenario())
+
+
+@live
+def test_oversized_upload_records_file_too_large_reason(tmp_path, monkeypatch, ingest_scratch_url):
+    """BUG-016: the `ingest_upload` (too-large) failure path records its own
+    reason, distinct from `ingest_manuscript`'s (unreadable-format) path."""
+    from sqlalchemy import select
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
+    from app.db import sqlalchemy_url
+    from app.errors import FileTooLargeError
+    from app.ingest.service import ingest_upload
+    from app.models import Instructor, Manuscript
+    from app.models.enums import IngestFailureReason, IngestStatus
+
+    monkeypatch.setenv("DATA_DIR", str(tmp_path / "data"))
+    monkeypatch.setenv("MAX_UPLOAD_MB", "1")
+    get_settings.cache_clear()
+    settings = get_settings()
+
+    async def chunks():
+        yield b"x" * (2 * 1024 * 1024)
+
+    async def scenario():
+        engine = create_async_engine(sqlalchemy_url(ingest_scratch_url))
+        factory = async_sessionmaker(engine, expire_on_commit=False)
+        async with factory() as session:
+            instructor = Instructor(
+                email=f"ingest-toolarge-{time.time_ns()}@test.local", display_name="Ingest Test"
+            )
+            session.add(instructor)
+            await session.commit()
+
+            with pytest.raises(FileTooLargeError):
+                await ingest_upload(
+                    session, chunks(), "big.pdf", "G", settings, instructor_id=instructor.id
+                )
+
+            manuscript = await session.scalar(
+                select(Manuscript).where(Manuscript.instructor_id == instructor.id)
+            )
+            assert manuscript.ingest_status == IngestStatus.failed
+            assert manuscript.ingest_failure_reason == IngestFailureReason.file_too_large
         await engine.dispose()
 
     asyncio.run(scenario())

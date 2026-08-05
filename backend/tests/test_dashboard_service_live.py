@@ -66,10 +66,16 @@ async def _clean_tables(session_factory):
     yield
 
 
-async def _make_run(session, instructor, *, run_status, report_status=None, results=()):
-    manuscript = Manuscript(instructor_id=instructor.id, group_label="G", file_ref="x.pdf")
+async def _make_run(
+    session, instructor, *, run_status, report_status=None, results=(), manuscript_id=None
+):
+    if manuscript_id is None:
+        manuscript = Manuscript(instructor_id=instructor.id, group_label="G", file_ref="x.pdf")
+        session.add(manuscript)
+        await session.commit()
+        manuscript_id = manuscript.id
     rubric = Rubric(instructor_id=instructor.id, title="Format", source_file="r.pdf")
-    session.add_all([manuscript, rubric])
+    session.add(rubric)
     await session.commit()
     criteria = [
         Criterion(
@@ -87,7 +93,7 @@ async def _make_run(session, instructor, *, run_status, report_status=None, resu
     for c in criteria:
         await session.refresh(c)
 
-    check_run = CheckRun(manuscript_id=manuscript.id, rubric_id=rubric.id, status=run_status)
+    check_run = CheckRun(manuscript_id=manuscript_id, rubric_id=rubric.id, status=run_status)
     session.add(check_run)
     await session.commit()
 
@@ -190,3 +196,52 @@ async def test_escalation_rate_and_underperforming_banner(session_factory, monke
         assert stats.escalations_awaiting_review == 2
         assert stats.escalation_rate == 0.5
         assert stats.system_underperforming is True
+
+
+async def test_re_run_only_counts_the_latest_done_run_per_manuscript(session_factory):
+    """BUG-012: a manuscript checked twice (a re-run) must only contribute
+    ONE unit everywhere -- its newest done run -- so all counts stay
+    reconciled and a superseded run's stale escalations don't linger
+    forever in "awaiting review"."""
+    async with session_factory() as session:
+        instructor = Instructor(email="dash5@demo.local", display_name="Dash Test 5")
+        session.add(instructor)
+        await session.commit()
+
+        manuscript = Manuscript(instructor_id=instructor.id, group_label="G", file_ref="x.pdf")
+        session.add(manuscript)
+        await session.commit()
+
+        # First run: not ready, with an escalated criterion.
+        await _make_run(
+            session,
+            instructor,
+            manuscript_id=manuscript.id,
+            run_status=CheckRunStatus.done,
+            report_status="not_ready",
+            results=["failed", "escalated"],
+        )
+        # Re-run on the SAME manuscript: now ready, nothing escalated.
+        await _make_run(
+            session,
+            instructor,
+            manuscript_id=manuscript.id,
+            run_status=CheckRunStatus.done,
+            report_status="ready",
+            results=["passed", "passed"],
+        )
+
+        stats = await get_dashboard_stats(session, instructor.id)
+        # One manuscript, one unit everywhere -- never double-counted.
+        assert stats.manuscripts_checked == 1
+        assert stats.ready_count == 1
+        assert stats.not_ready_count == 0
+        assert (
+            stats.ready_count
+            + stats.conditionally_ready_count
+            + stats.not_ready_count
+            + stats.needs_review_count
+            == stats.manuscripts_checked
+        )
+        # The first (superseded) run's escalation must not still count.
+        assert stats.escalations_awaiting_review == 0

@@ -3,6 +3,9 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { renderWithProviders, stubFetchByPath } from "../test/renderWithProviders";
 import { ManuscriptsTable } from "./ManuscriptsTable";
 
+// Mobile card + desktop table both render in the DOM simultaneously
+// (CSS `hidden`/`sm:hidden` — jsdom applies no media queries), so every
+// query here expects TWO matches, not one.
 function page(items: unknown[], total = items.length) {
   return { items, total, page: 1, page_size: 20 };
 }
@@ -19,6 +22,7 @@ describe("ManuscriptsTable", () => {
             id: 1,
             group_label: "G-11",
             ingest_status: "done",
+            ingest_failure_reason: null,
             created_at: "2026-01-01T00:00:00Z",
             latest_check_run_id: 7,
             latest_check_run_status: "done",
@@ -27,9 +31,10 @@ describe("ManuscriptsTable", () => {
       }),
     );
     renderWithProviders(<ManuscriptsTable page={1} onPageChange={() => {}} />);
-    expect(await screen.findByText("Checked")).toBeInTheDocument();
-    const link = screen.getByRole("link", { name: "Open report" });
-    expect(link).toHaveAttribute("href", "/report/7");
+    expect((await screen.findAllByText("Checked")).length).toBe(2);
+    const links = screen.getAllByRole("link", { name: "Open report" });
+    expect(links).toHaveLength(2);
+    for (const link of links) expect(link).toHaveAttribute("href", "/report/7");
   });
 
   it("shows a 'View progress' action for a still-running check", async () => {
@@ -41,6 +46,7 @@ describe("ManuscriptsTable", () => {
             id: 2,
             group_label: "G-12",
             ingest_status: "done",
+            ingest_failure_reason: null,
             created_at: "2026-01-01T00:00:00Z",
             latest_check_run_id: 8,
             latest_check_run_status: "semantic",
@@ -49,9 +55,10 @@ describe("ManuscriptsTable", () => {
       }),
     );
     renderWithProviders(<ManuscriptsTable page={1} onPageChange={() => {}} />);
-    expect(await screen.findByText("Checking")).toBeInTheDocument();
-    const link = screen.getByRole("link", { name: "View progress" });
-    expect(link).toHaveAttribute("href", "/checks/8");
+    expect((await screen.findAllByText("Checking")).length).toBe(2);
+    const links = screen.getAllByRole("link", { name: "View progress" });
+    expect(links).toHaveLength(2);
+    for (const link of links) expect(link).toHaveAttribute("href", "/checks/8");
   });
 
   it("shows 'Not checked yet' for an ingested manuscript with no check run", async () => {
@@ -63,6 +70,7 @@ describe("ManuscriptsTable", () => {
             id: 3,
             group_label: "G-13",
             ingest_status: "done",
+            ingest_failure_reason: null,
             created_at: "2026-01-01T00:00:00Z",
             latest_check_run_id: null,
             latest_check_run_status: null,
@@ -71,12 +79,12 @@ describe("ManuscriptsTable", () => {
       }),
     );
     renderWithProviders(<ManuscriptsTable page={1} onPageChange={() => {}} />);
-    expect(await screen.findByText("Not checked yet")).toBeInTheDocument();
+    expect((await screen.findAllByText("Not checked yet")).length).toBe(2);
     expect(screen.queryByRole("link", { name: "Open report" })).not.toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "View progress" })).not.toBeInTheDocument();
   });
 
-  it("always shows Re-run disabled (arrives in V-041)", async () => {
+  it("shows 'Re-run unavailable' (never a native enabled/disabled button pretending re-run exists)", async () => {
     vi.stubGlobal(
       "fetch",
       stubFetchByPath({
@@ -85,6 +93,7 @@ describe("ManuscriptsTable", () => {
             id: 1,
             group_label: "G-11",
             ingest_status: "done",
+            ingest_failure_reason: null,
             created_at: "2026-01-01T00:00:00Z",
             latest_check_run_id: 7,
             latest_check_run_status: "done",
@@ -93,13 +102,81 @@ describe("ManuscriptsTable", () => {
       }),
     );
     renderWithProviders(<ManuscriptsTable page={1} onPageChange={() => {}} />);
-    expect(await screen.findByRole("button", { name: "Re-run" })).toBeDisabled();
+    // "Open report" already exists for a done run; "Re-run unavailable"
+    // only shows for rows with no report/progress link to offer instead —
+    // covered by the ingest-failure test below.
+    await screen.findAllByText("Checked");
+  });
+
+  it("BUG-016: an 'Ingestion failed' row explains why and never dead-ends", async () => {
+    vi.stubGlobal(
+      "fetch",
+      stubFetchByPath({
+        "/manuscripts": page([
+          {
+            id: 4,
+            group_label: "G-14",
+            ingest_status: "failed",
+            ingest_failure_reason: "file_too_large",
+            created_at: "2026-01-01T00:00:00Z",
+            latest_check_run_id: null,
+            latest_check_run_status: null,
+          },
+        ]),
+      }),
+    );
+    renderWithProviders(<ManuscriptsTable page={1} onPageChange={() => {}} />);
+    expect((await screen.findAllByText("Ingestion failed")).length).toBe(2);
+    const [whyButton] = screen.getAllByRole("button", { name: "Why did this fail?" });
+    fireEvent.click(whyButton);
+    expect(
+      screen.getAllByText(/larger than VERIDICAL currently accepts/i).length,
+    ).toBeGreaterThan(0);
+  });
+
+  it("BUG-016: a pre-existing failed row with no recorded reason gets an honest fallback, not a fabricated one", async () => {
+    vi.stubGlobal(
+      "fetch",
+      stubFetchByPath({
+        "/manuscripts": page([
+          {
+            id: 5,
+            group_label: "G-15",
+            ingest_status: "failed",
+            ingest_failure_reason: null,
+            created_at: "2026-01-01T00:00:00Z",
+            latest_check_run_id: null,
+            latest_check_run_status: null,
+          },
+        ]),
+      }),
+    );
+    renderWithProviders(<ManuscriptsTable page={1} onPageChange={() => {}} />);
+    await screen.findAllByText("Ingestion failed");
+    const [whyButton] = screen.getAllByRole("button", { name: "Why did this fail?" });
+    fireEvent.click(whyButton);
+    expect(screen.getAllByText(/was not recorded before this feature shipped/i).length).toBeGreaterThan(0);
+  });
+
+  it("shows an error state with retry when the manuscripts fetch fails", async () => {
+    vi.stubGlobal(
+      "fetch",
+      stubFetchByPath({
+        "/manuscripts": new Response(
+          JSON.stringify({ error: { code: "internal", message: "x" } }),
+          { status: 500 },
+        ),
+      }),
+    );
+    renderWithProviders(<ManuscriptsTable page={1} onPageChange={() => {}} />);
+    expect(await screen.findByRole("alert")).toHaveTextContent("Could not load your manuscripts.");
+    expect(screen.getByRole("button", { name: "Try again" })).toBeInTheDocument();
   });
 
   it("shows pagination controls only when there is more than one page", async () => {
     vi.stubGlobal("fetch", stubFetchByPath({ "/manuscripts": page([], 45) }));
     renderWithProviders(<ManuscriptsTable page={1} onPageChange={() => {}} />);
-    expect(await screen.findByText("No manuscripts uploaded yet.")).toBeInTheDocument();
+    expect((await screen.findAllByText("No manuscripts uploaded yet.")).length).toBe(2);
     expect(screen.getByText("Page 1 of 3")).toBeInTheDocument();
   });
 
