@@ -49,19 +49,24 @@ describe("NewCheckModal", () => {
       stubFetchByPath({ "/manuscripts": MANUSCRIPTS, "/rubric-families": ONE_ACTIVE_FAMILY }),
     );
     renderWithProviders(<NewCheckModal onClose={() => {}} />);
-    await screen.findByRole("option", { name: "G-11" });
-    expect(screen.queryByRole("option", { name: "G-12 (still processing)" })).not.toBeInTheDocument();
+    await screen.findByRole("option", { name: /^G-11,/ });
+    expect(screen.queryByRole("option", { name: /G-12/ })).not.toBeInTheDocument();
   });
 
-  it("shows a validation message when Start is clicked with nothing selected", async () => {
+  it("shows a focused, accessible error summary when Start is clicked with nothing selected", async () => {
     vi.stubGlobal(
       "fetch",
       stubFetchByPath({ "/manuscripts": MANUSCRIPTS, "/rubric-families": ONE_ACTIVE_FAMILY }),
     );
     renderWithProviders(<NewCheckModal onClose={() => {}} />);
-    await screen.findByRole("option", { name: "G-11" });
+    await screen.findByRole("option", { name: /^G-11,/ });
+    // Start check is never disabled for validation reasons (GOV.UK
+    // pattern, matching 4d) — clicking it is what surfaces the problem.
+    expect(screen.getByRole("button", { name: "Start check" })).not.toBeDisabled();
     fireEvent.click(screen.getByRole("button", { name: "Start check" }));
-    expect(screen.getByRole("alert")).toHaveTextContent("Choose a manuscript first.");
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("Choose a manuscript.");
+    expect(alert).toHaveFocus();
   });
 
   it("auto-selects the single active rubric and shows its criteria count", async () => {
@@ -73,11 +78,13 @@ describe("NewCheckModal", () => {
     expect(await screen.findByText(/24 criteria/)).toBeInTheDocument();
   });
 
-  it("disables Start check when no active rubric exists", async () => {
+  it("explains, via the error summary, when no active rubric exists — Start check stays enabled", async () => {
     vi.stubGlobal("fetch", stubFetchByPath({ "/manuscripts": MANUSCRIPTS, "/rubric-families": [] }));
     renderWithProviders(<NewCheckModal onClose={() => {}} />);
-    await screen.findByText("No active rubric yet — confirm one on the rubric review screen first.");
-    expect(screen.getByRole("button", { name: "Start check" })).toBeDisabled();
+    await screen.findByText("No active rubric yet. Confirm one on the rubric review screen first.");
+    expect(screen.getByRole("button", { name: "Start check" })).not.toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: "Start check" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("No active rubric is available yet.");
   });
 
   it("submits the selected manuscript and rubric on Start check", async () => {
@@ -113,5 +120,65 @@ describe("NewCheckModal", () => {
       manuscript_id: 1,
       rubric_id: 9,
     });
+  });
+
+  it("shows a real loading state for manuscripts, not a false empty state (Nielsen visibility of system status)", async () => {
+    let resolveManuscripts: (value: Response) => void = () => {};
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const path = new URL(typeof input === "string" ? input : input.toString(), "http://localhost").pathname;
+        if (path === "/manuscripts") {
+          return new Promise<Response>((resolve) => {
+            resolveManuscripts = resolve;
+          });
+        }
+        return new Response(JSON.stringify(ONE_ACTIVE_FAMILY), { status: 200 });
+      }),
+    );
+    renderWithProviders(<NewCheckModal onClose={() => {}} />);
+
+    expect(await screen.findByText("Loading manuscripts.")).toBeInTheDocument();
+    expect(screen.queryByText(/No manuscripts have been ingested/)).not.toBeInTheDocument();
+
+    resolveManuscripts(new Response(JSON.stringify(MANUSCRIPTS), { status: 200 }));
+    await screen.findByRole("option", { name: /^G-11,/ });
+  });
+
+  it("shows a real fetch-error state with a working retry, for manuscripts", async () => {
+    let calls = 0;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const path = new URL(typeof input === "string" ? input : input.toString(), "http://localhost").pathname;
+      if (path === "/manuscripts") {
+        calls += 1;
+        if (calls === 1) return new Response("Internal error", { status: 500 });
+        return new Response(JSON.stringify(MANUSCRIPTS), { status: 200 });
+      }
+      return new Response(JSON.stringify(ONE_ACTIVE_FAMILY), { status: 200 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    renderWithProviders(<NewCheckModal onClose={() => {}} />);
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("Could not load your manuscripts.");
+    expect(calls).toBe(1);
+    fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+    await screen.findByRole("option", { name: /^G-11,/ });
+  });
+
+  it("distinguishes still-processing manuscripts from a genuinely empty list, honestly", async () => {
+    const allPending = {
+      ...MANUSCRIPTS,
+      items: [{ ...MANUSCRIPTS.items[1], id: 3 }],
+    };
+    vi.stubGlobal(
+      "fetch",
+      stubFetchByPath({ "/manuscripts": allPending, "/rubric-families": ONE_ACTIVE_FAMILY }),
+    );
+    renderWithProviders(<NewCheckModal onClose={() => {}} />);
+
+    expect(
+      await screen.findByText("Your manuscripts are still being processed. This can take a few minutes. Check back shortly."),
+    ).toBeInTheDocument();
   });
 });
