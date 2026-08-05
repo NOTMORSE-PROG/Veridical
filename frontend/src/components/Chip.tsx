@@ -1,14 +1,25 @@
-// Chip — DESIGN.md §2 (wireframe .pchip)
+// Chip — small pill for page-identifying metadata (e.g. a rubric title,
+// a count). V-055: only consumer left is screen 4d, redesigned alongside
+// it. Optional truncation for long values (title tooltip carries the
+// full string, same pattern already shipped on ManuscriptsTable.tsx).
 import type { ReactNode } from "react";
+import { cx } from "./cx";
 
 interface ChipProps {
   children: ReactNode;
+  title?: string;
+  maxWidthClass?: string;
 }
 
-export function Chip({ children }: ChipProps) {
+export function Chip({ children, title, maxWidthClass }: ChipProps) {
   return (
-    <span className="inline-flex items-center gap-1.5 rounded-pill border border-modal-border bg-panel px-2.5 py-0.5 text-xs whitespace-nowrap text-ink-soft">
-      {children}
+    <span
+      title={title}
+      className={cx(
+        "inline-flex min-w-0 items-center gap-1.5 rounded-full border border-border bg-panel px-2.5 py-1 text-sm whitespace-nowrap text-ink-secondary",
+      )}
+    >
+      <span className={cx(maxWidthClass, maxWidthClass && "truncate")}>{children}</span>
     </span>
   );
 }

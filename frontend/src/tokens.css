@@ -94,13 +94,12 @@
    * item (context/RESEARCH.md §19/§21) — deferred to whichever screen
    * builds the first LIVE status pill (4b/4e/4h), not decided here.
    * Remove each value below as its last consumer is rebuilt; remove this
-   * whole block once none remain. Consumers as of 2026-08-05 (grepped, not
+   * whole block once none remain. Consumers as of 2026-08-06 (grepped, not
    * guessed): audit/AuditLog.tsx, auth/RequireAuth.tsx, check/NewCheck.tsx,
-   * check/Progress.tsx, components/{Button,Chip,KpiCard,Modal,Panel,Pill,
-   * SegmentedToggle,Stepper,Tag}.tsx, dashboard/{KpiCards,ManuscriptsTable}.tsx,
-   * flags/FlagDetail.tsx, gallery/GalleryPage.tsx, pages/Dashboard.tsx,
-   * report/{EscalatedPanel,Report}.tsx, rubric/{Manage,ReviewCriteria,
-   * UploadRubricModal}.tsx, shell/AppShell.tsx.
+   * check/Progress.tsx, components/{Button,KpiCard,Panel,Pill,Stepper,
+   * Tag}.tsx, dashboard/KpiCards.tsx (partial), flags/FlagDetail.tsx,
+   * gallery/GalleryPage.tsx, report/{EscalatedPanel,Report}.tsx,
+   * rubric/Manage.tsx.
    */
   --color-status-ok-bg: #e5f1ea;
   --color-status-ok-text: #1e6b43;
