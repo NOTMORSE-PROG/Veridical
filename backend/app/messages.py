@@ -9,7 +9,7 @@ UNSUPPORTED_FILE_TYPE = "Unsupported file type '{suffix}'. Supported types: {sup
 
 FILE_UNREADABLE = (
     "The file could not be read as a document. It may be corrupted or "
-    "incomplete — please re-export and upload it again."
+    "incomplete. Please re-export and upload it again."
 )
 
 FILE_ENCRYPTED = (

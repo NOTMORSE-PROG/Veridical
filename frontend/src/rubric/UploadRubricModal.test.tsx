@@ -10,7 +10,30 @@ describe("UploadRubricModal", () => {
     vi.stubGlobal("fetch", vi.fn());
     renderWithProviders(<UploadRubricModal onClose={() => {}} />);
     fireEvent.click(screen.getByRole("button", { name: "Continue to review" }));
-    expect(screen.getByRole("alert")).toHaveTextContent("Choose a PDF or DOCX file first.");
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "Choose a format document before continuing.",
+    );
+  });
+
+  it("the custom file-trigger label is really associated with the input (not just visually near it)", () => {
+    vi.stubGlobal("fetch", vi.fn());
+    renderWithProviders(<UploadRubricModal onClose={() => {}} />);
+    // getByLabelText only succeeds on a real for/id (or wrapping) association.
+    expect(screen.getByLabelText("Choose file")).toHaveAttribute("type", "file");
+  });
+
+  it("shows a selected file as a removable chip, and remove returns focus to the trigger", () => {
+    vi.stubGlobal("fetch", vi.fn());
+    renderWithProviders(<UploadRubricModal onClose={() => {}} />);
+
+    const file = new File(["dummy"], "rubric.pdf", { type: "application/pdf" });
+    const input = screen.getByLabelText("Choose file") as HTMLInputElement;
+    fireEvent.change(input, { target: { files: [file] } });
+
+    expect(screen.getByText("rubric.pdf")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Remove rubric.pdf" }));
+    expect(screen.queryByText("rubric.pdf")).not.toBeInTheDocument();
+    expect(document.activeElement).toBe(input);
   });
 
   it("uploads the chosen file as multipart form data (not JSON)", async () => {
