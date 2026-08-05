@@ -14,6 +14,7 @@ CPU-bound and synchronous on purpose — callers run it in a threadpool.
 """
 
 import re
+import zipfile
 from zipfile import BadZipFile
 
 import docx
@@ -22,7 +23,7 @@ from docx.table import Table
 from docx.text.paragraph import Paragraph
 
 from app.config import Settings
-from app.errors import FileMalformedError
+from app.errors import FileMalformedError, FileTooLargeError
 from app.ingest import sections
 from app.ingest.normalize import normalize
 from app.ingest.patterns import HeadingPatterns, load_patterns
@@ -34,7 +35,7 @@ from app.ingest.schemas import (
     TableBlock,
     TextBlock,
 )
-from app.messages import FILE_UNREADABLE
+from app.messages import DOCX_EXPANDS_TOO_LARGE, FILE_UNREADABLE
 
 EMU_PER_POINT = 12700  # OOXML length unit (true invariant)
 # Word's built-in style names are part of the format, not a rubric choice.
@@ -42,9 +43,24 @@ _HEADING_STYLE = re.compile(r"^heading (?P<level>\d+)$")
 _TITLE_STYLE = "title"
 
 
+def _check_uncompressed_size(path: str, settings: Settings) -> None:
+    """A DOCX is a zip archive — `max_upload_mb` only caps the compressed
+    size on disk. Reject before python-docx ever unpacks it if the
+    UNCOMPRESSED total exceeds the configured ceiling (BUG-005/D-020:
+    zip-bomb class risk against Render's 512MB free-tier memory)."""
+    limit = settings.max_docx_uncompressed_mb * 1024 * 1024
+    total = 0
+    with zipfile.ZipFile(path) as zf:
+        for info in zf.infolist():
+            total += info.file_size
+            if total > limit:
+                raise FileTooLargeError(DOCX_EXPANDS_TOO_LARGE)
+
+
 def extract_document(path: str, settings: Settings) -> ExtractionResult:
     patterns = load_patterns(settings.ingest_patterns_file)
     try:
+        _check_uncompressed_size(path, settings)
         document = docx.Document(path)
     except (PackageNotFoundError, BadZipFile, KeyError, ValueError) as exc:
         raise FileMalformedError(FILE_UNREADABLE) from exc

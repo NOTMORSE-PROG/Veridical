@@ -13,10 +13,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app import messages
 from app.auth.dependencies import get_current_instructor
+from app.config import get_settings
 from app.db import get_session
 from app.ingest.schemas import IngestSummary, PaginatedManuscripts
 from app.ingest.service import ingest_upload, list_manuscripts
 from app.models.instructor import Instructor
+from app.ratelimit import enforce_action_rate_limit
 
 router = APIRouter(tags=["ingestion"])
 
@@ -28,14 +30,17 @@ _CHUNK_BYTES = 1024 * 1024
 async def ingest_manuscript_upload(
     file: UploadFile,
     session: Annotated[AsyncSession, Depends(get_session)],
+    instructor: Annotated[Instructor, Depends(get_current_instructor)],
     group_label: str = "Ungrouped",
 ) -> IngestSummary:
     async def chunks():
         while chunk := await file.read(_CHUNK_BYTES):
             yield chunk
 
+    settings = get_settings()
+    enforce_action_rate_limit(settings, "manuscript_ingest", instructor.id)
     manuscript, result, n_citations = await ingest_upload(
-        session, chunks(), file.filename or "", group_label
+        session, chunks(), file.filename or "", group_label, instructor_id=instructor.id
     )
     notes = [messages.IMAGE_ONLY_NOTE] if result.image_only else []
     return IngestSummary(

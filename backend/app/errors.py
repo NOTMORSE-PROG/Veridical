@@ -74,6 +74,14 @@ class ConflictError(VeridicalError):
     code = "conflict"
 
 
+class RateLimitedError(VeridicalError):
+    """Too many requests in the configured window (BUG-004/D-020) — resume
+    once the window resets; distinct from `unauthenticated` because the
+    caller IS who they say they are, just going too fast."""
+
+    code = "rate_limited"
+
+
 # HTTP mapping for the one exception handler (main.py). Codes absent here
 # are result STATES (not_applicable, unverifiable) that must never be
 # raised to HTTP; if one ever is, the handler still answers with the
@@ -86,6 +94,7 @@ HTTP_STATUS: dict[str, int] = {
     "unauthenticated": 401,
     "not_found": 404,
     "conflict": 409,
+    "rate_limited": 429,
     # A rubric-decomposition parse that failed schema validation (V-010) —
     # user-actionable (re-review/re-upload); V-011 wraps this in a retry
     # loop so it only ever reaches HTTP after repeated failure.

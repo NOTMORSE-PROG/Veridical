@@ -47,6 +47,9 @@ def client(api_scratch_url, tmp_path, monkeypatch):
     get_settings.cache_clear()
     db._engine = None
     auth_service._rate_limiter = None
+    import app.ratelimit as ratelimit
+
+    ratelimit._limiters.clear()  # BUG-004: don't leak check-run counts across tests
     from app.main import app
 
     with TestClient(app) as c:

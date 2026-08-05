@@ -9,6 +9,8 @@ import os
 import pytest
 from fastapi.testclient import TestClient
 
+import app.auth.service as auth_service
+from app.auth.security import hash_password
 from app.config import get_settings
 from tests.test_ingest_fixtures import FIXTURE_DIR
 
@@ -38,17 +40,54 @@ def api_scratch_url():
 
 @pytest.fixture()
 def client(api_scratch_url, tmp_path, monkeypatch):
-    """App wired to the scratch DB, a temp data dir, and fake-LLM mode."""
+    """App wired to the scratch DB, a temp data dir, and fake-LLM mode —
+    logged in as a seeded instructor (BUG-002/D-020: /manuscripts/ingest
+    now requires auth, same as every other manuscript-scoped route)."""
+    import asyncio
+
     import app.db as db
+    import app.ratelimit as ratelimit
+    from app.db import sqlalchemy_url
+    from app.models.instructor import Instructor
 
     monkeypatch.setenv("DATABASE_URL", api_scratch_url)
     monkeypatch.setenv("DATA_DIR", str(tmp_path / "data"))
     monkeypatch.setenv("VERIDICAL_FAKE_LLM", "1")
     get_settings.cache_clear()
     db._engine = None  # drop any engine bound to another database
+    auth_service._rate_limiter = None
+    ratelimit._limiters.clear()  # don't leak ingest-rate-limit counts across tests
     from app.main import app
 
+    async def seed_instructor():
+        # api_scratch_url is module-scoped (not truncated between tests,
+        # matching this file's prior convention) — find-or-create so a
+        # repeat email doesn't violate the unique constraint on a 2nd test.
+        from sqlalchemy import select
+        from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
+        engine = create_async_engine(sqlalchemy_url(api_scratch_url))
+        try:
+            async with async_sessionmaker(engine, expire_on_commit=False)() as session:
+                existing = await session.scalar(
+                    select(Instructor).where(Instructor.email == "prof@tip.edu.ph")
+                )
+                if existing is None:
+                    session.add(
+                        Instructor(
+                            email="prof@tip.edu.ph",
+                            display_name="Prof",
+                            password_hash=hash_password("s3cret!"),
+                        )
+                    )
+                    await session.commit()
+        finally:
+            await engine.dispose()
+
+    asyncio.run(seed_instructor())
+
     with TestClient(app) as tc:
+        tc.post("/auth/login", json={"email": "prof@tip.edu.ph", "password": "s3cret!"})
         yield tc
     db._engine = None
     get_settings.cache_clear()

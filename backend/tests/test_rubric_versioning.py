@@ -84,9 +84,9 @@ def session_factory(versioning_scratch_url):
 
 @pytest.fixture(autouse=True)
 async def _clean_tables(session_factory):
-    """The scratch DB is module-scoped; every test shares the same demo
-    instructor (fixed email), so family/version counts would otherwise
-    leak across tests."""
+    """The scratch DB is module-scoped; every test needs a clean slate for
+    family/version counts (and, since BUG-001/D-020, a fresh instructor id
+    to seed each test's owner against)."""
     async with session_factory() as session:
         await session.execute(
             text(
@@ -96,6 +96,22 @@ async def _clean_tables(session_factory):
         )
         await session.commit()
     yield
+
+
+@pytest.fixture()
+async def instructor_id(session_factory, _clean_tables) -> int:
+    """This test's owner — seeded fresh (after truncate) per test. Async
+    (not `asyncio.run()`-wrapped): a separate event loop touching the same
+    engine as the test body corrupts it across loops on Windows — this
+    exact bug is already documented in `_clean_tables`'s docstring above."""
+    from app.models.instructor import Instructor
+
+    async with session_factory() as session:
+        instructor = Instructor(email="prof@tip.edu.ph", display_name="Prof")
+        session.add(instructor)
+        await session.commit()
+        await session.refresh(instructor)
+        return instructor.id
 
 
 def _rubric_pdf(tmp_path, name="rubric.pdf"):
@@ -110,7 +126,9 @@ async def _chunks(path):
     yield path.read_bytes()
 
 
-async def _upload(session_factory, tmp_path, monkeypatch, *, family_id=None, title="Rubric"):
+async def _upload(
+    session_factory, tmp_path, monkeypatch, instructor_id, *, family_id=None, title="Rubric"
+):
     monkeypatch.setenv("DATA_DIR", str(tmp_path / "data"))
     get_settings.cache_clear()
     settings = get_settings()
@@ -125,33 +143,42 @@ async def _upload(session_factory, tmp_path, monkeypatch, *, family_id=None, tit
             title,
             SpyLLM(SCRIPTED_RESPONSE),
             settings,
+            instructor_id=instructor_id,
             family_id=family_id,
         )
 
 
-async def _confirm(session_factory, rubric_id):
+async def _confirm(session_factory, rubric_id, instructor_id):
     from app.rubric.schemas import CriterionIn, UpdateCriteriaRequest
     from app.rubric.service import get_rubric, update_criteria
 
     async with session_factory() as session:
-        rubric = await get_rubric(session, rubric_id)
+        rubric = await get_rubric(session, rubric_id, instructor_id)
         criteria = [
             CriterionIn(id=c.id, type=c.type, text=c.text, evidence=c.evidence, weight=c.weight)
             for c in rubric.criteria
         ]
         return await update_criteria(
-            session, rubric_id, UpdateCriteriaRequest(criteria=criteria, confirm=True)
+            session,
+            rubric_id,
+            UpdateCriteriaRequest(criteria=criteria, confirm=True),
+            instructor_id,
         )
 
 
 async def test_reupload_with_family_id_creates_v2_and_leaves_v1_untouched(
-    session_factory, tmp_path, monkeypatch
+    session_factory, tmp_path, monkeypatch, instructor_id
 ):
-    v1 = await _upload(session_factory, tmp_path, monkeypatch, title="V1")
-    await _confirm(session_factory, v1.id)
+    v1 = await _upload(session_factory, tmp_path, monkeypatch, instructor_id, title="V1")
+    await _confirm(session_factory, v1.id, instructor_id)
 
     v2 = await _upload(
-        session_factory, tmp_path, monkeypatch, family_id=v1.rubric_family_id, title="V2"
+        session_factory,
+        tmp_path,
+        monkeypatch,
+        instructor_id,
+        family_id=v1.rubric_family_id,
+        title="V2",
     )
 
     assert v2.rubric_family_id == v1.rubric_family_id
@@ -164,82 +191,131 @@ async def test_reupload_with_family_id_creates_v2_and_leaves_v1_untouched(
 
 
 async def test_reupload_into_unknown_family_raises_not_found(
-    session_factory, tmp_path, monkeypatch
+    session_factory, tmp_path, monkeypatch, instructor_id
 ):
     import uuid
 
     with pytest.raises(NotFoundError):
-        await _upload(session_factory, tmp_path, monkeypatch, family_id=uuid.uuid4())
+        await _upload(session_factory, tmp_path, monkeypatch, instructor_id, family_id=uuid.uuid4())
+
+
+async def test_reupload_into_another_instructors_family_raises_not_found(
+    session_factory, tmp_path, monkeypatch, instructor_id
+):
+    """BUG-001 regression: a family_id guessed from another instructor's
+    rubric must not be reachable — reads exactly like an unknown family_id."""
+    from app.models.instructor import Instructor
+
+    v1 = await _upload(session_factory, tmp_path, monkeypatch, instructor_id, title="V1")
+
+    async with session_factory() as session:
+        other = Instructor(email="other@tip.edu.ph", display_name="Other Prof")
+        session.add(other)
+        await session.commit()
+        await session.refresh(other)
+        other_instructor_id = other.id
+
+    with pytest.raises(NotFoundError):
+        await _upload(
+            session_factory,
+            tmp_path,
+            monkeypatch,
+            other_instructor_id,
+            family_id=v1.rubric_family_id,
+            title="V2",
+        )
 
 
 async def test_activating_v2_deactivates_v1_exactly_one_active_per_family(
-    session_factory, tmp_path, monkeypatch
+    session_factory, tmp_path, monkeypatch, instructor_id
 ):
     from app.rubric.service import activate_rubric, get_rubric
 
-    v1 = await _upload(session_factory, tmp_path, monkeypatch, title="V1")
-    await _confirm(session_factory, v1.id)  # v1 active
+    v1 = await _upload(session_factory, tmp_path, monkeypatch, instructor_id, title="V1")
+    await _confirm(session_factory, v1.id, instructor_id)  # v1 active
     v2 = await _upload(
-        session_factory, tmp_path, monkeypatch, family_id=v1.rubric_family_id, title="V2"
+        session_factory,
+        tmp_path,
+        monkeypatch,
+        instructor_id,
+        family_id=v1.rubric_family_id,
+        title="V2",
     )
 
     async with session_factory() as session:
-        await activate_rubric(session, v2.id)
+        await activate_rubric(session, v2.id, instructor_id)
 
     async with session_factory() as session:
-        v1_after = await get_rubric(session, v1.id)
-        v2_after = await get_rubric(session, v2.id)
+        v1_after = await get_rubric(session, v1.id, instructor_id)
+        v2_after = await get_rubric(session, v2.id, instructor_id)
     assert v1_after.is_active is False
     assert v2_after.is_active is True
 
 
-async def test_confirming_v2_also_deactivates_v1(session_factory, tmp_path, monkeypatch):
+async def test_confirming_v2_also_deactivates_v1(
+    session_factory, tmp_path, monkeypatch, instructor_id
+):
     """Same invariant, reached via the OTHER activation path (V-012's
     confirm, not V-013's explicit Activate button)."""
     from app.rubric.service import get_rubric
 
-    v1 = await _upload(session_factory, tmp_path, monkeypatch, title="V1")
-    await _confirm(session_factory, v1.id)
+    v1 = await _upload(session_factory, tmp_path, monkeypatch, instructor_id, title="V1")
+    await _confirm(session_factory, v1.id, instructor_id)
     v2 = await _upload(
-        session_factory, tmp_path, monkeypatch, family_id=v1.rubric_family_id, title="V2"
+        session_factory,
+        tmp_path,
+        monkeypatch,
+        instructor_id,
+        family_id=v1.rubric_family_id,
+        title="V2",
     )
-    await _confirm(session_factory, v2.id)
+    await _confirm(session_factory, v2.id, instructor_id)
 
     async with session_factory() as session:
-        v1_after = await get_rubric(session, v1.id)
+        v1_after = await get_rubric(session, v1.id, instructor_id)
     assert v1_after.is_active is False
 
 
 async def test_is_latest_version_flips_when_a_new_version_is_uploaded(
-    session_factory, tmp_path, monkeypatch
+    session_factory, tmp_path, monkeypatch, instructor_id
 ):
     from app.rubric.service import get_rubric
 
-    v1 = await _upload(session_factory, tmp_path, monkeypatch, title="V1")
+    v1 = await _upload(session_factory, tmp_path, monkeypatch, instructor_id, title="V1")
     async with session_factory() as session:
-        assert (await get_rubric(session, v1.id)).is_latest_version is True
+        assert (await get_rubric(session, v1.id, instructor_id)).is_latest_version is True
 
     v2 = await _upload(
-        session_factory, tmp_path, monkeypatch, family_id=v1.rubric_family_id, title="V2"
+        session_factory,
+        tmp_path,
+        monkeypatch,
+        instructor_id,
+        family_id=v1.rubric_family_id,
+        title="V2",
     )
     async with session_factory() as session:
-        assert (await get_rubric(session, v1.id)).is_latest_version is False
-        assert (await get_rubric(session, v2.id)).is_latest_version is True
+        assert (await get_rubric(session, v1.id, instructor_id)).is_latest_version is False
+        assert (await get_rubric(session, v2.id, instructor_id)).is_latest_version is True
 
 
 async def test_list_rubric_versions_orders_newest_first_with_counts(
-    session_factory, tmp_path, monkeypatch
+    session_factory, tmp_path, monkeypatch, instructor_id
 ):
     from app.rubric.service import list_rubric_versions
 
-    v1 = await _upload(session_factory, tmp_path, monkeypatch, title="V1")
-    await _confirm(session_factory, v1.id)
+    v1 = await _upload(session_factory, tmp_path, monkeypatch, instructor_id, title="V1")
+    await _confirm(session_factory, v1.id, instructor_id)
     v2 = await _upload(
-        session_factory, tmp_path, monkeypatch, family_id=v1.rubric_family_id, title="V2"
+        session_factory,
+        tmp_path,
+        monkeypatch,
+        instructor_id,
+        family_id=v1.rubric_family_id,
+        title="V2",
     )
 
     async with session_factory() as session:
-        versions = await list_rubric_versions(session, v1.rubric_family_id)
+        versions = await list_rubric_versions(session, v1.rubric_family_id, instructor_id)
 
     assert [v.version for v in versions] == [2, 1]
     assert versions[1].is_active is True  # v1
@@ -248,15 +324,36 @@ async def test_list_rubric_versions_orders_newest_first_with_counts(
     assert versions[0].id == v2.id
 
 
+async def test_list_rubric_versions_raises_not_found_for_another_instructor(
+    session_factory, tmp_path, monkeypatch, instructor_id
+):
+    """BUG-001 regression on the versions-list route specifically."""
+    from app.models.instructor import Instructor
+    from app.rubric.service import list_rubric_versions
+
+    v1 = await _upload(session_factory, tmp_path, monkeypatch, instructor_id, title="V1")
+
+    async with session_factory() as session:
+        other = Instructor(email="other2@tip.edu.ph", display_name="Other Prof 2")
+        session.add(other)
+        await session.commit()
+        await session.refresh(other)
+        other_instructor_id = other.id
+
+    async with session_factory() as session:
+        with pytest.raises(NotFoundError):
+            await list_rubric_versions(session, v1.rubric_family_id, other_instructor_id)
+
+
 async def test_list_rubric_families_returns_one_row_per_family(
-    session_factory, tmp_path, monkeypatch
+    session_factory, tmp_path, monkeypatch, instructor_id
 ):
     from app.rubric.service import list_rubric_families
 
-    cs = await _upload(session_factory, tmp_path, monkeypatch, title="CS-Format")
-    await _confirm(session_factory, cs.id)
-    it = await _upload(session_factory, tmp_path, monkeypatch, title="IT-Format")
-    await _confirm(session_factory, it.id)
+    cs = await _upload(session_factory, tmp_path, monkeypatch, instructor_id, title="CS-Format")
+    await _confirm(session_factory, cs.id, instructor_id)
+    it = await _upload(session_factory, tmp_path, monkeypatch, instructor_id, title="IT-Format")
+    await _confirm(session_factory, it.id, instructor_id)
 
     async with session_factory() as session:
         families = await list_rubric_families(session, cs.instructor_id)
@@ -266,9 +363,11 @@ async def test_list_rubric_families_returns_one_row_per_family(
     assert all(f.is_active for f in families)
 
 
-async def _insert_check_run_against(session_factory, rubric_id):
+async def _insert_check_run_against(session_factory, rubric_id, instructor_id):
     async with session_factory() as session:
-        manuscript = Manuscript(instructor_id=1, group_label="Group 1", file_ref="x.pdf")
+        manuscript = Manuscript(
+            instructor_id=instructor_id, group_label="Group 1", file_ref="x.pdf"
+        )
         session.add(manuscript)
         await session.flush()
         session.add(CheckRun(manuscript_id=manuscript.id, rubric_id=rubric_id))
@@ -276,39 +375,45 @@ async def _insert_check_run_against(session_factory, rubric_id):
 
 
 async def test_delete_blocked_when_reports_exist_allowed_otherwise(
-    session_factory, tmp_path, monkeypatch
+    session_factory, tmp_path, monkeypatch, instructor_id
 ):
     from app.rubric.service import delete_rubric, get_rubric
 
-    with_report = await _upload(session_factory, tmp_path, monkeypatch, title="HasReports")
-    without_report = await _upload(session_factory, tmp_path, monkeypatch, title="NoReports")
-    await _insert_check_run_against(session_factory, with_report.id)
+    with_report = await _upload(
+        session_factory, tmp_path, monkeypatch, instructor_id, title="HasReports"
+    )
+    without_report = await _upload(
+        session_factory, tmp_path, monkeypatch, instructor_id, title="NoReports"
+    )
+    await _insert_check_run_against(session_factory, with_report.id, instructor_id)
 
     async with session_factory() as session:
         with pytest.raises(ConflictError):
-            await delete_rubric(session, with_report.id)
+            await delete_rubric(session, with_report.id, instructor_id)
 
     async with session_factory() as session:
-        await delete_rubric(session, without_report.id)  # no reports -> succeeds
+        await delete_rubric(session, without_report.id, instructor_id)  # no reports -> succeeds
         with pytest.raises(NotFoundError):
-            await get_rubric(session, without_report.id)
+            await get_rubric(session, without_report.id, instructor_id)
 
 
 async def test_editing_an_active_version_with_reports_is_blocked(
-    session_factory, tmp_path, monkeypatch
+    session_factory, tmp_path, monkeypatch, instructor_id
 ):
     from app.rubric.schemas import CriterionIn, UpdateCriteriaRequest
     from app.rubric.service import get_rubric, update_criteria
 
-    v1 = await _upload(session_factory, tmp_path, monkeypatch, title="V1")
-    await _confirm(session_factory, v1.id)  # now active
-    await _insert_check_run_against(session_factory, v1.id)
+    v1 = await _upload(session_factory, tmp_path, monkeypatch, instructor_id, title="V1")
+    await _confirm(session_factory, v1.id, instructor_id)  # now active
+    await _insert_check_run_against(session_factory, v1.id, instructor_id)
 
     async with session_factory() as session:
-        rubric = await get_rubric(session, v1.id)
+        rubric = await get_rubric(session, v1.id, instructor_id)
         criteria = [
             CriterionIn(id=c.id, type=c.type, text="changed", evidence=c.evidence, weight=c.weight)
             for c in rubric.criteria
         ]
         with pytest.raises(ConflictError):
-            await update_criteria(session, v1.id, UpdateCriteriaRequest(criteria=criteria))
+            await update_criteria(
+                session, v1.id, UpdateCriteriaRequest(criteria=criteria), instructor_id
+            )

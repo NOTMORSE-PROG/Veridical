@@ -4,6 +4,7 @@ against its own scratch database.
 """
 
 import os
+import uuid
 from typing import Any
 
 import pytest
@@ -12,6 +13,7 @@ from sqlalchemy import select
 from app.config import get_settings
 from app.errors import NotFoundError
 from app.llm.base import LLMClient
+from app.models.instructor import Instructor
 from app.models.rubric import Criterion, Rubric
 from tests.test_ingest_pdf import PdfBuilder
 
@@ -79,6 +81,19 @@ def session_factory(rubric_scratch_url):
     yield async_sessionmaker(engine, expire_on_commit=False)
 
 
+async def _seed_instructor(session_factory) -> int:
+    """A fresh, uniquely-emailed instructor per call — this scratch DB is
+    module-scoped and never truncated between tests (matches
+    test_ingest_api.py's convention), so a fixed email would collide on
+    the unique constraint by the second test."""
+    async with session_factory() as session:
+        instructor = Instructor(email=f"{uuid.uuid4()}@test.local", display_name="Test Instructor")
+        session.add(instructor)
+        await session.commit()
+        await session.refresh(instructor)
+        return instructor.id
+
+
 def _rubric_pdf(tmp_path):
     # Title kept under the 20-char coverage-line floor (config default) so
     # it doesn't count as an uncovered "requirement" — it's a heading, not
@@ -106,9 +121,16 @@ async def test_create_rubric_from_upload_persists_criteria_with_normalized_weigh
 
     from app.rubric.service import create_rubric_from_upload
 
+    instructor_id = await _seed_instructor(session_factory)
     async with session_factory() as session:
         rubric = await create_rubric_from_upload(
-            session, _chunks(path), "rubric.pdf", "Oral Defense Rubric", spy, settings
+            session,
+            _chunks(path),
+            "rubric.pdf",
+            "Oral Defense Rubric",
+            spy,
+            settings,
+            instructor_id=instructor_id,
         )
         rubric_id = rubric.id
 
@@ -121,6 +143,7 @@ async def test_create_rubric_from_upload_persists_criteria_with_normalized_weigh
         assert persisted.title == "Oral Defense Rubric"
         assert persisted.version == 1
         assert persisted.source_file.endswith(".pdf")
+        assert persisted.instructor_id == instructor_id
 
         criteria = (
             (
@@ -151,23 +174,39 @@ async def test_repeated_upload_starts_a_new_family_not_a_new_version(
 
     from app.rubric.service import create_rubric_from_upload
 
+    instructor_id = await _seed_instructor(session_factory)
     async with session_factory() as session:
         first = await create_rubric_from_upload(
-            session, _chunks(path), "rubric.pdf", "Rubric A", SpyLLM(SCRIPTED_RESPONSE), settings
+            session,
+            _chunks(path),
+            "rubric.pdf",
+            "Rubric A",
+            SpyLLM(SCRIPTED_RESPONSE),
+            settings,
+            instructor_id=instructor_id,
         )
         second = await create_rubric_from_upload(
-            session, _chunks(path), "rubric.pdf", "Rubric B", SpyLLM(SCRIPTED_RESPONSE), settings
+            session,
+            _chunks(path),
+            "rubric.pdf",
+            "Rubric B",
+            SpyLLM(SCRIPTED_RESPONSE),
+            settings,
+            instructor_id=instructor_id,
         )
 
     assert first.rubric_family_id != second.rubric_family_id
     assert first.version == second.version == 1
 
 
-async def _seeded_rubric_id(session_factory, tmp_path, monkeypatch) -> int:
+async def _seeded_rubric(session_factory, tmp_path, monkeypatch) -> tuple[int, int]:
+    """Returns (rubric_id, instructor_id) — a fresh instructor owns a
+    freshly-uploaded rubric."""
     monkeypatch.setenv("DATA_DIR", str(tmp_path / "data"))
     get_settings.cache_clear()
     settings = get_settings()
     path = _rubric_pdf(tmp_path)
+    instructor_id = await _seed_instructor(session_factory)
     async with session_factory() as session:
         from app.rubric.service import create_rubric_from_upload
 
@@ -178,8 +217,9 @@ async def _seeded_rubric_id(session_factory, tmp_path, monkeypatch) -> int:
             "Oral Defense Rubric",
             SpyLLM(SCRIPTED_RESPONSE),
             settings,
+            instructor_id=instructor_id,
         )
-        return rubric.id
+        return rubric.id, instructor_id
 
 
 async def test_get_rubric_returns_criteria_ordered_by_position(
@@ -187,9 +227,9 @@ async def test_get_rubric_returns_criteria_ordered_by_position(
 ):
     from app.rubric.service import get_rubric
 
-    rubric_id = await _seeded_rubric_id(session_factory, tmp_path, monkeypatch)
+    rubric_id, instructor_id = await _seeded_rubric(session_factory, tmp_path, monkeypatch)
     async with session_factory() as session:
-        rubric = await get_rubric(session, rubric_id)
+        rubric = await get_rubric(session, rubric_id, instructor_id)
     assert [c.position for c in rubric.criteria] == [0, 1]
     assert rubric.is_active is False  # not confirmed yet
 
@@ -197,9 +237,48 @@ async def test_get_rubric_returns_criteria_ordered_by_position(
 async def test_get_rubric_raises_not_found_for_unknown_id(session_factory):
     from app.rubric.service import get_rubric
 
+    instructor_id = await _seed_instructor(session_factory)
     async with session_factory() as session:
         with pytest.raises(NotFoundError):
-            await get_rubric(session, 999999)
+            await get_rubric(session, 999999, instructor_id)
+
+
+async def test_get_rubric_raises_not_found_for_a_different_instructors_rubric(
+    session_factory, tmp_path, monkeypatch
+):
+    """BUG-001 regression: an authenticated instructor must never reach
+    another instructor's rubric by guessing/incrementing an id — a wrong
+    owner reads exactly like an unknown id, never a distinct 403 (no
+    existence leak)."""
+    from app.rubric.service import activate_rubric, delete_rubric, get_rubric, update_criteria
+
+    rubric_id, _owner_id = await _seeded_rubric(session_factory, tmp_path, monkeypatch)
+    other_instructor_id = await _seed_instructor(session_factory)
+
+    async with session_factory() as session:
+        with pytest.raises(NotFoundError):
+            await get_rubric(session, rubric_id, other_instructor_id)
+
+    async with session_factory() as session:
+        with pytest.raises(NotFoundError):
+            from app.rubric.schemas import CriterionIn, UpdateCriteriaRequest
+
+            await update_criteria(
+                session,
+                rubric_id,
+                UpdateCriteriaRequest(
+                    criteria=[CriterionIn(type="structural", text="x", weight=1.0)]
+                ),
+                other_instructor_id,
+            )
+
+    async with session_factory() as session:
+        with pytest.raises(NotFoundError):
+            await activate_rubric(session, rubric_id, other_instructor_id)
+
+    async with session_factory() as session:
+        with pytest.raises(NotFoundError):
+            await delete_rubric(session, rubric_id, other_instructor_id)
 
 
 async def test_update_criteria_edit_round_trip_persists(session_factory, tmp_path, monkeypatch):
@@ -207,9 +286,9 @@ async def test_update_criteria_edit_round_trip_persists(session_factory, tmp_pat
     from app.rubric.schemas import CriterionIn, UpdateCriteriaRequest
     from app.rubric.service import get_rubric, update_criteria
 
-    rubric_id = await _seeded_rubric_id(session_factory, tmp_path, monkeypatch)
+    rubric_id, instructor_id = await _seeded_rubric(session_factory, tmp_path, monkeypatch)
     async with session_factory() as session:
-        original = await get_rubric(session, rubric_id)
+        original = await get_rubric(session, rubric_id, instructor_id)
         edited = [
             CriterionIn(
                 id=c.id,
@@ -221,12 +300,15 @@ async def test_update_criteria_edit_round_trip_persists(session_factory, tmp_pat
             for c in original.criteria
         ]
         await update_criteria(
-            session, rubric_id, UpdateCriteriaRequest(criteria=edited, confirm=True)
+            session,
+            rubric_id,
+            UpdateCriteriaRequest(criteria=edited, confirm=True),
+            instructor_id,
         )
 
     # Reload with a FRESH session — proves it's persisted, not just in-memory.
     async with session_factory() as session:
-        reloaded = await get_rubric(session, rubric_id)
+        reloaded = await get_rubric(session, rubric_id, instructor_id)
     assert reloaded.is_active is True
     assert [c.type for c in reloaded.criteria] == ["semantic", "structural"]
     assert all(c.text.endswith("(edited)") for c in reloaded.criteria)
@@ -237,9 +319,9 @@ async def test_update_criteria_adds_and_deletes_rows(session_factory, tmp_path, 
     from app.rubric.schemas import CriterionIn, UpdateCriteriaRequest
     from app.rubric.service import get_rubric, update_criteria
 
-    rubric_id = await _seeded_rubric_id(session_factory, tmp_path, monkeypatch)
+    rubric_id, instructor_id = await _seeded_rubric(session_factory, tmp_path, monkeypatch)
     async with session_factory() as session:
-        original = await get_rubric(session, rubric_id)
+        original = await get_rubric(session, rubric_id, instructor_id)
         kept = original.criteria[0]
         new_list = [
             CriterionIn(
@@ -249,10 +331,12 @@ async def test_update_criteria_adds_and_deletes_rows(session_factory, tmp_path, 
                 id=None, type="semantic", text="A brand new hand-added criterion", weight=50.0
             ),
         ]
-        await update_criteria(session, rubric_id, UpdateCriteriaRequest(criteria=new_list))
+        await update_criteria(
+            session, rubric_id, UpdateCriteriaRequest(criteria=new_list), instructor_id
+        )
 
     async with session_factory() as session:
-        reloaded = await get_rubric(session, rubric_id)
+        reloaded = await get_rubric(session, rubric_id, instructor_id)
     assert len(reloaded.criteria) == 2  # the 2nd original was deleted, 1 new was added
     assert reloaded.criteria[1].text == "A brand new hand-added criterion"
     assert reloaded.is_active is False  # confirm defaults to False — save draft, not activate
@@ -264,13 +348,20 @@ async def test_update_criteria_rejects_a_criterion_id_from_another_rubric(
     from app.rubric.schemas import CriterionIn, UpdateCriteriaRequest
     from app.rubric.service import update_criteria
 
-    rubric_a = await _seeded_rubric_id(session_factory, tmp_path, monkeypatch)
-    rubric_b = await _seeded_rubric_id(session_factory, tmp_path, monkeypatch)
+    rubric_a, instructor_id = await _seeded_rubric(session_factory, tmp_path, monkeypatch)
+    rubric_b, _ = await _seeded_rubric(session_factory, tmp_path, monkeypatch)
 
     async with session_factory() as session:
-        from app.rubric.service import get_rubric
+        # rubric_b belongs to a different instructor; fetch its criterion
+        # id directly off the model to keep the test focused on the
+        # cross-rubric check, not another authorization path.
+        from sqlalchemy import select as sa_select
+        from sqlalchemy.orm import selectinload
 
-        b_criterion_id = (await get_rubric(session, rubric_b)).criteria[0].id
+        rubric_b_row = await session.scalar(
+            sa_select(Rubric).where(Rubric.id == rubric_b).options(selectinload(Rubric.criteria))
+        )
+        b_criterion_id = rubric_b_row.criteria[0].id
 
     async with session_factory() as session:
         with pytest.raises(NotFoundError):
@@ -282,4 +373,5 @@ async def test_update_criteria_rejects_a_criterion_id_from_another_rubric(
                         CriterionIn(id=b_criterion_id, type="structural", text="x", weight=1.0)
                     ]
                 ),
+                instructor_id,
             )

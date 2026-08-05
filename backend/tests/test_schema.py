@@ -269,3 +269,15 @@ def test_seed_script_is_idempotent(migrated, monkeypatch):
     second = asyncio.run(seed())
     assert "created" in first
     assert "already present" in second
+
+
+def test_seed_script_refuses_to_run_outside_dev(monkeypatch):
+    """BUG-006/D-020: writes a publicly-known password straight from its
+    own source — must never touch a non-dev database. No DATABASE_URL
+    needed: the guard fires before any engine is created."""
+    from scripts.seed_dev import RefusedInProductionError, seed
+
+    monkeypatch.setenv("VERIDICAL_ENV", "prod")
+    get_settings.cache_clear()
+    with pytest.raises(RefusedInProductionError):
+        asyncio.run(seed())

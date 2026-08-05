@@ -23,7 +23,6 @@ from app.ingest.schemas import ExtractionResult, ManuscriptListItem, PaginatedMa
 from app.llm import LLMNotConfiguredError, get_llm_client
 from app.models.citation import Citation
 from app.models.enums import IngestStatus
-from app.models.instructor import Instructor
 from app.models.manuscript import Manuscript
 from app.models.run import CheckRun
 
@@ -161,20 +160,16 @@ async def ingest_upload(
     filename: str,
     group_label: str,
     settings: Settings | None = None,
+    *,
+    instructor_id: int,
 ) -> tuple[Manuscript, ExtractionResult, int]:
     """Full upload flow for the HTTP surface: save (size-capped) → own row
-    → ingest. Uploads attach to the demo instructor until auth lands
-    (V-014) — this endpoint is the dev/demo surface for screen 4f."""
+    → ingest. `instructor_id` is the authenticated caller (BUG-002/D-020) —
+    this endpoint used to attach uploads to whichever instructor had the
+    lowest id, reachable with no login at all; fixed same session it was
+    found."""
     settings = settings or get_settings()
-    instructor = await session.scalar(select(Instructor).order_by(Instructor.id).limit(1))
-    if instructor is None:
-        # A fresh database with no seed: create the demo owner rather than
-        # failing the very first upload of a demo session.
-        instructor = Instructor(email="instructor@demo.local", display_name="Demo Instructor")
-        session.add(instructor)
-        await session.commit()
-
-    manuscript = Manuscript(instructor_id=instructor.id, group_label=group_label, file_ref="")
+    manuscript = Manuscript(instructor_id=instructor_id, group_label=group_label, file_ref="")
     session.add(manuscript)
     await session.commit()
 

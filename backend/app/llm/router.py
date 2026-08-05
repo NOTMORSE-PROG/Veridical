@@ -1,18 +1,24 @@
 """GET /quota — the dashboard quota meter (screens 4e/4u, V-009)."""
 
-from fastapi import APIRouter
+from typing import Annotated
 
+from fastapi import APIRouter, Depends
+
+from app.auth.dependencies import get_current_instructor
 from app.config import get_settings
 from app.llm import get_llm_queue
 from app.llm.pool import load_model_pool, pool_daily_capacity
 from app.llm.queue import next_reset_for, quota_day_for
 from app.llm.schemas import ModelQuotaStatus, QuotaStatus
+from app.models.instructor import Instructor
 
 router = APIRouter(tags=["llm"])
 
 
 @router.get("/quota", response_model=QuotaStatus)
-async def get_quota() -> QuotaStatus:
+async def get_quota(
+    instructor: Annotated[Instructor, Depends(get_current_instructor)],
+) -> QuotaStatus:
     settings = get_settings()
     if settings.veridical_fake_llm:
         # Fake mode spends no real quota — report that honestly rather than

@@ -86,6 +86,13 @@ class Settings(BaseSettings):
     # 200MB "manuscript" should never reach the parser). Real capstone
     # PDFs run 5–25 MB.
     max_upload_mb: int = 40
+    # DOCX is a zip archive — `max_upload_mb` only caps the COMPRESSED size
+    # on disk. A crafted archive can expand far beyond that in memory
+    # during parsing (zip-bomb class risk, BUG-005/D-020). This caps total
+    # UNCOMPRESSED member size before python-docx ever opens the archive;
+    # 500MB is generous for a real manuscript's embedded images while still
+    # bounding worst-case memory against Render's 512MB free-tier ceiling.
+    max_docx_uncompressed_mb: int = 500
 
     # --- LLM queue (V-009, ENGINEERING §3) -----------------------------------
     # Pinned model id (not the "-latest" alias): golden-set comparisons
@@ -255,6 +262,15 @@ class Settings(BaseSettings):
     # becomes multi-tenant, ENGINEERING §7-style honest limitation).
     login_rate_limit_max_attempts: int = 5
     login_rate_limit_window_seconds: float = 300.0
+    # Per-instructor throttle on quota-spending endpoints (check-run
+    # creation, manuscript ingest, rubric upload — BUG-004/D-020): defense-
+    # in-depth against one actor exhausting the shared 300-calls/day Gemini
+    # pool (D-001/D-014, ~17 manuscripts/day sizing). 20/hour is generous
+    # for real usage and bounds a runaway loop or hostile actor; same class
+    # of judgment call as the login limiter's 5/300s above, not a measured
+    # external number.
+    action_rate_limit_max_attempts: int = 20
+    action_rate_limit_window_seconds: float = 3600.0
 
     # --- CORS (V-048) --------------------------------------------------------
     # Comma-separated origins allowed to call the API from a browser. Empty

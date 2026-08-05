@@ -21,23 +21,11 @@ from app.errors import ConflictError, NotFoundError
 from app.ingest.service import detect_format, save_upload, select_extractor
 from app.llm.base import LLMClient
 from app.models.enums import CriterionType, RubricParseStatus
-from app.models.instructor import Instructor
 from app.models.rubric import Criterion, Rubric
 from app.models.run import CheckRun
 from app.rubric.decompose import raw_text_for_decomposition
 from app.rubric.schemas import RubricListItem, UpdateCriteriaRequest
 from app.rubric.validate import attempt_decomposition
-
-
-async def _get_or_create_demo_instructor(session: AsyncSession) -> Instructor:
-    """Uploads attach to the demo instructor until auth lands (V-014) —
-    same convention as manuscript ingestion (app/ingest/service.py)."""
-    instructor = await session.scalar(select(Instructor).order_by(Instructor.id).limit(1))
-    if instructor is None:
-        instructor = Instructor(email="instructor@demo.local", display_name="Demo Instructor")
-        session.add(instructor)
-        await session.commit()
-    return instructor
 
 
 async def create_rubric_from_upload(
@@ -47,19 +35,26 @@ async def create_rubric_from_upload(
     title: str,
     llm: LLMClient,
     settings: Settings | None = None,
+    *,
+    instructor_id: int,
     family_id: uuid.UUID | None = None,
 ) -> Rubric:
     """`family_id=None` (V-010 default) starts a brand-new family at
     version 1. `family_id` set (V-013, "Upload new format" on screen 4m)
     adds the next version to an EXISTING family — old versions, and
-    anything pinned to them, are untouched."""
+    anything pinned to them, are untouched. `instructor_id` is the
+    authenticated caller (BUG-001/D-020) — a family_id owned by a
+    different instructor reads as NotFoundError, same as an unknown one."""
     settings = settings or get_settings()
-    instructor = await _get_or_create_demo_instructor(session)
 
     version = 1
     if family_id is not None:
         siblings = (
-            await session.scalars(select(Rubric).where(Rubric.rubric_family_id == family_id))
+            await session.scalars(
+                select(Rubric).where(
+                    Rubric.rubric_family_id == family_id, Rubric.instructor_id == instructor_id
+                )
+            )
         ).all()
         if not siblings:
             raise NotFoundError(f"No rubric family {family_id}.")
@@ -69,7 +64,7 @@ async def create_rubric_from_upload(
     # as manuscript ingestion: the server-owned id names the stored file,
     # never the user-supplied filename.
     rubric = Rubric(
-        instructor_id=instructor.id,
+        instructor_id=instructor_id,
         title=title,
         source_file="",
         **({"rubric_family_id": family_id, "version": version} if family_id is not None else {}),
@@ -118,9 +113,15 @@ async def create_rubric_from_upload(
     return rubric
 
 
-async def get_rubric(session: AsyncSession, rubric_id: int) -> Rubric:
+async def get_rubric(session: AsyncSession, rubric_id: int, instructor_id: int) -> Rubric:
+    """Row-level authorized (BUG-001/D-020): a rubric owned by a different
+    instructor reads as NotFoundError, identical to an unknown id — no
+    existence leak, same pattern as `_owned_check_run` in
+    `app/report/service.py`."""
     rubric = await session.scalar(
-        select(Rubric).where(Rubric.id == rubric_id).options(selectinload(Rubric.criteria))
+        select(Rubric)
+        .where(Rubric.id == rubric_id, Rubric.instructor_id == instructor_id)
+        .options(selectinload(Rubric.criteria))
     )
     if rubric is None:
         raise NotFoundError(f"No rubric with id {rubric_id}.")
@@ -153,7 +154,7 @@ async def _activate_only(session: AsyncSession, rubric: Rubric) -> None:
 
 
 async def update_criteria(
-    session: AsyncSession, rubric_id: int, body: UpdateCriteriaRequest
+    session: AsyncSession, rubric_id: int, body: UpdateCriteriaRequest, instructor_id: int
 ) -> Rubric:
     """Screen 4d's Save/Confirm action (F2.3): replaces the full criteria
     set (edits, additions, deletions) in one transaction, and — only when
@@ -165,7 +166,7 @@ async def update_criteria(
     to it would silently change what those reports measured — blocked;
     the instructor uploads a new version instead (`family_id=` on
     create_rubric_from_upload)."""
-    rubric = await get_rubric(session, rubric_id)
+    rubric = await get_rubric(session, rubric_id, instructor_id)
     if rubric.is_active and await _has_reports(session, rubric_id):
         raise ConflictError(
             "This version has reports based on it and can no longer be edited — "
@@ -210,17 +211,17 @@ async def update_criteria(
         rubric.parse_issues = None
 
     await session.commit()
-    return await get_rubric(session, rubric_id)
+    return await get_rubric(session, rubric_id, instructor_id)
 
 
-async def activate_rubric(session: AsyncSession, rubric_id: int) -> Rubric:
+async def activate_rubric(session: AsyncSession, rubric_id: int, instructor_id: int) -> Rubric:
     """Screen 4m's "Activate" action — switch which EXISTING version is
     active without touching its criteria (unlike confirm, which follows
     an edit)."""
-    rubric = await get_rubric(session, rubric_id)
+    rubric = await get_rubric(session, rubric_id, instructor_id)
     await _activate_only(session, rubric)
     await session.commit()
-    return await get_rubric(session, rubric_id)
+    return await get_rubric(session, rubric_id, instructor_id)
 
 
 async def _to_list_item(session: AsyncSession, rubric: Rubric) -> RubricListItem:
@@ -242,11 +243,15 @@ async def _to_list_item(session: AsyncSession, rubric: Rubric) -> RubricListItem
     )
 
 
-async def list_rubric_versions(session: AsyncSession, family_id: uuid.UUID) -> list[RubricListItem]:
+async def list_rubric_versions(
+    session: AsyncSession, family_id: uuid.UUID, instructor_id: int
+) -> list[RubricListItem]:
+    """Row-level authorized (BUG-001/D-020): a family owned by a different
+    instructor reads as NotFoundError, same as an unknown id."""
     rubrics = (
         await session.scalars(
             select(Rubric)
-            .where(Rubric.rubric_family_id == family_id)
+            .where(Rubric.rubric_family_id == family_id, Rubric.instructor_id == instructor_id)
             .order_by(Rubric.version.desc())
         )
     ).all()
@@ -276,10 +281,10 @@ async def list_rubric_families(session: AsyncSession, instructor_id: int) -> lis
     return [await _to_list_item(session, r) for r in representatives]
 
 
-async def delete_rubric(session: AsyncSession, rubric_id: int) -> None:
+async def delete_rubric(session: AsyncSession, rubric_id: int, instructor_id: int) -> None:
     """F2.4 AC: blocked (with an explanation) when reports are pinned to
     this version — history is immutable."""
-    rubric = await get_rubric(session, rubric_id)
+    rubric = await get_rubric(session, rubric_id, instructor_id)
     if await _has_reports(session, rubric_id):
         raise ConflictError(
             "This version has reports based on it and can't be deleted — "

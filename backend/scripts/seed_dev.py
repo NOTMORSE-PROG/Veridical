@@ -24,8 +24,21 @@ DEMO_NAME = "Demo Instructor"
 DEMO_PASSWORD = "veridical-dev"
 
 
+class RefusedInProductionError(Exception):
+    """Raised instead of touching the database (BUG-006/D-020): this
+    script writes a publicly-known password straight from its own source,
+    so it must never run anywhere but a dev environment."""
+
+
 async def seed() -> str:
-    engine = create_async_engine(sqlalchemy_url(get_settings().database_url))
+    settings = get_settings()
+    if settings.veridical_env != "dev":
+        raise RefusedInProductionError(
+            f"seed_dev refuses to run against veridical_env={settings.veridical_env!r} "
+            "— it writes a publicly-known password (DEMO_PASSWORD) and must only ever "
+            "touch a dev database."
+        )
+    engine = create_async_engine(sqlalchemy_url(settings.database_url))
     session_factory = async_sessionmaker(engine, expire_on_commit=False)
     async with session_factory() as session:
         existing = await session.scalar(select(Instructor).where(Instructor.email == DEMO_EMAIL))

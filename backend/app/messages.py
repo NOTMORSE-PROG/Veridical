@@ -21,6 +21,12 @@ FILE_TOO_LARGE = (
     "Please export a smaller copy (e.g. compress embedded images)."
 )
 
+DOCX_EXPANDS_TOO_LARGE = (
+    "This document's internal content is much larger than its file size "
+    "suggests and can't be safely processed. Please re-export a clean copy "
+    "from Word."
+)
+
 IMAGE_ONLY_NOTE = (
     "This document contains little or no selectable text (it may be a "
     "scanned copy). Checks that need the text will be limited."

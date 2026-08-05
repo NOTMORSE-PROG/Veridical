@@ -8,6 +8,8 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import text
 
+import app.auth.service as auth_service
+from app.auth.security import hash_password
 from app.config import get_settings
 from tests.test_ingest_pdf import PdfBuilder
 
@@ -39,12 +41,15 @@ def api_scratch_url():
 @pytest.fixture()
 def client(api_scratch_url, tmp_path, monkeypatch):
     import app.db as db
+    import app.ratelimit as ratelimit
 
     monkeypatch.setenv("DATABASE_URL", api_scratch_url)
     monkeypatch.setenv("DATA_DIR", str(tmp_path / "data"))
     monkeypatch.setenv("VERIDICAL_FAKE_LLM", "1")
     get_settings.cache_clear()
     db._engine = None
+    auth_service._rate_limiter = None
+    ratelimit._limiters.clear()  # BUG-004: don't leak rubric-upload counts across tests
     from app.main import app
 
     with TestClient(app) as c:
@@ -82,6 +87,37 @@ def _clean_tables(api_scratch_url):
 
     asyncio.run(_truncate())
     yield
+
+
+@pytest.fixture(autouse=True)
+def _logged_in(client, _clean_tables, api_scratch_url):
+    """Seed the demo instructor and log the shared `client` in — every
+    rubric route now requires auth (BUG-001/D-020). Depends on
+    `_clean_tables` explicitly so the truncate always runs first."""
+    import asyncio
+
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
+    from app.db import sqlalchemy_url
+    from app.models.instructor import Instructor
+
+    async def seed():
+        engine = create_async_engine(sqlalchemy_url(api_scratch_url))
+        try:
+            async with async_sessionmaker(engine, expire_on_commit=False)() as session:
+                session.add(
+                    Instructor(
+                        email="prof@tip.edu.ph",
+                        display_name="Prof",
+                        password_hash=hash_password("s3cret!"),
+                    )
+                )
+                await session.commit()
+        finally:
+            await engine.dispose()
+
+    asyncio.run(seed())
+    client.post("/auth/login", json={"email": "prof@tip.edu.ph", "password": "s3cret!"})
 
 
 def _rubric_pdf(tmp_path):

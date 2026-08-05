@@ -6,11 +6,13 @@ from fastapi import APIRouter, BackgroundTasks, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.dependencies import get_current_instructor
+from app.config import get_settings
 from app.db import get_session
 from app.models.instructor import Instructor
 from app.pipeline.schemas import CheckRunOut, CreateCheckRunRequest
 from app.pipeline.service import create_check_run, get_check_run, list_check_runs, queue_position
 from app.pipeline.worker import advance_once
+from app.ratelimit import enforce_action_rate_limit
 
 router = APIRouter(tags=["check-runs"])
 
@@ -37,6 +39,7 @@ async def create_check_run_route(
     session: Annotated[AsyncSession, Depends(get_session)],
     instructor: Annotated[Instructor, Depends(get_current_instructor)],
 ) -> CheckRunOut:
+    enforce_action_rate_limit(get_settings(), "check_run", instructor.id)
     check_run = await create_check_run(session, instructor.id, body.manuscript_id, body.rubric_id)
     # Kick it now rather than waiting for the poll loop's next tick — the
     # background worker still owns steady-state progress and any queueing

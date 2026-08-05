@@ -29,6 +29,12 @@ class LoginRateLimiter:
         self._prune(key)
         self._attempts[key].append(self._clock())
 
+    def record_attempt(self, key: str) -> None:
+        """Same counter as `record_failure` — an alias for callers with no
+        pass/fail notion (BUG-004/D-020's per-action limiter just counts
+        "one more request happened," not login failures specifically)."""
+        self.record_failure(key)
+
     def reset(self, key: str) -> None:
         self._attempts.pop(key, None)
 

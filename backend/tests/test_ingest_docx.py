@@ -7,6 +7,7 @@ when the owner obtains one (recorded gap).
 """
 
 import io
+import zipfile
 from pathlib import Path
 
 import docx as docx_lib
@@ -14,7 +15,7 @@ import pymupdf
 import pytest
 
 from app.config import get_settings
-from app.errors import FileMalformedError
+from app.errors import FileMalformedError, FileTooLargeError
 from app.ingest.docx import extract_document
 from app.ingest.schemas import SectionNode
 from app.ingest.service import select_extractor
@@ -176,6 +177,25 @@ def test_malformed_docx_raises_taxonomy_error(tmp_path):
     bad.write_bytes(b"this is not a docx")
     with pytest.raises(FileMalformedError):
         extract_document(str(bad), get_settings())
+
+
+def test_docx_with_a_high_decompression_ratio_is_rejected_before_parsing(tmp_path, monkeypatch):
+    """BUG-005/D-020: a small on-disk DOCX whose declared uncompressed
+    content exceeds the configured ceiling is rejected before
+    python-docx ever unpacks it (zip-bomb class risk)."""
+    monkeypatch.setenv("MAX_DOCX_UNCOMPRESSED_MB", "1")
+    get_settings.cache_clear()
+    settings = get_settings()
+
+    path = tmp_path / "bomb.docx"
+    # Highly repetitive content compresses to a few KB on disk but the
+    # zip's own metadata still reports ~2MB of real uncompressed size —
+    # over the 1MB ceiling just configured.
+    with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr("word/document.xml", b"A" * (2 * 1024 * 1024))
+
+    with pytest.raises(FileTooLargeError):
+        extract_document(str(path), settings)
 
 
 def test_legacy_doc_rejected_with_clear_message():
