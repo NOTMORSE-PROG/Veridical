@@ -7,7 +7,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.config import get_settings
 from app.models.base import Base, PkCreatedMixin
-from app.models.enums import IngestStatus
+from app.models.enums import IngestFailureReason, IngestStatus
 
 if TYPE_CHECKING:
     from app.models.citation import Citation
@@ -23,6 +23,11 @@ class Manuscript(Base, PkCreatedMixin):
     file_ref: Mapped[str] = mapped_column(String(1024))
     ingest_status: Mapped[IngestStatus] = mapped_column(
         Enum(IngestStatus, native_enum=False), server_default=IngestStatus.pending
+    )
+    # BUG-016: a failed row must say why, not dead-end silently. NULL means
+    # "failed before this field existed" (old rows), never fabricated.
+    ingest_failure_reason: Mapped[IngestFailureReason | None] = mapped_column(
+        Enum(IngestFailureReason, native_enum=False)
     )
     # Chapter/section hierarchy produced by ingestion (F1); shape owned by V-004.
     section_tree: Mapped[dict[str, Any] | None] = mapped_column(JSONB)

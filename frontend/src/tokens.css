@@ -68,6 +68,24 @@
   --color-focus-inner-on-dark: var(--color-neutral-0);
 
   /*
+   * Status palette (V-055, screen 4e) — colorblind-checked: deuteranopia
+   * and protanopia simulated live against the real rendered pills before
+   * adoption, not just cited from general knowledge (context/RESEARCH.md
+   * §22 has the methodology). Replaces the legacy red/green status-pill
+   * pair, which measurably collapsed to near-identical pale beige under
+   * both simulations. Always paired with an icon + text label (WCAG
+   * 1.4.1) even though these ratios alone already clear 1.4.3/1.4.11.
+   */
+  --color-status-success-bg: #e3f6f4;
+  --color-status-success-text: #0d6e64;
+  --color-status-info-bg: #e7eefa;
+  --color-status-info-text: #2456a8;
+  --color-status-neutral-bg: var(--color-neutral-100);
+  --color-status-neutral-text: var(--color-neutral-600);
+  --color-status-attention-bg: #fdf0e1;
+  --color-status-attention-text: #92400e;
+
+  /*
    * LEGACY — retired palette, kept only so far-from-migrated screens don't
    * silently render unstyled mid-reconstruction (`--color-*: initial`
    * above means an undefined token is a missing CSS rule, not a build

@@ -30,4 +30,21 @@
   .on-dark:focus-visible {
     outline-color: var(--color-focus-inner-on-dark);
   }
+
+  /*
+   * WCAG 2.4.11 Focus Not Obscured (V-055): AppShell's header is sticky
+   * (visibility-of-system-status for a long manuscripts table), so every
+   * focusable element inside <main> needs enough scroll-margin to clear
+   * it when Tab scrolls it into view -- otherwise a focused control can
+   * land hidden underneath the header. Matches the header's own height
+   * tokens exactly.
+   */
+  main :is(a, button, input, select, textarea, [tabindex]) {
+    scroll-margin-top: calc(var(--header-height-mobile) + var(--spacing-2));
+  }
+  @media (min-width: 640px) {
+    main :is(a, button, input, select, textarea, [tabindex]) {
+      scroll-margin-top: calc(var(--header-height) + var(--spacing-2));
+    }
+  }
 }

@@ -43,10 +43,13 @@ export interface RubricListItem {
   report_count: number;
 }
 
+export type IngestFailureReason = "file_too_large" | "unreadable_format" | "extraction_failed";
+
 export interface ManuscriptListItem {
   id: number;
   group_label: string;
   ingest_status: "pending" | "processing" | "done" | "failed";
+  ingest_failure_reason: IngestFailureReason | null;
   created_at: string;
   latest_check_run_id: number | null;
   latest_check_run_status: CheckRunStatus | null;

@@ -148,6 +148,9 @@ class ManuscriptListItem(BaseModel):
     id: int
     group_label: str
     ingest_status: str
+    # None unless ingest_status is "failed" AND the reason was captured
+    # (BUG-016) — NULL, never fabricated, for pre-existing failed rows.
+    ingest_failure_reason: str | None = None
     created_at: datetime
     # None until a check has been run against this manuscript at least
     # once; lets the dashboard table (V-021) link "view progress"/"open
