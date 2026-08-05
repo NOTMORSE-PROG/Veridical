@@ -1,12 +1,13 @@
 // Route shell (V-014): auth-gated app routes render inside the one
 // AppShell; /gallery stays the ungated V-002 component review page.
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { BrowserRouter, Navigate, Route, Routes } from "react-router";
+import { BrowserRouter, Route, Routes } from "react-router";
 import { AuditLogPage } from "./audit/AuditLog";
 import { RequireAuth } from "./auth/RequireAuth";
 import { CheckProgressPage } from "./check/Progress";
 import { FlagDetailPage } from "./flags/FlagDetail";
 import { GalleryPage } from "./gallery/GalleryPage";
+import { LandingRoute } from "./pages/Landing";
 import { DashboardPage } from "./pages/Dashboard";
 import { SignInPage } from "./pages/SignIn";
 import { ReportPage } from "./report/Report";
@@ -21,7 +22,7 @@ export default function App() {
     <QueryClientProvider client={queryClient}>
       <BrowserRouter>
         <Routes>
-          <Route path="/" element={<Navigate to="/dashboard" replace />} />
+          <Route path="/" element={<LandingRoute />} />
           <Route path="/signin" element={<SignInPage />} />
           <Route
             path="/dashboard"

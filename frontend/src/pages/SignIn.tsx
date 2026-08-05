@@ -2,9 +2,10 @@
 // masthead + real H1 + two-column form/sidebar layout, GOV.UK-style error
 // summary, no native validation bubbles or alert() (custom-everything rule).
 import { type FormEvent, useEffect, useId, useRef, useState } from "react";
-import { Navigate, useLocation, useNavigate } from "react-router";
+import { Link, Navigate, useLocation, useNavigate } from "react-router";
 import { ApiError } from "../api/client";
 import { useLogin, useMe } from "../auth/useAuth";
+import { useRouteFocus } from "../routing/useRouteFocus";
 
 interface LocationState {
   from?: { pathname: string };
@@ -39,10 +40,9 @@ export function SignInPage() {
   const summaryRef = useRef<HTMLDivElement>(null);
   const emailRef = useRef<HTMLInputElement>(null);
   const passwordRef = useRef<HTMLInputElement>(null);
+  const headingRef = useRef<HTMLHeadingElement>(null);
 
-  useEffect(() => {
-    document.title = "Sign in - VERIDICAL";
-  }, []);
+  useRouteFocus("Sign in - VERIDICAL", headingRef);
 
   const hasErrors = Boolean(formError || fieldErrors.email || fieldErrors.password);
 
@@ -127,7 +127,13 @@ export function SignInPage() {
       <main className="mx-auto w-full max-w-[1120px] flex-1 px-4 pt-8 pb-16 sm:px-6 sm:pt-12 lg:px-10">
         <div className="grid grid-cols-1 gap-10 lg:grid-cols-[minmax(0,480px)_minmax(0,360px)]">
           <div>
-            <h1 className="text-lg font-bold text-ink sm:text-xl">Sign in to VERIDICAL</h1>
+            <h1
+              ref={headingRef}
+              tabIndex={-1}
+              className="text-lg font-bold text-ink outline-none sm:text-xl"
+            >
+              Sign in to VERIDICAL
+            </h1>
             <p className="mt-2 text-base text-ink-secondary">
               Quality and integrity assurance for BSIT capstone manuscripts.
             </p>
@@ -174,7 +180,13 @@ export function SignInPage() {
               </div>
             )}
 
-            <form id="signin-form" noValidate onSubmit={handleSubmit} className="mt-6 flex flex-col gap-4">
+            <form
+              id="signin-form"
+              tabIndex={-1}
+              noValidate
+              onSubmit={handleSubmit}
+              className="mt-6 flex flex-col gap-4 outline-none"
+            >
               <div className="flex flex-col gap-1">
                 <label htmlFor={emailId} className="text-sm font-medium text-ink">
                   Email address
@@ -297,6 +309,11 @@ export function SignInPage() {
                 VERIDICAL checks capstone manuscripts against your program's own rubric and flags
                 anything worth a second look. Every flag shows its evidence. You always make the
                 final call.
+              </p>
+              <p className="mt-2 text-sm">
+                <Link to="/" className="text-link underline hover:text-link-hover">
+                  Learn more about VERIDICAL
+                </Link>
               </p>
             </div>
             <div>
