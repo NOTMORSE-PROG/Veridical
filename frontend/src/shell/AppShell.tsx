@@ -248,13 +248,15 @@ export function AppShell({ children }: { children: ReactNode }) {
       </a>
 
       <header className="sticky top-0 z-40 flex h-14 items-center gap-3 border-b-[3px] border-accent bg-panel px-4 shadow-sm md:h-16 md:px-6 relative">
-        <span
-          aria-hidden="true"
-          className="flex h-7 w-7 flex-none items-center justify-center rounded-sm bg-action text-sm font-bold text-on-action"
-        >
-          V
-        </span>
-        <span className="text-sm font-bold tracking-header text-ink">VERIDICAL</span>
+        <Link to="/dashboard" className="flex flex-none items-center gap-2 rounded-sm">
+          <span
+            aria-hidden="true"
+            className="flex h-7 w-7 flex-none items-center justify-center rounded-sm bg-action text-sm font-bold text-on-action"
+          >
+            V
+          </span>
+          <span className="text-sm font-bold tracking-header text-ink">VERIDICAL</span>
+        </Link>
 
         <nav aria-label="Primary" className="ml-2.5 hidden items-center gap-4 md:flex">
           <DesktopNavLinks />

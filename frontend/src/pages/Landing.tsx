@@ -297,7 +297,7 @@ function LandingPage() {
 
       <header className="border-b-[3px] border-accent bg-action">
         <div className="mx-auto flex h-14 max-w-[1120px] items-center justify-between px-4 sm:h-16 sm:px-6 lg:px-10">
-          <div className="flex items-center gap-2">
+          <Link to="/" className="on-dark flex items-center gap-2 rounded-sm">
             <span
               aria-hidden="true"
               className="flex h-7 w-7 items-center justify-center rounded-sm bg-accent text-sm font-bold text-ink sm:h-8 sm:w-8"
@@ -307,7 +307,7 @@ function LandingPage() {
             <span className="text-base font-bold tracking-header text-on-action sm:text-md">
               VERIDICAL
             </span>
-          </div>
+          </Link>
           <Link
             to="/signin"
             className="on-dark inline-flex h-11 items-center justify-center rounded-md border border-neutral-0 px-4 text-sm font-bold text-on-action hover:bg-neutral-0 hover:text-ink"

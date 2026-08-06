@@ -126,4 +126,11 @@ describe("SignInPage", () => {
     expect(await screen.findByText("Report page")).toBeInTheDocument();
     expect(screen.queryByText("Dashboard page")).not.toBeInTheDocument();
   });
+
+  it("the header logo is a real link back to the landing page (previously dead-ended a visitor here with no way back)", async () => {
+    vi.stubGlobal("fetch", stubFetchByPath({ "/auth/me": SIGNED_OUT }));
+    renderWithProviders(<SignInPage />);
+    await waitFor(() => screen.getByRole("button", { name: "Sign in" }));
+    expect(screen.getByRole("link", { name: "VERIDICAL" })).toHaveAttribute("href", "/");
+  });
 });
