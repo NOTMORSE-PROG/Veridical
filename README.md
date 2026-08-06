@@ -64,3 +64,11 @@ uv run uvicorn app.main:app --reload
 
 - Imperative summary <72 chars, reference tickets as `V-###`
 - Code commits must be accompanied by a changelog entry (enforced by a local pre-commit hook running `tools/check_changelog.py`)
+
+## License
+
+MIT (see `LICENSE`). The statistical-forensics stack (`statcheck_python`)
+is GPL-3.0 and used as an ordinary dependency, not vendored — VERIDICAL
+runs it as a backend service and never redistributes it or a combined
+work, so GPL-3.0's copyleft (which triggers on distribution) doesn't
+reach this project's own license choice.
