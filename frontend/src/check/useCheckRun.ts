@@ -35,7 +35,16 @@ export function useCheckRun(id: number) {
     queryFn: () => api.get<CheckRun>(`/check-runs/${id}`),
     // Stops polling once the run is terminal — a finished run never
     // changes again, so there's nothing left to poll for (screen 4g).
+    // Stopping on a persisting fetch error too is not just an
+    // optimization: without it, `query.state.data` never becomes
+    // defined, so this callback keeps returning 2_000 forever and the
+    // query never settles into `isError` — confirmed live (ux-critic,
+    // V-055 4g review) as an indefinite "Loading…" state that silently
+    // re-polled a dead/404'd check run 75+ times over 65+ seconds,
+    // `aria-busy="true"` the whole time. The "Try again" button still
+    // triggers a fresh manual fetch regardless of this setting.
     refetchInterval: (query) => {
+      if (query.state.status === "error") return false;
       const status = query.state.data?.status;
       return status && TERMINAL_STATUSES.has(status) ? false : 2_000;
     },
