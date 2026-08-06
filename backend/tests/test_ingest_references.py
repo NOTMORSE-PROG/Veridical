@@ -13,7 +13,7 @@ import pytest
 
 from app.config import get_settings
 from app.ingest.patterns import load_patterns
-from app.ingest.references import extract_references, parse_reference
+from app.ingest.references import extract_references, non_reference_blocks, parse_reference
 from app.models.enums import CitationParseStatus
 from tests.test_ingest_pdf import DEMO_PDF, PdfBuilder
 
@@ -146,6 +146,29 @@ def test_docx_paragraph_segmentation(tmp_path):
     drafts = extract_references(result, load_patterns(settings.ingest_patterns_file))
     assert len(drafts) == 3
     assert [d_.parse_status for d_ in drafts] == [CitationParseStatus.parsed] * 3
+
+
+def test_non_reference_blocks_excludes_reference_span(tmp_path):
+    """V-027's search space for in-text citations: body text stays, the
+    bibliography entries (which also contain "(2020)"-shaped substrings)
+    are excluded so they're never mistaken for in-text mentions."""
+    b = PdfBuilder()
+    b.new_page().line("CHAPTER 1 INTRODUCTION", bold=True).line(
+        "Prior work (Reyes, 2023) motivates this study."
+    )
+    b.new_page().line("REFERENCES", bold=True)
+    b.line(WELL_FORMED[0][0])
+    path = b.save(tmp_path / "body_and_refs.pdf")
+    from app.ingest.pdf import extract_document
+
+    settings = get_settings()
+    result = extract_document(str(path), settings)
+    patterns = load_patterns(settings.ingest_patterns_file)
+    body = non_reference_blocks(result, patterns)
+    joined = " ".join(bl.text for bl in body)
+    assert "Prior work" in joined
+    assert "Assessing capstone readiness" not in joined  # the reference entry itself
+    assert len(body) < len(result.blocks)
 
 
 def test_document_without_references_yields_empty_not_error(tmp_path):

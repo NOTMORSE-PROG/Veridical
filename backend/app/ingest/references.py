@@ -68,6 +68,17 @@ def extract_references(result: ExtractionResult, patterns: HeadingPatterns) -> l
     return [parse_reference(raw, i) for i, raw in enumerate(entries)]
 
 
+def non_reference_blocks(result: ExtractionResult, patterns: HeadingPatterns) -> list[TextBlock]:
+    """All non-furniture blocks OUTSIDE the reference-list span — the search
+    space for in-text citation extraction (F5.1/V-027), so bibliography
+    entries (which also contain "(2020)"-shaped substrings) are never
+    mistaken for in-text mentions. Identity-based exclusion: `_reference_span`
+    slices `result.blocks`, so its entries are the SAME `TextBlock` objects.
+    """
+    ref_ids = {id(b) for b in _reference_span(result, patterns)}
+    return [b for b in result.blocks if not b.is_furniture and id(b) not in ref_ids]
+
+
 def parse_reference(raw: str, order_index: int) -> CitationDraft:
     """Best-effort APA parse. Never raises: any surprise leaves the entry
     as parse_failed with its raw text intact."""
