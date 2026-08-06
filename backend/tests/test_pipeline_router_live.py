@@ -60,18 +60,31 @@ def client(api_scratch_url, tmp_path, monkeypatch):
 
 @pytest.fixture()
 def logged_in(client, api_scratch_url, tmp_path):
-    """Seeds an instructor + an ingested manuscript + an active rubric,
-    logs in, and returns (client, manuscript_id, rubric_id)."""
+    """Seeds an instructor + a REALLY ingested manuscript (V-029: the
+    background check-run advance now always inspects the raw extraction
+    store for citation integrity, so `ingest_status=done` must be backed
+    by a real store the same way production guarantees — a manuscript row
+    faked as "done" without one is a fixture bug, not a case the pipeline
+    should silently tolerate) + an active rubric, logs in, and returns
+    (client, manuscript_id, rubric_id)."""
     import asyncio
 
     from sqlalchemy import text
     from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
+    from app.config import get_settings as _get_settings
     from app.db import sqlalchemy_url
-    from app.models.enums import IngestStatus
+    from app.ingest.service import ingest_manuscript
     from app.models.instructor import Instructor
     from app.models.manuscript import Manuscript
     from app.models.rubric import Rubric
+    from tests.test_ingest_pdf import PdfBuilder
+
+    pdf_builder = PdfBuilder()
+    pdf_builder.new_page().line("A STUDY OF THINGS", size=16, bold=True)
+    pdf_builder.new_page().line("ABSTRACT", bold=True)
+    pdf_builder.line("This is a test sentence used as evidence.")
+    pdf_path = pdf_builder.save(tmp_path / "seed.pdf")
 
     async def seed():
         engine = create_async_engine(sqlalchemy_url(api_scratch_url))
@@ -92,18 +105,18 @@ def logged_in(client, api_scratch_url, tmp_path):
                 session.add(instructor)
                 await session.commit()
                 manuscript = Manuscript(
-                    instructor_id=instructor.id,
-                    group_label="G-11",
-                    file_ref="x.pdf",
-                    ingest_status=IngestStatus.done,
+                    instructor_id=instructor.id, group_label="G-11", file_ref=str(pdf_path)
                 )
+                session.add(manuscript)
+                await session.commit()
+                await ingest_manuscript(session, manuscript, pdf_path, _get_settings())
                 rubric = Rubric(
                     instructor_id=instructor.id,
                     title="Format",
                     source_file="r.pdf",
                     is_active=True,
                 )
-                session.add_all([manuscript, rubric])
+                session.add(rubric)
                 await session.commit()
                 return manuscript.id, rubric.id
         finally:

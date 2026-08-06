@@ -21,6 +21,10 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.checks.citations.verify import (
+    existing_citation_integrity_result,
+    run_citation_integrity_check,
+)
 from app.checks.consistency import run_semantic_checks_with_consistency
 from app.checks.router import RouteDecision, apply_routing, route_criteria
 from app.checks.rules.context import build_rule_context
@@ -28,11 +32,14 @@ from app.checks.semantic import record_ungraded
 from app.checks.structural import run_structural_check
 from app.config import Settings, get_settings
 from app.errors import ApiDownError, FileMalformedError, QuotaExhaustedError
+from app.external.http import build_http_client
+from app.ingest.patterns import load_patterns
 from app.ingest.service import load_raw_store
 from app.llm import get_llm_client
 from app.llm.base import LLMClient
 from app.llm.queue import next_reset_for
 from app.models.audit import AuditLog
+from app.models.citation import Citation
 from app.models.enums import CheckKind, CheckRunStatus, IngestStatus, ResultOutcome
 from app.models.manuscript import Manuscript
 from app.models.rubric import Rubric
@@ -48,10 +55,12 @@ _STAGE_AFTER: dict[CheckRunStatus, CheckRunStatus] = {
     CheckRunStatus.aggregating: CheckRunStatus.done,
 }
 
-_INTEGRITY_SKIPPED_NOTE = (
-    "Integrity checks (internal agreement, citation integrity, statistical "
-    "forensics, originality/reuse) are not implemented yet. They arrive in "
-    "a later milestone. This stage is honestly skipped, not faked as passed."
+_STATISTICAL_FORENSICS_ORIGINALITY_NOT_IMPLEMENTED_NOTE = (
+    "Citation integrity (in-text cross-match, existence, retraction checks) "
+    "ran. Statistical forensics and originality/reuse checks are not "
+    "implemented yet and arrive in a later milestone — honestly noted, not "
+    "faked as passed. Internal agreement is already covered by "
+    "self-consistency voting on every AI-graded criterion (D-006)."
 )
 
 
@@ -298,9 +307,38 @@ async def _degrade_pending_semantic(
     return len(pending)
 
 
-def _run_integrity_stage(check_run: CheckRun) -> None:
+async def _run_integrity_stage(
+    session: AsyncSession, check_run: CheckRun, manuscript: Manuscript, settings: Settings
+) -> None:
+    """F5 (citation integrity, V-027/V-028/V-029) runs for real; F6
+    (statistical forensics) and F7 (originality/reuse) don't exist yet —
+    honestly noted, not silently skipped (charter rule 9)."""
+    existing = await existing_citation_integrity_result(session, check_run.id)
+    if existing is None:
+        citations = list(
+            (
+                await session.scalars(
+                    select(Citation)
+                    .where(Citation.manuscript_id == manuscript.id)
+                    .order_by(Citation.order_index)
+                )
+            ).all()
+        )
+        extraction = load_raw_store(settings, manuscript.id)
+        patterns = load_patterns(settings.ingest_patterns_file)
+        async with build_http_client(settings) as client:
+            result = await run_citation_integrity_check(
+                session, client, check_run.id, citations, extraction, patterns, settings
+            )
+        n_flags = result.detail.get("n_flags", 0) if result.detail else 0
+    else:
+        n_flags = existing.detail.get("n_flags", 0) if existing.detail else 0
     _record_stage(
-        check_run, CheckRunStatus.integrity, status="skipped", note=_INTEGRITY_SKIPPED_NOTE
+        check_run,
+        CheckRunStatus.integrity,
+        status="done",
+        citation_integrity_flags=n_flags,
+        note=_STATISTICAL_FORENSICS_ORIGINALITY_NOT_IMPLEMENTED_NOTE,
     )
 
 
@@ -349,7 +387,7 @@ async def run_check_run(
             await session.commit()
 
         if check_run.status == CheckRunStatus.integrity:
-            _run_integrity_stage(check_run)
+            await _run_integrity_stage(session, check_run, manuscript, settings)
             check_run.status = _STAGE_AFTER[CheckRunStatus.integrity]
             await session.commit()
 

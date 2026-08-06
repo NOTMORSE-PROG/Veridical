@@ -1,8 +1,9 @@
 """V-018 live-DB tests: the check-run state machine's own acceptance
 criteria — full happy path, resumability (kill/restart, no duplicate LLM
 calls), quota_exhausted parking + auto-resume, distinct failure taxonomy,
-and the integrity stage's honest "not implemented yet" skip. Own scratch
-DB, same convention as the other V2 live tests.
+and the integrity stage (V-029: citation integrity runs for real; F6/F7
+are honestly noted as not implemented yet). Own scratch DB, same
+convention as the other V2 live tests.
 """
 
 import os
@@ -192,7 +193,10 @@ async def test_full_happy_path_reaches_done_with_a_real_report(
             .scalars()
             .all()
         )
-        assert {r.criterion_id for r in results} == set(criterion_ids)
+        # One result per rubric criterion, plus one integrity check_result
+        # (criterion_id=None — F4-F7 aren't rubric criteria, model docstring).
+        assert {r.criterion_id for r in results if r.criterion_id is not None} == set(criterion_ids)
+        assert any(r.kind == CheckKind.citation_integrity for r in results)
         # Reload the check_run from a FRESH session — the in-memory object
         # already had every stage recorded, but a real bug (found live via
         # Playwright, see test below) had every stage after the first
@@ -243,18 +247,40 @@ async def test_stage_status_survives_a_fresh_reload_every_stage(
         assert stages["ingesting"]["status"] == "done"
         assert stages["structural"]["status"] == "done"
         assert stages["semantic"]["status"] == "done"
-        assert stages["integrity"]["status"] == "skipped"
+        assert stages["integrity"]["status"] == "done"
         assert stages["aggregating"]["status"] == "done"
 
 
-async def test_integrity_stage_is_honestly_skipped_not_faked(
+async def test_integrity_stage_runs_citation_check_and_notes_pending_forensics(
     session_factory, tmp_path, monkeypatch
 ):
+    """V-029: the integrity stage now actually runs citation integrity
+    (F5) — the fixture PDF has no reference list, so this exercises the
+    zero-citations path (no network calls, a real CheckResult with
+    n_references=0) while still honestly noting that F6/F7 don't exist yet
+    (charter rule 9: a partial implementation is reported as partial)."""
     check_run_id, _, settings = await _seed(session_factory, tmp_path, monkeypatch)
     async with session_factory() as session:
         check_run = await session.get(CheckRun, check_run_id)
         await run_check_run(session, check_run, settings, FakeLLMClient())
-        assert check_run.stage_status["stages"]["integrity"]["status"] == "skipped"
+        assert check_run.stage_status["stages"]["integrity"]["status"] == "done"
+        note = check_run.stage_status["stages"]["integrity"]["note"]
+        assert "Citation integrity" in note
+        assert "not implemented yet" in note
+
+    async with session_factory() as verify:
+        result = (
+            await verify.execute(
+                select(CheckResult).where(
+                    CheckResult.check_run_id == check_run_id,
+                    CheckResult.kind == CheckKind.citation_integrity,
+                )
+            )
+        ).scalar_one()
+        assert result.criterion_id is None
+        assert result.outcome == ResultOutcome.passed
+        assert result.detail["n_references"] == 0
+        assert result.detail["n_flags"] == 0
 
 
 class _FlakyThenFineLLM:
