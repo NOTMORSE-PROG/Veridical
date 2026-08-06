@@ -86,6 +86,22 @@
   --color-status-attention-text: #92400e;
 
   /*
+   * Severity ramp (V-055, screen 4i) — sequential blue -> amber -> red,
+   * deliberately not a red/green pair. A live deuteranopia/protanopia
+   * simulation of red-vs-amber (the two ends nearest each other) showed
+   * HIGH/MEDIUM converging toward the same olive tone under both
+   * conditions — text label + icon shape (SeverityTag's level-meter
+   * bars) carry the distinction, never color alone (WCAG 1.4.1). Pure
+   * aliases of already-contrast-verified primitives above, not new hex.
+   */
+  --color-severity-high-bg: var(--color-danger-bg);
+  --color-severity-high-text: var(--color-danger);
+  --color-severity-med-bg: var(--color-status-attention-bg);
+  --color-severity-med-text: var(--color-status-attention-text);
+  --color-severity-low-bg: var(--color-status-info-bg);
+  --color-severity-low-text: var(--color-status-info-text);
+
+  /*
    * LEGACY — retired palette, kept only so far-from-migrated screens don't
    * silently render unstyled mid-reconstruction (`--color-*: initial`
    * above means an undefined token is a missing CSS rule, not a build
