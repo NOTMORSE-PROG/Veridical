@@ -1,7 +1,18 @@
-import { screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { MemoryRouter } from "react-router";
 import { renderWithProviders, stubFetchByPath } from "../test/renderWithProviders";
 import { AppShell } from "./AppShell";
+
+// Desktop nav + the mobile disclosure panel's own nav both render in the
+// DOM at once (the panel is toggled via the `hidden` attribute, not
+// unmounted) — every nav-item query here expects TWO matches, not one.
+// The mobile panel's account block ("Sign out") is inside that same
+// `hidden`-gated container, so it's correctly excluded from role queries
+// while the panel is closed (jsdom respects the native `hidden`
+// attribute, unlike Tailwind's `md:hidden` classes which need real CSS
+// media-query support jsdom doesn't have).
 
 const QUOTA = {
   mode: "fake",
@@ -18,7 +29,7 @@ const QUOTA = {
 describe("AppShell", () => {
   afterEach(() => vi.unstubAllGlobals());
 
-  it("shows the signed-in instructor's initials and a real (not invented) quota number", async () => {
+  it("shows the signed-in instructor's initials and a real (not invented) quota direction", async () => {
     vi.stubGlobal(
       "fetch",
       stubFetchByPath({
@@ -33,10 +44,31 @@ describe("AppShell", () => {
       { route: "/dashboard" },
     );
     await waitFor(() => expect(screen.getByText("DI")).toBeInTheDocument());
-    expect(screen.getByText("Quota 0%")).toBeInTheDocument();
+    // BUG-017: never a bare, directionless percentage. Rendered twice — a
+    // visible (mobile-hidden) span and an sr-only span carry the same
+    // full sentence, since a short mobile badge ("100% left") replaces it
+    // visually below the sm: breakpoint but the accessible name stays full.
+    expect(screen.getAllByText("AI capacity: 100% remaining today").length).toBe(2);
   });
 
-  it("underlines the active nav link for the current route", async () => {
+  it("BUG-017: shows an unambiguous 'no capacity left' state, not a bare 0%", async () => {
+    vi.stubGlobal(
+      "fetch",
+      stubFetchByPath({
+        "/auth/me": { id: 1, email: "a@b.com", display_name: "Demo Instructor" },
+        "/quota": { ...QUOTA, calls_used: 1400, calls_remaining: 0 },
+      }),
+    );
+    renderWithProviders(
+      <AppShell>
+        <div>content</div>
+      </AppShell>,
+      { route: "/dashboard" },
+    );
+    expect((await screen.findAllByText("No AI capacity left today")).length).toBe(2);
+  });
+
+  it("marks the active nav link with aria-current, not just a class (BUG-015 area)", async () => {
     vi.stubGlobal(
       "fetch",
       stubFetchByPath({
@@ -50,11 +82,15 @@ describe("AppShell", () => {
       </AppShell>,
       { route: "/dashboard" },
     );
+    // Only the desktop nav's link is in the accessibility tree right now —
+    // the mobile panel is closed (`hidden`), correctly excluding its
+    // duplicate copy from getByRole (unlike getByText, which doesn't check
+    // accessibility-tree visibility and would find both).
     const dashboardLink = await screen.findByRole("link", { name: "Dashboard" });
-    expect(dashboardLink.className).toMatch(/border-primary/);
+    expect(dashboardLink).toHaveAttribute("aria-current", "page");
   });
 
-  it("renders every nav item every page uses the same one shell (no per-page nav)", async () => {
+  it("renders every real nav item — the same one shell every page uses (no per-page nav)", async () => {
     vi.stubGlobal(
       "fetch",
       stubFetchByPath({
@@ -67,8 +103,137 @@ describe("AppShell", () => {
         <div />
       </AppShell>,
     );
-    for (const label of ["Dashboard", "Rubric", "Submissions", "Archive", "Audit log", "Settings"]) {
-      expect(screen.getByText(label)).toBeInTheDocument();
+    for (const label of ["Dashboard", "Rubric", "Audit log"]) {
+      expect(screen.getAllByText(label).length).toBe(2);
     }
+  });
+
+  it("nav redesign: no placeholder item advertises an unbuilt/unapproved feature (Submissions referenced the BLOCKED V7 student portal, D-005)", async () => {
+    vi.stubGlobal(
+      "fetch",
+      stubFetchByPath({
+        "/auth/me": new Response(JSON.stringify({ error: {} }), { status: 401 }),
+        "/quota": QUOTA,
+      }),
+    );
+    renderWithProviders(
+      <AppShell>
+        <div />
+      </AppShell>,
+    );
+    for (const label of ["Submissions", "Archive", "Settings", "Soon"]) {
+      expect(screen.queryByText(label)).not.toBeInTheDocument();
+    }
+  });
+
+  it("BUG-024: the mobile account block (sign-out) lives inside the disclosure panel, reachable once opened", async () => {
+    vi.stubGlobal(
+      "fetch",
+      stubFetchByPath({
+        "/auth/me": { id: 1, email: "a@b.com", display_name: "Demo Instructor" },
+        "/quota": QUOTA,
+      }),
+    );
+    renderWithProviders(
+      <AppShell>
+        <div />
+      </AppShell>,
+      { route: "/dashboard" },
+    );
+    await waitFor(() => expect(screen.getByText("DI")).toBeInTheDocument());
+    // queryByText ignores the native `hidden` attribute (it isn't an
+    // accessible-tree query), so assert via role instead — this is the
+    // same distinction the file's own top comment calls out.
+    expect(screen.queryByRole("button", { name: "Sign out" })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Open menu" }));
+    expect(screen.getByText("Signed in as Demo Instructor")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Sign out" })).toBeInTheDocument();
+  });
+
+  it("WCAG 2.4.11 (found live, ux-critic): the panel closes when focus tabs past its last item, instead of leaving a focused control hidden underneath the still-open panel", async () => {
+    vi.stubGlobal(
+      "fetch",
+      stubFetchByPath({
+        "/auth/me": { id: 1, email: "a@b.com", display_name: "Demo Instructor" },
+        "/quota": QUOTA,
+      }),
+    );
+    renderWithProviders(
+      <AppShell>
+        <button type="button">Page content</button>
+      </AppShell>,
+      { route: "/dashboard" },
+    );
+    await waitFor(() => expect(screen.getByText("DI")).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: "Open menu" }));
+    const signOut = screen.getByRole("button", { name: "Sign out" });
+    const pageButton = screen.getByRole("button", { name: "Page content" });
+
+    fireEvent.blur(signOut, { relatedTarget: pageButton });
+
+    expect(screen.queryByRole("button", { name: "Sign out" })).not.toBeInTheDocument();
+  });
+
+  it("Shift+Tab back to the hamburger itself doesn't snap the panel shut", async () => {
+    vi.stubGlobal(
+      "fetch",
+      stubFetchByPath({
+        "/auth/me": { id: 1, email: "a@b.com", display_name: "Demo Instructor" },
+        "/quota": QUOTA,
+      }),
+    );
+    renderWithProviders(
+      <AppShell>
+        <div />
+      </AppShell>,
+      { route: "/dashboard" },
+    );
+    await waitFor(() => expect(screen.getByText("DI")).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: "Open menu" }));
+    const signOut = screen.getByRole("button", { name: "Sign out" });
+    const hamburger = screen.getByRole("button", { name: "Close menu" });
+
+    fireEvent.blur(signOut, { relatedTarget: hamburger });
+
+    expect(screen.getByRole("button", { name: "Sign out" })).toBeInTheDocument();
+  });
+
+  it("BUG-009: signing out clears the whole query cache, not just the auth query (a shared-machine cross-instructor leak otherwise)", async () => {
+    vi.stubGlobal(
+      "fetch",
+      stubFetchByPath({
+        "/auth/me": { id: 1, email: "a@b.com", display_name: "Demo Instructor" },
+        "/quota": QUOTA,
+        "/auth/logout": {},
+      }),
+    );
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+    });
+    // A stand-in for another instructor-scoped query (dashboard stats,
+    // manuscript lists) that should NOT survive logout on a shared browser.
+    queryClient.setQueryData(["dashboard-stats"], { readyCount: 3 });
+
+    render(
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter initialEntries={["/dashboard"]}>
+          <AppShell>
+            <div />
+          </AppShell>
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+    await waitFor(() => expect(screen.getByText("DI")).toBeInTheDocument());
+
+    fireEvent.click(screen.getByRole("button", { name: /Sign out/ }));
+    // A still-mounted query (useMe/useQuota) refetches immediately after a
+    // clear, which is correct — the proof of the fix is that the OTHER
+    // instructor's stale cached query is gone for good, not that the cache
+    // stays empty forever.
+    await waitFor(() => expect(queryClient.getQueryData(["dashboard-stats"])).toBeUndefined());
+    expect(
+      queryClient.getQueryCache().findAll({ queryKey: ["dashboard-stats"] }),
+    ).toHaveLength(0);
   });
 });

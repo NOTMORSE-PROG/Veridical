@@ -7,7 +7,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.dependencies import get_current_instructor
 from app.auth.schemas import InstructorOut, LoginRequest
-from app.auth.service import RateLimitedError, authenticate, create_session, delete_session
+from app.auth.service import (
+    RateLimitedError,
+    authenticate,
+    create_session,
+    delete_session,
+    mark_onboarding_dismissed,
+)
 from app.config import get_settings
 from app.db import get_session
 from app.errors import UnauthenticatedError
@@ -57,3 +63,12 @@ async def logout(
 @router.get("/me", response_model=InstructorOut)
 async def me(instructor: Annotated[Instructor, Depends(get_current_instructor)]) -> InstructorOut:
     return InstructorOut.model_validate(instructor)
+
+
+@router.post("/onboarding/dismiss", response_model=InstructorOut)
+async def dismiss_onboarding(
+    instructor: Annotated[Instructor, Depends(get_current_instructor)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> InstructorOut:
+    updated = await mark_onboarding_dismissed(session, instructor)
+    return InstructorOut.model_validate(updated)

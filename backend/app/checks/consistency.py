@@ -91,7 +91,11 @@ async def _vote_for_criterion(
     prompt_version: str = PROMPT_VERSION,
 ) -> VoteResult:
     if g1.verdict is None or g2.verdict is None:
-        reasons = [g.escalation_reason for g in (g1, g2) if g.escalation_reason]
+        # dict.fromkeys, not a plain list: the two grading passes fail with
+        # the SAME reason far more often than not (same manuscript, same
+        # unverifiable quote) — joining without dedup produced a literal
+        # doubled sentence in real output (V-055 report screen review).
+        reasons = dict.fromkeys(g.escalation_reason for g in (g1, g2) if g.escalation_reason)
         return VoteResult(None, 0.0, [g1.verdict, g2.verdict], None, "; ".join(reasons))
 
     if g1.verdict == g2.verdict:

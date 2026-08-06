@@ -21,5 +21,12 @@ class CheckRunOut(BaseModel):
     started_at: datetime | None
     finished_at: datetime | None
     created_at: datetime
+    # Display-only, for screen 4g (identifying which manuscript/rubric a
+    # check is running against without the instructor holding an ID
+    # number in their head). Optional: a manuscript/rubric could
+    # theoretically be gone by the time this is read.
+    manuscript_group_label: str | None = None
+    manuscript_uploaded_at: datetime | None = None
+    rubric_title: str | None = None
 
     model_config = {"from_attributes": True}

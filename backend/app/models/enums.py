@@ -24,6 +24,17 @@ class IngestStatus(StrEnum):
     failed = "failed"
 
 
+class IngestFailureReason(StrEnum):
+    """Closed, deliberately small taxonomy for BUG-016 (a failed-ingestion
+    row must tell the instructor something honest, not nothing). Three
+    buckets, not one per exception type — resist enumerating every possible
+    failure; a generic-but-honest catch-all beats an ever-growing list."""
+
+    file_too_large = "file_too_large"
+    unreadable_format = "unreadable_format"
+    extraction_failed = "extraction_failed"
+
+
 class CheckRunStatus(StrEnum):
     """Pipeline state machine (ENGINEERING.md §4)."""
 

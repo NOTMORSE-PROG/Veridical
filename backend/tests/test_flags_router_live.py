@@ -147,6 +147,10 @@ def test_get_annotate_override_happy_path(logged_in_with_one_flag):
     got = client.get(f"/flags/{flag_id}")
     assert got.status_code == 200
     assert got.json()["overridden"] is False
+    # Needed to build a breadcrumb back to the report from a direct/
+    # bookmarked link (screen 4i, V-055 review — previously missing).
+    assert got.json()["manuscript_group_label"] == "G-11"
+    assert isinstance(got.json()["check_run_id"], int)
 
     annotated = client.post(f"/flags/{flag_id}/annotate", json={"annotation": "Looks off."})
     assert annotated.status_code == 200

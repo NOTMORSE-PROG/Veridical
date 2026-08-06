@@ -32,11 +32,11 @@ describe("ReviewCriteriaPage", () => {
       path: "/rubric/:rubricId/review",
     });
 
-    expect(await screen.findByDisplayValue("Has an abstract")).toBeInTheDocument();
-    expect(screen.getByDisplayValue("Argument is well developed")).toBeInTheDocument();
-    expect(screen.getByDisplayValue("Abstract present")).toBeInTheDocument();
-    expect(screen.getByText("2 criteria")).toBeInTheDocument();
-    expect(screen.getByText("Weights total 100%")).toBeInTheDocument();
+    expect((await screen.findAllByDisplayValue("Has an abstract")).length).toBeGreaterThan(0);
+    expect(screen.getAllByDisplayValue("Argument is well developed").length).toBeGreaterThan(0);
+    expect(screen.getAllByDisplayValue("Abstract present").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("2 criteria")[0]).toBeInTheDocument();
+    expect(screen.getAllByText(/Weights total 100%/)[0]).toBeInTheDocument();
   });
 
   it("shows the needs-review banner with the parse issues when the parse was partial (V-011)", async () => {
@@ -77,9 +77,9 @@ describe("ReviewCriteriaPage", () => {
       path: "/rubric/:rubricId/review",
     });
 
-    const textInput = await screen.findByDisplayValue("Has an abstract");
-    fireEvent.change(textInput, { target: { value: "Has an abstract of at most 250 words" } });
-    fireEvent.click(screen.getByRole("button", { name: "Save draft" }));
+    const textInputs = await screen.findAllByDisplayValue("Has an abstract");
+    fireEvent.change(textInputs[0], { target: { value: "Has an abstract of at most 250 words" } });
+    fireEvent.click(screen.getAllByRole("button", { name: "Save draft" })[0]);
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
       expect.stringContaining("/rubrics/5/criteria"),
@@ -94,7 +94,7 @@ describe("ReviewCriteriaPage", () => {
     expect(body.confirm).toBe(false);
   });
 
-  it("deleting every row disables Save and Confirm, and shows an explanation", async () => {
+  it("removing every row shows an accessible, focused error summary instead of disabling Save", async () => {
     vi.stubGlobal(
       "fetch",
       vi.fn(async () => new Response(JSON.stringify(RUBRIC), { status: 200 })),
@@ -104,13 +104,17 @@ describe("ReviewCriteriaPage", () => {
       path: "/rubric/:rubricId/review",
     });
 
-    await screen.findByDisplayValue("Has an abstract");
-    fireEvent.click(screen.getByRole("button", { name: "Delete criterion 1" }));
-    fireEvent.click(screen.getByRole("button", { name: "Delete criterion 1" })); // list shifted up
+    await screen.findAllByDisplayValue("Has an abstract");
+    fireEvent.click(screen.getAllByRole("button", { name: "Remove criterion 1" })[0]);
+    fireEvent.click(screen.getAllByRole("button", { name: "Remove criterion 1" })[0]); // list shifted up
 
-    expect(await screen.findByText(/Add at least one criterion/)).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Save draft" })).toBeDisabled();
-    expect(screen.getByRole("button", { name: "Confirm & activate rubric" })).toBeDisabled();
+    // Save/Confirm stay enabled — clicking is what surfaces the problem,
+    // via a focused error summary (GOV.UK pattern) rather than a
+    // silently-disabled button a screen-reader user can't explain.
+    fireEvent.click(screen.getAllByRole("button", { name: "Save draft" })[0]);
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("Add at least one criterion.");
+    expect(alert).toHaveFocus();
   });
 
   it("Normalize rescales weights to sum to 100", async () => {
@@ -130,10 +134,10 @@ describe("ReviewCriteriaPage", () => {
       path: "/rubric/:rubricId/review",
     });
 
-    await screen.findByDisplayValue("Has an abstract");
-    expect(screen.getByText("Weights total 20%")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Normalize to 100%" }));
-    expect(await screen.findByText("Weights total 100%")).toBeInTheDocument();
+    await screen.findAllByDisplayValue("Has an abstract");
+    expect(screen.getAllByText(/Weights total 20%/)[0]).toBeInTheDocument();
+    fireEvent.click(screen.getAllByRole("button", { name: "Normalize to 100%" })[0]);
+    expect(await screen.findAllByText(/Weights total 100%/)).not.toHaveLength(0);
   });
 
   it("renders read-only when a newer version supersedes this one (V-013 F2.4)", async () => {
@@ -147,11 +151,95 @@ describe("ReviewCriteriaPage", () => {
       path: "/rubric/:rubricId/review",
     });
 
-    const textInput = await screen.findByDisplayValue("Has an abstract");
-    expect(textInput).toBeDisabled();
+    const textInputs = await screen.findAllByDisplayValue("Has an abstract");
+    for (const input of textInputs) expect(input).toBeDisabled();
     expect(screen.getByText(/read-only history/)).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Save draft" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Confirm & activate rubric" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Delete criterion 1" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Remove criterion 1" })).not.toBeInTheDocument();
+  });
+
+  it("BUG-021 regression guard: the fillable grid columns use minmax(0,1fr), not a bare 1fr, and every text field fills its column", async () => {
+    // jsdom doesn't compute real layout, so this can't assert actual
+    // pixel widths (that's what the live Playwright pass against the
+    // running app is for — see RESEARCH.md §24). This guards the exact
+    // literal regression BUG-021 was: a bare `1fr` track whose minimum
+    // is its content's intrinsic size, not the flexible width, silently
+    // reappearing in a future edit.
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(JSON.stringify(RUBRIC), { status: 200 })),
+    );
+    renderWithProviders(<ReviewCriteriaPage />, {
+      route: "/rubric/5/review",
+      path: "/rubric/:rubricId/review",
+    });
+
+    await screen.findAllByDisplayValue("Has an abstract");
+    const table = document.querySelector('[role="table"]');
+    expect(table?.innerHTML).toContain("minmax(0,1fr)_192px_minmax(0,1fr)");
+    for (const el of screen.getAllByLabelText("Criterion 1 text")) {
+      expect(el.className).toContain("w-full");
+    }
+    for (const el of screen.getAllByLabelText("Criterion 1 evidence")) {
+      expect(el.className).toContain("w-full");
+    }
+  });
+
+  it("every Remove button (desktop and mobile) carries a distinct per-row accessible name", async () => {
+    // Regression guard for a ux-critic finding: the mobile Remove
+    // button had only visible text ("Remove"), giving every row the
+    // same accessible name and breaking the document-order-based focus
+    // fallback in removeRow(). Both renders must carry the same
+    // "Remove criterion N" label.
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(JSON.stringify(RUBRIC), { status: 200 })),
+    );
+    renderWithProviders(<ReviewCriteriaPage />, {
+      route: "/rubric/5/review",
+      path: "/rubric/:rubricId/review",
+    });
+
+    await screen.findAllByDisplayValue("Has an abstract");
+    const row1Removes = screen.getAllByRole("button", { name: "Remove criterion 1" });
+    expect(row1Removes.length).toBe(2); // desktop + mobile
+  });
+
+  it("the weight field is not a native type=number spinner (platform-inconsistent chrome + scroll-wheel footgun)", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(JSON.stringify(RUBRIC), { status: 200 })),
+    );
+    renderWithProviders(<ReviewCriteriaPage />, {
+      route: "/rubric/5/review",
+      path: "/rubric/:rubricId/review",
+    });
+
+    await screen.findAllByDisplayValue("Has an abstract");
+    for (const el of screen.getAllByLabelText(/Criterion 1 weight, percent/)) {
+      expect((el as HTMLInputElement).type).toBe("text");
+    }
+  });
+
+  it("shows the Try again button and calls refetch when the rubric fails to load", async () => {
+    let calls = 0;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => {
+        calls += 1;
+        if (calls === 1) return new Response("Internal error", { status: 500 });
+        return new Response(JSON.stringify(RUBRIC), { status: 200 });
+      }),
+    );
+    renderWithProviders(<ReviewCriteriaPage />, {
+      route: "/rubric/5/review",
+      path: "/rubric/:rubricId/review",
+    });
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("Could not load this rubric.");
+    fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+    expect(await screen.findAllByDisplayValue("Has an abstract")).not.toHaveLength(0);
   });
 });

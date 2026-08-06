@@ -143,3 +143,26 @@ def test_logout_kills_the_session_server_side(seeded):
 
     after = seeded.get("/auth/me")
     assert after.status_code == 401
+
+
+def test_new_account_has_no_onboarding_dismissal_yet(seeded):
+    seeded.post("/auth/login", json={"email": "prof@tip.edu.ph", "password": "s3cret!"})
+    assert seeded.get("/auth/me").json()["onboarding_dismissed_at"] is None
+
+
+def test_dismissing_onboarding_persists_across_a_fresh_session(seeded):
+    seeded.post("/auth/login", json={"email": "prof@tip.edu.ph", "password": "s3cret!"})
+    dismissed = seeded.post("/auth/onboarding/dismiss")
+    assert dismissed.status_code == 200
+    assert dismissed.json()["onboarding_dismissed_at"] is not None
+
+    # Log out and back in (a "different session, not just a re-render") --
+    # the flag must survive, proving it is NOT session/localStorage-only.
+    seeded.post("/auth/logout")
+    seeded.post("/auth/login", json={"email": "prof@tip.edu.ph", "password": "s3cret!"})
+    assert seeded.get("/auth/me").json()["onboarding_dismissed_at"] is not None
+
+
+def test_dismissing_onboarding_without_a_session_is_401(seeded):
+    resp = seeded.post("/auth/onboarding/dismiss")
+    assert resp.status_code == 401

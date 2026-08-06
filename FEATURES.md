@@ -163,7 +163,7 @@ Combines everything into one explainable output (Objective 4, Fig. 3.12).
 ## 4. User Flows
 
 ### Flow A — Instructor first-time setup 🟢
-1. Instructor logs in → empty dashboard with "Upload required format" CTA
+1. Instructor logs in → empty dashboard with a one-time, skippable welcome message ("VERIDICAL flags things worth double-checking; it never decides for you") and the "Upload required format" CTA. Dismissed once, persisted to the account (not session-only), never shown again.
 2. Uploads rubric file (PDF/DOCX) → parsing progress indicator
 3. **Parsed-criteria review screen**: table of criteria with type (structural/semantic), evidence needed, weight — each editable
 4. Instructor edits/confirms → rubric saved as **v1, active**

@@ -23,6 +23,7 @@ from app.report.schemas import (
     EscalatedItemOut,
     EvidenceItem,
     ReportOut,
+    ResolutionOut,
     ResolveEscalationOut,
 )
 from app.report.scoring import (
@@ -112,6 +113,16 @@ async def build_report_payload(
 def _to_criterion_result(result: CheckResult, criterion: Criterion) -> CriterionResultOut:
     detail = result.detail or {}
     evidence = [EvidenceItem(**item) for item in detail.get("evidence", [])]
+    resolution_detail = detail.get("resolution")
+    resolution = (
+        ResolutionOut(
+            type=resolution_detail["type"],
+            reason=resolution_detail["reason"],
+            ai_majority_verdict=resolution_detail.get("ai_majority_verdict"),
+        )
+        if resolution_detail
+        else None
+    )
     return CriterionResultOut(
         criterion_id=criterion.id,
         text=criterion.text,
@@ -125,6 +136,7 @@ def _to_criterion_result(result: CheckResult, criterion: Criterion) -> Criterion
         reasoning=detail.get("reasoning"),
         reason=detail.get("reason"),
         evidence=evidence,
+        resolution=resolution,
     )
 
 
@@ -149,7 +161,7 @@ async def get_report(session: AsyncSession, check_run_id: int, instructor_id: in
     show — never a partial or guessed report."""
     check_run = await _owned_check_run(session, check_run_id, instructor_id)
     if check_run.status != CheckRunStatus.done:
-        raise ConflictError("This check hasn't finished yet — its report isn't ready.")
+        raise ConflictError("This check hasn't finished yet. Its report isn't ready.")
 
     manuscript = await session.get(Manuscript, check_run.manuscript_id)
     rubric = await session.get(Rubric, check_run.rubric_id)
@@ -180,6 +192,8 @@ async def get_report(session: AsyncSession, check_run_id: int, instructor_id: in
         ),
         thresholds=scoring_payload["thresholds"],
         reason=scoring_payload["reason"],
+        flag_deduction=scoring_payload["flag_deduction"],
+        unresolved_high_flag_count=scoring_payload["unresolved_high_flag_count"],
         results=results,
     )
 

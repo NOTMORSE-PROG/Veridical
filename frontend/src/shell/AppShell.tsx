@@ -1,22 +1,36 @@
-// Top-nav shell — DESIGN.md §2 (wireframe .ptb/.pnav/.pmark/.pav), the ONE
-// shell every authenticated page renders inside (V-014 AC: no per-page nav).
-import type { ReactNode } from "react";
+// Top-nav shell — the ONE shell every authenticated page renders inside
+// (V-014 AC: no per-page nav). V-055 reconstruction: sticky header, a real
+// mobile disclosure nav (BUG-015's fix also applies here), a 3-state quota
+// chip with a direction word (BUG-017), a 44px avatar hit area (BUG-019).
+//
+// Nav redesign (V-055, owner-requested follow-up): fixed BUG-024 (the
+// header overflowed the WCAG 1.4.10 320px reflow floor by 24px — measured
+// element-by-element, the fixed-width chrome alone exceeded 320px before
+// the flex-1 spacer had anything left to absorb) and removed the three
+// permanently-disabled "Soon" nav items. None of GOV.UK/USWDS/Material 3's
+// own primary-nav patterns document a disabled-nav-item component; primary
+// nav in each system is scoped to destinations that exist. "Submissions"
+// specifically referenced the V7 student portal, which is PROPOSED and
+// BLOCKED pending adviser approval (D-005) -- a permanent nav item for it
+// was advertising an unapproved feature in the one piece of chrome every
+// screen renders, not just an unbuilt-but-committed one (Archive/Settings,
+// V-042, are a materially different case). Desktop/mobile now switch at a
+// single `md:` (768px) breakpoint (was two staggered ones, `sm:`/`lg:`) --
+// re-measured live: the 3-real-item nav + full quota sentence needs
+// ~686-690px, `md:` leaves ~78-82px of margin. Account/sign-out moved out
+// of the persistent header row into the mobile disclosure panel (GOV.UK/
+// USWDS both separate "primary navigation" from "utility/account actions"
+// into distinct regions) -- the desktop avatar is unchanged, just now
+// `md:`-gated alongside the rest.
+import { type FocusEvent, type ReactNode, useEffect, useRef, useState } from "react";
 import { Link, useLocation } from "react-router";
 import { useQuota } from "../api/useQuota";
 import { useLogout, useMe } from "../auth/useAuth";
-import { Chip } from "../components/Chip";
-import { cx } from "../components/cx";
 
-// "Dashboard", "Rubric", and "Audit log" route now; the rest are future
-// tickets (V7 Submissions, V-042 Archive/Settings) — rendered inactive
-// rather than linking to a page that doesn't exist.
-const NAV_ITEMS: ReadonlyArray<{ label: string; to: string | null }> = [
+const NAV_ITEMS: ReadonlyArray<{ label: string; to: string }> = [
   { label: "Dashboard", to: "/dashboard" },
   { label: "Rubric", to: "/rubric" },
-  { label: "Submissions", to: null },
-  { label: "Archive", to: null },
   { label: "Audit log", to: "/audit" },
-  { label: "Settings", to: null },
 ];
 
 function initials(name: string): string {
@@ -28,57 +42,276 @@ function initials(name: string): string {
     .join("");
 }
 
-export function AppShell({ children }: { children: ReactNode }) {
+function DesktopNavLinks() {
+  const location = useLocation();
+  return (
+    <>
+      {NAV_ITEMS.map((item) => {
+        const isActive = location.pathname === item.to;
+        return (
+          <Link
+            key={item.label}
+            to={item.to}
+            aria-current={isActive ? "page" : undefined}
+            className="flex items-center border-b-2 border-transparent py-2 text-sm text-ink-secondary hover:text-ink aria-[current=page]:border-action aria-[current=page]:font-semibold aria-[current=page]:text-ink"
+          >
+            {item.label}
+          </Link>
+        );
+      })}
+    </>
+  );
+}
+
+function MobileNavLinks({ onNavigate }: { onNavigate: () => void }) {
+  const location = useLocation();
+  return (
+    <>
+      {NAV_ITEMS.map((item) => {
+        const isActive = location.pathname === item.to;
+        return (
+          <Link
+            key={item.label}
+            to={item.to}
+            onClick={onNavigate}
+            aria-current={isActive ? "page" : undefined}
+            className="flex min-h-11 items-center rounded-md border-l-2 border-transparent px-3 text-sm text-ink-secondary hover:bg-status-neutral-bg hover:text-ink aria-[current=page]:border-action aria-[current=page]:bg-status-neutral-bg aria-[current=page]:font-semibold aria-[current=page]:text-ink"
+          >
+            {item.label}
+          </Link>
+        );
+      })}
+    </>
+  );
+}
+
+function SignOutIcon() {
+  return (
+    <svg
+      aria-hidden="true"
+      viewBox="0 0 24 24"
+      width="18"
+      height="18"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M15 4h3a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-3" />
+      <path d="M4 12h12" />
+      <path d="M12 7l5 5-5 5" />
+    </svg>
+  );
+}
+
+function MobileAccountBlock({ onNavigate }: { onNavigate: () => void }) {
   const { data: me } = useMe();
-  const { data: quota } = useQuota();
   const logout = useLogout();
+  if (!me) return null;
+  return (
+    <div className="border-t border-border p-2">
+      <p className="min-w-0 truncate px-3 py-2 text-xs text-ink-tertiary" title={me.display_name}>
+        Signed in as {me.display_name}
+      </p>
+      <button
+        type="button"
+        onClick={() => {
+          logout.mutate();
+          onNavigate();
+        }}
+        className="flex min-h-11 w-full items-center gap-2 rounded-md px-3 text-sm font-medium text-ink hover:bg-status-neutral-bg"
+      >
+        <SignOutIcon />
+        Sign out
+      </button>
+    </div>
+  );
+}
+
+function QuotaChip() {
+  const { data: quota, isPending, isError } = useQuota();
+
+  if (isPending) {
+    return (
+      <span className="inline-flex items-center gap-1.5 rounded-full border border-border bg-panel px-2.5 py-1 text-xs whitespace-nowrap text-ink-tertiary">
+        <span aria-hidden="true" className="h-3 w-8 animate-pulse rounded-full bg-neutral-150 md:w-20" />
+        <span className="sr-only">Loading AI capacity</span>
+      </span>
+    );
+  }
+  if (isError || !quota) {
+    return (
+      <span className="inline-flex items-center rounded-full border border-border bg-panel px-2.5 py-1 text-xs whitespace-nowrap text-ink-tertiary">
+        <span aria-hidden="true" className="md:hidden">
+          N/A
+        </span>
+        <span aria-hidden="true" className="hidden md:inline">
+          AI capacity unavailable
+        </span>
+        <span className="sr-only">AI capacity unavailable</span>
+      </span>
+    );
+  }
+  const remainingPct =
+    quota.daily_limit > 0
+      ? Math.max(0, Math.round(100 - (quota.calls_used / quota.daily_limit) * 100))
+      : 100;
+  const atZero = remainingPct === 0;
+  // Full sentence at md:+ (matches the nav's own breakpoint below); a
+  // short-but-still-directional badge below it (never a bare number,
+  // BUG-017) since the full sentence doesn't fit the header once the
+  // desktop nav is hidden and the hamburger is the only other content.
+  const shortText = atZero ? "0% left" : `${remainingPct}% left`;
+  const longText = atZero
+    ? "No AI capacity left today"
+    : `AI capacity: ${remainingPct}% remaining today`;
+  return (
+    <span
+      className={
+        atZero
+          ? "inline-flex items-center rounded-full border border-status-attention-text/30 bg-status-attention-bg px-2.5 py-1 text-xs font-medium whitespace-nowrap text-status-attention-text"
+          : "inline-flex items-center rounded-full border border-border bg-panel px-2.5 py-1 text-xs whitespace-nowrap text-ink-secondary"
+      }
+    >
+      <span aria-hidden="true" className="md:hidden">
+        {shortText}
+      </span>
+      <span aria-hidden="true" className="hidden md:inline">
+        {longText}
+      </span>
+      <span className="sr-only">{longText}</span>
+    </span>
+  );
+}
+
+function AvatarButton() {
+  const { data: me } = useMe();
+  const logout = useLogout();
+  if (!me) return null;
+  return (
+    <button
+      type="button"
+      onClick={() => logout.mutate()}
+      aria-label={`Signed in as ${me.display_name}. Sign out`}
+      className="hidden h-11 w-11 flex-none items-center justify-center rounded-full hover:bg-status-neutral-bg md:flex"
+    >
+      <span className="flex h-8 w-8 items-center justify-center rounded-full bg-status-neutral-bg text-xs font-semibold text-ink">
+        {initials(me.display_name)}
+      </span>
+    </button>
+  );
+}
+
+export function AppShell({ children }: { children: ReactNode }) {
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
+  const hamburgerRef = useRef<HTMLButtonElement>(null);
   const location = useLocation();
 
-  const quotaPct =
-    quota && quota.daily_limit > 0 ? Math.round((quota.calls_used / quota.daily_limit) * 100) : 0;
+  useEffect(() => {
+    setMobileNavOpen(false);
+  }, [location.pathname]);
+
+  useEffect(() => {
+    if (!mobileNavOpen) return;
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        setMobileNavOpen(false);
+        hamburgerRef.current?.focus();
+      }
+    }
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
+  }, [mobileNavOpen]);
+
+  // Found live (ux-critic): tabbing past the panel's last item (Sign out)
+  // moved focus into <main> while the panel stayed open and opaque on top
+  // of it -- a focused control the user couldn't see or reach with a click
+  // (WCAG 2.4.11 Focus Not Obscured). This is a disclosure, not a modal
+  // (Modal.tsx's real focus trap is reserved for actual dialogs), so the
+  // fix is to close automatically when focus leaves the panel, not to trap
+  // it -- the same pattern GOV.UK's own mobile nav uses. Exempts the
+  // hamburger itself so Shift+Tab back to the trigger doesn't snap it shut.
+  function handlePanelBlur(event: FocusEvent<HTMLDivElement>) {
+    const next = event.relatedTarget as Node | null;
+    if (next && (event.currentTarget.contains(next) || next === hamburgerRef.current)) return;
+    setMobileNavOpen(false);
+  }
 
   return (
     <div className="flex min-h-screen flex-col bg-page">
-      <header className="flex items-center gap-3 border-b border-border bg-panel px-4 py-2.5">
-        <span className="flex h-[18px] w-[18px] flex-none items-center justify-center rounded-tag bg-primary text-2xs font-bold text-on-primary">
+      <a
+        href="#main-content"
+        className="sr-only focus-visible:not-sr-only focus-visible:absolute focus-visible:top-2 focus-visible:left-2 focus-visible:z-50 focus-visible:rounded-md focus-visible:bg-panel focus-visible:px-4 focus-visible:py-2 focus-visible:text-sm focus-visible:font-medium focus-visible:text-ink"
+      >
+        Skip to main content
+      </a>
+
+      <header className="sticky top-0 z-40 flex h-14 items-center gap-3 border-b-[3px] border-accent bg-panel px-4 shadow-sm md:h-16 md:px-6 relative">
+        <span
+          aria-hidden="true"
+          className="flex h-7 w-7 flex-none items-center justify-center rounded-sm bg-action text-sm font-bold text-on-action"
+        >
           V
         </span>
-        <span className="text-xs font-bold tracking-header">VERIDICAL</span>
-        <nav className="ml-2.5 flex gap-4 text-xs">
-          {NAV_ITEMS.map((item) =>
-            item.to ? (
-              <Link
-                key={item.label}
-                to={item.to}
-                className={cx(
-                  "-mb-2.5 border-b-2 border-transparent pb-2.5 text-ink-soft",
-                  location.pathname === item.to && "border-primary font-semibold text-primary-hover",
-                )}
-              >
-                {item.label}
-              </Link>
-            ) : (
-              <span key={item.label} className="cursor-default text-ink-soft opacity-45">
-                {item.label}
-              </span>
-            ),
-          )}
+        <span className="text-sm font-bold tracking-header text-ink">VERIDICAL</span>
+
+        <nav aria-label="Primary" className="ml-2.5 hidden items-center gap-4 md:flex">
+          <DesktopNavLinks />
         </nav>
+
         <span className="flex-1" />
-        <Chip>Quota {quotaPct}%</Chip>
-        {me && (
-          <button
-            type="button"
-            onClick={() => logout.mutate()}
-            title={`Signed in as ${me.display_name} — sign out`}
-            aria-label={`Signed in as ${me.display_name}. Sign out`}
-            className="flex h-[22px] w-[22px] flex-none items-center justify-center rounded-pill bg-border-soft text-2xs font-semibold text-ink-soft focus-visible:outline-2 focus-visible:outline-primary"
-          >
-            {initials(me.display_name)}
-          </button>
-        )}
+
+        <QuotaChip />
+
+        <button
+          ref={hamburgerRef}
+          type="button"
+          onClick={() => setMobileNavOpen((v) => !v)}
+          aria-expanded={mobileNavOpen}
+          aria-controls="mobile-nav-panel"
+          aria-label={mobileNavOpen ? "Close menu" : "Open menu"}
+          className="flex h-11 w-11 flex-none items-center justify-center text-ink md:hidden"
+        >
+          {mobileNavOpen ? (
+            <svg aria-hidden="true" viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+              <line x1="5" y1="5" x2="19" y2="19" />
+              <line x1="19" y1="5" x2="5" y2="19" />
+            </svg>
+          ) : (
+            <svg aria-hidden="true" viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+              <line x1="4" y1="7" x2="20" y2="7" />
+              <line x1="4" y1="12" x2="20" y2="12" />
+              <line x1="4" y1="17" x2="20" y2="17" />
+            </svg>
+          )}
+        </button>
+
+        {/*
+         * DOM-positioned right after the hamburger so Tab order is
+         * hamburger -> nav links -> account block, matching visual intent.
+         * `absolute` keeps it visually full-width below the header
+         * regardless of DOM position; the header is `relative` at this
+         * same breakpoint so the panel anchors to it, not the page.
+         */}
+        <div
+          id="mobile-nav-panel"
+          hidden={!mobileNavOpen}
+          onBlur={handlePanelBlur}
+          className="absolute top-full right-0 left-0 border-b border-border bg-panel md:hidden"
+        >
+          <nav aria-label="Primary" className="flex flex-col gap-1 p-2">
+            <MobileNavLinks onNavigate={() => setMobileNavOpen(false)} />
+          </nav>
+          <MobileAccountBlock onNavigate={() => setMobileNavOpen(false)} />
+        </div>
+
+        <AvatarButton />
       </header>
-      <main className="flex flex-1 flex-col">{children}</main>
+
+      <main id="main-content" tabIndex={-1} className="flex flex-1 flex-col">
+        {children}
+      </main>
     </div>
   );
 }

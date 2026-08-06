@@ -1,4 +1,4 @@
-import { screen, waitFor } from "@testing-library/react";
+import { fireEvent, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { renderWithProviders, stubFetchByPath } from "../test/renderWithProviders";
 import { DashboardPage } from "./Dashboard";
@@ -34,9 +34,11 @@ const MANUSCRIPTS_PAGE = {
       id: 1,
       group_label: "G-11",
       ingest_status: "done",
+      ingest_failure_reason: null,
       created_at: "2026-01-01T00:00:00Z",
       latest_check_run_id: 7,
       latest_check_run_status: "done",
+      latest_done_check_run_id: 7,
     },
   ],
   total: 1,
@@ -50,13 +52,104 @@ describe("DashboardPage", () => {
   it("renders the first-run empty state (screen 4b) with the 3-step guide", async () => {
     vi.stubGlobal(
       "fetch",
-      stubFetchByPath({ "/auth/me": { id: 1, email: "a@b.com", display_name: "Demo Instructor" } }),
+      stubFetchByPath({
+        "/auth/me": {
+          id: 1,
+          email: "a@b.com",
+          display_name: "Demo Instructor",
+          onboarding_dismissed_at: "2026-01-01T00:00:00Z",
+        },
+        "/rubric-families": [],
+      }),
     );
     renderWithProviders(<DashboardPage />);
-    expect(screen.getByText("No required format yet")).toBeInTheDocument();
+    // Staged reveal: nothing paints until `families` resolves (avoids a
+    // flash of the wrong screen), so this is asynchronous now.
+    expect(await screen.findByText("No required format yet")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Upload required format" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "New check" })).toBeDisabled();
     await waitFor(() => expect(screen.getByText("Demo Instructor")).toBeInTheDocument());
+  });
+
+  it("shows the first-run welcome banner for a genuinely new account (onboarding_dismissed_at null)", async () => {
+    vi.stubGlobal(
+      "fetch",
+      stubFetchByPath({
+        "/auth/me": {
+          id: 1,
+          email: "a@b.com",
+          display_name: "Demo Instructor",
+          onboarding_dismissed_at: null,
+        },
+        "/rubric-families": [],
+      }),
+    );
+    renderWithProviders(<DashboardPage />);
+    expect(await screen.findByText("Welcome to VERIDICAL")).toBeInTheDocument();
+    expect(
+      screen.getByText(/It never approves or rejects a defense for you/),
+    ).toBeInTheDocument();
+  });
+
+  it("dismissing the welcome banner hides it immediately, moves focus to the panel heading, and persists server-side", async () => {
+    const fetchMock = stubFetchByPath({
+      "/auth/me": {
+        id: 1,
+        email: "a@b.com",
+        display_name: "Demo Instructor",
+        onboarding_dismissed_at: null,
+      },
+      "/rubric-families": [],
+      "/auth/onboarding/dismiss": {
+        id: 1,
+        email: "a@b.com",
+        display_name: "Demo Instructor",
+        onboarding_dismissed_at: "2026-08-06T00:00:00Z",
+      },
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    renderWithProviders(<DashboardPage />);
+    await screen.findByText("Welcome to VERIDICAL");
+
+    fireEvent.click(screen.getByRole("button", { name: "Got it" }));
+
+    expect(screen.queryByText("Welcome to VERIDICAL")).not.toBeInTheDocument();
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        expect.stringContaining("/auth/onboarding/dismiss"),
+        expect.objectContaining({ method: "POST" }),
+      ),
+    );
+    await waitFor(() =>
+      expect(document.activeElement).toBe(screen.getByText("No required format yet")),
+    );
+    // backend-critic finding: OnboardingBanner used to own its own
+    // mutation too, firing a second independent POST per click. The
+    // parent must be the sole owner.
+    const dismissCalls = fetchMock.mock.calls.filter((call) =>
+      String(call[0]).includes("/auth/onboarding/dismiss"),
+    );
+    expect(dismissCalls).toHaveLength(1);
+  });
+
+  it("never shows the welcome banner once a rubric is active, regardless of the dismissal flag", async () => {
+    vi.stubGlobal(
+      "fetch",
+      stubFetchByPath({
+        "/auth/me": {
+          id: 1,
+          email: "a@b.com",
+          display_name: "Demo Instructor",
+          onboarding_dismissed_at: null,
+        },
+        "/rubric-families": ACTIVE_FAMILY,
+        "/stats": STATS,
+        "/manuscripts": MANUSCRIPTS_PAGE,
+      }),
+    );
+    renderWithProviders(<DashboardPage />);
+    await screen.findByText("3 manuscripts checked, by readiness status");
+    expect(screen.queryByText("Welcome to VERIDICAL")).not.toBeInTheDocument();
   });
 
   it("renders the populated dashboard (screen 4e) once a rubric is active", async () => {
@@ -70,11 +163,10 @@ describe("DashboardPage", () => {
       }),
     );
     renderWithProviders(<DashboardPage />);
-    expect(await screen.findByText("Manuscripts checked")).toBeInTheDocument();
+    expect(await screen.findByText("3 manuscripts checked, by readiness status")).toBeInTheDocument();
     expect(screen.queryByText("No required format yet")).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "New check" })).toBeEnabled();
-    expect(screen.getByText("3")).toBeInTheDocument();
-    expect(await screen.findByText("G-11")).toBeInTheDocument();
-    expect(screen.getByText("System underperforming", { exact: false })).toBeInTheDocument();
+    expect((await screen.findAllByText("G-11")).length).toBeGreaterThan(0);
+    expect(screen.getByText("System underperforming.")).toBeInTheDocument();
   });
 });

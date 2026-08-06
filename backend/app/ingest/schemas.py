@@ -148,12 +148,23 @@ class ManuscriptListItem(BaseModel):
     id: int
     group_label: str
     ingest_status: str
+    # None unless ingest_status is "failed" AND the reason was captured
+    # (BUG-016) — NULL, never fabricated, for pre-existing failed rows.
+    ingest_failure_reason: str | None = None
     created_at: datetime
     # None until a check has been run against this manuscript at least
     # once; lets the dashboard table (V-021) link "view progress"/"open
     # report" without a second request per row.
     latest_check_run_id: int | None = None
     latest_check_run_status: str | None = None
+    # The latest DONE run specifically, which can differ from
+    # latest_check_run_id if a newer re-run failed or is still in
+    # progress — lets the UI always link to the last known-good report
+    # instead of it going dark under a superseding run (backend-critic
+    # finding on BUG-012, V-055: the two "latest run" definitions used to
+    # diverge silently between this endpoint and the dashboard's KPI
+    # aggregation).
+    latest_done_check_run_id: int | None = None
 
     model_config = {"from_attributes": True}
 

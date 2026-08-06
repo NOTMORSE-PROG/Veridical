@@ -7,6 +7,7 @@ export interface Instructor {
   id: number;
   email: string;
   display_name: string;
+  onboarding_dismissed_at: string | null;
 }
 
 export type CriterionType = "structural" | "semantic";
@@ -43,13 +44,21 @@ export interface RubricListItem {
   report_count: number;
 }
 
+export type IngestFailureReason = "file_too_large" | "unreadable_format" | "extraction_failed";
+
 export interface ManuscriptListItem {
   id: number;
   group_label: string;
   ingest_status: "pending" | "processing" | "done" | "failed";
+  ingest_failure_reason: IngestFailureReason | null;
   created_at: string;
   latest_check_run_id: number | null;
   latest_check_run_status: CheckRunStatus | null;
+  // The latest DONE run specifically -- can differ from
+  // latest_check_run_id when a newer re-run failed or is still running,
+  // so a valid prior report never goes unreachable (backend-critic
+  // finding on BUG-012, V-055).
+  latest_done_check_run_id: number | null;
 }
 
 export interface PaginatedManuscripts {
@@ -71,6 +80,12 @@ export type CheckRunStatus =
 
 export interface StageEntry {
   status: string;
+  n_criteria?: number;
+  /** Only present when this stage actually degraded (screen 4g, V-055) —
+   * never set on a clean run, so its presence alone is the check. */
+  degraded_count?: number;
+  degraded_code?: string;
+  note?: string;
   [key: string]: unknown;
 }
 
@@ -90,11 +105,23 @@ export interface CheckRun {
   started_at: string | null;
   finished_at: string | null;
   created_at: string;
+  manuscript_group_label: string | null;
+  manuscript_uploaded_at: string | null;
+  rubric_title: string | null;
 }
 
 export interface EvidenceItem {
   quote: string;
   anchor: string;
+}
+
+/** Present only when an instructor resolved this criterion out of the
+ * escalation panel — the report must show this distinctly, never as an
+ * ordinary AI-graded row (V-055 review). */
+export interface ResolutionOut {
+  type: "accept_majority" | "mark_pass" | "mark_fail";
+  reason: string;
+  ai_majority_verdict: string | null;
 }
 
 export interface CriterionResultOut {
@@ -117,6 +144,7 @@ export interface CriterionResultOut {
   reasoning: string | null;
   reason: string | null;
   evidence: EvidenceItem[];
+  resolution: ResolutionOut | null;
 }
 
 export interface ReportOut {
@@ -127,6 +155,8 @@ export interface ReportOut {
   composite_score: number | null;
   thresholds: { ready_min_score: number; not_ready_max_score: number };
   reason: string | null;
+  flag_deduction: number;
+  unresolved_high_flag_count: number;
   results: CriterionResultOut[];
 }
 
@@ -185,6 +215,8 @@ export interface ResolveEscalationOut {
 export interface FlagOut {
   id: number;
   check_result_id: number;
+  check_run_id: number;
+  manuscript_group_label: string;
   check_kind: string;
   criterion_text: string | null;
   severity: "high" | "med" | "low";

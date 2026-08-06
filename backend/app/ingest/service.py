@@ -22,7 +22,7 @@ from app.ingest.patterns import load_patterns
 from app.ingest.schemas import ExtractionResult, ManuscriptListItem, PaginatedManuscripts
 from app.llm import LLMNotConfiguredError, get_llm_client
 from app.models.citation import Citation
-from app.models.enums import IngestStatus
+from app.models.enums import CheckRunStatus, IngestFailureReason, IngestStatus
 from app.models.manuscript import Manuscript
 from app.models.run import CheckRun
 
@@ -138,10 +138,17 @@ async def ingest_manuscript(
         await loop.run_in_executor(
             None, _write_raw_store, result, raw_store_path(settings, manuscript.id)
         )
-    except Exception:
+    except FileMalformedError:
         # Stage boundary (CODING.md §2): the failure is recorded on the row,
         # then propagates — run-level stage bookkeeping arrives with V-018.
+        # BUG-016: the row must say why, not just that it failed.
         manuscript.ingest_status = IngestStatus.failed
+        manuscript.ingest_failure_reason = IngestFailureReason.unreadable_format
+        await session.commit()
+        raise
+    except Exception:
+        manuscript.ingest_status = IngestStatus.failed
+        manuscript.ingest_failure_reason = IngestFailureReason.extraction_failed
         await session.commit()
         raise
 
@@ -181,6 +188,7 @@ async def ingest_upload(
         await save_upload(chunks, dest, settings)
     except FileTooLargeError:
         manuscript.ingest_status = IngestStatus.failed
+        manuscript.ingest_failure_reason = IngestFailureReason.file_too_large
         await session.commit()
         raise
     manuscript.file_ref = str(dest)
@@ -228,6 +236,14 @@ async def list_manuscripts(
 
     manuscript_ids = [m.id for m in manuscripts]
     latest_by_manuscript: dict[int, CheckRun] = {}
+    # Separate from `latest_by_manuscript` (backend-critic finding,
+    # V-055): a manuscript's absolute-latest run can be a failed/in-flight
+    # RE-run that supersedes an earlier DONE run with a perfectly valid,
+    # still-readable report. Tracking the latest DONE run too means "Open
+    # report" never goes dark just because a newer re-run hasn't finished
+    # yet — same class of bug BUG-012 was filed for, caught one level
+    # down before it shipped.
+    latest_done_by_manuscript: dict[int, CheckRun] = {}
     if manuscript_ids:
         runs = (
             await session.scalars(
@@ -240,6 +256,8 @@ async def list_manuscripts(
             # First one seen per manuscript is the latest (rows arrive
             # ordered newest-first within each manuscript_id group).
             latest_by_manuscript.setdefault(run.manuscript_id, run)
+            if run.status == CheckRunStatus.done:
+                latest_done_by_manuscript.setdefault(run.manuscript_id, run)
 
     def _latest_id(manuscript_id: int) -> int | None:
         run = latest_by_manuscript.get(manuscript_id)
@@ -249,14 +267,22 @@ async def list_manuscripts(
         run = latest_by_manuscript.get(manuscript_id)
         return run.status.value if run is not None else None
 
+    def _latest_done_id(manuscript_id: int) -> int | None:
+        run = latest_done_by_manuscript.get(manuscript_id)
+        return run.id if run is not None else None
+
     items = [
         ManuscriptListItem(
             id=m.id,
             group_label=m.group_label,
             ingest_status=m.ingest_status.value,
+            ingest_failure_reason=(
+                m.ingest_failure_reason.value if m.ingest_failure_reason else None
+            ),
             created_at=m.created_at,
             latest_check_run_id=_latest_id(m.id),
             latest_check_run_status=_latest_status(m.id),
+            latest_done_check_run_id=_latest_done_id(m.id),
         )
         for m in manuscripts
     ]
