@@ -287,8 +287,8 @@ async def delete_rubric(session: AsyncSession, rubric_id: int, instructor_id: in
     rubric = await get_rubric(session, rubric_id, instructor_id)
     if await _has_reports(session, rubric_id):
         raise ConflictError(
-            "This version has reports based on it and can't be deleted — "
-            "history stays available for comparability."
+            "This version has reports based on it and can't be deleted. "
+            "History stays available for comparability."
         )
     await session.delete(rubric)
     await session.commit()
