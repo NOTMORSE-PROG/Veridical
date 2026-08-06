@@ -130,7 +130,7 @@ export function SignInPage() {
             <h1
               ref={headingRef}
               tabIndex={-1}
-              className="text-lg font-bold text-ink outline-none sm:text-xl"
+              className="text-lg font-bold text-ink sm:text-xl"
             >
               Sign in to VERIDICAL
             </h1>
@@ -185,7 +185,7 @@ export function SignInPage() {
               tabIndex={-1}
               noValidate
               onSubmit={handleSubmit}
-              className="mt-6 flex flex-col gap-4 outline-none"
+              className="mt-6 flex flex-col gap-4"
             >
               <div className="flex flex-col gap-1">
                 <label htmlFor={emailId} className="text-sm font-medium text-ink">

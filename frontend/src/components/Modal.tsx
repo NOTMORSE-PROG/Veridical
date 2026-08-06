@@ -121,7 +121,7 @@ export function Modal({ title, children, footer, onClose }: ModalProps) {
       aria-modal="true"
       aria-labelledby={titleId}
       tabIndex={-1}
-      className="flex max-h-[90vh] w-full max-w-lg flex-col gap-4 overflow-y-auto rounded-lg border border-border bg-panel p-6 text-sm shadow-lg outline-none"
+      className="flex max-h-[90vh] w-full max-w-lg flex-col gap-4 overflow-y-auto rounded-lg border border-border bg-panel p-6 text-sm shadow-lg"
     >
       <div className="flex items-start gap-3">
         <h2 id={titleId} className="text-md font-bold text-ink">

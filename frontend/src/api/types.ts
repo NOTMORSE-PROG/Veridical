@@ -114,6 +114,15 @@ export interface EvidenceItem {
   anchor: string;
 }
 
+/** Present only when an instructor resolved this criterion out of the
+ * escalation panel — the report must show this distinctly, never as an
+ * ordinary AI-graded row (V-055 review). */
+export interface ResolutionOut {
+  type: "accept_majority" | "mark_pass" | "mark_fail";
+  reason: string;
+  ai_majority_verdict: string | null;
+}
+
 export interface CriterionResultOut {
   criterion_id: number;
   text: string;
@@ -134,6 +143,7 @@ export interface CriterionResultOut {
   reasoning: string | null;
   reason: string | null;
   evidence: EvidenceItem[];
+  resolution: ResolutionOut | null;
 }
 
 export interface ReportOut {
@@ -144,6 +154,8 @@ export interface ReportOut {
   composite_score: number | null;
   thresholds: { ready_min_score: number; not_ready_max_score: number };
   reason: string | null;
+  flag_deduction: number;
+  unresolved_high_flag_count: number;
   results: CriterionResultOut[];
 }
 

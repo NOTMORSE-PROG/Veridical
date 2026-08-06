@@ -114,7 +114,7 @@ export function CheckProgressPage() {
   return (
     <div className="mx-auto flex w-full max-w-2xl flex-col gap-4 p-4 sm:p-6">
       <div className="flex flex-col gap-1">
-        <h1 ref={headingRef} tabIndex={-1} className="text-lg font-bold text-ink outline-none sm:text-xl">
+        <h1 ref={headingRef} tabIndex={-1} className="text-lg font-bold text-ink sm:text-xl">
           Check progress
         </h1>
         {run && (

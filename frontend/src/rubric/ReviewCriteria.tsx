@@ -492,7 +492,7 @@ export function ReviewCriteriaPage() {
           ref={summaryRef}
           tabIndex={-1}
           role="alert"
-          className="rounded-md border-2 border-status-attention-text/40 bg-status-attention-bg p-3.5 text-sm text-status-attention-text outline-none"
+          className="rounded-md border-2 border-status-attention-text/40 bg-status-attention-bg p-3.5 text-sm text-status-attention-text"
         >
           <p className="font-semibold">
             Fix the following before {attempted === "confirm" ? "confirming and activating this rubric" : "saving"}:
@@ -793,7 +793,7 @@ function PageHeader({
           </Link>
           <span aria-hidden="true">/</span>
         </nav>
-        <h1 ref={headingRef} tabIndex={-1} className="text-lg font-bold text-ink outline-none sm:text-xl">
+        <h1 ref={headingRef} tabIndex={-1} className="text-lg font-bold text-ink sm:text-xl">
           Review parsed criteria
         </h1>
       </div>

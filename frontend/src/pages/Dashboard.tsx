@@ -82,7 +82,7 @@ export function DashboardPage() {
     <div className="flex flex-col gap-4 p-4 sm:p-6">
       <div className="flex items-start justify-between gap-3">
         <div>
-          <h1 ref={headingRef} tabIndex={-1} className="text-lg font-bold text-ink outline-none sm:text-xl">
+          <h1 ref={headingRef} tabIndex={-1} className="text-lg font-bold text-ink sm:text-xl">
             Dashboard
           </h1>
           {me && <p className="text-sm text-ink-secondary">{me.display_name}</p>}

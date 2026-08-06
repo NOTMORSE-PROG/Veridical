@@ -317,12 +317,12 @@ function LandingPage() {
         </div>
       </header>
 
-      <main id="main-content" tabIndex={-1} className="outline-none">
+      <main id="main-content" tabIndex={-1}>
         <div className="mx-auto max-w-[1120px] px-4 pt-12 pb-16 sm:px-6 sm:pt-16 sm:pb-20 lg:px-10 lg:pt-20">
           <h1
             ref={headingRef}
             tabIndex={-1}
-            className="text-lg font-bold text-ink outline-none sm:text-2xl"
+            className="text-lg font-bold text-ink sm:text-2xl"
           >
             Check capstone manuscripts against your own rubric, with evidence for every flag.
           </h1>
