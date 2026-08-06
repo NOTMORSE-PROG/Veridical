@@ -8,6 +8,11 @@ import { AppShell } from "./AppShell";
 // Desktop nav + the mobile disclosure panel's own nav both render in the
 // DOM at once (the panel is toggled via the `hidden` attribute, not
 // unmounted) — every nav-item query here expects TWO matches, not one.
+// The mobile panel's account block ("Sign out") is inside that same
+// `hidden`-gated container, so it's correctly excluded from role queries
+// while the panel is closed (jsdom respects the native `hidden`
+// attribute, unlike Tailwind's `md:hidden` classes which need real CSS
+// media-query support jsdom doesn't have).
 
 const QUOTA = {
   mode: "fake",
@@ -85,7 +90,7 @@ describe("AppShell", () => {
     expect(dashboardLink).toHaveAttribute("aria-current", "page");
   });
 
-  it("BUG-015: not-yet-shipped nav items are marked aria-disabled with a 'Soon' tag, not just styled differently", async () => {
+  it("renders every real nav item — the same one shell every page uses (no per-page nav)", async () => {
     vi.stubGlobal(
       "fetch",
       stubFetchByPath({
@@ -98,28 +103,100 @@ describe("AppShell", () => {
         <div />
       </AppShell>,
     );
-    const [settingsItem] = screen.getAllByText("Settings");
-    const wrapper = settingsItem.closest("span[aria-disabled]");
-    expect(wrapper).toHaveAttribute("aria-disabled", "true");
-    expect(wrapper).toHaveTextContent("Soon");
-  });
-
-  it("renders every nav item — the same one shell every page uses (no per-page nav)", async () => {
-    vi.stubGlobal(
-      "fetch",
-      stubFetchByPath({
-        "/auth/me": new Response(JSON.stringify({ error: {} }), { status: 401 }),
-        "/quota": QUOTA,
-      }),
-    );
-    renderWithProviders(
-      <AppShell>
-        <div />
-      </AppShell>,
-    );
-    for (const label of ["Dashboard", "Rubric", "Submissions", "Archive", "Audit log", "Settings"]) {
+    for (const label of ["Dashboard", "Rubric", "Audit log"]) {
       expect(screen.getAllByText(label).length).toBe(2);
     }
+  });
+
+  it("nav redesign: no placeholder item advertises an unbuilt/unapproved feature (Submissions referenced the BLOCKED V7 student portal, D-005)", async () => {
+    vi.stubGlobal(
+      "fetch",
+      stubFetchByPath({
+        "/auth/me": new Response(JSON.stringify({ error: {} }), { status: 401 }),
+        "/quota": QUOTA,
+      }),
+    );
+    renderWithProviders(
+      <AppShell>
+        <div />
+      </AppShell>,
+    );
+    for (const label of ["Submissions", "Archive", "Settings", "Soon"]) {
+      expect(screen.queryByText(label)).not.toBeInTheDocument();
+    }
+  });
+
+  it("BUG-024: the mobile account block (sign-out) lives inside the disclosure panel, reachable once opened", async () => {
+    vi.stubGlobal(
+      "fetch",
+      stubFetchByPath({
+        "/auth/me": { id: 1, email: "a@b.com", display_name: "Demo Instructor" },
+        "/quota": QUOTA,
+      }),
+    );
+    renderWithProviders(
+      <AppShell>
+        <div />
+      </AppShell>,
+      { route: "/dashboard" },
+    );
+    await waitFor(() => expect(screen.getByText("DI")).toBeInTheDocument());
+    // queryByText ignores the native `hidden` attribute (it isn't an
+    // accessible-tree query), so assert via role instead — this is the
+    // same distinction the file's own top comment calls out.
+    expect(screen.queryByRole("button", { name: "Sign out" })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Open menu" }));
+    expect(screen.getByText("Signed in as Demo Instructor")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Sign out" })).toBeInTheDocument();
+  });
+
+  it("WCAG 2.4.11 (found live, ux-critic): the panel closes when focus tabs past its last item, instead of leaving a focused control hidden underneath the still-open panel", async () => {
+    vi.stubGlobal(
+      "fetch",
+      stubFetchByPath({
+        "/auth/me": { id: 1, email: "a@b.com", display_name: "Demo Instructor" },
+        "/quota": QUOTA,
+      }),
+    );
+    renderWithProviders(
+      <AppShell>
+        <button type="button">Page content</button>
+      </AppShell>,
+      { route: "/dashboard" },
+    );
+    await waitFor(() => expect(screen.getByText("DI")).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: "Open menu" }));
+    const signOut = screen.getByRole("button", { name: "Sign out" });
+    const pageButton = screen.getByRole("button", { name: "Page content" });
+
+    fireEvent.blur(signOut, { relatedTarget: pageButton });
+
+    expect(screen.queryByRole("button", { name: "Sign out" })).not.toBeInTheDocument();
+  });
+
+  it("Shift+Tab back to the hamburger itself doesn't snap the panel shut", async () => {
+    vi.stubGlobal(
+      "fetch",
+      stubFetchByPath({
+        "/auth/me": { id: 1, email: "a@b.com", display_name: "Demo Instructor" },
+        "/quota": QUOTA,
+      }),
+    );
+    renderWithProviders(
+      <AppShell>
+        <div />
+      </AppShell>,
+      { route: "/dashboard" },
+    );
+    await waitFor(() => expect(screen.getByText("DI")).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: "Open menu" }));
+    const signOut = screen.getByRole("button", { name: "Sign out" });
+    const hamburger = screen.getByRole("button", { name: "Close menu" });
+
+    fireEvent.blur(signOut, { relatedTarget: hamburger });
+
+    expect(screen.getByRole("button", { name: "Sign out" })).toBeInTheDocument();
   });
 
   it("BUG-009: signing out clears the whole query cache, not just the auth query (a shared-machine cross-instructor leak otherwise)", async () => {

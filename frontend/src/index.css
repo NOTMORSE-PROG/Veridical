@@ -53,7 +53,7 @@
   main :is(a, button, input, select, textarea, [tabindex]) {
     scroll-margin-top: calc(var(--header-height-mobile) + var(--spacing-2));
   }
-  @media (min-width: 640px) {
+  @media (min-width: 768px) {
     main :is(a, button, input, select, textarea, [tabindex]) {
       scroll-margin-top: calc(var(--header-height) + var(--spacing-2));
     }
