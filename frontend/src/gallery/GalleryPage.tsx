@@ -9,7 +9,7 @@ import { Modal, ModalBackdrop } from "../components/Modal";
 import { Panel } from "../components/Panel";
 import { Pill } from "../components/Pill";
 import { Stepper } from "../components/Stepper";
-import { Tag } from "../components/Tag";
+import { SeverityTag } from "../components/SeverityTag";
 
 function Section({ title, children }: { title: string; children: ReactNode }) {
   return (
@@ -64,22 +64,22 @@ export function GalleryPage() {
 
       <Section title="Severity tags">
         <div className="flex flex-wrap items-center gap-2">
-          <Tag severity="high">High</Tag>
-          <Tag severity="medium">Medium</Tag>
-          <Tag severity="low">Low</Tag>
+          <SeverityTag severity="high" />
+          <SeverityTag severity="med" />
+          <SeverityTag severity="low" />
         </div>
       </Section>
 
       <Section title="Panel with header row">
         <Panel header="Manuscripts">
           <div className="grid grid-cols-[1fr_auto_auto] items-center gap-2.5 border-t border-border-soft px-3.5 py-2">
-            <span>Group 3 — Smart irrigation system</span>
-            <Tag severity="low">Low</Tag>
+            <span>Group 3, Smart irrigation system</span>
+            <SeverityTag severity="low" />
             <Pill status="ok">Ready</Pill>
           </div>
           <div className="grid grid-cols-[1fr_auto_auto] items-center gap-2.5 border-t border-border-soft px-3.5 py-2">
-            <span>Group 7 — Inventory forecasting</span>
-            <Tag severity="medium">Medium</Tag>
+            <span>Group 7, Inventory forecasting</span>
+            <SeverityTag severity="med" />
             <Pill status="warn">Conditionally ready</Pill>
           </div>
         </Panel>

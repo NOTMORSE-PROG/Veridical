@@ -27,10 +27,10 @@ from app.report.service import aggregate_and_score
 
 async def _scoped_flag(
     session: AsyncSession, flag_id: int, instructor_id: int
-) -> tuple[Flag, CheckResult]:
+) -> tuple[Flag, CheckResult, Manuscript]:
     row = (
         await session.execute(
-            select(Flag, CheckResult)
+            select(Flag, CheckResult, Manuscript)
             .join(CheckResult, CheckResult.id == Flag.check_result_id)
             .join(CheckRun, CheckRun.id == CheckResult.check_run_id)
             .join(Manuscript, Manuscript.id == CheckRun.manuscript_id)
@@ -42,7 +42,9 @@ async def _scoped_flag(
     return row
 
 
-async def _to_flag_out(session: AsyncSession, flag: Flag, result: CheckResult) -> FlagOut:
+async def _to_flag_out(
+    session: AsyncSession, flag: Flag, result: CheckResult, manuscript: Manuscript
+) -> FlagOut:
     criterion_text = None
     if result.criterion_id is not None:
         criterion = await session.get(Criterion, result.criterion_id)
@@ -51,6 +53,8 @@ async def _to_flag_out(session: AsyncSession, flag: Flag, result: CheckResult) -
     return FlagOut(
         id=flag.id,
         check_result_id=result.id,
+        check_run_id=result.check_run_id,
+        manuscript_group_label=manuscript.group_label,
         check_kind=result.kind.value,
         criterion_text=criterion_text,
         severity=flag.severity.value,
@@ -66,14 +70,14 @@ async def _to_flag_out(session: AsyncSession, flag: Flag, result: CheckResult) -
 
 
 async def get_flag(session: AsyncSession, flag_id: int, instructor_id: int) -> FlagOut:
-    flag, result = await _scoped_flag(session, flag_id, instructor_id)
-    return await _to_flag_out(session, flag, result)
+    flag, result, manuscript = await _scoped_flag(session, flag_id, instructor_id)
+    return await _to_flag_out(session, flag, result, manuscript)
 
 
 async def annotate_flag(
     session: AsyncSession, flag_id: int, instructor_id: int, annotation: str
 ) -> FlagOut:
-    flag, result = await _scoped_flag(session, flag_id, instructor_id)
+    flag, result, manuscript = await _scoped_flag(session, flag_id, instructor_id)
     flag.annotation = annotation.strip()
     session.add(
         AuditLog(
@@ -89,7 +93,7 @@ async def annotate_flag(
     )
     await session.commit()
     await session.refresh(flag)
-    return await _to_flag_out(session, flag, result)
+    return await _to_flag_out(session, flag, result, manuscript)
 
 
 async def override_flag(
@@ -102,7 +106,7 @@ async def override_flag(
     watches (`_flag_deduction`, V-019). Returns the flag plus its
     `check_run_id` so the router can hand back a fresh `ReportOut` in the
     SAME response (ticket AC: "recomputes score/status immediately")."""
-    flag, result = await _scoped_flag(session, flag_id, instructor_id)
+    flag, result, manuscript = await _scoped_flag(session, flag_id, instructor_id)
     flag.overridden = True
     flag.override_reason = reason.strip()
     session.add(
@@ -122,4 +126,4 @@ async def override_flag(
     await session.commit()
     await aggregate_and_score(session, result.check_run_id)
     await session.refresh(flag)
-    return await _to_flag_out(session, flag, result), result.check_run_id
+    return await _to_flag_out(session, flag, result, manuscript), result.check_run_id

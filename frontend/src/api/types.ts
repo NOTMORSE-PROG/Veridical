@@ -214,6 +214,8 @@ export interface ResolveEscalationOut {
 export interface FlagOut {
   id: number;
   check_result_id: number;
+  check_run_id: number;
+  manuscript_group_label: string;
   check_kind: string;
   criterion_text: string | null;
   severity: "high" | "med" | "low";

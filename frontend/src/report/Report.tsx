@@ -7,6 +7,7 @@ import { useRef, useState } from "react";
 import { Link, useParams } from "react-router";
 import { ApiError } from "../api/client";
 import type { CriterionResultOut, ReportOut } from "../api/types";
+import { AnchorPill } from "../components/AnchorPill";
 import { Chip } from "../components/Chip";
 import { StatusPill, type StatusPillTone } from "../components/StatusPill";
 import { useRouteFocus } from "../routing/useRouteFocus";
@@ -93,14 +94,6 @@ function resultDisplay(row: CriterionResultOut): { label: string; tone: StatusPi
     default:
       return { label: row.outcome, tone: "neutral" };
   }
-}
-
-function AnchorPill({ anchor }: { anchor: string }) {
-  return (
-    <span className="w-fit rounded-full bg-status-neutral-bg px-2 py-0.5 text-xs whitespace-nowrap text-ink-tertiary">
-      {anchor}
-    </span>
-  );
 }
 
 const RESOLUTION_VERB: Record<string, string> = {

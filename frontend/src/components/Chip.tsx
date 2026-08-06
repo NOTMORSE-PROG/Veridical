@@ -1,7 +1,6 @@
 // Chip — small pill for page-identifying metadata (e.g. a rubric title,
-// a count). V-055: only consumer left is screen 4d, redesigned alongside
-// it. Optional truncation for long values (title tooltip carries the
-// full string, same pattern already shipped on ManuscriptsTable.tsx).
+// a count). Optional truncation for long values (title tooltip carries
+// the full string, same pattern already shipped on ManuscriptsTable.tsx).
 import type { ReactNode } from "react";
 import { cx } from "./cx";
 
