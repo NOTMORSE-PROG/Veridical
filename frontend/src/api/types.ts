@@ -7,6 +7,7 @@ export interface Instructor {
   id: number;
   email: string;
   display_name: string;
+  onboarding_dismissed_at: string | null;
 }
 
 export type CriterionType = "structural" | "semantic";

@@ -91,3 +91,12 @@ async def delete_session(session: AsyncSession, token: str) -> None:
     if row is not None:
         await session.delete(row)
         await session.commit()
+
+
+async def mark_onboarding_dismissed(session: AsyncSession, instructor: Instructor) -> Instructor:
+    """Flow A first-run welcome banner (V-055): idempotent, re-dismissing
+    just re-stamps the timestamp."""
+    instructor.onboarding_dismissed_at = datetime.now(UTC)
+    await session.commit()
+    await session.refresh(instructor)
+    return instructor

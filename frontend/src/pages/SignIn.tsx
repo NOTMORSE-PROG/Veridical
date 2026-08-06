@@ -78,7 +78,8 @@ export function SignInPage() {
       {
         onSuccess: () => {
           setLiveMessage("");
-          navigate("/dashboard", { replace: true });
+          const from = (location.state as LocationState | null)?.from?.pathname ?? "/dashboard";
+          navigate(from, { replace: true });
         },
         onError: (err) => {
           setLiveMessage("");
