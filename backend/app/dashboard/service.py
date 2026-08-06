@@ -17,20 +17,31 @@ async def get_dashboard_stats(
 ) -> DashboardStats:
     settings = settings or get_settings()
 
-    manuscripts_checked = await session.scalar(
-        select(func.count(func.distinct(CheckRun.manuscript_id)))
+    # BUG-012: every count on this dashboard is scoped to ONE manuscript-
+    # level unit -- each manuscript's LATEST done CheckRun -- so all four
+    # status counts always sum to exactly `manuscripts_checked`, and a
+    # superseded re-run's stale escalations don't keep counting once a
+    # newer run exists for the same manuscript. A manuscript can have
+    # multiple CheckRuns (re-runs); only the newest done one represents
+    # its current, actionable state.
+    latest_done_run_ids_select = (
+        select(func.max(CheckRun.id).label("run_id"))
         .select_from(CheckRun)
         .join(Manuscript, Manuscript.id == CheckRun.manuscript_id)
         .where(Manuscript.instructor_id == instructor_id, CheckRun.status == CheckRunStatus.done)
+        .group_by(CheckRun.manuscript_id)
+    )
+    latest_done_run_ids = latest_done_run_ids_select.subquery()
+
+    manuscripts_checked = await session.scalar(
+        select(func.count()).select_from(latest_done_run_ids)
     )
 
     status_rows = (
         await session.execute(
             select(ReadinessReport.status, func.count())
             .select_from(ReadinessReport)
-            .join(CheckRun, CheckRun.id == ReadinessReport.check_run_id)
-            .join(Manuscript, Manuscript.id == CheckRun.manuscript_id)
-            .where(Manuscript.instructor_id == instructor_id)
+            .where(ReadinessReport.check_run_id.in_(select(latest_done_run_ids.c.run_id)))
             .group_by(ReadinessReport.status)
         )
     ).all()
@@ -38,14 +49,16 @@ async def get_dashboard_stats(
 
     # Only rubric-criterion results count toward escalation rate/awaiting-
     # review — integrity checks (F4-F7, criterion_id NULL) don't exist in
-    # V2 and aren't part of this ratio's meaning either way.
+    # V2 and aren't part of this ratio's meaning either way. Scoped to the
+    # same latest-done-run set as everything else above (BUG-012).
     criterion_result_rows = (
         await session.execute(
             select(CheckResult.outcome, func.count())
             .select_from(CheckResult)
-            .join(CheckRun, CheckRun.id == CheckResult.check_run_id)
-            .join(Manuscript, Manuscript.id == CheckRun.manuscript_id)
-            .where(Manuscript.instructor_id == instructor_id, CheckResult.criterion_id.is_not(None))
+            .where(
+                CheckResult.check_run_id.in_(select(latest_done_run_ids.c.run_id)),
+                CheckResult.criterion_id.is_not(None),
+            )
             .group_by(CheckResult.outcome)
         )
     ).all()

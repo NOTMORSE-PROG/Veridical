@@ -1,49 +1,55 @@
-// Stepper — DESIGN.md §1 stepper palette (wireframe .pstep / .pstep.done /
-// .pstep.run). Each state has a distinct glyph so state is never conveyed by
-// color alone (DESIGN.md §4).
+// Stepper — a GOV.UK Task List pattern (design-system.service.gov.uk/
+// components/task-list/): one row per stage, a StatusPill immediately
+// next to its label (never floated far away), an optional caption line
+// below. V-055 rebuild: `done` and `skipped` used to render identically
+// (a green checkmark for both), which visually implied more certainty
+// than the engine's own "not implemented yet, honestly skipped" state —
+// each StepState now gets its own StatusPill tone, reusing the shared,
+// colorblind-checked palette (StatusPill.tsx) rather than inventing a
+// second status-color system for this one component.
+import { StatusPill, type StatusPillTone } from "./StatusPill";
 import { cx } from "./cx";
 
-export type StepState = "done" | "running" | "pending";
+export type StepState = "pending" | "running" | "blocked" | "done" | "skipped" | "attention";
 
 export interface Step {
+  id: string;
   label: string;
   state: StepState;
-  note?: string;
+  tagText: string;
+  detail?: string;
 }
 
-const STEP_CIRCLE_CLASSES: Record<StepState, string> = {
-  done: "border-step-done bg-step-done text-on-primary",
-  running: "border-primary bg-primary text-on-primary",
-  pending: "border-step-pending-border bg-panel text-step-pending-text",
-};
-
-const STEP_GLYPHS: Record<StepState, string> = {
-  done: "✓",
-  running: "●",
-  pending: "○",
+const STEP_TONE: Record<StepState, StatusPillTone> = {
+  pending: "neutral",
+  running: "info",
+  blocked: "attention",
+  done: "success",
+  skipped: "neutral",
+  attention: "attention",
 };
 
 export function Stepper({ steps }: { steps: Step[] }) {
   return (
-    <ol className="flex flex-col gap-2">
-      {steps.map((step, index) => (
-        // Index keys are safe: the list is static per render, never reordered
-        <li key={index} className="flex items-center gap-2.5">
-          <span
-            aria-hidden="true"
-            className={cx(
-              "flex size-5 flex-none items-center justify-center rounded-pill border-2 text-2xs font-bold",
-              STEP_CIRCLE_CLASSES[step.state],
-            )}
-          >
-            {STEP_GLYPHS[step.state]}
-          </span>
-          <span className={cx("flex-1", step.state === "running" && "font-semibold")}>
-            {step.label}
-          </span>
-          {step.note !== undefined && (
-            <span className="text-xs text-ink-faint">{step.note}</span>
-          )}
+    <ol className="flex flex-col rounded-lg border border-border bg-panel">
+      {steps.map((step) => (
+        <li
+          key={step.id}
+          aria-current={step.state === "running" || step.state === "blocked" ? "step" : undefined}
+          className="flex flex-col gap-1 border-b border-border px-4 py-3 last:border-b-0"
+        >
+          <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
+            <span
+              className={cx(
+                "text-sm text-ink",
+                (step.state === "running" || step.state === "blocked") && "font-semibold",
+              )}
+            >
+              {step.label}
+            </span>
+            <StatusPill tone={STEP_TONE[step.state]}>{step.tagText}</StatusPill>
+          </div>
+          {step.detail && <p className="text-xs text-ink-secondary">{step.detail}</p>}
         </li>
       ))}
     </ol>

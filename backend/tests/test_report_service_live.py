@@ -11,12 +11,12 @@ from decimal import Decimal
 import pytest
 from sqlalchemy import select, text
 
-from app.models.enums import CheckKind, ReadinessStatus, ResultOutcome
+from app.models.enums import CheckKind, CheckRunStatus, ReadinessStatus, ResultOutcome
 from app.models.instructor import Instructor
 from app.models.manuscript import Manuscript
 from app.models.rubric import Criterion, Rubric
 from app.models.run import CheckResult, CheckRun, ReadinessReport
-from app.report.service import aggregate_and_score, build_report_payload
+from app.report.service import aggregate_and_score, build_report_payload, get_report
 
 live = pytest.mark.skipif(
     "DATABASE_URL" not in os.environ,
@@ -154,3 +154,73 @@ async def test_all_escalated_run_persists_needs_review_with_null_score(session_f
             )
         ).scalar_one()
         assert stored.composite_score is None
+
+
+async def test_resolved_escalation_surfaces_the_instructor_decision_on_the_report(session_factory):
+    """A human resolving an escalated criterion must be visible on the
+    report as a human decision, not silently relabeled as an ordinary
+    AI-graded row carrying the AI's own superseded failure text with no
+    trace of the instructor's reason (V-055 review — this was previously
+    dropped between the persisted `detail` JSON and the API response)."""
+    from app.checks.escalation import RESOLUTION_MARK_PASS, resolve_escalation
+
+    async with session_factory() as session:
+        instructor = Instructor(email="resolve@demo.local", display_name="Resolver")
+        session.add(instructor)
+        await session.commit()
+        manuscript = Manuscript(instructor_id=instructor.id, group_label="G", file_ref="x.pdf")
+        rubric = Rubric(instructor_id=instructor.id, title="Format", source_file="r.pdf")
+        session.add_all([manuscript, rubric])
+        await session.commit()
+        criterion = Criterion(
+            rubric_id=rubric.id,
+            type="semantic",
+            text="Some criterion",
+            evidence=None,
+            weight=Decimal("100"),
+            position=0,
+        )
+        session.add(criterion)
+        await session.commit()
+        await session.refresh(criterion)  # coerces .type from a raw str into CriterionType
+        check_run = CheckRun(manuscript_id=manuscript.id, rubric_id=rubric.id)
+        session.add(check_run)
+        await session.commit()
+        result = CheckResult(
+            check_run_id=check_run.id,
+            criterion_id=criterion.id,
+            kind=CheckKind.semantic,
+            outcome=ResultOutcome.escalated,
+            score=None,
+            detail={
+                "reason": "Could not verify the quoted evidence after a retry.",
+                "votes": [None, None],
+                "agreement": 0.0,
+            },
+        )
+        session.add(result)
+        await session.commit()
+        await session.refresh(result)
+
+        resolved = await resolve_escalation(
+            session,
+            check_run.id,
+            result.id,
+            instructor.id,
+            RESOLUTION_MARK_PASS,
+            "Verified manually against the source PDF.",
+        )
+        assert resolved.outcome == ResultOutcome.passed
+
+        check_run.status = CheckRunStatus.done
+        await session.commit()
+
+        report = await get_report(session, check_run.id, instructor.id)
+        row = report.results[0]
+        assert row.resolution is not None
+        assert row.resolution.type == RESOLUTION_MARK_PASS
+        assert row.resolution.reason == "Verified manually against the source PDF."
+        # The AI's original (now-superseded) text is still readable for
+        # context, but `resolution` is what the frontend must check FIRST
+        # so a human decision is never mislabeled as AI-graded.
+        assert row.reason == "Could not verify the quoted evidence after a retry."

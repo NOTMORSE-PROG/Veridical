@@ -1,4 +1,7 @@
 @import "tailwindcss";
+@import "@fontsource/public-sans/400.css";
+@import "@fontsource/public-sans/500.css";
+@import "@fontsource/public-sans/700.css";
 @import "./tokens.css";
 
 @layer base {
@@ -8,5 +11,51 @@
     font-family: var(--font-sans);
     font-size: var(--text-base);
     line-height: var(--text-base--line-height);
+  }
+
+  /*
+   * System-wide focus ring (V-055): the solid inner ring is the
+   * compliance-bearing layer (measured >=3:1 against both light and dark
+   * fills) and uses `outline`, which survives Windows forced-colors mode.
+   * The TIP-yellow outer halo is brand identity only (1.71:1 alone, fails
+   * WCAG 1.4.11 by itself) via `box-shadow`, which may disappear under
+   * forced-colors — the ring itself must not depend on it.
+   */
+  :focus-visible {
+    outline: var(--border-width-lg) solid var(--color-focus-inner);
+    outline-offset: 2px;
+    box-shadow: 0 0 0 5px var(--color-accent);
+  }
+
+  .on-dark:focus-visible {
+    outline-color: var(--color-focus-inner-on-dark);
+  }
+
+  /*
+   * 4c: focus lands on the visually-hidden native file input (`sr-only`
+   * can't itself be the visible focus target); mirror the ring onto its
+   * visible label sibling, same tokens as the base rule.
+   */
+  .file-trigger-input:focus-visible + label {
+    outline: var(--border-width-lg) solid var(--color-focus-inner);
+    outline-offset: 2px;
+    box-shadow: 0 0 0 5px var(--color-accent);
+  }
+
+  /*
+   * WCAG 2.4.11 Focus Not Obscured (V-055): AppShell's header is sticky
+   * (visibility-of-system-status for a long manuscripts table), so every
+   * focusable element inside <main> needs enough scroll-margin to clear
+   * it when Tab scrolls it into view -- otherwise a focused control can
+   * land hidden underneath the header. Matches the header's own height
+   * tokens exactly.
+   */
+  main :is(a, button, input, select, textarea, [tabindex]) {
+    scroll-margin-top: calc(var(--header-height-mobile) + var(--spacing-2));
+  }
+  @media (min-width: 768px) {
+    main :is(a, button, input, select, textarea, [tabindex]) {
+      scroll-margin-top: calc(var(--header-height) + var(--spacing-2));
+    }
   }
 }

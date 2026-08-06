@@ -8,6 +8,8 @@ from app.report.schemas import ReportOut
 class FlagOut(BaseModel):
     id: int
     check_result_id: int
+    check_run_id: int
+    manuscript_group_label: str
     check_kind: str
     # None for integrity checks (F4-F7) — they aren't tied to a rubric
     # criterion (check_result.criterion_id is nullable, ENGINEERING §2).

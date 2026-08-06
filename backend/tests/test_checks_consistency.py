@@ -181,3 +181,23 @@ async def test_pass_failing_to_grade_at_all_escalates_without_a_tie_break():
     assert llm.passes == ["pass_1", "pass_1", "pass_2"]
     assert results[0].outcome == ResultOutcome.escalated
     assert results[0].detail["agreement"] == 0.0
+
+
+async def test_both_passes_failing_with_the_same_reason_does_not_duplicate_it():
+    # The common real case: both grading passes fail identically (same
+    # manuscript, same unverifiable quote) — a naive "; ".join produced a
+    # literal doubled sentence in real report output (V-055 4h review).
+    criteria = [FakeCriterion(id=1, text="Some criterion")]
+    llm = ScriptedLLM(
+        [
+            {"not_verdicts": []},  # pass_1: batch attempt (malformed)
+            {"not_verdicts": []},  # pass_1: whole-batch retry (still malformed)
+            {"not_verdicts": []},  # pass_2: batch attempt (malformed)
+            {"not_verdicts": []},  # pass_2: whole-batch retry (still malformed)
+        ]
+    )
+    session = FakeSession()
+    results = await run_semantic_checks_with_consistency(session, 1, criteria, _extraction(), llm)
+    assert llm.passes == ["pass_1", "pass_1", "pass_2", "pass_2"]
+    assert results[0].outcome == ResultOutcome.escalated
+    assert results[0].detail["reason"] == "Grading response could not be validated after a retry."

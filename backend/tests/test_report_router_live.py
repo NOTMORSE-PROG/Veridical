@@ -143,3 +143,8 @@ def test_get_report_returns_the_full_shape(logged_in_with_a_done_run):
     assert body["thresholds"]["ready_min_score"] == 85.0
     assert len(body["results"]) == 1
     assert body["results"][0]["anchor"] == "page 2"
+    # Already computed by score_check_run but previously dropped before
+    # reaching the API — screen 4h needs these to state the actual
+    # determining factor instead of hedging with "or" (V-055 review).
+    assert body["flag_deduction"] == 0.0
+    assert body["unresolved_high_flag_count"] == 0

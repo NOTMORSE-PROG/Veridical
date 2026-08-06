@@ -9,6 +9,8 @@ from app.auth.dependencies import get_current_instructor
 from app.config import get_settings
 from app.db import get_session
 from app.models.instructor import Instructor
+from app.models.manuscript import Manuscript
+from app.models.rubric import Rubric
 from app.pipeline.schemas import CheckRunOut, CreateCheckRunRequest
 from app.pipeline.service import create_check_run, get_check_run, list_check_runs, queue_position
 from app.pipeline.worker import advance_once
@@ -19,6 +21,11 @@ router = APIRouter(tags=["check-runs"])
 
 async def _to_out(session: AsyncSession, check_run) -> CheckRunOut:
     position = await queue_position(session, check_run)
+    # session.get() hits the identity map when already loaded this
+    # session (the common case, since create/get already touched these
+    # rows) — display-only fields for screen 4g, never load-bearing.
+    manuscript = await session.get(Manuscript, check_run.manuscript_id)
+    rubric = await session.get(Rubric, check_run.rubric_id)
     return CheckRunOut(
         id=check_run.id,
         manuscript_id=check_run.manuscript_id,
@@ -29,6 +36,9 @@ async def _to_out(session: AsyncSession, check_run) -> CheckRunOut:
         started_at=check_run.started_at,
         finished_at=check_run.finished_at,
         created_at=check_run.created_at,
+        manuscript_group_label=manuscript.group_label if manuscript else None,
+        manuscript_uploaded_at=manuscript.created_at if manuscript else None,
+        rubric_title=rubric.title if rubric else None,
     )
 
 
