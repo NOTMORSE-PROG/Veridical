@@ -1,5 +1,5 @@
 // Audit log data layer (F8.10, screen 4s).
-import { useQuery } from "@tanstack/react-query";
+import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { api } from "../api/client";
 import type { AuditLogDetail, PaginatedAuditLog } from "../api/types";
 
@@ -25,6 +25,7 @@ export function useAuditLogPage(filters: AuditLogFilters, page: number, pageSize
   return useQuery({
     queryKey: ["audit-log", filters, page, pageSize],
     queryFn: () => api.get<PaginatedAuditLog>(`/audit?${buildQuery(filters, page, pageSize)}`),
+    placeholderData: keepPreviousData,
   });
 }
 

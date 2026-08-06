@@ -113,8 +113,8 @@
    * builds the first LIVE status pill (4b/4e/4h), not decided here.
    * Remove each value below as its last consumer is rebuilt; remove this
    * whole block once none remain. Consumers as of 2026-08-06 (grepped, not
-   * guessed): audit/AuditLog.tsx, auth/RequireAuth.tsx,
-   * components/{Button,KpiCard,Panel,Pill}.tsx, gallery/GalleryPage.tsx.
+   * guessed): auth/RequireAuth.tsx, components/{Button,KpiCard,Panel,
+   * Pill}.tsx, gallery/GalleryPage.tsx.
    */
   --color-status-ok-bg: #e5f1ea;
   --color-status-ok-text: #1e6b43;
