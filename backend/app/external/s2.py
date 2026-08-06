@@ -45,6 +45,7 @@ def _parse_paper(data: dict) -> VerificationResult:
         provider="s2",
         title=data.get("title"),
         url=pdf.get("url"),
+        abstract=data.get("abstract"),
         raw=data,
     )
 

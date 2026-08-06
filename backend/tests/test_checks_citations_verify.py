@@ -118,9 +118,15 @@ def _client(handler) -> httpx.AsyncClient:
 
 
 async def test_real_doi_confirmed_produces_no_flag(session_factory):
+    """CrossRef confirms existence; since it has no abstract for this DOI,
+    verify_citation supplements with an S2 lookup (module docstring: most
+    real DOI-backed citations have no CrossRef abstract at all)."""
+
     def handler(request):
-        assert "crossref.org" in str(request.url)
-        return httpx.Response(200, json={"message": {"DOI": "10.1/x", "title": ["Real Paper"]}})
+        if "crossref.org" in str(request.url):
+            return httpx.Response(200, json={"message": {"DOI": "10.1/x", "title": ["Real Paper"]}})
+        assert "semanticscholar.org" in str(request.url)
+        return httpx.Response(404)  # no S2 record either — abstract stays None, still fine
 
     citation = _citation(doi="10.1/x")
     async with session_factory() as session, _client(handler) as client:
@@ -244,6 +250,95 @@ def test_wording_never_uses_accusatory_language():
         assert "fabricat" not in lowered
         assert "dishonest" not in lowered
         assert "cheat" not in lowered
+
+
+async def test_crossref_missing_abstract_supplemented_from_s2(session_factory):
+    """V-030's own precondition: claim-support needs an abstract, and
+    CrossRef often doesn't have one — verify_citation must fill it in from
+    S2 without disturbing the CrossRef-sourced existence verdict."""
+
+    def handler(request):
+        if "crossref.org" in str(request.url):
+            return httpx.Response(200, json={"message": {"DOI": "10.1/y", "title": ["A Paper"]}})
+        assert "semanticscholar.org" in str(request.url)
+        return httpx.Response(200, json={"title": "A Paper", "abstract": "We report a finding."})
+
+    citation = _citation(doi="10.1/y")
+    async with session_factory() as session, _client(handler) as client:
+        verdict = await verify_citation(session, client, citation, settings=get_settings())
+    assert verdict.kind == VerdictKind.existence_confirmed
+    assert verdict.result.abstract == "We report a finding."
+    assert verdict.result.provider == "crossref"  # the ORIGINAL provider, not overwritten
+
+
+async def test_claim_support_flag_created_end_to_end(session_factory):
+    """The full V-027+V-029+V-030 assembly: a DOI-confirmed citation with
+    a supplemented abstract and a linked in-text claim produces a real
+    claim-support Flag when the LLM judges a mismatch."""
+    extraction = ExtractionResult(
+        page_count=1,
+        anchor_kind="page",
+        image_only=False,
+        text_chars=100,
+        section_tree=SectionTree(source="none", nodes=[]),
+        blocks=[
+            TextBlock(
+                page=1,
+                text="Prior work found no significant effect (Reyes, 2023).",
+                max_font_size=11.0,
+                bold_ratio=0.0,
+            )
+        ],
+        images=[],
+    )
+    from app.ingest.patterns import load_patterns
+
+    patterns = load_patterns(get_settings().ingest_patterns_file)
+    citation = _citation(0, doi="10.1/reyes", title="A Study", authors=["Reyes, J."], year=2023)
+    check_run_id = await _seed_check_run(session_factory)
+
+    def handler(request):
+        if "crossref.org" in str(request.url):
+            return httpx.Response(
+                200, json={"message": {"DOI": "10.1/reyes", "title": ["A Study"]}}
+            )
+        assert "semanticscholar.org" in str(request.url)
+        return httpx.Response(
+            200, json={"title": "A Study", "abstract": "We found a significant positive effect."}
+        )
+
+    class ScriptedLLM:
+        async def complete(self, prompt_type, prompt, *, prompt_version="unversioned", **context):
+            return {
+                "verdicts": [
+                    {
+                        "index": 0,
+                        "verdict": "possibly_unsupported",
+                        "reasoning": "The abstract reports an effect; the claim says none.",
+                        "abstract_excerpt": "a significant positive effect",
+                    }
+                ]
+            }
+
+    async with session_factory() as session, _client(handler) as client:
+        result = await run_citation_integrity_check(
+            session,
+            client,
+            check_run_id=check_run_id,
+            citations=[citation],
+            extraction=extraction,
+            patterns=patterns,
+            settings=get_settings(),
+            llm=ScriptedLLM(),
+        )
+        assert result.detail["n_claim_support_checked"] == 1
+        assert result.detail["n_claim_support_skipped_quota"] == 0
+
+        flag_query = text("SELECT severity, evidence_excerpt FROM flag WHERE check_result_id = :id")
+        rows = (await session.execute(flag_query, {"id": result.id})).all()
+        assert len(rows) == 1
+        assert rows[0].severity == "med"
+        assert "no significant effect" in rows[0].evidence_excerpt
 
 
 async def test_run_citation_integrity_check_persists_result_and_flags(session_factory):

@@ -1,7 +1,8 @@
 """Existence + retraction checks (F5.2/F5.3/F5.5, V-029) — the F5
 citation-integrity assembly: combines V-027's in-text cross-match (orphan/
 uncited) with real external verification (V-028's CrossRef/S2/OpenLibrary/
-GBooks clients) into one `check_result` per run, with real `Flag` rows.
+GBooks clients) and V-030's claim-support check into one `check_result`
+per run, with real `Flag` rows.
 
 Wording discipline is enforced here, not left to callers (charter rule 3):
 "unverifiable — please check manually", NEVER "fake"; a retraction is the
@@ -10,7 +11,7 @@ ONLY high-severity outcome this check ever produces — everything else
 those are, by themselves, evidence of anything wrong with the manuscript.
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from enum import StrEnum
 
 import httpx
@@ -24,6 +25,7 @@ from app.checks.citations.extract import (
     orphan_flags,
     uncited_flags,
 )
+from app.checks.citations.support import ClaimSupportInput, run_claim_support_check
 from app.config import Settings
 from app.errors import ApiDownError
 from app.external import cache
@@ -35,6 +37,7 @@ from app.external.schemas import VerificationResult
 from app.ingest.patterns import HeadingPatterns
 from app.ingest.references import non_reference_blocks
 from app.ingest.schemas import ExtractionResult
+from app.llm.base import LLMClient
 from app.models.citation import Citation
 from app.models.enums import CheckKind, FlagSeverity, ResultOutcome
 from app.models.run import CheckResult, Flag
@@ -86,13 +89,30 @@ async def verify_citation(
     alone, which would be a false reassurance (worse than a false flag,
     charter judgment #1)."""
     if citation.doi:
-        return await _verify_keyed(
+        verdict = await _verify_keyed(
             session,
             "doi",
             citation.doi,
             settings=settings,
             fetch=lambda: crossref_client.lookup_doi(client, citation.doi, settings=settings),
         )
+        # CrossRef often has no abstract (many publishers don't submit one) —
+        # most real DOI-backed citations would never reach V-030's
+        # claim-support check without this. S2 is the more reliable
+        # abstract source; only queried when existence is already confirmed
+        # and CrossRef didn't supply one, cached under its own key so it
+        # never clobbers the CrossRef-sourced existence/retraction result.
+        if (
+            verdict.kind == VerdictKind.existence_confirmed
+            and verdict.result is not None
+            and not verdict.result.abstract
+        ):
+            abstract = await _fetch_supplementary_abstract(
+                session, client, citation.doi, settings=settings
+            )
+            if abstract:
+                verdict = CitationVerdict(verdict.kind, replace(verdict.result, abstract=abstract))
+        return verdict
 
     if citation.isbn:
 
@@ -125,6 +145,27 @@ async def verify_citation(
     # No DOI/ISBN/title to key a lookup on (e.g. a parse_failed entry) —
     # genuinely unverifiable, no network call made.
     return CitationVerdict(VerdictKind.not_found)
+
+
+async def _fetch_supplementary_abstract(
+    session: AsyncSession, client: httpx.AsyncClient, doi: str, *, settings: Settings
+) -> str | None:
+    cached = await cache.get_cached(
+        session,
+        key_kind="doi_abstract",
+        key_value=doi,
+        stale_days=settings.citation_cache_stale_days,
+    )
+    if cached is not None:
+        return cached.abstract
+    try:
+        result = await s2_client.lookup_doi(client, doi, settings=settings)
+    except ApiDownError:
+        return None
+    await cache.store_result(
+        session, key_kind="doi_abstract", key_value=doi, provider="s2", result=result
+    )
+    return result.abstract
 
 
 async def _verify_keyed(session, key_kind, key_value, *, settings, fetch) -> CitationVerdict:
@@ -206,20 +247,52 @@ async def run_citation_integrity_check(
     extraction: ExtractionResult,
     patterns: HeadingPatterns,
     settings: Settings,
+    llm: LLMClient | None = None,
 ) -> CheckResult:
     body_blocks = non_reference_blocks(extraction, patterns)
     in_text = extract_in_text_citations(body_blocks)
     cross = cross_match(in_text, citations)
 
+    # First linked claim sentence per reference, for V-030's claim-support
+    # pairing — a citation mentioned in-text more than once keeps whichever
+    # mention was linked first; picking one is enough to check the source
+    # actually says what THIS manuscript uses it for.
+    claim_by_order_index: dict[int, str] = {}
+    for in_text_cite, matched_refs in cross.linked:
+        for ref in matched_refs:
+            claim_by_order_index.setdefault(ref.order_index, in_text_cite.claim_sentence)
+
     flag_drafts: list[CitationFlagDraft] = [
         *orphan_flags(cross.orphans),
         *uncited_flags(cross.uncited),
     ]
+    claim_support_pairs: list[ClaimSupportInput] = []
     for citation in citations:
         verdict = await verify_citation(session, client, citation, settings=settings)
         draft = _verdict_flag_draft(citation, verdict)
         if draft is not None:
             flag_drafts.append(draft)
+        claim_sentence = claim_by_order_index.get(citation.order_index)
+        if (
+            verdict.kind == VerdictKind.existence_confirmed
+            and verdict.result is not None
+            and verdict.result.abstract
+            and claim_sentence
+        ):
+            claim_support_pairs.append(
+                ClaimSupportInput(
+                    citation=citation,
+                    claim_sentence=claim_sentence,
+                    abstract=verdict.result.abstract,
+                )
+            )
+
+    n_claim_support_skipped = 0
+    if llm is not None and claim_support_pairs:
+        claim_flags, n_claim_support_skipped = await run_claim_support_check(
+            llm, claim_support_pairs, check_run_id=check_run_id, settings=settings
+        )
+        flag_drafts.extend(claim_flags)
 
     result = CheckResult(
         check_run_id=check_run_id,
@@ -232,6 +305,8 @@ async def run_citation_integrity_check(
             "n_linked": len(cross.linked),
             "n_orphans": len(cross.orphans),
             "n_uncited": len(cross.uncited),
+            "n_claim_support_checked": len(claim_support_pairs),
+            "n_claim_support_skipped_quota": n_claim_support_skipped,
             "n_flags": len(flag_drafts),
         },
     )
