@@ -6,7 +6,7 @@ waiting real wall-clock minutes (RPM windows are 60s).
 
 import asyncio
 
-from app.llm.queue import RateGovernor
+from app.rate_governor import RateGovernor
 
 
 class FakeClock:

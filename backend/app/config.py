@@ -272,6 +272,42 @@ class Settings(BaseSettings):
     action_rate_limit_max_attempts: int = 20
     action_rate_limit_window_seconds: float = 3600.0
 
+    # --- External citation-verification APIs (V-028, F5.6) -------------------
+    # Contact info sent to CrossRef/Open Library so requests land in each
+    # provider's higher "polite"/"identified" rate tier — required by both
+    # providers' own usage policies (RESEARCH.md §2), not a secret.
+    external_contact_email: str = "veridical@example.org"
+    external_http_timeout_seconds: float = 15.0
+    external_max_retries: int = 2
+    external_retry_base_seconds: float = 1.0
+    # CrossRef polite-pool rates changed 2025-12-01 (RESEARCH.md §2) — two
+    # different endpoints, two different limits: single-DOI lookup vs.
+    # metadata search.
+    crossref_single_rps: float = 10.0
+    crossref_list_rps: float = 3.0
+    # Semantic Scholar (RESEARCH.md §2): the unauthenticated shared pool is
+    # generously documented (5,000 req/5min) but genuinely shared/unreliable
+    # in practice, so the no-key path self-throttles to 1 rps regardless —
+    # matching what an authenticated key's search-endpoint limit would give
+    # anyway. Empty key = unauthenticated path (works today, no owner action
+    # needed to build against); set the env var once a key is issued
+    # (V-028's own pending action item) for a higher ceiling, no code change.
+    semantic_scholar_api_key: str | None = None
+    semantic_scholar_rps: float = 1.0
+    # Open Library: 3 rps with an identifying User-Agent (RESEARCH.md §2).
+    openlibrary_rps: float = 3.0
+    # Google Books: no key required for low-volume use. Current documented
+    # daily quotas conflict across Google's own pages (RESEARCH.md §2) — this
+    # is a LOCAL budget this app enforces on itself, not a number trusted
+    # from Google's inconsistent docs; degrades to Open-Library-only once
+    # the local daily counter hits it (ticket edge case).
+    google_books_api_key: str | None = None
+    google_books_daily_quota: int = 1000
+    # A cached verification older than this is re-checked even on a cache
+    # hit (retractions land late — ticket edge case: "don't trust an old
+    # 'not retracted' forever").
+    citation_cache_stale_days: int = 30
+
     # --- CORS (V-048) --------------------------------------------------------
     # Comma-separated origins allowed to call the API from a browser. Empty
     # in dev (no browser cross-origin caller yet); production sets it to
