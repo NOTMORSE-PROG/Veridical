@@ -54,4 +54,11 @@ describe("LandingRoute (screen 4v)", () => {
     expect(screen.queryByText(/sign up/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/create an account/i)).not.toBeInTheDocument();
   });
+
+  it("the header logo is a real link back to the landing page itself (consistency with sign-in/dashboard)", async () => {
+    vi.stubGlobal("fetch", stubFetchByPath({ "/auth/me": SIGNED_OUT }));
+    renderWithProviders(<LandingRoute />);
+    await screen.findByRole("heading", { level: 1 });
+    expect(screen.getByRole("link", { name: "VERIDICAL" })).toHaveAttribute("href", "/");
+  });
 });

@@ -236,4 +236,22 @@ describe("AppShell", () => {
       queryClient.getQueryCache().findAll({ queryKey: ["dashboard-stats"] }),
     ).toHaveLength(0);
   });
+
+  it("the header logo is a real link back to the dashboard (found live: it was plain text everywhere in the app)", async () => {
+    vi.stubGlobal(
+      "fetch",
+      stubFetchByPath({
+        "/auth/me": { id: 1, email: "a@b.com", display_name: "Demo Instructor" },
+        "/quota": QUOTA,
+      }),
+    );
+    renderWithProviders(
+      <AppShell>
+        <div />
+      </AppShell>,
+      { route: "/rubric" },
+    );
+    await waitFor(() => expect(screen.getByText("DI")).toBeInTheDocument());
+    expect(screen.getByRole("link", { name: "VERIDICAL" })).toHaveAttribute("href", "/dashboard");
+  });
 });

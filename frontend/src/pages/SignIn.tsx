@@ -111,7 +111,7 @@ export function SignInPage() {
 
       <header className="border-b-[3px] border-accent bg-action">
         <div className="mx-auto flex h-14 max-w-[1120px] items-center justify-between px-4 sm:h-16 sm:px-6 lg:px-10">
-          <div className="flex items-center gap-2">
+          <Link to="/" className="on-dark flex items-center gap-2 rounded-sm">
             <span
               aria-hidden="true"
               className="flex h-7 w-7 items-center justify-center rounded-sm bg-accent text-sm font-bold text-ink sm:h-8 sm:w-8"
@@ -121,7 +121,7 @@ export function SignInPage() {
             <span className="text-base font-bold tracking-header text-on-action sm:text-md">
               VERIDICAL
             </span>
-          </div>
+          </Link>
         </div>
       </header>
 
