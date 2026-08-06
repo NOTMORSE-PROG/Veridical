@@ -38,6 +38,7 @@ EXPECTED_TABLES = {
     "llm_quota_counter",  # V-009 (migration 0003)
     "llm_response_cache",  # V-009 (migration 0003)
     "session",  # V-014 (migration 0005)
+    "citation_cache",  # V-028 (migration 0012)
 }
 
 

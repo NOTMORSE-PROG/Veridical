@@ -7,12 +7,8 @@ DB-persisted daily quota, checks the response cache before spending quota
 Nothing outside `app/llm/` may call a transport directly (CODING.md §2).
 """
 
-import asyncio
 import hashlib
 import json
-import time
-from collections import deque
-from collections.abc import Awaitable, Callable
 from datetime import datetime, timedelta
 from typing import Any, Protocol
 from zoneinfo import ZoneInfo
@@ -25,13 +21,9 @@ from app.errors import ApiDownError, QuotaExhaustedError
 from app.llm.pool import ModelSpec, pool_daily_capacity
 from app.models.audit import AuditLog
 from app.models.llm import LLMQuotaCounter, LLMResponseCache
+from app.rate_governor import ClockFn, RateGovernor, SleepFn, _default_sleep
 
-SleepFn = Callable[[float], Awaitable[None]]
-ClockFn = Callable[[], float]
-
-
-async def _default_sleep(seconds: float) -> None:
-    await asyncio.sleep(seconds)
+__all__ = ["ClockFn", "LLMQueue", "RateGovernor", "SleepFn", "Transport"]
 
 
 class Transport(Protocol):
@@ -73,36 +65,6 @@ def next_reset_for(tz_name: str) -> datetime:
     today = datetime.now(tz).date()
     midnight = datetime(today.year, today.month, today.day, tzinfo=tz)
     return midnight + timedelta(days=1)
-
-
-class RateGovernor:
-    """Serializes calls to a sliding 60s window of at most `rpm` calls.
-
-    `clock`/`sleep` are injectable so tests can prove a 50-call burst never
-    exceeds the window without waiting real wall-clock minutes (V-009 AC).
-    """
-
-    def __init__(
-        self, rpm: int, *, clock: ClockFn | None = None, sleep: SleepFn | None = None
-    ) -> None:
-        self.rpm = rpm
-        self._clock = clock or time.monotonic
-        self._sleep = sleep or _default_sleep
-        self._lock = asyncio.Lock()
-        self._timestamps: deque[float] = deque()
-
-    async def acquire(self) -> None:
-        async with self._lock:
-            while True:
-                now = self._clock()
-                window_start = now - 60.0
-                while self._timestamps and self._timestamps[0] < window_start:
-                    self._timestamps.popleft()
-                if len(self._timestamps) < self.rpm:
-                    self._timestamps.append(now)
-                    return
-                wait = self._timestamps[0] + 60.0 - now
-                await self._sleep(max(wait, 0.01))
 
 
 class LLMQueue:
