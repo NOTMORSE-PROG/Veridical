@@ -3,11 +3,14 @@
 import asyncio
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from pathlib import Path
 
+from alembic.config import Config
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
+from alembic import command
 from app import db
 from app.audit.router import router as audit_router
 from app.auth.router import router as auth_router
@@ -22,9 +25,33 @@ from app.pipeline.worker import worker_loop
 from app.report.router import router as report_router
 from app.rubric.router import router as rubric_router
 
+_ALEMBIC_INI = Path(__file__).resolve().parent.parent / "alembic.ini"
+
+
+def _upgrade_to_head() -> None:
+    """Runs `alembic upgrade head` synchronously (Alembic's own async
+    support runs its own `asyncio.run()` inside `env.py` -- calling this
+    directly from a running event loop would raise; `asyncio.to_thread`
+    at the call site gives it a clean thread of its own). Idempotent: a
+    no-op if already at head, safe to run on every boot."""
+    command.upgrade(Config(str(_ALEMBIC_INI)), "head")
+
 
 @asynccontextmanager
 async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
+    # Migrations were previously a manual "remember to run alembic upgrade
+    # head against the Neon DSN" step (V-048) -- a real deploy landed a
+    # schema change (V-055's migration 0011) with no automated way to
+    # apply it. Keyed off veridical_env (already "prod" in Render's real
+    # environment today, confirmed live via /health) rather than a new
+    # settings flag, so this activates the moment this code deploys, no
+    # extra Render dashboard step required. Gated to prod only so no
+    # TestClient-based test (every one of which imports this module) ever
+    # points a real migration run at a test DATABASE_URL by surprise --
+    # same reasoning as pipeline_worker_autostart below.
+    if get_settings().veridical_env == "prod":
+        await asyncio.to_thread(_upgrade_to_head)
+
     # Gated by settings (default off, V-018): every TestClient-based test
     # imports this module, and a real polling loop must never start
     # against a test's DATABASE_URL by surprise. Production (Render)
