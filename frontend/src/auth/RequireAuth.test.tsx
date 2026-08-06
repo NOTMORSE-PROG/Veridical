@@ -36,4 +36,24 @@ describe("RequireAuth", () => {
     );
     await waitFor(() => expect(screen.queryByText("Protected content")).not.toBeInTheDocument());
   });
+
+  it("BUG-010: a transient backend failure (5xx) shows a retry state, not the sign-in redirect a real 401 gets", async () => {
+    vi.stubGlobal(
+      "fetch",
+      stubFetchByPath({
+        "/auth/me": new Response(
+          JSON.stringify({ error: { code: "internal", message: "x" } }),
+          { status: 500 },
+        ),
+      }),
+    );
+    renderWithProviders(
+      <RequireAuth>
+        <div>Protected content</div>
+      </RequireAuth>,
+    );
+    expect(await screen.findByRole("alert")).toHaveTextContent("could not reach the server");
+    expect(screen.getByRole("button", { name: "Try again" })).toBeInTheDocument();
+    expect(screen.queryByText("Protected content")).not.toBeInTheDocument();
+  });
 });

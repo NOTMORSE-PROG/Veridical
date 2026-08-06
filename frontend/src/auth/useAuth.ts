@@ -33,11 +33,31 @@ export function useLogin() {
   });
 }
 
+export function useDismissOnboarding() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: () => api.post<Instructor>("/auth/onboarding/dismiss"),
+    onSuccess: (instructor) => {
+      queryClient.setQueryData(ME_QUERY_KEY, instructor);
+    },
+  });
+}
+
 export function useLogout() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: () => api.post("/auth/logout"),
     onSuccess: () => {
+      // BUG-009: a full clear, not a targeted reset — the QueryClient
+      // instance lives for the tab's lifetime and query keys aren't
+      // scoped by instructor id, so any survivor (dashboard stats, quota,
+      // manuscript lists) could otherwise render to the NEXT instructor
+      // who signs in on the same browser/tab (a real cross-instructor
+      // data leak on a shared machine). Cite: TanStack Query maintainers,
+      // GitHub Discussion #7839 "Handle logout and user-dependent
+      // queries"; OWASP Session Management Cheat Sheet (invalidate state
+      // at logout, not just the auth token).
+      queryClient.clear();
       queryClient.setQueryData(ME_QUERY_KEY, null);
     },
   });

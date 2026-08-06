@@ -1,5 +1,7 @@
-import { screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { MemoryRouter } from "react-router";
 import { renderWithProviders, stubFetchByPath } from "../test/renderWithProviders";
 import { AppShell } from "./AppShell";
 
@@ -118,5 +120,43 @@ describe("AppShell", () => {
     for (const label of ["Dashboard", "Rubric", "Submissions", "Archive", "Audit log", "Settings"]) {
       expect(screen.getAllByText(label).length).toBe(2);
     }
+  });
+
+  it("BUG-009: signing out clears the whole query cache, not just the auth query (a shared-machine cross-instructor leak otherwise)", async () => {
+    vi.stubGlobal(
+      "fetch",
+      stubFetchByPath({
+        "/auth/me": { id: 1, email: "a@b.com", display_name: "Demo Instructor" },
+        "/quota": QUOTA,
+        "/auth/logout": {},
+      }),
+    );
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+    });
+    // A stand-in for another instructor-scoped query (dashboard stats,
+    // manuscript lists) that should NOT survive logout on a shared browser.
+    queryClient.setQueryData(["dashboard-stats"], { readyCount: 3 });
+
+    render(
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter initialEntries={["/dashboard"]}>
+          <AppShell>
+            <div />
+          </AppShell>
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+    await waitFor(() => expect(screen.getByText("DI")).toBeInTheDocument());
+
+    fireEvent.click(screen.getByRole("button", { name: /Sign out/ }));
+    // A still-mounted query (useMe/useQuota) refetches immediately after a
+    // clear, which is correct — the proof of the fix is that the OTHER
+    // instructor's stale cached query is gone for good, not that the cache
+    // stays empty forever.
+    await waitFor(() => expect(queryClient.getQueryData(["dashboard-stats"])).toBeUndefined());
+    expect(
+      queryClient.getQueryCache().findAll({ queryKey: ["dashboard-stats"] }),
+    ).toHaveLength(0);
   });
 });

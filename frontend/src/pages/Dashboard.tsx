@@ -4,27 +4,52 @@
 // (V-021). The quota meter (V-009) lives in AppShell's top bar for every
 // screen, so it isn't duplicated here.
 import { useMemo, useRef, useState } from "react";
-import { useMe } from "../auth/useAuth";
+import { useDismissOnboarding, useMe } from "../auth/useAuth";
 import { NewCheckModal } from "../check/NewCheck";
 import { KpiCards } from "../dashboard/KpiCards";
 import { ManuscriptsTable } from "../dashboard/ManuscriptsTable";
+import { OnboardingBanner } from "../dashboard/OnboardingBanner";
 import { useDashboardStats } from "../dashboard/useDashboard";
 import { useRouteFocus } from "../routing/useRouteFocus";
 import { useRubricFamilies } from "../rubric/useRubric";
 import { UploadRubricModal } from "../rubric/UploadRubricModal";
 
-function EmptyState({ onUpload }: { onUpload: () => void }) {
+function EmptyState({
+  onUpload,
+  showOnboarding,
+  onDismissOnboarding,
+}: {
+  onUpload: () => void;
+  showOnboarding: boolean;
+  onDismissOnboarding: () => void;
+}) {
+  const panelHeadingRef = useRef<HTMLHeadingElement>(null);
+
+  function handleBannerDismiss() {
+    onDismissOnboarding();
+    // The banner unmounts on dismiss, so focus must move to the next
+    // logical heading rather than fall back to <body> -- the SPA-focus
+    // rule applied at component-transition scale, not just route scale.
+    requestAnimationFrame(() => panelHeadingRef.current?.focus());
+  }
+
   return (
     <>
+      {showOnboarding && <OnboardingBanner onDismiss={handleBannerDismiss} />}
       <div className="flex flex-col items-center gap-3 rounded-lg border-2 border-dashed border-border-input bg-page p-8 text-center">
-        <h2 className="text-md font-bold text-ink">No required format yet</h2>
+        <h2 ref={panelHeadingRef} tabIndex={-1} className="text-md font-bold text-ink">
+          No required format yet
+        </h2>
         <p className="max-w-md text-sm text-ink-secondary">
           Upload the rubric or format document (PDF or DOCX). VERIDICAL parses it into checkable
           criteria for your review. Nothing runs until you confirm.
         </p>
         <button
           type="button"
-          onClick={onUpload}
+          onClick={() => {
+            onUpload();
+            onDismissOnboarding(); // starting the flow is an implicit "got it"
+          }}
           className="mt-1 flex h-11 items-center justify-center rounded-md bg-action px-4 text-sm font-bold text-on-action hover:bg-action-hover"
         >
           Upload required format
@@ -70,6 +95,8 @@ export function DashboardPage() {
   const { data: families, isPending: familiesPending } = useRubricFamilies();
   const [uploadOpen, setUploadOpen] = useState(false);
   const [newCheckOpen, setNewCheckOpen] = useState(false);
+  const [onboardingHiddenLocally, setOnboardingHiddenLocally] = useState(false);
+  const dismissOnboarding = useDismissOnboarding();
   const headingRef = useRef<HTMLHeadingElement>(null);
   useRouteFocus("Dashboard - VERIDICAL", headingRef);
 
@@ -77,6 +104,17 @@ export function DashboardPage() {
   // confirmed & active — same precondition that switches the whole
   // screen from the empty state (4b) to the populated one (4e).
   const hasActiveRubric = useMemo(() => (families ?? []).some((f) => f.is_active), [families]);
+
+  // Persisted server-side (Instructor.onboarding_dismissed_at) — never
+  // localStorage/sessionStorage, so it survives logout and a different
+  // browser. `me` withheld (undefined) until resolved avoids a flash of
+  // the banner before the real flag is known.
+  const showOnboarding = Boolean(me) && !me?.onboarding_dismissed_at && !onboardingHiddenLocally;
+
+  function handleDismissOnboarding() {
+    setOnboardingHiddenLocally(true); // hide instantly; never gate on the mutation
+    dismissOnboarding.mutate();
+  }
 
   return (
     <div className="flex flex-col gap-4 p-4 sm:p-6">
@@ -107,7 +145,11 @@ export function DashboardPage() {
       {familiesPending ? null : hasActiveRubric ? (
         <PopulatedDashboard />
       ) : (
-        <EmptyState onUpload={() => setUploadOpen(true)} />
+        <EmptyState
+          onUpload={() => setUploadOpen(true)}
+          showOnboarding={showOnboarding}
+          onDismissOnboarding={handleDismissOnboarding}
+        />
       )}
     </div>
   );

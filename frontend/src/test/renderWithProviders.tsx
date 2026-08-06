@@ -8,7 +8,11 @@ import { vi } from "vitest";
 
 export function renderWithProviders(
   ui: ReactElement,
-  { route = "/", path }: { route?: string; path?: string } = {},
+  {
+    route = "/",
+    path,
+    state,
+  }: { route?: string; path?: string; state?: Record<string, unknown> } = {},
 ) {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
@@ -16,9 +20,10 @@ export function renderWithProviders(
   // `path` matches a dynamic segment (e.g. "/rubric/:rubricId/review") so
   // useParams() resolves inside the test, same as the real router does.
   const routed = path ? <Routes><Route path={path} element={ui} /></Routes> : ui;
+  const entry = state ? { pathname: route, state } : route;
   return render(
     <QueryClientProvider client={queryClient}>
-      <MemoryRouter initialEntries={[route]}>{routed}</MemoryRouter>
+      <MemoryRouter initialEntries={[entry]}>{routed}</MemoryRouter>
     </QueryClientProvider>,
   );
 }
