@@ -1,0 +1,10 @@
+{
+  "verdicts": [
+    {
+      "index": 0,
+      "verdict": "supported",
+      "reasoning": "The claim matches what the abstract reports.",
+      "abstract_excerpt": null
+    }
+  ]
+}

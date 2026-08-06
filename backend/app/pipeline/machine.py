@@ -56,11 +56,11 @@ _STAGE_AFTER: dict[CheckRunStatus, CheckRunStatus] = {
 }
 
 _STATISTICAL_FORENSICS_ORIGINALITY_NOT_IMPLEMENTED_NOTE = (
-    "Citation integrity (in-text cross-match, existence, retraction checks) "
-    "ran. Statistical forensics and originality/reuse checks are not "
-    "implemented yet and arrive in a later milestone — honestly noted, not "
-    "faked as passed. Internal agreement is already covered by "
-    "self-consistency voting on every AI-graded criterion (D-006)."
+    "Citation integrity ran (in-text cross-match, existence, retraction, "
+    "and claim-support checks). Statistical forensics and originality/"
+    "reuse checks are not implemented yet and arrive in a later milestone "
+    "— honestly noted, not faked as passed. Internal agreement is already "
+    "covered by self-consistency voting on every AI-graded criterion (D-006)."
 )
 
 
@@ -308,9 +308,13 @@ async def _degrade_pending_semantic(
 
 
 async def _run_integrity_stage(
-    session: AsyncSession, check_run: CheckRun, manuscript: Manuscript, settings: Settings
+    session: AsyncSession,
+    check_run: CheckRun,
+    manuscript: Manuscript,
+    settings: Settings,
+    llm: LLMClient,
 ) -> None:
-    """F5 (citation integrity, V-027/V-028/V-029) runs for real; F6
+    """F5 (citation integrity, V-027/V-028/V-029/V-030) runs for real; F6
     (statistical forensics) and F7 (originality/reuse) don't exist yet —
     honestly noted, not silently skipped (charter rule 9)."""
     existing = await existing_citation_integrity_result(session, check_run.id)
@@ -328,7 +332,7 @@ async def _run_integrity_stage(
         patterns = load_patterns(settings.ingest_patterns_file)
         async with build_http_client(settings) as client:
             result = await run_citation_integrity_check(
-                session, client, check_run.id, citations, extraction, patterns, settings
+                session, client, check_run.id, citations, extraction, patterns, settings, llm
             )
         n_flags = result.detail.get("n_flags", 0) if result.detail else 0
     else:
@@ -387,7 +391,7 @@ async def run_check_run(
             await session.commit()
 
         if check_run.status == CheckRunStatus.integrity:
-            await _run_integrity_stage(session, check_run, manuscript, settings)
+            await _run_integrity_stage(session, check_run, manuscript, settings, llm)
             check_run.status = _STAGE_AFTER[CheckRunStatus.integrity]
             await session.commit()
 

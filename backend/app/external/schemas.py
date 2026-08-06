@@ -24,4 +24,7 @@ class VerificationResult:
     # ticket AC: "books/paywalled = existence-only + 'content not checkable'".
     content_checkable: bool = True
     url: str | None = None
+    # Populated by providers that return one (currently only S2, V-030's
+    # claim-support check) — None elsewhere, never fabricated from `raw`.
+    abstract: str | None = None
     raw: dict[str, Any] = field(default_factory=dict)

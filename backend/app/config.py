@@ -307,6 +307,11 @@ class Settings(BaseSettings):
     # hit (retractions land late — ticket edge case: "don't trust an old
     # 'not retracted' forever").
     citation_cache_stale_days: int = 30
+    # Claim-support check (V-030, F5.4): batched into as few Gemini calls
+    # as possible per manuscript (D-001/D-011). Local NLI was measured and
+    # ruled out (DECISIONS.md D-011 follow-up: 487MB peak RSS, doesn't fit
+    # Render's 512MB) — this is the Tier-2 fallback D-011 itself named.
+    claim_support_max_pairs_per_call: int = 20
 
     # --- CORS (V-048) --------------------------------------------------------
     # Comma-separated origins allowed to call the API from a browser. Empty
