@@ -156,7 +156,7 @@ export function NewCheckModal({ onClose }: { onClose: () => void }) {
               ref={summaryRef}
               tabIndex={-1}
               role="alert"
-              className="rounded-md border-2 border-status-attention-text/40 bg-status-attention-bg p-3.5 text-sm text-status-attention-text outline-none"
+              className="rounded-md border-2 border-status-attention-text/40 bg-status-attention-bg p-3.5 text-sm text-status-attention-text"
             >
               <p className="font-semibold">Fix the following before starting this check:</p>
               <ul className="mt-1.5 list-disc pl-5">

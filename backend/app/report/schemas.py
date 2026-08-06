@@ -10,6 +10,20 @@ class EvidenceItem(BaseModel):
     anchor: str
 
 
+class ResolutionOut(BaseModel):
+    """Present only when an instructor resolved this criterion out of the
+    escalation panel (`resolve_escalation`'s own docstring: "AI said X,
+    instructor resolved to Y, reason" side by side) — surfacing this was
+    previously dropped between the persisted `detail` JSON and the API
+    response, so a human decision rendered on screen 4h as an ordinary
+    AI-graded row with the AI's original (superseded) failure text and
+    no trace of the instructor's own reason (V-055 review)."""
+
+    type: str
+    reason: str
+    ai_majority_verdict: str | None
+
+
 class CriterionResultOut(BaseModel):
     """One row of screen 4h's results table. `basis`/`anchor`/`reasoning`/
     `reason`/`evidence` all come straight from `check_result.detail` — the
@@ -29,6 +43,7 @@ class CriterionResultOut(BaseModel):
     reasoning: str | None
     reason: str | None
     evidence: list[EvidenceItem]
+    resolution: ResolutionOut | None
 
 
 class ReportOut(BaseModel):
@@ -39,6 +54,12 @@ class ReportOut(BaseModel):
     composite_score: float | None
     thresholds: dict[str, float]
     reason: str | None
+    # Already computed by score_check_run (scoring.py) but previously
+    # dropped before reaching the API — without these the frontend could
+    # only hedge ("Not Ready because the score is X% OR a flag exists")
+    # instead of stating the actual determining factor (V-055 4h review).
+    flag_deduction: float
+    unresolved_high_flag_count: int
     results: list[CriterionResultOut]
 
 

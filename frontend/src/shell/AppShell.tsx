@@ -239,7 +239,7 @@ export function AppShell({ children }: { children: ReactNode }) {
         <AvatarButton />
       </header>
 
-      <main id="main-content" tabIndex={-1} className="flex flex-1 flex-col outline-none">
+      <main id="main-content" tabIndex={-1} className="flex flex-1 flex-col">
         {children}
       </main>
     </div>
