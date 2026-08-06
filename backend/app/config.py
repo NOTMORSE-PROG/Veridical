@@ -313,6 +313,11 @@ class Settings(BaseSettings):
     # Render's 512MB) — this is the Tier-2 fallback D-011 itself named.
     claim_support_max_pairs_per_call: int = 20
 
+    # --- Statistical forensics: extraction (V-031, F6.1) ----------------------
+    # Override the packaged table-column-header synonym list without a code
+    # change; empty = packaged default (same convention as structural_keywords_file).
+    forensics_keywords_file: Path | None = None
+
     # --- CORS (V-048) --------------------------------------------------------
     # Comma-separated origins allowed to call the API from a browser. Empty
     # in dev (no browser cross-origin caller yet); production sets it to
@@ -331,6 +336,7 @@ class Settings(BaseSettings):
         "structural_keywords_file",
         "structural_bound_patterns_file",
         "llm_model_pool_file",
+        "forensics_keywords_file",
         mode="before",
     )
     @classmethod

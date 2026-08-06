@@ -21,6 +21,11 @@ dependencies = [
     # stdlib zoneinfo has no data on Windows (and some minimal Linux images)
     # without this — needed for the quota governor's Pacific-midnight reset.
     "tzdata>=2025.1",
+    # D-003: reuse validated NHST-extraction/p-recalc, never reimplement.
+    # GPL-3.0 (PyPI name "statcheck", not "statcheck_python") — compatible
+    # with VERIDICAL's own MIT license as an ordinary SaaS-runtime
+    # dependency, never vendored; see DECISIONS.md D-022.
+    "statcheck>=0.0.7",
 ]
 
 [dependency-groups]

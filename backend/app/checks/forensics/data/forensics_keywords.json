@@ -1,0 +1,13 @@
+{
+  "_comment": [
+    "Table column-header synonyms for descriptive-statistic inference",
+    "(F6.1, V-031). Data, not code (ENGINEERING.md §8) — a table's own",
+    "header wording ('Mean' vs 'M' vs 'Average') is exactly the kind of",
+    "vocabulary that varies per rubric/instructor and must never be a",
+    "hardcoded branch."
+  ],
+  "n_headers": ["n", "N", "sample size", "no.", "no", "frequency", "f"],
+  "mean_headers": ["mean", "m", "average", "ave", "x̄", "weighted mean", "wm"],
+  "sd_headers": ["sd", "s.d.", "std. dev.", "std dev", "standard deviation", "σ"],
+  "percentage_headers": ["%", "percent", "percentage", "pct"]
+}
