@@ -409,7 +409,11 @@ async def test_quota_exhausted_still_produces_a_finished_run(
 
         assert check_run.status == CheckRunStatus.done, "the run must finish, not stall"
         assert "blocked" not in check_run.stage_status
-        assert "degraded" in check_run.stage_status["stages"]["semantic"]["note"]
+        semantic_stage = check_run.stage_status["stages"]["semantic"]
+        # 2 of the fixture's 3 criteria are semantic (criterion_ids[1:]) —
+        # both fail to grade since fail_after=0.
+        assert semantic_stage["degraded_count"] == len(criterion_ids) - 1
+        assert semantic_stage["degraded_code"] == "quota_exhausted"
 
     async with session_factory() as verify:
         results = (

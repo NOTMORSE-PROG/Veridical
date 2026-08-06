@@ -129,6 +129,12 @@ def test_create_get_and_list_check_run(logged_in):
     assert body["status"] == "queued"
     assert body["queue_position"] == 1
 
+    # Display-only fields for screen 4g — so an instructor never has to
+    # hold a manuscript/rubric ID number in their head to tell two check
+    # runs apart.
+    assert body["manuscript_group_label"] == "G-11"
+    assert body["rubric_title"] == "Format"
+
     fetched = client.get(f"/check-runs/{body['id']}")
     assert fetched.status_code == 200
     assert fetched.json()["manuscript_id"] == manuscript_id

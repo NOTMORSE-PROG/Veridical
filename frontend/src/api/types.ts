@@ -79,6 +79,12 @@ export type CheckRunStatus =
 
 export interface StageEntry {
   status: string;
+  n_criteria?: number;
+  /** Only present when this stage actually degraded (screen 4g, V-055) —
+   * never set on a clean run, so its presence alone is the check. */
+  degraded_count?: number;
+  degraded_code?: string;
+  note?: string;
   [key: string]: unknown;
 }
 
@@ -98,6 +104,9 @@ export interface CheckRun {
   started_at: string | null;
   finished_at: string | null;
   created_at: string;
+  manuscript_group_label: string | null;
+  manuscript_uploaded_at: string | null;
+  rubric_title: string | null;
 }
 
 export interface EvidenceItem {

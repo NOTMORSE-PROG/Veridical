@@ -198,7 +198,7 @@ class Settings(BaseSettings):
     # Instructor-facing wording for those criteria. Honest and non-accusatory
     # per charter rule 3: it describes OUR limit, never the manuscript.
     pipeline_quota_degraded_reason: str = (
-        "Not graded by AI — today's free AI capacity was reached. "
+        "Not graded by AI. Today's free AI capacity was reached. "
         "Needs your review, or re-run this check after the daily reset."
     )
     # Off by default so importing the FastAPI app (every TestClient-based

@@ -98,13 +98,25 @@ export function GalleryPage() {
           <Stepper
             steps={[
               {
+                id: "extract",
                 label: "Extract text & layout",
                 state: "done",
-                note: "12 pages · 3 s",
+                tagText: "Done",
+                detail: "12 pages, 3 s",
               },
-              { label: "AI decomposition into criteria", state: "running" },
-              { label: "Validation gate", state: "pending", note: "Waiting" },
-              { label: "Your review", state: "pending", note: "—" },
+              {
+                id: "decompose",
+                label: "AI decomposition into criteria",
+                state: "running",
+                tagText: "In progress",
+              },
+              {
+                id: "validate",
+                label: "Validation gate",
+                state: "pending",
+                tagText: "Not started yet",
+              },
+              { id: "review", label: "Your review", state: "pending", tagText: "Not started yet" },
             ]}
           />
         </Panel>

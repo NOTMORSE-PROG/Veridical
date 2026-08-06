@@ -50,7 +50,7 @@ _STAGE_AFTER: dict[CheckRunStatus, CheckRunStatus] = {
 
 _INTEGRITY_SKIPPED_NOTE = (
     "Integrity checks (internal agreement, citation integrity, statistical "
-    "forensics, originality/reuse) are not implemented yet — they arrive in "
+    "forensics, originality/reuse) are not implemented yet. They arrive in "
     "a later milestone. This stage is honestly skipped, not faked as passed."
 )
 
@@ -254,13 +254,19 @@ async def _run_semantic_stage(
                 outcome=ResultOutcome.quota_exhausted,
                 reason=settings.pipeline_quota_degraded_reason,
             )
-            _record_stage(
-                check_run,
-                CheckRunStatus.semantic,
-                status="done",
-                n_criteria=len(semantic_criterion_ids),
-                note=f"degraded: {ungraded} criteria not AI-graded ({exc})",
-            )
+            # Structured, not a freeform note: the frontend renders this
+            # instructor-facing (screen 4g), and a raw exception string
+            # embedded in a note could say anything — a real charter-9
+            # honesty risk (V-055 review). `degraded_count`/`degraded_code`
+            # are only set on an actual degradation, never on a clean run.
+            stage_fields: dict[str, Any] = {
+                "status": "done",
+                "n_criteria": len(semantic_criterion_ids),
+            }
+            if ungraded > 0:
+                stage_fields["degraded_count"] = ungraded
+                stage_fields["degraded_code"] = "quota_exhausted"
+            _record_stage(check_run, CheckRunStatus.semantic, **stage_fields)
             return
         except ApiDownError as exc:
             retry_seconds = settings.pipeline_api_down_retry_seconds
