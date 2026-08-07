@@ -625,6 +625,15 @@ wheels = [
 ]
 
 [[package]]
+name = "grim"
+version = "0.1.10"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/48/b8/f14554256fd08af7010733cefbf7f0113b9bad8fe83a4fad5e37851b42f2/grim-0.1.10.tar.gz", hash = "sha256:ca662ed6b6aff510daff19ffb425a135e010b87f056a5584f5f1c633be4c6504", size = 5213, upload-time = "2024-03-13T11:12:21.646Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/37/7d/73e4b23e04004f0320e6d7229a0637c2cf6497e3b23449bd9024e8afa613/grim-0.1.10-py3-none-any.whl", hash = "sha256:5c7b69abb43229e3f2b57293790d22e805f14409119f288b8fcd1e96817fdcab", size = 5608, upload-time = "2024-03-13T11:12:20.523Z" },
+]
+
+[[package]]
 name = "h11"
 version = "0.16.0"
 source = { registry = "https://pypi.org/simple" }
@@ -1384,6 +1393,21 @@ wheels = [
 ]
 
 [[package]]
+name = "pysprite"
+version = "1.2.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "matplotlib" },
+    { name = "numpy" },
+    { name = "pandas" },
+    { name = "seaborn" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/e3/9d/3e3fe757f079af85a434181a2def1c6287e9edf4ba8ed3570f1ad3f7c1fc/pysprite-1.2.1.tar.gz", hash = "sha256:1d58f433edf043121d8ac029cd9c2b83770e633b8ca665ccdb5cdc52ba7854b0", size = 17887, upload-time = "2019-07-10T14:03:38.718Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/10/fa/3001436e5a4640c8a4fcc4ec4151088fcfae5ca37a14ba1e492da6172a50/pysprite-1.2.1-py3-none-any.whl", hash = "sha256:1c50a03bd88c9301b1e50c112b1eed43effd23019ef25144527355ba9957f196", size = 15523, upload-time = "2019-07-10T14:03:37.529Z" },
+]
+
+[[package]]
 name = "pytest"
 version = "9.1.1"
 source = { registry = "https://pypi.org/simple" }
@@ -1590,6 +1614,20 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/f7/86/5185061a1fcc41d18c5dc2463969b3a3964b31d9ac67b2fb05d4c7ff7670/scipy-1.18.0-cp314-cp314t-musllinux_1_2_x86_64.whl", hash = "sha256:9aac6192fac56bf2ca534389d24623f07b39ff83317d58287285e7fbd622ff76", size = 37472480, upload-time = "2026-06-19T15:01:35.136Z" },
     { url = "https://files.pythonhosted.org/packages/31/8e/f04c68e39919a010d34f2ee1367fd705b0a25a02f609d755f0bfbc0a15fc/scipy-1.18.0-cp314-cp314t-win_amd64.whl", hash = "sha256:e40baea28ae7f5475c779741e2d90b1247c78531207b49c7030e698ff81cee3f", size = 37365390, upload-time = "2026-06-19T15:01:38.091Z" },
     { url = "https://files.pythonhosted.org/packages/d5/19/969dc072906c84dd0a3b05dcf57ea750936087d7873549e408b35cfc3f97/scipy-1.18.0-cp314-cp314t-win_arm64.whl", hash = "sha256:368e0a705903c466aa5f08eefb39e6b1b6b2d659e7352a31fd9e2438365be0f8", size = 25279661, upload-time = "2026-06-19T15:01:40.817Z" },
+]
+
+[[package]]
+name = "seaborn"
+version = "0.13.2"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "matplotlib" },
+    { name = "numpy" },
+    { name = "pandas" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/86/59/a451d7420a77ab0b98f7affa3a1d78a313d2f7281a57afb1a34bae8ab412/seaborn-0.13.2.tar.gz", hash = "sha256:93e60a40988f4d65e9f4885df477e2fdaff6b73a9ded434c1ab356dd57eefff7", size = 1457696, upload-time = "2024-01-25T13:21:52.551Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/83/11/00d3c3dfc25ad54e731d91449895a79e4bf2384dc3ac01809010ba88f6d5/seaborn-0.13.2-py3-none-any.whl", hash = "sha256:636f8336facf092165e27924f223d3c62ca560b1f2bb5dff7ab7fad265361987", size = 294914, upload-time = "2024-01-25T13:21:49.598Z" },
 ]
 
 [[package]]
@@ -1821,9 +1859,11 @@ dependencies = [
     { name = "asyncpg" },
     { name = "fastapi" },
     { name = "google-genai" },
+    { name = "grim" },
     { name = "pgvector" },
     { name = "pydantic-settings" },
     { name = "pymupdf" },
+    { name = "pysprite" },
     { name = "python-docx" },
     { name = "python-multipart" },
     { name = "sqlalchemy", extra = ["asyncio"] },
@@ -1847,9 +1887,11 @@ requires-dist = [
     { name = "asyncpg", specifier = ">=0.30" },
     { name = "fastapi", specifier = ">=0.139" },
     { name = "google-genai", specifier = ">=1.0" },
+    { name = "grim", specifier = ">=0.1.10" },
     { name = "pgvector", specifier = ">=0.3" },
     { name = "pydantic-settings", specifier = ">=2.6" },
     { name = "pymupdf", specifier = ">=1.28.0" },
+    { name = "pysprite", specifier = ">=1.2.1" },
     { name = "python-docx", specifier = ">=1.2.0" },
     { name = "python-multipart", specifier = ">=0.0.32" },
     { name = "sqlalchemy", extras = ["asyncio"], specifier = ">=2.0" },
