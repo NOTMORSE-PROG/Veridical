@@ -26,6 +26,11 @@ dependencies = [
     # with VERIDICAL's own MIT license as an ordinary SaaS-runtime
     # dependency, never vendored; see DECISIONS.md D-022.
     "statcheck>=0.0.7",
+    # D-003: GRIM/SPRITE wrap these directly (both MIT, no license concern).
+    # GRIMMER has no maintained Python package anywhere (V-032 research) —
+    # ported from R's rsprite2 in app/checks/forensics/grim.py instead.
+    "pysprite>=1.2.1",
+    "grim>=0.1.10",
 ]
 
 [dependency-groups]
