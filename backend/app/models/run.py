@@ -82,6 +82,14 @@ class Flag(Base, PkCreatedMixin):
     evidence_excerpt: Mapped[str] = mapped_column(Text)
     # Where to look: page/section locator; DOCX has no pages, so free-form.
     page_anchor: Mapped[str] = mapped_column(Text)
+    # Structured per-FLAG detail (kind/reason/arithmetic) — added V-033.
+    # A semantic-grading check_result has exactly one flag, so its "reason"
+    # could live on check_result.detail (V-020's original design); F5/F6
+    # (V-027-033) put MANY flags under ONE check_result, each with its own
+    # distinct honest-wording reason, which check_result.detail's single
+    # top-level key can't hold. `app.flags.service._to_flag_out` prefers
+    # this field and falls back to check_result.detail for older checks.
+    detail: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
     annotation: Mapped[str | None] = mapped_column(Text)
     overridden: Mapped[bool] = mapped_column(Boolean, server_default="false")
     override_reason: Mapped[str | None] = mapped_column(Text)

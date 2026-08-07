@@ -2,9 +2,14 @@
 override recomputes score/status live (ticket AC), the original AI
 finding is never destroyed, and cross-instructor access is rejected.
 
-No real integrity check produces flags yet (F4-F7 arrive V4/V5) — this
-seeds a Flag directly, the same honest-gap pattern V-021/V-023 already
-used for features whose real data source doesn't exist yet.
+`_seed_flagged_run` below seeds a Flag directly (no `flag.detail`,
+reason lives on `check_result.detail`) rather than running a real check —
+this still matches the ORIGINAL one-flag-per-check_result shape V-020's
+semantic grading produces, so it doubles as regression coverage for
+`_to_flag_out`'s fallback branch. F5/F6 (V-027-033, V4) now produce real
+flags with their OWN per-flag `detail` (many flags share one
+check_result) — see `test_flag_detail_takes_priority_over_check_result_detail`
+below for that shape.
 """
 
 import os
@@ -174,6 +179,73 @@ async def test_override_recomputes_score_live_and_preserves_the_original_finding
         after = await aggregate_and_score(session, check_run.id)
         assert after.status == ReadinessStatus.ready  # deduction gone, high-flag gate cleared
         assert after.composite_score == Decimal("100.00")
+
+
+async def _seed_two_flags_one_check_result(session):
+    """Mirrors the REAL F5/F6 shape (V-027-033): many `Flag` rows under ONE
+    `check_result`, each with its own `detail` — the shape
+    `check_result.detail`'s single top-level key can't represent (V-033's
+    reason for adding `Flag.detail`). Proves two flags sharing a
+    check_result get independent reasons rather than the check_result's
+    one shared `detail` bleeding into both."""
+    instructor = Instructor(email=f"flags3-{id(session)}@test.local", display_name="Flags Test 3")
+    session.add(instructor)
+    await session.commit()
+    manuscript = Manuscript(instructor_id=instructor.id, group_label="G", file_ref="x.docx")
+    rubric = Rubric(instructor_id=instructor.id, title="Format", source_file="r.pdf")
+    session.add_all([manuscript, rubric])
+    await session.commit()
+    check_run = CheckRun(
+        manuscript_id=manuscript.id, rubric_id=rubric.id, status=CheckRunStatus.done
+    )
+    session.add(check_run)
+    await session.commit()
+
+    # check_result.detail carries only aggregate counts (V-033's real
+    # shape) — never a per-flag reason — so a stale fallback to it would
+    # surface the WRONG text for both flags below.
+    result = CheckResult(
+        check_run_id=check_run.id,
+        criterion_id=None,
+        kind=CheckKind.statistical_forensics,
+        outcome=ResultOutcome.passed,
+        detail={"n_inferential_stats": 1, "n_descriptive_stats": 1, "n_flags": 2},
+    )
+    session.add(result)
+    await session.commit()
+    grim_flag = Flag(
+        check_result_id=result.id,
+        severity=FlagSeverity.high,
+        evidence_excerpt="n=10, M=3.33",
+        page_anchor="page 12",
+        detail={"kind": "grim_inconsistent", "reason": "Reported mean is not a possible value."},
+    )
+    pvalue_flag = Flag(
+        check_result_id=result.id,
+        severity=FlagSeverity.med,
+        evidence_excerpt="t(28)=2.45, p=.500",
+        page_anchor="page 14",
+        detail={"kind": "p_value_mismatch", "reason": "Recomputed p-value does not match."},
+    )
+    session.add_all([grim_flag, pvalue_flag])
+    await session.commit()
+    return instructor, grim_flag, pvalue_flag
+
+
+async def test_flag_detail_takes_priority_over_check_result_detail(session_factory):
+    async with session_factory() as session:
+        instructor, grim_flag, pvalue_flag = await _seed_two_flags_one_check_result(session)
+
+        grim_out = await get_flag(session, grim_flag.id, instructor.id)
+        assert grim_out.ai_verdict_summary is None  # no "verdict"/"basis" key on this detail shape
+        assert grim_out.ai_reasoning == "Reported mean is not a possible value."
+
+        pvalue_out = await get_flag(session, pvalue_flag.id, instructor.id)
+        assert pvalue_out.ai_reasoning == "Recomputed p-value does not match."
+
+        # Two flags, one check_result, two DISTINCT reasons — proves
+        # `flag.detail` (not `check_result.detail`) is the source.
+        assert grim_out.ai_reasoning != pvalue_out.ai_reasoning
 
 
 async def test_cross_instructor_access_is_rejected_not_leaked(session_factory):
