@@ -9,5 +9,6 @@
   "n_headers": ["n", "N", "sample size", "no.", "no", "frequency", "f"],
   "mean_headers": ["mean", "m", "average", "ave", "x̄", "weighted mean", "wm"],
   "sd_headers": ["sd", "s.d.", "std. dev.", "std dev", "standard deviation", "σ"],
-  "percentage_headers": ["%", "percent", "percentage", "pct"]
+  "percentage_headers": ["%", "percent", "percentage", "pct"],
+  "total_labels": ["total", "overall", "all", "combined", "grand total"]
 }

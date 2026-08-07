@@ -26,6 +26,10 @@ from app.checks.citations.verify import (
     run_citation_integrity_check,
 )
 from app.checks.consistency import run_semantic_checks_with_consistency
+from app.checks.forensics.service import (
+    existing_statistical_forensics_result,
+    run_statistical_forensics_check,
+)
 from app.checks.router import RouteDecision, apply_routing, route_criteria
 from app.checks.rules.context import build_rule_context
 from app.checks.semantic import record_ungraded
@@ -55,12 +59,13 @@ _STAGE_AFTER: dict[CheckRunStatus, CheckRunStatus] = {
     CheckRunStatus.aggregating: CheckRunStatus.done,
 }
 
-_STATISTICAL_FORENSICS_ORIGINALITY_NOT_IMPLEMENTED_NOTE = (
-    "Citation integrity ran (in-text cross-match, existence, retraction, "
-    "and claim-support checks). Statistical forensics and originality/"
-    "reuse checks are not implemented yet and arrive in a later milestone "
-    "— honestly noted, not faked as passed. Internal agreement is already "
-    "covered by self-consistency voting on every AI-graded criterion (D-006)."
+_ORIGINALITY_NOT_IMPLEMENTED_NOTE = (
+    "Citation integrity (cross-match, existence, retraction, claim-support) "
+    "and statistical forensics (GRIM/GRIMMER, p-value recalculation, sanity "
+    "checks) both ran. Originality/reuse checks are not implemented yet and "
+    "arrive in a later milestone — honestly noted, not faked as passed. "
+    "Internal agreement is already covered by self-consistency voting on "
+    "every AI-graded criterion (D-006)."
 )
 
 
@@ -314,11 +319,14 @@ async def _run_integrity_stage(
     settings: Settings,
     llm: LLMClient,
 ) -> None:
-    """F5 (citation integrity, V-027/V-028/V-029/V-030) runs for real; F6
-    (statistical forensics) and F7 (originality/reuse) don't exist yet —
-    honestly noted, not silently skipped (charter rule 9)."""
-    existing = await existing_citation_integrity_result(session, check_run.id)
-    if existing is None:
+    """F5 (citation integrity, V-027/V-028/V-029/V-030) and F6
+    (statistical forensics, V-031/V-032/V-033) both run for real; F7
+    (originality/reuse) doesn't exist yet — honestly noted, not silently
+    skipped (charter rule 9)."""
+    extraction = load_raw_store(settings, manuscript.id)
+
+    citation_existing = await existing_citation_integrity_result(session, check_run.id)
+    if citation_existing is None:
         citations = list(
             (
                 await session.scalars(
@@ -328,21 +336,35 @@ async def _run_integrity_stage(
                 )
             ).all()
         )
-        extraction = load_raw_store(settings, manuscript.id)
         patterns = load_patterns(settings.ingest_patterns_file)
         async with build_http_client(settings) as client:
-            result = await run_citation_integrity_check(
+            citation_result = await run_citation_integrity_check(
                 session, client, check_run.id, citations, extraction, patterns, settings, llm
             )
-        n_flags = result.detail.get("n_flags", 0) if result.detail else 0
+        citation_flags = citation_result.detail.get("n_flags", 0) if citation_result.detail else 0
     else:
-        n_flags = existing.detail.get("n_flags", 0) if existing.detail else 0
+        citation_flags = (
+            citation_existing.detail.get("n_flags", 0) if citation_existing.detail else 0
+        )
+
+    forensics_existing = await existing_statistical_forensics_result(session, check_run.id)
+    if forensics_existing is None:
+        forensics_result = await run_statistical_forensics_check(session, check_run.id, extraction)
+        forensics_flags = (
+            forensics_result.detail.get("n_flags", 0) if forensics_result.detail else 0
+        )
+    else:
+        forensics_flags = (
+            forensics_existing.detail.get("n_flags", 0) if forensics_existing.detail else 0
+        )
+
     _record_stage(
         check_run,
         CheckRunStatus.integrity,
         status="done",
-        citation_integrity_flags=n_flags,
-        note=_STATISTICAL_FORENSICS_ORIGINALITY_NOT_IMPLEMENTED_NOTE,
+        citation_integrity_flags=citation_flags,
+        statistical_forensics_flags=forensics_flags,
+        note=_ORIGINALITY_NOT_IMPLEMENTED_NOTE,
     )
 
 

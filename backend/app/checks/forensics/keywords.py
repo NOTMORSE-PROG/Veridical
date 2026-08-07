@@ -14,6 +14,7 @@ class ForensicsKeywords:
     mean_headers: frozenset[str]
     sd_headers: frozenset[str]
     percentage_headers: frozenset[str]
+    total_labels: frozenset[str]
 
 
 def load_keywords(path: Path | None = None) -> ForensicsKeywords:
@@ -23,4 +24,5 @@ def load_keywords(path: Path | None = None) -> ForensicsKeywords:
         mean_headers=frozenset(h.casefold() for h in raw["mean_headers"]),
         sd_headers=frozenset(h.casefold() for h in raw["sd_headers"]),
         percentage_headers=frozenset(h.casefold() for h in raw["percentage_headers"]),
+        total_labels=frozenset(h.casefold() for h in raw["total_labels"]),
     )
