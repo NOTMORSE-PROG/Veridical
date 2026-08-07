@@ -77,6 +77,12 @@ class ReportedStat:
     test_comparison: str | None = None  # "=" (statcheck only ever reports this)
     p_value: float | None = None
     p_comparison: str | None = None  # "=" | "<" | ">"
+    # Decimal-place counts statcheck's own extractor already computes
+    # (its `test_dec`/`dec` columns) — needed by V-033's p-recalculation
+    # (rounding tolerance depends on reported precision), not by V-032's
+    # GRIM/GRIMMER (descriptive-stat precision only, read from raw_text).
+    test_value_precision: int | None = None
+    p_value_precision: int | None = None
     # --- descriptive (from table columns) ---
     stat_name: Literal["n", "mean", "sd", "percentage"] | None = None
     value: float | None = None
@@ -96,6 +102,15 @@ def _as_float(value: object) -> float | None:
         return None
     try:
         return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _as_int(value: object) -> int | None:
+    if value is None or value == "":
+        return None
+    try:
+        return int(value)
     except (TypeError, ValueError):
         return None
 
@@ -139,6 +154,8 @@ def extract_inferential_stats(blocks: list[TextBlock]) -> list[ReportedStat]:
                     test_comparison=row.get("Test_Comparison"),
                     p_value=_as_float(row.get("Reported_P_Value")),
                     p_comparison=row.get("Reported_Comparison"),
+                    test_value_precision=_as_int(row.get("test_dec")),
+                    p_value_precision=_as_int(row.get("dec")),
                 )
             )
     return out
