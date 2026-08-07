@@ -319,6 +319,7 @@ async def run_citation_integrity_check(
                 severity=draft.severity,
                 evidence_excerpt=draft.evidence_excerpt,
                 page_anchor=draft.page_anchor,
+                detail=draft.detail,
             )
         )
     await session.commit()

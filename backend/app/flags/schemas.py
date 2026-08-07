@@ -23,9 +23,11 @@ class FlagOut(BaseModel):
     annotation: str | None
     overridden: bool
     override_reason: str | None
-    # What the check itself concluded, straight from check_result.detail
-    # — shown alongside the override so both are visible (ticket AC:
-    # "AI said X · instructor overrode to Y").
+    # What the check itself concluded — from flag.detail when present
+    # (F5/F6, V-033: many flags share one check_result), else
+    # check_result.detail (semantic grading, V-020: one flag per
+    # check_result) — shown alongside the override so both are visible
+    # (ticket AC: "AI said X · instructor overrode to Y").
     ai_verdict_summary: str | None
     ai_reasoning: str | None
 

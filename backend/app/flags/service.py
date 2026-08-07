@@ -49,7 +49,11 @@ async def _to_flag_out(
     if result.criterion_id is not None:
         criterion = await session.get(Criterion, result.criterion_id)
         criterion_text = criterion.text if criterion else None
-    detail = result.detail or {}
+    # Per-flag detail (V-033) takes priority — F5/F6 checks put many flags
+    # under one check_result, each needing its own reason; falls back to
+    # check_result.detail for the older one-flag-per-check_result shape
+    # (semantic grading, V-020) where the reason still lives there.
+    detail = flag.detail or result.detail or {}
     return FlagOut(
         id=flag.id,
         check_result_id=result.id,
