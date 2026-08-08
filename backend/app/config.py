@@ -366,6 +366,19 @@ class Settings(BaseSettings):
     # encodes a 200,000-word string without erroring).
     reuse_embedding_chunk_words: int = 800
 
+    # --- Originality/reuse: similarity query + write-back (V-037, F7.2/F7.3) --
+    # Calibrated empirically against real paired text (ticket file, not
+    # guessed): identical text -> 1.0, a lightly-edited near-duplicate
+    # (resubmission-shaped edits) -> ~0.98, same-topic-but-genuinely-
+    # different-wording -> ~0.63, unrelated -> ~0.21. 0.95 sits comfortably
+    # below every real near-duplicate measured and well above the safe
+    # same-topic zone.
+    reuse_exact_duplicate_threshold: float = 0.95
+    # Same calibration: 0.85 sits well above the ~0.63 same-topic ceiling
+    # measured, so a same-topic-but-original manuscript never crosses it
+    # (false-accusation guard, charter judgment #1).
+    reuse_high_similarity_threshold: float = 0.85
+
     # --- CORS (V-048) --------------------------------------------------------
     # Comma-separated origins allowed to call the API from a browser. Empty
     # in dev (no browser cross-origin caller yet); production sets it to
