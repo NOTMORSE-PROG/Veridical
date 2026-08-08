@@ -31,6 +31,7 @@ dependencies = [
     # ported from R's rsprite2 in app/checks/forensics/grim.py instead.
     "pysprite>=1.2.1",
     "grim>=0.1.10",
+    "model2vec>=0.8.2",
 ]
 
 [dependency-groups]

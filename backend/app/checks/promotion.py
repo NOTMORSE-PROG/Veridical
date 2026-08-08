@@ -18,7 +18,7 @@ this one out).
 
 from dataclasses import dataclass
 
-from app.checks.agreement import wilson_interval
+from app.checks.accuracy_stats import wilson_interval
 from app.config import Settings, get_settings
 
 
