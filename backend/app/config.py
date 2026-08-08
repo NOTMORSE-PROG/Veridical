@@ -38,6 +38,12 @@ class Settings(BaseSettings):
     # baked into the DB column at migration time — changing it later means
     # a new migration, not just an env edit.
     embedding_dim: int = 768
+    # Tier-1 local embedding model (D-011, all similarity work: intent<->
+    # outcome pairing V-035, originality archive V-036/037). potion-base-8M
+    # measured fresh 2026-08-08 at ~102MB alone (DECISIONS.md D-011
+    # addendum) — well inside the free-tier ceiling on its own; local NLI
+    # (the judgment half) did not clear the same gate and stays Tier 2.
+    embedding_model_id: str = "minishlab/potion-base-8M"
 
     # --- ingestion (V-004) ---------------------------------------------------
     # Local store for raw extraction results (page-anchored blocks, images,
@@ -338,6 +344,19 @@ class Settings(BaseSettings):
     # positive found live: the owner's own proposal defines "Internal
     # Agreement" in its glossary using the words "it intends to do").
     agreement_cue_max_lead_words: int = 8
+
+    # --- Internal agreement: intent<->outcome pairing (V-035, F4.3/F4.4) -----
+    # Cosine-similarity floor (potion-base-8M) an outcome must clear to be a
+    # PAIRING CANDIDATE at all — below this, no Gemini call is spent on it
+    # (quota discipline, D-011): an intent with zero candidates is an
+    # unmatched-intent flag without ever reaching the judgment tier.
+    agreement_pairing_similarity_floor: float = 0.35
+    # Bounds Gemini judgment calls per intent (quota discipline) — only the
+    # top-K most similar outcome candidates get judged.
+    agreement_pairing_max_candidates_per_intent: int = 3
+    # Batched into as few Gemini calls as possible per manuscript, same
+    # discipline as V-030's claim-support batching.
+    agreement_pairing_max_pairs_per_call: int = 20
 
     # --- CORS (V-048) --------------------------------------------------------
     # Comma-separated origins allowed to call the API from a browser. Empty

@@ -21,6 +21,10 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.checks.agreement.service import (
+    existing_internal_agreement_result,
+    run_internal_agreement_check,
+)
 from app.checks.citations.verify import (
     existing_citation_integrity_result,
     run_citation_integrity_check,
@@ -60,12 +64,11 @@ _STAGE_AFTER: dict[CheckRunStatus, CheckRunStatus] = {
 }
 
 _ORIGINALITY_NOT_IMPLEMENTED_NOTE = (
-    "Citation integrity (cross-match, existence, retraction, claim-support) "
-    "and statistical forensics (GRIM/GRIMMER, p-value recalculation, sanity "
-    "checks) both ran. Originality/reuse checks are not implemented yet and "
-    "arrive in a later milestone — honestly noted, not faked as passed. "
-    "Internal agreement is already covered by self-consistency voting on "
-    "every AI-graded criterion (D-006)."
+    "Internal agreement (intent vs. outcome) ran. Citation integrity "
+    "(cross-match, existence, retraction, claim-support) and statistical "
+    "forensics (GRIM/GRIMMER, p-value recalculation, sanity checks) also "
+    "ran. Originality/reuse checks are not implemented yet and arrive in a "
+    "later milestone — honestly noted, not faked as passed."
 )
 
 
@@ -319,11 +322,24 @@ async def _run_integrity_stage(
     settings: Settings,
     llm: LLMClient,
 ) -> None:
-    """F5 (citation integrity, V-027/V-028/V-029/V-030) and F6
-    (statistical forensics, V-031/V-032/V-033) both run for real; F7
-    (originality/reuse) doesn't exist yet — honestly noted, not silently
-    skipped (charter rule 9)."""
+    """F4 (internal agreement, V-034/V-035), F5 (citation integrity,
+    V-027/V-028/V-029/V-030), and F6 (statistical forensics,
+    V-031/V-032/V-033) all run for real; F7 (originality/reuse) doesn't
+    exist yet — honestly noted, not silently skipped (charter rule 9)."""
     extraction = load_raw_store(settings, manuscript.id)
+
+    agreement_existing = await existing_internal_agreement_result(session, check_run.id)
+    if agreement_existing is None:
+        agreement_result = await run_internal_agreement_check(
+            session, llm, check_run.id, extraction, settings
+        )
+        agreement_flags = (
+            agreement_result.detail.get("n_flags", 0) if agreement_result.detail else 0
+        )
+    else:
+        agreement_flags = (
+            agreement_existing.detail.get("n_flags", 0) if agreement_existing.detail else 0
+        )
 
     citation_existing = await existing_citation_integrity_result(session, check_run.id)
     if citation_existing is None:
@@ -362,6 +378,7 @@ async def _run_integrity_stage(
         check_run,
         CheckRunStatus.integrity,
         status="done",
+        internal_agreement_flags=agreement_flags,
         citation_integrity_flags=citation_flags,
         statistical_forensics_flags=forensics_flags,
         note=_ORIGINALITY_NOT_IMPLEMENTED_NOTE,

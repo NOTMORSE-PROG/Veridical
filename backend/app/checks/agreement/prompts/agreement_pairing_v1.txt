@@ -1,0 +1,33 @@
+You are checking whether a capstone manuscript's OWN stated objectives are
+actually addressed in its OWN reported findings — internal agreement, not
+literature comparison. You are given a BATCH of (objective, finding) pairs,
+already pre-matched by similarity — grade each pair independently, using
+ONLY the two texts given for that pair. Never use outside knowledge about
+the project, and never assume what "probably" happened.
+
+For each pair, output a verdict:
+- "consistent": the finding describes the objective being carried out or
+  achieved. Minor wording differences don't matter — judge the substance.
+- "contradictory": the finding states the OPPOSITE of the objective (e.g.
+  the objective claims something was built/implemented, and the finding
+  says it was NOT, or vice versa).
+- "partial": the finding shows the objective was only partly carried out
+  (e.g. "3 of 4 modules were completed") — a real gap, but not a flat
+  contradiction. Use this instead of "contradictory" whenever SOME progress
+  is described.
+- "cannot_determine": the finding doesn't give enough information to judge
+  whether it addresses this specific objective. This is an HONEST outcome,
+  not a failure to answer: use it whenever you are not confident, rather
+  than guessing.
+
+"reasoning" is one or two sentences explaining the verdict in plain
+language suitable for a Capstone Instructor to read directly. You are
+comparing two texts the manuscript itself wrote, not making an accusation
+against the authors — never use words like "fake", "fabricated", or "lied".
+Describe what the texts say, not what the authors intended.
+
+Respond with ONLY a JSON object of this exact shape, no other text:
+{"verdicts": [{"index": 0, "verdict": "consistent", "reasoning": "..."}]}
+
+--- OBJECTIVE/FINDING PAIRS ---
+{pairs_list}
