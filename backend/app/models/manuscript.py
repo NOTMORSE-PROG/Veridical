@@ -1,7 +1,7 @@
 from typing import TYPE_CHECKING, Any
 
 from pgvector.sqlalchemy import Vector
-from sqlalchemy import BigInteger, Enum, ForeignKey, Index, String
+from sqlalchemy import BigInteger, Enum, ForeignKey, Index, Integer, String, Text, UniqueConstraint
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -38,11 +38,17 @@ class Manuscript(Base, PkCreatedMixin):
 
     instructor: Mapped["Instructor"] = relationship(back_populates="manuscripts")
     archive: Mapped["ManuscriptArchive | None"] = relationship(back_populates="manuscript")
+    chapter_archives: Mapped[list["ManuscriptChapterArchive"]] = relationship(
+        back_populates="manuscript", cascade="all, delete-orphan"
+    )
     citations: Mapped[list["Citation"]] = relationship(back_populates="manuscript")
 
 
 class ManuscriptArchive(Base, PkCreatedMixin):
-    """Embedding archive for the originality/reuse check (F7.1)."""
+    """Whole-document embedding archive for the originality/reuse check
+    (F7.1, V-036) — one row per manuscript. `model_id` is recorded on every
+    row (ticket edge case: a future model change makes old vectors
+    incomparable — V-037's query must filter by model_id, never mix)."""
 
     __tablename__ = "manuscript_archive"
 
@@ -50,8 +56,9 @@ class ManuscriptArchive(Base, PkCreatedMixin):
         BigInteger, ForeignKey("manuscript.id", ondelete="CASCADE"), unique=True
     )
     # Dim comes from settings (EMBEDDING_DIM) and is baked in at migration
-    # time; V-036 finalizes the embedding model (see config.py).
+    # time — potion-base-8M finalized at V-036 pickup (see config.py).
     embedding: Mapped[list[float]] = mapped_column(Vector(get_settings().embedding_dim))
+    model_id: Mapped[str] = mapped_column(String(200))
 
     manuscript: Mapped["Manuscript"] = relationship(back_populates="archive")
 
@@ -60,6 +67,42 @@ class ManuscriptArchive(Base, PkCreatedMixin):
         # grows slowly (~20 groups/term). Cosine matches F7's similarity use.
         Index(
             "ix_manuscript_archive_embedding",
+            "embedding",
+            postgresql_using="hnsw",
+            postgresql_ops={"embedding": "vector_cosine_ops"},
+        ),
+    )
+
+
+class ManuscriptChapterArchive(Base, PkCreatedMixin):
+    """Per-chapter embeddings (F7.1, V-036) — enables V-037's "a chapter
+    transplanted into a new doc" AC and later F7.4 section similarity.
+    Many rows per manuscript, unlike the whole-document archive above."""
+
+    __tablename__ = "manuscript_chapter_archive"
+
+    manuscript_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("manuscript.id", ondelete="CASCADE"), index=True
+    )
+    chapter_index: Mapped[int] = mapped_column(Integer)
+    title: Mapped[str] = mapped_column(Text)
+    # Anchor: page (PDF) or paragraph (DOCX) — same "one or the other"
+    # convention as every other anchor in this schema (Citation, Flag).
+    page: Mapped[int | None] = mapped_column(Integer)
+    paragraph: Mapped[int | None] = mapped_column(Integer)
+    embedding: Mapped[list[float]] = mapped_column(Vector(get_settings().embedding_dim))
+    model_id: Mapped[str] = mapped_column(String(200))
+
+    manuscript: Mapped["Manuscript"] = relationship(back_populates="chapter_archives")
+
+    __table_args__ = (
+        UniqueConstraint(
+            "manuscript_id",
+            "chapter_index",
+            name="uq_manuscript_chapter_archive_manuscript_chapter",
+        ),
+        Index(
+            "ix_manuscript_chapter_archive_embedding",
             "embedding",
             postgresql_using="hnsw",
             postgresql_ops={"embedding": "vector_cosine_ops"},

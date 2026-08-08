@@ -32,12 +32,13 @@ class Settings(BaseSettings):
     # Per-attempt timeout for the /health DB probe. Generous because Neon
     # free tier autosuspends and needs time to wake (ENGINEERING.md §7).
     db_health_timeout: float = 5.0
-    # Dimensionality of manuscript_archive.embedding. Provisional until the
-    # embedding model is chosen (V-036); must stay ≤ 2000 or the HNSW index
-    # can't be built (pgvector limit, verified 2026-07-17). The value is
-    # baked into the DB column at migration time — changing it later means
-    # a new migration, not just an env edit.
-    embedding_dim: int = 768
+    # Dimensionality of manuscript_archive.embedding. Model chosen at V-036
+    # pickup: potion-base-8M outputs 256 dims (confirmed programmatically,
+    # `StaticModel.dim`, not assumed — DECISIONS.md D-011 addendum); must
+    # stay ≤ 2000 or the HNSW index can't be built (pgvector limit, verified
+    # 2026-07-17). The value is baked into the DB column at migration time —
+    # changing it later means a new migration (0014), not just an env edit.
+    embedding_dim: int = 256
     # Tier-1 local embedding model (D-011, all similarity work: intent<->
     # outcome pairing V-035, originality archive V-036/037). potion-base-8M
     # measured fresh 2026-08-08 at ~102MB alone (DECISIONS.md D-011
@@ -357,6 +358,13 @@ class Settings(BaseSettings):
     # Batched into as few Gemini calls as possible per manuscript, same
     # discipline as V-030's claim-support batching.
     agreement_pairing_max_pairs_per_call: int = 20
+
+    # --- Originality/reuse: embedding pipeline (V-036, F7.1) ------------------
+    # Chunk size (words) for chunk-and-average on long text (ticket edge
+    # case: 100+ page docs) — bounds how much a single bag-of-tokens vector
+    # gets diluted, not a hard model input limit (measured: potion-base-8M
+    # encodes a 200,000-word string without erroring).
+    reuse_embedding_chunk_words: int = 800
 
     # --- CORS (V-048) --------------------------------------------------------
     # Comma-separated origins allowed to call the API from a browser. Empty

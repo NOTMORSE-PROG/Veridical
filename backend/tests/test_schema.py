@@ -39,6 +39,7 @@ EXPECTED_TABLES = {
     "llm_response_cache",  # V-009 (migration 0003)
     "session",  # V-014 (migration 0005)
     "citation_cache",  # V-028 (migration 0012)
+    "manuscript_chapter_archive",  # V-036 (migration 0014)
 }
 
 
@@ -190,7 +191,8 @@ def test_pgvector_column_index_and_similarity_query(migrated):
             near = "[" + ",".join(["0.1"] * dim) + "]"
             probe = "[" + ",".join(["0.11"] * dim) + "]"
             await conn.execute(
-                "INSERT INTO manuscript_archive (manuscript_id, embedding) VALUES ($1, $2::vector)",
+                "INSERT INTO manuscript_archive (manuscript_id, embedding, model_id)"
+                " VALUES ($1, $2::vector, 'test-model')",
                 manuscript_id,
                 near,
             )
