@@ -10,7 +10,7 @@ from app.models.citation import Citation
 from app.models.citation_cache import CitationCache
 from app.models.instructor import Instructor
 from app.models.llm import LLMQuotaCounter, LLMResponseCache
-from app.models.manuscript import Manuscript, ManuscriptArchive
+from app.models.manuscript import Manuscript, ManuscriptArchive, ManuscriptChapterArchive
 from app.models.rubric import Criterion, Rubric
 from app.models.run import CheckResult, CheckRun, Flag, ReadinessReport
 from app.models.session import Session
@@ -29,6 +29,7 @@ __all__ = [
     "LLMResponseCache",
     "Manuscript",
     "ManuscriptArchive",
+    "ManuscriptChapterArchive",
     "ReadinessReport",
     "Rubric",
     "Session",
