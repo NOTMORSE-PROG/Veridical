@@ -34,6 +34,10 @@ from app.checks.forensics.service import (
     existing_statistical_forensics_result,
     run_statistical_forensics_check,
 )
+from app.checks.reuse.service import (
+    existing_originality_reuse_result,
+    run_originality_reuse_check,
+)
 from app.checks.router import RouteDecision, apply_routing, route_criteria
 from app.checks.rules.context import build_rule_context
 from app.checks.semantic import record_ungraded
@@ -63,12 +67,11 @@ _STAGE_AFTER: dict[CheckRunStatus, CheckRunStatus] = {
     CheckRunStatus.aggregating: CheckRunStatus.done,
 }
 
-_ORIGINALITY_NOT_IMPLEMENTED_NOTE = (
-    "Internal agreement (intent vs. outcome) ran. Citation integrity "
-    "(cross-match, existence, retraction, claim-support) and statistical "
-    "forensics (GRIM/GRIMMER, p-value recalculation, sanity checks) also "
-    "ran. Originality/reuse checks are not implemented yet and arrive in a "
-    "later milestone — honestly noted, not faked as passed."
+_INTEGRITY_STAGE_NOTE = (
+    "Internal agreement (intent vs. outcome), citation integrity "
+    "(cross-match, existence, retraction, claim-support), statistical "
+    "forensics (GRIM/GRIMMER, p-value recalculation, sanity checks), and "
+    "originality/reuse (archive similarity) all ran."
 )
 
 
@@ -323,9 +326,8 @@ async def _run_integrity_stage(
     llm: LLMClient,
 ) -> None:
     """F4 (internal agreement, V-034/V-035), F5 (citation integrity,
-    V-027/V-028/V-029/V-030), and F6 (statistical forensics,
-    V-031/V-032/V-033) all run for real; F7 (originality/reuse) doesn't
-    exist yet — honestly noted, not silently skipped (charter rule 9)."""
+    V-027/V-028/V-029/V-030), F6 (statistical forensics, V-031/V-032/
+    V-033), and F7 (originality/reuse, V-036/V-037) all run for real."""
     extraction = load_raw_store(settings, manuscript.id)
 
     agreement_existing = await existing_internal_agreement_result(session, check_run.id)
@@ -374,6 +376,20 @@ async def _run_integrity_stage(
             forensics_existing.detail.get("n_flags", 0) if forensics_existing.detail else 0
         )
 
+    reuse_existing = await existing_originality_reuse_result(session, check_run.id)
+    if reuse_existing is None:
+        reuse_result = await run_originality_reuse_check(
+            session, manuscript.id, check_run.id, extraction, settings
+        )
+        reuse_detail = reuse_result.detail or {}
+    else:
+        reuse_detail = reuse_existing.detail or {}
+    reuse_flags = reuse_detail.get("n_flags", 0)
+    # Cold-start disclosure (V-037 ticket AC): how many previously
+    # processed manuscripts this run was actually compared against — shown
+    # even at 0 (charter rule 9: honest about growing coverage).
+    archive_size_n = reuse_detail.get("archive_size_n", 0)
+
     _record_stage(
         check_run,
         CheckRunStatus.integrity,
@@ -381,7 +397,9 @@ async def _run_integrity_stage(
         internal_agreement_flags=agreement_flags,
         citation_integrity_flags=citation_flags,
         statistical_forensics_flags=forensics_flags,
-        note=_ORIGINALITY_NOT_IMPLEMENTED_NOTE,
+        originality_reuse_flags=reuse_flags,
+        originality_reuse_archive_size_n=archive_size_n,
+        note=_INTEGRITY_STAGE_NOTE,
     )
 
 

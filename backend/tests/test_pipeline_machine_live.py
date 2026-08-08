@@ -252,25 +252,25 @@ async def test_stage_status_survives_a_fresh_reload_every_stage(
         assert stages["aggregating"]["status"] == "done"
 
 
-async def test_integrity_stage_runs_citation_and_forensics_checks_and_notes_pending_originality(
+async def test_integrity_stage_runs_all_four_integrity_checks(
     session_factory, tmp_path, monkeypatch
 ):
-    """V-029/V-033: the integrity stage now actually runs BOTH citation
-    integrity (F5) and statistical forensics (F6) — the fixture PDF has no
-    reference list and no numbers, so this exercises the zero-citations
-    and zero-stats paths (no network calls, real CheckResults with
-    n_references=0 / an honest not_applicable outcome) while still
-    honestly noting that F7 (originality/reuse) doesn't exist yet (charter
-    rule 9: a partial implementation is reported as partial)."""
+    """V-029/V-033/V-037: the integrity stage now actually runs all four
+    F4-F7 checks — the fixture PDF has no reference list, no numbers, no
+    objective/finding statements, and (being the first manuscript
+    processed) an empty archive, so this exercises every check's own
+    honest zero/N-A path (no network calls, real CheckResults)."""
     check_run_id, _, settings = await _seed(session_factory, tmp_path, monkeypatch)
     async with session_factory() as session:
         check_run = await session.get(CheckRun, check_run_id)
         await run_check_run(session, check_run, settings, FakeLLMClient())
         assert check_run.stage_status["stages"]["integrity"]["status"] == "done"
         note = check_run.stage_status["stages"]["integrity"]["note"]
-        assert "Citation integrity" in note
+        assert "Internal agreement" in note
+        assert "citation integrity" in note.lower()
         assert "statistical forensics" in note.lower()
-        assert "not implemented yet" in note
+        assert "originality/reuse" in note.lower()
+        assert "not implemented" not in note
 
     async with session_factory() as verify:
         citation_result = (
@@ -301,6 +301,21 @@ async def test_integrity_stage_runs_citation_and_forensics_checks_and_notes_pend
         assert forensics_result.outcome == ResultOutcome.not_applicable
         assert forensics_result.detail["n_inferential_stats"] == 0
         assert forensics_result.detail["n_flags"] == 0
+
+        reuse_result = (
+            await verify.execute(
+                select(CheckResult).where(
+                    CheckResult.check_run_id == check_run_id,
+                    CheckResult.kind == CheckKind.originality_reuse,
+                )
+            )
+        ).scalar_one()
+        assert reuse_result.criterion_id is None
+        # First manuscript ever processed -> cold-start honesty: compared
+        # against 0 previously processed manuscripts, zero flags (nothing
+        # to match against yet), never faked as "clean" without saying why.
+        assert reuse_result.detail["archive_size_n"] == 0
+        assert reuse_result.detail["n_flags"] == 0
 
 
 class _FlakyThenFineLLM:
