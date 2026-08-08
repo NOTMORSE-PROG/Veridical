@@ -13,7 +13,7 @@ from collections import defaultdict
 from dataclasses import dataclass
 from typing import Literal
 
-from app.checks.agreement import AgreementStats, compute_agreement
+from app.checks.accuracy_stats import AgreementStats, compute_agreement
 from app.config import Settings, get_settings
 
 Verdict = Literal["pass", "fail"]

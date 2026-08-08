@@ -318,6 +318,27 @@ class Settings(BaseSettings):
     # change; empty = packaged default (same convention as structural_keywords_file).
     forensics_keywords_file: Path | None = None
 
+    # --- Internal agreement: intent/outcome extraction (V-034, F4.1/F4.2) ----
+    # Override the packaged cue lexicon without a code change; empty = packaged
+    # default (same convention as forensics_keywords_file).
+    agreement_cues_file: Path | None = None
+    # A heading-like line (short, title-case/upper-case/numbered) longer than
+    # this many words is treated as ordinary prose instead — real headings in
+    # the owner's own proposal top out at 6 words ("General Objective of the
+    # Study"); generous headroom above that.
+    agreement_heading_max_words: int = 12
+    # difflib.SequenceMatcher ratio above which two statements are treated as
+    # the same restated objective/finding (ticket edge case: Ch1 vs Ch3
+    # wording drift) rather than two distinct ones.
+    agreement_dedup_similarity_threshold: float = 0.82
+    # A modal-phrase cue ("aims to", "results showed") only counts within
+    # this many leading words of its sentence — real objective/finding
+    # statements name their subject early; a cue buried deeper is usually a
+    # nested clause TALKING ABOUT intent, not stating one (real false
+    # positive found live: the owner's own proposal defines "Internal
+    # Agreement" in its glossary using the words "it intends to do").
+    agreement_cue_max_lead_words: int = 8
+
     # --- CORS (V-048) --------------------------------------------------------
     # Comma-separated origins allowed to call the API from a browser. Empty
     # in dev (no browser cross-origin caller yet); production sets it to

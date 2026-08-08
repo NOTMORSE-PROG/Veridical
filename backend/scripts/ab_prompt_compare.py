@@ -26,7 +26,7 @@ import sys
 from datetime import UTC, datetime
 from pathlib import Path
 
-from app.checks.agreement import (
+from app.checks.accuracy_stats import (
     PairedComparison,
     compute_agreement,
     mcnemar_exact,
