@@ -158,6 +158,14 @@ function QuotaChip() {
       ? Math.max(0, Math.round(100 - (quota.calls_used / quota.daily_limit) * 100))
       : 100;
   const atZero = remainingPct === 0;
+  // Three-tier tone, same tone family the rest of the app uses for
+  // "system/process state" (V-056): quota is a hard operational
+  // constraint central to this product's economics (CLAUDE.md ground
+  // rule 2) but previously rendered as quiet text, indistinguishable in
+  // weight from decorative chrome — Nielsen's visibility-of-system-status
+  // heuristic. Now a compact filled meter, not just a number.
+  const tone: "neutral" | "caution" | "danger" =
+    remainingPct < 15 ? "danger" : remainingPct < 40 ? "caution" : "neutral";
   // Full sentence at md:+ (matches the nav's own breakpoint below); a
   // short-but-still-directional badge below it (never a bare number,
   // BUG-017) since the full sentence doesn't fit the header once the
@@ -166,14 +174,22 @@ function QuotaChip() {
   const longText = atZero
     ? "No AI capacity left today"
     : `AI capacity: ${remainingPct}% remaining today`;
+  const fillColor = `var(--color-status-${tone}-text)`;
   return (
     <span
-      className={
-        atZero
-          ? "inline-flex items-center rounded-full border border-status-attention-text/30 bg-status-attention-bg px-2.5 py-1 text-xs font-medium whitespace-nowrap text-status-attention-text"
-          : "inline-flex items-center rounded-full border border-border bg-panel px-2.5 py-1 text-xs whitespace-nowrap text-ink-secondary"
-      }
+      className="inline-flex items-center gap-2 rounded-full border border-border bg-panel py-1 pr-2.5 pl-1.5 text-xs whitespace-nowrap"
+      style={{ color: tone === "neutral" ? undefined : fillColor }}
     >
+      <span
+        aria-hidden="true"
+        className="h-1.5 w-10 flex-none overflow-hidden rounded-full md:w-14"
+        style={{ backgroundColor: "var(--color-neutral-150)" }}
+      >
+        <span
+          className="block h-full rounded-full"
+          style={{ width: `${remainingPct}%`, backgroundColor: fillColor }}
+        />
+      </span>
       <span aria-hidden="true" className="md:hidden">
         {shortText}
       </span>
@@ -310,6 +326,25 @@ export function AppShell({ children }: { children: ReactNode }) {
 
         <AvatarButton />
       </header>
+
+      {/*
+       * V-056: a dimmed backdrop behind the mobile nav panel, found
+       * missing during the ticket's ui-designer spec pass — page content
+       * below the panel showed through undimmed. Click-to-close only,
+       * deliberately NOT a focus trap: this is a disclosure that closes
+       * automatically when focus leaves it (see handlePanelBlur above),
+       * not a modal that blocks interaction with the rest of the page —
+       * converting it to a hard focus trap would contradict the WCAG
+       * 2.4.11 fix already verified live for this exact panel. The scrim
+       * is a visual-clarity fix only.
+       */}
+      {mobileNavOpen && (
+        <div
+          aria-hidden="true"
+          onClick={() => setMobileNavOpen(false)}
+          className="fixed inset-x-0 top-14 bottom-0 z-30 bg-neutral-900/50 md:hidden"
+        />
+      )}
 
       <main id="main-content" tabIndex={-1} className="flex flex-1 flex-col">
         {children}

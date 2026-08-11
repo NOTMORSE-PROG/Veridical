@@ -5,13 +5,21 @@
  * this one block, so nothing is duplicated. Components must not carry raw
  * values (charter rule 7 / ENGINEERING.md §8).
  *
- * V-055 reconstruction (2026-08-05): full replacement, not a restyle. TIP
- * Manila yellow/black used as accent/identity only, never a dominant fill —
- * measured 1.71:1 alone on white, so it never carries a compliance number by
- * itself (see the dual-layer focus ring below). Neutral ramp and every
- * semantic token below is independently measured against WCAG 2.2 AA, not
- * inherited from the retired palette. Full rationale + contrast ratios:
- * context/DESIGN.md, context/RESEARCH.md's V-055 dated subsections.
+ * V-056 restructure (2026-08-11): the owner rejected V-055's OWN shipped
+ * look ("i dont like our ui/ux. the color scheme is so bad" / "make sure
+ * that this doesn't look like the old one"). TIP's brand values are now
+ * READ LIVE (`getComputedStyle` against tip.edu.ph, not eyedropped or
+ * guessed — context/RESEARCH.md §12.1) rather than approximated: brand
+ * yellow #FFC20F, chrome bar #292929. This pass also resolves a real,
+ * code-verified collision V-055 only predicted: `conditionally_ready` and
+ * `severity-med` shared the same amber hue family as the system's
+ * "attention" (transient process/quota) tone, so a genuine judgment call
+ * and a routine ingestion hiccup rendered identically. Fix: a new
+ * caution/plum tone (hue ~317°) takes over every READINESS-VERDICT and
+ * FLAG-SEVERITY use of "the ambiguous middle case"; amber narrows to
+ * system/process state only, never a verdict on a manuscript. Full
+ * rationale, hue-separation math, and the colorblind reasoning behind the
+ * new hue: context/DESIGN.md.
  */
 
 @theme {
@@ -37,10 +45,20 @@
   --color-neutral-900: #14161a;
   --color-neutral-950: #0a0b0e;
 
-  /* TIP Manila identity primitives — accessible approximation, no public
-     hex/Pantone spec exists (context/RESEARCH.md §12). Accent only. */
-  --color-tip-yellow: #f6be00;
-  --color-tip-black: #14161a;
+  /* TIP Manila identity primitives — measured LIVE 2026-08-11 from
+     tip.edu.ph via getComputedStyle (context/RESEARCH.md §12.1), not an
+     approximation; a public spec was found by reading their CSS.
+     --color-tip-yellow never carries semantic meaning (status/severity/
+     verdict) — identity/chrome accent only, see the semantic tokens
+     below. --color-tip-chrome is a SEPARATE primitive from --color-ink,
+     deliberately: ink is a legibility primitive used everywhere and needs
+     maximum contrast margin; chrome is a brand primitive used only on the
+     pre-auth surfaces (4v, 4a) — conflating them would mean a future
+     brand tweak risks legibility regressions app-wide. */
+  --color-tip-yellow: #ffc20f;
+  --color-tip-chrome: #292929;
+  --color-on-tip-yellow: var(--color-neutral-900); /* 11.19:1 on --color-tip-yellow (our ink #14161a, not TIP's pure #000000 — recomputed, not copied from their 12.98:1) — required, never white/light text on yellow */
+  --color-on-tip-chrome: var(--color-neutral-0); /* 14.55:1 on --color-tip-chrome */
 
   /* Semantic tokens — what components actually use */
   --color-page: var(--color-neutral-50);
@@ -84,77 +102,56 @@
   --color-status-info-text: #2456a8;
   --color-status-neutral-bg: var(--color-neutral-100);
   --color-status-neutral-text: var(--color-neutral-600);
+  /* "Attention" = SYSTEM/PROCESS state only, as of V-056 (ingestion
+     failure, quota, a degraded pipeline stage) — NEVER a manuscript
+     readiness verdict and NEVER a flag severity from here on. Narrowed
+     because it collided with --color-status-caution below (both amber) on
+     exactly those two uses; see context/DESIGN.md for the full
+     categorical split and hue-separation math. */
   --color-status-attention-bg: #fdf0e1;
   --color-status-attention-text: #92400e;
 
+  /* "Caution" = the ambiguous middle case a human must judge — Conditionally
+     Ready (readiness verdict) and Medium severity (flag severity). New in
+     V-056, replacing amber for exactly these two uses (the collision named
+     above). Hue ~317° (plum/magenta), chosen per context/DESIGN.md's
+     colorblind reasoning: a strong blue (S-cone) component anchors it away
+     from red under deuteranopia/protanopia's red-green collapse, the same
+     property Okabe & Ito (2008) pick "reddish purple" for in their CVD-safe
+     categorical palette. `ux-critic` verifies with a live emulation pass —
+     this is reasoned, not simulated. */
+  --color-status-caution-bg: #f6e9f2;
+  --color-status-caution-text: #7a3566; /* 8.30:1 on white, 7.06:1 on --color-status-caution-bg */
+
+  /* "Danger" status tone (readiness = Not Ready) — pure alias of the
+     already-verified danger primitives, new StatusPillTone as of V-056.
+     Not Ready previously shared attention's amber with routine ingestion
+     hiccups; the worst verdict a manuscript can receive now reads at the
+     same weight as the system's other red-alert language. */
+  --color-status-danger-bg: var(--color-danger-bg);
+  --color-status-danger-text: var(--color-danger);
+
   /*
-   * Severity ramp (V-055, screen 4i) — sequential blue -> amber -> red,
-   * deliberately not a red/green pair. A live deuteranopia/protanopia
-   * simulation of red-vs-amber (the two ends nearest each other) showed
+   * Severity ramp (V-055, screen 4i; med remapped V-056) — sequential
+   * blue -> plum -> red, deliberately not a red/green pair. A live
+   * deuteranopia/protanopia simulation of red-vs-amber (V-055, the two
+   * ends nearest each other under the OLD amber-med scheme) showed
    * HIGH/MEDIUM converging toward the same olive tone under both
    * conditions — text label + icon shape (SeverityTag's level-meter
-   * bars) carry the distinction, never color alone (WCAG 1.4.1). Pure
+   * bars) carry the distinction, never color alone (WCAG 1.4.1), and
+   * remain load-bearing under the new caution/plum med tone too. Pure
    * aliases of already-contrast-verified primitives above, not new hex.
    */
   --color-severity-high-bg: var(--color-danger-bg);
   --color-severity-high-text: var(--color-danger);
-  --color-severity-med-bg: var(--color-status-attention-bg);
-  --color-severity-med-text: var(--color-status-attention-text);
+  --color-severity-med-bg: var(--color-status-caution-bg);
+  --color-severity-med-text: var(--color-status-caution-text);
   --color-severity-low-bg: var(--color-status-info-bg);
   --color-severity-low-text: var(--color-status-info-text);
-
-  /*
-   * LEGACY — retired palette, kept only so far-from-migrated screens don't
-   * silently render unstyled mid-reconstruction (`--color-*: initial`
-   * above means an undefined token is a missing CSS rule, not a build
-   * error — exactly the failure mode BUG-013 shipped from once already).
-   * A colorblind-safe status/severity system is a deliberate V-055 open
-   * item (context/RESEARCH.md §19/§21) — deferred to whichever screen
-   * builds the first LIVE status pill (4b/4e/4h), not decided here.
-   * Remove each value below as its last consumer is rebuilt; remove this
-   * whole block once none remain. Consumers as of 2026-08-06 (grepped, not
-   * guessed): components/{Button,KpiCard,Panel,Pill}.tsx (unused by any
-   * real screen — only gallery/GalleryPage.tsx, a dev-only component
-   * gallery, still references them; every real app screen is on the new
-   * system).
-   */
-  --color-status-ok-bg: #e5f1ea;
-  --color-status-ok-text: #1e6b43;
-  --color-status-warn-bg: #f9f0dd;
-  --color-status-warn-text: #8a5b10;
-  --color-status-bad-bg: #f9e8e5;
-  --color-status-bad-text: #a13a2c;
-  --color-status-processing-bg: #e7eefa;
-  --color-status-processing-text: #2456a8;
-  --color-status-queued-bg: #edeff2;
-  --color-status-queued-text: #5a6270;
-  --color-step-done: #2e7d52;
-  --color-step-pending-border: #c9cdd4;
-  --color-step-pending-text: #98a0aa;
-  --color-ink-faint: #8a919c;
-  --color-ink-soft: #5a6270;
-  --color-placeholder: #9aa1ab;
-  --color-border-soft: #edf1f8;
-  --color-border-button: #c6d2e5;
-  --color-table-head: #7d8aa3;
-  --color-table-head-bg: #eef3fb;
-  --color-info-bg: #eef4fb;
-  --color-info-border: #d4e3f7;
-  --color-info-text: #2b5687;
-  --color-excerpt-text: #3d434c;
-  --color-backdrop: #e8ecf3;
-  --color-modal-border: #dbe3ef;
-  --color-primary: #2456a8;
-  --color-primary-hover: #1d4587;
-  --color-on-primary: #ffffff;
 
   /* Type */
   --font-sans: "Public Sans", "Segoe UI", system-ui, -apple-system, "Helvetica Neue", Arial,
     sans-serif;
-
-  /* LEGACY size token — same removal rule as the blocks below. */
-  --text-2xs: 11.5px;
-  --text-2xs--line-height: 1.3;
 
   --text-xs: 0.75rem; /* 12px — meta, timestamps, fine print only */
   --text-xs--line-height: 1.5;
@@ -168,10 +165,27 @@
   --text-lg--line-height: 1.25;
   --text-xl: 1.875rem; /* 30px — desktop H1 */
   --text-xl--line-height: 1.2;
-  --text-2xl: 2.25rem; /* 36px — hero (4v) */
+  --text-2xl: 2.25rem; /* 36px — H1 on authenticated screens */
   --text-2xl--line-height: 1.15;
+  --text-3xl: 3rem; /* 48px — 4v hero H1 ONLY (new V-056). The 12/14/16 floor
+    is load-bearing for table/audit-log density (Miller's law, data-ink
+    ratio) — the "drab" complaint was a hierarchy/elevation/color problem,
+    not a type-scale one, so the working scale below is otherwise
+    unchanged; this is the one place "modern editorial" scale is earned,
+    matching how GOV.UK/marketing surfaces run larger display type than
+    their service/task pages. */
+  --text-3xl--line-height: 1.1;
 
   --tracking-header: 0.02em; /* wordmark only, never running/label text */
+  --tracking-display: -0.01em; /* --text-2xl/--text-3xl display headings only (V-056) — never body/label text. Material 3's type-scale docs tie negative tracking to its display tier. */
+
+  /* Motion (V-056) — motion-safe:-gated everywhere it's used. Never
+     applied to status pills, severity tags, or KPI numbers: verdict-
+     bearing elements don't animate on change (an unresolved AI judgment
+     must not look more settled just because it moved smoothly). */
+  --motion-duration-fast: 150ms;
+  --motion-duration-base: 200ms;
+  --motion-ease-out: cubic-bezier(0.16, 1, 0.3, 1);
 
   /* Spacing — 4px base, 8px-grid convention (Material 3 / USWDS) */
   --spacing-1: 0.25rem;
@@ -199,15 +213,7 @@
   --border-width-md: 2px; /* error state, emphasis */
   --border-width-lg: 3px; /* masthead accent rule, focus ring */
 
-  --shadow-sm: 0 1px 2px rgba(20, 22, 26, 0.06);
+  --shadow-sm: 0 1px 2px rgba(20, 22, 26, 0.06); /* KPI cards, rubric "Active format" card, flag-evidence blockquote (V-056) — withheld from escalation/override panels on purpose, see DESIGN.md */
   --shadow-md: 0 4px 12px rgba(20, 22, 26, 0.1);
   --shadow-lg: 0 12px 32px rgba(20, 22, 26, 0.16); /* modals */
-
-  /* LEGACY shape tokens — same removal rule as the color block above. */
-  --radius-panel: 8px;
-  --radius-control: 6px;
-  --radius-tag: 4px;
-  --radius-modal: 10px;
-  --radius-pill: 999px;
-  --shadow-modal: 0 8px 24px rgba(28, 42, 64, 0.12);
 }

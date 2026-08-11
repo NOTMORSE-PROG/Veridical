@@ -229,16 +229,16 @@ function LandingPending() {
       <p role="status" aria-live="polite" aria-busy="true" className="sr-only">
         {liveText}
       </p>
-      <header className="border-b-[3px] border-accent bg-action">
+      <header className="border-b-[3px] border-accent bg-tip-chrome">
         <div className="mx-auto flex h-14 max-w-[1120px] items-center px-4 sm:h-16 sm:px-6 lg:px-10">
           <div className="flex items-center gap-2">
             <span
               aria-hidden="true"
-              className="flex h-7 w-7 items-center justify-center rounded-sm bg-accent text-sm font-bold text-ink sm:h-8 sm:w-8"
+              className="flex h-7 w-7 items-center justify-center rounded-sm bg-accent text-sm font-bold text-on-tip-yellow sm:h-8 sm:w-8"
             >
               V
             </span>
-            <span className="text-base font-bold tracking-header text-on-action sm:text-md">
+            <span className="text-base font-bold tracking-header text-on-tip-chrome sm:text-md">
               VERIDICAL
             </span>
           </div>
@@ -295,22 +295,22 @@ function LandingPage() {
         Skip to main content
       </a>
 
-      <header className="border-b-[3px] border-accent bg-action">
+      <header className="border-b-[3px] border-accent bg-tip-chrome">
         <div className="mx-auto flex h-14 max-w-[1120px] items-center justify-between px-4 sm:h-16 sm:px-6 lg:px-10">
           <Link to="/" className="on-dark flex items-center gap-2 rounded-sm">
             <span
               aria-hidden="true"
-              className="flex h-7 w-7 items-center justify-center rounded-sm bg-accent text-sm font-bold text-ink sm:h-8 sm:w-8"
+              className="flex h-7 w-7 items-center justify-center rounded-sm bg-accent text-sm font-bold text-on-tip-yellow sm:h-8 sm:w-8"
             >
               V
             </span>
-            <span className="text-base font-bold tracking-header text-on-action sm:text-md">
+            <span className="text-base font-bold tracking-header text-on-tip-chrome sm:text-md">
               VERIDICAL
             </span>
           </Link>
           <Link
             to="/signin"
-            className="on-dark inline-flex h-11 items-center justify-center rounded-md border border-neutral-0 px-4 text-sm font-bold text-on-action hover:bg-neutral-0 hover:text-ink"
+            className="on-dark inline-flex h-11 items-center justify-center rounded-md border border-neutral-0 px-4 text-sm font-bold text-on-tip-chrome hover:bg-neutral-0 hover:text-tip-chrome"
           >
             Sign in
           </Link>
@@ -322,7 +322,7 @@ function LandingPage() {
           <h1
             ref={headingRef}
             tabIndex={-1}
-            className="text-lg font-bold text-ink sm:text-2xl"
+            className="text-lg font-bold tracking-display text-ink sm:text-3xl"
           >
             Check capstone manuscripts against your own rubric, with evidence for every flag.
           </h1>
@@ -340,6 +340,53 @@ function LandingPage() {
           <p className="mt-2 text-sm text-ink-secondary">
             Accounts are created by your program administrator.
           </p>
+          {/*
+           * A short version of the footer's attribution line, moved above
+           * the fold (V-056, `professor` finding): TIP-yellow now appears
+           * repeatedly above the fold (the header, the CTA button, the
+           * stat chips below) with no disclaiming context attached until
+           * the footer, a full scroll away. The owner's own condition for
+           * using real TIP marks was that the product identify itself as
+           * a student project, not an official system — that has to be
+           * reachable at the same moment the branding is, not eleven
+           * screen-heights later. The full sentence + logo stay in the
+           * footer; this is the same claim, shortened.
+           */}
+          <p className="mt-3 text-sm text-ink-tertiary">
+            A student capstone project at T.I.P. Manila, not an official T.I.P. system.
+          </p>
+
+          {/*
+           * Real TIP-pattern stat module (V-056) — mirrors how TIP's own
+           * homepage places bold black-on-yellow stat chips directly under
+           * its hero (tip.edu.ph, measured live 2026-08-11), a pattern this
+           * page had none of before: zero TIP-yellow appeared anywhere
+           * between the header and footer bars, which is where a first-
+           * time visitor's trust judgment actually forms. Numbers are
+           * honest and checkable (ground rule 3), not marketing filler.
+           * The third stat was originally "0 auto-decisions, every flag is
+           * yours to confirm" — `professor` found this overclaimed against
+           * the shipped mechanism (most non-escalated criterion results
+           * render as a final AI/rule verdict with no confirm action; the
+           * terminal decision gate, F8.5, is V-038, still TODO). Reworded
+           * to a claim that's actually true today: every Flag record
+           * (F4-F7 integrity findings) has a working override control
+           * with a mandatory reason (`flags/FlagDetail.tsx`'s
+           * `OverrideControl`, V-026) — checkable in the running app.
+           */}
+          <dl className="mt-10 grid grid-cols-1 gap-3 sm:grid-cols-3 sm:gap-4">
+            {[
+              { value: "4", label: "integrity checks, beyond your rubric" },
+              { value: "3", label: "readiness tiers, never a bare pass/fail" },
+              { value: "0", label: "flags you can't override" },
+            ].map(({ value, label }) => (
+              <div key={label} className="rounded-lg bg-accent px-5 py-4 text-on-tip-yellow">
+                <dt className="sr-only">{label}</dt>
+                <dd className="text-2xl font-bold tracking-display">{value}</dd>
+                <p className="mt-0.5 text-sm font-medium">{label}</p>
+              </div>
+            ))}
+          </dl>
         </div>
 
         <section aria-labelledby="checks-heading" className="border-t border-border py-12 sm:py-16">
@@ -417,18 +464,18 @@ function LandingPage() {
           </div>
         </section>
 
-        <section className="border-t-[3px] border-accent bg-action py-12 sm:py-16">
+        <section className="border-t-[3px] border-accent bg-tip-chrome py-12 sm:py-16">
           <div className="mx-auto max-w-[1120px] px-4 text-center sm:px-6 lg:px-10">
-            <h2 className="text-lg font-bold text-on-action">
+            <h2 className="text-lg font-bold text-on-tip-chrome">
               Ready to check your first manuscript?
             </h2>
             <Link
               to="/signin"
-              className="on-dark mt-6 flex h-12 w-full items-center justify-center rounded-md bg-neutral-0 px-6 text-base font-bold text-ink hover:bg-neutral-100 sm:mx-auto sm:inline-flex sm:w-auto sm:min-w-[200px]"
+              className="on-dark mt-6 flex h-12 w-full items-center justify-center rounded-md bg-accent px-6 text-base font-bold text-on-tip-yellow hover:bg-neutral-0 hover:text-tip-chrome sm:mx-auto sm:inline-flex sm:w-auto sm:min-w-[200px]"
             >
               Sign in
             </Link>
-            <p className="mt-3 text-sm text-on-action">
+            <p className="mt-3 text-sm text-on-tip-chrome">
               Accounts are created by your program administrator.
             </p>
           </div>
@@ -436,10 +483,25 @@ function LandingPage() {
       </main>
 
       <footer className="border-t border-border py-8">
-        <div className="mx-auto max-w-[1120px] px-4 sm:px-6 lg:px-10">
+        <div className="mx-auto flex max-w-[1120px] items-center gap-3 px-4 sm:px-6 lg:px-10">
+          {/*
+           * TIP mark, approved for use by the owner (2026-08-11) with this
+           * exact framing requirement: identify VERIDICAL as a student
+           * project AT T.I.P., never as an official TIP system. Asset
+           * fetched live from tip.edu.ph/assets/Uploads/
+           * TIP-INFORMAL-LOGO-04-2.png (2026-08-11) and stored locally —
+           * never hotlinked, their Cloudflare 403s non-browser clients.
+           */}
+          <img
+            src="/tip-logo.png"
+            alt="Technological Institute of the Philippines logo"
+            className="h-10 w-auto flex-none"
+            width={202}
+            height={140}
+          />
           <p className="text-sm text-ink-secondary">
             VERIDICAL is a capstone project by BSIT students at Technological Institute of the
-            Philippines, Manila.
+            Philippines, Manila, not an official T.I.P. system.
           </p>
         </div>
       </footer>

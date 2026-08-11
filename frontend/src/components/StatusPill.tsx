@@ -5,13 +5,21 @@
 import type { ReactNode } from "react";
 import { cx } from "./cx";
 
-export type StatusPillTone = "success" | "info" | "neutral" | "attention";
+export type StatusPillTone = "success" | "info" | "neutral" | "attention" | "caution" | "danger";
 
 const TONE_CLASSES: Record<StatusPillTone, string> = {
   success: "bg-status-success-bg text-status-success-text",
   info: "bg-status-info-bg text-status-info-text",
   neutral: "bg-status-neutral-bg text-status-neutral-text",
+  // System/process state only (ingestion failure, quota, a degraded stage)
+  // — never a readiness verdict, see tokens.css (V-056).
   attention: "bg-status-attention-bg text-status-attention-text",
+  // The ambiguous middle case a human must judge (Conditionally Ready) —
+  // new in V-056, replaces attention's amber for readiness verdicts.
+  caution: "bg-status-caution-bg text-status-caution-text",
+  // The worst readiness verdict (Not Ready) — new in V-056, reads at the
+  // same weight as the system's other red-alert language.
+  danger: "bg-status-danger-bg text-status-danger-text",
 };
 
 function ToneIcon({ tone }: { tone: StatusPillTone }) {
@@ -54,6 +62,22 @@ function ToneIcon({ tone }: { tone: StatusPillTone }) {
           <path d="M12 3.5 21 19.5H3Z" />
           <line x1="12" y1="10" x2="12" y2="14" />
           <circle cx="12" cy="17" r="0.5" fill="currentColor" />
+        </svg>
+      );
+    case "caution":
+      return (
+        <svg {...common}>
+          <circle cx="12" cy="12" r="9" />
+          <line x1="12" y1="7.5" x2="12" y2="13" />
+          <circle cx="12" cy="16.5" r="0.5" fill="currentColor" />
+        </svg>
+      );
+    case "danger":
+      return (
+        <svg {...common}>
+          <path d="M12 2 21.5 7v10L12 22 2.5 17V7Z" />
+          <line x1="12" y1="8" x2="12" y2="13" />
+          <circle cx="12" cy="16" r="0.5" fill="currentColor" />
         </svg>
       );
   }

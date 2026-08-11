@@ -217,7 +217,7 @@ function TypeRadioGroup({
           onClick={() => !disabled && onChange(opt)}
           className={cx(
             "px-3 text-sm font-medium",
-            fill ? "min-h-11 flex-1" : "h-9",
+            fill ? "min-h-11 flex-1" : "h-8",
             disabled
               ? "cursor-default bg-page text-ink-tertiary"
               : opt === value
@@ -511,9 +511,19 @@ export function ReviewCriteriaPage() {
 
       {/* Desktop table (>=640px). WCAG 1.4.10's data-table 2D-scroll
           exception is available here but deliberately not used — see the
-          mobile card layout below for why. */}
+          mobile card layout below for why.
+          V-056: compact density (spacing-2/3, not spacing-4) — the
+          diagnosed problem was that the header row promised a scannable
+          table while the body delivered full-card padding per row
+          (Nielsen #4, an intra-screen inconsistency), which multiplies at
+          the 15-20-criterion rubric scale FEATURES.md actually supports
+          (Miller's law). The auto-grow textareas are KEPT, not swapped
+          for truncate-on-focus: that behavior is real, already-tested
+          accessibility work (the resize-race fix above) — tightening the
+          row's own padding/gaps closes the density gap without discarding
+          it or introducing a new expand/collapse interaction. */}
       <div role="table" aria-label="Rubric criteria" className="hidden max-h-[70vh] overflow-auto rounded-lg border border-border sm:block">
-        <div role="row" className="sticky top-0 grid grid-cols-[28px_minmax(0,1fr)_192px_minmax(0,1fr)_140px_40px] gap-3 border-b border-border bg-status-neutral-bg px-3.5 py-2.5 text-xs font-semibold tracking-header text-ink-tertiary uppercase">
+        <div role="row" className="sticky top-0 grid grid-cols-[28px_minmax(0,1fr)_192px_minmax(0,1fr)_140px_40px] gap-2.5 border-b border-border bg-status-neutral-bg px-3.5 py-2 text-xs font-semibold tracking-header text-ink-tertiary uppercase">
           <span role="columnheader">#</span>
           <span role="columnheader">Criterion</span>
           <span role="columnheader">Type</span>
@@ -529,9 +539,9 @@ export function ReviewCriteriaPage() {
             <div
               key={row.key}
               role="row"
-              className="grid grid-cols-[28px_minmax(0,1fr)_192px_minmax(0,1fr)_140px_40px] items-start gap-3 border-t border-border px-3.5 py-3"
+              className="grid grid-cols-[28px_minmax(0,1fr)_192px_minmax(0,1fr)_140px_40px] items-start gap-2.5 border-t border-border px-3.5 py-2"
             >
-              <span role="cell" className="pt-2 text-sm text-ink-tertiary">
+              <span role="cell" className="pt-1.5 text-sm text-ink-tertiary">
                 {index + 1}
               </span>
               <span role="cell" className="min-w-0">
@@ -544,7 +554,7 @@ export function ReviewCriteriaPage() {
                   aria-invalid={textInvalid ? "true" : undefined}
                   aria-describedby={textInvalid ? `crit-text-err-${row.key}` : undefined}
                   className={cx(
-                    "min-h-9 w-full resize-none rounded-md border px-2.5 py-1.5 text-base text-ink disabled:bg-page disabled:text-ink-tertiary",
+                    "min-h-8 w-full resize-none rounded-md border px-2.5 py-1 text-base text-ink disabled:bg-page disabled:text-ink-tertiary",
                     textInvalid ? "border-2 border-status-attention-text" : "border-border-input",
                   )}
                 />
@@ -569,10 +579,10 @@ export function ReviewCriteriaPage() {
                   placeholder="What evidence satisfies this?"
                   disabled={readOnly}
                   aria-label={`Criterion ${index + 1} evidence`}
-                  className="min-h-9 w-full resize-none rounded-md border border-border-input px-2.5 py-1.5 text-base text-ink-secondary disabled:bg-page disabled:text-ink-tertiary"
+                  className="min-h-8 w-full resize-none rounded-md border border-border-input px-2.5 py-1 text-base text-ink-secondary disabled:bg-page disabled:text-ink-tertiary"
                 />
               </span>
-              <span role="cell" className="flex items-center gap-1.5 pt-0.5">
+              <span role="cell" className="flex items-center gap-1.5">
                 <input
                   type="text"
                   inputMode="decimal"
@@ -580,13 +590,13 @@ export function ReviewCriteriaPage() {
                   disabled={readOnly}
                   aria-label={`Criterion ${index + 1} weight, percent`}
                   onChange={(event) => handleWeightChange(row.key, event.target.value)}
-                  className="h-9 w-20 rounded-md border border-border-input px-2 text-base text-ink disabled:bg-page disabled:text-ink-tertiary"
+                  className="h-8 w-20 rounded-md border border-border-input px-2 text-base text-ink disabled:bg-page disabled:text-ink-tertiary"
                 />
                 <span aria-hidden="true" className="text-sm text-ink-tertiary">
                   %
                 </span>
               </span>
-              <span role="cell" className="pt-0.5">
+              <span role="cell">
                 {!readOnly && (
                   <button
                     type="button"

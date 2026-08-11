@@ -6,8 +6,13 @@
 // comparable row (backend/app/dashboard/service.py already fixed the data
 // side: the four counts always sum to manuscripts_checked).
 import type { StatusPillTone } from "../components/StatusPill";
+import { READINESS_TONE } from "../domain/readinessTone";
 import type { DashboardStats } from "./useDashboard";
 
+// Tone carried by BOTH the left-border accent and the number's text color
+// (V-056) — strengthens WCAG 1.4.1 beyond text-hue alone, and gives the
+// card the shadow-sm elevation the flat V-055 cards lacked (a real, named
+// driver of the "drab" complaint, not just a recolor).
 function StatusKpiCard({
   value,
   label,
@@ -18,7 +23,10 @@ function StatusKpiCard({
   tone: StatusPillTone;
 }) {
   return (
-    <div className="flex flex-col gap-1 rounded-lg border border-border bg-panel p-3">
+    <div
+      className="flex flex-col gap-1 rounded-lg border border-border bg-panel p-3 shadow-sm"
+      style={{ borderLeftWidth: "4px", borderLeftColor: `var(--color-status-${tone}-text)` }}
+    >
       <span
         className="text-2xl font-bold text-ink"
         style={{ color: `var(--color-status-${tone}-text)` }}
@@ -41,14 +49,22 @@ export function KpiCards({ stats }: { stats: DashboardStats }) {
           checked, by readiness status
         </h2>
         <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-          <StatusKpiCard value={stats.ready_count} label="Ready" tone="success" />
+          <StatusKpiCard value={stats.ready_count} label="Ready" tone={READINESS_TONE.ready} />
           <StatusKpiCard
             value={stats.conditionally_ready_count}
             label="Conditionally ready"
-            tone="info"
+            tone={READINESS_TONE.conditionally_ready}
           />
-          <StatusKpiCard value={stats.not_ready_count} label="Not ready" tone="attention" />
-          <StatusKpiCard value={stats.needs_review_count} label="Needs review" tone="neutral" />
+          <StatusKpiCard
+            value={stats.not_ready_count}
+            label="Not ready"
+            tone={READINESS_TONE.not_ready}
+          />
+          <StatusKpiCard
+            value={stats.needs_review_count}
+            label="Needs review"
+            tone={READINESS_TONE.needs_review}
+          />
         </div>
         <p className="text-xs text-ink-tertiary">
           These four numbers always add up to the manuscripts-checked count above.

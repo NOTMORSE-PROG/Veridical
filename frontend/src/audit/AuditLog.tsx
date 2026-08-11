@@ -58,6 +58,50 @@ function eventSummary(row: AuditLogSummary): string {
   return parts.join(" · ");
 }
 
+// Grouping (V-056) — a real screen showed five consecutive "Criterion
+// routing · Ungrouped" rows in an 11-minute span, each rendered at full
+// visual cost: the worst Miller's-law/data-ink-ratio case in the app.
+// Purely presentational, over the CURRENT page's already-fetched rows
+// only — no pagination/backend change, so a group never spans a page
+// boundary and a filter/page change can't silently hide a row. Only
+// non-instructor (automated) events group; overrides/escalations/manual
+// actions always stay full-weight, one row each (higher-stakes, low-
+// volume, exactly the rows that should NOT recede).
+type AuditRowGroup =
+  | { kind: "single"; row: AuditLogSummary }
+  | { kind: "group"; eventType: string; label: string; groupLabel: string | null; rows: AuditLogSummary[] };
+
+function groupConsecutive(items: AuditLogSummary[]): AuditRowGroup[] {
+  const out: AuditRowGroup[] = [];
+  for (const row of items) {
+    const canGroup = !isInstructorEvent(row.event_type);
+    const last = out[out.length - 1];
+    if (
+      canGroup &&
+      last?.kind === "group" &&
+      last.eventType === row.event_type &&
+      last.groupLabel === (row.manuscript_group_label ?? null)
+    ) {
+      last.rows.push(row);
+      continue;
+    }
+    if (canGroup) {
+      out.push({
+        kind: "group",
+        eventType: row.event_type,
+        label: eventLabel(row),
+        groupLabel: row.manuscript_group_label ?? null,
+        rows: [row],
+      });
+    } else {
+      out.push({ kind: "single", row });
+    }
+  }
+  // A "group" of exactly one row is just a single row with extra steps —
+  // flatten it back rather than rendering a pointless expand toggle.
+  return out.map((g) => (g.kind === "group" && g.rows.length === 1 ? { kind: "single", row: g.rows[0] } : g));
+}
+
 function isInstructorEvent(eventType: string): boolean {
   return (
     eventType === "flag_overridden" ||
@@ -204,6 +248,16 @@ export function AuditLogPage() {
   const activeFilterLabel = searchParams.get("filter") ?? "All";
   const detailId = searchParams.get("detail") ? Number(searchParams.get("detail")) : null;
   const [announcement, setAnnouncement] = useState("");
+  const [expandedGroups, setExpandedGroups] = useState<Set<number>>(new Set());
+
+  function toggleGroup(firstId: number) {
+    setExpandedGroups((current) => {
+      const next = new Set(current);
+      if (next.has(firstId)) next.delete(firstId);
+      else next.add(firstId);
+      return next;
+    });
+  }
 
   const activeFilter = FILTERS.find((f) => f.label === activeFilterLabel) ?? FILTERS[0];
   const { data, isLoading, isError, refetch } = useAuditLogPage(
@@ -346,25 +400,69 @@ export function AuditLogPage() {
 
       {!isLoading && !isError && (
         <>
-          {/* Mobile: card-per-row. */}
+          {/* Mobile: card-per-row (grouped rows collapse to one card). */}
           <ul aria-labelledby="audit-log-heading" className="flex flex-col gap-2 sm:hidden">
-            {data?.items.map((row) => (
-              <li key={row.id} className="rounded-lg border border-border bg-panel p-3">
-                <div className="flex items-start justify-between gap-2">
-                  <span className="text-xs text-ink-tertiary">{formatEventTime(row.created_at)}</span>
-                  <button
-                    type="button"
-                    onClick={() => setParam("detail", String(row.id))}
-                    className="inline-flex min-h-11 items-center rounded-md border border-border-input px-3 text-sm font-medium text-link hover:bg-status-neutral-bg"
-                  >
-                    Detail
-                  </button>
-                </div>
-                <div className="mt-1.5 text-sm text-ink">
-                  <EventContent row={row} />
-                </div>
-              </li>
-            ))}
+            {data &&
+              groupConsecutive(data.items).map((entry) => {
+                if (entry.kind === "single") {
+                  const row = entry.row;
+                  return (
+                    <li key={row.id} className="rounded-lg border border-border bg-panel p-3">
+                      <div className="flex items-start justify-between gap-2">
+                        <span className="text-xs text-ink-tertiary">{formatEventTime(row.created_at)}</span>
+                        <button
+                          type="button"
+                          onClick={() => setParam("detail", String(row.id))}
+                          className="inline-flex min-h-11 items-center rounded-md border border-border-input px-3 text-sm font-medium text-link hover:bg-status-neutral-bg"
+                        >
+                          Detail
+                        </button>
+                      </div>
+                      <div className="mt-1.5 text-sm text-ink">
+                        <EventContent row={row} />
+                      </div>
+                    </li>
+                  );
+                }
+                const firstId = entry.rows[0].id;
+                const expanded = expandedGroups.has(firstId);
+                return (
+                  <li key={firstId} className="rounded-lg border border-border bg-panel p-3">
+                    <button
+                      type="button"
+                      aria-expanded={expanded}
+                      onClick={() => toggleGroup(firstId)}
+                      className="flex min-h-11 w-full items-center justify-between gap-2 text-left text-sm text-ink"
+                    >
+                      <span>
+                        <b>{entry.rows.length}</b> x {entry.label} events between{" "}
+                        {formatEventTime(entry.rows[entry.rows.length - 1].created_at)} and{" "}
+                        {formatEventTime(entry.rows[0].created_at)}
+                        {entry.groupLabel && <span className="text-ink-tertiary"> · {entry.groupLabel}</span>}
+                      </span>
+                      <span aria-hidden="true" className="flex-none text-ink-tertiary">
+                        {expanded ? "−" : "+"}
+                      </span>
+                    </button>
+                    {expanded && (
+                      <ul className="mt-2 flex flex-col gap-2 border-t border-border pt-2">
+                        {entry.rows.map((row) => (
+                          <li key={row.id} className="flex items-start justify-between gap-2">
+                            <span className="text-xs text-ink-tertiary">{formatEventTime(row.created_at)}</span>
+                            <button
+                              type="button"
+                              onClick={() => setParam("detail", String(row.id))}
+                              className="inline-flex min-h-11 items-center rounded-md border border-border-input px-3 text-sm font-medium text-link hover:bg-status-neutral-bg"
+                            >
+                              Detail
+                            </button>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </li>
+                );
+              })}
             {data && data.items.length === 0 && (
               <li className="rounded-lg border border-border bg-panel p-4 text-sm text-ink-tertiary">
                 No audit events match this filter.
@@ -388,29 +486,88 @@ export function AuditLogPage() {
                 <span className="sr-only">Actions</span>
               </span>
             </div>
-            {data?.items.map((row) => (
-              <div
-                key={row.id}
-                role="row"
-                className="grid grid-cols-[152px_minmax(0,1fr)_84px] items-start gap-3 border-t border-border px-4 py-3 text-sm"
-              >
-                <span role="cell" className="pt-0.5 text-xs text-ink-tertiary">
-                  {formatEventTime(row.created_at)}
-                </span>
-                <span role="cell" className="min-w-0 text-ink">
-                  <EventContent row={row} />
-                </span>
-                <span role="cell" className="justify-self-end">
-                  <button
-                    type="button"
-                    onClick={() => setParam("detail", String(row.id))}
-                    className="inline-flex min-h-8 items-center text-sm font-medium text-link underline hover:text-link-hover"
-                  >
-                    Detail
-                  </button>
-                </span>
-              </div>
-            ))}
+            {data &&
+              groupConsecutive(data.items).map((entry) => {
+                if (entry.kind === "single") {
+                  const row = entry.row;
+                  return (
+                    <div
+                      key={row.id}
+                      role="row"
+                      className="grid grid-cols-[152px_minmax(0,1fr)_84px] items-start gap-3 border-t border-border px-4 py-3 text-sm"
+                    >
+                      <span role="cell" className="pt-0.5 text-xs text-ink-tertiary">
+                        {formatEventTime(row.created_at)}
+                      </span>
+                      <span role="cell" className="min-w-0 text-ink">
+                        <EventContent row={row} />
+                      </span>
+                      <span role="cell" className="justify-self-end">
+                        <button
+                          type="button"
+                          onClick={() => setParam("detail", String(row.id))}
+                          className="inline-flex min-h-8 items-center text-sm font-medium text-link underline hover:text-link-hover"
+                        >
+                          Detail
+                        </button>
+                      </span>
+                    </div>
+                  );
+                }
+                const firstId = entry.rows[0].id;
+                const expanded = expandedGroups.has(firstId);
+                return (
+                  <div key={firstId}>
+                    <div
+                      role="row"
+                      className="grid grid-cols-[152px_minmax(0,1fr)_84px] items-start gap-3 border-t border-border bg-page px-4 py-2 text-sm"
+                    >
+                      <span role="cell" className="pt-0.5 text-xs text-ink-tertiary">
+                        {formatEventTime(entry.rows[entry.rows.length - 1].created_at)} to{" "}
+                        {formatEventTime(entry.rows[0].created_at)}
+                      </span>
+                      <span role="cell" className="min-w-0 text-ink">
+                        <b>{entry.rows.length}</b> x {entry.label} events
+                        {entry.groupLabel && <span className="text-ink-tertiary"> · {entry.groupLabel}</span>}
+                      </span>
+                      <span role="cell" className="justify-self-end">
+                        <button
+                          type="button"
+                          aria-expanded={expanded}
+                          onClick={() => toggleGroup(firstId)}
+                          className="inline-flex min-h-8 items-center text-sm font-medium text-link underline hover:text-link-hover"
+                        >
+                          {expanded ? "Hide" : "Show all"}
+                        </button>
+                      </span>
+                    </div>
+                    {expanded &&
+                      entry.rows.map((row) => (
+                        <div
+                          key={row.id}
+                          role="row"
+                          className="grid grid-cols-[152px_minmax(0,1fr)_84px] items-start gap-3 border-t border-border py-2 pr-4 pl-8 text-sm"
+                        >
+                          <span role="cell" className="pt-0.5 text-xs text-ink-tertiary">
+                            {formatEventTime(row.created_at)}
+                          </span>
+                          <span role="cell" className="min-w-0 text-ink">
+                            <EventContent row={row} />
+                          </span>
+                          <span role="cell" className="justify-self-end">
+                            <button
+                              type="button"
+                              onClick={() => setParam("detail", String(row.id))}
+                              className="inline-flex min-h-8 items-center text-sm font-medium text-link underline hover:text-link-hover"
+                            >
+                              Detail
+                            </button>
+                          </span>
+                        </div>
+                      ))}
+                  </div>
+                );
+              })}
             {data && data.items.length === 0 && (
               <p role="cell" className="px-4 py-3 text-sm text-ink-tertiary">
                 No audit events match this filter.

@@ -101,7 +101,12 @@ export function SignInPage() {
   const passwordInvalid = Boolean(fieldErrors.password);
 
   return (
-    <div className="flex min-h-screen flex-col bg-page">
+    // Genuine split-screen (V-056), not a header + two-column-in-a-sea-of-
+    // white: the old layout only occupied the top ~35% of the viewport,
+    // which reads as unfinished next to any real institutional sign-in
+    // (GOV.UK/USWDS both fill the viewport). The black-chrome panel is
+    // also where TIP identity is most load-bearing — first contact.
+    <div className="flex min-h-screen flex-col lg:flex-row">
       <a
         href="#signin-form"
         className="sr-only focus-visible:not-sr-only focus-visible:absolute focus-visible:top-2 focus-visible:left-2 focus-visible:z-50 focus-visible:rounded-md focus-visible:bg-panel focus-visible:px-4 focus-visible:py-2 focus-visible:text-sm focus-visible:font-medium focus-visible:text-ink"
@@ -109,33 +114,54 @@ export function SignInPage() {
         Skip to sign-in form
       </a>
 
-      <header className="border-b-[3px] border-accent bg-action">
-        <div className="mx-auto flex h-14 max-w-[1120px] items-center justify-between px-4 sm:h-16 sm:px-6 lg:px-10">
-          <Link to="/" className="on-dark flex items-center gap-2 rounded-sm">
-            <span
-              aria-hidden="true"
-              className="flex h-7 w-7 items-center justify-center rounded-sm bg-accent text-sm font-bold text-ink sm:h-8 sm:w-8"
-            >
-              V
-            </span>
-            <span className="text-base font-bold tracking-header text-on-action sm:text-md">
-              VERIDICAL
-            </span>
+      <div className="flex flex-none flex-col border-b-[3px] border-accent bg-tip-chrome px-4 py-5 sm:px-6 lg:w-[42%] lg:border-r-[3px] lg:border-b-0 lg:px-10 lg:py-12">
+        <Link to="/" className="on-dark flex items-center gap-2 rounded-sm">
+          <span
+            aria-hidden="true"
+            className="flex h-7 w-7 items-center justify-center rounded-sm bg-accent text-sm font-bold text-on-tip-yellow sm:h-8 sm:w-8"
+          >
+            V
+          </span>
+          <span className="text-base font-bold tracking-header text-on-tip-chrome sm:text-md">
+            VERIDICAL
+          </span>
+        </Link>
+        {/*
+         * V-056 follow-up (ux-critic finding): was `justify-between` on
+         * the parent, pinning this block to the panel's bottom edge and
+         * leaving ~500px of unbroken dark space above it at 1440px — the
+         * one place this screen didn't clear the "professional next to
+         * GOV.UK/USWDS/Material 3" divergence-gate clause. Vertically
+         * centered in the REMAINING space below the logo instead, which
+         * is what those systems' own split-screen patterns do.
+         */}
+        <div className="hidden flex-1 flex-col justify-center lg:flex">
+          <p className="max-w-[360px] text-xl leading-snug font-bold tracking-display text-on-tip-chrome">
+            Quality and integrity assurance for BSIT capstone manuscripts.
+          </p>
+          <p className="mt-4 max-w-[360px] text-sm text-neutral-300">
+            Every flag shows its evidence. You always make the final call.
+          </p>
+          <Link
+            to="/"
+            className="on-dark mt-4 inline-block text-sm font-medium text-on-tip-chrome underline hover:text-neutral-300"
+          >
+            Learn more about VERIDICAL
           </Link>
         </div>
-      </header>
+      </div>
 
-      <main className="mx-auto w-full max-w-[1120px] flex-1 px-4 pt-8 pb-16 sm:px-6 sm:pt-12 lg:px-10">
-        <div className="grid grid-cols-1 gap-10 lg:grid-cols-[minmax(0,480px)_minmax(0,360px)]">
+      <main className="flex flex-1 items-center justify-center px-4 py-10 sm:px-6 lg:px-10">
+        <div className="w-full max-w-[440px]">
           <div>
             <h1
               ref={headingRef}
               tabIndex={-1}
-              className="text-lg font-bold text-ink sm:text-xl"
+              className="text-lg font-bold text-ink sm:text-2xl"
             >
               Sign in to VERIDICAL
             </h1>
-            <p className="mt-2 text-base text-ink-secondary">
+            <p className="mt-2 text-base text-ink-secondary lg:hidden">
               Quality and integrity assurance for BSIT capstone manuscripts.
             </p>
             {hasErrors && (
@@ -296,33 +322,20 @@ export function SignInPage() {
             </form>
           </div>
 
-          <aside className="flex flex-col gap-8 border-t border-border pt-8 lg:border-t-0 lg:pt-0">
-            <div>
-              <h2 className="text-base font-bold text-ink">Need help signing in?</h2>
-              <p className="mt-1 text-sm text-ink-secondary">
-                VERIDICAL accounts are created by your program administrator. Self-service account
-                recovery is not available yet in this capstone prototype.
-              </p>
-            </div>
-            <div>
-              <h2 className="text-base font-bold text-ink">About VERIDICAL</h2>
-              <p className="mt-1 text-sm text-ink-secondary">
-                VERIDICAL checks capstone manuscripts against your program's own rubric and flags
-                anything worth a second look. Every flag shows its evidence. You always make the
-                final call.
-              </p>
-              <p className="mt-2 text-sm">
-                <Link to="/" className="text-link underline hover:text-link-hover">
-                  Learn more about VERIDICAL
-                </Link>
-              </p>
-            </div>
-            <div>
-              <p className="text-sm text-ink-secondary">
-                Instructor and student accounts each route to their own workspace. Connections are
-                secured with TLS; stored data is encrypted.
-              </p>
-            </div>
+          {/*
+           * Collapsed to a compact footnote (V-056) — was a second full
+           * column of "Need help" + "About VERIDICAL" + a TLS note, which
+           * left the form floating in a sea of empty viewport (the
+           * diagnosed problem). "About VERIDICAL" now lives in the left
+           * brand panel instead of being duplicated here.
+           */}
+          <aside className="mt-8 border-t border-border pt-4">
+            <h2 className="sr-only">Need help signing in?</h2>
+            <p className="text-xs text-ink-tertiary">
+              VERIDICAL accounts are created by your program administrator; self-service
+              recovery isn't available yet in this capstone prototype. Instructor and student
+              accounts route to their own workspace; connections are secured with TLS.
+            </p>
           </aside>
         </div>
       </main>

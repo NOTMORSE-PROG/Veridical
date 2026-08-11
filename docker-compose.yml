@@ -28,6 +28,7 @@ services:
       VERIDICAL_FAKE_LLM: ${VERIDICAL_FAKE_LLM:-1}
       VERIDICAL_ENV: ${VERIDICAL_ENV:-dev}
       GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:5173}
     depends_on:
       db:
         condition: service_healthy

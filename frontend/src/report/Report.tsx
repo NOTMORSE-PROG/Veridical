@@ -10,6 +10,7 @@ import type { CriterionResultOut, ReportOut } from "../api/types";
 import { AnchorPill } from "../components/AnchorPill";
 import { Chip } from "../components/Chip";
 import { StatusPill, type StatusPillTone } from "../components/StatusPill";
+import { READINESS_LABEL, READINESS_TONE } from "../domain/readinessTone";
 import { useRouteFocus } from "../routing/useRouteFocus";
 import { EscalatedPanel } from "./EscalatedPanel";
 import { useReport } from "./useReport";
@@ -22,20 +23,6 @@ function SpinnerIcon() {
     </svg>
   );
 }
-
-const STATUS_TONE: Record<ReportOut["status"], StatusPillTone> = {
-  ready: "success",
-  conditionally_ready: "attention",
-  not_ready: "attention",
-  needs_review: "neutral",
-};
-
-const STATUS_LABEL: Record<ReportOut["status"], string> = {
-  ready: "Ready",
-  conditionally_ready: "Conditionally Ready",
-  not_ready: "Not Ready",
-  needs_review: "Needs Review",
-};
 
 // escalated/quota_exhausted/api_down all belong to the escalation panel
 // only (backend/app/checks/escalation.py's own NEEDS_REVIEW_OUTCOMES
@@ -77,16 +64,25 @@ function sourceCaption(row: CriterionResultOut): string {
   return row.kind === "structural" ? "Rule-checked" : "AI-graded";
 }
 
+// `attention` is system/process state only, never a manuscript verdict
+// (tokens.css, V-056's §1.2 rule) — found live by `ux-critic`, this
+// function was the one place that rule wasn't actually followed: a
+// criterion Fail is a real finding against the manuscript's own content,
+// not a routine hiccup, and was rendering pixel-identical to "Ingestion
+// failed." Fail moves to `danger` (a definitive negative finding, same
+// weight as the composite Not Ready verdict); Partial moves to
+// `caution` (the ambiguous middle case caution exists for — half credit
+// is neither a clean pass nor a clean fail).
 function resultDisplay(row: CriterionResultOut): { label: string; tone: StatusPillTone; caption?: string } {
   const isPartial = row.outcome === "passed" && row.score !== null && Math.round(row.score) === 50;
   if (isPartial) {
-    return { label: "Partial", tone: "attention", caption: "Counted as 50% credit toward this criterion's weight." };
+    return { label: "Partial", tone: "caution", caption: "Counted as 50% credit toward this criterion's weight." };
   }
   switch (row.outcome) {
     case "passed":
       return { label: "Pass", tone: "success" };
     case "failed":
-      return { label: "Fail", tone: "attention" };
+      return { label: "Fail", tone: "danger" };
     case "not_applicable":
       return { label: "Not applicable", tone: "neutral" };
     case "unverifiable":
@@ -261,7 +257,7 @@ export function ReportPage() {
           </div>
           {report && (
             <div className="flex flex-wrap items-center gap-3">
-              <StatusPill tone={STATUS_TONE[report.status]}>{STATUS_LABEL[report.status]}</StatusPill>
+              <StatusPill tone={READINESS_TONE[report.status]}>{READINESS_LABEL[report.status]}</StatusPill>
               {report.composite_score !== null && (
                 <span className="text-xl font-bold text-ink sm:text-2xl">{report.composite_score}%</span>
               )}
@@ -312,7 +308,12 @@ export function ReportPage() {
           {(() => {
             const mainResults = report.results.filter((r) => !NEEDS_REVIEW_OUTCOMES.has(r.outcome));
             return (
-              <div role="table" aria-label="Criteria results" className="overflow-hidden rounded-lg border border-border">
+              // Deliberately flatter than the escalated panel above (V-056):
+              // this content is already decided, reference-only — a
+              // lighter border keeps it visually receding rather than
+              // competing with the panel that still needs the instructor's
+              // input.
+              <div role="table" aria-label="Criteria results" className="overflow-hidden rounded-lg border border-border/60">
                 <div
                   role="row"
                   className="hidden grid-cols-[56px_minmax(0,1fr)_140px] gap-3 border-b border-border bg-status-neutral-bg px-3.5 py-2.5 text-xs font-semibold tracking-header text-ink-tertiary uppercase sm:grid"
