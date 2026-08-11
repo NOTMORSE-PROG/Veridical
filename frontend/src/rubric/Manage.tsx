@@ -316,7 +316,7 @@ export function ManageRubricPage() {
 
       <section
         aria-labelledby="format-summary-heading"
-        className="flex flex-col gap-3 rounded-lg border border-border bg-panel p-4 sm:p-5"
+        className="flex flex-col gap-3 rounded-lg border border-border bg-panel p-4 shadow-sm sm:p-5"
       >
         <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
           <div className="flex min-w-0 flex-col gap-1.5 sm:flex-row sm:items-center sm:gap-2.5">

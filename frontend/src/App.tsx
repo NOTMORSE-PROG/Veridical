@@ -1,12 +1,14 @@
 // Route shell (V-014): auth-gated app routes render inside the one
-// AppShell; /gallery stays the ungated V-002 component review page.
+// AppShell. The dev-only /gallery component-review page (V-002) was
+// removed in V-056 — it was the last consumer of the LEGACY token block
+// and the four legacy-only components (Button/KpiCard/Panel/Pill); every
+// real screen has been on the current token system since V-055.
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Route, Routes } from "react-router";
 import { AuditLogPage } from "./audit/AuditLog";
 import { RequireAuth } from "./auth/RequireAuth";
 import { CheckProgressPage } from "./check/Progress";
 import { FlagDetailPage } from "./flags/FlagDetail";
-import { GalleryPage } from "./gallery/GalleryPage";
 import { LandingRoute } from "./pages/Landing";
 import { DashboardPage } from "./pages/Dashboard";
 import { SignInPage } from "./pages/SignIn";
@@ -94,7 +96,6 @@ export default function App() {
               </RequireAuth>
             }
           />
-          <Route path="/gallery" element={<GalleryPage />} />
         </Routes>
       </BrowserRouter>
     </QueryClientProvider>

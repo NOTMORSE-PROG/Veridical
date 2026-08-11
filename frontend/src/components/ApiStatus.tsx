@@ -3,7 +3,7 @@
 // VITE_API_BASE_URL is a build-time env var (Vercel dashboard in prod,
 // empty in local dev where no backend URL is configured yet).
 import { useEffect, useState } from "react";
-import { Pill, type PillStatus } from "./Pill";
+import { StatusPill, type StatusPillTone } from "./StatusPill";
 
 type Health = { status: string; db: string };
 
@@ -30,18 +30,18 @@ export function ApiStatus() {
   }, [baseUrl]);
 
   if (state.kind === "unconfigured") {
-    return <Pill status="queued">API base URL not configured</Pill>;
+    return <StatusPill tone="neutral">API base URL not configured</StatusPill>;
   }
   if (state.kind === "loading") {
-    return <Pill status="processing">Checking API…</Pill>;
+    return <StatusPill tone="info">Checking API…</StatusPill>;
   }
   if (state.kind === "error") {
-    return <Pill status="bad">API unreachable</Pill>;
+    return <StatusPill tone="danger">API unreachable</StatusPill>;
   }
-  const status: PillStatus = state.health.status === "ok" ? "ok" : "warn";
+  const tone: StatusPillTone = state.health.status === "ok" ? "success" : "caution";
   return (
-    <Pill status={status}>
+    <StatusPill tone={tone}>
       API {state.health.status} · db {state.health.db}
-    </Pill>
+    </StatusPill>
   );
 }

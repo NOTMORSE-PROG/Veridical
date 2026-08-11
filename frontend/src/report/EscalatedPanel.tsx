@@ -8,12 +8,15 @@ import type { EscalatedItemOut, EscalationResolution } from "../api/types";
 import { cx } from "../components/cx";
 import { useEscalatedItems, useResolveEscalation } from "./useReport";
 
-function AttentionIcon() {
+// Same glyph as StatusPill's "caution" tone (circle + centered exclamation)
+// — this panel IS the ambiguous-middle-case surface the caution tone
+// exists for: an AI judgment the system could not settle on its own.
+function CautionIcon() {
   return (
     <svg aria-hidden="true" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M12 3.5 21 19.5H3Z" />
-      <line x1="12" y1="10" x2="12" y2="14" />
-      <circle cx="12" cy="17" r="0.5" fill="currentColor" />
+      <circle cx="12" cy="12" r="9" />
+      <line x1="12" y1="7.5" x2="12" y2="13" />
+      <circle cx="12" cy="16.5" r="0.5" fill="currentColor" />
     </svg>
   );
 }
@@ -187,9 +190,18 @@ export function EscalatedPanel({ checkRunId }: { checkRunId: number }) {
   if (!items || items.length === 0) return null;
 
   return (
-    <div className="rounded-lg border border-border bg-status-attention-bg">
-      <div className="flex flex-wrap items-center gap-2 border-b border-border px-3.5 py-2.5">
-        <AttentionIcon />
+    // Left accent bar carries the "unresolved judgment" signal (V-056) —
+    // deliberately NOT a full amber fill like V-055's: an unresolved AI
+    // judgment shouldn't look more settled/polished than it is (this
+    // product's overreliance-mitigation rule, RESEARCH.md §11), and the
+    // Pass/Fail buttons below need to read as active input controls
+    // against a plain panel, not get visually swallowed by a tinted one.
+    <div
+      className="overflow-hidden rounded-lg bg-panel"
+      style={{ borderLeftWidth: "4px", borderLeftColor: "var(--color-status-caution-text)" }}
+    >
+      <div className="flex flex-wrap items-center gap-2 border-b border-border bg-status-caution-bg px-3.5 py-2.5">
+        <CautionIcon />
         <h2 className="text-sm font-bold text-ink">Needs your review ({items.length})</h2>
         <span className="flex-1" />
         <span className="text-xs text-ink-tertiary">
