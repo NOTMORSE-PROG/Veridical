@@ -750,6 +750,7 @@ export function ReviewCriteriaPage() {
             </button>
             <button
               type="button"
+              data-tour="confirm-rubric-cta"
               disabled={save.isPending}
               onClick={() => attemptSave(true)}
               className="flex h-11 items-center justify-center rounded-md bg-action px-4 text-sm font-bold text-on-action disabled:opacity-60"

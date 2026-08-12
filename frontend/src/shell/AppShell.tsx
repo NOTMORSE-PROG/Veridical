@@ -26,6 +26,8 @@ import { type FocusEvent, type ReactNode, useEffect, useRef, useState } from "re
 import { Link, useLocation } from "react-router";
 import { useQuota } from "../api/useQuota";
 import { useLogout, useMe } from "../auth/useAuth";
+import { CoachMark } from "../onboarding/CoachMark";
+import { TourProvider, useTour } from "../onboarding/TourContext";
 
 const NAV_ITEMS: ReadonlyArray<{ label: string; to: string }> = [
   { label: "Dashboard", to: "/dashboard" },
@@ -105,6 +107,69 @@ function SignOutIcon() {
   );
 }
 
+// Reuses the exact spinner-arrow path already drawn identically in
+// Report.tsx/UploadRubricModal.tsx/NewCheck.tsx/ReviewCriteria.tsx/
+// StatusPill.tsx, minus the animate-spin class — a static circular
+// arrow, zero new asset, already visually familiar in this app as
+// "refresh/replay" from every one of those loading states (V-057).
+function ReplayIcon() {
+  return (
+    <svg aria-hidden="true" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+      <path d="M20 12a8 8 0 1 0-2.5 5.8" />
+      <path d="M20 8v4h-4" />
+    </svg>
+  );
+}
+
+function ReplayTourButton({
+  variant,
+  onNavigate,
+}: {
+  variant: "desktop" | "mobile";
+  onNavigate?: () => void;
+}) {
+  const { data: me } = useMe();
+  // Goes through the SAME useTour() instance CoachMark reads (shared via
+  // TourProvider, wrapped around this whole shell below) -- not its own
+  // useReplayOnboarding() mutation. Two independent instances each had
+  // their own local "was just dismissed" flag; clearing the server field
+  // through one instance's mutation never reset the OTHER instance's
+  // flag, so a second-or-later Replay click in one session silently did
+  // nothing (found live, ux-critic). One shared instance is the fix.
+  const tour = useTour();
+  if (!me) return null;
+
+  function handleReplay() {
+    tour.replay();
+    onNavigate?.();
+  }
+
+  if (variant === "desktop") {
+    return (
+      <button
+        type="button"
+        data-tour="replay-tour-desktop"
+        onClick={handleReplay}
+        aria-label="Replay VERIDICAL tour"
+        className="hidden h-11 w-11 flex-none items-center justify-center rounded-full text-ink-tertiary hover:bg-status-neutral-bg hover:text-ink md:flex"
+      >
+        <ReplayIcon />
+      </button>
+    );
+  }
+  return (
+    <button
+      type="button"
+      data-tour="replay-tour-mobile"
+      onClick={handleReplay}
+      className="flex min-h-11 w-full items-center gap-2 rounded-md px-3 text-sm font-medium text-ink hover:bg-status-neutral-bg"
+    >
+      <ReplayIcon />
+      Replay tour
+    </button>
+  );
+}
+
 function MobileAccountBlock({ onNavigate }: { onNavigate: () => void }) {
   const { data: me } = useMe();
   const logout = useLogout();
@@ -114,6 +179,7 @@ function MobileAccountBlock({ onNavigate }: { onNavigate: () => void }) {
       <p className="min-w-0 truncate px-3 py-2 text-xs text-ink-tertiary" title={me.display_name}>
         Signed in as {me.display_name}
       </p>
+      <ReplayTourButton variant="mobile" onNavigate={onNavigate} />
       <button
         type="button"
         onClick={() => {
@@ -255,6 +321,11 @@ export function AppShell({ children }: { children: ReactNode }) {
   }
 
   return (
+    // TourProvider wraps the whole shell (not just CoachMark) so the
+    // header's ReplayTourButton and CoachMark itself read the exact
+    // same useTour() instance -- one source of truth for "is the tour
+    // showing," not two independently-instantiated ones (V-057 fix).
+    <TourProvider>
     <div className="flex min-h-screen flex-col bg-page">
       <a
         href="#main-content"
@@ -281,6 +352,8 @@ export function AppShell({ children }: { children: ReactNode }) {
         <span className="flex-1" />
 
         <QuotaChip />
+
+        <ReplayTourButton variant="desktop" />
 
         <button
           ref={hamburgerRef}
@@ -349,6 +422,9 @@ export function AppShell({ children }: { children: ReactNode }) {
       <main id="main-content" tabIndex={-1} className="flex flex-1 flex-col">
         {children}
       </main>
+
+      <CoachMark />
     </div>
+    </TourProvider>
   );
 }

@@ -166,3 +166,23 @@ def test_dismissing_onboarding_persists_across_a_fresh_session(seeded):
 def test_dismissing_onboarding_without_a_session_is_401(seeded):
     resp = seeded.post("/auth/onboarding/dismiss")
     assert resp.status_code == 401
+
+
+def test_replaying_onboarding_clears_dismissal_and_persists(seeded):
+    seeded.post("/auth/login", json={"email": "prof@tip.edu.ph", "password": "s3cret!"})
+    seeded.post("/auth/onboarding/dismiss")
+    assert seeded.get("/auth/me").json()["onboarding_dismissed_at"] is not None
+
+    replayed = seeded.post("/auth/onboarding/replay")
+    assert replayed.status_code == 200
+    assert replayed.json()["onboarding_dismissed_at"] is None
+
+    # Persists across a fresh session too, same as dismiss does.
+    seeded.post("/auth/logout")
+    seeded.post("/auth/login", json={"email": "prof@tip.edu.ph", "password": "s3cret!"})
+    assert seeded.get("/auth/me").json()["onboarding_dismissed_at"] is None
+
+
+def test_replaying_onboarding_without_a_session_is_401(seeded):
+    resp = seeded.post("/auth/onboarding/replay")
+    assert resp.status_code == 401

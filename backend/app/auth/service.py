@@ -94,9 +94,22 @@ async def delete_session(session: AsyncSession, token: str) -> None:
 
 
 async def mark_onboarding_dismissed(session: AsyncSession, instructor: Instructor) -> Instructor:
-    """Flow A first-run welcome banner (V-055): idempotent, re-dismissing
-    just re-stamps the timestamp."""
+    """Flow A first-run welcome banner (V-055) / coach-mark tour (V-057):
+    idempotent, re-dismissing just re-stamps the timestamp."""
     instructor.onboarding_dismissed_at = datetime.now(UTC)
+    await session.commit()
+    await session.refresh(instructor)
+    return instructor
+
+
+async def mark_onboarding_replayed(session: AsyncSession, instructor: Instructor) -> Instructor:
+    """V-057 AC4 (replayable): clears the dismissed timestamp so the
+    coach-mark tour auto-starts again from its first step. Same field
+    `mark_onboarding_dismissed` sets — one piece of state, not a second
+    one — since the tour's current-step position lives client-side only
+    (a fresh tour always restarts at step 1, matching both of the
+    owner's reference screenshots' own "Replay this tour" affordance)."""
+    instructor.onboarding_dismissed_at = None
     await session.commit()
     await session.refresh(instructor)
     return instructor
