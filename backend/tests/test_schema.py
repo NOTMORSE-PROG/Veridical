@@ -132,6 +132,28 @@ def test_upgrade_creates_all_v1_tables(migrated):
 
 
 @pytestmark_live
+def test_migration_does_not_disable_pre_existing_app_loggers(migrated):
+    """BUG-032 regression: `alembic/env.py`'s `fileConfig()` call defaults to
+    `disable_existing_loggers=True`, which silently disables every logger
+    already registered (via `logging.getLogger(__name__)` at import time)
+    that isn't named in alembic.ini's own `[loggers]` section — in
+    production this runs on every boot (D-021: migrations auto-run at
+    startup), AFTER `app.main` has already imported `app.pipeline.worker`
+    and created its module-level logger. An undetected regression here
+    would silently swallow every `logger.exception()` call the pipeline
+    worker makes, with no error anywhere. `migrated` already ran a real
+    `alembic upgrade head` (the only way this code path actually executes),
+    so this simulates the exact import-then-migrate order main.py uses."""
+    import logging
+
+    # No manual setup needed: pytest already imported `app.pipeline.worker`
+    # (and thus created this logger) during test collection, well before
+    # the `migrated` fixture's `command.upgrade()` call above — the same
+    # import-then-migrate order `app/main.py` uses in production.
+    assert logging.getLogger("app.pipeline.worker").disabled is False
+
+
+@pytestmark_live
 def test_up_down_up_cycle(migrated):
     """Downgrade must return the DB to empty, and re-upgrade must succeed
     (CODING.md §2: up AND down tested). Self-restoring: ends at head."""

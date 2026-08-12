@@ -12,7 +12,15 @@ from app.models import Base
 config = context.config
 
 if config.config_file_name is not None:
-    fileConfig(config.config_file_name)
+    # disable_existing_loggers=False: the default (True) silently disables
+    # every already-registered logger NOT named in alembic.ini's [loggers]
+    # section — including every `app.*` logger, since app/main.py imports
+    # `app.pipeline.worker` (creating its module-level logger) before ever
+    # calling this. In production (D-021: migrations auto-run at boot),
+    # that means BUG-032's new `logger.exception()` calls would be
+    # permanently silenced immediately after the very first migration run,
+    # with no error and no way to tell short of reading this file.
+    fileConfig(config.config_file_name, disable_existing_loggers=False)
 
 target_metadata = Base.metadata
 

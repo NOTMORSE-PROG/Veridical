@@ -460,15 +460,47 @@ async def run_check_run(
             await session.commit()
 
     except PipelineBlockedError as exc:
+        # BUG-032 finding: if the exception that landed us here came from a
+        # DB-level failure mid-flush (an IntegrityError, a race with the
+        # poll loop), the session is left needing a rollback before it can
+        # commit again — otherwise THIS commit raises PendingRollbackError,
+        # propagating back out uncaught and re-swallowing the original bug.
+        # `rollback()` expires check_run's attributes; the async ORM can't
+        # lazy-load them on a plain sync attribute read afterward (raises
+        # MissingGreenlet), so an explicit refresh is required before
+        # `_record_blocked` touches `check_run.stage_status`.
+        await session.rollback()
+        await session.refresh(check_run)
         _record_blocked(check_run, exc.block)
         await session.commit()
     except TerminalFailure as exc:
+        await session.rollback()
+        await session.refresh(check_run)  # see PipelineBlockedError note above
         check_run.status = CheckRunStatus.failed
         check_run.finished_at = datetime.now(UTC)
         _record_failed(check_run, exc.code, exc.message)
         await session.commit()
     except FileMalformedError as exc:
+        await session.rollback()
+        await session.refresh(check_run)  # see PipelineBlockedError note above
         check_run.status = CheckRunStatus.failed
         check_run.finished_at = datetime.now(UTC)
         _record_failed(check_run, "file_malformed", str(exc))
+        await session.commit()
+    except Exception as exc:
+        # BUG-032: this runs inside a Starlette BackgroundTask (worker.py),
+        # which does not propagate exceptions anywhere — no client-visible
+        # error, no DB write. Without this catch-all, any stage-level bug
+        # (a missing data_dir cache file, an unhandled library error) leaves
+        # the row frozen at its last successful stage forever, reading as
+        # "in progress" with no way for the instructor to tell it apart from
+        # a run that's merely slow (charter rule 9: a stalled run must say
+        # so, not stay silent). Same generic-but-honest catch-all pattern as
+        # IngestFailureReason (models/enums.py) — one bucket, not one per
+        # exception type.
+        await session.rollback()
+        await session.refresh(check_run)  # see PipelineBlockedError note above
+        check_run.status = CheckRunStatus.failed
+        check_run.finished_at = datetime.now(UTC)
+        _record_failed(check_run, "unexpected_error", str(exc))
         await session.commit()

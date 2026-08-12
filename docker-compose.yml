@@ -29,6 +29,13 @@ services:
       VERIDICAL_ENV: ${VERIDICAL_ENV:-dev}
       GEMINI_API_KEY: ${GEMINI_API_KEY:-}
       CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:5173}
+    # BUG-032: data_dir (config.py, default "./data" -> /srv/veridical/data
+    # per the Dockerfile's WORKDIR) is a real on-disk cache the pipeline
+    # reads on every check-run, not just at ingestion — without this, every
+    # container recreate silently strands manuscripts the DB still thinks
+    # are fine.
+    volumes:
+      - ./backend/data:/srv/veridical/data
     depends_on:
       db:
         condition: service_healthy
