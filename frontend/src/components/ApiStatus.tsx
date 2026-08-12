@@ -1,7 +1,13 @@
 // V-048 smoke check: proves the deployed frontend can reach the deployed
-// backend across origins (CORS) — not a product screen, no wireframe ID.
-// VITE_API_BASE_URL is a build-time env var (Vercel dashboard in prod,
-// empty in local dev where no backend URL is configured yet).
+// backend — not a product screen, no wireframe ID. Not currently rendered
+// anywhere (dead code, confirmed BUG-003).
+//
+// VITE_API_BASE_URL is a build-time env var. BUG-003: this component
+// deliberately does NOT default to "/api" the way api/client.ts does —
+// it reads the raw env var so "unconfigured" stays an honest signal if
+// someone ever wires it back in without also checking the Vercel
+// dashboard is still correct. Do not "fix" this to match client.ts's
+// default without re-reading BUG-003's ticket first.
 import { useEffect, useState } from "react";
 import { StatusPill, type StatusPillTone } from "./StatusPill";
 

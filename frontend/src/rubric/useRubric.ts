@@ -15,7 +15,10 @@ export function useRubric(id: number) {
   });
 }
 
-const BASE_URL = (import.meta.env.VITE_API_BASE_URL as string | undefined) ?? "";
+// BUG-003: same default as api/client.ts — kept in sync deliberately,
+// since this file's multipart FormData upload can't go through the shared
+// `request()` wrapper (it must not set a JSON Content-Type).
+const BASE_URL = (import.meta.env.VITE_API_BASE_URL as string | undefined) ?? "/api";
 
 export function useUploadRubric() {
   return useMutation({

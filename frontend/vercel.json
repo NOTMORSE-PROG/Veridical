@@ -1,3 +1,11 @@
 {
-  "rewrites": [{ "source": "/(.*)", "destination": "/index.html" }]
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "routes": [
+    {
+      "src": "/api/(.*)",
+      "dest": "${BACKEND_URL}/$1",
+      "env": ["BACKEND_URL"]
+    },
+    { "src": "/(.*)", "dest": "/index.html" }
+  ]
 }

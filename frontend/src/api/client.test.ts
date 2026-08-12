@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { api } from "./client";
 
 describe("api client", () => {
@@ -43,5 +43,44 @@ describe("api client", () => {
     const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
     expect(init.credentials).toBe("include");
     expect(init.body).toBe(JSON.stringify({ email: "a@b.com", password: "x" }));
+  });
+});
+
+// BUG-003: BASE_URL is computed at module load time from
+// import.meta.env.VITE_API_BASE_URL, so testing its default requires a
+// fresh module instance per case (vi.resetModules + dynamic import) — the
+// static `import { api } from "./client"` above already froze its own
+// BASE_URL at file-load time and can't be reused for this.
+describe("api/client BASE_URL default", () => {
+  // The "api client" describe block above already loaded ./client via a
+  // static top-level import, freezing its BASE_URL from whatever the real
+  // frontend/.env gave it — resetModules must run BEFORE the first
+  // dynamic import here too, not just between this block's own tests.
+  beforeEach(() => vi.resetModules());
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.unstubAllGlobals();
+  });
+
+  it("falls back to /api (the vercel.json same-origin proxy) when VITE_API_BASE_URL is unset", async () => {
+    vi.stubEnv("VITE_API_BASE_URL", undefined);
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(new Response(JSON.stringify({}), { status: 200 })),
+    );
+    const { api: freshApi } = await import("./client");
+    await freshApi.get("/auth/me");
+    expect(vi.mocked(fetch).mock.calls[0][0]).toBe("/api/auth/me");
+  });
+
+  it("uses an explicit VITE_API_BASE_URL when set (local dev talking directly to the backend)", async () => {
+    vi.stubEnv("VITE_API_BASE_URL", "http://localhost:8000");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(new Response(JSON.stringify({}), { status: 200 })),
+    );
+    const { api: freshApi } = await import("./client");
+    await freshApi.get("/auth/me");
+    expect(vi.mocked(fetch).mock.calls[0][0]).toBe("http://localhost:8000/auth/me");
   });
 });
