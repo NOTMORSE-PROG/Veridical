@@ -37,3 +37,29 @@ jobs:
             echo "::error::Frontend not reachable at $WEB_URL (HTTP $code)"
             exit 1
           }
+      - name: Frontend static assets serve as themselves, not index.html (BUG-003)
+        # A vercel.json edit that moves the SPA catch-all into `routes`
+        # (which has no filesystem-first check the way `rewrites` does)
+        # makes every static asset resolve to index.html's HTML body
+        # instead — the browser refuses to execute a <script type=module>
+        # served as text/html, so the app never boots. This took prod down
+        # for every user, 2026-08-12, caught only by a manual live curl,
+        # not by anything in CI or this workflow. Same reasoning as the
+        # health/reachable checks above: proves the DEPLOY behaves
+        # correctly, which nothing at the code-review layer can see.
+        run: |
+          html="$(curl -sS --max-time 30 "$WEB_URL/")"
+          js_path="$(echo "$html" | grep -oE '/assets/[^"]+\.js' | head -1)"
+          [ -n "$js_path" ] || {
+            echo "::error::Could not find a hashed JS asset path in $WEB_URL/'s HTML"
+            exit 1
+          }
+          content_type="$(curl -sS -o /dev/null -w '%{content_type}' --max-time 30 "$WEB_URL$js_path")"
+          echo "Content-Type for $js_path: $content_type"
+          case "$content_type" in
+            application/javascript*|text/javascript*) ;;
+            *)
+              echo "::error::$WEB_URL$js_path served as '$content_type', not JavaScript — vercel.json routing is almost certainly broken (see BUG-003)"
+              exit 1
+              ;;
+          esac
