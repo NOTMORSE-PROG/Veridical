@@ -129,8 +129,23 @@ def test_class_below_agreement_bar_never_promotes_even_with_enough_samples():
 
 
 def test_class_clearing_both_bars_promotes():
-    settings = get_settings()
-    n = settings.tier_promotion_min_n
+    """Root-caused, not a flaky retry (2026-08-12): this used to read `n =
+    settings.tier_promotion_min_n` and assume perfect agreement AT the
+    minimum n clears the 90% Wilson lower bound. That was true when
+    `tier_promotion_min_n` defaulted to 35 (low = n/(n+z^2) >= 0.90 needs
+    n >= ~34.6), but `.env.example` moved the real default to 20 after
+    V-053/D-016 tightened it against the practical golden-set size — at
+    n=20 even 100% agreement only clears a 0.839 lower bound, correctly
+    BELOW the bar (the gate's own conservative-estimate design working
+    exactly as intended, per this module's docstring). The test's
+    assumption was stale, not the gate logic. Uses an explicit n=35 here
+    so this test asserts the actual promotion path regardless of
+    whatever `tier_promotion_min_n` is configured to in the environment
+    it runs in — the two neighboring tests above don't have this problem
+    since "below the bar never promotes" holds at any min_n value.
+    """
+    settings = get_settings().model_copy(update={"tier_promotion_min_n": 35})
+    n = 35
     stats = [ShadowClassStats("readability", "tier0", n=n, agreement=1.0, n_agree=n)]
     promotions = evaluate_promotions(stats, dated="2026-07-25", settings=settings)
     assert len(promotions) == 1
