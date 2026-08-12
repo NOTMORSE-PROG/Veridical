@@ -75,15 +75,51 @@ async def create_rubric_from_upload(
 
     suffix = Path(filename).suffix.lower()[:8]
     dest = settings.data_dir / "rubric_uploads" / f"{rubric.id}{suffix}"
-    await save_upload(chunks, dest, settings)
-    rubric.source_file = str(dest)
-    await session.commit()
+    try:
+        await save_upload(chunks, dest, settings)
+        rubric.source_file = str(dest)
+        await session.commit()
 
-    extractor = select_extractor(detect_format(dest))
-    loop = asyncio.get_running_loop()
-    # Extraction is CPU-bound — off the event loop (CODING.md §2), same as
-    # manuscript ingestion.
-    result = await loop.run_in_executor(None, extractor, str(dest), settings)
+        extractor = select_extractor(detect_format(dest))
+        loop = asyncio.get_running_loop()
+        # Extraction is CPU-bound — off the event loop (CODING.md §2), same
+        # as manuscript ingestion.
+        result = await loop.run_in_executor(None, extractor, str(dest), settings)
+    except Exception:
+        # BUG-027: an unreadable/corrupt file raises here, before there is
+        # anything for the instructor to review (attempt_decomposition
+        # below never raises, V-011 — everything after this point always
+        # succeeds with a real, if possibly `needs_review`, outcome). Left
+        # uncaught, the rubric row created above survives as a permanent
+        # 0-criteria "Draft" — the family's new highest version — which
+        # makes ReviewCriteriaPage's `readOnly` check treat the real
+        # active version as superseded, contradicting its own "This
+        # rubric is active" message on the same screen. Unlike a failed
+        # MANUSCRIPT ingestion (kept as a permanent, informative row,
+        # BUG-016 — the dashboard's whole job is listing every upload
+        # attempt), a rubric VERSION that never had anything reviewable
+        # was never real: delete it rather than leave a ghost in Version
+        # History.
+        #
+        # `backend-critic` finding: if the exception that landed us here
+        # was itself a DB-level failure mid-flush (a dropped connection,
+        # a Neon idle-suspend blip — app/db.py's check_connectivity
+        # docstring already documents this as a live condition), the
+        # session needs a rollback before it can issue the DELETE below —
+        # otherwise that commit raises its own DBAPIError, the original
+        # exception never propagates, and the orphaned row survives
+        # anyway (reproduced live: forcing a poisoned transaction here
+        # left the ghost row in place). Same pattern as BUG-032
+        # (app/pipeline/machine.py's except blocks) — rollback expires
+        # the ORM object's attributes, so a refresh is needed before
+        # `session.delete(rubric)` touches it again.
+        await session.rollback()
+        await session.refresh(rubric)
+        dest.unlink(missing_ok=True)
+        await session.delete(rubric)
+        await session.commit()
+        raise
+
     raw_text = raw_text_for_decomposition(result.blocks)
 
     # Never raises (V-011): a persistent failure comes back as a

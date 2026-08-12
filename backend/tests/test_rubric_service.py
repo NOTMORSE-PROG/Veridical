@@ -162,6 +162,125 @@ async def test_create_rubric_from_upload_persists_criteria_with_normalized_weigh
     assert sum(float(c.weight) for c in criteria) == pytest.approx(100.0)
 
 
+async def test_failed_upload_leaves_no_orphaned_rubric_version(
+    session_factory, tmp_path, monkeypatch
+):
+    """BUG-027: a corrupt/unreadable file must not leave a permanent
+    0-criteria "Draft" version behind — nothing was ever reviewable, so
+    nothing should persist. Before the fix, `create_rubric_from_upload`
+    committed the Rubric row before extraction ran, and never cleaned it
+    up when extraction raised — the orphaned row then became the
+    family's new highest version, which made ReviewCriteriaPage's
+    `readOnly` check falsely claim the real active version was
+    superseded."""
+    from app.errors import FileMalformedError
+    from app.rubric.service import create_rubric_from_upload
+
+    monkeypatch.setenv("DATA_DIR", str(tmp_path / "data"))
+    get_settings.cache_clear()
+    settings = get_settings()
+
+    async def garbage_chunks():
+        yield b"this is not a pdf, docx, or doc file at all"
+
+    instructor_id = await _seed_instructor(session_factory)
+    async with session_factory() as session:
+        with pytest.raises(FileMalformedError):
+            await create_rubric_from_upload(
+                session,
+                garbage_chunks(),
+                "bad.pdf",
+                "Broken Upload",
+                SpyLLM(SCRIPTED_RESPONSE),
+                settings,
+                instructor_id=instructor_id,
+            )
+
+    async with session_factory() as session:
+        rows = (
+            (await session.execute(select(Rubric).where(Rubric.instructor_id == instructor_id)))
+            .scalars()
+            .all()
+        )
+        assert rows == []
+
+    # A subsequent GOOD upload must land on version 1, not 2 — proving no
+    # version-number gap or lingering family from the failed attempt.
+    path = _rubric_pdf(tmp_path)
+    async with session_factory() as session:
+        good = await create_rubric_from_upload(
+            session,
+            _chunks(path),
+            "rubric.pdf",
+            "Real Rubric",
+            SpyLLM(SCRIPTED_RESPONSE),
+            settings,
+            instructor_id=instructor_id,
+        )
+    assert good.version == 1
+
+
+async def test_failed_upload_cleanup_survives_a_poisoned_transaction(
+    session_factory, tmp_path, monkeypatch
+):
+    """BUG-027, `backend-critic` finding: the except block's own cleanup
+    (`session.delete(rubric)`, `session.commit()`) can itself fail if the
+    exception that triggered it left the session's transaction aborted
+    (a DB-level hiccup mid-flow — Neon idle-suspend, a dropped connection;
+    app/db.py's check_connectivity docstring already documents this as a
+    live condition). Without a `rollback()` first, that second commit
+    raises `PendingRollbackError`/`InFailedSQLTransactionError` instead
+    of succeeding, the ORIGINAL exception never propagates, and — worse —
+    the orphaned rubric row survives anyway, reproducing BUG-027 through
+    a different trigger. Reproduced live against the real dev Postgres
+    before the `rollback()`/`refresh()` fix: 1 orphaned row remained.
+    After: 0."""
+    import contextlib
+
+    from sqlalchemy import text
+
+    import app.rubric.service as rubric_service
+
+    monkeypatch.setenv("DATA_DIR", str(tmp_path / "data"))
+    get_settings.cache_clear()
+    settings = get_settings()
+
+    async def garbage_chunks():
+        yield b"not a real pdf"
+
+    instructor_id = await _seed_instructor(session_factory)
+    async with session_factory() as session:
+        real_save_upload = rubric_service.save_upload
+
+        async def poisoning_save_upload(chunks_arg, dest, settings_arg):
+            result = await real_save_upload(chunks_arg, dest, settings_arg)
+            # Poison the transaction right where a real DB hiccup would
+            # land — after the file is saved, before the next commit.
+            with contextlib.suppress(Exception):
+                await session.execute(text("SELECT 1/0"))
+            return result
+
+        monkeypatch.setattr(rubric_service, "save_upload", poisoning_save_upload)
+        with pytest.raises(Exception):  # noqa: B017 — the poisoned-transaction DBAPIError, not FileMalformedError
+            await rubric_service.create_rubric_from_upload(
+                session,
+                garbage_chunks(),
+                "bad.pdf",
+                "Poisoned",
+                SpyLLM(SCRIPTED_RESPONSE),
+                settings,
+                instructor_id=instructor_id,
+            )
+
+    async with session_factory() as verify:
+        rows = (
+            (await verify.execute(select(Rubric).where(Rubric.instructor_id == instructor_id)))
+            .scalars()
+            .all()
+        )
+        assert rows == []
+
+
 async def test_repeated_upload_starts_a_new_family_not_a_new_version(
     session_factory, tmp_path, monkeypatch
 ):
