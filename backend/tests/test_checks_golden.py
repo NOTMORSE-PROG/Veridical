@@ -131,18 +131,24 @@ def test_class_below_agreement_bar_never_promotes_even_with_enough_samples():
 def test_class_clearing_both_bars_promotes():
     """Root-caused, not a flaky retry (2026-08-12): this used to read `n =
     settings.tier_promotion_min_n` and assume perfect agreement AT the
-    minimum n clears the 90% Wilson lower bound. That was true when
-    `tier_promotion_min_n` defaulted to 35 (low = n/(n+z^2) >= 0.90 needs
-    n >= ~34.6), but `.env.example` moved the real default to 20 after
-    V-053/D-016 tightened it against the practical golden-set size — at
-    n=20 even 100% agreement only clears a 0.839 lower bound, correctly
-    BELOW the bar (the gate's own conservative-estimate design working
-    exactly as intended, per this module's docstring). The test's
-    assumption was stale, not the gate logic. Uses an explicit n=35 here
-    so this test asserts the actual promotion path regardless of
-    whatever `tier_promotion_min_n` is configured to in the environment
-    it runs in — the two neighboring tests above don't have this problem
-    since "below the bar never promotes" holds at any min_n value.
+    minimum n clears the 90% Wilson lower bound. That's only true at
+    `config.py`'s intentional in-code default of 35 (low = n/(n+z^2) >=
+    0.90 needs n >= ~34.6) — the test broke on any run where `.env`
+    overrode it down to 20, per `.env.example`'s value at the time this
+    comment was first written. **Correction (BUG-030, 2026-08-12, same
+    day): `.env.example` was never an intentional post-V-053 decision —
+    it was simply stale, unedited since the original V-008 commit, and
+    has since been fixed to 35 to match `config.py`.** At n=20 even 100%
+    agreement only clears a 0.839 lower bound, correctly BELOW the bar
+    (the gate's own conservative-estimate design working exactly as
+    intended, per this module's docstring) — that part of the original
+    analysis was right; only the claim that 20 was a deliberate choice
+    was backwards. Still uses an explicit n=35 override here regardless
+    of `.env.example`'s now-correct value, so this test asserts the
+    actual promotion path independent of whatever `tier_promotion_min_n`
+    happens to be configured to in the environment it runs in — the two
+    neighboring tests above don't have this problem since "below the bar
+    never promotes" holds at any min_n value.
     """
     settings = get_settings().model_copy(update={"tier_promotion_min_n": 35})
     n = 35
