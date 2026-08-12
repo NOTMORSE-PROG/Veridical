@@ -1,18 +1,24 @@
-// BUG-003 regression: `vercel.json`'s /api route is what makes the
-// deployed frontend and backend same-origin from the browser's
-// perspective, which is the entire fix — the SameSite=Lax session cookie
-// only survives cross-site fetch calls because there IS no cross-site
-// fetch call anymore. A future edit that reorders or drops this rule
-// would silently reopen BUG-003 (Vercel evaluates `routes` top-to-bottom,
-// first match wins, so the catch-all SPA route must never come first).
+// BUG-003 regression, twice over:
 //
-// The destination references `${BACKEND_URL}` via the route's `env`
-// allow-list (Vercel's documented pattern for env vars in `routes.dest`,
-// vercel.com/docs/project-configuration/vercel-json#using-environment-
-// variables-in-routes) rather than hardcoding the Render URL, so it stays
-// a live pointer even if the backend's URL ever changes — the actual
-// value lives in the Vercel project's own env vars (Project Settings →
-// Environment Variables → BACKEND_URL), not in this repo.
+// 1. `vercel.json`'s /api route is what makes the deployed frontend and
+//    backend same-origin from the browser's perspective — the SameSite=Lax
+//    session cookie only survives cross-site fetch calls because there IS
+//    no cross-site fetch call anymore.
+// 2. The SPA catch-all MUST stay under `rewrites`, not `routes` — `routes`
+//    has no automatic "check the filesystem for a real static asset
+//    first" behavior (that was the now-deprecated `handle: filesystem`
+//    step; `rewrites` does this by default). An earlier version of this
+//    fix moved BOTH rules into a single `routes` array for what seemed
+//    like simpler, more deterministic ordering — and that took production
+//    down for every real user: `/assets/*.js`, `.css`, and `favicon.svg`
+//    all matched the catch-all and got served as `index.html` with
+//    Content-Type: text/html, so the browser refused to execute the
+//    module script and the app never booted. `routes` and `rewrites` CAN
+//    coexist in the same file (Vercel's own docs: "You can use routes
+//    alongside rewrites... You can use both in the same configuration."),
+//    which is what fixes this — the API proxy needs `routes` (for its
+//    `env` allow-list, which `rewrites` doesn't support), the SPA
+//    catch-all needs `rewrites` (for filesystem-first serving).
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -22,13 +28,17 @@ const configPath = join(dirname(fileURLToPath(import.meta.url)), "vercel.json");
 const config = JSON.parse(readFileSync(configPath, "utf-8"));
 
 describe("vercel.json", () => {
-  it("proxies /api/* to $BACKEND_URL before the SPA catch-all", () => {
-    const [first, second] = config.routes;
-    expect(first).toEqual({
-      src: "/api/(.*)",
-      dest: "${BACKEND_URL}/$1",
-      env: ["BACKEND_URL"],
-    });
-    expect(second).toEqual({ src: "/(.*)", dest: "/index.html" });
+  it("proxies /api/* to $BACKEND_URL via routes (env-interpolated, not hardcoded)", () => {
+    expect(config.routes).toEqual([
+      { src: "/api/(.*)", dest: "${BACKEND_URL}/$1", env: ["BACKEND_URL"] },
+    ]);
+  });
+
+  it("keeps the SPA catch-all under rewrites, NOT routes (filesystem-first serving — see file header)", () => {
+    expect(config.rewrites).toEqual([{ source: "/(.*)", destination: "/index.html" }]);
+    // The catch-all must never live in `routes` alongside the API rule —
+    // routes has no filesystem-first check, so it would swallow every
+    // static asset request too (the exact live outage this guards against).
+    expect(config.routes.some((r: { src?: string }) => r.src === "/(.*)")).toBe(false);
   });
 });
