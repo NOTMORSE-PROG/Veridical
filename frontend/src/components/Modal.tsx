@@ -6,6 +6,7 @@
 // reimplemented with VERIDICAL's own tokens.
 import { type ReactNode, useEffect, useId, useRef } from "react";
 import { createPortal } from "react-dom";
+import { useInertBackground } from "./useInertBackground";
 
 interface ModalProps {
   title: ReactNode;
@@ -27,19 +28,8 @@ function getFocusable(container: HTMLElement): HTMLElement[] {
 // `inert` while any modal is open makes the background genuinely
 // unreachable by ANY input mode, not just Tab -- the WAI-ARIA APG's own
 // Dialog pattern calls this out as part of "modal", not an extra.
-let openModalCount = 0;
-
-function useInertBackground() {
-  useEffect(() => {
-    const appRoot = document.getElementById("root");
-    openModalCount += 1;
-    if (appRoot && openModalCount === 1) appRoot.setAttribute("inert", "");
-    return () => {
-      openModalCount -= 1;
-      if (appRoot && openModalCount === 0) appRoot.removeAttribute("inert");
-    };
-  }, []);
-}
+// `useInertBackground` itself lives in ./useInertBackground (V-057) so
+// the coach-mark tour shares the same open-count, not a second one.
 
 export function ModalBackdrop({ children }: { children: ReactNode }) {
   useInertBackground();

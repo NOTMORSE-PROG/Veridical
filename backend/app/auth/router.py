@@ -13,6 +13,7 @@ from app.auth.service import (
     create_session,
     delete_session,
     mark_onboarding_dismissed,
+    mark_onboarding_replayed,
 )
 from app.config import get_settings
 from app.db import get_session
@@ -71,4 +72,14 @@ async def dismiss_onboarding(
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> InstructorOut:
     updated = await mark_onboarding_dismissed(session, instructor)
+    return InstructorOut.model_validate(updated)
+
+
+@router.post("/onboarding/replay", response_model=InstructorOut)
+async def replay_onboarding(
+    instructor: Annotated[Instructor, Depends(get_current_instructor)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> InstructorOut:
+    """V-057 (F9.2 follow-up): the coach-mark tour's replay control."""
+    updated = await mark_onboarding_replayed(session, instructor)
     return InstructorOut.model_validate(updated)

@@ -197,6 +197,7 @@ export function EscalatedPanel({ checkRunId }: { checkRunId: number }) {
     // Pass/Fail buttons below need to read as active input controls
     // against a plain panel, not get visually swallowed by a tinted one.
     <div
+      data-tour="escalated-panel"
       className="overflow-hidden rounded-lg bg-panel"
       style={{ borderLeftWidth: "4px", borderLeftColor: "var(--color-status-caution-text)" }}
     >

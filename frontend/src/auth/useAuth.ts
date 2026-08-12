@@ -43,6 +43,20 @@ export function useDismissOnboarding() {
   });
 }
 
+// V-057: the coach-mark tour's replay control. Same field as
+// useDismissOnboarding (onboarding_dismissed_at -> null) -- one piece
+// of persisted state, not a second one; the tour's current-step
+// position lives client-side only (a replay always restarts at step 1).
+export function useReplayOnboarding() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: () => api.post<Instructor>("/auth/onboarding/replay"),
+    onSuccess: (instructor) => {
+      queryClient.setQueryData(ME_QUERY_KEY, instructor);
+    },
+  });
+}
+
 export function useLogout() {
   const queryClient = useQueryClient();
   return useMutation({
