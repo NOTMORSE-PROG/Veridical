@@ -6,12 +6,21 @@ entry has `type: "retraction"`; corrections/errata are `type: "correction"`
 or `type: "erratum"` — distinct on purpose (ticket edge case: "a
 correction is info-severity not high"). Confirmed both cases exist with
 real DOIs via `https://api.crossref.org/v1/works?filter=update-type:retraction`
-and `...:correction`. Also confirmed a real, well-known retraction predating
-Crossref's 2023 Retraction Watch integration (the 1998 Wakefield MMR paper,
-DOI 10.1016/S0140-6736(97)11096-0) carries an empty `update-to`/`relation` —
-its title is prefixed "RETRACTED:" instead. `_parse_work` checks both, so
-older retractions aren't silently missed just because their metadata
-predates the structured field.
+and `...:correction`.
+
+BUG-034 (2026-08-13, re-verified live against the same DOI): the 1998
+Wakefield MMR paper's real retraction data lives ENTIRELY under
+`updated-by`, not `update-to` — `update-to` is null. `updated-by` uses
+the identical relation-type vocabulary (`type: "retraction"` /
+`"correction"` / `"erratum"`) and is CrossRef's Retraction Watch
+integration's actual field (`source: "retraction-watch"` on every
+entry) — `update-to` is the older, publisher-submitted mechanism.
+`_parse_work` checks both fields now; before this fix it only read
+`update-to`, so this exact DOI was only ever caught by the title-prefix
+fallback below — incidental (Elsevier/Lancet happened to also prefix
+the title), not because the structured path was actually complete. A
+retracted paper without a "RETRACTED:" title prefix AND with its data
+only under `updated-by` would have been missed entirely.
 """
 
 from typing import Any
@@ -46,13 +55,34 @@ def _parse_work(msg: dict[str, Any]) -> VerificationResult:
     retracted = False
     is_correction = False
     retraction_detail: str | None = None
-    for rel in msg.get("update-to") or []:
+    # BUG-034: `update-to` (publisher-submitted) and `updated-by`
+    # (CrossRef's Retraction Watch integration) both carry retraction
+    # relations under the same vocabulary — a real record can have its
+    # ONLY structured retraction data under either one, so both must be
+    # read, not just `update-to`. `backend-critic` review finding: real
+    # DOIs exist with the SAME retraction duplicated (or even a distinct
+    # second retraction notice) under both fields — which one's detail
+    # string gets shown must be an explicit choice, not an accident of
+    # iteration order. `retraction-watch`-sourced entries win ties: it's
+    # CrossRef's actively-maintained integration and this module's own
+    # docstring already claims it's "the superset in practice."
+    _RETRACTION_WATCH_PRIORITY = 1
+    _OTHER_SOURCE_PRIORITY = 0
+    best_priority = -1
+    for rel in [*(msg.get("update-to") or []), *(msg.get("updated-by") or [])]:
         rel_type = (rel.get("type") or "").lower()
         if rel_type == "retraction":
-            retracted = True
-            label = rel.get("label", "Retraction")
             source = rel.get("source", "unknown")
-            retraction_detail = f"{label} (source: {source})"
+            priority = (
+                _RETRACTION_WATCH_PRIORITY
+                if source == "retraction-watch"
+                else _OTHER_SOURCE_PRIORITY
+            )
+            if priority >= best_priority:
+                retracted = True
+                best_priority = priority
+                label = rel.get("label", "Retraction")
+                retraction_detail = f"{label} (source: {source})"
         elif rel_type in ("correction", "erratum"):
             is_correction = True
     if not retracted and title and title.upper().startswith("RETRACTED"):
