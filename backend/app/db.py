@@ -60,7 +60,16 @@ def get_engine() -> AsyncEngine:
     startup, ENGINEERING.md §7)."""
     global _engine
     if _engine is None:
-        _engine = create_async_engine(sqlalchemy_url(get_settings().database_url))
+        # hide_parameters: BUG-032 finding — SQLAlchemy's default exception
+        # __str__ embeds the full failing statement AND its literal bound
+        # values (manuscript text, instructor email, ...). Those exception
+        # strings get stored verbatim as a failed check_run's stage_status
+        # message and returned over the API — this must never carry real
+        # data, the same "never the DSN or credentials" bar check_connectivity
+        # already holds itself to above.
+        _engine = create_async_engine(
+            sqlalchemy_url(get_settings().database_url), hide_parameters=True
+        )
     return _engine
 
 

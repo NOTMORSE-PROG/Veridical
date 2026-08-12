@@ -7,6 +7,7 @@ immediately instead of waiting for the next poll tick.
 """
 
 import asyncio
+import logging
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 
@@ -19,6 +20,8 @@ from app.llm import get_llm_client
 from app.models.enums import CheckRunStatus
 from app.models.run import CheckRun
 from app.pipeline.machine import is_blocked, run_check_run
+
+logger = logging.getLogger(__name__)
 
 _NON_TERMINAL = (
     CheckRunStatus.queued,
@@ -84,9 +87,24 @@ async def worker_loop(
     """Runs forever (started as a background asyncio task at app startup);
     cancel it on shutdown. Polls immediately again after advancing a run
     (there may be more queued work), backs off to the configured interval
-    when idle."""
+    when idle.
+
+    BUG-032 finding: `run_check_run` already turns stage-level exceptions
+    into an honest `failed` check_run, but a tick can still raise BEFORE
+    reaching that try block (e.g. `pick_next_runnable`'s own query hitting
+    a transient DB error) — and this loop has no supervisor, so an
+    uncaught exception here would kill polling for every check_run, for
+    the rest of the process's uptime, with nothing to restart it. One bad
+    tick must degrade to "log and back off", never "the poller is gone."
+    """
     settings = settings or get_settings()
     session_factory = session_factory or db.get_session_factory()
     while True:
-        advanced = await worker_tick(session_factory, settings)
+        try:
+            advanced = await worker_tick(session_factory, settings)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception("worker_tick failed; backing off and retrying")
+            advanced = False
         await sleep(0.0 if advanced else settings.pipeline_worker_poll_seconds)

@@ -78,6 +78,22 @@ const FAILED = {
   },
 };
 
+// BUG-032: an unexpected_error must never surface the raw exception string
+// (which can contain a file path, or worse — see backend/app/db.py's
+// hide_parameters note) to the instructor-facing banner.
+const FAILED_UNEXPECTED = {
+  ...RUNNING,
+  status: "failed",
+  finished_at: "2026-01-01T01:00:00Z",
+  stage_status: {
+    stages: { ingesting: { status: "done" }, structural: {} },
+    failed: {
+      code: "unexpected_error",
+      message: "[Errno 2] No such file or directory: 'data/4.extraction.json'",
+    },
+  },
+};
+
 describe("CheckProgressPage", () => {
   afterEach(() => vi.unstubAllGlobals());
 
@@ -139,6 +155,18 @@ describe("CheckProgressPage", () => {
     expect(banner).toHaveTextContent("failed ingestion");
     expect(banner).not.toHaveTextContent("quota");
     expect(banner).not.toHaveTextContent("unavailable");
+  });
+
+  it("shows the generic unexpected_error banner, never the raw stored exception text (BUG-032)", async () => {
+    vi.stubGlobal("fetch", stubFetchByPath({ "/check-runs/5": FAILED_UNEXPECTED }));
+    renderWithProviders(<CheckProgressPage />, {
+      route: "/checks/5",
+      path: "/checks/:checkRunId",
+    });
+    const banner = await screen.findByRole("alert");
+    expect(banner).toHaveTextContent("Something went wrong while running this check");
+    expect(banner).not.toHaveTextContent("Errno");
+    expect(banner).not.toHaveTextContent("extraction.json");
   });
 
   it("shows a View readiness report link only once done", async () => {

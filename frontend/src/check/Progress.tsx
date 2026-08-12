@@ -27,6 +27,7 @@ const FAILURE_MESSAGES: Record<string, string> = {
   file_malformed: "This manuscript could not be checked because it failed ingestion.",
   api_down: "An external service is unavailable. This will resume automatically.",
   quota_exhausted: "Daily AI quota reached. This will resume automatically after reset.",
+  unexpected_error: "Something went wrong while running this check. Try running it again.",
 };
 
 const DEGRADED_REASONS: Record<string, string> = {
