@@ -2,7 +2,18 @@
 // (CODING.md §3: components never call fetch directly). Sends cookies
 // (the session cookie, V-014) and maps the failure-taxonomy envelope
 // ({error: {code, message}}) into a typed error every caller can branch on.
-const BASE_URL = (import.meta.env.VITE_API_BASE_URL as string | undefined) ?? "";
+//
+// BUG-003: default is "/api", not "" — production routes through
+// `vercel.json`'s same-origin rewrite proxy to the Render backend, so the
+// browser only ever sees one site (veridical-app.vercel.app) and the
+// SameSite=Lax session cookie survives every follow-up fetch. Before this,
+// the frontend called the Render URL directly (a genuinely cross-*site*
+// subresource request, not just cross-origin), and Lax cookies are never
+// attached to those — login set the cookie, but every call after it read
+// as logged-out. Local dev still sets VITE_API_BASE_URL explicitly
+// (frontend/.env) to talk to the backend directly; this default only
+// matters when it's unset.
+const BASE_URL = (import.meta.env.VITE_API_BASE_URL as string | undefined) ?? "/api";
 
 export class ApiError extends Error {
   readonly status: number;
