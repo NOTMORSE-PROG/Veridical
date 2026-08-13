@@ -4,7 +4,7 @@
 // report intermediate stages yet, so this shows one real "parsing" state
 // instead of inventing a fake step sequence (charter rule 3: never
 // present unverified progress as fact).
-import { useId, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { useNavigate } from "react-router";
 import { ApiError } from "../api/client";
 import { cx } from "../components/cx";
@@ -60,9 +60,20 @@ export function UploadRubricModal({ onClose, familyId }: UploadRubricModalProps)
   const upload = useUploadRubric();
   const navigate = useNavigate();
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const errorRef = useRef<HTMLParagraphElement>(null);
   const fileInputId = useId();
   const hintId = useId();
   const errorId = useId();
+
+  // BUG-028: "Continue to review" is `disabled` while `upload.isPending`,
+  // which drops focus to <body> per standard browser behavior for a
+  // focused element that becomes disabled — a keyboard user then has to
+  // re-Tab from the top of the whole document to get back into the
+  // still-open dialog. The field-validation path (missing file) never
+  // disables the button, so it never loses focus and doesn't need this.
+  useEffect(() => {
+    if (upload.isError) errorRef.current?.focus();
+  }, [upload.isError]);
 
   function handleContinue() {
     setFieldError(null);
@@ -194,7 +205,13 @@ export function UploadRubricModal({ onClose, familyId }: UploadRubricModalProps)
           )}
 
           {message && (
-            <p id={errorId} role="alert" className="text-sm font-medium text-danger">
+            <p
+              ref={errorRef}
+              id={errorId}
+              role="alert"
+              tabIndex={-1}
+              className="text-sm font-medium text-danger"
+            >
               <span className="sr-only">Error: </span>
               {message}
             </p>
