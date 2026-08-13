@@ -291,15 +291,38 @@ class LLMQueue:
 
             return response
 
+        if not candidates:
+            # BUG-035 follow-up (backend-critic): reachable only if every
+            # candidate model has daily_quota=0 (or, for the image path,
+            # none is vision-capable — that case already raises earlier).
+            # Distinct from the message below: these models were never
+            # tried at all, so "has spent its allowance" would be false —
+            # there was no allowance to spend in the first place.
+            raise QuotaExhaustedError(
+                f"No model in the pool has any {self._quota_day()} (Pacific) allowance "
+                f"configured; resumes {self._next_reset().isoformat()}."
+            )
         raise QuotaExhaustedError(
             f"Every model in the pool has spent its {self._quota_day()} (Pacific) allowance "
             f"({', '.join(exhausted)}); resumes {self._next_reset().isoformat()}."
         )
 
     def _candidates_for(self, context: dict[str, Any]) -> tuple[ModelSpec, ...]:
+        # BUG-035: `_try_reserve_quota`'s atomic UPSERT only gates the
+        # ON CONFLICT UPDATE branch — the plain INSERT (the day's first
+        # call for a model) has no quota check and always succeeds, so a
+        # `daily_quota=0` model (a way to operationally disable a model
+        # without removing it from the pool) would let exactly one real
+        # call through per day instead of zero. Filtered out here, not
+        # just left to `_try_reserve_quota`'s SQL, so a zero-quota model
+        # is never a candidate at all — the intent behind the docstring's
+        # `self._pool` (the full DECLARED pool, still used as-is for
+        # status reporting/capacity totals below) shouldn't leak into
+        # which models are actually eligible to serve a call.
+        eligible = tuple(spec for spec in self._pool if spec.daily_quota > 0)
         if not context.get("images"):
-            return self._pool
-        vision = tuple(spec for spec in self._pool if spec.vision)
+            return eligible
+        vision = tuple(spec for spec in eligible if spec.vision)
         if not vision:
             raise QuotaExhaustedError(
                 "No multimodal model in the pool can serve this image call; "

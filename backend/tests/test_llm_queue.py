@@ -157,6 +157,43 @@ async def test_quota_exhausted_blocks_before_calling_transport(session_factory):
     assert len(transport.calls) == 1  # the second submit never reached the transport
 
 
+async def test_daily_quota_zero_blocks_the_very_first_call(session_factory):
+    """BUG-035: `_try_reserve_quota`'s atomic UPSERT only gates the
+    ON CONFLICT UPDATE branch — the plain INSERT (the day's first call
+    for a model, i.e. no counter row exists yet) had no quota check at
+    all and always succeeded, regardless of `daily_quota`. A
+    `daily_quota=0` model (a way to operationally disable a model
+    without removing it from the pool) let exactly one real call
+    through per day instead of zero."""
+    transport = ScriptedTransport(responses=[{"a": 1}])
+    queue = _make_queue(session_factory, transport, daily_quota=0)
+
+    with pytest.raises(QuotaExhaustedError):
+        await queue.submit(
+            prompt_type="t", prompt="should never reach transport", prompt_version="v1"
+        )
+
+    assert len(transport.calls) == 0  # the cold-start call never reached the transport
+
+
+async def test_daily_quota_zero_error_message_never_claims_a_spent_allowance(session_factory):
+    """BUG-035 follow-up (backend-critic): a fully zero-quota pool skips
+    every candidate entirely (none is ever tried), so the generic
+    "has spent its allowance (models...)" message would render with an
+    empty, grammatically-broken model list and falsely imply calls were
+    made and quota consumed — honest-wording rule (ground rule 3/9)
+    applied to an internal error string, not just product-facing flags."""
+    transport = ScriptedTransport(responses=[{"a": 1}])
+    queue = _make_queue(session_factory, transport, daily_quota=0)
+
+    with pytest.raises(QuotaExhaustedError) as exc_info:
+        await queue.submit(prompt_type="t", prompt="never tried", prompt_version="v1")
+
+    message = str(exc_info.value)
+    assert "has spent" not in message
+    assert "no model in the pool has any" in message.lower()
+
+
 async def test_retries_up_to_max_then_raises_api_down_and_logs_failure(session_factory):
     transport = ScriptedTransport(fail_times=99, fail_with=TransportServerError)
     queue = _make_queue(session_factory, transport, max_retries=3)
@@ -274,6 +311,31 @@ async def test_a_per_day_429_closes_that_island_instead_of_being_retried(session
     stale = next(entry for entry in status["models"] if entry["model"] == "stale")
     assert stale["exhausted"] is True
     assert stale["calls_remaining"] == 0
+
+
+async def test_daily_quota_zero_model_is_skipped_in_a_mixed_pool(session_factory):
+    """BUG-035 follow-up (backend-critic): the single-model all-zero test
+    doesn't prove a `daily_quota=0` island is skipped rather than merely
+    ordered last — a realistic pool has it alongside normal-quota
+    models. Zero cold-start leakage on the disabled model specifically,
+    every call goes to the real one, and the disabled model still
+    reports honestly in status (never silently dropped from it)."""
+    transport = PerModelTransport()
+    queue = _make_queue(
+        session_factory,
+        transport,
+        pool=_pool(("disabled", 0, 1), ("normal", 5, 1)),
+    )
+
+    response = await queue.submit(prompt_type="t", prompt="one", prompt_version="v1")
+    assert response == {"served_by": "normal"}
+    assert transport.calls == ["normal"], "the disabled island must never be tried at all"
+
+    status = await queue.get_quota_status()
+    disabled = next(entry for entry in status["models"] if entry["model"] == "disabled")
+    assert disabled["daily_limit"] == 0
+    assert disabled["calls_remaining"] == 0
+    assert disabled["exhausted"] is True
 
 
 async def test_quota_exhausted_only_when_every_island_is_spent(session_factory):
