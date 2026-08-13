@@ -23,7 +23,13 @@ const dateFormatter = new Intl.DateTimeFormat(undefined, { dateStyle: "medium", 
 interface Problem {
   id: string;
   message: string;
-  focus: () => void;
+  // BUG-040: absent (not a no-op () => {}) for a structural blocker with
+  // nowhere in THIS modal to jump to ("no manuscripts"/"no active
+  // rubric" — the real fix is elsewhere, e.g. the upload/rubric-review
+  // screens) — rendering these as an underlined button promised an
+  // action the control didn't deliver (Tab lands on it, Enter does
+  // nothing observable, a false affordance).
+  focus?: () => void;
 }
 
 export function NewCheckModal({ onClose }: { onClose: () => void }) {
@@ -69,6 +75,32 @@ export function NewCheckModal({ onClose }: { onClose: () => void }) {
     summaryRef.current?.focus();
   }, [focusSummaryToken]);
 
+  // BUG-039: a "no active rubric"/"no manuscripts" block is a fact about
+  // the account, not something the instructor forgot to fill in — it
+  // shouldn't wait for a Start-check click to be discoverable. Once data
+  // has genuinely loaded (not pending, not errored), auto-run the SAME
+  // focus path a click would, so a keyboard/screen-reader user reaching
+  // this modal's Close button and tabbing forward lands on the
+  // explanation immediately, worded identically to (not differently
+  // from) whatever a later Start-check click would show. Deliberately
+  // does NOT set `submitAttempted` — `currentProblems` below already
+  // lets structural problems through unconditionally, so this stays
+  // decoupled from the "you haven't chosen a manuscript/rubric yet"
+  // validation, which must still wait for a real Start-check attempt
+  // (GOV.UK's own guidance this codebase already follows elsewhere).
+  // `isPending` (TanStack Query) only ever transitions true -> false
+  // once per query lifetime here (background refetches use
+  // `isFetching`, not `isPending`), so this can't re-fire on refetch.
+  useEffect(() => {
+    if (manuscriptsPending || familiesPending || manuscriptsError || familiesError) return;
+    const structural = computeProblems().some(
+      (p) => p.id === "no-manuscripts" || p.id === "no-rubric",
+    );
+    if (!structural) return;
+    setFocusSummaryToken((t) => t + 1);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [manuscriptsPending, familiesPending, manuscriptsError, familiesError]);
+
   // Auto-selects the sole active rubric once it loads (most instructors
   // have exactly one); an explicit pick always wins once made. Derived
   // per render rather than synced via an effect — `families` arrives
@@ -85,12 +117,12 @@ export function NewCheckModal({ onClose }: { onClose: () => void }) {
   function computeProblems(): Problem[] {
     const problems: Problem[] = [];
     if (readyManuscripts.length === 0) {
-      problems.push({ id: "no-manuscripts", message: "No manuscripts are available to check yet.", focus: () => {} });
+      problems.push({ id: "no-manuscripts", message: "No manuscripts are available to check yet." });
     } else if (manuscriptId === "") {
       problems.push({ id: "manuscript", message: "Choose a manuscript.", focus: () => manuscriptSelectRef.current?.focus() });
     }
     if (activeFamilies.length === 0) {
-      problems.push({ id: "no-rubric", message: "No active rubric is available yet.", focus: () => {} });
+      problems.push({ id: "no-rubric", message: "No active rubric is available yet." });
     } else if (activeFamilies.length > 1 && rubricId === "") {
       problems.push({
         id: "rubric",
@@ -114,7 +146,22 @@ export function NewCheckModal({ onClose }: { onClose: () => void }) {
     );
   }
 
-  const currentProblems = submitAttempted ? computeProblems() : [];
+  // BUG-039: structural blockers ("no manuscripts"/"no active rubric")
+  // are facts, not something to validate only after an attempted
+  // submit — they show as soon as they're genuinely known (not while
+  // still loading, and not during a fetch error — those already have
+  // their own dedicated loading/error UI below, and `readyManuscripts`/
+  // `activeFamilies` are both empty in those states too, which would
+  // otherwise wrongly surface "no manuscripts"/"no active rubric" on
+  // top of the real loading/error message). Choice blockers ("choose a
+  // manuscript"/"choose a rubric") still wait for `submitAttempted`,
+  // unchanged.
+  const currentProblems = computeProblems().filter((p) => {
+    if (submitAttempted) return true;
+    if (p.id === "no-manuscripts") return !manuscriptsPending && !manuscriptsError;
+    if (p.id === "no-rubric") return !familiesPending && !familiesError;
+    return false;
+  });
   const manuscriptInvalid = currentProblems.some((p) => p.id === "manuscript");
   const rubricInvalid = currentProblems.some((p) => p.id === "rubric");
   const serverError =
@@ -301,12 +348,6 @@ export function NewCheckModal({ onClose }: { onClose: () => void }) {
                 </>
               )}
             </div>
-          )}
-
-          {!familiesPending && !familiesError && activeFamilies.length === 0 && (
-            <p className="rounded-md border border-border bg-page px-3 py-2.5 text-sm text-ink-secondary">
-              No active rubric yet. Confirm one on the rubric review screen first.
-            </p>
           )}
 
           {selectedRubric && (
