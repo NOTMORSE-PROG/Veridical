@@ -5,6 +5,7 @@ import { api } from "../api/client";
 import type {
   EscalatedItemOut,
   EscalationResolution,
+  FlagSummaryOut,
   ReportOut,
   ResolveEscalationOut,
 } from "../api/types";
@@ -20,6 +21,16 @@ export function useEscalatedItems(checkRunId: number) {
   return useQuery({
     queryKey: ["report", checkRunId, "escalated"],
     queryFn: () => api.get<EscalatedItemOut[]>(`/check-runs/${checkRunId}/escalated`),
+  });
+}
+
+// BUG-033: its own endpoint, not a field on ReportOut — same shape as
+// useEscalatedItems above (a sibling panel self-fetches; the common case
+// of zero flags on a run never adds dead weight to every report fetch).
+export function useFlags(checkRunId: number) {
+  return useQuery({
+    queryKey: ["report", checkRunId, "flags"],
+    queryFn: () => api.get<FlagSummaryOut[]>(`/check-runs/${checkRunId}/flags`),
   });
 }
 

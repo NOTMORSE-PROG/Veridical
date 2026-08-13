@@ -234,6 +234,20 @@ export interface OverrideFlagOut extends FlagOut {
   report: ReportOut;
 }
 
+/** BUG-033: the report's own flags list — a deliberately smaller field
+ * set than FlagOut (see backend/app/report/schemas.py's own docstring
+ * for why: a summary row's job is "enough to decide whether to click,"
+ * not "enough to skip clicking"). */
+export interface FlagSummaryOut {
+  id: number;
+  check_kind: string;
+  severity: "high" | "med" | "low";
+  criterion_text: string | null;
+  evidence_excerpt: string;
+  page_anchor: string;
+  overridden: boolean;
+}
+
 /** One model's own daily allowance. The Gemini free tier meters per model,
  * so the quota meter's totals are sums over these islands (V-049). */
 export interface ModelQuotaStatus {
