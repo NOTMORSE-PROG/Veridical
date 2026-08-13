@@ -3,7 +3,7 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render } from "@testing-library/react";
 import type { ReactElement } from "react";
-import { MemoryRouter, Route, Routes } from "react-router";
+import { createMemoryRouter, RouterProvider } from "react-router";
 import { vi } from "vitest";
 
 export function renderWithProviders(
@@ -17,13 +17,21 @@ export function renderWithProviders(
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   });
-  // `path` matches a dynamic segment (e.g. "/rubric/:rubricId/review") so
-  // useParams() resolves inside the test, same as the real router does.
-  const routed = path ? <Routes><Route path={path} element={ui} /></Routes> : ui;
+  // A data router (createMemoryRouter), not plain MemoryRouter/Routes:
+  // react-router's navigation-blocking hook (useBlocker, BUG-037) only
+  // works inside a data router, and every screen under test must render
+  // in the same kind of router the real app now uses (App.tsx). `path`
+  // matches a dynamic segment (e.g. "/rubric/:rubricId/review") so
+  // useParams() resolves inside the test, same as the real router does;
+  // "*" (no `path` given) matches unconditionally, same as the old
+  // bare-`ui`-with-no-Route-boundary fallback did.
   const entry = state ? { pathname: route, state } : route;
+  const router = createMemoryRouter([{ path: path ?? "*", element: ui }], {
+    initialEntries: [entry],
+  });
   return render(
     <QueryClientProvider client={queryClient}>
-      <MemoryRouter initialEntries={[entry]}>{routed}</MemoryRouter>
+      <RouterProvider router={router} />
     </QueryClientProvider>,
   );
 }
