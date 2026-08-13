@@ -8,10 +8,11 @@
 // radio-group type toggle, an accessible error-summary validation flow,
 // and full loading/error states with real focus/live-region handling.
 import { type KeyboardEvent, useEffect, useRef, useState } from "react";
-import { Link, useParams } from "react-router";
+import { Link, useBlocker, useParams } from "react-router";
 import type { CriterionType } from "../api/types";
 import { Chip } from "../components/Chip";
 import { cx } from "../components/cx";
+import { Modal, ModalBackdrop } from "../components/Modal";
 import { useRouteFocus } from "../routing/useRouteFocus";
 import { type CriterionEdit, useRubric, useSaveCriteria } from "./useRubric";
 
@@ -238,6 +239,10 @@ export function ReviewCriteriaPage() {
   const { data: rubric, isPending, isError, refetch } = useRubric(id);
   const save = useSaveCriteria(id);
   const [rows, setRows] = useState<Row[] | null>(null);
+  // BUG-037: the last-saved snapshot rows are compared against, to
+  // detect edits that were never persisted (never a background refetch
+  // or the initial load alone — only a successful save moves this).
+  const [lastSavedRows, setLastSavedRows] = useState<Row[] | null>(null);
   const [attempted, setAttempted] = useState<"save" | "confirm" | null>(null);
   const [removedAnnouncement, setRemovedAnnouncement] = useState("");
   const [focusIntent, setFocusIntent] = useState<FocusIntent>(null);
@@ -274,18 +279,65 @@ export function ReviewCriteriaPage() {
   // background refetch must not clobber in-progress edits.
   useEffect(() => {
     if (rubric && rows === null) {
-      setRows(
-        rubric.criteria.map((c) => ({
-          key: String(c.id),
-          id: c.id,
-          type: c.type,
-          text: c.text,
-          evidence: c.evidence ?? "",
-          weight: c.weight,
-        })),
-      );
+      const seeded = rubric.criteria.map((c) => ({
+        key: String(c.id),
+        id: c.id,
+        type: c.type,
+        text: c.text,
+        evidence: c.evidence ?? "",
+        weight: c.weight,
+      }));
+      setRows(seeded);
+      // BUG-037: the last-PERSISTED snapshot, not just the last-loaded
+      // one — updated again on every successful save below. Comparing
+      // `rows` against this (not against `null`/mount) is what lets
+      // in-progress, never-saved edits be detected as unsaved work.
+      setLastSavedRows(seeded);
     }
   }, [rubric, rows]);
+
+  // BUG-037: unsaved edits were silently discarded on in-app navigation
+  // (a Dashboard nav-link click, no warning) — directly undermining the
+  // screen's own "Nothing runs until you confirm" promise and the HITL
+  // safety-net premise (V-012) that an instructor fixing a bad parse IS
+  // the safety net. A version another version has superseded (V-013
+  // F2.4) can't be edited at all, so it's never dirty. `useBlocker`
+  // (and therefore this hook call) must run unconditionally on every
+  // render — it's declared here, before this component's early
+  // (loading/error) returns below, not alongside the render logic that
+  // reads `rubric`/`rows` freely.
+  const editable = rubric ? rubric.is_latest_version : false;
+  const isDirty =
+    editable &&
+    rows !== null &&
+    lastSavedRows !== null &&
+    JSON.stringify(rows) !== JSON.stringify(lastSavedRows);
+  const blocker = useBlocker(
+    ({ currentLocation, nextLocation }) =>
+      isDirty && currentLocation.pathname !== nextLocation.pathname,
+  );
+  // ux-critic finding (BUG-037 review): a rapid double-click on either
+  // footer button called blocker.proceed()/reset() a second time before
+  // the dialog unmounted, and react-router's own invariant throws on a
+  // transition out of "blocked" that's already left that state
+  // ("Invalid blocker state transition: unblocked -> proceeding"). A
+  // ref, not state, since two synchronous clicks in the same task both
+  // read a re-render-pending `blocker.state` before either commit —
+  // only a ref write is visible to the second click's handler
+  // immediately.
+  const blockerResolvingRef = useRef(false);
+  useEffect(() => {
+    if (blocker.state === "blocked") blockerResolvingRef.current = false;
+  }, [blocker.state]);
+  function resolveBlocker(action: "reset" | "proceed") {
+    if (blockerResolvingRef.current || blocker.state !== "blocked") return;
+    blockerResolvingRef.current = true;
+    if (action === "reset") {
+      blocker.reset();
+    } else {
+      blocker.proceed();
+    }
+  }
 
   function updateRow(key: string, patch: Partial<Row>) {
     setRows((current) => current?.map((r) => (r.key === key ? { ...r, ...patch } : r)) ?? current);
@@ -444,7 +496,15 @@ export function ReviewCriteriaPage() {
       setFocusIntent({ type: "summary" });
       return;
     }
-    save.mutate({ criteria: toEdits(), confirm });
+    // Snapshot what's actually being submitted now, not `rows` read
+    // again inside onSuccess — the instructor could keep typing while
+    // the request is in flight, and only the submitted values are
+    // actually persisted.
+    const submitted = rows!;
+    save.mutate(
+      { criteria: toEdits(), confirm },
+      { onSuccess: () => setLastSavedRows(submitted) },
+    );
   }
 
   const saveError =
@@ -782,6 +842,38 @@ export function ReviewCriteriaPage() {
       <p className="text-sm text-ink-tertiary">
         A re-uploaded format later becomes v2. Old reports stay pinned to their original version.
       </p>
+
+      {blocker.state === "blocked" && (
+        <ModalBackdrop>
+          <Modal
+            title="Leave without saving your changes?"
+            onClose={() => resolveBlocker("reset")}
+            footer={
+              <>
+                <button
+                  type="button"
+                  onClick={() => resolveBlocker("reset")}
+                  className="flex h-11 items-center justify-center rounded-md border border-border-input bg-panel px-4 text-sm font-bold text-ink hover:bg-status-neutral-bg"
+                >
+                  Keep editing
+                </button>
+                <button
+                  type="button"
+                  onClick={() => resolveBlocker("proceed")}
+                  className="flex h-11 items-center justify-center rounded-md bg-danger px-4 text-sm font-bold text-on-danger hover:bg-danger-hover"
+                >
+                  Leave without saving
+                </button>
+              </>
+            }
+          >
+            <p className="text-sm text-ink">
+              You have unsaved changes to these criteria. If you leave this page now, those
+              changes will be discarded, and the rubric will stay exactly as it was last saved.
+            </p>
+          </Modal>
+        </ModalBackdrop>
+      )}
     </div>
   );
 }

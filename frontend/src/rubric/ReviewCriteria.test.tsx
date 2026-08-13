@@ -1,5 +1,7 @@
-import { fireEvent, screen, waitFor } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { createMemoryRouter, RouterProvider } from "react-router";
 import type { Rubric } from "../api/types";
 import { renderWithProviders } from "../test/renderWithProviders";
 import { ReviewCriteriaPage } from "./ReviewCriteria";
@@ -241,5 +243,129 @@ describe("ReviewCriteriaPage", () => {
     expect(alert).toHaveTextContent("Could not load this rubric.");
     fireEvent.click(screen.getByRole("button", { name: "Try again" }));
     expect(await screen.findAllByDisplayValue("Has an abstract")).not.toHaveLength(0);
+  });
+
+  // BUG-037: unsaved edits were silently discarded on in-app navigation,
+  // directly undermining this screen's own "Nothing runs until you
+  // confirm" promise. Renders a real two-route data router (the same
+  // kind App.tsx now uses) so `useBlocker` can actually intercept a
+  // navigation attempt — renderWithProviders only mounts one route.
+  function renderWithTwoRoutes() {
+    const router = createMemoryRouter(
+      [
+        { path: "/rubric/:rubricId/review", element: <ReviewCriteriaPage /> },
+        { path: "/dashboard", element: <div>Dashboard page</div> },
+      ],
+      { initialEntries: ["/rubric/5/review"] },
+    );
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+    });
+    render(
+      <QueryClientProvider client={queryClient}>
+        <RouterProvider router={router} />
+      </QueryClientProvider>,
+    );
+    return router;
+  }
+
+  it("BUG-037: warns before discarding an unsaved edit on in-app navigation, and cancel keeps the edit intact", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(JSON.stringify(RUBRIC), { status: 200 })),
+    );
+    const router = renderWithTwoRoutes();
+
+    const textInputs = await screen.findAllByDisplayValue("Has an abstract");
+    fireEvent.change(textInputs[0], { target: { value: "Has an abstract of at most 250 words" } });
+
+    router.navigate("/dashboard");
+    expect(await screen.findByText("Leave without saving your changes?")).toBeInTheDocument();
+    // Blocked: still on the review screen, edit intact, Dashboard not rendered.
+    expect(screen.queryByText("Dashboard page")).not.toBeInTheDocument();
+    expect(
+      screen.getAllByDisplayValue("Has an abstract of at most 250 words").length,
+    ).toBeGreaterThan(0);
+
+    fireEvent.click(screen.getByRole("button", { name: "Keep editing" }));
+    await waitFor(() =>
+      expect(screen.queryByText("Leave without saving your changes?")).not.toBeInTheDocument(),
+    );
+    expect(screen.queryByText("Dashboard page")).not.toBeInTheDocument();
+    expect(
+      screen.getAllByDisplayValue("Has an abstract of at most 250 words").length,
+    ).toBeGreaterThan(0);
+  });
+
+  it("BUG-037: 'Leave without saving' completes the navigation and discards the edit", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(JSON.stringify(RUBRIC), { status: 200 })),
+    );
+    const router = renderWithTwoRoutes();
+
+    const textInputs = await screen.findAllByDisplayValue("Has an abstract");
+    fireEvent.change(textInputs[0], { target: { value: "An edit that never gets saved" } });
+
+    router.navigate("/dashboard");
+    await screen.findByText("Leave without saving your changes?");
+    fireEvent.click(screen.getByRole("button", { name: "Leave without saving" }));
+
+    await waitFor(() => expect(screen.getByText("Dashboard page")).toBeInTheDocument());
+  });
+
+  it("BUG-037/ux-critic finding: a rapid double-click on 'Leave without saving' never throws (react-router rejects a second proceed() on an already-unblocked blocker)", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(JSON.stringify(RUBRIC), { status: 200 })),
+    );
+    const router = renderWithTwoRoutes();
+
+    const textInputs = await screen.findAllByDisplayValue("Has an abstract");
+    fireEvent.change(textInputs[0], { target: { value: "An edit that never gets saved" } });
+
+    router.navigate("/dashboard");
+    await screen.findByText("Leave without saving your changes?");
+    const leaveButton = screen.getByRole("button", { name: "Leave without saving" });
+    expect(() => {
+      fireEvent.click(leaveButton);
+      fireEvent.click(leaveButton);
+    }).not.toThrow();
+
+    await waitFor(() => expect(screen.getByText("Dashboard page")).toBeInTheDocument());
+  });
+
+  it("BUG-037: does not warn when navigating away with no unsaved edits", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(JSON.stringify(RUBRIC), { status: 200 })),
+    );
+    const router = renderWithTwoRoutes();
+
+    await screen.findAllByDisplayValue("Has an abstract");
+    router.navigate("/dashboard");
+
+    await waitFor(() => expect(screen.getByText("Dashboard page")).toBeInTheDocument());
+    expect(screen.queryByText("Leave without saving your changes?")).not.toBeInTheDocument();
+  });
+
+  it("BUG-037: a saved edit no longer counts as unsaved (no false-positive warning)", async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify(RUBRIC), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+    const router = renderWithTwoRoutes();
+
+    const textInputs = await screen.findAllByDisplayValue("Has an abstract");
+    fireEvent.change(textInputs[0], { target: { value: "Has an abstract, revised" } });
+    fireEvent.click(screen.getAllByRole("button", { name: "Save draft" })[0]);
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        expect.stringContaining("/rubrics/5/criteria"),
+        expect.objectContaining({ method: "PUT" }),
+      ),
+    );
+
+    router.navigate("/dashboard");
+    await waitFor(() => expect(screen.getByText("Dashboard page")).toBeInTheDocument());
+    expect(screen.queryByText("Leave without saving your changes?")).not.toBeInTheDocument();
   });
 });
