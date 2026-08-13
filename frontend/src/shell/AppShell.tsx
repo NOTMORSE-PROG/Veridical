@@ -226,8 +226,8 @@ function QuotaChip() {
   const atZero = remainingPct === 0;
   // Three-tier tone, same tone family the rest of the app uses for
   // "system/process state" (V-056): quota is a hard operational
-  // constraint central to this product's economics (CLAUDE.md ground
-  // rule 2) but previously rendered as quiet text, indistinguishable in
+  // constraint central to this product's economics (ground rule 2) but
+  // previously rendered as quiet text, indistinguishable in
   // weight from decorative chrome — Nielsen's visibility-of-system-status
   // heuristic. Now a compact filled meter, not just a number.
   const tone: "neutral" | "caution" | "danger" =

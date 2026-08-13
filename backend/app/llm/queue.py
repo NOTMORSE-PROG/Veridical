@@ -101,7 +101,7 @@ class LLMQueue:
                 raise ValueError("LLMQueue needs either pool= or model=/rpm=/daily_quota=.")
             pool = (ModelSpec(model=model, rpm=rpm, daily_quota=daily_quota, vision=True),)
         if not pool:
-            raise ValueError("LLMQueue pool is empty — there is nothing to spend.")
+            raise ValueError("LLMQueue pool is empty, there is nothing to spend.")
 
         self._transport = transport
         self._session_factory = session_factory

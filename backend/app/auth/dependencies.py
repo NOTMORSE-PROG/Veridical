@@ -22,5 +22,5 @@ async def get_current_instructor(
         raise UnauthenticatedError("Not signed in.")
     instructor = await get_instructor_by_token(session, token)
     if instructor is None:
-        raise UnauthenticatedError("Session expired or invalid — please sign in again.")
+        raise UnauthenticatedError("Session expired or invalid. Please sign in again.")
     return instructor

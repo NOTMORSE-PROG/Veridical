@@ -31,5 +31,5 @@ def enforce_action_rate_limit(settings: Settings, scope: str, instructor_id: int
     limiter = _get_limiter(settings, scope)
     key = str(instructor_id)
     if limiter.is_blocked(key):
-        raise RateLimitedError("Too many requests — please wait a bit before trying again.")
+        raise RateLimitedError("Too many requests, please wait a bit before trying again.")
     limiter.record_attempt(key)

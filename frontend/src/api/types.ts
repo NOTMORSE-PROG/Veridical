@@ -72,6 +72,24 @@ export interface PaginatedManuscripts {
   page_size: number;
 }
 
+/** Response of `POST /manuscripts/ingest` (V-059) -- what the upload
+ * screen shows immediately after a successful upload. `section_tree` is
+ * deliberately omitted -- nothing in this UI renders it. */
+export interface IngestSummary {
+  manuscript_id: number;
+  ingest_status: string;
+  page_count: number;
+  anchor_kind: "page" | "paragraph";
+  image_only: boolean;
+  text_chars: number;
+  images: number;
+  tables: number;
+  equations: number;
+  citations: number;
+  vision_status: "none" | "done" | "unavailable";
+  notes: string[];
+}
+
 export type CheckRunStatus =
   | "queued"
   | "ingesting"

@@ -170,7 +170,7 @@ async def resolve_escalation(
     if result is None or result.check_run_id != check_run_id:
         raise NotFoundError(f"No check result {check_result_id} on check run {check_run_id}.")
     if result.outcome not in NEEDS_REVIEW_OUTCOMES:
-        raise ConflictError("This criterion isn't awaiting review — nothing to resolve.")
+        raise ConflictError("This criterion isn't awaiting review, so there's nothing to resolve.")
 
     detail = dict(result.detail or {})
     majority_verdict = detail.get("verdict")
@@ -182,7 +182,7 @@ async def resolve_escalation(
             # inventing one would be the exact failure this system exists to
             # prevent.
             raise ConflictError(
-                "The AI never reached a majority verdict on this criterion — "
+                "The AI never reached a majority verdict on this criterion, "
                 "choose mark_pass or mark_fail instead."
             )
         new_outcome = _OUTCOME_BY_VERDICT[majority_verdict]

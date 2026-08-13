@@ -3,7 +3,7 @@
 // screen's polling query.
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api/client";
-import type { CheckRun, PaginatedManuscripts } from "../api/types";
+import type { CheckRun, IngestSummary, PaginatedManuscripts } from "../api/types";
 
 /** The New Check modal just wants "everything ingested" — requests one
  * generously large page rather than needing its own picker pagination
@@ -13,6 +13,32 @@ export function useManuscripts() {
     queryKey: ["manuscripts", "picker"],
     queryFn: () => api.get<PaginatedManuscripts>("/manuscripts?page=1&page_size=200"),
     select: (data) => data.items,
+  });
+}
+
+// V-059: the upload screen the product's own description promises
+// ("uploads a required format... and a manuscript") but never shipped.
+// `group_label` is a query parameter on the real endpoint, not a form
+// field (confirmed live against the running OpenAPI schema) -- same
+// query-param-plus-FormData shape `useUploadRubric` already uses for
+// `title`/`familyId`.
+export function useIngestManuscript() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ file, groupLabel }: { file: File; groupLabel: string }) => {
+      const form = new FormData();
+      form.append("file", file);
+      const trimmed = groupLabel.trim();
+      const query = trimmed ? `?group_label=${encodeURIComponent(trimmed)}` : "";
+      return api.post<IngestSummary>(`/manuscripts/ingest${query}`, form);
+    },
+    onSuccess: () => {
+      // Invalidates BOTH ["manuscripts", "picker"] (New Check's dropdown)
+      // and ["manuscripts", "table", ...] (the dashboard table) -- TanStack
+      // Query matches by key prefix, so one call covers both without
+      // either query needing to know about the other.
+      queryClient.invalidateQueries({ queryKey: ["manuscripts"] });
+    },
   });
 }
 
