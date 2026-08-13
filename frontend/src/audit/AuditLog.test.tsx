@@ -111,6 +111,19 @@ describe("AuditLogPage", () => {
     expect(screen.getByText(/uv run python -m scripts.replay_call 42/)).toBeInTheDocument();
   });
 
+  it("BUG-022: shows the manuscript's filename in the detail drawer, but not in the list rows (which stay light at volume)", async () => {
+    const detailWithFilename = { ...DETAIL, manuscript_original_filename: "Chapter1-3_FinalDefense.pdf" };
+    vi.stubGlobal(
+      "fetch",
+      stubFetchByPath({ "/audit": PAGE, "/audit/42": detailWithFilename }),
+    );
+    renderWithProviders(<AuditLogPage />, { route: "/audit", path: "/audit" });
+    await screen.findAllByText("AI call");
+    expect(screen.queryByText("Chapter1-3_FinalDefense.pdf")).not.toBeInTheDocument();
+    fireEvent.click(screen.getAllByRole("button", { name: "Detail" })[0]);
+    expect(await screen.findByText("Chapter1-3_FinalDefense.pdf")).toBeInTheDocument();
+  });
+
   it("pre-filters by check_run_id when arriving from the report's audit-trail link", async () => {
     const fetchMock = stubFetchByPath({ "/audit": PAGE });
     vi.stubGlobal("fetch", fetchMock);

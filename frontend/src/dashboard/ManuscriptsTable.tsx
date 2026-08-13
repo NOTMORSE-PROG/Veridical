@@ -9,6 +9,7 @@ import { Link } from "react-router";
 import type { IngestFailureReason, ManuscriptListItem } from "../api/types";
 import type { StatusPillTone } from "../components/StatusPill";
 import { StatusPill } from "../components/StatusPill";
+import { manuscriptIdentity } from "../domain/manuscriptLabel";
 import { useManuscriptsPage } from "./useDashboard";
 
 const RUNNING_STATUSES = new Set([
@@ -221,17 +222,27 @@ export function ManuscriptsTable({
           const { label, tone } = statusPill(row);
           const isIngestFailure = row.ingest_status === "failed";
           const isOpen = expandedId === row.id;
+          const identity = manuscriptIdentity(row.group_label, row.original_filename);
           return (
             <li key={row.id} className="rounded-lg border border-border bg-panel p-3">
               <div className="flex items-start justify-between gap-2">
                 <span
                   className="min-w-0 flex-1 truncate text-sm font-medium text-ink"
-                  title={row.group_label}
+                  title={identity.primary}
                 >
-                  {row.group_label}
+                  {identity.primary}
                 </span>
                 <StatusPill tone={tone}>{label}</StatusPill>
               </div>
+              {identity.secondary && (
+                <span
+                  tabIndex={0}
+                  className="mt-0.5 block truncate text-xs text-ink-tertiary"
+                  title={identity.secondary}
+                >
+                  {identity.secondary}
+                </span>
+              )}
               <div className="mt-2 flex items-center justify-between gap-2 text-xs text-ink-tertiary">
                 <span>{formatDate(row.created_at)}</span>
                 {isIngestFailure ? (
@@ -272,15 +283,27 @@ export function ManuscriptsTable({
           const { label, tone } = statusPill(row);
           const isIngestFailure = row.ingest_status === "failed";
           const isOpen = expandedId === row.id;
+          const identity = manuscriptIdentity(row.group_label, row.original_filename);
           return (
             <div key={row.id}>
               <div
                 role="row"
                 className="grid grid-cols-[minmax(0,1fr)_140px_140px_170px] items-center gap-3 border-t border-border px-4 py-3 text-sm"
               >
-                <span className="truncate text-ink" title={row.group_label}>
-                  {row.group_label}
-                </span>
+                <div className="flex min-w-0 flex-col justify-center">
+                  <span className="truncate text-ink" title={identity.primary}>
+                    {identity.primary}
+                  </span>
+                  {identity.secondary && (
+                    <span
+                      tabIndex={0}
+                      className="truncate text-xs text-ink-tertiary"
+                      title={identity.secondary}
+                    >
+                      {identity.secondary}
+                    </span>
+                  )}
+                </div>
                 <StatusPill tone={tone}>{label}</StatusPill>
                 <span className="text-ink-tertiary">{formatDate(row.created_at)}</span>
                 {isIngestFailure ? (

@@ -22,6 +22,11 @@ class AuditLogSummary(BaseModel):
 
 
 class AuditLogDetail(AuditLogSummary):
+    # BUG-022: only on the detail view, not the list rows (the list stays
+    # deliberately light at volume, ticket AC: "10K rows, 4s stays
+    # responsive") — group_label defaults to "Ungrouped" and can't
+    # distinguish two manuscripts alone.
+    manuscript_original_filename: str | None
     input_hash: str | None
     # Full raw payload (prompt, context, response) — the one sanctioned
     # place for it (CODING.md §1). The frontend caps the on-screen PREVIEW

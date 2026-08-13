@@ -11,6 +11,7 @@ import type { CriterionResultOut, ReportOut } from "../api/types";
 import { AnchorPill } from "../components/AnchorPill";
 import { Chip } from "../components/Chip";
 import { StatusPill, type StatusPillTone } from "../components/StatusPill";
+import { manuscriptIdentity } from "../domain/manuscriptLabel";
 import { READINESS_LABEL, READINESS_TONE } from "../domain/readinessTone";
 import { truncateAtWord } from "../format/text";
 import { useRouteFocus } from "../routing/useRouteFocus";
@@ -261,16 +262,23 @@ export function ReportPage() {
             <h1 ref={headingRef} tabIndex={-1} className="text-lg font-bold text-ink sm:text-xl">
               Readiness report
             </h1>
-            {report && (
-              <div className="flex flex-wrap items-center gap-1.5">
-                <Chip maxWidthClass="max-w-[240px]" title={report.manuscript_group_label}>
-                  {report.manuscript_group_label}
-                </Chip>
-                <Chip maxWidthClass="max-w-[240px]" title={report.rubric_title}>
-                  {report.rubric_title}
-                </Chip>
-              </div>
-            )}
+            {report &&
+              (() => {
+                const identity = manuscriptIdentity(
+                  report.manuscript_group_label,
+                  report.manuscript_original_filename,
+                );
+                return (
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    <Chip maxWidthClass="max-w-[240px]" title={identity.primary}>
+                      {identity.primary}
+                    </Chip>
+                    <Chip maxWidthClass="max-w-[240px]" title={report.rubric_title}>
+                      {report.rubric_title}
+                    </Chip>
+                  </div>
+                );
+              })()}
           </div>
           {report && (
             <div className="flex flex-wrap items-center gap-3">

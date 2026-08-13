@@ -112,6 +112,21 @@ describe("CheckProgressPage", () => {
     expect(screen.getByText(/G-11, uploaded/)).toBeInTheDocument();
   });
 
+  it("BUG-022: shows the manuscript's original filename, not just its (possibly default) group_label", async () => {
+    const run = {
+      ...RUNNING,
+      manuscript_group_label: "Ungrouped",
+      manuscript_original_filename: "Chapter1-3_FinalDefense.pdf",
+    };
+    vi.stubGlobal("fetch", stubFetchByPath({ "/check-runs/5": run }));
+    renderWithProviders(<CheckProgressPage />, {
+      route: "/checks/5",
+      path: "/checks/:checkRunId",
+    });
+    expect(await screen.findByText(/Chapter1-3_FinalDefense\.pdf, uploaded/)).toBeInTheDocument();
+    expect(screen.queryByText(/^Ungrouped,/)).not.toBeInTheDocument();
+  });
+
   it("shows the queue position pill only while genuinely queued, not once running (locked-in bug fix)", async () => {
     vi.stubGlobal("fetch", stubFetchByPath({ "/check-runs/5": QUEUED }));
     renderWithProviders(<CheckProgressPage />, {

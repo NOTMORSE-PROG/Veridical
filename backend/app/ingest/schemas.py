@@ -147,6 +147,10 @@ class ManuscriptListItem(BaseModel):
 
     id: int
     group_label: str
+    # BUG-022: group_label defaults to "Ungrouped" and can't distinguish
+    # two manuscripts alone; None for rows ingested before this column
+    # existed.
+    original_filename: str | None = None
     ingest_status: str
     # None unless ingest_status is "failed" AND the reason was captured
     # (BUG-016) — NULL, never fabricated, for pre-existing failed rows.
