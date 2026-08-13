@@ -18,14 +18,14 @@ from decimal import Decimal
 import pytest
 from sqlalchemy import text
 
-from app.errors import NotFoundError
+from app.errors import ConflictError, NotFoundError
 from app.flags.service import annotate_flag, get_flag, override_flag
 from app.models.enums import CheckKind, CheckRunStatus, FlagSeverity, ReadinessStatus, ResultOutcome
 from app.models.instructor import Instructor
 from app.models.manuscript import Manuscript
 from app.models.rubric import Criterion, Rubric
 from app.models.run import CheckResult, CheckRun, Flag
-from app.report.service import aggregate_and_score
+from app.report.service import aggregate_and_score, decide_report
 
 live = pytest.mark.skipif(
     "DATABASE_URL" not in os.environ,
@@ -85,7 +85,15 @@ async def _seed_flagged_run(session):
     session.add(instructor)
     await session.commit()
     manuscript = Manuscript(instructor_id=instructor.id, group_label="G", file_ref="x.pdf")
-    rubric = Rubric(instructor_id=instructor.id, title="Format", source_file="r.pdf")
+    # is_active explicitly set (not relying on the server_default) so any
+    # test that ends up reading `report.rubric_is_current` (V-038) sees
+    # the normal, realistic case rather than a same-session unrefreshed
+    # None -- SQLAlchemy's own expire_on_commit=False gotcha, not a
+    # production behavior (a fresh request-scoped session always loads
+    # the real committed value from Postgres).
+    rubric = Rubric(
+        instructor_id=instructor.id, title="Format", source_file="r.pdf", is_active=True
+    )
     session.add_all([manuscript, rubric])
     await session.commit()
     criterion = Criterion(
@@ -179,6 +187,26 @@ async def test_override_recomputes_score_live_and_preserves_the_original_finding
         after = await aggregate_and_score(session, check_run.id)
         assert after.status == ReadinessStatus.ready  # deduction gone, high-flag gate cleared
         assert after.composite_score == Decimal("100.00")
+
+
+async def test_override_is_blocked_once_the_report_is_decided(session_factory):
+    """V-038 / backend-critic finding: a decided report is supposed to be
+    frozen (AC2) — that only means something if a flag override (which
+    recomputes and PERSISTS a new composite/status onto the same
+    ReadinessReport row) can't silently move the score out from under an
+    already-recorded decision. Without this guard, an "approved" report
+    could end up sitting on top of a score that would no longer qualify,
+    with no reopen and no audit trace of the drift."""
+    async with session_factory() as session:
+        instructor, check_run, flag = await _seed_flagged_run(session)
+        await decide_report(session, check_run.id, instructor.id, "rejected", None)
+
+        with pytest.raises(ConflictError):
+            await override_flag(session, flag.id, instructor.id, "Trying to fix it post-decision.")
+
+        # Confirmed the override never applied — not just that it raised.
+        flag_out = await get_flag(session, flag.id, instructor.id)
+        assert flag_out.overridden is False
 
 
 async def _seed_two_flags_one_check_result(session):

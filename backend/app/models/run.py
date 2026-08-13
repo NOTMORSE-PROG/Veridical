@@ -110,6 +110,15 @@ class ReadinessReport(Base, PkCreatedMixin):
     status: Mapped[ReadinessStatus] = mapped_column(Enum(ReadinessStatus, native_enum=False))
     # The human decision (F8.5) — VERIDICAL itself never sets this.
     decision: Mapped[ReportDecision | None] = mapped_column(Enum(ReportDecision, native_enum=False))
+    # V-038: when/who/optional-note for the decision above. Cleared back to
+    # NULL on reopen (the reopen event itself, with its required reason, is
+    # what the immutable audit log preserves — this trio is a display
+    # convenience for the CURRENT decision only, not the historical record).
+    decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    decided_by_instructor_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("instructor.id")
+    )
+    decision_note: Mapped[str | None] = mapped_column(Text)
     # Revocable read-only sharing (F8.7): revoke = set NULL, re-share = new UUID.
     share_token: Mapped[uuid.UUID | None] = mapped_column(Uuid, unique=True)
 

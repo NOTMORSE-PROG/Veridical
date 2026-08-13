@@ -4,11 +4,19 @@
 // report", not duplicated here. V-055: colorblind-checked status pills,
 // a real mobile card layout (not a scrolling grid), a working "why did
 // ingestion fail" explanation (BUG-016), and a real fetch-error state.
+// V-038 / ux-critic finding: a DECISION (approved/returned/rejected) is
+// a third, distinct dimension from both pipeline status and readiness
+// verdict -- it's the human's own terminal call, not VERIDICAL's, so
+// showing it here isn't the readiness-verdict duplication this file's
+// own rule above guards against. Without it an instructor triaging ~20
+// manuscripts had no way to tell which they'd already decided without
+// opening every report.
 import { useEffect, useState } from "react";
 import { Link } from "react-router";
 import type { IngestFailureReason, ManuscriptListItem } from "../api/types";
 import type { StatusPillTone } from "../components/StatusPill";
 import { StatusPill } from "../components/StatusPill";
+import { DECISION_LABEL, DECISION_TONE } from "../domain/decisionTone";
 import { manuscriptIdentity } from "../domain/manuscriptLabel";
 import { useManuscriptsPage } from "./useDashboard";
 
@@ -36,7 +44,12 @@ function ingestFailureText(reason: IngestFailureReason | null): string {
 }
 
 function statusPill(row: ManuscriptListItem): { label: string; tone: StatusPillTone } {
-  if (row.latest_check_run_status === "done") return { label: "Checked", tone: "success" };
+  if (row.latest_check_run_status === "done") {
+    if (row.latest_decision) {
+      return { label: DECISION_LABEL[row.latest_decision], tone: DECISION_TONE[row.latest_decision] };
+    }
+    return { label: "Checked", tone: "success" };
+  }
   if (row.latest_check_run_status === "failed") return { label: "Check failed", tone: "attention" };
   if (row.latest_check_run_status && RUNNING_STATUSES.has(row.latest_check_run_status)) {
     return { label: "Checking", tone: "info" };

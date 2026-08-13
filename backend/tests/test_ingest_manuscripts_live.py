@@ -9,11 +9,11 @@ import pytest
 from sqlalchemy import text
 
 from app.ingest.service import list_manuscripts
-from app.models.enums import CheckRunStatus
+from app.models.enums import CheckRunStatus, ReadinessStatus
 from app.models.instructor import Instructor
 from app.models.manuscript import Manuscript
 from app.models.rubric import Rubric
-from app.models.run import CheckRun
+from app.models.run import CheckRun, ReadinessReport
 
 live = pytest.mark.skipif(
     "DATABASE_URL" not in os.environ,
@@ -54,7 +54,10 @@ def session_factory(scratch_url):
 async def _clean_tables(session_factory):
     async with session_factory() as session:
         await session.execute(
-            text("TRUNCATE check_run, rubric, manuscript, instructor RESTART IDENTITY CASCADE")
+            text(
+                "TRUNCATE readiness_report, check_run, rubric, manuscript, instructor "
+                "RESTART IDENTITY CASCADE"
+            )
         )
         await session.commit()
     yield
@@ -155,3 +158,54 @@ async def test_manuscript_with_no_check_run_has_null_latest_fields(session_facto
         assert page.items[0].latest_check_run_id is None
         assert page.items[0].latest_check_run_status is None
         assert page.items[0].latest_done_check_run_id is None
+
+
+async def test_latest_decision_is_surfaced_from_the_latest_done_runs_report(session_factory):
+    """V-038 / ux-critic finding: without this, the dashboard gave no
+    signal at all that a manuscript had already been decided."""
+    async with session_factory() as session:
+        instructor = Instructor(email="decided@demo.local", display_name="Decided Test")
+        session.add(instructor)
+        await session.commit()
+        manuscript = Manuscript(instructor_id=instructor.id, group_label="G", file_ref="x.pdf")
+        rubric = Rubric(instructor_id=instructor.id, title="Format", source_file="r.pdf")
+        session.add_all([manuscript, rubric])
+        await session.commit()
+
+        run = CheckRun(manuscript_id=manuscript.id, rubric_id=rubric.id, status=CheckRunStatus.done)
+        session.add(run)
+        await session.commit()
+        session.add(
+            ReadinessReport(
+                check_run_id=run.id,
+                status=ReadinessStatus.ready,
+                composite_score=90,
+                decision="approved",
+            )
+        )
+        await session.commit()
+
+        page = await list_manuscripts(session, instructor.id)
+        assert page.items[0].latest_decision == "approved"
+
+
+async def test_undecided_report_has_a_null_latest_decision_not_a_fabricated_one(session_factory):
+    async with session_factory() as session:
+        instructor = Instructor(email="undecided@demo.local", display_name="Undecided Test")
+        session.add(instructor)
+        await session.commit()
+        manuscript = Manuscript(instructor_id=instructor.id, group_label="G", file_ref="x.pdf")
+        rubric = Rubric(instructor_id=instructor.id, title="Format", source_file="r.pdf")
+        session.add_all([manuscript, rubric])
+        await session.commit()
+
+        run = CheckRun(manuscript_id=manuscript.id, rubric_id=rubric.id, status=CheckRunStatus.done)
+        session.add(run)
+        await session.commit()
+        session.add(
+            ReadinessReport(check_run_id=run.id, status=ReadinessStatus.ready, composite_score=90)
+        )
+        await session.commit()
+
+        page = await list_manuscripts(session, instructor.id)
+        assert page.items[0].latest_decision is None

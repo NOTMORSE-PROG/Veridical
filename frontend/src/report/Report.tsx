@@ -7,7 +7,7 @@ import type { ReactNode } from "react";
 import { useRef, useState } from "react";
 import { Link, useParams } from "react-router";
 import { ApiError } from "../api/client";
-import type { CriterionResultOut, ReportOut } from "../api/types";
+import type { CriterionResultOut, Decision, ReportOut } from "../api/types";
 import { AnchorPill } from "../components/AnchorPill";
 import { Chip } from "../components/Chip";
 import { StatusPill, type StatusPillTone } from "../components/StatusPill";
@@ -15,9 +15,15 @@ import { manuscriptIdentity } from "../domain/manuscriptLabel";
 import { READINESS_LABEL, READINESS_TONE } from "../domain/readinessTone";
 import { truncateAtWord } from "../format/text";
 import { useRouteFocus } from "../routing/useRouteFocus";
+import { DECISION_LABEL } from "../domain/decisionTone";
+import { DecisionPanel } from "./DecisionPanel";
 import { EscalatedPanel } from "./EscalatedPanel";
 import { FlagsPanel } from "./FlagsPanel";
 import { useReport } from "./useReport";
+
+function decisionLinkLabel(decision: Decision): string {
+  return `Decision: ${DECISION_LABEL[decision]}`;
+}
 
 function SpinnerIcon() {
   return (
@@ -292,6 +298,9 @@ export function ReportPage() {
               >
                 View audit trail
               </Link>
+              <a href="#decision-heading" className="text-sm text-link underline hover:text-link-hover">
+                {report.decision === null ? "Go to final decision" : decisionLinkLabel(report.decision)}
+              </a>
             </div>
           )}
         </div>
@@ -363,6 +372,14 @@ export function ReportPage() {
               </div>
             );
           })()}
+
+          <DecisionPanel
+            report={report}
+            manuscriptLabel={
+              manuscriptIdentity(report.manuscript_group_label, report.manuscript_original_filename)
+                .primary
+            }
+          />
         </>
       )}
     </div>

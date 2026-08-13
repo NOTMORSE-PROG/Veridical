@@ -63,6 +63,9 @@ export interface ManuscriptListItem {
   // so a valid prior report never goes unreachable (backend-critic
   // finding on BUG-012, V-055).
   latest_done_check_run_id: number | null;
+  // V-038: the latest DONE run's decision, if any -- sourced from the
+  // SAME run latest_done_check_run_id points at.
+  latest_decision: Decision | null;
 }
 
 export interface PaginatedManuscripts {
@@ -182,6 +185,29 @@ export interface ReportOut {
   flag_deduction: number;
   unresolved_high_flag_count: number;
   results: CriterionResultOut[];
+  // V-038 (F8.5) — the terminal gate. `decision` is null until the
+  // instructor decides; once set, the report is frozen until an explicit
+  // reopen.
+  decision: Decision | null;
+  decided_at: string | null;
+  decision_note: string | null;
+  // How many criteria still need review -- gates the decide action; the
+  // server re-checks authoritatively regardless.
+  pending_review_count: number;
+  // False when the rubric used for this run is no longer the active
+  // version for its family.
+  rubric_is_current: boolean;
+}
+
+export type Decision = "approved" | "returned" | "rejected";
+
+export interface DecisionIn {
+  decision: Decision;
+  note?: string | null;
+}
+
+export interface ReopenIn {
+  reason: string;
 }
 
 export interface AuditLogSummary {

@@ -47,6 +47,19 @@ async def get_dashboard_stats(
     ).all()
     status_counts = {status: count for status, count in status_rows}
 
+    # V-038: how many of these are actually decided (F8.5), not just
+    # scored -- same latest-done-run scope as every other count here.
+    decided_count = (
+        await session.scalar(
+            select(func.count())
+            .select_from(ReadinessReport)
+            .where(
+                ReadinessReport.check_run_id.in_(select(latest_done_run_ids.c.run_id)),
+                ReadinessReport.decision.is_not(None),
+            )
+        )
+    ) or 0
+
     # Only rubric-criterion results count toward escalation rate/awaiting-
     # review — integrity checks (F4-F7, criterion_id NULL) don't exist in
     # V2 and aren't part of this ratio's meaning either way. Scoped to the
@@ -79,4 +92,5 @@ async def get_dashboard_stats(
         system_underperforming=(
             escalation_rate is not None and escalation_rate > settings.escalation_budget
         ),
+        decided_count=decided_count,
     )

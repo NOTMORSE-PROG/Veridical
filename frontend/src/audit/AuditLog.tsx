@@ -41,6 +41,8 @@ const EVENT_LABELS: Record<string, string> = {
   flag_annotated: "Flag annotated",
   rubric_parse_attempt: "Rubric parse attempt",
   llm_model_exhausted: "AI model exhausted, failed over",
+  report_decided: "Decision recorded",
+  report_reopened: "Decision reopened",
 };
 
 function eventLabel(row: AuditLogSummary): string {
@@ -106,7 +108,9 @@ function isInstructorEvent(eventType: string): boolean {
   return (
     eventType === "flag_overridden" ||
     eventType === "flag_annotated" ||
-    eventType === "escalation_resolved"
+    eventType === "escalation_resolved" ||
+    eventType === "report_decided" ||
+    eventType === "report_reopened"
   );
 }
 

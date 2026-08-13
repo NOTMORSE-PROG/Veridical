@@ -13,6 +13,7 @@ const BASE: DashboardStats = {
   escalation_rate: 0.1,
   escalation_budget: 0.2,
   system_underperforming: false,
+  decided_count: 2,
 };
 
 describe("KpiCards", () => {
@@ -55,5 +56,17 @@ describe("KpiCards", () => {
   it("uses singular wording for exactly one manuscript checked", () => {
     render(<KpiCards stats={{ ...BASE, manuscripts_checked: 1 }} />);
     expect(screen.getByText("1 manuscript checked, by readiness status")).toBeInTheDocument();
+  });
+
+  it("V-038 / ux-critic finding: shows how many checked manuscripts have a real decision", () => {
+    render(<KpiCards stats={BASE} />);
+    expect(
+      screen.getByText("2 of 5 decided (approved, returned, or rejected)."),
+    ).toBeInTheDocument();
+  });
+
+  it("omits the decided line when nothing has been checked yet (nothing honest to report)", () => {
+    render(<KpiCards stats={{ ...BASE, manuscripts_checked: 0, decided_count: 0 }} />);
+    expect(screen.queryByText(/decided/)).not.toBeInTheDocument();
   });
 });

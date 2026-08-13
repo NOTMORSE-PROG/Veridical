@@ -14,6 +14,9 @@ export interface DashboardStats {
   escalation_rate: number | null;
   escalation_budget: number;
   system_underperforming: boolean;
+  // V-038: how many of the checked manuscripts above have a real
+  // recorded decision.
+  decided_count: number;
 }
 
 export function useDashboardStats() {

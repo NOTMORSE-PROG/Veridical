@@ -24,7 +24,7 @@ from app.llm import LLMNotConfiguredError, get_llm_client
 from app.models.citation import Citation
 from app.models.enums import CheckRunStatus, IngestFailureReason, IngestStatus
 from app.models.manuscript import Manuscript
-from app.models.run import CheckRun
+from app.models.run import CheckRun, ReadinessReport
 
 # One extractor per supported suffix. Each is a sync callable executed off
 # the event loop. Legacy .doc is deliberately absent: rejected with a clear
@@ -292,6 +292,26 @@ async def list_manuscripts(
         run = latest_done_by_manuscript.get(manuscript_id)
         return run.id if run is not None else None
 
+    # V-038 / ux-critic finding: one query for every latest-done run's
+    # decision, keyed by check_run_id then remapped by manuscript_id below
+    # -- avoids an N+1 (one query per row) at defense-season density.
+    decision_by_run: dict[int, str] = {}
+    done_run_ids = [run.id for run in latest_done_by_manuscript.values()]
+    if done_run_ids:
+        rows = (
+            await session.execute(
+                select(ReadinessReport.check_run_id, ReadinessReport.decision).where(
+                    ReadinessReport.check_run_id.in_(done_run_ids),
+                    ReadinessReport.decision.is_not(None),
+                )
+            )
+        ).all()
+        decision_by_run = {run_id: decision.value for run_id, decision in rows}
+
+    def _latest_decision(manuscript_id: int) -> str | None:
+        run = latest_done_by_manuscript.get(manuscript_id)
+        return decision_by_run.get(run.id) if run is not None else None
+
     items = [
         ManuscriptListItem(
             id=m.id,
@@ -305,6 +325,7 @@ async def list_manuscripts(
             latest_check_run_id=_latest_id(m.id),
             latest_check_run_status=_latest_status(m.id),
             latest_done_check_run_id=_latest_done_id(m.id),
+            latest_decision=_latest_decision(m.id),
         )
         for m in manuscripts
     ]

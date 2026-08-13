@@ -1,4 +1,4 @@
-import { fireEvent, screen, waitFor } from "@testing-library/react";
+import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { FlagSummaryOut, ReportOut } from "../api/types";
 import { renderWithProviders, stubFetchByPath } from "../test/renderWithProviders";
@@ -15,6 +15,11 @@ const BASE_REPORT: ReportOut = {
   reason: null,
   flag_deduction: 0,
   unresolved_high_flag_count: 0,
+  decision: null,
+  decided_at: null,
+  decision_note: null,
+  pending_review_count: 0,
+  rubric_is_current: true,
   results: [
     {
       criterion_id: 1,
@@ -478,5 +483,70 @@ describe("ReportPage", () => {
     // Both unresolved -> the group defaults open (trust over scanability).
     expect(screen.getByText(/The abstract claims a 95% accuracy rate/)).toBeInTheDocument();
     expect(screen.getByText(/A second, distinct internal-agreement issue/)).toBeInTheDocument();
+  });
+
+  it("V-038: the header link reflects undecided vs decided state and points at the decision section", async () => {
+    vi.stubGlobal(
+      "fetch",
+      stubFetchByPath({ "/check-runs/5/report": BASE_REPORT, ...stubEscalated(), ...stubFlags() }),
+    );
+    renderWithProviders(<ReportPage />, { route: "/report/5", path: "/report/:checkRunId" });
+
+    const link = await screen.findByRole("link", { name: "Go to final decision" });
+    expect(link).toHaveAttribute("href", "#decision-heading");
+  });
+
+  it("V-038: a decided report's header link states the actual decision, not the generic prompt", async () => {
+    const report: ReportOut = {
+      ...BASE_REPORT,
+      decision: "approved",
+      decided_at: "2026-08-13T10:00:00Z",
+    };
+    vi.stubGlobal(
+      "fetch",
+      stubFetchByPath({ "/check-runs/5/report": report, ...stubEscalated(), ...stubFlags() }),
+    );
+    renderWithProviders(<ReportPage />, { route: "/report/5", path: "/report/:checkRunId" });
+
+    expect(await screen.findByRole("link", { name: "Decision: Approved for defense" })).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Go to final decision" })).not.toBeInTheDocument();
+  });
+
+  it("V-038: the decision panel renders at the end of the report, wired to the real check_run_id", async () => {
+    vi.stubGlobal(
+      "fetch",
+      stubFetchByPath({ "/check-runs/5/report": BASE_REPORT, ...stubEscalated(), ...stubFlags() }),
+    );
+    renderWithProviders(<ReportPage />, { route: "/report/5", path: "/report/:checkRunId" });
+
+    expect(await screen.findByRole("heading", { name: "Final decision" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Approve for defense" })).toBeEnabled();
+  });
+
+  it("ux-critic finding: deciding through the REAL confirm modal moves focus to the Final decision heading once it closes, not just in an isolated rerender", async () => {
+    const decided: ReportOut = { ...BASE_REPORT, decision: "approved", decided_at: "2026-08-13T10:00:00Z" };
+    vi.stubGlobal(
+      "fetch",
+      stubFetchByPath({
+        "/check-runs/5/report": BASE_REPORT,
+        "/check-runs/5/decision": decided,
+        ...stubEscalated(),
+        ...stubFlags(),
+      }),
+    );
+    renderWithProviders(<ReportPage />, { route: "/report/5", path: "/report/:checkRunId" });
+
+    fireEvent.click(await screen.findByRole("button", { name: "Approve for defense" }));
+    const dialog = await screen.findByRole("dialog");
+    fireEvent.click(within(dialog).getByRole("button", { name: "Approve for defense" }));
+
+    // The real Modal unmounts (its own focus-restore cleanup fires),
+    // DecisionPanel re-renders from the live query cache with the newly
+    // decided report, and its own transition effect claims focus -- this
+    // exercises the actual integrated path end to end, not a bypassed
+    // prop rerender.
+    await waitFor(() =>
+      expect(document.activeElement).toBe(screen.getByRole("heading", { name: "Final decision" })),
+    );
   });
 });

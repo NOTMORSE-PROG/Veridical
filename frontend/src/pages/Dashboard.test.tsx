@@ -26,6 +26,7 @@ const STATS = {
   escalation_rate: 0.5,
   escalation_budget: 0.2,
   system_underperforming: true,
+  decided_count: 1,
 };
 
 const MANUSCRIPTS_PAGE = {

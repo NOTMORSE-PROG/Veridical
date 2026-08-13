@@ -1,5 +1,6 @@
 """Readiness report HTTP contract (F8.1-F8.2, screen 4h)."""
 
+from datetime import datetime
 from typing import Literal
 
 from pydantic import BaseModel, Field
@@ -65,6 +66,33 @@ class ReportOut(BaseModel):
     flag_deduction: float
     unresolved_high_flag_count: int
     results: list[CriterionResultOut]
+    # V-038 (F8.5) — the terminal gate. `decision` is None until the
+    # instructor decides; once set, the report is frozen (blocked from a
+    # new decision) until an explicit, reasoned reopen.
+    decision: str | None = None
+    decided_at: datetime | None = None
+    decision_note: str | None = None
+    # Gates the decide action client-side (the server re-checks
+    # authoritatively regardless — this is for the UI to explain BEFORE a
+    # blocked attempt, per AC1: "blocked w/ count + link to panel").
+    pending_review_count: int = 0
+    # Edge case: a decision made against a rubric version that is no
+    # longer the active one for its family (a newer version has since been
+    # confirmed) — surfaces as a warning banner, never silently hidden.
+    rubric_is_current: bool = True
+
+
+class DecisionIn(BaseModel):
+    decision: Literal["approved", "returned", "rejected"]
+    note: str | None = None
+
+
+class ReopenIn(BaseModel):
+    # Required, unlike the decision note — a decision can be made with no
+    # elaboration, but undoing one is exactly the kind of action this
+    # project's own audit-trail philosophy (V-024) says must explain
+    # itself.
+    reason: str = Field(min_length=1)
 
 
 class EscalatedItemOut(BaseModel):

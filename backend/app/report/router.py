@@ -9,16 +9,20 @@ from app.auth.dependencies import get_current_instructor
 from app.db import get_session
 from app.models.instructor import Instructor
 from app.report.schemas import (
+    DecisionIn,
     EscalatedItemOut,
     FlagSummaryOut,
+    ReopenIn,
     ReportOut,
     ResolveEscalationIn,
     ResolveEscalationOut,
 )
 from app.report.service import (
+    decide_report,
     get_report,
     list_escalated_for_run,
     list_flags_for_run,
+    reopen_report,
     resolve_escalation_for_run,
 )
 
@@ -66,3 +70,23 @@ async def resolve_escalation_route(
     return await resolve_escalation_for_run(
         session, check_run_id, check_result_id, instructor.id, body.resolution, body.reason
     )
+
+
+@router.post("/check-runs/{check_run_id}/decision", response_model=ReportOut)
+async def decide_report_route(
+    check_run_id: int,
+    body: DecisionIn,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    instructor: Annotated[Instructor, Depends(get_current_instructor)],
+) -> ReportOut:
+    return await decide_report(session, check_run_id, instructor.id, body.decision, body.note)
+
+
+@router.post("/check-runs/{check_run_id}/reopen", response_model=ReportOut)
+async def reopen_report_route(
+    check_run_id: int,
+    body: ReopenIn,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    instructor: Annotated[Instructor, Depends(get_current_instructor)],
+) -> ReportOut:
+    return await reopen_report(session, check_run_id, instructor.id, body.reason)

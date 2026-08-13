@@ -67,7 +67,14 @@ async def _clean_tables(session_factory):
 
 
 async def _make_run(
-    session, instructor, *, run_status, report_status=None, results=(), manuscript_id=None
+    session,
+    instructor,
+    *,
+    run_status,
+    report_status=None,
+    results=(),
+    manuscript_id=None,
+    decision=None,
 ):
     if manuscript_id is None:
         manuscript = Manuscript(instructor_id=instructor.id, group_label="G", file_ref="x.pdf")
@@ -113,6 +120,7 @@ async def _make_run(
                 check_run_id=check_run.id,
                 composite_score=None,
                 status=ReadinessStatus(report_status),
+                decision=decision,
             )
         )
     await session.commit()
@@ -245,3 +253,68 @@ async def test_re_run_only_counts_the_latest_done_run_per_manuscript(session_fac
         )
         # The first (superseded) run's escalation must not still count.
         assert stats.escalations_awaiting_review == 0
+
+
+async def test_decided_count_reflects_v038_decisions_scoped_to_latest_done_run(session_factory):
+    """V-038 / ux-critic finding: the dashboard gave no KPI signal at all
+    that the terminal decision gate had been used -- this closes that
+    gap (AC3, 'reflected on dashboard KPIs')."""
+    async with session_factory() as session:
+        instructor = Instructor(email="dash6@demo.local", display_name="Dash Test 6")
+        session.add(instructor)
+        await session.commit()
+
+        await _make_run(
+            session,
+            instructor,
+            run_status=CheckRunStatus.done,
+            report_status="ready",
+            decision="approved",
+        )
+        await _make_run(
+            session,
+            instructor,
+            run_status=CheckRunStatus.done,
+            report_status="not_ready",
+            decision="rejected",
+        )
+        # Scored but not yet decided -- must not count.
+        await _make_run(
+            session, instructor, run_status=CheckRunStatus.done, report_status="conditionally_ready"
+        )
+
+        stats = await get_dashboard_stats(session, instructor.id)
+        assert stats.manuscripts_checked == 3
+        assert stats.decided_count == 2
+
+
+async def test_a_superseded_runs_decision_does_not_linger_in_decided_count(session_factory):
+    async with session_factory() as session:
+        instructor = Instructor(email="dash7@demo.local", display_name="Dash Test 7")
+        session.add(instructor)
+        await session.commit()
+        manuscript = Manuscript(instructor_id=instructor.id, group_label="G", file_ref="x.pdf")
+        session.add(manuscript)
+        await session.commit()
+
+        # First run: decided approved.
+        await _make_run(
+            session,
+            instructor,
+            manuscript_id=manuscript.id,
+            run_status=CheckRunStatus.done,
+            report_status="ready",
+            decision="approved",
+        )
+        # Re-run on the SAME manuscript: not yet decided.
+        await _make_run(
+            session,
+            instructor,
+            manuscript_id=manuscript.id,
+            run_status=CheckRunStatus.done,
+            report_status="ready",
+        )
+
+        stats = await get_dashboard_stats(session, instructor.id)
+        assert stats.manuscripts_checked == 1
+        assert stats.decided_count == 0

@@ -1,0 +1,287 @@
+"""V-038 live-DB tests: the terminal decision gate (F8.5) — approve/return/
+reject, blocked while criteria still need review, frozen until an explicit
+reasoned reopen, and the superseded-rubric warning signal.
+"""
+
+import os
+from decimal import Decimal
+
+import pytest
+from sqlalchemy import select, text
+
+from app.errors import ConflictError, NotFoundError
+from app.models.enums import CheckKind, CheckRunStatus, ResultOutcome
+from app.models.instructor import Instructor
+from app.models.manuscript import Manuscript
+from app.models.rubric import Criterion, Rubric
+from app.models.run import CheckResult, CheckRun, ReadinessReport
+from app.report.service import (
+    aggregate_and_score,
+    decide_report,
+    get_report,
+    reopen_report,
+    resolve_escalation_for_run,
+)
+
+live = pytest.mark.skipif(
+    "DATABASE_URL" not in os.environ,
+    reason="integration: needs a live Postgres (CI service or local docker-compose)",
+)
+pytestmark = live
+
+SCRATCH_DB = "veridical_decisiontest"
+
+
+@pytest.fixture(scope="module")
+def scratch_url():
+    import asyncio
+
+    from alembic import command
+    from tests.test_schema import _admin_execute, _alembic_config, _swap_db
+
+    base = os.environ["DATABASE_URL"]
+    asyncio.run(_admin_execute(base, f'DROP DATABASE IF EXISTS "{SCRATCH_DB}"'))
+    asyncio.run(_admin_execute(base, f'CREATE DATABASE "{SCRATCH_DB}"'))
+    url = _swap_db(base, SCRATCH_DB)
+    command.upgrade(_alembic_config(url), "head")
+    yield url
+    asyncio.run(_admin_execute(base, f'DROP DATABASE IF EXISTS "{SCRATCH_DB}" WITH (FORCE)'))
+
+
+@pytest.fixture()
+def session_factory(scratch_url):
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
+    from app.db import sqlalchemy_url
+
+    engine = create_async_engine(sqlalchemy_url(scratch_url))
+    yield async_sessionmaker(engine, expire_on_commit=False)
+
+
+@pytest.fixture(autouse=True)
+async def _clean_tables(session_factory):
+    async with session_factory() as session:
+        await session.execute(
+            text(
+                "TRUNCATE audit_log, readiness_report, check_result, check_run, "
+                "criterion, rubric, manuscript, instructor RESTART IDENTITY CASCADE"
+            )
+        )
+        await session.commit()
+    yield
+
+
+async def _seed_decidable_run(session, *, rubric_is_active=True):
+    """A DONE run with exactly one decidable (passed) criterion — nothing
+    escalated, so decision is never blocked unless a test adds one."""
+    instructor = Instructor(email=f"dec-{id(session)}@test.local", display_name="Dec Test")
+    session.add(instructor)
+    await session.commit()
+    manuscript = Manuscript(instructor_id=instructor.id, group_label="G", file_ref="x.pdf")
+    rubric = Rubric(
+        instructor_id=instructor.id,
+        title="Format",
+        source_file="r.pdf",
+        is_active=rubric_is_active,
+    )
+    session.add_all([manuscript, rubric])
+    await session.commit()
+    criterion = Criterion(
+        rubric_id=rubric.id,
+        type="structural",
+        text="Has an abstract",
+        evidence=None,
+        weight=Decimal("100"),
+        position=0,
+    )
+    session.add(criterion)
+    await session.commit()
+    check_run = CheckRun(
+        manuscript_id=manuscript.id, rubric_id=rubric.id, status=CheckRunStatus.done
+    )
+    session.add(check_run)
+    await session.commit()
+    check_result = CheckResult(
+        check_run_id=check_run.id,
+        criterion_id=criterion.id,
+        kind=CheckKind.structural,
+        outcome=ResultOutcome.passed,
+        score=Decimal("100"),
+        detail={"basis": "rule"},
+    )
+    session.add(check_result)
+    await session.commit()
+    await aggregate_and_score(session, check_run.id)
+    return instructor, check_run
+
+
+async def _add_escalated_criterion(session, check_run):
+    criterion = Criterion(
+        rubric_id=check_run.rubric_id,
+        type="semantic",
+        text="Chapter 1 states the problem",
+        evidence=None,
+        weight=Decimal("50"),
+        position=1,
+    )
+    session.add(criterion)
+    await session.commit()
+    check_result = CheckResult(
+        check_run_id=check_run.id,
+        criterion_id=criterion.id,
+        kind=CheckKind.semantic,
+        outcome=ResultOutcome.escalated,
+        score=None,
+        detail={"basis": "llm", "agreement": 0.5, "votes": ["pass", "fail"]},
+    )
+    session.add(check_result)
+    await session.commit()
+    await aggregate_and_score(session, check_run.id)
+
+
+async def test_decides_and_freezes_the_report(session_factory):
+    async with session_factory() as session:
+        instructor, check_run = await _seed_decidable_run(session)
+        report = await decide_report(
+            session, check_run.id, instructor.id, "approved", "Looks ready."
+        )
+        assert report.decision == "approved"
+        assert report.decision_note == "Looks ready."
+        assert report.decided_at is not None
+
+        row = await session.scalar(
+            select(ReadinessReport).where(ReadinessReport.check_run_id == check_run.id)
+        )
+        assert row.decision.value == "approved"
+        assert row.decided_by_instructor_id == instructor.id
+
+
+async def test_note_is_optional(session_factory):
+    async with session_factory() as session:
+        instructor, check_run = await _seed_decidable_run(session)
+        report = await decide_report(session, check_run.id, instructor.id, "rejected", None)
+        assert report.decision == "rejected"
+        assert report.decision_note is None
+
+
+async def test_blank_note_normalizes_to_none(session_factory):
+    async with session_factory() as session:
+        instructor, check_run = await _seed_decidable_run(session)
+        report = await decide_report(session, check_run.id, instructor.id, "returned", "   ")
+        assert report.decision_note is None
+
+
+async def test_deciding_with_unresolved_escalations_is_blocked_with_the_count(session_factory):
+    async with session_factory() as session:
+        instructor, check_run = await _seed_decidable_run(session)
+        await _add_escalated_criterion(session, check_run)
+        with pytest.raises(ConflictError, match="1 criterion"):
+            await decide_report(session, check_run.id, instructor.id, "approved", None)
+
+        # Confirmed still undecided — the block is real, not advisory.
+        report = await get_report(session, check_run.id, instructor.id)
+        assert report.decision is None
+        assert report.pending_review_count == 1
+
+
+async def test_deciding_an_already_decided_report_is_rejected(session_factory):
+    async with session_factory() as session:
+        instructor, check_run = await _seed_decidable_run(session)
+        await decide_report(session, check_run.id, instructor.id, "approved", None)
+        with pytest.raises(ConflictError):
+            await decide_report(session, check_run.id, instructor.id, "rejected", None)
+
+
+async def test_resolving_an_escalation_is_blocked_once_the_report_is_decided(session_factory):
+    """`backend-critic` finding: `decide_report`'s own gate ensures no
+    escalation is pending AT decide time, but that alone doesn't stop a
+    LATER resolve from silently recomputing and persisting a new score
+    onto an already-decided report -- `raise_if_decided` must be enforced
+    inside `resolve_escalation_for_run` itself, not just at the decide
+    boundary."""
+    async with session_factory() as session:
+        instructor, check_run = await _seed_decidable_run(session)
+        await decide_report(session, check_run.id, instructor.id, "approved", None)
+        await _add_escalated_criterion(session, check_run)
+
+        escalated_result_id = await session.scalar(
+            select(CheckResult.id).where(
+                CheckResult.check_run_id == check_run.id,
+                CheckResult.outcome == ResultOutcome.escalated,
+            )
+        )
+        with pytest.raises(ConflictError):
+            await resolve_escalation_for_run(
+                session, check_run.id, escalated_result_id, instructor.id, "mark_pass", "reason"
+            )
+
+
+async def test_reopen_clears_the_decision_and_requires_a_reason(session_factory):
+    async with session_factory() as session:
+        instructor, check_run = await _seed_decidable_run(session)
+        await decide_report(session, check_run.id, instructor.id, "approved", "Initial call.")
+
+        report = await reopen_report(
+            session, check_run.id, instructor.id, "Found a citation issue after deciding."
+        )
+        assert report.decision is None
+        assert report.decision_note is None
+        assert report.decided_at is None
+
+        # Reopened -> can be decided again (not permanently locked).
+        redecided = await decide_report(session, check_run.id, instructor.id, "returned", None)
+        assert redecided.decision == "returned"
+
+
+async def test_reopening_a_never_decided_report_is_rejected(session_factory):
+    async with session_factory() as session:
+        instructor, check_run = await _seed_decidable_run(session)
+        with pytest.raises(ConflictError):
+            await reopen_report(session, check_run.id, instructor.id, "reason")
+
+
+async def test_reopen_writes_a_distinct_audit_event_preserving_the_prior_decision(session_factory):
+    async with session_factory() as session:
+        instructor, check_run = await _seed_decidable_run(session)
+        await decide_report(session, check_run.id, instructor.id, "rejected", None)
+        await reopen_report(session, check_run.id, instructor.id, "Instructor changed their mind.")
+
+        from app.models.audit import AuditLog
+
+        rows = (
+            (
+                await session.execute(
+                    select(AuditLog)
+                    .where(AuditLog.check_run_id == check_run.id)
+                    .order_by(AuditLog.id)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        event_types = [r.event_type for r in rows]
+        assert "report_decided" in event_types
+        assert "report_reopened" in event_types
+        reopened = next(r for r in rows if r.event_type == "report_reopened")
+        assert reopened.payload["prior_decision"] == "rejected"
+        assert reopened.payload["reason"] == "Instructor changed their mind."
+
+
+async def test_rubric_is_current_reflects_a_superseded_version(session_factory):
+    async with session_factory() as session:
+        instructor, check_run = await _seed_decidable_run(session, rubric_is_active=False)
+        report = await get_report(session, check_run.id, instructor.id)
+        assert report.rubric_is_current is False
+
+
+async def test_cross_instructor_cannot_decide_or_reopen(session_factory):
+    async with session_factory() as session:
+        _, check_run = await _seed_decidable_run(session)
+        stranger = Instructor(email="stranger-dec@test.local", display_name="Stranger")
+        session.add(stranger)
+        await session.commit()
+
+        with pytest.raises(NotFoundError):
+            await decide_report(session, check_run.id, stranger.id, "approved", None)
+        with pytest.raises(NotFoundError):
+            await reopen_report(session, check_run.id, stranger.id, "reason")

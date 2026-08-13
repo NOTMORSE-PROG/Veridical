@@ -5,16 +5,23 @@ check_results/flags into `ScorableResult`/`ScorableFlag`, runs the pure
 an instructor resolves an escalation).
 """
 
+from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.checks.escalation import EscalatedItem, list_escalated, resolve_escalation
+from app.audit.service import write_audit_event
+from app.checks.escalation import (
+    NEEDS_REVIEW_OUTCOMES,
+    EscalatedItem,
+    list_escalated,
+    resolve_escalation,
+)
 from app.config import Settings, get_settings
 from app.errors import ConflictError, NotFoundError
-from app.models.enums import CheckKind, CheckRunStatus, FlagSeverity
+from app.models.enums import CheckKind, CheckRunStatus, FlagSeverity, ReportDecision
 from app.models.manuscript import Manuscript
 from app.models.rubric import Criterion, Rubric
 from app.models.run import CheckResult, CheckRun, Flag, ReadinessReport
@@ -181,6 +188,14 @@ async def get_report(session: AsyncSession, check_run_id: int, instructor_id: in
     results = [_to_criterion_result(result, criterion) for result, criterion in rows]
 
     scoring_payload = await build_report_payload(session, check_run_id)
+    pending_review_count = await session.scalar(
+        select(func.count())
+        .select_from(CheckResult)
+        .where(
+            CheckResult.check_run_id == check_run_id,
+            CheckResult.outcome.in_(NEEDS_REVIEW_OUTCOMES),
+        )
+    )
     return ReportOut(
         check_run_id=check_run_id,
         manuscript_group_label=manuscript.group_label,
@@ -197,6 +212,11 @@ async def get_report(session: AsyncSession, check_run_id: int, instructor_id: in
         flag_deduction=scoring_payload["flag_deduction"],
         unresolved_high_flag_count=scoring_payload["unresolved_high_flag_count"],
         results=results,
+        decision=report.decision.value if report is not None and report.decision else None,
+        decided_at=report.decided_at if report is not None else None,
+        decision_note=report.decision_note if report is not None else None,
+        pending_review_count=pending_review_count or 0,
+        rubric_is_current=rubric.is_active,
     )
 
 
@@ -300,6 +320,7 @@ async def resolve_escalation_for_run(
     live") — the response carries the fresh `ReportOut` so the frontend
     never has to guess whether a follow-up fetch is needed."""
     await _owned_check_run(session, check_run_id, instructor_id)
+    await raise_if_decided(session, check_run_id)
     result = await resolve_escalation(
         session, check_run_id, check_result_id, instructor_id, resolution, reason
     )
@@ -311,3 +332,142 @@ async def resolve_escalation_for_run(
         score=float(result.score) if result.score is not None else None,
         report=report,
     )
+
+
+async def _get_owned_report(
+    session: AsyncSession, check_run_id: int, instructor_id: int
+) -> ReadinessReport:
+    """Shared precondition for decide/reopen: the run must be owned, done,
+    and have a real persisted report (never a guessed/partial one — the
+    same rule `get_report` itself enforces)."""
+    check_run = await _owned_check_run(session, check_run_id, instructor_id)
+    if check_run.status != CheckRunStatus.done:
+        raise ConflictError("This check hasn't finished yet. Its report isn't ready.")
+    report = await session.scalar(
+        select(ReadinessReport).where(ReadinessReport.check_run_id == check_run_id)
+    )
+    if report is None:
+        raise NotFoundError(f"No report for check run {check_run_id}.")
+    return report
+
+
+async def raise_if_decided(session: AsyncSession, check_run_id: int) -> None:
+    """V-038 AC2 ("decided report immutable until reopened") only means
+    something if it also binds every OTHER score-mutating action, not just
+    a second decide — `backend-critic` found live that overriding a flag
+    or resolving an escalation after decision would otherwise silently
+    change the persisted composite/status on the SAME `ReadinessReport`
+    row a human already signed off on, with no reopen and no audit trace
+    of the drift. Called by `resolve_escalation_for_run` (this module) and
+    `app.flags.service.override_flag` before either mutates anything —
+    both already recompute via `aggregate_and_score` right after, which is
+    exactly the write this guards."""
+    report = await session.scalar(
+        select(ReadinessReport).where(ReadinessReport.check_run_id == check_run_id)
+    )
+    if report is not None and report.decision is not None:
+        raise ConflictError(
+            "This report has already been decided. Reopen it first before changing "
+            "anything that affects its score."
+        )
+
+
+async def decide_report(
+    session: AsyncSession,
+    check_run_id: int,
+    instructor_id: int,
+    decision: str,
+    note: str | None,
+) -> ReportOut:
+    """The terminal gate (V-038, F8.5) — VERIDICAL never sets this itself
+    (charter rule 1); this is the ONE place a human decision gets
+    recorded. Blocked while any criterion still needs review (the
+    instructor must look at what the AI couldn't decide) and while the
+    report is already decided (must reopen first, explicitly, with a
+    reason — a decision is not silently overwritable)."""
+    report = await _get_owned_report(session, check_run_id, instructor_id)
+    if report.decision is not None:
+        raise ConflictError(
+            "This report has already been decided. Reopen it first to change the decision."
+        )
+    pending = await session.scalar(
+        select(func.count())
+        .select_from(CheckResult)
+        .where(
+            CheckResult.check_run_id == check_run_id,
+            CheckResult.outcome.in_(NEEDS_REVIEW_OUTCOMES),
+        )
+    )
+    if pending:
+        raise ConflictError(
+            f"{pending} criteri{'on' if pending == 1 else 'a'} still need your review before "
+            "this report can be decided. Resolve them first."
+        )
+
+    report.decision = ReportDecision(decision)
+    report.decided_at = datetime.now(UTC)
+    report.decided_by_instructor_id = instructor_id
+    report.decision_note = note.strip() if note and note.strip() else None
+    # `backend-critic` finding: without a snapshot of what the instructor
+    # was actually looking at, a later score drift (a flag override or
+    # escalation resolved after this decision — both now blocked by
+    # `raise_if_decided`, but the snapshot is what makes any future gap
+    # in that guard DETECTABLE from the audit log alone, not just
+    # prevented today) would be invisible in the trail.
+    await write_audit_event(
+        session,
+        event_type="report_decided",
+        check_run_id=check_run_id,
+        payload={
+            "instructor_id": instructor_id,
+            "decision": decision,
+            "note": report.decision_note,
+            "composite_score": (
+                float(report.composite_score) if report.composite_score is not None else None
+            ),
+            "status": report.status.value,
+        },
+    )
+    await session.commit()
+    return await get_report(session, check_run_id, instructor_id)
+
+
+async def reopen_report(
+    session: AsyncSession,
+    check_run_id: int,
+    instructor_id: int,
+    reason: str,
+) -> ReportOut:
+    """Undoes a decision so a new one can be made — always explicit, always
+    reasoned (AC: "reopen logged with reason"). The prior decision isn't
+    erased from history: it's preserved in the immutable audit log
+    (`report_decided`, then this `report_reopened` event), even though the
+    report's own display fields reset to None (the "current decision"
+    fields, not the historical record — see the model's own docstring)."""
+    report = await _get_owned_report(session, check_run_id, instructor_id)
+    if report.decision is None:
+        raise ConflictError("This report hasn't been decided yet. There's nothing to reopen.")
+
+    prior_decision = report.decision.value
+    prior_note = report.decision_note
+    report.decision = None
+    report.decided_at = None
+    report.decided_by_instructor_id = None
+    report.decision_note = None
+    await write_audit_event(
+        session,
+        event_type="report_reopened",
+        check_run_id=check_run_id,
+        payload={
+            "instructor_id": instructor_id,
+            "reason": reason.strip(),
+            "prior_decision": prior_decision,
+            "prior_note": prior_note,
+            "composite_score": (
+                float(report.composite_score) if report.composite_score is not None else None
+            ),
+            "status": report.status.value,
+        },
+    )
+    await session.commit()
+    return await get_report(session, check_run_id, instructor_id)

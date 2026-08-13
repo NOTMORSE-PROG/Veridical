@@ -169,6 +169,13 @@ class ManuscriptListItem(BaseModel):
     # diverge silently between this endpoint and the dashboard's KPI
     # aggregation).
     latest_done_check_run_id: int | None = None
+    # V-038 / ux-critic finding: without this, the dashboard gave no way
+    # to tell which manuscripts had already been decided (approved/
+    # returned/rejected) without opening every single report — a real
+    # cost at defense-season density (~20 manuscripts). Sourced from the
+    # SAME latest-done run `latest_done_check_run_id` points at, never a
+    # different one, so the two can't silently disagree.
+    latest_decision: str | None = None
 
     model_config = {"from_attributes": True}
 

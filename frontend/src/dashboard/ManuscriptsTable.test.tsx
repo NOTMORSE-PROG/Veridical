@@ -38,6 +38,30 @@ describe("ManuscriptsTable", () => {
     for (const link of links) expect(link).toHaveAttribute("href", "/report/7");
   });
 
+  it("V-038 / ux-critic finding: a decided manuscript shows its decision instead of the generic 'Checked' pill", async () => {
+    vi.stubGlobal(
+      "fetch",
+      stubFetchByPath({
+        "/manuscripts": page([
+          {
+            id: 1,
+            group_label: "G-11",
+            ingest_status: "done",
+            ingest_failure_reason: null,
+            created_at: "2026-01-01T00:00:00Z",
+            latest_check_run_id: 7,
+            latest_check_run_status: "done",
+            latest_done_check_run_id: 7,
+            latest_decision: "approved",
+          },
+        ]),
+      }),
+    );
+    renderWithProviders(<ManuscriptsTable page={1} onPageChange={() => {}} onUploadManuscript={() => {}} />);
+    expect((await screen.findAllByText("Approved for defense")).length).toBe(2);
+    expect(screen.queryByText("Checked")).not.toBeInTheDocument();
+  });
+
   it("shows a 'View progress' action for a still-running check", async () => {
     vi.stubGlobal(
       "fetch",

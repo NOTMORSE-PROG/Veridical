@@ -22,7 +22,7 @@ from app.models.audit import AuditLog
 from app.models.manuscript import Manuscript
 from app.models.rubric import Criterion
 from app.models.run import CheckResult, CheckRun, Flag
-from app.report.service import aggregate_and_score
+from app.report.service import aggregate_and_score, raise_if_decided
 
 
 async def _scoped_flag(
@@ -109,8 +109,13 @@ async def override_flag(
     `override_reason` change, which is what the scoring engine already
     watches (`_flag_deduction`, V-019). Returns the flag plus its
     `check_run_id` so the router can hand back a fresh `ReportOut` in the
-    SAME response (ticket AC: "recomputes score/status immediately")."""
+    SAME response (ticket AC: "recomputes score/status immediately").
+
+    V-038: blocked once the report has been decided — a score-affecting
+    mutation on a report a human already signed off on must go through an
+    explicit reopen first (see `app.report.service.raise_if_decided`)."""
     flag, result, manuscript = await _scoped_flag(session, flag_id, instructor_id)
+    await raise_if_decided(session, result.check_run_id)
     flag.overridden = True
     flag.override_reason = reason.strip()
     session.add(
