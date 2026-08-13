@@ -1,6 +1,7 @@
 // Auth state via the query cache — `me` IS the "am I signed in" source of
 // truth every guard/shell reads (V-014, F9.1).
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useNavigate } from "react-router";
 import { ApiError, api } from "../api/client";
 import type { Instructor } from "../api/types";
 
@@ -59,6 +60,7 @@ export function useReplayOnboarding() {
 
 export function useLogout() {
   const queryClient = useQueryClient();
+  const navigate = useNavigate();
   return useMutation({
     mutationFn: () => api.post("/auth/logout"),
     onSuccess: () => {
@@ -73,6 +75,16 @@ export function useLogout() {
       // at logout, not just the auth token).
       queryClient.clear();
       queryClient.setQueryData(ME_QUERY_KEY, null);
+      // BUG-036: RequireAuth's own `useMe()` observer doesn't reliably
+      // pick up this cache change on the CURRENTLY-mounted protected
+      // screen (verified live: AvatarButton's useMe() re-renders and
+      // hides itself correctly, but RequireAuth's sibling observer
+      // doesn't redirect until some unrelated later navigation) — a
+      // real content-exposure gap on a shared-computer workload (a
+      // manuscript's excerpts/scores stay fully visible after sign-out).
+      // An explicit redirect closes it directly instead of depending on
+      // that reactivity.
+      navigate("/signin", { replace: true });
     },
   });
 }
