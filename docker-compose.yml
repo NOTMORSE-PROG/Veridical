@@ -34,8 +34,22 @@ services:
     # reads on every check-run, not just at ingestion — without this, every
     # container recreate silently strands manuscripts the DB still thinks
     # are fine.
+    #
+    # BUG-031: `docker compose up` (no `--build`) reused whatever image
+    # was last built, with no doc warning and no way to tell the running
+    # container predates the current source tree — a real, hit-live
+    # reproducibility gap (a verification pass reviewed a stale image and
+    # nearly reported a real endpoint as missing). Bind-mounting the
+    # source and running uvicorn with `--reload` (below) means dev source
+    # edits are served immediately, with no rebuild step to forget — the
+    # image only goes stale on a genuine `pyproject.toml`/`uv.lock`
+    # dependency change, the same case every Python dev container has.
     volumes:
       - ./backend/data:/srv/veridical/data
+      - ./backend/app:/srv/veridical/app
+      - ./backend/alembic:/srv/veridical/alembic
+      - ./backend/alembic.ini:/srv/veridical/alembic.ini
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
     depends_on:
       db:
         condition: service_healthy

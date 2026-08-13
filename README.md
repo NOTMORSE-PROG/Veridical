@@ -41,6 +41,11 @@ docker compose up --build      # Postgres 16 + pgvector, then the API on :8000
 curl http://localhost:8000/health
 ```
 
+`--build` is only needed the first time and after a `pyproject.toml`/`uv.lock`
+change — the `api` service bind-mounts the backend source and runs uvicorn
+with `--reload`, so a plain `docker compose up` afterward serves current
+code, not a stale image.
+
 The compose Postgres is published on host port **5433** (not 5432, which is
 frequently occupied by a native Postgres install) — the backend's default
 `DATABASE_URL` already points there.
@@ -58,6 +63,15 @@ uv sync                        # install deps (creates .venv)
 uv run pytest                  # tests — no DB or keys required
 uv run ruff check .            # lint
 uv run uvicorn app.main:app --reload
+```
+
+Live-DB tests skip silently (not an error) when `DATABASE_URL` isn't set in
+the shell — `uv run pytest` alone undercounts vs. CI's full run. Export it
+first (matching the compose Postgres above, or CI's own value) to run the
+complete suite:
+
+```bash
+DATABASE_URL=postgresql://veridical:veridical@localhost:5433/veridical uv run pytest
 ```
 
 ## Commit conventions
