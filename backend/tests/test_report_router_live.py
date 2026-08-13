@@ -91,7 +91,12 @@ def logged_in_with_a_done_run(client, api_scratch_url):
                 manuscript = Manuscript(
                     instructor_id=instructor.id, group_label="G-11", file_ref="x.pdf"
                 )
-                rubric = Rubric(instructor_id=instructor.id, title="Format", source_file="r.pdf")
+                rubric = Rubric(
+                    instructor_id=instructor.id,
+                    title="Format",
+                    source_file="r.pdf",
+                    is_active=True,  # the normal case: checks run against an active rubric
+                )
                 session.add_all([manuscript, rubric])
                 await session.commit()
                 criterion = Criterion(
@@ -148,3 +153,43 @@ def test_get_report_returns_the_full_shape(logged_in_with_a_done_run):
     # determining factor instead of hedging with "or" (V-055 review).
     assert body["flag_deduction"] == 0.0
     assert body["unresolved_high_flag_count"] == 0
+    # V-038: unset by default, no gate pending, current rubric.
+    assert body["decision"] is None
+    assert body["pending_review_count"] == 0
+    assert body["rubric_is_current"] is True
+
+
+def test_decision_route_requires_auth(client):
+    resp = client.post("/check-runs/1/decision", json={"decision": "approved"})
+    assert resp.status_code == 401
+
+
+def test_decide_then_reopen_over_http(logged_in_with_a_done_run):
+    client, check_run_id = logged_in_with_a_done_run
+    resp = client.post(
+        f"/check-runs/{check_run_id}/decision",
+        json={"decision": "approved", "note": "Ready for defense."},
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["decision"] == "approved"
+    assert body["decision_note"] == "Ready for defense."
+
+    # Frozen: a second decision without reopening is rejected.
+    blocked = client.post(f"/check-runs/{check_run_id}/decision", json={"decision": "rejected"})
+    assert blocked.status_code == 409
+
+    # A reopen with no reason fails validation before it ever reaches the
+    # service's own ConflictError path.
+    bad_reopen = client.post(f"/check-runs/{check_run_id}/reopen", json={"reason": ""})
+    assert bad_reopen.status_code == 422
+
+    reopened = client.post(
+        f"/check-runs/{check_run_id}/reopen", json={"reason": "Adviser asked for a second look."}
+    )
+    assert reopened.status_code == 200
+    assert reopened.json()["decision"] is None
+
+    redecided = client.post(f"/check-runs/{check_run_id}/decision", json={"decision": "returned"})
+    assert redecided.status_code == 200
+    assert redecided.json()["decision"] == "returned"

@@ -69,6 +69,12 @@ export function KpiCards({ stats }: { stats: DashboardStats }) {
         <p className="text-xs text-ink-tertiary">
           These four numbers always add up to the manuscripts-checked count above.
         </p>
+        {stats.manuscripts_checked > 0 && (
+          <p className="text-xs text-ink-tertiary">
+            {stats.decided_count} of {stats.manuscripts_checked} decided (approved, returned, or
+            rejected).
+          </p>
+        )}
       </section>
 
       <section

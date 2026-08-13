@@ -203,7 +203,9 @@ export function EscalatedPanel({ checkRunId }: { checkRunId: number }) {
     >
       <div className="flex flex-wrap items-center gap-2 border-b border-border bg-status-caution-bg px-3.5 py-2.5">
         <CautionIcon />
-        <h2 className="text-sm font-bold text-ink">Needs your review ({items.length})</h2>
+        <h2 id="escalated-heading" tabIndex={-1} className="scroll-mt-16 text-sm font-bold text-ink">
+          Needs your review ({items.length})
+        </h2>
         <span className="flex-1" />
         <span className="text-xs text-ink-tertiary">
           Escalated by self-consistency vote, never auto-decided (F3.5).

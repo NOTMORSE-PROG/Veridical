@@ -1,8 +1,10 @@
 // Readiness report data layer (F8.1-F8.2, screen 4h) + the escalated
-// panel / resolution flow (V-023, F3.5).
+// panel / resolution flow (V-023, F3.5) + the terminal decision flow
+// (V-038, F8.5).
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { api } from "../api/client";
+import { ApiError, api } from "../api/client";
 import type {
+  Decision,
   EscalatedItemOut,
   EscalationResolution,
   FlagSummaryOut,
@@ -57,5 +59,45 @@ export function useResolveEscalation(checkRunId: number) {
       queryClient.invalidateQueries({ queryKey: ["report", checkRunId, "escalated"] });
       queryClient.invalidateQueries({ queryKey: ["stats"] }); // dashboard badge
     },
+  });
+}
+
+// A decided/reopened report can go stale from a genuine race (a second
+// tab, or clicking decide right after the last pending item was
+// resolved elsewhere) -- the 409 the server sends back is itself correct
+// and already well-worded (charter rule 3), but the LOCAL cache is now
+// wrong until the next fetch. Re-fetching on exactly that error code
+// means closing the modal shows the real current state instead of
+// silently re-offering an action that will fail again.
+function refetchReportOnConflict(queryClient: ReturnType<typeof useQueryClient>, checkRunId: number) {
+  return (error: unknown) => {
+    if (error instanceof ApiError && error.code === "conflict") {
+      queryClient.invalidateQueries({ queryKey: ["report", checkRunId] });
+    }
+  };
+}
+
+export function useDecideReport(checkRunId: number) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (body: { decision: Decision; note: string | null }) =>
+      api.post<ReportOut>(`/check-runs/${checkRunId}/decision`, body),
+    onSuccess: (report) => {
+      queryClient.setQueryData(["report", checkRunId], report);
+      queryClient.invalidateQueries({ queryKey: ["stats"] });
+    },
+    onError: refetchReportOnConflict(queryClient, checkRunId),
+  });
+}
+
+export function useReopenReport(checkRunId: number) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (reason: string) => api.post<ReportOut>(`/check-runs/${checkRunId}/reopen`, { reason }),
+    onSuccess: (report) => {
+      queryClient.setQueryData(["report", checkRunId], report);
+      queryClient.invalidateQueries({ queryKey: ["stats"] });
+    },
+    onError: refetchReportOnConflict(queryClient, checkRunId),
   });
 }
