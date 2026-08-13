@@ -31,7 +31,7 @@ describe("ManuscriptsTable", () => {
         ]),
       }),
     );
-    renderWithProviders(<ManuscriptsTable page={1} onPageChange={() => {}} />);
+    renderWithProviders(<ManuscriptsTable page={1} onPageChange={() => {}} onUploadManuscript={() => {}} />);
     expect((await screen.findAllByText("Checked")).length).toBe(2);
     const links = screen.getAllByRole("link", { name: "Open report" });
     expect(links).toHaveLength(2);
@@ -56,7 +56,7 @@ describe("ManuscriptsTable", () => {
         ]),
       }),
     );
-    renderWithProviders(<ManuscriptsTable page={1} onPageChange={() => {}} />);
+    renderWithProviders(<ManuscriptsTable page={1} onPageChange={() => {}} onUploadManuscript={() => {}} />);
     expect((await screen.findAllByText("Checking")).length).toBe(2);
     const links = screen.getAllByRole("link", { name: "View progress" });
     expect(links).toHaveLength(2);
@@ -81,7 +81,7 @@ describe("ManuscriptsTable", () => {
         ]),
       }),
     );
-    renderWithProviders(<ManuscriptsTable page={1} onPageChange={() => {}} />);
+    renderWithProviders(<ManuscriptsTable page={1} onPageChange={() => {}} onUploadManuscript={() => {}} />);
     await screen.findAllByText("Checking");
     const progressLinks = screen.getAllByRole("link", { name: "View progress" });
     for (const link of progressLinks) expect(link).toHaveAttribute("href", "/checks/20");
@@ -108,7 +108,7 @@ describe("ManuscriptsTable", () => {
         ]),
       }),
     );
-    renderWithProviders(<ManuscriptsTable page={1} onPageChange={() => {}} />);
+    renderWithProviders(<ManuscriptsTable page={1} onPageChange={() => {}} onUploadManuscript={() => {}} />);
     await screen.findAllByText("Check failed");
     const priorReportLinks = screen.getAllByRole("link", { name: "Open prior report" });
     expect(priorReportLinks).toHaveLength(2);
@@ -133,7 +133,7 @@ describe("ManuscriptsTable", () => {
         ]),
       }),
     );
-    renderWithProviders(<ManuscriptsTable page={1} onPageChange={() => {}} />);
+    renderWithProviders(<ManuscriptsTable page={1} onPageChange={() => {}} onUploadManuscript={() => {}} />);
     expect((await screen.findAllByText("Not checked yet")).length).toBe(2);
     expect(screen.queryByRole("link", { name: "Open report" })).not.toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "View progress" })).not.toBeInTheDocument();
@@ -157,7 +157,7 @@ describe("ManuscriptsTable", () => {
         ]),
       }),
     );
-    renderWithProviders(<ManuscriptsTable page={1} onPageChange={() => {}} />);
+    renderWithProviders(<ManuscriptsTable page={1} onPageChange={() => {}} onUploadManuscript={() => {}} />);
     // "Open report" already exists for a done run; "Re-run unavailable"
     // only shows for rows with no report/progress link to offer instead —
     // covered by the ingest-failure test below.
@@ -182,7 +182,7 @@ describe("ManuscriptsTable", () => {
         ]),
       }),
     );
-    renderWithProviders(<ManuscriptsTable page={1} onPageChange={() => {}} />);
+    renderWithProviders(<ManuscriptsTable page={1} onPageChange={() => {}} onUploadManuscript={() => {}} />);
     expect((await screen.findAllByText("Ingestion failed")).length).toBe(2);
     const [whyButton] = screen.getAllByRole("button", { name: "Why did this fail?" });
     fireEvent.click(whyButton);
@@ -209,7 +209,7 @@ describe("ManuscriptsTable", () => {
         ]),
       }),
     );
-    renderWithProviders(<ManuscriptsTable page={1} onPageChange={() => {}} />);
+    renderWithProviders(<ManuscriptsTable page={1} onPageChange={() => {}} onUploadManuscript={() => {}} />);
     await screen.findAllByText("Ingestion failed");
     const [whyButton] = screen.getAllByRole("button", { name: "Why did this fail?" });
     fireEvent.click(whyButton);
@@ -246,7 +246,7 @@ describe("ManuscriptsTable", () => {
         ]),
       }),
     );
-    renderWithProviders(<ManuscriptsTable page={1} onPageChange={() => {}} />);
+    renderWithProviders(<ManuscriptsTable page={1} onPageChange={() => {}} onUploadManuscript={() => {}} />);
     expect((await screen.findAllByText("Chapter1-3_FinalDefense.pdf")).length).toBe(2);
     expect(screen.getAllByText("Chapter1-3_Revised.pdf").length).toBe(2);
     // The default label is redundant once a filename wins the primary
@@ -273,7 +273,7 @@ describe("ManuscriptsTable", () => {
         ]),
       }),
     );
-    renderWithProviders(<ManuscriptsTable page={1} onPageChange={() => {}} />);
+    renderWithProviders(<ManuscriptsTable page={1} onPageChange={() => {}} onUploadManuscript={() => {}} />);
     expect((await screen.findAllByText("Ungrouped")).length).toBe(2);
   });
 
@@ -287,22 +287,39 @@ describe("ManuscriptsTable", () => {
         ),
       }),
     );
-    renderWithProviders(<ManuscriptsTable page={1} onPageChange={() => {}} />);
+    renderWithProviders(<ManuscriptsTable page={1} onPageChange={() => {}} onUploadManuscript={() => {}} />);
     expect(await screen.findByRole("alert")).toHaveTextContent("Could not load your manuscripts.");
     expect(screen.getByRole("button", { name: "Try again" })).toBeInTheDocument();
   });
 
   it("shows pagination controls only when there is more than one page", async () => {
     vi.stubGlobal("fetch", stubFetchByPath({ "/manuscripts": page([], 45) }));
-    renderWithProviders(<ManuscriptsTable page={1} onPageChange={() => {}} />);
-    expect((await screen.findAllByText("No manuscripts uploaded yet.")).length).toBe(2);
-    expect(screen.getByText("Page 1 of 3")).toBeInTheDocument();
+    renderWithProviders(<ManuscriptsTable page={1} onPageChange={() => {}} onUploadManuscript={() => {}} />);
+    expect(await screen.findByText("Page 1 of 3")).toBeInTheDocument();
+    // total=45 here (a later page's fixture) -- zero ROWS on this
+    // particular page must not be confused with zero manuscripts overall,
+    // so the "no manuscripts at all" upload CTA must not appear.
+    expect(screen.queryByText("No manuscripts yet")).not.toBeInTheDocument();
+  });
+
+  it("V-059: zero manuscripts overall shows a real upload CTA, not flat dead-end text", async () => {
+    vi.stubGlobal("fetch", stubFetchByPath({ "/manuscripts": page([], 0) }));
+    const onUploadManuscript = vi.fn();
+    renderWithProviders(
+      <ManuscriptsTable page={1} onPageChange={() => {}} onUploadManuscript={onUploadManuscript} />,
+    );
+    const ctaButtons = await screen.findAllByRole("button", { name: "Upload manuscript" });
+    expect(ctaButtons.length).toBe(2); // mobile card + desktop table, same as every other dual-render case
+    fireEvent.click(ctaButtons[0]);
+    expect(onUploadManuscript).toHaveBeenCalledTimes(1);
   });
 
   it("calls onPageChange when Next is clicked", async () => {
     vi.stubGlobal("fetch", stubFetchByPath({ "/manuscripts": page([], 45) }));
     const onPageChange = vi.fn();
-    renderWithProviders(<ManuscriptsTable page={1} onPageChange={onPageChange} />);
+    renderWithProviders(
+      <ManuscriptsTable page={1} onPageChange={onPageChange} onUploadManuscript={() => {}} />,
+    );
     fireEvent.click(await screen.findByRole("button", { name: "Next" }));
     expect(onPageChange).toHaveBeenCalledWith(2);
   });

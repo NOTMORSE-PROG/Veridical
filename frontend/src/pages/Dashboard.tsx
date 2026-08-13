@@ -6,6 +6,7 @@
 import { useMemo, useRef, useState } from "react";
 import { useMe } from "../auth/useAuth";
 import { NewCheckModal } from "../check/NewCheck";
+import { UploadManuscriptModal } from "../check/UploadManuscriptModal";
 import { KpiCards } from "../dashboard/KpiCards";
 import { ManuscriptsTable } from "../dashboard/ManuscriptsTable";
 import { useDashboardStats } from "../dashboard/useDashboard";
@@ -59,13 +60,13 @@ function EmptyState({ onUpload }: { onUpload: () => void }) {
   );
 }
 
-function PopulatedDashboard() {
+function PopulatedDashboard({ onUploadManuscript }: { onUploadManuscript: () => void }) {
   const { data: stats } = useDashboardStats();
   const [page, setPage] = useState(1);
   return (
     <>
       {stats && <KpiCards stats={stats} />}
-      <ManuscriptsTable page={page} onPageChange={setPage} />
+      <ManuscriptsTable page={page} onPageChange={setPage} onUploadManuscript={onUploadManuscript} />
     </>
   );
 }
@@ -74,14 +75,19 @@ export function DashboardPage() {
   const { data: me } = useMe();
   const { data: families, isPending: familiesPending } = useRubricFamilies();
   const [uploadOpen, setUploadOpen] = useState(false);
+  const [uploadManuscriptOpen, setUploadManuscriptOpen] = useState(false);
   const [newCheckOpen, setNewCheckOpen] = useState(false);
+  const [preselectManuscriptId, setPreselectManuscriptId] = useState<number | undefined>(undefined);
   const headingRef = useRef<HTMLHeadingElement>(null);
   useRouteFocus("Dashboard - VERIDICAL", headingRef);
 
-  // "New check" (screen 4f) only makes sense once at least one rubric is
-  // confirmed & active — same precondition that switches the whole
-  // screen from the empty state (4b) to the populated one (4e).
+  // Drives which body renders (empty state 4b vs. populated 4e).
   const hasActiveRubric = useMemo(() => (families ?? []).some((f) => f.is_active), [families]);
+
+  function openNewCheck() {
+    setUploadManuscriptOpen(false);
+    setNewCheckOpen(true);
+  }
 
   return (
     <div className="flex flex-col gap-4 p-4 sm:p-6">
@@ -92,24 +98,59 @@ export function DashboardPage() {
           </h1>
           {me && <p className="text-sm text-ink-secondary">{me.display_name}</p>}
         </div>
-        <button
-          type="button"
-          data-tour="new-check-cta"
-          onClick={() => setNewCheckOpen(true)}
-          className="flex h-11 items-center justify-center rounded-md border border-border-input bg-panel px-4 text-sm font-bold text-ink hover:bg-status-neutral-bg"
-        >
-          New check
-        </button>
+        {/* BUG-023: never gate a header CTA behind a precondition and hide
+            it — the destination explains what's missing instead (the New
+            Check modal's own structural-blocker panel, now wired to this
+            Upload manuscript CTA too, V-059). Both buttons are always
+            present, consistent with that established precedent. */}
+        <div className="flex flex-col gap-2 sm:flex-row">
+          <button
+            type="button"
+            onClick={() => setUploadManuscriptOpen(true)}
+            className="flex h-11 w-full items-center justify-center rounded-md border border-border-input bg-panel px-4 text-sm font-bold text-ink hover:bg-status-neutral-bg sm:w-auto"
+          >
+            Upload manuscript
+          </button>
+          <button
+            type="button"
+            data-tour="new-check-cta"
+            onClick={() => setNewCheckOpen(true)}
+            className="flex h-11 w-full items-center justify-center rounded-md border border-border-input bg-panel px-4 text-sm font-bold text-ink hover:bg-status-neutral-bg sm:w-auto"
+          >
+            New check
+          </button>
+        </div>
       </div>
 
-      {newCheckOpen && <NewCheckModal onClose={() => setNewCheckOpen(false)} />}
+      {newCheckOpen && (
+        <NewCheckModal
+          onClose={() => {
+            setNewCheckOpen(false);
+            setPreselectManuscriptId(undefined);
+          }}
+          initialManuscriptId={preselectManuscriptId}
+          onUploadManuscript={() => {
+            setNewCheckOpen(false);
+            setUploadManuscriptOpen(true);
+          }}
+        />
+      )}
       {uploadOpen && <UploadRubricModal onClose={() => setUploadOpen(false)} />}
+      {uploadManuscriptOpen && (
+        <UploadManuscriptModal
+          onClose={() => setUploadManuscriptOpen(false)}
+          onUploadSuccess={(manuscriptId) => {
+            setPreselectManuscriptId(manuscriptId);
+            openNewCheck();
+          }}
+        />
+      )}
 
       {/* Staged reveal: don't paint either state until we genuinely know
           which one is true (same pattern as 4v's LandingPending — avoids a
           flash of the wrong screen while `families` is still resolving). */}
       {familiesPending ? null : hasActiveRubric ? (
-        <PopulatedDashboard />
+        <PopulatedDashboard onUploadManuscript={() => setUploadManuscriptOpen(true)} />
       ) : (
         <EmptyState onUpload={() => setUploadOpen(true)} />
       )}

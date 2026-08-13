@@ -137,6 +137,41 @@ describe("NewCheckModal", () => {
     expect(item.tagName).not.toBe("BUTTON");
   });
 
+  it("V-059: 'no manuscripts' still renders as plain text when no upload handoff is wired (no caller regression)", async () => {
+    vi.stubGlobal(
+      "fetch",
+      stubFetchByPath({ "/manuscripts": { items: [], total: 0, page: 1, page_size: 200 }, "/rubric-families": ONE_ACTIVE_FAMILY }),
+    );
+    renderWithProviders(<NewCheckModal onClose={() => {}} />);
+    const alert = await screen.findByRole("alert");
+    const item = within(alert).getByText("No manuscripts are available to check yet.");
+    expect(item.tagName).not.toBe("BUTTON");
+  });
+
+  it("V-059: 'no manuscripts' becomes a real action that hands off to upload when the caller wires one", async () => {
+    vi.stubGlobal(
+      "fetch",
+      stubFetchByPath({ "/manuscripts": { items: [], total: 0, page: 1, page_size: 200 }, "/rubric-families": ONE_ACTIVE_FAMILY }),
+    );
+    const onUploadManuscript = vi.fn();
+    renderWithProviders(<NewCheckModal onClose={() => {}} onUploadManuscript={onUploadManuscript} />);
+    const alert = await screen.findByRole("alert");
+    const button = within(alert).getByRole("button", { name: "No manuscripts are available to check yet." });
+    fireEvent.click(button);
+    expect(onUploadManuscript).toHaveBeenCalledTimes(1);
+  });
+
+  it("V-059: preselects a just-uploaded manuscript once it actually appears in the loaded picker", async () => {
+    vi.stubGlobal(
+      "fetch",
+      stubFetchByPath({ "/manuscripts": MANUSCRIPTS, "/rubric-families": ONE_ACTIVE_FAMILY }),
+    );
+    renderWithProviders(<NewCheckModal onClose={() => {}} initialManuscriptId={1} />);
+    const select = await screen.findByRole("combobox", { name: /manuscript/i });
+    await waitFor(() => expect(select).toHaveValue("1"));
+    expect(screen.getByText(/^Selected:/)).toBeInTheDocument();
+  });
+
   it("submits the selected manuscript and rubric on Start check", async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const path = new URL(typeof input === "string" ? input : input.toString(), "http://localhost")

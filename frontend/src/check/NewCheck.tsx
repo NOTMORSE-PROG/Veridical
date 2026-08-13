@@ -24,15 +24,29 @@ interface Problem {
   id: string;
   message: string;
   // BUG-040: absent (not a no-op () => {}) for a structural blocker with
-  // nowhere in THIS modal to jump to ("no manuscripts"/"no active
-  // rubric" — the real fix is elsewhere, e.g. the upload/rubric-review
-  // screens) — rendering these as an underlined button promised an
-  // action the control didn't deliver (Tab lands on it, Enter does
-  // nothing observable, a false affordance).
-  focus?: () => void;
+  // nowhere in THIS modal to jump to — rendering these as an underlined
+  // button promised an action the control didn't deliver (Tab lands on
+  // it, Enter does nothing observable, a false affordance). V-059 gives
+  // "no manuscripts" a real destination (`onUploadManuscript`, when the
+  // caller supplies one); "no active rubric" still has none, so it stays
+  // plain text on purpose, not because this field can't hold one.
+  action?: () => void;
 }
 
-export function NewCheckModal({ onClose }: { onClose: () => void }) {
+export function NewCheckModal({
+  onClose,
+  initialManuscriptId,
+  onUploadManuscript,
+}: {
+  onClose: () => void;
+  /** Preselects a just-uploaded manuscript (V-059's Dashboard handoff) --
+   * only applied once it's actually present in the loaded picker list, so
+   * a race with the invalidation refetch can't seed a stale/bad id. */
+  initialManuscriptId?: number;
+  /** When supplied, the "no manuscripts" blocker becomes a real action
+   * instead of a dead-end sentence (BUG-039/040's own deferred fix). */
+  onUploadManuscript?: () => void;
+}) {
   const {
     data: manuscripts,
     isPending: manuscriptsPending,
@@ -74,6 +88,21 @@ export function NewCheckModal({ onClose }: { onClose: () => void }) {
     if (focusSummaryToken === 0) return;
     summaryRef.current?.focus();
   }, [focusSummaryToken]);
+
+  // V-059: preselects a manuscript just uploaded via the Dashboard's
+  // upload-then-check handoff. Waits for it to actually appear in the
+  // loaded, ready list rather than trusting the id blindly -- the
+  // invalidated picker query and this modal's mount aren't guaranteed to
+  // race in a particular order. An explicit pick always wins (same rule
+  // already used for `rubricId`), so this only ever fires once, before
+  // the instructor has chosen anything themselves.
+  useEffect(() => {
+    if (initialManuscriptId === undefined) return;
+    if (manuscriptId !== "") return;
+    if (readyManuscripts.some((m) => m.id === initialManuscriptId)) {
+      setManuscriptId(initialManuscriptId);
+    }
+  }, [initialManuscriptId, readyManuscripts, manuscriptId]);
 
   // BUG-039: a "no active rubric"/"no manuscripts" block is a fact about
   // the account, not something the instructor forgot to fill in — it
@@ -117,9 +146,13 @@ export function NewCheckModal({ onClose }: { onClose: () => void }) {
   function computeProblems(): Problem[] {
     const problems: Problem[] = [];
     if (readyManuscripts.length === 0) {
-      problems.push({ id: "no-manuscripts", message: "No manuscripts are available to check yet." });
+      problems.push({
+        id: "no-manuscripts",
+        message: "No manuscripts are available to check yet.",
+        action: onUploadManuscript,
+      });
     } else if (manuscriptId === "") {
-      problems.push({ id: "manuscript", message: "Choose a manuscript.", focus: () => manuscriptSelectRef.current?.focus() });
+      problems.push({ id: "manuscript", message: "Choose a manuscript.", action: () => manuscriptSelectRef.current?.focus() });
     }
     if (activeFamilies.length === 0) {
       problems.push({ id: "no-rubric", message: "No active rubric is available yet." });
@@ -127,7 +160,7 @@ export function NewCheckModal({ onClose }: { onClose: () => void }) {
       problems.push({
         id: "rubric",
         message: "Choose which active rubric to check against.",
-        focus: () => rubricSelectRef.current?.focus(),
+        action: () => rubricSelectRef.current?.focus(),
       });
     }
     return problems;
@@ -210,8 +243,8 @@ export function NewCheckModal({ onClose }: { onClose: () => void }) {
               <ul className="mt-1.5 list-disc pl-5">
                 {currentProblems.map((p) => (
                   <li key={p.id}>
-                    {p.focus ? (
-                      <button type="button" onClick={p.focus} className="text-link underline hover:text-link-hover">
+                    {p.action ? (
+                      <button type="button" onClick={p.action} className="text-link underline hover:text-link-hover">
                         {p.message}
                       </button>
                     ) : (

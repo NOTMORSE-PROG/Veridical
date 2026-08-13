@@ -175,12 +175,32 @@ function formatDate(iso: string): string {
   return new Date(iso).toLocaleDateString();
 }
 
+function UploadManuscriptCta({ onUploadManuscript }: { onUploadManuscript: () => void }) {
+  return (
+    <div className="flex flex-col items-center gap-3 rounded-lg border-2 border-dashed border-border-input bg-page p-8 text-center">
+      <h3 className="text-md font-bold text-ink">No manuscripts yet</h3>
+      <p className="max-w-md text-sm text-ink-secondary">
+        Upload a manuscript to check its readiness against your active format.
+      </p>
+      <button
+        type="button"
+        onClick={onUploadManuscript}
+        className="mt-1 flex h-11 items-center justify-center rounded-md bg-action px-4 text-sm font-bold text-on-action hover:bg-action-hover"
+      >
+        Upload manuscript
+      </button>
+    </div>
+  );
+}
+
 export function ManuscriptsTable({
   page,
   onPageChange,
+  onUploadManuscript,
 }: {
   page: number;
   onPageChange: (p: number) => void;
+  onUploadManuscript: () => void;
 }) {
   const { data, isLoading, isError, refetch } = useManuscriptsPage(page);
   const [expandedId, setExpandedId] = useState<number | null>(null);
@@ -259,9 +279,9 @@ export function ManuscriptsTable({
             </li>
           );
         })}
-        {data.items.length === 0 && (
-          <li className="rounded-lg border border-border bg-panel p-4 text-sm text-ink-tertiary">
-            No manuscripts uploaded yet.
+        {data.total === 0 && (
+          <li>
+            <UploadManuscriptCta onUploadManuscript={onUploadManuscript} />
           </li>
         )}
       </ul>
@@ -320,8 +340,10 @@ export function ManuscriptsTable({
             </div>
           );
         })}
-        {data.items.length === 0 && (
-          <p className="px-4 py-3 text-sm text-ink-tertiary">No manuscripts uploaded yet.</p>
+        {data.total === 0 && (
+          <div className="px-4 py-3">
+            <UploadManuscriptCta onUploadManuscript={onUploadManuscript} />
+          </div>
         )}
       </div>
 
