@@ -176,6 +176,14 @@ class ManuscriptListItem(BaseModel):
     # SAME latest-done run `latest_done_check_run_id` points at, never a
     # different one, so the two can't silently disagree.
     latest_decision: str | None = None
+    # V-041 / ux-critic finding (P1, live-reproduced): without this, a
+    # bulk re-run UI has no signal to exclude a manuscript whose latest
+    # done run was under a COMPLETELY UNRELATED rubric family -- it would
+    # default such a manuscript to selected and could silently submit it
+    # for grading against a rubric it was never checked against, burning
+    # real quota (D-001) with no indication anywhere in the row. Sourced
+    # from the SAME latest-done run as `latest_done_check_run_id`.
+    latest_done_rubric_family_id: str | None = None
 
     model_config = {"from_attributes": True}
 

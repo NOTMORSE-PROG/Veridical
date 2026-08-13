@@ -31,7 +31,7 @@ describe("ManuscriptsTable", () => {
         ]),
       }),
     );
-    renderWithProviders(<ManuscriptsTable page={1} onPageChange={() => {}} onUploadManuscript={() => {}} />);
+    renderWithProviders(<ManuscriptsTable page={1} onPageChange={() => {}} onUploadManuscript={() => {}} onRerun={() => {}} />);
     expect((await screen.findAllByText("Checked")).length).toBe(2);
     const links = screen.getAllByRole("link", { name: "Open report" });
     expect(links).toHaveLength(2);
@@ -57,7 +57,7 @@ describe("ManuscriptsTable", () => {
         ]),
       }),
     );
-    renderWithProviders(<ManuscriptsTable page={1} onPageChange={() => {}} onUploadManuscript={() => {}} />);
+    renderWithProviders(<ManuscriptsTable page={1} onPageChange={() => {}} onUploadManuscript={() => {}} onRerun={() => {}} />);
     expect((await screen.findAllByText("Approved for defense")).length).toBe(2);
     expect(screen.queryByText("Checked")).not.toBeInTheDocument();
   });
@@ -80,7 +80,7 @@ describe("ManuscriptsTable", () => {
         ]),
       }),
     );
-    renderWithProviders(<ManuscriptsTable page={1} onPageChange={() => {}} onUploadManuscript={() => {}} />);
+    renderWithProviders(<ManuscriptsTable page={1} onPageChange={() => {}} onUploadManuscript={() => {}} onRerun={() => {}} />);
     expect((await screen.findAllByText("Checking")).length).toBe(2);
     const links = screen.getAllByRole("link", { name: "View progress" });
     expect(links).toHaveLength(2);
@@ -105,7 +105,7 @@ describe("ManuscriptsTable", () => {
         ]),
       }),
     );
-    renderWithProviders(<ManuscriptsTable page={1} onPageChange={() => {}} onUploadManuscript={() => {}} />);
+    renderWithProviders(<ManuscriptsTable page={1} onPageChange={() => {}} onUploadManuscript={() => {}} onRerun={() => {}} />);
     await screen.findAllByText("Checking");
     const progressLinks = screen.getAllByRole("link", { name: "View progress" });
     for (const link of progressLinks) expect(link).toHaveAttribute("href", "/checks/20");
@@ -132,7 +132,7 @@ describe("ManuscriptsTable", () => {
         ]),
       }),
     );
-    renderWithProviders(<ManuscriptsTable page={1} onPageChange={() => {}} onUploadManuscript={() => {}} />);
+    renderWithProviders(<ManuscriptsTable page={1} onPageChange={() => {}} onUploadManuscript={() => {}} onRerun={() => {}} />);
     await screen.findAllByText("Check failed");
     const priorReportLinks = screen.getAllByRole("link", { name: "Open prior report" });
     expect(priorReportLinks).toHaveLength(2);
@@ -157,13 +157,13 @@ describe("ManuscriptsTable", () => {
         ]),
       }),
     );
-    renderWithProviders(<ManuscriptsTable page={1} onPageChange={() => {}} onUploadManuscript={() => {}} />);
+    renderWithProviders(<ManuscriptsTable page={1} onPageChange={() => {}} onUploadManuscript={() => {}} onRerun={() => {}} />);
     expect((await screen.findAllByText("Not checked yet")).length).toBe(2);
     expect(screen.queryByRole("link", { name: "Open report" })).not.toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "View progress" })).not.toBeInTheDocument();
   });
 
-  it("shows 'Re-run unavailable' (never a native enabled/disabled button pretending re-run exists)", async () => {
+  it("V-041: a done manuscript offers Re-run alongside Open report, and it fires onRerun with the manuscript id", async () => {
     vi.stubGlobal(
       "fetch",
       stubFetchByPath({
@@ -181,11 +181,67 @@ describe("ManuscriptsTable", () => {
         ]),
       }),
     );
-    renderWithProviders(<ManuscriptsTable page={1} onPageChange={() => {}} onUploadManuscript={() => {}} />);
-    // "Open report" already exists for a done run; "Re-run unavailable"
-    // only shows for rows with no report/progress link to offer instead —
-    // covered by the ingest-failure test below.
+    const onRerun = vi.fn();
+    renderWithProviders(
+      <ManuscriptsTable page={1} onPageChange={() => {}} onUploadManuscript={() => {}} onRerun={onRerun} />,
+    );
     await screen.findAllByText("Checked");
+    const rerunButtons = screen.getAllByRole("button", { name: "Re-run" });
+    expect(rerunButtons).toHaveLength(2); // mobile + desktop
+    fireEvent.click(rerunButtons[0]);
+    expect(onRerun).toHaveBeenCalledWith(1);
+  });
+
+  it("V-041 / ui-designer finding: a never-checked manuscript offers no Re-run action (nothing to re-run, no false affordance)", async () => {
+    vi.stubGlobal(
+      "fetch",
+      stubFetchByPath({
+        "/manuscripts": page([
+          {
+            id: 3,
+            group_label: "G-13",
+            ingest_status: "done",
+            ingest_failure_reason: null,
+            created_at: "2026-01-01T00:00:00Z",
+            latest_check_run_id: null,
+            latest_check_run_status: null,
+            latest_done_check_run_id: null,
+          },
+        ]),
+      }),
+    );
+    renderWithProviders(<ManuscriptsTable page={1} onPageChange={() => {}} onUploadManuscript={() => {}} onRerun={() => {}} />);
+    await screen.findAllByText("Not checked yet");
+    expect(screen.queryByRole("button", { name: "Re-run" })).not.toBeInTheDocument();
+  });
+
+  it("V-041: a manuscript whose latest run failed but has an earlier done run still offers Re-run", async () => {
+    vi.stubGlobal(
+      "fetch",
+      stubFetchByPath({
+        "/manuscripts": page([
+          {
+            id: 7,
+            group_label: "G-17",
+            ingest_status: "done",
+            ingest_failure_reason: null,
+            created_at: "2026-01-01T00:00:00Z",
+            latest_check_run_id: 21,
+            latest_check_run_status: "failed",
+            latest_done_check_run_id: 10,
+          },
+        ]),
+      }),
+    );
+    const onRerun = vi.fn();
+    renderWithProviders(
+      <ManuscriptsTable page={1} onPageChange={() => {}} onUploadManuscript={() => {}} onRerun={onRerun} />,
+    );
+    await screen.findAllByText("Check failed");
+    const rerunButtons = screen.getAllByRole("button", { name: "Re-run" });
+    expect(rerunButtons).toHaveLength(2);
+    fireEvent.click(rerunButtons[0]);
+    expect(onRerun).toHaveBeenCalledWith(7);
   });
 
   it("BUG-016: an 'Ingestion failed' row explains why and never dead-ends", async () => {
@@ -206,7 +262,7 @@ describe("ManuscriptsTable", () => {
         ]),
       }),
     );
-    renderWithProviders(<ManuscriptsTable page={1} onPageChange={() => {}} onUploadManuscript={() => {}} />);
+    renderWithProviders(<ManuscriptsTable page={1} onPageChange={() => {}} onUploadManuscript={() => {}} onRerun={() => {}} />);
     expect((await screen.findAllByText("Ingestion failed")).length).toBe(2);
     const [whyButton] = screen.getAllByRole("button", { name: "Why did this fail?" });
     fireEvent.click(whyButton);
@@ -233,7 +289,7 @@ describe("ManuscriptsTable", () => {
         ]),
       }),
     );
-    renderWithProviders(<ManuscriptsTable page={1} onPageChange={() => {}} onUploadManuscript={() => {}} />);
+    renderWithProviders(<ManuscriptsTable page={1} onPageChange={() => {}} onUploadManuscript={() => {}} onRerun={() => {}} />);
     await screen.findAllByText("Ingestion failed");
     const [whyButton] = screen.getAllByRole("button", { name: "Why did this fail?" });
     fireEvent.click(whyButton);
@@ -270,7 +326,7 @@ describe("ManuscriptsTable", () => {
         ]),
       }),
     );
-    renderWithProviders(<ManuscriptsTable page={1} onPageChange={() => {}} onUploadManuscript={() => {}} />);
+    renderWithProviders(<ManuscriptsTable page={1} onPageChange={() => {}} onUploadManuscript={() => {}} onRerun={() => {}} />);
     expect((await screen.findAllByText("Chapter1-3_FinalDefense.pdf")).length).toBe(2);
     expect(screen.getAllByText("Chapter1-3_Revised.pdf").length).toBe(2);
     // The default label is redundant once a filename wins the primary
@@ -297,7 +353,7 @@ describe("ManuscriptsTable", () => {
         ]),
       }),
     );
-    renderWithProviders(<ManuscriptsTable page={1} onPageChange={() => {}} onUploadManuscript={() => {}} />);
+    renderWithProviders(<ManuscriptsTable page={1} onPageChange={() => {}} onUploadManuscript={() => {}} onRerun={() => {}} />);
     expect((await screen.findAllByText("Ungrouped")).length).toBe(2);
   });
 
@@ -311,14 +367,14 @@ describe("ManuscriptsTable", () => {
         ),
       }),
     );
-    renderWithProviders(<ManuscriptsTable page={1} onPageChange={() => {}} onUploadManuscript={() => {}} />);
+    renderWithProviders(<ManuscriptsTable page={1} onPageChange={() => {}} onUploadManuscript={() => {}} onRerun={() => {}} />);
     expect(await screen.findByRole("alert")).toHaveTextContent("Could not load your manuscripts.");
     expect(screen.getByRole("button", { name: "Try again" })).toBeInTheDocument();
   });
 
   it("shows pagination controls only when there is more than one page", async () => {
     vi.stubGlobal("fetch", stubFetchByPath({ "/manuscripts": page([], 45) }));
-    renderWithProviders(<ManuscriptsTable page={1} onPageChange={() => {}} onUploadManuscript={() => {}} />);
+    renderWithProviders(<ManuscriptsTable page={1} onPageChange={() => {}} onUploadManuscript={() => {}} onRerun={() => {}} />);
     expect(await screen.findByText("Page 1 of 3")).toBeInTheDocument();
     // total=45 here (a later page's fixture) -- zero ROWS on this
     // particular page must not be confused with zero manuscripts overall,
@@ -330,7 +386,7 @@ describe("ManuscriptsTable", () => {
     vi.stubGlobal("fetch", stubFetchByPath({ "/manuscripts": page([], 0) }));
     const onUploadManuscript = vi.fn();
     renderWithProviders(
-      <ManuscriptsTable page={1} onPageChange={() => {}} onUploadManuscript={onUploadManuscript} />,
+      <ManuscriptsTable page={1} onPageChange={() => {}} onUploadManuscript={onUploadManuscript} onRerun={() => {}} />,
     );
     const ctaButtons = await screen.findAllByRole("button", { name: "Upload manuscript" });
     expect(ctaButtons.length).toBe(2); // mobile card + desktop table, same as every other dual-render case
@@ -342,7 +398,7 @@ describe("ManuscriptsTable", () => {
     vi.stubGlobal("fetch", stubFetchByPath({ "/manuscripts": page([], 45) }));
     const onPageChange = vi.fn();
     renderWithProviders(
-      <ManuscriptsTable page={1} onPageChange={onPageChange} onUploadManuscript={() => {}} />,
+      <ManuscriptsTable page={1} onPageChange={onPageChange} onUploadManuscript={() => {}} onRerun={() => {}} />,
     );
     fireEvent.click(await screen.findByRole("button", { name: "Next" }));
     expect(onPageChange).toHaveBeenCalledWith(2);

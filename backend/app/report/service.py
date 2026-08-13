@@ -196,6 +196,33 @@ async def get_report(session: AsyncSession, check_run_id: int, instructor_id: in
             CheckResult.outcome.in_(NEEDS_REVIEW_OUTCOMES),
         )
     )
+
+    # V-041: the most recent OTHER done+reported run for the SAME
+    # manuscript UNDER THE SAME RUBRIC FAMILY (e.g. this run is a
+    # re-check under a newer version of the same format) — the
+    # version-comparison line's data source. `backend-critic` found live
+    # that without the family filter, a manuscript checked against an
+    # unrelated format in between two real versions would win the
+    # comparison, manufacturing a "v1 -> v2" story that never happened
+    # (two different formats' verdicts, not two versions of one). None
+    # when this is the manuscript's first reported run under this family.
+    previous = (
+        await session.execute(
+            select(ReadinessReport.status, ReadinessReport.composite_score)
+            .join(CheckRun, CheckRun.id == ReadinessReport.check_run_id)
+            .join(Rubric, Rubric.id == CheckRun.rubric_id)
+            .where(
+                CheckRun.manuscript_id == check_run.manuscript_id,
+                CheckRun.id != check_run_id,
+                CheckRun.status == CheckRunStatus.done,
+                CheckRun.created_at < check_run.created_at,
+                Rubric.rubric_family_id == rubric.rubric_family_id,
+            )
+            .order_by(CheckRun.created_at.desc())
+            .limit(1)
+        )
+    ).first()
+
     return ReportOut(
         check_run_id=check_run_id,
         manuscript_group_label=manuscript.group_label,
@@ -217,6 +244,12 @@ async def get_report(session: AsyncSession, check_run_id: int, instructor_id: in
         decision_note=report.decision_note if report is not None else None,
         pending_review_count=pending_review_count or 0,
         rubric_is_current=rubric.is_active,
+        previous_status=previous.status.value if previous is not None else None,
+        previous_composite_score=(
+            float(previous.composite_score)
+            if previous is not None and previous.composite_score is not None
+            else None
+        ),
     )
 
 

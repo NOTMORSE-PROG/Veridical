@@ -20,6 +20,8 @@ const BASE_REPORT: ReportOut = {
   decision_note: null,
   pending_review_count: 0,
   rubric_is_current: true,
+  previous_status: null,
+  previous_composite_score: null,
   results: [
     {
       criterion_id: 1,
@@ -548,5 +550,37 @@ describe("ReportPage", () => {
     await waitFor(() =>
       expect(document.activeElement).toBe(screen.getByRole("heading", { name: "Final decision" })),
     );
+  });
+
+  it("V-041: renders the version-comparison line when a real prior run exists", async () => {
+    const report: ReportOut = {
+      ...BASE_REPORT,
+      status: "ready",
+      composite_score: 95,
+      previous_status: "conditionally_ready",
+      previous_composite_score: 70,
+    };
+    vi.stubGlobal(
+      "fetch",
+      stubFetchByPath({ "/check-runs/5/report": report, ...stubEscalated(), ...stubFlags() }),
+    );
+    renderWithProviders(<ReportPage />, { route: "/report/5", path: "/report/:checkRunId" });
+
+    expect(await screen.findByText("Previously")).toBeInTheDocument();
+    expect(screen.getByText("Conditionally Ready")).toBeInTheDocument();
+    expect(screen.getByText("(70%)")).toBeInTheDocument();
+    expect(screen.getByText("now")).toBeInTheDocument();
+    expect(screen.getByText("(95%)")).toBeInTheDocument();
+  });
+
+  it("V-041: omits the version-comparison line for a manuscript's first-ever report", async () => {
+    vi.stubGlobal(
+      "fetch",
+      stubFetchByPath({ "/check-runs/5/report": BASE_REPORT, ...stubEscalated(), ...stubFlags() }),
+    );
+    renderWithProviders(<ReportPage />, { route: "/report/5", path: "/report/:checkRunId" });
+
+    await screen.findByText("Ready");
+    expect(screen.queryByText("Previously")).not.toBeInTheDocument();
   });
 });

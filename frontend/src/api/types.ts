@@ -66,6 +66,11 @@ export interface ManuscriptListItem {
   // V-038: the latest DONE run's decision, if any -- sourced from the
   // SAME run latest_done_check_run_id points at.
   latest_decision: Decision | null;
+  // V-041 / ux-critic finding: which rubric FAMILY the latest DONE run
+  // used -- lets a bulk re-run UI exclude a manuscript checked only
+  // under a completely unrelated format, instead of defaulting it to
+  // selected and burning quota grading it against the wrong rubric.
+  latest_done_rubric_family_id: string | null;
 }
 
 export interface PaginatedManuscripts {
@@ -197,6 +202,26 @@ export interface ReportOut {
   // False when the rubric used for this run is no longer the active
   // version for its family.
   rubric_is_current: boolean;
+  // V-041 — the version-comparison line: the same manuscript's most
+  // recent OTHER done+reported run, if one exists (e.g. this run is a
+  // re-check against a newer rubric version). Null when this is the
+  // manuscript's first reported run.
+  previous_status: "ready" | "conditionally_ready" | "not_ready" | "needs_review" | null;
+  previous_composite_score: number | null;
+}
+
+// V-041: shown before confirming a bulk re-run. Each manuscript's own
+// most recent DONE run's real measured call count is the estimate --
+// null when it has never been checked before (nothing to estimate from).
+export interface RerunEstimateItem {
+  manuscript_id: number;
+  estimated_calls: number | null;
+}
+
+export interface RerunEstimateOut {
+  items: RerunEstimateItem[];
+  total_estimated_calls: number;
+  manuscripts_with_no_estimate: number;
 }
 
 export type Decision = "approved" | "returned" | "rejected";

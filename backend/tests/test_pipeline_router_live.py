@@ -169,3 +169,31 @@ def test_create_check_run_rejects_unconfirmed_rubric(logged_in):
     client, manuscript_id, _ = logged_in
     resp = client.post("/check-runs", json={"manuscript_id": manuscript_id, "rubric_id": 999999})
     assert resp.status_code == 404
+
+
+def test_rerun_estimate_requires_auth(client):
+    resp = client.get("/check-runs/rerun-estimate")
+    assert resp.status_code == 401
+
+
+def test_rerun_estimate_route_is_not_swallowed_by_the_int_path_param(logged_in):
+    """V-041: `/check-runs/rerun-estimate` must be registered BEFORE
+    `/check-runs/{check_run_id}` -- a literal path segment always has to
+    win over a dynamic one, never the reverse (a real, easy-to-get-wrong
+    FastAPI route-ordering trap)."""
+    client, manuscript_id, rubric_id = logged_in
+    resp = client.get(
+        f"/check-runs/rerun-estimate?rubric_id={rubric_id}&manuscript_id={manuscript_id}"
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    # A manuscript with no prior DONE run has nothing to estimate from.
+    assert body["items"] == [{"manuscript_id": manuscript_id, "estimated_calls": None}]
+    assert body["total_estimated_calls"] == 0
+    assert body["manuscripts_with_no_estimate"] == 1
+
+
+def test_rerun_estimate_requires_a_rubric_id(logged_in):
+    client, manuscript_id, _ = logged_in
+    resp = client.get(f"/check-runs/rerun-estimate?manuscript_id={manuscript_id}")
+    assert resp.status_code == 422

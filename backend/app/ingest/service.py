@@ -24,6 +24,7 @@ from app.llm import LLMNotConfiguredError, get_llm_client
 from app.models.citation import Citation
 from app.models.enums import CheckRunStatus, IngestFailureReason, IngestStatus
 from app.models.manuscript import Manuscript
+from app.models.rubric import Rubric
 from app.models.run import CheckRun, ReadinessReport
 
 # One extractor per supported suffix. Each is a sync callable executed off
@@ -312,6 +313,33 @@ async def list_manuscripts(
         run = latest_done_by_manuscript.get(manuscript_id)
         return decision_by_run.get(run.id) if run is not None else None
 
+    # V-041 / ux-critic finding (P1, live-reproduced against real
+    # multi-family seeded data): without this, RerunModal had no signal
+    # to tell "checked under the same rubric family, genuinely stale" from
+    # "checked under a completely unrelated format" -- it defaulted BOTH
+    # to selected, capable of silently submitting a manuscript for
+    # grading against a rubric it was never invited to run under, burning
+    # real quota (D-001) with no indication anywhere in the row. One
+    # query, no N+1, same shape as `decision_by_run` above.
+    family_by_run: dict[int, str] = {}
+    if done_run_ids:
+        rubric_ids = {run.rubric_id for run in latest_done_by_manuscript.values()}
+        rubric_rows = (
+            await session.execute(
+                select(Rubric.id, Rubric.rubric_family_id).where(Rubric.id.in_(rubric_ids))
+            )
+        ).all()
+        family_by_rubric = {rubric_id: str(family_id) for rubric_id, family_id in rubric_rows}
+        family_by_run = {
+            run.id: family_by_rubric[run.rubric_id]
+            for run in latest_done_by_manuscript.values()
+            if run.rubric_id in family_by_rubric
+        }
+
+    def _latest_done_rubric_family_id(manuscript_id: int) -> str | None:
+        run = latest_done_by_manuscript.get(manuscript_id)
+        return family_by_run.get(run.id) if run is not None else None
+
     items = [
         ManuscriptListItem(
             id=m.id,
@@ -326,6 +354,7 @@ async def list_manuscripts(
             latest_check_run_status=_latest_status(m.id),
             latest_done_check_run_id=_latest_done_id(m.id),
             latest_decision=_latest_decision(m.id),
+            latest_done_rubric_family_id=_latest_done_rubric_family_id(m.id),
         )
         for m in manuscripts
     ]

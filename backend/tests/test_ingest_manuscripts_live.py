@@ -189,6 +189,52 @@ async def test_latest_decision_is_surfaced_from_the_latest_done_runs_report(sess
         assert page.items[0].latest_decision == "approved"
 
 
+async def test_latest_done_rubric_family_id_is_surfaced_and_distinguishes_families(session_factory):
+    """V-041 / ux-critic finding (P1, live-reproduced against real
+    multi-family seeded data): without this field, a bulk re-run UI has
+    no signal to exclude a manuscript whose latest done run was under a
+    completely unrelated rubric family."""
+    async with session_factory() as session:
+        instructor = Instructor(email="family@demo.local", display_name="Family Test")
+        session.add(instructor)
+        await session.commit()
+        cs_format = Rubric(instructor_id=instructor.id, title="CS Format", source_file="cs.pdf")
+        it_format = Rubric(instructor_id=instructor.id, title="IT Format", source_file="it.pdf")
+        session.add_all([cs_format, it_format])
+        await session.commit()
+
+        checked_under_cs = Manuscript(
+            instructor_id=instructor.id, group_label="G1", file_ref="x.pdf"
+        )
+        checked_under_it = Manuscript(
+            instructor_id=instructor.id, group_label="G2", file_ref="y.pdf"
+        )
+        session.add_all([checked_under_cs, checked_under_it])
+        await session.commit()
+
+        session.add_all(
+            [
+                CheckRun(
+                    manuscript_id=checked_under_cs.id,
+                    rubric_id=cs_format.id,
+                    status=CheckRunStatus.done,
+                ),
+                CheckRun(
+                    manuscript_id=checked_under_it.id,
+                    rubric_id=it_format.id,
+                    status=CheckRunStatus.done,
+                ),
+            ]
+        )
+        await session.commit()
+
+        page = await list_manuscripts(session, instructor.id)
+        by_id = {item.id: item.latest_done_rubric_family_id for item in page.items}
+        assert by_id[checked_under_cs.id] == str(cs_format.rubric_family_id)
+        assert by_id[checked_under_it.id] == str(it_format.rubric_family_id)
+        assert by_id[checked_under_cs.id] != by_id[checked_under_it.id]
+
+
 async def test_undecided_report_has_a_null_latest_decision_not_a_fabricated_one(session_factory):
     async with session_factory() as session:
         instructor = Instructor(email="undecided@demo.local", display_name="Undecided Test")

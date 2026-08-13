@@ -2,7 +2,7 @@
 
 from typing import Annotated
 
-from fastapi import APIRouter, BackgroundTasks, Depends
+from fastapi import APIRouter, BackgroundTasks, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.dependencies import get_current_instructor
@@ -11,8 +11,14 @@ from app.db import get_session
 from app.models.instructor import Instructor
 from app.models.manuscript import Manuscript
 from app.models.rubric import Rubric
-from app.pipeline.schemas import CheckRunOut, CreateCheckRunRequest
-from app.pipeline.service import create_check_run, get_check_run, list_check_runs, queue_position
+from app.pipeline.schemas import CheckRunOut, CreateCheckRunRequest, RerunEstimateOut
+from app.pipeline.service import (
+    create_check_run,
+    estimate_rerun_calls,
+    get_check_run,
+    list_check_runs,
+    queue_position,
+)
 from app.pipeline.worker import advance_once
 from app.ratelimit import enforce_action_rate_limit
 
@@ -57,6 +63,18 @@ async def create_check_run_route(
     # behind an already-running check (ticket AC: second upload queues).
     background_tasks.add_task(advance_once, check_run.id)
     return await _to_out(session, check_run)
+
+
+@router.get("/check-runs/rerun-estimate", response_model=RerunEstimateOut)
+async def rerun_estimate_route(
+    rubric_id: int,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    instructor: Annotated[Instructor, Depends(get_current_instructor)],
+    manuscript_id: Annotated[list[int] | None, Query()] = None,
+) -> RerunEstimateOut:
+    # Registered BEFORE /check-runs/{check_run_id} -- a literal path
+    # segment must win over the dynamic int param, not the reverse.
+    return await estimate_rerun_calls(session, instructor.id, manuscript_id or [], rubric_id)
 
 
 @router.get("/check-runs/{check_run_id}", response_model=CheckRunOut)

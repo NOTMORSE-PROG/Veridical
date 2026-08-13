@@ -30,6 +30,7 @@ import { Modal, ModalBackdrop } from "../components/Modal";
 import type { StatusPillTone } from "../components/StatusPill";
 import { StatusPill } from "../components/StatusPill";
 import { useRouteFocus } from "../routing/useRouteFocus";
+import { RerunModal } from "./RerunModal";
 import {
   useActivateRubric,
   useDeleteRubric,
@@ -195,6 +196,14 @@ export function ManageRubricPage() {
   const [liveMessage, setLiveMessage] = useState("");
   const [justChanged, setJustChanged] = useState<JustChanged | null>(null);
   const historyHeadingRef = useRef<HTMLHeadingElement>(null);
+  // V-041: a persistent (not one-shot) signal that a version was just
+  // activated -- unlike `justChanged` (nulled the same tick it's read,
+  // only driving a one-time focus+announce effect), this survives until
+  // explicitly dismissed or acted on, since an instructor who doesn't
+  // re-run manuscripts in that exact moment (e.g. triages first, comes
+  // back later) would otherwise have no way to rediscover the offer.
+  const [recentActivation, setRecentActivation] = useState<number | null>(null);
+  const [rerunOpen, setRerunOpen] = useState(false);
 
   useEffect(() => {
     if (!justChanged) return;
@@ -212,6 +221,7 @@ export function ManageRubricPage() {
     try {
       await activate.mutateAsync(id);
       setJustChanged({ version, verb: "activated" });
+      setRecentActivation(version);
     } catch (err) {
       setActionError(err instanceof ApiError ? err.message : "Activate failed. Try again.");
     }
@@ -344,6 +354,13 @@ export function ManageRubricPage() {
                 </Link>
                 <button
                   type="button"
+                  onClick={() => setRerunOpen(true)}
+                  className="flex h-11 items-center justify-center whitespace-nowrap rounded-md border border-border-input bg-panel px-4 text-sm font-bold text-ink hover:bg-status-neutral-bg"
+                >
+                  Re-run manuscripts
+                </button>
+                <button
+                  type="button"
                   onClick={() => setUploadOpen(true)}
                   className="flex h-11 items-center justify-center whitespace-nowrap rounded-md bg-action px-4 text-sm font-bold text-on-action hover:bg-action-hover"
                 >
@@ -376,6 +393,43 @@ export function ManageRubricPage() {
           </p>
         )}
       </section>
+
+      {recentActivation !== null && (
+        <div
+          role="status"
+          className="flex flex-wrap items-center justify-between gap-2 rounded-md bg-status-info-bg px-3 py-2.5 text-sm text-status-info-text"
+        >
+          <span>
+            Version {recentActivation} is now active. Manuscripts already checked under a
+            previous version can be re-run against it.
+          </span>
+          <div className="flex flex-none items-center gap-3">
+            <button
+              type="button"
+              onClick={() => {
+                setRerunOpen(true);
+                setRecentActivation(null);
+              }}
+              className="text-sm font-semibold underline hover:no-underline"
+            >
+              Re-run manuscripts
+            </button>
+            <button
+              type="button"
+              aria-label="Dismiss"
+              onClick={() => setRecentActivation(null)}
+              className="flex h-8 w-8 flex-none items-center justify-center rounded-md hover:bg-status-neutral-bg"
+            >
+              <svg aria-hidden="true" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+                <line x1="5" y1="5" x2="19" y2="19" />
+                <line x1="19" y1="5" x2="5" y2="19" />
+              </svg>
+            </button>
+          </div>
+        </div>
+      )}
+
+      {rerunOpen && <RerunModal onClose={() => setRerunOpen(false)} />}
 
       {actionError && (
         <div

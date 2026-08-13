@@ -14,20 +14,10 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router";
 import type { IngestFailureReason, ManuscriptListItem } from "../api/types";
-import type { StatusPillTone } from "../components/StatusPill";
 import { StatusPill } from "../components/StatusPill";
-import { DECISION_LABEL, DECISION_TONE } from "../domain/decisionTone";
 import { manuscriptIdentity } from "../domain/manuscriptLabel";
+import { RUNNING_STATUSES, manuscriptStatus } from "../domain/manuscriptStatus";
 import { useManuscriptsPage } from "./useDashboard";
-
-const RUNNING_STATUSES = new Set([
-  "queued",
-  "ingesting",
-  "structural",
-  "semantic",
-  "integrity",
-  "aggregating",
-]);
 
 const INGEST_FAILURE_COPY: Record<IngestFailureReason, string> = {
   file_too_large:
@@ -41,22 +31,6 @@ const INGEST_FAILURE_COPY: Record<IngestFailureReason, string> = {
 function ingestFailureText(reason: IngestFailureReason | null): string {
   if (reason && INGEST_FAILURE_COPY[reason]) return INGEST_FAILURE_COPY[reason];
   return "This file could not be processed. The specific reason was not recorded before this feature shipped.";
-}
-
-function statusPill(row: ManuscriptListItem): { label: string; tone: StatusPillTone } {
-  if (row.latest_check_run_status === "done") {
-    if (row.latest_decision) {
-      return { label: DECISION_LABEL[row.latest_decision], tone: DECISION_TONE[row.latest_decision] };
-    }
-    return { label: "Checked", tone: "success" };
-  }
-  if (row.latest_check_run_status === "failed") return { label: "Check failed", tone: "attention" };
-  if (row.latest_check_run_status && RUNNING_STATUSES.has(row.latest_check_run_status)) {
-    return { label: "Checking", tone: "info" };
-  }
-  if (row.ingest_status === "done") return { label: "Not checked yet", tone: "neutral" };
-  if (row.ingest_status === "failed") return { label: "Ingestion failed", tone: "attention" };
-  return { label: "Ingesting", tone: "info" };
 }
 
 // Escape closes whichever row's reason panel is open, from anywhere on
@@ -125,7 +99,7 @@ function IngestFailurePanel({ row }: { row: ManuscriptListItem }) {
 const linkClass =
   "inline-flex min-h-6 items-center text-xs text-link underline hover:text-link-hover sm:min-h-11";
 
-function RowActions({ row }: { row: ManuscriptListItem }) {
+function RowActions({ row, onRerun }: { row: ManuscriptListItem; onRerun: (manuscriptId: number) => void }) {
   const running = row.latest_check_run_status
     ? RUNNING_STATUSES.has(row.latest_check_run_status)
     : false;
@@ -144,9 +118,14 @@ function RowActions({ row }: { row: ManuscriptListItem }) {
 
   if (row.latest_check_run_status === "done" && row.latest_check_run_id) {
     return (
-      <Link to={`/report/${row.latest_check_run_id}`} className={linkClass}>
-        Open report
-      </Link>
+      <div className="flex flex-col items-end gap-1 sm:flex-row sm:items-center sm:gap-3">
+        <Link to={`/report/${row.latest_check_run_id}`} className={linkClass}>
+          Open report
+        </Link>
+        <button type="button" onClick={() => onRerun(row.id)} className={linkClass}>
+          Re-run
+        </button>
+      </div>
     );
   }
   if (running && row.latest_check_run_id) {
@@ -171,17 +150,24 @@ function RowActions({ row }: { row: ManuscriptListItem }) {
           Why did this fail?
         </Link>
         {priorReportLink}
+        {/* An earlier DONE run still exists for this manuscript even
+            though its latest attempt failed -- a real re-run candidate,
+            not a dead end (V-041). */}
+        {row.latest_done_check_run_id && (
+          <button type="button" onClick={() => onRerun(row.id)} className={linkClass}>
+            Re-run
+          </button>
+        )}
       </div>
     );
   }
-  return (
-    <span
-      className="text-xs text-ink-tertiary"
-      title="Re-run against a new rubric version arrives later"
-    >
-      Re-run unavailable
-    </span>
-  );
+  // A manuscript with no completed run at all has nothing to re-run --
+  // the real next action ("New check") already lives in the Dashboard
+  // header, not this row (V-041 / ui-designer finding: the previous
+  // "Re-run unavailable" copy here implied a prior run existed when it
+  // never did, contradicting this row's own status pill two columns
+  // over which already correctly says "Not checked yet").
+  return null;
 }
 
 function formatDate(iso: string): string {
@@ -210,10 +196,12 @@ export function ManuscriptsTable({
   page,
   onPageChange,
   onUploadManuscript,
+  onRerun,
 }: {
   page: number;
   onPageChange: (p: number) => void;
   onUploadManuscript: () => void;
+  onRerun: (manuscriptId: number) => void;
 }) {
   const { data, isLoading, isError, refetch } = useManuscriptsPage(page);
   const [expandedId, setExpandedId] = useState<number | null>(null);
@@ -252,7 +240,7 @@ export function ManuscriptsTable({
           WCAG 1.4.10's data-table exception is a choice, not a default). */}
       <ul className="flex flex-col gap-2 sm:hidden">
         {data.items.map((row) => {
-          const { label, tone } = statusPill(row);
+          const { label, tone } = manuscriptStatus(row);
           const isIngestFailure = row.ingest_status === "failed";
           const isOpen = expandedId === row.id;
           const identity = manuscriptIdentity(row.group_label, row.original_filename);
@@ -281,7 +269,7 @@ export function ManuscriptsTable({
                 {isIngestFailure ? (
                   <IngestFailureButton row={row} isOpen={isOpen} onToggle={() => toggle(row.id)} />
                 ) : (
-                  <RowActions row={row} />
+                  <RowActions row={row} onRerun={onRerun} />
                 )}
               </div>
               {isIngestFailure && isOpen && (
@@ -313,7 +301,7 @@ export function ManuscriptsTable({
           </span>
         </div>
         {data.items.map((row) => {
-          const { label, tone } = statusPill(row);
+          const { label, tone } = manuscriptStatus(row);
           const isIngestFailure = row.ingest_status === "failed";
           const isOpen = expandedId === row.id;
           const identity = manuscriptIdentity(row.group_label, row.original_filename);
@@ -342,7 +330,7 @@ export function ManuscriptsTable({
                 {isIngestFailure ? (
                   <IngestFailureButton row={row} isOpen={isOpen} onToggle={() => toggle(row.id)} />
                 ) : (
-                  <RowActions row={row} />
+                  <RowActions row={row} onRerun={onRerun} />
                 )}
               </div>
               {isIngestFailure && isOpen && (

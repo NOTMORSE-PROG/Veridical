@@ -6,6 +6,7 @@
 // reimplemented with VERIDICAL's own tokens.
 import { type ReactNode, useEffect, useId, useRef } from "react";
 import { createPortal } from "react-dom";
+import { cx } from "./cx";
 import { useInertBackground } from "./useInertBackground";
 
 interface ModalProps {
@@ -13,7 +14,18 @@ interface ModalProps {
   children?: ReactNode;
   footer?: ReactNode;
   onClose?: () => void;
+  // V-041: RerunModal's picker + estimate + per-item progress list needs
+  // more room than every other modal's fixed 512px. Default "md" is
+  // byte-identical to what every existing consumer already renders --
+  // opting into "lg" (672px, the same width Progress.tsx's own page
+  // wrapper already uses) is a per-modal choice, not a system default.
+  size?: "md" | "lg";
 }
+
+const SIZE_CLASS: Record<"md" | "lg", string> = {
+  md: "max-w-lg",
+  lg: "max-w-2xl",
+};
 
 const FOCUSABLE_SELECTOR =
   'a[href], button:not([disabled]), textarea:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])';
@@ -41,7 +53,7 @@ export function ModalBackdrop({ children }: { children: ReactNode }) {
   );
 }
 
-export function Modal({ title, children, footer, onClose }: ModalProps) {
+export function Modal({ title, children, footer, onClose, size = "md" }: ModalProps) {
   const titleId = useId();
   const dialogRef = useRef<HTMLDivElement>(null);
   const previouslyFocused = useRef<HTMLElement | null>(null);
@@ -111,7 +123,10 @@ export function Modal({ title, children, footer, onClose }: ModalProps) {
       aria-modal="true"
       aria-labelledby={titleId}
       tabIndex={-1}
-      className="flex max-h-[90vh] w-full max-w-lg flex-col gap-4 overflow-y-auto rounded-lg border border-border bg-panel p-6 text-sm shadow-lg"
+      className={cx(
+        "flex max-h-[90vh] w-full flex-col gap-4 overflow-y-auto rounded-lg border border-border bg-panel p-6 text-sm shadow-lg",
+        SIZE_CLASS[size],
+      )}
     >
       <div className="flex items-start gap-3">
         <h2 id={titleId} className="text-md font-bold text-ink">

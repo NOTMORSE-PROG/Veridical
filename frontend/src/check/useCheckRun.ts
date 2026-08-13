@@ -3,7 +3,7 @@
 // screen's polling query.
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api/client";
-import type { CheckRun, IngestSummary, PaginatedManuscripts } from "../api/types";
+import type { CheckRun, IngestSummary, PaginatedManuscripts, RerunEstimateOut } from "../api/types";
 
 /** The New Check modal just wants "everything ingested" — requests one
  * generously large page rather than needing its own picker pagination
@@ -49,7 +49,33 @@ export function useCreateCheckRun() {
       api.post<CheckRun>("/check-runs", body),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["check-runs"] });
+      // V-041 (ui-designer finding): ManuscriptsTable reads
+      // latest_check_run_status from the /manuscripts list, not
+      // /check-runs -- without this, a freshly-created run (e.g. from
+      // RerunModal, which returns to the SAME screen instead of
+      // navigating away like NewCheckModal does) would leave the table
+      // showing stale "Checked" instead of "Checking" until an unrelated
+      // refetch happened to occur.
+      queryClient.invalidateQueries({ queryKey: ["manuscripts"] });
     },
+  });
+}
+
+// V-041 (D-001 quota discipline): shown BEFORE confirming a bulk
+// re-run against `rubricId`. Not Gemini-billed itself (reads audit_log,
+// a cheap DB aggregate) -- `staleTime` exists to avoid re-querying on
+// every checkbox toggle within one modal session, not to protect quota.
+export function useRerunEstimate(manuscriptIds: number[], rubricId: number | undefined) {
+  const sortedKey = [...manuscriptIds].sort((a, b) => a - b).join(",");
+  return useQuery({
+    queryKey: ["rerun-estimate", rubricId, sortedKey],
+    queryFn: () => {
+      const params = new URLSearchParams({ rubric_id: String(rubricId) });
+      for (const id of manuscriptIds) params.append("manuscript_id", String(id));
+      return api.get<RerunEstimateOut>(`/check-runs/rerun-estimate?${params.toString()}`);
+    },
+    enabled: manuscriptIds.length > 0 && rubricId !== undefined,
+    staleTime: 30_000,
   });
 }
 

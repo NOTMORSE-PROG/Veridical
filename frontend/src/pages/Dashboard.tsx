@@ -11,6 +11,7 @@ import { KpiCards } from "../dashboard/KpiCards";
 import { ManuscriptsTable } from "../dashboard/ManuscriptsTable";
 import { useDashboardStats } from "../dashboard/useDashboard";
 import { useRouteFocus } from "../routing/useRouteFocus";
+import { RerunModal } from "../rubric/RerunModal";
 import { useRubricFamilies } from "../rubric/useRubric";
 import { UploadRubricModal } from "../rubric/UploadRubricModal";
 
@@ -60,13 +61,24 @@ function EmptyState({ onUpload }: { onUpload: () => void }) {
   );
 }
 
-function PopulatedDashboard({ onUploadManuscript }: { onUploadManuscript: () => void }) {
+function PopulatedDashboard({
+  onUploadManuscript,
+  onRerun,
+}: {
+  onUploadManuscript: () => void;
+  onRerun: (manuscriptId: number) => void;
+}) {
   const { data: stats } = useDashboardStats();
   const [page, setPage] = useState(1);
   return (
     <>
       {stats && <KpiCards stats={stats} />}
-      <ManuscriptsTable page={page} onPageChange={setPage} onUploadManuscript={onUploadManuscript} />
+      <ManuscriptsTable
+        page={page}
+        onPageChange={setPage}
+        onUploadManuscript={onUploadManuscript}
+        onRerun={onRerun}
+      />
     </>
   );
 }
@@ -78,6 +90,8 @@ export function DashboardPage() {
   const [uploadManuscriptOpen, setUploadManuscriptOpen] = useState(false);
   const [newCheckOpen, setNewCheckOpen] = useState(false);
   const [preselectManuscriptId, setPreselectManuscriptId] = useState<number | undefined>(undefined);
+  const [rerunOpen, setRerunOpen] = useState(false);
+  const [rerunInitialIds, setRerunInitialIds] = useState<number[] | undefined>(undefined);
   const headingRef = useRef<HTMLHeadingElement>(null);
   useRouteFocus("Dashboard - VERIDICAL", headingRef);
 
@@ -145,12 +159,27 @@ export function DashboardPage() {
           }}
         />
       )}
+      {rerunOpen && (
+        <RerunModal
+          onClose={() => {
+            setRerunOpen(false);
+            setRerunInitialIds(undefined);
+          }}
+          initialManuscriptIds={rerunInitialIds}
+        />
+      )}
 
       {/* Staged reveal: don't paint either state until we genuinely know
           which one is true (same pattern as 4v's LandingPending — avoids a
           flash of the wrong screen while `families` is still resolving). */}
       {familiesPending ? null : hasActiveRubric ? (
-        <PopulatedDashboard onUploadManuscript={() => setUploadManuscriptOpen(true)} />
+        <PopulatedDashboard
+          onUploadManuscript={() => setUploadManuscriptOpen(true)}
+          onRerun={(manuscriptId) => {
+            setRerunInitialIds([manuscriptId]);
+            setRerunOpen(true);
+          }}
+        />
       ) : (
         <EmptyState onUpload={() => setUploadOpen(true)} />
       )}

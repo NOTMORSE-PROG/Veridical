@@ -21,6 +21,8 @@ const BASE_REPORT: ReportOut = {
   decision_note: null,
   pending_review_count: 0,
   rubric_is_current: true,
+  previous_status: null,
+  previous_composite_score: null,
   results: [],
 };
 
