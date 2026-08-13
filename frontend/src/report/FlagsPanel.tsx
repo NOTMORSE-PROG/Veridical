@@ -227,7 +227,7 @@ export function FlagsPanel({ checkRunId }: { checkRunId: number }) {
   }
 
   const tone = worstFlagTone(flags);
-  const groups = CHECK_KIND_ORDER.map((kind) => ({
+  const groups: { kind: string; flags: FlagSummaryOut[] }[] = CHECK_KIND_ORDER.map((kind) => ({
     kind,
     flags: flags.filter((f) => f.check_kind === kind),
   })).filter((g) => g.flags.length > 0);
