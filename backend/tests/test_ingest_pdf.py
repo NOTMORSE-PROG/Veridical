@@ -341,12 +341,21 @@ def test_service_persists_tree_and_status(tmp_path, monkeypatch, ingest_scratch_
     from sqlalchemy import select
     from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
+    from app import db
     from app.db import sqlalchemy_url
     from app.ingest.service import ingest_manuscript, raw_store_path
     from app.models import Instructor, Manuscript
     from app.models.enums import IngestStatus
 
     monkeypatch.setenv("DATA_DIR", str(tmp_path / "data"))
+    # BUG-038: ingest_manuscript's vision pass goes through get_llm_client(),
+    # which (in fake mode) now writes an audit row via the process-wide
+    # db.get_engine() — same DATABASE_URL/engine-reset convention already
+    # used by test_ingest_api.py/test_rubric_router.py's `client` fixtures,
+    # so that write lands in this test's own scratch DB, not the shared dev
+    # DB the ingest_scratch_url fixture's docstring promises never to touch.
+    monkeypatch.setenv("DATABASE_URL", ingest_scratch_url)
+    db._engine = None
     get_settings.cache_clear()
     settings = get_settings()
     pdf_path = _thesis_pdf(tmp_path)
@@ -406,7 +415,13 @@ def test_service_persists_tree_and_status(tmp_path, monkeypatch, ingest_scratch_
             assert broken.ingest_failure_reason == IngestFailureReason.unreadable_format
         await engine.dispose()
 
-    asyncio.run(scenario())
+    try:
+        asyncio.run(scenario())
+    finally:
+        # Drop the engine this test bound to its own scratch DB so later
+        # tests in the same process don't inherit it (mirrors
+        # test_ingest_api.py/test_rubric_router.py's `client` fixture).
+        db._engine = None
 
 
 @live
