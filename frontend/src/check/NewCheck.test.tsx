@@ -1,4 +1,4 @@
-import { fireEvent, screen, waitFor } from "@testing-library/react";
+import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { renderWithProviders, stubFetchByPath } from "../test/renderWithProviders";
 import { NewCheckModal } from "./NewCheck";
@@ -117,13 +117,24 @@ describe("NewCheckModal", () => {
     expect(await screen.findByText(/24 criteria/)).toBeInTheDocument();
   });
 
-  it("explains, via the error summary, when no active rubric exists — Start check stays enabled", async () => {
+  it("BUG-039: explains a missing active rubric immediately (not just after a Start-check click), focused for a keyboard user", async () => {
     vi.stubGlobal("fetch", stubFetchByPath({ "/manuscripts": MANUSCRIPTS, "/rubric-families": [] }));
     renderWithProviders(<NewCheckModal onClose={() => {}} />);
-    await screen.findByText("No active rubric yet. Confirm one on the rubric review screen first.");
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("No active rubric is available yet.");
+    // Same wording as a later Start-check click would show — one
+    // canonical message, not two different claims for the same state.
+    expect(alert).not.toHaveTextContent("Confirm one on the rubric review screen first.");
+    await waitFor(() => expect(document.activeElement).toBe(alert));
     expect(screen.getByRole("button", { name: "Start check" })).not.toBeDisabled();
-    fireEvent.click(screen.getByRole("button", { name: "Start check" }));
-    expect(await screen.findByRole("alert")).toHaveTextContent("No active rubric is available yet.");
+  });
+
+  it("BUG-040: a structural blocker with nowhere to jump to renders as plain text, not a false-affordance button", async () => {
+    vi.stubGlobal("fetch", stubFetchByPath({ "/manuscripts": MANUSCRIPTS, "/rubric-families": [] }));
+    renderWithProviders(<NewCheckModal onClose={() => {}} />);
+    const alert = await screen.findByRole("alert");
+    const item = within(alert).getByText("No active rubric is available yet.");
+    expect(item.tagName).not.toBe("BUTTON");
   });
 
   it("submits the selected manuscript and rubric on Start check", async () => {

@@ -90,7 +90,7 @@ describe("DashboardPage", () => {
     expect(newCheck).toBeEnabled();
     fireEvent.click(newCheck);
     expect(
-      await screen.findByText("No active rubric yet. Confirm one on the rubric review screen first."),
+      await screen.findByText("No active rubric is available yet."),
     ).toBeInTheDocument();
   });
 
