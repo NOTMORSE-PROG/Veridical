@@ -53,7 +53,7 @@ function EmptyState({ onUpload }: { onUpload: () => void }) {
         </li>
       </ol>
       <p className="text-center text-sm text-ink-tertiary">
-        "New check" stays disabled until a rubric is active.
+        Click "New check" any time. It tells you what's missing instead of just sitting there.
       </p>
     </>
   );
@@ -95,10 +95,8 @@ export function DashboardPage() {
         <button
           type="button"
           data-tour="new-check-cta"
-          disabled={!hasActiveRubric}
           onClick={() => setNewCheckOpen(true)}
-          title={hasActiveRubric ? undefined : "Upload a required format to enable checks"}
-          className="flex h-11 items-center justify-center rounded-md border border-border-input bg-panel px-4 text-sm font-bold text-ink hover:bg-status-neutral-bg disabled:opacity-45"
+          className="flex h-11 items-center justify-center rounded-md border border-border-input bg-panel px-4 text-sm font-bold text-ink hover:bg-status-neutral-bg"
         >
           New check
         </button>
