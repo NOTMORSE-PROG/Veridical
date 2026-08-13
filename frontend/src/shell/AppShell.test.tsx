@@ -1,7 +1,8 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { MemoryRouter } from "react-router";
+import { MemoryRouter, Route, Routes } from "react-router";
+import { RequireAuth } from "../auth/RequireAuth";
 import { renderWithProviders, stubFetchByPath } from "../test/renderWithProviders";
 import { AppShell } from "./AppShell";
 
@@ -235,6 +236,46 @@ describe("AppShell", () => {
     expect(
       queryClient.getQueryCache().findAll({ queryKey: ["dashboard-stats"] }),
     ).toHaveLength(0);
+  });
+
+  it("BUG-036: signing out immediately unmounts the currently-active protected screen, instead of leaving its content on screen until the next unrelated navigation", async () => {
+    vi.stubGlobal(
+      "fetch",
+      stubFetchByPath({
+        "/auth/me": { id: 1, email: "a@b.com", display_name: "Demo Instructor" },
+        "/quota": QUOTA,
+        "/auth/logout": {},
+      }),
+    );
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+    });
+    render(
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter initialEntries={["/report/25"]}>
+          <Routes>
+            <Route path="/signin" element={<div>Sign-in page</div>} />
+            <Route
+              path="/report/:id"
+              element={
+                <RequireAuth>
+                  <AppShell>
+                    <div>Real manuscript excerpt content</div>
+                  </AppShell>
+                </RequireAuth>
+              }
+            />
+          </Routes>
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+    await waitFor(() => expect(screen.getByText("DI")).toBeInTheDocument());
+    expect(screen.getByText("Real manuscript excerpt content")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /Sign out/ }));
+
+    await waitFor(() => expect(screen.getByText("Sign-in page")).toBeInTheDocument());
+    expect(screen.queryByText("Real manuscript excerpt content")).not.toBeInTheDocument();
   });
 
   it("the header logo is a real link back to the dashboard (found live: it was plain text everywhere in the app)", async () => {
