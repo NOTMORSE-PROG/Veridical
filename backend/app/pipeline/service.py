@@ -33,7 +33,7 @@ async def create_check_run(
         raise NotFoundError(f"No manuscript with id {manuscript_id}.")
     if manuscript.ingest_status != IngestStatus.done:
         raise ConflictError(
-            "This manuscript hasn't finished ingestion yet — try again once it's ready."
+            "This manuscript hasn't finished ingestion yet. Try again once it's ready."
         )
 
     rubric = await session.get(Rubric, rubric_id)
@@ -41,8 +41,8 @@ async def create_check_run(
         raise NotFoundError(f"No rubric with id {rubric_id}.")
     if not rubric.is_active:
         raise ConflictError(
-            "Only a confirmed, active rubric version can be used to start a check — "
-            "confirm it on the rubric review screen first."
+            "Only a confirmed, active rubric version can be used to start a check. "
+            "Confirm it on the rubric review screen first."
         )
 
     check_run = CheckRun(manuscript_id=manuscript_id, rubric_id=rubric_id)

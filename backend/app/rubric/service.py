@@ -205,8 +205,8 @@ async def update_criteria(
     rubric = await get_rubric(session, rubric_id, instructor_id)
     if rubric.is_active and await _has_reports(session, rubric_id):
         raise ConflictError(
-            "This version has reports based on it and can no longer be edited — "
-            "upload a new version instead (old reports stay pinned to this one)."
+            "This version has reports based on it and can no longer be edited. "
+            "Upload a new version instead (old reports stay pinned to this one)."
         )
     existing = {c.id: c for c in rubric.criteria}
     incoming_ids = {c.id for c in body.criteria if c.id is not None}
