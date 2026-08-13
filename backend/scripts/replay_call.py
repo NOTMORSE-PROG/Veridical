@@ -81,9 +81,18 @@ async def run(audit_id: int, *, fake: bool, live: bool) -> None:
             "\n(no `prompt` field on this row — it predates V-022's audit widening; "
             "nothing to replay, only the response below.)"
         )
-    recomputed = _input_hash(prompt_version, model, prompt, context)
-    match = "MATCH" if recomputed == row.input_hash else "MISMATCH"
-    print(f"recomputed input_hash={recomputed}  ({match})")
+    if row.input_hash is None:
+        # BUG-038: fake-mode `llm_call` rows always store `input_hash=None`
+        # (no response cache to key against, D-011 doesn't apply) — hashing
+        # and comparing anyway would print a MISMATCH for every fake-mode
+        # row, which reads as tamper/corruption evidence for a completely
+        # expected state (the honest-signal rule ground rule 3/9 asks for,
+        # applied to this tool's own output).
+        print("(fake-LLM mode — no cached input_hash to replay against, not a mismatch)")
+    else:
+        recomputed = _input_hash(prompt_version, model, prompt, context)
+        match = "MATCH" if recomputed == row.input_hash else "MISMATCH"
+        print(f"recomputed input_hash={recomputed}  ({match})")
     print(f"\n--- prompt ---\n{prompt}")
     print(f"\n--- stored response ---\n{json.dumps(payload.get('response'), indent=2)}")
 

@@ -5,7 +5,19 @@ or DB connection)."""
 import app.llm as llm_module
 from app.config import Settings
 from app.llm import GeminiLLMClient, get_llm_client
+from app.llm.fake import FakeLLMClient
 from app.llm.queue import LLMQueue
+
+
+def test_factory_wires_fake_client_with_a_session_factory():
+    """BUG-038: the real app wiring (as opposed to a bare `FakeLLMClient()`
+    in a test) must always pass a `session_factory`, or fake-mode completions
+    go back to writing no audit trail at all — the exact gap the bug was
+    about."""
+    settings = Settings(_env_file=None, veridical_fake_llm=True)
+    client = get_llm_client(settings)
+    assert isinstance(client, FakeLLMClient)
+    assert client._session_factory is not None
 
 
 def test_factory_returns_gemini_client_when_key_configured():

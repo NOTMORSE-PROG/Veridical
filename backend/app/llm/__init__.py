@@ -50,7 +50,13 @@ def _build_real_client(settings: Settings) -> GeminiLLMClient:
 
 def get_llm_client(settings: Settings) -> LLMClient:
     if settings.veridical_fake_llm:
-        return FakeLLMClient()
+        # BUG-038: without a session_factory, FakeLLMClient writes no
+        # audit trail at all — silently false against the audit log's own
+        # "every AI call" header claim in this project's zero-budget
+        # default mode. `db.get_session_factory()` is the same lazy
+        # process-wide factory `_build_real_client`'s `LLMQueue` already
+        # uses below.
+        return FakeLLMClient(session_factory=db.get_session_factory())
     global _real_client
     if _real_client is None:
         _real_client = _build_real_client(settings)
