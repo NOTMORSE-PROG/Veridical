@@ -96,3 +96,24 @@ class ResolveEscalationOut(BaseModel):
     # live") — the frontend never has to guess whether a second fetch is
     # needed.
     report: ReportOut
+
+
+class FlagSummaryOut(BaseModel):
+    """BUG-033: the report's own flags list (F4-F7) — deliberately a
+    smaller field set than `flags.schemas.FlagOut`. A summary row's job
+    is "enough to decide whether to click," not "enough to skip
+    clicking" — Zhang/Liao/Bellamy (FAccT 2020) and Bansal et al. (CHI
+    2021), already cited in this project's agent research (RESEARCH.md
+    §11), found more explanatory text around a verdict does not improve
+    calibration and can increase blind acceptance. `confidence`,
+    `override_reason`, `ai_verdict_summary`, `ai_reasoning`, and
+    `annotation` stay detail-page-only (`/flags/{id}`, `ui-designer`
+    spec, 2026-08-13)."""
+
+    id: int
+    check_kind: str
+    severity: str
+    criterion_text: str | None
+    evidence_excerpt: str
+    page_anchor: str
+    overridden: bool

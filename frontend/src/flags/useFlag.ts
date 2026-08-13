@@ -27,6 +27,14 @@ export function useOverrideFlag(flagId: number) {
     onSuccess: (out) => {
       queryClient.setQueryData(["flag", flagId], out);
       queryClient.setQueryData(["report", out.report.check_run_id], out.report);
+      // BUG-033: the report's flags panel is its own query
+      // (["report", id, "flags"], useReport.ts's useFlags) — without
+      // this, an instructor who overrides here and clicks "View updated
+      // report" would see a stale ACTIVE row in that panel until a
+      // manual refetch, reintroducing the exact "overridden must not
+      // read the same as active" failure this ticket exists to fix, one
+      // layer up (ui-designer spec, required not optional).
+      queryClient.invalidateQueries({ queryKey: ["report", out.report.check_run_id, "flags"] });
       queryClient.invalidateQueries({ queryKey: ["stats"] });
     },
   });

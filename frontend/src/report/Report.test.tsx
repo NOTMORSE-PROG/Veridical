@@ -1,6 +1,6 @@
 import { fireEvent, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { ReportOut } from "../api/types";
+import type { FlagSummaryOut, ReportOut } from "../api/types";
 import { renderWithProviders, stubFetchByPath } from "../test/renderWithProviders";
 import { ReportPage } from "./Report";
 
@@ -52,13 +52,32 @@ function stubEscalated(items: unknown[] = []) {
   return { "/check-runs/5/escalated": items };
 }
 
+// BUG-033: every test renders <FlagsPanel>, which fetches this on mount —
+// default to zero flags (the real, honest "found nothing" state) so
+// existing tests exercise the actual success path rather than an
+// unrelated 404/error alert stubFetchByPath's own fallback would
+// otherwise render.
+function stubFlags(items: FlagSummaryOut[] = []) {
+  return { "/check-runs/5/flags": items };
+}
+
+const SAMPLE_FLAG: FlagSummaryOut = {
+  id: 2,
+  check_kind: "internal_agreement",
+  severity: "med",
+  criterion_text: null,
+  evidence_excerpt: "The abstract claims a 95% accuracy rate, but Chapter 4 reports 87%.",
+  page_anchor: "page 3",
+  overridden: false,
+};
+
 describe("ReportPage", () => {
   afterEach(() => vi.unstubAllGlobals());
 
   it("renders the status pill, score, and manuscript/rubric identification", async () => {
     vi.stubGlobal(
       "fetch",
-      stubFetchByPath({ "/check-runs/5/report": BASE_REPORT, ...stubEscalated() }),
+      stubFetchByPath({ "/check-runs/5/report": BASE_REPORT, ...stubEscalated(), ...stubFlags() }),
     );
     renderWithProviders(<ReportPage />, { route: "/report/5", path: "/report/:checkRunId" });
 
@@ -71,7 +90,7 @@ describe("ReportPage", () => {
   it("BUG (weight/criterion collision) regression guard: the results grid uses minmax(0,1fr) and weight is right-aligned, not overlapping", async () => {
     vi.stubGlobal(
       "fetch",
-      stubFetchByPath({ "/check-runs/5/report": BASE_REPORT, ...stubEscalated() }),
+      stubFetchByPath({ "/check-runs/5/report": BASE_REPORT, ...stubEscalated(), ...stubFlags() }),
     );
     renderWithProviders(<ReportPage />, { route: "/report/5", path: "/report/:checkRunId" });
 
@@ -89,7 +108,7 @@ describe("ReportPage", () => {
       composite_score: 90,
       unresolved_high_flag_count: 2,
     };
-    vi.stubGlobal("fetch", stubFetchByPath({ "/check-runs/5/report": report, ...stubEscalated() }));
+    vi.stubGlobal("fetch", stubFetchByPath({ "/check-runs/5/report": report, ...stubEscalated(), ...stubFlags() }));
     renderWithProviders(<ReportPage />, { route: "/report/5", path: "/report/:checkRunId" });
 
     expect(
@@ -99,7 +118,7 @@ describe("ReportPage", () => {
 
   it("states the actual determining factor for Not Ready via a low score, when there is no flag involved", async () => {
     const report: ReportOut = { ...BASE_REPORT, status: "not_ready", composite_score: 40 };
-    vi.stubGlobal("fetch", stubFetchByPath({ "/check-runs/5/report": report, ...stubEscalated() }));
+    vi.stubGlobal("fetch", stubFetchByPath({ "/check-runs/5/report": report, ...stubEscalated(), ...stubFlags() }));
     renderWithProviders(<ReportPage />, { route: "/report/5", path: "/report/:checkRunId" });
 
     expect(await screen.findByText(/The score is 40% \(below the 60% floor\)/)).toBeInTheDocument();
@@ -112,7 +131,7 @@ describe("ReportPage", () => {
       composite_score: null,
       reason: "No criteria could be auto-scored.",
     };
-    vi.stubGlobal("fetch", stubFetchByPath({ "/check-runs/5/report": report, ...stubEscalated() }));
+    vi.stubGlobal("fetch", stubFetchByPath({ "/check-runs/5/report": report, ...stubEscalated(), ...stubFlags() }));
     renderWithProviders(<ReportPage />, { route: "/report/5", path: "/report/:checkRunId" });
 
     expect(await screen.findByText("No criteria could be auto-scored.")).toBeInTheDocument();
@@ -155,7 +174,7 @@ describe("ReportPage", () => {
         },
       ],
     };
-    vi.stubGlobal("fetch", stubFetchByPath({ "/check-runs/5/report": report, ...stubEscalated() }));
+    vi.stubGlobal("fetch", stubFetchByPath({ "/check-runs/5/report": report, ...stubEscalated(), ...stubFlags() }));
     renderWithProviders(<ReportPage />, { route: "/report/5", path: "/report/:checkRunId" });
 
     await screen.findByText("Ready");
@@ -166,7 +185,7 @@ describe("ReportPage", () => {
   it("BUG (anchor-loss) regression guard: a structural pass with an anchor but no quote still shows the anchor", async () => {
     vi.stubGlobal(
       "fetch",
-      stubFetchByPath({ "/check-runs/5/report": BASE_REPORT, ...stubEscalated() }),
+      stubFetchByPath({ "/check-runs/5/report": BASE_REPORT, ...stubEscalated(), ...stubFlags() }),
     );
     renderWithProviders(<ReportPage />, { route: "/report/5", path: "/report/:checkRunId" });
 
@@ -178,7 +197,7 @@ describe("ReportPage", () => {
   it("shows Partial with a caption for a score-50 semantic pass, distinct from a full Pass", async () => {
     vi.stubGlobal(
       "fetch",
-      stubFetchByPath({ "/check-runs/5/report": BASE_REPORT, ...stubEscalated() }),
+      stubFetchByPath({ "/check-runs/5/report": BASE_REPORT, ...stubEscalated(), ...stubFlags() }),
     );
     renderWithProviders(<ReportPage />, { route: "/report/5", path: "/report/:checkRunId" });
 
@@ -214,7 +233,7 @@ describe("ReportPage", () => {
         },
       ],
     };
-    vi.stubGlobal("fetch", stubFetchByPath({ "/check-runs/5/report": report, ...stubEscalated() }));
+    vi.stubGlobal("fetch", stubFetchByPath({ "/check-runs/5/report": report, ...stubEscalated(), ...stubFlags() }));
     renderWithProviders(<ReportPage />, { route: "/report/5", path: "/report/:checkRunId" });
 
     await screen.findByText("Ready");
@@ -239,7 +258,7 @@ describe("ReportPage", () => {
         },
       ],
     };
-    vi.stubGlobal("fetch", stubFetchByPath({ "/check-runs/5/report": report, ...stubEscalated() }));
+    vi.stubGlobal("fetch", stubFetchByPath({ "/check-runs/5/report": report, ...stubEscalated(), ...stubFlags() }));
     renderWithProviders(<ReportPage />, { route: "/report/5", path: "/report/:checkRunId" });
 
     await screen.findByText("Ready");
@@ -262,6 +281,7 @@ describe("ReportPage", () => {
       vi.fn(async (input: RequestInfo | URL) => {
         const url = typeof input === "string" ? input : input.toString();
         if (url.includes("/escalated")) return new Response("[]", { status: 200 });
+        if (url.includes("/flags")) return new Response("[]", { status: 200 });
         calls += 1;
         if (calls === 1) return new Response("Internal error", { status: 500 });
         return new Response(JSON.stringify(BASE_REPORT), { status: 200 });
@@ -293,5 +313,153 @@ describe("ReportPage", () => {
       "href",
       "/checks/5",
     );
+  });
+
+  // BUG-033: before this, a real flag existed nowhere on the report an
+  // instructor could reach it from — reproduced live, see the ticket.
+  it("BUG-033: honestly says no flags were found when there are none", async () => {
+    vi.stubGlobal(
+      "fetch",
+      stubFetchByPath({ "/check-runs/5/report": BASE_REPORT, ...stubEscalated(), ...stubFlags() }),
+    );
+    renderWithProviders(<ReportPage />, { route: "/report/5", path: "/report/:checkRunId" });
+
+    expect(await screen.findByText(/No integrity flags on this run/)).toBeInTheDocument();
+  });
+
+  it("BUG-033: renders a flag with a working link to its already-built detail page", async () => {
+    vi.stubGlobal(
+      "fetch",
+      stubFetchByPath({
+        "/check-runs/5/report": BASE_REPORT,
+        ...stubEscalated(),
+        ...stubFlags([SAMPLE_FLAG]),
+      }),
+    );
+    renderWithProviders(<ReportPage />, { route: "/report/5", path: "/report/:checkRunId" });
+
+    expect(await screen.findByText("Flags (1)")).toBeInTheDocument();
+    expect(
+      screen.getByText(/The abstract claims a 95% accuracy rate/),
+    ).toBeInTheDocument();
+    const link = screen.getByRole("link", { name: "Review evidence" });
+    expect(link).toHaveAttribute("href", "/flags/2");
+  });
+
+  it("BUG-033: an overridden flag reads distinctly from an active one — never the same", async () => {
+    const overridden: FlagSummaryOut = { ...SAMPLE_FLAG, overridden: true };
+    vi.stubGlobal(
+      "fetch",
+      stubFetchByPath({
+        "/check-runs/5/report": BASE_REPORT,
+        ...stubEscalated(),
+        ...stubFlags([overridden]),
+      }),
+    );
+    renderWithProviders(<ReportPage />, { route: "/report/5", path: "/report/:checkRunId" });
+
+    expect(await screen.findByText("This flag was overridden.")).toBeInTheDocument();
+    expect(screen.getByText("Overridden")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "View details" })).toHaveAttribute("href", "/flags/2");
+    expect(screen.queryByRole("link", { name: "Review evidence" })).not.toBeInTheDocument();
+  });
+
+  it("BUG-033: the explainer honestly names a real flag deduction and links down to the flags panel", async () => {
+    const report: ReportOut = {
+      ...BASE_REPORT,
+      status: "not_ready",
+      composite_score: 26.67,
+      flag_deduction: 40,
+    };
+    vi.stubGlobal(
+      "fetch",
+      stubFetchByPath({
+        "/check-runs/5/report": report,
+        ...stubEscalated(),
+        ...stubFlags([SAMPLE_FLAG]),
+      }),
+    );
+    renderWithProviders(<ReportPage />, { route: "/report/5", path: "/report/:checkRunId" });
+
+    expect(
+      await screen.findByText(/This includes a 40-point deduction from unresolved flags/),
+    ).toBeInTheDocument();
+    const anchorLink = screen.getByRole("link", { name: "Flags" });
+    expect(anchorLink).toHaveAttribute("href", "#flags-heading");
+  });
+
+  it("BUG-033/ux-critic finding: a group's collapsed-header severity scopes to UNRESOLVED flags only, never counting an overridden flag's severity as live risk", async () => {
+    const overriddenHigh: FlagSummaryOut = { ...SAMPLE_FLAG, id: 30, severity: "high", overridden: true };
+    const unresolvedLow: FlagSummaryOut = { ...SAMPLE_FLAG, id: 31, severity: "low", overridden: false };
+    vi.stubGlobal(
+      "fetch",
+      stubFetchByPath({
+        "/check-runs/5/report": BASE_REPORT,
+        ...stubEscalated(),
+        ...stubFlags([overriddenHigh, unresolvedLow]),
+      }),
+    );
+    renderWithProviders(<ReportPage />, { route: "/report/5", path: "/report/:checkRunId" });
+
+    await screen.findByText("Internal agreement (2)");
+    // Must say "low", never "high" — the only unresolved flag is low
+    // severity; the overridden high one is no longer live risk. Before
+    // the fix this read "1 high, 1 low severity", implying an active
+    // high-severity issue that didn't exist. Scoped to the group's own
+    // toggle button (not the whole page) since the explainer sentence
+    // elsewhere on screen legitimately says "no unresolved high-severity
+    // flags" about the run as a whole.
+    const groupToggle = screen.getByRole("button", { name: /Internal agreement \(2\)/ });
+    expect(groupToggle).toHaveTextContent("1 low severity");
+    expect(groupToggle).not.toHaveTextContent("high");
+  });
+
+  it("BUG-033/ux-critic finding: a manually-collapsed group survives a URL-restored remount (the real shape of a Back navigation)", async () => {
+    const first: FlagSummaryOut = { ...SAMPLE_FLAG, id: 40 };
+    const second: FlagSummaryOut = { ...SAMPLE_FLAG, id: 41 };
+    vi.stubGlobal(
+      "fetch",
+      stubFetchByPath({
+        "/check-runs/5/report": BASE_REPORT,
+        ...stubEscalated(),
+        ...stubFlags([first, second]),
+      }),
+    );
+    // Simulates the restored URL a real browser Back navigation would
+    // land on after the instructor toggled this group closed and then
+    // opened one flag's evidence — component state alone can't survive
+    // this (FlagsPanel remounts), the URL must carry it.
+    renderWithProviders(<ReportPage />, {
+      route: "/report/5?flags_toggled=internal_agreement",
+      path: "/report/:checkRunId",
+    });
+
+    // Both unresolved -> the group's COMPUTED default is open; the URL
+    // param says the instructor toggled it away from that default, so
+    // it must render collapsed instead.
+    await screen.findByText("Internal agreement (2)");
+    expect(screen.queryByText(/The abstract claims a 95% accuracy rate/)).not.toBeInTheDocument();
+  });
+
+  it("BUG-033: groups 2+ flags of the same check family under one disclosure, not separate panels", async () => {
+    const second: FlagSummaryOut = {
+      ...SAMPLE_FLAG,
+      id: 3,
+      evidence_excerpt: "A second, distinct internal-agreement issue.",
+    };
+    vi.stubGlobal(
+      "fetch",
+      stubFetchByPath({
+        "/check-runs/5/report": BASE_REPORT,
+        ...stubEscalated(),
+        ...stubFlags([SAMPLE_FLAG, second]),
+      }),
+    );
+    renderWithProviders(<ReportPage />, { route: "/report/5", path: "/report/:checkRunId" });
+
+    expect(await screen.findByText("Internal agreement (2)")).toBeInTheDocument();
+    // Both unresolved -> the group defaults open (trust over scanability).
+    expect(screen.getByText(/The abstract claims a 95% accuracy rate/)).toBeInTheDocument();
+    expect(screen.getByText(/A second, distinct internal-agreement issue/)).toBeInTheDocument();
   });
 });

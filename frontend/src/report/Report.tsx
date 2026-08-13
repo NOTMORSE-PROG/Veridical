@@ -3,6 +3,7 @@
 // and not_applicable/unverifiable rows are visually distinct from a real
 // pass/fail (taxonomy honesty, charter rule 9) — never dressed up as a
 // finding.
+import type { ReactNode } from "react";
 import { useRef, useState } from "react";
 import { Link, useParams } from "react-router";
 import { ApiError } from "../api/client";
@@ -11,8 +12,10 @@ import { AnchorPill } from "../components/AnchorPill";
 import { Chip } from "../components/Chip";
 import { StatusPill, type StatusPillTone } from "../components/StatusPill";
 import { READINESS_LABEL, READINESS_TONE } from "../domain/readinessTone";
+import { truncateAtWord } from "../format/text";
 import { useRouteFocus } from "../routing/useRouteFocus";
 import { EscalatedPanel } from "./EscalatedPanel";
+import { FlagsPanel } from "./FlagsPanel";
 import { useReport } from "./useReport";
 
 function SpinnerIcon() {
@@ -31,7 +34,7 @@ function SpinnerIcon() {
 // were silently doing exactly that before this fix).
 const NEEDS_REVIEW_OUTCOMES = new Set(["escalated", "quota_exhausted", "api_down"]);
 
-function explainer(r: ReportOut): string {
+function explainerBase(r: ReportOut): string {
   if (r.status === "needs_review") return r.reason ?? "This run needs manual review.";
   if (r.unresolved_high_flag_count > 0) {
     return `Not Ready. ${r.unresolved_high_flag_count} unresolved high-severity ${r.unresolved_high_flag_count === 1 ? "flag" : "flags"} found. Any unresolved high-severity flag forces Not Ready, regardless of score.`;
@@ -45,15 +48,29 @@ function explainer(r: ReportOut): string {
   return `Conditionally Ready. The score is ${r.composite_score}%, between ${r.thresholds.not_ready_max_score}% and ${r.thresholds.ready_min_score}%.`;
 }
 
-function formatWeight(w: number): string {
-  return `${Math.round(w * 10) / 10}%`;
+// BUG-033: the explainer must honestly account for WHERE a deduction
+// came from — before this, a run could lose real points to unresolved
+// flags with no mention anywhere on the page of why. Renders a real
+// same-page anchor to the flags panel below (scroll-mt-16 on that
+// panel's own heading keeps the jump target clear of the sticky header,
+// WCAG 2.4.11 — measured live against the real 56px header).
+function explainer(r: ReportOut): ReactNode {
+  const base = explainerBase(r);
+  if (r.flag_deduction <= 0) return base;
+  const points = Math.round(r.flag_deduction * 10) / 10;
+  return (
+    <>
+      {base} This includes a {points}-point deduction from unresolved flags. See{" "}
+      <a href="#flags-heading" className="font-medium underline">
+        Flags
+      </a>{" "}
+      below.
+    </>
+  );
 }
 
-function truncateAtWord(text: string, max: number): string {
-  if (text.length <= max) return text;
-  const cut = text.slice(0, max);
-  const lastSpace = cut.lastIndexOf(" ");
-  return (lastSpace > max * 0.6 ? cut.slice(0, lastSpace) : cut) + "…";
+function formatWeight(w: number): string {
+  return `${Math.round(w * 10) / 10}%`;
 }
 
 // A resolved row's source is the instructor, never the AI or the rule
@@ -304,6 +321,8 @@ export function ReportPage() {
           </p>
 
           <EscalatedPanel checkRunId={report.check_run_id} />
+
+          <FlagsPanel checkRunId={report.check_run_id} />
 
           {(() => {
             const mainResults = report.results.filter((r) => !NEEDS_REVIEW_OUTCOMES.has(r.outcome));

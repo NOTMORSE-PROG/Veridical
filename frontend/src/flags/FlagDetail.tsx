@@ -10,6 +10,7 @@ import { AnchorPill } from "../components/AnchorPill";
 import { Chip } from "../components/Chip";
 import { cx } from "../components/cx";
 import { SeverityTag, type Severity } from "../components/SeverityTag";
+import { checkKindMeta, humanize } from "../domain/checkKind";
 import { useRouteFocus } from "../routing/useRouteFocus";
 import { useAnnotateFlag, useFlag, useOverrideFlag } from "./useFlag";
 
@@ -20,25 +21,6 @@ function SpinnerIcon() {
       <path d="M20 8v4h-4" />
     </svg>
   );
-}
-
-const CHECK_KIND_META: Record<string, { eyebrow: string; title: string }> = {
-  internal_agreement: { eyebrow: "Internal agreement check", title: "Possible internal contradiction" },
-  citation_integrity: { eyebrow: "Citation integrity check", title: "Possible citation issue" },
-  statistical_forensics: { eyebrow: "Statistical forensics check", title: "Possible statistical inconsistency" },
-  originality_reuse: { eyebrow: "Originality and reuse check", title: "Possible content overlap" },
-};
-
-// Sentence case ("Not supported"), matching CHECK_KIND_META's own
-// hand-written eyebrow strings ("Internal agreement check") — title
-// case ("Not Supported") reads like two proper nouns in running text.
-function humanize(snake: string): string {
-  const words = snake.split("_");
-  return words.map((w, i) => (i === 0 ? w[0]?.toUpperCase() + w.slice(1) : w)).join(" ");
-}
-
-function checkKindMeta(kind: string): { eyebrow: string; title: string } {
-  return CHECK_KIND_META[kind] ?? { eyebrow: humanize(kind), title: "Possible inconsistency" };
 }
 
 function AnnotationBox({ flagId, initial }: { flagId: number; initial: string | null }) {
