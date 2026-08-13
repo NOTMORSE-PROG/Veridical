@@ -80,6 +80,12 @@ class ReportOut(BaseModel):
     # longer the active one for its family (a newer version has since been
     # confirmed) — surfaces as a warning banner, never silently hidden.
     rubric_is_current: bool = True
+    # V-041 — the version-comparison line: the same manuscript's most
+    # recent OTHER done+reported run, if one exists (e.g. this run is a
+    # re-check against a newer rubric version). None when this is the
+    # manuscript's first reported run — never a fabricated comparison.
+    previous_status: str | None = None
+    previous_composite_score: float | None = None
 
 
 class DecisionIn(BaseModel):

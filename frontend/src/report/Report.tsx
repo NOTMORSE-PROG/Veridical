@@ -306,6 +306,28 @@ export function ReportPage() {
         </div>
       </header>
 
+      {/* V-041: historical orientation about a DIFFERENT (earlier) run,
+          kept visually separate from the explainer box below (this
+          run's own authoritative "why this verdict" reasoning) so the
+          two are never read as one blended justification -- same
+          category-separation discipline as the KpiCards/Report tone
+          fix (V-056). Only renders when a real prior run exists; never
+          invents rubric version numbers ReportOut doesn't carry. */}
+      {report && report.previous_status && (
+        <p className="flex flex-wrap items-center gap-1.5 text-sm text-ink-secondary">
+          <span>Previously</span>
+          <StatusPill tone={READINESS_TONE[report.previous_status]}>
+            {READINESS_LABEL[report.previous_status]}
+          </StatusPill>
+          {report.previous_composite_score !== null && <span>({report.previous_composite_score}%)</span>}
+          <span aria-hidden="true">&rarr;</span>
+          <span>now</span>
+          <StatusPill tone={READINESS_TONE[report.status]}>{READINESS_LABEL[report.status]}</StatusPill>
+          {report.composite_score !== null && <span>({report.composite_score}%)</span>}
+          <span>.</span>
+        </p>
+      )}
+
       {isPending ? (
         <div role="status" aria-live="polite" aria-busy="true" className="flex items-center gap-2 rounded-lg border border-border bg-panel p-6 text-sm text-ink-secondary">
           <SpinnerIcon />
