@@ -73,4 +73,26 @@ describe("UploadRubricModal", () => {
 
     expect(await screen.findByRole("alert")).toHaveTextContent("The file could not be read.");
   });
+
+  it("BUG-028: moves focus to the error message on a failed upload, instead of stranding it at <body>", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        new Response(
+          JSON.stringify({ error: { code: "file_malformed", message: "The file could not be read." } }),
+          { status: 422 },
+        ),
+      ),
+    );
+    renderWithProviders(<UploadRubricModal onClose={() => {}} />);
+
+    const file = new File(["dummy"], "rubric.pdf", { type: "application/pdf" });
+    const input = document.querySelector('input[type="file"]') as HTMLInputElement;
+    fireEvent.change(input, { target: { files: [file] } });
+    fireEvent.click(screen.getByRole("button", { name: "Continue to review" }));
+
+    const alert = await screen.findByRole("alert");
+    await waitFor(() => expect(document.activeElement).toBe(alert));
+    expect(document.activeElement).not.toBe(document.body);
+  });
 });
