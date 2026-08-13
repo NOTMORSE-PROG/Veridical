@@ -21,6 +21,11 @@ class Manuscript(Base, PkCreatedMixin):
     group_label: Mapped[str] = mapped_column(String(200))
     # Reference to the stored upload (path/object key), never file content.
     file_ref: Mapped[str] = mapped_column(String(1024))
+    # BUG-022: group_label defaults to a constant ("Ungrouped") for any
+    # manuscript not explicitly grouped, so it alone can't distinguish two
+    # uploads. The instructor's own filename usually can. NULL for rows
+    # ingested before this column existed (no backfill source).
+    original_filename: Mapped[str | None] = mapped_column(String(255))
     ingest_status: Mapped[IngestStatus] = mapped_column(
         Enum(IngestStatus, native_enum=False), server_default=IngestStatus.pending
     )

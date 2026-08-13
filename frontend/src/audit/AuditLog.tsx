@@ -197,6 +197,11 @@ function AuditDetailModal({ id, onClose }: { id: number; onClose: () => void }) 
                   <b className="text-ink">Group:</b> {data.manuscript_group_label}
                 </span>
               )}
+              {data.manuscript_original_filename && (
+                <span>
+                  <b className="text-ink">File:</b> {data.manuscript_original_filename}
+                </span>
+              )}
               {instructor && instructorId !== null && (
                 <span>
                   <b className="text-ink">Performed by:</b> You

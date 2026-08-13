@@ -37,6 +37,7 @@ async def _to_out(session: AsyncSession, check_run) -> CheckRunOut:
         finished_at=check_run.finished_at,
         created_at=check_run.created_at,
         manuscript_group_label=manuscript.group_label if manuscript else None,
+        manuscript_original_filename=manuscript.original_filename if manuscript else None,
         manuscript_uploaded_at=manuscript.created_at if manuscript else None,
         rubric_title=rubric.title if rubric else None,
     )

@@ -5,6 +5,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router";
 import { ApiError } from "../api/client";
 import { Modal, ModalBackdrop } from "../components/Modal";
+import { formatManuscriptOption, manuscriptIdentity } from "../domain/manuscriptLabel";
 import { useRubricFamilies } from "../rubric/useRubric";
 import { useCreateCheckRun, useManuscripts } from "./useCheckRun";
 
@@ -224,7 +225,10 @@ export function NewCheckModal({ onClose }: { onClose: () => void }) {
                   <option value="">Select a manuscript.</option>
                   {readyManuscripts.map((m) => (
                     <option key={m.id} value={m.id}>
-                      {m.group_label}, uploaded {dateFormatter.format(new Date(m.created_at))}
+                      {formatManuscriptOption(
+                        manuscriptIdentity(m.group_label, m.original_filename),
+                        dateFormatter.format(new Date(m.created_at)),
+                      )}
                     </option>
                   ))}
                 </select>
@@ -233,12 +237,20 @@ export function NewCheckModal({ onClose }: { onClose: () => void }) {
                     Choose a manuscript.
                   </p>
                 )}
-                {selectedManuscript && (
-                  <p className="text-sm text-ink-secondary">
-                    Selected: <b className="font-medium text-ink">{selectedManuscript.group_label}</b>, uploaded{" "}
-                    {dateFormatter.format(new Date(selectedManuscript.created_at))}.
-                  </p>
-                )}
+                {selectedManuscript &&
+                  (() => {
+                    const identity = manuscriptIdentity(
+                      selectedManuscript.group_label,
+                      selectedManuscript.original_filename,
+                    );
+                    return (
+                      <p className="text-sm text-ink-secondary break-words">
+                        Selected: <b className="font-medium text-ink">{identity.primary}</b>
+                        {identity.secondary && <> ({identity.secondary})</>}, uploaded{" "}
+                        {dateFormatter.format(new Date(selectedManuscript.created_at))}.
+                      </p>
+                    );
+                  })()}
               </>
             )}
           </div>

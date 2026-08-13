@@ -53,6 +53,45 @@ describe("NewCheckModal", () => {
     expect(screen.queryByRole("option", { name: /G-12/ })).not.toBeInTheDocument();
   });
 
+  it("BUG-022: two manuscripts sharing the default group_label list distinguishably via original_filename", async () => {
+    vi.stubGlobal(
+      "fetch",
+      stubFetchByPath({
+        "/manuscripts": {
+          items: [
+            {
+              id: 3,
+              group_label: "Ungrouped",
+              original_filename: "Chapter1-3_FinalDefense.pdf",
+              ingest_status: "done",
+              created_at: "2026-01-01T00:00:00Z",
+              latest_check_run_id: null,
+              latest_check_run_status: null,
+            },
+            {
+              id: 4,
+              group_label: "Ungrouped",
+              original_filename: "Chapter1-3_Revised.pdf",
+              ingest_status: "done",
+              created_at: "2026-01-01T00:00:00Z",
+              latest_check_run_id: null,
+              latest_check_run_status: null,
+            },
+          ],
+          total: 2,
+          page: 1,
+          page_size: 200,
+        },
+        "/rubric-families": ONE_ACTIVE_FAMILY,
+      }),
+    );
+    renderWithProviders(<NewCheckModal onClose={() => {}} />);
+    await screen.findByRole("option", { name: /^Chapter1-3_FinalDefense\.pdf,/ });
+    expect(
+      screen.getByRole("option", { name: /^Chapter1-3_Revised\.pdf,/ }),
+    ).toBeInTheDocument();
+  });
+
   it("shows a focused, accessible error summary when Start is clicked with nothing selected", async () => {
     vi.stubGlobal(
       "fetch",

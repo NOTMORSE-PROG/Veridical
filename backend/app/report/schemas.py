@@ -49,6 +49,10 @@ class CriterionResultOut(BaseModel):
 class ReportOut(BaseModel):
     check_run_id: int
     manuscript_group_label: str
+    # BUG-022: group_label defaults to "Ungrouped" and can't distinguish
+    # two manuscripts alone; None for rows ingested before this column
+    # existed.
+    manuscript_original_filename: str | None
     rubric_title: str
     status: str
     composite_score: float | None

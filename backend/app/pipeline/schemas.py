@@ -26,6 +26,10 @@ class CheckRunOut(BaseModel):
     # number in their head). Optional: a manuscript/rubric could
     # theoretically be gone by the time this is read.
     manuscript_group_label: str | None = None
+    # BUG-022: group_label alone can't distinguish two manuscripts
+    # (defaults to "Ungrouped"); None if the manuscript predates this
+    # column, or is gone.
+    manuscript_original_filename: str | None = None
     manuscript_uploaded_at: datetime | None = None
     rubric_title: str | None = None
 

@@ -8,6 +8,7 @@ import { useEffect, useRef, useState } from "react";
 import { Link, useParams } from "react-router";
 import type { CheckRun, CheckRunStatus } from "../api/types";
 import { Stepper, type Step, type StepState } from "../components/Stepper";
+import { formatManuscriptOption, manuscriptIdentity } from "../domain/manuscriptLabel";
 import { useRouteFocus } from "../routing/useRouteFocus";
 import { useCheckRun } from "./useCheckRun";
 
@@ -121,7 +122,12 @@ export function CheckProgressPage() {
         {run && (
           <p className="text-sm text-ink-secondary">
             {run.manuscript_group_label
-              ? `${run.manuscript_group_label}, uploaded ${run.manuscript_uploaded_at ? formatDateTime(run.manuscript_uploaded_at) : "an earlier date"}`
+              ? formatManuscriptOption(
+                  manuscriptIdentity(run.manuscript_group_label, run.manuscript_original_filename),
+                  run.manuscript_uploaded_at
+                    ? formatDateTime(run.manuscript_uploaded_at)
+                    : "an earlier date",
+                )
               : `Manuscript #${run.manuscript_id}`}{" "}
             against {run.rubric_title ?? "the active rubric"}
           </p>

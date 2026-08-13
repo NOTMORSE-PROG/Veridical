@@ -114,6 +114,82 @@ def test_upload_pdf_returns_summary(client):
 
 
 @live
+def test_two_ungrouped_manuscripts_are_distinguishable_by_filename(client):
+    """BUG-022: group_label defaults to "Ungrouped" for any manuscript not
+    explicitly grouped, so two such uploads were indistinguishable in
+    every picker/list. The instructor's own filename (already sent on
+    every upload, previously discarded) now survives instead."""
+    r1 = _upload(client, "native.pdf", as_name="Chapter1-3_FinalDefense.pdf")
+    r2 = _upload(client, "native.pdf", as_name="Chapter1-3_Revised.pdf")
+    assert r1.status_code == 200, r1.text
+    assert r2.status_code == 200, r2.text
+
+    body = client.get("/manuscripts").json()
+    by_filename = {item["original_filename"]: item for item in body["items"]}
+    assert "Chapter1-3_FinalDefense.pdf" in by_filename
+    assert "Chapter1-3_Revised.pdf" in by_filename
+    assert by_filename["Chapter1-3_FinalDefense.pdf"]["group_label"] == "Ungrouped"
+    assert by_filename["Chapter1-3_Revised.pdf"]["group_label"] == "Ungrouped"
+    assert (
+        by_filename["Chapter1-3_FinalDefense.pdf"]["id"]
+        != by_filename["Chapter1-3_Revised.pdf"]["id"]
+    )
+
+
+@live
+def test_filename_with_control_characters_never_500s(client):
+    """BUG-022 review (backend-critic): a NUL byte in the uploaded
+    filename previously reached Postgres unfiltered and 500'd (UTF8
+    encoding rejects NUL outright) before the ingest even got a chance
+    to run — this is a client-input taxonomy gap, not a real file
+    problem, so it must never surface as an unhandled 500.
+
+    `TestClient`'s `files=` convenience helper percent-encodes control
+    characters in the filename before they ever leave the client, which
+    would mask this exact bug — a raw multipart body is built by hand so
+    an actual NUL byte reaches the server, the way backend-critic's own
+    live repro did."""
+    content = (FIXTURE_DIR / "native.pdf").read_bytes()
+    boundary = "boundary123"
+    body_bytes = (
+        (
+            f"--{boundary}\r\n"
+            f'Content-Disposition: form-data; name="file"; filename="evil\x00name\x07.pdf"\r\n'
+            f"Content-Type: application/octet-stream\r\n\r\n"
+        ).encode("utf-8", errors="surrogateescape")
+        + content
+        + f"\r\n--{boundary}--\r\n".encode()
+    )
+
+    r = client.post(
+        "/manuscripts/ingest",
+        content=body_bytes,
+        headers={"content-type": f"multipart/form-data; boundary={boundary}"},
+    )
+    assert r.status_code == 200, r.text
+
+    manuscripts = client.get("/manuscripts").json()
+    item = next(i for i in manuscripts["items"] if i["id"] == r.json()["manuscript_id"])
+    assert "\x00" not in (item["original_filename"] or "")
+    assert item["original_filename"] == "evilname.pdf"
+
+
+@live
+def test_windows_style_path_in_filename_is_stripped_on_linux(client):
+    """BUG-022 review (backend-critic): bare Path(...).name only splits
+    on the HOST's own separator -- production runs on Linux, so a raw
+    Windows-style path from a non-browser client would otherwise pass
+    through untouched and be stored (and shown to the instructor) in
+    full, including whatever local directory structure it revealed."""
+    r = _upload(client, "native.pdf", as_name="C:\\Users\\student\\Desktop\\Thesis_Final.pdf")
+    assert r.status_code == 200, r.text
+
+    body = client.get("/manuscripts").json()
+    item = next(i for i in body["items"] if i["id"] == r.json()["manuscript_id"])
+    assert item["original_filename"] == "Thesis_Final.pdf"
+
+
+@live
 def test_malformed_upload_is_a_422_not_a_500(client):
     r = _upload(client, "malformed.pdf")
     assert r.status_code == 422

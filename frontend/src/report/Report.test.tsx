@@ -7,6 +7,7 @@ import { ReportPage } from "./Report";
 const BASE_REPORT: ReportOut = {
   check_run_id: 5,
   manuscript_group_label: "Ungrouped",
+  manuscript_original_filename: null,
   rubric_title: "TIP Format",
   status: "ready",
   composite_score: 92,
@@ -85,6 +86,22 @@ describe("ReportPage", () => {
     expect(screen.getByText("92%")).toBeInTheDocument();
     expect(screen.getByText("Ungrouped")).toBeInTheDocument();
     expect(screen.getByText("TIP Format")).toBeInTheDocument();
+  });
+
+  it("BUG-022: shows the manuscript's filename, not the (possibly default) group_label, once the report links a check to a specific upload", async () => {
+    const report: ReportOut = {
+      ...BASE_REPORT,
+      manuscript_group_label: "Ungrouped",
+      manuscript_original_filename: "Chapter1-3_FinalDefense.pdf",
+    };
+    vi.stubGlobal(
+      "fetch",
+      stubFetchByPath({ "/check-runs/5/report": report, ...stubEscalated(), ...stubFlags() }),
+    );
+    renderWithProviders(<ReportPage />, { route: "/report/5", path: "/report/:checkRunId" });
+
+    expect(await screen.findByText("Chapter1-3_FinalDefense.pdf")).toBeInTheDocument();
+    expect(screen.queryByText("Ungrouped")).not.toBeInTheDocument();
   });
 
   it("BUG (weight/criterion collision) regression guard: the results grid uses minmax(0,1fr) and weight is right-aligned, not overlapping", async () => {

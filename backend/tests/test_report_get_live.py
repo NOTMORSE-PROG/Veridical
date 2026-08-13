@@ -71,7 +71,12 @@ async def _seed_done_run(session_factory):
         instructor = Instructor(email="report-get@demo.local", display_name="Report Get Test")
         session.add(instructor)
         await session.commit()
-        manuscript = Manuscript(instructor_id=instructor.id, group_label="G-11", file_ref="x.pdf")
+        manuscript = Manuscript(
+            instructor_id=instructor.id,
+            group_label="G-11",
+            file_ref="x.pdf",
+            original_filename="G-11-Thesis.pdf",
+        )
         rubric = Rubric(instructor_id=instructor.id, title="Format", source_file="r.pdf")
         session.add_all([manuscript, rubric])
         await session.commit()
@@ -116,6 +121,10 @@ async def test_get_report_returns_the_full_shape_for_a_done_run(session_factory)
         report = await get_report(session, check_run_id, instructor_id)
         assert report.check_run_id == check_run_id
         assert report.manuscript_group_label == "G-11"
+        # BUG-022 review (backend-critic): assert the ACTUAL filename,
+        # not a copy of the label — the two are easy to swap silently in
+        # the construction site with no existing test to catch it.
+        assert report.manuscript_original_filename == "G-11-Thesis.pdf"
         assert report.composite_score == 100.0
         assert len(report.results) == 1
         row = report.results[0]

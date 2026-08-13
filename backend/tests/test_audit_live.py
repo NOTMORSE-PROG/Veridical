@@ -68,7 +68,12 @@ async def _clean_tables(session_factory):
 
 
 async def _make_run(session, instructor):
-    manuscript = Manuscript(instructor_id=instructor.id, group_label="G", file_ref="x.pdf")
+    manuscript = Manuscript(
+        instructor_id=instructor.id,
+        group_label="G",
+        file_ref="x.pdf",
+        original_filename="G-Thesis.pdf",
+    )
     rubric = Rubric(instructor_id=instructor.id, title="Format", source_file="r.pdf")
     session.add_all([manuscript, rubric])
     await session.commit()
@@ -231,6 +236,11 @@ async def test_detail_returns_full_payload_and_input_hash(session_factory):
         assert detail.input_hash == "abc123"
         assert detail.payload["prompt"] == "hello"
         assert detail.payload["response"] == {"x": 1}
+        # BUG-022 review (backend-critic): the new 3-column unpack in
+        # get_audit_log_detail is easy to swap silently — assert the
+        # ACTUAL filename, not a copy of group_label ("G").
+        assert detail.manuscript_group_label == "G"
+        assert detail.manuscript_original_filename == "G-Thesis.pdf"
 
 
 async def test_detail_404s_for_another_instructors_row(session_factory):

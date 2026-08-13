@@ -105,7 +105,10 @@ def logged_in(client, api_scratch_url, tmp_path):
                 session.add(instructor)
                 await session.commit()
                 manuscript = Manuscript(
-                    instructor_id=instructor.id, group_label="G-11", file_ref=str(pdf_path)
+                    instructor_id=instructor.id,
+                    group_label="G-11",
+                    file_ref=str(pdf_path),
+                    original_filename="G-11-Thesis.pdf",
                 )
                 session.add(manuscript)
                 await session.commit()
@@ -146,6 +149,11 @@ def test_create_get_and_list_check_run(logged_in):
     # hold a manuscript/rubric ID number in their head to tell two check
     # runs apart.
     assert body["manuscript_group_label"] == "G-11"
+    # BUG-022 review (backend-critic): the 3-tuple/attribute plumbing for
+    # this field is easy to get subtly wrong (e.g. swapped with
+    # group_label) with zero existing test to catch it — assert it's the
+    # ACTUAL filename, not a copy of the label.
+    assert body["manuscript_original_filename"] == "G-11-Thesis.pdf"
     assert body["rubric_title"] == "Format"
 
     fetched = client.get(f"/check-runs/{body['id']}")

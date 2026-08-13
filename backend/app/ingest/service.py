@@ -176,12 +176,33 @@ async def ingest_upload(
     lowest id, reachable with no login at all; fixed same session it was
     found."""
     settings = settings or get_settings()
-    manuscript = Manuscript(instructor_id=instructor_id, group_label=group_label, file_ref="")
+    # BUG-022: group_label defaults to a constant ("Ungrouped"), so it
+    # alone can't tell two manuscripts apart in a picker/list — the
+    # instructor's own filename usually can. `.replace("\\", "/")` before
+    # `.name` makes path-component stripping OS-independent — bare
+    # `Path(...).name` only splits on the HOST's own separator, and
+    # production runs on Linux (D-003), so a raw Windows-style path from
+    # a non-browser client would otherwise pass through untouched.
+    # `isprintable()` drops control characters, including a literal NUL
+    # byte — verified live: an unescaped NUL in `filename` 500'd this
+    # endpoint before this filter existed (Postgres's UTF8 encoding
+    # rejects NUL outright; backend-critic finding, BUG-022 review).
+    # `[:255]` matches the column's own limit so an unusually long
+    # filename never 500s here either.
+    clean_name = "".join(ch for ch in filename.replace("\\", "/") if ch.isprintable())
+    original_filename = Path(clean_name).name[:255] or None
+    manuscript = Manuscript(
+        instructor_id=instructor_id,
+        group_label=group_label,
+        file_ref="",
+        original_filename=original_filename,
+    )
     session.add(manuscript)
     await session.commit()
 
     # Stored under a server-owned name: the id is the identity; the
-    # original filename is user input and never touches the filesystem.
+    # original filename never touches the filesystem (it's persisted for
+    # display only, above).
     suffix = Path(filename).suffix.lower()[:8]
     dest = settings.data_dir / "uploads" / f"{manuscript.id}{suffix}"
     try:
@@ -275,6 +296,7 @@ async def list_manuscripts(
         ManuscriptListItem(
             id=m.id,
             group_label=m.group_label,
+            original_filename=m.original_filename,
             ingest_status=m.ingest_status.value,
             ingest_failure_reason=(
                 m.ingest_failure_reason.value if m.ingest_failure_reason else None

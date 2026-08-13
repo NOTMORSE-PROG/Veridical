@@ -28,7 +28,7 @@ from app.models.run import CheckRun
 
 def _scoped_query(instructor_id: int):
     return (
-        select(AuditLog, Manuscript.group_label)
+        select(AuditLog, Manuscript.group_label, Manuscript.original_filename)
         .join(CheckRun, CheckRun.id == AuditLog.check_run_id)
         .join(Manuscript, Manuscript.id == CheckRun.manuscript_id)
         .where(Manuscript.instructor_id == instructor_id)
@@ -81,7 +81,7 @@ async def list_audit_log(
             .limit(page_size)
         )
     ).all()
-    items = [_summary(row, group_label) for row, group_label in rows]
+    items = [_summary(row, group_label) for row, group_label, _original_filename in rows]
     return PaginatedAuditLog(items=items, total=total or 0, page=page, page_size=page_size)
 
 
@@ -93,10 +93,11 @@ async def get_audit_log_detail(
     ).first()
     if row is None:
         raise NotFoundError(f"No audit log entry {audit_id}.")
-    entry, group_label = row
+    entry, group_label, original_filename = row
     summary = _summary(entry, group_label)
     return AuditLogDetail(
         **summary.model_dump(),
+        manuscript_original_filename=original_filename,
         input_hash=entry.input_hash,
         payload=entry.payload or {},
     )

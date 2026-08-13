@@ -49,6 +49,10 @@ export type IngestFailureReason = "file_too_large" | "unreadable_format" | "extr
 export interface ManuscriptListItem {
   id: number;
   group_label: string;
+  // BUG-022: group_label defaults to "Ungrouped" and can't distinguish
+  // two manuscripts alone; null for rows ingested before this field
+  // existed.
+  original_filename: string | null;
   ingest_status: "pending" | "processing" | "done" | "failed";
   ingest_failure_reason: IngestFailureReason | null;
   created_at: string;
@@ -106,6 +110,7 @@ export interface CheckRun {
   finished_at: string | null;
   created_at: string;
   manuscript_group_label: string | null;
+  manuscript_original_filename: string | null;
   manuscript_uploaded_at: string | null;
   rubric_title: string | null;
 }
@@ -150,6 +155,7 @@ export interface CriterionResultOut {
 export interface ReportOut {
   check_run_id: number;
   manuscript_group_label: string;
+  manuscript_original_filename: string | null;
   rubric_title: string;
   status: "ready" | "conditionally_ready" | "not_ready" | "needs_review";
   composite_score: number | null;
@@ -172,6 +178,9 @@ export interface AuditLogSummary {
 }
 
 export interface AuditLogDetail extends AuditLogSummary {
+  // Only on the detail view, not AuditLogSummary's list rows -- the list
+  // stays deliberately light at volume (BUG-022).
+  manuscript_original_filename: string | null;
   input_hash: string | null;
   payload: Record<string, unknown>;
 }

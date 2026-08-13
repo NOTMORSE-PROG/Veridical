@@ -216,6 +216,67 @@ describe("ManuscriptsTable", () => {
     expect(screen.getAllByText(/was not recorded before this feature shipped/i).length).toBeGreaterThan(0);
   });
 
+  it("BUG-022: two manuscripts sharing the default group_label render distinguishably via original_filename", async () => {
+    vi.stubGlobal(
+      "fetch",
+      stubFetchByPath({
+        "/manuscripts": page([
+          {
+            id: 6,
+            group_label: "Ungrouped",
+            original_filename: "Chapter1-3_FinalDefense.pdf",
+            ingest_status: "done",
+            ingest_failure_reason: null,
+            created_at: "2026-01-01T00:00:00Z",
+            latest_check_run_id: null,
+            latest_check_run_status: null,
+            latest_done_check_run_id: null,
+          },
+          {
+            id: 7,
+            group_label: "Ungrouped",
+            original_filename: "Chapter1-3_Revised.pdf",
+            ingest_status: "done",
+            ingest_failure_reason: null,
+            created_at: "2026-01-01T00:00:00Z",
+            latest_check_run_id: null,
+            latest_check_run_status: null,
+            latest_done_check_run_id: null,
+          },
+        ]),
+      }),
+    );
+    renderWithProviders(<ManuscriptsTable page={1} onPageChange={() => {}} />);
+    expect((await screen.findAllByText("Chapter1-3_FinalDefense.pdf")).length).toBe(2);
+    expect(screen.getAllByText("Chapter1-3_Revised.pdf").length).toBe(2);
+    // The default label is redundant once a filename wins the primary
+    // slot -- it must not also render as dead-weight chrome on the row.
+    expect(screen.queryByText("Ungrouped")).not.toBeInTheDocument();
+  });
+
+  it("BUG-022: a pre-migration row with no original_filename falls back to group_label alone, unchanged", async () => {
+    vi.stubGlobal(
+      "fetch",
+      stubFetchByPath({
+        "/manuscripts": page([
+          {
+            id: 8,
+            group_label: "Ungrouped",
+            original_filename: null,
+            ingest_status: "done",
+            ingest_failure_reason: null,
+            created_at: "2026-01-01T00:00:00Z",
+            latest_check_run_id: null,
+            latest_check_run_status: null,
+            latest_done_check_run_id: null,
+          },
+        ]),
+      }),
+    );
+    renderWithProviders(<ManuscriptsTable page={1} onPageChange={() => {}} />);
+    expect((await screen.findAllByText("Ungrouped")).length).toBe(2);
+  });
+
   it("shows an error state with retry when the manuscripts fetch fails", async () => {
     vi.stubGlobal(
       "fetch",

@@ -184,6 +184,7 @@ async def get_report(session: AsyncSession, check_run_id: int, instructor_id: in
     return ReportOut(
         check_run_id=check_run_id,
         manuscript_group_label=manuscript.group_label,
+        manuscript_original_filename=manuscript.original_filename,
         rubric_title=rubric.title,
         status=report.status.value if report is not None else scoring_payload["status"],
         composite_score=(
