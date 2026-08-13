@@ -1,4 +1,4 @@
-import { screen, waitFor } from "@testing-library/react";
+import { fireEvent, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { renderWithProviders, stubFetchByPath } from "../test/renderWithProviders";
 import { DashboardPage } from "./Dashboard";
@@ -67,8 +67,31 @@ describe("DashboardPage", () => {
     // flash of the wrong screen), so this is asynchronous now.
     expect(await screen.findByText("No required format yet")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Upload required format" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "New check" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "New check" })).toBeEnabled();
     await waitFor(() => expect(screen.getByText("Demo Instructor")).toBeInTheDocument());
+  });
+
+  it("BUG-023: 'New check' with no active rubric explains what's missing instead of dead-clicking silently", async () => {
+    vi.stubGlobal(
+      "fetch",
+      stubFetchByPath({
+        "/auth/me": {
+          id: 1,
+          email: "a@b.com",
+          display_name: "Demo Instructor",
+          onboarding_dismissed_at: "2026-01-01T00:00:00Z",
+        },
+        "/rubric-families": [],
+        "/manuscripts": { items: [], total: 0, page: 1, page_size: 200 },
+      }),
+    );
+    renderWithProviders(<DashboardPage />);
+    const newCheck = await screen.findByRole("button", { name: "New check" });
+    expect(newCheck).toBeEnabled();
+    fireEvent.click(newCheck);
+    expect(
+      await screen.findByText("No active rubric yet. Confirm one on the rubric review screen first."),
+    ).toBeInTheDocument();
   });
 
   it("renders the populated dashboard (screen 4e) once a rubric is active", async () => {
