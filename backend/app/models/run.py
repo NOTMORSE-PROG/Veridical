@@ -5,12 +5,11 @@ rubric version are first-class (Flow E) and every result/flag/report hangs
 off exactly one execution.
 """
 
-import uuid
 from datetime import datetime
 from decimal import Decimal
 from typing import Any
 
-from sqlalchemy import BigInteger, Boolean, DateTime, Enum, ForeignKey, Numeric, Text, Uuid
+from sqlalchemy import BigInteger, Boolean, DateTime, Enum, ForeignKey, Numeric, Text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -119,7 +118,5 @@ class ReadinessReport(Base, PkCreatedMixin):
         BigInteger, ForeignKey("instructor.id")
     )
     decision_note: Mapped[str | None] = mapped_column(Text)
-    # Revocable read-only sharing (F8.7): revoke = set NULL, re-share = new UUID.
-    share_token: Mapped[uuid.UUID | None] = mapped_column(Uuid, unique=True)
 
     check_run: Mapped["CheckRun"] = relationship(back_populates="report")
