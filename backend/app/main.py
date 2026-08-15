@@ -26,6 +26,7 @@ from app.pipeline.worker import worker_loop
 from app.report.router import router as report_router
 from app.rubric.router import router as rubric_router
 from app.settings.router import router as settings_router
+from app.share.router import router as share_router
 
 _ALEMBIC_INI = Path(__file__).resolve().parent.parent / "alembic.ini"
 
@@ -84,6 +85,7 @@ app.include_router(pipeline_router)
 app.include_router(report_router)
 app.include_router(rubric_router)
 app.include_router(settings_router)
+app.include_router(share_router)
 
 _cors_origins = get_settings().cors_allowed_origins_list
 if _cors_origins:

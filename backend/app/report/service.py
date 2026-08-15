@@ -169,6 +169,16 @@ async def get_report(session: AsyncSession, check_run_id: int, instructor_id: in
     A run must have finished (`done`) before there's anything real to
     show — never a partial or guessed report."""
     check_run = await _owned_check_run(session, check_run_id, instructor_id)
+    return await report_out_for_check_run(session, check_run)
+
+
+async def report_out_for_check_run(session: AsyncSession, check_run: CheckRun) -> ReportOut:
+    """V-040: the same report-assembly logic `get_report` uses, split out
+    so the public share-link view (`app.share.service`, token-authorized
+    instead of instructor-owned) can build the identical `ReportOut` a
+    signed-in instructor sees -- one source of truth for what a report
+    IS, two different authorization paths to reach it."""
+    check_run_id = check_run.id
     if check_run.status != CheckRunStatus.done:
         raise ConflictError("This check hasn't finished yet. Its report isn't ready.")
 
@@ -298,6 +308,14 @@ async def list_flags_for_run(
     precedent exactly (a sibling panel self-fetches; the common case of
     zero flags on a run never adds dead weight to every report fetch)."""
     await _owned_check_run(session, check_run_id, instructor_id)
+    return await flags_for_check_run(session, check_run_id)
+
+
+async def flags_for_check_run(session: AsyncSession, check_run_id: int) -> list[FlagSummaryOut]:
+    """V-040: split out of `list_flags_for_run` for the same reason as
+    `report_out_for_check_run` -- the public share-link view needs the
+    identical flags list, reached through token authorization instead of
+    instructor ownership."""
     rows = (
         await session.execute(
             select(Flag, CheckResult)

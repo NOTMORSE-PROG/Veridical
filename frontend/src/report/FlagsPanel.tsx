@@ -106,7 +106,15 @@ function panelSubline(flags: FlagSummaryOut[]): string {
   return `All ${overridden.length} overridden.`;
 }
 
-function FlagRow({ flag, showEyebrow }: { flag: FlagSummaryOut; showEyebrow: boolean }) {
+function FlagRow({
+  flag,
+  showEyebrow,
+  linkToDetail,
+}: {
+  flag: FlagSummaryOut;
+  showEyebrow: boolean;
+  linkToDetail: boolean;
+}) {
   return (
     <div className="flex flex-col gap-1.5 border-t border-border px-3.5 py-3 text-sm sm:flex-row sm:items-start sm:justify-between sm:gap-3">
       <div className="min-w-0 flex-1">
@@ -124,12 +132,21 @@ function FlagRow({ flag, showEyebrow }: { flag: FlagSummaryOut; showEyebrow: boo
           {flag.overridden && <StatusPill tone="neutral">Overridden</StatusPill>}
         </div>
       </div>
-      <Link
-        to={`/flags/${flag.id}`}
-        className="flex min-h-11 flex-none items-center rounded-md border border-border-input bg-panel px-3 text-sm font-medium text-ink hover:bg-status-neutral-bg sm:min-h-9"
-      >
-        {flag.overridden ? "View details" : "Review evidence"}
-      </Link>
+      {/* V-040: the adviser view has nowhere for this to go -- /flags/:id
+          is RequireAuth-wrapped, and FlagSummaryOut already carries
+          everything this audience needs inline (excerpt/anchor/severity;
+          its own docstring's "enough to decide," never "enough to skip
+          clicking," is exactly the bar this reduced view meets). Omitting
+          the link entirely is honest; pointing it at a route that would
+          just bounce the reader to a sign-in wall is not. */}
+      {linkToDetail && (
+        <Link
+          to={`/flags/${flag.id}`}
+          className="flex min-h-11 flex-none items-center rounded-md border border-border-input bg-panel px-3 text-sm font-medium text-ink hover:bg-status-neutral-bg sm:min-h-9"
+        >
+          {flag.overridden ? "View details" : "Review evidence"}
+        </Link>
+      )}
     </div>
   );
 }
@@ -139,14 +156,16 @@ function FlagGroup({
   flags,
   open,
   onToggle,
+  linkToDetail,
 }: {
   kind: string;
   flags: FlagSummaryOut[];
   open: boolean;
   onToggle: () => void;
+  linkToDetail: boolean;
 }) {
   if (flags.length === 1) {
-    return <FlagRow flag={flags[0]} showEyebrow />;
+    return <FlagRow flag={flags[0]} showEyebrow linkToDetail={linkToDetail} />;
   }
   return (
     <div className="border-t border-border">
@@ -166,7 +185,10 @@ function FlagGroup({
         </span>
         <span className="text-xs text-ink-tertiary">{groupCaption(flags)}</span>
       </button>
-      {open && flags.map((flag) => <FlagRow key={flag.id} flag={flag} showEyebrow={false} />)}
+      {open &&
+        flags.map((flag) => (
+          <FlagRow key={flag.id} flag={flag} showEyebrow={false} linkToDetail={linkToDetail} />
+        ))}
     </div>
   );
 }
@@ -186,8 +208,20 @@ function readToggled(searchParams: URLSearchParams): Set<string> {
   return raw ? new Set(raw.split(",")) : new Set();
 }
 
-export function FlagsPanel({ checkRunId }: { checkRunId: number }) {
-  const { data: flags, isPending, isError, refetch } = useFlags(checkRunId);
+/** The report's flags list, presentational -- takes an already-fetched
+ * `flags` array directly (BUG-033, extended V-040 so the public adviser
+ * view can render the SAME list from its own already-fetched
+ * `SharedReportOut.flags`, no second network call). `linkToDetail`
+ * defaults true (the instructor's own screen, via `FlagsPanel` below);
+ * the adviser view passes `false` -- `/flags/:id` is auth-gated and
+ * would just bounce a logged-out reader. */
+export function FlagsList({
+  flags,
+  linkToDetail = true,
+}: {
+  flags: FlagSummaryOut[];
+  linkToDetail?: boolean;
+}) {
   // Default open state is computed per group (any unresolved flag =>
   // open — ui-designer spec: trust over scanability where the two
   // conflict, since a "merely low-severity" group can still be what's
@@ -197,25 +231,6 @@ export function FlagsPanel({ checkRunId }: { checkRunId: number }) {
   const [searchParams, setSearchParams] = useSearchParams();
   const toggledAwayFromDefault = readToggled(searchParams);
 
-  if (isPending) {
-    return (
-      <div role="status" aria-live="polite" aria-busy="true" className="flex items-center gap-2 rounded-lg border border-border bg-panel p-4 text-sm text-ink-secondary">
-        <SpinnerIcon />
-        Loading flags.
-      </div>
-    );
-  }
-  if (isError || !flags) {
-    return (
-      <div role="alert" className="rounded-lg border border-status-attention-text/25 bg-status-attention-bg p-4 text-sm text-status-attention-text">
-        This report's flags couldn't be loaded.{" "}
-        <button type="button" onClick={() => refetch()} className="font-medium underline">
-          Try again
-        </button>
-        .
-      </div>
-    );
-  }
   if (flags.length === 0) {
     return (
       <p className="flex items-center gap-2 rounded-lg bg-status-success-bg px-4 py-2.5 text-sm text-status-success-text">
@@ -276,9 +291,41 @@ export function FlagsPanel({ checkRunId }: { checkRunId: number }) {
         const hasUnresolved = groupFlags.some((f) => !f.overridden);
         const open = toggledAwayFromDefault.has(kind) ? !hasUnresolved : hasUnresolved;
         return (
-          <FlagGroup key={kind} kind={kind} flags={groupFlags} open={open} onToggle={() => toggle(kind)} />
+          <FlagGroup
+            key={kind}
+            kind={kind}
+            flags={groupFlags}
+            open={open}
+            onToggle={() => toggle(kind)}
+            linkToDetail={linkToDetail}
+          />
         );
       })}
     </section>
   );
+}
+
+export function FlagsPanel({ checkRunId }: { checkRunId: number }) {
+  const { data: flags, isPending, isError, refetch } = useFlags(checkRunId);
+
+  if (isPending) {
+    return (
+      <div role="status" aria-live="polite" aria-busy="true" className="flex items-center gap-2 rounded-lg border border-border bg-panel p-4 text-sm text-ink-secondary">
+        <SpinnerIcon />
+        Loading flags.
+      </div>
+    );
+  }
+  if (isError || !flags) {
+    return (
+      <div role="alert" className="rounded-lg border border-status-attention-text/25 bg-status-attention-bg p-4 text-sm text-status-attention-text">
+        This report's flags couldn't be loaded.{" "}
+        <button type="button" onClick={() => refetch()} className="font-medium underline">
+          Try again
+        </button>
+        .
+      </div>
+    );
+  }
+  return <FlagsList flags={flags} />;
 }

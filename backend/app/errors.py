@@ -74,6 +74,15 @@ class ConflictError(VeridicalError):
     code = "conflict"
 
 
+class GoneError(VeridicalError):
+    """V-040: a share link that once worked but was deliberately revoked
+    or has expired — distinct from `not_found` (a token that never
+    existed) precisely so a revoked link's own visitor sees an honest
+    "this was turned off" message, not an ambiguous "wrong URL" one."""
+
+    code = "gone"
+
+
 class RateLimitedError(VeridicalError):
     """Too many requests in the configured window (BUG-004/D-020) — resume
     once the window resets; distinct from `unauthenticated` because the
@@ -94,6 +103,7 @@ HTTP_STATUS: dict[str, int] = {
     "unauthenticated": 401,
     "not_found": 404,
     "conflict": 409,
+    "gone": 410,
     "rate_limited": 429,
     # A rubric-decomposition parse that failed schema validation (V-010) —
     # user-actionable (re-review/re-upload); V-011 wraps this in a retry

@@ -128,7 +128,8 @@ export function DecisionModal({ decision, report, manuscriptLabel, onClose }: De
                 ReopenModal's own reason field avoids for the same
                 reason). */}
             <p id={noteHintId} className="text-xs text-ink-tertiary">
-              Saved with this decision and visible in the audit trail.
+              Saved with this decision and visible in the audit trail, and to anyone
+              you give a share link to this report.
             </p>
             <textarea
               id={noteId}

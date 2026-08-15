@@ -404,3 +404,24 @@ export interface ChangePasswordIn {
   current_password: string;
   new_password: string;
 }
+
+// V-040 (screens 4k-4l) — read-only, tokenized report sharing (F8.7).
+// No adviser accounts; the token itself is the credential.
+export interface CreateShareLinkIn {
+  expires_at: string | null;
+}
+
+export interface ShareLinkOut {
+  token: string;
+  check_run_id: number;
+  created_at: string;
+  expires_at: string | null;
+}
+
+// The public, unauthenticated adviser view's payload -- deliberately
+// just ReportOut + the same reduced FlagSummaryOut list the instructor's
+// own Flags panel uses, never a second, independently-drifting schema.
+export interface SharedReportOut {
+  report: ReportOut;
+  flags: FlagSummaryOut[];
+}

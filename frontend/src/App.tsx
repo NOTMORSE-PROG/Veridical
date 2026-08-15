@@ -21,6 +21,7 @@ import { FlagDetailPage } from "./flags/FlagDetail";
 import { LandingRoute } from "./pages/Landing";
 import { DashboardPage } from "./pages/Dashboard";
 import { SignInPage } from "./pages/SignIn";
+import { AdviserViewPage } from "./report/AdviserView";
 import { ReportPage } from "./report/Report";
 import { ManageRubricPage } from "./rubric/Manage";
 import { ReviewCriteriaPage } from "./rubric/ReviewCriteria";
@@ -34,6 +35,10 @@ const router = createBrowserRouter(
     <>
       <Route path="/" element={<LandingRoute />} />
       <Route path="/signin" element={<SignInPage />} />
+      {/* V-040 (screen 4l): deliberately outside RequireAuth/AppShell --
+          a public, unauthenticated read reached by a token in the URL,
+          not a session. */}
+      <Route path="/shared/:token" element={<AdviserViewPage />} />
       <Route
         path="/dashboard"
         element={

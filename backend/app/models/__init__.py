@@ -14,6 +14,7 @@ from app.models.manuscript import Manuscript, ManuscriptArchive, ManuscriptChapt
 from app.models.rubric import Criterion, Rubric
 from app.models.run import CheckResult, CheckRun, Flag, ReadinessReport
 from app.models.session import Session
+from app.models.share import ShareLink
 
 __all__ = [
     "AuditLog",
@@ -32,5 +33,6 @@ __all__ = [
     "ManuscriptChapterArchive",
     "ReadinessReport",
     "Rubric",
+    "ShareLink",
     "Session",
 ]

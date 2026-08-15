@@ -40,6 +40,7 @@ EXPECTED_TABLES = {
     "session",  # V-014 (migration 0005)
     "citation_cache",  # V-028 (migration 0012)
     "manuscript_chapter_archive",  # V-036 (migration 0014)
+    "share_link",  # V-040 (migration 0018)
 }
 
 
