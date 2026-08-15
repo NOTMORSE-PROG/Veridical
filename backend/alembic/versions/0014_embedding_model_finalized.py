@@ -21,17 +21,29 @@ import pgvector.sqlalchemy
 import sqlalchemy as sa
 
 from alembic import op
-from app.config import get_settings
 
 revision: str = "0014"
 down_revision: str | None = "0013"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
+# Hardcoded, not `get_settings().embedding_dim` (V-043 deployment finding,
+# live-reproduced): this migration's whole job is to LOCK IN the finalized
+# dimension permanently -- reading a mutable env-backed setting at
+# migration-run-time instead defeats that, and it's exactly what broke
+# production. Render's env still carried the OLD provisional
+# `EMBEDDING_DIM=768` (a leftover from before this migration existed,
+# never cleaned up) when this migration ran there, so it "succeeded" and
+# marked itself applied while silently leaving the column at `vector(768)`
+# -- the same value it started at. Every other environment (local dev, CI,
+# which never set that env var) happened to get the right answer by
+# coincidence, not because the migration was actually deterministic. Fixed
+# here at the root; migration 0023 repairs any environment already stuck
+# on the wrong dimension from before this fix.
+_EMBEDDING_DIM = 256
+
 
 def upgrade() -> None:
-    settings = get_settings()
-
     # Defensive, not a real data migration: F7 has never shipped, so this
     # table is empty in every real environment. Truncating first makes the
     # dimension-changing ALTER safe regardless.
@@ -40,8 +52,8 @@ def upgrade() -> None:
     op.alter_column(
         "manuscript_archive",
         "embedding",
-        type_=pgvector.sqlalchemy.Vector(settings.embedding_dim),
-        postgresql_using=f"embedding::vector({settings.embedding_dim})",
+        type_=pgvector.sqlalchemy.Vector(_EMBEDDING_DIM),
+        postgresql_using=f"embedding::vector({_EMBEDDING_DIM})",
     )
     op.add_column("manuscript_archive", sa.Column("model_id", sa.String(200), nullable=False))
     op.create_index(
@@ -60,7 +72,7 @@ def upgrade() -> None:
         sa.Column("title", sa.Text(), nullable=False),
         sa.Column("page", sa.Integer(), nullable=True),
         sa.Column("paragraph", sa.Integer(), nullable=True),
-        sa.Column("embedding", pgvector.sqlalchemy.Vector(settings.embedding_dim), nullable=False),
+        sa.Column("embedding", pgvector.sqlalchemy.Vector(_EMBEDDING_DIM), nullable=False),
         sa.Column("model_id", sa.String(200), nullable=False),
         sa.Column("id", sa.BigInteger(), sa.Identity(always=False), nullable=False),
         sa.Column(
