@@ -43,6 +43,7 @@ const EVENT_LABELS: Record<string, string> = {
   llm_model_exhausted: "AI model exhausted, failed over",
   report_decided: "Decision recorded",
   report_reopened: "Decision reopened",
+  manuscript_purged: "Archive purged",
 };
 
 function eventLabel(row: AuditLogSummary): string {
@@ -110,7 +111,8 @@ function isInstructorEvent(eventType: string): boolean {
     eventType === "flag_annotated" ||
     eventType === "escalation_resolved" ||
     eventType === "report_decided" ||
-    eventType === "report_reopened"
+    eventType === "report_reopened" ||
+    eventType === "manuscript_purged"
   );
 }
 

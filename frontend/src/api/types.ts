@@ -352,3 +352,55 @@ export interface QuotaStatus {
   rpm_limit: number;
   models?: ModelQuotaStatus[];
 }
+
+// V-042 (screen 4t) — the F7 originality/reuse archive: which manuscripts
+// still have an embedding archive, and per-item purge.
+export interface ArchiveItemOut {
+  manuscript_id: number;
+  group_label: string;
+  original_filename: string | null;
+  created_at: string;
+  latest_check_run_status: CheckRunStatus | null;
+  has_archive: boolean;
+  purged_at: string | null;
+}
+
+export interface PaginatedArchive {
+  items: ArchiveItemOut[];
+  total: number;
+  page: number;
+  page_size: number;
+}
+
+export interface PurgeOut {
+  manuscript_id: number;
+  purged_at: string;
+}
+
+// V-042 (screen 4u) — read-only transparency: scoring/escalation
+// thresholds (F8.9 isn't built yet, so `editable` is always false today)
+// and which prompt/model versions actually ran, sourced live from the
+// audit log (never a static/hardcoded version table).
+export interface ThresholdsOut {
+  ready_min_score: number;
+  not_ready_max_score: number;
+  escalation_agreement_threshold: number;
+  editable: boolean;
+}
+
+export interface PromptVersionOut {
+  prompt_type: string;
+  prompt_version: string;
+  model: string;
+  observed_at: string;
+}
+
+export interface SettingsOut {
+  thresholds: ThresholdsOut;
+  prompt_versions: PromptVersionOut[];
+}
+
+export interface ChangePasswordIn {
+  current_password: string;
+  new_password: string;
+}

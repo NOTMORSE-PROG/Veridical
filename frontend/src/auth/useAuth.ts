@@ -3,7 +3,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router";
 import { ApiError, api } from "../api/client";
-import type { Instructor } from "../api/types";
+import type { ChangePasswordIn, Instructor } from "../api/types";
 
 export const ME_QUERY_KEY = ["auth", "me"] as const;
 
@@ -55,6 +55,13 @@ export function useReplayOnboarding() {
     onSuccess: (instructor) => {
       queryClient.setQueryData(ME_QUERY_KEY, instructor);
     },
+  });
+}
+
+// V-042 (settings, screen 4u).
+export function useChangePassword() {
+  return useMutation({
+    mutationFn: (body: ChangePasswordIn) => api.post<{ ok: boolean }>("/auth/password", body),
   });
 }
 

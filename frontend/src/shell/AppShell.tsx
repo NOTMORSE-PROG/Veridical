@@ -14,25 +14,36 @@
 // BLOCKED pending adviser approval (D-005) -- a permanent nav item for it
 // was advertising an unapproved feature in the one piece of chrome every
 // screen renders, not just an unbuilt-but-committed one (Archive/Settings,
-// V-042, are a materially different case). Desktop/mobile now switch at a
-// single `md:` (768px) breakpoint (was two staggered ones, `sm:`/`lg:`) --
-// re-measured live: the 3-real-item nav + full quota sentence needs
-// ~686-690px, `md:` leaves ~78-82px of margin. Account/sign-out moved out
+// V-042, are a materially different case). Desktop/mobile switch at a
+// single breakpoint (was two staggered ones, `sm:`/`lg:`, before V-055's
+// own fix); V-042 moved that single breakpoint from `md:` (768px) to
+// `lg:` (1024px) when NAV_ITEMS grew 3 -> 5 (Archive/Settings added) --
+// V-055's own `md:` measurement (~686-690px used, ~78-82px margin) had no
+// room left for two more real items, and the Playwright browser was held
+// by a concurrent session this ticket, so this is a reasoned estimate
+// (item width + gap-4 for two more labels comfortably exceeds the old
+// margin), not a live re-measurement -- re-verify with
+// `getBoundingClientRect` at 1000-1024px once the browser is free, per
+// this file's own standing practice of re-measuring rather than
+// trusting an old number (ground rule 8). Account/sign-out moved out
 // of the persistent header row into the mobile disclosure panel (GOV.UK/
 // USWDS both separate "primary navigation" from "utility/account actions"
 // into distinct regions) -- the desktop avatar is unchanged, just now
-// `md:`-gated alongside the rest.
+// `lg:`-gated alongside the rest.
 import { type FocusEvent, type ReactNode, useEffect, useRef, useState } from "react";
 import { Link, useLocation } from "react-router";
 import { useQuota } from "../api/useQuota";
 import { useLogout, useMe } from "../auth/useAuth";
+import { quotaRemaining } from "../domain/quotaTone";
 import { CoachMark } from "../onboarding/CoachMark";
 import { TourProvider, useTour } from "../onboarding/TourContext";
 
 const NAV_ITEMS: ReadonlyArray<{ label: string; to: string }> = [
   { label: "Dashboard", to: "/dashboard" },
   { label: "Rubric", to: "/rubric" },
+  { label: "Archive", to: "/archive" },
   { label: "Audit log", to: "/audit" },
+  { label: "Settings", to: "/settings" },
 ];
 
 function initials(name: string): string {
@@ -151,7 +162,7 @@ function ReplayTourButton({
         data-tour="replay-tour-desktop"
         onClick={handleReplay}
         aria-label="Replay VERIDICAL tour"
-        className="hidden h-11 w-11 flex-none items-center justify-center rounded-full text-ink-tertiary hover:bg-status-neutral-bg hover:text-ink md:flex"
+        className="hidden h-11 w-11 flex-none items-center justify-center rounded-full text-ink-tertiary hover:bg-status-neutral-bg hover:text-ink lg:flex"
       >
         <ReplayIcon />
       </button>
@@ -201,7 +212,7 @@ function QuotaChip() {
   if (isPending) {
     return (
       <span className="inline-flex items-center gap-1.5 rounded-full border border-border bg-panel px-2.5 py-1 text-xs whitespace-nowrap text-ink-tertiary">
-        <span aria-hidden="true" className="h-3 w-8 animate-pulse rounded-full bg-neutral-150 md:w-20" />
+        <span aria-hidden="true" className="h-3 w-8 animate-pulse rounded-full bg-neutral-150 lg:w-20" />
         <span className="sr-only">Loading AI capacity</span>
       </span>
     );
@@ -209,30 +220,26 @@ function QuotaChip() {
   if (isError || !quota) {
     return (
       <span className="inline-flex items-center rounded-full border border-border bg-panel px-2.5 py-1 text-xs whitespace-nowrap text-ink-tertiary">
-        <span aria-hidden="true" className="md:hidden">
+        <span aria-hidden="true" className="lg:hidden">
           N/A
         </span>
-        <span aria-hidden="true" className="hidden md:inline">
+        <span aria-hidden="true" className="hidden lg:inline">
           AI capacity unavailable
         </span>
         <span className="sr-only">AI capacity unavailable</span>
       </span>
     );
   }
-  const remainingPct =
-    quota.daily_limit > 0
-      ? Math.max(0, Math.round(100 - (quota.calls_used / quota.daily_limit) * 100))
-      : 100;
-  const atZero = remainingPct === 0;
   // Three-tier tone, same tone family the rest of the app uses for
   // "system/process state" (V-056): quota is a hard operational
   // constraint central to this product's economics (ground rule 2) but
   // previously rendered as quiet text, indistinguishable in
   // weight from decorative chrome — Nielsen's visibility-of-system-status
-  // heuristic. Now a compact filled meter, not just a number.
-  const tone: "neutral" | "caution" | "danger" =
-    remainingPct < 15 ? "danger" : remainingPct < 40 ? "caution" : "neutral";
-  // Full sentence at md:+ (matches the nav's own breakpoint below); a
+  // heuristic. Now a compact filled meter, not just a number. Shared with
+  // Settings' own fuller quota view (V-042) via domain/quotaTone.ts, so
+  // the two screens can't silently disagree about "how bad is this".
+  const { remainingPct, atZero, tone } = quotaRemaining(quota.calls_used, quota.daily_limit);
+  // Full sentence at lg:+ (matches the nav's own breakpoint below); a
   // short-but-still-directional badge below it (never a bare number,
   // BUG-017) since the full sentence doesn't fit the header once the
   // desktop nav is hidden and the hamburger is the only other content.
@@ -248,7 +255,7 @@ function QuotaChip() {
     >
       <span
         aria-hidden="true"
-        className="h-1.5 w-10 flex-none overflow-hidden rounded-full md:w-14"
+        className="h-1.5 w-10 flex-none overflow-hidden rounded-full lg:w-14"
         style={{ backgroundColor: "var(--color-neutral-150)" }}
       >
         <span
@@ -256,10 +263,10 @@ function QuotaChip() {
           style={{ width: `${remainingPct}%`, backgroundColor: fillColor }}
         />
       </span>
-      <span aria-hidden="true" className="md:hidden">
+      <span aria-hidden="true" className="lg:hidden">
         {shortText}
       </span>
-      <span aria-hidden="true" className="hidden md:inline">
+      <span aria-hidden="true" className="hidden lg:inline">
         {longText}
       </span>
       <span className="sr-only">{longText}</span>
@@ -276,7 +283,7 @@ function AvatarButton() {
       type="button"
       onClick={() => logout.mutate()}
       aria-label={`Signed in as ${me.display_name}. Sign out`}
-      className="hidden h-11 w-11 flex-none items-center justify-center rounded-full hover:bg-status-neutral-bg md:flex"
+      className="hidden h-11 w-11 flex-none items-center justify-center rounded-full hover:bg-status-neutral-bg lg:flex"
     >
       <span className="flex h-8 w-8 items-center justify-center rounded-full bg-status-neutral-bg text-xs font-semibold text-ink">
         {initials(me.display_name)}
@@ -334,7 +341,7 @@ export function AppShell({ children }: { children: ReactNode }) {
         Skip to main content
       </a>
 
-      <header className="sticky top-0 z-40 flex h-14 items-center gap-3 border-b-[3px] border-accent bg-panel px-4 shadow-sm md:h-16 md:px-6 relative">
+      <header className="sticky top-0 z-40 flex h-14 items-center gap-3 border-b-[3px] border-accent bg-panel px-4 shadow-sm lg:h-16 lg:px-6 relative">
         <Link to="/dashboard" className="flex flex-none items-center gap-2 rounded-sm">
           <span
             aria-hidden="true"
@@ -345,7 +352,7 @@ export function AppShell({ children }: { children: ReactNode }) {
           <span className="text-sm font-bold tracking-header text-ink">VERIDICAL</span>
         </Link>
 
-        <nav aria-label="Primary" className="ml-2.5 hidden items-center gap-4 md:flex">
+        <nav aria-label="Primary" className="ml-2.5 hidden items-center gap-4 lg:flex">
           <DesktopNavLinks />
         </nav>
 
@@ -362,7 +369,7 @@ export function AppShell({ children }: { children: ReactNode }) {
           aria-expanded={mobileNavOpen}
           aria-controls="mobile-nav-panel"
           aria-label={mobileNavOpen ? "Close menu" : "Open menu"}
-          className="flex h-11 w-11 flex-none items-center justify-center text-ink md:hidden"
+          className="flex h-11 w-11 flex-none items-center justify-center text-ink lg:hidden"
         >
           {mobileNavOpen ? (
             <svg aria-hidden="true" viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
@@ -389,7 +396,7 @@ export function AppShell({ children }: { children: ReactNode }) {
           id="mobile-nav-panel"
           hidden={!mobileNavOpen}
           onBlur={handlePanelBlur}
-          className="absolute top-full right-0 left-0 border-b border-border bg-panel md:hidden"
+          className="absolute top-full right-0 left-0 border-b border-border bg-panel lg:hidden"
         >
           <nav aria-label="Primary" className="flex flex-col gap-1 p-2">
             <MobileNavLinks onNavigate={() => setMobileNavOpen(false)} />
@@ -415,7 +422,7 @@ export function AppShell({ children }: { children: ReactNode }) {
         <div
           aria-hidden="true"
           onClick={() => setMobileNavOpen(false)}
-          className="fixed inset-x-0 top-14 bottom-0 z-30 bg-neutral-900/50 md:hidden"
+          className="fixed inset-x-0 top-14 bottom-0 z-30 bg-neutral-900/50 lg:hidden"
         />
       )}
 

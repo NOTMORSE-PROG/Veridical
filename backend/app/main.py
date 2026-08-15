@@ -12,6 +12,7 @@ from fastapi.responses import JSONResponse
 
 from alembic import command
 from app import db
+from app.archive.router import router as archive_router
 from app.audit.router import router as audit_router
 from app.auth.router import router as auth_router
 from app.config import get_settings
@@ -24,6 +25,7 @@ from app.pipeline.router import router as pipeline_router
 from app.pipeline.worker import worker_loop
 from app.report.router import router as report_router
 from app.rubric.router import router as rubric_router
+from app.settings.router import router as settings_router
 
 _ALEMBIC_INI = Path(__file__).resolve().parent.parent / "alembic.ini"
 
@@ -71,6 +73,7 @@ app = FastAPI(
     description="Defense-readiness checks for capstone manuscripts.",
     lifespan=_lifespan,
 )
+app.include_router(archive_router)
 app.include_router(audit_router)
 app.include_router(auth_router)
 app.include_router(dashboard_router)
@@ -80,6 +83,7 @@ app.include_router(llm_router)
 app.include_router(pipeline_router)
 app.include_router(report_router)
 app.include_router(rubric_router)
+app.include_router(settings_router)
 
 _cors_origins = get_settings().cors_allowed_origins_list
 if _cors_origins:

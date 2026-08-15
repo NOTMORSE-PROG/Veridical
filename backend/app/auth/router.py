@@ -6,10 +6,12 @@ from fastapi import APIRouter, Depends, Request, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.dependencies import get_current_instructor
-from app.auth.schemas import InstructorOut, LoginRequest
+from app.auth.schemas import ChangePasswordIn, InstructorOut, LoginRequest
 from app.auth.service import (
     RateLimitedError,
+    WrongPasswordError,
     authenticate,
+    change_password,
     create_session,
     delete_session,
     mark_onboarding_dismissed,
@@ -64,6 +66,28 @@ async def logout(
 @router.get("/me", response_model=InstructorOut)
 async def me(instructor: Annotated[Instructor, Depends(get_current_instructor)]) -> InstructorOut:
     return InstructorOut.model_validate(instructor)
+
+
+@router.post("/password")
+async def change_password_route(
+    body: ChangePasswordIn,
+    request: Request,
+    instructor: Annotated[Instructor, Depends(get_current_instructor)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> dict[str, bool]:
+    settings = get_settings()
+    # get_current_instructor already required this cookie to exist and
+    # resolve, so it's guaranteed present here too.
+    current_token = request.cookies[settings.session_cookie_name]
+    try:
+        await change_password(
+            session, instructor, body.current_password, body.new_password, current_token, settings
+        )
+    except RateLimitedError as exc:
+        raise UnauthenticatedError("Too many attempts. Please try again in a few minutes.") from exc
+    except WrongPasswordError as exc:
+        raise UnauthenticatedError("Current password is incorrect.") from exc
+    return {"ok": True}
 
 
 @router.post("/onboarding/dismiss", response_model=InstructorOut)
