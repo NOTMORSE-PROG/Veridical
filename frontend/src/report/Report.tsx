@@ -4,7 +4,7 @@
 // pass/fail (taxonomy honesty, charter rule 9) — never dressed up as a
 // finding.
 import type { ReactNode } from "react";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link, useParams } from "react-router";
 import { ApiError } from "../api/client";
 import type { CriterionResultOut, Decision, ReportOut } from "../api/types";
@@ -19,7 +19,7 @@ import { DECISION_LABEL } from "../domain/decisionTone";
 import { DecisionPanel } from "./DecisionPanel";
 import { EscalatedPanel } from "./EscalatedPanel";
 import { FlagsPanel } from "./FlagsPanel";
-import { useReport } from "./useReport";
+import { useExportReportPdf, useReport } from "./useReport";
 
 function decisionLinkLabel(decision: Decision): string {
   return `Decision: ${DECISION_LABEL[decision]}`;
@@ -253,6 +253,21 @@ export function ReportPage() {
   const { data: report, isPending, isError, error, refetch } = useReport(id);
   const headingRef = useRef<HTMLHeadingElement>(null);
   useRouteFocus("Readiness report - VERIDICAL", headingRef);
+  const exportPdf = useExportReportPdf(id);
+  const exportErrorRef = useRef<HTMLParagraphElement>(null);
+  useEffect(() => {
+    if (exportPdf.isError) exportErrorRef.current?.focus();
+  }, [exportPdf.isError]);
+  // ux-critic finding (P1, live-reproduced): `exportPdf.isPending` is a
+  // value from the LAST render, not updated in place -- N clicks landing
+  // in the same synchronous tick (before React re-renders) all read the
+  // same stale "not pending" value, so checking it in the handler alone
+  // doesn't actually stop a rapid double-click (verified: a naive `if
+  // (exportPdf.isPending) return` guard still let 3 rapid clicks through).
+  // A plain mutable ref, set synchronously and cleared in onSettled
+  // (fires on both success AND error), is the only guard that's actually
+  // synchronous with the click itself.
+  const exportInFlightRef = useRef(false);
 
   return (
     <div className="mx-auto flex w-full max-w-5xl flex-col gap-4 p-4 sm:p-6">
@@ -301,9 +316,58 @@ export function ReportPage() {
               <a href="#decision-heading" className="text-sm text-link underline hover:text-link-hover">
                 {report.decision === null ? "Go to final decision" : decisionLinkLabel(report.decision)}
               </a>
+              <button
+                type="button"
+                onClick={() => {
+                  if (exportInFlightRef.current) return;
+                  exportInFlightRef.current = true;
+                  exportPdf.mutate(undefined, {
+                    onSettled: () => {
+                      exportInFlightRef.current = false;
+                    },
+                  });
+                }}
+                disabled={exportPdf.isPending}
+                aria-busy={exportPdf.isPending ? "true" : undefined}
+                aria-describedby="export-pdf-note"
+                className="inline-flex items-center gap-1.5 text-sm font-medium text-link underline hover:text-link-hover disabled:no-underline disabled:opacity-60"
+              >
+                {exportPdf.isPending && <SpinnerIcon />}
+                {exportPdf.isPending ? "Exporting PDF." : "Export PDF"}
+              </button>
             </div>
           )}
         </div>
+        {report && (
+          // ux-critic finding: the exported PDF's own accessibility
+          // limitation (reportlab produces an untagged PDF -- no
+          // semantic reading order for assistive tech) was disclosed
+          // only in a code comment nobody using the product would read.
+          // Stated plainly here instead (charter judgment #4: disclose
+          // limitations before being asked).
+          <p id="export-pdf-note" className="text-xs text-ink-tertiary">
+            Downloaded PDFs are not optimized for screen readers. Use this on-screen report for
+            accessible review.
+          </p>
+        )}
+        {exportPdf.isPending && (
+          <p role="status" aria-live="polite" className="sr-only">
+            Exporting this report to PDF.
+          </p>
+        )}
+        {exportPdf.isError && (
+          <p
+            ref={exportErrorRef}
+            role="alert"
+            tabIndex={-1}
+            className="text-sm font-medium text-danger"
+          >
+            <span className="sr-only">Error: </span>
+            {exportPdf.error instanceof ApiError
+              ? exportPdf.error.message
+              : "Could not export this report. Try again."}
+          </p>
+        )}
       </header>
 
       {/* V-041: historical orientation about a DIFFERENT (earlier) run,

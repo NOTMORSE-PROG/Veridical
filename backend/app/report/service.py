@@ -30,6 +30,7 @@ from app.report.schemas import (
     EscalatedItemOut,
     EvidenceItem,
     FlagSummaryOut,
+    ReportExportData,
     ReportOut,
     ResolutionOut,
     ResolveEscalationOut,
@@ -338,6 +339,37 @@ async def list_flags_for_run(
             f.id,
         ),
     )
+
+
+async def get_report_export_data(
+    session: AsyncSession, check_run_id: int, instructor_id: int
+) -> ReportExportData:
+    """V-039 (screen 4h export action): assembles everything the PDF
+    export needs from the SAME data sources the on-screen report/flags
+    panels already use -- never a second, divergent read path. Ownership
+    is validated once, by `get_report` itself (raises `NotFoundError`);
+    the two supplementary reads below trust that check.
+    """
+    report = await get_report(session, check_run_id, instructor_id)
+    flags = await list_flags_for_run(session, check_run_id, instructor_id)
+
+    # F7's archive-size disclosure (V-037) lives on its own CheckResult
+    # row (criterion_id=None, one per run) -- never surfaced in
+    # ReportOut.results (that table is criteria-linked results only), so
+    # it needs its own small read here.
+    archive_check = await session.scalar(
+        select(CheckResult).where(
+            CheckResult.check_run_id == check_run_id,
+            CheckResult.kind == CheckKind.originality_reuse,
+        )
+    )
+    archive_size_n = (
+        archive_check.detail.get("archive_size_n")
+        if archive_check is not None and archive_check.detail
+        else None
+    )
+
+    return ReportExportData(report=report, flags=flags, archive_size_n=archive_size_n)
 
 
 async def resolve_escalation_for_run(

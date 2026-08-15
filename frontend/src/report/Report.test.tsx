@@ -583,4 +583,143 @@ describe("ReportPage", () => {
     await screen.findByText("Ready");
     expect(screen.queryByText("Previously")).not.toBeInTheDocument();
   });
+
+  it("V-039: Export PDF fetches the real PDF endpoint and triggers a save, with a loading state", async () => {
+    let resolveExport: ((r: Response) => void) | undefined;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = typeof input === "string" ? input : input.toString();
+      const path = new URL(url, "http://localhost").pathname;
+      if (path === "/check-runs/5/report/export.pdf") {
+        return new Promise<Response>((resolve) => {
+          resolveExport = resolve;
+        });
+      }
+      const handlers = {
+        "/check-runs/5/report": BASE_REPORT,
+        ...stubEscalated(),
+        ...stubFlags(),
+      } as Record<string, unknown>;
+      return new Response(JSON.stringify(handlers[path] ?? {}), { status: 200 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("URL.createObjectURL", vi.fn(() => "blob:mock"));
+    vi.stubGlobal("URL.revokeObjectURL", vi.fn());
+    renderWithProviders(<ReportPage />, { route: "/report/5", path: "/report/:checkRunId" });
+
+    await screen.findByText("Ready");
+    fireEvent.click(screen.getByRole("button", { name: "Export PDF" }));
+
+    expect(await screen.findByRole("button", { name: /Exporting PDF/ })).toHaveAttribute(
+      "aria-busy",
+      "true",
+    );
+
+    resolveExport?.(
+      new Response(new Blob([new Uint8Array([0x25, 0x50, 0x44, 0x46])]), {
+        status: 200,
+        headers: { "Content-Type": "application/pdf" },
+      }),
+    );
+
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Export PDF" })).not.toHaveAttribute("aria-busy"),
+    );
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringContaining("/check-runs/5/report/export.pdf"),
+      expect.anything(),
+    );
+  });
+
+  it("V-039: ux-critic finding (P1): rapid double-clicking Export PDF fires only ONE export request", async () => {
+    // `disabled={isPending}` only takes effect after React's next commit
+    // -- N synchronous clicks landing in the same tick would otherwise
+    // all call mutate(), each one a real server-side reportlab render on
+    // a single-worker, 512MB Render instance (the exact concurrent-
+    // render risk this ticket's own research picked reportlab to avoid).
+    let exportCalls = 0;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = typeof input === "string" ? input : input.toString();
+      const path = new URL(url, "http://localhost").pathname;
+      if (path === "/check-runs/5/report/export.pdf") {
+        exportCalls += 1;
+        return new Response(new Blob([new Uint8Array([0x25, 0x50, 0x44, 0x46])]), {
+          status: 200,
+          headers: { "Content-Type": "application/pdf" },
+        });
+      }
+      const handlers = {
+        "/check-runs/5/report": BASE_REPORT,
+        ...stubEscalated(),
+        ...stubFlags(),
+      } as Record<string, unknown>;
+      return new Response(JSON.stringify(handlers[path] ?? {}), { status: 200 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("URL.createObjectURL", vi.fn(() => "blob:mock"));
+    vi.stubGlobal("URL.revokeObjectURL", vi.fn());
+    renderWithProviders(<ReportPage />, { route: "/report/5", path: "/report/:checkRunId" });
+
+    await screen.findByText("Ready");
+    const button = screen.getByRole("button", { name: "Export PDF" });
+    // Three clicks in the same synchronous tick, before React commits
+    // the disabled state -- reproduces the real rapid-click race.
+    fireEvent.click(button);
+    fireEvent.click(button);
+    fireEvent.click(button);
+
+    await waitFor(() => expect(exportCalls).toBeGreaterThan(0));
+    expect(exportCalls).toBe(1);
+  });
+
+  it("V-039: discloses the exported PDF's screen-reader limitation where a real user would see it", async () => {
+    vi.stubGlobal(
+      "fetch",
+      stubFetchByPath({ "/check-runs/5/report": BASE_REPORT, ...stubEscalated(), ...stubFlags() }),
+    );
+    renderWithProviders(<ReportPage />, { route: "/report/5", path: "/report/:checkRunId" });
+
+    await screen.findByText("Ready");
+    expect(
+      screen.getByText(/Downloaded PDFs are not optimized for screen readers/),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Export PDF" })).toHaveAttribute(
+      "aria-describedby",
+      "export-pdf-note",
+    );
+  });
+
+  it("V-039: shows the server's error if the export request fails", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = typeof input === "string" ? input : input.toString();
+      const path = new URL(url, "http://localhost").pathname;
+      if (path === "/check-runs/5/report/export.pdf") {
+        return new Response(
+          JSON.stringify({ error: { code: "internal", message: "Could not build the export." } }),
+          { status: 500 },
+        );
+      }
+      const handlers = {
+        "/check-runs/5/report": BASE_REPORT,
+        ...stubEscalated(),
+        ...stubFlags(),
+      } as Record<string, unknown>;
+      return new Response(JSON.stringify(handlers[path] ?? {}), { status: 200 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    renderWithProviders(<ReportPage />, { route: "/report/5", path: "/report/:checkRunId" });
+
+    await screen.findByText("Ready");
+    fireEvent.click(screen.getByRole("button", { name: "Export PDF" }));
+
+    const error = await screen.findByText("Could not build the export.");
+    const alert = error.closest('[role="alert"]');
+    expect(alert).toBeInTheDocument();
+    // Focus moves to the error itself (ReopenModal.tsx/DecisionModal.tsx's
+    // own established convention) -- a passive live-region announcement
+    // alone isn't enough for a screen-reader user who isn't listening at
+    // the exact moment the request settles.
+    expect(document.activeElement).toBe(alert);
+    // The button must recover, not stay stuck busy on a failed export.
+    expect(screen.getByRole("button", { name: "Export PDF" })).not.toHaveAttribute("aria-busy");
+  });
 });

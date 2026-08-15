@@ -101,3 +101,24 @@ export function useReopenReport(checkRunId: number) {
     onError: refetchReportOnConflict(queryClient, checkRunId),
   });
 }
+
+// V-039: fetches the PDF as a Blob and triggers a real file save via a
+// temporary object URL -- a plain `<a href>` can't show an in-page
+// aria-busy/error state while the export generates (real, if small,
+// latency: the ticket's own AC is "<30s"), and can't distinguish a
+// failed export from a successful one without a page navigation.
+export function useExportReportPdf(checkRunId: number) {
+  return useMutation({
+    mutationFn: () => api.getBlob(`/check-runs/${checkRunId}/report/export.pdf`),
+    onSuccess: (blob) => {
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `veridical-report-${checkRunId}.pdf`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+    },
+  });
+}

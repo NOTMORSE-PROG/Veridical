@@ -155,3 +155,16 @@ class FlagSummaryOut(BaseModel):
     evidence_excerpt: str
     page_anchor: str
     overridden: bool
+
+
+class ReportExportData(BaseModel):
+    """V-039: everything the PDF export needs, gathered once. `flags`
+    mirrors the report's own flags panel (BUG-033) exactly -- the export
+    is a print-adapted view of the same instructor-facing data, never a
+    second source of truth. `archive_size_n` is None when the F7 check
+    never ran (no embeddable content extracted) -- an honest gap, not a
+    fabricated zero."""
+
+    report: ReportOut
+    flags: list[FlagSummaryOut]
+    archive_size_n: int | None
