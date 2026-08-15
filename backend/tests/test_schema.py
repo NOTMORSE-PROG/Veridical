@@ -233,6 +233,43 @@ def test_pgvector_column_index_and_similarity_query(migrated):
 
 
 @pytestmark_live
+def test_migrated_embedding_columns_are_exactly_256_dim_regardless_of_env(migrated):
+    """V-043 (production deployment) finding, live-reproduced: migration
+    0014 used to read `get_settings().embedding_dim` at migration-run
+    time instead of hardcoding the value it was meant to lock in
+    permanently. Every environment that never carried a stray
+    `EMBEDDING_DIM` env var override (this test's own `migrated` fixture
+    included) got the right answer by COINCIDENCE, not because the
+    migration was actually deterministic -- production had a leftover
+    `EMBEDDING_DIM=768` env var (provisional value from before this
+    migration existed) and silently ended up with a `vector(768)` column
+    while every other environment showed `vector(256)`, exactly the kind
+    of drift `test_pgvector_column_index_and_similarity_query` (which
+    derives its own dimension FROM `get_settings().embedding_dim`) cannot
+    catch, since it's tautological with respect to the same value that
+    was wrong. This test asserts the LITERAL migrated dimension instead,
+    independent of whatever `EMBEDDING_DIM` this test process happens to
+    have set -- the real, permanent, code-decided value (potion-base-8M,
+    D-011), not a re-read of the same settings a bug could also affect.
+    """
+
+    async def scenario():
+        conn = await asyncpg.connect(migrated)
+        try:
+            for table in ("manuscript_archive", "manuscript_chapter_archive"):
+                typ = await conn.fetchval(
+                    "SELECT format_type(atttypid, atttypmod) FROM pg_attribute"
+                    " WHERE attrelid = $1::regclass AND attname = 'embedding'",
+                    table,
+                )
+                assert typ == "vector(256)", f"{table}.embedding is {typ!r}, expected vector(256)"
+        finally:
+            await conn.close()
+
+    asyncio.run(scenario())
+
+
+@pytestmark_live
 def test_rubric_family_version_must_be_unique(migrated):
     async def scenario():
         conn = await asyncpg.connect(migrated)
