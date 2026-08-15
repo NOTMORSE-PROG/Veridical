@@ -13,6 +13,7 @@
 // behavior is identical to before.
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createBrowserRouter, createRoutesFromElements, Route, RouterProvider } from "react-router";
+import { ArchivePage } from "./archive/Archive";
 import { AuditLogPage } from "./audit/AuditLog";
 import { RequireAuth } from "./auth/RequireAuth";
 import { CheckProgressPage } from "./check/Progress";
@@ -23,6 +24,7 @@ import { SignInPage } from "./pages/SignIn";
 import { ReportPage } from "./report/Report";
 import { ManageRubricPage } from "./rubric/Manage";
 import { ReviewCriteriaPage } from "./rubric/ReviewCriteria";
+import { SettingsPage } from "./settings/Settings";
 import { AppShell } from "./shell/AppShell";
 
 const queryClient = new QueryClient();
@@ -48,6 +50,26 @@ const router = createBrowserRouter(
           <RequireAuth>
             <AppShell>
               <ManageRubricPage />
+            </AppShell>
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/archive"
+        element={
+          <RequireAuth>
+            <AppShell>
+              <ArchivePage />
+            </AppShell>
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/settings"
+        element={
+          <RequireAuth>
+            <AppShell>
+              <SettingsPage />
             </AppShell>
           </RequireAuth>
         }

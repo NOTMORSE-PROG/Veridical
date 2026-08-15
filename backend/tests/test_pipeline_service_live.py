@@ -5,6 +5,7 @@ ingestion/activation preconditions) and `queue_position`'s FIFO ordering
 
 import os
 import time
+from datetime import UTC, datetime
 
 import pytest
 from sqlalchemy import text
@@ -64,7 +65,9 @@ async def _clean_tables(session_factory):
     yield
 
 
-async def _seed_instructor_manuscript_rubric(session_factory, *, ingested=True, active=True):
+async def _seed_instructor_manuscript_rubric(
+    session_factory, *, ingested=True, active=True, purged=False
+):
     async with session_factory() as session:
         instructor = Instructor(
             email=f"svc-{time.time_ns()}@test.local", display_name="Service Test"
@@ -76,6 +79,7 @@ async def _seed_instructor_manuscript_rubric(session_factory, *, ingested=True, 
             group_label="G",
             file_ref="x.pdf",
             ingest_status=IngestStatus.done if ingested else IngestStatus.processing,
+            purged_at=datetime.now(UTC) if purged else None,
         )
         rubric = Rubric(
             instructor_id=instructor.id, title="Format", source_file="r.pdf", is_active=active
@@ -103,6 +107,20 @@ async def test_create_check_run_rejects_unfinished_ingestion(session_factory):
     )
     async with session_factory() as session:
         with pytest.raises(ConflictError):
+            await create_check_run(session, instructor_id, manuscript_id, rubric_id)
+
+
+async def test_create_check_run_rejects_a_purged_manuscript(session_factory):
+    """backend-critic finding (V-042, P1, live-reproduced): a purged
+    manuscript's stored files are gone; without this gate, a check-run
+    would queue, then fail deep in the pipeline with a raw
+    FileNotFoundError, and the frontend's generic failure copy would
+    tell the instructor to retry an action that can never succeed."""
+    instructor_id, manuscript_id, rubric_id = await _seed_instructor_manuscript_rubric(
+        session_factory, purged=True
+    )
+    async with session_factory() as session:
+        with pytest.raises(ConflictError, match="purged"):
             await create_check_run(session, instructor_id, manuscript_id, rubric_id)
 
 

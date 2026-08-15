@@ -1,7 +1,18 @@
+from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
 from pgvector.sqlalchemy import Vector
-from sqlalchemy import BigInteger, Enum, ForeignKey, Index, Integer, String, Text, UniqueConstraint
+from sqlalchemy import (
+    BigInteger,
+    DateTime,
+    Enum,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+)
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -40,6 +51,10 @@ class Manuscript(Base, PkCreatedMixin):
     # no FK on purpose — the student entity doesn't exist and may never.
     version: Mapped[int | None]
     submitted_by: Mapped[int | None] = mapped_column(BigInteger)
+    # V-042: set when the instructor purges the F7 embedding archive + the
+    # stored files. The Manuscript row, check-run history, and any decision
+    # are deliberately kept -- NULL means "never purged", never fabricated.
+    purged_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     instructor: Mapped["Instructor"] = relationship(back_populates="manuscripts")
     archive: Mapped["ManuscriptArchive | None"] = relationship(back_populates="manuscript")

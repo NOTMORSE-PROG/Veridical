@@ -39,6 +39,19 @@ async def create_check_run(
         raise ConflictError(
             "This manuscript hasn't finished ingestion yet. Try again once it's ready."
         )
+    # backend-critic finding (V-042, P1): a purged manuscript's stored
+    # files are gone (archive/service.py::purge_manuscript), but nothing
+    # here checked for that -- a re-check attempt (the natural next move
+    # after a purge, or a V-041 re-run) would run, fail deep in the
+    # pipeline with a raw FileNotFoundError, and the frontend's generic
+    # failure copy ("Something went wrong... Try running it again")
+    # would tell the instructor to retry an action that can never
+    # succeed. Caught here instead, with an honest, specific reason.
+    if manuscript.purged_at is not None:
+        raise ConflictError(
+            "This manuscript's stored content was purged and can no longer be checked. "
+            "Upload it again to check it."
+        )
 
     rubric = await session.get(Rubric, rubric_id)
     if rubric is None or rubric.instructor_id != instructor_id:

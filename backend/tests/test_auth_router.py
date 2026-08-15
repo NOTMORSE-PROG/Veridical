@@ -46,12 +46,14 @@ def client(api_scratch_url, tmp_path, monkeypatch):
     get_settings.cache_clear()
     db._engine = None
     auth_service._rate_limiter = None
+    auth_service._password_change_limiter = None
     from app.main import app
 
     with TestClient(app) as c:
         yield c
     db._engine = None
     auth_service._rate_limiter = None
+    auth_service._password_change_limiter = None
 
 
 @pytest.fixture()
@@ -126,6 +128,7 @@ def test_repeated_wrong_passwords_get_rate_limited(seeded, monkeypatch):
     monkeypatch.setenv("LOGIN_RATE_LIMIT_MAX_ATTEMPTS", "2")
     get_settings.cache_clear()
     auth_service._rate_limiter = None
+    auth_service._password_change_limiter = None
     for _ in range(2):
         resp = seeded.post("/auth/login", json={"email": "prof@tip.edu.ph", "password": "wrong"})
         assert resp.status_code == 401
@@ -185,4 +188,105 @@ def test_replaying_onboarding_clears_dismissal_and_persists(seeded):
 
 def test_replaying_onboarding_without_a_session_is_401(seeded):
     resp = seeded.post("/auth/onboarding/replay")
+    assert resp.status_code == 401
+
+
+def test_changing_password_requires_the_current_one(seeded):
+    """V-042 (settings, screen 4u): a left-open session alone must not be
+    enough to lock the real owner out via a changed password."""
+    seeded.post("/auth/login", json={"email": "prof@tip.edu.ph", "password": "s3cret!"})
+    resp = seeded.post(
+        "/auth/password",
+        json={"current_password": "wrong-one", "new_password": "brand-new-pw"},
+    )
+    assert resp.status_code == 401
+    assert resp.json()["error"]["message"] == "Current password is incorrect."
+
+    # The old password still works -- nothing was mutated on a rejected attempt.
+    still_works = seeded.post(
+        "/auth/login", json={"email": "prof@tip.edu.ph", "password": "s3cret!"}
+    )
+    assert still_works.status_code == 200
+
+
+def test_changing_password_succeeds_and_the_new_one_logs_in(seeded):
+    seeded.post("/auth/login", json={"email": "prof@tip.edu.ph", "password": "s3cret!"})
+    resp = seeded.post(
+        "/auth/password",
+        json={"current_password": "s3cret!", "new_password": "brand-new-pw"},
+    )
+    assert resp.status_code == 200
+
+    seeded.post("/auth/logout")
+    old = seeded.post("/auth/login", json={"email": "prof@tip.edu.ph", "password": "s3cret!"})
+    assert old.status_code == 401
+
+
+def test_changing_password_revokes_every_other_session_but_keeps_this_one(seeded):
+    """backend-critic finding (P1): a password change is a security-
+    boundary event -- a session left open on another device (or a stolen
+    cookie) must not survive the exact recovery step meant to kill it,
+    but the request that just re-proved the password shouldn't log
+    itself out."""
+    cookie_name = get_settings().session_cookie_name
+
+    seeded.post("/auth/login", json={"email": "prof@tip.edu.ph", "password": "s3cret!"})
+    other_device_token = seeded.cookies.get(cookie_name)
+
+    # A second, independent session for the same account (a different
+    # device/browser) -- logging in again issues a NEW token without
+    # invalidating the first.
+    seeded.post("/auth/login", json={"email": "prof@tip.edu.ph", "password": "s3cret!"})
+    this_device_token = seeded.cookies.get(cookie_name)
+    assert this_device_token != other_device_token
+
+    resp = seeded.post(
+        "/auth/password",
+        json={"current_password": "s3cret!", "new_password": "brand-new-pw"},
+    )
+    assert resp.status_code == 200
+
+    seeded.cookies.set(cookie_name, other_device_token)
+    assert seeded.get("/auth/me").status_code == 401
+
+    seeded.cookies.set(cookie_name, this_device_token)
+    assert seeded.get("/auth/me").status_code == 200
+
+
+def test_changing_password_is_rate_limited_like_login(seeded, monkeypatch):
+    monkeypatch.setenv("LOGIN_RATE_LIMIT_MAX_ATTEMPTS", "2")
+    get_settings.cache_clear()
+    auth_service._password_change_limiter = None
+    seeded.post("/auth/login", json={"email": "prof@tip.edu.ph", "password": "s3cret!"})
+
+    for _ in range(2):
+        resp = seeded.post(
+            "/auth/password",
+            json={"current_password": "wrong-one", "new_password": "brand-new-pw"},
+        )
+        assert resp.status_code == 401
+    blocked = seeded.post(
+        "/auth/password",
+        json={"current_password": "s3cret!", "new_password": "brand-new-pw"},
+    )
+    assert blocked.status_code == 401
+    assert "many attempts" in blocked.json()["error"]["message"].lower()
+    # Blocked even with the CORRECT current password -- the password was
+    # never actually changed by any of the three attempts.
+    still_old = seeded.post("/auth/login", json={"email": "prof@tip.edu.ph", "password": "s3cret!"})
+    assert still_old.status_code == 200
+
+
+def test_changing_password_rejects_a_too_short_new_password(seeded):
+    seeded.post("/auth/login", json={"email": "prof@tip.edu.ph", "password": "s3cret!"})
+    resp = seeded.post(
+        "/auth/password", json={"current_password": "s3cret!", "new_password": "short"}
+    )
+    assert resp.status_code == 422
+
+
+def test_changing_password_without_a_session_is_401(seeded):
+    resp = seeded.post(
+        "/auth/password", json={"current_password": "s3cret!", "new_password": "brand-new-pw"}
+    )
     assert resp.status_code == 401
