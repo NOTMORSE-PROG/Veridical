@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.auth.dependencies import get_current_instructor
 from app.config import get_settings
 from app.db import get_session
-from app.llm import get_llm_client
+from app.llm import get_llm_client_for
 from app.models.instructor import Instructor
 from app.ratelimit import enforce_action_rate_limit
 from app.rubric.schemas import RubricListItem, RubricOut, UpdateCriteriaRequest
@@ -44,12 +44,13 @@ async def upload_rubric(
 
     settings = get_settings()
     enforce_action_rate_limit(settings, "rubric_upload", instructor.id)
+    llm = await get_llm_client_for(session, settings, instructor.id)
     rubric = await create_rubric_from_upload(
         session,
         chunks(),
         file.filename or "",
         title,
-        get_llm_client(settings),
+        llm,
         settings,
         instructor_id=instructor.id,
         family_id=family_id,

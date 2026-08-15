@@ -21,6 +21,11 @@ class ModelQuotaStatus(BaseModel):
 
 class QuotaStatus(BaseModel):
     mode: Literal["fake", "live"]
+    # V-052 (BYOK): which key this status describes -- "own" only when the
+    # requesting instructor has their own Gemini key configured and this
+    # reflects THEIR island, "shared" otherwise (including fake mode, which
+    # never spends a real key of either kind -- charter rule 9, honesty).
+    key_source: Literal["own", "shared"]
     quota_day: str
     # Aggregated across the pool: the number capacity claims are priced
     # against (D-001/D-014).

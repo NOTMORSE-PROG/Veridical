@@ -223,9 +223,10 @@ def test_ingestion_survives_a_real_vision_api_failure(tmp_path, monkeypatch):
         async def scenario(exc=exc, manuscript=manuscript, settings=settings):
             import app.ingest.service as service_module
 
-            monkeypatch.setattr(
-                service_module, "get_llm_client", lambda _settings: _FailingLLM(exc)
-            )
+            async def _fake_resolver(_session, _settings, _instructor_id):
+                return _FailingLLM(exc)
+
+            monkeypatch.setattr(service_module, "get_llm_client_for", _fake_resolver)
             return await ingest_manuscript(_StubSession(), manuscript, path, settings)
 
         result = asyncio.run(scenario())

@@ -13,6 +13,7 @@ const ME: Instructor = {
 
 const QUOTA: QuotaStatus = {
   mode: "live",
+  key_source: "shared",
   quota_day: "2026-08-14",
   calls_used: 40,
   daily_limit: 300,
@@ -50,6 +51,7 @@ const SETTINGS: SettingsOut = {
       observed_at: "2026-08-14T00:00:00Z",
     },
   ],
+  api_key: { byok_available: true, has_own_api_key: false },
 };
 
 function baseHandlers(overrides: Record<string, unknown> = {}) {
@@ -225,5 +227,171 @@ describe("SettingsPage", () => {
     expect(
       await screen.findByText("No AI grading calls have been recorded yet. This fills in automatically once VERIDICAL grades a manuscript."),
     ).toBeInTheDocument();
+  });
+
+  it("shows a disabled explanation, never a form, when BYOK isn't available on this deployment", async () => {
+    vi.stubGlobal(
+      "fetch",
+      stubFetchByPath(
+        baseHandlers({
+          "/settings": { ...SETTINGS, api_key: { byok_available: false, has_own_api_key: false } },
+        }),
+      ),
+    );
+    renderWithProviders(<SettingsPage />);
+    await screen.findByText("Prof Cruz");
+
+    expect(
+      await screen.findByText(/Bringing your own API key isn't available on this deployment yet/),
+    ).toBeInTheDocument();
+    expect(screen.queryByLabelText("Gemini API key")).not.toBeInTheDocument();
+  });
+
+  it("shows the create form when BYOK is available and no key is set", async () => {
+    vi.stubGlobal("fetch", stubFetchByPath(baseHandlers()));
+    renderWithProviders(<SettingsPage />);
+    await screen.findByText("Prof Cruz");
+
+    expect(await screen.findByLabelText("Gemini API key")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Save key" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /Get a free key from Google AI Studio/ })).toHaveAttribute(
+      "href",
+      "https://aistudio.google.com/app/apikey",
+    );
+  });
+
+  it("blocks submit and focuses the field when the key is empty", async () => {
+    vi.stubGlobal("fetch", stubFetchByPath(baseHandlers()));
+    renderWithProviders(<SettingsPage />);
+    await screen.findByText("Prof Cruz");
+
+    fireEvent.click(await screen.findByRole("button", { name: "Save key" }));
+    expect(await screen.findByText("Paste your Gemini API key.")).toBeInTheDocument();
+    expect(document.activeElement).toBe(screen.getByLabelText("Gemini API key"));
+  });
+
+  it("saves a valid key, moves focus to the configured state, and never echoes the key", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === "string" ? input : input.toString();
+      const path = new URL(url, "http://localhost").pathname;
+      if (path === "/settings/api-key" && init?.method === "POST") {
+        const body = JSON.parse(init.body as string);
+        expect(body).toEqual({ api_key: "AIzaSy-real-looking-key" });
+        return new Response(
+          JSON.stringify({ ...SETTINGS, api_key: { byok_available: true, has_own_api_key: true } }),
+          { status: 200 },
+        );
+      }
+      const handlers = baseHandlers();
+      return new Response(JSON.stringify(handlers[path as keyof typeof handlers]), { status: 200 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    renderWithProviders(<SettingsPage />);
+    await screen.findByText("Prof Cruz");
+
+    fireEvent.change(await screen.findByLabelText("Gemini API key"), {
+      target: { value: "AIzaSy-real-looking-key" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save key" }));
+
+    const configured = await screen.findByText(
+      "Your own Gemini API key is active. AI grading now uses your quota, not the shared pool.",
+    );
+    expect(configured).toBeInTheDocument();
+    expect(document.activeElement).toBe(configured);
+    expect(screen.getByRole("button", { name: "Remove key" })).toBeInTheDocument();
+    expect(document.body.innerHTML).not.toContain("AIzaSy-real-looking-key");
+  });
+
+  it("shows the server's error on an invalid key and does not flip to configured", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === "string" ? input : input.toString();
+      const path = new URL(url, "http://localhost").pathname;
+      if (path === "/settings/api-key" && init?.method === "POST") {
+        return new Response(
+          JSON.stringify({
+            error: {
+              code: "invalid_api_key",
+              message: "Gemini rejected this key. Check that it's correct and still active, then try again.",
+            },
+          }),
+          { status: 422 },
+        );
+      }
+      const handlers = baseHandlers();
+      return new Response(JSON.stringify(handlers[path as keyof typeof handlers]), { status: 200 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    renderWithProviders(<SettingsPage />);
+    await screen.findByText("Prof Cruz");
+
+    fireEvent.change(await screen.findByLabelText("Gemini API key"), {
+      target: { value: "bad-key" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save key" }));
+
+    const error = await screen.findByText(
+      "Gemini rejected this key. Check that it's correct and still active, then try again.",
+    );
+    expect(error.closest('[role="alert"]')).toBeInTheDocument();
+    expect(document.activeElement).toBe(error.closest('[role="alert"]'));
+    expect(screen.queryByRole("button", { name: "Remove key" })).not.toBeInTheDocument();
+  });
+
+  it("removing a key reverts to the create form and moves focus back to the input", async () => {
+    let removed = false;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === "string" ? input : input.toString();
+      const path = new URL(url, "http://localhost").pathname;
+      if (path === "/settings/api-key" && init?.method === "DELETE") {
+        removed = true;
+        return new Response(
+          JSON.stringify({ ...SETTINGS, api_key: { byok_available: true, has_own_api_key: false } }),
+          { status: 200 },
+        );
+      }
+      if (path === "/settings") {
+        return new Response(
+          JSON.stringify({
+            ...SETTINGS,
+            api_key: { byok_available: true, has_own_api_key: !removed },
+          }),
+          { status: 200 },
+        );
+      }
+      const handlers = baseHandlers();
+      return new Response(JSON.stringify(handlers[path as keyof typeof handlers]), { status: 200 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    renderWithProviders(<SettingsPage />);
+    await screen.findByText("Prof Cruz");
+
+    fireEvent.click(await screen.findByRole("button", { name: "Remove key" }));
+
+    const input = await screen.findByLabelText("Gemini API key");
+    expect(document.activeElement).toBe(input);
+    expect(screen.getByRole("button", { name: "Save key" })).toBeInTheDocument();
+  });
+
+  it("quota meter shows which key is in use", async () => {
+    vi.stubGlobal(
+      "fetch",
+      stubFetchByPath(baseHandlers({ "/quota": { ...QUOTA, key_source: "own" } })),
+    );
+    renderWithProviders(<SettingsPage />);
+    await screen.findByText("Prof Cruz");
+    expect(await screen.findByText("Using your own key")).toBeInTheDocument();
+  });
+
+  it("suppresses the key-source pill in fake mode (numbers are simulated either way)", async () => {
+    vi.stubGlobal(
+      "fetch",
+      stubFetchByPath(baseHandlers({ "/quota": { ...QUOTA, mode: "fake", key_source: "shared" } })),
+    );
+    renderWithProviders(<SettingsPage />);
+    await screen.findByText("Prof Cruz");
+    await screen.findByText("Running in test mode. These numbers are simulated, not real API usage.");
+    expect(screen.queryByText("Using the shared key")).not.toBeInTheDocument();
+    expect(screen.queryByText("Using your own key")).not.toBeInTheDocument();
   });
 });

@@ -29,6 +29,19 @@ class Settings(BaseSettings):
     database_url: str = "postgresql://veridical:veridical@localhost:5433/veridical"
     # Only needed when fake-LLM mode is OFF and a real call is made (V-009).
     gemini_api_key: str | None = None
+    # V-052 (BYOK): master key encrypting each instructor's own pasted
+    # Gemini key at rest (Fernet, `cryptography.fernet.Fernet.generate_key()`
+    # — a 32-byte urlsafe-base64 value). Unset = the BYOK feature is simply
+    # unavailable on this deployment (settings hides the input rather than
+    # storing a key it can't safely protect); never defaulted, set once via
+    # the host's env var dashboard (ENGINEERING §8: secrets are never
+    # defaulted in code). Rotation is NOT solved by Fernet alone -- would
+    # need a decrypt-old/re-encrypt-new migration of every stored key; not
+    # attempted here, documented as a known limitation (ticket edge case).
+    byok_encryption_key: str | None = None
+    # Timeout for the one-shot validation probe (GET /models, no generation
+    # spent) run before an instructor's pasted key is saved.
+    byok_probe_timeout_seconds: float = 15.0
     # Per-attempt timeout for the /health DB probe. Generous because Neon
     # free tier autosuspends and needs time to wake (ENGINEERING.md §7).
     db_health_timeout: float = 5.0

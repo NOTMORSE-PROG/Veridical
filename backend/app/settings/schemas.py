@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class ThresholdsOut(BaseModel):
@@ -23,6 +23,19 @@ class PromptVersionOut(BaseModel):
     observed_at: datetime
 
 
+class ApiKeyStatusOut(BaseModel):
+    """V-052 (BYOK). Never the key itself, encrypted or not -- only whether
+    one is configured, so this is safe to send in every /settings response."""
+
+    byok_available: bool
+    has_own_api_key: bool
+
+
 class SettingsOut(BaseModel):
     thresholds: ThresholdsOut
     prompt_versions: list[PromptVersionOut]
+    api_key: ApiKeyStatusOut
+
+
+class SetApiKeyIn(BaseModel):
+    api_key: str = Field(min_length=1, max_length=200)

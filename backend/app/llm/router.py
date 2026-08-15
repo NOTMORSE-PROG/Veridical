@@ -3,10 +3,12 @@
 from typing import Annotated
 
 from fastapi import APIRouter, Depends
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.dependencies import get_current_instructor
 from app.config import get_settings
-from app.llm import get_llm_queue
+from app.db import get_session
+from app.llm import get_quota_status_for
 from app.llm.pool import load_model_pool, pool_daily_capacity
 from app.llm.queue import next_reset_for, quota_day_for
 from app.llm.schemas import ModelQuotaStatus, QuotaStatus
@@ -17,6 +19,7 @@ router = APIRouter(tags=["llm"])
 
 @router.get("/quota", response_model=QuotaStatus)
 async def get_quota(
+    session: Annotated[AsyncSession, Depends(get_session)],
     instructor: Annotated[Instructor, Depends(get_current_instructor)],
 ) -> QuotaStatus:
     settings = get_settings()
@@ -28,6 +31,7 @@ async def get_quota(
         pool = load_model_pool(settings.llm_model_pool_file)
         return QuotaStatus(
             mode="fake",
+            key_source="shared",
             quota_day=quota_day_for(settings.llm_quota_reset_timezone),
             calls_used=0,
             daily_limit=pool_daily_capacity(pool),
@@ -50,5 +54,5 @@ async def get_quota(
                 for spec in pool
             ],
         )
-    status = await get_llm_queue(settings).get_quota_status()
-    return QuotaStatus(mode="live", **status)
+    status, key_source = await get_quota_status_for(session, settings, instructor.id)
+    return QuotaStatus(mode="live", key_source=key_source, **status)

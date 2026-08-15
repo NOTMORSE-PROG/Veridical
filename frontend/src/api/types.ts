@@ -341,6 +341,11 @@ export interface ModelQuotaStatus {
 
 export interface QuotaStatus {
   mode: "fake" | "live";
+  /** V-052 (BYOK): "own" only when this instructor has their own Gemini
+   * key configured and this status reflects THEIR island; "shared"
+   * otherwise (including fake mode, which spends no real key of either
+   * kind). */
+  key_source: "own" | "shared";
   quota_day: string;
   /** Aggregated across the whole model pool. */
   calls_used: number;
@@ -395,9 +400,20 @@ export interface PromptVersionOut {
   observed_at: string;
 }
 
+/** V-052 (BYOK). Never the key itself, encrypted or not. */
+export interface ApiKeyStatusOut {
+  byok_available: boolean;
+  has_own_api_key: boolean;
+}
+
 export interface SettingsOut {
   thresholds: ThresholdsOut;
   prompt_versions: PromptVersionOut[];
+  api_key: ApiKeyStatusOut;
+}
+
+export interface SetApiKeyIn {
+  api_key: string;
 }
 
 export interface ChangePasswordIn {

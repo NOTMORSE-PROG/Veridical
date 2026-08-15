@@ -37,6 +37,11 @@ dependencies = [
     # free-tier ceiling (no native Pango/Cairo deps, no browser-engine
     # memory floor; see tickets/V6-defense-day/V-039.md's own research).
     "reportlab>=4.2",
+    # V-052 (BYOK): was already present transitively via google-auth (a
+    # google-genai dependency) but never pinned as our own -- now used
+    # directly (Fernet) to encrypt instructor-supplied Gemini keys at rest.
+    # Prebuilt manylinux wheels, no native build toolchain (Render-safe).
+    "cryptography>=43",
 ]
 
 [dependency-groups]
