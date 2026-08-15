@@ -49,8 +49,28 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return (await res.json()) as T;
 }
 
+// V-039: the report PDF export returns raw bytes (application/pdf), not
+// the JSON envelope every other endpoint uses -- a separate path that
+// still shares the same session-cookie/error-envelope handling as
+// `request()`, not a second ad-hoc fetch call.
+async function requestBlob(path: string): Promise<Blob> {
+  const res = await fetch(`${BASE_URL}${path}`, { credentials: "include" });
+  if (!res.ok) {
+    const body = (await res.json().catch(() => null)) as
+      | { error?: { code?: string; message?: string } }
+      | null;
+    throw new ApiError(
+      res.status,
+      body?.error?.code ?? "internal",
+      body?.error?.message ?? `Request failed (${res.status}).`,
+    );
+  }
+  return res.blob();
+}
+
 export const api = {
   get: <T>(path: string): Promise<T> => request<T>(path),
+  getBlob: (path: string): Promise<Blob> => requestBlob(path),
   post: <T>(path: string, body?: unknown): Promise<T> =>
     request<T>(path, {
       method: "POST",

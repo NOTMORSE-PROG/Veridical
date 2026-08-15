@@ -2,12 +2,13 @@
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.dependencies import get_current_instructor
 from app.db import get_session
 from app.models.instructor import Instructor
+from app.report.export import build_report_pdf
 from app.report.schemas import (
     DecisionIn,
     EscalatedItemOut,
@@ -20,6 +21,7 @@ from app.report.schemas import (
 from app.report.service import (
     decide_report,
     get_report,
+    get_report_export_data,
     list_escalated_for_run,
     list_flags_for_run,
     reopen_report,
@@ -36,6 +38,22 @@ async def get_report_route(
     instructor: Annotated[Instructor, Depends(get_current_instructor)],
 ) -> ReportOut:
     return await get_report(session, check_run_id, instructor.id)
+
+
+@router.get("/check-runs/{check_run_id}/report/export.pdf")
+async def export_report_pdf_route(
+    check_run_id: int,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    instructor: Annotated[Instructor, Depends(get_current_instructor)],
+) -> Response:
+    data = await get_report_export_data(session, check_run_id, instructor.id)
+    pdf_bytes = build_report_pdf(data)
+    filename = f"veridical-report-{check_run_id}.pdf"
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 @router.get("/check-runs/{check_run_id}/escalated", response_model=list[EscalatedItemOut])

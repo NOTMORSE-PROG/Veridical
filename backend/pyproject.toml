@@ -32,6 +32,11 @@ dependencies = [
     "pysprite>=1.2.1",
     "grim>=0.1.10",
     "model2vec>=0.8.2",
+    # V-039: pure-Python PDF generation for the report export -- picked
+    # over WeasyPrint/headless-chromium specifically for Render's 512MB
+    # free-tier ceiling (no native Pango/Cairo deps, no browser-engine
+    # memory floor; see tickets/V6-defense-day/V-039.md's own research).
+    "reportlab>=4.2",
 ]
 
 [dependency-groups]
