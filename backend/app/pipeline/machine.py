@@ -47,7 +47,7 @@ from app.errors import ApiDownError, FileMalformedError, QuotaExhaustedError
 from app.external.http import build_http_client
 from app.ingest.patterns import load_patterns
 from app.ingest.service import load_raw_store
-from app.llm import get_llm_client
+from app.llm import get_llm_client_for
 from app.llm.base import LLMClient
 from app.llm.queue import next_reset_for
 from app.models.audit import AuditLog
@@ -410,9 +410,16 @@ async def run_check_run(
     llm: LLMClient | None = None,
 ) -> None:
     settings = settings or get_settings()
-    llm = llm or get_llm_client(settings)
 
     manuscript = await session.get(Manuscript, check_run.manuscript_id)
+    # V-052 (BYOK): resolved AFTER `manuscript` so the instructor's own
+    # Gemini key (falling back to the shared pool on quota exhaustion) is
+    # used instead of always spending the shared key -- `llm` stays
+    # injectable (tests, and the vision-pass path in ingest/service.py
+    # which resolves its own client earlier, before a CheckRun exists).
+    llm = llm or await get_llm_client_for(
+        session, settings, manuscript.instructor_id if manuscript is not None else None
+    )
     rubric = await session.scalar(
         select(Rubric)
         .where(Rubric.id == check_run.rubric_id)

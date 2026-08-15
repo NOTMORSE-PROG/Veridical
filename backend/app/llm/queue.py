@@ -17,13 +17,23 @@ from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from app.errors import ApiDownError, QuotaExhaustedError
+from app.errors import ApiDownError, InvalidApiKeyError, QuotaExhaustedError
 from app.llm.pool import ModelSpec, pool_daily_capacity
 from app.models.audit import AuditLog
 from app.models.llm import LLMQuotaCounter, LLMResponseCache
 from app.rate_governor import ClockFn, RateGovernor, SleepFn, _default_sleep
 
-__all__ = ["ClockFn", "LLMQueue", "RateGovernor", "SleepFn", "Transport"]
+__all__ = [
+    "ClockFn",
+    "LLMQueue",
+    "RateGovernor",
+    "SleepFn",
+    "Transport",
+    "TransportDailyQuotaExhausted",
+    "TransportInvalidKey",
+    "TransportRateLimited",
+    "TransportServerError",
+]
 
 
 class Transport(Protocol):
@@ -52,6 +62,21 @@ class TransportDailyQuotaExhausted(Exception):
 
 class TransportServerError(Exception):
     """Transport signaled a 5xx — retry with backoff, then `api_down`."""
+
+
+class TransportInvalidKey(Exception):
+    """The key itself was rejected (401/403, or any APIError Google didn't
+    already classify as a per-minute/per-day 429 or a 5xx) -- V-052
+    (backend-critic finding, P1, live-reproduced): this used to propagate
+    as a raw, unmapped `genai_errors.APIError` straight out of `submit()`,
+    which `FallbackLLMClient` (app/llm/__init__.py) had no way to catch,
+    so a revoked or mistyped instructor key was a hard crash of the whole
+    check_run instead of the graceful "fall back to the shared key" the
+    ticket's own edge case requires. Never retried (the key won't start
+    working between attempts a second apart) and never tried against
+    another model in the pool (an invalid key fails identically against
+    every model, so trying the rest would just be four more guaranteed
+    failures before reporting the same root cause)."""
 
 
 def quota_day_for(tz_name: str) -> str:
@@ -92,6 +117,7 @@ class LLMQueue:
         governor: RateGovernor | None = None,
         clock: ClockFn | None = None,
         sleep: SleepFn | None = None,
+        instructor_id: int | None = None,
     ) -> None:
         if pool is None:
             # Single-model form: still supported so a caller (or a test) can
@@ -106,6 +132,11 @@ class LLMQueue:
         self._transport = transport
         self._session_factory = session_factory
         self._pool = pool
+        # V-052 (BYOK): None = this queue spends the shared pool key; a real
+        # id = an instructor's own key, a genuinely separate Gemini quota
+        # island (see LLMQuotaCounter's own docstring for the partial-index
+        # reasoning). Threaded into every quota-table read/write below.
+        self._instructor_id = instructor_id
         self._temperature = temperature
         self._max_retries = max_retries
         self._retry_base_seconds = retry_base_seconds
@@ -250,6 +281,31 @@ class LLMQueue:
                     await session.commit()
                 exhausted.append(spec.model)
                 continue
+            except TransportInvalidKey as exc:
+                # Unlike quota exhaustion, an invalid key fails identically
+                # against every model in the pool -- raise immediately
+                # rather than burning through the rest of `candidates` for
+                # guaranteed-identical failures. `InvalidApiKeyError` (not
+                # `ApiDownError`): `FallbackLLMClient` (app/llm/__init__.py)
+                # catches it and reroutes to the shared key, the same as it
+                # already does for `QuotaExhaustedError` -- a revoked/bad
+                # BYOK key must degrade gracefully, never hard-fail the run
+                # (V-052 ticket edge case, backend-critic finding P1).
+                async with self._session_factory() as session:
+                    await self._write_audit(
+                        session,
+                        event_type="llm_call_failed",
+                        prompt_type=prompt_type,
+                        prompt_version=prompt_version,
+                        input_hash=input_hash,
+                        check_run_id=check_run_id,
+                        response={"error": str(exc)},
+                        context=context,
+                        prompt=prompt,
+                        model=spec.model,
+                    )
+                    await session.commit()
+                raise InvalidApiKeyError(f"Gemini rejected this API key: {exc}") from exc
             except ApiDownError as exc:
                 async with self._session_factory() as session:
                     await self._write_audit(
@@ -338,6 +394,11 @@ class LLMQueue:
         closed, and how much of the pool is still open).
         """
         day = self._quota_day()
+        instructor_filter = (
+            LLMQuotaCounter.instructor_id.is_(None)
+            if self._instructor_id is None
+            else LLMQuotaCounter.instructor_id == self._instructor_id
+        )
         async with self._session_factory() as session:
             rows = (
                 await session.execute(
@@ -345,7 +406,7 @@ class LLMQueue:
                         LLMQuotaCounter.model,
                         LLMQuotaCounter.call_count,
                         LLMQuotaCounter.cache_hit_count,
-                    ).where(LLMQuotaCounter.quota_day == day)
+                    ).where(LLMQuotaCounter.quota_day == day, instructor_filter)
                 )
             ).all()
         used_by_model = {model: (calls, hits) for model, calls, hits in rows}
@@ -382,6 +443,25 @@ class LLMQueue:
             "models": per_model,
         }
 
+    def _quota_conflict_target(self) -> dict[str, Any]:
+        """Postgres ON CONFLICT must name a real unique index, and a partial
+        index's target must match its own WHERE predicate exactly -- there
+        are two (shared vs. per-instructor, see LLMQuotaCounter's own
+        docstring), so which one applies depends on `self._instructor_id`."""
+        if self._instructor_id is None:
+            return {
+                "index_elements": [LLMQuotaCounter.quota_day, LLMQuotaCounter.model],
+                "index_where": LLMQuotaCounter.instructor_id.is_(None),
+            }
+        return {
+            "index_elements": [
+                LLMQuotaCounter.quota_day,
+                LLMQuotaCounter.model,
+                LLMQuotaCounter.instructor_id,
+            ],
+            "index_where": LLMQuotaCounter.instructor_id.isnot(None),
+        }
+
     async def _try_reserve_quota(self, session: AsyncSession, spec: ModelSpec) -> bool:
         """Atomic check-and-increment for ONE model's island (INSERT ... ON
         CONFLICT ... WHERE): safe under concurrent workers even though Render
@@ -394,9 +474,15 @@ class LLMQueue:
         day = self._quota_day()
         stmt = (
             pg_insert(LLMQuotaCounter)
-            .values(quota_day=day, model=spec.model, call_count=1, cache_hit_count=0)
+            .values(
+                quota_day=day,
+                model=spec.model,
+                instructor_id=self._instructor_id,
+                call_count=1,
+                cache_hit_count=0,
+            )
             .on_conflict_do_update(
-                index_elements=[LLMQuotaCounter.quota_day, LLMQuotaCounter.model],
+                **self._quota_conflict_target(),
                 set_={"call_count": LLMQuotaCounter.call_count + 1},
                 where=LLMQuotaCounter.call_count < spec.daily_quota,
             )
@@ -411,9 +497,15 @@ class LLMQueue:
         day = self._quota_day()
         stmt = (
             pg_insert(LLMQuotaCounter)
-            .values(quota_day=day, model=spec.model, call_count=spec.daily_quota, cache_hit_count=0)
+            .values(
+                quota_day=day,
+                model=spec.model,
+                instructor_id=self._instructor_id,
+                call_count=spec.daily_quota,
+                cache_hit_count=0,
+            )
             .on_conflict_do_update(
-                index_elements=[LLMQuotaCounter.quota_day, LLMQuotaCounter.model],
+                **self._quota_conflict_target(),
                 set_={"call_count": spec.daily_quota},
             )
         )
@@ -423,9 +515,15 @@ class LLMQueue:
         day = self._quota_day()
         stmt = (
             pg_insert(LLMQuotaCounter)
-            .values(quota_day=day, model=model, call_count=0, cache_hit_count=1)
+            .values(
+                quota_day=day,
+                model=model,
+                instructor_id=self._instructor_id,
+                call_count=0,
+                cache_hit_count=1,
+            )
             .on_conflict_do_update(
-                index_elements=[LLMQuotaCounter.quota_day, LLMQuotaCounter.model],
+                **self._quota_conflict_target(),
                 set_={"cache_hit_count": LLMQuotaCounter.cache_hit_count + 1},
             )
         )

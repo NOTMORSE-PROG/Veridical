@@ -20,7 +20,7 @@ from app.errors import ApiDownError, FileMalformedError, FileTooLargeError, Quot
 from app.ingest import docx, pdf, references, vision
 from app.ingest.patterns import load_patterns
 from app.ingest.schemas import ExtractionResult, ManuscriptListItem, PaginatedManuscripts
-from app.llm import LLMNotConfiguredError, get_llm_client
+from app.llm import LLMNotConfiguredError, get_llm_client_for
 from app.models.citation import Citation
 from app.models.enums import CheckRunStatus, IngestFailureReason, IngestStatus
 from app.models.manuscript import Manuscript
@@ -121,9 +121,8 @@ async def ingest_manuscript(
         try:
             # Vision pass (F1.3) merges image tables/equations into result
             # BEFORE the raw store is written, so the store is complete.
-            await vision.read_images(
-                result, file_path, get_llm_client(settings), patterns, settings
-            )
+            llm = await get_llm_client_for(session, settings, manuscript.instructor_id)
+            await vision.read_images(result, file_path, llm, patterns, settings)
         except (LLMNotConfiguredError, ApiDownError, QuotaExhaustedError):
             # No client (real mode before V-009), or the queue's own
             # retries were exhausted, or the daily quota ran out: image

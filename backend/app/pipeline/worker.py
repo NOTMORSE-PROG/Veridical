@@ -16,7 +16,6 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app import db
 from app.config import Settings, get_settings
-from app.llm import get_llm_client
 from app.models.enums import CheckRunStatus
 from app.models.run import CheckRun
 from app.pipeline.machine import is_blocked, run_check_run
@@ -60,7 +59,10 @@ async def advance_once(
         check_run = await session.get(CheckRun, check_run_id)
         if check_run is None:
             return
-        await run_check_run(session, check_run, settings, get_llm_client(settings))
+        # llm=None -- V-052 (BYOK): run_check_run resolves the caller's real
+        # client itself, after it loads the manuscript, so it can select the
+        # owning instructor's own key (falling back to the shared pool).
+        await run_check_run(session, check_run, settings)
 
 
 async def worker_tick(
@@ -75,7 +77,7 @@ async def worker_tick(
         run = await pick_next_runnable(session)
         if run is None:
             return False
-        await run_check_run(session, run, settings, get_llm_client(settings))
+        await run_check_run(session, run, settings)
         return True
 
 

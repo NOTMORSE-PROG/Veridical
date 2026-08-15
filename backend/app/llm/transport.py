@@ -9,6 +9,7 @@ from google.genai import types as genai_types
 
 from app.llm.queue import (
     TransportDailyQuotaExhausted,
+    TransportInvalidKey,
     TransportRateLimited,
     TransportServerError,
 )
@@ -66,6 +67,14 @@ class GeminiTransport:
                 raise TransportRateLimited(str(exc)) from exc
             if exc.code is not None and exc.code >= 500:
                 raise TransportServerError(str(exc)) from exc
+            if exc.code in (401, 403):
+                # backend-critic finding (P1, V-052): the key itself was
+                # rejected (revoked, or a BYOK key that passed the save-time
+                # probe but stopped working since) -- scoped to 401/403
+                # specifically, not every other non-429/non-5xx code, since
+                # a 400 can be a genuine per-model/per-request problem that
+                # would fail identically on any key, not a key problem.
+                raise TransportInvalidKey(str(exc)) from exc
             raise
 
         text = response.text

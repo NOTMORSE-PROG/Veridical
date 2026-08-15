@@ -10,16 +10,19 @@ import pytest
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
+from app.auth.security import hash_password
 from app.db import sqlalchemy_url
-from app.errors import ApiDownError, QuotaExhaustedError
+from app.errors import ApiDownError, InvalidApiKeyError, QuotaExhaustedError
 from app.llm.pool import ModelSpec
 from app.llm.queue import (
     LLMQueue,
     TransportDailyQuotaExhausted,
+    TransportInvalidKey,
     TransportRateLimited,
     TransportServerError,
 )
 from app.models.audit import AuditLog
+from app.models.instructor import Instructor
 
 live = pytest.mark.skipif(
     "DATABASE_URL" not in os.environ,
@@ -155,6 +158,40 @@ async def test_quota_exhausted_blocks_before_calling_transport(session_factory):
         await queue.submit(prompt_type="t", prompt="second, different prompt", prompt_version="v1")
 
     assert len(transport.calls) == 1  # the second submit never reached the transport
+
+
+async def test_invalid_key_raises_immediately_without_trying_other_models(session_factory):
+    """V-052/backend-critic finding (P1, live-reproduced): a revoked/bad
+    key used to propagate as a raw, unmapped SDK exception all the way out
+    of `submit()` -- `FallbackLLMClient` had no typed exception to catch,
+    so a bad BYOK key was a hard crash, not a graceful fall-back to the
+    shared key. Fixed: `transport.py` classifies a 401/403 as
+    `TransportInvalidKey`, and `submit()` turns that into
+    `InvalidApiKeyError` immediately -- not added to `exhausted` and
+    retried against the pool's other models, since an invalid key fails
+    identically against every model (unlike quota exhaustion, which is
+    genuinely per-model)."""
+    transport = ScriptedTransport(fail_times=1, fail_with=TransportInvalidKey)
+    queue = _make_queue(session_factory, transport, pool=_pool(("first", 50, 1), ("second", 50, 1)))
+
+    with pytest.raises(InvalidApiKeyError):
+        await queue.submit(prompt_type="t", prompt="p", prompt_version="v1")
+
+    assert len(transport.calls) == 1  # never tried "second"
+
+
+async def test_invalid_key_is_never_retried(session_factory):
+    """Unlike a transient TransportServerError/TransportRateLimited, a bad
+    key won't start working between attempts a second apart -- retrying
+    it would just burn the retry budget for a guaranteed-identical
+    failure."""
+    transport = ScriptedTransport(fail_times=1, fail_with=TransportInvalidKey)
+    queue = _make_queue(session_factory, transport, max_retries=5)
+
+    with pytest.raises(InvalidApiKeyError):
+        await queue.submit(prompt_type="t", prompt="p", prompt_version="v1")
+
+    assert len(transport.calls) == 1  # not retried up to max_retries=5
 
 
 async def test_daily_quota_zero_blocks_the_very_first_call(session_factory):
@@ -433,3 +470,96 @@ async def test_check_run_id_is_excluded_from_the_cache_key(session_factory):
     await queue.submit(prompt_type="t", prompt="same content", prompt_version="v1", check_run_id=2)
 
     assert len(transport.calls) == 1
+
+
+@pytest.fixture()
+async def instructor_ids(session_factory) -> tuple[int, int]:
+    """A real FK now backs llm_quota_counter.instructor_id (migration
+    0022) -- these tests need real Instructor rows, not arbitrary ints.
+    Unique emails per call (not truncated between tests, unlike the quota
+    tables) so repeated fixture use across tests never collides."""
+    import uuid
+
+    suffix = uuid.uuid4().hex[:8]
+    async with session_factory() as session:
+        a = Instructor(
+            email=f"byok-a-{suffix}@tip.edu.ph", display_name="A", password_hash=hash_password("x")
+        )
+        b = Instructor(
+            email=f"byok-b-{suffix}@tip.edu.ph", display_name="B", password_hash=hash_password("x")
+        )
+        session.add_all([a, b])
+        await session.commit()
+        return a.id, b.id
+
+
+async def test_instructor_quota_is_a_separate_island_from_the_shared_pool(
+    session_factory, instructor_ids
+):
+    """V-052 (BYOK): an instructor's own key spends a genuinely separate
+    quota counter from the shared pool key, even for the identical model
+    name -- the two partial unique indexes (migration 0022) exist
+    specifically so these never collide into one row."""
+    _, instructor_id = instructor_ids
+    shared = _make_queue(session_factory, ScriptedTransport(responses=[{"a": 1}]))
+    own = _make_queue(
+        session_factory, ScriptedTransport(responses=[{"b": 2}]), instructor_id=instructor_id
+    )
+
+    await shared.submit(prompt_type="t", prompt="shared call", prompt_version="v1")
+    await own.submit(prompt_type="t", prompt="own call", prompt_version="v1")
+
+    shared_status = await shared.get_quota_status()
+    own_status = await own.get_quota_status()
+    assert shared_status["calls_used"] == 1
+    assert own_status["calls_used"] == 1
+
+
+async def test_two_different_instructors_have_independent_quota_islands(
+    session_factory, instructor_ids
+):
+    """Not just instructor-vs-shared -- instructor A's own key spending
+    quota must never appear on instructor B's own counter either."""
+    id_a, id_b = instructor_ids
+    queue_a = _make_queue(
+        session_factory, ScriptedTransport(responses=[{"a": 1}, {"a": 2}]), instructor_id=id_a
+    )
+    queue_b = _make_queue(
+        session_factory, ScriptedTransport(responses=[{"b": 1}]), instructor_id=id_b
+    )
+
+    await queue_a.submit(prompt_type="t", prompt="a1", prompt_version="v1")
+    await queue_a.submit(prompt_type="t", prompt="a2", prompt_version="v1")
+    await queue_b.submit(prompt_type="t", prompt="b1", prompt_version="v1")
+
+    assert (await queue_a.get_quota_status())["calls_used"] == 2
+    assert (await queue_b.get_quota_status())["calls_used"] == 1
+
+
+async def test_instructor_own_key_exhaustion_leaves_the_shared_islands_untouched(
+    session_factory, instructor_ids
+):
+    """An instructor's own key hitting its (tiny, test-scoped) daily cap for
+    a model name must never spend the shared pool's counter for that SAME
+    model name -- each queue's ON CONFLICT target (the conflict-target
+    helper) must resolve to its own partial index, not accidentally share
+    one across `instructor_id` values."""
+    _, instructor_id = instructor_ids
+    own = _make_queue(
+        session_factory,
+        ScriptedTransport(responses=[{"a": 1}]),
+        instructor_id=instructor_id,
+        pool=_pool(("shared-model-name", 1, 0)),
+    )
+    await own.submit(prompt_type="t", prompt="p1", prompt_version="v1")
+    with pytest.raises(QuotaExhaustedError):
+        # Own queue's single unit of daily_quota is already spent.
+        await own.submit(prompt_type="t", prompt="p2", prompt_version="v2")
+
+    shared = _make_queue(
+        session_factory,
+        ScriptedTransport(responses=[{"ok": True}]),
+        pool=_pool(("shared-model-name", 1, 0)),
+    )
+    response = await shared.submit(prompt_type="t", prompt="p3", prompt_version="v1")
+    assert response == {"ok": True}

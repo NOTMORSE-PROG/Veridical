@@ -15,7 +15,7 @@ import { cx } from "../components/cx";
 import { useChangePassword, useMe } from "../auth/useAuth";
 import { quotaRemaining } from "../domain/quotaTone";
 import { useRouteFocus } from "../routing/useRouteFocus";
-import { useSettings } from "./useSettings";
+import { useDeleteApiKey, useSetApiKey, useSettings } from "./useSettings";
 
 const MIN_PASSWORD_LENGTH = 8; // Matches the backend schema's own OWASP-baseline comment.
 
@@ -238,6 +238,236 @@ function PasswordSection() {
   );
 }
 
+// V-052 (BYOK): a free-standing section, not folded into PasswordSection --
+// this is optional/reversible AI-capacity configuration, not a credential
+// gate on the account itself. Four states in priority order: loading,
+// load-error, unavailable-on-this-deployment (disabled, never hidden --
+// charter rule 9), and configured-vs-not (form vs. status+remove).
+function ApiKeySection() {
+  const { data, isPending, isError, refetch } = useSettings();
+  const setKey = useSetApiKey();
+  const deleteKey = useDeleteApiKey();
+  const [value, setValue] = useState("");
+  const [attempted, setAttempted] = useState(false);
+  const [announcement, setAnnouncement] = useState("");
+  const errorRef = useRef<HTMLParagraphElement>(null);
+  const keyInputRef = useRef<HTMLInputElement>(null);
+  const configuredRef = useRef<HTMLParagraphElement>(null);
+  const prevHasOwnKey = useRef<boolean | null>(null);
+
+  const activeError = setKey.error ?? deleteKey.error;
+  useEffect(() => {
+    if (activeError) errorRef.current?.focus();
+  }, [activeError]);
+
+  // Same in-place-content-swap focus-move convention as ShareModal.tsx's
+  // `prevLinkToken` -- Modal.tsx's own focus-trap only runs on mount, and
+  // this section isn't a modal at all, but the underlying bug class
+  // (content swaps in place, nothing claims focus) applies identically.
+  useEffect(() => {
+    const has = data?.api_key.has_own_api_key ?? null;
+    if (has !== null && prevHasOwnKey.current !== null && has !== prevHasOwnKey.current) {
+      if (has) configuredRef.current?.focus();
+      else keyInputRef.current?.focus();
+    }
+    prevHasOwnKey.current = has;
+  }, [data?.api_key.has_own_api_key]);
+
+  if (isPending) {
+    return (
+      <SectionCard headingId="api-key-heading" title="Your own API key">
+        <div role="status" aria-live="polite" aria-busy="true" className="text-sm text-ink-tertiary">
+          Loading your API key settings…
+        </div>
+      </SectionCard>
+    );
+  }
+  if (isError || !data) {
+    return (
+      <SectionCard headingId="api-key-heading" title="Your own API key">
+        <div
+          role="alert"
+          className="rounded-md border border-status-attention-text/25 bg-status-attention-bg p-3 text-sm text-status-attention-text"
+        >
+          Could not load your API key settings.{" "}
+          <button type="button" onClick={() => refetch()} className="underline">
+            Try again
+          </button>
+          .
+        </div>
+      </SectionCard>
+    );
+  }
+
+  const { byok_available, has_own_api_key } = data.api_key;
+
+  if (!byok_available) {
+    return (
+      <SectionCard headingId="api-key-heading" title="Your own API key">
+        <p className="text-sm text-ink-secondary">
+          VERIDICAL currently shares one free Gemini key across every instructor, so the AI
+          capacity everyone sees is split between all of you. Bringing your own key lets your AI
+          grading draw from your own quota instead.
+        </p>
+        <p className="mt-3 rounded-md border border-status-attention-text/25 bg-status-attention-bg p-3 text-sm text-status-attention-text">
+          Bringing your own API key isn't available on this deployment yet. Ask your
+          administrator to enable it. Until then, VERIDICAL grades using the shared key.
+        </p>
+      </SectionCard>
+    );
+  }
+
+  const serverError =
+    activeError instanceof ApiError
+      ? activeError.message
+      : activeError
+        ? has_own_api_key
+          ? "Could not remove your API key. Try again."
+          : "Could not save your API key. Try again."
+        : null;
+
+  function resetOnEdit() {
+    if (attempted) setAttempted(false);
+    if (setKey.isError) setKey.reset();
+  }
+
+  function handleSubmit(event: FormEvent) {
+    event.preventDefault();
+    setAttempted(true);
+    if (!value.trim()) {
+      keyInputRef.current?.focus();
+      return;
+    }
+    setKey.mutate(
+      { api_key: value },
+      {
+        onSuccess: () => {
+          setValue("");
+          setAnnouncement("Your own API key is saved and active.");
+        },
+      },
+    );
+  }
+
+  function handleDelete() {
+    deleteKey.mutate(undefined, {
+      onSuccess: () => setAnnouncement("Removed. AI grading now uses the shared key."),
+    });
+  }
+
+  const emptyOnSubmit = attempted && !value.trim();
+
+  if (has_own_api_key) {
+    return (
+      <SectionCard headingId="api-key-heading" title="Your own API key">
+        <p ref={configuredRef} tabIndex={-1} className="text-sm text-ink">
+          Your own Gemini API key is active. AI grading now uses your quota, not the shared pool.
+        </p>
+        <p role="status" aria-live="polite" className="sr-only">
+          {announcement}
+        </p>
+
+        {serverError && (
+          <p
+            ref={errorRef}
+            role="alert"
+            tabIndex={-1}
+            className="mt-2 text-sm font-medium text-danger"
+          >
+            <span className="sr-only">Error: </span>
+            {serverError}
+          </p>
+        )}
+
+        <button
+          type="button"
+          onClick={handleDelete}
+          disabled={deleteKey.isPending}
+          aria-busy={deleteKey.isPending ? "true" : undefined}
+          className="mt-3 flex h-11 items-center justify-center self-start rounded-md border border-border-input bg-panel px-4 text-sm font-bold text-ink hover:bg-status-neutral-bg disabled:opacity-60"
+        >
+          {deleteKey.isPending ? "Removing." : "Remove key"}
+        </button>
+        <p className="mt-1.5 text-xs text-ink-tertiary">
+          Removing switches AI grading back to the shared key immediately. You can add your key
+          again any time.
+        </p>
+      </SectionCard>
+    );
+  }
+
+  return (
+    <SectionCard headingId="api-key-heading" title="Your own API key">
+      <p className="text-sm text-ink-secondary">
+        VERIDICAL currently shares one free Gemini key across every instructor, so the AI
+        capacity everyone sees is split between all of you. Add your own free Gemini API key and
+        your AI grading draws from your own quota instead, so your runs never compete with
+        anyone else's for capacity.
+      </p>
+      <p className="mt-1 text-sm text-ink-secondary">
+        This is optional. VERIDICAL grades manuscripts using the shared key whether or not you
+        add your own, and you can remove your key at any time.
+      </p>
+      <a
+        href="https://aistudio.google.com/app/apikey"
+        target="_blank"
+        rel="noopener noreferrer"
+        className="mt-2 inline-flex min-h-11 items-center gap-1 text-sm font-medium text-link underline hover:text-link-hover"
+      >
+        Get a free key from Google AI Studio
+        <span className="sr-only"> (opens in a new tab)</span>
+      </a>
+
+      <p role="status" aria-live="polite" className="sr-only">
+        {announcement}
+      </p>
+
+      <form onSubmit={handleSubmit} className="mt-3 flex flex-col gap-3">
+        <label className="flex flex-col gap-1">
+          <span className="text-sm font-medium text-ink">Gemini API key</span>
+          <input
+            ref={keyInputRef}
+            type="password"
+            autoComplete="off"
+            value={value}
+            onChange={(e) => {
+              setValue(e.target.value);
+              resetOnEdit();
+            }}
+            aria-invalid={emptyOnSubmit ? "true" : undefined}
+            aria-describedby={emptyOnSubmit ? "api-key-err" : undefined}
+            className={cx(
+              "h-11 rounded-md border px-3 text-base text-ink",
+              emptyOnSubmit ? "border-2 border-status-attention-text" : "border-border-input",
+            )}
+          />
+        </label>
+        {emptyOnSubmit && (
+          <p id="api-key-err" className="text-sm text-status-attention-text">
+            Paste your Gemini API key.
+          </p>
+        )}
+
+        {serverError && (
+          <p ref={errorRef} role="alert" tabIndex={-1} className="text-sm font-medium text-danger">
+            <span className="sr-only">Error: </span>
+            {serverError}
+          </p>
+        )}
+
+        <button
+          type="submit"
+          disabled={setKey.isPending}
+          aria-busy={setKey.isPending ? "true" : undefined}
+          className="flex h-11 items-center justify-center self-start rounded-md bg-action px-4 text-sm font-bold text-on-action hover:bg-action-hover disabled:opacity-60"
+        >
+          {setKey.isPending ? "Validating key." : "Save key"}
+        </button>
+      </form>
+    </SectionCard>
+  );
+}
+
 const quotaGridCols = "grid-cols-[minmax(0,1fr)_110px_110px_110px_80px_120px]";
 
 function ModelRow({ model }: { model: ModelQuotaStatus }) {
@@ -292,6 +522,11 @@ function QuotaSection() {
   return (
     <SectionCard headingId="quota-heading" title="AI capacity">
       <div className="flex flex-col gap-2">
+        {quota.mode === "live" && (
+          <StatusPill tone={quota.key_source === "own" ? "success" : "neutral"}>
+            {quota.key_source === "own" ? "Using your own key" : "Using the shared key"}
+          </StatusPill>
+        )}
         {quota.mode === "fake" && (
           <p className="text-xs font-medium text-status-caution-text">
             Running in test mode. These numbers are simulated, not real API usage.
@@ -467,6 +702,7 @@ export function SettingsPage() {
       </h1>
       <ProfileSection />
       <PasswordSection />
+      <ApiKeySection />
       <QuotaSection />
       <TransparencySection />
     </div>

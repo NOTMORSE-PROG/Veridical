@@ -29,6 +29,14 @@ services:
       VERIDICAL_ENV: ${VERIDICAL_ENV:-dev}
       GEMINI_API_KEY: ${GEMINI_API_KEY:-}
       CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:5173}
+      # V-052 (BYOK): omitted here previously -- BYOK_ENCRYPTION_KEY being
+      # set in the host's .env silently never reached the container, so
+      # the feature read as "unavailable on this deployment" even when a
+      # developer had genuinely configured it (ux-critic finding, P1,
+      # live-reproduced: GET /settings returned byok_available:false
+      # through the container, true against a process reading .env
+      # directly). Blank default matches every other optional secret here.
+      BYOK_ENCRYPTION_KEY: ${BYOK_ENCRYPTION_KEY:-}
     # BUG-032: data_dir (config.py, default "./data" -> /srv/veridical/data
     # per the Dockerfile's WORKDIR) is a real on-disk cache the pipeline
     # reads on every check-run, not just at ingestion — without this, every

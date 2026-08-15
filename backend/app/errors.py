@@ -83,6 +83,13 @@ class GoneError(VeridicalError):
     code = "gone"
 
 
+class InvalidApiKeyError(VeridicalError):
+    """V-052: an instructor-pasted Gemini API key failed a real validation
+    probe — user-fixable (wrong/revoked key, typo), never a generic 500."""
+
+    code = "invalid_api_key"
+
+
 class RateLimitedError(VeridicalError):
     """Too many requests in the configured window (BUG-004/D-020) — resume
     once the window resets; distinct from `unauthenticated` because the
@@ -105,6 +112,7 @@ HTTP_STATUS: dict[str, int] = {
     "conflict": 409,
     "gone": 410,
     "rate_limited": 429,
+    "invalid_api_key": 422,
     # A rubric-decomposition parse that failed schema validation (V-010) —
     # user-actionable (re-review/re-upload); V-011 wraps this in a retry
     # loop so it only ever reaches HTTP after repeated failure.
