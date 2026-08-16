@@ -5,7 +5,7 @@
 // drifting copies.
 import type { ReactNode } from "react";
 import { useState } from "react";
-import type { CriterionResultOut, ReportOut } from "../api/types";
+import type { ReportCommon, ResolutionOut, ResultRowCommon } from "../api/types";
 import { AnchorPill } from "../components/AnchorPill";
 import { StatusPill, type StatusPillTone } from "../components/StatusPill";
 import { truncateAtWord } from "../format/text";
@@ -17,7 +17,10 @@ import { truncateAtWord } from "../format/text";
 // were silently doing exactly that before this fix).
 export const NEEDS_REVIEW_OUTCOMES = new Set(["escalated", "quota_exhausted", "api_down"]);
 
-export function explainerBase(r: ReportOut): string {
+// BUG-044: typed against ReportCommon, not ReportOut -- this function is
+// called from the public adviser view (AdviserView.tsx) with a
+// PublicReportOut, which does not have every field ReportOut does.
+export function explainerBase(r: ReportCommon): string {
   if (r.status === "needs_review") return r.reason ?? "This run needs manual review.";
   if (r.unresolved_high_flag_count > 0) {
     return `Not Ready. ${r.unresolved_high_flag_count} unresolved high-severity ${r.unresolved_high_flag_count === 1 ? "flag" : "flags"} found. Any unresolved high-severity flag forces Not Ready, regardless of score.`;
@@ -38,7 +41,7 @@ export function explainerBase(r: ReportOut): string {
 // exists on this page (the instructor's own report screen); the public
 // adviser view passes `null` since it has no such anchor to jump to
 // yet, and says so in plain prose instead of a dead link.
-export function explainer(r: ReportOut, flagsAnchor: string | null): ReactNode {
+export function explainer(r: ReportCommon, flagsAnchor: string | null): ReactNode {
   const base = explainerBase(r);
   if (r.flag_deduction <= 0) return base;
   const points = Math.round(r.flag_deduction * 10) / 10;
@@ -63,7 +66,7 @@ export function formatWeight(w: number): string {
 // A resolved row's source is the instructor, never the AI or the rule
 // engine that originally (and unsuccessfully) tried to decide it — this
 // must win over the kind-based caption unconditionally.
-export function sourceCaption(row: CriterionResultOut): string {
+export function sourceCaption(row: ResultRowCommon): string {
   if (row.resolution) return "Resolved by instructor";
   return row.kind === "structural" ? "Rule-checked" : "AI-graded";
 }
@@ -87,7 +90,7 @@ export function sourceCaption(row: CriterionResultOut): string {
 // raw-enum fallback -- an adviser must never see a bare "escalated"
 // string with no explanation.
 export function resultDisplay(
-  row: CriterionResultOut,
+  row: ResultRowCommon,
 ): { label: string; tone: StatusPillTone; caption?: string } {
   const isPartial = row.outcome === "passed" && row.score !== null && Math.round(row.score) === 50;
   if (isPartial) {
@@ -147,7 +150,7 @@ export const RESOLUTION_VERB: Record<string, string> = {
 // silently outranked the instructor's own decision (V-055 review — the
 // exact failure this system's human-in-the-loop design exists to
 // prevent, ground rule 1).
-function ResolutionBlock({ resolution }: { resolution: NonNullable<CriterionResultOut["resolution"]> }) {
+function ResolutionBlock({ resolution }: { resolution: ResolutionOut }) {
   return (
     <div className="flex flex-col gap-1.5 text-sm">
       <p className="text-ink">
@@ -164,7 +167,7 @@ function ResolutionBlock({ resolution }: { resolution: NonNullable<CriterionResu
   );
 }
 
-function EvidenceBlock({ row }: { row: CriterionResultOut }) {
+function EvidenceBlock({ row }: { row: ResultRowCommon }) {
   const [expanded, setExpanded] = useState(false);
   const explanation = row.reasoning ?? row.reason ?? null;
   const first = row.evidence[0];
@@ -222,7 +225,7 @@ function EvidenceBlock({ row }: { row: CriterionResultOut }) {
   return null;
 }
 
-function ResultRow({ row }: { row: CriterionResultOut }) {
+function ResultRow({ row }: { row: ResultRowCommon }) {
   const { label, tone, caption } = resultDisplay(row);
   return (
     <>
@@ -277,7 +280,7 @@ export function ResultsTable({
   totalCount,
   awaitingReviewMessage = "Every criterion is awaiting your review above.",
 }: {
-  results: CriterionResultOut[];
+  results: ResultRowCommon[];
   totalCount: number;
   /** Report.tsx (instructor, "your review" -- the escalation panel
    * above is theirs to act on) and AdviserView.tsx (read-only, no

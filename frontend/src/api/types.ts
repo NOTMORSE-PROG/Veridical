@@ -155,7 +155,21 @@ export interface ResolutionOut {
   ai_majority_verdict: string | null;
 }
 
-export interface CriterionResultOut {
+// BUG-044 (High, live-reproduced): `ResultsTable`/`DecisionSummary`/
+// `explainer` are shared between the instructor's own authenticated
+// report (Report.tsx) and the public, unauthenticated adviser view
+// (AdviserView.tsx) -- before this fix they typed their props as the
+// full `ReportOut`/`CriterionResultOut` directly, so the public payload
+// (`SharedReportOut`) being typed as literally `ReportOut` meant any
+// field ever added to it (V-041's `previous_status`, the per-criterion
+// `resolution` -- the instructor's own private override reasoning) was
+// silently readable by anyone with the link, no cookie required. These
+// two "*Common" interfaces are the actual security boundary now: they
+// name exactly the fields safe for a public reader, and both `ReportOut`
+// and the new `PublicReportOut` below satisfy them structurally --
+// adding a field to `ReportOut` alone can never again make it reach a
+// shared component's public rendering path.
+export interface ResultRowCommon {
   criterion_id: number;
   text: string;
   type: CriterionType;
@@ -175,39 +189,72 @@ export interface CriterionResultOut {
   reasoning: string | null;
   reason: string | null;
   evidence: EvidenceItem[];
+  // Optional, not absent: `CriterionResultOut` (instructor-facing) always
+  // carries a real value; `PublicCriterionResultOut` (BUG-044) doesn't
+  // declare the field at all, which TypeScript treats as compatible with
+  // an optional property here -- `if (row.resolution)` reads correctly
+  // either way.
+  resolution?: ResolutionOut | null;
+}
+
+export interface CriterionResultOut extends ResultRowCommon {
   resolution: ResolutionOut | null;
 }
 
-export interface ReportOut {
-  check_run_id: number;
-  manuscript_group_label: string;
-  manuscript_original_filename: string | null;
-  rubric_title: string;
+/** BUG-044 fix: the public, unauthenticated adviser view's per-criterion
+ * row. Deliberately does NOT extend `CriterionResultOut` or declare a
+ * `resolution` field -- see `ResultRowCommon`'s own comment. */
+export type PublicCriterionResultOut = ResultRowCommon;
+
+export interface ReportCommon {
   status: "ready" | "conditionally_ready" | "not_ready" | "needs_review";
   composite_score: number | null;
   thresholds: { ready_min_score: number; not_ready_max_score: number };
   reason: string | null;
   flag_deduction: number;
   unresolved_high_flag_count: number;
-  results: CriterionResultOut[];
   // V-038 (F8.5) — the terminal gate. `decision` is null until the
   // instructor decides; once set, the report is frozen until an explicit
   // reopen.
   decision: Decision | null;
   decided_at: string | null;
+  // V-040's ShareModal.tsx/DecisionModal.tsx copy already discloses this
+  // specifically before an instructor shares or writes one -- the one
+  // decision-adjacent field the public payload legitimately carries too.
   decision_note: string | null;
-  // How many criteria still need review -- gates the decide action; the
-  // server re-checks authoritatively regardless.
-  pending_review_count: number;
   // False when the rubric used for this run is no longer the active
   // version for its family.
   rubric_is_current: boolean;
+}
+
+export interface ReportOut extends ReportCommon {
+  check_run_id: number;
+  manuscript_group_label: string;
+  manuscript_original_filename: string | null;
+  rubric_title: string;
+  results: CriterionResultOut[];
+  // How many criteria still need review -- gates the decide action; the
+  // server re-checks authoritatively regardless. Instructor-only: BUG-044
+  // found this published to anonymous readers for no reason (the public
+  // view derives an equivalent count from `results` itself).
+  pending_review_count: number;
   // V-041 — the version-comparison line: the same manuscript's most
-  // recent OTHER done+reported run, if one exists (e.g. this run is a
-  // re-check against a newer rubric version). Null when this is the
-  // manuscript's first reported run.
+  // recent OTHER done+reported run, if one exists. Instructor-only:
+  // BUG-044 found this published a DIFFERENT, never-shared check run's
+  // own score to anyone holding a link for a different one.
   previous_status: "ready" | "conditionally_ready" | "not_ready" | "needs_review" | null;
   previous_composite_score: number | null;
+}
+
+/** BUG-044 fix: the public, unauthenticated adviser view's report
+ * payload. Deliberately does NOT extend `ReportOut` -- see
+ * `ReportCommon`'s own comment for which fields were cut and why. */
+export interface PublicReportOut extends ReportCommon {
+  check_run_id: number;
+  manuscript_group_label: string;
+  manuscript_original_filename: string | null;
+  rubric_title: string;
+  results: PublicCriterionResultOut[];
 }
 
 // V-041: shown before confirming a bulk re-run. Each manuscript's own
@@ -434,10 +481,12 @@ export interface ShareLinkOut {
   expires_at: string | null;
 }
 
-// The public, unauthenticated adviser view's payload -- deliberately
-// just ReportOut + the same reduced FlagSummaryOut list the instructor's
-// own Flags panel uses, never a second, independently-drifting schema.
+// The public, unauthenticated adviser view's payload. BUG-044: used to
+// be typed as ReportOut itself ("safe by never being reachable through
+// this route" turned out false the moment a shared component read a
+// field that route's data actually carried) -- now PublicReportOut, an
+// independently-typed, deliberately smaller shape.
 export interface SharedReportOut {
-  report: ReportOut;
+  report: PublicReportOut;
   flags: FlagSummaryOut[];
 }

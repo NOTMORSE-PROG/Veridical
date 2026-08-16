@@ -12,7 +12,7 @@ from app.models.manuscript import Manuscript
 from app.models.run import CheckRun
 from app.models.share import ShareLink
 from app.pipeline.service import get_check_run
-from app.report.schemas import ReportOut
+from app.report.schemas import PublicCriterionResultOut, PublicReportOut, ReportOut
 from app.report.service import flags_for_check_run, report_out_for_check_run
 from app.share.schemas import SharedReportOut, ShareLinkOut
 
@@ -127,6 +127,50 @@ async def revoke_share_link(session: AsyncSession, check_run_id: int, instructor
     await session.commit()
 
 
+def _to_public_report(report: ReportOut) -> PublicReportOut:
+    """BUG-044 fix: an explicit field-by-field projection, not a reuse of
+    `ReportOut` or a blind `.model_dump()` reconstruction — every field
+    below is a deliberate choice, so a future field added to `ReportOut`
+    is invisible here until someone decides it belongs. `resolution`
+    (per-criterion) and `previous_status`/`previous_composite_score`/
+    `pending_review_count` (report-level) are the fields this function
+    is the reason don't appear -- see `PublicReportOut`'s own docstring
+    for why each was excluded."""
+    return PublicReportOut(
+        check_run_id=report.check_run_id,
+        manuscript_group_label=report.manuscript_group_label,
+        manuscript_original_filename=report.manuscript_original_filename,
+        rubric_title=report.rubric_title,
+        status=report.status,
+        composite_score=report.composite_score,
+        thresholds=report.thresholds,
+        reason=report.reason,
+        flag_deduction=report.flag_deduction,
+        unresolved_high_flag_count=report.unresolved_high_flag_count,
+        results=[
+            PublicCriterionResultOut(
+                criterion_id=r.criterion_id,
+                text=r.text,
+                type=r.type,
+                weight=r.weight,
+                kind=r.kind,
+                outcome=r.outcome,
+                score=r.score,
+                basis=r.basis,
+                anchor=r.anchor,
+                reasoning=r.reasoning,
+                reason=r.reason,
+                evidence=r.evidence,
+            )
+            for r in report.results
+        ],
+        decision=report.decision,
+        decided_at=report.decided_at,
+        decision_note=report.decision_note,
+        rubric_is_current=report.rubric_is_current,
+    )
+
+
 async def get_shared_report(session: AsyncSession, token: str) -> SharedReportOut:
     """The public, unauthenticated read (screen 4l) -- the token IS the
     authorization; no instructor_id anywhere in this path. Distinguishes
@@ -147,4 +191,4 @@ async def get_shared_report(session: AsyncSession, token: str) -> SharedReportOu
 
     report: ReportOut = await report_out_for_check_run(session, check_run)
     flags = await flags_for_check_run(session, check_run.id)
-    return SharedReportOut(report=report, flags=flags)
+    return SharedReportOut(report=_to_public_report(report), flags=flags)

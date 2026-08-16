@@ -266,3 +266,196 @@ def test_shared_report_exposes_zero_mutating_endpoints(logged_in_with_a_done_run
         )
     # The token itself grants no access to any OTHER endpoint either.
     assert client.get(f"/check-runs/{check_run_id}/report").status_code == 401
+
+
+@pytest.fixture()
+def logged_in_with_a_resolved_and_prior_run(client, api_scratch_url):
+    """BUG-044 (High, live-reproduced): seeds the exact scenario that
+    leaked -- a criterion the instructor resolved out of escalation
+    (carries `resolution.reason`, their own private override reasoning)
+    AND an earlier DONE run for the same manuscript+rubric family (so
+    `previous_status`/`previous_composite_score` are real, non-null
+    values, not just absent-by-coincidence). The current (second) run is
+    the one shared."""
+    import asyncio
+
+    from sqlalchemy import text
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
+    from app.db import sqlalchemy_url
+    from app.models.enums import CheckKind, CheckRunStatus, ResultOutcome
+    from app.models.instructor import Instructor
+    from app.models.manuscript import Manuscript
+    from app.models.rubric import Criterion, Rubric
+    from app.models.run import CheckResult, CheckRun
+    from app.report.service import aggregate_and_score
+
+    async def seed():
+        engine = create_async_engine(sqlalchemy_url(api_scratch_url))
+        try:
+            factory = async_sessionmaker(engine, expire_on_commit=False)
+            async with factory() as session:
+                await session.execute(
+                    text(
+                        "TRUNCATE share_link, readiness_report, check_result, check_run, "
+                        "criterion, rubric, manuscript, instructor RESTART IDENTITY CASCADE"
+                    )
+                )
+                owner = Instructor(
+                    email="prof2@tip.edu.ph",
+                    display_name="Prof",
+                    password_hash=hash_password("s3cret!"),
+                )
+                session.add(owner)
+                await session.commit()
+                manuscript = Manuscript(
+                    instructor_id=owner.id, group_label="G-12", file_ref="x.pdf"
+                )
+                rubric = Rubric(
+                    instructor_id=owner.id, title="Format", source_file="r.pdf", is_active=True
+                )
+                session.add_all([manuscript, rubric])
+                await session.commit()
+                criterion = Criterion(
+                    rubric_id=rubric.id,
+                    type="structural",
+                    text="Has an abstract",
+                    evidence=None,
+                    weight=Decimal("100"),
+                    position=0,
+                )
+                session.add(criterion)
+                await session.commit()
+
+                # Run 1: an earlier DONE + reported run -- the "previous"
+                # run this instructor never shared.
+                run1 = CheckRun(manuscript_id=manuscript.id, rubric_id=rubric.id)
+                session.add(run1)
+                await session.commit()
+                session.add(
+                    CheckResult(
+                        check_run_id=run1.id,
+                        criterion_id=criterion.id,
+                        kind=CheckKind.structural,
+                        outcome=ResultOutcome.failed,
+                        score=0.0,
+                        detail={"reason": "No abstract found."},
+                    )
+                )
+                run1.status = CheckRunStatus.done
+                await session.commit()
+                await aggregate_and_score(session, run1.id)
+
+                # Run 2: the run actually shared -- one criterion resolved
+                # out of escalation, carrying the instructor's own
+                # private override reasoning.
+                run2 = CheckRun(manuscript_id=manuscript.id, rubric_id=rubric.id)
+                session.add(run2)
+                await session.commit()
+                session.add(
+                    CheckResult(
+                        check_run_id=run2.id,
+                        criterion_id=criterion.id,
+                        kind=CheckKind.structural,
+                        outcome=ResultOutcome.passed,
+                        score=100.0,
+                        detail={
+                            "resolution": {
+                                "type": "mark_pass",
+                                "reason": "Verified manually for review testing.",
+                                "ai_majority_verdict": "fail",
+                            }
+                        },
+                    )
+                )
+                run2.status = CheckRunStatus.done
+                await session.commit()
+                await aggregate_and_score(session, run2.id)
+                return run2.id
+        finally:
+            await engine.dispose()
+
+    check_run_id = asyncio.run(seed())
+    client.post("/auth/login", json={"email": "prof2@tip.edu.ph", "password": "s3cret!"})
+    return client, check_run_id
+
+
+def test_shared_report_never_leaks_resolution_reasoning_or_a_prior_runs_score(
+    logged_in_with_a_resolved_and_prior_run,
+):
+    """BUG-044 (High): live-reproduces the exact leak and proves the fix.
+    Before the fix, `resolution.reason` and `previous_status`/
+    `previous_composite_score` were all present in this exact response."""
+    client, check_run_id = logged_in_with_a_resolved_and_prior_run
+
+    # Confirm the leak-worthy data is REAL on the authenticated side first
+    # -- this test would be meaningless if the seed never produced it.
+    authed = client.get(f"/check-runs/{check_run_id}/report").json()
+    assert authed["previous_status"] == "not_ready"
+    assert authed["results"][0]["resolution"]["reason"] == "Verified manually for review testing."
+
+    client.post(f"/check-runs/{check_run_id}/share", json={})
+    token = client.get(f"/check-runs/{check_run_id}/share").json()["token"]
+
+    client.cookies.clear()
+    shared = client.get(f"/shared/{token}/report").json()
+
+    assert "resolution" not in shared["report"]["results"][0]
+    assert "previous_status" not in shared["report"]
+    assert "previous_composite_score" not in shared["report"]
+    assert "pending_review_count" not in shared["report"]
+
+    # Belt-and-suspenders: the leaked text must not appear ANYWHERE in the
+    # raw response, not just be absent from the specific key it used to
+    # live under (guards against it resurfacing under a different key).
+    import json as _json
+
+    raw = _json.dumps(shared)
+    assert "Verified manually for review testing" not in raw
+
+
+def test_shared_report_public_schema_is_an_exact_allow_list(
+    logged_in_with_a_resolved_and_prior_run,
+):
+    """The cheapest structural guard available (BUG-044's own
+    recommendation): assert the EXACT key set, so a future field added to
+    `ReportOut`/`CriterionResultOut` fails this test instead of silently
+    reaching an anonymous reader the moment someone reuses that model."""
+    client, check_run_id = logged_in_with_a_resolved_and_prior_run
+    client.post(f"/check-runs/{check_run_id}/share", json={})
+    token = client.get(f"/check-runs/{check_run_id}/share").json()["token"]
+
+    client.cookies.clear()
+    shared = client.get(f"/shared/{token}/report").json()
+
+    assert set(shared["report"].keys()) == {
+        "check_run_id",
+        "manuscript_group_label",
+        "manuscript_original_filename",
+        "rubric_title",
+        "status",
+        "composite_score",
+        "thresholds",
+        "reason",
+        "flag_deduction",
+        "unresolved_high_flag_count",
+        "results",
+        "decision",
+        "decided_at",
+        "decision_note",
+        "rubric_is_current",
+    }
+    assert set(shared["report"]["results"][0].keys()) == {
+        "criterion_id",
+        "text",
+        "type",
+        "weight",
+        "kind",
+        "outcome",
+        "score",
+        "basis",
+        "anchor",
+        "reasoning",
+        "reason",
+        "evidence",
+    }

@@ -5,13 +5,16 @@
 // surface into its own module at all, so "this page can mutate nothing"
 // stays true at the source level, not just because the buttons happen
 // not to render.
-import type { ReportOut } from "../api/types";
+import type { ReportCommon } from "../api/types";
 import { StatusPill } from "../components/StatusPill";
 import { DECISION_LABEL, DECISION_TONE } from "../domain/decisionTone";
 
 const dateFormatter = new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" });
 
-export function DecisionSummary({ report }: { report: ReportOut }) {
+// BUG-044: typed against ReportCommon, not ReportOut -- rendered from the
+// public adviser view with a PublicReportOut, which lacks several
+// instructor-only fields this component never needed anyway.
+export function DecisionSummary({ report }: { report: ReportCommon }) {
   return (
     <div className="flex flex-col gap-3 rounded-lg border border-border bg-panel p-4">
       <h2 className="text-sm font-bold text-ink">Final decision</h2>
