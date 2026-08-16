@@ -206,20 +206,17 @@ export function AdviserViewPage() {
         )}
       </div>
 
-      {report.previous_status && (
-        <p className="flex flex-wrap items-center gap-1.5 text-sm text-ink-secondary">
-          <span>Previously</span>
-          <StatusPill tone={READINESS_TONE[report.previous_status]}>
-            {READINESS_LABEL[report.previous_status]}
-          </StatusPill>
-          {report.previous_composite_score !== null && <span>({report.previous_composite_score}%)</span>}
-          <span aria-hidden="true">&rarr;</span>
-          <span>now</span>
-          <StatusPill tone={READINESS_TONE[report.status]}>{READINESS_LABEL[report.status]}</StatusPill>
-          {report.composite_score !== null && <span>({report.composite_score}%)</span>}
-          <span>.</span>
-        </p>
-      )}
+      {/* BUG-044 (High): the "Previously X -> now Y" comparison line
+          (V-041) used to render here off `report.previous_status`/
+          `previous_composite_score` -- both removed from the public
+          payload entirely, because that data describes a DIFFERENT
+          check run the instructor never shared. Anyone holding this
+          link learned a prior, unshared run's score. `PublicReportOut`
+          doesn't carry the fields at all now, so this can't silently
+          come back the way it silently appeared (V-041 added the fields
+          to `ReportOut` for the instructor's own screen and this public
+          view inherited them for free, since it was typed as `ReportOut`
+          itself at the time). */}
 
       <p className="rounded-lg bg-status-info-bg px-4 py-2.5 text-sm text-status-info-text">
         {explainer(report, "#flags-heading")}

@@ -88,6 +88,61 @@ class ReportOut(BaseModel):
     previous_composite_score: float | None = None
 
 
+class PublicCriterionResultOut(BaseModel):
+    """BUG-044 fix: the public, unauthenticated adviser view's (screen 4l)
+    per-criterion row — an explicit, minimal projection, deliberately NOT
+    `CriterionResultOut`, so a field added to the instructor-facing model
+    is never auto-published to an anonymous reader. Excludes `resolution`
+    specifically: it carries the instructor's own private reasoning for
+    overriding an AI verdict (e.g. "I'm passing this because the student
+    has had a rough term"), which `SharedReportOut`'s own prior docstring
+    claimed was already excluded — it wasn't, because that version was
+    typed as `ReportOut` itself and inherited every field `ReportOut` ever
+    grows."""
+
+    criterion_id: int
+    text: str
+    type: str
+    weight: float
+    kind: str
+    outcome: str
+    score: float | None
+    basis: str | None
+    anchor: str | None
+    reasoning: str | None
+    reason: str | None
+    evidence: list[EvidenceItem]
+
+
+class PublicReportOut(BaseModel):
+    """BUG-044 fix: the public, unauthenticated adviser view's report
+    payload — deliberately NOT `ReportOut`. Excludes `previous_status`/
+    `previous_composite_score` (a DIFFERENT, never-shared check run's own
+    outcome — V-041's comparison line was never meant for this audience)
+    and `pending_review_count` (the frontend derives an equivalent count
+    from `results` itself; the field doesn't need a public value at all).
+    `decision_note` stays: V-040's own `ShareModal.tsx`/`DecisionModal.tsx`
+    copy already discloses it specifically to the instructor before they
+    share or write one — the one decision-adjacent field this audience
+    legitimately has informed consent to see."""
+
+    check_run_id: int
+    manuscript_group_label: str
+    manuscript_original_filename: str | None
+    rubric_title: str
+    status: str
+    composite_score: float | None
+    thresholds: dict[str, float]
+    reason: str | None
+    flag_deduction: float
+    unresolved_high_flag_count: int
+    results: list[PublicCriterionResultOut]
+    decision: str | None = None
+    decided_at: datetime | None = None
+    decision_note: str | None = None
+    rubric_is_current: bool = True
+
+
 class DecisionIn(BaseModel):
     decision: Literal["approved", "returned", "rejected"]
     note: str | None = None

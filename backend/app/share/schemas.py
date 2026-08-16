@@ -2,7 +2,7 @@ from datetime import datetime
 
 from pydantic import BaseModel
 
-from app.report.schemas import FlagSummaryOut, ReportOut
+from app.report.schemas import FlagSummaryOut, PublicReportOut
 
 
 class CreateShareLinkIn(BaseModel):
@@ -21,12 +21,18 @@ class ShareLinkOut(BaseModel):
 
 class SharedReportOut(BaseModel):
     """The public, unauthenticated adviser view's payload (screen 4l).
-    Deliberately just `ReportOut` + the same reduced `FlagSummaryOut`
-    list the instructor's own Flags panel uses (BUG-033) -- no separate,
-    independently-drifting "adviser" schema. Everything NOT safe for a
-    logged-out reader (annotations, overrides, the audit trail, the
-    dashboard) is excluded by simply never being reachable through this
-    router, not by a second field-by-field allow-list to keep in sync."""
 
-    report: ReportOut
+    BUG-044 (High, live-reproduced): this used to be typed as `ReportOut`
+    itself — the instructor-facing model — on the theory that anything
+    unsafe was "excluded by simply never being reachable through this
+    router." That claim was false: `ReportOut` is shared and growing
+    (V-041 added `previous_status`/`previous_composite_score` for an
+    unrelated feature and both were silently published here), and the
+    per-criterion `resolution` field — the instructor's own private
+    reasoning for overriding an AI verdict — was live and readable with
+    no cookie. Now `PublicReportOut`: an explicit, minimal, independently
+    -typed projection (`app/report/schemas.py`) that must be deliberately
+    extended, never one that grows for free."""
+
+    report: PublicReportOut
     flags: list[FlagSummaryOut]

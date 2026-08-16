@@ -90,6 +90,33 @@ describe("AdviserViewPage", () => {
     expect((await screen.findAllByText("Conditionally Ready")).length).toBeGreaterThan(0);
   });
 
+  it("BUG-044: never renders a prior run's status/score, even if a mock response smuggles it in", async () => {
+    // The real fix is that `PublicReportOut` doesn't carry these fields at
+    // all -- this proves the FRONTEND half independently: even a raw JSON
+    // response (bypassing TS entirely, the way a real fetch response
+    // would) that still had the old fields must not surface them, since
+    // this component no longer reads `report.previous_status` at all.
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = typeof input === "string" ? input : input.toString();
+      const path = new URL(url, "http://localhost").pathname;
+      if (path === "/shared/tok123/report") {
+        return new Response(
+          JSON.stringify({
+            report: { ...BASE_REPORT, previous_status: "not_ready", previous_composite_score: 26.67 },
+            flags: [],
+          }),
+          { status: 200 },
+        );
+      }
+      return new Response("{}", { status: 200 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render();
+    await screen.findAllByText("Conditionally Ready");
+    expect(screen.queryByText("Previously")).not.toBeInTheDocument();
+    expect(screen.queryByText(/26\.67/)).not.toBeInTheDocument();
+  });
+
   it("renders the full, unfiltered results table -- pending criteria show as Awaiting review, not hidden", async () => {
     // Mobile card + desktop grid both render in the DOM simultaneously
     // (jsdom applies no media queries) -- same convention as every other
