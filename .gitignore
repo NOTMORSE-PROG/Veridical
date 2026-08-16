@@ -49,6 +49,17 @@ frontend/dist/
 
 # ── Tooling artifacts ─────────────────────────────────────────────
 .playwright-mcp/
+# Agent/session screenshots land at the repo root (ui-designer,
+# ux-critic, professor all write there by default). They show real
+# manuscript content, so they are local-only under D-007 — the same
+# reason *.pdf is ignored above. Root-anchored so committed UI assets
+# under frontend/public/ are unaffected. Found untracked AND
+# un-ignored by the 2026-08-16 whole-product audit (Track C, C20):
+# a single `git add -A` would have published them.
+/*.png
+/*.jpg
+/*.jpeg
+/*.webp
 
 # ── OS / editor ──────────────────────────────────────────────────
 Thumbs.db

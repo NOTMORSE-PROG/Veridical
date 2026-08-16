@@ -2,7 +2,17 @@
 
 > **Purpose of this document:** Finalize the feature set, user flows, tech stack, and testing strategy for VERIDICAL before development starts. It is based on the capstone proposal (`VERIDICAL-DOCUMENTATION.pdf`, Chapters 1–3) plus feasibility research done in July 2026. Items that changed from the proposal are marked and justified so Chapter 3 tables can be updated to match.
 >
-> **Status legend:** 🟢 **Core** (must ship) · 🟡 **Should-have** (ship if time allows) · ⚪ **Optional** (nice-to-have) · 🔵 **Proposed** (pending adviser approval — not committed)
+> **Priority legend (NOT build status):** 🟢 **Core** (must ship) · 🟡 **Should-have** (ship if time allows) · ⚪ **Optional** (nice-to-have) · 🔵 **Proposed** (pending adviser approval — not committed)
+>
+> ⚠️ **These markers say how important a feature is, never whether it is
+> built.** A 🟢 item may be unbuilt; a 🟡 item may have shipped months ago. This
+> document is a **specification**, not a status report — the only authority on
+> what actually exists is `tickets/BOARD.md` (internal), and the running app.
+> *(Clarified 2026-08-16 after the whole-product audit found that the column was
+> headed "Status" while carrying priority values, and identified this as the
+> single mechanical reason the project reads as finished when it is not — the
+> owner's own opening complaint. Renaming the legend is the minimum fix; a real
+> build-status column is proposed and awaiting the owner's call.)*
 
 ---
 
@@ -204,7 +214,7 @@ Combines everything into one explainable output (Objective 4, Fig. 3.12).
 |---|---|---|---|
 | Backend | Python, FastAPI | Python 3.12 + **FastAPI** ✔ unchanged | — |
 | Ingestion | GROBID, PyMuPDF, Docling, Nougat | **PyMuPDF + python-docx + Gemini multimodal**; Docling optional (local); GROBID via free HuggingFace Space as optional fallback | GROBID needs 2–4 GB RAM — no free tier provides it (Render free = 512 MB). Nougat needs a GPU. Gemini's multimodal free tier covers image tables/equations at zero cost |
-| AI/LLM | Groq API free tier | **Gemini Flash free tier** (primary LLM) | Groq free = 6K tokens/min, ~1K req/day — one 80-page manuscript (~60K+ tokens) would crawl. Gemini Flash free = 250K tokens/min, 1M-token context (whole manuscript in one call), ~1,500 req/day |
+| AI/LLM | Groq API free tier | **Gemini Flash free tier** (primary LLM) | Groq free = 6K tokens/min, ~1K req/day — one 80-page manuscript (~60K+ tokens) would crawl. Gemini Flash free = 250K tokens/min, 1M-token context (whole manuscript in one call), **300 req/day measured across the model pool** (corrected 2026-08-16; the "~1,500/day" written here originally was retracted by D-001/D-014 — a single model allows 20/day) |
 | ML utilities | scikit-learn, cross-encoder NLI | ✔ unchanged (sentence-transformers cross-encoder for NLI/claim-support, runs CPU) | — |
 | Statistical forensics | (to build) | **statcheck_python, pysprite, grim_test** (existing open source) | Validated implementations exist; reuse them, don't reimplement |
 | Database | PostgreSQL via Neon + pgvector | ✔ unchanged | Free tier confirmed adequate |
@@ -222,9 +232,15 @@ To stay comfortably inside free-tier quota during defense season and to strength
 2. **Tier 1 — local lightweight models** (CPU, in-process, free): static sentence embeddings (Model2Vec-class, ~8MB at ~90% of MiniLM quality) for similarity work, and a small quantized NLI cross-encoder for entailment/contradiction.
 3. **Tier 2 — Gemini as the arbiter**: called only where lower tiers are inconclusive or the criterion is irreducibly judgmental — batched, cached by input hash (re-runs cost ~0 calls), self-consistency as 2 passes + tie-break.
 
-Each tier escalates only its uncertain residue upward, ending at the instructor — the same human-in-the-loop principle, applied uniformly at every level. Estimated effect: worst-case ~103 Gemini calls/manuscript drops to ~17 (≈340/day at 20 groups — 4.4× headroom under the daily budget). Every verdict is labeled with its basis (rule / signal / local model / AI) in the report.
+Each tier escalates only its uncertain residue upward, ending at the instructor — the same human-in-the-loop principle, applied uniformly at every level. Estimated effect: worst-case ~103 Gemini calls/manuscript drops to ~17. **At the real measured budget of 300 req/day (pooled), that is ~17 manuscripts/day, with no headroom to spare** (D-011 as CORRECTED by D-014). Every verdict is labeled with its basis (rule / signal / local model / AI) in the report.
 
-> 📌 **Action for the paper:** update Table 3.2 (APIs), Table 3.4 (software), and §3.2 ingestion tools to reflect this column, so the documentation and the build don't diverge. The cascade amendment above strengthens Chapter 2's hybrid-system argument (rule-then-AI literature) and gives Chapter 3 a defensible quota-feasibility analysis.
+> ⚠️ **CORRECTED 2026-08-16.** This paragraph previously read *"≈340/day at 20 groups — 4.4× headroom under the daily budget"*, computed against the pre-measurement figure of ~1,500 req/day. That figure was retracted on 2026-07-26: `gemini-3.5-flash` allows **20 req/day** free, and the engineered model pool yields a measured **300/day** — see `context/DECISIONS.md` D-001 and D-014, which state in terms *"Do not quote 1,500 anywhere."* The correction survived in DECISIONS.md and never reached this file, which was edited eleven days later without it. Found by the 2026-08-16 whole-product audit (Track C, C1/C2).
+
+> 📌 **Action for the paper:** update Table 3.2 (APIs), Table 3.4 (software), and §3.2 ingestion tools to reflect this column, so the documentation and the build don't diverge. **Use ~17 manuscripts/day with no headroom — NOT the retracted "20 groups/day, 4.4× headroom".** The cascade amendment above strengthens Chapter 2's hybrid-system argument (rule-then-AI literature) and gives Chapter 3 a defensible quota-feasibility analysis.
+>
+> The honest version is also the more interesting finding: documented 1,500 → measured 20 → engineered 300 is a real result, reported against the team's own interest, and Chapter 3 should present it as one.
+>
+> ⚠️ Two further Chapter 3 corrections the same audit found, both **verified against the repo** (Track F, F2): Table 3.4 lists **GROBID, Docling, Nougat, Groq, scikit-learn,** and a **cross-encoder NLI model** — all six have **zero occurrences in `backend/`**. The shipped stack is PyMuPDF + python-docx + Gemini (vision and grading), and the cross-encoder was **measured at 487MB RSS by V-030/V-035 and deliberately ruled out** against Render's 512MB ceiling. That rejection is a genuine engineering finding and belongs in the paper; the tool it rejected does not belong in the stack table. `README.md` already states the true stack, so the paper currently contradicts a public file in this repo.
 
 ---
 
@@ -232,7 +248,7 @@ Each tier escalates only its uncertain residue upward, ending at the instructor 
 
 | API | Used by | Cost | Rate limit | Handling |
 |---|---|---|---|---|
-| Gemini API (Flash, free tier) | F1.3, F2, F3, F4, F5.4 | Free | ~10–15 req/min, ~1,500 req/day, 250K tokens/min | Central LLM queue; batch criteria per call; daily-quota meter on dashboard |
+| Gemini API (Flash, free tier) | F1.3, F2, F3, F4, F5.4 | Free | ~10–15 req/min, **300 req/day measured across the engineered model pool** (a single model gives only 20/day — D-001/D-014; the retracted "~1,500/day" figure was corrected out on 2026-08-16), 250K tokens/min | Central LLM queue; batch criteria per call; daily-quota meter on dashboard; per-instructor BYOK (V-052) is the only lever that grows capacity with adoption |
 | CrossRef REST API | F5.2, F5.3 | Free | Polite pool (add `mailto`) | 1 req/sec queue + citation cache (F5.6) |
 | Retraction Watch (via Crossref) | F5.3 | **Free** (Crossref acquired it, 2023) | Same as CrossRef | Same queue; also downloadable as full CSV for offline bulk checks |
 | Semantic Scholar API | F5.2, F5.4 | Free (API key) | **1 req/sec** | Secondary lookup only, cached |
@@ -283,12 +299,12 @@ Each phase ends demo-able; the applicability gates (F6.5 etc.) mean partially-bu
 
 | Risk | Impact | Mitigation |
 |---|---|---|
-| Gemini free daily quota (~1,500 req/day) exhausted during defense season | Checks stall mid-batch | Batch criteria per call (1M context = whole manuscript in one prompt); dashboard quota meter; queue resumes next day; optional second Google Cloud project as spare quota |
+| Gemini free daily quota (**300 req/day measured across the model pool** — corrected 2026-08-16 from the retracted ~1,500 figure, D-001/D-014) exhausted during defense season | Checks stall mid-batch. **At ~17 calls/manuscript this is ~17 manuscripts/day with no headroom — a real capacity ceiling, not a comfortable margin** | Batch criteria per call (1M context = whole manuscript in one prompt); dashboard quota meter; queue resumes next day; optional second Google Cloud project as spare quota |
 | Render free tier cold start (30–60 s after 15 min idle) | "Is it broken?" first impression | Frontend shows a "waking the server" state; optionally a free uptime pinger during defense weeks |
 | Citation APIs weak on local/Philippine sources | Legit local citations flagged unverifiable | Explicit "unverifiable ≠ fake" wording + manual-review flag (already the design); cache instructor's manual confirmations so the same source isn't re-flagged |
 | AI grading inconsistency | Trust collapse with instructor/panel | Self-consistency voting, escalation, golden-dataset regression (§7.2); instructor override always available |
 | Rubric parse errors on unusual formats | Wrong criteria checked | Mandatory instructor review screen (F2.3) before any rubric is used — human confirms the parse, matching the HITL principle |
-| Manuscript data privacy (PH Data Privacy Act) | Legal/ethical exposure | TLS + encrypted storage, instructor-only access, no third-party sharing beyond citation metadata (only citation strings leave the system, never manuscript text except to Gemini — disclose this in the consent/ethics section) |
+| Manuscript data privacy (PH Data Privacy Act) | Legal/ethical exposure | TLS + encrypted storage; no third-party sharing beyond citation metadata (only citation strings leave the system, never manuscript text except to Gemini — disclose this in the consent/ethics section). **The F7 originality corpus is shared, by design (owner decision, 2026-08-16, BUG-050): every ingested manuscript is inserted into one library and any manuscript may match any other, across instructor accounts. That is the feature — coverage grows with every insert.** What a match returns is bounded: the matched manuscript's identity and a limited excerpt, never the full document (owner ruling, 2026-08-11). **This corrects the previous wording, "instructor-only access", which described the schema's per-instructor scoping and not the corpus's actual behavior.** |
 | Free-tier terms change (it happened to Railway/Fly) | Hosting breaks | Everything in Docker; migration to any host is config, not code |
 
 ---
