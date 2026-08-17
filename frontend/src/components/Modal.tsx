@@ -46,7 +46,7 @@ function getFocusable(container: HTMLElement): HTMLElement[] {
 export function ModalBackdrop({ children }: { children: ReactNode }) {
   useInertBackground();
   return createPortal(
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-neutral-900/50 p-4">
+    <div className="motion-safe:animate-scrim-in fixed inset-0 z-(--z-modal) flex items-center justify-center bg-scrim p-4">
       {children}
     </div>,
     document.body,
@@ -124,7 +124,7 @@ export function Modal({ title, children, footer, onClose, size = "md" }: ModalPr
       aria-labelledby={titleId}
       tabIndex={-1}
       className={cx(
-        "flex max-h-[90vh] w-full flex-col gap-4 overflow-y-auto rounded-lg border border-border bg-panel p-6 text-sm shadow-lg",
+        "motion-safe:animate-dialog-in flex max-h-[90vh] w-full flex-col gap-4 overflow-y-auto rounded-lg border border-border bg-panel p-6 text-sm shadow-(--elevation-overlay)",
         SIZE_CLASS[size],
       )}
     >
