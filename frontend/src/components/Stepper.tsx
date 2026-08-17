@@ -42,9 +42,13 @@ const RAIL_FILLED: Record<StepState, boolean> = {
   attention: true,
 };
 
+// `isolate` on the <ol> is REQUIRED by DESIGN.md §1.9 for any component using
+// --z-raised: `relative` alone does not create a stacking context, so the rail
+// dot's lift would otherwise compete in the ROOT context rather than locally.
+// Missed when the token was applied; caught by ux-critic 2026-08-16.
 export function Stepper({ steps }: { steps: Step[] }) {
   return (
-    <ol className="relative flex flex-col rounded-lg border border-border bg-panel">
+    <ol className="relative isolate flex flex-col rounded-lg border border-border bg-panel">
       {/* Connecting rail (V-056) — Gestalt continuity: five independent
           rows previously read as five unrelated facts, not one pipeline.
           Purely decorative (aria-hidden); the StatusPill text is still

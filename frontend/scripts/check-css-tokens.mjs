@@ -76,8 +76,15 @@ for (const token of REQUIRED_IN_BUILD) {
   }
 }
 
-// BUG-085: raw z-index values. Seven lived in src, two of them inline, and
-// the skip link tied with the modal overlay. Use the --z-* scale.
+// BUG-085: raw z-index values. Eleven layering sites now carry a --z-* token
+// (9 class-based + 2 inline in CoachMark); before the migration the skip link
+// and the modal backdrop were BOTH z-50, a genuine tie broken only by paint
+// order. Use the scale.
+//
+// GUARD GAP, named by ux-critic 2026-08-16 and not yet closed: this catches a
+// raw z-index but NOT a component using --z-raised without `isolation:
+// isolate` on its own root, which DESIGN.md §1.9 requires. Stepper.tsx shipped
+// exactly that violation on the same change that wrote the rule.
 const RAW_Z = /(?:^|[\s"'`])z-(?:\[)?\d+\]?|zIndex:\s*\d/;
 // D4: 2 of 12 animation sites shipped with no reduced-motion guard.
 //
