@@ -44,6 +44,7 @@ REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
 TICKETS = REPO_ROOT / "tickets"
 BOARD = TICKETS / "BOARD.md"
 
+AGENTS = ("ui-designer", "ux-critic", "backend-critic", "professor", "newcomer", "manager")
 OPEN_STORY = {"TODO", "WIP", "BLOCKED", "PARKED"}
 DONE_STORY = {"DONE"}
 OPEN_BUG = {"TODO", "WIP"}
@@ -151,6 +152,29 @@ def main() -> int:
                     n_open_bug += 1
                     open_ids.append(f.stem)
 
+    # ---- DoD 12/12b: a DONE ticket must name its agents and disposition ----
+    # Running the agent is half the loop; the audit found 41 of 46 DONE tickets
+    # naming no critic at all, and DoD 12 as first written said nothing about
+    # what happens to a finding once made. Warn rather than block: this is
+    # retroactive over years of history, and a hard failure would make the gate
+    # unusable on day one. Loud and countable is the point.
+    stale_dod = []
+    for mdir in sorted(TICKETS.glob("V[0-9]*-*")):
+        d = mdir / "done"
+        if not d.exists():
+            continue
+        for f in sorted(d.glob("V-*.md")):
+            try:
+                body = f.read_text(encoding="utf-8", errors="replace")
+            except OSError:
+                continue
+            named = any(a in body for a in AGENTS)
+            dispositioned = "Agent findings and disposition" in body
+            if not named:
+                stale_dod.append((f.stem, "names no agent (DoD 12)"))
+            elif not dispositioned:
+                stale_dod.append((f.stem, "no disposition section (DoD 12b)"))
+
     # ---- board cross-check ---------------------------------------------
     text = board_text()
     if text:
@@ -173,6 +197,14 @@ def main() -> int:
 
     if not args.quiet:
         print(f"open story tickets: {n_open_story}   open bugs: {n_open_bug}")
+        if stale_dod:
+            no_agent = sum(1 for _, r in stale_dod if "names no agent" in r)
+            no_disp = len(stale_dod) - no_agent
+            print(
+                f"DoD 12/12b backlog: {no_agent} DONE ticket(s) name no agent, "
+                f"{no_disp} name one but have no disposition section "
+                f"(warning, not a failure -- retroactive)"
+            )
 
     if problems:
         print("\nBLOCKED: ticket placement is inconsistent.\n")
