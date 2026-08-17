@@ -8,7 +8,7 @@ and nothing secret is required unless a live integration is actually used.
 from functools import lru_cache
 from pathlib import Path
 
-from pydantic import field_validator
+from pydantic import field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -197,19 +197,19 @@ class Settings(BaseSettings):
     # start producing flags, not invent the scoring interaction.
     scoring_flag_deduction_high: float = 15.0
     scoring_flag_deduction_med: float = 8.0
-    # --- Weight importance display (D-023, BUG-051/052/098) ------------------
-    # Criterion weight is a RELATIVE value (no required total), so it's
-    # bucketed into the same Low/Medium/High scale flag severity already
-    # uses rather than shown as a bare percentage. Expressed as a ratio
-    # against the EQUAL-SPLIT average for the rubric (1.0 = "as important
-    # as an equal share would be") so the bucketing adapts to any rubric
-    # size instead of needing rubric-specific absolute thresholds — a
-    # weight below this ratio is Low, at/above `weight_importance_high_min_ratio`
-    # is High, everything between is Medium.
-    weight_importance_low_max_ratio: float = 0.5
-    weight_importance_high_min_ratio: float = 1.5
     scoring_flag_deduction_low: float = 3.0
     scoring_flag_deduction_cap: float = 40.0
+    # --- Weight importance display (D-023, BUG-051/052/098) ------------------
+    # Criterion weight is a RELATIVE value (no required total), so it's
+    # bucketed into a Low/Medium/High scale rather than shown as a bare
+    # percentage. Expressed as a ratio against the EQUAL-SPLIT average for
+    # the rubric (1.0 = "as important as an equal share would be") so the
+    # bucketing adapts to any rubric size instead of needing rubric-specific
+    # absolute thresholds — a weight below this ratio is Low, at/above
+    # `weight_importance_high_min_ratio` is High, everything between is
+    # Medium.
+    weight_importance_low_max_ratio: float = 0.5
+    weight_importance_high_min_ratio: float = 1.5
 
     # --- Check-run orchestration (V-018, ENGINEERING §4) ---------------------
     # How often the background worker polls for the next runnable
@@ -430,6 +430,19 @@ class Settings(BaseSettings):
         # mean "unset": Path("") normalizes to Path(".") which is truthy,
         # so without this the loader would try to read a directory.
         return None if value == "" else value
+
+    @model_validator(mode="after")
+    def _weight_importance_ratios_are_ordered(self) -> "Settings":
+        # backend-critic finding (BUG-052 review): `weight_importance.py`
+        # checks `low_max_ratio` first, then `high_min_ratio`, else `med`
+        # -- an operator swapping these in `.env` (or setting them equal)
+        # would make `med` unreachable and silently relabel genuinely-high
+        # weight criteria as "low". Caught at startup, not discovered live.
+        if self.weight_importance_low_max_ratio >= self.weight_importance_high_min_ratio:
+            raise ValueError(
+                "weight_importance_low_max_ratio must be less than weight_importance_high_min_ratio"
+            )
+        return self
 
 
 @lru_cache

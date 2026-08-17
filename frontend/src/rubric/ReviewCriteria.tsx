@@ -387,6 +387,10 @@ export function ReviewCriteriaPage() {
     queryVisible<HTMLElement>(`[aria-label="Criterion ${index + 1} text"]`)[0]?.focus();
   }
 
+  function focusCriterionWeight(index: number) {
+    queryVisible<HTMLElement>(`[aria-label="Criterion ${index + 1} weight"]`)[0]?.focus();
+  }
+
   function removeRow(key: string, index: number) {
     setRows((current) => {
       if (!current) return current;
@@ -489,6 +493,20 @@ export function ReviewCriteriaPage() {
             focus: () => focusCriterionText(i),
           });
         }
+        // BUG-052 fix item 1 (backend-critic finding, live-reproduced): the
+        // API already rejects weight <= 0 (`Field(gt=0)`), but nothing
+        // client-side caught it, so a zeroed-out weight (e.g. the input
+        // cleared then left blank) reached a generic "Request failed
+        // (422)" with no actionable message -- ground rule 7's own
+        // "enforce at the API, not just the button" also meant not ONLY
+        // the API.
+        if (r.weight <= 0) {
+          problems.push({
+            id: `weight-${r.key}`,
+            message: `Criterion ${i + 1}'s weight must be greater than zero.`,
+            focus: () => focusCriterionWeight(i),
+          });
+        }
       });
     }
     return problems;
@@ -547,11 +565,26 @@ export function ReviewCriteriaPage() {
             <AttentionIcon />
             Needs manual completion
           </p>
-          <p className="mt-1">
-            VERIDICAL's parser could not confirm every row below on its own, after several
-            attempts. Check each row's criterion text, evidence, and weight against your original
-            format file before confirming.
-          </p>
+          {/* BUG-052 fix (backend-critic finding, live-reproduced): confirming
+              a rubric no longer erases this warning (parse_status survives
+              Confirm now), so this banner and "This rubric is active" below
+              can both be true at once -- telling an instructor to check rows
+              "before confirming" a rubric that's already confirmed and
+              actively grading manuscripts is a real contradiction. Wording
+              branches on `is_active` instead. */}
+          {rubric.is_active ? (
+            <p className="mt-1">
+              VERIDICAL's parser could not confirm every row on its own, after several attempts,
+              and this rubric was activated anyway. Review each row's criterion text, evidence,
+              and weight against your original format file, and save any corrections.
+            </p>
+          ) : (
+            <p className="mt-1">
+              VERIDICAL's parser could not confirm every row below on its own, after several
+              attempts. Check each row's criterion text, evidence, and weight against your original
+              format file before confirming.
+            </p>
+          )}
           {rubric.parse_issues && rubric.parse_issues.length > 0 && (
             <ul className="mt-1.5 list-disc pl-5">
               {rubric.parse_issues.map((issue) => (
@@ -822,7 +855,9 @@ export function ReviewCriteriaPage() {
               Confirm &amp; activate rubric
             </button>
           </div>
-          <p className="text-sm text-ink-tertiary">Confirming requires every criterion to have text.</p>
+          <p className="text-sm text-ink-tertiary">
+            Confirming requires every criterion to have text and a weight greater than zero.
+          </p>
         </>
       )}
 

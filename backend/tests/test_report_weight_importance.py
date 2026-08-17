@@ -2,7 +2,9 @@
 relative to the rubric's own equal-split average -- pure function, no DB.
 """
 
-from app.config import get_settings
+import pytest
+
+from app.config import Settings, get_settings
 from app.report.weight_importance import weight_importance
 
 
@@ -50,3 +52,26 @@ def test_zero_average_defaults_to_medium_not_a_crash():
     assuming that invariant holds forever."""
     settings = get_settings()
     assert weight_importance(0.0, average_weight=0.0, settings=settings) == "med"
+
+
+def test_default_ratios_match_the_frontend_live_preview():
+    """backend-critic finding: `ReviewCriteria.tsx`'s `liveWeightImportance`
+    hardcodes the SAME 0.5/1.5 ratios client-side (a deliberate, disclosed
+    exception -- the frontend can't read `Settings` per-request), so the
+    live preview matches what the report will actually show in the common
+    (default-config) case. This is the tripwire: if these defaults ever
+    change, this test fails and says so, rather than the two copies
+    silently drifting apart."""
+    settings = Settings()
+    assert settings.weight_importance_low_max_ratio == 0.5
+    assert settings.weight_importance_high_min_ratio == 1.5
+
+
+def test_low_max_ratio_must_be_below_high_min_ratio():
+    """backend-critic finding: `weight_importance()` checks low first, then
+    high, else med -- swapped or equal thresholds would make "med"
+    unreachable and silently relabel high-weight criteria as low."""
+    with pytest.raises(ValueError, match="weight_importance_low_max_ratio"):
+        Settings(weight_importance_low_max_ratio=1.5, weight_importance_high_min_ratio=0.5)
+    with pytest.raises(ValueError, match="weight_importance_low_max_ratio"):
+        Settings(weight_importance_low_max_ratio=1.0, weight_importance_high_min_ratio=1.0)

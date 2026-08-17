@@ -64,6 +64,28 @@ describe("ReviewCriteriaPage", () => {
     ).toBeInTheDocument();
   });
 
+  it("BUG-052 (backend-critic finding): a confirmed-but-flagged rubric gets past-tense wording, never 'before confirming'", async () => {
+    const confirmedButFlagged: Rubric = {
+      ...RUBRIC,
+      is_active: true,
+      parse_status: "needs_review",
+      parse_issues: ["only 40% of the source text is reflected in the parsed criteria"],
+    };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(JSON.stringify(confirmedButFlagged), { status: 200 })),
+    );
+    renderWithProviders(<ReviewCriteriaPage />, {
+      route: "/rubric/5/review",
+      path: "/rubric/:rubricId/review",
+    });
+
+    await screen.findByText("Needs manual completion");
+    expect(screen.getByText(/this rubric was activated anyway/)).toBeInTheDocument();
+    expect(screen.queryByText(/before confirming/)).not.toBeInTheDocument();
+    expect(screen.getByText("This rubric is active. Checks use it now.")).toBeInTheDocument();
+  });
+
   it("editing a field then saving sends the edit in the PUT body (edit round-trip)", async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = typeof input === "string" ? input : input.toString();
@@ -119,6 +141,30 @@ describe("ReviewCriteriaPage", () => {
     const alert = await screen.findByRole("alert");
     expect(alert).toHaveTextContent("Add at least one criterion.");
     expect(alert).toHaveFocus();
+  });
+
+  it("BUG-052 (backend-critic finding): a zeroed-out weight blocks Confirm client-side, with an actionable message", async () => {
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) =>
+      new Response(JSON.stringify(RUBRIC), { status: 200 }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    renderWithProviders(<ReviewCriteriaPage />, {
+      route: "/rubric/5/review",
+      path: "/rubric/:rubricId/review",
+    });
+
+    await screen.findAllByDisplayValue("Has an abstract");
+    const weightInputs = screen.getAllByLabelText("Criterion 1 weight");
+    fireEvent.change(weightInputs[0], { target: { value: "" } });
+
+    fireEvent.click(screen.getAllByRole("button", { name: "Confirm & activate rubric" })[0]);
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("Criterion 1's weight must be greater than zero.");
+    expect(alert).toHaveFocus();
+    // Blocked client-side -- never even reached the network as a PUT.
+    expect(fetchMock.mock.calls.some(([, init]) => (init as RequestInit | undefined)?.method === "PUT")).toBe(
+      false,
+    );
   });
 
   it("D-023: shows a live Low/High importance tag next to an asymmetric weight, never a percentage", async () => {

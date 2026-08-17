@@ -224,21 +224,29 @@ def _styles(font: str) -> dict[str, ParagraphStyle]:
     }
 
 
-# D-023: weight is a relative value (no required total) -- rendered as
-# the same Low/Medium/High severity-style label `SeverityTag.tsx` uses
-# for flags, reusing the SAME tone colors (`_TONE_COLORS`) severity
-# already maps to below, never a bare percentage. Short label for the
-# narrow "Wt." table column, long label for the pending-escalation
+# D-023: weight is a relative value (no required total) -- rendered as a
+# Low/Medium/High label, never a bare percentage. Short label for the
+# narrow "Importance" table column, long label for the pending-escalation
 # section's inline prose -- same underlying fact, two column widths,
 # same single source (this dict), never re-derived independently (the
 # exact divergence `_format_weight`'s own history warns about).
+#
+# `backend-critic` finding (live-reproduced, frontend half): the first
+# version of this mapped High/Med/Low onto danger/caution/info, the SAME
+# tones a real severity flag uses -- but a heavily-weighted criterion is
+# not a risk finding, and this document ALSO prints real severity badges
+# (the Flags section above). Reusing danger red for "High importance"
+# reintroduced the exact defect D-023 exists to remove, visually instead
+# of numerically. Fixed the same way as the frontend's `WeightImportanceTag`:
+# a neutral ink-intensity scale (this module's own _INK/_INK_SECONDARY/
+# _INK_TERTIARY, already used throughout for typographic hierarchy), a
+# magnitude cue never a valence cue, no new tokens.
 _WEIGHT_IMPORTANCE_LABEL = {"high": "High", "med": "Medium", "low": "Low"}
 _WEIGHT_IMPORTANCE_LABEL_LONG = {
     "high": "High importance",
     "med": "Medium importance",
     "low": "Low importance",
 }
-_WEIGHT_IMPORTANCE_TONE = {"high": "danger", "med": "caution", "low": "info"}
 
 
 def _format_weight_importance(importance: str, *, long: bool = False) -> str:
@@ -620,9 +628,13 @@ def build_report_pdf(data: ReportExportData) -> bytes:
         for row in remaining:
             label, tone = _result_display(row)
             result_style = styles["cell_bold"] if tone in ("danger",) else styles["cell"]
-            importance_tone = _WEIGHT_IMPORTANCE_TONE.get(row.weight_importance, "neutral")
+            importance_ink = {"high": _INK, "med": _INK_SECONDARY, "low": _INK_TERTIARY}.get(
+                row.weight_importance, _INK_SECONDARY
+            )
             importance_style = ParagraphStyle(
-                "importance_cell", parent=styles["cell"], textColor=_TONE_COLORS[importance_tone][1]
+                "importance_cell",
+                parent=styles["cell_bold"] if row.weight_importance == "high" else styles["cell"],
+                textColor=importance_ink,
             )
             rows.append(
                 [
