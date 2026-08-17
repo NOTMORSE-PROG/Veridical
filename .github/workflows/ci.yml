@@ -49,12 +49,18 @@ jobs:
           VERIDICAL_FAKE_LLM: "1"
           DATABASE_URL: postgresql://veridical:veridical@localhost:5432/veridical
           # conftest.py's skip-floor guard (BUG-076) defaults to 5. CI's real,
-          # verified legitimate baseline is 8: 5 tests need a real Gemini key
-          # (VERIDICAL_FAKE_LLM=1 here) and 3 need the owner's real proposal
+          # verified legitimate baseline is 9: 5 tests need a real Gemini key
+          # (VERIDICAL_FAKE_LLM=1 here) and 4 need the owner's real proposal
           # PDF, which is local-only (D-007) and absent from this checkout.
-          # Confirmed 2026-08-17 (run 31992116301) -- do not raise further
-          # without checking which specific tests are newly skipping and why.
-          VERIDICAL_MAX_SKIPS: "8"
+          # Raised 8 -> 9 (BUG-048, run 32036317930): a new end-to-end
+          # regression test needs BOTH that PDF and the owner's real TIP
+          # rubric decomposition (context/golden/rubric_tip.json, also
+          # local-only/gitignored) -- routes and executes all 11 real
+          # criteria against the real manuscript extraction, which cannot
+          # be faked without defeating the point of the test. Confirmed
+          # 2026-08-17 -- do not raise further without checking which
+          # specific tests are newly skipping and why.
+          VERIDICAL_MAX_SKIPS: "9"
 
   frontend:
     runs-on: ubuntu-latest
