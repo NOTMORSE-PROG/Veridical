@@ -179,13 +179,8 @@
   --tracking-header: 0.02em; /* wordmark only, never running/label text */
   --tracking-display: -0.01em; /* --text-2xl/--text-3xl display headings only (V-056) — never body/label text. Material 3's type-scale docs tie negative tracking to its display tier. */
 
-  /* Motion (V-056) — motion-safe:-gated everywhere it's used. Never
-     applied to status pills, severity tags, or KPI numbers: verdict-
-     bearing elements don't animate on change (an unresolved AI judgment
-     must not look more settled just because it moved smoothly). */
-  --motion-duration-fast: 150ms;
-  --motion-duration-base: 200ms;
-  --motion-ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  /* Motion, depth and layering moved to the `@theme static` block below
+     (BUG-101): these were declared here and silently tree-shaken. */
 
   /* Spacing — 4px base, 8px-grid convention (Material 3 / USWDS) */
   --spacing-1: 0.25rem;
@@ -213,7 +208,70 @@
   --border-width-md: 2px; /* error state, emphasis */
   --border-width-lg: 3px; /* masthead accent rule, focus ring */
 
-  --shadow-sm: 0 1px 2px rgba(20, 22, 26, 0.06); /* KPI cards, rubric "Active format" card, flag-evidence blockquote (V-056) — withheld from escalation/override panels on purpose, see DESIGN.md */
+  --shadow-sm: 0 1px 2px rgba(20, 22, 26, 0.06); /* primitive; use --elevation-* semantic aliases, see DESIGN.md §1.9 */
   --shadow-md: 0 4px 12px rgba(20, 22, 26, 0.1);
-  --shadow-lg: 0 12px 32px rgba(20, 22, 26, 0.16); /* modals */
+  --shadow-lg: 0 12px 32px rgba(20, 22, 26, 0.16); /* primitive; see --elevation-overlay */
+}
+
+/*
+ * Depth, elevation and motion. This block is `@theme static` on purpose:
+ * Tailwind v4 strips any @theme variable nothing references, and a token read
+ * from a TSX inline style is invisible to its scanner. That is exactly how
+ * V-056's three motion tokens came to be documented in DESIGN.md while being
+ * absent from the shipped stylesheet (BUG-101: measured 2026-08-16,
+ * getPropertyValue('--motion-duration-fast') returned "" on the running app).
+ * Do NOT move these into the plain @theme block above.
+ * Full rationale: context/DESIGN.md §1.9 (depth) and §1.10 (motion).
+ */
+@theme static {
+  /* Layer scale. A raw z-index in a component is a defect (ground rule 7).
+     Small values, not a 1000-series: this product imports no third-party
+     component library, so there is no foreign stack to out-rank. Century
+     spacing between layers, decade within a pair, so the next insertion is a
+     choice between named neighbours instead of an invention. */
+  --z-base: 0;
+  --z-raised: 10; /* local lift only; owner must set isolation: isolate */
+  --z-sticky: 100; /* sticky header row inside a scrolling data table */
+  --z-nav-scrim: 200; /* below the header: the close control lives there */
+  --z-header: 300; /* the only topmost persistent chrome (WCAG 2.4.11 compensation is written for it) */
+  --z-dropdown: 400; /* RESERVED: popover portalled to body */
+  --z-modal: 500; /* backdrop; the dialog is its DOM child and needs none */
+  --z-tour-spotlight: 600; /* above the modal on purpose, see DESIGN.md §1.9 */
+  --z-tour-card: 610;
+  --z-toast: 700; /* RESERVED */
+  --z-skip-link: 800; /* topmost. Safe only while every overlay inerts #root */
+
+  /* Elevation. Semantic aliases over the shadow primitives. */
+  --elevation-flat: none;
+  --elevation-raised: var(--shadow-sm);
+  --elevation-floating: var(--shadow-md); /* RESERVED: first consumer of shadow-md */
+  --elevation-overlay: var(--shadow-lg);
+  --color-scrim: rgba(20, 22, 26, 0.5); /* one spelling; was three */
+
+  /* Motion: duration. All inside Material 3's "short" band (50-200ms), which
+     that spec scopes to small utility-focused transitions. 100ms clears
+     Miller's 0.1s instantaneous limit (via Nielsen, response times). */
+  --motion-duration-instant: 100ms;
+  --motion-duration-fast: 150ms;
+  --motion-duration-base: 200ms;
+  --motion-duration-exit: 120ms; /* RESERVED: no component animates its exit */
+
+  /* Motion: easing. ease-out unchanged from V-056. standard and in are
+     Material 3's Standard and Standard-accelerate curves. */
+  --motion-ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --motion-ease-standard: cubic-bezier(0.2, 0, 0, 1);
+  --motion-ease-in: cubic-bezier(0.3, 0, 1, 1); /* RESERVED */
+
+  /* Motion: distance. Capped at 8px so an entrance never meaningfully moves
+     the box a concurrent focus scroll-into-view computes against. Collapses
+     to 0 under prefers-reduced-motion (index.css). */
+  --motion-distance-sm: 4px;
+  --motion-distance-md: 8px;
+
+  /* Named animations. --animate-* IS a Tailwind v4 namespace, so each emits
+     an animate-<name> utility. */
+  --animate-scrim-in: scrim-in var(--motion-duration-base) var(--motion-ease-out) both;
+  --animate-dialog-in: dialog-in var(--motion-duration-base) var(--motion-ease-out) both;
+  --animate-coachmark-in: coachmark-in var(--motion-duration-fast) var(--motion-ease-out) both;
+  --animate-panel-in: panel-in var(--motion-duration-base) var(--motion-ease-out) both;
 }

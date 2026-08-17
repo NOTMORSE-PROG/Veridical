@@ -59,16 +59,60 @@
     }
   }
 
-  /* V-057 coach-mark entrance -- reuses --motion-duration-fast/
-     --motion-ease-out (tokens.css), motion-safe:-gated at the call site. */
-  @keyframes coachmark-in {
+  /* Entrance keyframes. translateY reads --motion-distance-*, which collapses
+     to 0 under prefers-reduced-motion (below), so a forgotten motion-safe:
+     prefix degrades to a pure cross-fade rather than to a slide. WCAG 2.3.3
+     (AAA) excludes opacity from "motion animation": movement is the
+     vestibular trigger, a fade is not. Durations/easings come from the
+     --animate-* tokens in tokens.css, never from literals at the call site
+     (BUG-101: the previous comment here claimed token reuse that did not
+     exist -- CoachMark hardcoded 150ms and the CSS keyword ease-out). */
+  @keyframes scrim-in {
     from {
       opacity: 0;
-      transform: translateY(4px);
     }
     to {
       opacity: 1;
-      transform: translateY(0);
     }
+  }
+  @keyframes dialog-in {
+    from {
+      opacity: 0;
+      transform: translateY(var(--motion-distance-md));
+    }
+    to {
+      opacity: 1;
+      transform: none;
+    }
+  }
+  @keyframes panel-in {
+    from {
+      opacity: 0;
+      transform: translateY(calc(var(--motion-distance-md) * -1));
+    }
+    to {
+      opacity: 1;
+      transform: none;
+    }
+  }
+  @keyframes coachmark-in {
+    from {
+      opacity: 0;
+      transform: translateY(var(--motion-distance-sm));
+    }
+    to {
+      opacity: 1;
+      transform: none;
+    }
+  }
+}
+
+/* Reduced motion: keep the fade, drop the movement. Unlayered on purpose so it
+   outranks the theme layer's own values (emitted order is theme, base,
+   components, utilities). */
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --motion-distance-sm: 0px;
+    --motion-distance-md: 0px;
   }
 }

@@ -212,7 +212,7 @@ function QuotaChip() {
   if (isPending) {
     return (
       <span className="inline-flex items-center gap-1.5 rounded-full border border-border bg-panel px-2.5 py-1 text-xs whitespace-nowrap text-ink-tertiary">
-        <span aria-hidden="true" className="h-3 w-8 animate-pulse rounded-full bg-neutral-150 lg:w-20" />
+        <span aria-hidden="true" className="h-3 w-8 animate-pulse motion-reduce:animate-none rounded-full bg-neutral-150 lg:w-20" />
         <span className="sr-only">Loading AI capacity</span>
       </span>
     );
@@ -336,12 +336,12 @@ export function AppShell({ children }: { children: ReactNode }) {
     <div className="flex min-h-screen flex-col bg-page">
       <a
         href="#main-content"
-        className="sr-only focus-visible:not-sr-only focus-visible:absolute focus-visible:top-2 focus-visible:left-2 focus-visible:z-50 focus-visible:rounded-md focus-visible:bg-panel focus-visible:px-4 focus-visible:py-2 focus-visible:text-sm focus-visible:font-medium focus-visible:text-ink"
+        className="sr-only focus-visible:not-sr-only focus-visible:absolute focus-visible:top-2 focus-visible:left-2 focus-visible:z-(--z-skip-link) focus-visible:rounded-md focus-visible:bg-panel focus-visible:px-4 focus-visible:py-2 focus-visible:text-sm focus-visible:font-medium focus-visible:text-ink"
       >
         Skip to main content
       </a>
 
-      <header className="sticky top-0 z-40 flex h-14 items-center gap-3 border-b-[3px] border-accent bg-panel px-4 shadow-sm lg:h-16 lg:px-6 relative">
+      <header className="sticky top-0 z-(--z-header) flex h-14 items-center gap-3 border-b-[3px] border-accent bg-panel px-4 shadow-(--elevation-raised) lg:h-16 lg:px-6 relative">
         <Link to="/dashboard" className="flex flex-none items-center gap-2 rounded-sm">
           <span
             aria-hidden="true"
@@ -396,7 +396,7 @@ export function AppShell({ children }: { children: ReactNode }) {
           id="mobile-nav-panel"
           hidden={!mobileNavOpen}
           onBlur={handlePanelBlur}
-          className="absolute top-full right-0 left-0 border-b border-border bg-panel lg:hidden"
+          className="motion-safe:animate-panel-in absolute top-full right-0 left-0 border-b border-border bg-panel lg:hidden"
         >
           <nav aria-label="Primary" className="flex flex-col gap-1 p-2">
             <MobileNavLinks onNavigate={() => setMobileNavOpen(false)} />
@@ -422,7 +422,7 @@ export function AppShell({ children }: { children: ReactNode }) {
         <div
           aria-hidden="true"
           onClick={() => setMobileNavOpen(false)}
-          className="fixed inset-x-0 top-14 bottom-0 z-30 bg-neutral-900/50 lg:hidden"
+          className="motion-safe:animate-scrim-in fixed inset-x-0 top-14 bottom-0 z-(--z-nav-scrim) bg-scrim lg:hidden"
         />
       )}
 

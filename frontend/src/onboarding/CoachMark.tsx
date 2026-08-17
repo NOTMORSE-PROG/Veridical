@@ -41,7 +41,7 @@ function StepDots({ current, total }: { current: number; total: number }) {
         return (
           <span
             key={stepNum}
-            className="h-1.5 rounded-full transition-all"
+            className="h-1.5 rounded-full motion-safe:transition-[width,background-color]"
             style={{
               width: isCurrent ? "16px" : "6px",
               backgroundColor: isCurrent
@@ -163,7 +163,7 @@ function CoachMarkCard({
           not "this is flagged" (DESIGN.md §1.7's overreliance rule). */}
       <div
         aria-hidden="true"
-        className="motion-safe:transition-all motion-safe:duration-150"
+        className="motion-safe:transition-[top,left,width,height] motion-safe:duration-(--motion-duration-base) motion-safe:ease-(--motion-ease-standard)"
         style={{
           position: "fixed",
           top: anchorRect.top - 4,
@@ -172,9 +172,9 @@ function CoachMarkCard({
           height: anchorRect.height + 8,
           borderRadius: "10px",
           boxShadow:
-            "0 0 0 4px var(--color-panel), 0 0 0 7px var(--color-action), 0 0 0 9999px rgba(20, 22, 26, 0.5)",
+            "0 0 0 4px var(--color-panel), 0 0 0 7px var(--color-action), 0 0 0 9999px var(--color-scrim)",
           pointerEvents: "none",
-          zIndex: 60,
+          zIndex: "var(--z-tour-spotlight)",
         }}
       />
       <div
@@ -184,8 +184,8 @@ function CoachMarkCard({
         aria-labelledby={titleId}
         aria-describedby={bodyId}
         tabIndex={-1}
-        className="motion-safe:animate-[coachmark-in_150ms_ease-out] flex flex-col gap-3 rounded-lg border border-border bg-panel p-4 shadow-lg"
-        style={{ position: "fixed", top: cardTop, left: cardLeft, width: "320px", maxWidth: "calc(100vw - 32px)", zIndex: 61 }}
+        className="motion-safe:animate-coachmark-in flex flex-col gap-3 rounded-lg border border-border bg-panel p-4 shadow-(--elevation-overlay)"
+        style={{ position: "fixed", top: cardTop, left: cardLeft, width: "320px", maxWidth: "calc(100vw - 32px)", zIndex: "var(--z-tour-card)" }}
       >
         <div className="flex items-start gap-2">
           <h2 id={titleId} className="flex-1 text-sm font-bold text-ink">

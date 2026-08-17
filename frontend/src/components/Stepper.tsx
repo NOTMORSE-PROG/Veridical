@@ -58,7 +58,7 @@ export function Stepper({ steps }: { steps: Step[] }) {
         >
           <span
             aria-hidden="true"
-            className="relative z-10 mt-1 h-2.5 w-2.5 flex-none rounded-full"
+            className="relative z-(--z-raised) mt-1 h-2.5 w-2.5 flex-none rounded-full"
             style={{
               backgroundColor: RAIL_FILLED[step.state] ? `var(--color-status-${STEP_TONE[step.state]}-text)` : "var(--color-panel)",
               border: `2px solid var(--color-status-${STEP_TONE[step.state]}-text)`,

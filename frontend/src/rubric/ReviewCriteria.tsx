@@ -583,7 +583,7 @@ export function ReviewCriteriaPage() {
           row's own padding/gaps closes the density gap without discarding
           it or introducing a new expand/collapse interaction. */}
       <div role="table" aria-label="Rubric criteria" className="hidden max-h-[70vh] overflow-auto rounded-lg border border-border sm:block">
-        <div role="row" className="sticky top-0 grid grid-cols-[28px_minmax(0,1fr)_192px_minmax(0,1fr)_140px_40px] gap-2.5 border-b border-border bg-status-neutral-bg px-3.5 py-2 text-xs font-semibold tracking-header text-ink-tertiary uppercase">
+        <div role="row" className="sticky top-0 z-(--z-sticky) grid grid-cols-[28px_minmax(0,1fr)_192px_minmax(0,1fr)_140px_40px] gap-2.5 border-b border-border bg-status-neutral-bg px-3.5 py-2 text-xs font-semibold tracking-header text-ink-tertiary uppercase">
           <span role="columnheader">#</span>
           <span role="columnheader">Criterion</span>
           <span role="columnheader">Type</span>
