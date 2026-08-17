@@ -1,3 +1,26 @@
 #!/bin/sh
-# Copy me to .git/hooks/pre-commit (see tools/check_changelog.py docstring)
-python "$(git rev-parse --show-toplevel)/tools/check_changelog.py"
+# Copy me to .git/hooks/pre-commit  (see tools/check_changelog.py docstring)
+#
+#   cp tools/pre-commit .git/hooks/pre-commit        POSIX
+#   copy tools\pre-commit .git\hooks\pre-commit      Windows
+#
+# Every gate here exists because the same rule already drifted at least
+# once while it was only written down. The 2026-08-16 whole-product audit
+# put it plainly: every rule in this project enforced by a script has
+# held, and every rule enforced by discipline has drifted. Adding a gate
+# is how a rule becomes real.
+set -e
+
+ROOT="$(git rev-parse --show-toplevel)"
+
+# Code changes require a same-day CHANGELOG entry.
+python "$ROOT/tools/check_changelog.py"
+
+# No em/en dash in user-facing strings. Staged files only, so the hook
+# stays fast and does not block on the pre-existing backbog.
+# (Full sweep: python tools/check_dashes.py)
+python "$ROOT/tools/check_dashes.py" --staged
+
+# A ticket's folder must match its own Status, and the board's counts
+# must match the filesystem. DoD item 14.
+python "$ROOT/tools/check_ticket_placement.py" --quiet
