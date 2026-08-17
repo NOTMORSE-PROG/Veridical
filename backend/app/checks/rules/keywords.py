@@ -3,6 +3,7 @@ the vocabulary that decides which rule a criterion is talking about is
 data, never a hardcoded branch)."""
 
 import json
+import re
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -38,8 +39,14 @@ def load_keywords(path: Path | None = None) -> StructuralKeywords:
 
 
 def contains_any(text: str, words: frozenset[str]) -> bool:
+    """Word-boundary match, not a bare substring test (BUG-048): a
+    criterion whose evidence quotes a rubric's own level name
+    ("Acceptable") must never match the word "table" just because
+    "table" is a substring of "acceptable". `\\b` treats an internal
+    apostrophe/hyphen as a boundary too, which is what a keyword list of
+    single tokens ("table", "references", ...) needs."""
     lowered = text.lower()
-    return any(word in lowered for word in words)
+    return any(re.search(rf"\b{re.escape(word)}\b", lowered) for word in words)
 
 
 def full_text(criterion) -> str:
