@@ -30,6 +30,12 @@ class FlagOut(BaseModel):
     # (ticket AC: "AI said X · instructor overrode to Y").
     ai_verdict_summary: str | None
     ai_reasoning: str | None
+    # BUG-049: "fake" (fixture data — e.g. a vision-pass table that was
+    # never in the manuscript), "real", or "unknown" (predates migration
+    # 0024). The flag evidence page is exactly where the audit found a
+    # fabricated statistical-forensics finding rendered with no disclosure
+    # at all.
+    llm_mode: str
 
 
 class AnnotateFlagIn(BaseModel):

@@ -1,11 +1,11 @@
 {
   "kind": "table",
   "confidence": "high",
-  "caption": "Table 4.2 Mean usability scores per respondent group",
+  "caption": "[FIXTURE — TEST DATA, NOT FROM A REAL DOCUMENT] Table 4.2 Mean usability scores per respondent group",
   "rows": [
     ["Group", "N", "Mean", "SD"],
-    ["Students", "12", "3.42", "0.51"],
-    ["Instructors", "5", "4.20", "0.37"]
+    ["FIXTURE — Students", "12", "3.42", "0.51"],
+    ["FIXTURE — Instructors", "5", "4.20", "0.37"]
   ],
   "latex": null
 }

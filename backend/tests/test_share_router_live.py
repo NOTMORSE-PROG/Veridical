@@ -444,6 +444,10 @@ def test_shared_report_public_schema_is_an_exact_allow_list(
         "decided_at",
         "decision_note",
         "rubric_is_current",
+        # BUG-049: deliberately published -- the adviser reading a shared
+        # link has no other context to catch a fake-mode fixture finding
+        # presented as real.
+        "llm_mode",
     }
     assert set(shared["report"]["results"][0].keys()) == {
         "criterion_id",

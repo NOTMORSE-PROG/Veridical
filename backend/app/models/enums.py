@@ -114,3 +114,19 @@ class ReportDecision(StrEnum):
     approved = "approved"
     returned = "returned"
     rejected = "rejected"
+
+
+class LLMMode(StrEnum):
+    """Which LLM backend produced a check_run's AI-graded results and
+    vision fixtures (BUG-049): fake-mode fixture data was indistinguishable
+    from a real Gemini call anywhere a verdict was shown — no disclosure on
+    the report, the exported PDF, or the public adviser link, and the mode
+    wasn't even persisted, so an old report couldn't be told apart from a
+    real one after the fact. `unknown` exists ONLY for check_run rows that
+    predate this column (migration 0024's backfill) — new rows always get
+    `fake`/`real` explicitly at creation (`pipeline.service.create_check_run`);
+    nothing new ever writes `unknown`."""
+
+    fake = "fake"
+    real = "real"
+    unknown = "unknown"

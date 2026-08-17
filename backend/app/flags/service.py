@@ -27,10 +27,10 @@ from app.report.service import aggregate_and_score, raise_if_decided
 
 async def _scoped_flag(
     session: AsyncSession, flag_id: int, instructor_id: int
-) -> tuple[Flag, CheckResult, Manuscript]:
+) -> tuple[Flag, CheckResult, Manuscript, CheckRun]:
     row = (
         await session.execute(
-            select(Flag, CheckResult, Manuscript)
+            select(Flag, CheckResult, Manuscript, CheckRun)
             .join(CheckResult, CheckResult.id == Flag.check_result_id)
             .join(CheckRun, CheckRun.id == CheckResult.check_run_id)
             .join(Manuscript, Manuscript.id == CheckRun.manuscript_id)
@@ -43,7 +43,11 @@ async def _scoped_flag(
 
 
 async def _to_flag_out(
-    session: AsyncSession, flag: Flag, result: CheckResult, manuscript: Manuscript
+    session: AsyncSession,
+    flag: Flag,
+    result: CheckResult,
+    manuscript: Manuscript,
+    check_run: CheckRun,
 ) -> FlagOut:
     criterion_text = None
     if result.criterion_id is not None:
@@ -70,18 +74,19 @@ async def _to_flag_out(
         override_reason=flag.override_reason,
         ai_verdict_summary=detail.get("verdict") or detail.get("basis"),
         ai_reasoning=detail.get("reasoning") or detail.get("reason"),
+        llm_mode=check_run.llm_mode.value,
     )
 
 
 async def get_flag(session: AsyncSession, flag_id: int, instructor_id: int) -> FlagOut:
-    flag, result, manuscript = await _scoped_flag(session, flag_id, instructor_id)
-    return await _to_flag_out(session, flag, result, manuscript)
+    flag, result, manuscript, check_run = await _scoped_flag(session, flag_id, instructor_id)
+    return await _to_flag_out(session, flag, result, manuscript, check_run)
 
 
 async def annotate_flag(
     session: AsyncSession, flag_id: int, instructor_id: int, annotation: str
 ) -> FlagOut:
-    flag, result, manuscript = await _scoped_flag(session, flag_id, instructor_id)
+    flag, result, manuscript, check_run = await _scoped_flag(session, flag_id, instructor_id)
     flag.annotation = annotation.strip()
     session.add(
         AuditLog(
@@ -97,7 +102,7 @@ async def annotate_flag(
     )
     await session.commit()
     await session.refresh(flag)
-    return await _to_flag_out(session, flag, result, manuscript)
+    return await _to_flag_out(session, flag, result, manuscript, check_run)
 
 
 async def override_flag(
@@ -114,7 +119,7 @@ async def override_flag(
     V-038: blocked once the report has been decided — a score-affecting
     mutation on a report a human already signed off on must go through an
     explicit reopen first (see `app.report.service.raise_if_decided`)."""
-    flag, result, manuscript = await _scoped_flag(session, flag_id, instructor_id)
+    flag, result, manuscript, check_run = await _scoped_flag(session, flag_id, instructor_id)
     await raise_if_decided(session, result.check_run_id)
     flag.overridden = True
     flag.override_reason = reason.strip()
@@ -135,4 +140,4 @@ async def override_flag(
     await session.commit()
     await aggregate_and_score(session, result.check_run_id)
     await session.refresh(flag)
-    return await _to_flag_out(session, flag, result, manuscript), result.check_run_id
+    return await _to_flag_out(session, flag, result, manuscript, check_run), result.check_run_id

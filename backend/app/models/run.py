@@ -18,6 +18,7 @@ from app.models.enums import (
     CheckKind,
     CheckRunStatus,
     FlagSeverity,
+    LLMMode,
     ReadinessStatus,
     ReportDecision,
     ResultOutcome,
@@ -31,6 +32,13 @@ class CheckRun(Base, PkCreatedMixin):
     rubric_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("rubric.id"), index=True)
     status: Mapped[CheckRunStatus] = mapped_column(
         Enum(CheckRunStatus, native_enum=False), server_default=CheckRunStatus.queued
+    )
+    # BUG-049: which LLM backend produced this run's AI-graded results —
+    # persisted at creation (never inferred later) so a report can always
+    # honestly disclose whether it describes the real manuscript or a
+    # canned fixture, even after the fact.
+    llm_mode: Mapped[LLMMode] = mapped_column(
+        Enum(LLMMode, native_enum=False), server_default=LLMMode.unknown
     )
     # Per-stage progress + failure taxonomy state, rendered by screens 4f–4g;
     # stage granularity is what makes quota-exhausted runs resumable (D-001).

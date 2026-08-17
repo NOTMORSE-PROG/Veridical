@@ -9,9 +9,10 @@ DB logic (CODING.md §2: services never import FastAPI).
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import Settings, get_settings
 from app.errors import ConflictError, NotFoundError
 from app.models.audit import AuditLog
-from app.models.enums import CheckRunStatus, IngestStatus
+from app.models.enums import CheckRunStatus, IngestStatus, LLMMode
 from app.models.manuscript import Manuscript
 from app.models.rubric import Rubric
 from app.models.run import CheckRun
@@ -30,7 +31,11 @@ _ACTIVE_STATUSES = (
 
 
 async def create_check_run(
-    session: AsyncSession, instructor_id: int, manuscript_id: int, rubric_id: int
+    session: AsyncSession,
+    instructor_id: int,
+    manuscript_id: int,
+    rubric_id: int,
+    settings: Settings | None = None,
 ) -> CheckRun:
     manuscript = await session.get(Manuscript, manuscript_id)
     if manuscript is None or manuscript.instructor_id != instructor_id:
@@ -62,7 +67,12 @@ async def create_check_run(
             "Confirm it on the rubric review screen first."
         )
 
-    check_run = CheckRun(manuscript_id=manuscript_id, rubric_id=rubric_id)
+    settings = settings or get_settings()
+    # BUG-049: persisted at creation, not inferred later -- without this,
+    # a fake-LLM-mode run's report/PDF/public link could never be told
+    # apart from a real one after the fact.
+    llm_mode = LLMMode.fake if settings.veridical_fake_llm else LLMMode.real
+    check_run = CheckRun(manuscript_id=manuscript_id, rubric_id=rubric_id, llm_mode=llm_mode)
     session.add(check_run)
     await session.commit()
     await session.refresh(check_run)
