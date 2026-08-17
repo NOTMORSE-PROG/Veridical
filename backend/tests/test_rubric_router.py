@@ -197,6 +197,36 @@ def test_put_criteria_rejects_an_empty_list(client, tmp_path):
     assert resp.status_code == 422
 
 
+def test_put_criteria_rejects_a_zero_or_negative_weight_at_the_api(client, tmp_path):
+    """BUG-052 fix item 1: 'validate only against degenerate input (zero,
+    negative, all-zero); enforce at the API, not just the button.' A
+    weight of 999 is a valid relative value under the DECIDED model
+    (weights don't need to total 100) and must NOT be rejected -- only
+    zero/negative, which can never mean anything as a relative weight."""
+    uploaded = _upload(client, tmp_path)
+    criteria = [{**c, "weight": 999.0} for c in uploaded["criteria"]]
+    resp = client.put(
+        f"/rubrics/{uploaded['id']}/criteria", json={"criteria": criteria, "confirm": False}
+    )
+    assert resp.status_code == 200, resp.text  # a large relative weight is legitimate
+
+    zero = [{**c, "weight": 0} for c in uploaded["criteria"]]
+    resp = client.put(
+        f"/rubrics/{uploaded['id']}/criteria", json={"criteria": zero, "confirm": True}
+    )
+    assert resp.status_code == 422
+
+    negative = [{**c, "weight": -5} for c in uploaded["criteria"]]
+    resp = client.put(
+        f"/rubrics/{uploaded['id']}/criteria", json={"criteria": negative, "confirm": True}
+    )
+    assert resp.status_code == 422
+
+    # And the rubric must NOT have been activated by either rejected attempt.
+    reloaded = client.get(f"/rubrics/{uploaded['id']}").json()
+    assert reloaded["is_active"] is False
+
+
 def _confirm(client, rubric_id, criteria):
     resp = client.put(
         f"/rubrics/{rubric_id}/criteria", json={"criteria": criteria, "confirm": True}

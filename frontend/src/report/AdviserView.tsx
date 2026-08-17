@@ -11,6 +11,7 @@ import { type ReactNode, useEffect, useRef } from "react";
 import { Link, useParams } from "react-router";
 import { ApiError } from "../api/client";
 import { Chip } from "../components/Chip";
+import { RubricNeedsReviewBanner } from "../components/RubricNeedsReviewBanner";
 import { StatusPill } from "../components/StatusPill";
 import { TestModeBanner } from "../components/TestModeBanner";
 import { manuscriptIdentity } from "../domain/manuscriptLabel";
@@ -201,6 +202,10 @@ export function AdviserViewPage() {
       </div>
 
       <TestModeBanner llmMode={report.llm_mode} />
+      <RubricNeedsReviewBanner
+        needsReview={report.rubric_needs_review}
+        issues={report.rubric_parse_issues}
+      />
 
       <div className="flex flex-wrap items-center gap-3">
         <StatusPill tone={READINESS_TONE[report.status]}>{READINESS_LABEL[report.status]}</StatusPill>

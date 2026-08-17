@@ -21,7 +21,13 @@ from app.checks.escalation import (
 )
 from app.config import Settings, get_settings
 from app.errors import ConflictError, NotFoundError
-from app.models.enums import CheckKind, CheckRunStatus, FlagSeverity, ReportDecision
+from app.models.enums import (
+    CheckKind,
+    CheckRunStatus,
+    FlagSeverity,
+    ReportDecision,
+    RubricParseStatus,
+)
 from app.models.manuscript import Manuscript
 from app.models.rubric import Criterion, Rubric
 from app.models.run import CheckResult, CheckRun, Flag, ReadinessReport
@@ -41,6 +47,7 @@ from app.report.scoring import (
     score_check_run,
     scoring_result_as_dict,
 )
+from app.report.weight_importance import WeightImportance, weight_importance
 
 
 async def _load_scorable_results(session: AsyncSession, check_run_id: int) -> list[ScorableResult]:
@@ -119,7 +126,12 @@ async def build_report_payload(
     return scoring_result_as_dict(score_check_run(results, flags, settings))
 
 
-def _to_criterion_result(result: CheckResult, criterion: Criterion) -> CriterionResultOut:
+def _to_criterion_result(
+    result: CheckResult,
+    criterion: Criterion,
+    *,
+    importance: WeightImportance,
+) -> CriterionResultOut:
     detail = result.detail or {}
     evidence = [EvidenceItem(**item) for item in detail.get("evidence", [])]
     resolution_detail = detail.get("resolution")
@@ -137,6 +149,7 @@ def _to_criterion_result(result: CheckResult, criterion: Criterion) -> Criterion
         text=criterion.text,
         type=criterion.type.value,
         weight=float(criterion.weight),
+        weight_importance=importance,
         kind=result.kind.value,
         outcome=result.outcome.value,
         score=float(result.score) if result.score is not None else None,
@@ -172,12 +185,15 @@ async def get_report(session: AsyncSession, check_run_id: int, instructor_id: in
     return await report_out_for_check_run(session, check_run)
 
 
-async def report_out_for_check_run(session: AsyncSession, check_run: CheckRun) -> ReportOut:
+async def report_out_for_check_run(
+    session: AsyncSession, check_run: CheckRun, settings: Settings | None = None
+) -> ReportOut:
     """V-040: the same report-assembly logic `get_report` uses, split out
     so the public share-link view (`app.share.service`, token-authorized
     instead of instructor-owned) can build the identical `ReportOut` a
     signed-in instructor sees -- one source of truth for what a report
     IS, two different authorization paths to reach it."""
+    settings = settings or get_settings()
     check_run_id = check_run.id
     if check_run.status != CheckRunStatus.done:
         raise ConflictError("This check hasn't finished yet. Its report isn't ready.")
@@ -196,7 +212,25 @@ async def report_out_for_check_run(session: AsyncSession, check_run: CheckRun) -
             .order_by(Criterion.position)
         )
     ).all()
-    results = [_to_criterion_result(result, criterion) for result, criterion in rows]
+    # D-023: weight is relative (scoring.py normalises, never a
+    # must-total-100 rule) -- bucketed into Low/Medium/High relative to
+    # this run's own equal-split average, never shown as a bare
+    # percentage. `average_weight <= 0` can't happen in practice (every
+    # persisted `Criterion.weight` is API-validated `> 0`, schemas.py),
+    # but a run with zero criteria could reach this with an empty `rows`.
+    average_weight = (
+        sum(float(criterion.weight) for _, criterion in rows) / len(rows) if rows else 0.0
+    )
+    results = [
+        _to_criterion_result(
+            result,
+            criterion,
+            importance=weight_importance(
+                float(criterion.weight), average_weight=average_weight, settings=settings
+            ),
+        )
+        for result, criterion in rows
+    ]
 
     scoring_payload = await build_report_payload(session, check_run_id)
     pending_review_count = await session.scalar(
@@ -256,6 +290,8 @@ async def report_out_for_check_run(session: AsyncSession, check_run: CheckRun) -
         decision_note=report.decision_note if report is not None else None,
         pending_review_count=pending_review_count or 0,
         rubric_is_current=rubric.is_active,
+        rubric_needs_review=rubric.parse_status == RubricParseStatus.needs_review,
+        rubric_parse_issues=rubric.parse_issues,
         previous_status=previous.status.value if previous is not None else None,
         previous_composite_score=(
             float(previous.composite_score)

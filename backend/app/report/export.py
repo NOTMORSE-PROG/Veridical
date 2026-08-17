@@ -224,15 +224,33 @@ def _styles(font: str) -> dict[str, ParagraphStyle]:
     }
 
 
-def _format_weight(weight: float) -> str:
-    """One rounding rule for a criterion's weight, used everywhere it's
-    shown in this document -- ux-critic finding (P2, live-reproduced):
-    the Criteria Results table rounded to 1 decimal (matching Report.tsx's
-    own `formatWeight()`) while the pending-escalation section printed
-    the raw unrounded value, so the SAME fact read as "14.3%" in one
-    section and "14.286%" in another of the same document -- a real
-    trust problem for a standalone artifact an adviser reads cold."""
-    return f"{round(weight * 10) / 10}%"
+# D-023: weight is a relative value (no required total) -- rendered as
+# the same Low/Medium/High severity-style label `SeverityTag.tsx` uses
+# for flags, reusing the SAME tone colors (`_TONE_COLORS`) severity
+# already maps to below, never a bare percentage. Short label for the
+# narrow "Wt." table column, long label for the pending-escalation
+# section's inline prose -- same underlying fact, two column widths,
+# same single source (this dict), never re-derived independently (the
+# exact divergence `_format_weight`'s own history warns about).
+_WEIGHT_IMPORTANCE_LABEL = {"high": "High", "med": "Medium", "low": "Low"}
+_WEIGHT_IMPORTANCE_LABEL_LONG = {
+    "high": "High importance",
+    "med": "Medium importance",
+    "low": "Low importance",
+}
+_WEIGHT_IMPORTANCE_TONE = {"high": "danger", "med": "caution", "low": "info"}
+
+
+def _format_weight_importance(importance: str, *, long: bool = False) -> str:
+    """One label rule for a criterion's weight importance, used
+    everywhere it's shown in this document -- see this function's own
+    prior history as `_format_weight` (ux-critic P2, live-reproduced) for
+    why a single shared formatter matters: the pending-escalation section
+    and the Criteria Results table rendering the SAME fact two different
+    ways is a real trust problem for a standalone artifact an adviser
+    reads cold."""
+    table = _WEIGHT_IMPORTANCE_LABEL_LONG if long else _WEIGHT_IMPORTANCE_LABEL
+    return table.get(importance, importance)
 
 
 def _format_date(dt: datetime, *, with_time: bool = False) -> str:
@@ -445,6 +463,22 @@ def build_report_pdf(data: ReportExportData) -> bytes:
             )
         )
         flow.append(test_mode_tag)
+    if report.rubric_needs_review:
+        flow.append(Spacer(1, 4))
+        flow.append(
+            Paragraph(
+                escape(
+                    "This rubric was activated while the parser's own coverage check "
+                    "still flagged it as needing manual completion. Its criteria may not "
+                    "fully reflect the required format's source text."
+                ),
+                ParagraphStyle(
+                    "rubric_needs_review",
+                    parent=styles["caption"],
+                    textColor=_TONE_COLORS["caution"][1],
+                ),
+            )
+        )
     flow.append(Spacer(1, 12))
 
     # 2. Verdict block.
@@ -491,7 +525,8 @@ def build_report_pdf(data: ReportExportData) -> bytes:
         for row in pending:
             block = [
                 Paragraph(
-                    f"{escape(row.text)} <i>(weight {_format_weight(row.weight)})</i>",
+                    f"{escape(row.text)} "
+                    f"<i>({_format_weight_importance(row.weight_importance, long=True)})</i>",
                     styles["body_bold"],
                 ),
                 Paragraph(_pending_review_reason(row.outcome), styles["body"]),
@@ -577,7 +612,7 @@ def build_report_pdf(data: ReportExportData) -> bytes:
     flow.append(Paragraph("Criteria Results", styles["h2"]))
     if remaining:
         header = [
-            Paragraph("Wt.", styles["cell_bold"]),
+            Paragraph("Importance", styles["cell_bold"]),
             Paragraph("Criterion", styles["cell_bold"]),
             Paragraph("Result", styles["cell_bold"]),
         ]
@@ -585,14 +620,18 @@ def build_report_pdf(data: ReportExportData) -> bytes:
         for row in remaining:
             label, tone = _result_display(row)
             result_style = styles["cell_bold"] if tone in ("danger",) else styles["cell"]
+            importance_tone = _WEIGHT_IMPORTANCE_TONE.get(row.weight_importance, "neutral")
+            importance_style = ParagraphStyle(
+                "importance_cell", parent=styles["cell"], textColor=_TONE_COLORS[importance_tone][1]
+            )
             rows.append(
                 [
-                    Paragraph(_format_weight(row.weight), styles["cell"]),
+                    Paragraph(_format_weight_importance(row.weight_importance), importance_style),
                     _criterion_flowable(row, styles),
                     Paragraph(escape(label), result_style),
                 ]
             )
-        table = Table(rows, colWidths=[40, content_width - 40 - 85, 85], repeatRows=1)
+        table = Table(rows, colWidths=[62, content_width - 62 - 85, 85], repeatRows=1)
         table_style = [
             ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#f1f2f5")),
             ("LINEBELOW", (0, 0), (-1, 0), 0.75, _RULE),

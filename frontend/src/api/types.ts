@@ -173,7 +173,15 @@ export interface ResultRowCommon {
   criterion_id: number;
   text: string;
   type: CriterionType;
+  // D-023: the raw relative weight (no required total) -- kept for
+  // completeness but NOT what the UI displays; see `weight_importance`.
   weight: number;
+  // D-023 (BUG-051/052/098): this criterion's weight bucketed into the
+  // same Low/Medium/High scale flag severity uses (`SeverityTag.tsx`),
+  // computed server-side from its share of this run's total weight --
+  // never rendered as a raw percentage, which asserted a scale a
+  // relative value doesn't have.
+  weight_importance: "low" | "med" | "high";
   kind: string;
   outcome:
     | "passed"
@@ -230,6 +238,13 @@ export interface ReportCommon {
   // report's verdict is shown so fixture-derived flags/scores can never
   // be mistaken for real findings about the manuscript.
   llm_mode: "fake" | "real" | "unknown";
+  // BUG-052: whether the rubric this run graded against was confirmed
+  // while the parser's own coverage gate still flagged it as needing
+  // manual completion -- survives activation now (it used to be silently
+  // wiped the instant Confirm was clicked) so the report can keep
+  // disclosing that the measuring instrument was flagged.
+  rubric_needs_review: boolean;
+  rubric_parse_issues: string[] | null;
 }
 
 export interface ReportOut extends ReportCommon {

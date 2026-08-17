@@ -448,12 +448,20 @@ def test_shared_report_public_schema_is_an_exact_allow_list(
         # link has no other context to catch a fake-mode fixture finding
         # presented as real.
         "llm_mode",
+        # BUG-052: deliberately published -- the adviser needs to know the
+        # measuring instrument (the rubric) was flagged too, not just the
+        # instructor.
+        "rubric_needs_review",
+        "rubric_parse_issues",
     }
     assert set(shared["report"]["results"][0].keys()) == {
         "criterion_id",
         "text",
         "type",
         "weight",
+        # D-023: the Low/Medium/High importance bucket, deliberately
+        # published too -- the adviser reads the same criteria table.
+        "weight_importance",
         "kind",
         "outcome",
         "score",

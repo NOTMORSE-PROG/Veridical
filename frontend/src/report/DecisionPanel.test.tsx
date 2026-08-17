@@ -22,6 +22,8 @@ const BASE_REPORT: ReportOut = {
   pending_review_count: 0,
   rubric_is_current: true,
   llm_mode: "real",
+  rubric_needs_review: false,
+  rubric_parse_issues: null,
   previous_status: null,
   previous_composite_score: null,
   results: [],

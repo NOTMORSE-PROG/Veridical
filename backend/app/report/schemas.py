@@ -35,7 +35,19 @@ class CriterionResultOut(BaseModel):
     criterion_id: int
     text: str
     type: str
+    # BUG-051: the raw relative weight (report/scoring.py normalises it,
+    # never requires a 100 total) -- kept for completeness, but NOT what
+    # either renderer displays as of D-023: a raw number asserts a scale
+    # it doesn't have. Display uses `weight_importance` instead.
     weight: float
+    # D-023: this run's SHARE of the rubric's total weight, bucketed into
+    # the same Low/Medium/High scale flag severity already uses
+    # (`app/report/weight_importance.py`) -- computed once server-side so
+    # both renderers (ResultsTable.tsx, export.py) render the SAME tag
+    # instead of each re-deriving a number and drifting (Track D's
+    # Critical 2, the exact duplication that let "999%" and a differently-
+    # rounded weight ship in two places at once).
+    weight_importance: str
     kind: str
     outcome: str
     score: float | None
@@ -86,6 +98,16 @@ class ReportOut(BaseModel):
     # longer the active one for its family (a newer version has since been
     # confirmed) — surfaces as a warning banner, never silently hidden.
     rubric_is_current: bool = True
+    # BUG-052: whether the rubric this run graded against was confirmed
+    # while `parse_status` was still `needs_review` (the parser's own
+    # coverage gate wasn't satisfied at decomposition time). Confirming a
+    # rubric is the instructor's resolution of that ambiguity (charter
+    # rule 1, human-in-the-loop) -- but the fact that a warning EXISTED
+    # must survive activation, not vanish the instant Confirm is clicked,
+    # so an instructor or adviser reading the report later can see the
+    # measuring instrument was flagged.
+    rubric_needs_review: bool = False
+    rubric_parse_issues: list[str] | None = None
     # V-041 — the version-comparison line: the same manuscript's most
     # recent OTHER done+reported run, if one exists (e.g. this run is a
     # re-check against a newer rubric version). None when this is the
@@ -110,6 +132,7 @@ class PublicCriterionResultOut(BaseModel):
     text: str
     type: str
     weight: float
+    weight_importance: str
     kind: str
     outcome: str
     score: float | None
@@ -150,6 +173,10 @@ class PublicReportOut(BaseModel):
     decided_at: datetime | None = None
     decision_note: str | None = None
     rubric_is_current: bool = True
+    # BUG-052: the adviser needs to know the measuring instrument was
+    # flagged too, not just the instructor.
+    rubric_needs_review: bool = False
+    rubric_parse_issues: list[str] | None = None
 
 
 class DecisionIn(BaseModel):

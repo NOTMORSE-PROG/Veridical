@@ -8,6 +8,7 @@ import { useState } from "react";
 import type { ReportCommon, ResolutionOut, ResultRowCommon } from "../api/types";
 import { AnchorPill } from "../components/AnchorPill";
 import { StatusPill, type StatusPillTone } from "../components/StatusPill";
+import { WeightImportanceTag } from "../components/WeightImportanceTag";
 import { truncateAtWord } from "../format/text";
 
 // escalated/quota_exhausted/api_down all belong to the escalation panel
@@ -57,10 +58,6 @@ export function explainer(r: ReportCommon, flagsAnchor: string | null): ReactNod
       below.
     </>
   );
-}
-
-function formatWeight(w: number): string {
-  return `${Math.round(w * 10) / 10}%`;
 }
 
 // A resolved row's source is the instructor, never the AI or the rule
@@ -231,10 +228,10 @@ function ResultRow({ row }: { row: ResultRowCommon }) {
     <>
       <div
         role="row"
-        className="hidden grid-cols-[56px_minmax(0,1fr)_140px] items-start gap-3 border-t border-border px-3.5 py-3 sm:grid"
+        className="hidden grid-cols-[88px_minmax(0,1fr)_140px] items-start gap-3 border-t border-border px-3.5 py-3 sm:grid"
       >
-        <span role="cell" className="pt-0.5 text-right text-sm whitespace-nowrap text-ink-tertiary tabular-nums">
-          {formatWeight(row.weight)}
+        <span role="cell" className="pt-0.5">
+          <WeightImportanceTag importance={row.weight_importance} />
         </span>
         <div role="cell" className="min-w-0">
           <p className="text-sm text-ink">{row.text}</p>
@@ -253,7 +250,7 @@ function ResultRow({ row }: { row: ResultRowCommon }) {
 
       <div className="border-t border-border p-3 sm:hidden">
         <div className="flex items-start justify-between gap-2">
-          <span className="text-xs text-ink-tertiary">{formatWeight(row.weight)}</span>
+          <WeightImportanceTag importance={row.weight_importance} />
           <StatusPill tone={tone}>{label}</StatusPill>
         </div>
         <p className="mt-1 text-sm text-ink">{row.text}</p>
@@ -295,11 +292,9 @@ export function ResultsTable({
     >
       <div
         role="row"
-        className="hidden grid-cols-[56px_minmax(0,1fr)_140px] gap-3 border-b border-border bg-status-neutral-bg px-3.5 py-2.5 text-xs font-semibold tracking-header text-ink-tertiary uppercase sm:grid"
+        className="hidden grid-cols-[88px_minmax(0,1fr)_140px] gap-3 border-b border-border bg-status-neutral-bg px-3.5 py-2.5 text-xs font-semibold tracking-header text-ink-tertiary uppercase sm:grid"
       >
-        <span role="columnheader" className="text-right">
-          Wt.
-        </span>
+        <span role="columnheader">Importance</span>
         <span role="columnheader">Criterion</span>
         <span role="columnheader" className="text-right">
           Result

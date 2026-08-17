@@ -21,6 +21,8 @@ const BASE_REPORT: ReportOut = {
   pending_review_count: 1,
   rubric_is_current: true,
   llm_mode: "real",
+  rubric_needs_review: false,
+  rubric_parse_issues: null,
   previous_status: null,
   previous_composite_score: null,
   results: [
@@ -29,6 +31,7 @@ const BASE_REPORT: ReportOut = {
       text: "Has an abstract",
       type: "structural",
       weight: 50,
+      weight_importance: "med",
       kind: "structural",
       outcome: "passed",
       score: 100,
@@ -44,6 +47,7 @@ const BASE_REPORT: ReportOut = {
       text: "States the research problem",
       type: "semantic",
       weight: 50,
+      weight_importance: "med",
       kind: "semantic",
       outcome: "escalated",
       score: null,
@@ -117,6 +121,25 @@ describe("AdviserViewPage", () => {
     render();
     expect(await screen.findByText(/AI mode unknown/)).toBeInTheDocument();
     expect(screen.queryByText(/Test-mode run/)).not.toBeInTheDocument();
+  });
+
+  it("BUG-052: discloses a rubric activated with a coverage warning to the adviser too", async () => {
+    vi.stubGlobal(
+      "fetch",
+      stubFetchByPath({
+        "/shared/tok123/report": shared({
+          report: {
+            ...BASE_REPORT,
+            rubric_needs_review: true,
+            rubric_parse_issues: ["Only 10% of the source text is reflected."],
+          },
+        }),
+      }),
+    );
+    render();
+    expect(
+      await screen.findByText(/activated while the parser's own coverage check/),
+    ).toBeInTheDocument();
   });
 
   it("BUG-044: never renders a prior run's status/score, even if a mock response smuggles it in", async () => {

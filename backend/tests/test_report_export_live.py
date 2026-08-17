@@ -162,13 +162,15 @@ def test_export_returns_a_real_pdf_with_the_right_headers(logged_in_with_a_done_
     assert len(resp.content) > 0
 
 
-def test_export_formats_a_pending_criterions_weight_the_same_way_everywhere(
-    client, api_scratch_url
-):
-    """ux-critic finding (P2, live-reproduced): the Criteria Results table
-    rounded weight to 1 decimal (matching Report.tsx's own formatWeight())
-    while the pending-escalation section printed the raw unrounded value
-    -- the SAME fact read as two different numbers in one document."""
+def test_export_shows_weight_as_an_importance_label_never_a_percentage(client, api_scratch_url):
+    """D-023 (BUG-051/052/098): weight is a relative value with no
+    required total -- rendered as a Low/Medium/High importance label in
+    BOTH the pending-escalation section and the Criteria Results table,
+    never as a raw percentage (which asserted a scale it didn't have --
+    ux-critic's own prior finding on this exact pair of renderers was
+    that they used to format the SAME fact two different ways; the fix
+    is that both now call the one shared `_format_weight_importance`,
+    structurally, not just by convention)."""
     import asyncio
 
     from sqlalchemy import text
@@ -208,16 +210,36 @@ def test_export_formats_a_pending_criterions_weight_the_same_way_everywhere(
                 )
                 session.add_all([manuscript, rubric])
                 await session.commit()
-                # 1/7 of 100 = 14.285714...% -- rounds to 14.3%, never 14.286%.
-                criterion = Criterion(
+                # Deliberately unequal weights, average = (18+2+10)/3 = 10:
+                # 18 is 1.8x average -> High; 2 is 0.2x -> Low; 10 is
+                # exactly 1.0x -> Medium -- three distinct labels, one in
+                # the pending section (escalated), two in the criteria
+                # table (decided).
+                pending_criterion = Criterion(
                     rubric_id=rubric.id,
                     type="semantic",
                     text="Chapter 1 states the research problem",
                     evidence=None,
-                    weight=Decimal("14.285714"),
+                    weight=Decimal("18"),
                     position=0,
                 )
-                session.add(criterion)
+                low_criterion = Criterion(
+                    rubric_id=rubric.id,
+                    type="structural",
+                    text="Has an abstract",
+                    evidence=None,
+                    weight=Decimal("2"),
+                    position=1,
+                )
+                med_criterion = Criterion(
+                    rubric_id=rubric.id,
+                    type="structural",
+                    text="Has a references section",
+                    evidence=None,
+                    weight=Decimal("10"),
+                    position=2,
+                )
+                session.add_all([pending_criterion, low_criterion, med_criterion])
                 await session.commit()
                 check_run = CheckRun(manuscript_id=manuscript.id, rubric_id=rubric.id)
                 session.add(check_run)
@@ -225,10 +247,30 @@ def test_export_formats_a_pending_criterions_weight_the_same_way_everywhere(
                 session.add(
                     CheckResult(
                         check_run_id=check_run.id,
-                        criterion_id=criterion.id,
+                        criterion_id=pending_criterion.id,
                         kind=CheckKind.semantic,
                         outcome=ResultOutcome.escalated,
                         detail={"reason": "Split vote"},
+                    )
+                )
+                session.add(
+                    CheckResult(
+                        check_run_id=check_run.id,
+                        criterion_id=low_criterion.id,
+                        kind=CheckKind.structural,
+                        outcome=ResultOutcome.passed,
+                        score=100.0,
+                        detail={"rule_id": "required_section_present", "anchor": "page 2"},
+                    )
+                )
+                session.add(
+                    CheckResult(
+                        check_run_id=check_run.id,
+                        criterion_id=med_criterion.id,
+                        kind=CheckKind.structural,
+                        outcome=ResultOutcome.passed,
+                        score=100.0,
+                        detail={"rule_id": "required_section_present", "anchor": "page 3"},
                     )
                 )
                 check_run.status = CheckRunStatus.done
@@ -248,9 +290,15 @@ def test_export_formats_a_pending_criterions_weight_the_same_way_everywhere(
 
     doc = fitz.open(stream=resp.content, filetype="pdf")
     full_text = "\n".join(page.get_text() for page in doc)
-    assert "14.3%" in full_text
-    assert "14.286%" not in full_text
-    assert "14.285714%" not in full_text
+    # The pending section's own inline phrasing ("(High importance)").
+    assert "High importance" in full_text
+    # The criteria table's short labels for the two decided criteria.
+    assert "Low" in full_text
+    assert "Medium" in full_text
+    # Never shown alongside the criterion as a raw weight percentage
+    # (the pre-fix behavior for these exact numbers would have shown
+    # "60.0%", "6.7%", "33.3%" next to the criterion text/importance).
+    assert "(High importance)" in full_text
 
 
 def test_export_survives_real_ampersand_bearing_citation_text(client, api_scratch_url):

@@ -240,11 +240,20 @@ async def update_criteria(
             row.position = position
 
     if body.confirm:
-        # A confirmed rubric is, by definition, no longer "needs manual
-        # completion" — the instructor's review IS the resolution (HITL).
+        # BUG-052: confirming used to reset `parse_status` to `parsed` and
+        # wipe `parse_issues` unconditionally -- true in the narrow sense
+        # that the instructor's review IS the human-in-the-loop resolution
+        # (charter rule 1), but it erased the one piece of information the
+        # rest of the product needs to keep showing: THAT the parser
+        # flagged this rubric before it was confirmed. `parse_status`/
+        # `parse_issues` are left exactly as `attempt_decomposition` (or a
+        # prior save) set them -- confirming activates the rubric, it does
+        # not retroactively rewrite the parser's own history. Nothing else
+        # in the pipeline gates on `parse_status` (grepped: only the
+        # pre-confirm review-screen banner reads it), so a rubric staying
+        # `needs_review` after activation blocks nothing; it only means
+        # the report can honestly say so (`ReportOut.rubric_needs_review`).
         await _activate_only(session, rubric)
-        rubric.parse_status = RubricParseStatus.parsed
-        rubric.parse_issues = None
 
     await session.commit()
     return await get_rubric(session, rubric_id, instructor_id)
