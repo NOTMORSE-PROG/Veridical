@@ -20,7 +20,7 @@ export const NEEDS_REVIEW_OUTCOMES = new Set(["escalated", "quota_exhausted", "a
 // BUG-044: typed against ReportCommon, not ReportOut -- this function is
 // called from the public adviser view (AdviserView.tsx) with a
 // PublicReportOut, which does not have every field ReportOut does.
-export function explainerBase(r: ReportCommon): string {
+function explainerBase(r: ReportCommon): string {
   if (r.status === "needs_review") return r.reason ?? "This run needs manual review.";
   if (r.unresolved_high_flag_count > 0) {
     return `Not Ready. ${r.unresolved_high_flag_count} unresolved high-severity ${r.unresolved_high_flag_count === 1 ? "flag" : "flags"} found. Any unresolved high-severity flag forces Not Ready, regardless of score.`;
@@ -59,14 +59,14 @@ export function explainer(r: ReportCommon, flagsAnchor: string | null): ReactNod
   );
 }
 
-export function formatWeight(w: number): string {
+function formatWeight(w: number): string {
   return `${Math.round(w * 10) / 10}%`;
 }
 
 // A resolved row's source is the instructor, never the AI or the rule
 // engine that originally (and unsuccessfully) tried to decide it — this
 // must win over the kind-based caption unconditionally.
-export function sourceCaption(row: ResultRowCommon): string {
+function sourceCaption(row: ResultRowCommon): string {
   if (row.resolution) return "Resolved by instructor";
   return row.kind === "structural" ? "Rule-checked" : "AI-graded";
 }
@@ -138,7 +138,7 @@ export function resultDisplay(
   }
 }
 
-export const RESOLUTION_VERB: Record<string, string> = {
+const RESOLUTION_VERB: Record<string, string> = {
   accept_majority: "Accepted the AI's verdict",
   mark_pass: "Marked Pass",
   mark_fail: "Marked Fail",
