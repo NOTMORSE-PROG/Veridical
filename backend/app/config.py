@@ -197,6 +197,17 @@ class Settings(BaseSettings):
     # start producing flags, not invent the scoring interaction.
     scoring_flag_deduction_high: float = 15.0
     scoring_flag_deduction_med: float = 8.0
+    # --- Weight importance display (D-023, BUG-051/052/098) ------------------
+    # Criterion weight is a RELATIVE value (no required total), so it's
+    # bucketed into the same Low/Medium/High scale flag severity already
+    # uses rather than shown as a bare percentage. Expressed as a ratio
+    # against the EQUAL-SPLIT average for the rubric (1.0 = "as important
+    # as an equal share would be") so the bucketing adapts to any rubric
+    # size instead of needing rubric-specific absolute thresholds — a
+    # weight below this ratio is Low, at/above `weight_importance_high_min_ratio`
+    # is High, everything between is Medium.
+    weight_importance_low_max_ratio: float = 0.5
+    weight_importance_high_min_ratio: float = 1.5
     scoring_flag_deduction_low: float = 3.0
     scoring_flag_deduction_cap: float = 40.0
 

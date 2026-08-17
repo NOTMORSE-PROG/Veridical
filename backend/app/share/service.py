@@ -154,6 +154,7 @@ def _to_public_report(report: ReportOut) -> PublicReportOut:
                 text=r.text,
                 type=r.type,
                 weight=r.weight,
+                weight_importance=r.weight_importance,
                 kind=r.kind,
                 outcome=r.outcome,
                 score=r.score,
@@ -169,6 +170,10 @@ def _to_public_report(report: ReportOut) -> PublicReportOut:
         decided_at=report.decided_at,
         decision_note=report.decision_note,
         rubric_is_current=report.rubric_is_current,
+        # BUG-052: deliberately published -- the adviser needs to know the
+        # measuring instrument was flagged too, not just the instructor.
+        rubric_needs_review=report.rubric_needs_review,
+        rubric_parse_issues=report.rubric_parse_issues,
     )
 
 

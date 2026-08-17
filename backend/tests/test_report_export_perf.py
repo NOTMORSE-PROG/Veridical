@@ -28,6 +28,7 @@ def _sixty_criterion_report() -> ReportExportData:
             "formatting, in enough detail to be realistic.",
             type="semantic" if i % 2 else "structural",
             weight=100 / 60,
+            weight_importance="med",
             kind="semantic_grading",
             outcome="passed" if i % 3 else "failed",
             score=90.0,

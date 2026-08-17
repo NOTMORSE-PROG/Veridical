@@ -38,7 +38,9 @@ describe("ReviewCriteriaPage", () => {
     expect(screen.getAllByDisplayValue("Argument is well developed").length).toBeGreaterThan(0);
     expect(screen.getAllByDisplayValue("Abstract present").length).toBeGreaterThan(0);
     expect(screen.getAllByText("2 criteria")[0]).toBeInTheDocument();
-    expect(screen.getAllByText(/Weights total 100%/)[0]).toBeInTheDocument();
+    // D-023: weight is relative, no required total -- never framed as a
+    // percentage that must sum to 100.
+    expect(screen.getAllByText("Weight is relative, no required total")[0]).toBeInTheDocument();
   });
 
   it("shows the needs-review banner with the parse issues when the parse was partial (V-011)", async () => {
@@ -119,11 +121,11 @@ describe("ReviewCriteriaPage", () => {
     expect(alert).toHaveFocus();
   });
 
-  it("Normalize rescales weights to sum to 100", async () => {
+  it("D-023: shows a live Low/High importance tag next to an asymmetric weight, never a percentage", async () => {
     const unbalanced: Rubric = {
       ...RUBRIC,
       criteria: [
-        { ...RUBRIC.criteria[0], weight: 10 },
+        { ...RUBRIC.criteria[0], weight: 90 },
         { ...RUBRIC.criteria[1], weight: 10 },
       ],
     };
@@ -137,9 +139,36 @@ describe("ReviewCriteriaPage", () => {
     });
 
     await screen.findAllByDisplayValue("Has an abstract");
-    expect(screen.getAllByText(/Weights total 20%/)[0]).toBeInTheDocument();
-    fireEvent.click(screen.getAllByRole("button", { name: "Normalize to 100%" })[0]);
-    expect(await screen.findAllByText(/Weights total 100%/)).not.toHaveLength(0);
+    // average = 50: 90 is 1.8x -> High, 10 is 0.2x -> Low.
+    expect(screen.getAllByText("High").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Low").length).toBeGreaterThan(0);
+    expect(screen.queryByText(/90%/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/10%/)).not.toBeInTheDocument();
+  });
+
+  it("Distribute weights evenly sets every criterion to the same weight", async () => {
+    const unbalanced: Rubric = {
+      ...RUBRIC,
+      criteria: [
+        { ...RUBRIC.criteria[0], weight: 90 },
+        { ...RUBRIC.criteria[1], weight: 10 },
+      ],
+    };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(JSON.stringify(unbalanced), { status: 200 })),
+    );
+    renderWithProviders(<ReviewCriteriaPage />, {
+      route: "/rubric/5/review",
+      path: "/rubric/:rubricId/review",
+    });
+
+    await screen.findAllByDisplayValue("Has an abstract");
+    fireEvent.click(screen.getAllByRole("button", { name: "Distribute weights evenly" })[0]);
+    const weightInputs = await screen.findAllByLabelText(/Criterion \d weight$/);
+    const values = weightInputs.map((el) => (el as HTMLInputElement).value);
+    expect(new Set(values).size).toBe(1); // all equal now
+    expect(values[0]).toBe("50");
   });
 
   it("renders read-only when a newer version supersedes this one (V-013 F2.4)", async () => {
@@ -219,7 +248,8 @@ describe("ReviewCriteriaPage", () => {
     });
 
     await screen.findAllByDisplayValue("Has an abstract");
-    for (const el of screen.getAllByLabelText(/Criterion 1 weight, percent/)) {
+    // D-023: no longer labelled "percent" -- weight is a relative value.
+    for (const el of screen.getAllByLabelText(/Criterion 1 weight/)) {
       expect((el as HTMLInputElement).type).toBe("text");
     }
   });

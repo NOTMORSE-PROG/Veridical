@@ -8,6 +8,7 @@ import { Link, useParams } from "react-router";
 import { ApiError } from "../api/client";
 import type { Decision } from "../api/types";
 import { Chip } from "../components/Chip";
+import { RubricNeedsReviewBanner } from "../components/RubricNeedsReviewBanner";
 import { StatusPill } from "../components/StatusPill";
 import { TestModeBanner } from "../components/TestModeBanner";
 import { manuscriptIdentity } from "../domain/manuscriptLabel";
@@ -196,6 +197,12 @@ export function ReportPage() {
       )}
 
       {report && <TestModeBanner llmMode={report.llm_mode} />}
+      {report && (
+        <RubricNeedsReviewBanner
+          needsReview={report.rubric_needs_review}
+          issues={report.rubric_parse_issues}
+        />
+      )}
 
       {isPending ? (
         <div role="status" aria-live="polite" aria-busy="true" className="flex items-center gap-2 rounded-lg border border-border bg-panel p-6 text-sm text-ink-secondary">

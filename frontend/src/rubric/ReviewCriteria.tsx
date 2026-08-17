@@ -13,8 +13,27 @@ import type { CriterionType } from "../api/types";
 import { Chip } from "../components/Chip";
 import { cx } from "../components/cx";
 import { Modal, ModalBackdrop } from "../components/Modal";
+import { WeightImportanceTag, type WeightImportance } from "../components/WeightImportanceTag";
 import { useRouteFocus } from "../routing/useRouteFocus";
 import { type CriterionEdit, useRubric, useSaveCriteria } from "./useRubric";
+
+// D-023: mirrors `app/report/weight_importance.py`'s default ratios (a
+// live preview as the instructor types, not the authoritative bucket --
+// that's computed server-side per report from `WEIGHT_IMPORTANCE_*`
+// settings, which this screen has no way to read at request time).
+// Deliberately the SAME numbers as the backend's own defaults so the
+// live preview matches what the report will actually show in the
+// common case.
+const WEIGHT_IMPORTANCE_LOW_MAX_RATIO = 0.5;
+const WEIGHT_IMPORTANCE_HIGH_MIN_RATIO = 1.5;
+
+function liveWeightImportance(weight: number, averageWeight: number): WeightImportance {
+  if (averageWeight <= 0) return "med";
+  const ratio = weight / averageWeight;
+  if (ratio < WEIGHT_IMPORTANCE_LOW_MAX_RATIO) return "low";
+  if (ratio >= WEIGHT_IMPORTANCE_HIGH_MIN_RATIO) return "high";
+  return "med";
+}
 
 interface Row {
   key: string;
@@ -395,16 +414,12 @@ export function ReviewCriteriaPage() {
     });
   }
 
-  function normalizeWeights() {
+  function distributeWeightsEvenly() {
     setRows((current) => {
       if (!current || current.length === 0) return current;
-      const total = current.reduce((sum, r) => sum + r.weight, 0);
-      const normalized =
-        total <= 0
-          ? current.map((r) => ({ ...r, weight: Math.round((100 / current.length) * 1000) / 1000 }))
-          : current.map((r) => ({ ...r, weight: Math.round((r.weight / total) * 100 * 1000) / 1000 }));
-      setRemovedAnnouncement("Weights normalized. Total is now 100%.");
-      return normalized;
+      const evenShare = Math.round((100 / current.length) * 1000) / 1000;
+      setRemovedAnnouncement("Weights set equal across all criteria.");
+      return current.map((r) => ({ ...r, weight: evenShare }));
     });
   }
 
@@ -453,7 +468,7 @@ export function ReviewCriteriaPage() {
   // read-only, never silently mutated.
   const readOnly = !rubric.is_latest_version;
   const weightSum = rows.reduce((sum, r) => sum + r.weight, 0);
-  const weightsBalanced = Math.abs(weightSum - 100) < 0.1;
+  const averageWeight = rows.length > 0 ? weightSum / rows.length : 0;
   const showErrors = attempted !== null;
 
   function blockingProblems(forConfirm: boolean) {
@@ -642,19 +657,17 @@ export function ReviewCriteriaPage() {
                   className="min-h-8 w-full resize-none rounded-md border border-border-input px-2.5 py-1 text-base text-ink-secondary disabled:bg-page disabled:text-ink-tertiary"
                 />
               </span>
-              <span role="cell" className="flex items-center gap-1.5">
+              <span role="cell" className="flex flex-col items-start gap-1">
                 <input
                   type="text"
                   inputMode="decimal"
                   value={row.weight}
                   disabled={readOnly}
-                  aria-label={`Criterion ${index + 1} weight, percent`}
+                  aria-label={`Criterion ${index + 1} weight`}
                   onChange={(event) => handleWeightChange(row.key, event.target.value)}
                   className="h-8 w-20 rounded-md border border-border-input px-2 text-base text-ink disabled:bg-page disabled:text-ink-tertiary"
                 />
-                <span aria-hidden="true" className="text-sm text-ink-tertiary">
-                  %
-                </span>
+                <WeightImportanceTag importance={liveWeightImportance(row.weight, averageWeight)} />
               </span>
               <span role="cell">
                 {!readOnly && (
@@ -742,19 +755,17 @@ export function ReviewCriteriaPage() {
               </label>
               <label className="mt-2 flex w-28 flex-col gap-1">
                 <span className="text-sm font-medium text-ink-secondary">Weight</span>
-                <div className="flex items-center gap-1.5">
+                <div className="flex flex-col items-start gap-1">
                   <input
                     type="text"
                     inputMode="decimal"
                     value={row.weight}
                     disabled={readOnly}
-                    aria-label={`Criterion ${index + 1} weight, percent (mobile)`}
+                    aria-label={`Criterion ${index + 1} weight (mobile)`}
                     onChange={(event) => handleWeightChange(row.key, event.target.value)}
                     className="h-11 w-20 rounded-md border border-border-input px-2 text-base text-ink disabled:bg-page disabled:text-ink-tertiary"
                   />
-                  <span aria-hidden="true" className="text-sm text-ink-tertiary">
-                    %
-                  </span>
+                  <WeightImportanceTag importance={liveWeightImportance(row.weight, averageWeight)} />
                 </div>
               </label>
             </li>
@@ -785,20 +796,13 @@ export function ReviewCriteriaPage() {
             <span className="hidden flex-1 sm:block" />
             <button
               type="button"
-              onClick={normalizeWeights}
+              onClick={distributeWeightsEvenly}
               className="flex h-11 items-center justify-center rounded-md border border-border-input bg-panel px-3.5 text-sm font-medium text-ink hover:bg-status-neutral-bg"
             >
-              Normalize to 100%
+              Distribute weights evenly
             </button>
-            <span
-              className={cx(
-                "inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-sm font-semibold whitespace-nowrap",
-                weightsBalanced
-                  ? "bg-status-success-bg text-status-success-text"
-                  : "bg-status-attention-bg text-status-attention-text",
-              )}
-            >
-              Weights total {Math.round(weightSum * 10) / 10}%{!weightsBalanced && " (needs 100%)"}
+            <span className="inline-flex items-center gap-1.5 rounded-full bg-status-neutral-bg px-2.5 py-1 text-sm font-semibold whitespace-nowrap text-ink-secondary">
+              Weight is relative, no required total
             </span>
             <button
               type="button"

@@ -21,6 +21,8 @@ const BASE_REPORT: ReportOut = {
   pending_review_count: 0,
   rubric_is_current: true,
   llm_mode: "real",
+  rubric_needs_review: false,
+  rubric_parse_issues: null,
   previous_status: null,
   previous_composite_score: null,
   results: [
@@ -29,6 +31,7 @@ const BASE_REPORT: ReportOut = {
       text: "Manuscript contains an abstract of at most 250 words",
       type: "structural",
       weight: 16.667,
+      weight_importance: "med",
       kind: "structural",
       outcome: "passed",
       score: 100,
@@ -44,6 +47,7 @@ const BASE_REPORT: ReportOut = {
       text: "Chapter 1 states the research problem",
       type: "semantic",
       weight: 33.333,
+      weight_importance: "med",
       kind: "semantic",
       outcome: "passed",
       score: 50,
@@ -130,6 +134,33 @@ describe("ReportPage", () => {
     expect(screen.queryByText(/Test-mode run/)).not.toBeInTheDocument();
   });
 
+  it("BUG-052: discloses a rubric that was activated with a coverage warning", async () => {
+    const report: ReportOut = {
+      ...BASE_REPORT,
+      rubric_needs_review: true,
+      rubric_parse_issues: ["Only 10% of the source text is reflected in the parsed criteria."],
+    };
+    vi.stubGlobal(
+      "fetch",
+      stubFetchByPath({ "/check-runs/5/report": report, ...stubEscalated(), ...stubFlags() }),
+    );
+    renderWithProviders(<ReportPage />, { route: "/report/5", path: "/report/:checkRunId" });
+
+    expect(await screen.findByText(/activated while the parser's own coverage check/)).toBeInTheDocument();
+    expect(screen.getByText(/Only 10% of the source text/)).toBeInTheDocument();
+  });
+
+  it("shows no rubric-coverage disclosure when the parser had no complaint", async () => {
+    vi.stubGlobal(
+      "fetch",
+      stubFetchByPath({ "/check-runs/5/report": BASE_REPORT, ...stubEscalated(), ...stubFlags() }),
+    );
+    renderWithProviders(<ReportPage />, { route: "/report/5", path: "/report/:checkRunId" });
+
+    await screen.findByText("Ready");
+    expect(screen.queryByText(/activated while the parser's own coverage check/)).not.toBeInTheDocument();
+  });
+
   it("BUG-022: shows the manuscript's filename, not the (possibly default) group_label, once the report links a check to a specific upload", async () => {
     const report: ReportOut = {
       ...BASE_REPORT,
@@ -156,8 +187,10 @@ describe("ReportPage", () => {
     await screen.findByText("Ready");
     const table = document.querySelector('[role="table"]');
     expect(table?.innerHTML).toContain("minmax(0,1fr)");
-    // Weight rounds for display (16.667 -> 16.7%), doesn't leak raw precision.
-    expect(screen.getAllByText("16.7%").length).toBeGreaterThan(0);
+    // D-023: weight renders as a Low/Medium/High importance tag, never a
+    // raw percentage.
+    expect(screen.getAllByText("Medium").length).toBeGreaterThan(0);
+    expect(screen.queryByText(/16\.7%/)).not.toBeInTheDocument();
   });
 
   it("states the actual determining factor for Not Ready via an unresolved high-severity flag, not a hedge", async () => {
@@ -206,6 +239,7 @@ describe("ReportPage", () => {
           text: "Escalated criterion",
           type: "semantic",
           weight: 10,
+          weight_importance: "med",
           kind: "semantic",
           outcome: "escalated",
           score: null,
@@ -221,6 +255,7 @@ describe("ReportPage", () => {
           text: "Quota-exhausted criterion",
           type: "semantic",
           weight: 10,
+          weight_importance: "med",
           kind: "semantic",
           outcome: "quota_exhausted",
           score: null,
@@ -276,6 +311,7 @@ describe("ReportPage", () => {
           text: "The methodology section is appropriate",
           type: "semantic",
           weight: 20,
+          weight_importance: "med",
           kind: "semantic",
           outcome: "passed",
           score: 100,

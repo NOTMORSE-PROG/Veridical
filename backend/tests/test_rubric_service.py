@@ -434,6 +434,53 @@ async def test_update_criteria_edit_round_trip_persists(session_factory, tmp_pat
     assert all(float(c.weight) == 42.0 for c in reloaded.criteria)
 
 
+async def test_bug_052_confirm_does_not_erase_a_needs_review_parse_status(
+    session_factory, tmp_path, monkeypatch
+):
+    """BUG-052 second half: confirming used to unconditionally reset
+    `parse_status` to `parsed` and wipe `parse_issues` -- true in the
+    narrow sense that the instructor's review is the human-in-the-loop
+    resolution (charter rule 1), but it erased the one piece of
+    information the rest of the product needs: THAT the parser flagged
+    this rubric before it was confirmed. A rubric that was `needs_review`
+    before Confirm must still read `needs_review` after -- nothing else
+    in the pipeline gates on this field (only the pre-confirm review
+    banner did), so it blocks nothing; it only lets the report keep
+    disclosing the warning honestly."""
+    from app.models.enums import RubricParseStatus
+    from app.models.rubric import Rubric
+    from app.rubric.schemas import CriterionIn, UpdateCriteriaRequest
+    from app.rubric.service import get_rubric, update_criteria
+
+    rubric_id, instructor_id = await _seeded_rubric(session_factory, tmp_path, monkeypatch)
+    async with session_factory() as session:
+        rubric = await session.get(Rubric, rubric_id)
+        rubric.parse_status = RubricParseStatus.needs_review
+        rubric.parse_issues = ["Only 10% of the source text is reflected in the parsed criteria."]
+        await session.commit()
+
+    async with session_factory() as session:
+        original = await get_rubric(session, rubric_id, instructor_id)
+        edited = [
+            CriterionIn(id=c.id, type=c.type, text=c.text, evidence=c.evidence, weight=c.weight)
+            for c in original.criteria
+        ]
+        await update_criteria(
+            session,
+            rubric_id,
+            UpdateCriteriaRequest(criteria=edited, confirm=True),
+            instructor_id,
+        )
+
+    async with session_factory() as session:
+        reloaded = await get_rubric(session, rubric_id, instructor_id)
+    assert reloaded.is_active is True  # confirm still activates
+    assert reloaded.parse_status == RubricParseStatus.needs_review  # but doesn't erase the warning
+    assert reloaded.parse_issues == [
+        "Only 10% of the source text is reflected in the parsed criteria."
+    ]
+
+
 async def test_update_criteria_adds_and_deletes_rows(session_factory, tmp_path, monkeypatch):
     from app.rubric.schemas import CriterionIn, UpdateCriteriaRequest
     from app.rubric.service import get_rubric, update_criteria
