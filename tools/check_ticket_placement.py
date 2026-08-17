@@ -45,6 +45,19 @@ TICKETS = REPO_ROOT / "tickets"
 BOARD = TICKETS / "BOARD.md"
 
 AGENTS = ("ui-designer", "ux-critic", "backend-critic", "professor", "newcomer", "manager")
+
+# V8 start gate (owner decision 2026-08-16, tickets/V8-PROPOSAL-real-use.md).
+# V8 may begin once the three demo-critical bugs are fixed, and even then only
+# the unblocked tickets are eligible. Each blocked ticket names the bug that
+# must be in BUGS/fixed/ before it may go DONE -- building V-062 on an unfixed
+# BUG-043 would bake the silent-drop path into the new Group FK permanently.
+V8_START_GATE = ("BUG-049", "BUG-048", "BUG-052")
+V8_BLOCKERS = {
+    "V-062": "BUG-043",  # Group FK would inherit the silently-dropped label path
+    "V-070": "BUG-049",  # a real page image beside a fabricated fixture flag
+    "V-066": "BUG-050",  # library display depends on the self-match/label fixes
+    "V-058": "BUG-050",  # same, and it widens the same exposure
+}
 OPEN_STORY = {"TODO", "WIP", "BLOCKED", "PARKED"}
 DONE_STORY = {"DONE"}
 OPEN_BUG = {"TODO", "WIP"}
@@ -174,6 +187,24 @@ def main() -> int:
                 stale_dod.append((f.stem, "names no agent (DoD 12)"))
             elif not dispositioned:
                 stale_dod.append((f.stem, "no disposition section (DoD 12b)"))
+
+    # ---- V8 start gate and per-ticket blockers --------------------------
+    fixed_bugs = {f.stem for f in (TICKETS / "BUGS" / "fixed").glob("BUG-*.md")}         if (TICKETS / "BUGS" / "fixed").exists() else set()
+    v8_done = TICKETS / "V8-real-use" / "done"
+    if v8_done.exists():
+        for f in sorted(v8_done.glob("V-*.md")):
+            missing = [b for b in V8_START_GATE if b not in fixed_bugs]
+            if missing:
+                problems.append(
+                    f"{f.stem} is DONE but the V8 start gate is not met: "
+                    f"{', '.join(missing)} still open"
+                )
+            blocker = V8_BLOCKERS.get(f.stem)
+            if blocker and blocker not in fixed_bugs:
+                problems.append(
+                    f"{f.stem} is DONE but its blocker {blocker} is still open "
+                    f"-- see tickets/V8-PROPOSAL-real-use.md"
+                )
 
     # ---- board cross-check ---------------------------------------------
     text = board_text()
