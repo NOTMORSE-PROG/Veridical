@@ -59,6 +59,34 @@
     }
   }
 
+  /* Hover and in-place state feedback (DESIGN.md §1.10). Applied once here
+     rather than at 142 button sites, which is also why it survives: there is
+     no per-component decision to forget.
+
+     Deliberately narrow:
+       - COLOUR PROPERTIES ONLY. Never `transition-all` (§1.10's first DON'T):
+         it animates layout and, on a verdict-bearing element, is how the
+         settledness rule gets broken by accident rather than by decision.
+       - `outline` is EXCLUDED, so the focus ring stays instant. A fading ring
+         makes rapid Tab traversal feel laggy and can leave a keyboard user
+         briefly unsure where focus is. This is §1.10's explicit DON'T and the
+         token most likely to be "improved" later.
+       - Scoped to interactive elements, so it cannot reach a status pill,
+         severity tag or KPI number (those are spans) -- MOTION_INTENSITY 0 on
+         verdict surfaces.
+       - Gated on prefers-reduced-motion at the media-query level, which is the
+         same guarantee the motion-safe: utility gives per site. */
+  @media (prefers-reduced-motion: no-preference) {
+    button,
+    a,
+    [role="button"],
+    summary {
+      transition-property: color, background-color, border-color;
+      transition-duration: var(--motion-duration-instant);
+      transition-timing-function: var(--motion-ease-standard);
+    }
+  }
+
   /* Entrance keyframes. translateY reads --motion-distance-*, which collapses
      to 0 under prefers-reduced-motion (below), so a forgotten motion-safe:
      prefix degrades to a pure cross-fade rather than to a slide. WCAG 2.3.3
