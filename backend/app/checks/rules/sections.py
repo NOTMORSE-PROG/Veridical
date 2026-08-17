@@ -53,13 +53,31 @@ def identify_target_section(criterion) -> str | None:
     return None
 
 
+def _title_candidates(target: str) -> frozenset[str]:
+    """BUG-048 follow-up: `target` and a document's real heading can both
+    be genuine synonyms for the SAME section (a criterion asking about
+    "the bibliography" against a document that titled its section
+    "REFERENCES") without either string containing the other — the
+    plain substring check below would falsely report the section
+    missing. `reference_titles` already exists as this exact synonym
+    family (F1.5, `app/ingest/references.py`'s own reference-list
+    detection uses it the same way); reused here rather than duplicated,
+    so teaching the app a new reference-section name in one place
+    teaches it everywhere (same principle `identify_target_section`'s
+    own docstring states for `unnumbered_sections`)."""
+    if target in _HEADING_PATTERNS.reference_titles:
+        return _HEADING_PATTERNS.reference_titles
+    return frozenset({target})
+
+
 def find_section_node(target: str, tree: SectionTree) -> SectionNode | None:
     """First node whose title matches `target` (substring either
     direction, casefolded) — the actual lookup the required-section rule
     runs, and what V-017 uses to locate a criterion's text span."""
+    candidates = _title_candidates(target)
     for node in walk_sections(tree):
         title = node.title.casefold()
-        if target in title or title in target:
+        if any(candidate in title or title in candidate for candidate in candidates):
             return node
     return None
 

@@ -18,7 +18,7 @@ from app.checks.rules.tables import RULE_ID as TABLE_FORMAT_RULE_ID
 from app.checks.signals import compute_shadow_signals
 from app.config import get_settings
 from app.ingest.schemas import PageGeometry, SectionNode, SectionTree, TableBlock
-from app.models.enums import ResultOutcome
+from app.models.enums import CheckKind, ResultOutcome
 
 DEMO_PDF = Path(__file__).resolve().parents[2] / "VERIDICAL-DOCUMENTATION.pdf"
 
@@ -227,6 +227,60 @@ def test_reference_count_does_not_match_when_no_number_present():
     assert not spec.matches(FakeCriterion(text="References must use APA style"))
 
 
+def test_bug_048_reference_count_ignores_a_bound_about_a_different_unit():
+    """BUG-048 root cause 2: a bound whose captured unit isn't a reference
+    noun (here "internet", from "<= 2 internet sites") describes a
+    DIFFERENT quantity than the total reference count and must never be
+    silently applied to it -- that produced a confident, wrong FAIL on a
+    real 17-reference document. Correct behavior is `unverifiable`, not a
+    guessed pass or fail (charter rule 9)."""
+    spec = get_rule(REFERENCE_COUNT_RULE_ID)
+    criterion = FakeCriterion(
+        text=(
+            "The bibliography includes the required number of major references and "
+            "contains no more than two internet sites."
+        ),
+        evidence=(
+            "Beginner (1) for 3 major references and <= 2 internet sites, Exemplary (4) "
+            "for more than 5 major references and <= 2 internet sites."
+        ),
+    )
+    assert spec.matches(criterion)  # a reference noun AND a bound are present
+    citations = [FakeCitation(order_index=i, raw_text=f"Ref {i} (2020).") for i in range(17)]
+    outcome = spec.run(criterion, _ctx(citations=citations))
+    assert outcome.outcome == ResultOutcome.unverifiable
+    assert outcome.detail["found_unit"] == "internet"
+
+
+def test_reference_count_applies_a_bound_with_no_captured_unit():
+    """A bare bound with no unit word right after the number (e.g. cut
+    off by punctuation) is ambiguous but assumed to be about references,
+    since the rule only matched because a reference noun is already
+    present elsewhere in the text -- this must keep working, not
+    regress into `unverifiable` for every bound."""
+    spec = get_rule(REFERENCE_COUNT_RULE_ID)
+    criterion = FakeCriterion(text="References: at least 15, no exceptions.")
+    citations = [FakeCitation(order_index=i, raw_text=f"Ref {i} (2020).") for i in range(17)]
+    outcome = spec.run(criterion, _ctx(citations=citations))
+    assert outcome.outcome == ResultOutcome.passed
+    assert outcome.detail["actual_count"] == 17
+
+
+def test_bug_048_reference_count_recognizes_an_adjective_between_number_and_noun():
+    """backend-critic finding (BUG-048 review): `bound.unit` only ever
+    captures the single word immediately adjacent to the number, so
+    ordinary "at least 5 major references" phrasing captures unit="major"
+    (an adjective, not the noun) -- treating that as "not about
+    references" would be a real regression versus the pre-fix behavior,
+    which never checked unit at all and got this ordinary case right."""
+    spec = get_rule(REFERENCE_COUNT_RULE_ID)
+    criterion = FakeCriterion(text="The bibliography must include at least 5 major references.")
+    citations = [FakeCitation(order_index=i, raw_text=f"Ref {i} (2020).") for i in range(17)]
+    outcome = spec.run(criterion, _ctx(citations=citations))
+    assert outcome.outcome == ResultOutcome.passed
+    assert outcome.detail["actual_count"] == 17
+
+
 # --- references.py: citation_style_sniff -----------------------------------------
 
 
@@ -265,6 +319,26 @@ def test_citation_style_sniff_not_applicable_with_no_citations():
     spec = get_rule(CITATION_STYLE_RULE_ID)
     outcome = spec.run(FakeCriterion(text="References must use APA style"), _ctx(citations=[]))
     assert outcome.outcome == ResultOutcome.not_applicable
+
+
+def test_bug_048_citation_style_does_not_collide_with_apa_via_substring():
+    """backend-critic finding (BUG-048 review): `_named_style` had root
+    cause 1's exact bug ("apa" is a substring of "apart") one function
+    below where `_matches_citation_style` was already fixed. A criterion
+    genuinely naming IEEE style, whose wording separately contains a
+    word like "apart", must not be silently reclassified as an APA-style
+    check -- that would run the year-in-parentheses heuristic against
+    IEEE-numbered citations and produce a confident, wrong FAIL instead
+    of the honest "not yet checked automatically" `unverifiable`."""
+    spec = get_rule(CITATION_STYLE_RULE_ID)
+    criterion = FakeCriterion(
+        text="References must be cited consistently, apart from figures, following IEEE style."
+    )
+    assert spec.matches(criterion)
+    citations = [FakeCitation(order_index=0, raw_text="[1] J. Smith, A study of things, 2020.")]
+    outcome = spec.run(criterion, _ctx(citations=citations))
+    assert outcome.outcome == ResultOutcome.unverifiable
+    assert "ieee" in outcome.detail["reason"]
 
 
 # --- pages.py: page_limit --------------------------------------------------------
@@ -331,6 +405,33 @@ def test_margins_min_bound():
 # --- tables.py: table_formatting_presence ---------------------------------------
 
 
+def test_bug_048_acceptable_does_not_collide_with_table_via_substring():
+    """BUG-048 root cause 1, the canary: `contains_any` used to be a bare
+    substring test, and "table" is a substring of "acceptable" -- exactly
+    the level-name word a levelled rubric's evidence quotes verbatim
+    ("Acceptable (2) for some errors"). A criterion whose evidence merely
+    describes an "Acceptable" performance level must not be mistaken for
+    one asking about a literal document table."""
+    spec = get_rule(TABLE_FORMAT_RULE_ID)
+    criterion = FakeCriterion(
+        text="The bibliography is formatted correctly with minimal to no errors.",
+        evidence=(
+            "Check the bibliography formatting against the required style guide using a "
+            "1-4 scale: Beginner (1) for correct format with many errors, Acceptable (2) "
+            "for some errors, Proficient (3) for few errors, and Exemplary (4) for no errors."
+        ),
+    )
+    assert not spec.matches(criterion)
+
+
+def test_bug_048_table_format_rule_still_matches_a_real_table_criterion():
+    """The word-boundary fix must not overcorrect into false negatives --
+    a criterion that genuinely talks about tables still matches."""
+    spec = get_rule(TABLE_FORMAT_RULE_ID)
+    criterion = FakeCriterion(text="Tables must be properly formatted with captions")
+    assert spec.matches(criterion)
+
+
 def test_table_formatting_fails_when_no_tables_present():
     spec = get_rule(TABLE_FORMAT_RULE_ID)
     criterion = FakeCriterion(text="Tables must be properly formatted with captions")
@@ -395,6 +496,111 @@ demo_pdf_only = pytest.mark.skipif(
     not DEMO_PDF.exists(),
     reason="owner's proposal PDF is local-only (D-007); run this suite locally",
 )
+
+GOLDEN_RUBRIC_TIP = Path(__file__).resolve().parents[2] / "context" / "golden" / "rubric_tip.json"
+
+golden_rubric_tip_only = pytest.mark.skipif(
+    not GOLDEN_RUBRIC_TIP.exists(),
+    reason="golden rubric decomposition is local-only (context/ gitignored); run locally",
+)
+
+
+@demo_pdf_only
+@golden_rubric_tip_only
+def test_bug_048_all_eleven_real_tip_criteria_route_and_execute_with_no_false_structural_verdict():
+    """BUG-048's own regression test, run for real: routes and executes
+    ALL 11 criteria of the owner's real TIP rubric decomposition
+    (context/golden/rubric_tip.json) against the owner's real manuscript
+    extraction (VERIDICAL-DOCUMENTATION.pdf, 17 real references) -- the
+    exact reproduction the audit used. Before the fix this produced
+    "zero correct": a substring collision ("acceptable" contains "table")
+    mis-routed the bibliography-formatting criterion into
+    table_formatting_presence (a confident, wrong FAIL: "No tables were
+    found in the manuscript"), and the reference-count rule silently
+    applied a "<= 2 internet sites" sub-bound to the TOTAL reference
+    count (a confident, wrong FAIL on a real 17-reference document). A
+    synthetic 4-criterion fixture is what let this ship; this is the
+    real, current, real-Gemini-produced 11-criterion decomposition, end
+    to end."""
+    import json
+
+    from app.checks.router import route_criterion
+
+    data = json.loads(GOLDEN_RUBRIC_TIP.read_text(encoding="utf-8"))
+    criteria = data["criteria"]
+    assert len(criteria) == 11  # golden evidence hasn't silently drifted
+    structural_source_count = sum(1 for c in criteria if c["type"] == "structural")
+    assert structural_source_count == 4  # matches the golden file's own structural_count
+
+    from app.ingest.patterns import load_patterns
+    from app.ingest.pdf import extract_document
+    from app.ingest.references import extract_references
+
+    settings = get_settings()
+    result = extract_document(str(DEMO_PDF), settings)
+    citations = extract_references(result, load_patterns())
+    assert len(citations) == 17  # matches V0's recorded evidence exactly
+
+    ctx = _ctx(
+        anchor_kind=result.anchor_kind,
+        page_count=result.page_count,
+        section_tree=result.section_tree,
+        citations=citations,
+    )
+
+    decisions = [
+        route_criterion(
+            FakeCriterion(text=c["text"], evidence=c["evidence_needed"]),
+            criterion_id=i,
+            raw_type=c["type"],
+        )
+        for i, c in enumerate(criteria)
+    ]
+    # Coverage invariant BUG-048 itself calls out: every criterion gets
+    # exactly one decision, structural or semantic, never dropped.
+    assert len(decisions) == 11
+    assert all(d.kind in (CheckKind.structural, CheckKind.semantic) for d in decisions)
+
+    # The two criteria that were ALREADY correctly falling back to AI (no
+    # keyword collision involved) stay that way -- "purpose in a single
+    # sentence" and "writing free of mechanical errors" have no
+    # purpose-built rule in this registry.
+    assert decisions[1].kind == CheckKind.semantic and decisions[1].degraded
+    assert decisions[5].kind == CheckKind.semantic and decisions[5].degraded
+
+    # BUG-048 root cause 1: "bibliography...formatted correctly...
+    # Acceptable(2)" must NOT match table_formatting_presence via the
+    # "acceptable" contains "table" substring collision -- that produced
+    # a confident, wrong FAIL ("No tables were found in the manuscript").
+    # With the collision gone, the criterion's own mention of
+    # "bibliography" legitimately matches `required_section_present`
+    # instead (the generic, load-last "does a named section exist" rule)
+    # -- and, via the reference_titles synonym fix above, correctly finds
+    # the document's real "REFERENCES" section rather than falsely
+    # failing on a bibliography/references naming mismatch.
+    bibliography_format_decision = decisions[9]
+    assert bibliography_format_decision.kind == CheckKind.structural
+    assert bibliography_format_decision.rule_id == REQUIRED_SECTION_RULE_ID
+    bibliography_outcome = get_rule(REQUIRED_SECTION_RULE_ID).run(
+        FakeCriterion(text=criteria[9]["text"], evidence=criteria[9]["evidence_needed"]), ctx
+    )
+    assert bibliography_outcome.outcome == ResultOutcome.passed
+    assert bibliography_outcome.detail["matched_title"] == "REFERENCES"
+
+    # BUG-048 root cause 2: routes to reference_count_min_max (a real
+    # reference noun AND a real bound ARE present in the text), but the
+    # bound `extract_bound` actually finds ("<= 2 internet sites", a
+    # per-level sub-constraint) is not about the total reference count --
+    # it must resolve to `unverifiable`, never a false FAIL against the
+    # document's real 17 references.
+    reference_count_decision = decisions[10]
+    assert reference_count_decision.kind == CheckKind.structural
+    assert reference_count_decision.rule_id == REFERENCE_COUNT_RULE_ID
+    spec = get_rule(REFERENCE_COUNT_RULE_ID)
+    criterion = FakeCriterion(text=criteria[10]["text"], evidence=criteria[10]["evidence_needed"])
+    outcome = spec.run(criterion, ctx)
+    assert outcome.outcome == ResultOutcome.unverifiable
+    assert outcome.detail["found_unit"] == "internet"
 
 
 @demo_pdf_only
