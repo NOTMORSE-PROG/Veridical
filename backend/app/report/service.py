@@ -249,6 +249,7 @@ async def report_out_for_check_run(session: AsyncSession, check_run: CheckRun) -
         reason=scoring_payload["reason"],
         flag_deduction=scoring_payload["flag_deduction"],
         unresolved_high_flag_count=scoring_payload["unresolved_high_flag_count"],
+        llm_mode=check_run.llm_mode.value,
         results=results,
         decision=report.decision.value if report is not None and report.decision else None,
         decided_at=report.decided_at if report is not None else None,

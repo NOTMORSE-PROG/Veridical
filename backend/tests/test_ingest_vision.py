@@ -18,8 +18,8 @@ from tests.test_ingest_pdf import PdfBuilder
 
 KNOWN_ROWS = [
     ["Group", "N", "Mean", "SD"],
-    ["Students", "12", "3.42", "0.51"],
-    ["Instructors", "5", "4.20", "0.37"],
+    ["FIXTURE — Students", "12", "3.42", "0.51"],
+    ["FIXTURE — Instructors", "5", "4.20", "0.37"],
 ]
 
 

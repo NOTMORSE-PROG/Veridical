@@ -225,6 +225,11 @@ export interface ReportCommon {
   // False when the rubric used for this run is no longer the active
   // version for its family.
   rubric_is_current: boolean;
+  // BUG-049: "fake" (fixture data, no real Gemini call), "real", or
+  // "unknown" (a run that predates this field) -- shown wherever this
+  // report's verdict is shown so fixture-derived flags/scores can never
+  // be mistaken for real findings about the manuscript.
+  llm_mode: "fake" | "real" | "unknown";
 }
 
 export interface ReportOut extends ReportCommon {
@@ -353,6 +358,9 @@ export interface FlagOut {
   override_reason: string | null;
   ai_verdict_summary: string | null;
   ai_reasoning: string | null;
+  // BUG-049: the flag evidence page is exactly where the audit found a
+  // fabricated statistical-forensics finding rendered with no disclosure.
+  llm_mode: "fake" | "real" | "unknown";
 }
 
 export interface OverrideFlagOut extends FlagOut {

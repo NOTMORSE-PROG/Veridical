@@ -74,6 +74,7 @@ def _sixty_criterion_report() -> ReportExportData:
         reason=None,
         flag_deduction=2.5,
         unresolved_high_flag_count=0,
+        llm_mode="real",
         results=results,
         decision=None,
         decided_at=None,

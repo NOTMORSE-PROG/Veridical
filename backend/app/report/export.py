@@ -141,6 +141,28 @@ _CHECK_KIND_LABEL = {
 }
 NEEDS_REVIEW_OUTCOMES = ("escalated", "quota_exhausted", "api_down")
 
+# BUG-049: one source of truth for the disclosure text/tone, used by both
+# the badge (near the title) and the footer line on every page -- a
+# hand-duplicated string in two places is exactly the kind of drift this
+# project's honest-wording discipline exists to prevent. `real` needs no
+# disclosure at all; `unknown` (a run that predates migration 0024's
+# `llm_mode` column) gets its own honest, distinct wording -- not a
+# confident "this is fake" claim, and not silence either, which would
+# recreate the exact non-disclosure this ticket exists to close for
+# every pre-migration run (backend-critic finding, live-reproduced
+# against report/29 -- the ticket's own reproduction case).
+_LLM_MODE_DISCLOSURE = {
+    "fake": (
+        "Test-mode run: AI results are simulated and do not describe this document.",
+        "danger",
+    ),
+    "unknown": (
+        "AI mode unknown: this run predates AI-mode tracking, so whether it used real "
+        "or simulated AI results can't be confirmed.",
+        "caution",
+    ),
+}
+
 
 def _styles(font: str) -> dict[str, ParagraphStyle]:
     bold = f"{font}-Bold"
@@ -392,6 +414,37 @@ def build_report_pdf(data: ReportExportData) -> bytes:
             styles["framing"],
         )
     )
+    llm_mode_disclosure = _LLM_MODE_DISCLOSURE.get(report.llm_mode)
+    if llm_mode_disclosure is not None:
+        disclosure_text, disclosure_tone = llm_mode_disclosure
+        disclosure_color = _TONE_COLORS[disclosure_tone][1]
+        flow.append(Spacer(1, 6))
+        test_mode_tag = Table(
+            [
+                [
+                    Paragraph(
+                        disclosure_text,
+                        ParagraphStyle(
+                            "test_mode_badge",
+                            parent=styles["draft_badge"],
+                            textColor=disclosure_color,
+                        ),
+                    )
+                ]
+            ]
+        )
+        test_mode_tag.setStyle(
+            TableStyle(
+                [
+                    ("BOX", (0, 0), (-1, -1), 0.75, disclosure_color),
+                    ("LEFTPADDING", (0, 0), (-1, -1), 8),
+                    ("RIGHTPADDING", (0, 0), (-1, -1), 8),
+                    ("TOPPADDING", (0, 0), (-1, -1), 5),
+                    ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
+                ]
+            )
+        )
+        flow.append(test_mode_tag)
     flow.append(Spacer(1, 12))
 
     # 2. Verdict block.
@@ -600,6 +653,8 @@ def build_report_pdf(data: ReportExportData) -> bytes:
                 )
             )
 
+    footer_llm_disclosure = _LLM_MODE_DISCLOSURE.get(report.llm_mode)
+
     def _on_page(canvas: Canvas, doc_: SimpleDocTemplate) -> None:
         canvas.saveState()
         page_num = canvas.getPageNumber()
@@ -635,6 +690,11 @@ def build_report_pdf(data: ReportExportData) -> bytes:
             "This report reflects the instructor's own review and decisions. It is not an "
             "automated grade.",
         )
+        if footer_llm_disclosure is not None:
+            footer_text, footer_tone = footer_llm_disclosure
+            canvas.setFont(f"{font}-Bold", 8)
+            canvas.setFillColor(_TONE_COLORS[footer_tone][1])
+            canvas.drawCentredString(A4[0] / 2, 16, footer_text)
 
         if is_draft:
             canvas.saveState()

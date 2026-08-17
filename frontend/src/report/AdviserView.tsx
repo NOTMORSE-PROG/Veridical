@@ -12,6 +12,7 @@ import { Link, useParams } from "react-router";
 import { ApiError } from "../api/client";
 import { Chip } from "../components/Chip";
 import { StatusPill } from "../components/StatusPill";
+import { TestModeBanner } from "../components/TestModeBanner";
 import { manuscriptIdentity } from "../domain/manuscriptLabel";
 import { READINESS_LABEL, READINESS_TONE } from "../domain/readinessTone";
 import { DecisionSummary } from "./DecisionSummary";
@@ -198,6 +199,8 @@ export function AdviserViewPage() {
           </Chip>
         </div>
       </div>
+
+      <TestModeBanner llmMode={report.llm_mode} />
 
       <div className="flex flex-wrap items-center gap-3">
         <StatusPill tone={READINESS_TONE[report.status]}>{READINESS_LABEL[report.status]}</StatusPill>

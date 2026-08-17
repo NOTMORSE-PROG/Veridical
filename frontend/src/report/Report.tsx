@@ -9,6 +9,7 @@ import { ApiError } from "../api/client";
 import type { Decision } from "../api/types";
 import { Chip } from "../components/Chip";
 import { StatusPill } from "../components/StatusPill";
+import { TestModeBanner } from "../components/TestModeBanner";
 import { manuscriptIdentity } from "../domain/manuscriptLabel";
 import { READINESS_LABEL, READINESS_TONE } from "../domain/readinessTone";
 import { useRouteFocus } from "../routing/useRouteFocus";
@@ -193,6 +194,8 @@ export function ReportPage() {
           <span>.</span>
         </p>
       )}
+
+      {report && <TestModeBanner llmMode={report.llm_mode} />}
 
       {isPending ? (
         <div role="status" aria-live="polite" aria-busy="true" className="flex items-center gap-2 rounded-lg border border-border bg-panel p-6 text-sm text-ink-secondary">

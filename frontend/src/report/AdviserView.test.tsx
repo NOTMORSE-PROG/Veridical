@@ -20,6 +20,7 @@ const BASE_REPORT: ReportOut = {
   decision_note: null,
   pending_review_count: 1,
   rubric_is_current: true,
+  llm_mode: "real",
   previous_status: null,
   previous_composite_score: null,
   results: [
@@ -88,6 +89,34 @@ describe("AdviserViewPage", () => {
     render();
     expect(screen.getByText("Loading shared report.")).toBeInTheDocument();
     expect((await screen.findAllByText("Conditionally Ready")).length).toBeGreaterThan(0);
+  });
+
+  it("BUG-049: discloses a test-mode (fake-LLM) run to the adviser -- the audience with no other context at all", async () => {
+    vi.stubGlobal(
+      "fetch",
+      stubFetchByPath({ "/shared/tok123/report": shared({ report: { ...BASE_REPORT, llm_mode: "fake" } }) }),
+    );
+    render();
+    expect(await screen.findByText(/Test-mode run/)).toBeInTheDocument();
+  });
+
+  it("shows no test-mode disclosure for a real run", async () => {
+    vi.stubGlobal("fetch", stubFetchByPath({ "/shared/tok123/report": shared() }));
+    render();
+    await screen.findAllByText("Conditionally Ready");
+    expect(screen.queryByText(/Test-mode run/)).not.toBeInTheDocument();
+  });
+
+  it("BUG-049 (backend-critic finding): discloses an unknown-mode run to the adviser, distinctly from real", async () => {
+    vi.stubGlobal(
+      "fetch",
+      stubFetchByPath({
+        "/shared/tok123/report": shared({ report: { ...BASE_REPORT, llm_mode: "unknown" } }),
+      }),
+    );
+    render();
+    expect(await screen.findByText(/AI mode unknown/)).toBeInTheDocument();
+    expect(screen.queryByText(/Test-mode run/)).not.toBeInTheDocument();
   });
 
   it("BUG-044: never renders a prior run's status/score, even if a mock response smuggles it in", async () => {

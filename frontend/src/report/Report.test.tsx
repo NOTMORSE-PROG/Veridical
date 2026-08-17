@@ -20,6 +20,7 @@ const BASE_REPORT: ReportOut = {
   decision_note: null,
   pending_review_count: 0,
   rubric_is_current: true,
+  llm_mode: "real",
   previous_status: null,
   previous_composite_score: null,
   results: [
@@ -93,6 +94,40 @@ describe("ReportPage", () => {
     expect(screen.getByText("92%")).toBeInTheDocument();
     expect(screen.getByText("Ungrouped")).toBeInTheDocument();
     expect(screen.getByText("TIP Format")).toBeInTheDocument();
+  });
+
+  it("BUG-049: discloses a test-mode (fake-LLM) run so its verdict is never mistaken for a real one", async () => {
+    const report: ReportOut = { ...BASE_REPORT, llm_mode: "fake" };
+    vi.stubGlobal(
+      "fetch",
+      stubFetchByPath({ "/check-runs/5/report": report, ...stubEscalated(), ...stubFlags() }),
+    );
+    renderWithProviders(<ReportPage />, { route: "/report/5", path: "/report/:checkRunId" });
+
+    expect(await screen.findByText(/Test-mode run/)).toBeInTheDocument();
+  });
+
+  it("shows no test-mode disclosure for a real run", async () => {
+    vi.stubGlobal(
+      "fetch",
+      stubFetchByPath({ "/check-runs/5/report": BASE_REPORT, ...stubEscalated(), ...stubFlags() }),
+    );
+    renderWithProviders(<ReportPage />, { route: "/report/5", path: "/report/:checkRunId" });
+
+    await screen.findByText("Ready");
+    expect(screen.queryByText(/Test-mode run/)).not.toBeInTheDocument();
+  });
+
+  it("BUG-049 (backend-critic finding): discloses an unknown-mode run distinctly from real, never silently as real", async () => {
+    const report: ReportOut = { ...BASE_REPORT, llm_mode: "unknown" };
+    vi.stubGlobal(
+      "fetch",
+      stubFetchByPath({ "/check-runs/5/report": report, ...stubEscalated(), ...stubFlags() }),
+    );
+    renderWithProviders(<ReportPage />, { route: "/report/5", path: "/report/:checkRunId" });
+
+    expect(await screen.findByText(/AI mode unknown/)).toBeInTheDocument();
+    expect(screen.queryByText(/Test-mode run/)).not.toBeInTheDocument();
   });
 
   it("BUG-022: shows the manuscript's filename, not the (possibly default) group_label, once the report links a check to a specific upload", async () => {

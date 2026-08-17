@@ -65,6 +65,12 @@ class ReportOut(BaseModel):
     # instead of stating the actual determining factor (V-055 4h review).
     flag_deduction: float
     unresolved_high_flag_count: int
+    # BUG-049: "fake" (fixture data, no real Gemini call), "real", or
+    # "unknown" (a run that predates this field, migration 0024's
+    # backfill) — shown wherever this report's verdict is shown so
+    # fixture-derived flags/scores can never be mistaken for real
+    # findings about the manuscript.
+    llm_mode: str
     results: list[CriterionResultOut]
     # V-038 (F8.5) — the terminal gate. `decision` is None until the
     # instructor decides; once set, the report is frozen (blocked from a
@@ -136,6 +142,9 @@ class PublicReportOut(BaseModel):
     reason: str | None
     flag_deduction: float
     unresolved_high_flag_count: int
+    # BUG-049: the public adviser view has NO other context at all --
+    # this is the one audience that matters most for this disclosure.
+    llm_mode: str
     results: list[PublicCriterionResultOut]
     decision: str | None = None
     decided_at: datetime | None = None

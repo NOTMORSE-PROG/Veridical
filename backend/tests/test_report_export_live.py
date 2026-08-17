@@ -374,6 +374,118 @@ def test_export_marks_an_undecided_report_draft_with_the_watermark_and_footer_li
     assert "not an automated grade" in full_text
 
 
+def test_export_discloses_unknown_llm_mode_distinctly_from_real(logged_in_with_a_done_run):
+    """backend-critic finding (BUG-049 review, live-reproduced against
+    report/29 -- the ticket's own reproduction case): a run that
+    predates `llm_mode` tracking backfills to "unknown", and treating
+    that the same as "real" (i.e. showing nothing) silently recreates
+    the exact non-disclosure this ticket exists to close, for every
+    pre-migration run. `logged_in_with_a_done_run` seeds a plain
+    `CheckRun(...)` with no explicit `llm_mode` -- exactly the
+    server_default backfill shape."""
+    client, check_run_id = logged_in_with_a_done_run
+    resp = client.get(f"/check-runs/{check_run_id}/report/export.pdf")
+    assert resp.status_code == 200
+
+    import fitz
+
+    doc = fitz.open(stream=resp.content, filetype="pdf")
+    full_text = "\n".join(page.get_text() for page in doc)
+    assert "AI mode unknown" in full_text
+    assert "can't be confirmed" in full_text
+    assert "Test-mode run" not in full_text
+
+
+def test_export_discloses_test_mode_run(client, api_scratch_url):
+    """BUG-049: a fake-LLM-mode run's exported PDF used to look
+    IDENTICAL to a real one -- no disclosure anywhere a reader looks.
+    The disclosure must survive to the printed artifact, not just the
+    on-screen report."""
+    import asyncio
+
+    from sqlalchemy import text
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
+    from app.db import sqlalchemy_url
+    from app.models.enums import CheckKind, CheckRunStatus, LLMMode, ResultOutcome
+    from app.models.instructor import Instructor
+    from app.models.manuscript import Manuscript
+    from app.models.rubric import Criterion, Rubric
+    from app.models.run import CheckResult, CheckRun
+    from app.report.service import aggregate_and_score
+
+    async def seed():
+        engine = create_async_engine(sqlalchemy_url(api_scratch_url))
+        try:
+            factory = async_sessionmaker(engine, expire_on_commit=False)
+            async with factory() as session:
+                await session.execute(
+                    text(
+                        "TRUNCATE readiness_report, check_result, check_run, criterion, "
+                        "rubric, manuscript, instructor RESTART IDENTITY CASCADE"
+                    )
+                )
+                instructor = Instructor(
+                    email="prof@tip.edu.ph",
+                    display_name="Prof",
+                    password_hash=hash_password("s3cret!"),
+                )
+                session.add(instructor)
+                await session.commit()
+                manuscript = Manuscript(
+                    instructor_id=instructor.id, group_label="G", file_ref="x.pdf"
+                )
+                rubric = Rubric(
+                    instructor_id=instructor.id, title="Format", source_file="r.pdf", is_active=True
+                )
+                session.add_all([manuscript, rubric])
+                await session.commit()
+                criterion = Criterion(
+                    rubric_id=rubric.id,
+                    type="structural",
+                    text="Has an abstract",
+                    evidence=None,
+                    weight=Decimal("100"),
+                    position=0,
+                )
+                session.add(criterion)
+                await session.commit()
+                check_run = CheckRun(
+                    manuscript_id=manuscript.id, rubric_id=rubric.id, llm_mode=LLMMode.fake
+                )
+                session.add(check_run)
+                await session.commit()
+                session.add(
+                    CheckResult(
+                        check_run_id=check_run.id,
+                        criterion_id=criterion.id,
+                        kind=CheckKind.structural,
+                        outcome=ResultOutcome.passed,
+                        score=100.0,
+                        detail={"rule_id": "required_section_present", "anchor": "page 2"},
+                    )
+                )
+                check_run.status = CheckRunStatus.done
+                await session.commit()
+                await aggregate_and_score(session, check_run.id)
+                return check_run.id
+        finally:
+            await engine.dispose()
+
+    check_run_id = asyncio.run(seed())
+    client.post("/auth/login", json={"email": "prof@tip.edu.ph", "password": "s3cret!"})
+
+    resp = client.get(f"/check-runs/{check_run_id}/report/export.pdf")
+    assert resp.status_code == 200
+
+    import fitz
+
+    doc = fitz.open(stream=resp.content, filetype="pdf")
+    full_text = "\n".join(page.get_text() for page in doc)
+    assert "Test-mode run" in full_text
+    assert "AI results are simulated" in full_text
+
+
 def test_export_rejects_a_strangers_check_run(logged_in_with_a_done_run, api_scratch_url):
     import asyncio
 

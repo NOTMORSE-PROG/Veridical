@@ -10,6 +10,7 @@ import { AnchorPill } from "../components/AnchorPill";
 import { Chip } from "../components/Chip";
 import { cx } from "../components/cx";
 import { SeverityTag, type Severity } from "../components/SeverityTag";
+import { TestModeBanner } from "../components/TestModeBanner";
 import { checkKindMeta, humanize } from "../domain/checkKind";
 import { useRouteFocus } from "../routing/useRouteFocus";
 import { useAnnotateFlag, useFlag, useOverrideFlag } from "./useFlag";
@@ -274,6 +275,8 @@ export function FlagDetailPage() {
           {flag && <span className="text-xs text-ink-tertiary tabular-nums">#{flag.id}</span>}
         </div>
       </header>
+
+      {flag && <TestModeBanner llmMode={flag.llm_mode} />}
 
       {isPending ? (
         <div role="status" aria-live="polite" aria-busy="true" className="flex items-center gap-2 rounded-lg border border-border bg-panel p-6 text-sm text-ink-secondary">

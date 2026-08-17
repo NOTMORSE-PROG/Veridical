@@ -147,6 +147,7 @@ def _to_public_report(report: ReportOut) -> PublicReportOut:
         reason=report.reason,
         flag_deduction=report.flag_deduction,
         unresolved_high_flag_count=report.unresolved_high_flag_count,
+        llm_mode=report.llm_mode,
         results=[
             PublicCriterionResultOut(
                 criterion_id=r.criterion_id,

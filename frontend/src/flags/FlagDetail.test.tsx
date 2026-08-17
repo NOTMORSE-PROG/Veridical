@@ -19,6 +19,7 @@ const FLAG = {
   override_reason: null,
   ai_verdict_summary: "not_supported",
   ai_reasoning: "This source appears in the Retraction Watch database.",
+  llm_mode: "real",
 };
 
 describe("FlagDetailPage", () => {
@@ -50,6 +51,26 @@ describe("FlagDetailPage", () => {
     expect(blockquote?.className).toContain("break-words");
     const verdictChip = screen.getByText(/AI verdict:/).closest("span");
     expect(verdictChip?.className).toContain("max-w-");
+  });
+
+  it("BUG-049: discloses a test-mode (fake-LLM) run so its finding is never mistaken for real", async () => {
+    vi.stubGlobal("fetch", stubFetchByPath({ "/flags/5": { ...FLAG, llm_mode: "fake" } }));
+    renderWithProviders(<FlagDetailPage />, { route: "/flags/5", path: "/flags/:flagId" });
+    expect(await screen.findByText(/Test-mode run/)).toBeInTheDocument();
+  });
+
+  it("BUG-049: shows no test-mode disclosure for a real run", async () => {
+    vi.stubGlobal("fetch", stubFetchByPath({ "/flags/5": FLAG }));
+    renderWithProviders(<FlagDetailPage />, { route: "/flags/5", path: "/flags/:flagId" });
+    await screen.findByText(/Wang, S\. \(2019\)/);
+    expect(screen.queryByText(/Test-mode run/)).not.toBeInTheDocument();
+  });
+
+  it("BUG-049 (backend-critic finding): discloses an unknown-mode flag distinctly from real", async () => {
+    vi.stubGlobal("fetch", stubFetchByPath({ "/flags/5": { ...FLAG, llm_mode: "unknown" } }));
+    renderWithProviders(<FlagDetailPage />, { route: "/flags/5", path: "/flags/:flagId" });
+    expect(await screen.findByText(/AI mode unknown/)).toBeInTheDocument();
+    expect(screen.queryByText(/Test-mode run/)).not.toBeInTheDocument();
   });
 
   it("builds a breadcrumb back to the report using the manuscript label and check_run_id", async () => {
