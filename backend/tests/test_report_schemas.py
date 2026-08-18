@@ -1,12 +1,13 @@
 """Pure Pydantic-schema-level tests for `app.report.schemas` -- no DB, no
 live server. BUG-096: the resolution-reason minimum length lives here.
+BUG-105: the identical fix for the reopen reason.
 """
 
 import pytest
 from pydantic import ValidationError
 
 from app.config import Settings
-from app.report.schemas import ResolveEscalationIn
+from app.report.schemas import ReopenIn, ResolveEscalationIn
 
 
 def test_a_one_character_reason_is_rejected():
@@ -46,3 +47,15 @@ def test_default_minimum_matches_the_frontend_hardcoded_copy():
     default ever changes, this test fails and says so, rather than the
     two copies silently drifting apart."""
     assert Settings().resolution_reason_min_length == 10
+
+
+def test_bug_105_a_one_character_reopen_reason_is_rejected():
+    """The identical defect BUG-096 fixed for `ResolveEscalationIn`,
+    found on `ReopenIn` by `backend-critic` reviewing that same diff."""
+    with pytest.raises(ValidationError, match="at least"):
+        ReopenIn(reason="x")
+
+
+def test_bug_105_a_real_reopen_reason_is_accepted_and_stripped():
+    parsed = ReopenIn(reason="  Found a citation issue after deciding.  ")
+    assert parsed.reason == "Found a citation issue after deciding."

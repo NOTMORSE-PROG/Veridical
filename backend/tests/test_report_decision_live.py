@@ -455,6 +455,17 @@ async def test_reopen_clears_the_decision_and_requires_a_reason(session_factory)
         assert redecided.decision == "returned"
 
 
+async def test_reopen_enforces_the_length_floor_even_bypassing_the_router(session_factory):
+    """BUG-105: `reopen_report` had no reason validation of its own at
+    all (relied entirely on the router's `ReopenIn` schema) -- the same
+    defense-in-depth gap `backend-critic` found in `resolve_escalation`."""
+    async with session_factory() as session:
+        instructor, check_run = await _seed_decidable_run(session)
+        await decide_report(session, check_run.id, instructor.id, "approved", None)
+        with pytest.raises(ConflictError, match="at least 10 characters"):
+            await reopen_report(session, check_run.id, instructor.id, "ok")
+
+
 async def test_reopening_a_never_decided_report_is_rejected(session_factory):
     async with session_factory() as session:
         instructor, check_run = await _seed_decidable_run(session)
