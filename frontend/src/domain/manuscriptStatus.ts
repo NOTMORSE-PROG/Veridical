@@ -5,7 +5,16 @@
 // tone/label logic. The READINESS verdict (Ready/Not Ready/etc.) is
 // deliberately NOT part of this -- it lives on the report itself
 // (screen 4h), never duplicated here.
-import type { ManuscriptListItem } from "../api/types";
+//
+// V-071 (BUG-058): Archive.tsx used to carry its own second copy of this
+// logic that never read ingest_status at all, so an ingestion-failed
+// manuscript showed as "Not checked yet" there while this same function
+// correctly called it "Ingestion failed" on the dashboard -- two screens
+// disagreeing about the same file. Archive now calls this function too;
+// the parameter type below is a structural subset both
+// `ManuscriptListItem` and `ArchiveItemOut` satisfy, not the full
+// dashboard-only shape, since Archive doesn't carry a `latest_decision`.
+import type { CheckRunStatus, Decision } from "../api/types";
 import type { StatusPillTone } from "../components/StatusPill";
 import { DECISION_LABEL, DECISION_TONE } from "./decisionTone";
 
@@ -18,7 +27,13 @@ export const RUNNING_STATUSES = new Set([
   "aggregating",
 ]);
 
-export function manuscriptStatus(row: ManuscriptListItem): { label: string; tone: StatusPillTone } {
+interface ManuscriptStatusInput {
+  ingest_status: string;
+  latest_check_run_status: CheckRunStatus | null;
+  latest_decision?: Decision | null;
+}
+
+export function manuscriptStatus(row: ManuscriptStatusInput): { label: string; tone: StatusPillTone } {
   if (row.latest_check_run_status === "done") {
     if (row.latest_decision) {
       return { label: DECISION_LABEL[row.latest_decision], tone: DECISION_TONE[row.latest_decision] };

@@ -8,6 +8,11 @@ class ArchiveItemOut(BaseModel):
     group_label: str
     original_filename: str | None
     created_at: datetime
+    # V-071 (BUG-058): this endpoint used to omit ingest_status entirely,
+    # so a manuscript whose ingestion had failed showed as "Not checked
+    # yet" here while the dashboard correctly read "Ingestion failed" for
+    # the exact same row -- two screens disagreeing about the same file.
+    ingest_status: str
     latest_check_run_status: str | None
     # Whether the F7 whole-document embedding row still exists -- False
     # both for "never checked" and "purged"; `purged_at` distinguishes them.

@@ -12,18 +12,12 @@ import { Chip } from "../components/Chip";
 import { Modal, ModalBackdrop } from "../components/Modal";
 import { StatusPill, type StatusPillTone } from "../components/StatusPill";
 import { manuscriptIdentity } from "../domain/manuscriptLabel";
+import { manuscriptStatus } from "../domain/manuscriptStatus";
 import { useRouteFocus } from "../routing/useRouteFocus";
 import { useArchive, usePurgeManuscript } from "./useArchive";
 
 function formatDate(iso: string): string {
   return new Date(iso).toLocaleDateString();
-}
-
-function checkStatusPill(row: ArchiveItemOut): { label: string; tone: StatusPillTone } {
-  if (row.latest_check_run_status === "done") return { label: "Checked", tone: "success" };
-  if (row.latest_check_run_status === "failed") return { label: "Check failed", tone: "attention" };
-  if (row.latest_check_run_status === null) return { label: "Not checked yet", tone: "neutral" };
-  return { label: "Checking", tone: "info" };
 }
 
 // A real 3-state combination, not 2 (`has_archive`/`purged_at` service.py
@@ -258,7 +252,7 @@ export function ArchivePage() {
           <ul className="flex flex-col gap-2 lg:hidden">
             {data.items.map((row) => {
               const identity = manuscriptIdentity(row.group_label, row.original_filename);
-              const check = checkStatusPill(row);
+              const check = manuscriptStatus(row);
               const state = archiveStatePill(row);
               return (
                 <li key={row.manuscript_id} className="rounded-lg border border-border bg-panel p-3">
@@ -306,7 +300,7 @@ export function ArchivePage() {
             </div>
             {data.items.map((row) => {
               const identity = manuscriptIdentity(row.group_label, row.original_filename);
-              const check = checkStatusPill(row);
+              const check = manuscriptStatus(row);
               const state = archiveStatePill(row);
               return (
                 <div

@@ -99,7 +99,29 @@ function IngestFailurePanel({ row }: { row: ManuscriptListItem }) {
 const linkClass =
   "inline-flex min-h-6 items-center text-xs text-link underline hover:text-link-hover sm:min-h-11";
 
-function RowActions({ row, onRerun }: { row: ManuscriptListItem; onRerun: (manuscriptId: number) => void }) {
+// V-071 (AC1): "N escalations awaiting your review" used to be a dashboard-
+// wide total with nothing pointing at which row it was in --
+// `newcomer`'s baseline had to open reports one at a time to find out.
+// `attention` tone matches its documented use (process/workflow state,
+// never a readiness verdict) -- same tone "Ingestion failed" already uses.
+function EscalationBadge({ count }: { count: number }) {
+  if (!count || count <= 0) return null;
+  return (
+    <StatusPill tone="attention">
+      {count} escalation{count === 1 ? "" : "s"}
+    </StatusPill>
+  );
+}
+
+function RowActions({
+  row,
+  onRerun,
+  onStartCheck,
+}: {
+  row: ManuscriptListItem;
+  onRerun: (manuscriptId: number) => void;
+  onStartCheck: (manuscriptId: number) => void;
+}) {
   const running = row.latest_check_run_status
     ? RUNNING_STATUSES.has(row.latest_check_run_status)
     : false;
@@ -161,13 +183,27 @@ function RowActions({ row, onRerun }: { row: ManuscriptListItem; onRerun: (manus
       </div>
     );
   }
-  // A manuscript with no completed run at all has nothing to re-run --
-  // the real next action ("New check") already lives in the Dashboard
-  // header, not this row (V-041 / ui-designer finding: the previous
-  // "Re-run unavailable" copy here implied a prior run existed when it
-  // never did, contradicting this row's own status pill two columns
-  // over which already correctly says "Not checked yet").
-  return null;
+  // V-071 (BUG-055): a successfully-ingested manuscript with no run at all
+  // used to have an empty Actions cell here -- the "Not checked yet" pill
+  // two columns over named the exact next step and this cell offered no
+  // way to take it. "New check" in the Dashboard header still works, but
+  // nothing on the row itself pointed there (AC0f: an absent expected
+  // control is the same defect class as a mislabelled one).
+  if (row.ingest_status === "done") {
+    return (
+      <button type="button" onClick={() => onStartCheck(row.id)} className={linkClass}>
+        Start check
+      </button>
+    );
+  }
+  // Still ingesting (ingestion failure is handled by IngestFailureButton
+  // above this component, never reaches here) -- nothing to act on yet.
+  // V-071 (BUG-055's second half): still a real, present grid cell, not an
+  // absent one -- the desktop table's `role="row"` must always expose the
+  // same cell count its own header declares four columnheaders for (ARIA
+  // 1.2); returning `null` here used to make this the one row shape with
+  // only 3 DOM children instead of 4.
+  return <span className="sr-only">Nothing to do yet -- still processing.</span>;
 }
 
 function formatDate(iso: string): string {
@@ -197,11 +233,13 @@ export function ManuscriptsTable({
   onPageChange,
   onUploadManuscript,
   onRerun,
+  onStartCheck,
 }: {
   page: number;
   onPageChange: (p: number) => void;
   onUploadManuscript: () => void;
   onRerun: (manuscriptId: number) => void;
+  onStartCheck: (manuscriptId: number) => void;
 }) {
   const { data, isLoading, isError, refetch } = useManuscriptsPage(page);
   const [expandedId, setExpandedId] = useState<number | null>(null);
@@ -253,7 +291,10 @@ export function ManuscriptsTable({
                 >
                   {identity.primary}
                 </span>
-                <StatusPill tone={tone}>{label}</StatusPill>
+                <div className="flex flex-none flex-col items-end gap-1">
+                  <StatusPill tone={tone}>{label}</StatusPill>
+                  <EscalationBadge count={row.escalations_awaiting_review} />
+                </div>
               </div>
               {identity.secondary && (
                 <span
@@ -269,7 +310,7 @@ export function ManuscriptsTable({
                 {isIngestFailure ? (
                   <IngestFailureButton row={row} isOpen={isOpen} onToggle={() => toggle(row.id)} />
                 ) : (
-                  <RowActions row={row} onRerun={onRerun} />
+                  <RowActions row={row} onRerun={onRerun} onStartCheck={onStartCheck} />
                 )}
               </div>
               {isIngestFailure && isOpen && (
@@ -291,7 +332,7 @@ export function ManuscriptsTable({
       <div className="hidden overflow-hidden rounded-lg border border-border sm:block">
         <div
           role="row"
-          className="grid grid-cols-[minmax(0,1fr)_140px_140px_170px] gap-3 border-b border-border bg-status-neutral-bg px-4 py-2.5 text-xs font-semibold tracking-header text-ink-tertiary uppercase"
+          className="grid grid-cols-[minmax(0,1fr)_190px_100px_170px] gap-3 border-b border-border bg-status-neutral-bg px-4 py-2.5 text-xs font-semibold tracking-header text-ink-tertiary uppercase"
         >
           <span role="columnheader">Group</span>
           <span role="columnheader">Status</span>
@@ -309,7 +350,7 @@ export function ManuscriptsTable({
             <div key={row.id}>
               <div
                 role="row"
-                className="grid grid-cols-[minmax(0,1fr)_140px_140px_170px] items-center gap-3 border-t border-border px-4 py-3 text-sm"
+                className="grid grid-cols-[minmax(0,1fr)_190px_100px_170px] items-center gap-3 border-t border-border px-4 py-3 text-sm"
               >
                 <div className="flex min-w-0 flex-col justify-center">
                   <span className="truncate text-ink" title={identity.primary}>
@@ -325,12 +366,15 @@ export function ManuscriptsTable({
                     </span>
                   )}
                 </div>
-                <StatusPill tone={tone}>{label}</StatusPill>
+                <div className="flex flex-col items-start gap-1">
+                  <StatusPill tone={tone}>{label}</StatusPill>
+                  <EscalationBadge count={row.escalations_awaiting_review} />
+                </div>
                 <span className="text-ink-tertiary">{formatDate(row.created_at)}</span>
                 {isIngestFailure ? (
                   <IngestFailureButton row={row} isOpen={isOpen} onToggle={() => toggle(row.id)} />
                 ) : (
-                  <RowActions row={row} onRerun={onRerun} />
+                  <RowActions row={row} onRerun={onRerun} onStartCheck={onStartCheck} />
                 )}
               </div>
               {isIngestFailure && isOpen && (

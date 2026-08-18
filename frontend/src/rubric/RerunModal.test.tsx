@@ -175,6 +175,50 @@ describe("RerunModal", () => {
     expect(screen.getByRole("button", { name: "Re-run 0 manuscripts" })).toBeInTheDocument();
   });
 
+  it("V-071 (newcomer finding): the bulk-entry paragraph claims 'all manuscripts' are selected, and that's true here (opened with no initialManuscriptIds)", async () => {
+    vi.stubGlobal(
+      "fetch",
+      stubBase({
+        "/manuscripts": {
+          items: [manuscript({ id: 1 }), manuscript({ id: 2, group_label: "G-12", latest_check_run_id: 8, latest_done_check_run_id: 8 })],
+          total: 2,
+          page: 1,
+          page_size: 200,
+        },
+      }),
+    );
+    renderWithProviders(<RerunModal onClose={() => {}} />);
+    expect(
+      await screen.findByText(
+        "All manuscripts previously checked against TIP Format are selected by default. Deselect any you don't want to re-run.",
+      ),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/Only the manuscript/)).not.toBeInTheDocument();
+  });
+
+  it("V-071 (newcomer finding, live-reproduced): opened via a single row's Re-run action, the paragraph says ONLY that manuscript is preselected, not 'all manuscripts'", async () => {
+    vi.stubGlobal(
+      "fetch",
+      stubBase({
+        "/manuscripts": {
+          items: [manuscript({ id: 1 }), manuscript({ id: 2, group_label: "G-12", latest_check_run_id: 8, latest_done_check_run_id: 8 })],
+          total: 2,
+          page: 1,
+          page_size: 200,
+        },
+      }),
+    );
+    renderWithProviders(<RerunModal onClose={() => {}} initialManuscriptIds={[1]} />);
+    expect(
+      await screen.findByText(
+        "Only the manuscript you chose is selected by default. Select others below if you want to re-run them too.",
+      ),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/All manuscripts previously checked/)).not.toBeInTheDocument();
+    // The checkbox state backs up the sentence: only the requested row is checked.
+    expect(screen.getByRole("button", { name: "Re-run 1 manuscript" })).toBeInTheDocument();
+  });
+
   it("ux-critic finding (P2): the Select all checkbox goes indeterminate on a partial selection, not indistinguishable from none selected", async () => {
     vi.stubGlobal(
       "fetch",

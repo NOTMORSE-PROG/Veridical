@@ -178,4 +178,114 @@ describe("EscalatedPanel", () => {
     const body = JSON.parse(init.body as string) as { resolution: string; reason: string };
     expect(body).toEqual({ resolution: "accept_majority", reason: "AI's grading looks correct on review." });
   });
+
+  it("V-071 (BUG-054, live-reproduced 3/3 times): focus moves to the panel heading after a resolution, not <body>", async () => {
+    let resolved = false;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === "string" ? input : input.toString();
+      if (url.includes("/resolve") && init?.method === "POST") {
+        resolved = true;
+        return new Response(
+          JSON.stringify({
+            check_result_id: 4,
+            outcome: "passed",
+            score: 100,
+            report: {
+              check_run_id: 5,
+              manuscript_group_label: "Ungrouped",
+              rubric_title: "Format",
+              status: "ready",
+              composite_score: 95,
+              thresholds: { ready_min_score: 85, not_ready_max_score: 60 },
+              reason: null,
+              flag_deduction: 0,
+              unresolved_high_flag_count: 0,
+              results: [],
+            },
+          }),
+          { status: 200 },
+        );
+      }
+      if (url.includes("/escalated")) {
+        // Two items pending, then one once the first is resolved -- the
+        // panel stays mounted throughout, so this exercises the "focus
+        // stays on the still-rendered heading" case, not the separate
+        // "last item resolved, panel unmounts" case this fix doesn't cover.
+        return new Response(JSON.stringify(resolved ? [SPLIT_VOTE] : [SPLIT_VOTE, REAL_MAJORITY]), {
+          status: 200,
+        });
+      }
+      return new Response("{}", { status: 200 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    renderWithProviders(<EscalatedPanel checkRunId={5} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Accept AI: pass" }));
+    fireEvent.change(screen.getByPlaceholderText("Why are you resolving this way?"), {
+      target: { value: "AI's grading looks correct on review." },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Confirm" }));
+
+    await waitFor(() =>
+      expect(document.activeElement).toBe(screen.getByRole("heading", { name: /Needs your review/ })),
+    );
+  });
+
+  it("ux-critic finding (P1, live-instrumented): resolving the LAST escalation keeps the aria-live announcement mounted instead of destroying it in the same pass, and moves focus off <body>", async () => {
+    let resolved = false;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === "string" ? input : input.toString();
+      if (url.includes("/resolve") && init?.method === "POST") {
+        resolved = true;
+        return new Response(
+          JSON.stringify({
+            check_result_id: 4,
+            outcome: "passed",
+            score: 100,
+            report: {
+              check_run_id: 5,
+              manuscript_group_label: "Ungrouped",
+              rubric_title: "Format",
+              status: "ready",
+              composite_score: 95,
+              thresholds: { ready_min_score: 85, not_ready_max_score: 60 },
+              reason: null,
+              flag_deduction: 0,
+              unresolved_high_flag_count: 0,
+              results: [],
+            },
+          }),
+          { status: 200 },
+        );
+      }
+      if (url.includes("/escalated")) {
+        // Only ONE item pending -- resolving it drops the list to empty,
+        // which is exactly the transition that used to unmount the whole
+        // panel (live region included) before it could be announced.
+        return new Response(JSON.stringify(resolved ? [] : [REAL_MAJORITY]), { status: 200 });
+      }
+      return new Response("{}", { status: 200 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    renderWithProviders(<EscalatedPanel checkRunId={5} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Accept AI: pass" }));
+    fireEvent.change(screen.getByPlaceholderText("Why are you resolving this way?"), {
+      target: { value: "AI's grading looks correct on review." },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Confirm" }));
+
+    // The heading and the resolved row are both gone (0 items left)...
+    await waitFor(() =>
+      expect(screen.queryByRole("heading", { name: /Needs your review/ })).not.toBeInTheDocument(),
+    );
+    // ...but the success text is still in the DOM, not discarded along with
+    // the panel it used to live inside.
+    expect(
+      screen.getByText("Resolved as passed. Composite score is now 95%."),
+    ).toBeInTheDocument();
+    // And focus did not fall back to <body> -- it moved to the surviving
+    // live region, the only thing left to hold it.
+    await waitFor(() => expect(document.activeElement).not.toBe(document.body));
+  });
 });

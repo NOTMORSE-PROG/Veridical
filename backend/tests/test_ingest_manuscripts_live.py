@@ -9,11 +9,11 @@ import pytest
 from sqlalchemy import text
 
 from app.ingest.service import list_manuscripts
-from app.models.enums import CheckRunStatus, ReadinessStatus
+from app.models.enums import CheckKind, CheckRunStatus, ReadinessStatus, ResultOutcome
 from app.models.instructor import Instructor
 from app.models.manuscript import Manuscript
 from app.models.rubric import Rubric
-from app.models.run import CheckRun, ReadinessReport
+from app.models.run import CheckResult, CheckRun, ReadinessReport
 
 live = pytest.mark.skipif(
     "DATABASE_URL" not in os.environ,
@@ -255,3 +255,51 @@ async def test_undecided_report_has_a_null_latest_decision_not_a_fabricated_one(
 
         page = await list_manuscripts(session, instructor.id)
         assert page.items[0].latest_decision is None
+
+
+async def test_escalations_awaiting_review_is_surfaced_per_manuscript(session_factory):
+    """V-071 (AC1): `newcomer`'s baseline walkthrough had to open reports
+    one at a time to find which manuscript held the dashboard's escalation
+    count -- this field lets the row say so directly."""
+    async with session_factory() as session:
+        instructor = Instructor(email="escalated@demo.local", display_name="Escalated Test")
+        session.add(instructor)
+        await session.commit()
+        has_escalations = Manuscript(instructor_id=instructor.id, group_label="G1", file_ref="x.pdf")
+        clean = Manuscript(instructor_id=instructor.id, group_label="G2", file_ref="y.pdf")
+        rubric = Rubric(instructor_id=instructor.id, title="Format", source_file="r.pdf")
+        session.add_all([has_escalations, clean, rubric])
+        await session.commit()
+
+        run_a = CheckRun(
+            manuscript_id=has_escalations.id, rubric_id=rubric.id, status=CheckRunStatus.done
+        )
+        run_b = CheckRun(manuscript_id=clean.id, rubric_id=rubric.id, status=CheckRunStatus.done)
+        session.add_all([run_a, run_b])
+        await session.commit()
+        session.add_all(
+            [
+                CheckResult(
+                    check_run_id=run_a.id,
+                    kind=CheckKind.semantic,
+                    outcome=ResultOutcome.escalated,
+                ),
+                CheckResult(
+                    check_run_id=run_a.id,
+                    kind=CheckKind.semantic,
+                    outcome=ResultOutcome.escalated,
+                ),
+                CheckResult(
+                    check_run_id=run_a.id, kind=CheckKind.semantic, outcome=ResultOutcome.passed
+                ),
+                CheckResult(
+                    check_run_id=run_b.id, kind=CheckKind.semantic, outcome=ResultOutcome.passed
+                ),
+            ]
+        )
+        await session.commit()
+
+        page = await list_manuscripts(session, instructor.id)
+        by_id = {item.id: item.escalations_awaiting_review for item in page.items}
+        assert by_id[has_escalations.id] == 2
+        assert by_id[clean.id] == 0

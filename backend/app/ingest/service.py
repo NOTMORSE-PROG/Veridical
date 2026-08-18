@@ -22,10 +22,10 @@ from app.ingest.patterns import load_patterns
 from app.ingest.schemas import ExtractionResult, ManuscriptListItem, PaginatedManuscripts
 from app.llm import LLMNotConfiguredError, get_llm_client_for
 from app.models.citation import Citation
-from app.models.enums import CheckRunStatus, IngestFailureReason, IngestStatus
+from app.models.enums import CheckRunStatus, IngestFailureReason, IngestStatus, ResultOutcome
 from app.models.manuscript import Manuscript
 from app.models.rubric import Rubric
-from app.models.run import CheckRun, ReadinessReport
+from app.models.run import CheckResult, CheckRun, ReadinessReport
 
 # One extractor per supported suffix. Each is a sync callable executed off
 # the event loop. Legacy .doc is deliberately absent: rejected with a clear
@@ -339,6 +339,30 @@ async def list_manuscripts(
         run = latest_done_by_manuscript.get(manuscript_id)
         return family_by_run.get(run.id) if run is not None else None
 
+    # V-071 (AC1, BUG-058-adjacent): the dashboard's "N escalations awaiting
+    # your review" count had no way to point at WHICH manuscript held them
+    # -- `newcomer`'s baseline walkthrough had to open reports one at a
+    # time, reading each one fully, to find the right row. Same one-query,
+    # no-N+1 shape as `decision_by_run` above, scoped to the same latest-
+    # done runs.
+    escalated_by_run: dict[int, int] = {}
+    if done_run_ids:
+        rows = (
+            await session.execute(
+                select(CheckResult.check_run_id, func.count())
+                .where(
+                    CheckResult.check_run_id.in_(done_run_ids),
+                    CheckResult.outcome == ResultOutcome.escalated,
+                )
+                .group_by(CheckResult.check_run_id)
+            )
+        ).all()
+        escalated_by_run = dict(rows)
+
+    def _escalations_awaiting_review(manuscript_id: int) -> int:
+        run = latest_done_by_manuscript.get(manuscript_id)
+        return escalated_by_run.get(run.id, 0) if run is not None else 0
+
     items = [
         ManuscriptListItem(
             id=m.id,
@@ -354,6 +378,7 @@ async def list_manuscripts(
             latest_done_check_run_id=_latest_done_id(m.id),
             latest_decision=_latest_decision(m.id),
             latest_done_rubric_family_id=_latest_done_rubric_family_id(m.id),
+            escalations_awaiting_review=_escalations_awaiting_review(m.id),
         )
         for m in manuscripts
     ]

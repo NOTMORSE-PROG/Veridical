@@ -282,12 +282,37 @@ export function RerunModal({ onClose, initialManuscriptIds }: RerunModalProps) {
                 criteria.
               </p>
 
-              {!hasSubmitted && (
-                <p className="text-sm text-ink-secondary">
-                  All manuscripts previously checked against {activeFamily.title} are selected by
-                  default. Deselect any you don't want to re-run.
-                </p>
-              )}
+              {/* V-071 (newcomer finding, live-reproduced): this paragraph
+                  used to unconditionally claim "all manuscripts... selected
+                  by default" even when opened from a single row's Re-run
+                  button, where only that one manuscript is preselected --
+                  the checkboxes were right and the sentence describing them
+                  was wrong. */}
+              {!hasSubmitted &&
+                (initialManuscriptIds && initialManuscriptIds.length > 0 ? (
+                  // A count fixed at seeding time, not a live read of
+                  // `selected` -- the sentence describes what was selected
+                  // BY DEFAULT, and must not silently start describing
+                  // whatever the instructor has toggled since. If nothing
+                  // requested actually made it in (every id excluded), the
+                  // paragraph below this one already explains that; saying
+                  // "selected by default" here too would contradict it.
+                  initialManuscriptIds.length - excludedInitialCount > 0 && (
+                    <p className="text-sm text-ink-secondary">
+                      Only the manuscript{initialManuscriptIds.length - excludedInitialCount === 1
+                        ? ""
+                        : "s"}{" "}
+                      you chose{" "}
+                      {initialManuscriptIds.length - excludedInitialCount === 1 ? "is" : "are"}{" "}
+                      selected by default. Select others below if you want to re-run them too.
+                    </p>
+                  )
+                ) : (
+                  <p className="text-sm text-ink-secondary">
+                    All manuscripts previously checked against {activeFamily.title} are selected by
+                    default. Deselect any you don't want to re-run.
+                  </p>
+                ))}
 
               {!hasSubmitted && excludedInitialCount > 0 && (
                 <p className="rounded-md bg-status-attention-bg px-3 py-2 text-sm text-status-attention-text">

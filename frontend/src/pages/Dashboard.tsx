@@ -64,9 +64,11 @@ function EmptyState({ onUpload }: { onUpload: () => void }) {
 function PopulatedDashboard({
   onUploadManuscript,
   onRerun,
+  onStartCheck,
 }: {
   onUploadManuscript: () => void;
   onRerun: (manuscriptId: number) => void;
+  onStartCheck: (manuscriptId: number) => void;
 }) {
   const { data: stats } = useDashboardStats();
   const [page, setPage] = useState(1);
@@ -78,6 +80,7 @@ function PopulatedDashboard({
         onPageChange={setPage}
         onUploadManuscript={onUploadManuscript}
         onRerun={onRerun}
+        onStartCheck={onStartCheck}
       />
     </>
   );
@@ -178,6 +181,10 @@ export function DashboardPage() {
           onRerun={(manuscriptId) => {
             setRerunInitialIds([manuscriptId]);
             setRerunOpen(true);
+          }}
+          onStartCheck={(manuscriptId) => {
+            setPreselectManuscriptId(manuscriptId);
+            openNewCheck();
           }}
         />
       ) : (

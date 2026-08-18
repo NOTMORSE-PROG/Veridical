@@ -2,7 +2,7 @@
 // disagreements the AI never auto-decided (charter rule 1). Resolving is
 // the ONLY way one of these becomes a score contribution — never
 // automatic.
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ApiError } from "../api/client";
 import type { EscalatedItemOut, EscalationResolution } from "../api/types";
 import { cx } from "../components/cx";
@@ -206,9 +206,40 @@ function ResolveRow({
 export function EscalatedPanel({ checkRunId }: { checkRunId: number }) {
   const { data: items, isPending } = useEscalatedItems(checkRunId);
   const [announcement, setAnnouncement] = useState("");
+  const headingRef = useRef<HTMLHeadingElement>(null);
+  const announcementRef = useRef<HTMLParagraphElement>(null);
+
+  const hasItems = !!items && items.length > 0;
+
+  // V-071 (BUG-054, live-reproduced 3/3 times): focus used to drop to
+  // <body> after every escalation resolution, stranding a keyboard user at
+  // the top of a document that can run to 34 flags. The heading already
+  // carried tabIndex={-1} for exactly this -- nothing had ever called
+  // .focus() on it. Called synchronously in the mutation's onSuccess, so
+  // the heading is still mounted at the moment this runs even when this
+  // was the LAST item (the query hasn't refetched to 0 yet) -- the case
+  // that needs more than this is handled by the effect below.
+  function handleResolved(message: string) {
+    setAnnouncement(message);
+    headingRef.current?.focus();
+  }
+
+  // ux-critic finding (P1, live-instrumented with a MutationObserver):
+  // resolving the LAST escalation used to unmount this whole panel --
+  // aria-live region included -- in the same render pass that received
+  // the success text, which is a well-documented way for a screen reader
+  // to drop the announcement entirely (WAI-ARIA Authoring Practices warn
+  // against destroying a live region right after it updates). The
+  // announcement paragraph now renders independently of `hasItems` so it
+  // survives that transition, and once there's no heading left to hold
+  // focus, this effect moves it here instead of letting focus fall back to
+  // <body>.
+  useEffect(() => {
+    if (!hasItems && announcement) announcementRef.current?.focus();
+  }, [hasItems, announcement]);
 
   if (isPending) return null;
-  if (!items || items.length === 0) return null;
+  if (!hasItems && !announcement) return null;
 
   return (
     // Left accent bar carries the "unresolved judgment" signal (V-056) —
@@ -222,22 +253,30 @@ export function EscalatedPanel({ checkRunId }: { checkRunId: number }) {
       className="overflow-hidden rounded-lg bg-panel"
       style={{ borderLeftWidth: "4px", borderLeftColor: "var(--color-status-caution-text)" }}
     >
-      <div className="flex flex-wrap items-center gap-2 border-b border-border bg-status-caution-bg px-3.5 py-2.5">
-        <CautionIcon />
-        <h2 id="escalated-heading" tabIndex={-1} className="scroll-mt-16 text-sm font-bold text-ink">
-          Needs your review ({items.length})
-        </h2>
-        <span className="flex-1" />
-        <span className="text-xs text-ink-tertiary">
-          Escalated by self-consistency vote, never auto-decided (F3.5).
-        </span>
-      </div>
-      <p aria-live="polite" className="sr-only">
+      {hasItems && (
+        <div className="flex flex-wrap items-center gap-2 border-b border-border bg-status-caution-bg px-3.5 py-2.5">
+          <CautionIcon />
+          <h2
+            id="escalated-heading"
+            ref={headingRef}
+            tabIndex={-1}
+            className="scroll-mt-16 text-sm font-bold text-ink"
+          >
+            Needs your review ({items!.length})
+          </h2>
+          <span className="flex-1" />
+          <span className="text-xs text-ink-tertiary">
+            Escalated by self-consistency vote, never auto-decided (F3.5).
+          </span>
+        </div>
+      )}
+      <p ref={announcementRef} tabIndex={-1} aria-live="polite" className="sr-only">
         {announcement}
       </p>
-      {items.map((item) => (
-        <ResolveRow key={item.check_result_id} item={item} checkRunId={checkRunId} onResolved={setAnnouncement} />
-      ))}
+      {hasItems &&
+        items!.map((item) => (
+          <ResolveRow key={item.check_result_id} item={item} checkRunId={checkRunId} onResolved={handleResolved} />
+        ))}
     </div>
   );
 }

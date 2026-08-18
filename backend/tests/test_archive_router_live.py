@@ -154,6 +154,7 @@ def seeded(client, api_scratch_url, tmp_path):
 
                 ids["mine"] = mine.id
                 ids["theirs"] = theirs.id
+                ids["owner_id"] = owner.id
                 ids["upload_path"] = str(upload_path)
                 ids["raw_path"] = str(raw_path)
         finally:
@@ -175,6 +176,49 @@ def test_lists_archive_state_including_embedding_presence(seeded):
     assert item["has_archive"] is True
     assert item["purged_at"] is None
     assert item["latest_check_run_status"] == "done"
+    assert item["ingest_status"] == "done"
+
+
+def test_ingest_failure_reads_as_failed_here_not_not_checked_yet(seeded, api_scratch_url):
+    # V-071 (BUG-058): this endpoint used to omit ingest_status entirely, so
+    # a manuscript whose ingestion itself failed was indistinguishable here
+    # from one that simply hadn't been run yet, while the dashboard's
+    # GET /manuscripts (same underlying column) correctly read "failed".
+    import asyncio
+
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
+    from app.models.enums import IngestFailureReason, IngestStatus
+    from app.models.manuscript import Manuscript
+    from tests.test_schema import sqlalchemy_url
+
+    client, ids = seeded
+
+    async def seed_failed(owner_id: int) -> int:
+        engine = create_async_engine(sqlalchemy_url(api_scratch_url))
+        try:
+            factory = async_sessionmaker(engine, expire_on_commit=False)
+            async with factory() as session:
+                failed = Manuscript(
+                    instructor_id=owner_id,
+                    group_label="G-failed",
+                    file_ref="",
+                    ingest_status=IngestStatus.failed,
+                    ingest_failure_reason=IngestFailureReason.unreadable_format,
+                )
+                session.add(failed)
+                await session.commit()
+                return failed.id
+        finally:
+            await engine.dispose()
+
+    failed_id = asyncio.run(seed_failed(ids["owner_id"]))
+
+    resp = client.get("/archive")
+    assert resp.status_code == 200
+    items = {item["manuscript_id"]: item for item in resp.json()["items"]}
+    assert items[failed_id]["ingest_status"] == "failed"
+    assert items[failed_id]["latest_check_run_status"] is None
 
 
 def test_purge_deletes_embeddings_and_files_but_keeps_the_manuscript_and_run(seeded):
