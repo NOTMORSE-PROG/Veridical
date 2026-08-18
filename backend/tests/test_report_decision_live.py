@@ -115,6 +115,49 @@ async def _seed_decidable_run(session, *, rubric_is_active=True):
     return instructor, check_run
 
 
+async def _seed_not_ready_run(session):
+    """A DONE run with exactly one decidable (FAILED) criterion -- scores
+    0, well below the default `not_ready_max_score` floor, so its status
+    is `not_ready`. BUG-095's test fixture: approving this without a
+    reason must be rejected."""
+    instructor = Instructor(email=f"notready-{id(session)}@test.local", display_name="NR Test")
+    session.add(instructor)
+    await session.commit()
+    manuscript = Manuscript(instructor_id=instructor.id, group_label="G", file_ref="x.pdf")
+    rubric = Rubric(
+        instructor_id=instructor.id, title="Format", source_file="r.pdf", is_active=True
+    )
+    session.add_all([manuscript, rubric])
+    await session.commit()
+    criterion = Criterion(
+        rubric_id=rubric.id,
+        type="structural",
+        text="Has an abstract",
+        evidence=None,
+        weight=Decimal("100"),
+        position=0,
+    )
+    session.add(criterion)
+    await session.commit()
+    check_run = CheckRun(
+        manuscript_id=manuscript.id, rubric_id=rubric.id, status=CheckRunStatus.done
+    )
+    session.add(check_run)
+    await session.commit()
+    check_result = CheckResult(
+        check_run_id=check_run.id,
+        criterion_id=criterion.id,
+        kind=CheckKind.structural,
+        outcome=ResultOutcome.failed,
+        score=Decimal("0"),
+        detail={"basis": "rule"},
+    )
+    session.add(check_result)
+    await session.commit()
+    await aggregate_and_score(session, check_run.id)
+    return instructor, check_run
+
+
 async def _add_escalated_criterion(session, check_run):
     criterion = Criterion(
         rubric_id=check_run.rubric_id,
@@ -157,10 +200,16 @@ async def test_decides_and_freezes_the_report(session_factory):
 
 
 async def test_note_is_optional(session_factory):
+    """BUG-095: a note is optional when the decision AGREES with
+    VERIDICAL's own computed verdict -- `_seed_decidable_run` produces a
+    fully-passing, `ready` report, so approving it is the agreeing case.
+    Disagreeing decisions (e.g. rejecting a `ready` report) require a
+    reason -- see `test_deciding_against_the_verdict_requires_a_reason`
+    below."""
     async with session_factory() as session:
         instructor, check_run = await _seed_decidable_run(session)
-        report = await decide_report(session, check_run.id, instructor.id, "rejected", None)
-        assert report.decision == "rejected"
+        report = await decide_report(session, check_run.id, instructor.id, "approved", None)
+        assert report.decision == "approved"
         assert report.decision_note is None
 
 
@@ -190,6 +239,67 @@ async def test_deciding_an_already_decided_report_is_rejected(session_factory):
         await decide_report(session, check_run.id, instructor.id, "approved", None)
         with pytest.raises(ConflictError):
             await decide_report(session, check_run.id, instructor.id, "rejected", None)
+
+
+async def test_approving_a_not_ready_report_without_a_reason_is_rejected(session_factory):
+    """BUG-095: approving a manuscript VERIDICAL itself scored `not_ready`
+    used to need no reason at all -- the single highest-stakes,
+    most panel-visible action in the product, while overriding one
+    low-severity flag or resolving one escalation both already required
+    one."""
+    async with session_factory() as session:
+        instructor, check_run = await _seed_not_ready_run(session)
+        with pytest.raises(ConflictError, match="disagrees"):
+            await decide_report(session, check_run.id, instructor.id, "approved", None)
+
+        # Confirmed still undecided -- the block is real, not advisory.
+        report = await get_report(session, check_run.id, instructor.id)
+        assert report.decision is None
+
+
+async def test_approving_a_not_ready_report_with_a_reason_succeeds(session_factory):
+    async with session_factory() as session:
+        instructor, check_run = await _seed_not_ready_run(session)
+        report = await decide_report(
+            session,
+            check_run.id,
+            instructor.id,
+            "approved",
+            "Panel already reviewed the flagged sections and cleared them in person.",
+        )
+        assert report.decision == "approved"
+        assert report.decision_note == (
+            "Panel already reviewed the flagged sections and cleared them in person."
+        )
+
+
+async def test_rejecting_a_ready_report_without_a_reason_is_rejected(session_factory):
+    async with session_factory() as session:
+        instructor, check_run = await _seed_decidable_run(session)  # status: ready
+        with pytest.raises(ConflictError, match="disagrees"):
+            await decide_report(session, check_run.id, instructor.id, "rejected", None)
+
+
+async def test_approving_a_ready_report_without_a_reason_is_allowed(session_factory):
+    """The point is capturing DISAGREEMENT with the system, not demanding
+    a reason for every decision -- when decision and verdict agree, a
+    note stays optional (ground rule 1: the human's judgment is the
+    valuable signal, not paperwork for its own sake)."""
+    async with session_factory() as session:
+        instructor, check_run = await _seed_decidable_run(session)  # status: ready
+        report = await decide_report(session, check_run.id, instructor.id, "approved", None)
+        assert report.decision == "approved"
+        assert report.decision_note is None
+
+
+async def test_returning_a_report_for_revision_never_requires_a_reason(session_factory):
+    """ "Returned" isn't a claim of agreement OR disagreement with the
+    verdict -- it's neither an approval nor a rejection, so it's never in
+    `DECISIONS_REQUIRING_A_REASON` regardless of status."""
+    async with session_factory() as session:
+        instructor, check_run = await _seed_not_ready_run(session)
+        report = await decide_report(session, check_run.id, instructor.id, "returned", None)
+        assert report.decision == "returned"
 
 
 async def test_resolving_an_escalation_is_blocked_once_the_report_is_decided(session_factory):
@@ -243,7 +353,13 @@ async def test_reopening_a_never_decided_report_is_rejected(session_factory):
 async def test_reopen_writes_a_distinct_audit_event_preserving_the_prior_decision(session_factory):
     async with session_factory() as session:
         instructor, check_run = await _seed_decidable_run(session)
-        await decide_report(session, check_run.id, instructor.id, "rejected", None)
+        # BUG-095: rejecting a `ready` report (`_seed_decidable_run`'s
+        # status) disagrees with VERIDICAL's own verdict and now requires
+        # a reason -- unrelated to what THIS test asserts (the reopen
+        # audit trail), so a real note here, not None.
+        await decide_report(
+            session, check_run.id, instructor.id, "rejected", "Found a citation issue on review."
+        )
         await reopen_report(session, check_run.id, instructor.id, "Instructor changed their mind.")
 
         from app.models.audit import AuditLog

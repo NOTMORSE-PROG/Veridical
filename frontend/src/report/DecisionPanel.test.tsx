@@ -170,6 +170,13 @@ describe("DecisionPanel", () => {
     );
     renderWithProviders(<DecisionPanel report={BASE_REPORT} manuscriptLabel="G-11" />);
     fireEvent.click(screen.getByRole("button", { name: "Reject" }));
+    // BASE_REPORT is "ready" -- rejecting it disagrees with the verdict
+    // (BUG-095), so a reason is required before the request is even
+    // sent; fill one in so this test reaches the server's 409, which is
+    // what it's actually asserting.
+    fireEvent.change(within(screen.getByRole("dialog")).getByLabelText("Reason (required)"), {
+      target: { value: "Found unresolved formatting issues on review." },
+    });
     fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Reject" }));
 
     expect(await screen.findByRole("alert")).toHaveTextContent(
