@@ -301,6 +301,138 @@ def test_export_shows_weight_as_an_importance_label_never_a_percentage(client, a
     assert "(High importance)" in full_text
 
 
+def test_export_never_drops_a_pending_criterion_from_a_decided_report(client, api_scratch_url):
+    """BUG-081: `report/service.py`'s `decide_report` already refuses to
+    decide a report while a criterion is still escalated/quota_exhausted/
+    api_down (`test_deciding_with_unresolved_escalations_is_blocked_with_
+    the_count`, `test_report_decision_live.py`) -- the specific
+    reachability path the ticket described (decide with escalations
+    pending) does not reproduce through the normal decide flow, and that
+    guard predates this ticket. But `build_report_pdf` decided whether to
+    render a pending row purely from `is_draft`, with no defense if a
+    decided report's `results` ever contained a pending row anyway (stale
+    data from before that guard existed, or a future regression in it) --
+    it would silently vanish from BOTH the pending section (`is_draft`
+    false) and the Criteria Results table (`shown_ids` excludes pending
+    rows unconditionally), while the on-screen `EscalatedPanel.tsx` still
+    shows it. This seeds exactly that state directly at the ORM level
+    (bypassing `decide_report`, the only way it could occur) and proves
+    the pending criterion is still disclosed in the PDF handed to the
+    panel."""
+    import asyncio
+
+    from sqlalchemy import select, text
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
+    from app.db import sqlalchemy_url
+    from app.models.enums import CheckKind, CheckRunStatus, ReportDecision, ResultOutcome
+    from app.models.instructor import Instructor
+    from app.models.manuscript import Manuscript
+    from app.models.rubric import Criterion, Rubric
+    from app.models.run import CheckResult, CheckRun, ReadinessReport
+    from app.report.service import aggregate_and_score
+
+    async def seed():
+        engine = create_async_engine(sqlalchemy_url(api_scratch_url))
+        try:
+            factory = async_sessionmaker(engine, expire_on_commit=False)
+            async with factory() as session:
+                await session.execute(
+                    text(
+                        "TRUNCATE readiness_report, check_result, check_run, criterion, "
+                        "rubric, manuscript, instructor RESTART IDENTITY CASCADE"
+                    )
+                )
+                instructor = Instructor(
+                    email="prof2@tip.edu.ph",
+                    display_name="Prof",
+                    password_hash=hash_password("s3cret!"),
+                )
+                session.add(instructor)
+                await session.commit()
+                manuscript = Manuscript(
+                    instructor_id=instructor.id, group_label="G-12", file_ref="x.pdf"
+                )
+                rubric = Rubric(
+                    instructor_id=instructor.id, title="Format", source_file="r.pdf", is_active=True
+                )
+                session.add_all([manuscript, rubric])
+                await session.commit()
+                decided_criterion = Criterion(
+                    rubric_id=rubric.id,
+                    type="structural",
+                    text="Has an abstract",
+                    evidence=None,
+                    weight=Decimal("10"),
+                    position=0,
+                )
+                stuck_criterion = Criterion(
+                    rubric_id=rubric.id,
+                    type="semantic",
+                    text="Chapter 1 states the research problem clearly enough to defend",
+                    evidence=None,
+                    weight=Decimal("10"),
+                    position=1,
+                )
+                session.add_all([decided_criterion, stuck_criterion])
+                await session.commit()
+                check_run = CheckRun(manuscript_id=manuscript.id, rubric_id=rubric.id)
+                session.add(check_run)
+                await session.commit()
+                session.add(
+                    CheckResult(
+                        check_run_id=check_run.id,
+                        criterion_id=decided_criterion.id,
+                        kind=CheckKind.structural,
+                        outcome=ResultOutcome.passed,
+                        score=100.0,
+                        detail={"rule_id": "required_section_present", "anchor": "page 2"},
+                    )
+                )
+                session.add(
+                    CheckResult(
+                        check_run_id=check_run.id,
+                        criterion_id=stuck_criterion.id,
+                        kind=CheckKind.semantic,
+                        outcome=ResultOutcome.escalated,
+                        detail={"reason": "Split vote"},
+                    )
+                )
+                check_run.status = CheckRunStatus.done
+                await session.commit()
+                await aggregate_and_score(session, check_run.id)
+                # Decided directly at the ORM level -- `decide_report`
+                # itself would refuse this (proven by the test named
+                # above); this simulates the only way a decided report
+                # could ever end up with a still-pending row.
+                report = await session.scalar(
+                    select(ReadinessReport).where(ReadinessReport.check_run_id == check_run.id)
+                )
+                report.decision = ReportDecision.approved
+                await session.commit()
+                return check_run.id
+        finally:
+            await engine.dispose()
+
+    check_run_id = asyncio.run(seed())
+    client.post("/auth/login", json={"email": "prof2@tip.edu.ph", "password": "s3cret!"})
+
+    resp = client.get(f"/check-runs/{check_run_id}/report/export.pdf")
+    assert resp.status_code == 200
+
+    import fitz
+
+    doc = fitz.open(stream=resp.content, filetype="pdf")
+    full_text = "\n".join(page.get_text() for page in doc)
+    # The stuck criterion must appear SOMEWHERE in the decided PDF --
+    # pre-fix, it appeared nowhere at all.
+    assert "Chapter 1 states the research problem clearly enough to defend" in full_text
+    # A decided report is not a draft -- must not claim to be one.
+    assert "Needs Your Review" not in full_text
+    assert "Unresolved At Time Of Decision" in full_text
+    assert "AI reached no verdict for this criterion." in full_text
+
+
 def test_export_survives_real_ampersand_bearing_citation_text(client, api_scratch_url):
     """ui-designer finding: a real seeded flag reads 'Reyes, J. P., & Cruz,
     M. A. (2023)...' -- reportlab's Paragraph parses its input as a mini

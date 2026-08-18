@@ -526,10 +526,23 @@ def build_report_pdf(data: ReportExportData) -> bytes:
     flow.append(Paragraph(escape(_explainer(report)), styles["body"]))
     flow.append(Spacer(1, 10))
 
-    # 3. Pending escalations (only when still undecided with unresolved items).
+    # 3. Pending escalations. BUG-081: this used to be gated on `is_draft`,
+    # so a criterion still escalated at decide time (blocked in the normal
+    # flow by `decide_report`'s own gate, `service.py`, but not something
+    # this rendering function should assume will always hold -- data can
+    # predate that gate or reach here by a path this function doesn't
+    # control) fell out of BOTH this section and the Criteria Results
+    # table below (`shown_ids` excludes pending rows unconditionally) --
+    # disappearing from the decided PDF entirely while `EscalatedPanel.tsx`
+    # still showed it on screen. Render it either way; only the wording
+    # changes with `is_draft`.
     pending = [r for r in report.results if r.outcome in NEEDS_REVIEW_OUTCOMES and not r.resolution]
-    if is_draft and pending:
-        flow.append(Paragraph("Needs Your Review", styles["h2"]))
+    if pending:
+        flow.append(
+            Paragraph(
+                "Needs Your Review" if is_draft else "Unresolved At Time Of Decision", styles["h2"]
+            )
+        )
         for row in pending:
             block = [
                 Paragraph(
@@ -539,7 +552,9 @@ def build_report_pdf(data: ReportExportData) -> bytes:
                 ),
                 Paragraph(_pending_review_reason(row.outcome), styles["body"]),
                 Paragraph(
-                    "Not yet resolved. This is why this export is marked DRAFT.",
+                    "Not yet resolved. This is why this export is marked DRAFT."
+                    if is_draft
+                    else "Not yet resolved when the instructor recorded this decision.",
                     styles["body_bold"],
                 ),
             ]
@@ -691,6 +706,20 @@ def build_report_pdf(data: ReportExportData) -> bytes:
                 )
             )
             flow.append(note_table)
+        # BUG-081: this used to be silent for a decided report -- the
+        # undecided branch below always said so, the decided branch never
+        # did, even though "Unresolved At Time Of Decision" above can be
+        # non-empty for a decided report too.
+        if pending:
+            flow.append(Spacer(1, 4))
+            flow.append(
+                Paragraph(
+                    f"{len(pending)} criteri{'on' if len(pending) == 1 else 'a'} "
+                    f"{'was' if len(pending) == 1 else 'were'} still unresolved when this "
+                    "decision was recorded. See Unresolved At Time Of Decision above.",
+                    styles["body"],
+                )
+            )
     else:
         flow.append(
             Paragraph("No decision has been recorded for this manuscript yet.", styles["body"])
@@ -698,8 +727,8 @@ def build_report_pdf(data: ReportExportData) -> bytes:
         if pending:
             flow.append(
                 Paragraph(
-                    f"{len(pending)} criteria still needed the instructor's review at the time "
-                    "this document was generated.",
+                    f"{len(pending)} criteri{'on' if len(pending) == 1 else 'a'} still needed the "
+                    "instructor's review at the time this document was generated.",
                     styles["body"],
                 )
             )
