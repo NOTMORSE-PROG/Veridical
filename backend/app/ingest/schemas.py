@@ -126,6 +126,9 @@ class IngestSummary(BaseModel):
     (4c/4f) needs to show; the full extraction lives in the raw store."""
 
     manuscript_id: int
+    # BUG-043: echoes back what was actually persisted, so a client that
+    # sent group_label has a way to notice if it was silently dropped.
+    group_label: str
     ingest_status: str
     page_count: int
     anchor_kind: Literal["page", "paragraph"]

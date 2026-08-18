@@ -89,6 +89,9 @@ export interface PaginatedManuscripts {
  * deliberately omitted -- nothing in this UI renders it. */
 export interface IngestSummary {
   manuscript_id: number;
+  // BUG-043: echoes back what the server actually persisted, so a client
+  // that sent a group label has a way to notice if it was ever dropped.
+  group_label: string;
   ingest_status: string;
   page_count: number;
   anchor_kind: "page" | "paragraph";

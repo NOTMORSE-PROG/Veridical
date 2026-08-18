@@ -18,10 +18,11 @@ export function useManuscripts() {
 
 // V-059: the upload screen the product's own description promises
 // ("uploads a required format... and a manuscript") but never shipped.
-// `group_label` is a query parameter on the real endpoint, not a form
-// field (confirmed live against the running OpenAPI schema) -- same
-// query-param-plus-FormData shape `useUploadRubric` already uses for
-// `title`/`familyId`.
+// BUG-043: `group_label` now travels as a form field on the same
+// multipart body as the file, not a query parameter -- the endpoint used
+// to silently discard a form field sent this way, and a query parameter
+// also wrote the group's identity into request/proxy logs and browser
+// history unnecessarily.
 export function useIngestManuscript() {
   const queryClient = useQueryClient();
   return useMutation({
@@ -29,8 +30,8 @@ export function useIngestManuscript() {
       const form = new FormData();
       form.append("file", file);
       const trimmed = groupLabel.trim();
-      const query = trimmed ? `?group_label=${encodeURIComponent(trimmed)}` : "";
-      return api.post<IngestSummary>(`/manuscripts/ingest${query}`, form);
+      if (trimmed) form.append("group_label", trimmed);
+      return api.post<IngestSummary>("/manuscripts/ingest", form);
     },
     onSuccess: () => {
       // Invalidates BOTH ["manuscripts", "picker"] (New Check's dropdown)
