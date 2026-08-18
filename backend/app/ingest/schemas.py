@@ -184,6 +184,11 @@ class ManuscriptListItem(BaseModel):
     # real quota (D-001) with no indication anywhere in the row. Sourced
     # from the SAME latest-done run as `latest_done_check_run_id`.
     latest_done_rubric_family_id: str | None = None
+    # V-071 (AC1): how many of the latest done run's criteria are escalated
+    # and awaiting the instructor's review -- lets the dashboard point
+    # directly at the manuscript holding them instead of just a total count
+    # with no row to follow.
+    escalations_awaiting_review: int = 0
 
     model_config = {"from_attributes": True}
 

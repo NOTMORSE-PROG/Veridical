@@ -14,6 +14,7 @@ const ARCHIVED: ArchiveItemOut = {
   group_label: "G1",
   original_filename: "g1.pdf",
   created_at: "2026-08-01T00:00:00Z",
+  ingest_status: "done",
   latest_check_run_status: "done",
   has_archive: true,
   purged_at: null,
@@ -24,6 +25,7 @@ const NOT_YET_ARCHIVED: ArchiveItemOut = {
   group_label: "G2",
   original_filename: "g2.pdf",
   created_at: "2026-08-02T00:00:00Z",
+  ingest_status: "done",
   latest_check_run_status: null,
   has_archive: false,
   purged_at: null,
@@ -34,9 +36,26 @@ const REMOVED: ArchiveItemOut = {
   group_label: "G3",
   original_filename: "g3.pdf",
   created_at: "2026-08-03T00:00:00Z",
+  ingest_status: "done",
   latest_check_run_status: "done",
   has_archive: false,
   purged_at: "2026-08-10T00:00:00Z",
+};
+
+// V-071 (BUG-058): a manuscript whose ingestion itself failed used to show
+// "Not checked yet" here -- indistinguishable from a file that simply
+// hadn't been run -- while the dashboard correctly read "Ingestion failed"
+// for the identical row. Both screens now go through the same
+// `manuscriptStatus()` function.
+const INGEST_FAILED: ArchiveItemOut = {
+  manuscript_id: 4,
+  group_label: "G4",
+  original_filename: "g4.pdf",
+  created_at: "2026-08-04T00:00:00Z",
+  ingest_status: "failed",
+  latest_check_run_status: null,
+  has_archive: false,
+  purged_at: null,
 };
 
 function page(items: ArchiveItemOut[]): PaginatedArchive {
@@ -85,6 +104,18 @@ describe("ArchivePage", () => {
     // already-purged rows have nothing to purge.
     expect(screen.getAllByRole("button", { name: /^Purge/ }).length).toBe(2);
     expect(screen.getAllByText(/^Removed /).length).toBe(2);
+  });
+
+  it("V-071 (BUG-058): an ingestion-failed manuscript reads 'Ingestion failed' here, not 'Not checked yet' (agrees with the dashboard)", async () => {
+    vi.stubGlobal(
+      "fetch",
+      stubFetchByPath({ "/archive": page([NOT_YET_ARCHIVED, INGEST_FAILED]) }),
+    );
+    renderWithProviders(<ArchivePage />);
+    await screen.findAllByText("G2");
+
+    expect(screen.getAllByText("Not checked yet").length).toBe(2);
+    expect(screen.getAllByText("Ingestion failed").length).toBe(2);
   });
 
   it("Purge requires confirmation before the endpoint is called", async () => {

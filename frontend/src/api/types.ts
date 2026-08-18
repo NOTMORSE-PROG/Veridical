@@ -71,6 +71,10 @@ export interface ManuscriptListItem {
   // under a completely unrelated format, instead of defaulting it to
   // selected and burning quota grading it against the wrong rubric.
   latest_done_rubric_family_id: string | null;
+  // V-071 (AC1): how many of the latest done run's criteria are escalated
+  // and awaiting review -- lets the row itself say "this one needs you"
+  // instead of only a dashboard-wide total with nothing to point at.
+  escalations_awaiting_review: number;
 }
 
 export interface PaginatedManuscripts {
@@ -435,6 +439,9 @@ export interface ArchiveItemOut {
   group_label: string;
   original_filename: string | null;
   created_at: string;
+  // V-071 (BUG-058): needed so this screen's status pill can agree with
+  // the dashboard's about the same manuscript -- see manuscriptStatus().
+  ingest_status: "pending" | "processing" | "done" | "failed";
   latest_check_run_status: CheckRunStatus | null;
   has_archive: boolean;
   purged_at: string | null;
