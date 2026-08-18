@@ -106,7 +106,11 @@ describe("EscalatedPanel", () => {
     expect(confirmButton).not.toBeDisabled();
     fireEvent.click(confirmButton);
 
-    expect(await screen.findByText("Enter a reason before confirming.")).toBeInTheDocument();
+    const error = await screen.findByText("Enter a reason before confirming.");
+    expect(error).toBeInTheDocument();
+    // `ux-critic` finding (WCAG 4.1.3): must be announced without the
+    // user having to tab back to the field.
+    expect(error).toHaveAttribute("role", "alert");
     const reasonInput = screen.getByPlaceholderText("Why are you resolving this way?");
     expect(reasonInput).toHaveAttribute("aria-invalid", "true");
   });

@@ -161,7 +161,13 @@ function ResolveRow({
               )}
             />
             {reasonInvalid && (
-              <p id={reasonErrId} className="text-sm text-status-attention-text">
+              // `ux-critic` finding: WCAG 4.1.3 (Status Messages) -- this
+              // used to be associated only via aria-describedby, which a
+              // screen-reader user only hears if they tab back to the
+              // field. `role="alert"` announces it immediately on
+              // rejection, matching this component's own serverError
+              // paragraph below.
+              <p id={reasonErrId} role="alert" className="text-sm text-status-attention-text">
                 {reason.trim()
                   ? `Reason must be at least ${RESOLUTION_REASON_MIN_LENGTH} characters -- this appears in the report, the exported PDF, and any share link.`
                   : "Enter a reason before confirming."}

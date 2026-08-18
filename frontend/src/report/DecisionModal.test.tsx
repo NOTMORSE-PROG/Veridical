@@ -74,7 +74,11 @@ describe("DecisionModal (BUG-095)", () => {
     expect(confirmButton).not.toBeDisabled(); // validated on click, never pre-disabled
 
     fireEvent.click(confirmButton);
-    expect(await screen.findByText("Enter a reason before confirming.")).toBeInTheDocument();
+    const error = await screen.findByText("Enter a reason before confirming.");
+    expect(error).toBeInTheDocument();
+    // `ux-critic` finding (WCAG 4.1.3): must be announced without the
+    // user having to tab back to the field.
+    expect(error).toHaveAttribute("role", "alert");
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
