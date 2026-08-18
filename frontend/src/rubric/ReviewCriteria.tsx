@@ -794,7 +794,14 @@ export function ReviewCriteriaPage() {
                     inputMode="decimal"
                     value={row.weight}
                     disabled={readOnly}
-                    aria-label={`Criterion ${index + 1} weight (mobile)`}
+                    // `ux-critic` finding (BUG-098): "(mobile)" is
+                    // developer vocabulary leaking into what a screen
+                    // reader actually says out loud -- only one of the
+                    // two responsive copies is ever in the accessibility
+                    // tree at once (confirmed live: the other is
+                    // `display:none`), so there's no ambiguity to
+                    // disambiguate. Matches the desktop input's label.
+                    aria-label={`Criterion ${index + 1} weight`}
                     onChange={(event) => handleWeightChange(row.key, event.target.value)}
                     className="h-11 w-20 rounded-md border border-border-input px-2 text-base text-ink disabled:bg-page disabled:text-ink-tertiary"
                   />
