@@ -9,10 +9,25 @@ import { ApiError } from "../api/client";
 import type { Decision, ReportOut } from "../api/types";
 import { Modal, ModalBackdrop } from "../components/Modal";
 import { StatusPill } from "../components/StatusPill";
+import { cx } from "../components/cx";
 import { READINESS_LABEL, READINESS_TONE } from "../domain/readinessTone";
 import { useDecideReport } from "./useReport";
 
 const NOTE_MAX_LENGTH = 1000;
+
+// BUG-095: mirrors `service.py`'s `DECISIONS_REQUIRING_A_REASON` -- a
+// client-side pre-check so the instructor sees the requirement before
+// submitting, not just after a rejected request. The server re-checks
+// authoritatively regardless (this is UX, not the security boundary).
+// Required only when the decision DISAGREES with VERIDICAL's own
+// computed verdict -- approving a `not_ready`/`conditionally_ready`
+// report, or rejecting a `ready` one. "Returned" is neither an approval
+// nor a rejection, so it never requires one.
+const STATUSES_REQUIRING_A_REASON: Record<Decision, ReadonlySet<string>> = {
+  approved: new Set(["not_ready", "conditionally_ready"]),
+  rejected: new Set(["ready"]),
+  returned: new Set(),
+};
 
 const COPY: Record<
   Decision,
@@ -47,18 +62,24 @@ interface DecisionModalProps {
 
 export function DecisionModal({ decision, report, manuscriptLabel, onClose }: DecisionModalProps) {
   const [note, setNote] = useState("");
+  const [attempted, setAttempted] = useState(false);
   const decide = useDecideReport(report.check_run_id);
   const errorRef = useRef<HTMLParagraphElement>(null);
   const noteId = useId();
   const noteHintId = useId();
   const noteCounterId = useId();
+  const noteErrId = useId();
   const copy = COPY[decision];
+  const reasonRequired = STATUSES_REQUIRING_A_REASON[decision].has(report.status);
+  const reasonInvalid = attempted && reasonRequired && !note.trim();
 
   useEffect(() => {
     if (decide.isError) errorRef.current?.focus();
   }, [decide.isError]);
 
   function handleConfirm() {
+    setAttempted(true);
+    if (reasonRequired && !note.trim()) return;
     decide.mutate(
       { decision, note: note.trim() ? note.trim() : null },
       { onSuccess: () => onClose() },
@@ -119,7 +140,7 @@ export function DecisionModal({ decision, report, manuscriptLabel, onClose }: De
           </p>
           <div className="flex flex-col gap-1">
             <label htmlFor={noteId} className="text-sm font-medium text-ink">
-              Note (optional)
+              {reasonRequired ? "Reason (required)" : "Note (optional)"}
             </label>
             {/* Hint and counter kept OUTSIDE the label/via aria-describedby
                 rather than nested inside a <label> -- a nested counter
@@ -128,22 +149,49 @@ export function DecisionModal({ decision, report, manuscriptLabel, onClose }: De
                 ReopenModal's own reason field avoids for the same
                 reason). */}
             <p id={noteHintId} className="text-xs text-ink-tertiary">
-              Saved with this decision and visible in the audit trail, and to anyone
-              you give a share link to this report.
+              {/* BUG-095: every OTHER instructor justification on this
+                  product is required (overriding a flag, resolving an
+                  escalation, reopening a decision) -- this was the one
+                  exception, optional even when it overruled the system's
+                  own verdict. Required only when this decision DISAGREES
+                  with what VERIDICAL computed; still optional when they
+                  agree. */}
+              {reasonRequired
+                ? `This disagrees with VERIDICAL's own ${READINESS_LABEL[report.status].toLowerCase()} ` +
+                  "verdict, so explain why. Saved with this decision and visible in the audit " +
+                  "trail, and to anyone you give a share link to this report."
+                : "Saved with this decision and visible in the audit trail, and to anyone " +
+                  "you give a share link to this report."}
             </p>
             <textarea
               id={noteId}
               value={note}
-              onChange={(event) => setNote(event.target.value)}
+              onChange={(event) => {
+                setNote(event.target.value);
+                if (attempted) setAttempted(false);
+              }}
               rows={3}
               maxLength={NOTE_MAX_LENGTH}
               disabled={decide.isPending}
-              aria-describedby={`${noteHintId} ${noteCounterId}`}
-              className="rounded-md border border-border-input px-3 py-2 text-base text-ink"
+              aria-invalid={reasonInvalid ? "true" : undefined}
+              aria-describedby={
+                reasonInvalid
+                  ? `${noteHintId} ${noteCounterId} ${noteErrId}`
+                  : `${noteHintId} ${noteCounterId}`
+              }
+              className={cx(
+                "rounded-md border px-3 py-2 text-base text-ink",
+                reasonInvalid ? "border-2 border-status-attention-text" : "border-border-input",
+              )}
             />
             <p id={noteCounterId} className="text-xs text-ink-tertiary">
               {note.length} / {NOTE_MAX_LENGTH}
             </p>
+            {reasonInvalid && (
+              <p id={noteErrId} className="text-sm text-status-attention-text">
+                Enter a reason before confirming.
+              </p>
+            )}
           </div>
           {serverError && (
             <p

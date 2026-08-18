@@ -25,6 +25,7 @@ from app.models.enums import (
     CheckKind,
     CheckRunStatus,
     FlagSeverity,
+    ReadinessStatus,
     ReportDecision,
     RubricParseStatus,
 )
@@ -492,6 +493,25 @@ async def raise_if_decided(session: AsyncSession, check_run_id: int) -> None:
         )
 
 
+# BUG-095: every OTHER instructor-written justification on this product
+# is required (overriding a flag, resolving an escalation, reopening a
+# decision) -- the single highest-stakes, most panel-visible action
+# (approving a manuscript for defense) was the one exception, optional
+# even when it overrules the system's own computed verdict. Required only
+# when the decision DISAGREES with what VERIDICAL computed -- that
+# disagreement is exactly what ground rule 1 says the human is for, and
+# is the one thing worth capturing. Left optional when decision and
+# verdict agree, so a routine approval of an already-Ready manuscript
+# isn't forced to invent a reason that doesn't exist.
+DECISIONS_REQUIRING_A_REASON: frozenset[tuple[ReportDecision, ReadinessStatus]] = frozenset(
+    {
+        (ReportDecision.approved, ReadinessStatus.not_ready),
+        (ReportDecision.approved, ReadinessStatus.conditionally_ready),
+        (ReportDecision.rejected, ReadinessStatus.ready),
+    }
+)
+
+
 async def decide_report(
     session: AsyncSession,
     check_run_id: int,
@@ -523,11 +543,18 @@ async def decide_report(
             f"{pending} criteri{'on' if pending == 1 else 'a'} still need your review before "
             "this report can be decided. Resolve them first."
         )
+    decision_enum = ReportDecision(decision)
+    stripped_note = note.strip() if note and note.strip() else None
+    if (decision_enum, report.status) in DECISIONS_REQUIRING_A_REASON and not stripped_note:
+        raise ConflictError(
+            f"This decision disagrees with VERIDICAL's own {report.status.value.replace('_', ' ')} "
+            "verdict. Explain why before confirming, so the audit trail records the disagreement."
+        )
 
-    report.decision = ReportDecision(decision)
+    report.decision = decision_enum
     report.decided_at = datetime.now(UTC)
     report.decided_by_instructor_id = instructor_id
-    report.decision_note = note.strip() if note and note.strip() else None
+    report.decision_note = stripped_note
     # `backend-critic` finding: without a snapshot of what the instructor
     # was actually looking at, a later score drift (a flag override or
     # escalation resolved after this decision — both now blocked by
