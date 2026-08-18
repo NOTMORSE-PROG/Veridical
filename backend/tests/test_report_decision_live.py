@@ -386,6 +386,34 @@ async def test_a_short_reason_is_rejected_when_a_reason_is_required(session_fact
         assert report.decision is None
 
 
+async def test_resolve_escalation_enforces_the_length_floor_even_bypassing_the_router(
+    session_factory,
+):
+    """`backend-critic` finding (BUG-096 review): the length floor
+    (`resolution_reason_min_length`) was enforced only at the Pydantic
+    schema layer (`ResolveEscalationIn`'s `field_validator`) -- this
+    codebase's own documented intent is that the SERVICE layer is a
+    defensive second check for "any other caller of this service
+    function" (the comment predates this test), but that defense only
+    ever covered presence, not the actual length property BUG-096 fixed.
+    Calls `resolve_escalation_for_run` directly, the way a future second
+    caller (a bulk-resolve endpoint, an admin script) would -- bypassing
+    the router's schema entirely."""
+    async with session_factory() as session:
+        instructor, check_run = await _seed_decidable_run(session)
+        await _add_escalated_criterion(session, check_run)
+        escalated_result_id = await session.scalar(
+            select(CheckResult.id).where(
+                CheckResult.check_run_id == check_run.id,
+                CheckResult.outcome == ResultOutcome.escalated,
+            )
+        )
+        with pytest.raises(ConflictError, match="at least 10 characters"):
+            await resolve_escalation_for_run(
+                session, check_run.id, escalated_result_id, instructor.id, "mark_pass", "ok"
+            )
+
+
 async def test_resolving_an_escalation_is_blocked_once_the_report_is_decided(session_factory):
     """`backend-critic` finding: `decide_report`'s own gate ensures no
     escalation is pending AT decide time, but that alone doesn't stop a

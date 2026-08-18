@@ -149,6 +149,7 @@ async def resolve_escalation(
     instructor_id: int,
     resolution: str,
     reason: str,
+    settings: Settings | None = None,
 ) -> CheckResult:
     """One instructor decision on one escalated criterion (ticket AC): the
     ONLY way an escalated result ever becomes a score contribution again —
@@ -158,11 +159,20 @@ async def resolve_escalation(
     reflect the human decision, which is what `aggregate_and_score`
     actually counts.
     """
-    # Reason presence is primarily enforced by the router's request schema
-    # (`Field(min_length=1)`, CODING.md §1: routers validate); this is a
-    # defensive second check for any other caller of this service function.
-    if not reason or not reason.strip():
-        raise ConflictError("A reason is required to resolve an escalated item.")
+    # Reason presence/length is primarily enforced by the router's request
+    # schema (`ResolveEscalationIn`'s `field_validator`, CODING.md §1:
+    # routers validate); this is a defensive second check for any other
+    # caller of this service function. `backend-critic` finding (BUG-096
+    # review): this used to check presence only, so a caller that bypassed
+    # the schema would still let a one-character reason through -- the
+    # exact defect BUG-096 fixed at the schema layer, reopened one layer
+    # down.
+    settings = settings or get_settings()
+    if not reason or len(reason.strip()) < settings.resolution_reason_min_length:
+        raise ConflictError(
+            f"A reason of at least {settings.resolution_reason_min_length} characters is "
+            "required to resolve an escalated item."
+        )
     if resolution not in _VALID_RESOLUTIONS:
         raise ConflictError(f"Unknown resolution {resolution!r}.")
 
