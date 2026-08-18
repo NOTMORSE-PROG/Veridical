@@ -1,0 +1,37 @@
+[
+  {
+    "name": "structural type and kind agree",
+    "type": "structural",
+    "kind": "structural",
+    "has_resolution": false,
+    "expected_caption": "Rule-checked"
+  },
+  {
+    "name": "semantic type and kind agree",
+    "type": "semantic",
+    "kind": "semantic",
+    "has_resolution": false,
+    "expected_caption": "AI-graded"
+  },
+  {
+    "name": "Tier-0/1 cascade: rubric declares semantic, actually decided by a rule",
+    "type": "semantic",
+    "kind": "structural",
+    "has_resolution": false,
+    "expected_caption": "Rule-checked"
+  },
+  {
+    "name": "reverse mismatch: rubric declares structural, actually decided semantically",
+    "type": "structural",
+    "kind": "semantic",
+    "has_resolution": false,
+    "expected_caption": "AI-graded"
+  },
+  {
+    "name": "an instructor resolution always wins, regardless of type/kind",
+    "type": "semantic",
+    "kind": "structural",
+    "has_resolution": true,
+    "expected_caption": "Resolved by instructor"
+  }
+]

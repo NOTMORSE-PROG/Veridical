@@ -62,8 +62,12 @@ export function explainer(r: ReportCommon, flagsAnchor: string | null): ReactNod
 
 // A resolved row's source is the instructor, never the AI or the rule
 // engine that originally (and unsuccessfully) tried to decide it — this
-// must win over the kind-based caption unconditionally.
-function sourceCaption(row: ResultRowCommon): string {
+// must win over the kind-based caption unconditionally. Exported (BUG-082)
+// so `ResultsTable.contract.test.ts` can assert this agrees with the
+// backend PDF's `_source_caption` against the same shared fixture cases
+// (`tests/fixtures/source_caption_cases.json`) -- the missing test that
+// let the two implementations disagree unnoticed in the first place.
+export function sourceCaption(row: ResultRowCommon): string {
   if (row.resolution) return "Resolved by instructor";
   return row.kind === "structural" ? "Rule-checked" : "AI-graded";
 }

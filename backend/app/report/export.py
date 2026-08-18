@@ -47,6 +47,7 @@ from reportlab.platypus import (
     TableStyle,
 )
 
+from app.checks.escalation import NEEDS_REVIEW_OUTCOMES as _NEEDS_REVIEW_OUTCOMES_ENUM
 from app.report.schemas import CriterionResultOut, FlagSummaryOut, ReportExportData
 
 _FONTS_DIR = Path(__file__).parent / "fonts"
@@ -139,7 +140,15 @@ _CHECK_KIND_LABEL = {
     "statistical_forensics": "Statistical forensics",
     "originality_reuse": "Originality / reuse",
 }
-NEEDS_REVIEW_OUTCOMES = ("escalated", "quota_exhausted", "api_down")
+# `backend-critic` finding (BUG-081/082 review): this used to be a
+# hand-copied string tuple, completely separate from the canonical
+# enum-based `NEEDS_REVIEW_OUTCOMES` in `app.checks.escalation` --
+# exactly the kind of un-tested duplication BUG-082's own ticket names as
+# the root cause of "two renderers agree by coincidence." `ResultOutcome`
+# is a `StrEnum`, so its members compare equal to the plain strings
+# `CriterionResultOut.outcome` actually carries -- this is a real import,
+# not a re-declaration that could drift again.
+NEEDS_REVIEW_OUTCOMES = tuple(_NEEDS_REVIEW_OUTCOMES_ENUM)
 
 # BUG-049: one source of truth for the disclosure text/tone, used by both
 # the badge (near the title) and the footer line on every page -- a
@@ -357,9 +366,18 @@ def _result_display(row: CriterionResultOut) -> tuple[str, str]:
 
 
 def _source_caption(row: CriterionResultOut) -> str:
+    """BUG-082: this used to read `row.type` (what the rubric DECLARES the
+    criterion to be), while the frontend's identical caption
+    (`ResultsTable.tsx`'s `sourceCaption`) reads `row.kind` (how the
+    criterion was ACTUALLY checked). They agreed only by coincidence --
+    the entire point of the Tier-0/1 cascade is a `semantic` criterion
+    decided by a deterministic signal, which is exactly when they diverge.
+    Now reads `kind`, same as the frontend, so a criterion that WAS
+    decided by a rule says "Rule-checked" here even when the rubric calls
+    it semantic."""
     if row.resolution:
         return "Resolved by instructor"
-    return "Rule-checked" if row.type == "structural" else "AI-graded"
+    return "Rule-checked" if row.kind == "structural" else "AI-graded"
 
 
 def _pending_review_reason(outcome: str) -> str:

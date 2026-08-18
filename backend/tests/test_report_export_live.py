@@ -433,6 +433,108 @@ def test_export_never_drops_a_pending_criterion_from_a_decided_report(client, ap
     assert "AI reached no verdict for this criterion." in full_text
 
 
+def test_export_captions_a_criterion_by_kind_not_by_declared_type(client, api_scratch_url):
+    """BUG-082: `CriterionResultOut` carries both `type` (what the rubric
+    DECLARES -- `criterion.type`) and `kind` (how it was ACTUALLY checked
+    -- `result.kind`). The frontend's `sourceCaption` (`ResultsTable.tsx`)
+    has always read `kind`; this PDF's `_source_caption` used to read
+    `type` instead, so the two captioned the SAME criterion two different
+    ways the moment they diverged -- exactly what the Tier-0/1 cascade
+    does on purpose (a `semantic` criterion decided by a deterministic
+    rule). Seeds that exact mismatch: a criterion the rubric calls
+    `semantic`, checked with `kind=structural`, and asserts the PDF calls
+    it "Rule-checked" -- matching the frontend, not the rubric's own
+    declared type (which would have said "AI-graded", the pre-fix
+    behavior)."""
+    import asyncio
+
+    from sqlalchemy import text
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
+    from app.db import sqlalchemy_url
+    from app.models.enums import CheckKind, CheckRunStatus, ResultOutcome
+    from app.models.instructor import Instructor
+    from app.models.manuscript import Manuscript
+    from app.models.rubric import Criterion, Rubric
+    from app.models.run import CheckResult, CheckRun
+    from app.report.service import aggregate_and_score
+
+    async def seed():
+        engine = create_async_engine(sqlalchemy_url(api_scratch_url))
+        try:
+            factory = async_sessionmaker(engine, expire_on_commit=False)
+            async with factory() as session:
+                await session.execute(
+                    text(
+                        "TRUNCATE readiness_report, check_result, check_run, criterion, "
+                        "rubric, manuscript, instructor RESTART IDENTITY CASCADE"
+                    )
+                )
+                instructor = Instructor(
+                    email="prof3@tip.edu.ph",
+                    display_name="Prof",
+                    password_hash=hash_password("s3cret!"),
+                )
+                session.add(instructor)
+                await session.commit()
+                manuscript = Manuscript(
+                    instructor_id=instructor.id, group_label="G-13", file_ref="x.pdf"
+                )
+                rubric = Rubric(
+                    instructor_id=instructor.id, title="Format", source_file="r.pdf", is_active=True
+                )
+                session.add_all([manuscript, rubric])
+                await session.commit()
+                # Rubric DECLARES this semantic -- but it was actually
+                # decided by a Tier-0 deterministic rule (kind=structural).
+                cascaded_criterion = Criterion(
+                    rubric_id=rubric.id,
+                    type="semantic",
+                    text="Has a references section with at least five sources",
+                    evidence=None,
+                    weight=Decimal("10"),
+                    position=0,
+                )
+                session.add(cascaded_criterion)
+                await session.commit()
+                check_run = CheckRun(
+                    manuscript_id=manuscript.id, rubric_id=rubric.id, status=CheckRunStatus.done
+                )
+                session.add(check_run)
+                await session.commit()
+                session.add(
+                    CheckResult(
+                        check_run_id=check_run.id,
+                        criterion_id=cascaded_criterion.id,
+                        kind=CheckKind.structural,
+                        outcome=ResultOutcome.passed,
+                        score=100.0,
+                        detail={"rule_id": "required_section_present", "anchor": "page 4"},
+                    )
+                )
+                await session.commit()
+                await aggregate_and_score(session, check_run.id)
+                return check_run.id
+        finally:
+            await engine.dispose()
+
+    check_run_id = asyncio.run(seed())
+    client.post("/auth/login", json={"email": "prof3@tip.edu.ph", "password": "s3cret!"})
+
+    resp = client.get(f"/check-runs/{check_run_id}/report/export.pdf")
+    assert resp.status_code == 200
+
+    import fitz
+
+    doc = fitz.open(stream=resp.content, filetype="pdf")
+    full_text = "\n".join(page.get_text() for page in doc)
+    # Matches the frontend's `kind`-based caption -- not "AI-graded",
+    # which is what `type`-based captioning (the pre-fix behavior) would
+    # have printed for a criterion the rubric calls semantic.
+    assert "Rule-checked" in full_text
+    assert "AI-graded" not in full_text
+
+
 def test_export_survives_real_ampersand_bearing_citation_text(client, api_scratch_url):
     """ui-designer finding: a real seeded flag reads 'Reyes, J. P., & Cruz,
     M. A. (2023)...' -- reportlab's Paragraph parses its input as a mini
