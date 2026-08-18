@@ -33,6 +33,7 @@ function manuscript(overrides: Partial<ManuscriptListItem> = {}): ManuscriptList
     // that need to exercise the cross-family exclusion override this
     // explicitly (see the dedicated test below).
     latest_done_rubric_family_id: "fam-1",
+    escalations_awaiting_review: 0,
     ...overrides,
   };
 }
