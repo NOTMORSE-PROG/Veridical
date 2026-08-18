@@ -18,7 +18,7 @@ import { manuscriptIdentity } from "../domain/manuscriptLabel";
 import { READINESS_LABEL, READINESS_TONE } from "../domain/readinessTone";
 import { DecisionSummary } from "./DecisionSummary";
 import { FlagsList } from "./FlagsPanel";
-import { NEEDS_REVIEW_OUTCOMES, ResultsTable, explainer } from "./ResultsTable";
+import { NEEDS_REVIEW_OUTCOMES, ResultsTable, explainer, pendingDisclosure } from "./ResultsTable";
 import { useSharedReport } from "./useShare";
 
 function SpinnerIcon() {
@@ -228,14 +228,7 @@ export function AdviserViewPage() {
 
       <p className="rounded-lg bg-status-info-bg px-4 py-2.5 text-sm text-status-info-text">
         {explainer(report, "#flags-heading")}
-        {pendingCount > 0 && (
-          <>
-            {" "}
-            {pendingCount} {pendingCount === 1 ? "criterion" : "criteria"} still{" "}
-            {pendingCount === 1 ? "needs" : "need"} the instructor's review and{" "}
-            {pendingCount === 1 ? "isn't" : "aren't"} yet reflected in the score.
-          </>
-        )}
+        {pendingDisclosure(pendingCount)}
       </p>
 
       <FlagsList flags={flags} linkToDetail={false} />

@@ -211,6 +211,17 @@ class Settings(BaseSettings):
     weight_importance_low_max_ratio: float = 0.5
     weight_importance_high_min_ratio: float = 1.5
 
+    # --- Resolution reason (BUG-096) ------------------------------------------
+    # The escalation-resolution "Reason (required)" field previously
+    # enforced only `min_length=1`, so a single character ("x") satisfied
+    # it and was then published verbatim to the report, the exported PDF,
+    # and the public share link ("Marked Pass. x"). A length floor is
+    # crude but honest, and cheaper to get right than trying to detect a
+    # "real" justification -- chosen low enough that a genuine short
+    # reason ("Verified in Chapter 2.") still clears it, high enough that
+    # a single keystroke never does.
+    resolution_reason_min_length: int = 10
+
     # --- Check-run orchestration (V-018, ENGINEERING §4) ---------------------
     # How often the background worker polls for the next runnable
     # check_run when it isn't actively advancing one (simplest job runner
