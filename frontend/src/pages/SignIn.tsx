@@ -142,12 +142,6 @@ export function SignInPage() {
           <p className="mt-4 max-w-[360px] text-sm text-neutral-300">
             Every flag shows its evidence. You always make the final call.
           </p>
-          <Link
-            to="/"
-            className="on-dark mt-4 inline-block text-sm font-medium text-on-tip-chrome underline hover:text-neutral-300"
-          >
-            Learn more about VERIDICAL
-          </Link>
         </div>
       </div>
 

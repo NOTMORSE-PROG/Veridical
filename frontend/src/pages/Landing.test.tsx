@@ -17,7 +17,7 @@ describe("LandingRoute (screen 4v)", () => {
     expect(
       await screen.findByRole("heading", {
         level: 1,
-        name: /check capstone manuscripts against your own rubric/i,
+        name: /manuscript readiness checks for capstone instructors/i,
       }),
     ).toBeInTheDocument();
   });
@@ -30,20 +30,27 @@ describe("LandingRoute (screen 4v)", () => {
     renderWithProviders(<LandingRoute />);
 
     await waitFor(() =>
-      expect(screen.queryByText(/check capstone manuscripts/i)).not.toBeInTheDocument(),
+      expect(screen.queryByText(/manuscript readiness checks/i)).not.toBeInTheDocument(),
     );
   });
 
-  it("every 'Sign in' control routes to /signin, never a native affordance", async () => {
+  it("V-067: exactly one 'Sign in' control on the page, routing to /signin", async () => {
     vi.stubGlobal("fetch", stubFetchByPath({ "/auth/me": SIGNED_OUT }));
     renderWithProviders(<LandingRoute />);
     await screen.findByRole("heading", { level: 1 });
 
     const signInLinks = screen.getAllByRole("link", { name: "Sign in" });
-    expect(signInLinks.length).toBeGreaterThan(0);
-    for (const link of signInLinks) {
-      expect(link).toHaveAttribute("href", "/signin");
-    }
+    expect(signInLinks).toHaveLength(1);
+    expect(signInLinks[0]).toHaveAttribute("href", "/signin");
+  });
+
+  it("V-067: carries no readiness-tier-count claim (Track E P2-1, contradicted the dashboard's real 4-tile KPI row)", async () => {
+    vi.stubGlobal("fetch", stubFetchByPath({ "/auth/me": SIGNED_OUT }));
+    renderWithProviders(<LandingRoute />);
+    await screen.findByRole("heading", { level: 1 });
+
+    expect(screen.queryByText(/readiness tiers/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/one of three statuses/i)).not.toBeInTheDocument();
   });
 
   it("carries no student-facing signup content (instructor-facing only, V7 blocked)", async () => {
