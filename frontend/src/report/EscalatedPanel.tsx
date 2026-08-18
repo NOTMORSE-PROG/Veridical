@@ -13,11 +13,13 @@ import { useEscalatedItems, useResolveEscalation } from "./useReport";
 // disclosed exception D-023 already made for `weight_importance`'s
 // ratios), so this is hardcoded here and the two are kept from silently
 // drifting by a backend test asserting the default matches
-// (`test_report_weight_importance.py`'s sibling tripwire pattern). A
-// one-character "x" used to satisfy the old `.trim()`-only check and was
-// then published verbatim to the report, the PDF, and the public share
-// link.
-const RESOLUTION_REASON_MIN_LENGTH = 10;
+// (`test_report_schemas.py`'s `test_default_minimum_matches_the_
+// frontend_hardcoded_copy`). A one-character "x" used to satisfy the old
+// `.trim()`-only check and was then published verbatim to the report,
+// the PDF, and the public share link. Exported (BUG-095 follow-up) so
+// `DecisionModal.tsx` can reuse the same floor for the decision-note
+// field instead of hardcoding a second, possibly-drifting copy.
+export const RESOLUTION_REASON_MIN_LENGTH = 10;
 
 // Same glyph as StatusPill's "caution" tone (circle + centered exclamation)
 // — this panel IS the ambiguous-middle-case surface the caution tone
