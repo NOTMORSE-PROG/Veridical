@@ -607,6 +607,7 @@ async def reopen_report(
     check_run_id: int,
     instructor_id: int,
     reason: str,
+    settings: Settings | None = None,
 ) -> ReportOut:
     """Undoes a decision so a new one can be made — always explicit, always
     reasoned (AC: "reopen logged with reason"). The prior decision isn't
@@ -617,6 +618,13 @@ async def reopen_report(
     report = await _get_owned_report(session, check_run_id, instructor_id)
     if report.decision is None:
         raise ConflictError("This report hasn't been decided yet. There's nothing to reopen.")
+    # BUG-105: reason presence/length is primarily enforced by the
+    # router's request schema (`ReopenIn`'s `field_validator`); this is a
+    # defensive second check for any other caller of this service
+    # function, same reasoning `resolve_escalation` already documents.
+    minimum = (settings or get_settings()).resolution_reason_min_length
+    if not reason or len(reason.strip()) < minimum:
+        raise ConflictError(f"A reason of at least {minimum} characters is required to reopen.")
 
     prior_decision = report.decision.value
     prior_note = report.decision_note

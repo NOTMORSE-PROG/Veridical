@@ -187,11 +187,24 @@ class DecisionIn(BaseModel):
 
 
 class ReopenIn(BaseModel):
-    # Required, unlike the decision note — a decision can be made with no
-    # elaboration, but undoing one is exactly the kind of action this
+    # Always required (the decision note is only conditionally required,
+    # BUG-095) -- undoing a decision is exactly the kind of action this
     # project's own audit-trail philosophy (V-024) says must explain
     # itself.
     reason: str = Field(min_length=1)
+
+    # BUG-105: the identical defect BUG-096 fixed for ResolveEscalationIn
+    # -- min_length=1 let a single character satisfy a field whose own
+    # comment says it "must explain itself." Reuses
+    # resolution_reason_min_length rather than inventing a second number.
+    @field_validator("reason")
+    @classmethod
+    def _reason_meets_the_minimum(cls, value: str) -> str:
+        stripped = value.strip()
+        minimum = get_settings().resolution_reason_min_length
+        if len(stripped) < minimum:
+            raise ValueError(f"reason must be at least {minimum} characters")
+        return stripped
 
 
 class EscalatedItemOut(BaseModel):
