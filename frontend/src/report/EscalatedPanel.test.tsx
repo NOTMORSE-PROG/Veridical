@@ -111,6 +111,21 @@ describe("EscalatedPanel", () => {
     expect(reasonInput).toHaveAttribute("aria-invalid", "true");
   });
 
+  it("BUG-096: rejects a one-character reason instead of publishing it verbatim", async () => {
+    vi.stubGlobal("fetch", stubFetchByPath({ "/check-runs/5/escalated": [REAL_MAJORITY] }));
+    renderWithProviders(<EscalatedPanel checkRunId={5} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Pass" }));
+    const reasonInput = screen.getByPlaceholderText("Why are you resolving this way?");
+    fireEvent.change(reasonInput, { target: { value: "x" } });
+    fireEvent.click(screen.getByRole("button", { name: "Confirm" }));
+
+    expect(
+      await screen.findByText(/Reason must be at least 10 characters/),
+    ).toBeInTheDocument();
+    expect(reasonInput).toHaveAttribute("aria-invalid", "true");
+  });
+
   it("submits the resolution with the reason and updates the announcement on success", async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = typeof input === "string" ? input : input.toString();

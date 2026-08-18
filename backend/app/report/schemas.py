@@ -3,7 +3,9 @@
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
+
+from app.config import get_settings
 
 
 class EvidenceItem(BaseModel):
@@ -215,6 +217,21 @@ class ResolveEscalationIn(BaseModel):
     # Router validates presence (CODING.md §1) so the service's own check
     # is defense-in-depth, not the primary gate.
     reason: str = Field(min_length=1)
+
+    # BUG-096: `min_length=1` let a single character ("x") satisfy a field
+    # labelled "Reason (required)" -- accepted, then published verbatim to
+    # the report, the exported PDF, and the public share link. A real
+    # floor (`resolution_reason_min_length`, config.py, not hardcoded here
+    # per rule 7) is crude but honest about what "required" was supposed
+    # to mean.
+    @field_validator("reason")
+    @classmethod
+    def _reason_meets_the_minimum(cls, value: str) -> str:
+        stripped = value.strip()
+        minimum = get_settings().resolution_reason_min_length
+        if len(stripped) < minimum:
+            raise ValueError(f"reason must be at least {minimum} characters")
+        return stripped
 
 
 class ResolveEscalationOut(BaseModel):

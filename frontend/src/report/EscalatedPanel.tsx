@@ -8,6 +8,17 @@ import type { EscalatedItemOut, EscalationResolution } from "../api/types";
 import { cx } from "../components/cx";
 import { useEscalatedItems, useResolveEscalation } from "./useReport";
 
+// BUG-096: mirrors `config.py`'s `resolution_reason_min_length` -- the
+// frontend can't read backend `Settings` per-request (same deliberate,
+// disclosed exception D-023 already made for `weight_importance`'s
+// ratios), so this is hardcoded here and the two are kept from silently
+// drifting by a backend test asserting the default matches
+// (`test_report_weight_importance.py`'s sibling tripwire pattern). A
+// one-character "x" used to satisfy the old `.trim()`-only check and was
+// then published verbatim to the report, the PDF, and the public share
+// link.
+const RESOLUTION_REASON_MIN_LENGTH = 10;
+
 // Same glyph as StatusPill's "caution" tone (circle + centered exclamation)
 // — this panel IS the ambiguous-middle-case surface the caution tone
 // exists for: an AI judgment the system could not settle on its own.
@@ -64,7 +75,7 @@ function ResolveRow({
 
   function confirm() {
     setAttempted(true);
-    if (!pending || !reason.trim()) return;
+    if (!pending || reason.trim().length < RESOLUTION_REASON_MIN_LENGTH) return;
     resolve.mutate(
       { checkResultId: item.check_result_id, resolution: pending, reason: reason.trim() },
       {
@@ -81,7 +92,7 @@ function ResolveRow({
 
   const serverError =
     resolve.error instanceof ApiError ? resolve.error.message : resolve.error ? "Couldn't resolve this item." : null;
-  const reasonInvalid = attempted && !reason.trim();
+  const reasonInvalid = attempted && reason.trim().length < RESOLUTION_REASON_MIN_LENGTH;
   const reasonErrId = `resolve-reason-err-${item.check_result_id}`;
 
   return (
@@ -149,7 +160,9 @@ function ResolveRow({
             />
             {reasonInvalid && (
               <p id={reasonErrId} className="text-sm text-status-attention-text">
-                Enter a reason before confirming.
+                {reason.trim()
+                  ? `Reason must be at least ${RESOLUTION_REASON_MIN_LENGTH} characters -- this appears in the report, the exported PDF, and any share link.`
+                  : "Enter a reason before confirming."}
               </p>
             )}
           </label>

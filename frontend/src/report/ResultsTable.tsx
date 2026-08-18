@@ -35,6 +35,27 @@ function explainerBase(r: ReportCommon): string {
   return `Conditionally Ready. The score is ${r.composite_score}%, between ${r.thresholds.not_ready_max_score}% and ${r.thresholds.ready_min_score}%.`;
 }
 
+// BUG-096 (ground rule 8 amendment): a verdict must not read as settled
+// arithmetic while criteria remain unassessed -- stated as a plain count
+// ("N criteria still need review"), never a second percentage. This used
+// to exist only on the public adviser view (`AdviserView.tsx`, written
+// inline there); the instructor's own `Report.tsx` showed the identical
+// headline sentence with NO such qualifier, even though it has exactly
+// the same information (`report.pending_review_count`) available --
+// exactly the kind of one-renderer-only fix Track D's Critical 2 warns
+// about. Factored out so both renderers say the same thing, once.
+export function pendingDisclosure(pendingCount: number): ReactNode {
+  if (pendingCount <= 0) return null;
+  return (
+    <>
+      {" "}
+      {pendingCount} {pendingCount === 1 ? "criterion" : "criteria"} still{" "}
+      {pendingCount === 1 ? "needs" : "need"} the instructor's review and{" "}
+      {pendingCount === 1 ? "isn't" : "aren't"} yet reflected in the score.
+    </>
+  );
+}
+
 // BUG-033: the explainer must honestly account for WHERE a deduction
 // came from — before this, a run could lose real points to unresolved
 // flags with no mention anywhere on the page of why. `flagsAnchor`
