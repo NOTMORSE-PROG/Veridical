@@ -145,6 +145,7 @@ describe("DashboardPage", () => {
         return new Response(
           JSON.stringify({
             manuscript_id: 99,
+            group_label: "Ungrouped",
             ingest_status: "done",
             page_count: 8,
             anchor_kind: "page",

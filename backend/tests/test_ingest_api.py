@@ -137,6 +137,59 @@ def test_two_ungrouped_manuscripts_are_distinguishable_by_filename(client):
 
 
 @live
+def test_group_label_sent_as_form_field_is_persisted(client):
+    """BUG-043: a bare scalar FastAPI parameter is a QUERY parameter, not a
+    form field, even on a multipart endpoint. A client that sends
+    `group_label` as a form field alongside the file -- the conventional
+    thing to do, since the file is already multipart -- had it silently
+    discarded; the manuscript was created with the default "Ungrouped" and
+    nothing in the response said so."""
+    content = (FIXTURE_DIR / "native.pdf").read_bytes()
+    r = client.post(
+        "/manuscripts/ingest",
+        files={"file": ("native.pdf", content, "application/octet-stream")},
+        data={"group_label": "FORM-FIELD-TEST"},
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["group_label"] == "FORM-FIELD-TEST"
+
+    body = client.get("/manuscripts").json()
+    item = next(i for i in body["items"] if i["id"] == r.json()["manuscript_id"])
+    assert item["group_label"] == "FORM-FIELD-TEST"
+
+
+@live
+def test_group_label_query_param_still_works_for_one_release(client):
+    """BUG-043's fix: the query-param path (the only one that worked
+    before this fix, and the shape the frontend used as its documented
+    workaround) must keep working for one release so an in-flight client
+    isn't broken mid-deploy."""
+    content = (FIXTURE_DIR / "native.pdf").read_bytes()
+    r = client.post(
+        "/manuscripts/ingest?group_label=QUERY-PARAM-TEST",
+        files={"file": ("native.pdf", content, "application/octet-stream")},
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["group_label"] == "QUERY-PARAM-TEST"
+
+
+@live
+def test_group_label_form_field_wins_over_conflicting_query_param(client):
+    """BUG-043: a form field doesn't leak into logs/URLs the way a query
+    parameter does, so when a client sends both (e.g. mid-migration), the
+    form field -- the one this fix exists to make work -- takes
+    precedence."""
+    content = (FIXTURE_DIR / "native.pdf").read_bytes()
+    r = client.post(
+        "/manuscripts/ingest?group_label=QUERY-PARAM-VALUE",
+        files={"file": ("native.pdf", content, "application/octet-stream")},
+        data={"group_label": "FORM-FIELD-VALUE"},
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["group_label"] == "FORM-FIELD-VALUE"
+
+
+@live
 def test_filename_with_control_characters_never_500s(client):
     """BUG-022 review (backend-critic): a NUL byte in the uploaded
     filename previously reached Postgres unfiltered and 500'd (UTF8

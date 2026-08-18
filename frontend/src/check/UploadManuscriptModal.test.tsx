@@ -5,6 +5,7 @@ import { UploadManuscriptModal } from "./UploadManuscriptModal";
 
 const SUMMARY = {
   manuscript_id: 42,
+  group_label: "Ungrouped",
   ingest_status: "done",
   page_count: 12,
   anchor_kind: "page",
@@ -36,7 +37,7 @@ describe("UploadManuscriptModal", () => {
     );
   });
 
-  it("uploads as multipart form data with group_label as a query param, not a form field", async () => {
+  it("BUG-043: uploads as multipart form data with group_label as a form field, not a query param", async () => {
     const fetchMock = vi.fn(
       async (_input: RequestInfo | URL, _init?: RequestInit) => new Response(JSON.stringify(SUMMARY), { status: 200 }),
     );
@@ -49,13 +50,13 @@ describe("UploadManuscriptModal", () => {
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalled());
     const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
-    expect(url).toContain("/manuscripts/ingest?group_label=Group%205");
+    expect(url).toBe("/manuscripts/ingest");
     expect(init.body).toBeInstanceOf(FormData);
-    expect((init.body as FormData).get("group_label")).toBeNull();
+    expect((init.body as FormData).get("group_label")).toBe("Group 5");
     expect((init.headers as Record<string, string> | undefined)?.["Content-Type"]).toBeUndefined();
   });
 
-  it("omits group_label from the query entirely when left blank (server applies its own default)", async () => {
+  it("omits group_label from the form entirely when left blank (server applies its own default)", async () => {
     const fetchMock = vi.fn(
       async (_input: RequestInfo | URL, _init?: RequestInit) => new Response(JSON.stringify(SUMMARY), { status: 200 }),
     );
@@ -66,8 +67,9 @@ describe("UploadManuscriptModal", () => {
     fireEvent.click(screen.getByRole("button", { name: "Upload manuscript" }));
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalled());
-    const [url] = fetchMock.mock.calls[0] as [string, RequestInit];
-    expect(url).not.toContain("group_label");
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe("/manuscripts/ingest");
+    expect((init.body as FormData).get("group_label")).toBeNull();
   });
 
   it("shows real, honest facts on success, not a bare checkmark, and offers to start a check", async () => {

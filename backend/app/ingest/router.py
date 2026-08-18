@@ -8,7 +8,7 @@ in service.py. Auth arrives with V-014.
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, UploadFile
+from fastapi import APIRouter, Depends, Form, Query, UploadFile
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app import messages
@@ -31,8 +31,17 @@ async def ingest_manuscript_upload(
     file: UploadFile,
     session: Annotated[AsyncSession, Depends(get_session)],
     instructor: Annotated[Instructor, Depends(get_current_instructor)],
-    group_label: str = "Ungrouped",
+    # BUG-043: a bare scalar is a QUERY parameter in FastAPI, even on a
+    # multipart endpoint, and silently dropped a form-field `group_label`
+    # with no error. `Form()` reads it from the multipart body instead.
+    # The query param is still accepted for one release so an in-flight
+    # client isn't broken mid-deploy; the form field wins when both are
+    # sent, since it's the one that doesn't leak group identity into logs.
+    group_label: Annotated[str | None, Form()] = None,
+    group_label_query: Annotated[str | None, Query(alias="group_label")] = None,
 ) -> IngestSummary:
+    resolved_group_label = group_label or group_label_query or "Ungrouped"
+
     async def chunks():
         while chunk := await file.read(_CHUNK_BYTES):
             yield chunk
@@ -40,11 +49,12 @@ async def ingest_manuscript_upload(
     settings = get_settings()
     enforce_action_rate_limit(settings, "manuscript_ingest", instructor.id)
     manuscript, result, n_citations = await ingest_upload(
-        session, chunks(), file.filename or "", group_label, instructor_id=instructor.id
+        session, chunks(), file.filename or "", resolved_group_label, instructor_id=instructor.id
     )
     notes = [messages.IMAGE_ONLY_NOTE] if result.image_only else []
     return IngestSummary(
         manuscript_id=manuscript.id,
+        group_label=manuscript.group_label,
         ingest_status=manuscript.ingest_status,
         page_count=result.page_count,
         anchor_kind=result.anchor_kind,
