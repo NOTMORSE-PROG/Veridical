@@ -216,6 +216,35 @@ describe("ReportPage", () => {
     expect(await screen.findByText(/The score is 40% \(below the 60% floor\)/)).toBeInTheDocument();
   });
 
+  it("BUG-096: discloses unassessed criteria on the instructor's own report, not just the public adviser view", async () => {
+    const report: ReportOut = {
+      ...BASE_REPORT,
+      status: "not_ready",
+      composite_score: 0,
+      pending_review_count: 3,
+    };
+    vi.stubGlobal(
+      "fetch",
+      stubFetchByPath({ "/check-runs/5/report": report, ...stubEscalated(), ...stubFlags() }),
+    );
+    renderWithProviders(<ReportPage />, { route: "/report/5", path: "/report/:checkRunId" });
+
+    expect(
+      await screen.findByText(/3 criteria still need the instructor's review/),
+    ).toBeInTheDocument();
+  });
+
+  it("BUG-096: says nothing extra when every criterion has already been assessed", async () => {
+    vi.stubGlobal(
+      "fetch",
+      stubFetchByPath({ "/check-runs/5/report": BASE_REPORT, ...stubEscalated(), ...stubFlags() }),
+    );
+    renderWithProviders(<ReportPage />, { route: "/report/5", path: "/report/:checkRunId" });
+
+    await screen.findByText(/The score is 92%/);
+    expect(screen.queryByText(/still need the instructor's review/)).not.toBeInTheDocument();
+  });
+
   it("uses the reason field verbatim for needs_review", async () => {
     const report: ReportOut = {
       ...BASE_REPORT,
