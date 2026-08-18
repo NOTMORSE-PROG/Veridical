@@ -24,3 +24,10 @@ python "$ROOT/tools/check_dashes.py" --staged
 # A ticket's folder must match its own Status, and the board's counts
 # must match the filesystem. DoD item 14.
 python "$ROOT/tools/check_ticket_placement.py" --quiet
+
+# Concurrent sessions: two of them cannot hold the same ticket or the same
+# shared resource. Warns (loudly) about contention, blocks only on a real
+# double-claim, so the owner committing by hand is never gated on it.
+# Identify yourself so the commit is attributable:
+#   VERIDICAL_SESSION=s-YYYYMMDD-xxxx git commit -m "..."
+python "$ROOT/tools/session.py" check --quiet
