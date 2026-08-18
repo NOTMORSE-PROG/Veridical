@@ -158,6 +158,54 @@ async def _seed_not_ready_run(session):
     return instructor, check_run
 
 
+async def _seed_needs_review_run(session):
+    """A DONE run whose only criterion is `not_applicable` -- excluded
+    from scoring (`scoring.py`'s `weight_sum <= 0` short-circuit), so
+    NOTHING is computed at all: `composite_score=None`,
+    `status=needs_review`. Not in `NEEDS_REVIEW_OUTCOMES` (that's
+    escalated/quota_exhausted/api_down only), so the earlier `pending`
+    gate does NOT block deciding this -- `DECISIONS_REQUIRING_A_REASON`
+    is the only thing standing between this state and a one-click,
+    zero-signal, zero-explanation decision (backend-critic finding,
+    BUG-095 follow-up)."""
+    instructor = Instructor(email=f"needsreview-{id(session)}@test.local", display_name="NR2 Test")
+    session.add(instructor)
+    await session.commit()
+    manuscript = Manuscript(instructor_id=instructor.id, group_label="G", file_ref="x.pdf")
+    rubric = Rubric(
+        instructor_id=instructor.id, title="Format", source_file="r.pdf", is_active=True
+    )
+    session.add_all([manuscript, rubric])
+    await session.commit()
+    criterion = Criterion(
+        rubric_id=rubric.id,
+        type="structural",
+        text="Uses a rubric-external logbook the manuscript can't demonstrate",
+        evidence=None,
+        weight=Decimal("100"),
+        position=0,
+    )
+    session.add(criterion)
+    await session.commit()
+    check_run = CheckRun(
+        manuscript_id=manuscript.id, rubric_id=rubric.id, status=CheckRunStatus.done
+    )
+    session.add(check_run)
+    await session.commit()
+    check_result = CheckResult(
+        check_run_id=check_run.id,
+        criterion_id=criterion.id,
+        kind=CheckKind.structural,
+        outcome=ResultOutcome.not_applicable,
+        score=None,
+        detail={"basis": "rule"},
+    )
+    session.add(check_result)
+    await session.commit()
+    await aggregate_and_score(session, check_run.id)
+    return instructor, check_run
+
+
 async def _add_escalated_criterion(session, check_run):
     criterion = Criterion(
         rubric_id=check_run.rubric_id,
@@ -300,6 +348,42 @@ async def test_returning_a_report_for_revision_never_requires_a_reason(session_f
         instructor, check_run = await _seed_not_ready_run(session)
         report = await decide_report(session, check_run.id, instructor.id, "returned", None)
         assert report.decision == "returned"
+
+
+async def test_approving_or_rejecting_a_needs_review_report_requires_a_reason(session_factory):
+    """`backend-critic` finding, live-reproduced: `needs_review` was
+    missing entirely from `DECISIONS_REQUIRING_A_REASON` -- that status
+    means composite_score is None, nothing was computed at all, so EITHER
+    decision on it is pure human judgment with zero AI signal behind it."""
+    async with session_factory() as session:
+        instructor, check_run = await _seed_needs_review_run(session)
+        report = await get_report(session, check_run.id, instructor.id)
+        assert report.status == "needs_review"
+        assert report.composite_score is None
+
+        with pytest.raises(ConflictError, match="disagrees"):
+            await decide_report(session, check_run.id, instructor.id, "approved", None)
+
+    async with session_factory() as session:
+        instructor, check_run = await _seed_needs_review_run(session)
+        with pytest.raises(ConflictError, match="disagrees"):
+            await decide_report(session, check_run.id, instructor.id, "rejected", None)
+
+
+async def test_a_short_reason_is_rejected_when_a_reason_is_required(session_factory):
+    """`newcomer`/`backend-critic` finding, live-reproduced: this used to
+    check presence only, so "ok" satisfied it -- the escalation-
+    resolution reason (BUG-096) enforces a real minimum on the exact same
+    class of published justification; this is the SAME control on the
+    higher-stakes action and had a lower bar than the one it trained the
+    instructor to expect two clicks earlier."""
+    async with session_factory() as session:
+        instructor, check_run = await _seed_not_ready_run(session)
+        with pytest.raises(ConflictError, match="at least 10 characters"):
+            await decide_report(session, check_run.id, instructor.id, "approved", "ok")
+
+        report = await get_report(session, check_run.id, instructor.id)
+        assert report.decision is None
 
 
 async def test_resolving_an_escalation_is_blocked_once_the_report_is_decided(session_factory):

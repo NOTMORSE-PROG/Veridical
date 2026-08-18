@@ -11,6 +11,7 @@ import { Modal, ModalBackdrop } from "../components/Modal";
 import { StatusPill } from "../components/StatusPill";
 import { cx } from "../components/cx";
 import { READINESS_LABEL, READINESS_TONE } from "../domain/readinessTone";
+import { RESOLUTION_REASON_MIN_LENGTH } from "./EscalatedPanel";
 import { useDecideReport } from "./useReport";
 
 const NOTE_MAX_LENGTH = 1000;
@@ -20,12 +21,15 @@ const NOTE_MAX_LENGTH = 1000;
 // submitting, not just after a rejected request. The server re-checks
 // authoritatively regardless (this is UX, not the security boundary).
 // Required only when the decision DISAGREES with VERIDICAL's own
-// computed verdict -- approving a `not_ready`/`conditionally_ready`
-// report, or rejecting a `ready` one. "Returned" is neither an approval
-// nor a rejection, so it never requires one.
+// computed verdict -- approving a `not_ready`/`conditionally_ready`/
+// `needs_review` report, or rejecting a `ready`/`needs_review` one.
+// `needs_review` means nothing was computed at all, so EITHER decision on
+// it is pure human judgment with zero AI signal behind it (backend-critic
+// finding, live-reproduced: this was missing entirely). "Returned" is
+// neither an approval nor a rejection, so it never requires one.
 const STATUSES_REQUIRING_A_REASON: Record<Decision, ReadonlySet<string>> = {
-  approved: new Set(["not_ready", "conditionally_ready"]),
-  rejected: new Set(["ready"]),
+  approved: new Set(["not_ready", "conditionally_ready", "needs_review"]),
+  rejected: new Set(["ready", "needs_review"]),
   returned: new Set(),
 };
 
@@ -71,7 +75,13 @@ export function DecisionModal({ decision, report, manuscriptLabel, onClose }: De
   const noteErrId = useId();
   const copy = COPY[decision];
   const reasonRequired = STATUSES_REQUIRING_A_REASON[decision].has(report.status);
-  const reasonInvalid = attempted && reasonRequired && !note.trim();
+  // BUG-095 follow-up (newcomer/backend-critic finding, live-reproduced):
+  // this used to check presence only, so "ok" satisfied it -- the
+  // escalation-resolution reason (BUG-096) enforces a real minimum on the
+  // exact same class of published justification; this is the SAME
+  // control on the higher-stakes action and had a lower bar than the one
+  // it trained the instructor to expect two clicks earlier.
+  const reasonInvalid = attempted && reasonRequired && note.trim().length < RESOLUTION_REASON_MIN_LENGTH;
 
   useEffect(() => {
     if (decide.isError) errorRef.current?.focus();
@@ -79,7 +89,7 @@ export function DecisionModal({ decision, report, manuscriptLabel, onClose }: De
 
   function handleConfirm() {
     setAttempted(true);
-    if (reasonRequired && !note.trim()) return;
+    if (reasonRequired && note.trim().length < RESOLUTION_REASON_MIN_LENGTH) return;
     decide.mutate(
       { decision, note: note.trim() ? note.trim() : null },
       { onSuccess: () => onClose() },
@@ -189,7 +199,9 @@ export function DecisionModal({ decision, report, manuscriptLabel, onClose }: De
             </p>
             {reasonInvalid && (
               <p id={noteErrId} className="text-sm text-status-attention-text">
-                Enter a reason before confirming.
+                {note.trim()
+                  ? `Reason must be at least ${RESOLUTION_REASON_MIN_LENGTH} characters -- this appears in the report, the exported PDF, and any share link.`
+                  : "Enter a reason before confirming."}
               </p>
             )}
           </div>

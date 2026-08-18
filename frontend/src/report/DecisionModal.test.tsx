@@ -106,6 +106,51 @@ describe("DecisionModal (BUG-095)", () => {
     });
   });
 
+  it("BUG-095 follow-up: a short reason (\"ok\") is rejected, not just presence-checked", async () => {
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) =>
+      new Response(JSON.stringify(reportWithStatus("not_ready", 0)), { status: 200 }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    renderWithProviders(
+      <DecisionModal
+        decision="approved"
+        report={reportWithStatus("not_ready", 0)}
+        manuscriptLabel="G-11"
+        onClose={vi.fn()}
+      />,
+    );
+
+    fireEvent.change(screen.getByLabelText("Reason (required)"), { target: { value: "ok" } });
+    fireEvent.click(screen.getByRole("button", { name: "Approve for defense" }));
+
+    expect(await screen.findByText(/Reason must be at least 10 characters/)).toBeInTheDocument();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("requires a reason when approving or rejecting a needs_review report (nothing was computed at all)", () => {
+    vi.stubGlobal("fetch", stubFetchByPath({}));
+    const { unmount } = renderWithProviders(
+      <DecisionModal
+        decision="approved"
+        report={reportWithStatus("needs_review", null)}
+        manuscriptLabel="G-11"
+        onClose={vi.fn()}
+      />,
+    );
+    expect(screen.getByText("Reason (required)")).toBeInTheDocument();
+    unmount();
+
+    renderWithProviders(
+      <DecisionModal
+        decision="rejected"
+        report={reportWithStatus("needs_review", null)}
+        manuscriptLabel="G-11"
+        onClose={vi.fn()}
+      />,
+    );
+    expect(screen.getByText("Reason (required)")).toBeInTheDocument();
+  });
+
   it("requires a reason when rejecting a Ready report", () => {
     vi.stubGlobal("fetch", stubFetchByPath({}));
     renderWithProviders(

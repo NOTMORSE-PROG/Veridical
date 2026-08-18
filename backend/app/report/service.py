@@ -503,11 +503,21 @@ async def raise_if_decided(session: AsyncSession, check_run_id: int) -> None:
 # is the one thing worth capturing. Left optional when decision and
 # verdict agree, so a routine approval of an already-Ready manuscript
 # isn't forced to invent a reason that doesn't exist.
+#
+# `backend-critic` finding (BUG-095 review, live-reproduced): `needs_review`
+# was missing entirely -- that status means nothing was computed at all
+# (composite_score is None, `scoring.py`'s own comment: "No criteria could
+# be auto-scored"). There is no verdict to "agree" or "disagree" with, so
+# EITHER decision on it is pure human judgment with zero AI signal behind
+# it -- the case ground rule 1 most wants a reason recorded for, and the
+# one case that was sailing through with none.
 DECISIONS_REQUIRING_A_REASON: frozenset[tuple[ReportDecision, ReadinessStatus]] = frozenset(
     {
         (ReportDecision.approved, ReadinessStatus.not_ready),
         (ReportDecision.approved, ReadinessStatus.conditionally_ready),
+        (ReportDecision.approved, ReadinessStatus.needs_review),
         (ReportDecision.rejected, ReadinessStatus.ready),
+        (ReportDecision.rejected, ReadinessStatus.needs_review),
     }
 )
 
@@ -518,6 +528,7 @@ async def decide_report(
     instructor_id: int,
     decision: str,
     note: str | None,
+    settings: Settings | None = None,
 ) -> ReportOut:
     """The terminal gate (V-038, F8.5) — VERIDICAL never sets this itself
     (charter rule 1); this is the ONE place a human decision gets
@@ -545,11 +556,23 @@ async def decide_report(
         )
     decision_enum = ReportDecision(decision)
     stripped_note = note.strip() if note and note.strip() else None
-    if (decision_enum, report.status) in DECISIONS_REQUIRING_A_REASON and not stripped_note:
-        raise ConflictError(
-            f"This decision disagrees with VERIDICAL's own {report.status.value.replace('_', ' ')} "
-            "verdict. Explain why before confirming, so the audit trail records the disagreement."
-        )
+    if (decision_enum, report.status) in DECISIONS_REQUIRING_A_REASON:
+        # `newcomer`/`backend-critic` finding, live-reproduced: this used
+        # to check presence only, so "ok" satisfied it -- the escalation-
+        # resolution reason (BUG-096) enforces a real minimum on the exact
+        # same class of published, audit-trail justification; this is the
+        # SAME control on the higher-stakes action and had a lower bar
+        # than the one it trained the instructor to expect. Reuses
+        # `resolution_reason_min_length` rather than inventing a second
+        # number -- both are "a typed justification an instructor
+        # supplies, published to the report/PDF/share link."
+        minimum = (settings or get_settings()).resolution_reason_min_length
+        if not stripped_note or len(stripped_note) < minimum:
+            raise ConflictError(
+                f"This decision disagrees with VERIDICAL's own "
+                f"{report.status.value.replace('_', ' ')} verdict. Explain why in at least "
+                f"{minimum} characters, so the audit trail records the disagreement."
+            )
 
     report.decision = decision_enum
     report.decided_at = datetime.now(UTC)
