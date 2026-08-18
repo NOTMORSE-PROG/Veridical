@@ -265,7 +265,9 @@ async def test_escalations_awaiting_review_is_surfaced_per_manuscript(session_fa
         instructor = Instructor(email="escalated@demo.local", display_name="Escalated Test")
         session.add(instructor)
         await session.commit()
-        has_escalations = Manuscript(instructor_id=instructor.id, group_label="G1", file_ref="x.pdf")
+        has_escalations = Manuscript(
+            instructor_id=instructor.id, group_label="G1", file_ref="x.pdf"
+        )
         clean = Manuscript(instructor_id=instructor.id, group_label="G2", file_ref="y.pdf")
         rubric = Rubric(instructor_id=instructor.id, title="Format", source_file="r.pdf")
         session.add_all([has_escalations, clean, rubric])
