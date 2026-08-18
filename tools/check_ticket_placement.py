@@ -54,7 +54,12 @@ AGENTS = ("ui-designer", "ux-critic", "backend-critic", "professor", "newcomer",
 V8_START_GATE = ("BUG-049", "BUG-048", "BUG-052")
 V8_BLOCKERS = {
     "V-062": "BUG-043",  # Group FK would inherit the silently-dropped label path
-    "V-070": "BUG-049",  # a real page image beside a fabricated fixture flag
+    # "V-070": "BUG-049" -- RETIRED 2026-08-18. BUG-049 was fixed on
+    # 2026-08-17 and the blocker became a no-op the moment it landed. The
+    # session that fixed it wrote "should be trimmed next time that file is
+    # touched" into STATE.md, which is discipline, which is what drifts.
+    # A satisfied blocker left in the map is a rule that silently outlives
+    # its own precondition.
     "V-066": "BUG-050",  # library display depends on the self-match/label fixes
     "V-058": "BUG-050",  # same, and it widens the same exposure
 }
@@ -62,6 +67,11 @@ OPEN_STORY = {"TODO", "WIP", "BLOCKED", "PARKED"}
 DONE_STORY = {"DONE"}
 OPEN_BUG = {"TODO", "WIP"}
 CLOSED_BUG = {"FIXED", "WONTFIX"}
+
+# Section markers on the board. Distinctive on purpose -- the board
+# discusses its own sections in prose, so a bare phrase match is wrong.
+CLOSED_MARKER = "── CLOSED BUGS ──"
+GAPS_MARKER = "## Carried-forward gaps"
 
 # Status: **TODO**  /  Status: TODO  /  · Status: DONE-via-BUG-033
 STATUS_RE = re.compile(r"Status:\s*\**\s*([A-Za-z][A-Za-z-]*)", re.I)
@@ -100,6 +110,9 @@ def main() -> int:
 
     problems: list[str] = []
     open_ids: list[str] = []
+    closed_ids: list[str] = []
+    open_bug_ids: list[str] = []
+    closed_bug_ids: list[str] = []
     n_open_story = n_open_bug = 0
 
     if not TICKETS.exists():
@@ -136,6 +149,8 @@ def main() -> int:
                 if sub == "open":
                     n_open_story += 1
                     open_ids.append(f.stem)
+                else:
+                    closed_ids.append(f.stem)
 
     # ---- bugs ----------------------------------------------------------
     bugs = TICKETS / "BUGS"
@@ -164,6 +179,10 @@ def main() -> int:
                 if sub == "open":
                     n_open_bug += 1
                     open_ids.append(f.stem)
+                    open_bug_ids.append(f.stem)
+                else:
+                    closed_ids.append(f.stem)
+                    closed_bug_ids.append(f.stem)
 
     # ---- DoD 12/12b: a DONE ticket must name its agents and disposition ----
     # Running the agent is half the loop; the audit found 41 of 46 DONE tickets
@@ -215,15 +234,60 @@ def main() -> int:
                     f"{tid} is open on disk but never mentioned in tickets/BOARD.md "
                     f"-- a ticket with no board row is invisible (DoD 14)"
                 )
-        for heading, actual in (
-            (r"##\s*Open bugs\s*[-—]+\s*(\d+)", n_open_bug),
-            (r"##\s*Open story tickets\s*[-—]+\s*(\d+)", n_open_story),
+
+        # DoD 14's SECOND half, which this gate did not check until
+        # 2026-08-18. It enforced "closing a ticket moves the file" and
+        # "an OPEN ticket has a row", and those held -- but nothing read
+        # the board after a ticket closed, so a closed ticket could leave
+        # OPEN WORK and never arrive anywhere. Found live: BUG-070 and
+        # BUG-071 sat in BUGS/fixed/ appearing on NO board section at all,
+        # while the CLOSED BUGS heading counted them as "49, all verified
+        # fixed" -- a heading that overcounted its own list by two and
+        # described two WONTFIX-MOOT reverts as verified fixes. Exactly
+        # the append-only blind spot the 2026-08-16 audit named.
+        for tid in closed_ids:
+            if tid not in text:
+                problems.append(
+                    f"{tid} is closed on disk but never mentioned in "
+                    f"tickets/BOARD.md -- closing is two moves, and the row "
+                    f"has to land somewhere (DoD 14)"
+                )
+
+        # Split on the section MARKER, not the bare phrase: the board's
+        # own prose says "CLOSED BUGS" in passing, and matching that
+        # swallowed the whole open-bug table into "the closed section".
+        closed_section = ""
+        if CLOSED_MARKER in text:
+            closed_section = text.split(CLOSED_MARKER, 1)[1].split(GAPS_MARKER)[0]
+        # Match a TABLE ROW, not a bare mention. The register's own preamble
+        # discusses individual bugs by id, so a substring test both misses a
+        # deleted row (the prose still mentions it) and fires on prose that
+        # merely names an open one. Rows start `| `BUG-###` |`.
+        registered = set(re.findall(r"^\|\s*`(BUG-\d+)`\s*\|", closed_section, re.M))
+        for tid in closed_bug_ids:
+            if tid not in registered:
+                problems.append(
+                    f"{tid} is in BUGS/fixed/ but has no row in the board's "
+                    f"CLOSED BUGS register"
+                )
+        for tid in open_bug_ids:
+            if tid in registered:
+                problems.append(
+                    f"{tid} is still open but has a row in the CLOSED BUGS "
+                    f"register -- a ticket lives in exactly one place"
+                )
+
+        for heading, actual, what in (
+            (r"##\s*Open bugs\s*[-—]+\s*(\d+)", n_open_bug, "open bugs"),
+            (r"##\s*Open story tickets\s*[-—]+\s*(\d+)", n_open_story, "open story tickets"),
+            (r"── CLOSED BUGS ──\s*(\d+)", len(closed_bug_ids), "closed bugs"),
         ):
             m = re.search(heading, text)
             if m and int(m.group(1)) != actual:
                 problems.append(
-                    f"BOARD.md heading says {m.group(1)} but the filesystem has "
-                    f"{actual} -- the counts are content, not decoration"
+                    f"BOARD.md {what} heading says {m.group(1)} but the "
+                    f"filesystem has {actual} -- the counts are content, "
+                    f"not decoration"
                 )
 
     if not args.quiet:
