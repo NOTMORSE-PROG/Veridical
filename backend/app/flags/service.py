@@ -16,13 +16,38 @@ by this ticket).
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.checks.reuse.embed import split_context
+from app.config import get_settings
 from app.errors import NotFoundError
-from app.flags.schemas import FlagOut
+from app.flags.schemas import FlagOut, PassagePairOut
 from app.models.audit import AuditLog
 from app.models.manuscript import Manuscript
 from app.models.rubric import Criterion
 from app.models.run import CheckResult, CheckRun, Flag
 from app.report.service import aggregate_and_score, raise_if_decided
+
+
+def _passage_pair_from_detail(evidence_excerpt: str, detail: dict) -> PassagePairOut | None:
+    kind = detail.get("kind") or ""
+    if not kind.endswith("_passage"):
+        return None
+    own_before, own_after = split_context(detail.get("own_context_text", ""), evidence_excerpt)
+    matched_excerpt = detail.get("matched_text", "")
+    matched_before, matched_after = split_context(
+        detail.get("matched_context_text", ""), matched_excerpt
+    )
+    return PassagePairOut(
+        own_excerpt=evidence_excerpt,
+        own_context_before=own_before,
+        own_context_after=own_after,
+        matched_ref=detail["matched_manuscript_id"],
+        matched_excerpt=matched_excerpt,
+        matched_context_before=matched_before,
+        matched_context_after=matched_after,
+        context_words_each_side=get_settings().reuse_passage_context_words,
+        similarity=detail.get("similarity", 0.0),
+        level="exact_duplicate" if "exact_duplicate" in kind else "high_similarity",
+    )
 
 
 async def _scoped_flag(
@@ -75,6 +100,7 @@ async def _to_flag_out(
         ai_verdict_summary=detail.get("verdict") or detail.get("basis"),
         ai_reasoning=detail.get("reasoning") or detail.get("reason"),
         llm_mode=check_run.llm_mode.value,
+        passage_pair=_passage_pair_from_detail(flag.evidence_excerpt, detail),
     )
 
 

@@ -42,11 +42,16 @@ from typing import Literal
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.checks.reuse.embed import DocumentEmbeddings
+from app.checks.reuse.embed import DocumentEmbeddings, PassageEmbedding
 from app.config import Settings
 from app.groups.service import DEFAULT_GROUP_LABEL, normalize_group_name
 from app.models.group import Group
-from app.models.manuscript import Manuscript, ManuscriptArchive, ManuscriptChapterArchive
+from app.models.manuscript import (
+    Manuscript,
+    ManuscriptArchive,
+    ManuscriptChapterArchive,
+    ManuscriptPassageArchive,
+)
 
 _UNGROUPED_NORMALIZED = normalize_group_name(DEFAULT_GROUP_LABEL)
 
@@ -235,3 +240,196 @@ async def query_similar_manuscripts(
     )
 
     return OriginalityQueryResult(matches=matches, archive_size_n=archive_size_n)
+
+
+# --- Passage-level query (V-072, F7.4) --------------------------------------
+#
+# Measured 2026-08-20 (V-072.md's own "still genuinely open" research item):
+# HNSW query latency against a scratch table at 2,000/5,000/10,000 rows
+# (the ticket's own worst-case archive-size projection) was ~1-2ms per
+# query even at 10,000 rows, and a sequential loop of 200 per-passage
+# queries (a realistic manuscript's passage count) against a 10,000-row
+# archive totalled ~0.22s. That resolves the performance question this
+# ticket left open: the exact same "one query per own item" loop
+# `_best_chapter_matches` already uses above is fast enough here too — no
+# batched/LATERAL-join query was needed.
+
+
+@dataclass(frozen=True)
+class PassageMatch:
+    own_passage_index: int
+    own_chapter_index: int
+    own_page: int | None
+    own_paragraph: int | None
+    own_char_start: int
+    own_char_end: int
+    own_text: str
+    own_context_text: str
+    own_is_reference_list: bool
+    own_is_block_quote: bool
+    level: MatchLevel
+    similarity: float
+    matched_manuscript_id: int
+    # Internal only, same BUG-050/097 convention as `SimilarityMatch` above
+    # — never serialized to an instructor-facing response.
+    matched_group_label: str
+    matched_chapter_index: int
+    matched_page: int | None
+    matched_paragraph: int | None
+    matched_char_start: int
+    matched_char_end: int
+    matched_text: str
+    matched_context_text: str
+    matched_is_reference_list: bool
+    matched_is_block_quote: bool
+
+
+async def passage_archive_size(
+    session: AsyncSession, *, exclude_manuscript_ids: set[int], settings: Settings
+) -> int:
+    """Same cold-start honesty purpose as `_archive_size` above (ticket
+    AC5: "a thin archive must not make passage matching look
+    authoritative") — a separate count because the passage archive can be
+    non-empty even when a manuscript's whole-doc/chapter vectors are (a
+    manuscript with chapters but very short ones could produce passages at
+    a size below F7.1's own dilution-vs-signal balance, an edge this
+    ticket doesn't need to resolve, just not misreport)."""
+    return (
+        await session.scalar(
+            select(func.count())
+            .select_from(ManuscriptPassageArchive)
+            .where(
+                ManuscriptPassageArchive.model_id == settings.embedding_model_id,
+                ManuscriptPassageArchive.manuscript_id.notin_(exclude_manuscript_ids),
+            )
+        )
+    ) or 0
+
+
+def _classify_passage(similarity: float, settings: Settings) -> MatchLevel | None:
+    if similarity >= settings.reuse_passage_exact_duplicate_threshold:
+        return "exact_duplicate"
+    if similarity >= settings.reuse_passage_high_similarity_threshold:
+        return "high_similarity"
+    return None
+
+
+async def _best_passage_match_for(
+    session: AsyncSession,
+    passage: PassageEmbedding,
+    *,
+    exclude_manuscript_ids: set[int],
+    include_reference_list: bool,
+    include_block_quote: bool,
+    settings: Settings,
+) -> PassageMatch | None:
+    distance_expr = ManuscriptPassageArchive.embedding.cosine_distance(passage.embedding)
+    conditions = [
+        ManuscriptPassageArchive.model_id == settings.embedding_model_id,
+        ManuscriptPassageArchive.manuscript_id.notin_(exclude_manuscript_ids),
+    ]
+    # The CANDIDATE side respects the same inclusion flags as the query
+    # side: a reference-list/block-quote passage on either side of a match
+    # is exactly what "on by default" excludes (ticket AC3) -- filtering
+    # only the query side would still let a legitimate body passage match
+    # an excluded reference-list passage in the archive.
+    if not include_reference_list:
+        conditions.append(ManuscriptPassageArchive.is_reference_list.is_(False))
+    if not include_block_quote:
+        conditions.append(ManuscriptPassageArchive.is_block_quote.is_(False))
+
+    row = (
+        await session.execute(
+            select(
+                ManuscriptPassageArchive,
+                (1 - distance_expr).label("similarity"),
+                Manuscript.group_label,
+            )
+            .join(Manuscript, Manuscript.id == ManuscriptPassageArchive.manuscript_id)
+            .where(*conditions)
+            .order_by(distance_expr)
+            .limit(1)
+        )
+    ).first()
+    if row is None:
+        return None
+    level = _classify_passage(float(row.similarity), settings)
+    if level is None:
+        return None
+    archive_row: ManuscriptPassageArchive = row[0]
+    return PassageMatch(
+        own_passage_index=passage.passage_index,
+        own_chapter_index=passage.chapter_index,
+        own_page=passage.page,
+        own_paragraph=passage.paragraph,
+        own_char_start=passage.char_start,
+        own_char_end=passage.char_end,
+        own_text=passage.text,
+        own_context_text=passage.context_text,
+        own_is_reference_list=passage.is_reference_list,
+        own_is_block_quote=passage.is_block_quote,
+        level=level,
+        similarity=float(row.similarity),
+        matched_manuscript_id=archive_row.manuscript_id,
+        matched_group_label=row.group_label,
+        matched_chapter_index=archive_row.chapter_index,
+        matched_page=archive_row.page,
+        matched_paragraph=archive_row.paragraph,
+        matched_char_start=archive_row.char_start,
+        matched_char_end=archive_row.char_end,
+        matched_text=archive_row.text,
+        matched_context_text=archive_row.context_text,
+        matched_is_reference_list=archive_row.is_reference_list,
+        matched_is_block_quote=archive_row.is_block_quote,
+    )
+
+
+@dataclass(frozen=True)
+class PassageQueryResult:
+    matches: list[PassageMatch]
+    # Same cold-start disclosure purpose as `OriginalityQueryResult.archive_size_n`
+    # (ticket AC5) — shown even when 0.
+    passage_archive_size_n: int
+
+
+async def query_similar_passages(
+    session: AsyncSession,
+    manuscript_id: int,
+    passages: list[PassageEmbedding],
+    settings: Settings,
+    *,
+    include_reference_list: bool = False,
+    include_block_quote: bool = False,
+    exclude_manuscript_ids: set[int] | None = None,
+) -> PassageQueryResult:
+    """One query per own passage (see the perf note above for why that's
+    fine) — same self/group-sibling exclusion as `query_similar_manuscripts`
+    (BUG-050 item 1 applies at every granularity, not just whole-doc/
+    chapter). `include_reference_list`/`include_block_quote` default to
+    `False` (ticket AC3: "on by default") — the live exploration toggle
+    (`app.report.service`) is the only caller that ever passes `True`, and
+    it never turns those matches into scored `Flag` rows (see
+    `app.checks.reuse.service`'s own module docstring for that split)."""
+    exclude = {manuscript_id, *(exclude_manuscript_ids or set())}
+    exclude |= await _group_sibling_manuscript_ids(session, manuscript_id)
+    archive_size_n = await passage_archive_size(
+        session, exclude_manuscript_ids=exclude, settings=settings
+    )
+
+    matches: list[PassageMatch] = []
+    for passage in passages:
+        if not include_reference_list and passage.is_reference_list:
+            continue
+        if not include_block_quote and passage.is_block_quote:
+            continue
+        match = await _best_passage_match_for(
+            session,
+            passage,
+            exclude_manuscript_ids=exclude,
+            include_reference_list=include_reference_list,
+            include_block_quote=include_block_quote,
+            settings=settings,
+        )
+        if match is not None:
+            matches.append(match)
+    return PassageQueryResult(matches=matches, passage_archive_size_n=archive_size_n)

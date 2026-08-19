@@ -61,8 +61,8 @@ async def _clean(session_factory):
         await session.execute(
             text(
                 "TRUNCATE flag, check_result, check_run, rubric, manuscript_chapter_archive, "
-                "manuscript_archive, manuscript, manuscript_group, group_member, instructor "
-                "RESTART IDENTITY CASCADE"
+                "manuscript_passage_archive, manuscript_archive, manuscript, manuscript_group, "
+                "group_member, instructor RESTART IDENTITY CASCADE"
             )
         )
         await session.commit()
@@ -214,10 +214,12 @@ async def test_reuploaded_duplicate_produces_a_high_severity_flag(session_factor
         )
         assert result.detail["archive_size_n"] == 1  # compared against the first upload
         # A true duplicate flags at EVERY granularity that matches — the
-        # whole document AND each of its 2 chapters, all independently
+        # whole document, each of its 2 chapters, AND each of its 2
+        # passages (V-072/F7.4: CH1 and CH2 are each short enough to form
+        # exactly one passage per chapter), all independently
         # exact-duplicate (more informative for the instructor than
         # collapsing to one flag would be).
-        assert result.detail["n_flags"] == 3
+        assert result.detail["n_flags"] == 5
 
         rows = (
             await session.execute(
@@ -228,11 +230,15 @@ async def test_reuploaded_duplicate_produces_a_high_severity_flag(session_factor
                 {"id": result.id},
             )
         ).all()
-    assert len(rows) == 3
+    assert len(rows) == 5
     assert all(r.severity == "high" for r in rows)
     assert all(r.matched_group == "Group A" for r in rows)
     kinds = {r.kind for r in rows}
-    assert kinds == {"reuse_exact_duplicate", "reuse_exact_duplicate_chapter"}
+    assert kinds == {
+        "reuse_exact_duplicate",
+        "reuse_exact_duplicate_chapter",
+        "reuse_exact_duplicate_passage",
+    }
 
 
 async def test_same_groups_own_prior_submission_is_never_reuse(session_factory):
@@ -289,7 +295,9 @@ async def test_different_groups_still_flag_each_other(session_factory):
         result = await run_originality_reuse_check(
             session, manuscript_b, check_run_b, _extraction(CH1, CH2), settings
         )
-    assert result.detail["n_flags"] == 3
+    # V-072/F7.4: 2 more than before (one exact-duplicate passage flag per
+    # chapter — see the reuploaded-duplicate test's own comment above).
+    assert result.detail["n_flags"] == 5
     assert result.detail["archive_size_n"] == 1
 
 
@@ -323,7 +331,9 @@ async def test_ungrouped_default_bucket_is_not_exempted(session_factory):
         result = await run_originality_reuse_check(
             session, manuscript_b, check_run_b, _extraction(CH1, CH2), settings
         )
-    assert result.detail["n_flags"] == 3
+    # V-072/F7.4: 2 more than before (one exact-duplicate passage flag per
+    # chapter — see the reuploaded-duplicate test's own comment above).
+    assert result.detail["n_flags"] == 5
     assert result.detail["archive_size_n"] == 1
 
 
@@ -399,19 +409,35 @@ async def test_flag_text_never_leaks_matched_manuscripts_identity_or_headings(se
         )
         rows = (
             await session.execute(
-                text("SELECT evidence_excerpt FROM flag WHERE check_result_id = :id"),
+                text(
+                    "SELECT evidence_excerpt, detail->>'kind' AS kind, "
+                    "detail->>'reason' AS detail_reason FROM flag WHERE check_result_id = :id"
+                ),
                 {"id": result.id},
             )
         ).all()
-    assert len(rows) == 3
+    # V-072/F7.4: 2 more rows than before (one exact-duplicate passage flag
+    # per chapter, CH1/CH2 are each short enough to form exactly one).
+    assert len(rows) == 5
     for row in rows:
         assert real_group_label not in row.evidence_excerpt
         assert other_ch1_title not in row.evidence_excerpt
         assert other_ch2_title not in row.evidence_excerpt
-        # A bounded, non-identifying reference must still be present --
-        # BUG-050 item 5: "the matched manuscript must become
-        # identifiable" (just not identifying).
-        assert f"#{manuscript_a}" in row.evidence_excerpt
+        # A passage flag's evidence_excerpt is real OWN-side passage text
+        # (never the matched side's, so it can't leak the other side's
+        # title/heading either -- checked above), not a templated sentence
+        # -- the bounded, non-identifying #ref reference lives in
+        # `detail.reason` for these instead of in evidence_excerpt (see
+        # `app/checks/reuse/service.py`'s wording-templates comment for
+        # why). BUG-050 item 5 ("the matched manuscript must become
+        # identifiable, just not identifying") still holds either way.
+        if row.kind is not None and row.kind.endswith("_passage"):
+            assert real_group_label not in row.detail_reason
+            assert other_ch1_title not in row.detail_reason
+            assert other_ch2_title not in row.detail_reason
+            assert f"#{manuscript_a}" in row.detail_reason
+        else:
+            assert f"#{manuscript_a}" in row.evidence_excerpt
 
 
 async def test_transplanted_chapter_produces_a_chapter_level_flag(session_factory):
