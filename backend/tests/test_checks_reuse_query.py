@@ -15,8 +15,10 @@ from app.checks.reuse.service import (
 )
 from app.config import get_settings
 from app.db import sqlalchemy_url
+from app.groups.service import DEFAULT_GROUP_LABEL, normalize_group_name
 from app.ingest.schemas import ExtractionResult, SectionNode, SectionTree, TextBlock
 from app.models.enums import ResultOutcome
+from app.models.group import Group
 from app.models.instructor import Instructor
 from app.models.manuscript import Manuscript
 from app.models.rubric import Rubric
@@ -59,7 +61,8 @@ async def _clean(session_factory):
         await session.execute(
             text(
                 "TRUNCATE flag, check_result, check_run, rubric, manuscript_chapter_archive, "
-                "manuscript_archive, manuscript, instructor RESTART IDENTITY CASCADE"
+                "manuscript_archive, manuscript, manuscript_group, group_member, instructor "
+                "RESTART IDENTITY CASCADE"
             )
         )
         await session.commit()
@@ -84,6 +87,49 @@ async def _seed_manuscript_and_run(session_factory, *, group_label: str) -> tupl
         session.add(manuscript)
         await session.commit()
         rubric = Rubric(instructor_id=instructor.id, title="Format", source_file="r.pdf")
+        session.add(rubric)
+        await session.commit()
+        check_run = CheckRun(manuscript_id=manuscript.id, rubric_id=rubric.id)
+        session.add(check_run)
+        await session.commit()
+        return manuscript.id, check_run.id
+
+
+async def _seed_instructor(session_factory) -> int:
+    global _seed_counter
+    _seed_counter += 1
+    async with session_factory() as session:
+        instructor = Instructor(
+            email=f"reuse-query-test-{_seed_counter}@test.local", display_name="Reuse Query Test"
+        )
+        session.add(instructor)
+        await session.commit()
+        return instructor.id
+
+
+async def _make_group(session_factory, *, instructor_id: int, name: str) -> int:
+    async with session_factory() as session:
+        group = Group(
+            instructor_id=instructor_id, name=name, name_normalized=normalize_group_name(name)
+        )
+        session.add(group)
+        await session.commit()
+        return group.id
+
+
+async def _seed_manuscript_in_group(
+    session_factory, *, instructor_id: int, group_id: int | None
+) -> tuple[int, int]:
+    async with session_factory() as session:
+        manuscript = Manuscript(
+            instructor_id=instructor_id,
+            group_id=group_id,
+            group_label="unused, group_id is what matters here",
+            file_ref="test.pdf",
+        )
+        session.add(manuscript)
+        await session.commit()
+        rubric = Rubric(instructor_id=instructor_id, title="Format", source_file="r.pdf")
         session.add(rubric)
         await session.commit()
         check_run = CheckRun(manuscript_id=manuscript.id, rubric_id=rubric.id)
@@ -187,6 +233,98 @@ async def test_reuploaded_duplicate_produces_a_high_severity_flag(session_factor
     assert all(r.matched_group == "Group A" for r in rows)
     kinds = {r.kind for r in rows}
     assert kinds == {"reuse_exact_duplicate", "reuse_exact_duplicate_chapter"}
+
+
+async def test_same_groups_own_prior_submission_is_never_reuse(session_factory):
+    """BUG-050 item 1 (fixed 2026-08-19, unblocked by V-062's real
+    `Group`/`group_id`): a team's own revision/re-upload must not flag
+    against its own prior submission -- `exclude_manuscript_ids` used to
+    exclude only the SAME ROW, so every second and later check of any
+    real group reproduced five false HIGH flags."""
+    settings = get_settings()
+    instructor_id = await _seed_instructor(session_factory)
+    group_id = await _make_group(session_factory, instructor_id=instructor_id, name="Group A")
+
+    manuscript_a, check_run_a = await _seed_manuscript_in_group(
+        session_factory, instructor_id=instructor_id, group_id=group_id
+    )
+    async with session_factory() as session:
+        await run_originality_reuse_check(
+            session, manuscript_a, check_run_a, _extraction(CH1, CH2), settings
+        )
+
+    # Same team, same group, a revised/re-uploaded manuscript row.
+    manuscript_b, check_run_b = await _seed_manuscript_in_group(
+        session_factory, instructor_id=instructor_id, group_id=group_id
+    )
+    async with session_factory() as session:
+        result = await run_originality_reuse_check(
+            session, manuscript_b, check_run_b, _extraction(CH1, CH2), settings
+        )
+    assert result.detail["n_flags"] == 0
+    assert result.detail["archive_size_n"] == 0  # the sibling doesn't even count as "archive"
+
+
+async def test_different_groups_still_flag_each_other(session_factory):
+    """The group exemption must not become a blanket cross-team exemption
+    -- two DIFFERENT real groups (same instructor) re-using the same text
+    must still flag exactly as before this fix."""
+    settings = get_settings()
+    instructor_id = await _seed_instructor(session_factory)
+    group_a = await _make_group(session_factory, instructor_id=instructor_id, name="Group A")
+    group_b = await _make_group(session_factory, instructor_id=instructor_id, name="Group B")
+
+    manuscript_a, check_run_a = await _seed_manuscript_in_group(
+        session_factory, instructor_id=instructor_id, group_id=group_a
+    )
+    async with session_factory() as session:
+        await run_originality_reuse_check(
+            session, manuscript_a, check_run_a, _extraction(CH1, CH2), settings
+        )
+
+    manuscript_b, check_run_b = await _seed_manuscript_in_group(
+        session_factory, instructor_id=instructor_id, group_id=group_b
+    )
+    async with session_factory() as session:
+        result = await run_originality_reuse_check(
+            session, manuscript_b, check_run_b, _extraction(CH1, CH2), settings
+        )
+    assert result.detail["n_flags"] == 3
+    assert result.detail["archive_size_n"] == 1
+
+
+async def test_ungrouped_default_bucket_is_not_exempted(session_factory):
+    """Safety guard on the fix above: "Ungrouped" is the ONE shared
+    fallback row every manuscript with no real team name resolves into
+    per instructor (`resolve_or_create_group`) -- it is not one team, it
+    is every not-yet-assigned team. Exempting its siblings would silently
+    hide real reuse between two UNRELATED groups that both just haven't
+    been assigned a name yet, which is the opposite of what F7 exists to
+    catch. Two manuscripts sharing the "Ungrouped" bucket must still flag."""
+    settings = get_settings()
+    instructor_id = await _seed_instructor(session_factory)
+    ungrouped_id = await _make_group(
+        session_factory, instructor_id=instructor_id, name=DEFAULT_GROUP_LABEL
+    )
+
+    manuscript_a, check_run_a = await _seed_manuscript_in_group(
+        session_factory, instructor_id=instructor_id, group_id=ungrouped_id
+    )
+    async with session_factory() as session:
+        await run_originality_reuse_check(
+            session, manuscript_a, check_run_a, _extraction(CH1, CH2), settings
+        )
+
+    # A genuinely different team, also defaulted to "Ungrouped".
+    manuscript_b, check_run_b = await _seed_manuscript_in_group(
+        session_factory, instructor_id=instructor_id, group_id=ungrouped_id
+    )
+    async with session_factory() as session:
+        result = await run_originality_reuse_check(
+            session, manuscript_b, check_run_b, _extraction(CH1, CH2), settings
+        )
+    assert result.detail["n_flags"] == 3
+    assert result.detail["archive_size_n"] == 1
 
 
 def _extraction_titled(
