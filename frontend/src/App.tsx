@@ -17,6 +17,7 @@ import { ArchivePage } from "./archive/Archive";
 import { AuditLogPage } from "./audit/AuditLog";
 import { RequireAuth } from "./auth/RequireAuth";
 import { CheckProgressPage } from "./check/Progress";
+import { DocumentViewerPage } from "./document/DocumentViewer";
 import { FlagDetailPage } from "./flags/FlagDetail";
 import { LandingRoute } from "./pages/Landing";
 import { DashboardPage } from "./pages/Dashboard";
@@ -105,6 +106,16 @@ const router = createBrowserRouter(
           <RequireAuth>
             <AppShell>
               <ReportPage />
+            </AppShell>
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/report/:checkRunId/document"
+        element={
+          <RequireAuth>
+            <AppShell>
+              <DocumentViewerPage />
             </AppShell>
           </RequireAuth>
         }

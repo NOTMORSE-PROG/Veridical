@@ -3,6 +3,7 @@
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Response
+from fastapi.responses import FileResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.dependencies import get_current_instructor
@@ -13,6 +14,7 @@ from app.report.schemas import (
     DecisionIn,
     EscalatedItemOut,
     FlagSummaryOut,
+    ManuscriptViewerOut,
     ReopenIn,
     ReportOut,
     ResolveEscalationIn,
@@ -20,6 +22,8 @@ from app.report.schemas import (
 )
 from app.report.service import (
     decide_report,
+    get_manuscript_file_path,
+    get_manuscript_viewer,
     get_report,
     get_report_export_data,
     list_escalated_for_run,
@@ -72,6 +76,31 @@ async def list_flags_route(
     instructor: Annotated[Instructor, Depends(get_current_instructor)],
 ) -> list[FlagSummaryOut]:
     return await list_flags_for_run(session, check_run_id, instructor.id)
+
+
+@router.get("/check-runs/{check_run_id}/document", response_model=ManuscriptViewerOut)
+async def get_manuscript_viewer_route(
+    check_run_id: int,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    instructor: Annotated[Instructor, Depends(get_current_instructor)],
+) -> ManuscriptViewerOut:
+    """V-065 AC1/2/7: the manuscript-viewer screen's metadata + per-flag
+    anchor regions. Split from the raw file bytes below (ui-designer spec
+    §2.2) — a streamed PDF has no business inside a JSON envelope."""
+    return await get_manuscript_viewer(session, check_run_id, instructor.id)
+
+
+@router.get("/check-runs/{check_run_id}/document/file")
+async def get_manuscript_file_route(
+    check_run_id: int,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    instructor: Annotated[Instructor, Depends(get_current_instructor)],
+) -> FileResponse:
+    """PDF sources only -- the frontend's PDF.js pane fetches the actual
+    submitted bytes here (V-065 Q1: never re-rasterized server-side). A
+    purged manuscript raises `GoneError` (410), not a silent empty body."""
+    path = await get_manuscript_file_path(session, check_run_id, instructor.id)
+    return FileResponse(path, media_type="application/pdf")
 
 
 @router.post(

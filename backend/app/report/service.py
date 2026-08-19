@@ -7,8 +7,10 @@ an instructor resolves an escalation).
 
 from datetime import UTC, datetime
 from decimal import Decimal
-from typing import Any
+from pathlib import Path
+from typing import Any, Literal
 
+import pymupdf
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -20,7 +22,9 @@ from app.checks.escalation import (
     resolve_escalation,
 )
 from app.config import Settings, get_settings
-from app.errors import ConflictError, NotFoundError
+from app.errors import ConflictError, GoneError, NotFoundError
+from app.ingest.regions import recover_region
+from app.ingest.schemas import SectionTree
 from app.models.enums import (
     CheckKind,
     CheckRunStatus,
@@ -36,7 +40,9 @@ from app.report.schemas import (
     CriterionResultOut,
     EscalatedItemOut,
     EvidenceItem,
+    FlagRegionOut,
     FlagSummaryOut,
+    ManuscriptViewerOut,
     ReportExportData,
     ReportOut,
     ResolutionOut,
@@ -395,6 +401,155 @@ async def flags_for_check_run(session: AsyncSession, check_run_id: int) -> list[
             f.id,
         ),
     )
+
+
+async def get_manuscript_viewer(
+    session: AsyncSession, check_run_id: int, instructor_id: int, settings: Settings | None = None
+) -> ManuscriptViewerOut:
+    """V-065 AC1/2/7: what the manuscript-viewer screen loads. Opens ONLY
+    the current manuscript's own file — F7 flags anchored to a chapter
+    title always name `match.own_chapter_title` (`app/checks/reuse/
+    service.py`), never the matched manuscript's, so there is never a
+    reason for this endpoint to touch another instructor's file (the same
+    boundary BUG-050/BUG-097 established for evidence_excerpt)."""
+    settings = settings or get_settings()
+    check_run = await _owned_check_run(session, check_run_id, instructor_id)
+    manuscript = await session.get(Manuscript, check_run.manuscript_id)
+
+    suffix = Path(manuscript.file_ref).suffix.lower()
+    source_format: Literal["pdf", "docx", "unknown"] = (
+        "pdf" if suffix == ".pdf" else "docx" if suffix == ".docx" else "unknown"
+    )
+
+    flags = (
+        (
+            await session.execute(
+                select(Flag)
+                .join(CheckResult, CheckResult.id == Flag.check_result_id)
+                .where(CheckResult.check_run_id == check_run_id)
+            )
+        )
+        .scalars()
+        .all()
+    )
+
+    def _unavailable_regions() -> list[FlagRegionOut]:
+        # §5.7 of the ui-designer spec: one mechanism for "nothing to show"
+        # -- every flag collapses to the same `unavailable` kind whether the
+        # cause is a purge, an unsupported format, or an unopenable file, so
+        # the frontend's evidence-section copy is consistent either way.
+        return [
+            FlagRegionOut(
+                flag_id=flag.id,
+                kind="unavailable",
+                page=None,
+                end_page=None,
+                bbox=None,
+                all_bboxes=[],
+                paragraph=None,
+                index=None,
+            )
+            for flag in flags
+        ]
+
+    if manuscript.purged_at is not None:
+        return ManuscriptViewerOut(
+            manuscript_id=manuscript.id,
+            original_filename=manuscript.original_filename,
+            source_format=source_format,
+            available=False,
+            unavailable_reason=(
+                f"This manuscript's source file was purged on "
+                f"{manuscript.purged_at.date().isoformat()} and can no longer be viewed."
+            ),
+            purged_at=manuscript.purged_at,
+            page_count=None,
+            regions=_unavailable_regions(),
+        )
+
+    if source_format == "unknown":
+        return ManuscriptViewerOut(
+            manuscript_id=manuscript.id,
+            original_filename=manuscript.original_filename,
+            source_format=source_format,
+            available=False,
+            unavailable_reason="This manuscript's source file format isn't supported for viewing.",
+            purged_at=None,
+            page_count=None,
+            regions=_unavailable_regions(),
+        )
+
+    section_tree = SectionTree.model_validate(manuscript.section_tree or {"source": "none"})
+
+    doc = None
+    page_count = None
+    if source_format == "pdf":
+        try:
+            doc = pymupdf.open(manuscript.file_ref)
+            page_count = doc.page_count
+        except (pymupdf.FileDataError, pymupdf.FileNotFoundError, RuntimeError, ValueError):
+            return ManuscriptViewerOut(
+                manuscript_id=manuscript.id,
+                original_filename=manuscript.original_filename,
+                source_format=source_format,
+                available=False,
+                unavailable_reason="This manuscript's source file could not be opened.",
+                purged_at=None,
+                page_count=None,
+                regions=_unavailable_regions(),
+            )
+
+    try:
+        regions = []
+        for flag in flags:
+            region = recover_region(
+                doc, section_tree, flag.page_anchor, flag.evidence_excerpt, settings=settings
+            )
+            regions.append(
+                FlagRegionOut(
+                    flag_id=flag.id,
+                    kind=region.kind,
+                    page=region.page,
+                    end_page=region.end_page,
+                    bbox=region.bbox,
+                    all_bboxes=list(region.all_bboxes),
+                    paragraph=region.paragraph,
+                    index=region.index,
+                )
+            )
+    finally:
+        if doc is not None:
+            doc.close()
+
+    return ManuscriptViewerOut(
+        manuscript_id=manuscript.id,
+        original_filename=manuscript.original_filename,
+        source_format=source_format,
+        available=True,
+        unavailable_reason=None,
+        purged_at=None,
+        page_count=page_count,
+        regions=regions,
+    )
+
+
+async def get_manuscript_file_path(
+    session: AsyncSession, check_run_id: int, instructor_id: int
+) -> Path:
+    """V-065 AC1: the raw-bytes half of the viewer, split from
+    `get_manuscript_viewer`'s JSON metadata per the ui-designer spec's Β§2.2
+    -- streaming a file has no business being wrapped in a Pydantic model.
+    PDF sources only (DOCX never reaches this endpoint; the frontend's
+    text pane is served from `section_tree`, not raw bytes) and never a
+    purged manuscript -- both are the router's job to enforce with the
+    right HTTP status (410/404), not this function's."""
+    check_run = await _owned_check_run(session, check_run_id, instructor_id)
+    manuscript = await session.get(Manuscript, check_run.manuscript_id)
+    if manuscript.purged_at is not None:
+        raise GoneError("This manuscript's source file was purged and can no longer be read.")
+    if Path(manuscript.file_ref).suffix.lower() != ".pdf":
+        raise ConflictError("This manuscript's source file isn't a PDF.")
+    return Path(manuscript.file_ref)
 
 
 async def get_report_export_data(

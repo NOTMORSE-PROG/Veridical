@@ -466,6 +466,43 @@ export interface FlagSummaryOut {
   overridden: boolean;
 }
 
+// V-065: what the manuscript viewer's document pane can actually do with
+// one flag's anchor -- never more than `app.ingest.regions.recover_region`
+// measured it can recover (real 47-page manuscript, 2026-08-19). "kind"
+// drives which affordance renders; every other field is null unless that
+// kind uses it.
+export type AnchorRegionKind =
+  | "page_bbox"
+  | "page_only"
+  | "reference_list"
+  | "reference_position"
+  | "section"
+  | "whole_document"
+  | "paragraph_only"
+  | "unavailable";
+
+export interface FlagRegionOut {
+  flag_id: number;
+  kind: AnchorRegionKind;
+  page: number | null;
+  end_page: number | null;
+  bbox: [number, number, number, number] | null;
+  all_bboxes: [number, number, number, number][];
+  paragraph: number | null;
+  index: number | null;
+}
+
+export interface ManuscriptViewerOut {
+  manuscript_id: number;
+  original_filename: string | null;
+  source_format: "pdf" | "docx" | "unknown";
+  available: boolean;
+  unavailable_reason: string | null;
+  purged_at: string | null;
+  page_count: number | null;
+  regions: FlagRegionOut[];
+}
+
 /** One model's own daily allowance. The Gemini free tier meters per model,
  * so the quota meter's totals are sums over these islands (V-049). */
 export interface ModelQuotaStatus {

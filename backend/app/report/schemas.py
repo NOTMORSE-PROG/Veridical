@@ -278,6 +278,51 @@ class FlagSummaryOut(BaseModel):
     overridden: bool
 
 
+class FlagRegionOut(BaseModel):
+    """V-065 AC1-4: what the manuscript viewer can actually do with one
+    flag's anchor. `kind` is never fabricated past what
+    `app.ingest.regions.recover_region` measured it can recover (real
+    47-page manuscript, 2026-08-19): "bbox" only when a precise box was
+    found on the page; "page_only" is an honest degraded state (the page
+    is real, no box is), not an error."""
+
+    flag_id: int
+    kind: Literal[
+        "page_bbox",
+        "page_only",
+        "reference_list",
+        "reference_position",
+        "section",
+        "whole_document",
+        "paragraph_only",
+        "unavailable",
+    ]
+    page: int | None
+    end_page: int | None
+    bbox: tuple[float, float, float, float] | None
+    all_bboxes: list[tuple[float, float, float, float]]
+    paragraph: int | None
+    index: int | None
+
+
+class ManuscriptViewerOut(BaseModel):
+    """V-065 AC1/7: what screen 4h's "open the manuscript" action loads.
+    `source_format` decides which pane the frontend renders (PDF.js vs
+    extracted text, decided 2026-08-19 — see V-065.md Q1) — never
+    guessed client-side from the byte content."""
+
+    manuscript_id: int
+    original_filename: str | None
+    source_format: Literal["pdf", "docx", "unknown"]
+    available: bool
+    # Populated only when `available` is False — the reason is always
+    # stated, never a silent empty pane (ground rule 3 / AC7).
+    unavailable_reason: str | None
+    purged_at: datetime | None
+    page_count: int | None
+    regions: list[FlagRegionOut]
+
+
 class ReportExportData(BaseModel):
     """V-039: everything the PDF export needs, gathered once. `flags`
     mirrors the report's own flags panel (BUG-033) exactly -- the export
