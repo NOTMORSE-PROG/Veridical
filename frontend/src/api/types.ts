@@ -42,6 +42,9 @@ export interface RubricListItem {
   created_at: string;
   criteria_count: number;
   report_count: number;
+  // V-064 (AC1): a family-level attribute. null = "Not set" -- never
+  // guessed, same convention as ManuscriptListItem.program.
+  program: string | null;
 }
 
 export type IngestFailureReason = "file_too_large" | "unreadable_format" | "extraction_failed";

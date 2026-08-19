@@ -21,6 +21,7 @@ from app.errors import ConflictError, NotFoundError
 from app.ingest.service import detect_format, save_upload, select_extractor
 from app.llm.base import LLMClient
 from app.models.enums import CriterionType, RubricParseStatus
+from app.models.group import Program
 from app.models.rubric import Criterion, Rubric
 from app.models.run import CheckRun
 from app.rubric.decompose import raw_text_for_decomposition
@@ -48,6 +49,16 @@ async def create_rubric_from_upload(
     settings = settings or get_settings()
 
     version = 1
+    # V-064 (`backend-critic` finding, P1, live-reproduced): a new version
+    # uploaded into an existing family used to always start at
+    # `program_id=None`, silently reverting a family that had a program
+    # set back to "eligible for everything" the moment this new version
+    # was activated -- no error, nothing to notice. Every sibling shares
+    # the same `program_id` (kept in sync by `set_rubric_family_program`,
+    # which updates every row at once), so any one of them names the
+    # family's current value; carried forward here so a routine "upload a
+    # corrected format" action can never silently undo program scoping.
+    family_program_id: int | None = None
     if family_id is not None:
         siblings = (
             await session.scalars(
@@ -59,6 +70,7 @@ async def create_rubric_from_upload(
         if not siblings:
             raise NotFoundError(f"No rubric family {family_id}.")
         version = max(r.version for r in siblings) + 1
+        family_program_id = siblings[0].program_id
 
     # The row exists (and has its id) before the file does — same pattern
     # as manuscript ingestion: the server-owned id names the stored file,
@@ -67,6 +79,7 @@ async def create_rubric_from_upload(
         instructor_id=instructor_id,
         title=title,
         source_file="",
+        program_id=family_program_id,
         **({"rubric_family_id": family_id, "version": version} if family_id is not None else {}),
     )
     session.add(rubric)
@@ -168,7 +181,14 @@ async def get_rubric(session: AsyncSession, rubric_id: int, instructor_id: int) 
     # from_attributes=True) can read it like any other field (CODING.md
     # §2: routers stay thin, shaping stays here).
     rubric.is_latest_version = max_version == rubric.version  # type: ignore[attr-defined]
+    rubric.program = await _program_name(session, rubric.program_id)  # type: ignore[attr-defined]
     return rubric
+
+
+async def _program_name(session: AsyncSession, program_id: int | None) -> str | None:
+    if program_id is None:
+        return None
+    return await session.scalar(select(Program.name).where(Program.id == program_id))
 
 
 async def _has_reports(session: AsyncSession, rubric_id: int) -> bool:
@@ -285,6 +305,7 @@ async def _to_list_item(session: AsyncSession, rubric: Rubric) -> RubricListItem
         created_at=rubric.created_at,
         criteria_count=criteria_count or 0,
         report_count=report_count or 0,
+        program=await _program_name(session, rubric.program_id),
     )
 
 
@@ -324,6 +345,33 @@ async def list_rubric_families(session: AsyncSession, instructor_id: int) -> lis
             seen.add(rubric.rubric_family_id)
             representatives.append(rubric)
     return [await _to_list_item(session, r) for r in representatives]
+
+
+async def set_rubric_family_program(
+    session: AsyncSession, family_id: uuid.UUID, program_id: int | None, instructor_id: int
+) -> list[RubricListItem]:
+    """Screen 4m (V-064, AC1): sets (or clears, `program_id=None`) the
+    WHOLE family's program in one write -- every version row, not just
+    the latest, so an older (still-readable, V-013) version of the
+    family never disagrees with its own family's current program.
+    Row-level authorized: a family owned by a different instructor reads
+    as NotFoundError, same as every other rubric lookup in this module."""
+    rubrics = (
+        await session.scalars(
+            select(Rubric).where(
+                Rubric.rubric_family_id == family_id, Rubric.instructor_id == instructor_id
+            )
+        )
+    ).all()
+    if not rubrics:
+        raise NotFoundError(f"No rubric family {family_id}.")
+    if program_id is not None and await session.get(Program, program_id) is None:
+        raise NotFoundError(f"No program with id {program_id}.")
+    await session.execute(
+        update(Rubric).where(Rubric.rubric_family_id == family_id).values(program_id=program_id)
+    )
+    await session.commit()
+    return await list_rubric_versions(session, family_id, instructor_id)
 
 
 async def delete_rubric(session: AsyncSession, rubric_id: int, instructor_id: int) -> None:

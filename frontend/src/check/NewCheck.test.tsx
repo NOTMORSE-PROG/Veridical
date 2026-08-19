@@ -266,4 +266,101 @@ describe("NewCheckModal", () => {
       await screen.findByText("Your manuscripts are still being processed. This can take a few minutes. Check back shortly."),
     ).toBeInTheDocument();
   });
+
+  const CS_MANUSCRIPT = {
+    id: 1,
+    group_label: "G-CS",
+    program: "CS",
+    ingest_status: "done",
+    created_at: "2026-01-01T00:00:00Z",
+    latest_check_run_id: null,
+    latest_check_run_status: null,
+  };
+  const UNSET_PROGRAM_MANUSCRIPT = { ...CS_MANUSCRIPT, id: 2, group_label: "G-Unset", program: null };
+  const CS_RUBRIC = { ...ONE_ACTIVE_FAMILY[0], id: 9, title: "CS Format", program: "CS" };
+  const IT_RUBRIC = { ...ONE_ACTIVE_FAMILY[0], id: 10, title: "IT Format", program: "IT" };
+
+  it("V-064 AC2: auto-selects the single ELIGIBLE rubric once a program-matching manuscript is chosen, not just the single active one overall", async () => {
+    vi.stubGlobal(
+      "fetch",
+      stubFetchByPath({
+        "/manuscripts": { items: [CS_MANUSCRIPT], total: 1, page: 1, page_size: 200 },
+        "/rubric-families": [CS_RUBRIC, IT_RUBRIC],
+      }),
+    );
+    renderWithProviders(<NewCheckModal onClose={() => {}} initialManuscriptId={1} />);
+    const select = await screen.findByRole("combobox", { name: /manuscript/i });
+    await waitFor(() => expect(select).toHaveValue("1"));
+    expect(await screen.findByText(/CS Format/)).toBeInTheDocument();
+    expect(screen.queryByText(/IT Format/)).not.toBeInTheDocument();
+  });
+
+  it("V-064 AC4 (ux-critic finding): a PARTIAL exclusion (1 of 2 active rubrics eligible) is disclosed too, not just the zero-eligible case", async () => {
+    vi.stubGlobal(
+      "fetch",
+      stubFetchByPath({
+        "/manuscripts": { items: [CS_MANUSCRIPT], total: 1, page: 1, page_size: 200 },
+        "/rubric-families": [CS_RUBRIC, IT_RUBRIC],
+      }),
+    );
+    renderWithProviders(<NewCheckModal onClose={() => {}} initialManuscriptId={1} />);
+    const select = await screen.findByRole("combobox", { name: /manuscript/i });
+    await waitFor(() => expect(select).toHaveValue("1"));
+    // The picker itself never renders (only 1 of 2 is eligible) -- the
+    // excluded one's existence must still be disclosed somewhere.
+    expect(screen.queryByRole("combobox", { name: /rubric/i })).not.toBeInTheDocument();
+    expect(
+      await screen.findByText("1 other active rubric not shown: its program doesn't match this manuscript's (CS)."),
+    ).toBeInTheDocument();
+  });
+
+  it("V-064 AC4: explains, not silently hides, when nothing active fits the manuscript's program", async () => {
+    vi.stubGlobal(
+      "fetch",
+      stubFetchByPath({
+        "/manuscripts": { items: [CS_MANUSCRIPT], total: 1, page: 1, page_size: 200 },
+        "/rubric-families": [IT_RUBRIC],
+      }),
+    );
+    renderWithProviders(<NewCheckModal onClose={() => {}} initialManuscriptId={1} />);
+    const select = await screen.findByRole("combobox", { name: /manuscript/i });
+    await waitFor(() => expect(select).toHaveValue("1"));
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("No active rubric is set up for this manuscript's program (CS)");
+  });
+
+  it("V-064 AC3: a manuscript with no program set is offered every active rubric, with a non-blocking hint", async () => {
+    vi.stubGlobal(
+      "fetch",
+      stubFetchByPath({
+        "/manuscripts": { items: [UNSET_PROGRAM_MANUSCRIPT], total: 1, page: 1, page_size: 200 },
+        "/rubric-families": [CS_RUBRIC, IT_RUBRIC],
+      }),
+    );
+    renderWithProviders(<NewCheckModal onClose={() => {}} initialManuscriptId={2} />);
+    const select = await screen.findByRole("combobox", { name: /manuscript/i });
+    await waitFor(() => expect(select).toHaveValue("2"));
+    expect(
+      await screen.findByText("This manuscript's program is not set, so every active rubric is offered."),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: /CS Format/ })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: /IT Format/ })).toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("V-064 AC2: a rubric with no program set stays eligible for a program-set manuscript too", async () => {
+    const unsetRubric = { ...ONE_ACTIVE_FAMILY[0], id: 11, title: "Any Program", program: null };
+    vi.stubGlobal(
+      "fetch",
+      stubFetchByPath({
+        "/manuscripts": { items: [CS_MANUSCRIPT], total: 1, page: 1, page_size: 200 },
+        "/rubric-families": [unsetRubric],
+      }),
+    );
+    renderWithProviders(<NewCheckModal onClose={() => {}} initialManuscriptId={1} />);
+    const select = await screen.findByRole("combobox", { name: /manuscript/i });
+    await waitFor(() => expect(select).toHaveValue("1"));
+    expect(await screen.findByText(/Any Program/)).toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
 });

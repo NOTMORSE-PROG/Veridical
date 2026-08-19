@@ -8,10 +8,11 @@ import time
 from datetime import UTC, datetime
 
 import pytest
-from sqlalchemy import text
+from sqlalchemy import select, text
 
 from app.errors import ConflictError, NotFoundError
 from app.models.enums import IngestStatus
+from app.models.group import Group, Program
 from app.models.instructor import Instructor
 from app.models.manuscript import Manuscript
 from app.models.rubric import Rubric
@@ -140,6 +141,103 @@ async def test_create_check_run_rejects_another_instructors_manuscript(session_f
     async with session_factory() as session:
         with pytest.raises(NotFoundError):
             await create_check_run(session, instructor_id + 999, manuscript_id, rubric_id)
+
+
+async def _seed_with_programs(
+    session_factory, *, manuscript_program: str | None, rubric_program: str | None
+):
+    """A manuscript (via its group) and an active rubric, each optionally
+    assigned a real seeded Program (CS/IT come from migration 0025's own
+    seed, not created here)."""
+    async with session_factory() as session:
+        instructor = Instructor(
+            email=f"prog-{time.time_ns()}@test.local", display_name="Program Test"
+        )
+        session.add(instructor)
+        await session.commit()
+
+        manuscript_program_id = None
+        if manuscript_program is not None:
+            manuscript_program_id = await session.scalar(
+                select(Program.id).where(Program.name == manuscript_program)
+            )
+        group = Group(
+            instructor_id=instructor.id,
+            name="G",
+            name_normalized="g",
+            program_id=manuscript_program_id,
+        )
+        session.add(group)
+        await session.commit()
+
+        manuscript = Manuscript(
+            instructor_id=instructor.id,
+            group_id=group.id,
+            group_label="G",
+            file_ref="x.pdf",
+            ingest_status=IngestStatus.done,
+        )
+        rubric_program_id = None
+        if rubric_program is not None:
+            rubric_program_id = await session.scalar(
+                select(Program.id).where(Program.name == rubric_program)
+            )
+        rubric = Rubric(
+            instructor_id=instructor.id,
+            title="Format",
+            source_file="r.pdf",
+            is_active=True,
+            program_id=rubric_program_id,
+        )
+        session.add_all([manuscript, rubric])
+        await session.commit()
+        return instructor.id, manuscript.id, rubric.id
+
+
+async def test_create_check_run_rejects_a_mismatched_program(session_factory):
+    """V-064 AC5: the server-side half -- the ONLY guard bulk re-run
+    can't route around (per V-041's lesson: a client-side-only filter
+    already missed an equivalent cross-family case once)."""
+    instructor_id, manuscript_id, rubric_id = await _seed_with_programs(
+        session_factory, manuscript_program="CS", rubric_program="IT"
+    )
+    async with session_factory() as session:
+        with pytest.raises(ConflictError, match="CS.*IT"):
+            await create_check_run(session, instructor_id, manuscript_id, rubric_id)
+
+
+async def test_create_check_run_allows_a_matching_program(session_factory):
+    instructor_id, manuscript_id, rubric_id = await _seed_with_programs(
+        session_factory, manuscript_program="CS", rubric_program="CS"
+    )
+    async with session_factory() as session:
+        check_run = await create_check_run(session, instructor_id, manuscript_id, rubric_id)
+        assert check_run.id is not None
+
+
+async def test_create_check_run_allows_an_unset_rubric_program_against_any_manuscript(
+    session_factory,
+):
+    """AC3: a rubric with no program set is eligible for everything --
+    never a lock-out just because the rubric side hasn't been configured."""
+    instructor_id, manuscript_id, rubric_id = await _seed_with_programs(
+        session_factory, manuscript_program="CS", rubric_program=None
+    )
+    async with session_factory() as session:
+        check_run = await create_check_run(session, instructor_id, manuscript_id, rubric_id)
+        assert check_run.id is not None
+
+
+async def test_create_check_run_allows_an_unset_manuscript_program_against_any_rubric(
+    session_factory,
+):
+    """AC3: a manuscript with no program set may use any rubric."""
+    instructor_id, manuscript_id, rubric_id = await _seed_with_programs(
+        session_factory, manuscript_program=None, rubric_program="IT"
+    )
+    async with session_factory() as session:
+        check_run = await create_check_run(session, instructor_id, manuscript_id, rubric_id)
+        assert check_run.id is not None
 
 
 async def test_queue_position_is_fifo_among_active_runs(session_factory):

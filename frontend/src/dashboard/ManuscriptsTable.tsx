@@ -47,7 +47,7 @@ function ProgramFilter({
   }
   // No programs configured at all: a select with only "All"/"Not set"
   // has nothing real to filter between -- clutter, not a control.
-  if (!programs || programs.length === 0) return null;
+  if (!Array.isArray(programs) || programs.length === 0) return null;
 
   return (
     <div className="flex flex-col gap-1.5 sm:flex-row sm:items-center sm:gap-2">

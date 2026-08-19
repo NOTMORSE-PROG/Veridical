@@ -13,6 +13,7 @@ from sqlalchemy import select, text
 from app.config import get_settings
 from app.errors import ConflictError, NotFoundError
 from app.llm.base import LLMClient
+from app.models.group import Program
 from app.models.manuscript import Manuscript
 from app.models.rubric import Rubric
 from app.models.run import CheckRun
@@ -363,6 +364,40 @@ async def test_list_rubric_families_returns_one_row_per_family(
     assert all(f.is_active for f in families)
 
 
+async def test_two_simultaneously_active_families_carry_distinct_programs(
+    session_factory, tmp_path, monkeypatch, instructor_id
+):
+    """V-064's own QA step: two REAL simultaneously-active families,
+    scoped to two different real programs -- not just schema-level
+    plumbing, the exact shape an instructor with a CS format and an IT
+    format actually has."""
+    from app.rubric.service import list_rubric_families, set_rubric_family_program
+
+    cs_rubric = await _upload(
+        session_factory, tmp_path, monkeypatch, instructor_id, title="CS-Format"
+    )
+    await _confirm(session_factory, cs_rubric.id, instructor_id)
+    it_rubric = await _upload(
+        session_factory, tmp_path, monkeypatch, instructor_id, title="IT-Format"
+    )
+    await _confirm(session_factory, it_rubric.id, instructor_id)
+
+    async with session_factory() as session:
+        cs_id = await session.scalar(select(Program.id).where(Program.name == "CS"))
+        it_id = await session.scalar(select(Program.id).where(Program.name == "IT"))
+        await set_rubric_family_program(session, cs_rubric.rubric_family_id, cs_id, instructor_id)
+        await set_rubric_family_program(session, it_rubric.rubric_family_id, it_id, instructor_id)
+
+        families = await list_rubric_families(session, instructor_id)
+
+    program_by_family = {f.rubric_family_id: f.program for f in families}
+    assert program_by_family[cs_rubric.rubric_family_id] == "CS"
+    assert program_by_family[it_rubric.rubric_family_id] == "IT"
+    # Both families still independently active -- setting a program never
+    # touches is_active (a genuinely separate concern).
+    assert all(f.is_active for f in families)
+
+
 async def _insert_check_run_against(session_factory, rubric_id, instructor_id):
     async with session_factory() as session:
         manuscript = Manuscript(
@@ -417,3 +452,108 @@ async def test_editing_an_active_version_with_reports_is_blocked(
             await update_criteria(
                 session, v1.id, UpdateCriteriaRequest(criteria=criteria), instructor_id
             )
+
+
+async def test_set_rubric_family_program_updates_every_version_row(
+    session_factory, tmp_path, monkeypatch, instructor_id
+):
+    """V-064 AC1: a family-level attribute, denormalized onto every
+    version row -- setting it must not silently leave an OLDER (still-
+    readable, V-013 history-is-immutable) version disagreeing with its
+    own family's current program."""
+    from app.rubric.service import set_rubric_family_program
+
+    v1 = await _upload(session_factory, tmp_path, monkeypatch, instructor_id, title="V1")
+    await _confirm(session_factory, v1.id, instructor_id)
+    v2 = await _upload(
+        session_factory,
+        tmp_path,
+        monkeypatch,
+        instructor_id,
+        family_id=v1.rubric_family_id,
+        title="V2",
+    )
+
+    async with session_factory() as session:
+        cs_id = await session.scalar(select(Program.id).where(Program.name == "CS"))
+        items = await set_rubric_family_program(session, v1.rubric_family_id, cs_id, instructor_id)
+
+    assert {item.program for item in items} == {"CS"}
+    assert {item.id for item in items} == {v1.id, v2.id}
+
+
+async def test_set_rubric_family_program_can_clear_it_back_to_not_set(
+    session_factory, tmp_path, monkeypatch, instructor_id
+):
+    from app.rubric.service import set_rubric_family_program
+
+    v1 = await _upload(session_factory, tmp_path, monkeypatch, instructor_id, title="V1")
+    async with session_factory() as session:
+        cs_id = await session.scalar(select(Program.id).where(Program.name == "CS"))
+        await set_rubric_family_program(session, v1.rubric_family_id, cs_id, instructor_id)
+        cleared = await set_rubric_family_program(session, v1.rubric_family_id, None, instructor_id)
+    assert all(item.program is None for item in cleared)
+
+
+async def test_set_rubric_family_program_rejects_another_instructors_family(
+    session_factory, tmp_path, monkeypatch, instructor_id
+):
+    from app.models.instructor import Instructor
+    from app.rubric.service import set_rubric_family_program
+
+    v1 = await _upload(session_factory, tmp_path, monkeypatch, instructor_id, title="V1")
+    async with session_factory() as session:
+        other = Instructor(email="other2@tip.edu.ph", display_name="Other Prof")
+        session.add(other)
+        await session.commit()
+        await session.refresh(other)
+        other_id = other.id
+        cs_id = await session.scalar(select(Program.id).where(Program.name == "CS"))
+
+    async with session_factory() as session:
+        with pytest.raises(NotFoundError):
+            await set_rubric_family_program(session, v1.rubric_family_id, cs_id, other_id)
+
+
+async def test_set_rubric_family_program_rejects_an_unknown_program_id(
+    session_factory, tmp_path, monkeypatch, instructor_id
+):
+    from app.rubric.service import set_rubric_family_program
+
+    v1 = await _upload(session_factory, tmp_path, monkeypatch, instructor_id, title="V1")
+    async with session_factory() as session:
+        with pytest.raises(NotFoundError):
+            await set_rubric_family_program(session, v1.rubric_family_id, 999_999, instructor_id)
+
+
+async def test_a_new_version_uploaded_into_a_scoped_family_inherits_its_program(
+    session_factory, tmp_path, monkeypatch, instructor_id
+):
+    """`backend-critic` finding (V-064 review), live-reproduced: a new
+    version used to always land at program_id=None regardless of the
+    family's own current program -- routine "upload a corrected format"
+    (V-013) silently reverted a CS-only family back to "eligible for
+    everything" the moment the new version was activated, no error, no
+    warning. Every sibling must share the same program (the same
+    invariant `set_rubric_family_program` itself maintains)."""
+    from app.rubric.service import set_rubric_family_program
+
+    v1 = await _upload(session_factory, tmp_path, monkeypatch, instructor_id, title="V1")
+    async with session_factory() as session:
+        cs_id = await session.scalar(select(Program.id).where(Program.name == "CS"))
+        await set_rubric_family_program(session, v1.rubric_family_id, cs_id, instructor_id)
+
+    v2 = await _upload(
+        session_factory,
+        tmp_path,
+        monkeypatch,
+        instructor_id,
+        family_id=v1.rubric_family_id,
+        title="V2",
+    )
+    assert v2.version == 2
+    async with session_factory() as session:
+        from app.rubric.service import get_rubric
+
+        v2_reloaded = await get_rubric(session, v2.id, instructor_id)
+    assert v2_reloaded.program == "CS"  # not None -- inherited, not reset

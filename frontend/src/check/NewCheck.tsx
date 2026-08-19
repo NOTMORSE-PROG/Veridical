@@ -6,6 +6,7 @@ import { useNavigate } from "react-router";
 import { ApiError } from "../api/client";
 import { Modal, ModalBackdrop } from "../components/Modal";
 import { formatManuscriptOption, manuscriptIdentity } from "../domain/manuscriptLabel";
+import { isRubricEligibleForProgram } from "../domain/rubricEligibility";
 import { useRubricFamilies } from "../rubric/useRubric";
 import { useCreateCheckRun, useManuscripts } from "./useCheckRun";
 
@@ -130,18 +131,45 @@ export function NewCheckModal({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [manuscriptsPending, familiesPending, manuscriptsError, familiesError]);
 
-  // Auto-selects the sole active rubric once it loads (most instructors
-  // have exactly one); an explicit pick always wins once made. Derived
-  // per render rather than synced via an effect — `families` arrives
+  const selectedManuscript = readyManuscripts.find((m) => m.id === manuscriptId);
+
+  // V-064 (AC2/AC4): once a manuscript is chosen, narrow to only the
+  // rubrics eligible for ITS program -- not silently, the excluded ones
+  // still exist in `activeFamilies` for the "why isn't X offered"
+  // explanation below. Before a manuscript is chosen there's nothing to
+  // filter against yet, so every active family is shown.
+  const eligibleFamilies = selectedManuscript
+    ? activeFamilies.filter((f) => isRubricEligibleForProgram(selectedManuscript.program, f.program))
+    : activeFamilies;
+  const familiesForPicker = selectedManuscript ? eligibleFamilies : activeFamilies;
+
+  // Auto-selects the sole ELIGIBLE rubric once it loads (most instructors
+  // have exactly one, or exactly one that fits this manuscript's
+  // program); an explicit pick always wins once made, and is dropped if
+  // it stops being eligible (a later manuscript change made it
+  // ineligible) rather than silently submitted anyway. Derived per
+  // render rather than synced via an effect — `families` arrives
   // asynchronously, so a one-time useState initializer would miss it.
   const rubricId: number | "" =
-    chosenRubricId !== ""
+    chosenRubricId !== "" && eligibleFamilies.some((f) => f.id === chosenRubricId)
       ? chosenRubricId
-      : activeFamilies.length === 1
-        ? activeFamilies[0].id
+      : eligibleFamilies.length === 1
+        ? eligibleFamilies[0].id
         : "";
-  const selectedManuscript = readyManuscripts.find((m) => m.id === manuscriptId);
-  const selectedRubric = activeFamilies.find((f) => f.id === rubricId);
+  const selectedRubric = eligibleFamilies.find((f) => f.id === rubricId);
+  // AC3: a manuscript with no program set is never told "nothing fits" —
+  // it's eligible for everything, so this only ever fires when the
+  // manuscript HAS a program and nothing active matches it.
+  const noEligibleRubricForProgram =
+    selectedManuscript?.program != null && activeFamilies.length > 0 && eligibleFamilies.length === 0;
+  // ux-critic finding (V-064 review, live-reproduced): the FULL-exclusion
+  // case above is explained, but a PARTIAL one wasn't -- with 2+ active
+  // rubrics and exactly 1 eligible, the picker (gated on
+  // `familiesForPicker.length > 1`) never renders at all, so the excluded
+  // rubric(s) existing was invisible, contradicting AC4's own "explained,
+  // not silently hidden" for this in-between case just as much as the
+  // zero-eligible one.
+  const excludedForProgramCount = selectedManuscript ? activeFamilies.length - eligibleFamilies.length : 0;
 
   function computeProblems(): Problem[] {
     const problems: Problem[] = [];
@@ -156,7 +184,15 @@ export function NewCheckModal({
     }
     if (activeFamilies.length === 0) {
       problems.push({ id: "no-rubric", message: "No active rubric is available yet." });
-    } else if (activeFamilies.length > 1 && rubricId === "") {
+    } else if (noEligibleRubricForProgram) {
+      // AC4: explained, not silently hidden -- names the manuscript's
+      // own program so the instructor can see WHY nothing was offered,
+      // not just that nothing was.
+      problems.push({
+        id: "no-eligible-rubric",
+        message: `No active rubric is set up for this manuscript's program (${selectedManuscript!.program}). Set a rubric's program on the rubric management screen, or clear this manuscript's program.`,
+      });
+    } else if (eligibleFamilies.length > 1 && rubricId === "") {
       problems.push({
         id: "rubric",
         message: "Choose which active rubric to check against.",
@@ -193,6 +229,10 @@ export function NewCheckModal({
     if (submitAttempted) return true;
     if (p.id === "no-manuscripts") return !manuscriptsPending && !manuscriptsError;
     if (p.id === "no-rubric") return !familiesPending && !familiesError;
+    // Same reasoning as "no-manuscripts"/"no-rubric": a fact about this
+    // manuscript's program, not something the instructor forgot to fill
+    // in -- visible as soon as it's known, not gated on a submit attempt.
+    if (p.id === "no-eligible-rubric") return !familiesPending && !familiesError;
     return false;
   });
   const manuscriptInvalid = currentProblems.some((p) => p.id === "manuscript");
@@ -331,11 +371,19 @@ export function NewCheckModal({
                       </p>
                     );
                   })()}
+                {/* AC3: not a blocker -- an unset program never narrows the
+                    rubric choice, this just tells the instructor why every
+                    active rubric is still on offer. */}
+                {selectedManuscript && selectedManuscript.program == null && (
+                  <p className="text-sm text-ink-tertiary">
+                    This manuscript's program is not set, so every active rubric is offered.
+                  </p>
+                )}
               </>
             )}
           </div>
 
-          {activeFamilies.length > 1 && (
+          {familiesForPicker.length > 1 && (
             <div className="flex flex-col gap-1.5">
               <span id="rubric-label" className="text-sm font-medium text-ink">
                 Rubric
@@ -367,7 +415,7 @@ export function NewCheckModal({
                     className={`min-h-11 w-full rounded-md border bg-panel px-3 text-base text-ink sm:h-9 ${rubricInvalid ? "border-2 border-status-attention-text" : "border-border-input"}`}
                   >
                     <option value="">Select an active rubric.</option>
-                    {activeFamilies.map((f) => (
+                    {familiesForPicker.map((f) => (
                       <option key={f.id} value={f.id}>
                         {f.title} (v{f.version})
                       </option>
@@ -393,6 +441,20 @@ export function NewCheckModal({
               Runs against <b>{selectedRubric.title}</b> v{selectedRubric.version},{" "}
               {selectedRubric.criteria_count} criteria.
             </div>
+          )}
+
+          {/* V-064 (ux-critic finding, AC4): with exactly one eligible
+              rubric, the picker above never renders at all (its own
+              length > 1 gate) -- without this, an excluded rubric's
+              existence was invisible whenever at least one other rubric
+              remained eligible, same "explained, not silently hidden"
+              gap AC4 already covers for the zero-eligible case. */}
+          {excludedForProgramCount > 0 && eligibleFamilies.length > 0 && (
+            <p className="text-sm text-ink-tertiary">
+              {excludedForProgramCount} other active rubric{excludedForProgramCount === 1 ? "" : "s"} not
+              shown: {excludedForProgramCount === 1 ? "its" : "their"} program doesn't match this
+              manuscript's ({selectedManuscript!.program}).
+            </p>
           )}
 
           <p className="text-sm text-ink-tertiary">

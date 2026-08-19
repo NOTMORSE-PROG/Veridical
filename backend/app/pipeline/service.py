@@ -13,6 +13,7 @@ from app.config import Settings, get_settings
 from app.errors import ConflictError, NotFoundError
 from app.models.audit import AuditLog
 from app.models.enums import CheckRunStatus, IngestStatus, LLMMode
+from app.models.group import Group, Program
 from app.models.manuscript import Manuscript
 from app.models.rubric import Rubric
 from app.models.run import CheckRun
@@ -66,6 +67,33 @@ async def create_check_run(
             "Only a confirmed, active rubric version can be used to start a check. "
             "Confirm it on the rubric review screen first."
         )
+
+    # V-064 (AC5): the server-side half of program eligibility -- the
+    # ONLY guard bulk re-run can't route around, per V-041's own lesson
+    # that a client-side-only filter (the frontend picker) missed a real
+    # cross-family submission path. Permissive by default (AC3): a block
+    # fires only when BOTH sides have a program set AND they disagree --
+    # either side unset stays fully eligible, matching the same
+    # never-lock-out-on-missing-data convention program-unset manuscripts
+    # already get everywhere else in this feature.
+    if rubric.program_id is not None:
+        manuscript_program_id = None
+        if manuscript.group_id is not None:
+            manuscript_program_id = await session.scalar(
+                select(Group.program_id).where(Group.id == manuscript.group_id)
+            )
+        if manuscript_program_id is not None and manuscript_program_id != rubric.program_id:
+            manuscript_program_name = await session.scalar(
+                select(Program.name).where(Program.id == manuscript_program_id)
+            )
+            rubric_program_name = await session.scalar(
+                select(Program.name).where(Program.id == rubric.program_id)
+            )
+            raise ConflictError(
+                f"This manuscript's program ({manuscript_program_name}) doesn't match "
+                f"this rubric's program ({rubric_program_name}). Choose a rubric for "
+                "the right program, or one with no program set."
+            )
 
     settings = settings or get_settings()
     # BUG-049: persisted at creation, not inferred later -- without this,

@@ -21,7 +21,7 @@
 // coexisting is proven at the data/API layer (list_rubric_families
 // returns one row per family, tested), but nothing in this screen lets
 // an instructor switch between them yet.
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { Link } from "react-router";
 import { ApiError } from "../api/client";
 import type { RubricListItem } from "../api/types";
@@ -29,6 +29,7 @@ import { Chip } from "../components/Chip";
 import { Modal, ModalBackdrop } from "../components/Modal";
 import type { StatusPillTone } from "../components/StatusPill";
 import { StatusPill } from "../components/StatusPill";
+import { usePrograms } from "../dashboard/useDashboard";
 import { useRouteFocus } from "../routing/useRouteFocus";
 import { RerunModal } from "./RerunModal";
 import {
@@ -36,8 +37,76 @@ import {
   useDeleteRubric,
   useRubricFamilies,
   useRubricVersions,
+  useSetRubricFamilyProgram,
 } from "./useRubric";
 import { UploadRubricModal } from "./UploadRubricModal";
+
+// V-064 (AC1): lets the instructor set/clear the WHOLE family's program
+// -- the one control this ticket's ACs actually require (filtering reads
+// this value everywhere else; nothing else needs to write it). A plain
+// labeled `<select>`, same precedent as the dashboard's program filter
+// (`ManuscriptsTable.tsx`'s `ProgramFilter`) -- the program list is
+// data-driven, not a fixed small set.
+function ProgramControl({
+  familyId,
+  program,
+}: {
+  familyId: string;
+  program: string | null;
+}) {
+  const { data: programs, isLoading } = usePrograms();
+  const setProgram = useSetRubricFamilyProgram();
+  const [error, setError] = useState<string | null>(null);
+  const selectId = useId();
+
+  if (isLoading || !Array.isArray(programs) || programs.length === 0) return null;
+
+  // `program` (from RubricListItem) is the NAME, but the <select>'s
+  // options are keyed by id (matching the mutation's own program_id
+  // shape) -- resolve name -> id so an already-set program shows as
+  // actually selected, not blank.
+  const currentProgramId = program ? programs.find((p) => p.name === program)?.id : undefined;
+
+  async function handleChange(value: string) {
+    setError(null);
+    const programId = value === "" ? null : Number(value);
+    try {
+      await setProgram.mutateAsync({ familyId, programId });
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Could not update the program. Try again.");
+    }
+  }
+
+  return (
+    <div className="flex flex-col gap-1">
+      <div className="flex items-center gap-2">
+        <label htmlFor={selectId} className="text-sm font-medium text-ink">
+          Program
+        </label>
+        <select
+          id={selectId}
+          value={currentProgramId ?? ""}
+          disabled={setProgram.isPending}
+          onChange={(event) => handleChange(event.target.value)}
+          className="h-9 rounded-md border border-border-input bg-panel px-2.5 text-sm text-ink disabled:opacity-60"
+        >
+          <option value="">Not set</option>
+          {programs.map((p) => (
+            <option key={p.id} value={p.id}>
+              {p.name}
+            </option>
+          ))}
+        </select>
+      </div>
+      {error && (
+        <p role="alert" className="text-sm font-medium text-danger">
+          <span className="sr-only">Error: </span>
+          {error}
+        </p>
+      )}
+    </div>
+  );
+}
 
 function formatDate(iso: string): string {
   return new Date(iso).toLocaleDateString();
@@ -392,6 +461,7 @@ export function ManageRubricPage() {
             can check manuscripts against it.
           </p>
         )}
+        <ProgramControl familyId={family.rubric_family_id} program={displayVersion.program} />
       </section>
 
       {recentActivation !== null && (

@@ -8,6 +8,7 @@ import { useCreateCheckRun, useManuscripts, useRerunEstimate } from "../check/us
 import { Modal, ModalBackdrop } from "../components/Modal";
 import { manuscriptIdentity } from "../domain/manuscriptLabel";
 import { RUNNING_STATUSES, manuscriptStatus } from "../domain/manuscriptStatus";
+import { isRubricEligibleForProgram } from "../domain/rubricEligibility";
 import { useRubricFamilies } from "./useRubric";
 
 function SpinnerIcon() {
@@ -50,6 +51,14 @@ export function RerunModal({ onClose, initialManuscriptIds }: RerunModalProps) {
   // in the row to warn the instructor. Manuscripts done under an EARLIER
   // VERSION OF THE SAME FAMILY remain eligible (the whole point of this
   // ticket); "same family" is the only thing that changes.
+  //
+  // V-064 (AC5): the SAME class of exclusion, extended to program --
+  // silently proceeding here is exactly the client-side gap V-041 itself
+  // found once already (a server-side fix alone wasn't enough). A
+  // manuscript's program can change AFTER its last check ran under this
+  // family (ticket edge case) without a real submission ever reaching
+  // the mismatched-program server guard, so this must be checked here
+  // too, not just trusted to the create-check-run endpoint.
   const eligible = useMemo(
     () =>
       (manuscripts ?? []).filter(
@@ -57,6 +66,7 @@ export function RerunModal({ onClose, initialManuscriptIds }: RerunModalProps) {
           m.latest_done_check_run_id !== null &&
           m.latest_done_rubric_family_id !== null &&
           m.latest_done_rubric_family_id === activeFamily?.rubric_family_id &&
+          isRubricEligibleForProgram(m.program, activeFamily?.program) &&
           !(m.latest_check_run_status && RUNNING_STATUSES.has(m.latest_check_run_status)),
       ),
     [manuscripts, activeFamily],
@@ -317,9 +327,10 @@ export function RerunModal({ onClose, initialManuscriptIds }: RerunModalProps) {
               {!hasSubmitted && excludedInitialCount > 0 && (
                 <p className="rounded-md bg-status-attention-bg px-3 py-2 text-sm text-status-attention-text">
                   The manuscript{excludedInitialCount === 1 ? "" : "s"} you selected{" "}
-                  {excludedInitialCount === 1 ? "wasn't" : "weren't"} checked against{" "}
-                  {activeFamily.title}, so {excludedInitialCount === 1 ? "it isn't" : "they aren't"}{" "}
-                  included below.
+                  {excludedInitialCount === 1 ? "isn't" : "aren't"} included below: either{" "}
+                  {excludedInitialCount === 1 ? "it wasn't" : "they weren't"} checked against{" "}
+                  {activeFamily.title}, or {excludedInitialCount === 1 ? "its" : "their"} program no
+                  longer matches this rubric's.
                 </p>
               )}
 

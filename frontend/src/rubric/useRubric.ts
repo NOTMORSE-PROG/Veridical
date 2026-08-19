@@ -115,3 +115,15 @@ export function useDeleteRubric() {
     onSuccess: invalidate,
   });
 }
+
+// V-064 (AC1, screen 4m): sets (or clears, program_id: null) the WHOLE
+// family's program in one write -- every version, not just the one
+// currently shown.
+export function useSetRubricFamilyProgram() {
+  const invalidate = useInvalidateVersionLists();
+  return useMutation({
+    mutationFn: ({ familyId, programId }: { familyId: string; programId: number | null }) =>
+      api.put<RubricListItem[]>(`/rubric-families/${familyId}/program`, { program_id: programId }),
+    onSuccess: invalidate,
+  });
+}
