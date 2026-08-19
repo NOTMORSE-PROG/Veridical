@@ -427,6 +427,25 @@ class Settings(BaseSettings):
     def cors_allowed_origins_list(self) -> list[str]:
         return [origin.strip() for origin in self.cors_allowed_origins.split(",") if origin.strip()]
 
+    # --- Programs (V-062) -----------------------------------------------------
+    # Comma-separated seed for the `program` reference table (ground rule 7:
+    # CS/IT are TIP's programs today, not a permanent fact about the product
+    # -- another school, or TIP next year, may need a different list, and
+    # that must be a config/data change, never a redeploy). Same raw-string
+    # convention as `cors_allowed_origins` above, for the same reason.
+    # `scripts/seed_programs.py` reads this and upserts; the migration that
+    # first created the table seeds the two values known at the time it was
+    # written directly (a historical fact about what shipped), not by
+    # reading this setting at migration-run time (BUG-042's lesson: a
+    # migration must never read live settings for something it's supposed
+    # to lock in, or a stray env var makes different environments diverge
+    # silently) -- this setting is for ongoing, post-migration additions.
+    default_programs: str = "CS,IT"
+
+    @property
+    def default_programs_list(self) -> list[str]:
+        return [name.strip() for name in self.default_programs.split(",") if name.strip()]
+
     @field_validator(
         "ingest_patterns_file",
         "structural_keywords_file",

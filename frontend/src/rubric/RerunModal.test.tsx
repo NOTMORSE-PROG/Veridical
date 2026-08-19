@@ -34,6 +34,7 @@ function manuscript(overrides: Partial<ManuscriptListItem> = {}): ManuscriptList
     // explicitly (see the dedicated test below).
     latest_done_rubric_family_id: "fam-1",
     escalations_awaiting_review: 0,
+    program: null,
     ...overrides,
   };
 }

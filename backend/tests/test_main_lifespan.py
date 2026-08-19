@@ -17,10 +17,14 @@ def test_prod_env_triggers_a_migration_check_on_startup(monkeypatch):
     get_settings.cache_clear()
     from app.main import app
 
-    with patch("app.main._upgrade_to_head") as mock_upgrade:
+    with (
+        patch("app.main._upgrade_to_head") as mock_upgrade,
+        patch("app.main._seed_programs_on_boot") as mock_seed,
+    ):
         with TestClient(app):
             pass
         mock_upgrade.assert_called_once()
+        mock_seed.assert_called_once()
     get_settings.cache_clear()
 
 
@@ -29,8 +33,12 @@ def test_dev_env_never_runs_a_migration_on_startup(monkeypatch):
     get_settings.cache_clear()
     from app.main import app
 
-    with patch("app.main._upgrade_to_head") as mock_upgrade:
+    with (
+        patch("app.main._upgrade_to_head") as mock_upgrade,
+        patch("app.main._seed_programs_on_boot") as mock_seed,
+    ):
         with TestClient(app):
             pass
         mock_upgrade.assert_not_called()
+        mock_seed.assert_not_called()
     get_settings.cache_clear()

@@ -2,7 +2,7 @@
 // manuscripts table.
 import { useQuery } from "@tanstack/react-query";
 import { api } from "../api/client";
-import type { PaginatedManuscripts } from "../api/types";
+import type { PaginatedManuscripts, ProgramOut } from "../api/types";
 
 export interface DashboardStats {
   manuscripts_checked: number;
@@ -26,10 +26,23 @@ export function useDashboardStats() {
   });
 }
 
-export function useManuscriptsPage(page: number, pageSize = 20) {
+// V-062 (AC5): `program` is optional -- omitted entirely (not sent as an
+// empty string) when the filter is cleared, matching the query builder
+// pattern `useRerunEstimate` already uses.
+export function useManuscriptsPage(page: number, pageSize = 20, program?: string) {
+  const query = program ? `&program=${encodeURIComponent(program)}` : "";
   return useQuery({
-    queryKey: ["manuscripts", "table", page, pageSize],
+    queryKey: ["manuscripts", "table", page, pageSize, program ?? null],
     queryFn: () =>
-      api.get<PaginatedManuscripts>(`/manuscripts?page=${page}&page_size=${pageSize}`),
+      api.get<PaginatedManuscripts>(`/manuscripts?page=${page}&page_size=${pageSize}${query}`),
+  });
+}
+
+// V-062 (AC5): backs the dashboard's program filter -- the list itself
+// (CS/IT today) is data, not something the frontend hardcodes.
+export function usePrograms() {
+  return useQuery({
+    queryKey: ["programs"],
+    queryFn: () => api.get<ProgramOut[]>("/programs"),
   });
 }

@@ -29,7 +29,6 @@ class Manuscript(Base, PkCreatedMixin):
     __tablename__ = "manuscript"
 
     instructor_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("instructor.id"), index=True)
-    group_label: Mapped[str] = mapped_column(String(200))
     # Reference to the stored upload (path/object key), never file content.
     file_ref: Mapped[str] = mapped_column(String(1024))
     # BUG-022: group_label defaults to a constant ("Ungrouped") for any
@@ -37,6 +36,20 @@ class Manuscript(Base, PkCreatedMixin):
     # uploads. The instructor's own filename usually can. NULL for rows
     # ingested before this column existed (no backfill source).
     original_filename: Mapped[str | None] = mapped_column(String(255))
+    # V-062: `group_label` is now a write-through display cache of
+    # `group.name` (kept in sync at ingest time by
+    # `app/groups/service.py::resolve_or_create_group`), not the raw
+    # instructor-typed text -- two differently-cased submissions of the
+    # same team resolve to one Group and one canonical spelling here.
+    # Column itself, and every reader of it, is unchanged; NULL is never
+    # valid (every row has SOME label, even the default).
+    group_label: Mapped[str] = mapped_column(String(200))
+    # NULL only for rows ingested before this column existed (migration
+    # 0025's backfill populates every pre-existing row; NEVER null for a
+    # row created after this ships — `ingest_upload` always resolves one).
+    group_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("manuscript_group.id"), index=True
+    )
     ingest_status: Mapped[IngestStatus] = mapped_column(
         Enum(IngestStatus, native_enum=False), server_default=IngestStatus.pending
     )

@@ -15,6 +15,7 @@ from app import messages
 from app.auth.dependencies import get_current_instructor
 from app.config import get_settings
 from app.db import get_session
+from app.groups.service import DEFAULT_GROUP_LABEL
 from app.ingest.schemas import IngestSummary, PaginatedManuscripts
 from app.ingest.service import ingest_upload, list_manuscripts
 from app.models.instructor import Instructor
@@ -40,7 +41,7 @@ async def ingest_manuscript_upload(
     group_label: Annotated[str | None, Form()] = None,
     group_label_query: Annotated[str | None, Query(alias="group_label")] = None,
 ) -> IngestSummary:
-    resolved_group_label = group_label or group_label_query or "Ungrouped"
+    resolved_group_label = group_label or group_label_query or DEFAULT_GROUP_LABEL
 
     async def chunks():
         while chunk := await file.read(_CHUNK_BYTES):
@@ -76,5 +77,11 @@ async def list_manuscripts_route(
     instructor: Annotated[Instructor, Depends(get_current_instructor)],
     page: int = 1,
     page_size: int = 50,
+    # V-062 (AC5): filters to manuscripts whose group has this program.
+    # `UNSET_PROGRAM_FILTER` ("__unset__") asks for manuscripts with no
+    # program set instead -- a real filter state, not an unreachable one.
+    program: str | None = None,
 ) -> PaginatedManuscripts:
-    return await list_manuscripts(session, instructor.id, page=page, page_size=page_size)
+    return await list_manuscripts(
+        session, instructor.id, page=page, page_size=page_size, program=program
+    )

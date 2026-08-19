@@ -41,6 +41,8 @@ EXPECTED_TABLES = {
     "citation_cache",  # V-028 (migration 0012)
     "manuscript_chapter_archive",  # V-036 (migration 0014)
     "share_link",  # V-040 (migration 0018)
+    "program",  # V-062 (migration 0025)
+    "manuscript_group",  # V-062 (migration 0025)
 }
 
 
@@ -332,6 +334,29 @@ def test_seed_script_is_idempotent(migrated, monkeypatch):
     second = asyncio.run(seed())
     assert "created" in first
     assert "already present" in second
+
+
+@pytestmark_live
+def test_seed_programs_is_idempotent_and_picks_up_a_new_name(migrated, monkeypatch):
+    """V-062: migration 0025 already seeded CS/IT directly, so re-running
+    this against a freshly-migrated DB must add nothing (idempotent) --
+    but adding a name to `default_programs` that ISN'T in the DB yet must
+    be picked up, since that's the whole point of keeping this
+    config-driven rather than another migration per new program."""
+    from app.groups.service import seed_default_programs
+
+    monkeypatch.setenv("DATABASE_URL", migrated)
+    get_settings.cache_clear()
+    first = asyncio.run(seed_default_programs())
+    assert first == []  # CS/IT already present from the migration itself
+
+    monkeypatch.setenv("DEFAULT_PROGRAMS", "CS,IT,ECE")
+    get_settings.cache_clear()
+    second = asyncio.run(seed_default_programs())
+    assert second == ["ECE"]
+    third = asyncio.run(seed_default_programs())
+    assert third == []  # idempotent: ECE is already there now
+    get_settings.cache_clear()
 
 
 def test_seed_script_refuses_to_run_outside_dev(monkeypatch):
