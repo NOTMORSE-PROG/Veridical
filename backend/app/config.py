@@ -431,7 +431,9 @@ class Settings(BaseSettings):
 
     @property
     def region_search_candidate_lengths_list(self) -> list[int]:
-        return [int(n.strip()) for n in self.region_search_candidate_lengths.split(",") if n.strip()]
+        return [
+            int(n.strip()) for n in self.region_search_candidate_lengths.split(",") if n.strip()
+        ]
 
     # --- CORS (V-048) --------------------------------------------------------
     # Comma-separated origins allowed to call the API from a browser. Empty
