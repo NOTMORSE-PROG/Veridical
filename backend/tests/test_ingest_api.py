@@ -190,6 +190,56 @@ def test_group_label_form_field_wins_over_conflicting_query_param(client):
 
 
 @live
+def test_group_label_resolves_case_insensitively_to_one_group(client):
+    """V-062 AC1: "Group 4" and "group 4" must resolve to the SAME group
+    -- the first spelling submitted wins as the display name."""
+    content = (FIXTURE_DIR / "native.pdf").read_bytes()
+    r1 = client.post(
+        "/manuscripts/ingest",
+        files={"file": ("a.pdf", content, "application/octet-stream")},
+        data={"group_label": "Group 4"},
+    )
+    r2 = client.post(
+        "/manuscripts/ingest",
+        files={"file": ("b.pdf", content, "application/octet-stream")},
+        data={"group_label": "group   4"},
+    )
+    assert r1.status_code == 200 and r2.status_code == 200
+    # Second submission's group_label is the FIRST spelling, not its own.
+    assert r1.json()["group_label"] == "Group 4"
+    assert r2.json()["group_label"] == "Group 4"
+
+    groups = client.get("/groups").json()
+    matching = [g for g in groups if g["name"] == "Group 4"]
+    assert len(matching) == 1, f"expected exactly one 'Group 4' row, got {groups!r}"
+    assert matching[0]["program"] is None  # never guessed
+
+
+@live
+def test_new_groups_program_is_null_until_set_and_filters_correctly(client):
+    """V-062 AC5: `program` is None ("Not set") for a freshly-created
+    group, and GET /manuscripts?program=... only returns manuscripts
+    whose group has that program assigned -- never a guess."""
+    r = _upload(client, "native.pdf")
+    manuscript_id = r.json()["manuscript_id"]
+
+    body = client.get("/manuscripts").json()
+    item = next(i for i in body["items"] if i["id"] == manuscript_id)
+    assert item["program"] is None
+
+    # No group has a program set yet, so filtering by any real program
+    # name excludes this (and every other) manuscript -- not a guess.
+    filtered = client.get("/manuscripts?program=CS").json()
+    assert manuscript_id not in {i["id"] for i in filtered["items"]}
+
+
+@live
+def test_get_programs_lists_the_seeded_reference_data(client):
+    programs = client.get("/programs").json()
+    assert {p["name"] for p in programs} == {"CS", "IT"}
+
+
+@live
 def test_filename_with_control_characters_never_500s(client):
     """BUG-022 review (backend-critic): a NUL byte in the uploaded
     filename previously reached Postgres unfiltered and 500'd (UTF8

@@ -6,10 +6,12 @@ the latest-check-run join used by the dashboard table's row actions.
 import os
 
 import pytest
-from sqlalchemy import text
+from sqlalchemy import select, text
 
+from app.groups.service import UNSET_PROGRAM_FILTER
 from app.ingest.service import list_manuscripts
 from app.models.enums import CheckKind, CheckRunStatus, ReadinessStatus, ResultOutcome
+from app.models.group import Group, Program
 from app.models.instructor import Instructor
 from app.models.manuscript import Manuscript
 from app.models.rubric import Rubric
@@ -305,3 +307,52 @@ async def test_escalations_awaiting_review_is_surfaced_per_manuscript(session_fa
         by_id = {item.id: item.escalations_awaiting_review for item in page.items}
         assert by_id[has_escalations.id] == 2
         assert by_id[clean.id] == 0
+
+
+async def test_program_filter_and_display_are_sourced_through_the_group(session_factory):
+    """V-062 AC5: `program` filters GET /manuscripts to only manuscripts
+    whose group has that program set, and every row's `program` field
+    reflects its OWN group's program, never a different manuscript's."""
+    async with session_factory() as session:
+        instructor = Instructor(email="program@demo.local", display_name="Program Test")
+        session.add(instructor)
+        await session.commit()
+
+        cs = await session.scalar(select(Program).where(Program.name == "CS"))
+        cs_group = Group(
+            instructor_id=instructor.id, name="CS Team", name_normalized="cs team", program_id=cs.id
+        )
+        unset_group = Group(
+            instructor_id=instructor.id, name="No Program Yet", name_normalized="no program yet"
+        )
+        session.add_all([cs_group, unset_group])
+        await session.commit()
+
+        cs_manuscript = Manuscript(
+            instructor_id=instructor.id,
+            group_id=cs_group.id,
+            group_label=cs_group.name,
+            file_ref="a.pdf",
+        )
+        unset_manuscript = Manuscript(
+            instructor_id=instructor.id,
+            group_id=unset_group.id,
+            group_label=unset_group.name,
+            file_ref="b.pdf",
+        )
+        session.add_all([cs_manuscript, unset_manuscript])
+        await session.commit()
+
+        filtered = await list_manuscripts(session, instructor.id, program="CS")
+        assert {item.id for item in filtered.items} == {cs_manuscript.id}
+
+        everything = await list_manuscripts(session, instructor.id)
+        program_by_id = {item.id: item.program for item in everything.items}
+        assert program_by_id[cs_manuscript.id] == "CS"
+        assert program_by_id[unset_manuscript.id] is None
+
+        # `ui-designer` finding while speccing the dashboard filter: an
+        # inner join alone can only ever match manuscripts that HAVE a
+        # program, so "Not set" needs its own reachable filter value.
+        unset_only = await list_manuscripts(session, instructor.id, program=UNSET_PROGRAM_FILTER)
+        assert {item.id for item in unset_only.items} == {unset_manuscript.id}

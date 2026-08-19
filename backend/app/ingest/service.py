@@ -11,18 +11,20 @@ from collections.abc import AsyncIterator, Callable
 from dataclasses import asdict
 from pathlib import Path
 
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app import messages
 from app.config import Settings, get_settings
 from app.errors import ApiDownError, FileMalformedError, FileTooLargeError, QuotaExhaustedError
+from app.groups.service import UNSET_PROGRAM_FILTER, resolve_or_create_group
 from app.ingest import docx, pdf, references, vision
 from app.ingest.patterns import load_patterns
 from app.ingest.schemas import ExtractionResult, ManuscriptListItem, PaginatedManuscripts
 from app.llm import LLMNotConfiguredError, get_llm_client_for
 from app.models.citation import Citation
 from app.models.enums import CheckRunStatus, IngestFailureReason, IngestStatus, ResultOutcome
+from app.models.group import Group, Program
 from app.models.manuscript import Manuscript
 from app.models.rubric import Rubric
 from app.models.run import CheckResult, CheckRun, ReadinessReport
@@ -191,9 +193,16 @@ async def ingest_upload(
     # filename never 500s here either.
     clean_name = "".join(ch for ch in filename.replace("\\", "/") if ch.isprintable())
     original_filename = Path(clean_name).name[:255] or None
+    # V-062: group_label is no longer stored verbatim -- it's resolved
+    # against the instructor's existing groups first (case/whitespace
+    # insensitive, AC1), so "Group 4" and "group 4" land on the same row
+    # and the manuscript's own group_label becomes whichever spelling that
+    # row already settled on.
+    group = await resolve_or_create_group(session, instructor_id, group_label)
     manuscript = Manuscript(
         instructor_id=instructor_id,
-        group_label=group_label,
+        group_id=group.id,
+        group_label=group.name,
         file_ref="",
         original_filename=original_filename,
     )
@@ -232,23 +241,48 @@ def _write_raw_store(result: ExtractionResult, path: Path) -> None:
 
 
 async def list_manuscripts(
-    session: AsyncSession, instructor_id: int, *, page: int = 1, page_size: int = 50
+    session: AsyncSession,
+    instructor_id: int,
+    *,
+    page: int = 1,
+    page_size: int = 50,
+    program: str | None = None,
 ) -> PaginatedManuscripts:
     """Server-paginated listing (V-021 edge case: 100+ manuscripts in
     defense season) for both the dashboard table (4e) and the New Check
     modal's manuscript picker (V-018, which just requests a generously
     large page). Each row carries its own latest check_run id/status so
     the dashboard can link "view progress"/"open report" with zero extra
-    per-row requests."""
-    total = await session.scalar(
-        select(func.count())
-        .select_from(Manuscript)
-        .where(Manuscript.instructor_id == instructor_id)
-    )
+    per-row requests.
+
+    `program` (V-062, AC5) filters to manuscripts whose group is assigned
+    that program -- an inner join, so a manuscript with no group or a
+    group whose program is still NULL ("Not set") is correctly excluded
+    from any specific-program filter rather than guessed into one.
+    `UNSET_PROGRAM_FILTER` is the one sentinel value that asks for exactly
+    those excluded rows instead -- a real, selectable filter state, not an
+    edge case to hide (`ui-designer` finding while speccing the dashboard
+    control this powers)."""
+    filters = [Manuscript.instructor_id == instructor_id]
+    count_stmt = select(func.count()).select_from(Manuscript)
+    manuscripts_stmt = select(Manuscript)
+    if program == UNSET_PROGRAM_FILTER:
+        count_stmt = count_stmt.outerjoin(Group, Group.id == Manuscript.group_id)
+        manuscripts_stmt = manuscripts_stmt.outerjoin(Group, Group.id == Manuscript.group_id)
+        filters.append(or_(Manuscript.group_id.is_(None), Group.program_id.is_(None)))
+    elif program is not None:
+        count_stmt = count_stmt.join(Group, Group.id == Manuscript.group_id).join(
+            Program, Program.id == Group.program_id
+        )
+        manuscripts_stmt = manuscripts_stmt.join(Group, Group.id == Manuscript.group_id).join(
+            Program, Program.id == Group.program_id
+        )
+        filters.append(Program.name == program)
+
+    total = await session.scalar(count_stmt.where(*filters))
     manuscripts = (
         await session.scalars(
-            select(Manuscript)
-            .where(Manuscript.instructor_id == instructor_id)
+            manuscripts_stmt.where(*filters)
             .order_by(Manuscript.created_at.desc())
             .offset((page - 1) * page_size)
             .limit(page_size)
@@ -363,10 +397,30 @@ async def list_manuscripts(
         run = latest_done_by_manuscript.get(manuscript_id)
         return escalated_by_run.get(run.id, 0) if run is not None else 0
 
+    # V-062 (AC5): each row's program, sourced through its group -- every
+    # row needs this for display regardless of whether `program` filtered
+    # this query, so it's a separate lookup, not reused from the filter
+    # join above (which only ran when a filter was actually given).
+    program_by_manuscript: dict[int, str] = {}
+    if manuscript_ids:
+        rows = (
+            await session.execute(
+                select(Manuscript.id, Program.name)
+                .join(Group, Group.id == Manuscript.group_id)
+                .join(Program, Program.id == Group.program_id)
+                .where(Manuscript.id.in_(manuscript_ids))
+            )
+        ).all()
+        program_by_manuscript = dict(rows)
+
+    def _program(manuscript_id: int) -> str | None:
+        return program_by_manuscript.get(manuscript_id)
+
     items = [
         ManuscriptListItem(
             id=m.id,
             group_label=m.group_label,
+            program=_program(m.id),
             original_filename=m.original_filename,
             ingest_status=m.ingest_status.value,
             ingest_failure_reason=(

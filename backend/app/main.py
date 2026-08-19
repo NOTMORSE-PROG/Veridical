@@ -19,6 +19,8 @@ from app.config import get_settings
 from app.dashboard.router import router as dashboard_router
 from app.errors import HTTP_STATUS, VeridicalError
 from app.flags.router import router as flags_router
+from app.groups.router import router as groups_router
+from app.groups.service import seed_default_programs
 from app.ingest.router import router as ingest_router
 from app.llm.router import router as llm_router
 from app.pipeline.router import router as pipeline_router
@@ -40,6 +42,15 @@ def _upgrade_to_head() -> None:
     command.upgrade(Config(str(_ALEMBIC_INI)), "head")
 
 
+async def _seed_programs_on_boot() -> None:
+    """V-062: picks up any name added to `Settings.default_programs`
+    since the last deploy, with no new migration required (ground rule
+    7). Idempotent (find-or-create) -- thin, patchable wrapper so tests
+    can mock this the same way they mock `_upgrade_to_head`, matching
+    it move-for-move rather than needing their own separate story."""
+    await seed_default_programs()
+
+
 @asynccontextmanager
 async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
     # Migrations were previously a manual "remember to run alembic upgrade
@@ -54,6 +65,11 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
     # same reasoning as pipeline_worker_autostart below.
     if get_settings().veridical_env == "prod":
         await asyncio.to_thread(_upgrade_to_head)
+        # Gated to prod for the same reason the migration check above is
+        # -- every TestClient-based test imports this module and must
+        # never open a real DB connection by surprise against whatever
+        # DATABASE_URL happens to be configured.
+        await _seed_programs_on_boot()
 
     # Gated by settings (default off, V-018): every TestClient-based test
     # imports this module, and a real polling loop must never start
@@ -79,6 +95,7 @@ app.include_router(audit_router)
 app.include_router(auth_router)
 app.include_router(dashboard_router)
 app.include_router(flags_router)
+app.include_router(groups_router)
 app.include_router(ingest_router)
 app.include_router(llm_router)
 app.include_router(pipeline_router)

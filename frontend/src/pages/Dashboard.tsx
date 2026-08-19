@@ -72,12 +72,22 @@ function PopulatedDashboard({
 }) {
   const { data: stats } = useDashboardStats();
   const [page, setPage] = useState(1);
+  // V-062 (AC5): changing the filter starts back at page 1 -- a filter
+  // that silently kept you on, say, page 3 of a now much-shorter result
+  // set would just as often land on an empty page as a useful one.
+  const [program, setProgram] = useState<string | undefined>(undefined);
+  function onProgramChange(next: string | undefined) {
+    setProgram(next);
+    setPage(1);
+  }
   return (
     <>
       {stats && <KpiCards stats={stats} />}
       <ManuscriptsTable
         page={page}
         onPageChange={setPage}
+        program={program}
+        onProgramChange={onProgramChange}
         onUploadManuscript={onUploadManuscript}
         onRerun={onRerun}
         onStartCheck={onStartCheck}

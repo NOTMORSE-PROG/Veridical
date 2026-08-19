@@ -75,6 +75,25 @@ export interface ManuscriptListItem {
   // and awaiting review -- lets the row itself say "this one needs you"
   // instead of only a dashboard-wide total with nothing to point at.
   escalations_awaiting_review: number;
+  // V-062 (AC5): the manuscript's group's program, sourced through the
+  // Group entity. null = "Not set" -- never guessed, same convention as
+  // ingest_failure_reason.
+  program: string | null;
+}
+
+// V-062: a real Group entity, replacing free-text group_label as the
+// identity mechanism -- read-only from the frontend today (no dedicated
+// create/manage screen; a Group is created implicitly by uploading with
+// its name).
+export interface GroupOut {
+  id: number;
+  name: string;
+  program: string | null;
+}
+
+export interface ProgramOut {
+  id: number;
+  name: string;
 }
 
 export interface PaginatedManuscripts {

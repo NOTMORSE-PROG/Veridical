@@ -11,13 +11,67 @@
 // own rule above guards against. Without it an instructor triaging ~20
 // manuscripts had no way to tell which they'd already decided without
 // opening every report.
-import { useEffect, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
+import type { RefObject } from "react";
 import { Link } from "react-router";
 import type { IngestFailureReason, ManuscriptListItem } from "../api/types";
 import { StatusPill } from "../components/StatusPill";
 import { manuscriptIdentity } from "../domain/manuscriptLabel";
 import { RUNNING_STATUSES, manuscriptStatus } from "../domain/manuscriptStatus";
-import { useManuscriptsPage } from "./useDashboard";
+import { useManuscriptsPage, usePrograms } from "./useDashboard";
+
+// V-062 (AC5): the one sentinel value that means "no program set" -- must
+// match `app/groups/service.py::UNSET_PROGRAM_FILTER` exactly (a protocol
+// detail between the two, not user-facing data, so it's a literal on both
+// sides rather than a fetched value).
+const UNSET_PROGRAM_FILTER = "__unset__";
+
+function ProgramFilter({
+  program,
+  onProgramChange,
+  selectRef,
+}: {
+  program: string | undefined;
+  onProgramChange: (next: string | undefined) => void;
+  selectRef: RefObject<HTMLSelectElement | null>;
+}) {
+  const { data: programs, isLoading } = usePrograms();
+  const filterId = useId();
+
+  if (isLoading) {
+    return (
+      <span role="status" aria-live="polite" aria-busy="true" className="text-sm text-ink-tertiary">
+        Loading programs…
+      </span>
+    );
+  }
+  // No programs configured at all: a select with only "All"/"Not set"
+  // has nothing real to filter between -- clutter, not a control.
+  if (!programs || programs.length === 0) return null;
+
+  return (
+    <div className="flex flex-col gap-1.5 sm:flex-row sm:items-center sm:gap-2">
+      <label htmlFor={filterId} className="text-sm font-medium text-ink">
+        Filter by program
+      </label>
+      <select
+        ref={selectRef}
+        id={filterId}
+        value={program ?? ""}
+        onChange={(event) => onProgramChange(event.target.value || undefined)}
+        className="min-h-11 rounded-md border border-border-input bg-panel px-3 text-base text-ink sm:h-9 sm:min-h-0"
+      >
+        <option value="">All programs</option>
+        {programs.map((p) => (
+          <option key={p.id} value={p.name}>
+            {p.name}
+          </option>
+        ))}
+        <option value={UNSET_PROGRAM_FILTER}>Not set</option>
+      </select>
+    </div>
+  );
+}
 
 const INGEST_FAILURE_COPY: Record<IngestFailureReason, string> = {
   file_too_large:
@@ -98,6 +152,22 @@ function IngestFailurePanel({ row }: { row: ManuscriptListItem }) {
 
 const linkClass =
   "inline-flex min-h-6 items-center text-xs text-link underline hover:text-link-hover sm:min-h-11";
+
+// V-062 (`ux-critic` finding): the filter has nothing to verify its own
+// results against without this -- an instructor filtering to "CS" had no
+// way to confirm the rows shown actually belong to CS, or that nothing
+// wrongly slipped through. Renders nothing when unset ("Not set" filter
+// results correctly show no badge at all, which IS the confirmation for
+// that case) -- a plain muted label, not a StatusPill, since a program
+// name is reference data, not a judgment/verdict.
+function ProgramBadge({ program }: { program: string | null }) {
+  if (!program) return null;
+  return (
+    <span className="inline-flex w-fit items-center rounded-full border border-border-input bg-status-neutral-bg px-1.5 py-0.5 text-[11px] font-medium text-ink-tertiary">
+      {program}
+    </span>
+  );
+}
 
 // V-071 (AC1): "N escalations awaiting your review" used to be a dashboard-
 // wide total with nothing pointing at which row it was in --
@@ -228,41 +298,85 @@ function UploadManuscriptCta({ onUploadManuscript }: { onUploadManuscript: () =>
   );
 }
 
+// V-062: zero results because of an active filter is a DIFFERENT state
+// from zero manuscripts existing at all -- `UploadManuscriptCta` reads as
+// false ("no manuscripts yet") when manuscripts exist but just don't
+// match the current program filter.
+function FilteredEmptyState({ onClearFilter }: { onClearFilter: () => void }) {
+  return (
+    <div className="flex flex-col items-center gap-3 rounded-lg border-2 border-dashed border-border-input bg-page p-8 text-center">
+      <p className="text-sm text-ink-secondary">No manuscripts match this filter.</p>
+      <button type="button" onClick={onClearFilter} className={linkClass}>
+        Clear filter
+      </button>
+    </div>
+  );
+}
+
 export function ManuscriptsTable({
   page,
   onPageChange,
+  program,
+  onProgramChange,
   onUploadManuscript,
   onRerun,
   onStartCheck,
 }: {
   page: number;
   onPageChange: (p: number) => void;
+  program: string | undefined;
+  onProgramChange: (next: string | undefined) => void;
   onUploadManuscript: () => void;
   onRerun: (manuscriptId: number) => void;
   onStartCheck: (manuscriptId: number) => void;
 }) {
-  const { data, isLoading, isError, refetch } = useManuscriptsPage(page);
+  const { data, isLoading, isError, refetch } = useManuscriptsPage(page, 20, program);
   const [expandedId, setExpandedId] = useState<number | null>(null);
   useEscapeToClose(expandedId !== null, () => setExpandedId(null));
+  const programSelectRef = useRef<HTMLSelectElement>(null);
+
+  // V-062 (`ux-critic` finding, P2 a11y): "Clear filter" unmounts itself
+  // the instant it's clicked, and nothing claimed focus afterward --
+  // confirmed live, `document.activeElement` fell back to `<body>`.
+  // Moves focus to the persistent filter select instead (same BUG-028
+  // reasoning this codebase already applies elsewhere: a control that
+  // disables/unmounts mid-interaction must hand focus somewhere real).
+  function clearProgramFilter() {
+    onProgramChange(undefined);
+    programSelectRef.current?.focus();
+  }
+
+  // The filter is an independent data source from the manuscripts list --
+  // it stays visible (and usable) through the list's own loading/error
+  // states rather than disappearing along with the rest of the table.
+  const filterControl = (
+    <ProgramFilter program={program} onProgramChange={onProgramChange} selectRef={programSelectRef} />
+  );
 
   if (isLoading) {
     return (
-      <div role="status" aria-live="polite" aria-busy="true" className="p-4 text-sm text-ink-tertiary">
-        Loading manuscripts…
+      <div className="flex flex-col gap-2">
+        {filterControl}
+        <div role="status" aria-live="polite" aria-busy="true" className="p-4 text-sm text-ink-tertiary">
+          Loading manuscripts…
+        </div>
       </div>
     );
   }
   if (isError) {
     return (
-      <div
-        role="alert"
-        className="rounded-lg border border-status-attention-text/25 bg-status-attention-bg p-4 text-sm text-status-attention-text"
-      >
-        Could not load your manuscripts.{" "}
-        <button type="button" onClick={() => refetch()} className="underline">
-          Try again
-        </button>
-        .
+      <div className="flex flex-col gap-2">
+        {filterControl}
+        <div
+          role="alert"
+          className="rounded-lg border border-status-attention-text/25 bg-status-attention-bg p-4 text-sm text-status-attention-text"
+        >
+          Could not load your manuscripts.{" "}
+          <button type="button" onClick={() => refetch()} className="underline">
+            Try again
+          </button>
+          .
+        </div>
       </div>
     );
   }
@@ -273,6 +387,7 @@ export function ManuscriptsTable({
 
   return (
     <div className="flex flex-col gap-2">
+      {filterControl}
       {/* Mobile: card-per-row (a 4-column comparative grid isn't the right
           shape for one dominant text column + short metadata below 640px —
           WCAG 1.4.10's data-table exception is a choice, not a default). */}
@@ -305,6 +420,9 @@ export function ManuscriptsTable({
                   {identity.secondary}
                 </span>
               )}
+              <div className="mt-1">
+                <ProgramBadge program={row.program} />
+              </div>
               <div className="mt-2 flex items-center justify-between gap-2 text-xs text-ink-tertiary">
                 <span>{formatDate(row.created_at)}</span>
                 {isIngestFailure ? (
@@ -323,7 +441,11 @@ export function ManuscriptsTable({
         })}
         {data.total === 0 && (
           <li>
-            <UploadManuscriptCta onUploadManuscript={onUploadManuscript} />
+            {program !== undefined ? (
+              <FilteredEmptyState onClearFilter={clearProgramFilter} />
+            ) : (
+              <UploadManuscriptCta onUploadManuscript={onUploadManuscript} />
+            )}
           </li>
         )}
       </ul>
@@ -352,7 +474,7 @@ export function ManuscriptsTable({
                 role="row"
                 className="grid grid-cols-[minmax(0,1fr)_190px_100px_170px] items-center gap-3 border-t border-border px-4 py-3 text-sm"
               >
-                <div className="flex min-w-0 flex-col justify-center">
+                <div className="flex min-w-0 flex-col justify-center gap-0.5">
                   <span className="truncate text-ink" title={identity.primary}>
                     {identity.primary}
                   </span>
@@ -365,6 +487,7 @@ export function ManuscriptsTable({
                       {identity.secondary}
                     </span>
                   )}
+                  <ProgramBadge program={row.program} />
                 </div>
                 <div className="flex flex-col items-start gap-1">
                   <StatusPill tone={tone}>{label}</StatusPill>
@@ -387,7 +510,11 @@ export function ManuscriptsTable({
         })}
         {data.total === 0 && (
           <div className="px-4 py-3">
-            <UploadManuscriptCta onUploadManuscript={onUploadManuscript} />
+            {program !== undefined ? (
+              <FilteredEmptyState onClearFilter={clearProgramFilter} />
+            ) : (
+              <UploadManuscriptCta onUploadManuscript={onUploadManuscript} />
+            )}
           </div>
         )}
       </div>

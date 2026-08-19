@@ -154,6 +154,11 @@ class ManuscriptListItem(BaseModel):
     # two manuscripts alone; None for rows ingested before this column
     # existed.
     original_filename: str | None = None
+    # V-062 (AC5): the manuscript's group's program, if one has been set.
+    # NULL/None = "Not set" -- never guessed, same convention as
+    # `ingest_failure_reason`. Most rows will be None until an instructor
+    # (or V-063's title-page inference) sets a program on the group.
+    program: str | None = None
     ingest_status: str
     # None unless ingest_status is "failed" AND the reason was captured
     # (BUG-016) — NULL, never fabricated, for pre-existing failed rows.
