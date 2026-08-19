@@ -157,6 +157,14 @@ describe("DashboardPage", () => {
             citations: 3,
             vision_status: "none",
             notes: [],
+            group_proposal: {
+              title: null,
+              short_name: null,
+              members: [],
+              program: null,
+              adviser: null,
+              extraction_failed: false,
+            },
           }),
           { status: 200 },
         );

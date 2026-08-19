@@ -2,7 +2,7 @@
 // manuscripts table.
 import { useQuery } from "@tanstack/react-query";
 import { api } from "../api/client";
-import type { PaginatedManuscripts, ProgramOut } from "../api/types";
+import type { GroupCollisionOut, PaginatedManuscripts, ProgramOut } from "../api/types";
 
 export interface DashboardStats {
   manuscripts_checked: number;
@@ -44,5 +44,26 @@ export function usePrograms() {
   return useQuery({
     queryKey: ["programs"],
     queryFn: () => api.get<ProgramOut[]>("/programs"),
+  });
+}
+
+// V-063 (owner's call, 2026-08-19): a READ-ONLY pre-check the confirm
+// form calls WHILE the instructor edits the group name/members, so rule
+// 3's "propose the match, do not apply it" collision is disclosed BEFORE
+// they confirm, not only after via a disambiguating suffix. Caller is
+// expected to debounce `shortName`/`memberNames` itself (same manual
+// setTimeout pattern `RerunModal.tsx` already uses) -- this hook just
+// gates on there being something real to check.
+export function useGroupCollisionCheck(shortName: string, memberNames: string[]) {
+  const trimmed = shortName.trim();
+  const realMembers = memberNames.map((m) => m.trim()).filter((m) => m.length > 0);
+  return useQuery({
+    queryKey: ["group-collision", trimmed, [...realMembers].sort()],
+    queryFn: () => {
+      const params = new URLSearchParams({ short_name: trimmed });
+      for (const name of realMembers) params.append("member_names", name);
+      return api.get<GroupCollisionOut>(`/groups/collision-check?${params.toString()}`);
+    },
+    enabled: trimmed.length > 0 && realMembers.length > 0,
   });
 }

@@ -109,6 +109,44 @@ export interface PaginatedManuscripts {
 /** Response of `POST /manuscripts/ingest` (V-059) -- what the upload
  * screen shows immediately after a successful upload. `section_tree` is
  * deliberately omitted -- nothing in this UI renders it. */
+// V-063: a proposed value plus WHERE it came from (page/paragraph
+// anchor) -- the same evidence standard the rest of the product is held
+// to (screens 4h/4i already use this "value + anchor" shape).
+export interface AnchoredValue {
+  value: string;
+  anchor: string;
+}
+
+export interface TitlePageProposal {
+  title: AnchoredValue | null;
+  short_name: AnchoredValue | null;
+  members: AnchoredValue[];
+  program: AnchoredValue | null;
+  adviser: AnchoredValue | null;
+  // true = nothing usable found at all (e.g. an image-only scan) -- a
+  // PARTIAL proposal (title found, no members) is NOT a failure and is
+  // shown as-is, gaps included, never fabricated.
+  extraction_failed: boolean;
+}
+
+export interface ConfirmGroupResponse {
+  group_id: number;
+  group_label: string;
+  program: string | null;
+  // true = an existing group was matched (a real resubmission); false =
+  // a brand-new group was created.
+  matched: boolean;
+}
+
+// V-063 (owner's call, 2026-08-19): rule 3 of the matching rule (ticket's
+// DECIDED section, "PROPOSE the match, do not apply it") surfaced to the
+// confirm form BEFORE the instructor confirms, not only disclosed after
+// the fact via a disambiguating suffix.
+export interface GroupCollisionOut {
+  collision: boolean;
+  existing_group_name: string | null;
+}
+
 export interface IngestSummary {
   manuscript_id: number;
   // BUG-043: echoes back what the server actually persisted, so a client
@@ -125,6 +163,9 @@ export interface IngestSummary {
   citations: number;
   vision_status: "none" | "done" | "unavailable";
   notes: string[];
+  // V-063: the auto-proposed group/program, deterministically extracted
+  // from the title page -- the confirm dialog's own data source.
+  group_proposal: TitlePageProposal;
 }
 
 export type CheckRunStatus =

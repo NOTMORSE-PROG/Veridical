@@ -16,15 +16,27 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app import messages
 from app.config import Settings, get_settings
-from app.errors import ApiDownError, FileMalformedError, FileTooLargeError, QuotaExhaustedError
-from app.groups.service import UNSET_PROGRAM_FILTER, resolve_or_create_group
+from app.errors import (
+    ApiDownError,
+    FileMalformedError,
+    FileTooLargeError,
+    NotFoundError,
+    QuotaExhaustedError,
+)
+from app.groups.service import (
+    UNSET_PROGRAM_FILTER,
+    match_or_create_group_from_proposal,
+    program_name_for,
+    resolve_or_create_group,
+)
 from app.ingest import docx, pdf, references, vision
 from app.ingest.patterns import load_patterns
 from app.ingest.schemas import ExtractionResult, ManuscriptListItem, PaginatedManuscripts
+from app.ingest.titlepage import AnchoredValue, TitlePageProposal, extract_title_page
 from app.llm import LLMNotConfiguredError, get_llm_client_for
 from app.models.citation import Citation
 from app.models.enums import CheckRunStatus, IngestFailureReason, IngestStatus, ResultOutcome
-from app.models.group import Group, Program
+from app.models.group import Group, GroupMember, Program
 from app.models.manuscript import Manuscript
 from app.models.rubric import Rubric
 from app.models.run import CheckResult, CheckRun, ReadinessReport
@@ -171,7 +183,7 @@ async def ingest_upload(
     settings: Settings | None = None,
     *,
     instructor_id: int,
-) -> tuple[Manuscript, ExtractionResult, int]:
+) -> tuple[Manuscript, ExtractionResult, int, TitlePageProposal]:
     """Full upload flow for the HTTP surface: save (size-capped) → own row
     → ingest. `instructor_id` is the authenticated caller (BUG-002/D-020) —
     this endpoint used to attach uploads to whichever instructor had the
@@ -232,7 +244,11 @@ async def ingest_upload(
         )
         or 0
     )
-    return manuscript, result, n_citations
+    # V-063: deterministic, no LLM call (Q1 DECIDED) -- proposes only,
+    # never applies (the instructor confirms via a separate endpoint).
+    patterns = load_patterns(settings.ingest_patterns_file)
+    title_page_proposal = extract_title_page(result, patterns)
+    return manuscript, result, n_citations, title_page_proposal
 
 
 def _write_raw_store(result: ExtractionResult, path: Path) -> None:
@@ -446,3 +462,94 @@ def load_raw_store(settings: Settings, manuscript_id: int) -> ExtractionResult:
     return ExtractionResult.model_validate_json(
         raw_store_path(settings, manuscript_id).read_text(encoding="utf-8")
     )
+
+
+async def get_group_proposal(
+    session: AsyncSession, settings: Settings, manuscript_id: int, instructor_id: int
+) -> TitlePageProposal:
+    """V-063 (AC6): re-derives the SAME proposal `ingest_upload` computed
+    at upload time, from the persisted raw store -- nothing about the
+    proposal itself is stored, it's recomputed on demand. This is what
+    makes "dismiss now, decide later" a real, no-dead-end path (AC6)
+    rather than a one-shot dialog: the dashboard's own "Set group" action
+    calls this exact function whenever the instructor comes back to it.
+
+    ux-critic (V-063 review), reproduced live: reopening on a manuscript
+    that was ALREADY confirmed into a real group used to blindly re-derive
+    the ORIGINAL title-page extraction every time -- an instructor who'd
+    already fixed a garbled proposal would see their fix appear to have
+    vanished, and risked silently reverting a good group record back to
+    the bad one by re-confirming without noticing. A group only ever gets
+    `GroupMember` rows through a real V-063 confirm (the older, plain
+    pre-upload free-text path never creates them) -- so "this manuscript's
+    current group has recorded members" is a reliable, DERIVED signal
+    (no new column) that there's a confirmed state to show instead of the
+    stale extraction. The anchor "current group" (never "p. N"/"paragraph
+    N") tells the frontend this came from the group record, not the
+    document -- the same evidence-honesty rule as an instructor's own
+    edit, just sourced differently."""
+    manuscript = await session.get(Manuscript, manuscript_id)
+    if manuscript is None or manuscript.instructor_id != instructor_id:
+        raise NotFoundError(f"No manuscript with id {manuscript_id}.")
+
+    current_group = await session.get(Group, manuscript.group_id)
+    if current_group is not None:
+        member_names = (
+            await session.scalars(
+                select(GroupMember.name).where(GroupMember.group_id == current_group.id)
+            )
+        ).all()
+        if member_names:
+            program_name = await program_name_for(session, current_group.program_id)
+            return TitlePageProposal(
+                title=None,
+                short_name=AnchoredValue(current_group.name, "current group"),
+                members=[AnchoredValue(name, "current group") for name in member_names],
+                program=AnchoredValue(program_name, "current group") if program_name else None,
+                adviser=None,
+                extraction_failed=False,
+            )
+
+    result = load_raw_store(settings, manuscript_id)
+    patterns = load_patterns(settings.ingest_patterns_file)
+    return extract_title_page(result, patterns)
+
+
+async def confirm_manuscript_group(
+    session: AsyncSession,
+    manuscript_id: int,
+    instructor_id: int,
+    group_name: str,
+    member_names: list[str],
+    program_id: int | None,
+) -> tuple[Group, bool]:
+    """V-063 (AC2): applies a CONFIRMED (possibly instructor-edited)
+    proposal -- this is the only place a title-page proposal ever
+    actually changes a manuscript's group; `extract_title_page` itself
+    has no DB access and no side effects. `program_id` is only ever set
+    on a NEWLY created group, never an existing one that already had a
+    chance to be corrected some other way -- a later upload's own
+    proposal must not silently overwrite a fact about a group that
+    already exists."""
+    manuscript = await session.get(Manuscript, manuscript_id)
+    if manuscript is None or manuscript.instructor_id != instructor_id:
+        raise NotFoundError(f"No manuscript with id {manuscript_id}.")
+    # backend-critic (V-063 review): reproduced live -- an unvalidated
+    # program_id reached the FK and surfaced as a bare, unhandled 500
+    # (asyncpg's ForeignKeyViolationError) instead of this codebase's own
+    # established pattern for the same instructor-supplied FK
+    # (`rubric/service.py::set_rubric_family_program`).
+    if program_id is not None and await session.get(Program, program_id) is None:
+        raise NotFoundError(f"No program with id {program_id}.")
+
+    group, matched = await match_or_create_group_from_proposal(
+        session, instructor_id, group_name, member_names
+    )
+    if not matched and program_id is not None:
+        group.program_id = program_id
+
+    manuscript.group_id = group.id
+    manuscript.group_label = group.name
+    await session.commit()
+    await session.refresh(group)
+    return group, matched

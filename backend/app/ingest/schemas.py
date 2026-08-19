@@ -121,6 +121,30 @@ class SectionTree(BaseModel):
     nodes: list[SectionNode] = Field(default_factory=list)
 
 
+class AnchoredValueOut(BaseModel):
+    """A proposed value plus WHERE it came from (V-063 AC3) — the same
+    evidence standard the rest of the product is held to."""
+
+    value: str
+    anchor: str
+
+
+class TitlePageProposalOut(BaseModel):
+    """V-063: a deterministic, evidence-anchored proposal for a
+    manuscript's group/program — proposes only, never applies (AC2).
+    `extraction_failed=True` means nothing usable was found at all
+    (AC5); a partial proposal (e.g. a title with no members) is NOT a
+    failure and is shown exactly as found, gaps included, never
+    fabricated."""
+
+    title: AnchoredValueOut | None
+    short_name: AnchoredValueOut | None
+    members: list[AnchoredValueOut] = Field(default_factory=list)
+    program: AnchoredValueOut | None
+    adviser: AnchoredValueOut | None
+    extraction_failed: bool
+
+
 class IngestSummary(BaseModel):
     """Response body of POST /manuscripts/ingest — what the upload screen
     (4c/4f) needs to show; the full extraction lives in the raw store."""
@@ -143,6 +167,28 @@ class IngestSummary(BaseModel):
     # User-facing notes (message templates) — e.g. the limited-checks note
     # for scans. Honest states, not errors.
     notes: list[str] = Field(default_factory=list)
+    # V-063: the auto-proposed group/program, deterministically extracted
+    # from the title page — the confirm dialog's own data source.
+    group_proposal: TitlePageProposalOut
+
+
+class ConfirmGroupRequest(BaseModel):
+    """PATCH /manuscripts/{id}/group body (V-063 AC2): every field is
+    exactly what the instructor confirmed or edited — this endpoint never
+    reads back into the extraction itself, only what's sent here."""
+
+    group_name: str = Field(min_length=1)
+    member_names: list[str] = Field(default_factory=list)
+    program_id: int | None = None
+
+
+class ConfirmGroupResponse(BaseModel):
+    group_id: int
+    group_label: str
+    program: str | None
+    # True = an existing group was matched (AC4); False = a new one was
+    # created — lets the confirm dialog say which happened, honestly.
+    matched: bool
 
 
 class ManuscriptListItem(BaseModel):

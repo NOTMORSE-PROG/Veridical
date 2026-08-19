@@ -187,10 +187,12 @@ function RowActions({
   row,
   onRerun,
   onStartCheck,
+  onSetGroup,
 }: {
   row: ManuscriptListItem;
   onRerun: (manuscriptId: number) => void;
   onStartCheck: (manuscriptId: number) => void;
+  onSetGroup: (manuscriptId: number) => void;
 }) {
   const running = row.latest_check_run_status
     ? RUNNING_STATUSES.has(row.latest_check_run_status)
@@ -208,6 +210,17 @@ function RowActions({
       </Link>
     ) : null;
 
+  // V-063 (AC6): reopens the same title-page group proposal a manuscript
+  // was ingested with, any time later -- a real ingested manuscript
+  // always has one to reopen, regardless of what its check runs are
+  // doing, so this isn't tied to any one branch below.
+  const setGroupLink =
+    row.ingest_status === "done" ? (
+      <button type="button" onClick={() => onSetGroup(row.id)} className={linkClass}>
+        Set group
+      </button>
+    ) : null;
+
   if (row.latest_check_run_status === "done" && row.latest_check_run_id) {
     return (
       <div className="flex flex-col items-end gap-1 sm:flex-row sm:items-center sm:gap-3">
@@ -217,6 +230,7 @@ function RowActions({
         <button type="button" onClick={() => onRerun(row.id)} className={linkClass}>
           Re-run
         </button>
+        {setGroupLink}
       </div>
     );
   }
@@ -227,6 +241,7 @@ function RowActions({
           View progress
         </Link>
         {priorReportLink}
+        {setGroupLink}
       </div>
     );
   }
@@ -250,6 +265,7 @@ function RowActions({
             Re-run
           </button>
         )}
+        {setGroupLink}
       </div>
     );
   }
@@ -261,9 +277,12 @@ function RowActions({
   // control is the same defect class as a mislabelled one).
   if (row.ingest_status === "done") {
     return (
-      <button type="button" onClick={() => onStartCheck(row.id)} className={linkClass}>
-        Start check
-      </button>
+      <div className="flex flex-col items-end gap-1 sm:flex-row sm:items-center sm:gap-3">
+        <button type="button" onClick={() => onStartCheck(row.id)} className={linkClass}>
+          Start check
+        </button>
+        {setGroupLink}
+      </div>
     );
   }
   // Still ingesting (ingestion failure is handled by IngestFailureButton
@@ -321,6 +340,7 @@ export function ManuscriptsTable({
   onUploadManuscript,
   onRerun,
   onStartCheck,
+  onSetGroup,
 }: {
   page: number;
   onPageChange: (p: number) => void;
@@ -329,6 +349,7 @@ export function ManuscriptsTable({
   onUploadManuscript: () => void;
   onRerun: (manuscriptId: number) => void;
   onStartCheck: (manuscriptId: number) => void;
+  onSetGroup: (manuscriptId: number) => void;
 }) {
   const { data, isLoading, isError, refetch } = useManuscriptsPage(page, 20, program);
   const [expandedId, setExpandedId] = useState<number | null>(null);
@@ -428,7 +449,12 @@ export function ManuscriptsTable({
                 {isIngestFailure ? (
                   <IngestFailureButton row={row} isOpen={isOpen} onToggle={() => toggle(row.id)} />
                 ) : (
-                  <RowActions row={row} onRerun={onRerun} onStartCheck={onStartCheck} />
+                  <RowActions
+                    row={row}
+                    onRerun={onRerun}
+                    onStartCheck={onStartCheck}
+                    onSetGroup={onSetGroup}
+                  />
                 )}
               </div>
               {isIngestFailure && isOpen && (
@@ -497,7 +523,12 @@ export function ManuscriptsTable({
                 {isIngestFailure ? (
                   <IngestFailureButton row={row} isOpen={isOpen} onToggle={() => toggle(row.id)} />
                 ) : (
-                  <RowActions row={row} onRerun={onRerun} onStartCheck={onStartCheck} />
+                  <RowActions
+                    row={row}
+                    onRerun={onRerun}
+                    onStartCheck={onStartCheck}
+                    onSetGroup={onSetGroup}
+                  />
                 )}
               </div>
               {isIngestFailure && isOpen && (

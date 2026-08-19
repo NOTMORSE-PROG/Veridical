@@ -43,6 +43,7 @@ EXPECTED_TABLES = {
     "share_link",  # V-040 (migration 0018)
     "program",  # V-062 (migration 0025)
     "manuscript_group",  # V-062 (migration 0025)
+    "group_member",  # V-063 (migration 0027)
 }
 
 

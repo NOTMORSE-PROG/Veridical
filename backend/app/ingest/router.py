@@ -15,9 +15,20 @@ from app import messages
 from app.auth.dependencies import get_current_instructor
 from app.config import get_settings
 from app.db import get_session
-from app.groups.service import DEFAULT_GROUP_LABEL
-from app.ingest.schemas import IngestSummary, PaginatedManuscripts
-from app.ingest.service import ingest_upload, list_manuscripts
+from app.groups.service import DEFAULT_GROUP_LABEL, program_name_for
+from app.ingest.schemas import (
+    ConfirmGroupRequest,
+    ConfirmGroupResponse,
+    IngestSummary,
+    PaginatedManuscripts,
+    TitlePageProposalOut,
+)
+from app.ingest.service import (
+    confirm_manuscript_group,
+    get_group_proposal,
+    ingest_upload,
+    list_manuscripts,
+)
 from app.models.instructor import Instructor
 from app.ratelimit import enforce_action_rate_limit
 
@@ -49,7 +60,7 @@ async def ingest_manuscript_upload(
 
     settings = get_settings()
     enforce_action_rate_limit(settings, "manuscript_ingest", instructor.id)
-    manuscript, result, n_citations = await ingest_upload(
+    manuscript, result, n_citations, title_page_proposal = await ingest_upload(
         session, chunks(), file.filename or "", resolved_group_label, instructor_id=instructor.id
     )
     notes = [messages.IMAGE_ONLY_NOTE] if result.image_only else []
@@ -68,6 +79,42 @@ async def ingest_manuscript_upload(
         citations=n_citations,
         section_tree=result.section_tree,
         notes=notes,
+        group_proposal=TitlePageProposalOut.model_validate(
+            title_page_proposal, from_attributes=True
+        ),
+    )
+
+
+@router.get("/manuscripts/{manuscript_id}/group-proposal", response_model=TitlePageProposalOut)
+async def get_group_proposal_route(
+    manuscript_id: int,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    instructor: Annotated[Instructor, Depends(get_current_instructor)],
+) -> TitlePageProposalOut:
+    """V-063 (AC6): re-derives the same proposal shown right after upload
+    -- lets the dashboard offer "Set group" any time later, so dismissing
+    the confirm dialog is never a dead end."""
+    settings = get_settings()
+    proposal = await get_group_proposal(session, settings, manuscript_id, instructor.id)
+    return TitlePageProposalOut.model_validate(proposal, from_attributes=True)
+
+
+@router.patch("/manuscripts/{manuscript_id}/group", response_model=ConfirmGroupResponse)
+async def confirm_manuscript_group_route(
+    manuscript_id: int,
+    body: ConfirmGroupRequest,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    instructor: Annotated[Instructor, Depends(get_current_instructor)],
+) -> ConfirmGroupResponse:
+    """V-063 (AC2/AC4): applies a confirmed (or instructor-edited, or
+    fully instructor-typed) group proposal -- the ONLY place a proposal
+    ever changes a manuscript's group."""
+    group, matched = await confirm_manuscript_group(
+        session, manuscript_id, instructor.id, body.group_name, body.member_names, body.program_id
+    )
+    program_name = await program_name_for(session, group.program_id)
+    return ConfirmGroupResponse(
+        group_id=group.id, group_label=group.name, program=program_name, matched=matched
     )
 
 

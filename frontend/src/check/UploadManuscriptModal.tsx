@@ -2,16 +2,42 @@
 // manuscript" (the product's own one-line description). The format half
 // has had a real screen since V-012 (UploadRubricModal.tsx, screen 4c);
 // this is the same shape pointed at the ingestion endpoint instead --
-// same Modal base, same file-input/error pattern, one extra optional
-// field (group label). No mandatory review screen follows this one (a
-// manuscript has nothing to confirm the way a parsed rubric does), so
-// unlike the rubric modal this one shows a real success state in place
-// rather than auto-navigating away.
+// same Modal base, same file-input/error pattern. No mandatory review
+// screen follows this one (a manuscript has nothing to confirm the way a
+// parsed rubric does), so unlike the rubric modal this one shows a real
+// success state in place rather than auto-navigating away.
+//
+// V-063 (owner's call, 2026-08-19): this modal used to also carry its own
+// free-text "Group name or label" field, resolved into a real `Group`
+// immediately at ingest. ux-critic reproduced why that no longer belongs
+// here: typing a label created a real group, which the group-proposal
+// dialog below then silently reassigned the manuscript away from moments
+// later, leaving the first one an orphaned, empty group with no notice to
+// the instructor. The group-proposal dialog is now the ONLY place a real
+// group gets set from this screen; ingest always starts at the
+// "Ungrouped" default (`resolve_or_create_group`'s own fallback).
 import { useEffect, useId, useRef, useState } from "react";
 import { ApiError } from "../api/client";
 import { Modal, ModalBackdrop } from "../components/Modal";
-import { UNGROUPED_LABEL } from "../domain/manuscriptLabel";
+import type { ConfirmGroupResponse, TitlePageProposal } from "../api/types";
+import { GroupProposalFields } from "./GroupProposalFields";
 import { useIngestManuscript } from "./useCheckRun";
+
+// V-063: a proposal with nothing usable (no title, no short name, no
+// members, no program, no adviser) and no extraction failure to disclose
+// either just has nothing worth interrupting the success screen for --
+// the plain "Upload another"/"Start a check" footer stays as it was
+// before this ticket.
+function hasProposalWorthShowing(proposal: TitlePageProposal): boolean {
+  return (
+    proposal.extraction_failed ||
+    proposal.title !== null ||
+    proposal.short_name !== null ||
+    proposal.members.length > 0 ||
+    proposal.program !== null ||
+    proposal.adviser !== null
+  );
+}
 
 interface UploadManuscriptModalProps {
   onClose: () => void;
@@ -60,16 +86,15 @@ function SpinnerIcon() {
 
 export function UploadManuscriptModal({ onClose, onUploadSuccess }: UploadManuscriptModalProps) {
   const [file, setFile] = useState<File | null>(null);
-  const [groupLabel, setGroupLabel] = useState("");
   const [fieldError, setFieldError] = useState<string | null>(null);
+  const [groupResolved, setGroupResolved] = useState(false);
   const ingest = useIngestManuscript();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const errorRef = useRef<HTMLParagraphElement>(null);
+  const uploadAnotherRef = useRef<HTMLButtonElement>(null);
   const fileInputId = useId();
   const hintId = useId();
   const errorId = useId();
-  const groupLabelId = useId();
-  const groupHintId = useId();
 
   // Same BUG-028 rationale as UploadRubricModal: a focused element that
   // becomes `disabled` mid-pending drops focus to <body>. Moving focus to
@@ -86,13 +111,13 @@ export function UploadManuscriptModal({ onClose, onUploadSuccess }: UploadManusc
       setFieldError("Choose a manuscript file before uploading.");
       return;
     }
-    ingest.mutate({ file, groupLabel });
+    ingest.mutate({ file });
   }
 
   function handleUploadAnother() {
     setFile(null);
-    setGroupLabel("");
     ingest.reset();
+    setGroupResolved(false);
     fileInputRef.current?.focus();
   }
 
@@ -110,6 +135,26 @@ export function UploadManuscriptModal({ onClose, onUploadSuccess }: UploadManusc
     summary?.vision_status === "unavailable" &&
     summary.images + summary.tables + summary.equations > 0;
 
+  // V-063: right after a successful upload, if the title page had
+  // anything worth confirming, the group-proposal form takes over the
+  // footer (it carries its own "Skip for now"/"Confirm group" actions
+  // inline) instead of the plain post-upload footer below.
+  const showGroupProposal =
+    summary !== undefined && !groupResolved && hasProposalWorthShowing(summary.group_proposal);
+
+  function handleGroupProposalDone(_result: ConfirmGroupResponse | null) {
+    setGroupResolved(true);
+  }
+
+  // ux-critic (V-063 review): the group-proposal form unmounts the
+  // instant it resolves (Skip/Done), and nothing claimed focus on the
+  // way back to the plain footer -- same BUG-028/`removeMember` rule as
+  // everywhere else this codebase enforces it: a control that unmounts
+  // mid-interaction must hand focus somewhere real.
+  useEffect(() => {
+    if (groupResolved) uploadAnotherRef.current?.focus();
+  }, [groupResolved]);
+
   return (
     <ModalBackdrop>
       <Modal
@@ -117,22 +162,25 @@ export function UploadManuscriptModal({ onClose, onUploadSuccess }: UploadManusc
         onClose={ingest.isPending ? undefined : onClose}
         footer={
           summary ? (
-            <>
-              <button
-                type="button"
-                onClick={handleUploadAnother}
-                className="flex h-11 items-center justify-center rounded-md border border-border-input bg-panel px-4 text-sm font-bold text-ink hover:bg-status-neutral-bg"
-              >
-                Upload another
-              </button>
-              <button
-                type="button"
-                onClick={() => onUploadSuccess(summary.manuscript_id)}
-                className="flex h-11 items-center justify-center rounded-md bg-action px-4 text-sm font-bold text-on-action hover:bg-action-hover"
-              >
-                Start a check with this manuscript
-              </button>
-            </>
+            showGroupProposal ? undefined : (
+              <>
+                <button
+                  ref={uploadAnotherRef}
+                  type="button"
+                  onClick={handleUploadAnother}
+                  className="flex h-11 items-center justify-center rounded-md border border-border-input bg-panel px-4 text-sm font-bold text-ink hover:bg-status-neutral-bg"
+                >
+                  Upload another
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onUploadSuccess(summary.manuscript_id)}
+                  className="flex h-11 items-center justify-center rounded-md bg-action px-4 text-sm font-bold text-on-action hover:bg-action-hover"
+                >
+                  Start a check with this manuscript
+                </button>
+              </>
+            )
           ) : (
             <>
               <button
@@ -174,6 +222,13 @@ export function UploadManuscriptModal({ onClose, onUploadSuccess }: UploadManusc
                 reading model is unavailable). Checks that depend on image content may be
                 limited.
               </p>
+            )}
+            {showGroupProposal && (
+              <GroupProposalFields
+                manuscriptId={summary.manuscript_id}
+                proposal={summary.group_proposal}
+                onDone={handleGroupProposalDone}
+              />
             )}
           </div>
         ) : (
@@ -243,26 +298,6 @@ export function UploadManuscriptModal({ onClose, onUploadSuccess }: UploadManusc
                 </button>
               </div>
             )}
-
-            <div className="flex flex-col gap-1.5">
-              <label htmlFor={groupLabelId} className="text-sm font-medium text-ink">
-                Group name or label
-              </label>
-              <input
-                id={groupLabelId}
-                type="text"
-                value={groupLabel}
-                disabled={ingest.isPending}
-                maxLength={200}
-                placeholder="e.g. Group 5"
-                aria-describedby={groupHintId}
-                onChange={(event) => setGroupLabel(event.target.value)}
-                className="min-h-11 w-full rounded-md border border-border-input bg-panel px-3 text-base text-ink sm:h-9"
-              />
-              <p id={groupHintId} className="text-sm text-ink-secondary">
-                {`Optional. Helps you tell manuscripts apart once you have several, for example a project or team name. If left blank, this manuscript is labeled "${UNGROUPED_LABEL}".`}
-              </p>
-            </div>
 
             {ingest.isPending && (
               <p role="status" className="flex items-center gap-2 text-sm text-ink-secondary">

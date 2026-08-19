@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 
 from app.config import get_settings
 from app.db import sqlalchemy_url
-from app.models.group import Group, Program
+from app.models.group import Group, GroupMember, Program
 
 # Same retry-on-IntegrityError pattern already established in
 # `app/share/service.py::create_share_link` for the identical class of
@@ -72,6 +72,12 @@ def normalize_group_name(name: str) -> str:
 
 async def list_programs(session: AsyncSession) -> list[Program]:
     return list((await session.scalars(select(Program).order_by(Program.name))).all())
+
+
+async def program_name_for(session: AsyncSession, program_id: int | None) -> str | None:
+    if program_id is None:
+        return None
+    return await session.scalar(select(Program.name).where(Program.id == program_id))
 
 
 async def seed_default_programs() -> list[str]:
@@ -159,3 +165,125 @@ async def resolve_or_create_group(
             continue
         return group
     raise AssertionError("unreachable")  # loop always returns or raises
+
+
+async def find_rule3_collision(
+    session: AsyncSession, instructor_id: int, short_name: str, member_names: list[str]
+) -> Group | None:
+    """V-063 (owner's call, 2026-08-19): a READ-ONLY pre-check for the
+    confirm form, run BEFORE the instructor clicks Confirm -- rule 3 of
+    `match_or_create_group_from_proposal`'s own matching rule (ticket's
+    DECIDED section) says "PROPOSE the match, do not apply it" for a
+    same-short-name-zero-overlap collision, but the shipped confirm flow
+    only ever disclosed that collision AFTER the fact, via a
+    disambiguating suffix on the PATCH response (backend-critic, V-063
+    review). This lets the frontend show "a group named X already exists,
+    but none of these members match its records" while the instructor can
+    still change what they're about to submit, instead of only after.
+
+    Returns the colliding group, or `None` if there's no collision --
+    either no same-named group exists at all, or one does and at least
+    one member already overlaps (the ordinary match case, not a
+    collision). No incoming members at all is never a collision (nothing
+    to compare against yet, e.g. the instructor hasn't finished typing)."""
+    display_name = short_name.strip() or DEFAULT_GROUP_LABEL
+    base_normalized = normalize_group_name(display_name)
+    normalized_incoming = {normalize_group_name(m) for m in member_names if m.strip()}
+    if not normalized_incoming:
+        return None
+
+    candidates = (
+        await session.scalars(
+            select(Group).where(
+                Group.instructor_id == instructor_id, Group.name_normalized == base_normalized
+            )
+        )
+    ).all()
+    for candidate in candidates:
+        existing_names = (
+            await session.scalars(
+                select(GroupMember.name).where(GroupMember.group_id == candidate.id)
+            )
+        ).all()
+        existing_normalized = {normalize_group_name(n) for n in existing_names}
+        if not (normalized_incoming & existing_normalized):
+            return candidate
+    return None
+
+
+async def match_or_create_group_from_proposal(
+    session: AsyncSession, instructor_id: int, short_name: str, member_names: list[str]
+) -> tuple[Group, bool]:
+    """V-063's own matching rule (ticket's DECIDED section, proven against
+    the owner's own real documents): short name matches AND at least one
+    member overlaps -> the SAME group (any newly observed member is
+    added, never overwrites what's already recorded). Short name matches
+    but zero members overlap -> rule 3, two DIFFERENT teams sharing an
+    acronym -- never silently merged. No short-name match at all -> a
+    plain new group.
+
+    Returns `(group, matched)` -- `matched=True` means an existing group
+    was found and reused; `False` means a new one was created, so the
+    caller can disclose which happened (AC4-adjacent honesty, matching
+    this module's own `resolve_or_create_group` precedent).
+
+    A rule-3 collision (short name taken by an unrelated group with no
+    member overlap) is disambiguated with a numeric suffix so both can
+    coexist under V-062's `(instructor_id, name_normalized)` uniqueness
+    guarantee, which still protects the ordinary "same instructor,
+    typo/case variant" case unchanged -- retried on `IntegrityError`
+    exactly like `resolve_or_create_group`, RE-QUERYING candidates from
+    scratch on every attempt (not just re-suffixing), for the same
+    concurrent-upload reason `resolve_or_create_group` re-queries at the
+    top of its own loop. `backend-critic` (V-063 review) reproduced live
+    why the re-query matters: two concurrent submissions for the SAME
+    team (overlapping members, no pre-existing group) both see an empty
+    `candidates` list before either commits, so a suffix-only retry would
+    split one team across "VERIDICAL" and "VERIDICAL (2)" instead of the
+    loser's retry finding the winner's row via the overlap check."""
+    display_name = short_name.strip() or DEFAULT_GROUP_LABEL
+    base_normalized = normalize_group_name(display_name)
+    normalized_incoming = {normalize_group_name(m) for m in member_names if m.strip()}
+
+    for attempt in range(_MAX_CREATE_ATTEMPTS):
+        candidates = (
+            await session.scalars(
+                select(Group).where(
+                    Group.instructor_id == instructor_id, Group.name_normalized == base_normalized
+                )
+            )
+        ).all()
+        for candidate in candidates:
+            existing_names = (
+                await session.scalars(
+                    select(GroupMember.name).where(GroupMember.group_id == candidate.id)
+                )
+            ).all()
+            existing_normalized = {normalize_group_name(n) for n in existing_names}
+            if normalized_incoming & existing_normalized:
+                for member_name in member_names:
+                    stripped = member_name.strip()
+                    if stripped and normalize_group_name(stripped) not in existing_normalized:
+                        session.add(GroupMember(group_id=candidate.id, name=stripped))
+                await session.flush()
+                return candidate, True
+
+        suffix = len(candidates) + 1
+        name = display_name if suffix == 1 else f"{display_name} ({suffix})"
+        normalized = base_normalized if suffix == 1 else f"{base_normalized} ({suffix})"
+        group = Group(instructor_id=instructor_id, name=name, name_normalized=normalized)
+        session.add(group)
+        try:
+            await session.flush()
+        except IntegrityError:
+            await session.rollback()
+            if attempt == _MAX_CREATE_ATTEMPTS - 1:
+                raise
+            continue
+        for member_name in member_names:
+            stripped = member_name.strip()
+            if stripped:
+                session.add(GroupMember(group_id=group.id, name=stripped))
+        await session.flush()
+        return group, False
+    raise AssertionError("unreachable")
