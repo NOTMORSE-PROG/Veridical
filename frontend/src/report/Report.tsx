@@ -105,6 +105,12 @@ export function ReportPage() {
                 <span className="text-xl font-bold text-ink sm:text-2xl">{report.composite_score}%</span>
               )}
               <Link
+                to={`/report/${report.check_run_id}/document`}
+                className="text-sm text-link underline hover:text-link-hover"
+              >
+                View manuscript
+              </Link>
+              <Link
                 to={`/audit?check_run_id=${report.check_run_id}`}
                 className="text-sm text-link underline hover:text-link-hover"
               >

@@ -414,6 +414,25 @@ class Settings(BaseSettings):
     # (false-accusation guard, charter judgment #1).
     reuse_high_similarity_threshold: float = 0.85
 
+    # --- Anchor-to-region recovery (V-065 Q2 / shared with V-070) -------------
+    # Candidate excerpt lengths tried, longest first, against PyMuPDF's
+    # page.search_for() to recover a bounding box from a flag's stored
+    # evidence_excerpt. Measured 2026-08-19 against 34 real flags on a real
+    # 47-page manuscript: verbatim-quote flags hit at full length; a
+    # progressively shorter prefix is tried because real excerpts are often
+    # truncated with an ellipsis or wrap mid-line in ways search_for won't
+    # match verbatim. Below 8 chars a "match" is too likely to be
+    # coincidental to trust (`region_search_min_candidate_chars` below).
+    # Comma-separated raw string, same convention as `cors_allowed_origins`:
+    # pydantic-settings JSON-decodes complex env fields before any validator
+    # runs, which breaks on a plain CSV value from .env.
+    region_search_candidate_lengths: str = "400,120,80,40"
+    region_search_min_candidate_chars: int = 8
+
+    @property
+    def region_search_candidate_lengths_list(self) -> list[int]:
+        return [int(n.strip()) for n in self.region_search_candidate_lengths.split(",") if n.strip()]
+
     # --- CORS (V-048) --------------------------------------------------------
     # Comma-separated origins allowed to call the API from a browser. Empty
     # in dev (no browser cross-origin caller yet); production sets it to

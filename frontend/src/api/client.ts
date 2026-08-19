@@ -13,7 +13,11 @@
 // as logged-out. Local dev still sets VITE_API_BASE_URL explicitly
 // (frontend/.env) to talk to the backend directly; this default only
 // matters when it's unset.
-const BASE_URL = (import.meta.env.VITE_API_BASE_URL as string | undefined) ?? "/api";
+// Exported for V-065's PDF.js pane: pdf.js loads a PDF by URL (with
+// `withCredentials: true` for the session cookie) rather than through this
+// module's own JSON/blob request functions, so it needs the same base URL
+// this file already resolves once, not a second guess at it.
+export const BASE_URL = (import.meta.env.VITE_API_BASE_URL as string | undefined) ?? "/api";
 
 export class ApiError extends Error {
   readonly status: number;

@@ -8,6 +8,7 @@ import type {
   EscalatedItemOut,
   EscalationResolution,
   FlagSummaryOut,
+  ManuscriptViewerOut,
   ReportOut,
   ResolveEscalationOut,
 } from "../api/types";
@@ -33,6 +34,18 @@ export function useFlags(checkRunId: number) {
   return useQuery({
     queryKey: ["report", checkRunId, "flags"],
     queryFn: () => api.get<FlagSummaryOut[]>(`/check-runs/${checkRunId}/flags`),
+  });
+}
+
+// V-065: the manuscript viewer's metadata + per-flag anchor regions. Own
+// query key (not folded into ["report", checkRunId]) -- same "sibling
+// panel self-fetches" precedent as useFlags above, and this one is
+// noticeably heavier (opens the PDF server-side to compute regions), so a
+// screen that never opens the viewer should never pay for it.
+export function useManuscriptViewer(checkRunId: number) {
+  return useQuery({
+    queryKey: ["report", checkRunId, "document"],
+    queryFn: () => api.get<ManuscriptViewerOut>(`/check-runs/${checkRunId}/document`),
   });
 }
 

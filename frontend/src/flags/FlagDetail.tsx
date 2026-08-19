@@ -316,7 +316,15 @@ export function FlagDetailPage() {
             <blockquote className="rounded-lg border border-border bg-page px-4 py-3 text-sm break-words text-ink">
               {flag.evidence_excerpt}
             </blockquote>
-            <AnchorPill anchor={flag.page_anchor} />
+            <div className="flex flex-wrap items-center gap-2">
+              <AnchorPill anchor={flag.page_anchor} />
+              <Link
+                to={`/report/${flag.check_run_id}/document?flag=${flag.id}`}
+                className="text-sm font-medium text-link underline hover:text-link-hover"
+              >
+                View in document
+              </Link>
+            </div>
             {flag.ai_reasoning && <p className="text-sm text-ink-secondary">{flag.ai_reasoning}</p>}
           </section>
 
