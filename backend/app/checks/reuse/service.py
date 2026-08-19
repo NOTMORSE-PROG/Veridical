@@ -21,26 +21,40 @@ from app.ingest.schemas import ExtractionResult
 from app.models.enums import CheckKind, FlagSeverity, ResultOutcome
 from app.models.run import CheckResult, Flag
 
+# BUG-050 Branch B (owner, 2026-08-16) / BUG-097: the F7 corpus is shared
+# across instructor accounts BY DESIGN — that decision is not what these
+# wordings are about. What they must never do is turn a match into a
+# content leak: `newcomer` reproduced a day-one account's very first
+# report exposing another instructor's real group name AND the matched
+# document's actual chapter heading text. A match is reported via an
+# opaque, non-identifying reference (`{ref}`, the archived manuscript's
+# internal id) — enough to make the match IDENTIFIABLE (BUG-050 item 5;
+# can be referred back to, e.g. once V-066's browse screen exists) without
+# making it IDENTIFYING (no other account's real label or heading ever
+# appears in text an instructor reads). `matched_group_label` and
+# `matched_chapter_title` stay in `detail` below for internal use only —
+# confirmed never serialized to any API response (`app/flags/service.py`
+# reads only `verdict`/`basis` off `detail`).
 EXACT_DUPLICATE_WHOLE_DOC_WORDING = (
     "This manuscript appears to be a duplicate or near-duplicate ({pct}% match) of "
-    'a manuscript previously processed by VERIDICAL ("{other_group}") — possible '
-    "resubmission or reuse. Please verify manually."
+    "archived manuscript #{ref} in VERIDICAL's shared originality library: "
+    "possible resubmission or reuse. Please verify manually."
 )
 HIGH_SIMILARITY_WHOLE_DOC_WORDING = (
-    "This manuscript shows high similarity ({pct}% match) to a manuscript "
-    'previously processed by VERIDICAL ("{other_group}") — possible shared content '
+    "This manuscript shows high similarity ({pct}% match) to archived manuscript "
+    "#{ref} in VERIDICAL's shared originality library: possible shared content "
     "or reuse. Please verify manually."
 )
 EXACT_DUPLICATE_CHAPTER_WORDING = (
     'The section "{own_chapter}" appears to be a duplicate or near-duplicate '
-    '({pct}% match) of "{other_chapter}" in a manuscript previously processed by '
-    'VERIDICAL ("{other_group}") — possible resubmission or reuse of that section. '
+    "({pct}% match) of a section in archived manuscript #{ref} in VERIDICAL's "
+    "shared originality library: possible resubmission or reuse of that section. "
     "Please verify manually."
 )
 HIGH_SIMILARITY_CHAPTER_WORDING = (
-    'The section "{own_chapter}" shows high similarity ({pct}% match) to '
-    '"{other_chapter}" in a manuscript previously processed by VERIDICAL '
-    '("{other_group}") — possible reuse of that section. Please verify manually.'
+    'The section "{own_chapter}" shows high similarity ({pct}% match) to a section '
+    "in archived manuscript #{ref} in VERIDICAL's shared originality library: "
+    "possible reuse of that section. Please verify manually."
 )
 
 
@@ -60,9 +74,8 @@ def _match_to_flag_draft(match: SimilarityMatch) -> tuple[FlagSeverity, str, dic
 
     reason = template.format(
         pct=pct,
-        other_group=match.matched_group_label,
+        ref=match.matched_manuscript_id,
         own_chapter=match.own_chapter_title,
-        other_chapter=match.matched_chapter_title,
     )
     detail = {
         "kind": f"reuse_{match.level}{'_chapter' if is_chapter else ''}",

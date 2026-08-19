@@ -189,6 +189,93 @@ async def test_reuploaded_duplicate_produces_a_high_severity_flag(session_factor
     assert kinds == {"reuse_exact_duplicate", "reuse_exact_duplicate_chapter"}
 
 
+def _extraction_titled(
+    ch1_title: str, ch1_text: str, ch2_title: str, ch2_text: str
+) -> ExtractionResult:
+    blocks = [
+        _block(ch1_title, page=1),
+        _block(ch1_text, page=1),
+        _block(ch2_title, page=5),
+        _block(ch2_text, page=5),
+    ]
+    nodes = [
+        SectionNode(title=ch1_title, level=1, page=1),
+        SectionNode(title=ch2_title, level=1, page=5),
+    ]
+    return ExtractionResult(
+        page_count=5,
+        anchor_kind="page",
+        image_only=False,
+        text_chars=sum(len(b.text) for b in blocks),
+        section_tree=SectionTree(source="heuristics", nodes=nodes),
+        blocks=blocks,
+        images=[],
+    )
+
+
+async def test_flag_text_never_leaks_matched_manuscripts_identity_or_headings(session_factory):
+    """BUG-050/BUG-097 (Branch B display half, owner 2026-08-16): the
+    corpus is shared across instructors on purpose, but a match must
+    return a bounded, non-identifying reference -- never the OTHER
+    instructor's real group label or the OTHER manuscript's actual
+    chapter heading text (`newcomer` reproduced both leaking into a
+    day-one account's very first report: the matched paper's real title
+    (its `group_label`) and its real section headings, e.g. "CHAPTER 2
+    REVIEW OF RELATED LITERATURE AND STUDIES"). `evidence_excerpt` is the
+    one field actually rendered to the instructor (`FlagDetail.tsx`), so
+    this asserts the shown text, not just `detail` (which stays internal
+    and is intentionally left alone -- never serialized to any API
+    response, confirmed via `app/flags/service.py`). The two manuscripts
+    use DIFFERENT chapter titles over the SAME underlying content, so a
+    title appearing in the flag text can only have come from the matched
+    (other) side, never the querying instructor's own."""
+    settings = get_settings()
+    real_group_label = "BSIT-4A Attendance Monitoring System Group"
+    other_ch1_title = "CHAPTER 1 THE PROBLEM AND ITS BACKGROUND"
+    other_ch2_title = "CHAPTER 2 REVIEW OF RELATED LITERATURE AND STUDIES"
+    own_ch1_title = "Introduction"
+    own_ch2_title = "Related Work"
+
+    manuscript_a, check_run_a = await _seed_manuscript_and_run(
+        session_factory, group_label=real_group_label
+    )
+    async with session_factory() as session:
+        await run_originality_reuse_check(
+            session,
+            manuscript_a,
+            check_run_a,
+            _extraction_titled(other_ch1_title, CH1, other_ch2_title, CH2),
+            settings,
+        )
+
+    manuscript_b, check_run_b = await _seed_manuscript_and_run(
+        session_factory, group_label="Group B"
+    )
+    async with session_factory() as session:
+        result = await run_originality_reuse_check(
+            session,
+            manuscript_b,
+            check_run_b,
+            _extraction_titled(own_ch1_title, CH1, own_ch2_title, CH2),
+            settings,
+        )
+        rows = (
+            await session.execute(
+                text("SELECT evidence_excerpt FROM flag WHERE check_result_id = :id"),
+                {"id": result.id},
+            )
+        ).all()
+    assert len(rows) == 3
+    for row in rows:
+        assert real_group_label not in row.evidence_excerpt
+        assert other_ch1_title not in row.evidence_excerpt
+        assert other_ch2_title not in row.evidence_excerpt
+        # A bounded, non-identifying reference must still be present --
+        # BUG-050 item 5: "the matched manuscript must become
+        # identifiable" (just not identifying).
+        assert f"#{manuscript_a}" in row.evidence_excerpt
+
+
 async def test_transplanted_chapter_produces_a_chapter_level_flag(session_factory):
     """Ticket AC (V5 demo seed): a chapter transplanted into a new doc ->
     chapter-level flag, even when the WHOLE document is otherwise

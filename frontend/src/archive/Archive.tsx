@@ -229,6 +229,11 @@ export function ArchivePage() {
           Every manuscript VERIDICAL has processed, and whether its content is still stored for
           future originality comparisons.
         </p>
+        <p className="mt-1 text-sm text-ink-secondary">
+          This count is your own account's manuscripts only. Originality checks compare against a
+          shared library across every VERIDICAL account, so a match can reference a manuscript
+          that isn't listed here.
+        </p>
       </div>
       <p role="status" aria-live="polite" className="sr-only">
         {liveMessage}
