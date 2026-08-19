@@ -14,13 +14,26 @@ manuscript would otherwise find its own prior archive row.
 old vectors incomparable, and this is the one place that guarantee
 actually gets enforced, not just documented.
 
+**Own group's prior submissions are never reuse** (BUG-050 item 1, fixed
+2026-08-19 now that V-062 gave `Manuscript.group_id` a real FK instead of
+free text): `_group_sibling_manuscript_ids` below excludes every OTHER
+manuscript row in the querying manuscript's own group, so a re-upload or
+revision by the same team never flags against its own prior submission.
+Deliberately does NOT apply this to the "Ungrouped" default bucket
+(`app.groups.service.DEFAULT_GROUP_LABEL`) — every manuscript with no real
+team name resolves into that ONE shared row per instructor
+(`resolve_or_create_group`), so excluding its siblings would silently hide
+real reuse between two UNRELATED teams that both just haven't been
+assigned a group yet (the opposite of what this check exists to catch).
+
 **V7 hook, dormant** (ticket AC: "Resubmission by the same group (V7
 future) exempted via family link — design the exemption now, dormant
-until V7"): `exclude_manuscript_ids` exists on the query signature for
-exactly this — no caller passes it yet (V7's resubmission/family data
-model doesn't exist, D-005 blocks it), so it is always empty today. When
-V7 lands a real family link, wiring the exemption is passing that set in,
-not redesigning this function.
+until V7"): `exclude_manuscript_ids` exists on the query signature for a
+FUTURE family-link exemption distinct from the group exemption above — no
+caller passes it yet (V7's resubmission/family data model doesn't exist,
+D-005 blocks it), so it is always empty today. When V7 lands a real
+family link, wiring that exemption is passing that set in, not
+redesigning this function.
 """
 
 from dataclasses import dataclass
@@ -31,7 +44,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.checks.reuse.embed import DocumentEmbeddings
 from app.config import Settings
+from app.groups.service import DEFAULT_GROUP_LABEL, normalize_group_name
+from app.models.group import Group
 from app.models.manuscript import Manuscript, ManuscriptArchive, ManuscriptChapterArchive
+
+_UNGROUPED_NORMALIZED = normalize_group_name(DEFAULT_GROUP_LABEL)
 
 MatchLevel = Literal["exact_duplicate", "high_similarity"]
 
@@ -163,6 +180,36 @@ async def _best_chapter_matches(
     return matches
 
 
+async def _group_sibling_manuscript_ids(session: AsyncSession, manuscript_id: int) -> set[int]:
+    row = (
+        await session.execute(
+            select(Manuscript.group_id, Manuscript.instructor_id, Group.name_normalized)
+            .outerjoin(Group, Group.id == Manuscript.group_id)
+            .where(Manuscript.id == manuscript_id)
+        )
+    ).first()
+    if row is None or row.group_id is None or row.name_normalized == _UNGROUPED_NORMALIZED:
+        return set()
+    # `instructor_id` is redundant with `group_id` today -- `Group` rows are
+    # always created scoped to one instructor (`resolve_or_create_group`,
+    # `app/groups/service.py`), so no `group_id` can span two instructors.
+    # Kept explicit anyway (`backend-critic` review, 2026-08-19): a silent
+    # false negative here (a real cross-tenant match that never fires) is
+    # WORSE than BUG-050's leak was, because nothing surfaces to notice it
+    # by -- worth the one extra predicate as a belt-and-suspenders guard
+    # against that scoping invariant ever drifting elsewhere.
+    return set(
+        (
+            await session.scalars(
+                select(Manuscript.id).where(
+                    Manuscript.group_id == row.group_id,
+                    Manuscript.instructor_id == row.instructor_id,
+                )
+            )
+        ).all()
+    )
+
+
 async def query_similar_manuscripts(
     session: AsyncSession,
     manuscript_id: int,
@@ -172,6 +219,7 @@ async def query_similar_manuscripts(
     exclude_manuscript_ids: set[int] | None = None,
 ) -> OriginalityQueryResult:
     exclude = {manuscript_id, *(exclude_manuscript_ids or set())}
+    exclude |= await _group_sibling_manuscript_ids(session, manuscript_id)
     archive_size_n = await _archive_size(session, exclude_manuscript_ids=exclude, settings=settings)
 
     matches: list[SimilarityMatch] = []
