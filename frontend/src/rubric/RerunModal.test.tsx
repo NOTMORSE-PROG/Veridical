@@ -14,6 +14,7 @@ const ACTIVE_FAMILY: RubricListItem[] = [
     created_at: "2026-01-01T00:00:00Z",
     criteria_count: 12,
     report_count: 3,
+    program: null,
   },
 ];
 
@@ -171,7 +172,9 @@ describe("RerunModal", () => {
     );
     renderWithProviders(<RerunModal onClose={() => {}} initialManuscriptIds={[2]} />);
     expect(
-      await screen.findByText("The manuscript you selected wasn't checked against TIP Format, so it isn't included below."),
+      await screen.findByText(
+        "The manuscript you selected isn't included below: either it wasn't checked against TIP Format, or its program no longer matches this rubric's.",
+      ),
     ).toBeInTheDocument();
     // Nothing preselected, since the requested one was excluded.
     expect(screen.getByRole("button", { name: "Re-run 0 manuscripts" })).toBeInTheDocument();
@@ -428,5 +431,72 @@ describe("RerunModal", () => {
     renderWithProviders(<RerunModal onClose={onClose} />);
     fireEvent.click(await screen.findByRole("button", { name: "Cancel" }));
     expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it("V-064 AC5: excludes a manuscript whose program no longer matches the active rubric's, never defaulting it to selected", async () => {
+    const csFamily = [{ ...ACTIVE_FAMILY[0], program: "CS" }];
+    vi.stubGlobal(
+      "fetch",
+      stubBase({
+        "/rubric-families": csFamily,
+        "/manuscripts": {
+          items: [
+            manuscript({ id: 1, group_label: "Matches CS", program: "CS" }),
+            manuscript({ id: 2, group_label: "Now IT", program: "IT" }),
+          ],
+          total: 2,
+          page: 1,
+          page_size: 200,
+        },
+      }),
+    );
+    renderWithProviders(<RerunModal onClose={() => {}} />);
+    await screen.findByText("Matches CS");
+    expect(screen.queryByText("Now IT")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Re-run 1 manuscript" })).toBeInTheDocument();
+  });
+
+  it("V-064 AC3: a manuscript with no program set stays eligible for a program-set active rubric", async () => {
+    const csFamily = [{ ...ACTIVE_FAMILY[0], program: "CS" }];
+    vi.stubGlobal(
+      "fetch",
+      stubBase({
+        "/rubric-families": csFamily,
+        "/manuscripts": {
+          items: [manuscript({ id: 1, group_label: "No program set", program: null })],
+          total: 1,
+          page: 1,
+          page_size: 200,
+        },
+      }),
+    );
+    renderWithProviders(<RerunModal onClose={() => {}} />);
+    expect(await screen.findByText("No program set")).toBeInTheDocument();
+  });
+
+  it("V-064 AC5: a program-mismatched manuscript requested via a single row's Re-run action is disclosed, not silently dropped", async () => {
+    const csFamily = [{ ...ACTIVE_FAMILY[0], program: "CS" }];
+    vi.stubGlobal(
+      "fetch",
+      stubBase({
+        "/rubric-families": csFamily,
+        "/manuscripts": {
+          items: [
+            manuscript({ id: 1, group_label: "Eligible one", program: "CS" }),
+            manuscript({ id: 2, group_label: "Wrong program", program: "IT" }),
+          ],
+          total: 2,
+          page: 1,
+          page_size: 200,
+        },
+      }),
+    );
+    renderWithProviders(<RerunModal onClose={() => {}} initialManuscriptIds={[2]} />);
+    expect(
+      await screen.findByText(
+        "The manuscript you selected isn't included below: either it wasn't checked against TIP Format, or its program no longer matches this rubric's.",
+      ),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Re-run 0 manuscripts" })).toBeInTheDocument();
   });
 });

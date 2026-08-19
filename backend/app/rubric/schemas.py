@@ -64,6 +64,10 @@ class RubricOut(BaseModel):
     # its own family's only (hence latest) version, so this never blocks
     # the first-time confirm flow (V-012).
     is_latest_version: bool
+    # V-064 (AC1): a family-level attribute (see the ticket/migration
+    # 0026 for why it's denormalized this way). None = "Not set" -- never
+    # guessed, same convention as `ManuscriptListItem.program`.
+    program: str | None
     criteria: list[CriterionOut]
 
     model_config = {"from_attributes": True}
@@ -81,6 +85,7 @@ class RubricListItem(BaseModel):
     created_at: datetime
     criteria_count: int
     report_count: int
+    program: str | None = None
 
 
 class CriterionIn(BaseModel):
@@ -101,6 +106,13 @@ class CriterionIn(BaseModel):
         if not stripped:
             raise ValueError("criterion text must not be blank")
         return stripped
+
+
+class SetRubricFamilyProgramRequest(BaseModel):
+    """PUT /rubric-families/{family_id}/program body (V-064, AC1).
+    `program_id: null` explicitly clears it back to "Not set"."""
+
+    program_id: int | None
 
 
 class UpdateCriteriaRequest(BaseModel):

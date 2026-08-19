@@ -12,7 +12,12 @@ from app.db import get_session
 from app.llm import get_llm_client_for
 from app.models.instructor import Instructor
 from app.ratelimit import enforce_action_rate_limit
-from app.rubric.schemas import RubricListItem, RubricOut, UpdateCriteriaRequest
+from app.rubric.schemas import (
+    RubricListItem,
+    RubricOut,
+    SetRubricFamilyProgramRequest,
+    UpdateCriteriaRequest,
+)
 from app.rubric.service import (
     activate_rubric,
     create_rubric_from_upload,
@@ -20,6 +25,7 @@ from app.rubric.service import (
     get_rubric,
     list_rubric_families,
     list_rubric_versions,
+    set_rubric_family_program,
     update_criteria,
 )
 
@@ -113,3 +119,13 @@ async def list_rubric_versions_route(
     instructor: Annotated[Instructor, Depends(get_current_instructor)],
 ) -> list[RubricListItem]:
     return await list_rubric_versions(session, family_id, instructor.id)
+
+
+@router.put("/rubric-families/{family_id}/program", response_model=list[RubricListItem])
+async def set_rubric_family_program_route(
+    family_id: uuid.UUID,
+    body: SetRubricFamilyProgramRequest,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    instructor: Annotated[Instructor, Depends(get_current_instructor)],
+) -> list[RubricListItem]:
+    return await set_rubric_family_program(session, family_id, body.program_id, instructor.id)

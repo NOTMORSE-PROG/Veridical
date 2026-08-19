@@ -20,6 +20,7 @@ const V2: RubricListItem = {
   created_at: "2026-07-25T00:00:00Z",
   criteria_count: 5,
   report_count: 0,
+  program: null,
 };
 
 const V1: RubricListItem = {
@@ -31,6 +32,7 @@ const V1: RubricListItem = {
   created_at: "2026-06-01T00:00:00Z",
   criteria_count: 4,
   report_count: 3,
+  program: null,
 };
 
 describe("ManageRubricPage", () => {
@@ -251,5 +253,88 @@ describe("ManageRubricPage", () => {
     renderWithProviders(<ManageRubricPage />);
     await screen.findAllByText("V3.pdf");
     expect(screen.getAllByText("Reports pinned").length).toBe(2);
+  });
+
+  it("V-064 AC1: shows 'Not set' when the family has no program, and offers real seeded programs to pick from", async () => {
+    vi.stubGlobal(
+      "fetch",
+      stubFetchByPath({
+        "/rubric-families": [V1],
+        [`/rubric-families/${FAMILY_ID}/versions`]: [V1],
+        "/programs": [
+          { id: 1, name: "CS" },
+          { id: 2, name: "IT" },
+        ],
+      }),
+    );
+    renderWithProviders(<ManageRubricPage />);
+    const select = await screen.findByLabelText("Program");
+    expect(select).toHaveValue("");
+    expect(screen.getByRole("option", { name: "CS" })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "IT" })).toBeInTheDocument();
+  });
+
+  it("V-064 AC1: shows the family's already-set program as actually selected, not blank", async () => {
+    const csFamily: RubricListItem = { ...V1, program: "CS" };
+    vi.stubGlobal(
+      "fetch",
+      stubFetchByPath({
+        "/rubric-families": [csFamily],
+        [`/rubric-families/${FAMILY_ID}/versions`]: [csFamily],
+        "/programs": [
+          { id: 1, name: "CS" },
+          { id: 2, name: "IT" },
+        ],
+      }),
+    );
+    renderWithProviders(<ManageRubricPage />);
+    const select = await screen.findByLabelText("Program");
+    await waitFor(() => expect(select).toHaveValue("1"));
+  });
+
+  it("V-064 AC1: changing the program PUTs the family's new program_id", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = new URL(typeof input === "string" ? input : input.toString(), "http://localhost").pathname;
+      if (path === "/rubric-families") return new Response(JSON.stringify([V1]), { status: 200 });
+      if (path === `/rubric-families/${FAMILY_ID}/versions`) {
+        return new Response(JSON.stringify([V1]), { status: 200 });
+      }
+      if (path === "/programs") {
+        return new Response(JSON.stringify([{ id: 1, name: "CS" }, { id: 2, name: "IT" }]), { status: 200 });
+      }
+      if (path === `/rubric-families/${FAMILY_ID}/program` && init?.method === "PUT") {
+        return new Response(JSON.stringify([{ ...V1, program: "IT" }]), { status: 200 });
+      }
+      return new Response("{}", { status: 200 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    renderWithProviders(<ManageRubricPage />);
+    const select = await screen.findByLabelText("Program");
+    fireEvent.change(select, { target: { value: "2" } });
+
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        expect.stringContaining(`/rubric-families/${FAMILY_ID}/program`),
+        expect.objectContaining({ method: "PUT" }),
+      ),
+    );
+    const call = fetchMock.mock.calls.find(
+      ([, init]) => init?.method === "PUT",
+    ) as [string, RequestInit] | undefined;
+    expect(JSON.parse((call?.[1]?.body as string) ?? "{}")).toEqual({ program_id: 2 });
+  });
+
+  it("V-064: renders no program control when no programs are configured on the account", async () => {
+    vi.stubGlobal(
+      "fetch",
+      stubFetchByPath({
+        "/rubric-families": [V1],
+        [`/rubric-families/${FAMILY_ID}/versions`]: [V1],
+        "/programs": [],
+      }),
+    );
+    renderWithProviders(<ManageRubricPage />);
+    await screen.findByText("v1 · Active");
+    expect(screen.queryByLabelText("Program")).not.toBeInTheDocument();
   });
 });

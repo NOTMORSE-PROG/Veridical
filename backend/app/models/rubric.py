@@ -53,6 +53,11 @@ class Rubric(Base, PkCreatedMixin):
     # family" when re-uploads exist; V-012 only ever has one version to
     # activate.
     is_active: Mapped[bool] = mapped_column(Boolean, server_default="false")
+    # V-064 (AC1): a FAMILY-level attribute (denormalized onto every
+    # version row, same as `title`) -- NULL = "not set", eligible for
+    # everything (AC3), never guessed. Kept in sync across a family's
+    # versions by `app/rubric/service.py::set_rubric_family_program`.
+    program_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("program.id"))
 
     instructor: Mapped["Instructor"] = relationship(back_populates="rubrics")
     # cascade="all, delete-orphan" + passive_deletes=True: deleting a
