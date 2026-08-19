@@ -8,7 +8,7 @@ from app.models.audit import AuditLog
 from app.models.base import Base
 from app.models.citation import Citation
 from app.models.citation_cache import CitationCache
-from app.models.group import Group, Program
+from app.models.group import Group, GroupMember, Program
 from app.models.instructor import Instructor
 from app.models.llm import LLMQuotaCounter, LLMResponseCache
 from app.models.manuscript import Manuscript, ManuscriptArchive, ManuscriptChapterArchive
@@ -27,6 +27,7 @@ __all__ = [
     "Criterion",
     "Flag",
     "Group",
+    "GroupMember",
     "Instructor",
     "LLMQuotaCounter",
     "LLMResponseCache",

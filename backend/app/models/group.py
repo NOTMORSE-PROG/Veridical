@@ -8,7 +8,7 @@ must be a data change, never a redeploy.
 """
 
 from sqlalchemy import BigInteger, ForeignKey, String, UniqueConstraint
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base, PkCreatedMixin
 
@@ -52,3 +52,25 @@ class Group(Base, PkCreatedMixin):
             "instructor_id", "name_normalized", name="uq_manuscript_group_instructor_name"
         ),
     )
+
+    members: Mapped[list["GroupMember"]] = relationship(
+        back_populates="group", cascade="all, delete-orphan"
+    )
+
+
+class GroupMember(Base, PkCreatedMixin):
+    """A name observed on a manuscript's own title page (V-063's `By:`
+    block extraction) -- the durable record the matching rule needs:
+    "short name matches AND at least one member overlaps" is how two
+    different teams that happen to share a short acronym stay distinct
+    groups instead of silently merging (see V-063's own DECIDED section
+    for the real-document proof this rule is built on)."""
+
+    __tablename__ = "group_member"
+
+    group_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("manuscript_group.id", ondelete="CASCADE"), index=True
+    )
+    name: Mapped[str] = mapped_column(String(200))
+
+    group: Mapped["Group"] = relationship(back_populates="members")

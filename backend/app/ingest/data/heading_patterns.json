@@ -63,5 +63,23 @@
     "^\\d{1,4}$",
     "^page\\s+\\d+(\\s+of\\s+\\d+)?$"
   ],
-  "toc_line_suffix": "[.\\u2026\\s]*\\d{1,4}\\s*$"
+  "toc_line_suffix": "[.\\u2026\\s]*\\d{1,4}\\s*$",
+  "title_page": {
+    "_comment": [
+      "V-063: deterministic title-page extraction (group name, members,",
+      "program) -- data, not code, same as every other pattern in this",
+      "file. `degree_program_map` keys are matched as substrings of the",
+      "text AFTER `degree_prefix`, case-insensitive; values must be real",
+      "Program.name rows (seeded by migration 0025) or the match is",
+      "silently skipped (never fabricates a program that doesn't exist)."
+    ],
+    "by_markers": ["by:", "by"],
+    "adviser_markers": ["adviser:", "adviser"],
+    "degree_prefix": "bachelor of science in",
+    "degree_program_map": {
+      "information technology": "IT",
+      "computer science": "CS"
+    },
+    "title_separators": [":", " - "]
+  }
 }

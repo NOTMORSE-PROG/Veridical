@@ -5,6 +5,7 @@
 // screen, so it isn't duplicated here.
 import { useMemo, useRef, useState } from "react";
 import { useMe } from "../auth/useAuth";
+import { GroupProposalDialog } from "../check/GroupProposalDialog";
 import { NewCheckModal } from "../check/NewCheck";
 import { UploadManuscriptModal } from "../check/UploadManuscriptModal";
 import { KpiCards } from "../dashboard/KpiCards";
@@ -65,10 +66,12 @@ function PopulatedDashboard({
   onUploadManuscript,
   onRerun,
   onStartCheck,
+  onSetGroup,
 }: {
   onUploadManuscript: () => void;
   onRerun: (manuscriptId: number) => void;
   onStartCheck: (manuscriptId: number) => void;
+  onSetGroup: (manuscriptId: number) => void;
 }) {
   const { data: stats } = useDashboardStats();
   const [page, setPage] = useState(1);
@@ -91,6 +94,7 @@ function PopulatedDashboard({
         onUploadManuscript={onUploadManuscript}
         onRerun={onRerun}
         onStartCheck={onStartCheck}
+        onSetGroup={onSetGroup}
       />
     </>
   );
@@ -105,6 +109,7 @@ export function DashboardPage() {
   const [preselectManuscriptId, setPreselectManuscriptId] = useState<number | undefined>(undefined);
   const [rerunOpen, setRerunOpen] = useState(false);
   const [rerunInitialIds, setRerunInitialIds] = useState<number[] | undefined>(undefined);
+  const [setGroupManuscriptId, setSetGroupManuscriptId] = useState<number | undefined>(undefined);
   const headingRef = useRef<HTMLHeadingElement>(null);
   useRouteFocus("Dashboard - VERIDICAL", headingRef);
 
@@ -181,6 +186,13 @@ export function DashboardPage() {
           initialManuscriptIds={rerunInitialIds}
         />
       )}
+      {setGroupManuscriptId !== undefined && (
+        <GroupProposalDialog
+          manuscriptId={setGroupManuscriptId}
+          onClose={() => setSetGroupManuscriptId(undefined)}
+          onDone={() => setSetGroupManuscriptId(undefined)}
+        />
+      )}
 
       {/* Staged reveal: don't paint either state until we genuinely know
           which one is true (same pattern as 4v's LandingPending — avoids a
@@ -196,6 +208,7 @@ export function DashboardPage() {
             setPreselectManuscriptId(manuscriptId);
             openNewCheck();
           }}
+          onSetGroup={(manuscriptId) => setSetGroupManuscriptId(manuscriptId)}
         />
       ) : (
         <EmptyState onUpload={() => setUploadOpen(true)} />

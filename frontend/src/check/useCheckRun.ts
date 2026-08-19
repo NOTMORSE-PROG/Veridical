@@ -3,7 +3,14 @@
 // screen's polling query.
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api/client";
-import type { CheckRun, IngestSummary, PaginatedManuscripts, RerunEstimateOut } from "../api/types";
+import type {
+  CheckRun,
+  ConfirmGroupResponse,
+  IngestSummary,
+  PaginatedManuscripts,
+  RerunEstimateOut,
+  TitlePageProposal,
+} from "../api/types";
 
 /** The New Check modal just wants "everything ingested" — requests one
  * generously large page rather than needing its own picker pagination
@@ -18,19 +25,19 @@ export function useManuscripts() {
 
 // V-059: the upload screen the product's own description promises
 // ("uploads a required format... and a manuscript") but never shipped.
-// BUG-043: `group_label` now travels as a form field on the same
-// multipart body as the file, not a query parameter -- the endpoint used
-// to silently discard a form field sent this way, and a query parameter
-// also wrote the group's identity into request/proxy logs and browser
-// history unnecessarily.
+// V-063 (owner's call, 2026-08-19): no longer takes a `groupLabel` --
+// this modal's own free-text field was removed (see
+// UploadManuscriptModal.tsx's header comment for why), so every ingest
+// now starts at the backend's own "Ungrouped" default; the
+// group-proposal dialog is the only place a real group gets set. The
+// backend endpoint still accepts a `group_label` form field generically
+// (BUG-043's fix), this UI just never sends one anymore.
 export function useIngestManuscript() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({ file, groupLabel }: { file: File; groupLabel: string }) => {
+    mutationFn: ({ file }: { file: File }) => {
       const form = new FormData();
       form.append("file", file);
-      const trimmed = groupLabel.trim();
-      if (trimmed) form.append("group_label", trimmed);
       return api.post<IngestSummary>("/manuscripts/ingest", form);
     },
     onSuccess: () => {
@@ -39,6 +46,32 @@ export function useIngestManuscript() {
       // Query matches by key prefix, so one call covers both without
       // either query needing to know about the other.
       queryClient.invalidateQueries({ queryKey: ["manuscripts"] });
+    },
+  });
+}
+
+// V-063 (AC6): re-derives the SAME proposal shown right after upload --
+// lets the "Set group" entry point (dashboard) reopen it any time later,
+// so dismissing the confirm dialog is never a dead end.
+export function useGroupProposal(manuscriptId: number | undefined) {
+  return useQuery({
+    queryKey: ["group-proposal", manuscriptId],
+    queryFn: () => api.get<TitlePageProposal>(`/manuscripts/${manuscriptId}/group-proposal`),
+    enabled: manuscriptId !== undefined,
+  });
+}
+
+// V-063 (AC2/AC4): applies a confirmed (or instructor-edited, or fully
+// hand-typed) group proposal -- the only mutation that ever changes a
+// manuscript's group via this flow.
+export function useConfirmGroup(manuscriptId: number | undefined) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (body: { group_name: string; member_names: string[]; program_id: number | null }) =>
+      api.patch<ConfirmGroupResponse>(`/manuscripts/${manuscriptId}/group`, body),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["manuscripts"] });
+      queryClient.invalidateQueries({ queryKey: ["groups"] });
     },
   });
 }
