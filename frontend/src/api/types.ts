@@ -427,6 +427,25 @@ export interface ResolveEscalationOut {
   report: ReportOut;
 }
 
+// V-072 (F7.4): present only on a passage-level reuse flag. `matched_ref`
+// is the same opaque, non-identifying manuscript id every other F7 flag
+// already uses (BUG-050/097) -- never a real name or heading.
+// `matched_excerpt`/`matched_context_before`/`matched_context_after` are
+// bounded, stored text (never a live read of the matched manuscript's
+// file -- bounded-excerpt rule, carried from V-058/BUG-050 Branch B).
+export interface PassagePairOut {
+  own_excerpt: string;
+  own_context_before: string | null;
+  own_context_after: string | null;
+  matched_ref: number;
+  matched_excerpt: string;
+  matched_context_before: string | null;
+  matched_context_after: string | null;
+  context_words_each_side: number;
+  similarity: number;
+  level: "exact_duplicate" | "high_similarity";
+}
+
 export interface FlagOut {
   id: number;
   check_result_id: number;
@@ -446,6 +465,7 @@ export interface FlagOut {
   // BUG-049: the flag evidence page is exactly where the audit found a
   // fabricated statistical-forensics finding rendered with no disclosure.
   llm_mode: "fake" | "real" | "unknown";
+  passage_pair: PassagePairOut | null;
 }
 
 export interface OverrideFlagOut extends FlagOut {
@@ -464,6 +484,9 @@ export interface FlagSummaryOut {
   evidence_excerpt: string;
   page_anchor: string;
   overridden: boolean;
+  // V-072 (F7.4): distinguishes a passage-level reuse flag from today's
+  // whole-document/chapter-level ones (same check_kind).
+  is_passage_level: boolean;
 }
 
 // V-065: what the manuscript viewer's document pane can actually do with
@@ -501,6 +524,33 @@ export interface ManuscriptViewerOut {
   purged_at: string | null;
   page_count: number | null;
   regions: FlagRegionOut[];
+}
+
+// V-072 (F7.4), `ui-designer` spec §4.2/§4.3: a passage match the DEFAULT
+// policy excludes from scoring (own or matched side falls inside the
+// reference list or a detected block quote) -- revealed only when the
+// instructor turns on the matching exploration toggle. Never a real
+// `Flag` -- `id` is a request-scoped string, `own_region.flag_id` is a
+// synthetic negative int, neither can be confused with a real Flag.id.
+export interface ExcludedReuseMatchOut {
+  id: string;
+  own_excerpt: string;
+  own_context_before: string | null;
+  own_context_after: string | null;
+  own_region: FlagRegionOut;
+  matched_ref: number;
+  matched_excerpt: string;
+  matched_context_before: string | null;
+  matched_context_after: string | null;
+  context_words_each_side: number;
+  similarity: number;
+  level: "exact_duplicate" | "high_similarity";
+  excluded_reason: ("reference_list" | "block_quote")[];
+}
+
+export interface ReuseMatchesOut {
+  passage_archive_size_n: number;
+  matches: ExcludedReuseMatchOut[];
 }
 
 /** One model's own daily allowance. The Gemini free tier meters per model,

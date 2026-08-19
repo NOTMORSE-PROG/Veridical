@@ -21,6 +21,8 @@ from app.checks.escalation import (
     list_escalated,
     resolve_escalation,
 )
+from app.checks.reuse.embed import PassageEmbedding, split_context
+from app.checks.reuse.query import query_similar_passages
 from app.config import Settings, get_settings
 from app.errors import ConflictError, GoneError, NotFoundError
 from app.ingest.regions import recover_region
@@ -33,13 +35,14 @@ from app.models.enums import (
     ReportDecision,
     RubricParseStatus,
 )
-from app.models.manuscript import Manuscript
+from app.models.manuscript import Manuscript, ManuscriptPassageArchive
 from app.models.rubric import Criterion, Rubric
 from app.models.run import CheckResult, CheckRun, Flag, ReadinessReport
 from app.report.schemas import (
     CriterionResultOut,
     EscalatedItemOut,
     EvidenceItem,
+    ExcludedReuseMatchOut,
     FlagRegionOut,
     FlagSummaryOut,
     ManuscriptViewerOut,
@@ -47,6 +50,7 @@ from app.report.schemas import (
     ReportOut,
     ResolutionOut,
     ResolveEscalationOut,
+    ReuseMatchesOut,
 )
 from app.report.scoring import (
     ScorableFlag,
@@ -389,6 +393,7 @@ async def flags_for_check_run(session: AsyncSession, check_run_id: int) -> list[
             evidence_excerpt=flag.evidence_excerpt,
             page_anchor=flag.page_anchor,
             overridden=flag.overridden,
+            is_passage_level=bool((flag.detail or {}).get("kind", "").endswith("_passage")),
         )
         for flag, result in rows
     ]
@@ -530,6 +535,137 @@ async def get_manuscript_viewer(
         purged_at=None,
         page_count=page_count,
         regions=regions,
+    )
+
+
+async def list_reuse_passage_matches(
+    session: AsyncSession,
+    check_run_id: int,
+    instructor_id: int,
+    *,
+    include_reference_list: bool,
+    include_block_quote: bool,
+    settings: Settings | None = None,
+) -> ReuseMatchesOut:
+    """V-072 (F7.4), `ui-designer` spec §4.2/§6: the exploration toggle's
+    live data source. Reads THIS manuscript's own already-persisted
+    passage archive (written by `run_originality_reuse_check`'s
+    write-back, `app.checks.reuse.store.store_passage_embeddings`) rather
+    than re-embedding — the check already computed these vectors once.
+    Returns only matches the DEFAULT policy would exclude (own or matched
+    side is a reference-list/block-quote passage) — a match between two
+    ordinary body passages is already a real, scored `Flag` and has no
+    business appearing twice here. Never turns any of these into a `Flag`
+    row (module docstring, `app/checks/reuse/query.py`)."""
+    settings = settings or get_settings()
+    check_run = await _owned_check_run(session, check_run_id, instructor_id)
+    manuscript = await session.get(Manuscript, check_run.manuscript_id)
+
+    archive_rows = (
+        (
+            await session.execute(
+                select(ManuscriptPassageArchive).where(
+                    ManuscriptPassageArchive.manuscript_id == manuscript.id
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    passages = [
+        PassageEmbedding(
+            passage_index=r.passage_index,
+            chapter_index=r.chapter_index,
+            anchor_kind="page" if r.page is not None else "paragraph",
+            page=r.page,
+            paragraph=r.paragraph,
+            char_start=r.char_start,
+            char_end=r.char_end,
+            text=r.text,
+            context_text=r.context_text,
+            is_reference_list=r.is_reference_list,
+            is_block_quote=r.is_block_quote,
+            embedding=r.embedding,
+        )
+        for r in archive_rows
+    ]
+
+    query_result = await query_similar_passages(
+        session,
+        manuscript.id,
+        passages,
+        settings,
+        include_reference_list=include_reference_list,
+        include_block_quote=include_block_quote,
+    )
+    excluded = [
+        m
+        for m in query_result.matches
+        if m.own_is_reference_list
+        or m.own_is_block_quote
+        or m.matched_is_reference_list
+        or m.matched_is_block_quote
+    ]
+
+    section_tree = SectionTree.model_validate(manuscript.section_tree or {"source": "none"})
+    doc = None
+    if Path(manuscript.file_ref).suffix.lower() == ".pdf" and manuscript.purged_at is None:
+        try:
+            doc = pymupdf.open(manuscript.file_ref)
+        except (pymupdf.FileDataError, pymupdf.FileNotFoundError, RuntimeError, ValueError):
+            doc = None
+
+    try:
+        results: list[ExcludedReuseMatchOut] = []
+        for i, m in enumerate(excluded):
+            own_anchor = f"p. {m.own_page}" if m.own_page is not None else f"¶{m.own_paragraph}"
+            # Same OWN-side anchor→region mechanism every other flag
+            # already uses (V-065's `recover_region`) — the excluded
+            # match's real quotable text (`m.own_text`) is what lets it
+            # find and highlight a precise box, not a templated sentence.
+            region = recover_region(doc, section_tree, own_anchor, m.own_text, settings=settings)
+            own_before, own_after = split_context(m.own_context_text, m.own_text)
+            matched_before, matched_after = split_context(m.matched_context_text, m.matched_text)
+            reasons: list[str] = []
+            if m.own_is_reference_list or m.matched_is_reference_list:
+                reasons.append("reference_list")
+            if m.own_is_block_quote or m.matched_is_block_quote:
+                reasons.append("block_quote")
+            results.append(
+                ExcludedReuseMatchOut(
+                    id=f"excl-{i}",
+                    own_excerpt=m.own_text,
+                    own_context_before=own_before,
+                    own_context_after=own_after,
+                    own_region=FlagRegionOut(
+                        # Synthetic, never a real Flag.id (module docstring
+                        # above) — negative so it can never collide with a
+                        # real flag_id, per the ui-designer spec's own call.
+                        flag_id=-(i + 1),
+                        kind=region.kind,
+                        page=region.page,
+                        end_page=region.end_page,
+                        bbox=region.bbox,
+                        all_bboxes=list(region.all_bboxes),
+                        paragraph=region.paragraph,
+                        index=region.index,
+                    ),
+                    matched_ref=m.matched_manuscript_id,
+                    matched_excerpt=m.matched_text,
+                    matched_context_before=matched_before,
+                    matched_context_after=matched_after,
+                    context_words_each_side=settings.reuse_passage_context_words,
+                    similarity=round(m.similarity, 3),
+                    level=m.level,
+                    excluded_reason=reasons,
+                )
+            )
+    finally:
+        if doc is not None:
+            doc.close()
+
+    return ReuseMatchesOut(
+        passage_archive_size_n=query_result.passage_archive_size_n, matches=results
     )
 
 

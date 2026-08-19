@@ -189,6 +189,23 @@ export function PdfPane({
     el?.focus({ preventScroll: false });
   }, [selectedFlagId, boxes]);
 
+  // `ux-critic` finding (V-072 review, 2026-08-20): the highlight's own
+  // popover (opened by the focus-move effect above, since a focused
+  // element also counts as hovered for keyboard users) had no way to
+  // dismiss -- it stayed open indefinitely and, at narrow widths, visibly
+  // overlapped other content. V-072's passage flags made this far more
+  // common than it was under V-065 alone (many more flags now resolve to
+  // a real `page_bbox`, so the auto-focus-on-select effect above fires
+  // far more often). Escape is this app's own established dismiss
+  // convention (Modal.tsx already uses it) -- reused here, not invented.
+  useEffect(() => {
+    function onKeyDown(e: KeyboardEvent) {
+      if (e.key === "Escape") setHoveredFlagId(null);
+    }
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, []);
+
   function commitPageInput() {
     const n = Number(pageInput);
     if (Number.isFinite(n) && pdf) {

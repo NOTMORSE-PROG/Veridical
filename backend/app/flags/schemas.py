@@ -5,6 +5,33 @@ from pydantic import BaseModel, Field
 from app.report.schemas import ReportOut
 
 
+class PassagePairOut(BaseModel):
+    """V-072 (F7.4): present only on a passage-level reuse flag
+    (`FlagOut.passage_pair`) — the two-sided comparison `ui-designer`'s
+    spec (2026-08-20) calls `PassagePairPanel`. `matched_excerpt`/
+    `matched_context_before`/`matched_context_after` are bounded, stored
+    text (`app/models/manuscript.py`'s `ManuscriptPassageArchive.text`/
+    `context_text`, computed once at archive-build time) — never a live
+    read of the matched manuscript's file (bounded-excerpt rule, carried
+    from V-058/BUG-050 Branch B). `matched_ref` is the same opaque,
+    non-identifying manuscript id every other F7 flag already uses
+    (BUG-050/097) — never a real name or heading."""
+
+    own_excerpt: str
+    own_context_before: str | None
+    own_context_after: str | None
+    matched_ref: int
+    matched_excerpt: str
+    matched_context_before: str | None
+    matched_context_after: str | None
+    # Echoes `reuse_passage_context_words` (config, not hardcoded on the
+    # frontend) — the bounded-window disclosure ticket AC8 requires
+    # wherever a match is shown.
+    context_words_each_side: int
+    similarity: float
+    level: str
+
+
 class FlagOut(BaseModel):
     id: int
     check_result_id: int
@@ -36,6 +63,8 @@ class FlagOut(BaseModel):
     # fabricated statistical-forensics finding rendered with no disclosure
     # at all.
     llm_mode: str
+    # V-072 (F7.4): present only for a passage-level reuse flag.
+    passage_pair: PassagePairOut | None = None
 
 
 class AnnotateFlagIn(BaseModel):

@@ -13,9 +13,14 @@ compares this manuscript against itself.
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.checks.reuse.embed import compute_document_embeddings
-from app.checks.reuse.query import SimilarityMatch, query_similar_manuscripts
-from app.checks.reuse.store import store_document_embeddings
+from app.checks.reuse.embed import compute_document_embeddings, compute_passage_embeddings
+from app.checks.reuse.query import (
+    PassageMatch,
+    SimilarityMatch,
+    query_similar_manuscripts,
+    query_similar_passages,
+)
+from app.checks.reuse.store import store_document_embeddings, store_passage_embeddings
 from app.config import Settings
 from app.ingest.schemas import ExtractionResult
 from app.models.enums import CheckKind, FlagSeverity, ResultOutcome
@@ -57,6 +62,32 @@ HIGH_SIMILARITY_CHAPTER_WORDING = (
     "possible reuse of that section. Please verify manually."
 )
 
+# F7.4 (V-072) passage-level wording. Deliberately different SHAPE from the
+# templates above, not just different text: those go into `Flag.reason`
+# AND `Flag.evidence_excerpt` (there is no real quotable text to excerpt at
+# whole-doc/chapter granularity, so the sentence stands in for both). A
+# passage match DOES have real quotable text -- the passage itself -- so
+# `evidence_excerpt` becomes the passage's own words (bounded to
+# `reuse_passage_chunk_words`) and these templates go into
+# `Flag.detail["reason"]` only, which `app.flags.service._to_flag_out`
+# already surfaces as `ai_reasoning`. This also means passage flags are the
+# ONLY F7 flags whose `evidence_excerpt` is real page text, not a
+# templated sentence -- which is what lets V-065's `page.search_for()`-based
+# region recovery actually find and highlight them precisely (measured
+# 13/13 for real quoted prose, `app/ingest/regions.py`'s own module
+# docstring), unlike today's whole-doc/chapter flags, which only ever
+# resolve to a coarse `section`/`whole_document` region.
+EXACT_DUPLICATE_PASSAGE_WORDING = (
+    "This passage appears to be a duplicate or near-duplicate ({pct}% match) of a "
+    "passage in archived manuscript #{ref} in VERIDICAL's shared originality "
+    "library: possible resubmission or reuse of this passage. Please verify manually."
+)
+HIGH_SIMILARITY_PASSAGE_WORDING = (
+    "This passage shows high similarity ({pct}% match) to a passage in archived "
+    "manuscript #{ref} in VERIDICAL's shared originality library: possible reuse "
+    "of this passage. Please verify manually."
+)
+
 
 def _match_to_flag_draft(match: SimilarityMatch) -> tuple[FlagSeverity, str, dict]:
     pct = round(match.similarity * 100, 1)
@@ -89,6 +120,42 @@ def _match_to_flag_draft(match: SimilarityMatch) -> tuple[FlagSeverity, str, dic
     return severity, reason, detail
 
 
+def _passage_match_to_flag_draft(match: PassageMatch) -> tuple[FlagSeverity, str, str, dict]:
+    """Returns (severity, evidence_excerpt, page_anchor, detail) — a
+    different shape from `_match_to_flag_draft` above (see the wording
+    templates' own comment for why: real passage text as the excerpt,
+    the explanatory sentence in `detail["reason"]` instead)."""
+    pct = round(match.similarity * 100, 1)
+    if match.level == "exact_duplicate":
+        severity = FlagSeverity.high
+        template = EXACT_DUPLICATE_PASSAGE_WORDING
+    else:
+        severity = FlagSeverity.med
+        template = HIGH_SIMILARITY_PASSAGE_WORDING
+    reason = template.format(pct=pct, ref=match.matched_manuscript_id)
+
+    page_anchor = (
+        f"p. {match.own_page}" if match.own_page is not None else f"¶{match.own_paragraph}"
+    )
+    detail = {
+        "kind": f"reuse_{match.level}_passage",
+        "reason": reason,
+        "similarity": round(match.similarity, 3),
+        "matched_manuscript_id": match.matched_manuscript_id,
+        "matched_group_label": match.matched_group_label,  # internal only, BUG-050/097
+        "own_chapter_index": match.own_chapter_index,
+        "own_context_text": match.own_context_text,
+        "matched_chapter_index": match.matched_chapter_index,
+        "matched_page": match.matched_page,
+        "matched_paragraph": match.matched_paragraph,
+        "matched_text": match.matched_text,
+        "matched_context_text": match.matched_context_text,
+        "is_reference_list_match": match.own_is_reference_list or match.matched_is_reference_list,
+        "is_block_quote_match": match.own_is_block_quote or match.matched_is_block_quote,
+    }
+    return severity, match.own_text, page_anchor, detail
+
+
 async def run_originality_reuse_check(
     session: AsyncSession,
     manuscript_id: int,
@@ -115,6 +182,16 @@ async def run_originality_reuse_check(
         return result
 
     query_result = await query_similar_manuscripts(session, manuscript_id, embeddings, settings)
+    # F7.4 (V-072): passage-level candidates alongside the whole-doc/chapter
+    # ones above -- a genuinely different chunker (`compute_passage_embeddings`),
+    # queried separately (`query_similar_passages` excludes reference-list/
+    # block-quote passages by default, ticket AC3), but folded into the
+    # SAME check_result (one F7 result per run, more flags at finer
+    # granularity — same "flags at every matching level" precedent the
+    # existing exact-duplicate test already documents for chapter vs
+    # whole-doc).
+    passages = compute_passage_embeddings(extraction, settings)
+    passage_query_result = await query_similar_passages(session, manuscript_id, passages, settings)
 
     result = CheckResult(
         check_run_id=check_run_id,
@@ -123,7 +200,8 @@ async def run_originality_reuse_check(
         outcome=ResultOutcome.passed,
         detail={
             "archive_size_n": query_result.archive_size_n,
-            "n_flags": len(query_result.matches),
+            "passage_archive_size_n": passage_query_result.passage_archive_size_n,
+            "n_flags": len(query_result.matches) + len(passage_query_result.matches),
         },
     )
     session.add(result)
@@ -140,11 +218,27 @@ async def run_originality_reuse_check(
                 detail=detail,
             )
         )
+    for passage_match in passage_query_result.matches:
+        severity, evidence_excerpt, page_anchor, detail = _passage_match_to_flag_draft(
+            passage_match
+        )
+        session.add(
+            Flag(
+                check_result_id=result.id,
+                severity=severity,
+                evidence_excerpt=evidence_excerpt,
+                page_anchor=page_anchor,
+                detail=detail,
+            )
+        )
     await session.commit()
 
     # Write-back AFTER the check + its flags are committed (ticket AC,
-    # F7.3) — never match against self.
+    # F7.3) — never match against self. Passage write-back follows the
+    # same ordering for the same reason.
     await store_document_embeddings(session, manuscript_id, embeddings)
+    if passages:
+        await store_passage_embeddings(session, manuscript_id, passages, settings)
 
     return result
 

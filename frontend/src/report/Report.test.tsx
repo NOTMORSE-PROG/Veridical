@@ -82,6 +82,7 @@ const SAMPLE_FLAG: FlagSummaryOut = {
   evidence_excerpt: "The abstract claims a 95% accuracy rate, but Chapter 4 reports 87%.",
   page_anchor: "page 3",
   overridden: false,
+  is_passage_level: false,
 };
 
 describe("ReportPage", () => {

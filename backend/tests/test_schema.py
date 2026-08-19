@@ -44,6 +44,7 @@ EXPECTED_TABLES = {
     "program",  # V-062 (migration 0025)
     "manuscript_group",  # V-062 (migration 0025)
     "group_member",  # V-063 (migration 0027)
+    "manuscript_passage_archive",  # V-072 (migration 0028)
 }
 
 
@@ -259,7 +260,11 @@ def test_migrated_embedding_columns_are_exactly_256_dim_regardless_of_env(migrat
     async def scenario():
         conn = await asyncpg.connect(migrated)
         try:
-            for table in ("manuscript_archive", "manuscript_chapter_archive"):
+            for table in (
+                "manuscript_archive",
+                "manuscript_chapter_archive",
+                "manuscript_passage_archive",
+            ):
                 typ = await conn.fetchval(
                     "SELECT format_type(atttypid, atttypmod) FROM pg_attribute"
                     " WHERE attrelid = $1::regclass AND attname = 'embedding'",

@@ -435,6 +435,49 @@ class Settings(BaseSettings):
             int(n.strip()) for n in self.region_search_candidate_lengths.split(",") if n.strip()
         ]
 
+    # --- Originality/reuse: passage-level similarity (V-072, F7.4) ------------
+    # Passage size for the F7.4 chunker -- deliberately smaller than
+    # `reuse_embedding_chunk_words` (800, F7.1's dilution bound for
+    # whole-doc/chapter averaging). V-065's own research (Q4, 2026-08-19)
+    # measured ~120-word real passages through potion-base-8M separating
+    # nearly as cleanly as the chapter-level calibration; 150 gives a little
+    # headroom above that measured floor without approaching chapter size.
+    reuse_passage_chunk_words: int = 150
+    # Bounded context window (words each side of the exact matched passage)
+    # persisted alongside it at archive-build time -- the bounded-excerpt
+    # rule (owner ruling, carried from V-058/BUG-050 Branch B) requires a
+    # match to show "a bounded, configurable window of context, never the
+    # full archived document." Computed and stored once, not read live from
+    # the matched manuscript's file (V-065 Q1's RAM ruling applies equally
+    # here -- no cross-account file access at all for the matched side).
+    reuse_passage_context_words: int = 60
+    # Same calibration V-065 measured (Q4): passage-level cosine separation
+    # spans nearly the chapter-level dynamic range, so these start at the
+    # SAME values as `reuse_exact_duplicate_threshold`/
+    # `reuse_high_similarity_threshold` -- kept as distinct settings (not
+    # reused directly) because passage-level is a genuinely different
+    # granularity and may need independent tuning later without touching
+    # the chapter/whole-doc thresholds it was copied from.
+    reuse_passage_exact_duplicate_threshold: float = 0.95
+    reuse_passage_high_similarity_threshold: float = 0.85
+
+    # --- Block-quote detection (V-072, F7.4 exclusion) -------------------------
+    # PDF only (no bbox exists for DOCX blocks, `ingest/schemas.py`'s own
+    # TextBlock.bbox comment: "PDF only: layout position" -- an honest gap,
+    # not built for DOCX this ticket). A block's left edge (x0) sitting this
+    # many points right of its chapter's own body-text left margin is
+    # classified as a block quote candidate -- same "hanging indent vs body"
+    # signal `app/ingest/references.py`'s entry segmentation already uses,
+    # just inverted (there, indent continues an entry; here, indent marks a
+    # quoted block). 20pt sits comfortably above APA's standard 0.5in (36pt)
+    # block-quote indent's own rendering jitter floor while staying well
+    # below a full paragraph indent misfire.
+    block_quote_indent_threshold_points: float = 20.0
+    # Below this length, an indented block is more likely a run-in list
+    # item or a short label than a quoted passage worth excluding from
+    # F7.4 candidacy at all.
+    block_quote_min_words: int = 15
+
     # --- CORS (V-048) --------------------------------------------------------
     # Comma-separated origins allowed to call the API from a browser. Empty
     # in dev (no browser cross-origin caller yet); production sets it to

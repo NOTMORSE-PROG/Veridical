@@ -19,6 +19,7 @@ from app.report.schemas import (
     ReportOut,
     ResolveEscalationIn,
     ResolveEscalationOut,
+    ReuseMatchesOut,
 )
 from app.report.service import (
     decide_report,
@@ -28,6 +29,7 @@ from app.report.service import (
     get_report_export_data,
     list_escalated_for_run,
     list_flags_for_run,
+    list_reuse_passage_matches,
     reopen_report,
     resolve_escalation_for_run,
 )
@@ -88,6 +90,27 @@ async def get_manuscript_viewer_route(
     anchor regions. Split from the raw file bytes below (ui-designer spec
     §2.2) — a streamed PDF has no business inside a JSON envelope."""
     return await get_manuscript_viewer(session, check_run_id, instructor.id)
+
+
+@router.get("/check-runs/{check_run_id}/document/reuse-matches", response_model=ReuseMatchesOut)
+async def list_reuse_passage_matches_route(
+    check_run_id: int,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    instructor: Annotated[Instructor, Depends(get_current_instructor)],
+    include_reference_list: bool = False,
+    include_block_quote: bool = False,
+) -> ReuseMatchesOut:
+    """V-072 (F7.4), `ui-designer` spec §4.2: the exclusion-toggle
+    exploration panel's data source. Both toggles default to `False`
+    (ticket AC3, "on by default") — matches this returns are never scored
+    `Flag` rows regardless of what's passed here."""
+    return await list_reuse_passage_matches(
+        session,
+        check_run_id,
+        instructor.id,
+        include_reference_list=include_reference_list,
+        include_block_quote=include_block_quote,
+    )
 
 
 @router.get("/check-runs/{check_run_id}/document/file")

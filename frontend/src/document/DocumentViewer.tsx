@@ -12,10 +12,12 @@ import { CHECK_KIND_SHORT_LABEL } from "../domain/checkKind";
 import { truncateAtWord } from "../format/text";
 import { useFlag } from "../flags/useFlag";
 import { useRouteFocus } from "../routing/useRouteFocus";
-import { useFlags, useManuscriptViewer } from "../report/useReport";
-import type { FlagSummaryOut } from "../api/types";
+import { useExcludedReuseMatches, useFlags, useManuscriptViewer } from "../report/useReport";
+import type { FlagRegionOut, FlagSummaryOut } from "../api/types";
+import { PassagePairPanel } from "./PassagePairPanel";
 import { PdfPane } from "./PdfPane";
 import { regionCopy } from "./regionCopy";
+import { ReuseExplorePanel } from "./ReuseExplorePanel";
 
 function SpinnerIcon() {
   return (
@@ -31,11 +33,13 @@ function BrowseFlags({
   isPending,
   isError,
   onSelect,
+  onExplore,
 }: {
   flags: FlagSummaryOut[] | undefined;
   isPending: boolean;
   isError: boolean;
   onSelect: (flagId: number) => void;
+  onExplore: () => void;
 }) {
   if (isPending) {
     return (
@@ -53,10 +57,20 @@ function BrowseFlags({
   }
   if (flags.length === 0) {
     return (
-      <p className="p-4 text-sm text-ink-secondary">
-        No integrity flags on this run. VERIDICAL's four integrity checks (internal agreement,
-        citation integrity, statistical forensics, and originality/reuse) found nothing to report.
-      </p>
+      <div>
+        <p className="p-4 text-sm text-ink-secondary">
+          No integrity flags on this run. VERIDICAL's four integrity checks (internal agreement,
+          citation integrity, statistical forensics, and originality/reuse) found nothing to
+          report.
+        </p>
+        <p className="border-t border-border bg-status-neutral-bg px-3.5 py-2 text-xs text-status-neutral-text">
+          VERIDICAL also compares shorter passages, about 150 words, against its shared library,
+          separately from the whole-document and section comparisons above.{" "}
+          <button type="button" onClick={onExplore} className="font-medium text-link underline hover:text-link-hover">
+            Explore passage matches
+          </button>
+        </p>
+      </div>
     );
   }
 
@@ -65,6 +79,13 @@ function BrowseFlags({
       <p className="border-b border-border bg-status-neutral-bg px-3.5 py-2 text-xs text-status-neutral-text">
         Citation and originality checks skip the reference list itself when comparing text, so a
         shared bibliography entry doesn't get flagged as reused content.
+      </p>
+      <p className="border-b border-border bg-status-neutral-bg px-3.5 py-2 text-xs text-status-neutral-text">
+        VERIDICAL also compares shorter passages, about 150 words, against its shared library,
+        separately from the whole-document and section comparisons above.{" "}
+        <button type="button" onClick={onExplore} className="font-medium text-link underline hover:text-link-hover">
+          Explore passage matches
+        </button>
       </p>
       {flags.map((flag) => (
         <button
@@ -90,7 +111,15 @@ function BrowseFlags({
   );
 }
 
-function FlagDetailCard({ flagId, onBack }: { flagId: number; onBack: () => void }) {
+function FlagDetailCard({
+  flagId,
+  onBack,
+  onExplore,
+}: {
+  flagId: number;
+  onBack: () => void;
+  onExplore: () => void;
+}) {
   const { data: flag, isPending, isError } = useFlag(flagId);
 
   if (isPending) {
@@ -128,10 +157,89 @@ function FlagDetailCard({ flagId, onBack }: { flagId: number; onBack: () => void
         <AnchorPill anchor={flag.page_anchor} />
         {flag.ai_reasoning && <p className="text-sm text-ink-secondary">{flag.ai_reasoning}</p>}
       </section>
+      {flag.passage_pair && (
+        <>
+          <PassagePairPanel pair={flag.passage_pair} ownAnchor={flag.page_anchor} variant="flag" />
+          <button type="button" onClick={onExplore} className="w-fit text-sm font-medium text-link underline hover:text-link-hover">
+            See other passage matches for this manuscript
+          </button>
+        </>
+      )}
       <Link to={`/flags/${flag.id}`} className="w-fit text-sm font-medium text-link underline hover:text-link-hover">
         Open as full page
       </Link>
     </div>
+  );
+}
+
+// Switches the analysis pane between browsing flags, one flag's detail,
+// and the F7.4 exploration panel -- factored out since both the PDF and
+// DOCX layout branches below render the identical three-way choice.
+function AnalysisPane({
+  selectedFlagId,
+  isExploring,
+  flags,
+  flagsPending,
+  flagsError,
+  selectedRegion,
+  onSelectFlag,
+  onExplore,
+  onBackToFlags,
+  includeReferenceList,
+  includeBlockQuote,
+  onToggleReferenceList,
+  onToggleBlockQuote,
+  excludedMatchesQuery,
+  expandedMatchId,
+  onExpandMatch,
+}: {
+  selectedFlagId: number | null;
+  isExploring: boolean;
+  flags: FlagSummaryOut[] | undefined;
+  flagsPending: boolean;
+  flagsError: boolean;
+  selectedRegion: FlagRegionOut | null;
+  onSelectFlag: (flagId: number) => void;
+  onExplore: () => void;
+  onBackToFlags: () => void;
+  includeReferenceList: boolean;
+  includeBlockQuote: boolean;
+  onToggleReferenceList: (value: boolean) => void;
+  onToggleBlockQuote: (value: boolean) => void;
+  excludedMatchesQuery: ReturnType<typeof useExcludedReuseMatches>;
+  expandedMatchId: string | null;
+  onExpandMatch: (id: string | null) => void;
+}) {
+  if (isExploring) {
+    return (
+      <ReuseExplorePanel
+        flags={flags}
+        onSelectFlag={onSelectFlag}
+        onBack={onBackToFlags}
+        includeReferenceList={includeReferenceList}
+        includeBlockQuote={includeBlockQuote}
+        onToggleReferenceList={onToggleReferenceList}
+        onToggleBlockQuote={onToggleBlockQuote}
+        excludedMatchesQuery={excludedMatchesQuery}
+        expandedMatchId={expandedMatchId}
+        onExpandMatch={onExpandMatch}
+      />
+    );
+  }
+  if (selectedFlagId === null) {
+    return (
+      <BrowseFlags flags={flags} isPending={flagsPending} isError={flagsError} onSelect={onSelectFlag} onExplore={onExplore} />
+    );
+  }
+  return (
+    <>
+      {selectedRegion && regionCopy(selectedRegion) && (
+        <p className="border-b border-border bg-status-neutral-bg px-3.5 py-2 text-xs text-status-neutral-text">
+          {regionCopy(selectedRegion)}
+        </p>
+      )}
+      <FlagDetailCard flagId={selectedFlagId} onBack={onBackToFlags} onExplore={onExplore} />
+    </>
   );
 }
 
@@ -140,15 +248,25 @@ export function DocumentViewerPage() {
   const id = Number(checkRunId);
   const [searchParams, setSearchParams] = useSearchParams();
   const selectedFlagId = searchParams.get("flag") ? Number(searchParams.get("flag")) : null;
+  // V-072 (F7.4): the exploration panel's own URL state, mutually
+  // exclusive with `flag` (same "one analysis-pane view at a time"
+  // convention `flag` already establishes).
+  const isExploring = searchParams.get("panel") === "explore";
+  const includeReferenceList = searchParams.get("ref") === "1";
+  const includeBlockQuote = searchParams.get("quote") === "1";
+  const expandedMatchId = searchParams.get("match");
   const headingRef = useRef<HTMLHeadingElement>(null);
   useRouteFocus("Manuscript - VERIDICAL", headingRef);
 
   const { data: viewer, isPending, isError, refetch } = useManuscriptViewer(id);
   const { data: flags, isPending: flagsPending, isError: flagsError } = useFlags(id);
+  const excludedMatchesQuery = useExcludedReuseMatches(id, { includeReferenceList, includeBlockQuote });
 
   function selectFlag(flagId: number) {
     const next = new URLSearchParams(searchParams);
     next.set("flag", String(flagId));
+    next.delete("panel");
+    next.delete("match");
     setSearchParams(next);
   }
   function clearFlag() {
@@ -156,9 +274,46 @@ export function DocumentViewerPage() {
     next.delete("flag");
     setSearchParams(next);
   }
+  function openExplore() {
+    const next = new URLSearchParams(searchParams);
+    next.delete("flag");
+    next.set("panel", "explore");
+    setSearchParams(next);
+  }
+  function closeExplore() {
+    const next = new URLSearchParams(searchParams);
+    next.delete("panel");
+    next.delete("ref");
+    next.delete("quote");
+    next.delete("match");
+    setSearchParams(next);
+  }
+  function setToggle(key: "ref" | "quote", value: boolean) {
+    const next = new URLSearchParams(searchParams);
+    if (value) next.set(key, "1");
+    else next.delete(key);
+    setSearchParams(next);
+  }
+  function setExpandedMatch(matchId: string | null) {
+    const next = new URLSearchParams(searchParams);
+    if (matchId) next.set("match", matchId);
+    else next.delete("match");
+    setSearchParams(next);
+  }
 
-  const selectedRegion = viewer?.regions.find((r) => r.flag_id === selectedFlagId) ?? null;
+  const expandedMatch =
+    excludedMatchesQuery.data?.matches.find((m) => m.id === expandedMatchId) ?? null;
+  const selectedRegion = isExploring
+    ? expandedMatch?.own_region ?? null
+    : (viewer?.regions.find((r) => r.flag_id === selectedFlagId) ?? null);
   const requestedPage = selectedRegion?.page ?? null;
+  // The explore panel's expanded match reuses PdfPane's existing
+  // highlight mechanism exactly as any other flag does -- its region is
+  // just appended to the same list, keyed by the synthetic negative
+  // `flag_id` the backend already generated for it (never a real Flag.id).
+  const pdfRegions =
+    isExploring && expandedMatch ? [...(viewer?.regions ?? []), expandedMatch.own_region] : viewer?.regions ?? [];
+  const pdfSelectedFlagId = isExploring ? (expandedMatch?.own_region.flag_id ?? null) : selectedFlagId;
 
   return (
     <div className="flex h-[calc(100dvh-4rem)] flex-col">
@@ -211,31 +366,32 @@ export function DocumentViewerPage() {
           <div className="min-h-0 border-b border-border lg:border-r lg:border-b-0">
             <PdfPane
               checkRunId={id}
-              regions={viewer.regions}
+              regions={pdfRegions}
               flags={flags ?? []}
-              selectedFlagId={selectedFlagId}
+              selectedFlagId={pdfSelectedFlagId}
               onSelectFlag={selectFlag}
               requestedPage={requestedPage}
             />
           </div>
           <div className="min-h-0 overflow-y-auto">
-            {selectedFlagId === null ? (
-              <BrowseFlags
-                flags={flags}
-                isPending={flagsPending}
-                isError={flagsError}
-                onSelect={selectFlag}
-              />
-            ) : (
-              <>
-                {selectedRegion && regionCopy(selectedRegion) && (
-                  <p className="border-b border-border bg-status-neutral-bg px-3.5 py-2 text-xs text-status-neutral-text">
-                    {regionCopy(selectedRegion)}
-                  </p>
-                )}
-                <FlagDetailCard flagId={selectedFlagId} onBack={clearFlag} />
-              </>
-            )}
+            <AnalysisPane
+              selectedFlagId={selectedFlagId}
+              isExploring={isExploring}
+              flags={flags}
+              flagsPending={flagsPending}
+              flagsError={flagsError}
+              selectedRegion={selectedRegion}
+              onSelectFlag={selectFlag}
+              onExplore={openExplore}
+              onBackToFlags={isExploring ? closeExplore : clearFlag}
+              includeReferenceList={includeReferenceList}
+              includeBlockQuote={includeBlockQuote}
+              onToggleReferenceList={(v) => setToggle("ref", v)}
+              onToggleBlockQuote={(v) => setToggle("quote", v)}
+              excludedMatchesQuery={excludedMatchesQuery}
+              expandedMatchId={expandedMatchId}
+              onExpandMatch={setExpandedMatch}
+            />
           </div>
         </div>
       )}
@@ -250,23 +406,24 @@ export function DocumentViewerPage() {
             </p>
           </div>
           <div className="min-h-0 overflow-y-auto">
-            {selectedFlagId === null ? (
-              <BrowseFlags
-                flags={flags}
-                isPending={flagsPending}
-                isError={flagsError}
-                onSelect={selectFlag}
-              />
-            ) : (
-              <>
-                {selectedRegion && regionCopy(selectedRegion) && (
-                  <p className="border-b border-border bg-status-neutral-bg px-3.5 py-2 text-xs text-status-neutral-text">
-                    {regionCopy(selectedRegion)}
-                  </p>
-                )}
-                <FlagDetailCard flagId={selectedFlagId} onBack={clearFlag} />
-              </>
-            )}
+            <AnalysisPane
+              selectedFlagId={selectedFlagId}
+              isExploring={isExploring}
+              flags={flags}
+              flagsPending={flagsPending}
+              flagsError={flagsError}
+              selectedRegion={selectedRegion}
+              onSelectFlag={selectFlag}
+              onExplore={openExplore}
+              onBackToFlags={isExploring ? closeExplore : clearFlag}
+              includeReferenceList={includeReferenceList}
+              includeBlockQuote={includeBlockQuote}
+              onToggleReferenceList={(v) => setToggle("ref", v)}
+              onToggleBlockQuote={(v) => setToggle("quote", v)}
+              excludedMatchesQuery={excludedMatchesQuery}
+              expandedMatchId={expandedMatchId}
+              onExpandMatch={setExpandedMatch}
+            />
           </div>
         </div>
       )}

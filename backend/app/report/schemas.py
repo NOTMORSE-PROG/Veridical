@@ -276,6 +276,13 @@ class FlagSummaryOut(BaseModel):
     evidence_excerpt: str
     page_anchor: str
     overridden: bool
+    # V-072 (F7.4): distinguishes a passage-level reuse flag from today's
+    # whole-document/chapter-level ones (same `check_kind`,
+    # `originality_reuse`) -- lets the passage-pair exploration panel
+    # list exactly its own scored matches without inventing a second
+    # request. False for every non-F7.4 flag, including every other
+    # check kind.
+    is_passage_level: bool = False
 
 
 class FlagRegionOut(BaseModel):
@@ -321,6 +328,47 @@ class ManuscriptViewerOut(BaseModel):
     purged_at: datetime | None
     page_count: int | None
     regions: list[FlagRegionOut]
+
+
+class ExcludedReuseMatchOut(BaseModel):
+    """V-072 (F7.4), `ui-designer` spec (2026-08-20) §4.2/§4.3: a passage
+    match that the default policy excludes from scoring (own or matched
+    side falls inside the reference list or a detected block quote) —
+    revealed only when the instructor turns on the corresponding
+    exploration toggle. NEVER a `Flag` row (never scored, never persisted
+    as one) — `id` is a request-scoped string, not a `Flag.id`, so it can
+    never be confused with one client-side.
+
+    `own_region` reuses `FlagRegionOut`'s exact shape (including a
+    `flag_id`, set to a synthetic negative int here per the spec's own
+    call — reusing the existing type over inventing a near-duplicate one
+    with `flag_id` removed) so `PdfPane`'s own highlight/anchor mechanism
+    needs no widening to render it."""
+
+    id: str
+    own_excerpt: str
+    own_context_before: str | None
+    own_context_after: str | None
+    own_region: FlagRegionOut
+    matched_ref: int
+    matched_excerpt: str
+    matched_context_before: str | None
+    matched_context_after: str | None
+    context_words_each_side: int
+    similarity: float
+    level: str
+    excluded_reason: list[Literal["reference_list", "block_quote"]]
+
+
+class ReuseMatchesOut(BaseModel):
+    """V-072 (F7.4): the exploration panel's data source. `archive_size_n`
+    is the PASSAGE archive's own count (ticket AC5: "a thin archive must
+    not make passage matching look authoritative") — always shown, even 0,
+    same cold-start-honesty convention as every other `archive_size_n`
+    already in this codebase."""
+
+    passage_archive_size_n: int
+    matches: list[ExcludedReuseMatchOut]
 
 
 class ReportExportData(BaseModel):

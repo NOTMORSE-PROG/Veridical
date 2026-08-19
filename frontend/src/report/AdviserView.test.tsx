@@ -69,6 +69,7 @@ const SAMPLE_FLAG: FlagSummaryOut = {
   evidence_excerpt: "The abstract claims 95% accuracy, Chapter 4 reports 87%.",
   page_anchor: "page 3",
   overridden: false,
+  is_passage_level: false,
 };
 
 function shared(overrides: Partial<SharedReportOut> = {}): SharedReportOut {

@@ -74,6 +74,9 @@ class Manuscript(Base, PkCreatedMixin):
     chapter_archives: Mapped[list["ManuscriptChapterArchive"]] = relationship(
         back_populates="manuscript", cascade="all, delete-orphan"
     )
+    passage_archives: Mapped[list["ManuscriptPassageArchive"]] = relationship(
+        back_populates="manuscript", cascade="all, delete-orphan"
+    )
     citations: Mapped[list["Citation"]] = relationship(back_populates="manuscript")
 
 
@@ -136,6 +139,67 @@ class ManuscriptChapterArchive(Base, PkCreatedMixin):
         ),
         Index(
             "ix_manuscript_chapter_archive_embedding",
+            "embedding",
+            postgresql_using="hnsw",
+            postgresql_ops={"embedding": "vector_cosine_ops"},
+        ),
+    )
+
+
+class ManuscriptPassageArchive(Base, PkCreatedMixin):
+    """Passage-level embeddings (F7.4, V-072) — one row per ~150-word
+    passage, many more rows per manuscript than the chapter archive above.
+    Includes reference-list and block-quote passages (tagged via
+    `is_reference_list`/`is_block_quote`, never dropped at this layer) —
+    F7.1-3's chapter/whole-doc vectors already exclude that text entirely
+    (`app/checks/reuse/embed.py`'s own docstring); F7.4 needs it STORED so
+    the instructor's exclusion toggle (ticket AC7) has something real to
+    reveal when switched off, not silently unavailable.
+
+    `char_start`/`char_end` are offsets within the OWNING CHAPTER's own
+    assembled text (`"\\n".join` of its content blocks), not the whole
+    document and not the original file's byte offsets — see
+    `PassageEmbedding`'s own docstring for what that basis is.
+
+    `text`/`context_text` are the bounded-excerpt mechanism itself (owner
+    ruling, carried from V-058/BUG-050 Branch B): both are computed and
+    truncated ONCE here, at embed time, from this manuscript's own
+    extraction — never a live read of a (potentially another account's)
+    file at match-view time. This is what lets the F7.4 passage-pair
+    viewer show a matched passage's actual text without ever opening the
+    matched manuscript's stored file.
+    """
+
+    __tablename__ = "manuscript_passage_archive"
+
+    manuscript_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("manuscript.id", ondelete="CASCADE"), index=True
+    )
+    passage_index: Mapped[int] = mapped_column(Integer)
+    chapter_index: Mapped[int] = mapped_column(Integer)
+    # Same "page (PDF) or paragraph (DOCX), one or the other" convention as
+    # every other anchor in this schema (Citation, Flag, ManuscriptChapterArchive).
+    page: Mapped[int | None] = mapped_column(Integer)
+    paragraph: Mapped[int | None] = mapped_column(Integer)
+    char_start: Mapped[int] = mapped_column(Integer)
+    char_end: Mapped[int] = mapped_column(Integer)
+    text: Mapped[str] = mapped_column(Text)
+    context_text: Mapped[str] = mapped_column(Text)
+    is_reference_list: Mapped[bool] = mapped_column(default=False)
+    is_block_quote: Mapped[bool] = mapped_column(default=False)
+    embedding: Mapped[list[float]] = mapped_column(Vector(get_settings().embedding_dim))
+    model_id: Mapped[str] = mapped_column(String(200))
+
+    manuscript: Mapped["Manuscript"] = relationship(back_populates="passage_archives")
+
+    __table_args__ = (
+        UniqueConstraint(
+            "manuscript_id",
+            "passage_index",
+            name="uq_manuscript_passage_archive_manuscript_passage",
+        ),
+        Index(
+            "ix_manuscript_passage_archive_embedding",
             "embedding",
             postgresql_using="hnsw",
             postgresql_ops={"embedding": "vector_cosine_ops"},

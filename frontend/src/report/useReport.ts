@@ -11,6 +11,7 @@ import type {
   ManuscriptViewerOut,
   ReportOut,
   ResolveEscalationOut,
+  ReuseMatchesOut,
 } from "../api/types";
 
 export function useReport(checkRunId: number) {
@@ -46,6 +47,36 @@ export function useManuscriptViewer(checkRunId: number) {
   return useQuery({
     queryKey: ["report", checkRunId, "document"],
     queryFn: () => api.get<ManuscriptViewerOut>(`/check-runs/${checkRunId}/document`),
+  });
+}
+
+// V-072 (F7.4), `ui-designer` spec §4.2/§6: the exclusion-toggle
+// exploration panel's data source. Own query key, keyed by toggle state
+// (so flipping a toggle is a real, separately-cached fetch, not a stale
+// re-render) -- never touches ["report", checkRunId, "flags"], since
+// nothing this returns is ever a scored Flag (see the backend's own
+// module docstring, app/checks/reuse/query.py). Disabled while both
+// toggles are off: nothing to show, no wasted round trip.
+// Always enabled, not gated on either toggle being on: `passage_archive_size_n`
+// (the exploration panel's always-shown coverage disclosure, ticket AC5)
+// comes from this SAME endpoint regardless of toggle state, and real HNSW
+// query latency at this archive's projected worst-case row count measured
+// ~1-2ms (V-072.md's own research) -- cheap enough that gating the fetch
+// buys no real savings and would leave the disclosure with nothing to show
+// until a toggle is flipped.
+export function useExcludedReuseMatches(
+  checkRunId: number,
+  { includeReferenceList, includeBlockQuote }: { includeReferenceList: boolean; includeBlockQuote: boolean },
+) {
+  return useQuery({
+    queryKey: ["report", checkRunId, "reuse-matches", includeReferenceList, includeBlockQuote],
+    queryFn: () => {
+      const params = new URLSearchParams({
+        include_reference_list: String(includeReferenceList),
+        include_block_quote: String(includeBlockQuote),
+      });
+      return api.get<ReuseMatchesOut>(`/check-runs/${checkRunId}/document/reuse-matches?${params}`);
+    },
   });
 }
 

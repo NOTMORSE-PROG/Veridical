@@ -4,9 +4,12 @@ DB — this module never touches the database (pure function over
 `ExtractionResult`), same convention as `test_checks_agreement_extract.py`."""
 
 from app.checks.reuse.embed import (
+    _add_context,
     _average_normalize,
     _chunk_words,
+    _word_chunk_offsets,
     compute_document_embeddings,
+    compute_passage_embeddings,
     embed_long_text,
 )
 from app.config import get_settings
@@ -140,3 +143,121 @@ def test_empty_manuscript_has_no_whole_document_vector():
     result = compute_document_embeddings(_extraction([], nodes=[]), settings=SETTINGS)
     assert result.whole_document is None
     assert result.chapters == []
+
+
+# --- passage-level chunking (V-072, F7.4) --------------------------------------
+
+
+def test_word_chunk_offsets_covers_every_word_exactly_once():
+    text = " ".join(f"word{i}" for i in range(10))
+    offsets = _word_chunk_offsets(text, 4)
+    assert [text[s:e] for s, e in offsets] == [
+        "word0 word1 word2 word3",
+        "word4 word5 word6 word7",
+        "word8 word9",
+    ]
+
+
+def test_add_context_widens_by_real_words_each_side():
+    text = "one two three FOUR five six seven"
+    start, end = text.index("FOUR"), text.index("FOUR") + len("FOUR")
+    assert _add_context(text, start, end, context_words=2) == "two three FOUR five six"
+
+
+def test_add_context_zero_words_returns_only_the_passage_itself():
+    """`backend-critic` finding (V-072 review, 2026-08-20): `-0 == 0` in
+    Python made `context_words=0` silently include ALL preceding text
+    instead of none -- the opposite of what the setting says. Regression
+    guard for the fixed three-branch version."""
+    text = "one two three FOUR five six seven"
+    start, end = text.index("FOUR"), text.index("FOUR") + len("FOUR")
+    assert _add_context(text, start, end, context_words=0) == "FOUR"
+
+
+def test_add_context_bounded_at_document_edges():
+    text = "one two three"
+    start, end = 0, len("one")
+    # Only "two three" exists after -- context_words=10 must not overrun.
+    assert _add_context(text, start, end, context_words=10) == "one two three"
+
+
+def test_compute_passage_embeddings_short_chapter_is_one_passage():
+    blocks = [
+        _block("Chapter 1: Introduction", page=1),
+        _block("The current process for tracking attendance is entirely manual.", page=1),
+    ]
+    nodes = [SectionNode(title="Chapter 1: Introduction", level=1, page=1)]
+    passages = compute_passage_embeddings(_extraction(blocks, nodes), settings=SETTINGS)
+    assert len(passages) == 1
+    assert passages[0].chapter_index == 0
+    assert passages[0].page == 1
+    assert passages[0].is_reference_list is False
+    assert passages[0].is_block_quote is False
+    assert "entirely manual" in passages[0].text
+
+
+def test_compute_passage_embeddings_no_chapter_structure_is_empty():
+    """Honest, named scope limit (module docstring): F7.4 needs chapter
+    structure. A flat/unparseable document still gets F7.1's whole-document
+    fallback (unaffected by this ticket) but no passage-level coverage."""
+    blocks = [_block("Some flat, unstructured content with no headings at all.", page=1)]
+    passages = compute_passage_embeddings(_extraction(blocks, nodes=[]), settings=SETTINGS)
+    assert passages == []
+
+
+def test_compute_passage_embeddings_tags_reference_list_passages():
+    blocks = [
+        _block("Chapter 1: Introduction", page=1),
+        _block("Real body content about attendance tracking.", page=1),
+        _block("References", page=2),
+        _block("Doe, J. (2020). A study of things. Journal of Studies, 1(1), 1-10.", page=2),
+    ]
+    nodes = [
+        SectionNode(title="Chapter 1: Introduction", level=1, page=1),
+        SectionNode(title="References", level=1, page=2),
+    ]
+    passages = compute_passage_embeddings(_extraction(blocks, nodes), settings=SETTINGS)
+    assert len(passages) == 2
+    body_passage = next(p for p in passages if p.chapter_index == 0)
+    ref_passage = next(p for p in passages if p.chapter_index == 1)
+    assert body_passage.is_reference_list is False
+    assert ref_passage.is_reference_list is True
+    # Tagged, not dropped (module docstring) -- the reference passage is
+    # still embedded and still carries its own real text.
+    assert "Doe, J." in ref_passage.text
+
+
+def test_compute_passage_embeddings_offsets_are_real_slices_of_chapter_text():
+    blocks = [
+        _block("Chapter 1: Introduction", page=1),
+        _block("First sentence here.", page=1),
+    ]
+    nodes = [SectionNode(title="Chapter 1: Introduction", level=1, page=1)]
+    passages = compute_passage_embeddings(_extraction(blocks, nodes), settings=SETTINGS)
+    full_chapter_text = "Chapter 1: Introduction\nFirst sentence here."
+    passage = passages[0]
+    assert full_chapter_text[passage.char_start : passage.char_end] == passage.text
+
+
+def test_compute_passage_embeddings_is_deterministic():
+    blocks = [
+        _block("Chapter 1: Introduction", page=1),
+        _block("The current process for tracking attendance is entirely manual.", page=1),
+    ]
+    nodes = [SectionNode(title="Chapter 1: Introduction", level=1, page=1)]
+    p1 = compute_passage_embeddings(_extraction(blocks, nodes), settings=SETTINGS)
+    p2 = compute_passage_embeddings(_extraction(blocks, nodes), settings=SETTINGS)
+    assert p1[0].embedding == p2[0].embedding
+
+
+def test_compute_passage_embeddings_large_block_splits_by_word_count():
+    """A single block far exceeding the passage size (>2x chunk_words)
+    splits into multiple passages by word count instead of becoming one
+    unbounded passage."""
+    giant_text = " ".join(f"word{i}" for i in range(SETTINGS.reuse_passage_chunk_words * 3))
+    blocks = [_block("Chapter 1: Introduction", page=1), _block(giant_text, page=1)]
+    nodes = [SectionNode(title="Chapter 1: Introduction", level=1, page=1)]
+    passages = compute_passage_embeddings(_extraction(blocks, nodes), settings=SETTINGS)
+    assert len(passages) >= 2
+    for p in passages:
+        assert len(p.text.split()) <= SETTINGS.reuse_passage_chunk_words
