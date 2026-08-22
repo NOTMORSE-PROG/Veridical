@@ -55,6 +55,7 @@ from app.report.schemas import (
 from app.report.scoring import (
     ScorableFlag,
     ScorableResult,
+    flag_ai_verdict_summary,
     score_check_run,
     scoring_result_as_dict,
 )
@@ -82,17 +83,26 @@ async def _load_scorable_results(session: AsyncSession, check_run_id: int) -> li
 
 async def _load_scorable_flags(session: AsyncSession, check_run_id: int) -> list[ScorableFlag]:
     rows = (
-        (
-            await session.execute(
-                select(Flag)
-                .join(CheckResult, CheckResult.id == Flag.check_result_id)
-                .where(CheckResult.check_run_id == check_run_id)
-            )
+        await session.execute(
+            select(Flag, CheckResult)
+            .join(CheckResult, CheckResult.id == Flag.check_result_id)
+            .where(CheckResult.check_run_id == check_run_id)
         )
-        .scalars()
-        .all()
-    )
-    return [ScorableFlag(severity=flag.severity, overridden=flag.overridden) for flag in rows]
+    ).all()
+    return [
+        ScorableFlag(
+            severity=flag.severity,
+            overridden=flag.overridden,
+            # Same `flag.detail or result.detail` precedence `_to_flag_out`
+            # uses (a semantic-grading flag, V-020, has no `Flag.detail` of
+            # its own and falls back to its check_result's) — computing
+            # this two different ways in two places is exactly the
+            # duplication that let "999%"/"1082%" ship as two disagreeing
+            # numbers at once (Track D's Critical 2, D-023).
+            has_verdict=flag_ai_verdict_summary(flag.detail or result.detail) is not None,
+        )
+        for flag, result in rows
+    ]
 
 
 async def aggregate_and_score(
@@ -323,6 +333,7 @@ def _to_escalated_out(item: EscalatedItem) -> EscalatedItemOut:
         ai_majority_verdict=item.detail.get("verdict"),
         reason=item.reason,
         review_reason=item.review_reason,
+        unverified_evidence=item.unverified_evidence,
     )
 
 

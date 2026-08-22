@@ -37,10 +37,45 @@ class ScorableResult:
     score: float | None  # 0-100; None for any non-decidable outcome
 
 
+def flag_ai_verdict_summary(detail: dict[str, Any] | None) -> str | None:
+    """What the underlying check actually determined, as a short summary —
+    single source of truth for both the flag-detail page's "AI verdict"
+    label (`app.flags.service._to_flag_out`) and this module's own "does
+    this flag count" gate (BUG-053: a flag the check genuinely reached no
+    finding on must never drive Not Ready or a deduction by default — the
+    exact case ground rule 1 exists to prevent). F4/F5/F6/F7 checks store
+    their finding under "kind"/"reason" (F7's own module docstring; V-033),
+    never "verdict"/"basis" (semantic grading's vocabulary, V-020) — a
+    naive `detail.get("verdict") or detail.get("basis")` is None for every
+    one of them, which is what made a REAL retraction/contradiction/reuse-
+    match finding render as "AI verdict: unavailable" on screen (BUG-053,
+    live on `/flags/78`) even though a real determination existed.
+
+    **`Flag.detail`/`Flag`-derived `CheckResult.detail` ONLY — never call
+    this against a semantic-grading `CheckResult.detail`** (backend-critic
+    finding, V-068): an escalated semantic result sets `"basis": "llm"` on
+    purpose to mean "the AI graded it and reached no verdict" (`semantic.py`/
+    `consistency.py`'s own escalation branches) — feeding that dict through
+    this function would return the string `"llm"`, a confident-looking
+    non-answer for the exact no-verdict state ground rule 1 exists to keep
+    escalated, never labeled. This is currently unreachable (only Flag-shaped
+    detail dicts are ever passed here) — keep it that way.
+    """
+    detail = detail or {}
+    return detail.get("verdict") or detail.get("basis") or detail.get("kind")
+
+
 @dataclass(frozen=True)
 class ScorableFlag:
     severity: FlagSeverity
     overridden: bool
+    # BUG-053 Option A: True unless the check that created this flag left
+    # no real finding behind (`flag_ai_verdict_summary` returns None) — no
+    # shipped check does this today (each always sets at least "kind"), so
+    # this is a defensive floor rather than a live-reachable path; default
+    # True keeps every existing call site (and test) that never names it
+    # counting exactly as before.
+    has_verdict: bool = True
 
 
 @dataclass(frozen=True)
@@ -85,7 +120,11 @@ def _flag_deduction(flags: list[ScorableFlag], settings: Settings) -> tuple[floa
         FlagSeverity.med: settings.scoring_flag_deduction_med,
         FlagSeverity.low: settings.scoring_flag_deduction_low,
     }
-    unresolved = [f for f in flags if not f.overridden]
+    # BUG-053 Option A: a flag with no real verdict behind it (has_verdict
+    # False) is excluded the same way an overridden one is — it must not
+    # force `not_ready` or deduct points by default, only a human-affirmed
+    # finding may do that (charter rule 1).
+    unresolved = [f for f in flags if not f.overridden and f.has_verdict]
     total = sum(per_severity[f.severity] for f in unresolved)
     capped = min(total, settings.scoring_flag_deduction_cap)
     high_count = sum(1 for f in unresolved if f.severity == FlagSeverity.high)
@@ -114,7 +153,7 @@ def score_check_run(
             status=ReadinessStatus.needs_review,
             reason=(
                 "No criteria could be auto-scored (all escalated/not-applicable, or the "
-                "decidable rubric weight is zero) — this run needs manual review."
+                "decidable rubric weight is zero). This run needs manual review."
             ),
             thresholds=thresholds,
             flag_deduction=deduction,

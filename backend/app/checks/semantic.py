@@ -292,10 +292,21 @@ async def _grade_single_criterion(
     consistency_pass: str = "single",
     prompt_version: str = PROMPT_VERSION,
     annotator_stance: str = "",
-) -> tuple[GradeVerdict, list[str]] | None:
+) -> tuple[GradeVerdict, list[str] | None] | None:
     """One-criterion retry, same context — used both when the batch
     response omitted a criterion and when its quotes failed containment,
-    and (V-022) as the single-criterion tie-break call on a voting split."""
+    and (V-022) as the single-criterion tie-break call on a voting split.
+
+    The `anchors` half of the returned tuple is `None` when the model DID
+    return a verdict but its quotes failed containment verification too —
+    the caller still gets the raw `verdict` (quotes + reasoning) back so it
+    can show them as UNVERIFIED evidence instead of silently discarding
+    them (V-068 Q1: this is the exact gap that made the panel say "could
+    not verify the quoted evidence" while showing none of it). Charter
+    rule 1 still holds: unverified quotes never become a decided
+    pass/fail, which is the caller's job to enforce, not this function's.
+    A bare `None` return means the model produced no usable verdict for
+    this criterion at all."""
     prompt = _build_prompt(
         batch, [criterion], prompt_version=prompt_version, annotator_stance=annotator_stance
     )
@@ -313,8 +324,6 @@ async def _grade_single_criterion(
     if verdict is None:
         return None
     anchors = _verify_quotes(verdict.evidence_quotes, batch.blocks, anchor_kind)
-    if anchors is None:
-        return None
     return verdict, anchors
 
 
@@ -383,14 +392,52 @@ async def grade_batch_verdicts(
                 criterion, batch, llm, check_run_id, anchor_kind, consistency_pass=consistency_pass
             )
             if retry is None:
-                reason = (
-                    "Could not verify the quoted evidence after a retry."
-                    if verdict is not None
-                    else "No verdict was returned for this criterion, even after a retry."
-                )
-                out[criterion.id] = GradedVerdict(criterion.id, None, None, None, None, reason)
+                if verdict is not None:
+                    # The ORIGINAL batch verdict had quotes that failed
+                    # containment, and the retry produced nothing at all
+                    # (dropped the criterion, or errored) -- fall back to
+                    # the batch verdict's own quotes/reasoning as
+                    # unverified evidence, same principle as the
+                    # retry_anchors-is-None branch below (backend-critic
+                    # finding, V-068: this branch was still discarding
+                    # real model output, reproducing the ticket's own bug
+                    # through an adjacent path the first pass missed).
+                    out[criterion.id] = GradedVerdict(
+                        criterion.id,
+                        None,
+                        verdict.reasoning,
+                        verdict.evidence_quotes,
+                        None,
+                        "Could not verify the quoted evidence after a retry.",
+                    )
+                else:
+                    out[criterion.id] = GradedVerdict(
+                        criterion.id,
+                        None,
+                        None,
+                        None,
+                        None,
+                        "No verdict was returned for this criterion, even after a retry.",
+                    )
                 continue
-            verdict, anchors = retry
+            retry_verdict, retry_anchors = retry
+            if retry_anchors is None:
+                # The retry reached a verdict but its quotes ALSO failed
+                # containment — never promote unverified quotes to a
+                # decided pass/fail (charter rule 1), but the raw
+                # quotes/reasoning are real model output, worth carrying
+                # to the panel as "could not verify" rather than dropping
+                # (V-068 Q1/Q2).
+                out[criterion.id] = GradedVerdict(
+                    criterion.id,
+                    None,
+                    retry_verdict.reasoning,
+                    retry_verdict.evidence_quotes,
+                    None,
+                    "Could not verify the quoted evidence after a retry.",
+                )
+                continue
+            verdict, anchors = retry_verdict, retry_anchors
         out[criterion.id] = GradedVerdict(
             criterion.id, verdict.verdict, verdict.reasoning, verdict.evidence_quotes, anchors, None
         )
@@ -468,17 +515,16 @@ async def _grade_batch(
     for criterion in batch_criteria:
         g = graded[criterion.id]
         if g.verdict is None:
+            escalated_detail: dict[str, Any] = {
+                "basis": "llm",
+                "reason": g.escalation_reason,
+                "prompt_version": PROMPT_VERSION,
+            }
+            if g.quotes:
+                escalated_detail["unverified_evidence"] = g.quotes
             results.append(
                 await _persist(
-                    session,
-                    check_run_id,
-                    criterion,
-                    ResultOutcome.escalated,
-                    {
-                        "basis": "llm",
-                        "reason": g.escalation_reason,
-                        "prompt_version": PROMPT_VERSION,
-                    },
+                    session, check_run_id, criterion, ResultOutcome.escalated, escalated_detail
                 )
             )
             continue

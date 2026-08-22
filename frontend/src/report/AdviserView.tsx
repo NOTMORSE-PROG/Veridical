@@ -18,7 +18,13 @@ import { manuscriptIdentity } from "../domain/manuscriptLabel";
 import { READINESS_LABEL, READINESS_TONE } from "../domain/readinessTone";
 import { DecisionSummary } from "./DecisionSummary";
 import { FlagsList } from "./FlagsPanel";
-import { NEEDS_REVIEW_OUTCOMES, ResultsTable, explainer, pendingDisclosure } from "./ResultsTable";
+import {
+  NEEDS_REVIEW_OUTCOMES,
+  ResultsTable,
+  excludedFromScoreCount,
+  explainer,
+  pendingDisclosure,
+} from "./ResultsTable";
 import { useSharedReport } from "./useShare";
 
 function SpinnerIcon() {
@@ -228,7 +234,7 @@ export function AdviserViewPage() {
 
       <p className="rounded-lg bg-status-info-bg px-4 py-2.5 text-sm text-status-info-text">
         {explainer(report, "#flags-heading")}
-        {pendingDisclosure(pendingCount)}
+        {pendingDisclosure(pendingCount, excludedFromScoreCount(report.results))}
       </p>
 
       <FlagsList flags={flags} linkToDetail={false} />

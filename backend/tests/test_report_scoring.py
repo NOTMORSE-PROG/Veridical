@@ -5,7 +5,12 @@ examples, no DB, no LLM.
 
 from app.config import get_settings
 from app.models.enums import FlagSeverity, ReadinessStatus, ResultOutcome
-from app.report.scoring import ScorableFlag, ScorableResult, score_check_run
+from app.report.scoring import (
+    ScorableFlag,
+    ScorableResult,
+    flag_ai_verdict_summary,
+    score_check_run,
+)
 
 
 def _result(criterion_id, weight, outcome, score=None):
@@ -106,6 +111,39 @@ def test_overridden_high_flag_does_not_force_not_ready():
     scoring = score_check_run(results, flags, get_settings())
     assert scoring.status == ReadinessStatus.ready
     assert scoring.unresolved_high_flag_count == 0
+
+
+# --- BUG-053 Option A: a flag the check reached no real finding on -----------------
+
+
+def test_no_verdict_high_flag_does_not_force_not_ready():
+    """A flag whose underlying check left no real determination behind
+    must not decide the verdict by default (charter rule 1) -- same
+    protection an overridden flag already gets. Not reachable by any
+    shipped check today (every one always sets "kind"/"reason"/"verdict"/
+    "basis"), so this is a defensive floor, exercised here directly."""
+    results = [_result(1, 100, ResultOutcome.passed, 100.0)]  # would otherwise be Ready
+    flags = [ScorableFlag(severity=FlagSeverity.high, overridden=False, has_verdict=False)]
+    scoring = score_check_run(results, flags, get_settings())
+    assert scoring.status == ReadinessStatus.ready
+    assert scoring.unresolved_high_flag_count == 0
+    assert scoring.flag_deduction == 0.0
+
+
+def test_flag_ai_verdict_summary_reads_kind_before_calling_it_unavailable():
+    """REGRESSION (BUG-053): F4-F7 flags store their finding under "kind"/
+    "reason" (V-033), never "verdict"/"basis" (semantic grading's own
+    vocabulary, V-020) -- a naive `detail.get("verdict") or
+    detail.get("basis")` was None for every one of them, rendering a REAL
+    finding (a retraction, a contradiction, a reuse match) as "AI verdict:
+    unavailable" on screen."""
+    assert flag_ai_verdict_summary({"kind": "retracted_source", "reason": "..."}) == (
+        "retracted_source"
+    )
+    assert flag_ai_verdict_summary({"verdict": "fail"}) == "fail"
+    assert flag_ai_verdict_summary({"basis": "llm"}) == "llm"
+    assert flag_ai_verdict_summary({}) is None
+    assert flag_ai_verdict_summary(None) is None
 
 
 def test_flag_deduction_is_capped():

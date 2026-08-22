@@ -44,16 +44,43 @@ function explainerBase(r: ReportCommon): string {
 // the same information (`report.pending_review_count`) available --
 // exactly the kind of one-renderer-only fix Track D's Critical 2 warns
 // about. Factored out so both renderers say the same thing, once.
-export function pendingDisclosure(pendingCount: number): ReactNode {
-  if (pendingCount <= 0) return null;
+//
+// `excludedCount` (V-068, `ux-critic` finding): a criterion resolved
+// "Needs the document" (or any other `not_applicable`/`unverifiable`
+// outcome) stops being pending the moment it's resolved -- but it is
+// PERMANENTLY excluded from the score, which is exactly the "confident
+// 0%" this ticket's own DECIDED section promised never to show. Reported
+// as its own sentence, separate from the pending count, since the two
+// facts ("still needs review" vs "will never count") are different
+// enough to conflate.
+export function pendingDisclosure(pendingCount: number, excludedCount = 0): ReactNode {
+  if (pendingCount <= 0 && excludedCount <= 0) return null;
   return (
     <>
-      {" "}
-      {pendingCount} {pendingCount === 1 ? "criterion" : "criteria"} still{" "}
-      {pendingCount === 1 ? "needs" : "need"} the instructor's review and{" "}
-      {pendingCount === 1 ? "isn't" : "aren't"} yet reflected in the score.
+      {pendingCount > 0 && (
+        <>
+          {" "}
+          {pendingCount} {pendingCount === 1 ? "criterion" : "criteria"} still{" "}
+          {pendingCount === 1 ? "needs" : "need"} the instructor's review and{" "}
+          {pendingCount === 1 ? "isn't" : "aren't"} yet reflected in the score.
+        </>
+      )}
+      {excludedCount > 0 && (
+        <>
+          {" "}
+          {excludedCount} {excludedCount === 1 ? "criterion isn't" : "criteria aren't"} counted toward
+          this score (not applicable, or the instructor said it needs the document).
+        </>
+      )}
     </>
   );
+}
+
+// V-068: the count `pendingDisclosure`'s second clause needs, derived from
+// the same `results` array both renderers already have -- never a second
+// server round trip for a fact the payload already contains.
+export function excludedFromScoreCount(results: readonly Pick<ResultRowCommon, "outcome">[]): number {
+  return results.filter((r) => r.outcome === "not_applicable" || r.outcome === "unverifiable").length;
 }
 
 // BUG-033: the explainer must honestly account for WHERE a deduction
@@ -164,6 +191,10 @@ const RESOLUTION_VERB: Record<string, string> = {
   accept_majority: "Accepted the AI's verdict",
   mark_pass: "Marked Pass",
   mark_fail: "Marked Fail",
+  // V-068 AC2: excluded from the score, not decided either way -- the
+  // verb has to say that plainly, not borrow "Marked" language that
+  // would imply a Pass/Fail judgment was made.
+  needs_document: "Marked as needing the document",
 };
 
 // A resolved criterion must never render as an ordinary AI-graded/rule-

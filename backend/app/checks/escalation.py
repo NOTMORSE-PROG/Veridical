@@ -31,12 +31,20 @@ _OUTCOME_BY_VERDICT = {
     "fail": ResultOutcome.failed,
 }
 
-# Instructor's three resolution choices (ticket): accept whatever the AI's
-# own majority vote was, or override to a specific verdict outright.
+# Instructor's resolution choices: accept whatever the AI's own majority
+# vote was, override to a specific verdict outright, or (V-068 AC2/BUG-096
+# DECIDED 2026-08-16) say plainly that a real decision needs the document
+# itself rather than guessing.
 RESOLUTION_ACCEPT_MAJORITY = "accept_majority"
 RESOLUTION_MARK_PASS = "mark_pass"
 RESOLUTION_MARK_FAIL = "mark_fail"
-_VALID_RESOLUTIONS = {RESOLUTION_ACCEPT_MAJORITY, RESOLUTION_MARK_PASS, RESOLUTION_MARK_FAIL}
+RESOLUTION_NEEDS_DOCUMENT = "needs_document"
+_VALID_RESOLUTIONS = {
+    RESOLUTION_ACCEPT_MAJORITY,
+    RESOLUTION_MARK_PASS,
+    RESOLUTION_MARK_FAIL,
+    RESOLUTION_NEEDS_DOCUMENT,
+}
 
 # Outcomes that mean "a human still has to decide this one". They are NOT
 # interchangeable — see `list_escalated` — but they share a workflow: shown
@@ -96,6 +104,11 @@ class EscalatedItem:
     # ran — quota spent or API down). Same panel, different amount of
     # evidence behind the row.
     review_reason: str
+    # V-068 Q2: quotes the model actually returned but that failed
+    # containment verification — shown separately from (never inside) a
+    # verified `evidence` list, since verification is what produces a real
+    # anchor (no partial anchor exists to report for these).
+    unverified_evidence: list[str] | None = None
 
 
 async def list_escalated(session: AsyncSession, check_run_id: int) -> list[EscalatedItem]:
@@ -137,6 +150,7 @@ async def list_escalated(session: AsyncSession, check_run_id: int) -> list[Escal
                 reason=detail.get("reason"),
                 detail=detail,
                 review_reason=review_reason_for(result.outcome),
+                unverified_evidence=detail.get("unverified_evidence"),
             )
         )
     return items
@@ -199,8 +213,14 @@ async def resolve_escalation(
         new_score = _SCORE_BY_VERDICT[majority_verdict]
     elif resolution == RESOLUTION_MARK_PASS:
         new_outcome, new_score = ResultOutcome.passed, 100.0
-    else:
+    elif resolution == RESOLUTION_MARK_FAIL:
         new_outcome, new_score = ResultOutcome.failed, 0.0
+    else:  # RESOLUTION_NEEDS_DOCUMENT — DECIDED 2026-08-16: excludes from
+        # the composite exactly like `not_applicable` already behaves
+        # (never a 0, never a pass), and does NOT block the final decision
+        # (`decide_report`'s pending count only watches NEEDS_REVIEW_
+        # OUTCOMES, which `not_applicable` was never a member of).
+        new_outcome, new_score = ResultOutcome.not_applicable, None
 
     agreement = detail.get("agreement")
     detail["resolution"] = {

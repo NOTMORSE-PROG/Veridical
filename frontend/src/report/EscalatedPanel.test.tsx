@@ -14,6 +14,7 @@ const SPLIT_VOTE: EscalatedItemOut = {
   ai_majority_verdict: null,
   reason: null,
   review_reason: "low_confidence",
+  unverified_evidence: null,
 };
 
 const BOTH_NO_VERDICT: EscalatedItemOut = {
@@ -26,6 +27,7 @@ const BOTH_NO_VERDICT: EscalatedItemOut = {
   ai_majority_verdict: null,
   reason: "Could not verify the quoted evidence after a retry.",
   review_reason: "low_confidence",
+  unverified_evidence: ["a quote that could not be verified against the source"],
 };
 
 const NOT_GRADED: EscalatedItemOut = {
@@ -38,6 +40,7 @@ const NOT_GRADED: EscalatedItemOut = {
   ai_majority_verdict: null,
   reason: null,
   review_reason: "not_graded",
+  unverified_evidence: null,
 };
 
 const REAL_MAJORITY: EscalatedItemOut = {
@@ -50,6 +53,7 @@ const REAL_MAJORITY: EscalatedItemOut = {
   ai_majority_verdict: "pass",
   reason: null,
   review_reason: "low_confidence",
+  unverified_evidence: null,
 };
 
 describe("EscalatedPanel", () => {
@@ -87,6 +91,25 @@ describe("EscalatedPanel", () => {
     expect(screen.queryByRole("button", { name: /Accept AI/ })).not.toBeInTheDocument();
     expect(
       screen.getByText("The AI reached no verdict to accept for this criterion."),
+    ).toBeInTheDocument();
+  });
+
+  it("V-068 Q1/Q2: renders unverified evidence under its own label, never merged into a verified block", async () => {
+    vi.stubGlobal("fetch", stubFetchByPath({ "/check-runs/5/escalated": [BOTH_NO_VERDICT] }));
+    renderWithProviders(<EscalatedPanel checkRunId={5} />);
+
+    expect(await screen.findByText("Could not verify against the source")).toBeInTheDocument();
+    expect(
+      screen.getByText('"a quote that could not be verified against the source"'),
+    ).toBeInTheDocument();
+  });
+
+  it("V-068 AC2: always offers a third option that is not a guess", async () => {
+    vi.stubGlobal("fetch", stubFetchByPath({ "/check-runs/5/escalated": [REAL_MAJORITY] }));
+    renderWithProviders(<EscalatedPanel checkRunId={5} />);
+
+    expect(
+      await screen.findByRole("button", { name: "Needs the document" }),
     ).toBeInTheDocument();
   });
 
@@ -177,6 +200,58 @@ describe("EscalatedPanel", () => {
     const init = call![1] as RequestInit;
     const body = JSON.parse(init.body as string) as { resolution: string; reason: string };
     expect(body).toEqual({ resolution: "accept_majority", reason: "AI's grading looks correct on review." });
+  });
+
+  it("V-068 AC2: submits needs_document as its own resolution, distinct from pass/fail", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === "string" ? input : input.toString();
+      if (url.includes("/resolve") && init?.method === "POST") {
+        return new Response(
+          JSON.stringify({
+            check_result_id: 4,
+            outcome: "not_applicable",
+            score: null,
+            report: {
+              check_run_id: 5,
+              manuscript_group_label: "Ungrouped",
+              rubric_title: "Format",
+              status: "needs_review",
+              composite_score: null,
+              thresholds: { ready_min_score: 85, not_ready_max_score: 60 },
+              reason: null,
+              flag_deduction: 0,
+              unresolved_high_flag_count: 0,
+              results: [],
+            },
+          }),
+          { status: 200 },
+        );
+      }
+      if (url.includes("/escalated")) return new Response(JSON.stringify([REAL_MAJORITY]), { status: 200 });
+      return new Response("{}", { status: 200 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    renderWithProviders(<EscalatedPanel checkRunId={5} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Needs the document" }));
+    fireEvent.change(screen.getByPlaceholderText("Why are you resolving this way?"), {
+      target: { value: "Cannot judge this without opening the manuscript myself." },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Confirm" }));
+
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        expect.stringContaining("/resolve"),
+        expect.objectContaining({ method: "POST" }),
+      ),
+    );
+    const call = fetchMock.mock.calls.find(([, init]) => (init as RequestInit | undefined)?.method === "POST");
+    const init = call![1] as RequestInit;
+    const body = JSON.parse(init.body as string) as { resolution: string; reason: string };
+    expect(body.resolution).toBe("needs_document");
+    expect(
+      await screen.findByText("Resolved as excluded (needs the document). Composite score is now unavailable%."),
+    ).toBeInTheDocument();
   });
 
   it("V-071 (BUG-054, live-reproduced 3/3 times): focus moves to the panel heading after a resolution, not <body>", async () => {

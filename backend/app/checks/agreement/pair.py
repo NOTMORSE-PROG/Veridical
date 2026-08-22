@@ -37,20 +37,20 @@ PROMPT_VERSION = "v1"
 _PROMPT_FILE = Path(__file__).parent / "prompts" / f"{PROMPT_TYPE}_{PROMPT_VERSION}.txt"
 
 UNMATCHED_INTENT_WORDING = (
-    'Objective "{intent}" does not appear to be addressed in the results — '
-    "possible gap or unstated change of scope. Please check manually."
+    'Objective "{intent}" does not appear to be addressed in the results, '
+    "a possible gap or unstated change of scope. Please check manually."
 )
 CONTRADICTORY_WORDING = (
-    "This objective and this result appear to contradict each other — possible "
+    "This objective and this result appear to contradict each other, a possible "
     'inconsistency, please check manually. Objective: "{intent}" | Result: "{outcome}"'
 )
 PARTIAL_WORDING = (
-    "This objective appears to be only partially addressed in the results — "
-    'possible incomplete implementation, please check manually. Objective: "{intent}" '
+    "This objective appears to be only partially addressed in the results, "
+    'a possible incomplete implementation, please check manually. Objective: "{intent}" '
     '| Result: "{outcome}"'
 )
 CANNOT_DETERMINE_WORDING = (
-    "Could not determine whether this result addresses this objective — please "
+    "Could not determine whether this result addresses this objective. Please "
     "check manually if this matters for your review."
 )
 

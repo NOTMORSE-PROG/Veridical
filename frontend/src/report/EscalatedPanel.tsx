@@ -84,8 +84,13 @@ function ResolveRow({
         onSuccess: (out) => {
           setPending(null);
           setAttempted(false);
+          // "not_applicable" is what `needs_document` resolves to server-side
+          // (excluded from the composite, same as any N/A criterion) -- say
+          // that plainly rather than echo the raw outcome enum.
+          const outcomeLabel =
+            out.outcome === "not_applicable" ? "excluded (needs the document)" : out.outcome;
           onResolved(
-            `Resolved as ${out.outcome}. Composite score is now ${out.report.composite_score ?? "unavailable"}%.`,
+            `Resolved as ${outcomeLabel}. Composite score is now ${out.report.composite_score ?? "unavailable"}%.`,
           );
         },
       },
@@ -99,11 +104,52 @@ function ResolveRow({
 
   return (
     <div className="border-t border-border px-3.5 py-3 text-sm">
-      <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between sm:gap-3">
+      {/* ux-critic finding (V-068): this used to switch to a side-by-side
+          row at `sm:` (640px), which reflowed cleanly with 2-3 buttons but
+          broke (WCAG 1.4.10) once this ticket's 4th button made the button
+          row too wide to share 640-850px with the criterion text -- the
+          text column collapsed to ~1 word per line. `lg:` (1024px) is the
+          width `ux-critic` confirmed clean; stacking vertically below that
+          is the existing, already-safe narrow-viewport layout, not a new
+          fallback. */}
+      <div className="flex flex-col gap-2 lg:flex-row lg:items-start lg:justify-between lg:gap-3">
         <div className="min-w-0 flex-1">
           <p className="font-semibold text-ink">"{item.criterion_text}"</p>
           <p className="mt-0.5 text-xs text-ink-tertiary">{voteSummary(item)}</p>
           {item.reason && <p className="mt-0.5 text-xs text-ink-tertiary">{item.reason}</p>}
+          {/* V-068 AC1: the charter's 10-second verification bar applied to
+              the panel that decides the composite score -- previously this
+              row showed nothing the AI actually looked at. Deliberately its
+              own block, never merged with a verified `Flag.evidence_excerpt`
+              elsewhere in the app (V-068 Q2: verification is what produces a
+              real anchor, so there is no anchor to show alongside these). */}
+          {item.unverified_evidence && item.unverified_evidence.length > 0 && (
+            // `professor` finding (V-068): the ticket's own Q2 research
+            // says "the shape itself must carry that distinction, not
+            // just the surrounding prose" -- a shared border/background
+            // token with the app's normal VERIFIED evidence block
+            // (FlagDetail.tsx) didn't meet that bar on a skim. Reuses the
+            // panel's own existing caution color (its left accent bar,
+            // above) rather than inventing a new token.
+            <div
+              className="mt-1.5 flex items-start gap-1.5 rounded-md border border-border bg-page p-2"
+              style={{ borderLeftWidth: "3px", borderLeftColor: "var(--color-status-caution-text)" }}
+            >
+              <span className="mt-0.5 shrink-0 text-status-caution-text">
+                <CautionIcon />
+              </span>
+              <div>
+                <p className="text-xs font-semibold tracking-header text-ink-tertiary uppercase">
+                  Could not verify against the source
+                </p>
+                {item.unverified_evidence.map((quote, i) => (
+                  <blockquote key={i} className="mt-1 text-xs break-words text-ink-secondary">
+                    "{quote}"
+                  </blockquote>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
         {pending === null && (
           <div className="flex flex-none flex-wrap gap-2">
@@ -111,7 +157,7 @@ function ResolveRow({
               <button
                 type="button"
                 onClick={() => start("accept_majority")}
-                className="flex min-h-11 flex-1 items-center justify-center rounded-md border border-border-input bg-panel px-3 text-sm font-medium text-ink hover:bg-status-neutral-bg sm:min-h-9 sm:flex-none sm:px-2.5"
+                className="flex min-h-11 flex-1 items-center justify-center rounded-md border border-border-input bg-panel px-3 text-sm font-medium text-ink hover:bg-status-neutral-bg lg:min-h-9 lg:flex-none lg:px-2.5"
               >
                 Accept AI: {item.ai_majority_verdict}
               </button>
@@ -119,21 +165,31 @@ function ResolveRow({
             <button
               type="button"
               onClick={() => start("mark_pass")}
-              className="flex min-h-11 flex-1 items-center justify-center rounded-md border border-border-input bg-panel px-3 text-sm font-medium text-ink hover:bg-status-neutral-bg sm:min-h-9 sm:flex-none sm:px-2.5"
+              className="flex min-h-11 flex-1 items-center justify-center rounded-md border border-border-input bg-panel px-3 text-sm font-medium text-ink hover:bg-status-neutral-bg lg:min-h-9 lg:flex-none lg:px-2.5"
             >
               Pass
             </button>
             <button
               type="button"
               onClick={() => start("mark_fail")}
-              className="flex min-h-11 flex-1 items-center justify-center rounded-md border border-border-input bg-panel px-3 text-sm font-medium text-ink hover:bg-status-neutral-bg sm:min-h-9 sm:flex-none sm:px-2.5"
+              className="flex min-h-11 flex-1 items-center justify-center rounded-md border border-border-input bg-panel px-3 text-sm font-medium text-ink hover:bg-status-neutral-bg lg:min-h-9 lg:flex-none lg:px-2.5"
             >
               Fail
+            </button>
+            {/* V-068 AC2, DECIDED 2026-08-16: a third option that isn't a
+                guess -- excludes this criterion from the composite (like
+                not_applicable) and never blocks the decision. */}
+            <button
+              type="button"
+              onClick={() => start("needs_document")}
+              className="flex min-h-11 flex-1 items-center justify-center rounded-md border border-border-input bg-panel px-3 text-sm font-medium text-ink hover:bg-status-neutral-bg lg:min-h-9 lg:flex-none lg:px-2.5"
+            >
+              Needs the document
             </button>
           </div>
         )}
         {pending === null && item.ai_majority_verdict === null && (
-          <p className="text-xs text-ink-tertiary sm:max-w-[220px]">
+          <p className="text-xs text-ink-tertiary lg:max-w-[220px]">
             The AI reached no verdict to accept for this criterion.
           </p>
         )}

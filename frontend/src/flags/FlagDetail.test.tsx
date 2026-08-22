@@ -91,6 +91,23 @@ describe("FlagDetailPage", () => {
     expect(screen.getByRole("button", { name: "Override" })).not.toBeDisabled();
   });
 
+  it("BUG-053: never claims a finding stands as reported when no AI verdict actually exists", async () => {
+    vi.stubGlobal(
+      "fetch",
+      stubFetchByPath({ "/flags/5": { ...FLAG, ai_verdict_summary: null } }),
+    );
+    renderWithProviders(<FlagDetailPage />, { route: "/flags/5", path: "/flags/:flagId" });
+    await screen.findByText(/Wang, S\./);
+    expect(
+      screen.queryByText("This finding stands as VERIDICAL reported it unless you override it below."),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByText(
+        "VERIDICAL did not reach a determination on this one, so it doesn't count toward the readiness verdict unless you affirm it below.",
+      ),
+    ).toBeInTheDocument();
+  });
+
   it("requires a reason before confirming, validated on click (Confirm is never pre-disabled)", async () => {
     vi.stubGlobal("fetch", stubFetchByPath({ "/flags/5": FLAG }));
     renderWithProviders(<FlagDetailPage />, { route: "/flags/5", path: "/flags/:flagId" });

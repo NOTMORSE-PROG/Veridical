@@ -24,6 +24,7 @@ from app.models.audit import AuditLog
 from app.models.manuscript import Manuscript
 from app.models.rubric import Criterion
 from app.models.run import CheckResult, CheckRun, Flag
+from app.report.scoring import flag_ai_verdict_summary
 from app.report.service import aggregate_and_score, raise_if_decided
 
 
@@ -97,7 +98,14 @@ async def _to_flag_out(
         annotation=flag.annotation,
         overridden=flag.overridden,
         override_reason=flag.override_reason,
-        ai_verdict_summary=detail.get("verdict") or detail.get("basis"),
+        # BUG-053: was `detail.get("verdict") or detail.get("basis")` only
+        # -- those two keys are semantic grading's own vocabulary (V-020),
+        # and F4/F5/F6/F7 flags never set them (they use "kind"/"reason"
+        # instead), so every non-semantic flag rendered "AI verdict:
+        # unavailable" regardless of whether a real finding existed.
+        # `flag_ai_verdict_summary` is the single source both this label
+        # and the scoring engine's own "does this flag count" gate share.
+        ai_verdict_summary=flag_ai_verdict_summary(detail),
         ai_reasoning=detail.get("reasoning") or detail.get("reason"),
         llm_mode=check_run.llm_mode.value,
         passage_pair=_passage_pair_from_detail(flag.evidence_excerpt, detail),

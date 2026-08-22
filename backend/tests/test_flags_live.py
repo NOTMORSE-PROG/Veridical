@@ -265,7 +265,11 @@ async def test_flag_detail_takes_priority_over_check_result_detail(session_facto
         instructor, grim_flag, pvalue_flag = await _seed_two_flags_one_check_result(session)
 
         grim_out = await get_flag(session, grim_flag.id, instructor.id)
-        assert grim_out.ai_verdict_summary is None  # no "verdict"/"basis" key on this detail shape
+        # BUG-053 fix: this detail shape has no "verdict"/"basis" key (F6's
+        # own vocabulary is "kind"/"reason", V-033) -- it used to read as
+        # `None` ("AI verdict: unavailable") even though a real finding
+        # exists; `flag_ai_verdict_summary` now falls back to "kind".
+        assert grim_out.ai_verdict_summary == "grim_inconsistent"
         assert grim_out.ai_reasoning == "Reported mean is not a possible value."
 
         pvalue_out = await get_flag(session, pvalue_flag.id, instructor.id)
@@ -274,6 +278,65 @@ async def test_flag_detail_takes_priority_over_check_result_detail(session_facto
         # Two flags, one check_result, two DISTINCT reasons — proves
         # `flag.detail` (not `check_result.detail`) is the source.
         assert grim_out.ai_reasoning != pvalue_out.ai_reasoning
+
+
+async def test_no_verdict_high_flag_does_not_force_not_ready_live(session_factory):
+    """BUG-053 Option A, end to end: a high-severity flag whose underlying
+    check left no real finding behind (no "kind"/"reason"/"verdict"/
+    "basis" anywhere) must not decide the report by default. Not
+    reachable by any shipped check today (each always sets "kind" at
+    minimum) — seeded directly to prove the scoring engine's own side of
+    the guarantee, the same way `_seed_two_flags_one_check_result` proves
+    the per-flag-detail shape without running a real check."""
+    async with session_factory() as session:
+        instructor = Instructor(email=f"noverdict-{id(session)}@test.local", display_name="T")
+        session.add(instructor)
+        await session.commit()
+        manuscript = Manuscript(instructor_id=instructor.id, group_label="G", file_ref="x.pdf")
+        rubric = Rubric(instructor_id=instructor.id, title="Format", source_file="r.pdf")
+        session.add_all([manuscript, rubric])
+        await session.commit()
+        criterion = Criterion(
+            rubric_id=rubric.id, type="structural", text="C", weight=Decimal("100"), position=0
+        )
+        session.add(criterion)
+        await session.commit()
+        check_run = CheckRun(
+            manuscript_id=manuscript.id, rubric_id=rubric.id, status=CheckRunStatus.done
+        )
+        session.add(check_run)
+        await session.commit()
+        passing_result = CheckResult(
+            check_run_id=check_run.id,
+            criterion_id=criterion.id,
+            kind=CheckKind.structural,
+            outcome=ResultOutcome.passed,
+            score=100.0,
+            detail={"basis": "rule"},
+        )
+        empty_result = CheckResult(
+            check_run_id=check_run.id,
+            criterion_id=None,
+            kind=CheckKind.originality_reuse,
+            outcome=ResultOutcome.passed,
+            score=None,
+            detail={},
+        )
+        session.add_all([passing_result, empty_result])
+        await session.commit()
+        no_verdict_flag = Flag(
+            check_result_id=empty_result.id,
+            severity=FlagSeverity.high,
+            evidence_excerpt="x",
+            page_anchor="page 1",
+            detail={},  # no "kind"/"reason" -- the genuinely-unreachable case
+        )
+        session.add(no_verdict_flag)
+        await session.commit()
+
+        report = await aggregate_and_score(session, check_run.id)
+        assert report.status == ReadinessStatus.ready  # not forced not_ready by the empty flag
+        assert report.composite_score == Decimal("100.00")
 
 
 async def test_cross_instructor_access_is_rejected_not_leaked(session_factory):

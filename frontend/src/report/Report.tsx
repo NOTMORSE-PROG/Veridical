@@ -18,7 +18,13 @@ import { DECISION_LABEL } from "../domain/decisionTone";
 import { DecisionPanel } from "./DecisionPanel";
 import { EscalatedPanel } from "./EscalatedPanel";
 import { FlagsPanel } from "./FlagsPanel";
-import { NEEDS_REVIEW_OUTCOMES, ResultsTable, explainer, pendingDisclosure } from "./ResultsTable";
+import {
+  NEEDS_REVIEW_OUTCOMES,
+  ResultsTable,
+  excludedFromScoreCount,
+  explainer,
+  pendingDisclosure,
+} from "./ResultsTable";
 import { ShareModal } from "./ShareModal";
 import { useExportReportPdf, useReport } from "./useReport";
 import { useShareLink } from "./useShare";
@@ -239,7 +245,7 @@ export function ReportPage() {
         <>
           <p className="rounded-lg bg-status-info-bg px-4 py-2.5 text-sm text-status-info-text">
             {explainer(report, "#flags-heading")}
-            {pendingDisclosure(report.pending_review_count)}
+            {pendingDisclosure(report.pending_review_count, excludedFromScoreCount(report.results))}
           </p>
 
           <EscalatedPanel checkRunId={report.check_run_id} />

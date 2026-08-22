@@ -64,6 +64,21 @@ class VoteResult:
     votes: list[str | None]
     winner: GradedVerdict | None  # the pass whose evidence/reasoning we show
     escalation_reason: str | None  # set only when no pass could be voted at all
+    # V-068 Q1/Q2: raw quotes from a pass that produced real model output
+    # but failed containment verification — set only alongside
+    # `escalation_reason` (no winner), never alongside a real winner.
+    # Deduplicated (both passes commonly fail on the identical quote).
+    unverified_quotes: list[str] | None = None
+
+
+def _collect_unverified_quotes(*graded: GradedVerdict) -> list[str] | None:
+    quotes: list[str] = []
+    for g in graded:
+        if g.verdict is None and g.quotes:
+            for q in g.quotes:
+                if q not in quotes:
+                    quotes.append(q)
+    return quotes or None
 
 
 def _tally(votes: list[str]) -> tuple[str | None, float]:
@@ -96,7 +111,8 @@ async def _vote_for_criterion(
         # unverifiable quote) — joining without dedup produced a literal
         # doubled sentence in real output (V-055 report screen review).
         reasons = dict.fromkeys(g.escalation_reason for g in (g1, g2) if g.escalation_reason)
-        return VoteResult(None, 0.0, [g1.verdict, g2.verdict], None, "; ".join(reasons))
+        unverified = _collect_unverified_quotes(g1, g2)
+        return VoteResult(None, 0.0, [g1.verdict, g2.verdict], None, "; ".join(reasons), unverified)
 
     if g1.verdict == g2.verdict:
         return VoteResult(g1.verdict, 1.0, [g1.verdict, g2.verdict], g1, None)
@@ -120,8 +136,23 @@ async def _vote_for_criterion(
             [g1.verdict, g2.verdict, None],
             None,
             "Tie-break grading could not verify a verdict.",
+            _collect_unverified_quotes(g1, g2),
         )
     tie_verdict, tie_anchors = tie
+    if tie_anchors is None:
+        # The tie-break reached a verdict but its quotes ALSO failed
+        # verification — never promote to a decided majority; carry the
+        # raw quotes through as unverified evidence like every other
+        # verification failure in this module.
+        unverified = _collect_unverified_quotes(g1, g2) or list(tie_verdict.evidence_quotes or [])
+        return VoteResult(
+            None,
+            0.0,
+            [g1.verdict, g2.verdict, None],
+            None,
+            "Could not verify the quoted evidence after a retry.",
+            unverified or None,
+        )
     g3 = GradedVerdict(
         criterion.id,
         tie_verdict.verdict,
@@ -158,6 +189,8 @@ def _vote_detail(
         detail["reason"] = (
             vote.escalation_reason or "The self-consistency vote reached no majority."
         )
+        if vote.unverified_quotes:
+            detail["unverified_evidence"] = vote.unverified_quotes
     return detail
 
 

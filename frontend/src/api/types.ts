@@ -220,7 +220,7 @@ export interface EvidenceItem {
  * escalation panel — the report must show this distinctly, never as an
  * ordinary AI-graded row (V-055 review). */
 export interface ResolutionOut {
-  type: "accept_majority" | "mark_pass" | "mark_fail";
+  type: EscalationResolution;
   reason: string;
   ai_majority_verdict: string | null;
 }
@@ -411,9 +411,13 @@ export interface EscalatedItemOut {
    * never ran (daily capacity spent or API down). Different evidence, so
    * the panel must label them differently (V-050). */
   review_reason: "low_confidence" | "not_graded";
+  /** V-068: quotes the model actually returned but that failed containment
+   * verification. Never a verified anchor -- rendered under its own
+   * "could not verify" label, never inside a verified evidence block. */
+  unverified_evidence: string[] | null;
 }
 
-export type EscalationResolution = "accept_majority" | "mark_pass" | "mark_fail";
+export type EscalationResolution = "accept_majority" | "mark_pass" | "mark_fail" | "needs_document";
 
 export interface ResolveEscalationIn {
   resolution: EscalationResolution;

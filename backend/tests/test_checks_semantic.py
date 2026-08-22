@@ -309,6 +309,89 @@ async def test_no_semantic_criteria_makes_no_llm_call():
     assert llm.calls == []
 
 
+# --- V-068 Q1: unverified quotes survive a still-hallucinated retry ---------------
+
+
+async def test_still_hallucinated_retry_carries_the_raw_quotes_as_unverified():
+    """REGRESSION (V-068 Q1): the retry's own quotes/reasoning used to be
+    thrown away entirely when they ALSO failed verification -- the panel
+    said "could not verify the quoted evidence" while showing none of it.
+    They must now survive into the escalated CheckResult's own detail."""
+    tree = SectionTree(source="heuristics", nodes=[])
+    blocks = [
+        TextBlock(
+            page=1, text="The real sentence in the document.", max_font_size=11, bold_ratio=0.0
+        )
+    ]
+    extraction = _extraction(blocks=blocks, tree=tree)
+    criteria = [FakeCriterion(id=1, text="Some criterion")]
+
+    bad_response = {
+        "verdicts": [
+            {
+                "index": 0,
+                "verdict": "pass",
+                "reasoning": "Looks fine.",
+                "evidence_quotes": ["a sentence that does not exist"],
+            }
+        ]
+    }
+    llm = ScriptedLLM([bad_response, dict(bad_response)])
+    session = FakeSession()
+    results = await run_semantic_checks(session, 1, criteria, extraction, llm)
+    assert results[0].outcome == ResultOutcome.escalated
+    assert results[0].detail["unverified_evidence"] == ["a sentence that does not exist"]
+
+
+async def test_batch_hallucinated_quote_survives_a_retry_that_returns_nothing():
+    """REGRESSION (backend-critic finding, V-068): the previous fix only
+    covered the retry REACHING a verdict whose quotes also failed
+    verification. This is the adjacent branch it missed: the ORIGINAL
+    batch verdict had real quotes that failed verification, and the retry
+    itself produced no usable verdict at all (the model dropped the
+    criterion from its single-criterion response) -- the batch verdict's
+    own quotes/reasoning were being discarded here too, reproducing the
+    ticket's exact bug through a path its own new test didn't reach."""
+    tree = SectionTree(source="heuristics", nodes=[])
+    blocks = [
+        TextBlock(
+            page=1, text="The real sentence in the document.", max_font_size=11, bold_ratio=0.0
+        )
+    ]
+    extraction = _extraction(blocks=blocks, tree=tree)
+    criteria = [FakeCriterion(id=1, text="Some criterion")]
+
+    llm = ScriptedLLM(
+        [
+            {  # batch response: hallucinated quote, real reasoning
+                "verdicts": [
+                    {
+                        "index": 0,
+                        "verdict": "pass",
+                        "reasoning": "Batch pass reasoning.",
+                        "evidence_quotes": ["a sentence that does not exist"],
+                    }
+                ]
+            },
+            {  # single-criterion retry: model drops the criterion (wrong index)
+                "verdicts": [
+                    {
+                        "index": 5,
+                        "verdict": "pass",
+                        "reasoning": "irrelevant",
+                        "evidence_quotes": ["irrelevant"],
+                    }
+                ]
+            },
+        ]
+    )
+    session = FakeSession()
+    results = await run_semantic_checks(session, 1, criteria, extraction, llm)
+    assert results[0].outcome == ResultOutcome.escalated
+    assert results[0].detail["unverified_evidence"] == ["a sentence that does not exist"]
+    assert "verify" in results[0].detail["reason"]
+
+
 def test_bare_verdict_list_is_accepted_not_treated_as_low_confidence():
     """REGRESSION (V-054, found live in the audit log): Gemini intermittently
     returns the verdicts array WITHOUT the documented {"verdicts": ...}

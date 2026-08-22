@@ -246,6 +246,55 @@ describe("ReportPage", () => {
     expect(screen.queryByText(/still need the instructor's review/)).not.toBeInTheDocument();
   });
 
+  it("V-068 (ux-critic finding): discloses criteria excluded from the score, separately from pending ones", async () => {
+    // A criterion resolved "Needs the document" (or any other genuinely
+    // N/A outcome) stops being PENDING the instant it's resolved, but it
+    // is PERMANENTLY excluded from the composite -- the exact "confident
+    // 0%" ground rule 8 exists to prevent, and this ticket's own DECIDED
+    // section promised a disclosure for it, same as BUG-096's pending one.
+    const report: ReportOut = {
+      ...BASE_REPORT,
+      status: "not_ready",
+      composite_score: 0,
+      pending_review_count: 0,
+      results: [
+        ...BASE_REPORT.results,
+        {
+          criterion_id: 99,
+          text: "Findings are discussed with reference to prior literature",
+          type: "semantic",
+          weight: 20,
+          weight_importance: "med",
+          kind: "semantic",
+          outcome: "not_applicable",
+          score: null,
+          basis: "llm",
+          anchor: null,
+          reasoning: null,
+          reason: null,
+          evidence: [],
+          resolution: {
+            type: "needs_document",
+            reason: "Cannot judge this without the manuscript itself.",
+            ai_majority_verdict: null,
+          },
+        },
+      ],
+    };
+    vi.stubGlobal(
+      "fetch",
+      stubFetchByPath({ "/check-runs/5/report": report, ...stubEscalated(), ...stubFlags() }),
+    );
+    renderWithProviders(<ReportPage />, { route: "/report/5", path: "/report/:checkRunId" });
+
+    expect(
+      await screen.findByText(/1 criterion isn't counted toward this score/),
+    ).toBeInTheDocument();
+    // Never conflated with the "still needs review" pending sentence --
+    // this criterion is resolved, just permanently excluded.
+    expect(screen.queryByText(/still need the instructor's review/)).not.toBeInTheDocument();
+  });
+
   it("uses the reason field verbatim for needs_review", async () => {
     const report: ReportOut = {
       ...BASE_REPORT,

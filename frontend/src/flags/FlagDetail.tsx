@@ -90,7 +90,7 @@ function AnnotationBox({ flagId, initial }: { flagId: number; initial: string | 
   );
 }
 
-function OverrideControl({ flagId }: { flagId: number }) {
+function OverrideControl({ flagId, hasVerdict }: { flagId: number; hasVerdict: boolean }) {
   const [open, setOpen] = useState(false);
   const [reason, setReason] = useState("");
   const [attempted, setAttempted] = useState(false);
@@ -135,7 +135,16 @@ function OverrideControl({ flagId }: { flagId: number }) {
     return (
       <div className="flex flex-col gap-2">
         <p className="text-sm text-ink-secondary">
-          This finding stands as VERIDICAL reported it unless you override it below.
+          {hasVerdict
+            ? "This finding stands as VERIDICAL reported it unless you override it below."
+            : // BUG-053: the finding above claims a determination that was
+              // never actually reached -- this copy must not assert one.
+              // Not reachable by any shipped check today (every check that
+              // creates a Flag row always sets a real reason), but the
+              // scoring engine already treats this case as needing your
+              // affirmation (never counts by default), so the copy has to
+              // match that, not the old blanket sentence.
+              "VERIDICAL did not reach a determination on this one, so it doesn't count toward the readiness verdict unless you affirm it below."}
         </p>
         <button
           ref={triggerRef}
@@ -347,7 +356,7 @@ export function FlagDetailPage() {
               </p>
             </div>
           ) : (
-            <OverrideControl flagId={flag.id} />
+            <OverrideControl flagId={flag.id} hasVerdict={flag.ai_verdict_summary !== null} />
           )}
 
           <AnnotationBox flagId={flag.id} initial={flag.annotation} />
