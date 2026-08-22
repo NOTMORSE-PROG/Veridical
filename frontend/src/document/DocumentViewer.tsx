@@ -3,17 +3,24 @@
 // split-pane manuscript viewer. Document pane on the left (PDF.js for PDF
 // sources, a reconstructed-text pane for DOCX), analysis pane on the
 // right (the existing flags list, browse or one flag's detail).
-import { useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link, useParams, useSearchParams } from "react-router";
 import { AnchorPill } from "../components/AnchorPill";
 import { SeverityTag, type Severity } from "../components/SeverityTag";
 import { StatusPill } from "../components/StatusPill";
+import { TabPanel, Tabs } from "../components/Tabs";
 import { CHECK_KIND_SHORT_LABEL } from "../domain/checkKind";
 import { truncateAtWord } from "../format/text";
 import { useFlag } from "../flags/useFlag";
 import { useRouteFocus } from "../routing/useRouteFocus";
-import { useExcludedReuseMatches, useFlags, useManuscriptViewer } from "../report/useReport";
+import {
+  useExcludedReuseMatches,
+  useFlags,
+  useManuscriptParagraphs,
+  useManuscriptViewer,
+} from "../report/useReport";
 import type { FlagRegionOut, FlagSummaryOut } from "../api/types";
+import { DocxPane } from "./DocxPane";
 import { PassagePairPanel } from "./PassagePairPanel";
 import { PdfPane } from "./PdfPane";
 import { regionCopy } from "./regionCopy";
@@ -261,6 +268,13 @@ export function DocumentViewerPage() {
   const { data: viewer, isPending, isError, refetch } = useManuscriptViewer(id);
   const { data: flags, isPending: flagsPending, isError: flagsError } = useFlags(id);
   const excludedMatchesQuery = useExcludedReuseMatches(id, { includeReferenceList, includeBlockQuote });
+  const isDocx = viewer?.available === true && viewer.source_format === "docx";
+  const {
+    data: paragraphsData,
+    isPending: paragraphsPending,
+    isError: paragraphsError,
+    refetch: refetchParagraphs,
+  } = useManuscriptParagraphs(id, isDocx);
 
   function selectFlag(flagId: number) {
     const next = new URLSearchParams(searchParams);
@@ -315,6 +329,21 @@ export function DocumentViewerPage() {
     isExploring && expandedMatch ? [...(viewer?.regions ?? []), expandedMatch.own_region] : viewer?.regions ?? [];
   const pdfSelectedFlagId = isExploring ? (expandedMatch?.own_region.flag_id ?? null) : selectedFlagId;
 
+  // Mobile Document/Analysis tabs (`ui-designer` spec 2026-08-22): AC3's
+  // "activating a finding scrolls the document to it" has zero observable
+  // effect on a narrow viewport unless the document pane is actually
+  // visible, so selecting any region auto-switches to Document. The
+  // reverse never happens automatically -- tapping a highlight inside the
+  // Document tab doesn't evict the instructor from what they're reading;
+  // the Analysis tab's content is already correct whenever they choose to
+  // look at it next.
+  const [activeTab, setActiveTab] = useState<"document" | "analysis">(
+    selectedRegion ? "document" : "analysis",
+  );
+  useEffect(() => {
+    if (selectedRegion) setActiveTab("document");
+  }, [selectedRegion]);
+
   return (
     <div className="flex h-[calc(100dvh-4rem)] flex-col">
       <header className="flex flex-col gap-1 border-b border-border px-4 py-2.5 sm:px-6">
@@ -353,77 +382,80 @@ export function DocumentViewerPage() {
         </div>
       )}
 
-      {viewer && viewer.available && viewer.source_format === "pdf" && (
-        // Found live (`ux-critic`, 2026-08-19): at 320px the fixed
-        // side-by-side grid left the Next button physically unreachable
-        // (a real Playwright click failure, not a visual judgment -- the
-        // analysis pane's own overflow container intercepted the click).
-        // A single stacked column below `lg` (matching AppShell's own
-        // nav-collapse breakpoint) is the minimal real fix: every control
-        // stays reachable, even though the polished tab UI from the
-        // ui-designer spec (§3.2) is still a named, separate gap.
-        <div className="grid min-h-0 flex-1 grid-cols-1 grid-rows-[minmax(0,1fr)_minmax(0,1fr)] lg:grid-cols-[minmax(0,3fr)_minmax(0,2fr)] lg:grid-rows-1">
-          <div className="min-h-0 border-b border-border lg:border-r lg:border-b-0">
-            <PdfPane
-              checkRunId={id}
-              regions={pdfRegions}
-              flags={flags ?? []}
-              selectedFlagId={pdfSelectedFlagId}
-              onSelectFlag={selectFlag}
-              requestedPage={requestedPage}
-            />
-          </div>
-          <div className="min-h-0 overflow-y-auto">
-            <AnalysisPane
-              selectedFlagId={selectedFlagId}
-              isExploring={isExploring}
-              flags={flags}
-              flagsPending={flagsPending}
-              flagsError={flagsError}
-              selectedRegion={selectedRegion}
-              onSelectFlag={selectFlag}
-              onExplore={openExplore}
-              onBackToFlags={isExploring ? closeExplore : clearFlag}
-              includeReferenceList={includeReferenceList}
-              includeBlockQuote={includeBlockQuote}
-              onToggleReferenceList={(v) => setToggle("ref", v)}
-              onToggleBlockQuote={(v) => setToggle("quote", v)}
-              excludedMatchesQuery={excludedMatchesQuery}
-              expandedMatchId={expandedMatchId}
-              onExpandMatch={setExpandedMatch}
-            />
-          </div>
-        </div>
-      )}
-
-      {viewer && viewer.available && viewer.source_format === "docx" && (
-        <div className="grid min-h-0 flex-1 grid-cols-1 grid-rows-[minmax(0,1fr)_minmax(0,1fr)] lg:grid-cols-[minmax(0,3fr)_minmax(0,2fr)] lg:grid-rows-1">
-          <div className="min-h-0 overflow-y-auto border-b border-border p-4 lg:border-r lg:border-b-0">
-            <p className="rounded-lg bg-status-info-bg px-4 py-2.5 text-sm text-status-info-text">
-              Reconstructed text. This is VERIDICAL's extracted paragraph text, not the original
-              file's exact layout, tables, or images. Page numbers do not apply here; flags below
-              show their paragraph number instead.
-            </p>
-          </div>
-          <div className="min-h-0 overflow-y-auto">
-            <AnalysisPane
-              selectedFlagId={selectedFlagId}
-              isExploring={isExploring}
-              flags={flags}
-              flagsPending={flagsPending}
-              flagsError={flagsError}
-              selectedRegion={selectedRegion}
-              onSelectFlag={selectFlag}
-              onExplore={openExplore}
-              onBackToFlags={isExploring ? closeExplore : clearFlag}
-              includeReferenceList={includeReferenceList}
-              includeBlockQuote={includeBlockQuote}
-              onToggleReferenceList={(v) => setToggle("ref", v)}
-              onToggleBlockQuote={(v) => setToggle("quote", v)}
-              excludedMatchesQuery={excludedMatchesQuery}
-              expandedMatchId={expandedMatchId}
-              onExpandMatch={setExpandedMatch}
-            />
+      {viewer && viewer.available && (viewer.source_format === "pdf" || viewer.source_format === "docx") && (
+        <div className="flex min-h-0 flex-1 flex-col">
+          {/* Mobile Document/Analysis tabs (`ui-designer` spec, 2026-08-22).
+              Found live (`ux-critic`, 2026-08-19): at 320px a fixed
+              side-by-side grid left the Next button physically
+              unreachable. Below `lg` (AppShell's own nav-collapse
+              breakpoint) the two panes become real tabs instead of a
+              stacked column -- every control stays reachable AND
+              reachable without scrolling past the other pane first. */}
+          <Tabs
+            label="Document view"
+            className="lg:hidden"
+            active={activeTab}
+            onChange={(id2) => setActiveTab(id2 as "document" | "analysis")}
+            tabs={[
+              { id: "document", label: "Document" },
+              { id: "analysis", label: "Analysis", badge: flags ? String(flags.length) : undefined },
+            ]}
+          />
+          <div className="grid min-h-0 flex-1 grid-cols-1 lg:grid-cols-[minmax(0,3fr)_minmax(0,2fr)] lg:grid-rows-1">
+            <TabPanel
+              id="document"
+              label="Document"
+              active={activeTab === "document"}
+              className="lg:block min-h-0 border-b border-border lg:border-r lg:border-b-0"
+            >
+              {viewer.source_format === "pdf" ? (
+                <PdfPane
+                  checkRunId={id}
+                  regions={pdfRegions}
+                  flags={flags ?? []}
+                  selectedFlagId={pdfSelectedFlagId}
+                  onSelectFlag={selectFlag}
+                  requestedPage={requestedPage}
+                />
+              ) : (
+                <DocxPane
+                  paragraphs={paragraphsData?.paragraphs}
+                  paragraphsPending={paragraphsPending}
+                  paragraphsError={paragraphsError}
+                  onRetry={() => refetchParagraphs()}
+                  regions={pdfRegions}
+                  flags={flags ?? []}
+                  selectedFlagId={pdfSelectedFlagId}
+                  onSelectFlag={selectFlag}
+                  isVisible={activeTab === "document"}
+                />
+              )}
+            </TabPanel>
+            <TabPanel
+              id="analysis"
+              label="Analysis"
+              active={activeTab === "analysis"}
+              className="lg:block min-h-0 overflow-y-auto"
+            >
+              <AnalysisPane
+                selectedFlagId={selectedFlagId}
+                isExploring={isExploring}
+                flags={flags}
+                flagsPending={flagsPending}
+                flagsError={flagsError}
+                selectedRegion={selectedRegion}
+                onSelectFlag={selectFlag}
+                onExplore={openExplore}
+                onBackToFlags={isExploring ? closeExplore : clearFlag}
+                includeReferenceList={includeReferenceList}
+                includeBlockQuote={includeBlockQuote}
+                onToggleReferenceList={(v) => setToggle("ref", v)}
+                onToggleBlockQuote={(v) => setToggle("quote", v)}
+                excludedMatchesQuery={excludedMatchesQuery}
+                expandedMatchId={expandedMatchId}
+                onExpandMatch={setExpandedMatch}
+              />
+            </TabPanel>
           </div>
         </div>
       )}

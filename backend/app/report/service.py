@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 import pymupdf
+from pydantic import ValidationError
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -25,8 +26,9 @@ from app.checks.reuse.embed import PassageEmbedding, split_context
 from app.checks.reuse.query import query_similar_passages
 from app.config import Settings, get_settings
 from app.errors import ConflictError, GoneError, NotFoundError
-from app.ingest.regions import recover_region
+from app.ingest.regions import _flatten, recover_region
 from app.ingest.schemas import SectionTree
+from app.ingest.service import load_raw_store
 from app.models.enums import (
     CheckKind,
     CheckRunStatus,
@@ -40,6 +42,8 @@ from app.models.rubric import Criterion, Rubric
 from app.models.run import CheckResult, CheckRun, Flag, ReadinessReport
 from app.report.schemas import (
     CriterionResultOut,
+    DocumentParagraphOut,
+    DocumentParagraphsOut,
     EscalatedItemOut,
     EvidenceItem,
     ExcludedReuseMatchOut,
@@ -697,6 +701,55 @@ async def get_manuscript_file_path(
     if Path(manuscript.file_ref).suffix.lower() != ".pdf":
         raise ConflictError("This manuscript's source file isn't a PDF.")
     return Path(manuscript.file_ref)
+
+
+async def get_manuscript_paragraphs(
+    session: AsyncSession, check_run_id: int, instructor_id: int, settings: Settings | None = None
+) -> DocumentParagraphsOut:
+    """V-065 AC1 (DOCX gap): the reconstructed-text pane's actual content.
+    DOCX sources only (mirrors `get_manuscript_file_path`'s PDF-only
+    guard, the opposite direction) and never a purged manuscript. Reads
+    the same persisted extraction `load_raw_store` already serves to the
+    structural check engine (V-016) -- never a second extraction pass."""
+    settings = settings or get_settings()
+    check_run = await _owned_check_run(session, check_run_id, instructor_id)
+    manuscript = await session.get(Manuscript, check_run.manuscript_id)
+    if manuscript.purged_at is not None:
+        raise GoneError("This manuscript's source file was purged and can no longer be read.")
+    if Path(manuscript.file_ref).suffix.lower() != ".docx":
+        raise ConflictError("This manuscript's source file isn't a DOCX.")
+    # `backend-critic` finding (2026-08-22): this is the first caller of
+    # `load_raw_store` reached directly from a synchronous HTTP request --
+    # every other caller runs inside the pipeline worker, where BUG-032's
+    # own history shows the same FileNotFoundError (DB says ingested, disk
+    # raw-store is missing -- a backup/restore or migration skew) gets
+    # silently swallowed by Starlette's BackgroundTask instead of crashing.
+    # Here it would otherwise surface as a raw 500, not the honest
+    # "why is this unavailable" state ground rule 3 asks for everywhere
+    # else in this file (see `get_manuscript_viewer`'s PDF-open guard,
+    # immediately above).
+    try:
+        extraction = load_raw_store(settings, manuscript.id)
+    except (FileNotFoundError, ValidationError):
+        raise GoneError(
+            "This manuscript's extracted text could not be found and can no longer be read."
+        ) from None
+    section_tree = SectionTree.model_validate(manuscript.section_tree or {"source": "none"})
+    heading_levels = {
+        node.paragraph: node.level
+        for node in _flatten(section_tree.nodes)
+        if node.paragraph is not None
+    }
+    paragraphs = [
+        DocumentParagraphOut(
+            paragraph=block.paragraph,
+            text=block.text,
+            heading_level=heading_levels.get(block.paragraph),
+        )
+        for block in extraction.blocks
+        if block.paragraph is not None
+    ]
+    return DocumentParagraphsOut(paragraphs=paragraphs)
 
 
 async def get_report_export_data(

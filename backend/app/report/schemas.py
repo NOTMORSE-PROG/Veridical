@@ -339,6 +339,27 @@ class ManuscriptViewerOut(BaseModel):
     regions: list[FlagRegionOut]
 
 
+class DocumentParagraphOut(BaseModel):
+    """V-065 AC1 (DOCX gap): one paragraph of the reconstructed-text pane.
+    `paragraph` is `TextBlock.paragraph` verbatim (0-based body-item
+    ordinal, `app/ingest/schemas.py`) -- the SAME number `¶{paragraph}`
+    anchors already carry, so the frontend can match a flag's region to
+    a paragraph by simple equality, no re-indexing. `heading_level` is
+    cross-referenced from `section_tree` (1 = chapter), None for an
+    ordinary body paragraph -- `ui-designer` spec (2026-08-22): lets the
+    reader render real heading structure instead of an undifferentiated
+    wall of text, a real accessibility gain the PDF pane has no
+    equivalent for."""
+
+    paragraph: int
+    text: str
+    heading_level: int | None
+
+
+class DocumentParagraphsOut(BaseModel):
+    paragraphs: list[DocumentParagraphOut]
+
+
 class ExcludedReuseMatchOut(BaseModel):
     """V-072 (F7.4), `ui-designer` spec (2026-08-20) §4.2/§4.3: a passage
     match that the default policy excludes from scoring (own or matched

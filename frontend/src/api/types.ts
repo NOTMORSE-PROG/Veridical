@@ -530,6 +530,20 @@ export interface ManuscriptViewerOut {
   regions: FlagRegionOut[];
 }
 
+// V-065 AC1 (DOCX gap): the reconstructed-text pane's actual content.
+// `paragraph` matches a FlagRegionOut's own `paragraph` field verbatim --
+// both are `TextBlock.paragraph` (app/ingest/schemas.py), the 0-based
+// body-item ordinal `¶N` anchors already carry.
+export interface DocumentParagraphOut {
+  paragraph: number;
+  text: string;
+  heading_level: number | null;
+}
+
+export interface DocumentParagraphsOut {
+  paragraphs: DocumentParagraphOut[];
+}
+
 // V-072 (F7.4), `ui-designer` spec §4.2/§4.3: a passage match the DEFAULT
 // policy excludes from scoring (own or matched side falls inside the
 // reference list or a detected block quote) -- revealed only when the
