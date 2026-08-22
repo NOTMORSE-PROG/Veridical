@@ -12,6 +12,7 @@ from app.models.instructor import Instructor
 from app.report.export import build_report_pdf
 from app.report.schemas import (
     DecisionIn,
+    DocumentParagraphsOut,
     EscalatedItemOut,
     FlagSummaryOut,
     ManuscriptViewerOut,
@@ -24,6 +25,7 @@ from app.report.schemas import (
 from app.report.service import (
     decide_report,
     get_manuscript_file_path,
+    get_manuscript_paragraphs,
     get_manuscript_viewer,
     get_report,
     get_report_export_data,
@@ -111,6 +113,19 @@ async def list_reuse_passage_matches_route(
         include_reference_list=include_reference_list,
         include_block_quote=include_block_quote,
     )
+
+
+@router.get("/check-runs/{check_run_id}/document/paragraphs", response_model=DocumentParagraphsOut)
+async def get_manuscript_paragraphs_route(
+    check_run_id: int,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    instructor: Annotated[Instructor, Depends(get_current_instructor)],
+) -> DocumentParagraphsOut:
+    """V-065 AC1 (DOCX gap): the reconstructed-text pane's actual
+    paragraph content, split from `get_manuscript_viewer`'s metadata the
+    same way the PDF file bytes are (`.../document/file` below) -- DOCX
+    sources only, never a purged manuscript."""
+    return await get_manuscript_paragraphs(session, check_run_id, instructor.id)
 
 
 @router.get("/check-runs/{check_run_id}/document/file")

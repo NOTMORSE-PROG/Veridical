@@ -5,6 +5,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ApiError, api } from "../api/client";
 import type {
   Decision,
+  DocumentParagraphsOut,
   EscalatedItemOut,
   EscalationResolution,
   FlagSummaryOut,
@@ -47,6 +48,20 @@ export function useManuscriptViewer(checkRunId: number) {
   return useQuery({
     queryKey: ["report", checkRunId, "document"],
     queryFn: () => api.get<ManuscriptViewerOut>(`/check-runs/${checkRunId}/document`),
+  });
+}
+
+// V-065 AC1 (DOCX gap): the reconstructed-text pane's actual paragraph
+// content. Own query key/own fetch, same "sibling panel self-fetches"
+// precedent as useManuscriptViewer above -- a PDF-backed report never
+// pays for this. `enabled` is the caller's job (gate on source_format
+// === "docx", known only after useManuscriptViewer resolves).
+export function useManuscriptParagraphs(checkRunId: number, enabled: boolean) {
+  return useQuery({
+    queryKey: ["report", checkRunId, "document", "paragraphs"],
+    queryFn: () =>
+      api.get<DocumentParagraphsOut>(`/check-runs/${checkRunId}/document/paragraphs`),
+    enabled,
   });
 }
 
