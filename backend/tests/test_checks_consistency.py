@@ -183,6 +183,66 @@ async def test_pass_failing_to_grade_at_all_escalates_without_a_tie_break():
     assert results[0].detail["agreement"] == 0.0
 
 
+async def test_tie_break_still_hallucinated_carries_unverified_quotes():
+    """REGRESSION (V-068 Q1/Q2): a tie-break call that reaches a verdict but
+    fails quote verification used to be treated identically to a tie-break
+    that returned nothing at all -- the real quotes it produced were
+    discarded. They must now reach `detail["unverified_evidence"]`."""
+    criteria = [FakeCriterion(id=1, text="Some criterion")]
+    llm = ScriptedLLM(
+        [
+            _verdict_response("pass"),
+            _verdict_response("fail"),
+            {
+                "verdicts": [
+                    {
+                        "index": 0,
+                        "verdict": "pass",
+                        "reasoning": "Tie-break reasoning.",
+                        "evidence_quotes": ["a quote not present in the source"],
+                    }
+                ]
+            },
+        ]
+    )
+    session = FakeSession()
+    results = await run_semantic_checks_with_consistency(session, 1, criteria, _extraction(), llm)
+    assert llm.passes == ["pass_1", "pass_2", "tie_break"]
+    assert results[0].outcome == ResultOutcome.escalated
+    assert results[0].detail["unverified_evidence"] == ["a quote not present in the source"]
+    assert "verdict" not in results[0].detail  # never promoted to a decided majority
+
+
+async def test_both_passes_unverifiable_with_the_same_quote_dedupes_it():
+    """Both passes commonly hallucinate the identical quote (same
+    manuscript, same unverifiable text) -- `unverified_evidence` must not
+    show it twice, same dedup convention `reason` already has."""
+    criteria = [FakeCriterion(id=1, text="Some criterion")]
+    hallucinated = {
+        "verdicts": [
+            {
+                "index": 0,
+                "verdict": "pass",
+                "reasoning": "Looks fine.",
+                "evidence_quotes": ["a quote not present in the source"],
+            }
+        ]
+    }
+    llm = ScriptedLLM(
+        [
+            dict(hallucinated),  # pass_1: batch attempt
+            dict(hallucinated),  # pass_1: single-criterion retry
+            dict(hallucinated),  # pass_2: batch attempt
+            dict(hallucinated),  # pass_2: single-criterion retry
+        ]
+    )
+    session = FakeSession()
+    results = await run_semantic_checks_with_consistency(session, 1, criteria, _extraction(), llm)
+    assert llm.passes == ["pass_1", "pass_1", "pass_2", "pass_2"]  # no tie-break spent
+    assert results[0].outcome == ResultOutcome.escalated
+    assert results[0].detail["unverified_evidence"] == ["a quote not present in the source"]
+
+
 async def test_both_passes_failing_with_the_same_reason_does_not_duplicate_it():
     # The common real case: both grading passes fail identically (same
     # manuscript, same unverifiable quote) — a naive "; ".join produced a

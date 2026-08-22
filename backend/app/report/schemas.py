@@ -223,10 +223,19 @@ class EscalatedItemOut(BaseModel):
     # AI never ran (quota spent / API down). The instructor must be able to
     # tell these apart (V-050) — they carry very different evidence.
     review_reason: str = "low_confidence"
+    # V-068 AC1/Q2: quotes the model actually returned but that failed
+    # containment verification — the charter's 10-second verification bar
+    # applied to the panel that most needed it and had none before. Never
+    # merged into a verified `evidence` list (no real anchor exists for an
+    # unverified quote); rendered under its own "could not verify" label.
+    unverified_evidence: list[str] | None = None
 
 
 class ResolveEscalationIn(BaseModel):
-    resolution: Literal["accept_majority", "mark_pass", "mark_fail"]
+    # "needs_document" (V-068 AC2, DECIDED 2026-08-16): a third option that
+    # isn't a guess — excludes the criterion from the composite like
+    # `not_applicable`, never blocks the decision.
+    resolution: Literal["accept_majority", "mark_pass", "mark_fail", "needs_document"]
     # Router validates presence (CODING.md §1) so the service's own check
     # is defense-in-depth, not the primary gate.
     reason: str = Field(min_length=1)
