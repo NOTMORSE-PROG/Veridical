@@ -123,6 +123,49 @@ def test_chapter_span_stops_at_next_chapter():
     assert ch1_vec != ch2_vec
 
 
+def test_references_as_its_own_chapter_produces_no_chapter_embedding():
+    """BUG-114: when 'References' is its own level-1 chapter node, its
+    only surviving content (after `non_reference_blocks` excludes the
+    actual entries) is the heading word itself. Two unrelated manuscripts
+    that both structure References this way must NOT get a byte-identical
+    chapter embedding out of it -- the fix is to skip the chapter
+    entirely, the same way `_reference_span` recognizes the heading."""
+    blocks = [
+        _block("Chapter 1: Introduction", page=1),
+        _block("Attendance tracking is currently manual for this group.", page=1),
+        _block("References", page=2),
+        _block("Doe, J. (2020). A study of things. Journal of Studies, 1(1), 1-10.", page=2),
+    ]
+    nodes = [
+        SectionNode(title="Chapter 1: Introduction", level=1, page=1),
+        SectionNode(title="References", level=1, page=2),
+    ]
+    result = compute_document_embeddings(_extraction(blocks, nodes), settings=SETTINGS)
+    # Only the real chapter got an embedding -- the References "chapter"
+    # produced no entry at all, so it can never match another manuscript's
+    # References-only chapter at 1.0 similarity.
+    assert len(result.chapters) == 1
+    assert result.chapters[0].title == "Chapter 1: Introduction"
+
+
+def test_bibliography_heading_variants_are_also_skipped_as_chapters():
+    """Same defect, case/synonym-insensitive -- reuses
+    `patterns.reference_titles`, not a literal 'References' string match."""
+    blocks = [
+        _block("Chapter 1: Introduction", page=1),
+        _block("Real content unique to this manuscript.", page=1),
+        _block("BIBLIOGRAPHY", page=2),
+        _block("Cruz, M. (2021). Another study. Journal, 2(1), 5-9.", page=2),
+    ]
+    nodes = [
+        SectionNode(title="Chapter 1: Introduction", level=1, page=1),
+        SectionNode(title="BIBLIOGRAPHY", level=1, page=2),
+    ]
+    result = compute_document_embeddings(_extraction(blocks, nodes), settings=SETTINGS)
+    assert len(result.chapters) == 1
+    assert result.chapters[0].title == "Chapter 1: Introduction"
+
+
 def test_model_id_recorded_on_every_embedding():
     blocks = [_block("Chapter 1: Introduction", page=1), _block("Some real content.", page=1)]
     nodes = [SectionNode(title="Chapter 1: Introduction", level=1, page=1)]
@@ -203,6 +246,34 @@ def test_compute_passage_embeddings_no_chapter_structure_is_empty():
     blocks = [_block("Some flat, unstructured content with no headings at all.", page=1)]
     passages = compute_passage_embeddings(_extraction(blocks, nodes=[]), settings=SETTINGS)
     assert passages == []
+
+
+def test_heading_only_references_chapter_is_still_tagged_reference_list():
+    """BUG-114 passage-level extension (backend-critic finding, 2026-08-24
+    review of the chapter-level fix): a References chapter with ZERO real
+    citation blocks below the heading -- extraction gap, or a genuinely
+    empty section -- forms its own standalone passage from the heading
+    word alone. `ref_ids` (same mechanism as `non_reference_blocks`) never
+    includes the heading block itself, so without this fix that passage
+    is mistagged `is_reference_list=False` and evades F7.4's default
+    exclusion, reproducing BUG-114's false-1.0-similarity failure at
+    passage granularity. Reproduces the reviewer's own empirical repro:
+    `PassageEmbedding(chapter_index=1, text='References',
+    is_reference_list=False, ...)`."""
+    blocks = [
+        _block("Chapter 1: Introduction", page=1),
+        _block("Real content unique to this manuscript.", page=1),
+        _block("References", page=2),
+        # No citation entries follow -- the degenerate case.
+    ]
+    nodes = [
+        SectionNode(title="Chapter 1: Introduction", level=1, page=1),
+        SectionNode(title="References", level=1, page=2),
+    ]
+    passages = compute_passage_embeddings(_extraction(blocks, nodes), settings=SETTINGS)
+    ref_passage = next(p for p in passages if p.chapter_index == 1)
+    assert ref_passage.text == "References"
+    assert ref_passage.is_reference_list is True
 
 
 def test_compute_passage_embeddings_tags_reference_list_passages():

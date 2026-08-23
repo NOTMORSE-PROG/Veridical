@@ -39,6 +39,7 @@ from typing import Literal
 
 from app.config import Settings, get_settings
 from app.ingest.blockquotes import block_quote_block_ids
+from app.ingest.normalize import normalize
 from app.ingest.patterns import load_patterns
 from app.ingest.references import non_reference_blocks
 from app.ingest.schemas import ExtractionResult, SectionNode, TextBlock
@@ -140,6 +141,19 @@ def compute_document_embeddings(
     chapter_texts: list[str] = []
 
     for i, node in enumerate(chapters):
+        # BUG-114: a chapter whose OWN heading is the references/bibliography
+        # title (a real, common section-tree shape, not a contrived one) has
+        # every real entry excluded by `non_reference_blocks` above, but the
+        # heading block itself survives (`_reference_span` only excludes
+        # blocks STRICTLY BETWEEN the heading and the next one) -- so the
+        # chapter's "content" degenerates to the single word "References".
+        # Any two manuscripts with this shape then produce a byte-identical
+        # chapter text and a false 1.0-similarity match. Same title-matching
+        # mechanism `references.py::_reference_span` already uses to FIND
+        # this heading -- skip the chapter entirely rather than embed a
+        # heading-only span.
+        if normalize(node.title).casefold() in patterns.reference_titles:
+            continue
         next_chapter = chapters[i + 1] if i + 1 < len(chapters) else None
         span_blocks = _chapter_span_blocks(
             node, next_chapter, content_blocks, extraction.anchor_kind
@@ -394,6 +408,25 @@ def compute_passage_embeddings(
     texts: list[str] = []
 
     for chapter_idx, node in enumerate(chapters):
+        # BUG-114 (passage-level extension, backend-critic finding on this
+        # ticket's own review): `ref_ids` above is computed the same way
+        # `non_reference_blocks` is -- it never includes the references
+        # HEADING block itself, only real entries below it. When a
+        # References chapter has zero real entries left after that (e.g. an
+        # extraction gap, or the section is genuinely empty), the heading
+        # forms its own standalone passage, untagged (`is_reference_list`
+        # False), so F7.4's default exclusion never catches it -- the exact
+        # false-1.0-similarity mechanism BUG-114 fixed at chapter level,
+        # reproduced at passage level under a narrower precondition BUG-114's
+        # own regression fixture (which always includes a real reference
+        # entry) never exercised. Unlike the chapter-level fix, this chapter
+        # must still be EMBEDDED and STORED (F7.4's whole point: the
+        # exclusion toggle needs real, revealable content) -- so instead of
+        # skipping the chapter, every passage built from a chapter whose OWN
+        # heading matches `patterns.reference_titles` is forced
+        # `is_reference_list=True`, whether or not its particular blocks
+        # individually fell inside `_reference_span`'s narrower window.
+        chapter_is_reference_list = normalize(node.title).casefold() in patterns.reference_titles
         next_chapter = chapters[chapter_idx + 1] if chapter_idx + 1 < len(chapters) else None
         span_blocks = [
             b
@@ -411,6 +444,8 @@ def compute_passage_embeddings(
             ref_ids=ref_ids,
             quote_ids=quote_ids,
         ):
+            if chapter_is_reference_list:
+                draft["is_reference_list"] = True
             draft["chapter_index"] = chapter_idx
             draft["context_text"] = _add_context(
                 full_chapter_text,
