@@ -22,6 +22,7 @@ from app.flags.router import router as flags_router
 from app.groups.router import router as groups_router
 from app.groups.service import seed_default_programs
 from app.ingest.router import router as ingest_router
+from app.library.router import router as library_router
 from app.llm.router import router as llm_router
 from app.pipeline.router import router as pipeline_router
 from app.pipeline.worker import worker_loop
@@ -97,6 +98,7 @@ app.include_router(dashboard_router)
 app.include_router(flags_router)
 app.include_router(groups_router)
 app.include_router(ingest_router)
+app.include_router(library_router)
 app.include_router(llm_router)
 app.include_router(pipeline_router)
 app.include_router(report_router)

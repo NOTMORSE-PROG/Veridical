@@ -436,11 +436,6 @@ async def get_manuscript_viewer(
     check_run = await _owned_check_run(session, check_run_id, instructor_id)
     manuscript = await session.get(Manuscript, check_run.manuscript_id)
 
-    suffix = Path(manuscript.file_ref).suffix.lower()
-    source_format: Literal["pdf", "docx", "unknown"] = (
-        "pdf" if suffix == ".pdf" else "docx" if suffix == ".docx" else "unknown"
-    )
-
     flags = (
         (
             await session.execute(
@@ -451,6 +446,23 @@ async def get_manuscript_viewer(
         )
         .scalars()
         .all()
+    )
+    return await manuscript_viewer_for(manuscript, flags, settings)
+
+
+async def manuscript_viewer_for(
+    manuscript: Manuscript, flags: list[Flag], settings: Settings
+) -> ManuscriptViewerOut:
+    """The check-run-independent core of `get_manuscript_viewer` (V-066:
+    extracted so the library's own-manuscript document view, which has no
+    check run and no flags at all, can open the identical file-opening/
+    purge-guard logic instead of a second copy of it existing somewhere
+    else -- the exact class of drift BUG-032's history warns against).
+    Callers own resolving AND authorizing `manuscript` before this is ever
+    called; this function does no ownership check of its own."""
+    suffix = Path(manuscript.file_ref).suffix.lower()
+    source_format: Literal["pdf", "docx", "unknown"] = (
+        "pdf" if suffix == ".pdf" else "docx" if suffix == ".docx" else "unknown"
     )
 
     def _unavailable_regions() -> list[FlagRegionOut]:
@@ -696,6 +708,13 @@ async def get_manuscript_file_path(
     right HTTP status (410/404), not this function's."""
     check_run = await _owned_check_run(session, check_run_id, instructor_id)
     manuscript = await session.get(Manuscript, check_run.manuscript_id)
+    return manuscript_file_path_for(manuscript)
+
+
+def manuscript_file_path_for(manuscript: Manuscript) -> Path:
+    """The ownership-independent core of `get_manuscript_file_path` (V-066,
+    same extraction rationale as `manuscript_viewer_for` above). Callers
+    own resolving AND authorizing `manuscript` first."""
     if manuscript.purged_at is not None:
         raise GoneError("This manuscript's source file was purged and can no longer be read.")
     if Path(manuscript.file_ref).suffix.lower() != ".pdf":
@@ -714,6 +733,13 @@ async def get_manuscript_paragraphs(
     settings = settings or get_settings()
     check_run = await _owned_check_run(session, check_run_id, instructor_id)
     manuscript = await session.get(Manuscript, check_run.manuscript_id)
+    return manuscript_paragraphs_for(manuscript, settings)
+
+
+def manuscript_paragraphs_for(manuscript: Manuscript, settings: Settings) -> DocumentParagraphsOut:
+    """The ownership-independent core of `get_manuscript_paragraphs`
+    (V-066, same extraction rationale as `manuscript_viewer_for` above).
+    Callers own resolving AND authorizing `manuscript` first."""
     if manuscript.purged_at is not None:
         raise GoneError("This manuscript's source file was purged and can no longer be read.")
     if Path(manuscript.file_ref).suffix.lower() != ".docx":

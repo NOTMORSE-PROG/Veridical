@@ -13,12 +13,14 @@
 // behavior is identical to before.
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createBrowserRouter, createRoutesFromElements, Route, RouterProvider } from "react-router";
-import { ArchivePage } from "./archive/Archive";
 import { AuditLogPage } from "./audit/AuditLog";
 import { RequireAuth } from "./auth/RequireAuth";
 import { CheckProgressPage } from "./check/Progress";
 import { DocumentViewerPage } from "./document/DocumentViewer";
 import { FlagDetailPage } from "./flags/FlagDetail";
+import { LibraryComparePage } from "./library/LibraryCompare";
+import { LibraryDetailPage } from "./library/LibraryDetail";
+import { LibraryPage } from "./library/Library";
 import { LandingRoute } from "./pages/Landing";
 import { DashboardPage } from "./pages/Dashboard";
 import { SignInPage } from "./pages/SignIn";
@@ -61,11 +63,31 @@ const router = createBrowserRouter(
         }
       />
       <Route
-        path="/archive"
+        path="/library"
         element={
           <RequireAuth>
             <AppShell>
-              <ArchivePage />
+              <LibraryPage />
+            </AppShell>
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/library/compare"
+        element={
+          <RequireAuth>
+            <AppShell>
+              <LibraryComparePage />
+            </AppShell>
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/library/:manuscriptId"
+        element={
+          <RequireAuth>
+            <AppShell>
+              <LibraryDetailPage />
             </AppShell>
           </RequireAuth>
         }

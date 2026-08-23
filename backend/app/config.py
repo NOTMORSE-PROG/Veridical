@@ -461,6 +461,16 @@ class Settings(BaseSettings):
     reuse_passage_exact_duplicate_threshold: float = 0.95
     reuse_passage_high_similarity_threshold: float = 0.85
 
+    # --- Library (V-066, F7.1/F7.2 surfaces) -----------------------------------
+    # How many chapters' worth of passage excerpt the library shows for a
+    # manuscript the viewing instructor does NOT own -- the bounded,
+    # CONFIGURABLE excerpt Q2's ruling requires (owner, 2026-08-11, carried
+    # from V-058/BUG-050 Branch B): identity plus a bounded window, never
+    # the full document. One representative passage per chapter, capped at
+    # this many chapters, so the excerpt scales with how many chapters
+    # exist without ever approaching a full read of a long manuscript.
+    library_excerpt_max_chapters: int = 5
+
     # --- Block-quote detection (V-072, F7.4 exclusion) -------------------------
     # PDF only (no bbox exists for DOCX blocks, `ingest/schemas.py`'s own
     # TextBlock.bbox comment: "PDF only: layout position" -- an honest gap,

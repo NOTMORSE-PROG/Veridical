@@ -522,6 +522,7 @@ async def confirm_manuscript_group(
     group_name: str,
     member_names: list[str],
     program_id: int | None,
+    title: str | None = None,
 ) -> tuple[Group, bool]:
     """V-063 (AC2): applies a CONFIRMED (possibly instructor-edited)
     proposal -- this is the only place a title-page proposal ever
@@ -530,7 +531,10 @@ async def confirm_manuscript_group(
     on a NEWLY created group, never an existing one that already had a
     chance to be corrected some other way -- a later upload's own
     proposal must not silently overwrite a fact about a group that
-    already exists."""
+    already exists. `title` (V-066) follows the identical rule: a second
+    manuscript matched into an existing group carries its OWN title page,
+    which is not necessarily the group's -- only the group's first confirm
+    ever sets it."""
     manuscript = await session.get(Manuscript, manuscript_id)
     if manuscript is None or manuscript.instructor_id != instructor_id:
         raise NotFoundError(f"No manuscript with id {manuscript_id}.")
@@ -545,8 +549,12 @@ async def confirm_manuscript_group(
     group, matched = await match_or_create_group_from_proposal(
         session, instructor_id, group_name, member_names
     )
-    if not matched and program_id is not None:
-        group.program_id = program_id
+    if not matched:
+        if program_id is not None:
+            group.program_id = program_id
+        stripped_title = title.strip() if title else None
+        if stripped_title:
+            group.title = stripped_title
 
     manuscript.group_id = group.id
     manuscript.group_label = group.name

@@ -295,6 +295,84 @@ def test_confirming_a_match_never_overwrites_the_existing_groups_program(client,
 
 
 @live
+def test_confirming_persists_the_extracted_title(client, tmp_path):
+    """V-066: `TitlePageProposal.title` used to be shown in the confirm
+    dialog and then discarded -- this is the first thing that ever
+    persists it, so the library screen has something real to show.
+
+    Deliberately a distinct group name/members from every other test in
+    this module (module-scoped shared DB, `api_scratch_url`): "VERIDICAL"
+    with overlapping members is used by several earlier tests, and reusing
+    it here would silently MATCH into their already-created group instead
+    of creating a fresh one, making this test depend on file execution
+    order rather than on its own setup."""
+    path = _title_page_pdf(tmp_path, name="titletest1.pdf", title="TITLETEST: A Study")
+    upload = client.post(
+        "/manuscripts/ingest",
+        files={"file": ("titletest1.pdf", path.read_bytes(), "application/pdf")},
+    )
+    manuscript_id = upload.json()["manuscript_id"]
+    extracted_title = upload.json()["group_proposal"]["title"]["value"]
+    assert extracted_title == "TITLETEST: A Study"
+
+    confirm = client.patch(
+        f"/manuscripts/{manuscript_id}/group",
+        json={
+            "group_name": "TITLETEST-PERSIST",
+            "member_names": ["Some Member"],
+            "program_id": None,
+            "title": extracted_title,
+        },
+    )
+    assert confirm.status_code == 200, confirm.text
+    assert confirm.json()["matched"] is False  # brand new group, own unique name
+    assert confirm.json()["title"] == "TITLETEST: A Study"
+
+
+@live
+def test_confirming_a_match_never_overwrites_the_existing_groups_title(client, tmp_path):
+    """Same rule as the program test above, same reason: a second
+    manuscript matched into an existing group carries its OWN title page,
+    which is not necessarily the group's. Own unique group name, same
+    isolation reasoning as the test above."""
+    first_path = _title_page_pdf(tmp_path, name="first-tt.pdf", title="TITLETEST: First Version")
+    first_upload = client.post(
+        "/manuscripts/ingest",
+        files={"file": ("first-tt.pdf", first_path.read_bytes(), "application/pdf")},
+    )
+    first_id = first_upload.json()["manuscript_id"]
+    first_confirm = client.patch(
+        f"/manuscripts/{first_id}/group",
+        json={
+            "group_name": "TITLETEST-NOOVERWRITE",
+            "member_names": ["Titletest Member A", "Titletest Member B"],
+            "program_id": None,
+            "title": "TITLETEST: First Version",
+        },
+    )
+    assert first_confirm.json()["matched"] is False
+
+    second_path = _title_page_pdf(tmp_path, name="second-tt.pdf", title="TITLETEST - Revised")
+    second_upload = client.post(
+        "/manuscripts/ingest",
+        files={"file": ("second-tt.pdf", second_path.read_bytes(), "application/pdf")},
+    )
+    second_id = second_upload.json()["manuscript_id"]
+    confirm = client.patch(
+        f"/manuscripts/{second_id}/group",
+        json={
+            "group_name": "TITLETEST-NOOVERWRITE",
+            "member_names": ["Titletest Member A"],
+            "program_id": None,
+            "title": "TITLETEST - Revised",
+        },
+    )
+    assert confirm.status_code == 200, confirm.text
+    assert confirm.json()["matched"] is True
+    assert confirm.json()["title"] == "TITLETEST: First Version"
+
+
+@live
 def test_confirming_with_an_unknown_program_id_is_a_clean_404_not_a_bare_500(client, tmp_path):
     """backend-critic (V-063 review): reproduced live as an unhandled
     `IntegrityError`/`ForeignKeyViolationError` before this guard existed

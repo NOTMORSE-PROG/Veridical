@@ -256,6 +256,15 @@ def test_purging_a_strangers_manuscript_is_not_found(seeded):
     assert resp.status_code == 404
 
 
+def test_out_of_range_pagination_is_a_clean_422_not_a_bare_500(seeded):
+    """security-auditor (V-066 review): reproduced live as an unhandled
+    500 before this bound existed."""
+    client, _ = seeded
+    assert client.get("/archive?page=0").status_code == 422
+    assert client.get("/archive?page_size=0").status_code == 422
+    assert client.get("/archive?page_size=99999").status_code == 422
+
+
 def test_archive_route_requires_auth(client):
     assert client.get("/archive").status_code == 401
     assert client.delete("/archive/1").status_code == 401

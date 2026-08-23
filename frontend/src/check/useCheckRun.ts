@@ -67,8 +67,12 @@ export function useGroupProposal(manuscriptId: number | undefined) {
 export function useConfirmGroup(manuscriptId: number | undefined) {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (body: { group_name: string; member_names: string[]; program_id: number | null }) =>
-      api.patch<ConfirmGroupResponse>(`/manuscripts/${manuscriptId}/group`, body),
+    mutationFn: (body: {
+      group_name: string;
+      member_names: string[];
+      program_id: number | null;
+      title: string | null;
+    }) => api.patch<ConfirmGroupResponse>(`/manuscripts/${manuscriptId}/group`, body),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["manuscripts"] });
       queryClient.invalidateQueries({ queryKey: ["groups"] });

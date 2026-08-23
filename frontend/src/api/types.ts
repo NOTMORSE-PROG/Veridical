@@ -133,6 +133,9 @@ export interface ConfirmGroupResponse {
   group_id: number;
   group_label: string;
   program: string | null;
+  // V-066: null unless this confirm was the group's FIRST (a later
+  // manuscript matched into an existing group never overwrites it).
+  title: string | null;
   // true = an existing group was matched (a real resubmission); false =
   // a brand-new group was created.
   matched: boolean;
@@ -603,31 +606,53 @@ export interface QuotaStatus {
   models?: ModelQuotaStatus[];
 }
 
-// V-042 (screen 4t) — the F7 originality/reuse archive: which manuscripts
-// still have an embedding archive, and per-item purge.
-export interface ArchiveItemOut {
+// V-042: per-item purge of the F7 embedding archive (originally screen
+// 4t, now folded into the Library screen, V-066 -- Library is a strict
+// superset of what the old Archive screen showed).
+export interface PurgeOut {
   manuscript_id: number;
-  group_label: string;
-  original_filename: string | null;
-  created_at: string;
-  // V-071 (BUG-058): needed so this screen's status pill can agree with
-  // the dashboard's about the same manuscript -- see manuscriptStatus().
-  ingest_status: "pending" | "processing" | "done" | "failed";
-  latest_check_run_status: CheckRunStatus | null;
-  has_archive: boolean;
-  purged_at: string | null;
+  purged_at: string;
 }
 
-export interface PaginatedArchive {
-  items: ArchiveItemOut[];
+// V-066 (screen 4w) — the shared-corpus library: replaces the Archive
+// screen above (a strict superset -- every own manuscript still gets its
+// archive state + purge action, plus every other account's, plus real
+// metadata Archive never showed).
+export interface LibraryItemOut {
+  manuscript_id: number;
+  group_label: string;
+  title: string | null;
+  authors: string[];
+  program: string | null;
+  original_filename: string | null;
+  created_at: string;
+  purged_at: string | null;
+  is_own: boolean;
+}
+
+export interface PaginatedLibrary {
+  items: LibraryItemOut[];
   total: number;
   page: number;
   page_size: number;
 }
 
-export interface PurgeOut {
+export interface LibraryChapterExcerptOut {
+  chapter_index: number;
+  title: string;
+  excerpt: string | null;
+  context_before: string | null;
+  context_after: string | null;
+}
+
+// The bounded, cross-tenant-safe detail view (Q2's ruling) -- never the
+// full document, always available regardless of ownership.
+export interface LibraryExcerptOut {
   manuscript_id: number;
-  purged_at: string;
+  chapters: LibraryChapterExcerptOut[];
+  total_chapters: number;
+  limitations: string;
+  purged_at: string | null;
 }
 
 // V-042 (screen 4u) — read-only transparency: scoring/escalation

@@ -3,13 +3,17 @@
 // on the other, both showing real text -- the similarity score stays
 // subordinate (owner's anti-Turnitin ruling, carried from V-058), never
 // a large colored percentage or a severity-styled badge.
+import { Link } from "react-router";
 import type { PassagePairOut } from "../api/types";
 
 const HIGHLIGHT_STYLE = {
   background: "color-mix(in srgb, var(--color-status-caution-text) 20%, transparent)",
 };
 
-function PassageBlock({
+// V-066: exported so the library's bounded-excerpt view (a non-owned
+// manuscript's detail/compare pane) can reuse the identical block
+// primitive instead of a second, near-identical one.
+export function PassageBlock({
   label,
   before,
   excerpt,
@@ -82,6 +86,14 @@ export function PassagePairPanel({
             after={pair.matched_context_after}
           />
           <p className="mt-1 text-xs text-ink-tertiary">Stored excerpt, not the full document.</p>
+          {/* V-066 (BUG-122 direction 2): "#N" used to be dead information
+              -- the library now gives it somewhere real to go. */}
+          <Link
+            to={`/library/${pair.matched_ref}`}
+            className="mt-1 inline-block text-xs font-medium text-link underline hover:text-link-hover"
+          >
+            Open in Library
+          </Link>
         </div>
       </div>
       <p className="text-xs text-ink-tertiary">

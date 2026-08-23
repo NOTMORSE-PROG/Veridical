@@ -6,14 +6,13 @@
 // deliberately NOT part of this -- it lives on the report itself
 // (screen 4h), never duplicated here.
 //
-// V-071 (BUG-058): Archive.tsx used to carry its own second copy of this
-// logic that never read ingest_status at all, so an ingestion-failed
-// manuscript showed as "Not checked yet" there while this same function
-// correctly called it "Ingestion failed" on the dashboard -- two screens
-// disagreeing about the same file. Archive now calls this function too;
-// the parameter type below is a structural subset both
-// `ManuscriptListItem` and `ArchiveItemOut` satisfy, not the full
-// dashboard-only shape, since Archive doesn't carry a `latest_decision`.
+// V-071 (BUG-058): the old Archive.tsx (retired V-066, folded into the
+// Library screen) used to carry its own second copy of this logic that
+// never read ingest_status at all, so an ingestion-failed manuscript
+// showed as "Not checked yet" there while this same function correctly
+// called it "Ingestion failed" on the dashboard -- two screens disagreeing
+// about the same file. The parameter type below is a structural subset
+// `ManuscriptListItem` satisfies, not the full dashboard-only shape.
 import type { CheckRunStatus, Decision } from "../api/types";
 import type { StatusPillTone } from "../components/StatusPill";
 import { DECISION_LABEL, DECISION_TONE } from "./decisionTone";

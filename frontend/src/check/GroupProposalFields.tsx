@@ -180,7 +180,15 @@ export function GroupProposalFields({
     // the instructor clicks "Done" on the terminal banner below, so they
     // always see WHICH outcome happened (matched vs created) before this
     // form goes away.
-    confirm.mutate({ group_name: trimmedName, member_names: memberNames, program_id: programId });
+    confirm.mutate({
+      group_name: trimmedName,
+      member_names: memberNames,
+      program_id: programId,
+      // V-066: read-only in this form (not an editable field here), so
+      // whatever VERIDICAL extracted is exactly what's sent -- null when
+      // nothing was found, same as every other unfound proposal field.
+      title: proposal.title?.value ?? null,
+    });
   }
 
   const serverError =
