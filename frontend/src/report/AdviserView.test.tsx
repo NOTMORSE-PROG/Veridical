@@ -70,6 +70,7 @@ const SAMPLE_FLAG: FlagSummaryOut = {
   page_anchor: "page 3",
   overridden: false,
   is_passage_level: false,
+  first_upload_context: false,
 };
 
 function shared(overrides: Partial<SharedReportOut> = {}): SharedReportOut {
