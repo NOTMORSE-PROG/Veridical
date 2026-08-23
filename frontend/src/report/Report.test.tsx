@@ -83,6 +83,7 @@ const SAMPLE_FLAG: FlagSummaryOut = {
   page_anchor: "page 3",
   overridden: false,
   is_passage_level: false,
+  first_upload_context: false,
 };
 
 describe("ReportPage", () => {
@@ -518,6 +519,66 @@ describe("ReportPage", () => {
     ).toBeInTheDocument();
     const link = screen.getByRole("link", { name: "Review evidence" });
     expect(link).toHaveAttribute("href", "/flags/2");
+  });
+
+  it("BUG-097: an originality/reuse group with a first-upload-context flag shows the group note", async () => {
+    const reuseFlag: FlagSummaryOut = {
+      ...SAMPLE_FLAG,
+      id: 50,
+      check_kind: "originality_reuse",
+      first_upload_context: true,
+    };
+    vi.stubGlobal(
+      "fetch",
+      stubFetchByPath({
+        "/check-runs/5/report": BASE_REPORT,
+        ...stubEscalated(),
+        ...stubFlags([reuseFlag]),
+      }),
+    );
+    renderWithProviders(<ReportPage />, { route: "/report/5", path: "/report/:checkRunId" });
+
+    expect(await screen.findByText(/First-ever check on this account/)).toBeInTheDocument();
+  });
+
+  it("BUG-097: no first-upload-context note for an ordinary originality/reuse group", async () => {
+    const reuseFlag: FlagSummaryOut = {
+      ...SAMPLE_FLAG,
+      id: 51,
+      check_kind: "originality_reuse",
+      first_upload_context: false,
+    };
+    vi.stubGlobal(
+      "fetch",
+      stubFetchByPath({
+        "/check-runs/5/report": BASE_REPORT,
+        ...stubEscalated(),
+        ...stubFlags([reuseFlag]),
+      }),
+    );
+    renderWithProviders(<ReportPage />, { route: "/report/5", path: "/report/:checkRunId" });
+
+    await screen.findByText("Flags (1)");
+    expect(screen.queryByText(/First-ever check on this account/)).not.toBeInTheDocument();
+  });
+
+  it("BUG-097: no first-upload-context note leaks onto a non-originality/reuse group", async () => {
+    // SAMPLE_FLAG's check_kind is internal_agreement -- first_upload_context
+    // is meaningless outside originality_reuse, so it must never render the
+    // note even if the field were somehow set on the wrong kind.
+    const wrongKindFlag: FlagSummaryOut = { ...SAMPLE_FLAG, first_upload_context: true };
+    vi.stubGlobal(
+      "fetch",
+      stubFetchByPath({
+        "/check-runs/5/report": BASE_REPORT,
+        ...stubEscalated(),
+        ...stubFlags([wrongKindFlag]),
+      }),
+    );
+    renderWithProviders(<ReportPage />, { route: "/report/5", path: "/report/:checkRunId" });
+
+    await screen.findByText("Flags (1)");
+    expect(screen.queryByText(/First-ever check on this account/)).not.toBeInTheDocument();
   });
 
   it("BUG-033: an overridden flag reads distinctly from an active one — never the same", async () => {

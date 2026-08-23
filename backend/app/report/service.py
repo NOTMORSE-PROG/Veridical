@@ -409,6 +409,7 @@ async def flags_for_check_run(session: AsyncSession, check_run_id: int) -> list[
             page_anchor=flag.page_anchor,
             overridden=flag.overridden,
             is_passage_level=bool((flag.detail or {}).get("kind", "").endswith("_passage")),
+            first_upload_context=bool((flag.detail or {}).get("first_upload_context")),
         )
         for flag, result in rows
     ]

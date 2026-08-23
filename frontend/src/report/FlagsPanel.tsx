@@ -11,6 +11,7 @@ import { Link, useSearchParams } from "react-router";
 import type { FlagSummaryOut } from "../api/types";
 import { AnchorPill } from "../components/AnchorPill";
 import { cx } from "../components/cx";
+import { FirstUploadContextGroupNote } from "../components/FirstUploadContextBanner";
 import { SeverityTag, type Severity } from "../components/SeverityTag";
 import { StatusPill, type StatusPillTone } from "../components/StatusPill";
 import { CHECK_KIND_ORDER, CHECK_KIND_SHORT_LABEL } from "../domain/checkKind";
@@ -287,10 +288,16 @@ export function FlagsList({
           Possible inconsistencies found by VERIDICAL's integrity checks (F4 to F7), not accusations.
         </span>
       </div>
-      {groups.map(({ kind, flags: groupFlags }) => {
+      {groups.flatMap(({ kind, flags: groupFlags }) => {
         const hasUnresolved = groupFlags.some((f) => !f.overridden);
         const open = toggledAwayFromDefault.has(kind) ? !hasUnresolved : hasUnresolved;
-        return (
+        // BUG-097: first_upload is computed once per check run and applied
+        // uniformly to every originality/reuse match it produces, so any
+        // flag in this group carrying it means the whole group does.
+        const showFirstUploadNote =
+          kind === "originality_reuse" && groupFlags.some((f) => f.first_upload_context);
+        return [
+          showFirstUploadNote && <FirstUploadContextGroupNote key={`${kind}-first-upload`} />,
           <FlagGroup
             key={kind}
             kind={kind}
@@ -298,8 +305,8 @@ export function FlagsList({
             open={open}
             onToggle={() => toggle(kind)}
             linkToDetail={linkToDetail}
-          />
-        );
+          />,
+        ];
       })}
     </section>
   );
