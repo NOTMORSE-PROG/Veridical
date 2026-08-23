@@ -292,6 +292,11 @@ class FlagSummaryOut(BaseModel):
     # request. False for every non-F7.4 flag, including every other
     # check kind.
     is_passage_level: bool = False
+    # BUG-097 (presentation-only remedy, owner ruling 2026-08-24): mirrors
+    # FlagOut's own field (app/flags/schemas.py) -- see that class's
+    # docstring. Drives the flags panel's "first-ever check" group note,
+    # scoped to the originality_reuse group only.
+    first_upload_context: bool = False
 
 
 class FlagRegionOut(BaseModel):

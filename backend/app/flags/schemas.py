@@ -65,6 +65,14 @@ class FlagOut(BaseModel):
     llm_mode: str
     # V-072 (F7.4): present only for a passage-level reuse flag.
     passage_pair: PassagePairOut | None = None
+    # BUG-097 (presentation-only remedy, owner ruling 2026-08-24): True only
+    # for an F7 originality/reuse flag produced on the account's first-ever
+    # manuscript upload — never changes `severity` (see
+    # `app.checks.reuse.query.is_first_upload_for_instructor`'s docstring).
+    # Drives the report's "this is your first-ever check" banner so a new
+    # instructor knows to verify the match with extra care, without the
+    # product silently deciding the match is less trustworthy.
+    first_upload_context: bool = False
 
 
 class AnnotateFlagIn(BaseModel):

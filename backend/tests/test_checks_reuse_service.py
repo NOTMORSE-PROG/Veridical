@@ -52,3 +52,29 @@ def test_reason_never_leaks_matched_identity_or_heading(level, chapter_title, ex
     # any API response, so it deliberately still carries the raw fields.
     assert detail["matched_group_label"] == OTHER_GROUP
     assert detail["matched_chapter_title"] == chapter_title
+
+
+def test_first_upload_context_flags_detail_but_never_changes_severity_or_reason():
+    """BUG-097 (presentation-only remedy, owner ruling 2026-08-24): a
+    severity downgrade was considered and explicitly rejected (it would
+    have weakened genuine duplicate detection broadly, not just softened
+    one rare edge case -- see `query.is_first_upload_for_instructor`'s own
+    docstring). `first_upload=True` sets `detail["first_upload_context"]`
+    ONLY -- `ux-critic` finding (2026-08-24, live review of the built
+    banner): an earlier version also appended a caveat sentence to
+    `reason`, which duplicated the banner's own disclosure on the same
+    screen (Nielsen #4). The banner is the sole disclosure surface now;
+    `reason` must be byte-identical regardless of `first_upload`."""
+    match = SimilarityMatch(
+        level="exact_duplicate",
+        similarity=0.97,
+        matched_manuscript_id=7,
+        matched_group_label=OTHER_GROUP,
+    )
+    plain_severity, plain_reason, plain_detail = _match_to_flag_draft(match, first_upload=False)
+    first_severity, first_reason, first_detail = _match_to_flag_draft(match, first_upload=True)
+
+    assert plain_severity == first_severity == FlagSeverity.high
+    assert plain_detail["first_upload_context"] is False
+    assert first_detail["first_upload_context"] is True
+    assert first_reason == plain_reason  # no duplicate disclosure in the reason text

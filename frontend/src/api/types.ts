@@ -473,6 +473,10 @@ export interface FlagOut {
   // fabricated statistical-forensics finding rendered with no disclosure.
   llm_mode: "fake" | "real" | "unknown";
   passage_pair: PassagePairOut | null;
+  // BUG-097 (presentation-only remedy, owner ruling 2026-08-24): true only
+  // for an F7 flag produced on the account's first-ever manuscript upload.
+  // Never changes `severity`.
+  first_upload_context: boolean;
 }
 
 export interface OverrideFlagOut extends FlagOut {
@@ -494,6 +498,8 @@ export interface FlagSummaryOut {
   // V-072 (F7.4): distinguishes a passage-level reuse flag from today's
   // whole-document/chapter-level ones (same check_kind).
   is_passage_level: boolean;
+  // BUG-097: mirrors FlagOut's own field.
+  first_upload_context: boolean;
 }
 
 // V-065: what the manuscript viewer's document pane can actually do with

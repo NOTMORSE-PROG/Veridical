@@ -73,6 +73,19 @@ describe("FlagDetailPage", () => {
     expect(screen.queryByText(/Test-mode run/)).not.toBeInTheDocument();
   });
 
+  it("BUG-097: discloses a first-upload-context flag distinctly from an ordinary one", async () => {
+    vi.stubGlobal("fetch", stubFetchByPath({ "/flags/5": { ...FLAG, first_upload_context: true } }));
+    renderWithProviders(<FlagDetailPage />, { route: "/flags/5", path: "/flags/:flagId" });
+    expect(await screen.findByText(/First-ever check on this account/)).toBeInTheDocument();
+  });
+
+  it("BUG-097: shows no first-upload-context disclosure for an ordinary flag", async () => {
+    vi.stubGlobal("fetch", stubFetchByPath({ "/flags/5": { ...FLAG, first_upload_context: false } }));
+    renderWithProviders(<FlagDetailPage />, { route: "/flags/5", path: "/flags/:flagId" });
+    await screen.findByText(/Wang, S\. \(2019\)/);
+    expect(screen.queryByText(/First-ever check on this account/)).not.toBeInTheDocument();
+  });
+
   it("builds a breadcrumb back to the report using the manuscript label and check_run_id", async () => {
     vi.stubGlobal("fetch", stubFetchByPath({ "/flags/5": FLAG }));
     renderWithProviders(<FlagDetailPage />, { route: "/flags/5", path: "/flags/:flagId" });

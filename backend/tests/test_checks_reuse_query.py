@@ -241,6 +241,86 @@ async def test_reuploaded_duplicate_produces_a_high_severity_flag(session_factor
     }
 
 
+async def test_first_upload_context_flagged_but_severity_untouched(session_factory):
+    """BUG-097 (presentation-only remedy, owner ruling 2026-08-24): a
+    brand-new instructor's very first manuscript upload is, by
+    construction, a first-ever-upload match against manuscript_a's
+    (different instructor's) archive. Every flag from it must carry
+    `first_upload_context=True` in `detail` -- and severity must be
+    UNCHANGED (still `high` for an exact duplicate) -- reversed once that
+    same instructor has a second manuscript on record."""
+    settings = get_settings()
+
+    manuscript_a, check_run_a = await _seed_manuscript_and_run(
+        session_factory, group_label="Group A"
+    )
+    async with session_factory() as session:
+        await run_originality_reuse_check(
+            session, manuscript_a, check_run_a, _extraction(CH1, CH2), settings
+        )
+
+    # manuscript_b's instructor has NO other manuscript yet -- textbook
+    # first upload.
+    manuscript_b, check_run_b = await _seed_manuscript_and_run(
+        session_factory, group_label="Group B"
+    )
+    async with session_factory() as session:
+        result_b = await run_originality_reuse_check(
+            session, manuscript_b, check_run_b, _extraction(CH1, CH2), settings
+        )
+        assert result_b.detail["first_upload_context"] is True
+        rows_b = (
+            await session.execute(
+                text(
+                    "SELECT severity, detail->>'first_upload_context' AS ctx, "
+                    "detail->>'reason' AS reason FROM flag WHERE check_result_id = :id"
+                ),
+                {"id": result_b.id},
+            )
+        ).all()
+    assert len(rows_b) == 5
+    assert all(r.severity == "high" for r in rows_b)  # unchanged
+    assert all(r.ctx == "true" for r in rows_b)
+    # ux-critic finding (2026-08-24): the banner is the sole disclosure
+    # surface -- `reason` must be untouched by first_upload_context, not
+    # carry a duplicate caveat sentence alongside it.
+    assert not any("earliest check" in r.reason.lower() for r in rows_b)
+
+    # Same instructor (manuscript_b's), a SECOND manuscript -- no longer a
+    # first upload, so no caveat and no `first_upload_context` on the flags.
+    async with session_factory() as session:
+        instructor_b_id = (await session.get(Manuscript, manuscript_b)).instructor_id
+        rubric = Rubric(instructor_id=instructor_b_id, title="Format 2", source_file="r2.pdf")
+        session.add(rubric)
+        await session.commit()
+        manuscript_c = Manuscript(
+            instructor_id=instructor_b_id, group_label="Group B (second project)", file_ref="c.pdf"
+        )
+        session.add(manuscript_c)
+        await session.commit()
+        check_run_c = CheckRun(manuscript_id=manuscript_c.id, rubric_id=rubric.id)
+        session.add(check_run_c)
+        await session.commit()
+        manuscript_c_id, check_run_c_id = manuscript_c.id, check_run_c.id
+
+    async with session_factory() as session:
+        result_c = await run_originality_reuse_check(
+            session, manuscript_c_id, check_run_c_id, _extraction(CH1, CH2), settings
+        )
+        assert result_c.detail["first_upload_context"] is False
+        rows_c = (
+            await session.execute(
+                text(
+                    "SELECT detail->>'first_upload_context' AS ctx FROM flag "
+                    "WHERE check_result_id = :id"
+                ),
+                {"id": result_c.id},
+            )
+        ).all()
+    assert len(rows_c) == 5
+    assert all(r.ctx == "false" for r in rows_c)
+
+
 async def test_same_groups_own_prior_submission_is_never_reuse(session_factory):
     """BUG-050 item 1 (fixed 2026-08-19, unblocked by V-062's real
     `Group`/`group_id`): a team's own revision/re-upload must not flag

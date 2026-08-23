@@ -17,6 +17,7 @@ from app.checks.reuse.embed import compute_document_embeddings, compute_passage_
 from app.checks.reuse.query import (
     PassageMatch,
     SimilarityMatch,
+    is_first_upload_for_instructor,
     query_similar_manuscripts,
     query_similar_passages,
 )
@@ -88,8 +89,27 @@ HIGH_SIMILARITY_PASSAGE_WORDING = (
     "of this passage. Please verify manually."
 )
 
+# BUG-097 (presentation-only remedy, owner ruling 2026-08-24): drives
+# `detail["first_upload_context"]` below, which surfaces as the report's
+# distinct `FirstUploadContextBanner`/`FirstUploadContextGroupNote`
+# (frontend) — never changes severity or scoring (see
+# `query.is_first_upload_for_instructor`'s own docstring for why a
+# severity change was rejected).
+#
+# `ux-critic` finding (2026-08-24, live review of the built banner): an
+# earlier version of this fix ALSO appended a caveat sentence to `reason`
+# (surfaced via `FlagOut.ai_reasoning`) — with the banner rendering right
+# above it, the same "no track record yet, verify carefully" idea was
+# stated twice in near-identical wording on one screen, competing for
+# attention (Nielsen #4, minimalist design) and undermining the banner's
+# own job of being the one clear, distinct signal. The banner is the
+# sole disclosure surface now; `reason`/`ai_reasoning` stay exactly what
+# the underlying match template already says.
 
-def _match_to_flag_draft(match: SimilarityMatch) -> tuple[FlagSeverity, str, dict]:
+
+def _match_to_flag_draft(
+    match: SimilarityMatch, *, first_upload: bool = False
+) -> tuple[FlagSeverity, str, dict]:
     pct = round(match.similarity * 100, 1)
     is_chapter = match.matched_chapter_title is not None
     if match.level == "exact_duplicate":
@@ -116,11 +136,14 @@ def _match_to_flag_draft(match: SimilarityMatch) -> tuple[FlagSeverity, str, dic
         "matched_group_label": match.matched_group_label,
         "matched_chapter_title": match.matched_chapter_title,
         "own_chapter_title": match.own_chapter_title,
+        "first_upload_context": first_upload,
     }
     return severity, reason, detail
 
 
-def _passage_match_to_flag_draft(match: PassageMatch) -> tuple[FlagSeverity, str, str, dict]:
+def _passage_match_to_flag_draft(
+    match: PassageMatch, *, first_upload: bool = False
+) -> tuple[FlagSeverity, str, str, dict]:
     """Returns (severity, evidence_excerpt, page_anchor, detail) — a
     different shape from `_match_to_flag_draft` above (see the wording
     templates' own comment for why: real passage text as the excerpt,
@@ -140,6 +163,7 @@ def _passage_match_to_flag_draft(match: PassageMatch) -> tuple[FlagSeverity, str
     detail = {
         "kind": f"reuse_{match.level}_passage",
         "reason": reason,
+        "first_upload_context": first_upload,
         "similarity": round(match.similarity, 3),
         "matched_manuscript_id": match.matched_manuscript_id,
         "matched_group_label": match.matched_group_label,  # internal only, BUG-050/097
@@ -192,6 +216,10 @@ async def run_originality_reuse_check(
     # whole-doc).
     passages = compute_passage_embeddings(extraction, settings)
     passage_query_result = await query_similar_passages(session, manuscript_id, passages, settings)
+    # BUG-097 (presentation-only remedy): computed once, applied to every
+    # match this run produces — see `is_first_upload_for_instructor`'s own
+    # docstring for why this changes wording/context only, never severity.
+    first_upload = await is_first_upload_for_instructor(session, manuscript_id)
 
     result = CheckResult(
         check_run_id=check_run_id,
@@ -202,12 +230,13 @@ async def run_originality_reuse_check(
             "archive_size_n": query_result.archive_size_n,
             "passage_archive_size_n": passage_query_result.passage_archive_size_n,
             "n_flags": len(query_result.matches) + len(passage_query_result.matches),
+            "first_upload_context": first_upload,
         },
     )
     session.add(result)
     await session.flush()  # need result.id before attaching flags
     for match in query_result.matches:
-        severity, reason, detail = _match_to_flag_draft(match)
+        severity, reason, detail = _match_to_flag_draft(match, first_upload=first_upload)
         anchor = match.own_chapter_title or "whole document"
         session.add(
             Flag(
@@ -220,7 +249,7 @@ async def run_originality_reuse_check(
         )
     for passage_match in passage_query_result.matches:
         severity, evidence_excerpt, page_anchor, detail = _passage_match_to_flag_draft(
-            passage_match
+            passage_match, first_upload=first_upload
         )
         session.add(
             Flag(

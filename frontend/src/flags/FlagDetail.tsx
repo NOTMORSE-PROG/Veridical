@@ -10,6 +10,7 @@ import { AnchorPill } from "../components/AnchorPill";
 import { Chip } from "../components/Chip";
 import { cx } from "../components/cx";
 import { SeverityTag, type Severity } from "../components/SeverityTag";
+import { FirstUploadContextBanner } from "../components/FirstUploadContextBanner";
 import { TestModeBanner } from "../components/TestModeBanner";
 import { checkKindMeta, humanize } from "../domain/checkKind";
 import { useRouteFocus } from "../routing/useRouteFocus";
@@ -286,6 +287,7 @@ export function FlagDetailPage() {
       </header>
 
       {flag && <TestModeBanner llmMode={flag.llm_mode} />}
+      {flag && <FirstUploadContextBanner active={flag.first_upload_context} />}
 
       {isPending ? (
         <div role="status" aria-live="polite" aria-busy="true" className="flex items-center gap-2 rounded-lg border border-border bg-panel p-6 text-sm text-ink-secondary">

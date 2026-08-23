@@ -109,6 +109,7 @@ async def _to_flag_out(
         ai_reasoning=detail.get("reasoning") or detail.get("reason"),
         llm_mode=check_run.llm_mode.value,
         passage_pair=_passage_pair_from_detail(flag.evidence_excerpt, detail),
+        first_upload_context=bool(detail.get("first_upload_context")),
     )
 
 
