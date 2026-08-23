@@ -92,7 +92,18 @@ class AgreementFlagDraft:
 class PairingResult:
     flags: list[AgreementFlagDraft]
     n_unmatched_outcomes: int
-    n_skipped_for_quota: int
+    # BUG-072: three distinct causes, three distinct counters -- the
+    # original single `n_skipped_for_quota` reported a genuine
+    # PairingError (the model's structured output didn't validate, D-017's
+    # exact defect class) as ordinary budget exhaustion, making a real
+    # regression permanently indistinguishable from "we ran out of quota."
+    n_skipped_quota: int
+    n_skipped_api_down: int
+    n_skipped_parse_failure: int
+
+    @property
+    def n_skipped_total(self) -> int:
+        return self.n_skipped_quota + self.n_skipped_api_down + self.n_skipped_parse_failure
 
 
 # --- candidate generation (Tier 1, local) -------------------------------------
@@ -247,20 +258,30 @@ async def run_agreement_pairing(
     )
 
     flags = [_unmatched_intent_flag(intent) for intent in unmatched_intents]
-    skipped = 0
+    n_quota = n_api_down = n_parse_failure = 0
 
     chunk_size = max(1, settings.agreement_pairing_max_pairs_per_call)
     for start in range(0, len(candidates), chunk_size):
         chunk = candidates[start : start + chunk_size]
         try:
             verdicts = await _judge_batch(llm, chunk, check_run_id=check_run_id)
-        except (QuotaExhaustedError, ApiDownError, PairingError):
-            skipped += len(chunk)
+        except QuotaExhaustedError:
+            n_quota += len(chunk)
+            continue
+        except ApiDownError:
+            n_api_down += len(chunk)
+            continue
+        except PairingError:
+            n_parse_failure += len(chunk)
             continue
         for i, candidate in enumerate(chunk):
             verdict = verdicts.get(i)
             if verdict is None:
-                skipped += 1
+                # Same D-017 defect class as the batch-level PairingError
+                # above (the model silently omitted one pair's verdict
+                # from an otherwise-valid batch), not a quota/availability
+                # issue.
+                n_parse_failure += 1
                 continue
             draft = _candidate_to_flag(candidate, verdict)
             if draft is not None:
@@ -268,5 +289,9 @@ async def run_agreement_pairing(
 
     n_unmatched_outcomes = len(outcomes) - len(matched_outcome_indexes)
     return PairingResult(
-        flags=flags, n_unmatched_outcomes=n_unmatched_outcomes, n_skipped_for_quota=skipped
+        flags=flags,
+        n_unmatched_outcomes=n_unmatched_outcomes,
+        n_skipped_quota=n_quota,
+        n_skipped_api_down=n_api_down,
+        n_skipped_parse_failure=n_parse_failure,
     )

@@ -13,7 +13,7 @@ from app.checks.citations.support import (
     run_claim_support_check,
 )
 from app.config import get_settings
-from app.errors import QuotaExhaustedError
+from app.errors import ApiDownError, QuotaExhaustedError
 from app.models.enums import FlagSeverity
 
 
@@ -47,11 +47,9 @@ async def test_supported_verdict_produces_no_flag():
     llm = ScriptedLLM(
         [{"verdicts": [{"index": 0, "verdict": "supported", "reasoning": "Matches."}]}]
     )
-    flags, skipped = await run_claim_support_check(
-        llm, [_pair(0)], check_run_id=1, settings=get_settings()
-    )
-    assert flags == []
-    assert skipped == 0
+    result = await run_claim_support_check(llm, [_pair(0)], check_run_id=1, settings=get_settings())
+    assert result.flags == []
+    assert result.n_skipped_total == 0
 
 
 async def test_possibly_unsupported_with_verified_excerpt_is_medium_severity():
@@ -72,16 +70,14 @@ async def test_possibly_unsupported_with_verified_excerpt_is_medium_severity():
             }
         ]
     )
-    flags, skipped = await run_claim_support_check(
-        llm, [pair], check_run_id=1, settings=get_settings()
-    )
-    assert len(flags) == 1
-    assert flags[0].severity == FlagSeverity.med
-    assert flags[0].detail["kind"] == "claim_possibly_unsupported"
+    result = await run_claim_support_check(llm, [pair], check_run_id=1, settings=get_settings())
+    assert len(result.flags) == 1
+    assert result.flags[0].severity == FlagSeverity.med
+    assert result.flags[0].detail["kind"] == "claim_possibly_unsupported"
     expected = POSSIBLY_UNSUPPORTED_WORDING.format(
         claim=pair.claim_sentence, excerpt="no relationship between X and Y"
     )
-    assert flags[0].detail["reason"] == expected
+    assert result.flags[0].detail["reason"] == expected
 
 
 async def test_hallucinated_excerpt_downgrades_to_cannot_determine():
@@ -103,11 +99,11 @@ async def test_hallucinated_excerpt_downgrades_to_cannot_determine():
             }
         ]
     )
-    flags, _ = await run_claim_support_check(llm, [pair], check_run_id=1, settings=get_settings())
-    assert len(flags) == 1
-    assert flags[0].severity == FlagSeverity.low
-    assert flags[0].detail["kind"] == "claim_support_cannot_determine"
-    assert flags[0].detail["reason"] == CANNOT_DETERMINE_WORDING
+    result = await run_claim_support_check(llm, [pair], check_run_id=1, settings=get_settings())
+    assert len(result.flags) == 1
+    assert result.flags[0].severity == FlagSeverity.low
+    assert result.flags[0].detail["kind"] == "claim_support_cannot_determine"
+    assert result.flags[0].detail["reason"] == CANNOT_DETERMINE_WORDING
 
 
 async def test_cannot_determine_is_low_severity_honest_outcome():
@@ -124,21 +120,64 @@ async def test_cannot_determine_is_low_severity_honest_outcome():
             }
         ]
     )
-    flags, skipped = await run_claim_support_check(
-        llm, [_pair(0)], check_run_id=1, settings=get_settings()
-    )
-    assert len(flags) == 1
-    assert flags[0].severity == FlagSeverity.low
-    assert skipped == 0
+    result = await run_claim_support_check(llm, [_pair(0)], check_run_id=1, settings=get_settings())
+    assert len(result.flags) == 1
+    assert result.flags[0].severity == FlagSeverity.low
+    assert result.n_skipped_total == 0
 
 
 async def test_quota_exhausted_degrades_honestly_not_crash():
     llm = ScriptedLLM([QuotaExhaustedError("daily budget spent")])
-    flags, skipped = await run_claim_support_check(
+    result = await run_claim_support_check(
         llm, [_pair(0), _pair(1)], check_run_id=1, settings=get_settings()
     )
-    assert flags == []
-    assert skipped == 2  # both pairs in the one exhausted batch are honestly counted
+    assert result.flags == []
+    # Both pairs in the one exhausted batch are honestly counted, and
+    # counted as QUOTA specifically -- not lumped with the other two causes.
+    assert result.n_skipped_quota == 2
+    assert result.n_skipped_api_down == 0
+    assert result.n_skipped_parse_failure == 0
+
+
+async def test_api_down_is_a_distinct_counter_from_quota():
+    llm = ScriptedLLM([ApiDownError("provider unreachable")])
+    result = await run_claim_support_check(llm, [_pair(0)], check_run_id=1, settings=get_settings())
+    assert result.flags == []
+    assert result.n_skipped_api_down == 1
+    assert result.n_skipped_quota == 0
+    assert result.n_skipped_parse_failure == 0
+
+
+async def test_malformed_llm_output_counts_as_parse_failure_not_quota():
+    """BUG-072's own regression test: a ClaimSupportError (D-017's exact
+    defect class -- structured output that failed validation) must
+    increment the parse-failure counter, never the quota counter. Before
+    this fix, `except (QuotaExhaustedError, ApiDownError,
+    ClaimSupportError): skipped += len(chunk)` made a real model-output
+    regression permanently indistinguishable from ordinary budget
+    exhaustion."""
+    llm = ScriptedLLM([{"verdicts": "not a list, fails validation"}])
+    result = await run_claim_support_check(llm, [_pair(0)], check_run_id=1, settings=get_settings())
+    assert result.flags == []
+    assert result.n_skipped_parse_failure == 1
+    assert result.n_skipped_quota == 0
+    assert result.n_skipped_api_down == 0
+
+
+async def test_a_verdict_missing_from_an_otherwise_valid_batch_is_also_parse_failure():
+    """The per-index `verdicts.get(i) is None` path (batch validated, but
+    the model silently omitted one pair's verdict) is the SAME D-017
+    defect class as a batch-level ClaimSupportError, not a different
+    cause -- must count identically."""
+    llm = ScriptedLLM(
+        [{"verdicts": [{"index": 1, "verdict": "supported", "reasoning": "ok"}]}]  # omits index 0
+    )
+    result = await run_claim_support_check(
+        llm, [_pair(0), _pair(1)], check_run_id=1, settings=get_settings()
+    )
+    assert result.n_skipped_parse_failure == 1
+    assert result.n_skipped_quota == 0
+    assert result.n_skipped_api_down == 0
 
 
 async def test_batching_respects_max_pairs_per_call():
@@ -167,9 +206,9 @@ async def test_batching_respects_max_pairs_per_call():
 
 async def test_empty_pairs_makes_no_llm_call():
     llm = ScriptedLLM([])
-    flags, skipped = await run_claim_support_check(llm, [], check_run_id=1, settings=get_settings())
-    assert flags == []
-    assert skipped == 0
+    result = await run_claim_support_check(llm, [], check_run_id=1, settings=get_settings())
+    assert result.flags == []
+    assert result.n_skipped_total == 0
     assert llm.calls == []
 
 

@@ -41,12 +41,12 @@ _PROMPT_FILE = Path(__file__).parent / "prompts" / f"{PROMPT_TYPE}_{PROMPT_VERSI
 _WHITESPACE = re.compile(r"\s+")
 
 POSSIBLY_UNSUPPORTED_WORDING = (
-    "This citation may not support the claim it's attached to — please "
+    "This citation may not support the claim it's attached to, please "
     'review. Claim: "{claim}" | Source abstract says: "{excerpt}"'
 )
 CANNOT_DETERMINE_WORDING = (
     "Could not determine whether this source supports the claim it's "
-    "attached to (the abstract may not cover the specific point cited) — "
+    "attached to (the abstract may not cover the specific point cited), "
     "please check manually if this matters for your review."
 )
 
@@ -156,33 +156,61 @@ def _verdict_to_flag(
     )
 
 
+@dataclass(frozen=True)
+class ClaimSupportResult:
+    flags: list[CitationFlagDraft]
+    # BUG-072: three distinct causes, three distinct counters -- collapsing
+    # them into one "skipped for quota" counter (the pre-fix shape) reported
+    # a genuine ClaimSupportError (the model's structured output didn't
+    # validate, D-017's exact defect class) as if it were ordinary budget
+    # exhaustion, which would make a real regression permanently
+    # indistinguishable from "we ran out of quota today."
+    n_skipped_quota: int
+    n_skipped_api_down: int
+    n_skipped_parse_failure: int
+
+    @property
+    def n_skipped_total(self) -> int:
+        return self.n_skipped_quota + self.n_skipped_api_down + self.n_skipped_parse_failure
+
+
 async def run_claim_support_check(
     llm: LLMClient, pairs: list[ClaimSupportInput], *, check_run_id: int | None, settings: Settings
-) -> tuple[list[CitationFlagDraft], int]:
-    """Returns (flags, n_skipped_for_quota) — a degraded run still finishes
-    honestly (V-050's availability-floor pattern, applied here): if the
-    day's AI budget runs out partway through, the citations already judged
-    keep their real verdicts and the rest are counted, not silently
-    dropped or faked as clean."""
+) -> ClaimSupportResult:
+    """A degraded run still finishes honestly (V-050's availability-floor
+    pattern, applied here): whichever pairs got judged keep their real
+    verdicts, and the rest are counted -- by real cause, not lumped
+    together -- never silently dropped or faked as clean."""
     if not pairs:
-        return [], 0
+        return ClaimSupportResult([], 0, 0, 0)
 
     flags: list[CitationFlagDraft] = []
-    skipped = 0
+    n_quota = n_api_down = n_parse_failure = 0
     chunk_size = max(1, settings.claim_support_max_pairs_per_call)
     for start in range(0, len(pairs), chunk_size):
         chunk = pairs[start : start + chunk_size]
         try:
             verdicts = await _judge_batch(llm, chunk, check_run_id=check_run_id)
-        except (QuotaExhaustedError, ApiDownError, ClaimSupportError):
-            skipped += len(chunk)
+        except QuotaExhaustedError:
+            n_quota += len(chunk)
+            continue
+        except ApiDownError:
+            n_api_down += len(chunk)
+            continue
+        except ClaimSupportError:
+            n_parse_failure += len(chunk)
             continue
         for i, pair in enumerate(chunk):
             verdict = verdicts.get(i)
             if verdict is None:
-                skipped += 1
+                # A single pair's structured output failed validation
+                # inside an otherwise-successful batch (`_judge_batch`
+                # only omits the index, it doesn't raise) -- same D-017
+                # defect class as the batch-level ClaimSupportError above,
+                # not a quota or availability issue.
+                n_parse_failure += 1
                 continue
             draft = _verdict_to_flag(pair, verdict)
             if draft is not None:
                 flags.append(draft)
-    return flags, skipped
+    return ClaimSupportResult(flags, n_quota, n_api_down, n_parse_failure)
