@@ -168,21 +168,22 @@ async def test_reference_list_overlap_is_suppressed_by_default_and_revealed_when
             session, manuscript_b, check_run_b, extraction_b, settings
         )
         # Default: the reference-list match never became a scored PASSAGE
-        # flag (this test's own concern). Checked at the passage-kind
-        # level, not `n_flags` overall: a References chapter whose only
-        # text is its own heading (this fixture's shape) also produces a
-        # heading-only CHAPTER-level match today, a pre-existing V-036/037
-        # defect this session found but did not introduce and is out of
-        # this ticket's scope (filed BUG-114, tickets/BUGS/open) --
-        # unrelated to whether F7.4's OWN exclusion default works.
+        # flag (this test's own concern), AND no heading-only CHAPTER flag
+        # either -- BUG-114 (fixed) used to produce a false
+        # `reuse_exact_duplicate_chapter` here because a References chapter
+        # whose only surviving text was its own heading word matched any
+        # other manuscript's same-shaped References chapter at 1.0
+        # similarity. Now asserting `n_flags == 0` outright (not just
+        # passage-kind) is the BUG-114 regression guard itself -- do not
+        # loosen this back to a passage-only check without re-breaking that
+        # fix first.
         rows = (
             await session.execute(
                 text("SELECT detail->>'kind' AS kind FROM flag WHERE check_result_id = :id"),
                 {"id": result.id},
             )
         ).all()
-    passage_kinds = [r.kind for r in rows if r.kind is not None and r.kind.endswith("_passage")]
-    assert passage_kinds == []
+    assert rows == []
 
     # Toggled off: the SAME match is real and discoverable on request,
     # clearly tagged as a reference-list match, never scored.
