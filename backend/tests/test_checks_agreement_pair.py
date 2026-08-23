@@ -14,7 +14,7 @@ from app.checks.agreement.pair import (
     run_agreement_pairing,
 )
 from app.config import get_settings
-from app.errors import QuotaExhaustedError
+from app.errors import ApiDownError, QuotaExhaustedError
 from app.models.enums import FlagSeverity
 
 
@@ -216,7 +216,39 @@ async def test_quota_exhausted_degrades_honestly_not_crash():
         llm, intents, outcomes, check_run_id=1, settings=get_settings()
     )
     assert result.flags == []
-    assert result.n_skipped_for_quota == 1
+    assert result.n_skipped_quota == 1
+    assert result.n_skipped_api_down == 0
+    assert result.n_skipped_parse_failure == 0
+
+
+async def test_api_down_is_a_distinct_counter_from_quota():
+    llm = ScriptedLLM([ApiDownError("provider unreachable")])
+    intents = [_intent("To build a login module.")]
+    outcomes = [_outcome("The login module correctly authenticated 98% of test users.")]
+    result = await run_agreement_pairing(
+        llm, intents, outcomes, check_run_id=1, settings=get_settings()
+    )
+    assert result.flags == []
+    assert result.n_skipped_api_down == 1
+    assert result.n_skipped_quota == 0
+    assert result.n_skipped_parse_failure == 0
+
+
+async def test_malformed_llm_output_counts_as_parse_failure_not_quota():
+    """BUG-072's own regression test, F4's side: a batch-level structured-
+    output validation failure (D-017's defect class, raised as
+    `PairingError` inside `_judge_batch`) must increment the
+    parse-failure counter, never the quota counter."""
+    llm = ScriptedLLM([{"verdicts": "not a list, fails validation"}])
+    intents = [_intent("To build a login module.")]
+    outcomes = [_outcome("The login module correctly authenticated 98% of test users.")]
+    result = await run_agreement_pairing(
+        llm, intents, outcomes, check_run_id=1, settings=get_settings()
+    )
+    assert result.flags == []
+    assert result.n_skipped_parse_failure == 1
+    assert result.n_skipped_quota == 0
+    assert result.n_skipped_api_down == 0
 
 
 async def test_empty_intents_and_outcomes_makes_no_llm_call():
