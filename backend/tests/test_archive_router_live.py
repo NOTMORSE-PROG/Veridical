@@ -21,6 +21,16 @@ pytestmark = live
 SCRATCH_DB = "veridical_archiveapitest"
 
 
+def _unit_vector(dim: int) -> list[float]:
+    """A real unit vector (not the all-zero placeholder the other archive
+    fixtures use) -- needed wherever a test relies on pgvector's cosine
+    distance actually resolving to a real similarity instead of NaN
+    (`<=>` on two zero vectors is NaN, which never clears a similarity
+    threshold either way and would silently pass a test for the wrong
+    reason)."""
+    return [1.0] + [0.0] * (dim - 1)
+
+
 @pytest.fixture(scope="module")
 def api_scratch_url():
     import asyncio
@@ -72,7 +82,12 @@ def seeded(client, api_scratch_url, tmp_path):
     from app.ingest.service import raw_store_path
     from app.models.enums import CheckRunStatus, IngestStatus
     from app.models.instructor import Instructor
-    from app.models.manuscript import Manuscript, ManuscriptArchive, ManuscriptChapterArchive
+    from app.models.manuscript import (
+        Manuscript,
+        ManuscriptArchive,
+        ManuscriptChapterArchive,
+        ManuscriptPassageArchive,
+    )
     from app.models.rubric import Rubric
     from app.models.run import CheckRun
 
@@ -89,8 +104,9 @@ def seeded(client, api_scratch_url, tmp_path):
             async with factory() as session:
                 await session.execute(
                     text(
-                        "TRUNCATE manuscript_chapter_archive, manuscript_archive, check_run, "
-                        "manuscript, rubric, session, instructor RESTART IDENTITY CASCADE"
+                        "TRUNCATE manuscript_passage_archive, manuscript_chapter_archive, "
+                        "manuscript_archive, check_run, manuscript, rubric, session, "
+                        "instructor RESTART IDENTITY CASCADE"
                     )
                 )
                 owner = Instructor(
@@ -148,6 +164,30 @@ def seeded(client, api_scratch_url, tmp_path):
                         page=1,
                         embedding=[0.0] * settings.embedding_dim,
                         model_id="test-model",
+                    )
+                )
+                # BUG-123: a real passage row with real body text -- what
+                # purge must also delete, and what a purged-manuscript query
+                # must never surface.
+                session.add(
+                    ManuscriptPassageArchive(
+                        manuscript_id=mine.id,
+                        passage_index=0,
+                        chapter_index=0,
+                        page=1,
+                        char_start=0,
+                        char_end=40,
+                        text="Real body text that must not outlive purge.",
+                        context_text="Real body text that must not outlive purge.",
+                        embedding=_unit_vector(settings.embedding_dim),
+                        # Unlike the two archive rows above (which are never
+                        # run through `query_similar_passages` by any test
+                        # here), this row's `model_id` MUST match the real
+                        # `settings.embedding_model_id` -- `query.py` filters
+                        # on it, and a mismatched literal would silently
+                        # make BUG-123's regression tests pass for the wrong
+                        # reason (the row simply never becomes a candidate).
+                        model_id=settings.embedding_model_id,
                     )
                 )
                 await session.commit()
@@ -240,6 +280,118 @@ def test_purge_deletes_embeddings_and_files_but_keeps_the_manuscript_and_run(see
     # The manuscript row and its check-run history are NOT gone -- only
     # the archive/files were purged, not the record of the manuscript.
     assert after.json()["total"] == 1
+
+
+def test_purge_deletes_the_passage_level_archive_too(seeded, api_scratch_url):
+    """BUG-123 part (a): `purge_manuscript` used to delete only
+    `ManuscriptArchive`/`ManuscriptChapterArchive`, never
+    `ManuscriptPassageArchive` (V-072, added after purge shipped) -- so a
+    purged manuscript's real passage text and context kept existing in the
+    DB. Confirm the row seeded in `seeded` is actually gone after purge,
+    not just that the endpoint returned 200."""
+    import asyncio
+
+    from sqlalchemy import func, select
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
+    from app.db import sqlalchemy_url
+    from app.models.manuscript import ManuscriptPassageArchive
+
+    client, ids = seeded
+
+    async def count_passages() -> int:
+        engine = create_async_engine(sqlalchemy_url(api_scratch_url))
+        try:
+            factory = async_sessionmaker(engine, expire_on_commit=False)
+            async with factory() as session:
+                return (
+                    await session.scalar(
+                        select(func.count())
+                        .select_from(ManuscriptPassageArchive)
+                        .where(ManuscriptPassageArchive.manuscript_id == ids["mine"])
+                    )
+                ) or 0
+        finally:
+            await engine.dispose()
+
+    assert asyncio.run(count_passages()) == 1  # seeded fixture put exactly one row there
+
+    resp = client.delete(f"/archive/{ids['mine']}")
+    assert resp.status_code == 200
+
+    assert asyncio.run(count_passages()) == 0
+
+
+def test_purged_manuscripts_passages_are_never_returned_by_similarity_query(
+    seeded, api_scratch_url
+):
+    """BUG-123 part (b), belt-and-suspenders: even if a passage row somehow
+    survives purge (a future missed call site), `query_similar_passages`
+    must not return it. Sets `purged_at` directly on the archived
+    manuscript WITHOUT deleting its passage row, then queries a fresh
+    manuscript's passage against the archive -- proves the query-level
+    `Manuscript.purged_at IS NULL` filter works independently of the
+    deletion in `purge_manuscript`."""
+    import asyncio
+    from datetime import UTC, datetime
+
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
+    from app.checks.reuse.embed import PassageEmbedding
+    from app.checks.reuse.query import query_similar_passages
+    from app.config import get_settings
+    from app.db import sqlalchemy_url
+    from app.models.manuscript import Manuscript
+
+    client, ids = seeded
+    settings = get_settings()
+
+    async def mark_purged_without_deleting_archive() -> None:
+        engine = create_async_engine(sqlalchemy_url(api_scratch_url))
+        try:
+            factory = async_sessionmaker(engine, expire_on_commit=False)
+            async with factory() as session:
+                manuscript = await session.get(Manuscript, ids["mine"])
+                manuscript.purged_at = datetime.now(UTC)
+                await session.commit()
+        finally:
+            await engine.dispose()
+
+    async def run_query() -> list:
+        engine = create_async_engine(sqlalchemy_url(api_scratch_url))
+        try:
+            factory = async_sessionmaker(engine, expire_on_commit=False)
+            async with factory() as session:
+                querying_passage = PassageEmbedding(
+                    passage_index=0,
+                    chapter_index=0,
+                    anchor_kind="page",
+                    page=1,
+                    paragraph=None,
+                    char_start=0,
+                    char_end=40,
+                    text="Some other manuscript's own passage text.",
+                    context_text="Some other manuscript's own passage text.",
+                    is_reference_list=False,
+                    is_block_quote=False,
+                    # Identical to the archived passage's own vector
+                    # (`_unit_vector`) -- an exact 1.0-similarity match, so
+                    # without the purged_at filter this WOULD be returned.
+                    embedding=_unit_vector(settings.embedding_dim),
+                )
+                result = await query_similar_passages(
+                    session,
+                    ids["theirs"],  # a DIFFERENT manuscript doing the querying
+                    [querying_passage],
+                    settings,
+                )
+                return result.matches
+        finally:
+            await engine.dispose()
+
+    asyncio.run(mark_purged_without_deleting_archive())
+    matches = asyncio.run(run_query())
+    assert matches == []
 
 
 def test_purging_twice_is_a_conflict_not_a_silent_noop(seeded):

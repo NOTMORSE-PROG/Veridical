@@ -21,7 +21,12 @@ from app.audit.service import write_audit_event
 from app.config import Settings
 from app.errors import ConflictError, NotFoundError
 from app.ingest.service import raw_store_path
-from app.models.manuscript import Manuscript, ManuscriptArchive, ManuscriptChapterArchive
+from app.models.manuscript import (
+    Manuscript,
+    ManuscriptArchive,
+    ManuscriptChapterArchive,
+    ManuscriptPassageArchive,
+)
 from app.models.run import CheckRun
 
 
@@ -102,6 +107,18 @@ async def purge_manuscript(
     )
     await session.execute(
         delete(ManuscriptArchive).where(ManuscriptArchive.manuscript_id == manuscript_id)
+    )
+    # BUG-123: F7.4's passage-level archive (V-072) stores real body text
+    # per passage (`text`/`context_text`), not just a vector -- this is
+    # exactly the "comparison data used to check future manuscripts against
+    # it" the purge confirmation modal promises is deleted. It was added
+    # after this function shipped and purge was never updated to cover it,
+    # so purged text kept matching and kept surfacing in other instructors'
+    # flags. Same delete-by-manuscript_id pattern as the two tables above.
+    await session.execute(
+        delete(ManuscriptPassageArchive).where(
+            ManuscriptPassageArchive.manuscript_id == manuscript_id
+        )
     )
 
     # `file_ref` is already an absolute path (ingest/service.py writes it as

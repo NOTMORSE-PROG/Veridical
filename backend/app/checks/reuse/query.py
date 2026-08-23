@@ -185,6 +185,39 @@ async def _best_chapter_matches(
     return matches
 
 
+async def is_first_upload_for_instructor(session: AsyncSession, manuscript_id: int) -> bool:
+    """BUG-097 (presentation-only remedy, owner ruling 2026-08-24): True
+    when this manuscript is the ONLY manuscript its instructor has ever
+    uploaded — i.e. this instructor has no other `Manuscript` row. On a
+    genuinely first-ever upload, ANY match found is necessarily
+    cross-instructor by construction (there is no other manuscript from
+    this instructor to match against), so the caller doesn't need to
+    separately check the matched side's instructor.
+
+    Deliberately does NOT change severity or scoring (that was considered
+    and rejected: nearly every fixture in this test suite, and much of the
+    real corpus during its early/thin period, has exactly this shape, so a
+    severity downgrade here would broadly weaken genuine duplicate
+    detection, not just soften one rare edge case). This flag exists only
+    so the report can show a "this is your first-ever check, verify with
+    extra care" banner — the actual finding stays exactly as trustworthy
+    as any other match.
+    """
+    row = (
+        await session.execute(
+            select(Manuscript.instructor_id).where(Manuscript.id == manuscript_id)
+        )
+    ).first()
+    if row is None:
+        return False
+    other_count = await session.scalar(
+        select(func.count())
+        .select_from(Manuscript)
+        .where(Manuscript.instructor_id == row.instructor_id, Manuscript.id != manuscript_id)
+    )
+    return (other_count or 0) == 0
+
+
 async def _group_sibling_manuscript_ids(session: AsyncSession, manuscript_id: int) -> set[int]:
     row = (
         await session.execute(
@@ -298,9 +331,14 @@ async def passage_archive_size(
         await session.scalar(
             select(func.count())
             .select_from(ManuscriptPassageArchive)
+            .join(Manuscript, Manuscript.id == ManuscriptPassageArchive.manuscript_id)
             .where(
                 ManuscriptPassageArchive.model_id == settings.embedding_model_id,
                 ManuscriptPassageArchive.manuscript_id.notin_(exclude_manuscript_ids),
+                # BUG-123: a purged manuscript's passages must not count
+                # toward "how big is the comparison archive" either -- same
+                # honesty purpose as excluding them from matches.
+                Manuscript.purged_at.is_(None),
             )
         )
     ) or 0
@@ -327,6 +365,12 @@ async def _best_passage_match_for(
     conditions = [
         ManuscriptPassageArchive.model_id == settings.embedding_model_id,
         ManuscriptPassageArchive.manuscript_id.notin_(exclude_manuscript_ids),
+        # BUG-123 defense in depth: `purge_manuscript` now deletes this
+        # manuscript's passage rows outright, but this join+filter is a
+        # second, independent guard against a purged manuscript's text
+        # ever being matched or surfaced again -- a single missed delete
+        # call site should not be able to reintroduce the leak.
+        Manuscript.purged_at.is_(None),
     ]
     # The CANDIDATE side respects the same inclusion flags as the query
     # side: a reference-list/block-quote passage on either side of a match
