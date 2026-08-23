@@ -110,11 +110,21 @@ async def confirm_manuscript_group_route(
     fully instructor-typed) group proposal -- the ONLY place a proposal
     ever changes a manuscript's group."""
     group, matched = await confirm_manuscript_group(
-        session, manuscript_id, instructor.id, body.group_name, body.member_names, body.program_id
+        session,
+        manuscript_id,
+        instructor.id,
+        body.group_name,
+        body.member_names,
+        body.program_id,
+        body.title,
     )
     program_name = await program_name_for(session, group.program_id)
     return ConfirmGroupResponse(
-        group_id=group.id, group_label=group.name, program=program_name, matched=matched
+        group_id=group.id,
+        group_label=group.name,
+        program=program_name,
+        title=group.title,
+        matched=matched,
     )
 
 

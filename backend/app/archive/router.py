@@ -2,7 +2,7 @@
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.archive.schemas import PaginatedArchive, PurgeOut
@@ -19,8 +19,11 @@ router = APIRouter(tags=["archive"])
 async def list_archive_route(
     session: Annotated[AsyncSession, Depends(get_session)],
     instructor: Annotated[Instructor, Depends(get_current_instructor)],
-    page: int = 1,
-    page_size: int = 50,
+    # security-auditor (V-066 review, 2026-08-23): an out-of-range
+    # page/page_size crashed as a bare 500 -- reproduced live, pre-existing
+    # since this endpoint shipped. Same bound as `/library`'s own fix.
+    page: Annotated[int, Query(ge=1)] = 1,
+    page_size: Annotated[int, Query(ge=1, le=200)] = 50,
 ) -> PaginatedArchive:
     return await list_archive(session, instructor.id, page=page, page_size=page_size)
 

@@ -41,7 +41,10 @@ import { TourProvider, useTour } from "../onboarding/TourContext";
 const NAV_ITEMS: ReadonlyArray<{ label: string; to: string }> = [
   { label: "Dashboard", to: "/dashboard" },
   { label: "Rubric", to: "/rubric" },
-  { label: "Archive", to: "/archive" },
+  // V-066: was "Archive" / "/archive" -- Library is a strict superset (own
+  // manuscripts' archive state + purge, plus the whole shared corpus, plus
+  // real metadata Archive never showed), same nav slot, same item count.
+  { label: "Library", to: "/library" },
   { label: "Audit log", to: "/audit" },
   { label: "Settings", to: "/settings" },
 ];

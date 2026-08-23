@@ -9,7 +9,6 @@
 import { useEffect, useRef, useState } from "react";
 import * as pdfjsLib from "pdfjs-dist";
 import type { PDFDocumentProxy, PDFPageProxy, RenderTask } from "pdfjs-dist";
-import { BASE_URL } from "../api/client";
 import type { FlagRegionOut, FlagSummaryOut } from "../api/types";
 import { CHECK_KIND_SHORT_LABEL } from "../domain/checkKind";
 import { SeverityTag, type Severity } from "../components/SeverityTag";
@@ -31,14 +30,20 @@ interface HighlightBox {
 }
 
 export function PdfPane({
-  checkRunId,
+  fileUrl,
   regions,
   flags,
   selectedFlagId,
   onSelectFlag,
   requestedPage,
 }: {
-  checkRunId: number;
+  // V-066: was `checkRunId: number` (built the URL internally, always
+  // `/check-runs/{id}/document/file`) -- generalized to the URL itself so
+  // the library's own-manuscript two-up can feed this the SAME component
+  // pointed at `/library/{id}/document/file` instead of forking a second
+  // PDF pane (Pre-implementation research Q3, `tickets/V8-real-use/open/
+  // V-066.md`). Callers own building the right URL for their own route.
+  fileUrl: string;
   regions: FlagRegionOut[];
   flags: FlagSummaryOut[];
   selectedFlagId: number | null;
@@ -67,7 +72,7 @@ export function PdfPane({
   useEffect(() => {
     let cancelled = false;
     pdfjsLib
-      .getDocument({ url: `${BASE_URL}/check-runs/${checkRunId}/document/file`, withCredentials: true })
+      .getDocument({ url: fileUrl, withCredentials: true })
       .promise.then((doc) => {
         if (!cancelled) setPdf(doc);
       })
@@ -77,7 +82,7 @@ export function PdfPane({
     return () => {
       cancelled = true;
     };
-  }, [checkRunId]);
+  }, [fileUrl]);
 
   // Jump to a flag's page when it's selected/activated from the analysis
   // pane (AC3 direction 2).

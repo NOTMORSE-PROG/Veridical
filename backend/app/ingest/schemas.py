@@ -180,12 +180,19 @@ class ConfirmGroupRequest(BaseModel):
     group_name: str = Field(min_length=1)
     member_names: list[str] = Field(default_factory=list)
     program_id: int | None = None
+    # V-066: the full capstone title shown (read-only, not editable) in the
+    # confirm dialog alongside group_name/members -- carried through here
+    # exactly like program_id so it can be persisted, same "only set on a
+    # NEWLY created group" rule as program_id (see
+    # `app.ingest.service.confirm_manuscript_group`).
+    title: str | None = None
 
 
 class ConfirmGroupResponse(BaseModel):
     group_id: int
     group_label: str
     program: str | None
+    title: str | None = None
     # True = an existing group was matched (AC4); False = a new one was
     # created — lets the confirm dialog say which happened, honestly.
     matched: bool

@@ -104,7 +104,7 @@ describe("AppShell", () => {
         <div />
       </AppShell>,
     );
-    for (const label of ["Dashboard", "Rubric", "Archive", "Audit log", "Settings"]) {
+    for (const label of ["Dashboard", "Rubric", "Library", "Audit log", "Settings"]) {
       expect(screen.getAllByText(label).length).toBe(2);
     }
   });
@@ -126,7 +126,9 @@ describe("AppShell", () => {
     // them as real destinations (this file's own comment: "Archive/
     // Settings, V-042, are a materially different case" from the
     // disabled placeholders this test guards against) -- only the truly
-    // unbuilt/unapproved ones stay excluded now.
+    // unbuilt/unapproved ones stay excluded now. Archive itself was
+    // retired and folded into Library, V-066; the nav slot's own history
+    // still applies to it under its new name.
     for (const label of ["Submissions", "Soon"]) {
       expect(screen.queryByText(label)).not.toBeInTheDocument();
     }

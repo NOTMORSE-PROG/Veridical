@@ -126,7 +126,13 @@ describe("GroupProposalFields", () => {
         if (path === "/manuscripts/1/group" && init?.method === "PATCH") {
           patchBody.push(JSON.parse(init.body as string));
           return new Response(
-            JSON.stringify({ group_id: 5, group_label: "VERIDICAL", program: null, matched: true }),
+            JSON.stringify({
+              group_id: 5,
+              group_label: "VERIDICAL",
+              program: null,
+              title: "AI-Powered Capstone Advisor",
+              matched: true,
+            }),
             { status: 200 },
           );
         }
@@ -144,6 +150,7 @@ describe("GroupProposalFields", () => {
       group_name: "VERIDICAL",
       member_names: ["Juan Dela Cruz", "Maria Santos"],
       program_id: null,
+      title: "AI-Powered Capstone Advisor",
     });
     expect(onDone).not.toHaveBeenCalled();
 

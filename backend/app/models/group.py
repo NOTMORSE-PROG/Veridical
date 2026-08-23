@@ -46,6 +46,14 @@ class Group(Base, PkCreatedMixin):
     # leaves this NULL; V-063's title-page inference is the only path
     # that ever sets it for a NEW group.
     program_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("program.id"))
+    # V-066: the full capstone title, same NULL-means-not-set convention as
+    # `program_id` above. V-063's extraction (`app/ingest/titlepage.py`)
+    # already computes this and shows it in the confirm dialog; this column
+    # just gives it somewhere to live once confirmed. Never overwritten by
+    # a later confirm on the SAME group (see
+    # `app/groups/service.py::confirm_group_title` docstring) — first
+    # confirmed title wins, same "first spelling wins" rule `name` follows.
+    title: Mapped[str | None] = mapped_column(String(500))
 
     __table_args__ = (
         UniqueConstraint(

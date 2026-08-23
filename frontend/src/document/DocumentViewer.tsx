@@ -5,6 +5,7 @@
 // right (the existing flags list, browse or one flag's detail).
 import { useEffect, useRef, useState } from "react";
 import { Link, useParams, useSearchParams } from "react-router";
+import { BASE_URL } from "../api/client";
 import { AnchorPill } from "../components/AnchorPill";
 import { SeverityTag, type Severity } from "../components/SeverityTag";
 import { StatusPill } from "../components/StatusPill";
@@ -410,7 +411,7 @@ export function DocumentViewerPage() {
             >
               {viewer.source_format === "pdf" ? (
                 <PdfPane
-                  checkRunId={id}
+                  fileUrl={`${BASE_URL}/check-runs/${id}/document/file`}
                   regions={pdfRegions}
                   flags={flags ?? []}
                   selectedFlagId={pdfSelectedFlagId}
