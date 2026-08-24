@@ -118,6 +118,80 @@ describe("ShareModal", () => {
     );
   });
 
+  it("ux-critic finding (P1): cancelling the revoke confirmation returns focus to the Revoke button, not <body>", async () => {
+    vi.stubGlobal("fetch", stubFetchByPath({ "/check-runs/5/share": ACTIVE_LINK }));
+    renderWithProviders(<ShareModal checkRunId={5} manuscriptLabel="G1" onClose={() => {}} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Revoke link" }));
+    await screen.findByText(/Revoke this link\?/);
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+
+    const revokeButton = await screen.findByRole("button", { name: "Revoke link" });
+    expect(document.activeElement).toBe(revokeButton);
+  });
+
+  it("ux-critic finding (P1): cancelling the regenerate confirmation returns focus to the Regenerate button, not <body>", async () => {
+    vi.stubGlobal("fetch", stubFetchByPath({ "/check-runs/5/share": ACTIVE_LINK }));
+    renderWithProviders(<ShareModal checkRunId={5} manuscriptLabel="G1" onClose={() => {}} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Regenerate link" }));
+    await screen.findByText(/Replace this link with a new one\?/);
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+
+    const regenerateButton = await screen.findByRole("button", { name: "Regenerate link" });
+    expect(document.activeElement).toBe(regenerateButton);
+  });
+
+  it("ux-critic finding (P1): a successful revoke announces it and moves focus to Create link, not <body>", async () => {
+    let revoked = false;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === "string" ? input : input.toString();
+      const path = new URL(url, "http://localhost").pathname;
+      if (path === "/check-runs/5/share" && init?.method === "DELETE") {
+        revoked = true;
+        return new Response(JSON.stringify({ ok: true }), { status: 200 });
+      }
+      if (path === "/check-runs/5/share") {
+        return new Response(JSON.stringify(revoked ? null : ACTIVE_LINK), { status: 200 });
+      }
+      return new Response("{}", { status: 200 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    renderWithProviders(<ShareModal checkRunId={5} manuscriptLabel="G1" onClose={() => {}} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Revoke link" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Revoke link" }));
+
+    const createButton = await screen.findByRole("button", { name: "Create link" });
+    expect(document.activeElement).toBe(createButton);
+    expect(screen.getByText("Link revoked.")).toBeInTheDocument();
+  });
+
+  it("ux-critic finding (P1): a successful regenerate of an EXISTING link moves focus to the URL input and announces it, not just the very first link ever created", async () => {
+    const NEW_LINK: ShareLinkOut = { ...ACTIVE_LINK, token: "rotated-token" };
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === "string" ? input : input.toString();
+      const path = new URL(url, "http://localhost").pathname;
+      if (path === "/check-runs/5/share" && init?.method === "POST") {
+        return new Response(JSON.stringify(NEW_LINK), { status: 200 });
+      }
+      if (path === "/check-runs/5/share") return new Response(JSON.stringify(ACTIVE_LINK), { status: 200 });
+      return new Response("{}", { status: 200 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    renderWithProviders(<ShareModal checkRunId={5} manuscriptLabel="G1" onClose={() => {}} />);
+
+    // Focus something else first so a false pass (focus never moved
+    // from an earlier effect) can't hide behind coincidence.
+    await screen.findByDisplayValue(`${window.location.origin}/shared/abc123token`);
+    fireEvent.click(screen.getByRole("button", { name: "Regenerate link" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Create new link" }));
+
+    const rotatedInput = await screen.findByDisplayValue(`${window.location.origin}/shared/rotated-token`);
+    expect(document.activeElement).toBe(rotatedInput);
+    expect(screen.getByText("New link created.")).toBeInTheDocument();
+  });
+
   it("revoking flips the modal back to the create-link state", async () => {
     let revoked = false;
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -166,6 +240,78 @@ describe("ShareModal", () => {
     fireEvent.click(screen.getByRole("button", { name: "Create new link" }));
     await screen.findByDisplayValue(`${window.location.origin}/shared/brand-new-token`);
     expect(calls).toBe(1);
+  });
+
+  it("BUG-090: changing the expiry selection shows a pending notice without touching the live summary", async () => {
+    vi.stubGlobal("fetch", stubFetchByPath({ "/check-runs/5/share": ACTIVE_LINK }));
+    renderWithProviders(<ShareModal checkRunId={5} manuscriptLabel="G1" onClose={() => {}} />);
+
+    // Rest state: the select defaults to "current," no pending notice,
+    // and the summary line reflects the REAL live link (no expiry).
+    await screen.findByText(/No expiry set\./);
+    expect(screen.queryByText(/Not yet applied/)).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Regenerate link" })).toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText("New link's expiry"), { target: { value: "7d" } });
+
+    // The pending notice appears instantly, but the summary line (the
+    // control this whole ticket is about) is UNCHANGED -- it must never
+    // say something the server hasn't done.
+    expect(
+      await screen.findByText(/Not yet applied\. Click Regenerate link below to issue a new link that expires in 7 days\./),
+    ).toBeInTheDocument();
+    expect(screen.getByText(/No expiry set\./)).toBeInTheDocument();
+    // Redundant signal #2: the button label itself names the pending value.
+    expect(screen.getByRole("button", { name: "Regenerate link (7 days)" })).toBeInTheDocument();
+  });
+
+  it("BUG-090's own regression test: choosing an expiry and regenerating sends the real expires_at, and the summary reflects the new live link", async () => {
+    const NEW_LINK: ShareLinkOut = {
+      ...ACTIVE_LINK,
+      token: "brand-new-token",
+      expires_at: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
+    };
+    let sentBody: unknown = null;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === "string" ? input : input.toString();
+      const path = new URL(url, "http://localhost").pathname;
+      if (path === "/check-runs/5/share" && init?.method === "POST") {
+        sentBody = init.body ? JSON.parse(init.body as string) : null;
+        return new Response(JSON.stringify(NEW_LINK), { status: 200 });
+      }
+      if (path === "/check-runs/5/share") return new Response(JSON.stringify(ACTIVE_LINK), { status: 200 });
+      return new Response("{}", { status: 200 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    renderWithProviders(<ShareModal checkRunId={5} manuscriptLabel="G1" onClose={() => {}} />);
+
+    await screen.findByText(/No expiry set\./);
+    fireEvent.change(screen.getByLabelText("New link's expiry"), { target: { value: "7d" } });
+    fireEvent.click(screen.getByRole("button", { name: "Regenerate link (7 days)" }));
+    // Confirm sub-panel names the pending value too.
+    expect(
+      await screen.findByText(
+        /Replace this link with a new one that expires in 7 days\? The current link stops working immediately once you do\./,
+      ),
+    ).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Create new link" }));
+
+    await screen.findByDisplayValue(`${window.location.origin}/shared/brand-new-token`);
+    // The actual stored value the server received is a real, computed
+    // expires_at -- not null, not the string "7d". Compared with a small
+    // tolerance rather than exact-string equality: both the test's own
+    // "7 days from now" and the component's `Date.now()` call inside
+    // expiryFromSelection are computed independently, milliseconds apart.
+    const sentExpiresAt = new Date((sentBody as { expires_at: string }).expires_at).getTime();
+    const expectedExpiresAt = Date.now() + 7 * 24 * 60 * 60 * 1000;
+    expect(Math.abs(sentExpiresAt - expectedExpiresAt)).toBeLessThan(5000);
+    // The summary now reflects the NEW live link, not the selection.
+    expect(screen.getByText(/Expires .+\./)).toBeInTheDocument();
+    expect(screen.queryByText(/No expiry set\./)).not.toBeInTheDocument();
+    // The pending notice is gone and the select re-anchored to "current"
+    // -- no stale pending choice survives a successful regenerate.
+    expect(screen.queryByText(/Not yet applied/)).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Regenerate link" })).toBeInTheDocument();
   });
 
   it("shows the server's error message on a failed create", async () => {
