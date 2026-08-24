@@ -152,6 +152,60 @@ async def test_typo_doi_is_unverifiable_not_retried_via_title(session_factory):
     draft = _verdict_flag_draft(citation, verdict)
     assert draft.severity == FlagSeverity.low
     assert draft.detail["reason"] == UNVERIFIABLE_NOT_FOUND_WORDING
+    # BUG-078: a real DOI to key a confirmation on -- the flag is confirmable.
+    assert draft.detail["key_kind"] == "doi"
+    assert draft.detail["key_value"] == "10.9999/typo-doi"
+
+
+async def test_not_found_with_no_identifier_has_nothing_confirmable(session_factory):
+    """BUG-078: a citation with no DOI/ISBN/title at all (e.g. a
+    parse_failed entry) can't be keyed to any citation_cache row, so its
+    flag must carry no key_kind/key_value -- nothing for the instructor to
+    confirm, and the frontend/`confirm_citation_source` must be able to
+    tell this case apart from a genuinely confirmable one."""
+    citation = _citation(doi=None, isbn=None, title=None)
+    async with session_factory() as session, _client(lambda r: httpx.Response(404)) as client:
+        verdict = await verify_citation(session, client, citation, settings=get_settings())
+    assert verdict.kind == VerdictKind.not_found
+    draft = _verdict_flag_draft(citation, verdict)
+    assert "key_kind" not in draft.detail
+    assert "key_value" not in draft.detail
+
+
+async def test_instructor_confirmed_source_produces_no_flag(session_factory):
+    """BUG-078/FEATURES.md §9: once a source's citation_cache row is
+    marked instructor_confirmed (by `confirm_citation_source`, exercised
+    directly here rather than through the flags service to keep this test
+    scoped to `verify.py`'s own read side), a LATER verification of the
+    identical key (this manuscript's re-run, or a different manuscript
+    citing the same DOI) must resolve to `instructor_confirmed` and
+    produce no flag -- the whole point of the feature."""
+    from app.external.cache import confirm_citation_source
+
+    citation = _citation(doi="10.9999/confirmed-doi")
+    calls = []
+
+    def handler(request):
+        calls.append(str(request.url))
+        return httpx.Response(404)
+
+    async with session_factory() as session, _client(handler) as client:
+        first = await verify_citation(session, client, citation, settings=get_settings())
+    assert first.kind == VerdictKind.not_found
+
+    async with session_factory() as session:
+        confirmed = await confirm_citation_source(
+            session, key_kind="doi", key_value="10.9999/confirmed-doi"
+        )
+    assert confirmed is True
+
+    # Second verification hits the cache (not a fresh provider call) and
+    # must now resolve to instructor_confirmed, not not_found again.
+    async with session_factory() as session, _client(handler) as client:
+        second = await verify_citation(session, client, citation, settings=get_settings())
+    assert second.kind == VerdictKind.instructor_confirmed
+    assert _verdict_flag_draft(citation, second) is None
+    assert len(calls) == 1  # only the first lookup hit the network; the second was a cache hit
 
 
 async def test_known_retracted_doi_is_high_severity(session_factory):

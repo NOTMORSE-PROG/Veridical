@@ -72,6 +72,7 @@ const SAMPLE_FLAG: FlagSummaryOut = {
   overridden: false,
   is_passage_level: false,
   first_upload_context: false,
+  confirmed_citation_source: false,
 };
 
 function shared(overrides: Partial<SharedReportOut> = {}): SharedReportOut {
