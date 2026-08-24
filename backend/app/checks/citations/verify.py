@@ -63,21 +63,21 @@ class CitationVerdict:
 
 RETRACTED_WORDING = (
     "This source appears to have been RETRACTED ({detail}). Possible "
-    "integrity concern — please verify with the publisher or DOI before "
+    "integrity concern, please verify with the publisher or DOI before "
     "the defense."
 )
 CORRECTED_WORDING = (
     "This source has a published correction/erratum on record ({detail}). "
-    "Not a retraction — for your awareness."
+    "Not a retraction, for your awareness."
 )
 UNVERIFIABLE_NOT_FOUND_WORDING = (
     "Could not find this source in CrossRef, Semantic Scholar, Open "
     "Library, or Google Books. Possible local/unindexed source, a typo in "
-    "the citation, or a source these providers don't cover — please check "
+    "the citation, or a source these providers don't cover, please check "
     "manually. Unverifiable, not necessarily incorrect."
 )
 UNVERIFIABLE_API_DOWN_WORDING = (
-    "Could not check this source right now — the verification service(s) "
+    "Could not check this source right now, the verification service(s) "
     "were unreachable. Re-run this check later to verify."
 )
 
