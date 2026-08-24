@@ -280,6 +280,62 @@ async def test_flag_detail_takes_priority_over_check_result_detail(session_facto
         assert grim_out.ai_reasoning != pvalue_out.ai_reasoning
 
 
+async def test_ai_reasoning_is_suppressed_when_identical_to_evidence_excerpt(session_factory):
+    """BUG-112: F7 reuse flags set `detail["reason"]` to the exact same
+    sentence as `evidence_excerpt` -- `ai_reasoning` must not fall back to
+    it in that case, or the frontend renders one sentence twice. A
+    genuinely distinct `detail["reason"]` (the pre-existing F5/F6 shape,
+    `test_flag_detail_takes_priority_over_check_result_detail` above) must
+    still come through unsuppressed."""
+    async with session_factory() as session:
+        instructor = Instructor(email=f"dupreason-{id(session)}@test.local", display_name="T")
+        session.add(instructor)
+        await session.commit()
+        manuscript = Manuscript(instructor_id=instructor.id, group_label="G", file_ref="x.pdf")
+        rubric = Rubric(instructor_id=instructor.id, title="Format", source_file="r.pdf")
+        session.add_all([manuscript, rubric])
+        await session.commit()
+        check_run = CheckRun(
+            manuscript_id=manuscript.id, rubric_id=rubric.id, status=CheckRunStatus.done
+        )
+        session.add(check_run)
+        await session.commit()
+        result = CheckResult(
+            check_run_id=check_run.id,
+            criterion_id=None,
+            kind=CheckKind.originality_reuse,
+            outcome=ResultOutcome.failed,
+            score=None,
+            detail={},
+        )
+        session.add(result)
+        await session.commit()
+        same_sentence = "Possible reuse of a passage found elsewhere in VERIDICAL's library."
+        duplicated_flag = Flag(
+            check_result_id=result.id,
+            severity=FlagSeverity.high,
+            evidence_excerpt=same_sentence,
+            page_anchor="page 3",
+            detail={"kind": "reuse_passage_exact_duplicate", "reason": same_sentence},
+        )
+        distinct_flag = Flag(
+            check_result_id=result.id,
+            severity=FlagSeverity.med,
+            evidence_excerpt="The manuscript claims X.",
+            page_anchor="page 4",
+            detail={"kind": "agreement_contradictory", "reason": "This appears to contradict Y."},
+        )
+        session.add_all([duplicated_flag, distinct_flag])
+        await session.commit()
+
+        duplicated_out = await get_flag(session, duplicated_flag.id, instructor.id)
+        assert duplicated_out.evidence_excerpt == same_sentence
+        assert duplicated_out.ai_reasoning is None
+
+        distinct_out = await get_flag(session, distinct_flag.id, instructor.id)
+        assert distinct_out.ai_reasoning == "This appears to contradict Y."
+
+
 async def test_no_verdict_high_flag_does_not_force_not_ready_live(session_factory):
     """BUG-053 Option A, end to end: a high-severity flag whose underlying
     check left no real finding behind (no "kind"/"reason"/"verdict"/

@@ -68,6 +68,18 @@ async def _scoped_flag(
     return row
 
 
+def _distinct_reasoning(detail: dict, evidence_excerpt: str) -> str | None:
+    """`ai_reasoning`'s fallback source (`detail["reason"]`) is, for some
+    checks, the same sentence already set as `evidence_excerpt` -- BUG-112.
+    Suppress it in that case so the frontend never renders one sentence
+    twice in a row; `detail["reasoning"]` (a genuinely distinct field, set
+    by semantic grading) is never suppressed."""
+    reasoning = detail.get("reasoning") or detail.get("reason")
+    if reasoning is not None and reasoning == evidence_excerpt:
+        return None
+    return reasoning
+
+
 async def _to_flag_out(
     session: AsyncSession,
     flag: Flag,
@@ -106,7 +118,12 @@ async def _to_flag_out(
         # `flag_ai_verdict_summary` is the single source both this label
         # and the scoring engine's own "does this flag count" gate share.
         ai_verdict_summary=flag_ai_verdict_summary(detail),
-        ai_reasoning=detail.get("reasoning") or detail.get("reason"),
+        # BUG-112: some checks (F7 reuse) set detail["reason"] to the exact
+        # same sentence already shown as evidence_excerpt -- falling back to
+        # it here would render that sentence twice on screen 4i. A general
+        # guard, not a check-specific patch, so any future check that makes
+        # the same convenience choice doesn't reintroduce the duplication.
+        ai_reasoning=_distinct_reasoning(detail, flag.evidence_excerpt),
         llm_mode=check_run.llm_mode.value,
         passage_pair=_passage_pair_from_detail(flag.evidence_excerpt, detail),
         first_upload_context=bool(detail.get("first_upload_context")),
