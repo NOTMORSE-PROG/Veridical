@@ -193,6 +193,20 @@ async def resolve_escalation(
     result = await session.get(CheckResult, check_result_id)
     if result is None or result.check_run_id != check_run_id:
         raise NotFoundError(f"No check result {check_result_id} on check run {check_run_id}.")
+    # BUG-073 follow-up: an F4/F5 integrity check (criterion_id always
+    # None) can now also carry a needs-review outcome (a partially-
+    # executed run, quota_exhausted/api_down) -- this endpoint's whole
+    # resolution vocabulary (accept_majority/mark_pass/mark_fail/
+    # needs_document, `_OUTCOME_BY_VERDICT`/`_SCORE_BY_VERDICT`) is
+    # rubric-criterion grading semantics and doesn't mean anything for an
+    # integrity check. `list_escalated`'s own INNER JOIN to Criterion
+    # already keeps these off the review panel; this guard closes the
+    # same gap for a caller that reaches this endpoint directly with an
+    # integrity check's id instead of going through the panel.
+    if result.criterion_id is None:
+        raise ConflictError(
+            "This isn't a rubric criterion awaiting review, so there's nothing to resolve here."
+        )
     if result.outcome not in NEEDS_REVIEW_OUTCOMES:
         raise ConflictError("This criterion isn't awaiting review, so there's nothing to resolve.")
 

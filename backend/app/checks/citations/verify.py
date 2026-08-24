@@ -25,7 +25,11 @@ from app.checks.citations.extract import (
     orphan_flags,
     uncited_flags,
 )
-from app.checks.citations.support import ClaimSupportInput, run_claim_support_check
+from app.checks.citations.support import (
+    ClaimSupportInput,
+    ClaimSupportResult,
+    run_claim_support_check,
+)
 from app.config import Settings
 from app.errors import ApiDownError
 from app.external import cache
@@ -287,26 +291,48 @@ async def run_citation_integrity_check(
                 )
             )
 
-    n_claim_support_skipped = 0
+    claim_support_result = ClaimSupportResult([], 0, 0, 0)
     if llm is not None and claim_support_pairs:
-        claim_flags, n_claim_support_skipped = await run_claim_support_check(
+        claim_support_result = await run_claim_support_check(
             llm, claim_support_pairs, check_run_id=check_run_id, settings=settings
         )
-        flag_drafts.extend(claim_flags)
+        flag_drafts.extend(claim_support_result.flags)
+
+    # BUG-073: a check that skipped even one pair did NOT fully execute --
+    # `passed` is reserved for a run that judged everything it set out to
+    # judge. Priority when causes mix (rare, but a chunked run can hit more
+    # than one in a single check_run): `unverifiable` first -- a parse
+    # failure is D-017's exact defect class and charter rule 9 says it must
+    # never hide behind a more benign-sounding cause -- then `api_down`
+    # (retrying later plausibly helps), then `quota_exhausted` (the
+    # existing, most self-resolving state) last. The real per-cause counts
+    # are always in `detail` regardless of which one outcome wins.
+    if claim_support_result.n_skipped_parse_failure > 0:
+        outcome = ResultOutcome.unverifiable
+    elif claim_support_result.n_skipped_api_down > 0:
+        outcome = ResultOutcome.api_down
+    elif claim_support_result.n_skipped_quota > 0:
+        outcome = ResultOutcome.quota_exhausted
+    else:
+        outcome = ResultOutcome.passed
 
     result = CheckResult(
         check_run_id=check_run_id,
         criterion_id=None,
         kind=CheckKind.citation_integrity,
-        outcome=ResultOutcome.passed,
+        outcome=outcome,
         detail={
             "n_references": len(citations),
             "n_in_text_citations": len(in_text),
             "n_linked": len(cross.linked),
             "n_orphans": len(cross.orphans),
             "n_uncited": len(cross.uncited),
-            "n_claim_support_checked": len(claim_support_pairs),
-            "n_claim_support_skipped_quota": n_claim_support_skipped,
+            "n_claim_support_checked": len(claim_support_pairs)
+            - claim_support_result.n_skipped_total,
+            "n_claim_support_pairs_total": len(claim_support_pairs),
+            "n_claim_support_skipped_quota": claim_support_result.n_skipped_quota,
+            "n_claim_support_skipped_api_down": claim_support_result.n_skipped_api_down,
+            "n_claim_support_skipped_parse_failure": claim_support_result.n_skipped_parse_failure,
             "n_flags": len(flag_drafts),
         },
     )

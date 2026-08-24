@@ -32,13 +32,16 @@ SCRATCH_DB = "veridical_agreementtest"
 
 
 class ScriptedLLM:
-    def __init__(self, responses: list[dict[str, Any]]):
+    def __init__(self, responses: list[dict[str, Any] | Exception]):
         self._responses = list(responses)
         self.calls: list[str] = []
 
     async def complete(self, prompt_type, prompt, *, prompt_version="unversioned", **context):
         self.calls.append(prompt)
-        return self._responses.pop(0)
+        response = self._responses.pop(0)
+        if isinstance(response, Exception):
+            raise response
+        return response
 
 
 @pytest.fixture(scope="module")
@@ -197,6 +200,41 @@ async def test_unmatched_intent_produces_a_low_flag_no_llm_call(session_factory)
     assert rows[0].severity == "low"
     assert rows[0].kind == "agreement_unmatched_intent"
     assert llm.calls == []
+
+
+async def test_a_run_with_skipped_pairs_does_not_report_passed(session_factory):
+    """BUG-073's own regression test: nothing previously read
+    `n_skipped_for_quota`/`n_skipped_*`, and the check reported `passed`
+    unconditionally regardless of how many pairs it actually judged. A
+    manuscript with a genuinely contradictory intent/outcome pair whose
+    ONLY candidate hits QuotaExhaustedError must surface that -- not read
+    as a clean pass with zero flags (which is indistinguishable on screen
+    from "checked, found nothing wrong")."""
+    from app.errors import QuotaExhaustedError
+    from app.models.enums import ResultOutcome as RO
+
+    check_run_id = await _seed_check_run(session_factory)
+    extraction = _extraction(
+        [
+            _block("Objectives"),
+            _block("1. To build a biometric login module for the mobile app."),
+            _block("Summary of Findings"),
+            _block(
+                "1. The biometric login module was not implemented due to hardware constraints."
+            ),
+        ]
+    )
+    llm = ScriptedLLM([QuotaExhaustedError("daily budget spent")])
+    async with session_factory() as session:
+        result = await run_internal_agreement_check(
+            session, llm, check_run_id, extraction, get_settings()
+        )
+    assert result.outcome == RO.quota_exhausted
+    assert result.outcome != RO.passed
+    assert result.detail["n_flags"] == 0  # honestly nothing was judged, not "nothing wrong"
+    assert result.detail["n_skipped_quota"] == 1
+    assert result.detail["n_skipped_api_down"] == 0
+    assert result.detail["n_skipped_parse_failure"] == 0
 
 
 async def test_idempotent_rerun_does_not_duplicate_flags(session_factory):
