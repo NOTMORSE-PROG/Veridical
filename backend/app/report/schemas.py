@@ -61,6 +61,25 @@ class CriterionResultOut(BaseModel):
     resolution: ResolutionOut | None
 
 
+class IntegrityCheckStatusOut(BaseModel):
+    """BUG-125: on-screen disclosure that an F4/F5 integrity check did not
+    fully execute. BUG-073 (same day) made the underlying `CheckResult`
+    honest about this (`outcome` is `unverifiable`/`api_down`/
+    `quota_exhausted`, never a masked `passed`) -- nothing surfaced it on
+    screen until this. A narrow, explicit projection of `CheckResult.detail`,
+    never a passthrough: F7's own `detail` carries internal-only fields
+    (`matched_group_label`, BUG-050/BUG-097) that must never reach an API
+    response, and the same caution applies here even though F4/F5's detail
+    doesn't currently hold anything that sensitive -- the projection stays
+    explicit on principle, not because today's fields happen to be safe."""
+
+    check_kind: str
+    outcome: str
+    n_skipped_quota: int
+    n_skipped_api_down: int
+    n_skipped_parse_failure: int
+
+
 class ReportOut(BaseModel):
     check_run_id: int
     manuscript_group_label: str
@@ -116,6 +135,11 @@ class ReportOut(BaseModel):
     # manuscript's first reported run — never a fabricated comparison.
     previous_status: str | None = None
     previous_composite_score: float | None = None
+    # BUG-125: empty when every F4/F5 integrity check either fully ran or
+    # never applies to this manuscript (`not_applicable`) -- never a
+    # fabricated empty state, the same convention `rubric_parse_issues`
+    # already follows.
+    integrity_check_status: list[IntegrityCheckStatusOut] = []
 
 
 class PublicCriterionResultOut(BaseModel):

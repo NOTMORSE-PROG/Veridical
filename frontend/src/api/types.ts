@@ -324,6 +324,19 @@ export interface ReportCommon {
   rubric_parse_issues: string[] | null;
 }
 
+/** BUG-125: on-screen disclosure that an F4/F5 integrity check did not
+ * fully execute -- BUG-073 made `CheckResult.outcome` honest about this
+ * (never a masked "passed" when pairs were skipped), but nothing surfaced
+ * it here until now. A narrow, explicit projection of `CheckResult.detail`,
+ * never a passthrough. */
+export interface IntegrityCheckStatusOut {
+  check_kind: "internal_agreement" | "citation_integrity";
+  outcome: "unverifiable" | "api_down" | "quota_exhausted";
+  n_skipped_quota: number;
+  n_skipped_api_down: number;
+  n_skipped_parse_failure: number;
+}
+
 export interface ReportOut extends ReportCommon {
   check_run_id: number;
   manuscript_group_label: string;
@@ -341,6 +354,9 @@ export interface ReportOut extends ReportCommon {
   // own score to anyone holding a link for a different one.
   previous_status: "ready" | "conditionally_ready" | "not_ready" | "needs_review" | null;
   previous_composite_score: number | null;
+  // BUG-125: empty when every F4/F5 integrity check either fully ran or
+  // never applies to this manuscript -- never a fabricated empty state.
+  integrity_check_status: IntegrityCheckStatusOut[];
 }
 
 /** BUG-044 fix: the public, unauthenticated adviser view's report

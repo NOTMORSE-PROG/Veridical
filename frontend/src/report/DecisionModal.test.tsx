@@ -26,6 +26,7 @@ function reportWithStatus(status: ReportOut["status"], score: number | null): Re
     rubric_parse_issues: null,
     previous_status: null,
     previous_composite_score: null,
+    integrity_check_status: [],
     results: [],
   };
 }

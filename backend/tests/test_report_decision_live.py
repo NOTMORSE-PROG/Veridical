@@ -319,6 +319,55 @@ async def test_a_partially_executed_integrity_check_never_blocks_or_inflates_pen
         assert decided.decision == "approved"
 
 
+async def test_bug_125_a_partially_executed_integrity_check_is_disclosed_on_the_report(
+    session_factory,
+):
+    """BUG-125: BUG-073 made the CheckResult honest (outcome is
+    quota_exhausted/api_down/unverifiable, never a masked `passed`) but
+    nothing on the report surfaced it -- an instructor saw the identical
+    screen whether a check fully ran or silently skipped pairs. Asserts
+    the new `ReportOut.integrity_check_status` field carries the real
+    per-cause counts for a check that skipped some, and stays empty for
+    one that ran clean."""
+    async with session_factory() as session:
+        instructor, check_run = await _seed_decidable_run(session)
+        session.add(
+            CheckResult(
+                check_run_id=check_run.id,
+                criterion_id=None,
+                kind=CheckKind.citation_integrity,
+                outcome=ResultOutcome.api_down,
+                detail={
+                    "n_claim_support_skipped_quota": 0,
+                    "n_claim_support_skipped_api_down": 3,
+                    "n_claim_support_skipped_parse_failure": 0,
+                },
+            )
+        )
+        await session.commit()
+
+        report = await get_report(session, check_run.id, instructor.id)
+
+        assert len(report.integrity_check_status) == 1
+        status = report.integrity_check_status[0]
+        assert status.check_kind == "citation_integrity"
+        assert status.outcome == "api_down"
+        assert status.n_skipped_quota == 0
+        assert status.n_skipped_api_down == 3
+        assert status.n_skipped_parse_failure == 0
+
+
+async def test_bug_125_a_cleanly_run_integrity_check_is_not_disclosed(session_factory):
+    """Negative control for BUG-125: a check_run with no F4/F5 CheckResult
+    at all (the fixture's own baseline -- `_seed_decidable_run` never adds
+    one) must not fabricate a disclosure. Guards against a query that's
+    too broad and flags every run, not just partially-executed ones."""
+    async with session_factory() as session:
+        instructor, check_run = await _seed_decidable_run(session)
+        report = await get_report(session, check_run.id, instructor.id)
+        assert report.integrity_check_status == []
+
+
 async def test_deciding_an_already_decided_report_is_rejected(session_factory):
     async with session_factory() as session:
         instructor, check_run = await _seed_decidable_run(session)

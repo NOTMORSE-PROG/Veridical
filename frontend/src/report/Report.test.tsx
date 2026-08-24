@@ -25,6 +25,7 @@ const BASE_REPORT: ReportOut = {
   rubric_parse_issues: null,
   previous_status: null,
   previous_composite_score: null,
+  integrity_check_status: [],
   results: [
     {
       criterion_id: 1,
@@ -178,6 +179,127 @@ describe("ReportPage", () => {
 
     await screen.findByText("Ready");
     expect(screen.queryByText(/activated while the parser's own coverage check/)).not.toBeInTheDocument();
+  });
+
+  it("BUG-125: discloses a partially-executed integrity check even when it produced zero flags, so it can never read identically to a clean run", async () => {
+    const report: ReportOut = {
+      ...BASE_REPORT,
+      integrity_check_status: [
+        {
+          check_kind: "citation_integrity",
+          outcome: "api_down",
+          n_skipped_quota: 0,
+          n_skipped_api_down: 3,
+          n_skipped_parse_failure: 0,
+        },
+      ],
+    };
+    vi.stubGlobal(
+      "fetch",
+      stubFetchByPath({ "/check-runs/5/report": report, ...stubEscalated(), ...stubFlags() }),
+    );
+    renderWithProviders(<ReportPage />, { route: "/report/5", path: "/report/:checkRunId" });
+
+    expect(
+      await screen.findByText(/Citation integrity check: VERIDICAL's AI service was unreachable/),
+    ).toBeInTheDocument();
+    expect(screen.getByText(/3 pairs were skipped\./)).toBeInTheDocument();
+  });
+
+  it("BUG-125: a mixed-cause skip (more than one nonzero count) states a breakdown, not just a bare total", async () => {
+    const report: ReportOut = {
+      ...BASE_REPORT,
+      integrity_check_status: [
+        {
+          check_kind: "internal_agreement",
+          outcome: "unverifiable",
+          n_skipped_quota: 2,
+          n_skipped_api_down: 0,
+          n_skipped_parse_failure: 3,
+        },
+      ],
+    };
+    vi.stubGlobal(
+      "fetch",
+      stubFetchByPath({ "/check-runs/5/report": report, ...stubEscalated(), ...stubFlags() }),
+    );
+    renderWithProviders(<ReportPage />, { route: "/report/5", path: "/report/:checkRunId" });
+
+    expect(
+      await screen.findByText(
+        /5 pairs were skipped in total: 3 due to unreadable AI output, 2 due to the daily AI capacity limit\./,
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it("BUG-125: both F4 and F5 partially executed in the same run render as two separate banners, in F4-before-F5 order", async () => {
+    const report: ReportOut = {
+      ...BASE_REPORT,
+      integrity_check_status: [
+        {
+          check_kind: "citation_integrity",
+          outcome: "quota_exhausted",
+          n_skipped_quota: 1,
+          n_skipped_api_down: 0,
+          n_skipped_parse_failure: 0,
+        },
+        {
+          check_kind: "internal_agreement",
+          outcome: "api_down",
+          n_skipped_quota: 0,
+          n_skipped_api_down: 4,
+          n_skipped_parse_failure: 0,
+        },
+      ],
+    };
+    vi.stubGlobal(
+      "fetch",
+      stubFetchByPath({ "/check-runs/5/report": report, ...stubEscalated(), ...stubFlags() }),
+    );
+    renderWithProviders(<ReportPage />, { route: "/report/5", path: "/report/:checkRunId" });
+
+    const agreementBanner = await screen.findByText(/Internal agreement check:/);
+    const citationBanner = await screen.findByText(/Citation integrity check:/);
+    // Fixed F4->F7 order (CHECK_KIND_ORDER), regardless of the array
+    // order the backend happened to return them in.
+    expect(
+      agreementBanner.compareDocumentPosition(citationBanner) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+  });
+
+  it("shows no integrity-check disclosure when every F4/F5 check fully ran", async () => {
+    vi.stubGlobal(
+      "fetch",
+      stubFetchByPath({ "/check-runs/5/report": BASE_REPORT, ...stubEscalated(), ...stubFlags() }),
+    );
+    renderWithProviders(<ReportPage />, { route: "/report/5", path: "/report/:checkRunId" });
+
+    await screen.findByText("Ready");
+    expect(screen.queryByText(/Internal agreement check:/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Citation integrity check:/)).not.toBeInTheDocument();
+  });
+
+  it("BUG-125 (ux-critic P1, live-reproduced): a backend response missing integrity_check_status entirely never crashes the report page", async () => {
+    // A backend one release cycle behind the frontend (a rolling deploy,
+    // a stale cached bundle, a partial rollback) can omit this field even
+    // though the TS type says it's always present -- that's a compile-time
+    // promise, not a runtime one. Reproduced live: without a defensive
+    // guard, this threw and React Router's error boundary replaced the
+    // ENTIRE report page with a generic crash screen.
+    const { integrity_check_status: _omitted, ...staleReport } = BASE_REPORT;
+    vi.stubGlobal(
+      "fetch",
+      stubFetchByPath({
+        "/check-runs/5/report": staleReport as unknown as ReportOut,
+        ...stubEscalated(),
+        ...stubFlags(),
+      }),
+    );
+    renderWithProviders(<ReportPage />, { route: "/report/5", path: "/report/:checkRunId" });
+
+    await screen.findByText("Ready");
+    expect(screen.queryByText(/Internal agreement check:/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Citation integrity check:/)).not.toBeInTheDocument();
   });
 
   it("BUG-022: shows the manuscript's filename, not the (possibly default) group_label, once the report links a check to a specific upload", async () => {

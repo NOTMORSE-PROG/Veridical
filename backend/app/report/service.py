@@ -35,6 +35,7 @@ from app.models.enums import (
     FlagSeverity,
     ReadinessStatus,
     ReportDecision,
+    ResultOutcome,
     RubricParseStatus,
 )
 from app.models.manuscript import Manuscript, ManuscriptPassageArchive
@@ -49,6 +50,7 @@ from app.report.schemas import (
     ExcludedReuseMatchOut,
     FlagRegionOut,
     FlagSummaryOut,
+    IntegrityCheckStatusOut,
     ManuscriptViewerOut,
     ReportExportData,
     ReportOut,
@@ -187,6 +189,24 @@ def _to_criterion_result(
     )
 
 
+def _integrity_skip_count(kind: CheckKind, detail: dict[str, Any] | None, cause: str) -> int:
+    """BUG-125: F4's own `detail` (agreement/service.py) keys skip counts
+    `n_skipped_{cause}`; F5's (citations/verify.py) scopes the same three
+    causes to its claim-support sub-check, `n_claim_support_skipped_{cause}`
+    -- same three causes (BUG-072), two key prefixes. Branches on `kind`
+    explicitly (`backend-critic` finding) rather than trying both keys and
+    taking whichever is truthy: that fallback would silently return 0 for
+    a future check kind whose `detail` used neither naming convention,
+    instead of surfacing the gap."""
+    detail = detail or {}
+    key = (
+        f"n_skipped_{cause}"
+        if kind == CheckKind.internal_agreement
+        else f"n_claim_support_skipped_{cause}"
+    )
+    return detail.get(key, 0)
+
+
 async def _owned_check_run(
     session: AsyncSession, check_run_id: int, instructor_id: int
 ) -> CheckRun:
@@ -304,6 +324,51 @@ async def report_out_for_check_run(
         )
     ).first()
 
+    # BUG-125: an F4/F5 CheckResult that didn't fully execute -- BUG-073
+    # made the outcome honest, this is the still-missing on-screen
+    # disclosure. criterion_id is always None for these (F4/F5 aren't
+    # rubric criteria, ENGINEERING §2). F4's own `not_applicable` case ("no
+    # objective/finding-style statements detected") is a legitimate
+    # terminal state, not a partial run, so it's deliberately excluded.
+    # The explicit `kind` filter (`backend-critic` finding) matters beyond
+    # today's data: `IntegrityCheckStatusOut.check_kind` is a closed
+    # frontend union of exactly these two kinds, and `_integrity_skip_count`
+    # only knows these two `detail` key conventions -- without this filter,
+    # a future criterion_id=None/partial-execution outcome from a different
+    # check (F6/F7) would silently reach both as an unrecognised value.
+    integrity_rows = (
+        (
+            await session.execute(
+                select(CheckResult).where(
+                    CheckResult.check_run_id == check_run_id,
+                    CheckResult.criterion_id.is_(None),
+                    CheckResult.kind.in_(
+                        (CheckKind.internal_agreement, CheckKind.citation_integrity)
+                    ),
+                    CheckResult.outcome.in_(
+                        (
+                            ResultOutcome.unverifiable,
+                            ResultOutcome.api_down,
+                            ResultOutcome.quota_exhausted,
+                        )
+                    ),
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    integrity_check_status = [
+        IntegrityCheckStatusOut(
+            check_kind=row.kind.value,
+            outcome=row.outcome.value,
+            n_skipped_quota=_integrity_skip_count(row.kind, row.detail, "quota"),
+            n_skipped_api_down=_integrity_skip_count(row.kind, row.detail, "api_down"),
+            n_skipped_parse_failure=_integrity_skip_count(row.kind, row.detail, "parse_failure"),
+        )
+        for row in integrity_rows
+    ]
+
     return ReportOut(
         check_run_id=check_run_id,
         manuscript_group_label=manuscript.group_label,
@@ -334,6 +399,7 @@ async def report_out_for_check_run(
             if previous is not None and previous.composite_score is not None
             else None
         ),
+        integrity_check_status=integrity_check_status,
     )
 
 
