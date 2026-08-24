@@ -1,8 +1,20 @@
-"""User-facing message templates — the ONE place wording lives.
+"""User-facing message templates — general system/ingest/parse errors that
+don't belong to one specific check (BUG-079 correction: this is NOT the one
+place all user-visible wording lives, despite what this docstring used to
+claim — a real audit found ~18 more strings living as `*_WORDING` constants
+in each check module, next to the logic that produces them, e.g.
+`app/checks/citations/verify.py`'s `RETRACTED_WORDING`/
+`UNVERIFIABLE_NOT_FOUND_WORDING`).
 
 Charter rule 3: flags and errors describe possible problems and user-fixable
-states, never accusations. Keeping every user-visible string here makes the
-wording reviewable in a single file (CODING.md §1).
+states, never accusations. The real, mechanically-enforced review surface
+for that rule is `tools/check_dashes.py` (BUG-047, shipped) — an AST-parsed
+pre-commit gate covering every string literal in `backend/app/**` and
+`frontend/src/**`, docstrings/comments excluded, regardless of which file
+it lives in. Physically consolidating every string into this one file was
+the original (wrong) plan for achieving that; the gate makes location
+irrelevant, so it was never finished and shouldn't be — see BUG-079's own
+ticket for the full account of why this docstring was corrected instead.
 """
 
 UNSUPPORTED_FILE_TYPE = "Unsupported file type '{suffix}'. Supported types: {supported}."
