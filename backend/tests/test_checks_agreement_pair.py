@@ -236,9 +236,7 @@ async def test_quota_exhausted_stops_instead_of_retrying_every_remaining_chunk()
         _outcome("The cafeteria menu was updated every Monday by the admin."),
     ]
     llm = ScriptedLLM([QuotaExhaustedError("daily budget spent")])
-    result = await run_agreement_pairing(
-        llm, intents, outcomes, check_run_id=1, settings=settings
-    )
+    result = await run_agreement_pairing(llm, intents, outcomes, check_run_id=1, settings=settings)
     assert len(llm.calls) == 1
     assert result.flags == []
     # Both candidates -- not just the first chunk of 1 -- are honestly counted as skipped.
@@ -272,9 +270,7 @@ async def test_quota_exhausted_mid_run_counts_only_the_genuinely_unjudged_remain
             QuotaExhaustedError("daily budget spent"),
         ]
     )
-    result = await run_agreement_pairing(
-        llm, intents, outcomes, check_run_id=1, settings=settings
-    )
+    result = await run_agreement_pairing(llm, intents, outcomes, check_run_id=1, settings=settings)
     assert len(llm.calls) == 2
     assert result.flags == []
     # Candidate 0 was judged (consistent, no flag); candidates 1-2 (2 total)
