@@ -139,6 +139,54 @@ async def test_quota_exhausted_degrades_honestly_not_crash():
     assert result.n_skipped_parse_failure == 0
 
 
+async def test_quota_exhausted_stops_instead_of_retrying_every_remaining_chunk():
+    """BUG-080: once quota is exhausted, every remaining chunk would fail
+    identically -- the loop must stop (break), not keep retrying (continue).
+    Only one scripted response is provided; if the fix regresses back to
+    `continue`, the second chunk's call pops from an empty list and errors."""
+    settings = get_settings().model_copy(update={"claim_support_max_pairs_per_call": 2})
+    pairs = [_pair(i) for i in range(5)]
+    llm = ScriptedLLM([QuotaExhaustedError("daily budget spent")])
+    result = await run_claim_support_check(llm, pairs, check_run_id=1, settings=settings)
+    assert len(llm.calls) == 1
+    assert result.flags == []
+    # All 5 pairs -- not just the first chunk of 2 -- are honestly counted as skipped.
+    assert result.n_skipped_quota == 5
+    assert result.n_skipped_api_down == 0
+    assert result.n_skipped_parse_failure == 0
+
+
+async def test_quota_exhausted_mid_run_counts_only_the_genuinely_unjudged_remainder():
+    """backend-critic (BUG-080 review): the prior test only exhausts quota
+    on the FIRST chunk (`start == 0`), which can't catch an off-by-one in
+    `len(pairs) - start` (e.g. a regression to `- start - 1` or dropping
+    already-judged pairs from the count). Exhausts on the SECOND of three
+    chunks instead: chunk 1 (pairs 0-1) succeeds, chunk 2 (pairs 2-3) hits
+    quota -- only pairs 2-4 (`start=2` through the end) should count as
+    skipped, not all 5."""
+    settings = get_settings().model_copy(update={"claim_support_max_pairs_per_call": 2})
+    pairs = [_pair(i) for i in range(5)]
+    llm = ScriptedLLM(
+        [
+            {
+                "verdicts": [
+                    {"index": 0, "verdict": "supported", "reasoning": "ok"},
+                    {"index": 1, "verdict": "supported", "reasoning": "ok"},
+                ]
+            },
+            QuotaExhaustedError("daily budget spent"),
+        ]
+    )
+    result = await run_claim_support_check(llm, pairs, check_run_id=1, settings=settings)
+    assert len(llm.calls) == 2
+    assert result.flags == []
+    # Pairs 0-1 were judged (supported, no flag); pairs 2-4 (3 pairs) were
+    # never attempted and are the ones honestly counted as skipped.
+    assert result.n_skipped_quota == 3
+    assert result.n_skipped_api_down == 0
+    assert result.n_skipped_parse_failure == 0
+
+
 async def test_api_down_is_a_distinct_counter_from_quota():
     llm = ScriptedLLM([ApiDownError("provider unreachable")])
     result = await run_claim_support_check(llm, [_pair(0)], check_run_id=1, settings=get_settings())

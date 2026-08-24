@@ -266,8 +266,12 @@ async def run_agreement_pairing(
         try:
             verdicts = await _judge_batch(llm, chunk, check_run_id=check_run_id)
         except QuotaExhaustedError:
-            n_quota += len(chunk)
-            continue
+            # BUG-080: quota exhaustion is terminal for the whole run, not
+            # just this chunk -- every remaining candidate would fail
+            # identically, so count them all as skipped and stop instead of
+            # retrying.
+            n_quota += len(candidates) - start
+            break
         except ApiDownError:
             n_api_down += len(chunk)
             continue

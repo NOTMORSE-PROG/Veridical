@@ -221,6 +221,69 @@ async def test_quota_exhausted_degrades_honestly_not_crash():
     assert result.n_skipped_parse_failure == 0
 
 
+async def test_quota_exhausted_stops_instead_of_retrying_every_remaining_chunk():
+    """BUG-080: once quota is exhausted, every remaining chunk would fail
+    identically -- the loop must stop (break), not keep retrying (continue).
+    Only one scripted response is provided; if the fix regresses back to
+    `continue`, the second chunk's call pops from an empty list and errors."""
+    settings = get_settings().model_copy(update={"agreement_pairing_max_pairs_per_call": 1})
+    intents = [
+        _intent("To build a login module."),
+        _intent("To add a cafeteria menu feature."),
+    ]
+    outcomes = [
+        _outcome("The login module correctly authenticated 98% of test users."),
+        _outcome("The cafeteria menu was updated every Monday by the admin."),
+    ]
+    llm = ScriptedLLM([QuotaExhaustedError("daily budget spent")])
+    result = await run_agreement_pairing(
+        llm, intents, outcomes, check_run_id=1, settings=settings
+    )
+    assert len(llm.calls) == 1
+    assert result.flags == []
+    # Both candidates -- not just the first chunk of 1 -- are honestly counted as skipped.
+    assert result.n_skipped_quota == 2
+    assert result.n_skipped_api_down == 0
+    assert result.n_skipped_parse_failure == 0
+
+
+async def test_quota_exhausted_mid_run_counts_only_the_genuinely_unjudged_remainder():
+    """backend-critic (BUG-080 review): the prior test only exhausts quota
+    on the FIRST chunk (`start == 0`), which can't catch an off-by-one in
+    `len(candidates) - start` (e.g. a regression to `- start - 1` or
+    dropping already-judged candidates from the count). Exhausts on the
+    SECOND of three chunks instead: chunk 1 (candidate 0) succeeds, chunk 2
+    (candidate 1) hits quota -- only candidates 1-2 (`start=1` through the
+    end) should count as skipped, not all 3."""
+    settings = get_settings().model_copy(update={"agreement_pairing_max_pairs_per_call": 1})
+    intents = [
+        _intent("To build a login module."),
+        _intent("To add a cafeteria menu feature."),
+        _intent("To implement a grading rubric."),
+    ]
+    outcomes = [
+        _outcome("The login module correctly authenticated 98% of test users."),
+        _outcome("The cafeteria menu was updated every Monday by the admin."),
+        _outcome("The grading rubric was implemented and used for 200 submissions."),
+    ]
+    llm = ScriptedLLM(
+        [
+            {"verdicts": [{"index": 0, "verdict": "consistent", "reasoning": "ok"}]},
+            QuotaExhaustedError("daily budget spent"),
+        ]
+    )
+    result = await run_agreement_pairing(
+        llm, intents, outcomes, check_run_id=1, settings=settings
+    )
+    assert len(llm.calls) == 2
+    assert result.flags == []
+    # Candidate 0 was judged (consistent, no flag); candidates 1-2 (2 total)
+    # were never attempted and are the ones honestly counted as skipped.
+    assert result.n_skipped_quota == 2
+    assert result.n_skipped_api_down == 0
+    assert result.n_skipped_parse_failure == 0
+
+
 async def test_api_down_is_a_distinct_counter_from_quota():
     llm = ScriptedLLM([ApiDownError("provider unreachable")])
     intents = [_intent("To build a login module.")]
