@@ -17,7 +17,10 @@ from app.llm.base import LLMClient
 from app.rubric.schemas import ParsedCriterion, RubricDecomposition
 
 PROMPT_TYPE = "rubric_decomposition"
-PROMPT_VERSION = "v1"
+# BUG-092: v2 adds a third "not_assessable" type for defense-day/physical
+# requirements no document could ever settle (v1 only knew
+# structural/semantic, so these had nowhere to go but AI grading).
+PROMPT_VERSION = "v2"
 _PROMPT_FILE = Path(__file__).parent / "prompts" / f"{PROMPT_TYPE}_{PROMPT_VERSION}.txt"
 _PLACEHOLDER = "{rubric_text}"
 

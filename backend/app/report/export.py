@@ -377,6 +377,15 @@ def _source_caption(row: CriterionResultOut) -> str:
     it semantic."""
     if row.resolution:
         return "Resolved by instructor"
+    # BUG-092/`ux-critic` finding (2026-08-24): same fix as the frontend's
+    # `sourceCaption` (`ResultsTable.tsx`) -- a `not_assessable` criterion
+    # is deliberately never AI-graded, but its `kind` is a
+    # `CheckKind.semantic` audit-log placeholder (`router.py`), not a real
+    # signal that grading happened. Checked ahead of `kind` so the PDF
+    # export doesn't claim "AI-graded" for a criterion the router never
+    # sent to AI grading at all.
+    if row.type == "not_assessable":
+        return "Not checked"
     return "Rule-checked" if row.kind == "structural" else "AI-graded"
 
 

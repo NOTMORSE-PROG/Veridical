@@ -14,7 +14,7 @@ class ParsedCriterion(BaseModel):
     criterion — validated before anything touches the database."""
 
     text: str = Field(min_length=1)
-    type: Literal["structural", "semantic"]
+    type: Literal["structural", "semantic", "not_assessable"]
     evidence_needed: str | None = None
     weight: float = Field(gt=0)
 
@@ -35,7 +35,7 @@ class RubricDecomposition(BaseModel):
 
 class CriterionOut(BaseModel):
     id: int
-    type: Literal["structural", "semantic"]
+    type: Literal["structural", "semantic", "not_assessable"]
     text: str
     evidence: str | None
     weight: float
@@ -94,7 +94,7 @@ class CriterionIn(BaseModel):
     instructor added by hand."""
 
     id: int | None = None
-    type: Literal["structural", "semantic"]
+    type: Literal["structural", "semantic", "not_assessable"]
     text: str = Field(min_length=1)
     evidence: str | None = None
     weight: float = Field(gt=0)

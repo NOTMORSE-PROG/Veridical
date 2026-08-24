@@ -254,7 +254,10 @@ describe("ReviewCriteriaPage", () => {
 
     await screen.findAllByDisplayValue("Has an abstract");
     const table = document.querySelector('[role="table"]');
-    expect(table?.innerHTML).toContain("minmax(0,1fr)_192px_minmax(0,1fr)");
+    // BUG-092 (ux-critic finding): widened from 192px -- the third type
+    // option's longer label ("Not from the document") overflowed a
+    // 192px track by a measured 76.8px, overlapping the next cell.
+    expect(table?.innerHTML).toContain("minmax(0,1fr)_220px_minmax(0,1fr)");
     for (const el of screen.getAllByLabelText("Criterion 1 text")) {
       expect(el.className).toContain("w-full");
     }

@@ -11,10 +11,18 @@ from enum import StrEnum
 
 
 class CriterionType(StrEnum):
-    """F3.1 criterion router: deterministic rule vs AI grading."""
+    """F3.1 criterion router: deterministic rule vs AI grading vs (BUG-092)
+    not checkable from the document at all."""
 
     structural = "structural"
     semantic = "semantic"
+    # BUG-092: a real rubric line that describes a defense-day behavior or
+    # a physical requirement (e.g. "brings three bound copies," "answers
+    # questions on their feet") -- no amount of reading the manuscript can
+    # settle this. Routed straight to a terminal `not_applicable` result
+    # (router.py), never AI-graded, never escalated as if it were a
+    # document question.
+    not_assessable = "not_assessable"
 
 
 class IngestStatus(StrEnum):

@@ -117,6 +117,17 @@ export function explainer(r: ReportCommon, flagsAnchor: string | null): ReactNod
 // let the two implementations disagree unnoticed in the first place.
 export function sourceCaption(row: ResultRowCommon): string {
   if (row.resolution) return "Resolved by instructor";
+  // BUG-092/`ux-critic` finding (2026-08-24): a `not_assessable` criterion
+  // is routed straight to a terminal `not_applicable` result and is,
+  // deliberately, NEVER AI-graded (`router.py`'s own docstring) -- but
+  // its `kind` is set to `CheckKind.semantic` as pure audit-log
+  // bookkeeping (the router needs SOME kind to log, this isn't one).
+  // Falling through to the `kind !== "structural"` default read that
+  // placeholder as "AI-graded," directly contradicting the row's own
+  // adjacent caption ("not checked from the manuscript") in the same
+  // sentence. Checked first, ahead of `kind`, since `type` is the real
+  // signal here, `kind` never was.
+  if (row.type === "not_assessable") return "Not checked";
   return row.kind === "structural" ? "Rule-checked" : "AI-graded";
 }
 
@@ -155,6 +166,19 @@ export function resultDisplay(
     case "failed":
       return { label: "Fail", tone: "danger" };
     case "not_applicable":
+      // BUG-092: a `not_assessable`-typed criterion (a defense-day
+      // behavior or physical requirement, e.g. "brings three bound
+      // copies") reads distinctly from an ordinary N/A -- an instructor
+      // seeing just "Not applicable" with no reason has no way to tell
+      // this apart from a criterion the rubric parser genuinely couldn't
+      // route, which is a real gap, not by design.
+      if (row.type === "not_assessable") {
+        return {
+          label: "Not from the document",
+          tone: "neutral",
+          caption: "This is observed at the defense, not checked from the manuscript.",
+        };
+      }
       return { label: "Not applicable", tone: "neutral" };
     case "unverifiable":
       return {

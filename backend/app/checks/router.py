@@ -4,10 +4,13 @@ AI grading (V-017) — and guarantees the post-run invariant that every
 criterion ends up with exactly one check_result, never silently skipped
 (charter rule 1).
 
-Three outcomes per criterion:
+Four outcomes per criterion:
 - semantic (by type, or by structural-with-no-matching-rule — "honest
   degradation", logged so it's visible, not silently swapped)
 - structural (type is structural AND a registry rule matches)
+- not_assessable (BUG-092: a real defense-day/physical requirement no
+  document can settle — a correct decision, not a defect) -> persisted
+  directly as `not_applicable`, never AI-graded, never escalated.
 - unroutable (defensive only: the criterion's type isn't a recognized
   value at all) -> persisted directly as `not_applicable`, since nothing
   downstream can execute it either.
@@ -18,7 +21,11 @@ from dataclasses import dataclass
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.checks.rules import CriterionLike, find_matching_rule
-from app.messages import CRITERION_TYPE_UNRECOGNIZED, STRUCTURAL_RULE_UNIMPLEMENTED
+from app.messages import (
+    CRITERION_NOT_ASSESSABLE_FROM_DOCUMENT,
+    CRITERION_TYPE_UNRECOGNIZED,
+    STRUCTURAL_RULE_UNIMPLEMENTED,
+)
 from app.models.audit import AuditLog
 from app.models.enums import CheckKind, CriterionType, ResultOutcome
 from app.models.run import CheckResult
@@ -69,6 +76,21 @@ def route_criterion(criterion: CriterionLike, *, criterion_id: int, raw_type: st
             rule_id=None,
             degraded=True,
             note=STRUCTURAL_RULE_UNIMPLEMENTED,
+        )
+    if raw_type == CriterionType.not_assessable.value:
+        # BUG-092: a correct, honest routing decision, not a defect --
+        # `degraded=False` on purpose (unlike the unrecognized-type branch
+        # below, which really is a gap). `unroutable=True` still reuses
+        # the same "terminal not_applicable, never AI-graded, never
+        # escalated" persistence path (`apply_routing`), because the
+        # OUTCOME is identical: nothing runs.
+        return RouteDecision(
+            criterion_id=criterion_id,
+            kind=CheckKind.semantic,
+            rule_id=None,
+            degraded=False,
+            note=CRITERION_NOT_ASSESSABLE_FROM_DOCUMENT,
+            unroutable=True,
         )
     return RouteDecision(
         criterion_id=criterion_id,

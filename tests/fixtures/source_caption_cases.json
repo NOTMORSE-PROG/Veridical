@@ -33,5 +33,12 @@
     "kind": "structural",
     "has_resolution": true,
     "expected_caption": "Resolved by instructor"
+  },
+  {
+    "name": "BUG-092: not_assessable is never AI-graded, despite its kind placeholder saying semantic",
+    "type": "not_assessable",
+    "kind": "semantic",
+    "has_resolution": false,
+    "expected_caption": "Not checked"
   }
 ]

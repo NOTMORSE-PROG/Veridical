@@ -61,6 +61,23 @@ const BASE_REPORT: ReportOut = {
   ],
 };
 
+const NOT_ASSESSABLE_CRITERION = {
+  criterion_id: 3,
+  text: "The group brings three bound copies of the paper to the defense.",
+  type: "not_assessable" as const,
+  weight: 16.667,
+  weight_importance: "med" as const,
+  kind: "semantic",
+  outcome: "not_applicable" as const,
+  score: null,
+  basis: null,
+  anchor: null,
+  reasoning: null,
+  reason: null,
+  evidence: [],
+  resolution: null,
+};
+
 function stubEscalated(items: unknown[] = []) {
   return { "/check-runs/5/escalated": items };
 }
@@ -380,6 +397,34 @@ describe("ReportPage", () => {
     expect(
       screen.getAllByText(/Counted as 50% credit toward this criterion's weight\./).length,
     ).toBeGreaterThan(0);
+  });
+
+  it("BUG-092 (backend-critic/ux-critic finding): a not_assessable criterion never reads as AI-graded, which would contradict its own caption", async () => {
+    // router.py sets kind=CheckKind.semantic on a not_assessable criterion
+    // as pure audit-log bookkeeping (it was never AI-graded) -- the
+    // original sourceCaption() fell through to "AI-graded" for anything
+    // whose kind wasn't "structural", producing the self-contradicting
+    // "AI-graded . This is observed at the defense, not checked from the
+    // manuscript." Both backend-critic and ux-critic independently found
+    // this live; this is the combined-render regression test neither the
+    // isolated resultDisplay unit test nor the shared caption fixture
+    // alone would catch.
+    const report = {
+      ...BASE_REPORT,
+      results: [...BASE_REPORT.results, NOT_ASSESSABLE_CRITERION],
+    };
+    vi.stubGlobal(
+      "fetch",
+      stubFetchByPath({ "/check-runs/5/report": report, ...stubEscalated(), ...stubFlags() }),
+    );
+    renderWithProviders(<ReportPage />, { route: "/report/5", path: "/report/:checkRunId" });
+
+    await screen.findByText("Ready");
+    const captions = screen.getAllByText(
+      /Not checked · This is observed at the defense, not checked from the manuscript\./,
+    );
+    expect(captions.length).toBeGreaterThan(0);
+    expect(screen.queryByText(/AI-graded · This is observed at the defense/)).not.toBeInTheDocument();
   });
 
   it("BUG (resolution attribution) regression guard: a resolved criterion shows the instructor's own reason, never mislabeled as AI-graded with the AI's stale failure text", async () => {

@@ -8,6 +8,7 @@ from dataclasses import dataclass
 
 import pytest
 
+from app.checks.escalation import NEEDS_REVIEW_OUTCOMES
 from app.checks.router import route_criteria, route_criterion
 from app.checks.rules import (
     RuleSpec,
@@ -16,8 +17,12 @@ from app.checks.rules import (
     _snapshot_registry,
     register_rule,
 )
-from app.messages import CRITERION_TYPE_UNRECOGNIZED, STRUCTURAL_RULE_UNIMPLEMENTED
-from app.models.enums import CheckKind
+from app.messages import (
+    CRITERION_NOT_ASSESSABLE_FROM_DOCUMENT,
+    CRITERION_TYPE_UNRECOGNIZED,
+    STRUCTURAL_RULE_UNIMPLEMENTED,
+)
+from app.models.enums import CheckKind, ResultOutcome
 
 
 def _noop_run(criterion, ctx):  # pragma: no cover - never invoked in these routing-only tests
@@ -100,6 +105,31 @@ def test_unrecognized_type_is_unroutable_not_dropped():
     decision = route_criterion(c, criterion_id=c.id, raw_type=c.type)
     assert decision.unroutable is True
     assert decision.note == CRITERION_TYPE_UNRECOGNIZED
+
+
+def test_not_assessable_criterion_is_never_ai_graded_or_escalated():
+    """BUG-092's own regression test: a defense-day/physical requirement
+    (the ticket's own real examples -- bringing bound copies, answering
+    questions live) has nowhere to go under the old structural/semantic
+    split but the AI-grading pipeline, which then fails to reach a
+    verdict and escalates it as if it were a document question. Routed
+    terminally -- never touches semantic grading, never reaches the
+    escalation queue -- and honestly, not as a defect."""
+    c = FakeCriterion(
+        id=7,
+        type="not_assessable",
+        text="The group brings three bound copies of the paper to the defense.",
+    )
+    decision = route_criterion(c, criterion_id=c.id, raw_type=c.type)
+    assert decision.unroutable is True  # terminal: apply_routing persists not_applicable directly
+    assert decision.degraded is False  # a correct decision, not a fallback from a gap
+    assert decision.note == CRITERION_NOT_ASSESSABLE_FROM_DOCUMENT
+    # The escalation queue is populated from CheckResult rows with a
+    # criterion_id AND an outcome in NEEDS_REVIEW_OUTCOMES -- `unroutable`
+    # criteria never get a CheckResult with any of those outcomes at all
+    # (apply_routing writes `not_applicable` directly), so this can never
+    # reach `list_escalated` regardless of what else changes downstream.
+    assert ResultOutcome.not_applicable not in NEEDS_REVIEW_OUTCOMES
 
 
 def test_zero_weight_criterion_still_routes_normally():

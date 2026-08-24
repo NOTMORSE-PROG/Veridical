@@ -51,8 +51,15 @@ type FocusIntent =
   | { type: "summary" }
   | null;
 
-const TYPE_OPTIONS: readonly CriterionType[] = ["structural", "semantic"];
-const TYPE_LABELS: Record<CriterionType, string> = { structural: "Structural", semantic: "Semantic" };
+// BUG-092: an instructor can manually mark (or correct) a criterion as
+// "not from the document" too -- ground rule 1, the human always gets
+// the last word over the AI's own decomposition classification.
+const TYPE_OPTIONS: readonly CriterionType[] = ["structural", "semantic", "not_assessable"];
+const TYPE_LABELS: Record<CriterionType, string> = {
+  structural: "Structural",
+  semantic: "Semantic",
+  not_assessable: "Not from the document",
+};
 
 let newRowCounter = 0;
 
@@ -222,7 +229,17 @@ function TypeRadioGroup({
     <span
       role="radiogroup"
       aria-label={ariaLabel}
-      className={cx("inline-flex overflow-hidden rounded-md border border-border-input", fill && "w-full")}
+      // BUG-092 (ux-critic finding, P1): this was `inline-flex`,
+      // width-conditional on `fill` -- so the desktop (non-fill) table
+      // row let the group size to its OWN natural content width instead
+      // of respecting the grid column's fixed track, which the 3rd
+      // option's longer label ("Not from the document") overran by a
+      // measured 76.8px, landing on top of (and blocking mouse clicks
+      // on) the next cell. `w-full` unconditionally, always -- the group
+      // now always respects its container, on both the fill (mobile) and
+      // non-fill (desktop) call sites, closing the defect class, not
+      // just today's specific overflow.
+      className="flex w-full overflow-hidden rounded-md border border-border-input"
     >
       {TYPE_OPTIONS.map((opt, index) => (
         <button
@@ -236,8 +253,8 @@ function TypeRadioGroup({
           onKeyDown={(event) => onKeyDown(event, index)}
           onClick={() => !disabled && onChange(opt)}
           className={cx(
-            "px-3 text-sm font-medium",
-            fill ? "min-h-11 flex-1" : "h-8",
+            "min-w-0 flex-1 px-2 text-sm font-medium",
+            fill ? "min-h-11" : "min-h-8 py-1",
             disabled
               ? "cursor-default bg-page text-ink-tertiary"
               : opt === value
@@ -631,7 +648,7 @@ export function ReviewCriteriaPage() {
           row's own padding/gaps closes the density gap without discarding
           it or introducing a new expand/collapse interaction. */}
       <div role="table" aria-label="Rubric criteria" className="hidden max-h-[70vh] overflow-auto rounded-lg border border-border sm:block">
-        <div role="row" className="sticky top-0 z-(--z-sticky) grid grid-cols-[28px_minmax(0,1fr)_192px_minmax(0,1fr)_140px_40px] gap-2.5 border-b border-border bg-status-neutral-bg px-3.5 py-2 text-xs font-semibold tracking-header text-ink-tertiary uppercase">
+        <div role="row" className="sticky top-0 z-(--z-sticky) grid grid-cols-[28px_minmax(0,1fr)_220px_minmax(0,1fr)_140px_40px] gap-2.5 border-b border-border bg-status-neutral-bg px-3.5 py-2 text-xs font-semibold tracking-header text-ink-tertiary uppercase">
           <span role="columnheader">#</span>
           <span role="columnheader">Criterion</span>
           <span role="columnheader">Type</span>
@@ -647,7 +664,7 @@ export function ReviewCriteriaPage() {
             <div
               key={row.key}
               role="row"
-              className="grid grid-cols-[28px_minmax(0,1fr)_192px_minmax(0,1fr)_140px_40px] items-start gap-2.5 border-t border-border px-3.5 py-2"
+              className="grid grid-cols-[28px_minmax(0,1fr)_220px_minmax(0,1fr)_140px_40px] items-start gap-2.5 border-t border-border px-3.5 py-2"
             >
               <span role="cell" className="pt-1.5 text-sm text-ink-tertiary">
                 {index + 1}
