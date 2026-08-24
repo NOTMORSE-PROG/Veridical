@@ -10,6 +10,7 @@ import { AnchorPill } from "../components/AnchorPill";
 import { Chip } from "../components/Chip";
 import { cx } from "../components/cx";
 import { SeverityTag, type Severity } from "../components/SeverityTag";
+import { StatusPill } from "../components/StatusPill";
 import { FirstUploadContextBanner } from "../components/FirstUploadContextBanner";
 import { TestModeBanner } from "../components/TestModeBanner";
 import { checkKindMeta, humanize } from "../domain/checkKind";
@@ -328,6 +329,17 @@ export function FlagDetailPage() {
                 {meta ? meta.title : "Flag"}
               </h1>
               {flag && <SeverityTag severity={flag.severity as Severity} />}
+              {/* BUG-069 item 4: the report's own flags list correctly
+                  shows both the severity AND an overridden/confirmed pill
+                  side by side (FlagsPanel.tsx) -- this page, the one an
+                  instructor lands on to actually resolve a flag, used to
+                  show only the severity, even once resolved. */}
+              {flag?.overridden &&
+                (flag.confirmed_citation_source ? (
+                  <StatusPill tone="success">Source confirmed</StatusPill>
+                ) : (
+                  <StatusPill tone="neutral">Overridden</StatusPill>
+                ))}
             </div>
             {flag?.criterion_text && (
               <p className="text-sm text-ink-tertiary">Related criterion: {flag.criterion_text}</p>

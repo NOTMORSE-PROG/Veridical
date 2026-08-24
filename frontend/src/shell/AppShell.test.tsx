@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter, Route, Routes } from "react-router";
@@ -285,6 +285,67 @@ describe("AppShell", () => {
     expect(screen.getByRole("button", { name: "Sign out" })).toBeInTheDocument();
   });
 
+  it("BUG-069 item 2: clicking the desktop avatar opens a menu instead of signing out instantly", async () => {
+    vi.stubGlobal(
+      "fetch",
+      stubFetchByPath({
+        "/auth/me": { id: 1, email: "a@b.com", display_name: "Demo Instructor" },
+        "/quota": QUOTA,
+      }),
+    );
+    renderWithProviders(
+      <AppShell>
+        <div>content</div>
+      </AppShell>,
+      { route: "/dashboard" },
+    );
+    await waitFor(() => expect(screen.getByText("DI")).toBeInTheDocument());
+
+    const avatar = screen.getByRole("button", { name: "Signed in as Demo Instructor" });
+    expect(avatar).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByRole("menuitem", { name: "Sign out" })).not.toBeInTheDocument();
+
+    fireEvent.click(avatar);
+
+    expect(avatar).toHaveAttribute("aria-expanded", "true");
+    const menu = screen.getByRole("menu");
+    expect(screen.getByRole("menuitem", { name: "Sign out" })).toBeInTheDocument();
+    // The instructor's identity is shown IN the menu, not baked into the
+    // trigger's own accessible name the way the old single-click version
+    // folded "Sign out" into it. Scoped to the menu itself -- the mobile
+    // panel's own identical text is also in the DOM (`hidden`-gated, so
+    // invisible, but `getByText` doesn't respect `hidden` the way
+    // `getByRole` does -- this file's own top comment already notes that
+    // distinction for the "Sign out" button).
+    expect(within(menu).getByText("Signed in as Demo Instructor")).toBeInTheDocument();
+  });
+
+  it("BUG-069 item 2: Escape closes the avatar menu and returns focus to the avatar button", async () => {
+    vi.stubGlobal(
+      "fetch",
+      stubFetchByPath({
+        "/auth/me": { id: 1, email: "a@b.com", display_name: "Demo Instructor" },
+        "/quota": QUOTA,
+      }),
+    );
+    renderWithProviders(
+      <AppShell>
+        <div>content</div>
+      </AppShell>,
+      { route: "/dashboard" },
+    );
+    await waitFor(() => expect(screen.getByText("DI")).toBeInTheDocument());
+
+    const avatar = screen.getByRole("button", { name: "Signed in as Demo Instructor" });
+    fireEvent.click(avatar);
+    expect(screen.getByRole("menuitem", { name: "Sign out" })).toBeInTheDocument();
+
+    fireEvent.keyDown(document, { key: "Escape" });
+
+    expect(screen.queryByRole("menuitem", { name: "Sign out" })).not.toBeInTheDocument();
+    expect(avatar).toHaveFocus();
+  });
+
   it("BUG-009: signing out clears the whole query cache, not just the auth query (a shared-machine cross-instructor leak otherwise)", async () => {
     vi.stubGlobal(
       "fetch",
@@ -312,7 +373,10 @@ describe("AppShell", () => {
     );
     await waitFor(() => expect(screen.getByText("DI")).toBeInTheDocument());
 
-    fireEvent.click(screen.getByRole("button", { name: /Sign out/ }));
+    // BUG-069 item 2: the avatar opens a menu now (Jakob's law) instead of
+    // signing out on the first click -- open it, then activate Sign out.
+    fireEvent.click(screen.getByRole("button", { name: "Signed in as Demo Instructor" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Sign out" }));
     // A still-mounted query (useMe/useQuota) refetches immediately after a
     // clear, which is correct — the proof of the fix is that the OTHER
     // instructor's stale cached query is gone for good, not that the cache
@@ -357,7 +421,8 @@ describe("AppShell", () => {
     await waitFor(() => expect(screen.getByText("DI")).toBeInTheDocument());
     expect(screen.getByText("Real manuscript excerpt content")).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: /Sign out/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Signed in as Demo Instructor" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Sign out" }));
 
     await waitFor(() => expect(screen.getByText("Sign-in page")).toBeInTheDocument());
     expect(screen.queryByText("Real manuscript excerpt content")).not.toBeInTheDocument();

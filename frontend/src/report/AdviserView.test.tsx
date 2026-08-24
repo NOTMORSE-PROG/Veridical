@@ -256,6 +256,9 @@ describe("AdviserViewPage", () => {
     expect(await screen.findByText("Link not found")).toBeInTheDocument();
     expect(screen.getByText("This link doesn't exist.")).toBeInTheDocument();
     expect(screen.getByText(/contact the instructor who sent you this link/)).toBeInTheDocument();
+    // BUG-069 item 5: must not claim "you're viewing a report shared by
+    // the instructor" when there is, in fact, no report to view.
+    expect(screen.queryByText(/Read-only shared view/)).not.toBeInTheDocument();
   });
 
   it("shows an honest 410 message when the link was revoked", async () => {
@@ -275,6 +278,7 @@ describe("AdviserViewPage", () => {
     expect(
       screen.getByText("This link has been turned off by the instructor."),
     ).toBeInTheDocument();
+    expect(screen.queryByText(/Read-only shared view/)).not.toBeInTheDocument();
   });
 
   it("adds a noindex meta tag on mount and removes it on unmount", async () => {

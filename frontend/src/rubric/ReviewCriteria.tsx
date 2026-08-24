@@ -557,6 +557,33 @@ export function ReviewCriteriaPage() {
     );
   }
 
+  // BUG-069 item 3: the unsaved-changes dialog offered "Keep editing" and
+  // "Leave without saving" but not "Save draft and leave" -- while "Save
+  // draft" sat right there on the page behind it, one click away, and a
+  // draft save has no blocking requirements beyond "at least one
+  // criterion" (`blockingProblems(false)`), which is already true by the
+  // time this dialog can even be showing (an empty rows array can't be
+  // "dirty"). Saves, then only proceeds with the navigation on success --
+  // a failed save must never silently discard what the instructor typed
+  // instead of the error it claims to be avoiding.
+  function saveAndLeave() {
+    if (blockerResolvingRef.current || blocker.state !== "blocked") return;
+    const submitted = rows!;
+    blockerResolvingRef.current = true;
+    save.mutate(
+      { criteria: toEdits(), confirm: false },
+      {
+        onSuccess: () => {
+          setLastSavedRows(submitted);
+          blocker.proceed();
+        },
+        onError: () => {
+          blockerResolvingRef.current = false;
+        },
+      },
+    );
+  }
+
   const saveError =
     save.error instanceof Error ? save.error.message : save.error ? "Save failed. Try again." : null;
   const currentProblems = showErrors ? blockingProblems(attempted === "confirm") : [];
@@ -916,16 +943,29 @@ export function ReviewCriteriaPage() {
                 <button
                   type="button"
                   onClick={() => resolveBlocker("reset")}
-                  className="flex h-11 items-center justify-center rounded-md border border-border-input bg-panel px-4 text-sm font-bold text-ink hover:bg-status-neutral-bg"
+                  disabled={save.isPending}
+                  className="flex h-11 items-center justify-center rounded-md border border-border-input bg-panel px-4 text-sm font-bold text-ink hover:bg-status-neutral-bg disabled:opacity-45"
                 >
                   Keep editing
                 </button>
                 <button
                   type="button"
                   onClick={() => resolveBlocker("proceed")}
-                  className="flex h-11 items-center justify-center rounded-md bg-danger px-4 text-sm font-bold text-on-danger hover:bg-danger-hover"
+                  disabled={save.isPending}
+                  className="flex h-11 items-center justify-center rounded-md bg-danger px-4 text-sm font-bold text-on-danger hover:bg-danger-hover disabled:opacity-60"
                 >
                   Leave without saving
+                </button>
+                {/* BUG-069 item 3: "Save draft" sat on the page behind this
+                    dialog, one click away, but wasn't offered here --
+                    saves first, only navigates away once that succeeds. */}
+                <button
+                  type="button"
+                  onClick={saveAndLeave}
+                  disabled={save.isPending}
+                  className="flex h-11 items-center justify-center rounded-md bg-action px-4 text-sm font-bold text-on-action disabled:opacity-60"
+                >
+                  {save.isPending ? "Saving." : "Save draft and leave"}
                 </button>
               </>
             }
@@ -934,6 +974,12 @@ export function ReviewCriteriaPage() {
               You have unsaved changes to these criteria. If you leave this page now, those
               changes will be discarded, and the rubric will stay exactly as it was last saved.
             </p>
+            {saveError && (
+              <p role="alert" className="mt-2 text-sm font-medium text-status-attention-text">
+                <span className="sr-only">Error: </span>
+                {saveError}
+              </p>
+            )}
           </Modal>
         </ModalBackdrop>
       )}

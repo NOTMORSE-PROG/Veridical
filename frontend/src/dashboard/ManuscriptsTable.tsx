@@ -421,8 +421,20 @@ export function ManuscriptsTable({
           return (
             <li key={row.id} className="rounded-lg border border-border bg-panel p-3">
               <div className="flex items-start justify-between gap-2">
+                {/* BUG-069 item 8 (`ux-critic` finding, live-reproduced at
+                    320px): two different manuscript groups differing only
+                    in a trailing character ("...Group A" / "...Group B")
+                    rendered as the IDENTICAL truncated string -- the
+                    distinguishing suffix is exactly what a normal
+                    end-truncating ellipsis loses first. `direction: rtl` +
+                    `text-align: left` is the standard CSS trick for
+                    truncating from the START instead, so the tail (often
+                    the most distinguishing part of a name) survives; the
+                    text itself still reads left-to-right, only the
+                    truncation point moves. */}
                 <span
                   className="min-w-0 flex-1 truncate text-sm font-medium text-ink"
+                  style={{ direction: "rtl", textAlign: "left" }}
                   title={identity.primary}
                 >
                   {identity.primary}
@@ -436,6 +448,7 @@ export function ManuscriptsTable({
                 <span
                   tabIndex={0}
                   className="mt-0.5 block truncate text-xs text-ink-tertiary"
+                  style={{ direction: "rtl", textAlign: "left" }}
                   title={identity.secondary}
                 >
                   {identity.secondary}

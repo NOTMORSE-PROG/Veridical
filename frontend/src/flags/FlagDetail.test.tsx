@@ -176,6 +176,29 @@ describe("FlagDetailPage", () => {
     expect(document.activeElement).toBe(banner.closest('[tabindex="-1"]'));
   });
 
+  it("BUG-069 item 4: an overridden flag's own header shows an Overridden pill, matching the report's flags list", async () => {
+    vi.stubGlobal(
+      "fetch",
+      stubFetchByPath({
+        "/flags/5": { ...FLAG, overridden: true, override_reason: "Checked myself." },
+      }),
+    );
+    renderWithProviders(<FlagDetailPage />, { route: "/flags/5", path: "/flags/:flagId" });
+    await screen.findByText(/Wang, S\./);
+
+    expect(screen.getByText("High severity")).toBeInTheDocument();
+    expect(screen.getByText("Overridden")).toBeInTheDocument();
+  });
+
+  it("no Overridden pill in the header for a live, unresolved flag", async () => {
+    vi.stubGlobal("fetch", stubFetchByPath({ "/flags/5": FLAG }));
+    renderWithProviders(<FlagDetailPage />, { route: "/flags/5", path: "/flags/:flagId" });
+    await screen.findByText(/Wang, S\./);
+
+    expect(screen.getByText("High severity")).toBeInTheDocument();
+    expect(screen.queryByText("Overridden")).not.toBeInTheDocument();
+  });
+
   it("BUG (focus/announcement) regression guard: Cancel returns focus to the Override button, not <body>", async () => {
     vi.stubGlobal("fetch", stubFetchByPath({ "/flags/5": FLAG }));
     renderWithProviders(<FlagDetailPage />, { route: "/flags/5", path: "/flags/:flagId" });

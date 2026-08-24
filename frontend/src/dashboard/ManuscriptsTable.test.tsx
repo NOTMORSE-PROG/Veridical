@@ -481,6 +481,49 @@ describe("ManuscriptsTable", () => {
     expect(screen.queryByText("Ungrouped")).not.toBeInTheDocument();
   });
 
+  it("BUG-069 item 8 (ux-critic finding, live-reproduced at 320px): the mobile card's identity spans truncate from the START, preserving a distinguishing trailing character", async () => {
+    // Structural guard only -- jsdom has no real layout engine and can't
+    // measure where an ellipsis actually lands (this file's own sibling
+    // BUG-103 test makes the identical point). Two groups differing only
+    // in their LAST character ("...Group A" / "...Group B") rendered as
+    // the IDENTICAL truncated string live at 320px, because ordinary
+    // end-truncation drops the tail first -- `direction: rtl` +
+    // `text-align: left` is the fix (truncates from the start instead),
+    // so this pins that the style is actually applied, not just that the
+    // full (untruncated-in-jsdom) text happens to still differ.
+    vi.stubGlobal(
+      "fetch",
+      stubFetchByPath({
+        "/manuscripts": page([
+          {
+            id: 9,
+            group_label: "DOCX Viewer Test Group A",
+            original_filename: "docx_test_a.docx",
+            ingest_status: "done",
+            ingest_failure_reason: null,
+            created_at: "2026-01-01T00:00:00Z",
+            latest_check_run_id: null,
+            latest_check_run_status: null,
+            latest_done_check_run_id: null,
+          },
+        ]),
+      }),
+    );
+    renderWithProviders(<ManuscriptsTable page={1} onPageChange={() => {}} program={undefined} onProgramChange={() => {}} onUploadManuscript={() => {}} onRerun={() => {}} onStartCheck={() => {}} onSetGroup={() => {}} />);
+    // Mobile card + desktop table both render in the DOM (this file's own
+    // top comment) -- the fix is mobile-card-scoped (that's the layout
+    // active at 320px, the reflow floor this bug was found at), so only
+    // ONE of the two matches is expected to carry the style.
+    const primaries = await screen.findAllByText("DOCX Viewer Test Group A");
+    expect(primaries.some((el) => el.style.direction === "rtl" && el.style.textAlign === "left")).toBe(
+      true,
+    );
+    const secondaries = screen.getAllByText("docx_test_a.docx");
+    expect(
+      secondaries.some((el) => el.style.direction === "rtl" && el.style.textAlign === "left"),
+    ).toBe(true);
+  });
+
   it("BUG-022: a pre-migration row with no original_filename falls back to group_label alone, unchanged", async () => {
     vi.stubGlobal(
       "fetch",

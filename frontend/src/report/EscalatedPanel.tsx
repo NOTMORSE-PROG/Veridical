@@ -216,20 +216,25 @@ function ResolveRow({
                 reasonInvalid ? "border-2 border-status-attention-text" : "border-border-input",
               )}
             />
-            {reasonInvalid && (
-              // `ux-critic` finding: WCAG 4.1.3 (Status Messages) -- this
-              // used to be associated only via aria-describedby, which a
-              // screen-reader user only hears if they tab back to the
-              // field. `role="alert"` announces it immediately on
-              // rejection, matching this component's own serverError
-              // paragraph below.
-              <p id={reasonErrId} role="alert" className="text-sm text-status-attention-text">
-                {reason.trim()
-                  ? `Reason must be at least ${RESOLUTION_REASON_MIN_LENGTH} characters -- this appears in the report, the exported PDF, and any share link.`
-                  : "Enter a reason before confirming."}
-              </p>
-            )}
           </label>
+          {reasonInvalid && (
+            // BUG-069 item 1: this used to sit INSIDE the <label> above --
+            // a wrapping <label>'s full text content becomes part of the
+            // input's accessible NAME, so every time the field was
+            // focused/read, the error was announced a second time as
+            // "Reason (required) Enter a reason before confirming, edit
+            // text." Moved outside so the name stays just "Reason
+            // (required)"; `aria-describedby` still associates it (that
+            // doesn't require containment), and `role="alert"` (`ux-critic`
+            // finding, WCAG 4.1.3) still announces it immediately on
+            // rejection, matching this component's own serverError
+            // paragraph below.
+            <p id={reasonErrId} role="alert" className="text-sm text-status-attention-text">
+              {reason.trim()
+                ? `Reason must be at least ${RESOLUTION_REASON_MIN_LENGTH} characters -- this appears in the report, the exported PDF, and any share link.`
+                : "Enter a reason before confirming."}
+            </p>
+          )}
           {serverError && (
             <p role="alert" className="text-sm font-medium text-status-attention-text">
               {serverError}
