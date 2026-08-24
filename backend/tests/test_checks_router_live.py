@@ -175,3 +175,37 @@ async def test_unroutable_criterion_persists_not_applicable_never_dropped(sessio
     assert result.outcome == ResultOutcome.not_applicable
     assert result.kind == CheckKind.semantic
     assert result.detail["reason"]
+
+
+async def test_not_assessable_criterion_persists_not_applicable_never_ai_graded(session_factory):
+    """BUG-092, end to end: a real defense-day criterion (the ticket's
+    own example) never touches AI grading and never appears in the
+    escalation queue -- it gets a terminal, honest `not_applicable`
+    result directly, the same persistence path as an unroutable
+    criterion, but via a real `CriterionType` value, not a corrupted one."""
+    check_run_id, criterion_ids = await _seed_run(
+        session_factory,
+        [("not_assessable", "The group brings three bound copies of the paper to the defense.")],
+    )
+    async with session_factory() as session:
+        criteria = (
+            await session.execute(select(Criterion).where(Criterion.id == criterion_ids[0]))
+        ).scalars()
+        decisions = route_criteria(list(criteria))
+        assert decisions[0].unroutable
+        await apply_routing(session, check_run_id, decisions)
+
+    async with session_factory() as session:
+        result = (
+            await session.execute(
+                select(CheckResult).where(CheckResult.criterion_id == criterion_ids[0])
+            )
+        ).scalar_one()
+    assert result.outcome == ResultOutcome.not_applicable
+    assert "cannot check this from the document" in result.detail["reason"]
+
+    async with session_factory() as session:
+        from app.checks.escalation import list_escalated
+
+        escalated = await list_escalated(session, check_run_id)
+    assert escalated == []

@@ -43,3 +43,13 @@ CRITERION_TYPE_UNRECOGNIZED = (
     "This criterion's type could not be recognized, so it could not be "
     "checked automatically. It needs manual review."
 )
+
+# BUG-092: a real, defense-day requirement (e.g. bringing bound copies,
+# answering questions live) that no reading of the manuscript could ever
+# settle -- distinct from CRITERION_TYPE_UNRECOGNIZED, which is a defect
+# (an unroutable type). This one is a correct, honest routing decision.
+CRITERION_NOT_ASSESSABLE_FROM_DOCUMENT = (
+    "VERIDICAL cannot check this from the document. It describes something "
+    "you observe directly, such as a defense-day behavior or a physical "
+    "requirement, not a property of the manuscript itself."
+)

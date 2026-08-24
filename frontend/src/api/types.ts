@@ -10,7 +10,11 @@ export interface Instructor {
   onboarding_dismissed_at: string | null;
 }
 
-export type CriterionType = "structural" | "semantic";
+// BUG-092: "not_assessable" -- a real defense-day/physical requirement
+// (e.g. "brings three bound copies") no manuscript could ever settle.
+// Routed to a terminal `not_applicable` result, never AI-graded, never
+// escalated.
+export type CriterionType = "structural" | "semantic" | "not_assessable";
 
 export interface Criterion {
   id: number;
