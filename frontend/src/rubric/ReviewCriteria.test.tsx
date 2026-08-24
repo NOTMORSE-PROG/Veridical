@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createMemoryRouter, RouterProvider } from "react-router";
 import type { Rubric } from "../api/types";
@@ -412,6 +412,71 @@ describe("ReviewCriteriaPage", () => {
     }).not.toThrow();
 
     await waitFor(() => expect(screen.getByText("Dashboard page")).toBeInTheDocument());
+  });
+
+  it("BUG-069 item 3: 'Save draft and leave' saves the edit (a real PUT, not a no-op) and then completes the navigation", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === "string" ? input : input.toString();
+      if (init?.method === "PUT") {
+        const body = init?.body ? JSON.parse(init.body as string) : null;
+        expect(body?.confirm).toBe(false); // a DRAFT save, not a confirm
+        return new Response(JSON.stringify(RUBRIC), { status: 200 });
+      }
+      void url;
+      return new Response(JSON.stringify(RUBRIC), { status: 200 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const router = renderWithTwoRoutes();
+
+    const textInputs = await screen.findAllByDisplayValue("Has an abstract");
+    fireEvent.change(textInputs[0], { target: { value: "Has an abstract of at most 250 words" } });
+
+    router.navigate("/dashboard");
+    await screen.findByText("Leave without saving your changes?");
+    fireEvent.click(screen.getByRole("button", { name: "Save draft and leave" }));
+
+    await waitFor(() => expect(screen.getByText("Dashboard page")).toBeInTheDocument());
+    const saveCalls = fetchMock.mock.calls.filter(
+      ([, init]) => (init as RequestInit | undefined)?.method === "PUT",
+    );
+    expect(saveCalls.length).toBeGreaterThan(0);
+  });
+
+  it("BUG-069 item 3: a failed 'Save draft and leave' keeps the dialog open and shows the error, instead of silently discarding the edit or silently leaving", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        if (init?.method === "PUT") {
+          return new Response(JSON.stringify({ error: { message: "Save failed. Try again." } }), {
+            status: 500,
+          });
+        }
+        void input;
+        return new Response(JSON.stringify(RUBRIC), { status: 200 });
+      }),
+    );
+    const router = renderWithTwoRoutes();
+
+    const textInputs = await screen.findAllByDisplayValue("Has an abstract");
+    fireEvent.change(textInputs[0], { target: { value: "Has an abstract of at most 250 words" } });
+
+    router.navigate("/dashboard");
+    await screen.findByText("Leave without saving your changes?");
+    fireEvent.click(screen.getByRole("button", { name: "Save draft and leave" }));
+
+    // Scoped to the dialog: `Modal`'s own `useInertBackground` would hide
+    // the page's OWN (identical, shared-state) error paragraph behind it
+    // in a real browser (`inert` on #root), but jsdom here has no #root
+    // element for that mechanism to target, so both are technically in
+    // the accessible tree in this test environment.
+    const dialog = await screen.findByRole("dialog", {
+      name: "Leave without saving your changes?",
+    });
+    await waitFor(() => expect(within(dialog).getByRole("alert")).toBeInTheDocument());
+    // Still blocked: the dialog is still up, Dashboard never rendered,
+    // the edit is still intact -- a failed save must not read as success.
+    expect(screen.getByText("Leave without saving your changes?")).toBeInTheDocument();
+    expect(screen.queryByText("Dashboard page")).not.toBeInTheDocument();
   });
 
   it("BUG-037: does not warn when navigating away with no unsaved edits", async () => {

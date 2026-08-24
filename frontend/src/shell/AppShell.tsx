@@ -277,21 +277,79 @@ function QuotaChip() {
   );
 }
 
+// BUG-069 item 2 (Jakob's law: a top-right avatar universally opens a
+// menu; this one used to sign out on the first click, no menu, no
+// confirmation -- named failure scenario: "a busy instructor aiming for
+// a profile menu is signed out mid-task with unsaved work elsewhere").
+// Same disclosure shape as the mobile nav panel (open/close state,
+// blur-to-close, Escape-to-close) so this doesn't invent a second pattern
+// for the same "small panel anchored to a trigger button" idea.
 function AvatarButton() {
   const { data: me } = useMe();
   const logout = useLogout();
+  const [open, setOpen] = useState(false);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        setOpen(false);
+        triggerRef.current?.focus();
+      }
+    }
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
+  }, [open]);
+
+  function handleBlur(event: FocusEvent<HTMLDivElement>) {
+    const next = event.relatedTarget as Node | null;
+    if (next && (event.currentTarget.contains(next) || next === triggerRef.current)) return;
+    setOpen(false);
+  }
+
   if (!me) return null;
   return (
-    <button
-      type="button"
-      onClick={() => logout.mutate()}
-      aria-label={`Signed in as ${me.display_name}. Sign out`}
-      className="hidden h-11 w-11 flex-none items-center justify-center rounded-full hover:bg-status-neutral-bg lg:flex"
-    >
-      <span className="flex h-8 w-8 items-center justify-center rounded-full bg-status-neutral-bg text-xs font-semibold text-ink">
-        {initials(me.display_name)}
-      </span>
-    </button>
+    <div className="relative hidden lg:block">
+      <button
+        ref={triggerRef}
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+        aria-haspopup="menu"
+        aria-label={`Signed in as ${me.display_name}`}
+        className="flex h-11 w-11 flex-none items-center justify-center rounded-full hover:bg-status-neutral-bg"
+      >
+        <span className="flex h-8 w-8 items-center justify-center rounded-full bg-status-neutral-bg text-xs font-semibold text-ink">
+          {initials(me.display_name)}
+        </span>
+      </button>
+      {open && (
+        <div
+          ref={panelRef}
+          role="menu"
+          onBlur={handleBlur}
+          className="motion-safe:animate-panel-in absolute top-full right-0 z-(--z-header) mt-1 w-48 rounded-md border border-border bg-panel p-2 shadow-(--elevation-overlay)"
+        >
+          <p className="min-w-0 truncate px-3 py-2 text-xs text-ink-tertiary" title={me.display_name}>
+            Signed in as {me.display_name}
+          </p>
+          <button
+            type="button"
+            role="menuitem"
+            onClick={() => {
+              setOpen(false);
+              logout.mutate();
+            }}
+            className="flex min-h-11 w-full items-center gap-2 rounded-md px-3 text-sm font-medium text-ink hover:bg-status-neutral-bg"
+          >
+            <SignOutIcon />
+            Sign out
+          </button>
+        </div>
+      )}
+    </div>
   );
 }
 

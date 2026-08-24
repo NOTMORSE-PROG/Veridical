@@ -138,6 +138,22 @@ describe("EscalatedPanel", () => {
     expect(reasonInput).toHaveAttribute("aria-invalid", "true");
   });
 
+  it("BUG-069 item 1: the reason field's accessible name stays 'Reason (required)' -- the error must not fold into it and double-announce", async () => {
+    vi.stubGlobal("fetch", stubFetchByPath({ "/check-runs/5/escalated": [REAL_MAJORITY] }));
+    renderWithProviders(<EscalatedPanel checkRunId={5} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Pass" }));
+    fireEvent.click(screen.getByRole("button", { name: "Confirm" }));
+    await screen.findByText("Enter a reason before confirming.");
+
+    // A <label> wrapping the error text would fold it into the input's
+    // computed accessible name (getByRole("textbox", { name: ... })
+    // resolves by accessible name, so this only matches if the name is
+    // exactly the label text, not the label text plus the error).
+    const reasonInput = screen.getByRole("textbox", { name: "Reason (required)" });
+    expect(reasonInput).toBeInTheDocument();
+  });
+
   it("BUG-096: rejects a one-character reason instead of publishing it verbatim", async () => {
     vi.stubGlobal("fetch", stubFetchByPath({ "/check-runs/5/escalated": [REAL_MAJORITY] }));
     renderWithProviders(<EscalatedPanel checkRunId={5} />);

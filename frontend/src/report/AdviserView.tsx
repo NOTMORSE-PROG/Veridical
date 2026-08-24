@@ -59,7 +59,7 @@ function useNoindexMeta() {
   }, []);
 }
 
-function Chrome({ children }: { children: ReactNode }) {
+function Chrome({ children, showReadOnlyBanner = true }: { children: ReactNode; showReadOnlyBanner?: boolean }) {
   return (
     <div className="flex min-h-screen flex-col bg-page">
       <a
@@ -81,10 +81,16 @@ function Chrome({ children }: { children: ReactNode }) {
           </span>
         </div>
       </header>
-      <p className="bg-status-info-bg px-4 py-2.5 text-center text-sm text-status-info-text">
-        Read-only shared view. You're viewing a report shared by the instructor. No account is
-        required, and nothing on this page can be edited.
-      </p>
+      {/* BUG-069 item 5: this used to render unconditionally, including on
+          the "Link not found"/"Link no longer available" error states --
+          claiming "you're viewing a report shared by the instructor" when
+          there is, in fact, no report to view. */}
+      {showReadOnlyBanner && (
+        <p className="bg-status-info-bg px-4 py-2.5 text-center text-sm text-status-info-text">
+          Read-only shared view. You're viewing a report shared by the instructor. No account is
+          required, and nothing on this page can be edited.
+        </p>
+      )}
       <main id="main-content" tabIndex={-1} className="flex-1">
         <div className="mx-auto flex max-w-[900px] flex-col gap-4 p-4 sm:p-6">{children}</div>
       </main>
@@ -148,7 +154,7 @@ export function AdviserViewPage() {
         ? error.message
         : "This report couldn't be loaded right now.";
     return (
-      <Chrome>
+      <Chrome showReadOnlyBanner={false}>
         <h1
           ref={errorRef}
           tabIndex={-1}
