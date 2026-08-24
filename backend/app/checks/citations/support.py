@@ -192,8 +192,11 @@ async def run_claim_support_check(
         try:
             verdicts = await _judge_batch(llm, chunk, check_run_id=check_run_id)
         except QuotaExhaustedError:
-            n_quota += len(chunk)
-            continue
+            # BUG-080: quota exhaustion is terminal for the whole run, not
+            # just this chunk -- every remaining pair would fail identically,
+            # so count them all as skipped and stop instead of retrying.
+            n_quota += len(pairs) - start
+            break
         except ApiDownError:
             n_api_down += len(chunk)
             continue
