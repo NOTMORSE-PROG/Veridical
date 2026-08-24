@@ -473,6 +473,15 @@ export interface PassagePairOut {
   level: "exact_duplicate" | "high_similarity";
 }
 
+// BUG-078: what confirm-source would mark, if the instructor confirms this
+// flag's source — a title match isn't a unique identifier the way a
+// DOI/ISBN is (two distinct papers can share a normalized title), so the
+// frontend needs `kind` to show that collision risk distinctly.
+export interface CitationSourceKeyOut {
+  kind: "doi" | "isbn" | "title";
+  value: string;
+}
+
 export interface FlagOut {
   id: number;
   check_result_id: number;
@@ -497,9 +506,21 @@ export interface FlagOut {
   // for an F7 flag produced on the account's first-ever manuscript upload.
   // Never changes `severity`.
   first_upload_context: boolean;
+  // BUG-078: present only for a citation flag with a real DOI/ISBN/title
+  // to key a confirmation on — gates the "Confirm this source" button vs.
+  // the "nothing to confirm" explanation.
+  citation_source_key: CitationSourceKeyOut | null;
+  // True only when THIS flag was resolved via "Confirm this source"
+  // rather than an ordinary override — always false while `overridden` is
+  // false. Distinguishes the two terminal banners.
+  confirmed_citation_source: boolean;
 }
 
 export interface OverrideFlagOut extends FlagOut {
+  report: ReportOut;
+}
+
+export interface ConfirmCitationSourceOut extends FlagOut {
   report: ReportOut;
 }
 
@@ -520,6 +541,10 @@ export interface FlagSummaryOut {
   is_passage_level: boolean;
   // BUG-097: mirrors FlagOut's own field.
   first_upload_context: boolean;
+  // BUG-078: mirrors FlagOut's own field -- lets the panel distinguish a
+  // confirmed citation source from an ordinary override instead of
+  // showing the same "Overridden" pill for both.
+  confirmed_citation_source: boolean;
 }
 
 // V-065: what the manuscript viewer's document pane can actually do with

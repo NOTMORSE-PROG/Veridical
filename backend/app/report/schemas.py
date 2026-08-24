@@ -321,6 +321,12 @@ class FlagSummaryOut(BaseModel):
     # docstring. Drives the flags panel's "first-ever check" group note,
     # scoped to the originality_reuse group only.
     first_upload_context: bool = False
+    # BUG-078 (`ux-critic` finding, live-reproduced): mirrors FlagOut's own
+    # field -- without this, the panel's `overridden` pill read "Overridden"
+    # for a flag the instructor actually CONFIRMED, conflating exactly what
+    # `FlagDetail.tsx`'s own terminal banner is careful never to conflate
+    # (confirming isn't disagreeing with anything).
+    confirmed_citation_source: bool = False
 
 
 class FlagRegionOut(BaseModel):

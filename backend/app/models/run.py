@@ -100,6 +100,14 @@ class Flag(Base, PkCreatedMixin):
     annotation: Mapped[str | None] = mapped_column(Text)
     overridden: Mapped[bool] = mapped_column(Boolean, server_default="false")
     override_reason: Mapped[str | None] = mapped_column(Text)
+    # BUG-078: distinguishes "confirmed the citation source is legitimate"
+    # (also marks the shared citation_cache row, FEATURES.md §9) from an
+    # ordinary override -- both set overridden/override_reason the same
+    # way (same score-recalculation path), and override_reason is
+    # instructor-authored free text on BOTH paths, so text-matching it
+    # can't tell them apart reliably. A real column, not an inference
+    # (ui-designer spec, 2026-08-24).
+    confirmed_citation_source: Mapped[bool] = mapped_column(Boolean, server_default="false")
 
     check_result: Mapped["CheckResult"] = relationship(back_populates="flags")
 

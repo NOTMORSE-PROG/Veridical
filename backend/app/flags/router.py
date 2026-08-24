@@ -7,8 +7,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.dependencies import get_current_instructor
 from app.db import get_session
-from app.flags.schemas import AnnotateFlagIn, FlagOut, OverrideFlagIn, OverrideFlagOut
-from app.flags.service import annotate_flag, get_flag, override_flag
+from app.flags.schemas import (
+    AnnotateFlagIn,
+    ConfirmCitationSourceIn,
+    ConfirmCitationSourceOut,
+    FlagOut,
+    OverrideFlagIn,
+    OverrideFlagOut,
+)
+from app.flags.service import annotate_flag, confirm_citation_source, get_flag, override_flag
 from app.models.instructor import Instructor
 from app.report.service import get_report
 
@@ -44,3 +51,17 @@ async def override_flag_route(
     flag_out, check_run_id = await override_flag(session, flag_id, instructor.id, body.reason)
     report = await get_report(session, check_run_id, instructor.id)
     return OverrideFlagOut(**flag_out.model_dump(), report=report)
+
+
+@router.post("/{flag_id}/confirm-source", response_model=ConfirmCitationSourceOut)
+async def confirm_citation_source_route(
+    flag_id: int,
+    body: ConfirmCitationSourceIn,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    instructor: Annotated[Instructor, Depends(get_current_instructor)],
+) -> ConfirmCitationSourceOut:
+    flag_out, check_run_id = await confirm_citation_source(
+        session, flag_id, instructor.id, body.reason
+    )
+    report = await get_report(session, check_run_id, instructor.id)
+    return ConfirmCitationSourceOut(**flag_out.model_dump(), report=report)

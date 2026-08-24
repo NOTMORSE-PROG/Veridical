@@ -102,6 +102,7 @@ const SAMPLE_FLAG: FlagSummaryOut = {
   overridden: false,
   is_passage_level: false,
   first_upload_context: false,
+  confirmed_citation_source: false,
 };
 
 describe("ReportPage", () => {
@@ -760,10 +761,33 @@ describe("ReportPage", () => {
     );
     renderWithProviders(<ReportPage />, { route: "/report/5", path: "/report/:checkRunId" });
 
-    expect(await screen.findByText("This flag was overridden.")).toBeInTheDocument();
+    // BUG-078: "resolved" (not "overridden") is the summary's own wording
+    // now, since it also covers a confirmed-citation-source resolution
+    // truthfully -- the per-row pill still names the specific "Overridden".
+    expect(await screen.findByText("This flag was resolved.")).toBeInTheDocument();
     expect(screen.getByText("Overridden")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "View details" })).toHaveAttribute("href", "/flags/2");
     expect(screen.queryByRole("link", { name: "Review evidence" })).not.toBeInTheDocument();
+  });
+
+  it("BUG-078 (ux-critic finding): a confirmed citation source reads as 'Source confirmed', never the generic 'Overridden' pill", async () => {
+    const confirmed: FlagSummaryOut = {
+      ...SAMPLE_FLAG,
+      overridden: true,
+      confirmed_citation_source: true,
+    };
+    vi.stubGlobal(
+      "fetch",
+      stubFetchByPath({
+        "/check-runs/5/report": BASE_REPORT,
+        ...stubEscalated(),
+        ...stubFlags([confirmed]),
+      }),
+    );
+    renderWithProviders(<ReportPage />, { route: "/report/5", path: "/report/:checkRunId" });
+
+    expect(await screen.findByText("Source confirmed")).toBeInTheDocument();
+    expect(screen.queryByText("Overridden")).not.toBeInTheDocument();
   });
 
   it("BUG-033: the explainer honestly names a real flag deduction and links down to the flags panel", async () => {

@@ -1,5 +1,6 @@
-import { fireEvent, screen, waitFor } from "@testing-library/react";
+import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import type { ConfirmCitationSourceOut, FlagOut, ReportOut } from "../api/types";
 import { renderWithProviders, stubFetchByPath } from "../test/renderWithProviders";
 import { FlagDetailPage } from "./FlagDetail";
 
@@ -20,6 +21,12 @@ const FLAG = {
   ai_verdict_summary: "not_supported",
   ai_reasoning: "This source appears in the Retraction Watch database.",
   llm_mode: "real",
+  // BUG-078: this fixture's ai_verdict_summary ("not_supported") is never
+  // "unverifiable_not_found", so the new "Verify this source" section
+  // never gates on for any test below -- these two fields just need to be
+  // present to satisfy FlagOut's shape.
+  citation_source_key: null,
+  confirmed_citation_source: false,
 };
 
 describe("FlagDetailPage", () => {
@@ -231,5 +238,200 @@ describe("FlagDetailPage", () => {
     );
     renderWithProviders(<FlagDetailPage />, { route: "/flags/5", path: "/flags/:flagId" });
     expect(await screen.findByRole("alert")).toHaveTextContent("No flag 5.");
+  });
+});
+
+// BUG-078: "Confirm this source" -- gating (citation_integrity +
+// unverifiable_not_found only), the confirmable-vs-nothing-to-confirm
+// split within that, the modal's required-reason validation, and the
+// three-way terminal state (not resolved / ordinary override / confirmed
+// source) rendering a DIFFERENT, honest banner and announcement for each.
+function makeFlag(overrides: Partial<FlagOut> = {}): FlagOut {
+  return {
+    id: 20,
+    check_result_id: 5,
+    check_run_id: 44,
+    manuscript_group_label: "VERIDICAL",
+    check_kind: "citation_integrity",
+    criterion_text: null,
+    severity: "low",
+    confidence: null,
+    evidence_excerpt: "Serquiña, R. (2025). Automated integrity checking. J. Ed. Tech, 12(3).",
+    page_anchor: "reference #3",
+    annotation: null,
+    overridden: false,
+    override_reason: null,
+    ai_verdict_summary: "unverifiable_not_found",
+    ai_reasoning: null,
+    llm_mode: "real",
+    passage_pair: null,
+    first_upload_context: false,
+    citation_source_key: { kind: "doi", value: "10.9999/local-source" },
+    confirmed_citation_source: false,
+    ...overrides,
+  };
+}
+
+// Not fetched by FlagDetailPage itself (only surfaces via the "View
+// updated report" link's href) -- just needs to satisfy
+// ConfirmCitationSourceOut's `report: ReportOut` field shape.
+const REPORT: ReportOut = {
+  check_run_id: 44,
+  manuscript_group_label: "VERIDICAL",
+  manuscript_original_filename: null,
+  rubric_title: "TIP Format",
+  status: "conditionally_ready",
+  composite_score: 82,
+  thresholds: { ready_min_score: 85, not_ready_max_score: 60 },
+  reason: null,
+  flag_deduction: 0,
+  unresolved_high_flag_count: 0,
+  decision: null,
+  decided_at: null,
+  decision_note: null,
+  pending_review_count: 0,
+  rubric_is_current: true,
+  llm_mode: "real",
+  rubric_needs_review: false,
+  rubric_parse_issues: null,
+  previous_status: null,
+  previous_composite_score: null,
+  integrity_check_status: [],
+  results: [],
+};
+
+function renderFlag(flag: FlagOut, extraHandlers: Record<string, unknown> = {}) {
+  vi.stubGlobal("fetch", stubFetchByPath({ "/flags/20": flag, ...extraHandlers }));
+  return renderWithProviders(<FlagDetailPage />, {
+    route: "/flags/20",
+    path: "/flags/:flagId",
+  });
+}
+
+describe("FlagDetail — BUG-078 confirm-source", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("shows the confirmable copy and button for a citation flag with a real key", async () => {
+    renderFlag(makeFlag());
+    expect(await screen.findByText("Verify this source")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Confirm this source" })).toBeInTheDocument();
+    // Override stays available alongside it, with the connective line.
+    expect(screen.getByText(/Or, override just this flag/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Override" })).toBeInTheDocument();
+  });
+
+  it("shows the nothing-to-confirm explanation, no button, when there's no key", async () => {
+    renderFlag(makeFlag({ citation_source_key: null }));
+    expect(await screen.findByText("Verify this source")).toBeInTheDocument();
+    expect(screen.getByText(/couldn't find a DOI, ISBN, or title/)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Confirm this source" })).not.toBeInTheDocument();
+    // Override still offered as the fallback path the copy names.
+    expect(screen.getByRole("button", { name: "Override" })).toBeInTheDocument();
+  });
+
+  it("never shows the section for a non-citation-integrity flag", async () => {
+    renderFlag(
+      makeFlag({
+        check_kind: "statistical_forensics",
+        ai_verdict_summary: "grim_inconsistent",
+        citation_source_key: null,
+      }),
+    );
+    await screen.findByRole("button", { name: "Override" });
+    expect(screen.queryByText("Verify this source")).not.toBeInTheDocument();
+  });
+
+  it("never shows the section for a citation flag with a different verdict (e.g. retracted)", async () => {
+    renderFlag(makeFlag({ ai_verdict_summary: "retracted_source", citation_source_key: null }));
+    await screen.findByRole("button", { name: "Override" });
+    expect(screen.queryByText("Verify this source")).not.toBeInTheDocument();
+  });
+
+  it("opening the modal requires a reason before it will submit", async () => {
+    renderFlag(makeFlag());
+    fireEvent.click(await screen.findByRole("button", { name: "Confirm this source" }));
+
+    const dialog = await screen.findByRole("dialog", {
+      name: "Confirm this source is legitimate?",
+    });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Confirm this source" }));
+
+    expect(
+      await screen.findByText("Enter where you verified this before confirming."),
+    ).toBeInTheDocument();
+  });
+
+  it("caps the evidence blockquote so a long citation can't push the disclosure/buttons off-screen", async () => {
+    // ux-critic (BUG-078 review), live-reproduced: an unbounded blockquote
+    // on a genuinely long evidence_excerpt pushed the mandatory
+    // disclosure, reason field, and Confirm/Cancel buttons out of view.
+    renderFlag(makeFlag({ evidence_excerpt: "A very long citation. ".repeat(60) }));
+    fireEvent.click(await screen.findByRole("button", { name: "Confirm this source" }));
+    const dialog = await screen.findByRole("dialog", {
+      name: "Confirm this source is legitimate?",
+    });
+    const blockquote = within(dialog).getByText(/A very long citation\./);
+    expect(blockquote.className).toContain("max-h-");
+    expect(blockquote.className).toContain("overflow-y-auto");
+  });
+
+  it("shows a distinct caution note for a title-keyed (non-unique) match", async () => {
+    renderFlag(makeFlag({ citation_source_key: { kind: "title", value: "a common thesis title" } }));
+    fireEvent.click(await screen.findByRole("button", { name: "Confirm this source" }));
+    expect(await screen.findByText(/Matched by title, not a DOI or ISBN/)).toBeInTheDocument();
+    // The raw casefolded key value is deliberately not shown for a title match.
+    expect(screen.queryByText(/a common thesis title/)).not.toBeInTheDocument();
+  });
+
+  it("confirming resolves the flag with a distinct, honest banner — never the override wording", async () => {
+    const confirmed: ConfirmCitationSourceOut = {
+      ...makeFlag({
+        overridden: true,
+        confirmed_citation_source: true,
+        override_reason: "Verified on the publisher's own website.",
+      }),
+      report: REPORT,
+    };
+    renderFlag(makeFlag(), {
+      "/flags/20/confirm-source": confirmed,
+    });
+
+    fireEvent.click(await screen.findByRole("button", { name: "Confirm this source" }));
+    const dialog = await screen.findByRole("dialog", {
+      name: "Confirm this source is legitimate?",
+    });
+    fireEvent.change(screen.getByLabelText("Where you verified this (required)"), {
+      target: { value: "Verified on the publisher's own website." },
+    });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Confirm this source" }));
+
+    expect(
+      await screen.findByText(/You confirmed the source is legitimate, so this flag is resolved/),
+    ).toBeInTheDocument();
+    expect(screen.getByText(/Verified on the publisher's own website\./)).toBeInTheDocument();
+    expect(
+      screen.getByText(/This source is now marked verified across VERIDICAL/),
+    ).toBeInTheDocument();
+    // The ordinary-override sentence must never appear on this path.
+    expect(screen.queryByText(/You overrode this finding/)).not.toBeInTheDocument();
+    expect(
+      screen.getByText(
+        "This source was confirmed. The flag was resolved and the readiness report was recalculated.",
+      ),
+    ).toBeInTheDocument();
+
+    await waitFor(() => expect(document.activeElement).toHaveAttribute("tabindex", "-1"));
+  });
+
+  it("an ordinary override still renders the original override banner, not the confirm one", async () => {
+    renderFlag(
+      makeFlag({
+        overridden: true,
+        confirmed_citation_source: false,
+        override_reason: "Not actually retracted.",
+      }),
+    );
+    expect(await screen.findByText(/You overrode this finding/)).toBeInTheDocument();
+    expect(screen.queryByText(/You confirmed the source is legitimate/)).not.toBeInTheDocument();
   });
 });

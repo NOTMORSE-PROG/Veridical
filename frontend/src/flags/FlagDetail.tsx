@@ -14,6 +14,7 @@ import { FirstUploadContextBanner } from "../components/FirstUploadContextBanner
 import { TestModeBanner } from "../components/TestModeBanner";
 import { checkKindMeta, humanize } from "../domain/checkKind";
 import { useRouteFocus } from "../routing/useRouteFocus";
+import { ConfirmCitationSourceModal } from "./ConfirmCitationSourceModal";
 import { useAnnotateFlag, useFlag, useOverrideFlag } from "./useFlag";
 
 function SpinnerIcon() {
@@ -87,6 +88,48 @@ function AnnotationBox({ flagId, initial }: { flagId: number; initial: string | 
           </span>
         )}
       </div>
+    </section>
+  );
+}
+
+// BUG-078: shown only for a live, unresolved citation flag whose AI
+// verdict is "unverifiable_not_found" — gated by the parent on
+// `check_kind`/`ai_verdict_summary` (both already on the wire), matching
+// ui-designer's spec. Within that, `flag.citation_source_key` (present
+// only when a real DOI/ISBN/title existed to key the lookup on) decides
+// whether a button or an explanation renders.
+function ConfirmSourceControl({ flag }: { flag: FlagOut }) {
+  const [open, setOpen] = useState(false);
+
+  return (
+    <section aria-label="Verify this source" className="flex flex-col gap-2">
+      <span className="text-xs font-semibold tracking-header text-ink-tertiary uppercase">
+        Verify this source
+      </span>
+      {flag.citation_source_key ? (
+        <>
+          <p className="text-sm text-ink-secondary">
+            You can mark this specific source as verified if you've checked it yourself, for
+            example on the publisher's site or an institutional repository. This is different from
+            Override: it also affects every other manuscript that cites the same source, not just
+            this one.
+          </p>
+          <button
+            type="button"
+            onClick={() => setOpen(true)}
+            className="flex min-h-11 w-fit items-center rounded-md border border-border-input bg-panel px-3.5 text-sm font-medium text-ink hover:bg-status-neutral-bg sm:min-h-9"
+          >
+            Confirm this source
+          </button>
+          {open && <ConfirmCitationSourceModal flag={flag} onClose={() => setOpen(false)} />}
+        </>
+      ) : (
+        <p className="text-sm text-ink-secondary">
+          VERIDICAL couldn't find a DOI, ISBN, or title to check this citation against, so there's
+          no shared record to confirm it against. If you've verified this source yourself, use
+          Override below.
+        </p>
+      )}
     </section>
   );
 }
@@ -236,7 +279,15 @@ export function FlagDetailPage() {
     if (!flag) return;
     if (flag.overridden && !wasOverriddenRef.current) {
       bannerRef.current?.focus();
-      setAnnouncement("This finding was overridden. The readiness report was recalculated.");
+      // BUG-078: same transition, two honestly different outcomes — a
+      // confirmed source wasn't a disagreement with anything, so the
+      // announcement (like the terminal banner below) must not say
+      // "overrode."
+      setAnnouncement(
+        flag.confirmed_citation_source
+          ? "This source was confirmed. The flag was resolved and the readiness report was recalculated."
+          : "This finding was overridden. The readiness report was recalculated.",
+      );
     }
     wasOverriddenRef.current = flag.overridden;
     // Deliberately keyed on the boolean, not the whole `flag` object
@@ -339,27 +390,71 @@ export function FlagDetailPage() {
             {flag.ai_reasoning && <p className="text-sm text-ink-secondary">{flag.ai_reasoning}</p>}
           </section>
 
-          {flag.overridden ? (
-            <div
-              ref={bannerRef}
-              tabIndex={-1}
-              className="flex flex-col gap-1.5 rounded-lg bg-status-info-bg px-4 py-3 text-sm text-status-info-text"
-            >
-              <p>
-                AI said: <b>{humanizedVerdict(flag)}</b>. You overrode this finding.
-              </p>
-              <p>Reason: {flag.override_reason}</p>
-              <p className="text-xs">
-                The readiness report was recalculated.{" "}
-                <Link to={`/report/${flag.check_run_id}`} className="font-medium underline">
-                  View updated report
-                </Link>
-                .
-              </p>
-            </div>
-          ) : (
-            <OverrideControl flagId={flag.id} hasVerdict={flag.ai_verdict_summary !== null} />
-          )}
+          {(() => {
+            // BUG-078: a citation flag VERIDICAL couldn't verify offers a
+            // second path alongside Override — confirming the source
+            // itself, not just this one flag.
+            const confirmSourceEligible =
+              flag.check_kind === "citation_integrity" &&
+              flag.ai_verdict_summary === "unverifiable_not_found";
+
+            if (flag.overridden) {
+              return flag.confirmed_citation_source ? (
+                <div
+                  ref={bannerRef}
+                  tabIndex={-1}
+                  className="flex flex-col gap-1.5 rounded-lg bg-status-info-bg px-4 py-3 text-sm text-status-info-text"
+                >
+                  <p>
+                    VERIDICAL reported this as <b>{humanizedVerdict(flag)}</b>. You confirmed the
+                    source is legitimate, so this flag is resolved.
+                  </p>
+                  <p>Where you verified it: {flag.override_reason}</p>
+                  <p>
+                    This source is now marked verified across VERIDICAL. It won't be flagged as
+                    unverifiable on any other manuscript that cites it either.
+                  </p>
+                  <p className="text-xs">
+                    The readiness report was recalculated.{" "}
+                    <Link to={`/report/${flag.check_run_id}`} className="font-medium underline">
+                      View updated report
+                    </Link>
+                    .
+                  </p>
+                </div>
+              ) : (
+                <div
+                  ref={bannerRef}
+                  tabIndex={-1}
+                  className="flex flex-col gap-1.5 rounded-lg bg-status-info-bg px-4 py-3 text-sm text-status-info-text"
+                >
+                  <p>
+                    AI said: <b>{humanizedVerdict(flag)}</b>. You overrode this finding.
+                  </p>
+                  <p>Reason: {flag.override_reason}</p>
+                  <p className="text-xs">
+                    The readiness report was recalculated.{" "}
+                    <Link to={`/report/${flag.check_run_id}`} className="font-medium underline">
+                      View updated report
+                    </Link>
+                    .
+                  </p>
+                </div>
+              );
+            }
+
+            return (
+              <>
+                {confirmSourceEligible && <ConfirmSourceControl flag={flag} />}
+                {confirmSourceEligible && (
+                  <p className="text-sm text-ink-tertiary">
+                    Or, override just this flag without confirming the source anywhere else:
+                  </p>
+                )}
+                <OverrideControl flagId={flag.id} hasVerdict={flag.ai_verdict_summary !== null} />
+              </>
+            );
+          })()}
 
           <AnnotationBox flagId={flag.id} initial={flag.annotation} />
         </>

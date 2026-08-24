@@ -86,25 +86,30 @@ function severityBreakdown(flags: FlagSummaryOut[]): string {
 // collapsed header, implying an active high-severity issue that didn't
 // exist, while the panel's own top-line summary (correctly scoped)
 // disagreed with it on the same screen.
+// BUG-078 (ux-critic finding, live-reproduced): "overridden" is no longer
+// an honest word for every resolved flag here -- a confirmed citation
+// source resolved the flag without disagreeing with anything. "Resolved"
+// covers both paths truthfully; the per-row pill (FlagRow, above) still
+// names the specific one.
 function groupCaption(flags: FlagSummaryOut[]): string {
   const unresolved = flags.filter((f) => !f.overridden);
-  if (unresolved.length === 0) return "All overridden";
+  if (unresolved.length === 0) return "All resolved";
   return severityBreakdown(unresolved);
 }
 
 function panelSubline(flags: FlagSummaryOut[]): string {
   const unresolved = flags.filter((f) => !f.overridden);
-  const overridden = flags.filter((f) => f.overridden);
-  if (unresolved.length > 0 && overridden.length > 0) {
-    return `${severityBreakdown(unresolved)}. ${overridden.length} already overridden.`;
+  const resolved = flags.filter((f) => f.overridden);
+  if (unresolved.length > 0 && resolved.length > 0) {
+    return `${severityBreakdown(unresolved)}. ${resolved.length} already resolved.`;
   }
   if (unresolved.length > 0) {
     return `${severityBreakdown(unresolved)}.`;
   }
-  if (overridden.length === 1) {
-    return "This flag was overridden.";
+  if (resolved.length === 1) {
+    return "This flag was resolved.";
   }
-  return `All ${overridden.length} overridden.`;
+  return `All ${resolved.length} resolved.`;
 }
 
 function FlagRow({
@@ -130,7 +135,16 @@ function FlagRow({
         <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
           <AnchorPill anchor={flag.page_anchor} />
           <SeverityTag severity={flag.severity as Severity} />
-          {flag.overridden && <StatusPill tone="neutral">Overridden</StatusPill>}
+          {/* BUG-078 (ux-critic finding, live-reproduced): a confirmed
+              citation source is not a disagreement with anything -- the
+              same "Overridden" pill this row showed for both would
+              conflate exactly what FlagDetail.tsx's own terminal banner
+              is careful never to conflate. */}
+          {flag.confirmed_citation_source ? (
+            <StatusPill tone="success">Source confirmed</StatusPill>
+          ) : (
+            flag.overridden && <StatusPill tone="neutral">Overridden</StatusPill>
+          )}
         </div>
       </div>
       {/* V-040: the adviser view has nowhere for this to go -- /flags/:id

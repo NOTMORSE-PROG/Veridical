@@ -16,10 +16,12 @@ import os
 from decimal import Decimal
 
 import pytest
-from sqlalchemy import text
+from sqlalchemy import select, text
 
 from app.errors import ConflictError, NotFoundError
-from app.flags.service import annotate_flag, get_flag, override_flag
+from app.flags.schemas import CitationSourceKeyOut
+from app.flags.service import annotate_flag, confirm_citation_source, get_flag, override_flag
+from app.models.citation_cache import CitationCache
 from app.models.enums import CheckKind, CheckRunStatus, FlagSeverity, ReadinessStatus, ResultOutcome
 from app.models.instructor import Instructor
 from app.models.manuscript import Manuscript
@@ -67,8 +69,8 @@ async def _clean_tables(session_factory):
     async with session_factory() as session:
         await session.execute(
             text(
-                "TRUNCATE audit_log, flag, readiness_report, check_result, check_run, "
-                "criterion, rubric, manuscript, instructor RESTART IDENTITY CASCADE"
+                "TRUNCATE audit_log, citation_cache, flag, readiness_report, check_result, "
+                "check_run, criterion, rubric, manuscript, instructor RESTART IDENTITY CASCADE"
             )
         )
         await session.commit()
@@ -207,6 +209,114 @@ async def test_override_is_blocked_once_the_report_is_decided(session_factory):
         # Confirmed the override never applied — not just that it raised.
         flag_out = await get_flag(session, flag.id, instructor.id)
         assert flag_out.overridden is False
+
+
+async def _seed_confirmable_citation_flag(session):
+    """A real `unverifiable_not_found` citation flag (BUG-078) with a
+    matching `citation_cache` row already present -- the row a check run
+    would have created on its own first (uncached) lookup, which is
+    always true by the time a flag referencing it exists."""
+    instructor = Instructor(email=f"confirm-{id(session)}@test.local", display_name="Confirm Test")
+    session.add(instructor)
+    await session.commit()
+    manuscript = Manuscript(instructor_id=instructor.id, group_label="G", file_ref="x.pdf")
+    rubric = Rubric(instructor_id=instructor.id, title="Format", source_file="r.pdf")
+    session.add_all([manuscript, rubric])
+    await session.commit()
+    check_run = CheckRun(
+        manuscript_id=manuscript.id, rubric_id=rubric.id, status=CheckRunStatus.done
+    )
+    session.add(check_run)
+    await session.commit()
+    result = CheckResult(
+        check_run_id=check_run.id,
+        criterion_id=None,
+        kind=CheckKind.citation_integrity,
+        outcome=ResultOutcome.passed,
+        score=None,
+        detail={},
+    )
+    session.add(result)
+    await session.commit()
+    cache_row = CitationCache(
+        key_kind="doi",
+        key_value="10.9999/local-source",
+        provider="crossref",
+        result={"found": False, "provider": "crossref"},
+    )
+    session.add(cache_row)
+    await session.commit()
+    flag = Flag(
+        check_result_id=result.id,
+        severity=FlagSeverity.low,
+        evidence_excerpt="A local source not indexed by CrossRef.",
+        page_anchor="reference #3",
+        detail={
+            "kind": "unverifiable_not_found",
+            "reason": "Could not find this source in CrossRef, Semantic Scholar, "
+            "Open Library, or Google Books.",
+            "key_kind": "doi",
+            "key_value": "10.9999/local-source",
+        },
+    )
+    session.add(flag)
+    await session.commit()
+    await aggregate_and_score(session, check_run.id)
+    return instructor, check_run, flag
+
+
+async def test_confirm_citation_source_overrides_the_flag_and_marks_the_cache_row(session_factory):
+    async with session_factory() as session:
+        instructor, check_run, flag = await _seed_confirmable_citation_flag(session)
+
+        pre_out = await get_flag(session, flag.id, instructor.id)
+        assert pre_out.citation_source_key == CitationSourceKeyOut(
+            kind="doi", value="10.9999/local-source"
+        )
+        assert pre_out.confirmed_citation_source is False
+
+        flag_out, check_run_id = await confirm_citation_source(
+            session, flag.id, instructor.id, "Verified on the publisher's own website."
+        )
+        assert check_run_id == check_run.id
+        assert flag_out.overridden is True
+        assert flag_out.override_reason == "Verified on the publisher's own website."
+        assert flag_out.confirmed_citation_source is True
+        # Original AI finding untouched -- never destroyed, same convention as override_flag.
+        assert flag_out.evidence_excerpt == "A local source not indexed by CrossRef."
+
+        row = await session.scalar(
+            select(CitationCache).where(
+                CitationCache.key_kind == "doi", CitationCache.key_value == "10.9999/local-source"
+            )
+        )
+        assert row.instructor_confirmed is True
+        assert row.instructor_confirmed_at is not None
+
+
+async def test_confirm_citation_source_rejects_a_flag_with_nothing_to_confirm(session_factory):
+    async with session_factory() as session:
+        instructor, _, flag = await _seed_flagged_run(session)  # ordinary retraction-shaped flag
+        with pytest.raises(ConflictError):
+            await confirm_citation_source(session, flag.id, instructor.id, "I checked it.")
+        # Confirmed it never applied -- not just that it raised.
+        flag_out = await get_flag(session, flag.id, instructor.id)
+        assert flag_out.overridden is False
+        assert flag_out.confirmed_citation_source is False
+
+
+async def test_confirm_citation_source_is_blocked_once_the_report_is_decided(session_factory):
+    async with session_factory() as session:
+        instructor, check_run, flag = await _seed_confirmable_citation_flag(session)
+        await decide_report(
+            session,
+            check_run.id,
+            instructor.id,
+            "rejected",
+            "Deliberately disagreeing for this test.",
+        )
+        with pytest.raises(ConflictError):
+            await confirm_citation_source(session, flag.id, instructor.id, "I checked it.")
 
 
 async def _seed_two_flags_one_check_result(session):

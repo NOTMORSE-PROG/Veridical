@@ -1,7 +1,7 @@
 // Flag evidence/annotation/override data layer (F8.2/F8.4, screen 4i).
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api/client";
-import type { FlagOut, OverrideFlagOut } from "../api/types";
+import type { ConfirmCitationSourceOut, FlagOut, OverrideFlagOut } from "../api/types";
 
 export function useFlag(flagId: number) {
   return useQuery({
@@ -34,6 +34,23 @@ export function useOverrideFlag(flagId: number) {
       // manual refetch, reintroducing the exact "overridden must not
       // read the same as active" failure this ticket exists to fix, one
       // layer up (ui-designer spec, required not optional).
+      queryClient.invalidateQueries({ queryKey: ["report", out.report.check_run_id, "flags"] });
+      queryClient.invalidateQueries({ queryKey: ["stats"] });
+    },
+  });
+}
+
+// BUG-078: byte-identical onSuccess shape to useOverrideFlag (same three
+// setQueryData/invalidateQueries calls) — reusing it means the report's
+// flags panel correctly stops showing this flag as active, for free.
+export function useConfirmCitationSource(flagId: number) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (reason: string) =>
+      api.post<ConfirmCitationSourceOut>(`/flags/${flagId}/confirm-source`, { reason }),
+    onSuccess: (out) => {
+      queryClient.setQueryData(["flag", flagId], out);
+      queryClient.setQueryData(["report", out.report.check_run_id], out.report);
       queryClient.invalidateQueries({ queryKey: ["report", out.report.check_run_id, "flags"] });
       queryClient.invalidateQueries({ queryKey: ["stats"] });
     },

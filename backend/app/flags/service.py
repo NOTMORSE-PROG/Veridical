@@ -18,8 +18,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.checks.reuse.embed import split_context
 from app.config import get_settings
-from app.errors import NotFoundError
-from app.flags.schemas import FlagOut, PassagePairOut
+from app.errors import ConflictError, NotFoundError
+from app.external import cache
+from app.flags.schemas import CitationSourceKeyOut, FlagOut, PassagePairOut
 from app.models.audit import AuditLog
 from app.models.manuscript import Manuscript
 from app.models.rubric import Criterion
@@ -66,6 +67,21 @@ async def _scoped_flag(
     if row is None:
         raise NotFoundError(f"No flag {flag_id}.")
     return row
+
+
+def _citation_source_key(detail: dict) -> CitationSourceKeyOut | None:
+    """BUG-078: `verify.py` sets `key_kind`/`key_value` on a
+    `unverifiable_not_found` flag's detail only when a real DOI/ISBN/title
+    existed to key the lookup on (never for the "no identifier at all"
+    case) -- presence here is exactly what gates the "Confirm this source"
+    button on screen 4i (`ui-designer` spec, 2026-08-24)."""
+    if detail.get("kind") != "unverifiable_not_found":
+        return None
+    key_kind = detail.get("key_kind")
+    key_value = detail.get("key_value")
+    if not key_kind or not key_value:
+        return None
+    return CitationSourceKeyOut(kind=key_kind, value=key_value)
 
 
 def _distinct_reasoning(detail: dict, evidence_excerpt: str) -> str | None:
@@ -127,6 +143,8 @@ async def _to_flag_out(
         llm_mode=check_run.llm_mode.value,
         passage_pair=_passage_pair_from_detail(flag.evidence_excerpt, detail),
         first_upload_context=bool(detail.get("first_upload_context")),
+        citation_source_key=_citation_source_key(detail),
+        confirmed_citation_source=flag.confirmed_citation_source,
     )
 
 
@@ -190,6 +208,78 @@ async def override_flag(
         )
     )
     await session.commit()
+    await aggregate_and_score(session, result.check_run_id)
+    await session.refresh(flag)
+    return await _to_flag_out(session, flag, result, manuscript, check_run), result.check_run_id
+
+
+async def confirm_citation_source(
+    session: AsyncSession, flag_id: int, instructor_id: int, reason: str
+) -> tuple[FlagOut, int]:
+    """BUG-078/FEATURES.md §9: an "unverifiable, not found" citation flag
+    can be manually confirmed legitimate -- e.g. a real local/Philippine
+    source the four providers don't index. Two effects: (1) THIS flag is
+    overridden, same mechanics as `override_flag` (audit log,
+    `raise_if_decided` gate, live rescore, original finding never
+    destroyed) -- `flag.confirmed_citation_source` additionally records
+    that this path (not an ordinary override) is what resolved it, so the
+    terminal banner can say something true instead of "you overrode this
+    finding" (`ui-designer` spec, 2026-08-24); (2) the underlying
+    `citation_cache` row is marked `instructor_confirmed` -- a DURABLE,
+    CROSS-MANUSCRIPT mark (`citation_cache` is keyed by source identity —
+    DOI/ISBN/title — not by instructor or manuscript), so any future check
+    run, including another instructor's manuscript citing the identical
+    source, is never re-flagged either (FEATURES.md §9's own wording:
+    "cache instructor's manual confirmations so the same source isn't
+    re-flagged").
+
+    `reason` is instructor-authored ("Where you verified this") -- required,
+    same discipline as `override_flag`'s reason, and if anything a HIGHER
+    bar is warranted here (durable, cross-account), never a lower one.
+
+    Only reachable for a flag whose detail carries `key_kind`/`key_value`
+    (set by `verify.py` only when a real DOI/ISBN/title existed to key the
+    lookup on) — anything else is a `ConflictError`, never a silent no-op.
+
+    Commit ORDER matters (`backend-critic`, BUG-078 review, live-
+    reproduced): the flag/audit-log write commits FIRST, and only then is
+    `citation_cache` marked confirmed (its own separate commit) -- the
+    reverse order left a window where a crash between the two commits
+    would durably silence this source everywhere, forever, with no
+    `Flag.overridden` and no audit trail at all. This order's own worst
+    case (a crash after the first commit) is strictly safer: the flag is
+    honestly resolved with a real audit trail, and the source just isn't
+    globally suppressed yet -- recoverable by confirming again, which is
+    idempotent."""
+    flag, result, manuscript, check_run = await _scoped_flag(session, flag_id, instructor_id)
+    await raise_if_decided(session, result.check_run_id)
+    detail = flag.detail or result.detail or {}
+    key_kind = detail.get("key_kind")
+    key_value = detail.get("key_value")
+    if detail.get("kind") != "unverifiable_not_found" or not key_kind or not key_value:
+        raise ConflictError("This flag has no citation source to confirm.")
+    if not await cache.citation_source_cached(session, key_kind=key_kind, key_value=key_value):
+        raise NotFoundError("No cached lookup exists yet for this citation.")
+    stripped_reason = reason.strip()
+    flag.overridden = True
+    flag.override_reason = stripped_reason
+    flag.confirmed_citation_source = True
+    session.add(
+        AuditLog(
+            event_type="citation_source_confirmed",
+            check_run_id=result.check_run_id,
+            payload={
+                "flag_id": flag_id,
+                "check_result_id": result.id,
+                "instructor_id": instructor_id,
+                "reason": stripped_reason,
+                "key_kind": key_kind,
+                "key_value": key_value,
+            },
+        )
+    )
+    await session.commit()
+    await cache.confirm_citation_source(session, key_kind=key_kind, key_value=key_value)
     await aggregate_and_score(session, result.check_run_id)
     await session.refresh(flag)
     return await _to_flag_out(session, flag, result, manuscript, check_run), result.check_run_id

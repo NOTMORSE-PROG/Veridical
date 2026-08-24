@@ -53,12 +53,23 @@ class VerdictKind(StrEnum):
     corrected = "corrected"
     not_found = "not_found"
     api_down = "api_down"
+    # BUG-078/FEATURES.md §9: a `not_found` result whose citation_cache row
+    # an instructor has since manually confirmed legitimate (e.g. a real
+    # local/Philippine source these providers don't index) -- silence, same
+    # as `existence_confirmed`, never re-flagged.
+    instructor_confirmed = "instructor_confirmed"
 
 
 @dataclass(frozen=True)
 class CitationVerdict:
     kind: VerdictKind
     result: VerificationResult | None = None
+    # Set only when a real lookup key exists (doi/isbn/title) -- the
+    # "no DOI/ISBN/title at all" `not_found` case has nothing to confirm,
+    # so stays None; `_verdict_flag_draft` uses this to decide whether the
+    # resulting flag is confirmable (BUG-078).
+    key_kind: str | None = None
+    key_value: str | None = None
 
 
 RETRACTED_WORDING = (
@@ -180,20 +191,30 @@ async def _verify_keyed(session, key_kind, key_value, *, settings, fetch) -> Cit
         stale_days=settings.citation_cache_stale_days,
     )
     if cached is not None:
-        return _verdict_from_result(cached)
-    try:
-        result = await fetch()
-    except ApiDownError:
-        return CitationVerdict(VerdictKind.api_down)
-    await cache.store_result(
-        session, key_kind=key_kind, key_value=key_value, provider=result.provider, result=result
-    )
-    return _verdict_from_result(result)
+        verdict = _verdict_from_result(cached, key_kind=key_kind, key_value=key_value)
+    else:
+        try:
+            result = await fetch()
+        except ApiDownError:
+            return CitationVerdict(VerdictKind.api_down)
+        await cache.store_result(
+            session, key_kind=key_kind, key_value=key_value, provider=result.provider, result=result
+        )
+        verdict = _verdict_from_result(result, key_kind=key_kind, key_value=key_value)
+    if verdict.kind == VerdictKind.not_found and await cache.is_instructor_confirmed(
+        session, key_kind=key_kind, key_value=key_value
+    ):
+        return CitationVerdict(
+            VerdictKind.instructor_confirmed, verdict.result, key_kind, key_value
+        )
+    return verdict
 
 
-def _verdict_from_result(result: VerificationResult) -> CitationVerdict:
+def _verdict_from_result(
+    result: VerificationResult, *, key_kind: str | None = None, key_value: str | None = None
+) -> CitationVerdict:
     if not result.found:
-        return CitationVerdict(VerdictKind.not_found, result)
+        return CitationVerdict(VerdictKind.not_found, result, key_kind, key_value)
     if result.retracted:
         return CitationVerdict(VerdictKind.retracted, result)
     if result.is_correction:
@@ -202,7 +223,7 @@ def _verdict_from_result(result: VerificationResult) -> CitationVerdict:
 
 
 def _verdict_flag_draft(citation: Citation, verdict: CitationVerdict) -> CitationFlagDraft | None:
-    if verdict.kind == VerdictKind.existence_confirmed:
+    if verdict.kind in (VerdictKind.existence_confirmed, VerdictKind.instructor_confirmed):
         return None  # a confirmed, clean source is not a finding — no noise
     anchor = f"reference #{citation.order_index + 1}"
     if verdict.kind == VerdictKind.retracted:
@@ -235,11 +256,19 @@ def _verdict_flag_draft(citation: Citation, verdict: CitationVerdict) -> Citatio
             page_anchor=anchor,
             detail={"kind": "unverifiable_api_down", "reason": UNVERIFIABLE_API_DOWN_WORDING},
         )
+    detail = {"kind": "unverifiable_not_found", "reason": UNVERIFIABLE_NOT_FOUND_WORDING}
+    if verdict.key_kind is not None:
+        # BUG-078: only present when there's a real DOI/ISBN/title to key a
+        # confirmation on -- absent for the "no identifier at all" case, so
+        # the frontend/`confirm_citation_source` can tell confirmable
+        # flags apart from ones with nothing to confirm.
+        detail["key_kind"] = verdict.key_kind
+        detail["key_value"] = verdict.key_value
     return CitationFlagDraft(  # not_found
         severity=FlagSeverity.low,
         evidence_excerpt=citation.raw_text,
         page_anchor=anchor,
-        detail={"kind": "unverifiable_not_found", "reason": UNVERIFIABLE_NOT_FOUND_WORDING},
+        detail=detail,
     )
 
 
