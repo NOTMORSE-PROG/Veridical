@@ -183,6 +183,56 @@ describe("AppShell", () => {
     expect(screen.queryByRole("button", { name: "Sign out" })).not.toBeInTheDocument();
   });
 
+  it("BUG-102 (WCAG 2.4.11): activating the skip link closes the mobile nav, not just moves focus underneath it", async () => {
+    vi.stubGlobal(
+      "fetch",
+      stubFetchByPath({
+        "/auth/me": { id: 1, email: "a@b.com", display_name: "Demo Instructor" },
+        "/quota": QUOTA,
+      }),
+    );
+    renderWithProviders(
+      <AppShell>
+        <div />
+      </AppShell>,
+      { route: "/dashboard" },
+    );
+    await waitFor(() => expect(screen.getByText("DI")).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: "Open menu" }));
+    expect(screen.getByRole("button", { name: "Sign out" })).toBeInTheDocument();
+
+    // The skip link sits BEFORE the panel in the DOM -- activating it
+    // never passes focus through the panel, so the existing
+    // handlePanelBlur mechanism (tested above) never fires. This is the
+    // separate, generic click-capture fix.
+    fireEvent.click(screen.getByRole("link", { name: "Skip to main content" }));
+
+    expect(screen.queryByRole("button", { name: "Sign out" })).not.toBeInTheDocument();
+  });
+
+  it("BUG-102: any same-page anchor closes the mobile nav, not only the skip link", async () => {
+    vi.stubGlobal(
+      "fetch",
+      stubFetchByPath({
+        "/auth/me": { id: 1, email: "a@b.com", display_name: "Demo Instructor" },
+        "/quota": QUOTA,
+      }),
+    );
+    renderWithProviders(
+      <AppShell>
+        <a href="#decision-heading">Go to final decision</a>
+      </AppShell>,
+      { route: "/dashboard" },
+    );
+    await waitFor(() => expect(screen.getByText("DI")).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: "Open menu" }));
+    expect(screen.getByRole("button", { name: "Sign out" })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("link", { name: "Go to final decision" }));
+
+    expect(screen.queryByRole("button", { name: "Sign out" })).not.toBeInTheDocument();
+  });
+
   it("Shift+Tab back to the hamburger itself doesn't snap the panel shut", async () => {
     vi.stubGlobal(
       "fetch",

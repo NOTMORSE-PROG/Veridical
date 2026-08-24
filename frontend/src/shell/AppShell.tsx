@@ -316,6 +316,38 @@ export function AppShell({ children }: { children: ReactNode }) {
     return () => document.removeEventListener("keydown", onKeyDown);
   }, [mobileNavOpen]);
 
+  // BUG-102 (WCAG 2.2 SC 2.4.11 Focus Not Obscured, AA): the skip link
+  // sits BEFORE the mobile nav panel in the DOM, so activating it never
+  // passes focus through the panel and `handlePanelBlur` below never
+  // fires -- focus lands on #main-content while the opaque nav panel
+  // stays open on top of it, and the next Tab moves an invisible focus
+  // through controls the panel is covering. Explicitly NOT a z-index fix
+  // (measured: the skip link already paints correctly at `--z-skip-link:
+  // 800` -- the layer scale is structurally blind to this).
+  //
+  // Fixed generically for "any in-page anchor" (the ticket's own
+  // phrasing), not just the skip link: a capture-phase click listener on
+  // `document` closes the nav whenever the activated element is a
+  // same-page fragment link (`href` starting with "#"), covering
+  // DecisionPanel.tsx's "#escalated-heading" and Report.tsx's
+  // "#decision-heading" too -- both would reproduce the identical defect
+  // and neither has (or should need) a wired-in callback to AppShell's
+  // own `mobileNavOpen` state. A native `<a>` fires a real `click` event
+  // on Enter activation as well as a mouse click, so this covers the
+  // keyboard reproduction the ticket used, not just pointer input.
+  // Capture phase (not bubble) so this runs before the browser's own
+  // same-page scroll/focus jump, matching `onNavigate`'s existing
+  // close-before-navigate ordering for the panel's own links.
+  useEffect(() => {
+    if (!mobileNavOpen) return;
+    function onClickCapture(event: MouseEvent) {
+      const anchor = (event.target as Element | null)?.closest("a[href^='#']");
+      if (anchor) setMobileNavOpen(false);
+    }
+    document.addEventListener("click", onClickCapture, true);
+    return () => document.removeEventListener("click", onClickCapture, true);
+  }, [mobileNavOpen]);
+
   // Found live (ux-critic): tabbing past the panel's last item (Sign out)
   // moved focus into <main> while the panel stayed open and opaque on top
   // of it -- a focused control the user couldn't see or reach with a click
