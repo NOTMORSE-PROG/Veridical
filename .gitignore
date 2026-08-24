@@ -48,6 +48,7 @@ frontend/dist/
 *.log
 
 # ── Tooling artifacts ─────────────────────────────────────────────
+.codex/
 .playwright-mcp/
 # Agent/session screenshots land at the repo root (ui-designer,
 # ux-critic, professor all write there by default). They show real
