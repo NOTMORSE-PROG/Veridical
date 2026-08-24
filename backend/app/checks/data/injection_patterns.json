@@ -1,0 +1,104 @@
+{
+  "_readme": [
+    "BUG-045: language addressed at an automated grader, found inside",
+    "manuscript text passed into semantic grading. This is a Tier-0",
+    "heuristic (app.checks.signals convention, D-011): cheap, deterministic,",
+    "no LLM call, never itself a verdict.",
+    "",
+    "WHY THIS EXISTS. Self-consistency voting (V-022) grades a criterion",
+    "with two independent passes and treats their agreement as confidence",
+    "(D-006). Both passes read the SAME manuscript text, so an instruction",
+    "embedded in that text can make both passes comply identically -- which",
+    "reads to the vote as perfect agreement, which is exactly the condition",
+    "under which nothing is escalated to the instructor. A pattern match",
+    "here forces escalation regardless of what the vote agreed on, because",
+    "the vote's agreement is the one thing that cannot be trusted once this",
+    "matches (see app.checks.consistency.vote_batch).",
+    "",
+    "SCOPE, DELIBERATELY NARROW. These patterns describe imperative text",
+    "ADDRESSED AT a grader/system/AI, not any manuscript that happens to",
+    "discuss AI, security, or prompt injection as a topic -- a CS/IT",
+    "capstone about LLM security is a realistic legitimate document this",
+    "list must not punish. This has a real, MEASURED cost, not just a",
+    "theoretical one (backend-critic review, 2026-08-24): a literature-",
+    "review paragraph that QUOTES a trigger phrase verbatim (a natural",
+    "thing to write about this exact topic) matches, and because",
+    "`build_semantic_batches` groups every criterion with no identifiable",
+    "section into ONE shared whole-document batch, one quoted example can",
+    "force the ENTIRE batch to escalate, not just the criterion near it.",
+    "Accepted deliberately: it costs an instructor one extra manual review",
+    "of a batch, never a wrong grade or an accusation (ground rules 1 and",
+    "3), and the alternative -- staying silent on real injected text just",
+    "to avoid this -- is the whole failure BUG-045 exists to close. See",
+    "backend/tests/test_checks_injection.py's quoted-example test for the",
+    "documented case. Keep additions narrow and justify each one, the same",
+    "discipline as ALLOW_REGEX_FILES in tools/check_dashes.py.",
+    "",
+    "NOT A ROBUST FILTER. backend-critic (2026-08-24) evaded most of a",
+    "13-variant adversarial probe with straightforward paraphrase (no",
+    "leetspeak/encoding needed) -- regex pattern-matching cannot catch a",
+    "semantic paraphrase of an instruction, only its literal wording. This",
+    "list is a cheap, honest, ADDITIONAL layer on top of the prompt-level",
+    "fencing in semantic_grading_v1.txt/v2.txt (which resisted a live-",
+    "tested real attack this list did not independently catch), not a",
+    "replacement for it, and neither is claimed to be complete (FEATURES.md",
+    "F3's stated limitation says the same). Widening coverage costs nothing",
+    "but false positives (data-only edit); do not let this list's presence",
+    "imply the injection risk is closed.",
+    "",
+    "These are DATA, not code (ground rule 7): adding a pattern must never",
+    "need a code change or a redeploy of app/checks/injection.py."
+  ],
+  "patterns": [
+    {
+      "id": "ignore_instructions",
+      "regex": "\\bignore (all |any |the )?(previous|prior|above|earlier)\\s+instructions\\b",
+      "label": "instructs the reader to ignore prior instructions"
+    },
+    {
+      "id": "system_override",
+      "regex": "\\bsystem\\s*(override|instruction|message)\\b",
+      "label": "claims to be a system-level override or message"
+    },
+    {
+      "id": "grader_instruction",
+      "regex": "\\bgrader\\s+instruction\\b|\\binstruction\\s+for\\s+the\\s+grader\\b",
+      "label": "labels itself as an instruction for the grader"
+    },
+    {
+      "id": "addressed_to_grader",
+      "regex": "\\b(dear|note to|attention|message for)\\s+(the\\s+)?(grader|examiner|ai|llm|automated (grading )?system|model)\\b",
+      "label": "directly addresses the grading system rather than a human reader"
+    },
+    {
+      "id": "disregard_criteria",
+      "regex": "\\bdisregard\\s+(the\\s+)?(criteria|grading|rubric|rules)\\b",
+      "label": "instructs the reader to disregard the grading criteria"
+    },
+    {
+      "id": "you_must_output",
+      "regex": "\\byou\\s+must\\s+(output|respond|return|answer)\\b",
+      "label": "issues a direct output command in second person"
+    },
+    {
+      "id": "do_not_evaluate",
+      "regex": "\\bdo\\s+not\\s+(re-?)?evaluate\\s+(the\\s+)?(document|manuscript|text)\\b",
+      "label": "instructs the reader not to evaluate the document"
+    },
+    {
+      "id": "prewritten_verdict",
+      "regex": "\\b(this|the)\\s+(document|manuscript)\\s+(satisfies|fulfills|meets)\\s+all\\s+(rubric\\s+)?(requirements|criteria)\\b",
+      "label": "asserts a pre-written blanket verdict inside the document text itself"
+    },
+    {
+      "id": "false_prior_approval",
+      "regex": "\\balready\\s+(been\\s+)?(manually\\s+)?(reviewed|approved|verified|pre-approved)\\b[\\s\\S]{0,120}\\b(pass|passed|satisfied|confirmed|approved|skip|record)\\b",
+      "label": "claims a prior human review already approved the document, directing a canned pass"
+    },
+    {
+      "id": "record_dont_grade",
+      "regex": "\\b(record|log)\\s+(that\\s+)?(this\\s+)?(prior\\s+)?(finding|result|verdict|approval)\\b|\\bnot\\s+a\\s+(new\\s+)?grading\\s+(judgment|judgement|decision)\\b",
+      "label": "reframes grading as a data-entry step recording a pre-decided result"
+    }
+  ]
+}

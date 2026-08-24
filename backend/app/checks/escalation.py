@@ -61,9 +61,18 @@ NEEDS_REVIEW_OUTCOMES = (
 # never looked" — they justify very different amounts of trust.
 REVIEW_REASON_LOW_CONFIDENCE = "low_confidence"
 REVIEW_REASON_NOT_GRADED = "not_graded"
+# BUG-045: a THIRD reason, distinct from both of the above. This is not "the
+# AI hesitated" (`low_confidence`) — the vote may show perfect agreement —
+# and it is not "the AI never ran" (`not_graded`). It is "the AI agreed, and
+# that agreement cannot be trusted," which needs its own label so a UI never
+# renders a bare "Agreement N/N" line as if it meant confidence here
+# (backend-critic review, 2026-08-24, finding F1).
+REVIEW_REASON_INJECTION_SUSPECTED = "injection_suspected"
 
 
-def review_reason_for(outcome: ResultOutcome) -> str:
+def review_reason_for(outcome: ResultOutcome, detail: dict[str, Any] | None = None) -> str:
+    if detail and detail.get("injection_suspected"):
+        return REVIEW_REASON_INJECTION_SUSPECTED
     if outcome == ResultOutcome.escalated:
         return REVIEW_REASON_LOW_CONFIDENCE
     return REVIEW_REASON_NOT_GRADED
@@ -109,6 +118,12 @@ class EscalatedItem:
     # verified `evidence` list, since verification is what produces a real
     # anchor (no partial anchor exists to report for these).
     unverified_evidence: list[str] | None = None
+    # BUG-045: True when `app.checks.injection` matched language addressed
+    # at a grader/system/AI in this criterion's batch context. `snippet` is
+    # the short, bounded excerpt that matched — the actual evidence an
+    # instructor can check in 10 seconds (judgment §1), not just a claim.
+    injection_suspected: bool = False
+    injection_matched_snippet: str | None = None
 
 
 async def list_escalated(session: AsyncSession, check_run_id: int) -> list[EscalatedItem]:
@@ -149,8 +164,10 @@ async def list_escalated(session: AsyncSession, check_run_id: int) -> list[Escal
                 votes=detail.get("votes", []),
                 reason=detail.get("reason"),
                 detail=detail,
-                review_reason=review_reason_for(result.outcome),
+                review_reason=review_reason_for(result.outcome, detail),
                 unverified_evidence=detail.get("unverified_evidence"),
+                injection_suspected=bool(detail.get("injection_suspected")),
+                injection_matched_snippet=detail.get("injection_matched_snippet"),
             )
         )
     return items

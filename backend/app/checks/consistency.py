@@ -25,6 +25,7 @@ from app.checks.annotators import (
     perspective_for,
 )
 from app.checks.escalation import gate_vote
+from app.checks.injection import detect_injection_signal
 from app.checks.semantic import (
     PROMPT_VERSION,
     GradedVerdict,
@@ -55,6 +56,20 @@ def _stance(role: str, prompt_version: str) -> str:
 PASS_1 = "pass_1"
 PASS_2 = "pass_2"
 TIE_BREAK = "tie_break"
+
+# BUG-045: shown verbatim to the instructor via EscalatedPanel.tsx's
+# `item.reason` (escalation.py's `list_escalated` reads `detail["reason"]`
+# straight off the persisted CheckResult). Worded as a fact about the
+# document and about what the vote can and can't tell the instructor here,
+# never as an accusation against the student (ground rule 3) -- the same
+# language could describe a false positive (a capstone about prompt
+# injection) without being wrong about either case.
+INJECTION_SUSPECTED_REASON = (
+    "This document contains text that appears to address an automated "
+    "grader rather than the reader. Both AI grading passes read the same "
+    "document text, so their agreement on this criterion should not be "
+    "treated as confidence here; please review it directly."
+)
 
 
 @dataclass(frozen=True)
@@ -104,6 +119,7 @@ async def _vote_for_criterion(
     g2: GradedVerdict,
     *,
     prompt_version: str = PROMPT_VERSION,
+    skip_tie_break: bool = False,
 ) -> VoteResult:
     if g1.verdict is None or g2.verdict is None:
         # dict.fromkeys, not a plain list: the two grading passes fail with
@@ -116,6 +132,16 @@ async def _vote_for_criterion(
 
     if g1.verdict == g2.verdict:
         return VoteResult(g1.verdict, 1.0, [g1.verdict, g2.verdict], g1, None)
+
+    if skip_tie_break:
+        # BUG-045: the batch is already forced to escalate by
+        # `vote_batch`'s injection override regardless of what a tie-break
+        # would decide, so spending a real Gemini call on a verdict that
+        # gets discarded two lines later is pure quota waste (ground rule
+        # 2). The two real votes are still shown honestly (no fabricated
+        # third vote).
+        majority, agreement = _tally([g1.verdict, g2.verdict])
+        return VoteResult(majority, agreement, [g1.verdict, g2.verdict], None, None)
 
     # Disagreement: spend exactly one tie-break call (D-011), scoped to
     # this single criterion only — the rest of the batch is unaffected.
@@ -249,6 +275,11 @@ async def vote_batch(
         annotator_stance=_stance(ROLE_PASS_2, prompt_version),
     )
     shadow_detail = shadow_signals_as_detail(compute_shadow_signals(batch.context_text, settings))
+    # BUG-045: computed once per batch (regex, no LLM call, no quota cost),
+    # not per criterion -- every criterion in a batch shares the same
+    # context_text, so one match poisons the whole batch's vote the same
+    # way.
+    injection_signal = detect_injection_signal(batch.context_text)
 
     voted: list[VotedCriterion] = []
     for criterion in batch_criteria:
@@ -261,9 +292,23 @@ async def vote_batch(
             pass_1[criterion.id],
             pass_2[criterion.id],
             prompt_version=prompt_version,
+            skip_tie_break=injection_signal.suspected,
         )
         outcome, score = gate_vote(vote.majority_verdict, vote.agreement, settings)
         detail = _vote_detail(batch, vote, shadow_detail)
+        if injection_signal.suspected:
+            # Overrides the vote's own outcome regardless of what it
+            # decided (including a "perfect agreement" auto-accept) --
+            # that agreement is exactly what BUG-045 found cannot be
+            # trusted once a batch matches this signal. The vote's own
+            # verdict/reasoning/evidence, if any, are left in `detail`
+            # untouched so the instructor can still see what the AI said;
+            # only the outcome and the reason shown change.
+            outcome, score = ResultOutcome.escalated, None
+            detail["injection_suspected"] = True
+            detail["injection_matched_pattern"] = injection_signal.matched_pattern_id
+            detail["injection_matched_snippet"] = injection_signal.matched_snippet
+            detail["reason"] = INJECTION_SUSPECTED_REASON
         if score is not None:
             detail["score"] = score
         voted.append(VotedCriterion(criterion, vote, outcome, detail))

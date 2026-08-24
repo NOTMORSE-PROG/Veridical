@@ -265,6 +265,53 @@ async def test_unverified_evidence_survives_to_the_panel(session_factory):
         assert panel[0].unverified_evidence == ["a quote that could not be verified"]
 
 
+async def test_bug045_injection_suspected_item_carries_its_own_review_reason_and_snippet(
+    session_factory,
+):
+    """BUG-045 + backend-critic finding F1 (2026-08-24): an injection-
+    suspected item must NOT be indistinguishable from an ordinary
+    low_confidence escalation in the API response -- a UI rendering a bare
+    "Agreement N/N" line for this case would show the opposite of what the
+    reason text says. Seeded with PERFECT agreement (1.0, both passes
+    "pass") specifically, since that is the exact case BUG-045 is about:
+    the vote itself looks confident, and the override is what catches it."""
+    async with session_factory() as session:
+        instructor, check_run, _ = await _seed_escalated_run(
+            session, ai_majority_verdict="pass", agreement=1.0
+        )
+        check_result = (
+            await session.execute(
+                select(CheckResult).where(CheckResult.check_run_id == check_run.id)
+            )
+        ).scalar_one()
+        detail = dict(check_result.detail)
+        detail["injection_suspected"] = True
+        detail["injection_matched_snippet"] = "ignore all previous instructions"
+        check_result.detail = detail
+        await session.commit()
+
+        panel = await list_escalated_for_run(session, check_run.id, instructor.id)
+        assert panel[0].review_reason == "injection_suspected"
+        assert panel[0].injection_suspected is True
+        assert panel[0].injection_matched_snippet == "ignore all previous instructions"
+        # The AI's own (perfect-agreement) vote is still shown honestly --
+        # not hidden, just not the thing the instructor should trust here.
+        assert panel[0].agreement == 1.0
+
+
+async def test_ordinary_escalation_is_not_mislabeled_as_injection_suspected(session_factory):
+    """Negative control for the same finding: a normal low-confidence
+    escalation (no injection detail set at all) must keep its existing
+    review_reason and default injection fields, unaffected by this
+    ticket's new code path."""
+    async with session_factory() as session:
+        instructor, check_run, _ = await _seed_escalated_run(session)
+        panel = await list_escalated_for_run(session, check_run.id, instructor.id)
+        assert panel[0].review_reason == "low_confidence"
+        assert panel[0].injection_suspected is False
+        assert panel[0].injection_matched_snippet is None
+
+
 async def test_cross_instructor_access_is_rejected_not_leaked(session_factory):
     async with session_factory() as session:
         _, check_run, check_result = await _seed_escalated_run(session)

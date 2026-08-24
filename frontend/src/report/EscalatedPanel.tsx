@@ -43,6 +43,15 @@ function CautionIcon() {
 // reads as a real disagreement when the actual fact is "no opinion twice").
 function voteSummary(item: EscalatedItemOut): string {
   if (item.review_reason === "not_graded") return "Not graded by AI.";
+  // BUG-045/BUG-131: this case can have PERFECT agreement (both passes
+  // read the same manuscript text and complied identically) -- printing
+  // a bare "Agreement N/N." here would read as confidence, the exact
+  // opposite of what `item.reason` says two lines below. Replaced rather
+  // than suppressed, so the instructor still knows the AI passes agreed,
+  // just not that it means what agreement normally means.
+  if (item.review_reason === "injection_suspected") {
+    return "AI passes agreed, but that agreement can't be trusted here.";
+  }
   if (item.votes.length === 0) return "No votes recorded.";
   const real = item.votes.filter((v): v is string => v !== null);
   if (real.length === 0) {
@@ -117,6 +126,30 @@ function ResolveRow({
           <p className="font-semibold text-ink">"{item.criterion_text}"</p>
           <p className="mt-0.5 text-xs text-ink-tertiary">{voteSummary(item)}</p>
           {item.reason && <p className="mt-0.5 text-xs text-ink-tertiary">{item.reason}</p>}
+          {/* BUG-045/BUG-131: the actual matched excerpt, so the instructor
+              can verify the flag in the ~10 seconds judgment §1 asks for
+              instead of just trusting `item.reason`'s claim. Same shape as
+              the unverified-evidence block below (own left accent bar, own
+              heading) so this never reads as a second copy of the AI's
+              regular verified evidence. */}
+          {item.injection_suspected && item.injection_matched_snippet && (
+            <div
+              className="mt-1.5 flex items-start gap-1.5 rounded-md border border-border bg-page p-2"
+              style={{ borderLeftWidth: "3px", borderLeftColor: "var(--color-status-caution-text)" }}
+            >
+              <span className="mt-0.5 shrink-0 text-status-caution-text">
+                <CautionIcon />
+              </span>
+              <div>
+                <p className="text-xs font-semibold tracking-header text-ink-tertiary uppercase">
+                  Text addressed at an automated grader
+                </p>
+                <blockquote className="mt-1 text-xs break-words text-ink-secondary">
+                  "{item.injection_matched_snippet}"
+                </blockquote>
+              </div>
+            </div>
+          )}
           {/* V-068 AC1: the charter's 10-second verification bar applied to
               the panel that decides the composite score -- previously this
               row showed nothing the AI actually looked at. Deliberately its
@@ -157,7 +190,23 @@ function ResolveRow({
               <button
                 type="button"
                 onClick={() => start("accept_majority")}
-                className="flex min-h-11 flex-1 items-center justify-center rounded-md border border-border-input bg-panel px-3 text-sm font-medium text-ink hover:bg-status-neutral-bg lg:min-h-9 lg:flex-none lg:px-2.5"
+                className={cx(
+                  "flex min-h-11 flex-1 items-center justify-center rounded-md border px-3 text-sm font-medium lg:min-h-9 lg:flex-none lg:px-2.5",
+                  // ux-critic finding (P1, live-verified 2026-08-24): this
+                  // button is a one-click "accept the tainted verdict"
+                  // action for exactly the case that verdict came from an
+                  // instruction embedded in the manuscript -- identical
+                  // styling and DOM/visual-first position let an instructor
+                  // clear it as easily as any ordinary accept. Moved last
+                  // (`order-last`, same flex row, no layout restructure) and
+                  // given a visibly distinct, less-affordant treatment
+                  // (dashed border, no filled hover) so it never looks like
+                  // the default/first choice for this review_reason only --
+                  // every other outcome's Accept button is unchanged.
+                  item.review_reason === "injection_suspected"
+                    ? "order-last border-dashed border-status-caution-text/60 bg-page text-ink-secondary hover:bg-status-caution-bg"
+                    : "border-border-input bg-panel text-ink hover:bg-status-neutral-bg",
+                )}
               >
                 Accept AI: {item.ai_majority_verdict}
               </button>
