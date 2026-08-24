@@ -6,8 +6,11 @@ assembly), applied to F4.
 **Applicability gate**: a manuscript with no intent AND no outcome
 statements at all gets `outcome=not_applicable` — N/A is not "passed"
 (charter rule 9), never a silently-clean check_run when there was nothing
-to check. Any manuscript with at least one statement gets `outcome=passed`
-(whether or not it also carries flags — matches F5/F6's own convention).
+to check. A manuscript with statements that all got fully judged gets
+`outcome=passed` (whether or not it also carries flags — matches F5/F6's
+own convention). **BUG-073**: a run that skipped even one candidate pair
+(quota/API/parse-failure — `pair.py`'s `PairingResult`) does NOT get
+`passed` — see this module's own outcome-priority comment below.
 """
 
 from sqlalchemy import select
@@ -53,17 +56,36 @@ async def run_internal_agreement_check(
         llm, intents, outcomes, check_run_id=check_run_id, settings=settings
     )
 
+    # BUG-073: a check that skipped even one candidate pair did NOT fully
+    # execute -- `passed` is reserved for a run that judged everything it
+    # set out to. Same priority as F5's citation-integrity check
+    # (app/checks/citations/verify.py) when causes mix within one run:
+    # `unverifiable` (a parse failure, D-017's defect class, must never
+    # hide behind a more benign-sounding cause) first, then `api_down`,
+    # then `quota_exhausted` last. Real per-cause counts always live in
+    # `detail` regardless of which one outcome wins.
+    if pairing.n_skipped_parse_failure > 0:
+        outcome = ResultOutcome.unverifiable
+    elif pairing.n_skipped_api_down > 0:
+        outcome = ResultOutcome.api_down
+    elif pairing.n_skipped_quota > 0:
+        outcome = ResultOutcome.quota_exhausted
+    else:
+        outcome = ResultOutcome.passed
+
     result = CheckResult(
         check_run_id=check_run_id,
         criterion_id=None,
         kind=CheckKind.internal_agreement,
-        outcome=ResultOutcome.passed,
+        outcome=outcome,
         detail={
             "n_intents": len(intents),
             "n_outcomes": len(outcomes),
             "n_flags": len(pairing.flags),
             "n_unmatched_outcomes": pairing.n_unmatched_outcomes,
-            "n_skipped_for_quota": pairing.n_skipped_for_quota,
+            "n_skipped_quota": pairing.n_skipped_quota,
+            "n_skipped_api_down": pairing.n_skipped_api_down,
+            "n_skipped_parse_failure": pairing.n_skipped_parse_failure,
         },
     )
     session.add(result)

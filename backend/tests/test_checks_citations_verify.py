@@ -341,6 +341,72 @@ async def test_claim_support_flag_created_end_to_end(session_factory):
         assert "no significant effect" in rows[0].evidence_excerpt
 
 
+async def test_a_run_with_skipped_claim_support_pairs_does_not_report_passed(session_factory):
+    """BUG-073's own regression test, F5's side: nothing previously read
+    `n_claim_support_skipped_quota`, and the check reported `passed`
+    unconditionally regardless of how many claim-support pairs it
+    actually judged. A quota-exhausted claim-support batch must surface
+    as a non-`passed` outcome, honestly distinguishing "didn't fully run"
+    from "ran and found nothing.\""""
+    from app.errors import QuotaExhaustedError
+    from app.models.enums import ResultOutcome as RO
+
+    extraction = ExtractionResult(
+        page_count=1,
+        anchor_kind="page",
+        image_only=False,
+        text_chars=100,
+        section_tree=SectionTree(source="none", nodes=[]),
+        blocks=[
+            TextBlock(
+                page=1,
+                text="Prior work found no significant effect (Reyes, 2023).",
+                max_font_size=11.0,
+                bold_ratio=0.0,
+            )
+        ],
+        images=[],
+    )
+    from app.ingest.patterns import load_patterns
+
+    patterns = load_patterns(get_settings().ingest_patterns_file)
+    citation = _citation(0, doi="10.1/reyes", title="A Study", authors=["Reyes, J."], year=2023)
+    check_run_id = await _seed_check_run(session_factory)
+
+    def handler(request):
+        if "crossref.org" in str(request.url):
+            return httpx.Response(
+                200, json={"message": {"DOI": "10.1/reyes", "title": ["A Study"]}}
+            )
+        assert "semanticscholar.org" in str(request.url)
+        return httpx.Response(
+            200, json={"title": "A Study", "abstract": "We found a significant positive effect."}
+        )
+
+    class QuotaExhaustedLLM:
+        async def complete(self, prompt_type, prompt, *, prompt_version="unversioned", **context):
+            raise QuotaExhaustedError("daily budget spent")
+
+    async with session_factory() as session, _client(handler) as client:
+        result = await run_citation_integrity_check(
+            session,
+            client,
+            check_run_id=check_run_id,
+            citations=[citation],
+            extraction=extraction,
+            patterns=patterns,
+            settings=get_settings(),
+            llm=QuotaExhaustedLLM(),
+        )
+    assert result.outcome == RO.quota_exhausted
+    assert result.outcome != RO.passed
+    assert result.detail["n_claim_support_pairs_total"] == 1
+    assert result.detail["n_claim_support_checked"] == 0
+    assert result.detail["n_claim_support_skipped_quota"] == 1
+    assert result.detail["n_claim_support_skipped_api_down"] == 0
+    assert result.detail["n_claim_support_skipped_parse_failure"] == 0
+
+
 async def test_run_citation_integrity_check_persists_result_and_flags(session_factory):
     """End-to-end: orphan (V-027) + retraction (V-029) both land as real
     Flag rows on one shared check_result."""

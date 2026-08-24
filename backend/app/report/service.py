@@ -264,6 +264,17 @@ async def report_out_for_check_run(
         .where(
             CheckResult.check_run_id == check_run_id,
             CheckResult.outcome.in_(NEEDS_REVIEW_OUTCOMES),
+            # BUG-073 follow-up: an F4/F5 integrity check (criterion_id is
+            # always None, ENGINEERING §2) can now also carry a
+            # needs-review outcome (quota_exhausted/api_down, a partially-
+            # executed run) -- but `list_escalated` INNER JOINs Criterion,
+            # so an integrity check's row can never appear there to be
+            # resolved. Without this filter, this count (and the decide
+            # gate below) would say "N items need your review" for
+            # something the review panel can never show or let the
+            # instructor resolve -- a real deadlock, not just an
+            # off-by-one, since the report could never be decided.
+            CheckResult.criterion_id.isnot(None),
         )
     )
 
@@ -929,6 +940,12 @@ async def decide_report(
         .where(
             CheckResult.check_run_id == check_run_id,
             CheckResult.outcome.in_(NEEDS_REVIEW_OUTCOMES),
+            # BUG-073 follow-up: same scoping fix as `report_out_for_check_run`'s
+            # own `pending_review_count` above -- without this, a partially-
+            # executed F4/F5 integrity check (criterion_id is always None)
+            # could block a decision forever on an item `list_escalated`'s
+            # own INNER JOIN makes structurally impossible to ever resolve.
+            CheckResult.criterion_id.isnot(None),
         )
     )
     if pending:

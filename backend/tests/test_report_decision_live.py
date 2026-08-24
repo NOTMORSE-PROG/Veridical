@@ -281,6 +281,44 @@ async def test_deciding_with_unresolved_escalations_is_blocked_with_the_count(se
         assert report.pending_review_count == 1
 
 
+async def test_a_partially_executed_integrity_check_never_blocks_or_inflates_pending_review(
+    session_factory,
+):
+    """BUG-073 follow-up (found reviewing that ticket's own fix, not
+    filed separately): F4/F5 integrity checks (`criterion_id` is always
+    None, ENGINEERING §2) can now carry a needs-review outcome
+    (quota_exhausted/api_down) when they skip a pair -- but
+    `list_escalated`'s own INNER JOIN to Criterion means an integrity
+    check's row can never appear in the review panel to be resolved.
+    Before the `criterion_id.isnot(None)` filter on both
+    `pending_review_count` and `decide_report`'s own gate, this would
+    have been a real deadlock: "1 item needs your review" with no way to
+    ever see or resolve it, and the report could never be decided."""
+    async with session_factory() as session:
+        instructor, check_run = await _seed_decidable_run(session)
+        session.add(
+            CheckResult(
+                check_run_id=check_run.id,
+                criterion_id=None,
+                kind=CheckKind.internal_agreement,
+                outcome=ResultOutcome.quota_exhausted,
+                detail={
+                    "n_skipped_quota": 1,
+                    "n_skipped_api_down": 0,
+                    "n_skipped_parse_failure": 0,
+                },
+            )
+        )
+        await session.commit()
+
+        report = await get_report(session, check_run.id, instructor.id)
+        assert report.pending_review_count == 0  # the criterion-only count is unaffected
+
+        # And the decision itself is NOT blocked by it.
+        decided = await decide_report(session, check_run.id, instructor.id, "approved", None)
+        assert decided.decision == "approved"
+
+
 async def test_deciding_an_already_decided_report_is_rejected(session_factory):
     async with session_factory() as session:
         instructor, check_run = await _seed_decidable_run(session)
