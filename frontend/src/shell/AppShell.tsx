@@ -384,7 +384,23 @@ export function AppShell({ children }: { children: ReactNode }) {
           >
             V
           </span>
-          <span className="text-sm font-bold tracking-header text-ink">VERIDICAL</span>
+          {/* BUG-103: `QuotaChip` was added to this always-visible compact
+              row after BUG-024's fix measured 292px fitting a 320px
+              floor with a 28px margin -- nothing re-verified the floor
+              when quota visibility grew from "quiet text" to a real
+              meter+badge, and the margin was consumed (measured 328px,
+              8px over). The wordmark text, not the quota meter, is what
+              gives at the very narrowest range: it's decorative
+              (the logomark + the page's own content already establish
+              where you are), while the quota meter is exactly the kind
+              of "hard operational constraint" V-056's own reasoning
+              argued should stay visible, not the first thing cut.
+              `sr-only` below 360px, not `hidden` -- keeps this the
+              Link's accessible name (the "V" logomark span is
+              aria-hidden) instead of leaving the link unnamed. */}
+          <span className="max-[359px]:sr-only text-sm font-bold tracking-header text-ink">
+            VERIDICAL
+          </span>
         </Link>
 
         <nav aria-label="Primary" className="ml-2.5 hidden items-center gap-4 lg:flex">

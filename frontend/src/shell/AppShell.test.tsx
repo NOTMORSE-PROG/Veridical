@@ -183,6 +183,34 @@ describe("AppShell", () => {
     expect(screen.queryByRole("button", { name: "Sign out" })).not.toBeInTheDocument();
   });
 
+  it("BUG-103 (WCAG 1.4.10 Reflow): the wordmark carries its narrow-viewport sr-only class", async () => {
+    // Structural guard only -- jsdom has no real layout engine and can't
+    // evaluate the `max-[359px]:` media query itself (this file's own
+    // top comment makes the same point about `lg:hidden`), so this
+    // can't prove the header actually fits 320px. Live Playwright
+    // measurement (documentElement.scrollWidth <= innerWidth at a real
+    // 320px viewport) is the verification of record, same convention
+    // BUG-024's own regression test used for the identical symptom.
+    // This test exists so removing the class by accident fails
+    // SOMETHING, rather than nothing at all until the next live pass.
+    vi.stubGlobal(
+      "fetch",
+      stubFetchByPath({
+        "/auth/me": { id: 1, email: "a@b.com", display_name: "Demo Instructor" },
+        "/quota": QUOTA,
+      }),
+    );
+    renderWithProviders(
+      <AppShell>
+        <div />
+      </AppShell>,
+      { route: "/dashboard" },
+    );
+    await waitFor(() => expect(screen.getByText("DI")).toBeInTheDocument());
+    const wordmark = screen.getByText("VERIDICAL");
+    expect(wordmark.className).toContain("max-[359px]:sr-only");
+  });
+
   it("BUG-102 (WCAG 2.4.11): activating the skip link closes the mobile nav, not just moves focus underneath it", async () => {
     vi.stubGlobal(
       "fetch",
