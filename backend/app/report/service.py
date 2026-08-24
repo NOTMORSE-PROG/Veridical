@@ -415,6 +415,8 @@ def _to_escalated_out(item: EscalatedItem) -> EscalatedItemOut:
         reason=item.reason,
         review_reason=item.review_reason,
         unverified_evidence=item.unverified_evidence,
+        injection_suspected=item.injection_suspected,
+        injection_matched_snippet=item.injection_matched_snippet,
     )
 
 

@@ -253,6 +253,13 @@ class EscalatedItemOut(BaseModel):
     # merged into a verified `evidence` list (no real anchor exists for an
     # unverified quote); rendered under its own "could not verify" label.
     unverified_evidence: list[str] | None = None
+    # BUG-045: True when the batch's document text matched a pattern for
+    # language addressed at a grader/system/AI — `review_reason` is already
+    # "injection_suspected" in that case, but the UI needs the actual
+    # matched excerpt to let the instructor verify the flag directly rather
+    # than trusting a bare claim (judgment §1's 10-second verification bar).
+    injection_suspected: bool = False
+    injection_matched_snippet: str | None = None
 
 
 class ResolveEscalationIn(BaseModel):
