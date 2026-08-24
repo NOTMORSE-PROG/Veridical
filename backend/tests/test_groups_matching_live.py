@@ -9,7 +9,12 @@ import os
 import pytest
 from sqlalchemy import select, text
 
-from app.groups.service import find_rule3_collision, match_or_create_group_from_proposal
+from app.groups.service import (
+    DEFAULT_GROUP_LABEL,
+    find_rule3_collision,
+    match_or_create_group_from_proposal,
+    resolve_or_create_group,
+)
 from app.models.group import Group, GroupMember
 from app.models.instructor import Instructor
 
@@ -175,6 +180,42 @@ async def test_a_member_added_or_dropped_between_submissions_one_overlap_is_stil
     # Carol is now recorded too -- newly observed members are added, not
     # dropped just because this particular submission omitted Bob.
     assert set(members) == {"Alice Reyes", "Bob Santos", "Carol Cruz"}
+
+
+async def test_whitespace_only_ingest_group_label_falls_back_to_default_not_persisted_blank(
+    session_factory, instructor_id
+):
+    """BUG-111: the ticket reproduced `POST /manuscripts/ingest` with
+    `group_label="   "` persisting the literal whitespace verbatim, before
+    V-062 routed every group_label through this function. Re-checking here
+    because V-062 shipped after the bug was filed and the ticket was never
+    re-read against it (the exact process gap the project's own history
+    warns about) -- `resolve_or_create_group` already strips-then-defaults
+    (`display_name = raw_name.strip() or DEFAULT_GROUP_LABEL`), so this
+    pins that the whitespace-only case the ticket named is, in fact,
+    already closed and never regresses back open."""
+    async with session_factory() as session:
+        group = await resolve_or_create_group(session, instructor_id, "   ")
+        await session.commit()
+
+    assert group.name == DEFAULT_GROUP_LABEL
+
+
+async def test_whitespace_only_confirm_group_name_falls_back_to_default_not_persisted_blank(
+    session_factory, instructor_id
+):
+    """Same BUG-111 gap, the other entry point: PATCH .../group's
+    `group_name` (min_length=1 only checks character count, not
+    whitespace) flows through `match_or_create_group_from_proposal`, which
+    applies the identical strip-then-default rule."""
+    async with session_factory() as session:
+        group, matched = await match_or_create_group_from_proposal(
+            session, instructor_id, "   ", ["Some Member"]
+        )
+        await session.commit()
+
+    assert matched is False
+    assert group.name == DEFAULT_GROUP_LABEL
 
 
 async def test_no_short_name_match_at_all_creates_a_plain_new_group(session_factory, instructor_id):
