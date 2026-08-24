@@ -26,6 +26,7 @@ const BASE_REPORT: ReportOut = {
   rubric_parse_issues: null,
   previous_status: null,
   previous_composite_score: null,
+  integrity_check_status: [],
   results: [],
 };
 

@@ -135,7 +135,11 @@ def _to_public_report(report: ReportOut) -> PublicReportOut:
     (per-criterion) and `previous_status`/`previous_composite_score`/
     `pending_review_count` (report-level) are the fields this function
     is the reason don't appear -- see `PublicReportOut`'s own docstring
-    for why each was excluded."""
+    for why each was excluded. `integrity_check_status` (BUG-125) is the
+    newest such exclusion, NOT yet a settled policy call the way the
+    others are: whether an external adviser should see that an F4/F5
+    check partially executed is a real open question (carried forward,
+    not decided here) -- see BUG-125.md's own gap note."""
     return PublicReportOut(
         check_run_id=report.check_run_id,
         manuscript_group_label=report.manuscript_group_label,

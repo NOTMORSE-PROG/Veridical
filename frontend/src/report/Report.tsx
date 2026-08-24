@@ -8,6 +8,7 @@ import { Link, useParams } from "react-router";
 import { ApiError } from "../api/client";
 import type { Decision } from "../api/types";
 import { Chip } from "../components/Chip";
+import { IntegrityCheckStatusBanners } from "../components/IntegrityCheckStatusBanner";
 import { RubricNeedsReviewBanner } from "../components/RubricNeedsReviewBanner";
 import { StatusPill } from "../components/StatusPill";
 import { TestModeBanner } from "../components/TestModeBanner";
@@ -247,6 +248,8 @@ export function ReportPage() {
             {explainer(report, "#flags-heading")}
             {pendingDisclosure(report.pending_review_count, excludedFromScoreCount(report.results))}
           </p>
+
+          <IntegrityCheckStatusBanners statuses={report.integrity_check_status} />
 
           <EscalatedPanel checkRunId={report.check_run_id} />
 
