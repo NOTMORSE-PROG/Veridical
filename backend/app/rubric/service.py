@@ -150,6 +150,8 @@ async def create_rubric_from_upload(
             evidence=criterion.evidence_needed,
             weight=Decimal(str(criterion.weight)),
             position=position,
+            # V-069 AC1: structured, never squashed into `evidence` prose.
+            levels=[lvl.model_dump() for lvl in criterion.levels] if criterion.levels else None,
         )
         for position, criterion in enumerate(outcome.criteria)
     )
@@ -240,6 +242,12 @@ async def update_criteria(
         await session.execute(delete(Criterion).where(Criterion.id.in_(stale_ids)))
 
     for position, criterion_in in enumerate(body.criteria):
+        # V-069: round-tripped as given, never invented client-side — this
+        # ticket adds no per-level editing UI, so `levels` here is either
+        # exactly what was last persisted (an existing row) or `None` (a
+        # hand-added new row, which has no scale unless a future ticket
+        # adds one).
+        levels = [lvl.model_dump() for lvl in criterion_in.levels] if criterion_in.levels else None
         if criterion_in.id is None:
             session.add(
                 Criterion(
@@ -249,6 +257,7 @@ async def update_criteria(
                     evidence=criterion_in.evidence,
                     weight=Decimal(str(criterion_in.weight)),
                     position=position,
+                    levels=levels,
                 )
             )
         else:
@@ -258,6 +267,7 @@ async def update_criteria(
             row.evidence = criterion_in.evidence
             row.weight = Decimal(str(criterion_in.weight))
             row.position = position
+            row.levels = levels
 
     if body.confirm:
         # BUG-052: confirming used to reset `parse_status` to `parsed` and

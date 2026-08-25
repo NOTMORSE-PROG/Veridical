@@ -153,7 +153,13 @@ async def resolve_escalation_route(
     instructor: Annotated[Instructor, Depends(get_current_instructor)],
 ) -> ResolveEscalationOut:
     return await resolve_escalation_for_run(
-        session, check_run_id, check_result_id, instructor.id, body.resolution, body.reason
+        session,
+        check_run_id,
+        check_result_id,
+        instructor.id,
+        body.resolution,
+        body.reason,
+        level=body.level,
     )
 
 

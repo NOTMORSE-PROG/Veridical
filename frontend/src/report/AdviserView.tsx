@@ -19,6 +19,7 @@ import { READINESS_LABEL, READINESS_TONE } from "../domain/readinessTone";
 import { DecisionSummary } from "./DecisionSummary";
 import { FlagsList } from "./FlagsPanel";
 import {
+  LevelledRatingNote,
   NEEDS_REVIEW_OUTCOMES,
   ResultsTable,
   excludedFromScoreCount,
@@ -242,6 +243,7 @@ export function AdviserViewPage() {
         {explainer(report, "#flags-heading")}
         {pendingDisclosure(pendingCount, excludedFromScoreCount(report.results))}
       </p>
+      <LevelledRatingNote rating={report.levelled_rating} />
 
       <FlagsList flags={flags} linkToDetail={false} />
 

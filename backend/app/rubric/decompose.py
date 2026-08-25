@@ -17,10 +17,15 @@ from app.llm.base import LLMClient
 from app.rubric.schemas import ParsedCriterion, RubricDecomposition
 
 PROMPT_TYPE = "rubric_decomposition"
-# BUG-092: v2 adds a third "not_assessable" type for defense-day/physical
+# V-069: v3 adds an optional "levels" field so a graded performance scale
+# (BEGINNER 1/ACCEPTABLE 2/PROFICIENT 3/EXEMPLARY 4, or any institution's
+# own scale) is captured as structured data instead of being squashed into
+# "evidence_needed" prose (v1's prompt already told the model never to
+# collapse a scale — v1/v2 just had nowhere structured to put it). BUG-092:
+# v2 adds a third "not_assessable" type for defense-day/physical
 # requirements no document could ever settle (v1 only knew
 # structural/semantic, so these had nowhere to go but AI grading).
-PROMPT_VERSION = "v2"
+PROMPT_VERSION = "v3"
 _PROMPT_FILE = Path(__file__).parent / "prompts" / f"{PROMPT_TYPE}_{PROMPT_VERSION}.txt"
 _PLACEHOLDER = "{rubric_text}"
 

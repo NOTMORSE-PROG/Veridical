@@ -2,7 +2,7 @@
 // save/confirm mutation, and versioning (screens 4c/4d/4m).
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ApiError, api } from "../api/client";
-import type { CriterionType, Rubric, RubricListItem } from "../api/types";
+import type { CriterionType, Rubric, RubricListItem, RubricLevel } from "../api/types";
 
 export function rubricQueryKey(id: number) {
   return ["rubric", id] as const;
@@ -60,6 +60,11 @@ export interface CriterionEdit {
   text: string;
   evidence: string | null;
   weight: number;
+  // V-069: round-tripped as-is, never hand-edited on this screen in this
+  // ticket -- omitting this field on save would silently strip a
+  // decomposed scale back down to prose, since Save/Confirm REPLACES the
+  // full criteria set every time.
+  levels?: RubricLevel[] | null;
 }
 
 export function useSaveCriteria(rubricId: number) {

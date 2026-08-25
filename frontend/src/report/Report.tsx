@@ -20,6 +20,7 @@ import { DecisionPanel } from "./DecisionPanel";
 import { EscalatedPanel } from "./EscalatedPanel";
 import { FlagsPanel } from "./FlagsPanel";
 import {
+  LevelledRatingNote,
   NEEDS_REVIEW_OUTCOMES,
   ResultsTable,
   excludedFromScoreCount,
@@ -248,6 +249,7 @@ export function ReportPage() {
             {explainer(report, "#flags-heading")}
             {pendingDisclosure(report.pending_review_count, excludedFromScoreCount(report.results))}
           </p>
+          <LevelledRatingNote rating={report.levelled_rating} />
 
           <IntegrityCheckStatusBanners statuses={report.integrity_check_status} />
 

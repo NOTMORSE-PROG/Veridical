@@ -1,0 +1,106 @@
+You are decomposing a Capstone Instructor's own required-format document
+(a grading rubric, format checklist, or oral-defense rating sheet) into a
+list of individually checkable criteria. The instructor uploaded THIS
+document, nothing about its shape, section names, or scoring style is
+known in advance. Do not assume it looks like any particular institution's
+template.
+
+The raw text below was extracted by a generic document parser (PyMuPDF /
+python-docx). It has NO reliable layout: multi-column tables may arrive as
+loose, out-of-order cell fragments; header words can be split across lines
+("BEGIN NER 1" instead of "BEGINNER 1"); repeated boilerplate (running
+headers, page numbers) may appear inline. Read past this shredding, infer
+the intended criteria from the CONTENT, not from any expected structure.
+
+For each individually checkable requirement you find, output one criterion:
+- "text": the requirement itself, in your own clear words if the source
+  wording is fragmented, but never invent a requirement that is not in
+  the source text.
+- "type": one of three values.
+  - "structural" if satisfying it is a matter of objective, countable
+    fact (page count, section presence, word limit, number of
+    references, citation format).
+  - "semantic" if it requires judging the QUALITY or MEANING of the
+    writing (clarity, argument strength, depth of analysis) as it
+    appears in this document.
+  - "not_assessable" if it describes something that happens AT THE
+    DEFENSE, not in the manuscript itself, and cannot be judged from
+    reading the document no matter how carefully (e.g. "the group
+    brings three bound copies," "students answer questions live and
+    think on their feet," "presenters dress appropriately," "the team
+    arrives on time"). If the rubric line is about the DOCUMENT'S own
+    content, structure, or writing quality, it is structural or
+    semantic, not this. When genuinely unsure whether something is a
+    property of the document or a property of the defense event, prefer
+    structural/semantic, use "not_assessable" only for requirements a
+    reader of the manuscript could never resolve either way.
+- "evidence_needed": one sentence describing what a reader would look at
+  to check this criterion. For a "not_assessable" criterion, describe in
+  one sentence what an instructor observes directly instead. If this
+  criterion also has a "levels" scale (see below), this sentence should
+  say what a reader looks at in general, not repeat the level text.
+- "levels": OMIT this field entirely for an ordinary pass/fail
+  requirement. Include it ONLY when the source document itself describes
+  a POINT SCALE with two or more NAMED performance levels for this exact
+  requirement (e.g. a rubric row reading "Beginner 1 / Developing 2 /
+  Proficient 3 / Exemplary 4" with different descriptive text under each
+  column). When present, "levels" is a list, one entry per rung, in
+  ascending order:
+  - "level": the rung's ordinal position (1, 2, 3, ... — the LOWEST rung
+    is 1, regardless of what number the source prints next to it).
+  - "name": the rung's own name exactly as the source names it (e.g.
+    "Beginner", "Acceptable", "Developing") — never invent or translate
+    a name the source doesn't use.
+  - "descriptor": the full descriptive text for that rung, copied/
+    paraphrased from the source (this is where the detailed level text
+    goes — NOT into "evidence_needed").
+  - "points": the numeric point value the source assigns that rung (use
+    the source's own numbers; if the source only shows ordinal position
+    with no separate point value, use the ordinal itself).
+  Never force a "levels" scale onto a requirement that is genuinely
+  pass/fail in the source — this field only exists for a requirement the
+  source ITSELF grades on a named scale. A single document can have some
+  criteria with "levels" and some without.
+- "weight": a positive number expressing this criterion's relative
+  importance versus the others. If the source states explicit points or
+  percentages, use them (even if they don't sum to 100, they will be
+  normalized afterward). If the source states no explicit weighting, use
+  equal weights across all criteria you found.
+
+Rules:
+- If a single bullet or sentence mixes an objective/countable rule with a
+  quality judgment (e.g. "contains at least 5 references, each critically
+  discussed"), split it into two separate criteria, one structural, one
+  semantic.
+- If a single bullet or sentence mixes a document property with a
+  defense-day behavior (e.g. "the paper is well-organized and the team
+  answers questions confidently"), split it the same way, into a
+  structural/semantic criterion for the document part and a
+  "not_assessable" criterion for the defense-day part.
+- If the document repeats itself (e.g. the same grading grid printed once
+  per student, or duplicated pages), extract the criteria set ONCE. Do not
+  emit duplicate criteria for repeated content.
+- Preserve any non-English fragments (e.g. Filipino terms) exactly as
+  written, never translate them.
+- Ignore furniture: page numbers, running headers/footers, and signature
+  blocks are not criteria.
+- Output at least one criterion. If the text genuinely contains none,
+  that is a parser or input problem, not a valid answer, do your best
+  to find the checkable requirements implied by the document's purpose.
+
+Respond with ONLY a JSON object of this exact shape, no other text. The
+"levels" field is shown here for a levelled criterion; omit it entirely
+for an ordinary pass/fail one (see the second example criterion):
+{"criteria": [
+  {"text": "...", "type": "semantic", "evidence_needed": "...", "weight": 10,
+   "levels": [
+     {"level": 1, "name": "Beginner", "descriptor": "...", "points": 1},
+     {"level": 2, "name": "Acceptable", "descriptor": "...", "points": 2},
+     {"level": 3, "name": "Proficient", "descriptor": "...", "points": 3},
+     {"level": 4, "name": "Exemplary", "descriptor": "...", "points": 4}
+   ]},
+  {"text": "...", "type": "structural", "evidence_needed": "...", "weight": 10}
+]}
+
+--- DOCUMENT TEXT ---
+{rubric_text}

@@ -127,6 +127,10 @@ RESOLUTION_VERB = {
     "accept_majority": "Accepted the AI's verdict",
     "mark_pass": "Marked Pass",
     "mark_fail": "Marked Fail",
+    # V-069: fallback only — `_criterion_flowable` prefers "Marked
+    # {level name}" whenever `row.level` is present, which it always is
+    # for a real `mark_level` resolution.
+    "mark_level": "Marked a level",
 }
 _CHECK_KIND_ORDER = {
     "internal_agreement": 0,
@@ -354,6 +358,12 @@ def _tone_badge(label: str, tone: str, styles: dict[str, ParagraphStyle]) -> Tab
 
 
 def _result_display(row: CriterionResultOut) -> tuple[str, str]:
+    # V-069 AC2/AC5: a levelled criterion's judgment is its LEVEL NAME
+    # (owner-approved treatment), never Pass/Partial/Fail — the neutral
+    # "info" tone matches the on-screen `ResultsTable.tsx` treatment (a
+    # level is a rung on a scale, not a pass/fail valence).
+    if row.level is not None:
+        return row.level.name, "info"
     is_partial = row.outcome == "passed" and row.score is not None and round(row.score) == 50
     if is_partial:
         return "Partial", "caution"
@@ -401,8 +411,17 @@ def _pending_review_reason(outcome: str) -> str:
 def _criterion_flowable(row: CriterionResultOut, styles: dict[str, ParagraphStyle]) -> list:
     parts = [Paragraph(escape(row.text), styles["cell_bold"])]
     caption_bits = [_source_caption(row)]
+    # V-069 AC5: the decided rung's own points, alongside the level name
+    # already shown as the row's Result column — this is the "score" half
+    # of AC2's "shows a per-criterion level and score."
+    if row.level is not None:
+        caption_bits.append(f"{row.level.points:g}/{row.level.max_points:g} pts")
     if row.resolution:
-        verb = RESOLUTION_VERB.get(row.resolution.type, "Resolved by instructor")
+        verb = (
+            f"Marked {row.level.name}"
+            if row.resolution.type == "mark_level" and row.level is not None
+            else RESOLUTION_VERB.get(row.resolution.type, "Resolved by instructor")
+        )
         parts.append(
             Paragraph(f"<b>{escape(verb)}.</b> {escape(row.resolution.reason)}", styles["cell"])
         )
@@ -551,6 +570,25 @@ def build_report_pdf(data: ReportExportData) -> bytes:
     )
     flow.append(Spacer(1, 4))
     flow.append(Paragraph(escape(_explainer(report)), styles["body"]))
+    # V-069 AC2/AC5: the rubric's own institutional RATING, transcribed --
+    # owner-approved treatment (2026-08-25): shown as a small, clearly-
+    # attributed line, never in the large `styles["score"]` treatment
+    # reserved for the banded readiness verdict above (ground rule 8).
+    # Absent whenever no criterion in this rubric is levelled (AC3).
+    if report.levelled_rating is not None:
+        lr = report.levelled_rating
+        flow.append(Spacer(1, 4))
+        flow.append(
+            Paragraph(
+                escape(
+                    "This rubric's own RATING, transcribed from its formula (not a VERIDICAL "
+                    f"judgment): {lr.achieved_points:g}/{lr.max_points:g} points = "
+                    f"{lr.rating_percent}% ({lr.n_decided} of {lr.n_levelled} levelled criteria "
+                    "decided)."
+                ),
+                styles["caption"],
+            )
+        )
     flow.append(Spacer(1, 10))
 
     # 3. Pending escalations. BUG-081: this used to be gated on `is_draft`,
