@@ -768,6 +768,221 @@ def test_export_discloses_test_mode_run(client, api_scratch_url):
     assert "AI results are simulated" in full_text
 
 
+def _real_quote_pdf(tmp_path):
+    """A real, on-disk PDF with a genuine quoted sentence on page 1 -- the
+    exact V-070 scenario `app.report.page_images` is built for (as opposed
+    to `_regions_pdf`/`PdfBuilder` in test_ingest_regions.py, this only
+    needs to exist on disk at the path a seeded `Manuscript.file_ref`
+    points to)."""
+    from tests.test_ingest_pdf import PdfBuilder
+
+    b = PdfBuilder()
+    b.new_page().line("CHAPTER 1 INTRODUCTION", bold=True)
+    b.line("Before a student can defend their capstone the format must be checked.")
+    return b.save(tmp_path / "real_manuscript.pdf")
+
+
+def test_export_embeds_a_real_rendered_page_for_a_page_anchored_flag(
+    client, api_scratch_url, tmp_path
+):
+    """V-070 AC1: a report with >=1 page-anchored flag exports a PDF where
+    that flag is followed by an image of the ACTUAL SUBMITTED PAGE --
+    asserted here by re-opening the exported PDF with PyMuPDF and finding
+    a real embedded raster image on a page that also carries this flag's
+    own anchor caption, not just a bigger byte count."""
+    import asyncio
+
+    from sqlalchemy import text
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
+    from app.db import sqlalchemy_url
+    from app.models.enums import CheckKind, CheckRunStatus, FlagSeverity, ResultOutcome
+    from app.models.instructor import Instructor
+    from app.models.manuscript import Manuscript
+    from app.models.rubric import Criterion, Rubric
+    from app.models.run import CheckResult, CheckRun, Flag
+    from app.report.service import aggregate_and_score
+
+    pdf_path = _real_quote_pdf(tmp_path)
+
+    async def seed():
+        engine = create_async_engine(sqlalchemy_url(api_scratch_url))
+        try:
+            factory = async_sessionmaker(engine, expire_on_commit=False)
+            async with factory() as session:
+                await session.execute(
+                    text(
+                        "TRUNCATE flag, readiness_report, check_result, check_run, criterion, "
+                        "rubric, manuscript, instructor RESTART IDENTITY CASCADE"
+                    )
+                )
+                instructor = Instructor(
+                    email="pageimg@tip.edu.ph",
+                    display_name="Prof",
+                    password_hash=hash_password("s3cret!"),
+                )
+                session.add(instructor)
+                await session.commit()
+                manuscript = Manuscript(
+                    instructor_id=instructor.id,
+                    group_label="G-PageImg",
+                    file_ref=str(pdf_path),
+                )
+                rubric = Rubric(
+                    instructor_id=instructor.id, title="Format", source_file="r.pdf", is_active=True
+                )
+                session.add_all([manuscript, rubric])
+                await session.commit()
+                criterion = Criterion(
+                    rubric_id=rubric.id,
+                    type="structural",
+                    text="Has an abstract",
+                    evidence=None,
+                    weight=Decimal("100"),
+                    position=0,
+                )
+                session.add(criterion)
+                await session.commit()
+                check_run = CheckRun(manuscript_id=manuscript.id, rubric_id=rubric.id)
+                session.add(check_run)
+                await session.commit()
+                citation_result = CheckResult(
+                    check_run_id=check_run.id,
+                    criterion_id=None,
+                    kind=CheckKind.citation_integrity,
+                    outcome=ResultOutcome.passed,
+                )
+                session.add(citation_result)
+                await session.commit()
+                session.add(
+                    Flag(
+                        check_result_id=citation_result.id,
+                        severity=FlagSeverity.high,
+                        evidence_excerpt=(
+                            "Before a student can defend their capstone the format must be checked."
+                        ),
+                        page_anchor="p. 1",
+                    )
+                )
+                check_run.status = CheckRunStatus.done
+                await session.commit()
+                await aggregate_and_score(session, check_run.id)
+                return check_run.id
+        finally:
+            await engine.dispose()
+
+    check_run_id = asyncio.run(seed())
+    client.post("/auth/login", json={"email": "pageimg@tip.edu.ph", "password": "s3cret!"})
+
+    resp = client.get(f"/check-runs/{check_run_id}/report/export.pdf")
+    assert resp.status_code == 200
+    assert resp.content.startswith(b"%PDF")
+
+    import fitz
+
+    exported = fitz.open(stream=resp.content, filetype="pdf")
+    full_text = "\n".join(page.get_text() for page in exported)
+    assert "Rendered from the submitted PDF, page 1" in full_text
+    total_images = sum(len(page.get_images()) for page in exported)
+    assert total_images >= 1, "no raster image was embedded in the exported PDF"
+
+
+def test_export_states_an_explicit_reason_for_a_docx_manuscript(client, api_scratch_url, tmp_path):
+    """AC3: a DOCX source states its reason explicitly, never a silent
+    missing image."""
+    import asyncio
+
+    from sqlalchemy import text
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
+    from app.db import sqlalchemy_url
+    from app.models.enums import CheckKind, CheckRunStatus, FlagSeverity, ResultOutcome
+    from app.models.instructor import Instructor
+    from app.models.manuscript import Manuscript
+    from app.models.rubric import Criterion, Rubric
+    from app.models.run import CheckResult, CheckRun, Flag
+    from app.report.service import aggregate_and_score
+
+    docx_path = tmp_path / "manuscript.docx"
+    docx_path.write_bytes(b"not a real docx, never opened by this path")
+
+    async def seed():
+        engine = create_async_engine(sqlalchemy_url(api_scratch_url))
+        try:
+            factory = async_sessionmaker(engine, expire_on_commit=False)
+            async with factory() as session:
+                await session.execute(
+                    text(
+                        "TRUNCATE flag, readiness_report, check_result, check_run, criterion, "
+                        "rubric, manuscript, instructor RESTART IDENTITY CASCADE"
+                    )
+                )
+                instructor = Instructor(
+                    email="docximg@tip.edu.ph",
+                    display_name="Prof",
+                    password_hash=hash_password("s3cret!"),
+                )
+                session.add(instructor)
+                await session.commit()
+                manuscript = Manuscript(
+                    instructor_id=instructor.id,
+                    group_label="G-DocxImg",
+                    file_ref=str(docx_path),
+                )
+                rubric = Rubric(
+                    instructor_id=instructor.id, title="Format", source_file="r.pdf", is_active=True
+                )
+                session.add_all([manuscript, rubric])
+                await session.commit()
+                criterion = Criterion(
+                    rubric_id=rubric.id,
+                    type="structural",
+                    text="Has an abstract",
+                    evidence=None,
+                    weight=Decimal("100"),
+                    position=0,
+                )
+                session.add(criterion)
+                await session.commit()
+                check_run = CheckRun(manuscript_id=manuscript.id, rubric_id=rubric.id)
+                session.add(check_run)
+                await session.commit()
+                citation_result = CheckResult(
+                    check_run_id=check_run.id,
+                    criterion_id=None,
+                    kind=CheckKind.citation_integrity,
+                    outcome=ResultOutcome.passed,
+                )
+                session.add(citation_result)
+                await session.commit()
+                session.add(
+                    Flag(
+                        check_result_id=citation_result.id,
+                        severity=FlagSeverity.high,
+                        evidence_excerpt="irrelevant",
+                        page_anchor="¶1",
+                    )
+                )
+                check_run.status = CheckRunStatus.done
+                await session.commit()
+                await aggregate_and_score(session, check_run.id)
+                return check_run.id
+        finally:
+            await engine.dispose()
+
+    check_run_id = asyncio.run(seed())
+    client.post("/auth/login", json={"email": "docximg@tip.edu.ph", "password": "s3cret!"})
+
+    resp = client.get(f"/check-runs/{check_run_id}/report/export.pdf")
+    assert resp.status_code == 200
+
+    import fitz
+
+    exported = fitz.open(stream=resp.content, filetype="pdf")
+    full_text = "\n".join(page.get_text() for page in exported)
+    assert "submitted as a DOCX" in full_text
+
+
 def test_export_rejects_a_strangers_check_run(logged_in_with_a_done_run, api_scratch_url):
     import asyncio
 

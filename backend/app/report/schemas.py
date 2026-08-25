@@ -512,14 +512,35 @@ class ReuseMatchesOut(BaseModel):
     matches: list[ExcludedReuseMatchOut]
 
 
+class PageEvidenceImageOut(BaseModel):
+    """V-070: one flag's rendered-submitted-page evidence for the PDF
+    export ONLY -- never serialized over HTTP (`ReportExportData` is
+    consumed directly by `build_report_pdf`, never returned as a response
+    model, so a large `image_png` blob never reaches a JSON response).
+    `image_png` is None whenever no honest image could be produced for
+    this flag -- `reason` is ALWAYS set in that case (AC3: purged source,
+    DOCX source, and an unrecoverable anchor each get an explicit stated
+    reason, never a silent omission)."""
+
+    image_png: bytes | None
+    page: int | None
+    reason: str | None
+
+
 class ReportExportData(BaseModel):
     """V-039: everything the PDF export needs, gathered once. `flags`
     mirrors the report's own flags panel (BUG-033) exactly -- the export
     is a print-adapted view of the same instructor-facing data, never a
     second source of truth. `archive_size_n` is None when the F7 check
     never ran (no embeddable content extracted) -- an honest gap, not a
-    fabricated zero."""
+    fabricated zero.
+
+    `page_images` (V-070) is keyed by `FlagSummaryOut.id`, one entry per
+    flag in `flags` -- built by `app.report.page_images.build_page_evidence_images`
+    from the SAME anchor-recovery mechanism (`app.ingest.regions.recover_region`)
+    V-065's manuscript viewer already uses, per both tickets' own Q5."""
 
     report: ReportOut
     flags: list[FlagSummaryOut]
     archive_size_n: int | None
+    page_images: dict[int, PageEvidenceImageOut] = {}

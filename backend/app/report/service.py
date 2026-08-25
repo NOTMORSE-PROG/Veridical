@@ -5,6 +5,7 @@ check_results/flags into `ScorableResult`/`ScorableFlag`, runs the pure
 an instructor resolves an escalation).
 """
 
+import asyncio
 from datetime import UTC, datetime
 from decimal import Decimal
 from pathlib import Path
@@ -41,6 +42,7 @@ from app.models.enums import (
 from app.models.manuscript import Manuscript, ManuscriptPassageArchive
 from app.models.rubric import Criterion, Rubric
 from app.models.run import CheckResult, CheckRun, Flag, ReadinessReport
+from app.report.page_images import build_page_evidence_images
 from app.report.rating import compute_levelled_rating
 from app.report.schemas import (
     CriterionLevelOut,
@@ -55,6 +57,7 @@ from app.report.schemas import (
     IntegrityCheckStatusOut,
     LevelledRatingOut,
     ManuscriptViewerOut,
+    PageEvidenceImageOut,
     ReportExportData,
     ReportOut,
     ResolutionOut,
@@ -559,6 +562,49 @@ async def get_manuscript_viewer(
     return await manuscript_viewer_for(manuscript, flags, settings)
 
 
+def _open_manuscript_source(
+    manuscript: Manuscript,
+) -> tuple[pymupdf.Document | None, Literal["pdf", "docx", "unknown"], str | None]:
+    """Shared file-opening/purge-guard logic behind BOTH the manuscript
+    viewer (V-065, `manuscript_viewer_for` below) and the PDF export's
+    page-image rendering (V-070, `app.report.page_images` -- same Q5
+    sharing `regions.py` already established between those two tickets).
+    Extracted from `manuscript_viewer_for`'s own prior inline steps so the
+    purge/format/open-failure wording is stated in exactly one place, not
+    two independently-maintained copies (the drift class BUG-032's history
+    warns against).
+
+    Returns `(doc-or-None, source_format, reason-or-None)`. `reason` is set
+    ONLY for the three HARD-unavailable cases (purged, unsupported format,
+    a PDF that won't open) -- a DOCX source returns `(None, "docx", None)`:
+    no doc to open, but that is a normal, available manuscript, not an
+    error. Callers own closing `doc`."""
+    suffix = Path(manuscript.file_ref).suffix.lower()
+    source_format: Literal["pdf", "docx", "unknown"] = (
+        "pdf" if suffix == ".pdf" else "docx" if suffix == ".docx" else "unknown"
+    )
+    if manuscript.purged_at is not None:
+        return (
+            None,
+            source_format,
+            f"This manuscript's source file was purged on "
+            f"{manuscript.purged_at.date().isoformat()} and can no longer be viewed.",
+        )
+    if source_format == "unknown":
+        return (
+            None,
+            source_format,
+            "This manuscript's source file format isn't supported for viewing.",
+        )
+    if source_format == "docx":
+        return None, source_format, None
+    try:
+        doc = pymupdf.open(manuscript.file_ref)
+    except (pymupdf.FileDataError, pymupdf.FileNotFoundError, RuntimeError, ValueError):
+        return None, source_format, "This manuscript's source file could not be opened."
+    return doc, source_format, None
+
+
 async def manuscript_viewer_for(
     manuscript: Manuscript, flags: list[Flag], settings: Settings
 ) -> ManuscriptViewerOut:
@@ -569,10 +615,6 @@ async def manuscript_viewer_for(
     else -- the exact class of drift BUG-032's history warns against).
     Callers own resolving AND authorizing `manuscript` before this is ever
     called; this function does no ownership check of its own."""
-    suffix = Path(manuscript.file_ref).suffix.lower()
-    source_format: Literal["pdf", "docx", "unknown"] = (
-        "pdf" if suffix == ".pdf" else "docx" if suffix == ".docx" else "unknown"
-    )
 
     def _unavailable_regions() -> list[FlagRegionOut]:
         # §5.7 of the ui-designer spec: one mechanism for "nothing to show"
@@ -593,52 +635,21 @@ async def manuscript_viewer_for(
             for flag in flags
         ]
 
-    if manuscript.purged_at is not None:
+    doc, source_format, hard_reason = _open_manuscript_source(manuscript)
+    if hard_reason is not None:
         return ManuscriptViewerOut(
             manuscript_id=manuscript.id,
             original_filename=manuscript.original_filename,
             source_format=source_format,
             available=False,
-            unavailable_reason=(
-                f"This manuscript's source file was purged on "
-                f"{manuscript.purged_at.date().isoformat()} and can no longer be viewed."
-            ),
+            unavailable_reason=hard_reason,
             purged_at=manuscript.purged_at,
             page_count=None,
             regions=_unavailable_regions(),
         )
 
-    if source_format == "unknown":
-        return ManuscriptViewerOut(
-            manuscript_id=manuscript.id,
-            original_filename=manuscript.original_filename,
-            source_format=source_format,
-            available=False,
-            unavailable_reason="This manuscript's source file format isn't supported for viewing.",
-            purged_at=None,
-            page_count=None,
-            regions=_unavailable_regions(),
-        )
-
     section_tree = SectionTree.model_validate(manuscript.section_tree or {"source": "none"})
-
-    doc = None
-    page_count = None
-    if source_format == "pdf":
-        try:
-            doc = pymupdf.open(manuscript.file_ref)
-            page_count = doc.page_count
-        except (pymupdf.FileDataError, pymupdf.FileNotFoundError, RuntimeError, ValueError):
-            return ManuscriptViewerOut(
-                manuscript_id=manuscript.id,
-                original_filename=manuscript.original_filename,
-                source_format=source_format,
-                available=False,
-                unavailable_reason="This manuscript's source file could not be opened.",
-                purged_at=None,
-                page_count=None,
-                regions=_unavailable_regions(),
-            )
+    page_count = doc.page_count if doc is not None else None
 
     try:
         regions = []
@@ -672,6 +683,35 @@ async def manuscript_viewer_for(
         page_count=page_count,
         regions=regions,
     )
+
+
+def render_flag_page_images_for(
+    manuscript: Manuscript, flags: list[FlagSummaryOut], llm_mode: str, settings: Settings
+) -> dict[int, PageEvidenceImageOut]:
+    """V-070: the page-image half of the PDF export. Shares
+    `_open_manuscript_source` with the manuscript viewer above -- same
+    file-opening/purge-guard logic, never a second copy of it (V-066's own
+    extraction rationale). Synchronous by design: PyMuPDF rendering is
+    CPU-bound, so the caller (`get_report_export_data`) runs this through
+    `run_in_executor` rather than blocking VERIDICAL's single event loop
+    (CODING.md's PyMuPDF/embeddings rule; this export renders full pages
+    via `get_pixmap`, materially heavier than the viewer's
+    `search_for`-only path above)."""
+    doc, source_format, unavailable_reason = _open_manuscript_source(manuscript)
+    section_tree = SectionTree.model_validate(manuscript.section_tree or {"source": "none"})
+    try:
+        return build_page_evidence_images(
+            doc,
+            section_tree,
+            flags,
+            source_format=source_format,
+            unavailable_reason=unavailable_reason,
+            llm_mode=llm_mode,
+            settings=settings,
+        )
+    finally:
+        if doc is not None:
+            doc.close()
 
 
 async def list_reuse_passage_matches(
@@ -888,7 +928,7 @@ def manuscript_paragraphs_for(manuscript: Manuscript, settings: Settings) -> Doc
 
 
 async def get_report_export_data(
-    session: AsyncSession, check_run_id: int, instructor_id: int
+    session: AsyncSession, check_run_id: int, instructor_id: int, settings: Settings | None = None
 ) -> ReportExportData:
     """V-039 (screen 4h export action): assembles everything the PDF
     export needs from the SAME data sources the on-screen report/flags
@@ -896,6 +936,7 @@ async def get_report_export_data(
     is validated once, by `get_report` itself (raises `NotFoundError`);
     the two supplementary reads below trust that check.
     """
+    settings = settings or get_settings()
     report = await get_report(session, check_run_id, instructor_id)
     flags = await list_flags_for_run(session, check_run_id, instructor_id)
 
@@ -915,7 +956,21 @@ async def get_report_export_data(
         else None
     )
 
-    return ReportExportData(report=report, flags=flags, archive_size_n=archive_size_n)
+    # V-070: the actual submitted page, rendered, per page-anchored flag.
+    # `render_flag_page_images_for` is synchronous PyMuPDF work (`get_pixmap`
+    # over up to `export_max_page_images` full pages) -- run off the event
+    # loop rather than blocking VERIDICAL's single uvicorn worker for the
+    # duration of one export (CODING.md's PyMuPDF/embeddings rule).
+    check_run = await _owned_check_run(session, check_run_id, instructor_id)
+    manuscript = await session.get(Manuscript, check_run.manuscript_id)
+    loop = asyncio.get_running_loop()
+    page_images = await loop.run_in_executor(
+        None, render_flag_page_images_for, manuscript, flags, report.llm_mode, settings
+    )
+
+    return ReportExportData(
+        report=report, flags=flags, archive_size_n=archive_size_n, page_images=page_images
+    )
 
 
 async def resolve_escalation_for_run(

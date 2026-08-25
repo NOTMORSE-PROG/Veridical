@@ -35,10 +35,13 @@ from xml.sax.saxutils import escape
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import ParagraphStyle
+from reportlab.lib.utils import ImageReader
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.pdfgen.canvas import Canvas
 from reportlab.platypus import (
+    HRFlowable,
+    Image,
     KeepTogether,
     Paragraph,
     SimpleDocTemplate,
@@ -48,7 +51,13 @@ from reportlab.platypus import (
 )
 
 from app.checks.escalation import NEEDS_REVIEW_OUTCOMES as _NEEDS_REVIEW_OUTCOMES_ENUM
-from app.report.schemas import CriterionResultOut, FlagSummaryOut, ReportExportData
+from app.config import get_settings
+from app.report.schemas import (
+    CriterionResultOut,
+    FlagSummaryOut,
+    PageEvidenceImageOut,
+    ReportExportData,
+)
 
 _FONTS_DIR = Path(__file__).parent / "fonts"
 _FONT_FAMILY = "PublicSans"
@@ -443,11 +452,77 @@ def _criterion_flowable(row: CriterionResultOut, styles: dict[str, ParagraphStyl
     return parts
 
 
+def _page_evidence_flowables(
+    image: PageEvidenceImageOut | None,
+    content_width: float,
+    styles: dict[str, ParagraphStyle],
+    dpi: int,
+) -> list:
+    """V-070: the flag's own rendered submitted page, laid out under its
+    excerpt. `image` is None only when this flag was never assessed by
+    `app.report.page_images` at all (should not happen for a real export,
+    since every flag gets an entry -- defensive, not expected); a real
+    entry ALWAYS has either `image_png` or `reason` set (AC3: never a
+    silent omission for a purged source, a DOCX source, or an
+    unrecoverable anchor)."""
+    if image is None:
+        return []
+    if image.image_png is None:
+        # `ui-designer` finding, 2026-08-25: "zero evidence shown for this
+        # flag" is a materially different, weaker state than a routine
+        # page-number caption, but rendered in the exact same
+        # size/color/weight as one -- easy to skim past. Bumped to the
+        # document's own existing "needs attention" tone (the same
+        # caution color the rubric-needs-review notice above uses), bold,
+        # not a new component.
+        no_image_style = ParagraphStyle(
+            "no_image_reason",
+            parent=styles["caption_bold"],
+            textColor=_TONE_COLORS["caution"][1],
+        )
+        return [Spacer(1, 2), Paragraph(escape(image.reason or ""), no_image_style)]
+
+    # `ImageReader` is used ONLY to read the pixel dimensions -- reportlab's
+    # `Image` flowable, given an `ImageReader` directly, checks for a
+    # `.read` attribute to decide whether its argument is file-like and,
+    # finding none, falls through to `os.path.splitext(filename)` on the
+    # `ImageReader` OBJECT ITSELF and crashes (`TypeError: expected str,
+    # bytes or os.PathLike object, not ImageReader` -- reproduced live,
+    # reportlab 5.0.0). A plain `BytesIO` has `.read` and takes the
+    # file-like branch instead, so `Image` below gets its own fresh one.
+    native_w_px, native_h_px = ImageReader(BytesIO(image.image_png)).getSize()
+    # The raster was rendered at `dpi`; converting back to points (72/inch)
+    # gives the image's real physical size, which is then scaled DOWN only
+    # (never up past its native resolution) to fit the content column and
+    # the configured max height.
+    native_w = native_w_px * 72 / dpi
+    native_h = native_h_px * 72 / dpi
+    scale = min(
+        content_width / native_w, get_settings().export_page_image_max_height / native_h, 1.0
+    )
+
+    caption = (
+        f"Rendered from the submitted PDF, page {image.page}"
+        if image.page
+        else "Rendered from the submitted PDF"
+    )
+    if image.reason:
+        caption = f"{caption} · {image.reason}"
+
+    return [
+        Spacer(1, 4),
+        Image(BytesIO(image.image_png), width=native_w * scale, height=native_h * scale),
+        Spacer(1, 2),
+        Paragraph(escape(caption), styles["caption"]),
+    ]
+
+
 def build_report_pdf(data: ReportExportData) -> bytes:
     font = _register_fonts()
     styles = _styles(font)
     report = data.report
     is_draft = report.decision is None
+    export_dpi = get_settings().export_page_image_dpi
 
     buf = BytesIO()
     doc = SimpleDocTemplate(
@@ -675,11 +750,38 @@ def build_report_pdf(data: ReportExportData) -> bytes:
                     caption_text += " · Overridden"
                 header = Paragraph(caption_text, caption_style)
                 excerpt = Paragraph(escape(f.evidence_excerpt), styles["body"])
+                # `ui-designer` finding, 2026-08-25 (measured against a
+                # real 34-flag export: EVERY flag's own rendered page image
+                # trails onto the following page, so a page opening
+                # directly into "Anchor: p. N · ..." metadata -- the same
+                # weight/color as the CLOSING caption of the flag before it
+                # -- is this document's default reading experience, not an
+                # edge case). A hairline rule reused from the Criteria
+                # Results table's own existing convention (`_RULE`) marks
+                # "a new flag starts here" regardless of what's above it on
+                # the page, glued to the header it introduces so it can
+                # never appear detached from it.
+                divider = HRFlowable(
+                    width=content_width, thickness=0.5, color=_RULE, spaceBefore=6, spaceAfter=6
+                )
                 # Only the short header needs to stay glued to the excerpt
                 # that follows it; the excerpt itself paginates normally if
                 # genuinely long (never truncated -- this IS the evidence
                 # an instructor/adviser verifies independently).
-                flow.append(KeepTogether([header, Spacer(1, 2), excerpt]))
+                flow.append(KeepTogether([divider, header, Spacer(1, 2), excerpt]))
+                # V-070: the actual submitted page, not glued into the
+                # KeepTogether above -- a real rendered page can be taller
+                # than the excerpt text, and forcing it to share one
+                # unbreakable block with an already-long excerpt is exactly
+                # how a reportlab flowable ends up too tall to place on any
+                # page. Letting it flow independently means only the image
+                # itself (capped by `export_page_image_max_height`) has to
+                # fit, not the whole group.
+                flow.extend(
+                    _page_evidence_flowables(
+                        data.page_images.get(f.id), content_width, styles, export_dpi
+                    )
+                )
                 flow.append(Spacer(1, 8))
     flow.append(Spacer(1, 4))
     flow.append(Paragraph(_archive_disclosure(data.archive_size_n), styles["caption"]))

@@ -1,5 +1,6 @@
 """Readiness report HTTP surface (screen 4h)."""
 
+import asyncio
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Response
@@ -55,7 +56,13 @@ async def export_report_pdf_route(
     instructor: Annotated[Instructor, Depends(get_current_instructor)],
 ) -> Response:
     data = await get_report_export_data(session, check_run_id, instructor.id)
-    pdf_bytes = build_report_pdf(data)
+    # V-070 made this meaningfully heavier (page rendering already happened
+    # in `get_report_export_data`; this is now reportlab layout PLUS
+    # embedding those images) -- offload the CPU-bound build off the event
+    # loop rather than blocking VERIDICAL's single uvicorn worker for its
+    # duration (CODING.md's PyMuPDF/embeddings rule).
+    loop = asyncio.get_running_loop()
+    pdf_bytes = await loop.run_in_executor(None, build_report_pdf, data)
     filename = f"veridical-report-{check_run_id}.pdf"
     return Response(
         content=pdf_bytes,

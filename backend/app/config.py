@@ -435,6 +435,80 @@ class Settings(BaseSettings):
             int(n.strip()) for n in self.region_search_candidate_lengths.split(",") if n.strip()
         ]
 
+    # --- Report export: rendered page images (V-070) ---------------------------
+    # DPI for PyMuPDF's page.get_pixmap() when embedding a flagged manuscript
+    # page in the exported PDF. The "506.4MB, 5.6MB headroom" figure D-011/
+    # V-065 cite as this codebase's in-process memory baseline is STALE --
+    # it measured an onnxruntime/NLI cross-encoder stack that D-011's own
+    # text says was measured, rejected, and REMOVED (`onnxruntime` is
+    # confirmed absent from pyproject.toml/uv.lock today; `backend-critic`
+    # independently re-verified this claim, 2026-08-25).
+    #
+    # TWO real, dated, in-process (app + potion-base-8M loaded) measurements
+    # on 2026-08-25, reported separately rather than blended into one range
+    # (`backend-critic` finding: a prior draft of this comment blended them
+    # into a single inconsistent number that disagreed with the CHANGELOG
+    # entry describing the same work):
+    #   1. Random 28-page sample of the owner's real 47-page manuscript,
+    #      150dpi: baseline (app+model loaded) ~294-315MB working set,
+    #      +~36-57MB rendering, peaking ~342-351MB (~160-170MB headroom).
+    #   2. The 17 REAL flags of a real, live check_run against that same
+    #      manuscript, run through the actual `render_flag_page_images_for`
+    #      code path: peaked at 316MB working set (~196MB headroom).
+    # Both real-manuscript measurements land well under half the 512MB
+    # ceiling. `tests/test_report_export_perf.py::
+    # test_page_image_rendering_stays_within_a_measured_native_memory_bound`
+    # is the REPRODUCIBLE backstop for this claim going forward -- run it
+    # rather than trusting this comment's numbers as they age.
+    # 150dpi is legible print quality without spending that headroom faster
+    # than needed.
+    export_page_image_dpi: int = 150
+    # Safety valve, not expected to bind on a real manuscript: caps the
+    # number of DISTINCT PAGES one export will rasterize -- every flag
+    # anchored to an already-rendered page is free, REGARDLESS of whether
+    # its own excerpt/box differs from another flag's on that same page
+    # (`app/report/page_images.py`'s cache is keyed by page number alone,
+    # not by page+excerpt -- `backend-critic` finding, 2026-08-25: keying
+    # by (page, boxes) let a single heavily-flagged page consume the whole
+    # cap by itself, so a 2-page document could report "rendered-page limit
+    # reached" on its second, otherwise-untouched page). At the measured
+    # ~0.5-2MB incremental peak per page (150dpi, depending on page
+    # complexity), 80 pages stays well inside the measured headroom above,
+    # with real margin left for a second concurrent request. A flag whose
+    # page is skipped past the cap gets an honest "skipped" reason (AC3),
+    # never a silent drop.
+    export_max_page_images: int = 80
+    # Tolerance (PDF points) for merging same-line word-run boxes that
+    # `page.search_for()` returns as separate rects into one continuous
+    # highlight per line. Measured live (2026-08-25) against a real quoted
+    # excerpt: a multi-word phrase search returns one rect PER WORD-RUN on
+    # the same line, not one rect for the whole phrase -- drawing each
+    # separately is technically correct but reads as a broken/partial mark
+    # on the printed page. Two boxes are "the same line" when their y0
+    # (page-top-origin space) differs by less than this.
+    export_box_line_merge_tolerance: float = 2.0
+    # Max height (points) reserved for one embedded page image, independent
+    # of its width-fit scale -- A4's own usable content height (topMargin
+    # 98 + bottomMargin 56 subtracted from A4's ~842pt) is ~688pt, and an
+    # image scaled to the full content WIDTH alone can exceed that on its
+    # own (a near-A4-aspect page scaled to ~487pt content width comes out
+    # ~689pt tall). Capping height independently guarantees room is always
+    # left for the flag's own header/excerpt above the image on the same
+    # page, never a reportlab layout error from a single flowable too tall
+    # to place.
+    export_page_image_max_height: float = 420.0
+    # Desired EFFECTIVE (embedded/on-page) size of the fake/unknown-`llm_mode`
+    # disclosure band's text, in points -- `app/report/page_images.py`
+    # derives the RASTER's own native fontsize from this and the page's
+    # native height so the text reads at roughly this size regardless of
+    # how tall the source page is (`ui-designer` finding, 2026-08-25: a
+    # flat native fontsize shrinks proportionally with the page and
+    # measured ~4.8pt -- smaller than every other text in the document --
+    # on a real Letter-height source page scaled to fit
+    # `export_page_image_max_height`). 8pt matches this document's own
+    # smallest normal caption size (`export.py`'s `caption` style).
+    export_page_disclosure_font_pt: float = 8.0
+
     # --- Originality/reuse: passage-level similarity (V-072, F7.4) ------------
     # Passage size for the F7.4 chunker -- deliberately smaller than
     # `reuse_embedding_chunk_words` (800, F7.1's dilution bound for
