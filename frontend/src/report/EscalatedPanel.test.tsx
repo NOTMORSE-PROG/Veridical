@@ -72,6 +72,27 @@ const REAL_MAJORITY: EscalatedItemOut = {
   unverified_evidence: null,
 };
 
+// V-069 AC4: a levelled criterion's escalated item -- resolution options
+// must match the rubric's own scale, not Pass/Fail.
+const LEVELLED_ITEM: EscalatedItemOut = {
+  check_result_id: 6,
+  criterion_id: 15,
+  criterion_text: "Introduction states and previews the structure",
+  weight: 20,
+  agreement: 0.5,
+  votes: ["Proficient", "Acceptable"],
+  ai_majority_verdict: null,
+  reason: null,
+  review_reason: "low_confidence",
+  unverified_evidence: null,
+  levels: [
+    { level: 1, name: "Beginner", descriptor: "no clear structure", points: 1 },
+    { level: 2, name: "Acceptable", descriptor: "states the topic", points: 2 },
+    { level: 3, name: "Proficient", descriptor: "states and previews", points: 3 },
+    { level: 4, name: "Exemplary", descriptor: "engaging and complete", points: 4 },
+  ],
+};
+
 describe("EscalatedPanel", () => {
   afterEach(() => vi.unstubAllGlobals());
 
@@ -446,5 +467,92 @@ describe("EscalatedPanel", () => {
     // And focus did not fall back to <body> -- it moved to the surviving
     // live region, the only thing left to hold it.
     await waitFor(() => expect(document.activeElement).not.toBe(document.body));
+  });
+
+  it("V-069 AC4: a levelled criterion shows its own level names instead of Pass/Fail", async () => {
+    vi.stubGlobal("fetch", stubFetchByPath({ "/check-runs/5/escalated": [LEVELLED_ITEM] }));
+    renderWithProviders(<EscalatedPanel checkRunId={5} />);
+
+    expect(await screen.findByRole("button", { name: "Beginner" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Acceptable" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Proficient" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Exemplary" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Pass" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Fail" })).not.toBeInTheDocument();
+  });
+
+  it("V-069 AC4: picking a level submits mark_level with that level's own ordinal", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === "string" ? input : input.toString();
+      if (url.includes("/resolve") && init?.method === "POST") {
+        return new Response(
+          JSON.stringify({
+            check_result_id: 6,
+            outcome: "passed",
+            score: 75,
+            report: {
+              check_run_id: 5,
+              manuscript_group_label: "Ungrouped",
+              rubric_title: "TIP-VPAA-054B",
+              status: "ready",
+              composite_score: 87.5,
+              thresholds: { ready_min_score: 85, not_ready_max_score: 60 },
+              reason: null,
+              flag_deduction: 0,
+              unresolved_high_flag_count: 0,
+              // V-069 (`ux-critic` finding): the resolved row, WITH its
+              // server-computed level -- the announcement below must be
+              // built from this, not from client-side selection state.
+              results: [
+                {
+                  criterion_id: LEVELLED_ITEM.criterion_id,
+                  level: { name: "Proficient", ordinal: 3, points: 3, max_points: 4 },
+                },
+              ],
+            },
+          }),
+          { status: 200 },
+        );
+      }
+      if (url.includes("/escalated")) return new Response(JSON.stringify([LEVELLED_ITEM]), { status: 200 });
+      return new Response("{}", { status: 200 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    renderWithProviders(<EscalatedPanel checkRunId={5} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Proficient" }));
+    // V-069 (`ux-critic` finding, live-reproduced): between clicking a
+    // level and clicking Confirm, nothing said WHICH level was pending.
+    expect(await screen.findByText("Marking as: Proficient")).toBeInTheDocument();
+    fireEvent.change(screen.getByPlaceholderText("Why are you resolving this way?"), {
+      target: { value: "Read it myself: previews structure but isn't engaging." },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Confirm" }));
+
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        expect.stringContaining("/resolve"),
+        expect.objectContaining({ method: "POST" }),
+      ),
+    );
+    const call = fetchMock.mock.calls.find(([, init]) => (init as RequestInit | undefined)?.method === "POST");
+    const init = call![1] as RequestInit;
+    const body = JSON.parse(init.body as string) as {
+      resolution: string;
+      reason: string;
+      level: number;
+    };
+    expect(body).toEqual({
+      resolution: "mark_level",
+      reason: "Read it myself: previews structure but isn't engaging.",
+      level: 3,
+    });
+    // V-069 (`ux-critic` finding, live-reproduced): the aria-live
+    // announcement used to say "Resolved as passed" for ANY mark_level
+    // resolution -- a screen-reader user heard only the binary outcome
+    // at the one moment accuracy matters most.
+    expect(
+      await screen.findByText("Resolved as Proficient. Composite score is now 87.5%."),
+    ).toBeInTheDocument();
   });
 });

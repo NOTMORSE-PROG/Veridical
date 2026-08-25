@@ -53,6 +53,11 @@ const TONE_HEADER_BG: Record<StatusPillTone, string> = {
   danger: "bg-status-danger-bg",
   caution: "bg-status-caution-bg",
   info: "bg-status-info-bg",
+  // V-069: a flag's severity is never "level" (that tone is only for a
+  // levelled criterion's decided RESULT, never a flag) -- present only
+  // because `StatusPillTone` is a closed union `Record` requires
+  // exhaustively, same info-token pairing as StatusPill.tsx's own choice.
+  level: "bg-status-info-bg",
   neutral: "bg-status-neutral-bg",
   success: "bg-status-success-bg",
   attention: "bg-status-attention-bg",

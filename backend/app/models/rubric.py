@@ -92,5 +92,14 @@ class Criterion(Base, PkCreatedMixin):
     evidence: Mapped[str | None] = mapped_column(Text)
     weight: Mapped[Decimal] = mapped_column(Numeric(8, 3))
     position: Mapped[int]
+    # V-069 AC1/AC3: a graded performance scale's own named levels, as
+    # STRUCTURED data -- `[{"level": 1, "name": "Beginner", "descriptor":
+    # "...", "points": 1.0}, ...]`, ascending. NULL/empty = an ordinary
+    # pass/fail criterion (the common case, and every criterion before
+    # this column existed) -- nothing downstream (grading, scoring,
+    # export) branches on a global flag, only on whether THIS criterion
+    # carries levels, so a rubric mixing levelled and pass/fail criteria
+    # (ticket edge case) grades each one against its own vocabulary.
+    levels: Mapped[list[dict[str, Any]] | None] = mapped_column(JSONB)
 
     rubric: Mapped["Rubric"] = relationship(back_populates="criteria")

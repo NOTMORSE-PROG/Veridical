@@ -80,6 +80,79 @@ async def test_decompose_rubric_raises_on_blank_criterion_text():
         )
 
 
+# --- V-069: levels validation through the real decompose_rubric path -------
+
+_TIP_SCALE_RESPONSE = {
+    "criteria": [
+        {
+            "text": "Introduction states and previews structure",
+            "type": "semantic",
+            "evidence_needed": "Read the introduction",
+            "weight": 10,
+            "levels": [
+                {"level": 1, "name": "Beginner", "descriptor": "no structure", "points": 1},
+                {"level": 2, "name": "Acceptable", "descriptor": "states the topic", "points": 2},
+                {
+                    "level": 3,
+                    "name": "Proficient",
+                    "descriptor": "states and previews",
+                    "points": 3,
+                },
+                {"level": 4, "name": "Exemplary", "descriptor": "engaging", "points": 4},
+            ],
+        }
+    ]
+}
+
+
+async def test_decompose_rubric_round_trips_a_valid_levelled_scale():
+    criteria = await decompose_rubric("x", SpyLLM(_TIP_SCALE_RESPONSE))
+    assert criteria[0].levels is not None
+    assert [lvl.name for lvl in criteria[0].levels] == [
+        "Beginner",
+        "Acceptable",
+        "Proficient",
+        "Exemplary",
+    ]
+
+
+async def test_decompose_rubric_rejects_an_all_zero_points_scale():
+    """`backend-critic` finding: an all-zero-points scale makes
+    max_points 0, which crashed the resolve endpoint's division with a
+    raw ZeroDivisionError -- now caught at the source, before it can ever
+    reach a stored Criterion."""
+    zero_scale = {
+        "criteria": [
+            {
+                "text": "x",
+                "type": "semantic",
+                "weight": 10,
+                "levels": [
+                    {"level": 1, "name": "None", "descriptor": "x", "points": 0},
+                    {"level": 2, "name": "Some", "descriptor": "y", "points": 0},
+                ],
+            }
+        ]
+    }
+    with pytest.raises(RubricParseError):
+        await decompose_rubric("x", SpyLLM(zero_scale))
+
+
+async def test_decompose_rubric_rejects_a_single_rung_scale():
+    single_rung = {
+        "criteria": [
+            {
+                "text": "x",
+                "type": "semantic",
+                "weight": 10,
+                "levels": [{"level": 1, "name": "Only", "descriptor": "x", "points": 1}],
+            }
+        ]
+    }
+    with pytest.raises(RubricParseError):
+        await decompose_rubric("x", SpyLLM(single_rung))
+
+
 async def test_decompose_handles_prose_style_input_with_no_numbering():
     """The format-agnosticism claim, at the code level: nothing here
     branches on bullets/numbering/section names — a plain paragraph goes

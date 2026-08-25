@@ -41,7 +41,9 @@ from app.models.enums import (
 from app.models.manuscript import Manuscript, ManuscriptPassageArchive
 from app.models.rubric import Criterion, Rubric
 from app.models.run import CheckResult, CheckRun, Flag, ReadinessReport
+from app.report.rating import compute_levelled_rating
 from app.report.schemas import (
+    CriterionLevelOut,
     CriterionResultOut,
     DocumentParagraphOut,
     DocumentParagraphsOut,
@@ -51,12 +53,14 @@ from app.report.schemas import (
     FlagRegionOut,
     FlagSummaryOut,
     IntegrityCheckStatusOut,
+    LevelledRatingOut,
     ManuscriptViewerOut,
     ReportExportData,
     ReportOut,
     ResolutionOut,
     ResolveEscalationOut,
     ReuseMatchesOut,
+    RubricLevelOut,
 )
 from app.report.scoring import (
     ScorableFlag,
@@ -186,6 +190,10 @@ def _to_criterion_result(
         reason=detail.get("reason"),
         evidence=evidence,
         resolution=resolution,
+        # V-069 AC2: `detail["level"]` is set by `checks/semantic.py`,
+        # `checks/consistency.py`, and `checks/escalation.resolve_escalation`
+        # for a levelled criterion's decided result — `None` otherwise.
+        level=CriterionLevelOut(**detail["level"]) if detail.get("level") else None,
     )
 
 
@@ -369,6 +377,24 @@ async def report_out_for_check_run(
         for row in integrity_rows
     ]
 
+    # V-069 AC2: `None` whenever no criterion in `rows` is levelled (AC3 —
+    # a pass/fail rubric's report gains no new visible field). Reuses the
+    # SAME `rows` this function already loaded, never a second query.
+    levelled_rating_result = compute_levelled_rating(
+        [criterion for _, criterion in rows], {result.criterion_id: result for result, _ in rows}
+    )
+    levelled_rating = (
+        LevelledRatingOut(
+            achieved_points=levelled_rating_result.achieved_points,
+            max_points=levelled_rating_result.max_points,
+            rating_percent=levelled_rating_result.rating_percent,
+            n_decided=levelled_rating_result.n_decided,
+            n_levelled=levelled_rating_result.n_levelled,
+        )
+        if levelled_rating_result is not None
+        else None
+    )
+
     return ReportOut(
         check_run_id=check_run_id,
         manuscript_group_label=manuscript.group_label,
@@ -400,6 +426,7 @@ async def report_out_for_check_run(
             else None
         ),
         integrity_check_status=integrity_check_status,
+        levelled_rating=levelled_rating,
     )
 
 
@@ -417,6 +444,7 @@ def _to_escalated_out(item: EscalatedItem) -> EscalatedItemOut:
         unverified_evidence=item.unverified_evidence,
         injection_suspected=item.injection_suspected,
         injection_matched_snippet=item.injection_matched_snippet,
+        levels=[RubricLevelOut(**lvl) for lvl in item.levels] if item.levels else None,
     )
 
 
@@ -897,6 +925,8 @@ async def resolve_escalation_for_run(
     instructor_id: int,
     resolution: str,
     reason: str,
+    *,
+    level: int | None = None,
 ) -> ResolveEscalationOut:
     """Resolves one escalated criterion, then recomputes the composite
     score/status LIVE (ticket AC: "resolution updates score + status
@@ -905,7 +935,7 @@ async def resolve_escalation_for_run(
     await _owned_check_run(session, check_run_id, instructor_id)
     await raise_if_decided(session, check_run_id)
     result = await resolve_escalation(
-        session, check_run_id, check_result_id, instructor_id, resolution, reason
+        session, check_run_id, check_result_id, instructor_id, resolution, reason, level=level
     )
     await aggregate_and_score(session, check_run_id)
     report = await get_report(session, check_run_id, instructor_id)

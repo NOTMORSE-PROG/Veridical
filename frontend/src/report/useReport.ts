@@ -102,14 +102,18 @@ export function useResolveEscalation(checkRunId: number) {
       checkResultId,
       resolution,
       reason,
+      level,
     }: {
       checkResultId: number;
       resolution: EscalationResolution;
       reason: string;
+      // V-069 AC4: required (and only meaningful) when resolution is
+      // "mark_level" -- the level's own ordinal.
+      level?: number;
     }) =>
       api.post<ResolveEscalationOut>(
         `/check-runs/${checkRunId}/escalated/${checkResultId}/resolve`,
-        { resolution, reason },
+        { resolution, reason, level },
       ),
     onSuccess: (out) => {
       // The response already carries the fresh report (ticket AC: "live");

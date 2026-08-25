@@ -13,6 +13,41 @@ class EvidenceItem(BaseModel):
     anchor: str
 
 
+class CriterionLevelOut(BaseModel):
+    """V-069 AC2: a decided levelled criterion's own rung — the judgment
+    the instructor reads (owner-approved treatment, 2026-08-25), not a
+    percentage. `points`/`max_points` ride along for the RATING
+    transcription, never shown as the primary verdict on their own."""
+
+    name: str
+    ordinal: int
+    points: float
+    max_points: float
+
+
+class RubricLevelOut(BaseModel):
+    """One rung of a criterion's OWN scale, as captured at decomposition
+    (or hand-edit) time -- the resolve panel's level-picker data source
+    (V-069 AC4), distinct from `CriterionLevelOut` (a DECIDED result)."""
+
+    level: int
+    name: str
+    descriptor: str
+    points: float
+
+
+class LevelledRatingOut(BaseModel):
+    """V-069 AC2: the rubric's own RATING formula, transcribed — see
+    `app.report.rating`'s module docstring for why this is never merged
+    into the composite score."""
+
+    achieved_points: float
+    max_points: float
+    rating_percent: float
+    n_decided: int
+    n_levelled: int
+
+
 class ResolutionOut(BaseModel):
     """Present only when an instructor resolved this criterion out of the
     escalation panel (`resolve_escalation`'s own docstring: "AI said X,
@@ -59,6 +94,10 @@ class CriterionResultOut(BaseModel):
     reason: str | None
     evidence: list[EvidenceItem]
     resolution: ResolutionOut | None
+    # V-069 AC2: present only for a levelled criterion's decided result —
+    # the judgment the instructor reads for that row (owner-approved
+    # treatment). `None` for every ordinary pass/fail criterion, unchanged.
+    level: CriterionLevelOut | None = None
 
 
 class IntegrityCheckStatusOut(BaseModel):
@@ -140,6 +179,9 @@ class ReportOut(BaseModel):
     # fabricated empty state, the same convention `rubric_parse_issues`
     # already follows.
     integrity_check_status: list[IntegrityCheckStatusOut] = []
+    # V-069 AC2/AC3: `None` whenever no criterion in this rubric is
+    # levelled — a pass/fail rubric's report gains no new visible field.
+    levelled_rating: LevelledRatingOut | None = None
 
 
 class PublicCriterionResultOut(BaseModel):
@@ -167,6 +209,21 @@ class PublicCriterionResultOut(BaseModel):
     reasoning: str | None
     reason: str | None
     evidence: list[EvidenceItem]
+    # V-069 AC5: the adviser view carries the level too, same as the
+    # instructor-facing report — a level name is what was decided, not
+    # instructor-private reasoning (unlike `resolution`, deliberately
+    # still excluded here).
+    level: CriterionLevelOut | None = None
+    # V-069 (`ux-critic` finding, live-reproduced): `resolution` is
+    # deliberately excluded above (BUG-044, the reason text is private),
+    # but that left this row's PROVENANCE label with no honest signal at
+    # all — `sourceCaption()`/`_source_caption()` fell through to
+    # "AI-graded" for a criterion an instructor actually resolved by hand,
+    # showing the AI's own superseded evidence as if it were the final
+    # word. `resolved` is the non-private half of `resolution` (a bare
+    # fact, not the reasoning) — safe to publish, same boundary BUG-052
+    # already drew for `rubric_needs_review`.
+    resolved: bool = False
 
 
 class PublicReportOut(BaseModel):
@@ -203,6 +260,7 @@ class PublicReportOut(BaseModel):
     # flagged too, not just the instructor.
     rubric_needs_review: bool = False
     rubric_parse_issues: list[str] | None = None
+    levelled_rating: LevelledRatingOut | None = None
 
 
 class DecisionIn(BaseModel):
@@ -260,16 +318,27 @@ class EscalatedItemOut(BaseModel):
     # than trusting a bare claim (judgment §1's 10-second verification bar).
     injection_suspected: bool = False
     injection_matched_snippet: str | None = None
+    # V-069 AC4: the criterion's own scale, so the panel can render a level
+    # picker instead of Pass/Fail — `None` for an ordinary pass/fail
+    # criterion, unchanged from before this ticket.
+    levels: list[RubricLevelOut] | None = None
 
 
 class ResolveEscalationIn(BaseModel):
     # "needs_document" (V-068 AC2, DECIDED 2026-08-16): a third option that
     # isn't a guess — excludes the criterion from the composite like
     # `not_applicable`, never blocks the decision.
-    resolution: Literal["accept_majority", "mark_pass", "mark_fail", "needs_document"]
+    # "mark_level" (V-069 AC4): the resolution vocabulary for a levelled
+    # criterion — requires `level` below.
+    resolution: Literal["accept_majority", "mark_pass", "mark_fail", "needs_document", "mark_level"]
     # Router validates presence (CODING.md §1) so the service's own check
     # is defense-in-depth, not the primary gate.
     reason: str = Field(min_length=1)
+    # V-069 AC4: required (and only meaningful) when resolution is
+    # "mark_level" — the level's own ordinal, matched against the
+    # criterion's own scale server-side (never trusted as a name/points
+    # pair the client could get wrong).
+    level: int | None = None
 
     # BUG-096: `min_length=1` let a single character ("x") satisfy a field
     # labelled "Reason (required)" -- accepted, then published verbatim to
@@ -443,14 +512,35 @@ class ReuseMatchesOut(BaseModel):
     matches: list[ExcludedReuseMatchOut]
 
 
+class PageEvidenceImageOut(BaseModel):
+    """V-070: one flag's rendered-submitted-page evidence for the PDF
+    export ONLY -- never serialized over HTTP (`ReportExportData` is
+    consumed directly by `build_report_pdf`, never returned as a response
+    model, so a large `image_png` blob never reaches a JSON response).
+    `image_png` is None whenever no honest image could be produced for
+    this flag -- `reason` is ALWAYS set in that case (AC3: purged source,
+    DOCX source, and an unrecoverable anchor each get an explicit stated
+    reason, never a silent omission)."""
+
+    image_png: bytes | None
+    page: int | None
+    reason: str | None
+
+
 class ReportExportData(BaseModel):
     """V-039: everything the PDF export needs, gathered once. `flags`
     mirrors the report's own flags panel (BUG-033) exactly -- the export
     is a print-adapted view of the same instructor-facing data, never a
     second source of truth. `archive_size_n` is None when the F7 check
     never ran (no embeddable content extracted) -- an honest gap, not a
-    fabricated zero."""
+    fabricated zero.
+
+    `page_images` (V-070) is keyed by `FlagSummaryOut.id`, one entry per
+    flag in `flags` -- built by `app.report.page_images.build_page_evidence_images`
+    from the SAME anchor-recovery mechanism (`app.ingest.regions.recover_region`)
+    V-065's manuscript viewer already uses, per both tickets' own Q5."""
 
     report: ReportOut
     flags: list[FlagSummaryOut]
     archive_size_n: int | None
+    page_images: dict[int, PageEvidenceImageOut] = {}

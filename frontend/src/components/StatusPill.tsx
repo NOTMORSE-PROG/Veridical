@@ -5,11 +5,22 @@
 import type { ReactNode } from "react";
 import { cx } from "./cx";
 
-export type StatusPillTone = "success" | "info" | "neutral" | "attention" | "caution" | "danger";
+export type StatusPillTone = "success" | "info" | "level" | "neutral" | "attention" | "caution" | "danger";
 
 const TONE_CLASSES: Record<StatusPillTone, string> = {
   success: "bg-status-success-bg text-status-success-text",
   info: "bg-status-info-bg text-status-info-text",
+  // V-069 (`ux-critic` finding, live-reproduced): a decided levelled-
+  // criterion result (e.g. "Proficient") is informational, not a pass/
+  // fail valence -- `info`'s own blue token pairing was the right color
+  // choice, but `info`'s icon is a genuine loading spinner (every OTHER
+  // `info` usage, ApiStatus.tsx/manuscriptStatus.ts, really is "still in
+  // progress" -- confirmed live via getComputedStyle, it is actually
+  // spinning). Reusing it for a FINISHED, human-legible verdict told the
+  // instructor something was still processing. Same color tokens as
+  // `info`, a static ascending-bars icon instead (a "rung on a scale"
+  // metaphor, distinct from every other tone's icon).
+  level: "bg-status-info-bg text-status-info-text",
   neutral: "bg-status-neutral-bg text-status-neutral-text",
   // System/process state only (ingestion failure, quota, a degraded stage)
   // — never a readiness verdict, see tokens.css (V-056).
@@ -47,6 +58,14 @@ function ToneIcon({ tone }: { tone: StatusPillTone }) {
         <svg {...common} className="motion-safe:animate-spin motion-reduce:animate-none">
           <path d="M20 12a8 8 0 1 0-2.5 5.8" />
           <path d="M20 8v4h-4" />
+        </svg>
+      );
+    case "level":
+      return (
+        <svg {...common}>
+          <line x1="6" y1="16" x2="6" y2="19" />
+          <line x1="12" y1="12" x2="12" y2="19" />
+          <line x1="18" y1="8" x2="18" y2="19" />
         </svg>
       );
     case "neutral":

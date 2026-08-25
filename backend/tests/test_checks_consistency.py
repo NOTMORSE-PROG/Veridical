@@ -20,6 +20,9 @@ class FakeCriterion:
     id: int
     text: str
     evidence: str | None = None
+    # V-069: default None keeps every existing test (which never sets
+    # this) exercising the exact pre-ticket pass/partial/fail path.
+    levels: list[dict] | None = None
 
 
 class FakeSession:
@@ -362,3 +365,120 @@ async def test_both_passes_failing_with_the_same_reason_does_not_duplicate_it():
     assert llm.passes == ["pass_1", "pass_1", "pass_2", "pass_2"]
     assert results[0].outcome == ResultOutcome.escalated
     assert results[0].detail["reason"] == "Grading response could not be validated after a retry."
+
+
+# --- V-069: levelled criteria through the full N-pass voting path ----------
+
+TIP_SCALE = [
+    {"level": 1, "name": "Beginner", "descriptor": "no clear structure", "points": 1},
+    {"level": 2, "name": "Acceptable", "descriptor": "states the topic", "points": 2},
+    {"level": 3, "name": "Proficient", "descriptor": "states and previews", "points": 3},
+    {"level": 4, "name": "Exemplary", "descriptor": "engaging and complete", "points": 4},
+]
+
+
+def test_gate_vote_levelled_criterion_maps_level_name_to_score():
+    criterion = FakeCriterion(id=1, text="x", levels=TIP_SCALE)
+    outcome, score = gate_vote("Proficient", 1.0, get_settings(), criterion=criterion)
+    assert outcome == ResultOutcome.passed
+    assert score == 75.0  # 3/4 * 100
+
+
+def test_gate_vote_levelled_criterion_still_gated_by_agreement_threshold():
+    criterion = FakeCriterion(id=1, text="x", levels=TIP_SCALE)
+    outcome, score = gate_vote("Proficient", 0.667, get_settings(), criterion=criterion)
+    assert outcome == ResultOutcome.escalated
+    assert score is None
+
+
+async def test_two_agreeing_passes_on_a_levelled_criterion_produce_a_decided_level():
+    criteria = [FakeCriterion(id=1, text="Levelled criterion", levels=TIP_SCALE)]
+    llm = ScriptedLLM([_verdict_response("Proficient"), _verdict_response("Proficient")])
+    session = FakeSession()
+    results = await run_semantic_checks_with_consistency(session, 1, criteria, _extraction(), llm)
+    assert results[0].outcome == ResultOutcome.passed
+    assert results[0].score == 75.0
+    assert results[0].detail["level"] == {
+        "name": "Proficient",
+        "ordinal": 3,
+        "points": 3.0,
+        "max_points": 4.0,
+    }
+    # The raw AI verdict string is still the level name, same field
+    # pass/partial/fail already used -- one vocabulary slot, two meanings
+    # depending on the criterion, never a second field to keep in sync.
+    assert results[0].detail["verdict"] == "Proficient"
+
+
+async def test_disagreeing_levels_on_a_levelled_criterion_escalate_like_any_other_split():
+    criteria = [FakeCriterion(id=1, text="Levelled criterion", levels=TIP_SCALE)]
+    llm = ScriptedLLM(
+        [
+            _verdict_response("Proficient"),
+            _verdict_response("Acceptable"),
+            _verdict_response("Proficient"),
+        ]
+    )
+    session = FakeSession()
+    results = await run_semantic_checks_with_consistency(session, 1, criteria, _extraction(), llm)
+    assert llm.passes == ["pass_1", "pass_2", "tie_break"]
+    # Default threshold (1.0) escalates the 2/3 majority same as pass/fail.
+    assert results[0].outcome == ResultOutcome.escalated
+    assert results[0].detail["verdict"] == "Proficient"  # AI's own majority still shown
+    assert "level" not in results[0].detail  # never scored while escalated
+
+
+async def test_a_mixed_batch_grades_each_criterion_against_its_own_vocabulary():
+    """Edge case (ticket): a rubric mixing levelled and pass/fail criteria
+    -- each criterion in the SAME batch must be graded against its own
+    scale, never a global mode flag."""
+    criteria = [
+        FakeCriterion(id=1, text="Levelled criterion", levels=TIP_SCALE),
+        FakeCriterion(id=2, text="Ordinary pass/fail criterion", levels=None),
+    ]
+
+    def _batch_response(verdicts: list[str]) -> dict:
+        return {
+            "verdicts": [
+                {
+                    "index": i,
+                    "verdict": v,
+                    "reasoning": f"Reasoned to {v}.",
+                    "evidence_quotes": ["The methodology is described in detail."],
+                }
+                for i, v in enumerate(verdicts)
+            ]
+        }
+
+    llm = ScriptedLLM(
+        [_batch_response(["Exemplary", "pass"]), _batch_response(["Exemplary", "pass"])]
+    )
+    session = FakeSession()
+    results = await run_semantic_checks_with_consistency(session, 1, criteria, _extraction(), llm)
+    by_criterion = {r.criterion_id: r for r in results}
+    assert by_criterion[1].score == 100.0
+    assert by_criterion[1].detail["level"]["name"] == "Exemplary"
+    assert by_criterion[2].score == 100.0
+    assert "level" not in by_criterion[2].detail
+
+
+async def test_both_passes_agree_on_an_unrecognized_level_name_escalates_with_a_real_reason():
+    """`backend-critic` finding, live-reproduced: BOTH passes can agree
+    (agreement 1.0, a real `vote.winner`) on a verdict string that still
+    doesn't name any of this criterion's own levels (a model that answers
+    "Good" instead of the exact required level name). `_vote_detail`'s
+    "has a winner" branch never set `detail["reason"]` for this case --
+    the panel showed an unexplained "Agreement 2/2," reading as
+    confidence when the AI hasn't actually decided anything this
+    criterion's own scale can score. The identical overreliance trap
+    BUG-045 closed for prompt injection, reopened here."""
+    criteria = [FakeCriterion(id=1, text="Levelled criterion", levels=TIP_SCALE)]
+    llm = ScriptedLLM([_verdict_response("Good"), _verdict_response("Good")])
+    session = FakeSession()
+    results = await run_semantic_checks_with_consistency(session, 1, criteria, _extraction(), llm)
+    assert results[0].outcome == ResultOutcome.escalated
+    assert results[0].detail["agreement"] == 1.0  # perfect agreement, still escalated
+    assert "level" not in results[0].detail
+    assert results[0].detail["reason"] == (
+        "The grading response used an unrecognized verdict ('Good') for this criterion's own scale."
+    )

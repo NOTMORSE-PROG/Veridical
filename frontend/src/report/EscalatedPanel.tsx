@@ -74,12 +74,19 @@ function ResolveRow({
   onResolved: (message: string) => void;
 }) {
   const [pending, setPending] = useState<EscalationResolution | null>(null);
+  // V-069 AC4: which rung the instructor picked, for a "mark_level"
+  // resolution only -- `start()` for every other resolution leaves this
+  // null, and the resolution vocabulary itself already prevents mark_level
+  // from ever being confirmed without one (the level buttons are the only
+  // thing that sets both at once).
+  const [selectedLevel, setSelectedLevel] = useState<number | null>(null);
   const [reason, setReason] = useState("");
   const [attempted, setAttempted] = useState(false);
   const resolve = useResolveEscalation(checkRunId);
 
-  function start(resolution: EscalationResolution) {
+  function start(resolution: EscalationResolution, level?: number) {
     setPending(resolution);
+    setSelectedLevel(level ?? null);
     setReason("");
     setAttempted(false);
   }
@@ -88,16 +95,32 @@ function ResolveRow({
     setAttempted(true);
     if (!pending || reason.trim().length < RESOLUTION_REASON_MIN_LENGTH) return;
     resolve.mutate(
-      { checkResultId: item.check_result_id, resolution: pending, reason: reason.trim() },
+      {
+        checkResultId: item.check_result_id,
+        resolution: pending,
+        reason: reason.trim(),
+        level: selectedLevel ?? undefined,
+      },
       {
         onSuccess: (out) => {
           setPending(null);
           setAttempted(false);
+          // V-069 (`ux-critic` finding, live-reproduced via aria-live
+          // inspection): this used to announce the raw binary `out.outcome`
+          // ("passed") even for a mark_level resolution -- a sighted user
+          // sees "Marked Acceptable" moments later in the row, but a
+          // screen-reader user heard only "passed" at the one moment
+          // (the live announcement) accuracy matters most. The resolved
+          // row in the fresh `out.report` already carries the server-
+          // computed level, so this reads the level NAME from there
+          // rather than trusting client-side selection state.
+          const resolvedRow = out.report.results.find((r) => r.criterion_id === item.criterion_id);
           // "not_applicable" is what `needs_document` resolves to server-side
           // (excluded from the composite, same as any N/A criterion) -- say
           // that plainly rather than echo the raw outcome enum.
           const outcomeLabel =
-            out.outcome === "not_applicable" ? "excluded (needs the document)" : out.outcome;
+            resolvedRow?.level?.name ??
+            (out.outcome === "not_applicable" ? "excluded (needs the document)" : out.outcome);
           onResolved(
             `Resolved as ${outcomeLabel}. Composite score is now ${out.report.composite_score ?? "unavailable"}%.`,
           );
@@ -110,6 +133,14 @@ function ResolveRow({
     resolve.error instanceof ApiError ? resolve.error.message : resolve.error ? "Couldn't resolve this item." : null;
   const reasonInvalid = attempted && reason.trim().length < RESOLUTION_REASON_MIN_LENGTH;
   const reasonErrId = `resolve-reason-err-${item.check_result_id}`;
+  // V-069 (`ux-critic` finding, live-reproduced): between clicking a level
+  // button and clicking Confirm, nothing on screen said WHICH level was
+  // pending -- an instructor who second-guesses or is interrupted had no
+  // way to verify what they were about to submit. Echoed in the reason
+  // panel below, same "Marking as: X" pattern for every resolution that
+  // has a specific target (not just mark_level).
+  const pendingLevelName =
+    pending === "mark_level" ? item.levels?.find((l) => l.level === selectedLevel)?.name : undefined;
 
   return (
     <div className="border-t border-border px-3.5 py-3 text-sm">
@@ -211,20 +242,39 @@ function ResolveRow({
                 Accept AI: {item.ai_majority_verdict}
               </button>
             )}
-            <button
-              type="button"
-              onClick={() => start("mark_pass")}
-              className="flex min-h-11 flex-1 items-center justify-center rounded-md border border-border-input bg-panel px-3 text-sm font-medium text-ink hover:bg-status-neutral-bg lg:min-h-9 lg:flex-none lg:px-2.5"
-            >
-              Pass
-            </button>
-            <button
-              type="button"
-              onClick={() => start("mark_fail")}
-              className="flex min-h-11 flex-1 items-center justify-center rounded-md border border-border-input bg-panel px-3 text-sm font-medium text-ink hover:bg-status-neutral-bg lg:min-h-9 lg:flex-none lg:px-2.5"
-            >
-              Fail
-            </button>
+            {/* V-069 AC4: "on a 1-4 rubric they choose a level, not
+                Pass/Fail" -- the resolution vocabulary itself must match
+                the rubric's own scale. `item.levels` is only ever present
+                for a criterion carrying its own named performance levels. */}
+            {item.levels && item.levels.length > 0 ? (
+              item.levels.map((lvl) => (
+                <button
+                  key={lvl.level}
+                  type="button"
+                  onClick={() => start("mark_level", lvl.level)}
+                  className="flex min-h-11 flex-1 items-center justify-center rounded-md border border-border-input bg-panel px-3 text-sm font-medium text-ink hover:bg-status-neutral-bg lg:min-h-9 lg:flex-none lg:px-2.5"
+                >
+                  {lvl.name}
+                </button>
+              ))
+            ) : (
+              <>
+                <button
+                  type="button"
+                  onClick={() => start("mark_pass")}
+                  className="flex min-h-11 flex-1 items-center justify-center rounded-md border border-border-input bg-panel px-3 text-sm font-medium text-ink hover:bg-status-neutral-bg lg:min-h-9 lg:flex-none lg:px-2.5"
+                >
+                  Pass
+                </button>
+                <button
+                  type="button"
+                  onClick={() => start("mark_fail")}
+                  className="flex min-h-11 flex-1 items-center justify-center rounded-md border border-border-input bg-panel px-3 text-sm font-medium text-ink hover:bg-status-neutral-bg lg:min-h-9 lg:flex-none lg:px-2.5"
+                >
+                  Fail
+                </button>
+              </>
+            )}
             {/* V-068 AC2, DECIDED 2026-08-16: a third option that isn't a
                 guess -- excludes this criterion from the composite (like
                 not_applicable) and never blocks the decision. */}
@@ -245,6 +295,9 @@ function ResolveRow({
       </div>
       {pending !== null && (
         <div className="mt-2 flex flex-col gap-2 rounded-md border border-border bg-page p-3">
+          {pendingLevelName && (
+            <p className="text-sm font-semibold text-ink">Marking as: {pendingLevelName}</p>
+          )}
           <label className="flex flex-col gap-1">
             <span className="text-xs font-semibold tracking-header text-ink-tertiary uppercase">
               Reason (required)

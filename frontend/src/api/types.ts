@@ -16,6 +16,16 @@ export interface Instructor {
 // escalated.
 export type CriterionType = "structural" | "semantic" | "not_assessable";
 
+// V-069 AC1: one rung of a criterion's own graded performance scale, as
+// captured at decomposition (or hand-edit) time -- structured data, never
+// prose squashed into `evidence`.
+export interface RubricLevel {
+  level: number;
+  name: string;
+  descriptor: string;
+  points: number;
+}
+
 export interface Criterion {
   id: number;
   type: CriterionType;
@@ -23,6 +33,14 @@ export interface Criterion {
   evidence: string | null;
   weight: number;
   position: number;
+  // V-069: null/absent for an ordinary pass/fail criterion (the common
+  // case, and every criterion before this shipped) -- present only for a
+  // criterion the source document itself describes as a graded scale.
+  // Optional (though the real API always sends the key), same convention
+  // as EscalatedItemOut.injection_suspected below: hand-written fixtures
+  // that predate this ticket don't need every one of them updated just to
+  // keep compiling.
+  levels?: RubricLevel[] | null;
 }
 
 export interface Rubric {
@@ -280,6 +298,26 @@ export interface ResultRowCommon {
   // an optional property here -- `if (row.resolution)` reads correctly
   // either way.
   resolution?: ResolutionOut | null;
+  /** V-069 (`ux-critic` finding): the bare FACT of being resolved, safe to
+   * publish even where the private reasoning (`resolution`) isn't --
+   * `PublicCriterionResultOut` sets this without `resolution` at all;
+   * `CriterionResultOut` never sets it (its own `resolution` already says
+   * so). `sourceCaption()` checks both, since only one is ever present. */
+  resolved?: boolean;
+  // V-069 AC2: present only for a levelled criterion's decided result --
+  // the level NAME is the judgment (owner-approved treatment); points/
+  // max_points ride along for the RATING transcription only. Optional
+  // (though the real API always sends the key), same `resolution?`
+  // convention immediately above.
+  level?: CriterionLevel | null;
+}
+
+// V-069 AC2: a decided levelled criterion's own rung.
+export interface CriterionLevel {
+  name: string;
+  ordinal: number;
+  points: number;
+  max_points: number;
 }
 
 export interface CriterionResultOut extends ResultRowCommon {
@@ -322,6 +360,25 @@ export interface ReportCommon {
   // disclosing that the measuring instrument was flagged.
   rubric_needs_review: boolean;
   rubric_parse_issues: string[] | null;
+  // V-069 AC2/AC3/AC5: the rubric's own institutional RATING, transcribed
+  // -- null whenever no criterion in this rubric is levelled (the common
+  // case gains no new visible field). Deliberately published to both
+  // audiences, same reasoning BUG-052 already applied to
+  // rubric_needs_review above. Optional (though the real API always sends
+  // the key), same fixture-compatibility convention used throughout this
+  // file for a field added after existing hand-written test mocks.
+  levelled_rating?: LevelledRating | null;
+}
+
+// V-069 AC2: the rubric's own RATING formula, transcribed -- never merged
+// into `composite_score` (see the backend's `app.report.rating` module
+// docstring for why the two may legitimately disagree).
+export interface LevelledRating {
+  achieved_points: number;
+  max_points: number;
+  rating_percent: number;
+  n_decided: number;
+  n_levelled: number;
 }
 
 /** BUG-125: on-screen disclosure that an F4/F5 integrity check did not
@@ -450,13 +507,26 @@ export interface EscalatedItemOut {
    * keep compiling. */
   injection_suspected?: boolean;
   injection_matched_snippet?: string | null;
+  /** V-069 AC4: the criterion's own scale, so the panel can render a level
+   * picker instead of Pass/Fail. Null/absent for an ordinary pass/fail
+   * criterion, unchanged from before this ticket. */
+  levels?: RubricLevel[] | null;
 }
 
-export type EscalationResolution = "accept_majority" | "mark_pass" | "mark_fail" | "needs_document";
+export type EscalationResolution =
+  | "accept_majority"
+  | "mark_pass"
+  | "mark_fail"
+  | "needs_document"
+  | "mark_level";
 
 export interface ResolveEscalationIn {
   resolution: EscalationResolution;
   reason: string;
+  // V-069 AC4: required (and only meaningful) when resolution is
+  // "mark_level" -- the level's own ordinal, matched server-side against
+  // the criterion's own scale.
+  level?: number | null;
 }
 
 export interface ResolveEscalationOut {

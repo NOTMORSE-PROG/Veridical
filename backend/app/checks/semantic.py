@@ -20,6 +20,7 @@ from typing import Any
 from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.checks.levels import level_scale_prompt_fragment, outcome_and_score
 from app.checks.rules.sections import find_section_node, identify_target_section, walk_sections
 from app.checks.schemas import GradeBatchResponse, GradeVerdict
 from app.checks.signals import compute_shadow_signals, shadow_signals_as_detail
@@ -31,18 +32,30 @@ from app.models.enums import CheckKind, ResultOutcome
 from app.models.run import CheckResult
 
 PROMPT_TYPE = "semantic_grading"
-PROMPT_VERSION = "v1"
+# V-069: v3 is v1 (still the module default before this ticket — see the
+# discrepancy note below) plus ONE addition: a per-criterion levelled-scale
+# exception, so a levelled criterion's own level names validate as a
+# "verdict" too. Deliberately NOT built on v2's fuller STEP-1/2/3 rewrite
+# (that file already exists but was never made the module default) — this
+# ticket's blast radius is "levels support," not "also switch every
+# criterion's grading prompt wording," and widening it would make the
+# AC3 pass/fail regression check less honest about what it's actually
+# proving unchanged.
+#
+# Adjacent discrepancy found, NOT fixed here (out of scope): v1 has been
+# the module default this whole time, including in production
+# (`consistency.vote_batch`'s own `prompt_version: str = PROMPT_VERSION`
+# default, never overridden at the pipeline call site) — but V-054/D-017's
+# own docstrings describe per-pass annotator stance as already shipped and
+# live. `_stance()` returns "" for exactly "v1", so stance text has
+# actually been discarded on every real grading call since V-054, despite
+# the golden-set/audit-log evidence implying otherwise. Logged to
+# STATE.md; not this ticket's to fix.
+PROMPT_VERSION = "v3"
 _PROMPT_FILE = Path(__file__).parent / "prompts" / f"{PROMPT_TYPE}_{PROMPT_VERSION}.txt"
 _WHOLE_DOCUMENT_KEY = "__whole_document__"
 
 _WHITESPACE = re.compile(r"\s+")
-
-_SCORE_BY_VERDICT = {"pass": 100.0, "partial": 50.0, "fail": 0.0}
-_OUTCOME_BY_VERDICT = {
-    "pass": ResultOutcome.passed,
-    "partial": ResultOutcome.passed,
-    "fail": ResultOutcome.failed,
-}
 
 
 class SemanticGradeError(VeridicalError):
@@ -144,6 +157,9 @@ def _criteria_listing(criteria: list[Any]) -> str:
         line = f"{i}. {criterion.text}"
         if getattr(criterion, "evidence", None):
             line += f" (Evidence needed: {criterion.evidence})"
+        scale = level_scale_prompt_fragment(criterion)
+        if scale:
+            line += f" [{scale}]"
         lines.append(line)
     return "\n".join(lines)
 
@@ -528,26 +544,45 @@ async def _grade_batch(
                 )
             )
             continue
-        results.append(
-            await _persist(
-                session,
-                check_run_id,
-                criterion,
-                _OUTCOME_BY_VERDICT[g.verdict],
-                {
-                    "score": _SCORE_BY_VERDICT[g.verdict],
-                    "basis": "llm",
-                    "verdict": g.verdict,
-                    "reasoning": g.reasoning,
-                    "evidence": [
-                        {"quote": q, "anchor": a} for q, a in zip(g.quotes, g.anchors, strict=True)
-                    ],
-                    "context_label": batch.label,
-                    "prompt_version": PROMPT_VERSION,
-                    "shadow": shadow_detail,
-                },
+        outcome, score, level = outcome_and_score(criterion, g.verdict)
+        if outcome == ResultOutcome.escalated:
+            # V-069: the model returned a verdict string that doesn't name
+            # any of THIS criterion's own levels (and isn't pass/partial/
+            # fail either) -- never guessed onto the nearest-looking rung
+            # (charter rule 1). Same shape as the `g.verdict is None`
+            # branch above, distinct reason text.
+            results.append(
+                await _persist(
+                    session,
+                    check_run_id,
+                    criterion,
+                    ResultOutcome.escalated,
+                    {
+                        "basis": "llm",
+                        "reason": (
+                            f"The grading response used an unrecognized verdict "
+                            f"({g.verdict!r}) for this criterion's own scale."
+                        ),
+                        "prompt_version": PROMPT_VERSION,
+                    },
+                )
             )
-        )
+            continue
+        detail: dict[str, Any] = {
+            "score": score,
+            "basis": "llm",
+            "verdict": g.verdict,
+            "reasoning": g.reasoning,
+            "evidence": [
+                {"quote": q, "anchor": a} for q, a in zip(g.quotes, g.anchors, strict=True)
+            ],
+            "context_label": batch.label,
+            "prompt_version": PROMPT_VERSION,
+            "shadow": shadow_detail,
+        }
+        if level is not None:
+            detail["level"] = level.as_detail()
+        results.append(await _persist(session, check_run_id, criterion, outcome, detail))
     return results
 
 

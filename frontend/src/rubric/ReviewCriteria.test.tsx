@@ -120,6 +120,95 @@ describe("ReviewCriteriaPage", () => {
     expect(body.confirm).toBe(false);
   });
 
+  // V-069 AC1: levels must survive Save unchanged -- Save/Confirm replaces
+  // the FULL criteria set every time, so omitting this field would
+  // silently strip a decomposed scale back down to prose.
+  const TIP_SCALE = [
+    { level: 1, name: "Beginner", descriptor: "no clear structure", points: 1 },
+    { level: 2, name: "Acceptable", descriptor: "states the topic", points: 2 },
+    { level: 3, name: "Proficient", descriptor: "states and previews", points: 3 },
+    { level: 4, name: "Exemplary", descriptor: "engaging and complete", points: 4 },
+  ];
+  const LEVELLED_RUBRIC: Rubric = {
+    ...RUBRIC,
+    criteria: [
+      {
+        id: 1,
+        type: "semantic",
+        text: "Introduction states and previews structure",
+        evidence: "Introduction section",
+        weight: 100,
+        position: 0,
+        levels: TIP_SCALE,
+      },
+    ],
+  };
+
+  it("V-069 AC1: shows a Levelled badge for a criterion carrying its own scale", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(JSON.stringify(LEVELLED_RUBRIC), { status: 200 })),
+    );
+    renderWithProviders(<ReviewCriteriaPage />, {
+      route: "/rubric/5/review",
+      path: "/rubric/:rubricId/review",
+    });
+
+    expect((await screen.findAllByText("Levelled (4)")).length).toBeGreaterThan(0);
+  });
+
+  it("V-069 (`ux-critic` finding, live-reproduced): the Levelled badge is keyboard-operable and shows the level names as real text once opened, not hover-only", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(JSON.stringify(LEVELLED_RUBRIC), { status: 200 })),
+    );
+    renderWithProviders(<ReviewCriteriaPage />, {
+      route: "/rubric/5/review",
+      path: "/rubric/:rubricId/review",
+    });
+
+    // A native <summary> is focusable and keyboard-toggleable by
+    // construction (Enter/Space) -- unlike the old `<span title=...>`,
+    // reachable only by mouse hover (`tabIndex: -1`).
+    const summaries = await screen.findAllByText("Levelled (4)");
+    fireEvent.click(summaries[0]);
+    expect((await screen.findAllByText("Proficient")).length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Exemplary").length).toBeGreaterThan(0);
+  });
+
+  it("V-069 AC1: saving round-trips a criterion's levels unchanged, never stripped", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === "string" ? input : input.toString();
+      if (init?.method === "PUT") {
+        return new Response(JSON.stringify(LEVELLED_RUBRIC), { status: 200 });
+      }
+      if (url.includes("/rubrics/5")) {
+        return new Response(JSON.stringify(LEVELLED_RUBRIC), { status: 200 });
+      }
+      return new Response("{}", { status: 200 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    renderWithProviders(<ReviewCriteriaPage />, {
+      route: "/rubric/5/review",
+      path: "/rubric/:rubricId/review",
+    });
+
+    await screen.findAllByText("Levelled (4)");
+    fireEvent.click(screen.getAllByRole("button", { name: "Save draft" })[0]);
+
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        expect.stringContaining("/rubrics/5/criteria"),
+        expect.objectContaining({ method: "PUT" }),
+      ),
+    );
+    const putCall = fetchMock.mock.calls.find(([, init]) => (init as RequestInit | undefined)?.method === "PUT");
+    const body = JSON.parse((putCall![1] as RequestInit).body as string) as {
+      criteria: Array<{ levels: unknown }>;
+    };
+    expect(body.criteria[0].levels).toEqual(TIP_SCALE);
+  });
+
   it("removing every row shows an accessible, focused error summary instead of disabling Save", async () => {
     vi.stubGlobal(
       "fetch",

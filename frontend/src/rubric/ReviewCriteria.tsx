@@ -9,7 +9,7 @@
 // and full loading/error states with real focus/live-region handling.
 import { type KeyboardEvent, useEffect, useRef, useState } from "react";
 import { Link, useBlocker, useParams } from "react-router";
-import type { CriterionType } from "../api/types";
+import type { CriterionType, RubricLevel } from "../api/types";
 import { Chip } from "../components/Chip";
 import { cx } from "../components/cx";
 import { Modal, ModalBackdrop } from "../components/Modal";
@@ -42,6 +42,10 @@ interface Row {
   text: string;
   evidence: string;
   weight: number;
+  // V-069 AC1: round-tripped, never edited on this screen in this ticket
+  // (no AC requires per-level text editing) -- must survive Save/Confirm
+  // unchanged, since that action replaces the full criteria set.
+  levels: RubricLevel[] | null;
 }
 
 type FocusIntent =
@@ -269,6 +273,34 @@ function TypeRadioGroup({
   );
 }
 
+// V-069 AC1: makes the decomposer's own captured scale visible on the one
+// screen an instructor actually reviews parsed criteria on -- read-only in
+// this ticket (no AC requires per-level text editing; see the ticket's own
+// "scoped out" note), but the data must not look silently absent just
+// because there's no edit control for it yet.
+//
+// `ux-critic` finding (live-reproduced): a bare `<span title=...>` is
+// reachable ONLY by mouse hover (`tabIndex: -1`, confirmed) -- a keyboard-
+// only user saw "Levelled (N)" and nothing more, never learning the level
+// names exist. `<details>/<summary>` is natively focusable and keyboard-
+// operable (Enter/Space toggles it) with no custom ARIA needed, and shows
+// the names as real, always-in-the-DOM text once opened rather than a
+// hover-only tooltip.
+function LevelsBadge({ levels }: { levels: RubricLevel[] }) {
+  return (
+    <details className="mt-1 w-fit text-xs">
+      <summary className="inline-flex w-fit cursor-pointer items-center gap-1 rounded-full bg-status-info-bg px-2 py-0.5 font-medium text-status-info-text">
+        Levelled ({levels.length})
+      </summary>
+      <ul className="mt-1 list-disc pl-4 text-ink-secondary">
+        {levels.map((l) => (
+          <li key={l.level}>{l.name}</li>
+        ))}
+      </ul>
+    </details>
+  );
+}
+
 export function ReviewCriteriaPage() {
   const { rubricId } = useParams<{ rubricId: string }>();
   const id = Number(rubricId);
@@ -322,6 +354,7 @@ export function ReviewCriteriaPage() {
         text: c.text,
         evidence: c.evidence ?? "",
         weight: c.weight,
+        levels: c.levels ?? null,
       }));
       setRows(seeded);
       // BUG-037: the last-PERSISTED snapshot, not just the last-loaded
@@ -428,7 +461,15 @@ export function ReviewCriteriaPage() {
     setRows((current) => {
       const next = [
         ...(current ?? []),
-        { key: `new-${++newRowCounter}`, id: null, type: "structural" as CriterionType, text: "", evidence: "", weight: 0 },
+        {
+          key: `new-${++newRowCounter}`,
+          id: null,
+          type: "structural" as CriterionType,
+          text: "",
+          evidence: "",
+          weight: 0,
+          levels: null,
+        },
       ];
       setFocusIntent({ type: "criterion-text", index: next.length - 1 });
       return next;
@@ -536,6 +577,7 @@ export function ReviewCriteriaPage() {
       text: r.text,
       evidence: r.evidence.trim() ? r.evidence : null,
       weight: r.weight,
+      levels: r.levels,
     }));
   }
 
@@ -716,13 +758,14 @@ export function ReviewCriteriaPage() {
                   </p>
                 )}
               </span>
-              <span role="cell">
+              <span role="cell" className="flex flex-col items-start gap-1">
                 <TypeRadioGroup
                   value={row.type}
                   onChange={(t) => updateRow(row.key, { type: t })}
                   ariaLabel={`Criterion ${index + 1} type`}
                   disabled={readOnly}
                 />
+                {row.levels && row.levels.length > 0 && <LevelsBadge levels={row.levels} />}
               </span>
               <span role="cell" className="min-w-0">
                 <AutoGrowTextarea
@@ -818,6 +861,7 @@ export function ReviewCriteriaPage() {
                   fill
                   disabled={readOnly}
                 />
+                {row.levels && row.levels.length > 0 && <LevelsBadge levels={row.levels} />}
               </div>
               <label className="mt-2 flex flex-col gap-1">
                 <span className="text-sm font-medium text-ink-secondary">Evidence</span>

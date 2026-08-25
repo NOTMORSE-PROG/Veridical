@@ -26,6 +26,7 @@ from app.checks.annotators import (
 )
 from app.checks.escalation import gate_vote
 from app.checks.injection import detect_injection_signal
+from app.checks.levels import outcome_and_score
 from app.checks.semantic import (
     PROMPT_VERSION,
     GradedVerdict,
@@ -294,8 +295,37 @@ async def vote_batch(
             prompt_version=prompt_version,
             skip_tie_break=injection_signal.suspected,
         )
-        outcome, score = gate_vote(vote.majority_verdict, vote.agreement, settings)
+        outcome, score = gate_vote(
+            vote.majority_verdict, vote.agreement, settings, criterion=criterion
+        )
         detail = _vote_detail(batch, vote, shadow_detail)
+        if vote.majority_verdict is not None:
+            # V-069: `gate_vote` already confirmed this verdict decides
+            # something -- re-deriving it here (rather than having
+            # `gate_vote` return it) keeps `gate_vote`'s own return shape
+            # unchanged for every existing caller (see its docstring).
+            verdict_outcome, _verdict_score, level = outcome_and_score(
+                criterion, vote.majority_verdict
+            )
+            if outcome == ResultOutcome.passed and level is not None:
+                detail["level"] = level.as_detail()
+            elif verdict_outcome == ResultOutcome.escalated and "reason" not in detail:
+                # `backend-critic` finding, live-reproduced: BOTH passes can
+                # agree (agreement 1.0, a real `vote.winner`) on a verdict
+                # string that still doesn't name any of THIS criterion's own
+                # levels (a model that answers "Good" instead of the exact
+                # required level name) -- `_vote_detail`'s "has a winner"
+                # branch never sets `detail["reason"]`, so this landed in
+                # the panel as an unexplained "Agreement N/N," reading as
+                # confidence when the AI hasn't actually decided anything
+                # this criterion's own scale can score -- the identical
+                # overreliance trap BUG-045 closed for prompt injection,
+                # reopened here. Same message `semantic.py`'s single-pass
+                # path already uses for this exact case.
+                detail["reason"] = (
+                    f"The grading response used an unrecognized verdict "
+                    f"({vote.majority_verdict!r}) for this criterion's own scale."
+                )
         if injection_signal.suspected:
             # Overrides the vote's own outcome regardless of what it
             # decided (including a "perfect agreement" auto-accept) --

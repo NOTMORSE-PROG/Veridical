@@ -2,8 +2,6 @@
 for one batched grading call.
 """
 
-from typing import Literal
-
 from pydantic import BaseModel, Field, field_validator
 
 
@@ -11,10 +9,20 @@ class GradeVerdict(BaseModel):
     """One criterion's verdict within a batch response. `index` ties it
     back to the criterion at that position in the request's own
     "--- CRITERIA ---" listing (stable within one call; never a DB id, so
-    the model never has to echo one back correctly)."""
+    the model never has to echo one back correctly).
+
+    V-069: `verdict` was `Literal["pass", "partial", "fail"]` until this
+    ticket — relaxed to a plain string so a levelled criterion's own level
+    NAME (e.g. "Proficient") validates too. This schema has no way to know
+    which criterion index it belongs to, so it can't validate the string
+    against that criterion's own scale here; `app.checks.levels.
+    outcome_and_score` does that per-criterion check downstream and
+    escalates an unrecognized string rather than guessing (charter rule 1)
+    — a strictly safer fallback than the old Literal's `KeyError` on any
+    value this validator wouldn't have let through in the first place."""
 
     index: int
-    verdict: Literal["pass", "partial", "fail"]
+    verdict: str = Field(min_length=1)
     reasoning: str = Field(min_length=1)
     evidence_quotes: list[str] = Field(min_length=1)
 

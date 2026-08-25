@@ -5,7 +5,13 @@
 // drifting copies.
 import type { ReactNode } from "react";
 import { useState } from "react";
-import type { ReportCommon, ResolutionOut, ResultRowCommon } from "../api/types";
+import type {
+  CriterionLevel,
+  LevelledRating,
+  ReportCommon,
+  ResolutionOut,
+  ResultRowCommon,
+} from "../api/types";
 import { AnchorPill } from "../components/AnchorPill";
 import { StatusPill, type StatusPillTone } from "../components/StatusPill";
 import { WeightImportanceTag } from "../components/WeightImportanceTag";
@@ -108,6 +114,23 @@ export function explainer(r: ReportCommon, flagsAnchor: string | null): ReactNod
   );
 }
 
+// V-069 AC2/AC3/AC5: the rubric's own institutional RATING, transcribed --
+// owner-approved treatment (2026-08-25): a small, clearly-attributed line,
+// never the large headline treatment reserved for the banded readiness
+// verdict above it (ground rule 8). Shared between Report.tsx and
+// AdviserView.tsx (AC5) so both audiences see the identical wording, one
+// source of truth. Renders nothing when `rating` is null/absent (AC3).
+export function LevelledRatingNote({ rating }: { rating: LevelledRating | null | undefined }) {
+  if (!rating) return null;
+  return (
+    <p className="text-xs text-ink-tertiary">
+      This rubric's own RATING, transcribed from its formula (not a VERIDICAL judgment): {rating.achieved_points}/
+      {rating.max_points} points = {rating.rating_percent}% ({rating.n_decided} of {rating.n_levelled} levelled
+      criteria decided).
+    </p>
+  );
+}
+
 // A resolved row's source is the instructor, never the AI or the rule
 // engine that originally (and unsuccessfully) tried to decide it — this
 // must win over the kind-based caption unconditionally. Exported (BUG-082)
@@ -116,7 +139,12 @@ export function explainer(r: ReportCommon, flagsAnchor: string | null): ReactNod
 // (`tests/fixtures/source_caption_cases.json`) -- the missing test that
 // let the two implementations disagree unnoticed in the first place.
 export function sourceCaption(row: ResultRowCommon): string {
-  if (row.resolution) return "Resolved by instructor";
+  // V-069 (`ux-critic` finding, live-reproduced): the public adviser view
+  // never carries `resolution` (BUG-044, the reason text is private), so
+  // this fell through to "AI-graded" for a criterion an instructor
+  // actually resolved by hand, showing the AI's own SUPERSEDED evidence
+  // as final. `resolved` is the non-private half of the same fact.
+  if (row.resolution || row.resolved) return "Resolved by instructor";
   // BUG-092/`ux-critic` finding (2026-08-24): a `not_assessable` criterion
   // is routed straight to a terminal `not_applicable` result and is,
   // deliberately, NEVER AI-graded (`router.py`'s own docstring) -- but
@@ -152,6 +180,19 @@ export function sourceCaption(row: ResultRowCommon): string {
 export function resultDisplay(
   row: ResultRowCommon,
 ): { label: string; tone: StatusPillTone; caption?: string } {
+  // V-069 AC2: a levelled criterion's judgment is its LEVEL NAME
+  // (owner-approved treatment, not Pass/Partial/Fail) -- the dedicated
+  // "level" tone (`ux-critic` finding: NOT "info", whose icon is a real
+  // loading spinner every other user of that tone genuinely needs) reads
+  // as a decided, informational rung, not a pass/fail valence and not
+  // still-in-progress.
+  if (row.level) {
+    return {
+      label: row.level.name,
+      tone: "level",
+      caption: `${row.level.points}/${row.level.max_points} pts`,
+    };
+  }
   const isPartial = row.outcome === "passed" && row.score !== null && Math.round(row.score) === 50;
   if (isPartial) {
     return {
@@ -219,6 +260,10 @@ const RESOLUTION_VERB: Record<string, string> = {
   // verb has to say that plainly, not borrow "Marked" language that
   // would imply a Pass/Fail judgment was made.
   needs_document: "Marked as needing the document",
+  // V-069: fallback only -- `ResolutionBlock` prefers "Marked {level
+  // name}" whenever `level` is present, which it always is for a real
+  // mark_level resolution.
+  mark_level: "Marked a level",
 };
 
 // A resolved criterion must never render as an ordinary AI-graded/rule-
@@ -227,12 +272,18 @@ const RESOLUTION_VERB: Record<string, string> = {
 // silently outranked the instructor's own decision (V-055 review — the
 // exact failure this system's human-in-the-loop design exists to
 // prevent, ground rule 1).
-function ResolutionBlock({ resolution }: { resolution: ResolutionOut }) {
+function ResolutionBlock({ resolution, level }: { resolution: ResolutionOut; level?: CriterionLevel | null }) {
+  // V-069: "Marked {level name}" says WHICH rung, not just that some
+  // resolution happened -- `RESOLUTION_VERB`'s generic "mark_level" entry
+  // is a fallback only, for the case `level` is somehow absent.
+  const verb =
+    resolution.type === "mark_level" && level
+      ? `Marked ${level.name}`
+      : (RESOLUTION_VERB[resolution.type] ?? "Resolved by instructor");
   return (
     <div className="flex flex-col gap-1.5 text-sm">
       <p className="text-ink">
-        <span className="font-semibold">{RESOLUTION_VERB[resolution.type] ?? "Resolved by instructor"}.</span>{" "}
-        {resolution.reason}
+        <span className="font-semibold">{verb}.</span> {resolution.reason}
       </p>
       {resolution.ai_majority_verdict && (
         <p className="text-xs text-ink-tertiary">
@@ -251,7 +302,7 @@ function EvidenceBlock({ row }: { row: ResultRowCommon }) {
   const controlsId = `evidence-more-${row.criterion_id}`;
 
   if (row.resolution) {
-    return <ResolutionBlock resolution={row.resolution} />;
+    return <ResolutionBlock resolution={row.resolution} level={row.level} />;
   }
   if (row.evidence.length > 0) {
     const text = first.quote;

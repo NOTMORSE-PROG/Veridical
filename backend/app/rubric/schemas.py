@@ -9,6 +9,27 @@ from typing import Literal
 from pydantic import BaseModel, Field, field_validator
 
 
+class ParsedLevel(BaseModel):
+    """One rung of a graded performance scale (V-069 AC1) — structured,
+    never squashed into `evidence_needed` prose. `level` is the scale's own
+    ordinal (1-based, ascending); `points` is whatever numeric value the
+    source document assigns that rung (not assumed to equal `level` — a
+    source could weight its top rung higher than its ordinal position)."""
+
+    level: int = Field(ge=1)
+    name: str = Field(min_length=1)
+    descriptor: str = Field(min_length=1)
+    points: float = Field(ge=0)
+
+    @field_validator("name", "descriptor")
+    @classmethod
+    def _not_blank(cls, value: str) -> str:
+        stripped = value.strip()
+        if not stripped:
+            raise ValueError("must not be blank")
+        return stripped
+
+
 class ParsedCriterion(BaseModel):
     """Exactly what the decomposition prompt is asked to return per
     criterion — validated before anything touches the database."""
@@ -17,6 +38,11 @@ class ParsedCriterion(BaseModel):
     type: Literal["structural", "semantic", "not_assessable"]
     evidence_needed: str | None = None
     weight: float = Field(gt=0)
+    # V-069 AC1/AC3: present only for a criterion the source document
+    # itself describes as a graded scale (>=2 named levels) — absent for
+    # an ordinary pass/fail requirement, never invented (the prompt is
+    # explicit: don't force a scale onto a format that doesn't have one).
+    levels: list[ParsedLevel] | None = None
 
     @field_validator("text")
     @classmethod
@@ -25,6 +51,25 @@ class ParsedCriterion(BaseModel):
         if not stripped:
             raise ValueError("criterion text must not be blank")
         return stripped
+
+    @field_validator("levels")
+    @classmethod
+    def _levels_are_a_real_scale(cls, value: list[ParsedLevel] | None) -> list[ParsedLevel] | None:
+        if value is None:
+            return None
+        if len(value) < 2:
+            raise ValueError("levels must describe at least 2 rungs, or be omitted entirely")
+        ordinals = [lvl.level for lvl in value]
+        if ordinals != sorted(ordinals) or len(set(ordinals)) != len(ordinals):
+            raise ValueError("levels must have distinct, ascending `level` ordinals")
+        # `backend-critic` finding (live-reproduced): an all-zero-points
+        # scale makes `max_points` 0, which crashed the resolve endpoint's
+        # points/max_points arithmetic with a raw `ZeroDivisionError`
+        # instead of an honest, catchable error. Caught here at the
+        # source, before it can ever reach a stored Criterion.
+        if all(lvl.points <= 0 for lvl in value):
+            raise ValueError("levels must have at least one rung worth more than 0 points")
+        return value
 
 
 class RubricDecomposition(BaseModel):
@@ -40,6 +85,7 @@ class CriterionOut(BaseModel):
     evidence: str | None
     weight: float
     position: int
+    levels: list[ParsedLevel] | None = None
 
     model_config = {"from_attributes": True}
 
@@ -98,6 +144,12 @@ class CriterionIn(BaseModel):
     text: str = Field(min_length=1)
     evidence: str | None = None
     weight: float = Field(gt=0)
+    # V-069: round-tripped, never hand-edited on this screen in this
+    # ticket (no AC requires per-level editing UI) — the instructor's
+    # Save/Confirm action must not silently strip a decomposed scale back
+    # down to prose, which is exactly what omitting this field here would
+    # do (`update_criteria` REPLACES the full criteria set every save).
+    levels: list[ParsedLevel] | None = None
 
     @field_validator("text")
     @classmethod

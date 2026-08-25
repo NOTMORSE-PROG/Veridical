@@ -167,6 +167,19 @@ def _to_public_report(report: ReportOut) -> PublicReportOut:
                 reasoning=r.reasoning,
                 reason=r.reason,
                 evidence=r.evidence,
+                # V-069 AC5: the level IS the judgment for this row
+                # (owner-approved treatment) -- deliberately published,
+                # same reasoning BUG-052 already applied to
+                # rubric_needs_review below.
+                level=r.level,
+                # V-069 (`ux-critic` finding, live-reproduced): the bare
+                # FACT of being resolved is safe to publish even though
+                # the private reasoning (`r.resolution`) isn't -- without
+                # this, the public row had no way to tell "AI-graded" from
+                # "instructor resolved this by hand," and fell back to
+                # showing the AI's own superseded evidence as if it were
+                # final.
+                resolved=r.resolution is not None,
             )
             for r in report.results
         ],
@@ -178,6 +191,9 @@ def _to_public_report(report: ReportOut) -> PublicReportOut:
         # measuring instrument was flagged too, not just the instructor.
         rubric_needs_review=report.rubric_needs_review,
         rubric_parse_issues=report.rubric_parse_issues,
+        # V-069 AC2/AC5: the rubric's own RATING, same transcription-only
+        # treatment as the instructor's own report view.
+        levelled_rating=report.levelled_rating,
     )
 
 

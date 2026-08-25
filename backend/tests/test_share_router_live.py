@@ -453,6 +453,11 @@ def test_shared_report_public_schema_is_an_exact_allow_list(
         # instructor.
         "rubric_needs_review",
         "rubric_parse_issues",
+        # V-069 AC5: the rubric's own RATING, deliberately published too --
+        # same transcription-only treatment the instructor's own report
+        # view gets, and `None` for the common (non-levelled) case this
+        # fixture actually seeds.
+        "levelled_rating",
     }
     assert set(shared["report"]["results"][0].keys()) == {
         "criterion_id",
@@ -470,4 +475,14 @@ def test_shared_report_public_schema_is_an_exact_allow_list(
         "reasoning",
         "reason",
         "evidence",
+        # V-069 AC5: the decided level IS the judgment for a levelled
+        # criterion's row -- deliberately published, `None` here since
+        # this fixture's rubric has no levelled criteria.
+        "level",
+        # V-069 (`ux-critic` finding, live-reproduced): the bare FACT of
+        # being resolved, safe to publish even though the private
+        # reasoning (`resolution`, excluded above) isn't -- without this,
+        # a hand-resolved criterion had no signal at all on the public
+        # view and fell through to "AI-graded."
+        "resolved",
     }

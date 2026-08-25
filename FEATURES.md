@@ -81,11 +81,12 @@ Turns *any* uploaded format into checkable items — the module that makes VERID
 
 | # | Feature | Status | Acceptance criteria |
 |---|---|---|---|
-| F2.1 | AI decomposition of rubric text into individual criteria | 🟢 | Each criterion gets: text, **type** (structural/semantic), **evidence needed**, **weight** |
+| F2.1 | AI decomposition of rubric text into individual criteria | 🟢 | Each criterion gets: text, **type** (structural/semantic), **evidence needed**, **weight**, and — where the source document itself describes one — a structured **levels** scale (see F2.6) |
 | F2.2 | Validation gate + re-attempt loop (Fig. 3.7) | 🟢 | Malformed parse retries up to N times, then surfaces a parse-review screen |
 | F2.3 | **Instructor review/edit of parsed criteria before first use** | 🟢 | Instructor can re-type, re-weight, delete, or add criteria; nothing runs until confirmed |
 | F2.4 | Rubric versioning | 🟢 | A re-uploaded rubric becomes v2; old reports keep pointing at v1 (a rubric change is a measurement change) |
 | F2.5 | Criterion library (reuse criteria across terms) | ⚪ | Instructor can import criteria from a previous rubric version |
+| F2.6 | **Levelled (graded-scale) rubric support** (V-069) | 🟢 | A criterion the source document grades on a NAMED performance scale (e.g. Beginner 1/Acceptable 2/Proficient 3/Exemplary 4, any point values, any rung count, mixed freely with ordinary pass/fail criteria in the same rubric) decomposes into structured per-rung data instead of prose; grading matches the model's verdict against that criterion's own rung names; the instructor's escalation-resolution choices match the rubric's own scale (a level, not forced Pass/Fail); the report/export/adviser view show the decided rung as the judgment plus the rubric's own points-based RATING as a labeled transcription, never merged into the banded readiness verdict (ground rule 8). Verified end-to-end against the checked-in fixture/test suite; **not yet verified against a live Gemini decomposition of a real institutional document** (no scale-carrying rubric has been run through the real model in production as of this writing) — a rubric whose scale is described only in prose with no discoverable per-criterion boundary still decomposes as ordinary pass/fail, by design |
 
 ### F3 — Hybrid Checking Engine 🟢
 Routes structural items to deterministic rules and semantic items to AI grading (Objective 2).

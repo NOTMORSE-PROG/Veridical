@@ -17,19 +17,13 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.checks.levels import is_levelled, match_level_by_ordinal, outcome_and_score
 from app.config import Settings, get_settings
 from app.errors import ConflictError, NotFoundError
 from app.models.audit import AuditLog
 from app.models.enums import ResultOutcome
 from app.models.rubric import Criterion
 from app.models.run import CheckResult
-
-_SCORE_BY_VERDICT = {"pass": 100.0, "partial": 50.0, "fail": 0.0}
-_OUTCOME_BY_VERDICT = {
-    "pass": ResultOutcome.passed,
-    "partial": ResultOutcome.passed,
-    "fail": ResultOutcome.failed,
-}
 
 # Instructor's resolution choices: accept whatever the AI's own majority
 # vote was, override to a specific verdict outright, or (V-068 AC2/BUG-096
@@ -39,11 +33,17 @@ RESOLUTION_ACCEPT_MAJORITY = "accept_majority"
 RESOLUTION_MARK_PASS = "mark_pass"
 RESOLUTION_MARK_FAIL = "mark_fail"
 RESOLUTION_NEEDS_DOCUMENT = "needs_document"
+# V-069 AC4: "on a 1-4 rubric they choose a level, not Pass/Fail" -- the
+# instructor's own resolution vocabulary must match the rubric's own
+# scale, the identical principle the ticket's Responsibilities section
+# names for `escalation.py:28-32`'s pre-existing pass/fail-only gap.
+RESOLUTION_MARK_LEVEL = "mark_level"
 _VALID_RESOLUTIONS = {
     RESOLUTION_ACCEPT_MAJORITY,
     RESOLUTION_MARK_PASS,
     RESOLUTION_MARK_FAIL,
     RESOLUTION_NEEDS_DOCUMENT,
+    RESOLUTION_MARK_LEVEL,
 }
 
 # Outcomes that mean "a human still has to decide this one". They are NOT
@@ -79,7 +79,11 @@ def review_reason_for(outcome: ResultOutcome, detail: dict[str, Any] | None = No
 
 
 def gate_vote(
-    majority_verdict: str | None, agreement: float, settings: Settings | None = None
+    majority_verdict: str | None,
+    agreement: float,
+    settings: Settings | None = None,
+    *,
+    criterion: Any = None,
 ) -> tuple[ResultOutcome, float | None]:
     """Turns a self-consistency vote into a persistable (outcome, score).
 
@@ -90,13 +94,25 @@ def gate_vote(
     agreement falls below the configured threshold (default 1.0 — ANY
     disagreement escalates until golden-set evidence justifies loosening
     it, D-012).
+
+    `criterion` (V-069, keyword-only, defaults to `None`): when given and
+    levelled, the verdict is matched against THAT criterion's own level
+    names instead of the pass/partial/fail vocabulary
+    (`app.checks.levels.outcome_and_score` — the single source of truth
+    both this function and `semantic.py`'s single-pass path now share).
+    Every existing call site that omits it keeps the exact old behavior,
+    including for an unmapped verdict string, which is now an honest
+    escalation instead of a `KeyError` — unreachable under the old
+    `Literal["pass","partial","fail"]`-validated schema, so not a
+    regression against anything that could previously happen.
     """
     settings = settings or get_settings()
     if majority_verdict is None:
         return ResultOutcome.escalated, None
     if agreement < settings.escalation_agreement_threshold:
         return ResultOutcome.escalated, None
-    return _OUTCOME_BY_VERDICT[majority_verdict], _SCORE_BY_VERDICT[majority_verdict]
+    outcome, score, _level = outcome_and_score(criterion, majority_verdict)
+    return outcome, score
 
 
 @dataclass(frozen=True)
@@ -124,6 +140,10 @@ class EscalatedItem:
     # instructor can check in 10 seconds (judgment §1), not just a claim.
     injection_suspected: bool = False
     injection_matched_snippet: str | None = None
+    # V-069 AC4: the criterion's own scale, so the resolve panel can render
+    # a level picker instead of Pass/Fail — `None`/empty for an ordinary
+    # pass/fail criterion, unchanged from before this ticket.
+    levels: list[dict[str, Any]] | None = None
 
 
 async def list_escalated(session: AsyncSession, check_run_id: int) -> list[EscalatedItem]:
@@ -168,6 +188,7 @@ async def list_escalated(session: AsyncSession, check_run_id: int) -> list[Escal
                 unverified_evidence=detail.get("unverified_evidence"),
                 injection_suspected=bool(detail.get("injection_suspected")),
                 injection_matched_snippet=detail.get("injection_matched_snippet"),
+                levels=criterion.levels,
             )
         )
     return items
@@ -181,6 +202,10 @@ async def resolve_escalation(
     resolution: str,
     reason: str,
     settings: Settings | None = None,
+    *,
+    # V-069 AC4: the level ORDINAL the instructor picked, required (and
+    # only meaningful) when `resolution == RESOLUTION_MARK_LEVEL`.
+    level: int | None = None,
 ) -> CheckResult:
     """One instructor decision on one escalated criterion (ticket AC): the
     ONLY way an escalated result ever becomes a score contribution again —
@@ -227,8 +252,24 @@ async def resolve_escalation(
     if result.outcome not in NEEDS_REVIEW_OUTCOMES:
         raise ConflictError("This criterion isn't awaiting review, so there's nothing to resolve.")
 
+    # V-069 AC4: fetched unconditionally (cheap, single extra PK lookup) —
+    # needed by accept_majority (a levelled criterion's own vote uses its
+    # level vocabulary too), mark_level, and the pass/fail-on-a-levelled-
+    # criterion guard below, so a conditional fetch would just duplicate
+    # this same call three ways.
+    criterion = await session.get(Criterion, result.criterion_id)
+
     detail = dict(result.detail or {})
     majority_verdict = detail.get("verdict")
+    resolved_level: dict[str, Any] | None = None
+
+    if resolution in (RESOLUTION_MARK_PASS, RESOLUTION_MARK_FAIL) and is_levelled(criterion):
+        raise ConflictError(
+            "This criterion has its own named performance levels. Choose mark_level "
+            "with a level instead of Pass/Fail."
+        )
+    if resolution == RESOLUTION_MARK_LEVEL and not is_levelled(criterion):
+        raise ConflictError("This criterion doesn't have named performance levels.")
 
     if resolution == RESOLUTION_ACCEPT_MAJORITY:
         if majority_verdict is None:
@@ -240,18 +281,52 @@ async def resolve_escalation(
                 "The AI never reached a majority verdict on this criterion, "
                 "choose mark_pass or mark_fail instead."
             )
-        new_outcome = _OUTCOME_BY_VERDICT[majority_verdict]
-        new_score = _SCORE_BY_VERDICT[majority_verdict]
+        new_outcome, new_score, level_match = outcome_and_score(criterion, majority_verdict)
+        if new_outcome == ResultOutcome.escalated:
+            raise ConflictError(
+                "The AI's own vote used a verdict that no longer matches this criterion's "
+                "scale; choose mark_pass, mark_fail, or mark_level instead."
+            )
+        if level_match is not None:
+            resolved_level = level_match.as_detail()
     elif resolution == RESOLUTION_MARK_PASS:
         new_outcome, new_score = ResultOutcome.passed, 100.0
     elif resolution == RESOLUTION_MARK_FAIL:
         new_outcome, new_score = ResultOutcome.failed, 0.0
+    elif resolution == RESOLUTION_MARK_LEVEL:
+        level_match = match_level_by_ordinal(criterion, level)
+        if level_match is None:
+            raise ConflictError(f"Level {level!r} isn't one of this criterion's own levels.")
+        if not level_match.max_points:
+            # `backend-critic` finding, live-reproduced: a degenerate all-
+            # zero-points scale (now blocked at the source by
+            # `ParsedLevel`'s own validator, guarded here too for any
+            # criterion that predates that check) used to raise a raw,
+            # unhandled `ZeroDivisionError` -- an unexplained 500 on the
+            # highest-stakes screen in the product, instead of an honest,
+            # catchable error.
+            raise ConflictError(
+                "This criterion's own scale has no rung worth more than 0 points, so it "
+                "can't produce a real score. This is a problem with the rubric itself."
+            )
+        new_outcome = ResultOutcome.passed
+        new_score = level_match.points / level_match.max_points * 100.0
+        resolved_level = level_match.as_detail()
     else:  # RESOLUTION_NEEDS_DOCUMENT — DECIDED 2026-08-16: excludes from
         # the composite exactly like `not_applicable` already behaves
         # (never a 0, never a pass), and does NOT block the final decision
         # (`decide_report`'s pending count only watches NEEDS_REVIEW_
         # OUTCOMES, which `not_applicable` was never a member of).
         new_outcome, new_score = ResultOutcome.not_applicable, None
+
+    if resolved_level is not None:
+        detail["level"] = resolved_level
+    elif "level" in detail:
+        # Overriding a levelled criterion's own AI-suggested level with a
+        # plain mark_pass/mark_fail is blocked above, so this only clears a
+        # STALE level (e.g. a resolution changed via a second call) —
+        # defensive, not a reachable path today.
+        del detail["level"]
 
     agreement = detail.get("agreement")
     detail["resolution"] = {

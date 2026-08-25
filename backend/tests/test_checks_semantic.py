@@ -18,6 +18,9 @@ class FakeCriterion:
     id: int
     text: str
     evidence: str | None = None
+    # V-069: default None keeps every existing test exercising the exact
+    # pre-ticket pass/partial/fail path.
+    levels: list[dict] | None = None
 
 
 class FakeSession:
@@ -422,3 +425,94 @@ def test_unwrapping_does_not_loosen_the_verdict_contract():
     bad = [{"index": 0, "verdict": "fail", "reasoning": "r", "evidence_quotes": []}]
     with pytest.raises(ValidationError):
         GradeBatchResponse.model_validate(_unwrap_verdicts(bad))
+
+
+# --- V-069: levelled criteria (single-pass path) ----------------------------
+
+TIP_SCALE = [
+    {"level": 1, "name": "Beginner", "descriptor": "no clear structure", "points": 1},
+    {"level": 2, "name": "Acceptable", "descriptor": "states the topic", "points": 2},
+    {"level": 3, "name": "Proficient", "descriptor": "states and previews", "points": 3},
+    {"level": 4, "name": "Exemplary", "descriptor": "engaging and complete", "points": 4},
+]
+
+
+def test_criteria_listing_injects_the_scale_for_a_levelled_criterion_only():
+    from app.checks.semantic import _criteria_listing
+
+    criteria = [
+        FakeCriterion(id=1, text="Levelled one", levels=TIP_SCALE),
+        FakeCriterion(id=2, text="Ordinary pass/fail one", levels=None),
+    ]
+    listing = _criteria_listing(criteria)
+    assert "Beginner (1) = no clear structure" in listing
+    assert "Exemplary (4) = engaging and complete" in listing
+    lines = listing.splitlines()
+    assert "Beginner" not in lines[1]  # the non-levelled criterion's own line is untouched
+
+
+async def test_levelled_criterion_verdict_becomes_a_scored_level():
+    tree = SectionTree(source="heuristics", nodes=[])
+    blocks = [
+        TextBlock(
+            page=1,
+            text="The introduction states and previews.",
+            max_font_size=11,
+            bold_ratio=0.0,
+        )
+    ]
+    extraction = _extraction(blocks=blocks, tree=tree)
+    criteria = [FakeCriterion(id=1, text="Introduction quality", levels=TIP_SCALE)]
+    llm = ScriptedLLM(
+        [
+            {
+                "verdicts": [
+                    {
+                        "index": 0,
+                        "verdict": "Proficient",
+                        "reasoning": "States and previews the structure.",
+                        "evidence_quotes": ["The introduction states and previews."],
+                    }
+                ]
+            }
+        ]
+    )
+    session = FakeSession()
+    results = await run_semantic_checks(session, 1, criteria, extraction, llm)
+    assert results[0].outcome == ResultOutcome.passed
+    assert results[0].score == 75.0
+    assert results[0].detail["level"] == {
+        "name": "Proficient",
+        "ordinal": 3,
+        "points": 3.0,
+        "max_points": 4.0,
+    }
+
+
+async def test_levelled_criterion_unrecognized_verdict_escalates():
+    """A model that ignores the per-criterion scale instruction and answers
+    plain "pass" for a levelled criterion must escalate -- never silently
+    scored as if "pass" were one of this criterion's own levels (charter
+    rule 1: never guess)."""
+    tree = SectionTree(source="heuristics", nodes=[])
+    blocks = [TextBlock(page=1, text="Some prose.", max_font_size=11, bold_ratio=0.0)]
+    extraction = _extraction(blocks=blocks, tree=tree)
+    criteria = [FakeCriterion(id=1, text="Introduction quality", levels=TIP_SCALE)]
+    llm = ScriptedLLM(
+        [
+            {
+                "verdicts": [
+                    {
+                        "index": 0,
+                        "verdict": "pass",
+                        "reasoning": "Looks fine.",
+                        "evidence_quotes": ["Some prose."],
+                    }
+                ]
+            }
+        ]
+    )
+    session = FakeSession()
+    results = await run_semantic_checks(session, 1, criteria, extraction, llm)
+    assert results[0].outcome == ResultOutcome.escalated
+    assert "unrecognized verdict" in results[0].detail["reason"]
