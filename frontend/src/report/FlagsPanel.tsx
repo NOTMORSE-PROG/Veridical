@@ -16,6 +16,7 @@ import { SeverityTag, type Severity } from "../components/SeverityTag";
 import { StatusPill, type StatusPillTone } from "../components/StatusPill";
 import { CHECK_KIND_ORDER, CHECK_KIND_SHORT_LABEL } from "../domain/checkKind";
 import { worstFlagTone } from "../domain/flagTone";
+import { problemLabel } from "../domain/problemLabel";
 import { truncateAtWord } from "../format/text";
 import { useFlags } from "./useReport";
 
@@ -121,10 +122,16 @@ function FlagRow({
   flag,
   showEyebrow,
   linkToDetail,
+  hideExcerpt = false,
 }: {
   flag: FlagSummaryOut;
   showEyebrow: boolean;
   linkToDetail: boolean;
+  // V-071 AC8: set by DuplicateCluster, whose own header already shows
+  // the (shared) excerpt and problem label once -- repeating them on
+  // every anchor row underneath would reproduce the exact "same sentence
+  // N times" wall this AC exists to remove.
+  hideExcerpt?: boolean;
 }) {
   return (
     <div className="flex flex-col gap-1.5 border-t border-border px-3.5 py-3 text-sm sm:flex-row sm:items-start sm:justify-between sm:gap-3">
@@ -134,9 +141,22 @@ function FlagRow({
             {CHECK_KIND_SHORT_LABEL[flag.check_kind] ?? flag.check_kind}
           </p>
         )}
-        <p className={flag.overridden ? "text-ink-tertiary" : "text-ink-secondary"}>
-          {truncateAtWord(flag.evidence_excerpt, 140)}
-        </p>
+        {!hideExcerpt && (
+          <>
+            <p className={flag.overridden ? "text-ink-tertiary" : "text-ink-secondary"}>
+              {truncateAtWord(flag.evidence_excerpt, 140)}
+            </p>
+            {/* V-071 AC9: a short, closed-vocabulary statement of WHICH
+                problem this is -- plain text, not a pill (a pill implies
+                a state to resolve, same weight as SeverityTag/StatusPill;
+                this is a caption). Null for any check_kind/detail.kind
+                this project hasn't given honest short copy yet
+                (problemLabel.ts), never a guessed label. */}
+            {problemLabel(flag.problem_kind) && (
+              <p className="mt-0.5 text-xs font-medium text-ink-tertiary">{problemLabel(flag.problem_kind)}</p>
+            )}
+          </>
+        )}
         <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
           <AnchorPill anchor={flag.page_anchor} />
           <SeverityTag severity={flag.severity as Severity} />
@@ -171,22 +191,140 @@ function FlagRow({
   );
 }
 
+// V-071 AC8: flags sharing the same finding -- same check_kind, the same
+// excerpt text, and the same problem_kind -- differ only by which page
+// they were found on. A real run produced 12 GRIM flags reading the
+// literal same sentence; clustering them collapses that into one card
+// with N anchors instead of N repeats of one sentence. `problem_kind` is
+// required to match too (not just excerpt text) so two flags that
+// coincidentally quote the same words for two DIFFERENT underlying
+// problems never merge into one misleading card. Order-preserving (first
+// occurrence order), not sorted, so this never fights the backend's own
+// fixed severity/resolution ordering (test_report_flags_live.py).
+function clusterFlags(flags: FlagSummaryOut[]): FlagSummaryOut[][] {
+  const order: string[] = [];
+  const byKey = new Map<string, FlagSummaryOut[]>();
+  for (const flag of flags) {
+    const key = `${flag.check_kind} ${flag.evidence_excerpt.trim()} ${flag.problem_kind ?? ""}`;
+    let cluster = byKey.get(key);
+    if (!cluster) {
+      cluster = [];
+      byKey.set(key, cluster);
+      order.push(key);
+    }
+    cluster.push(flag);
+  }
+  return order.map((key) => byKey.get(key)!);
+}
+
+// `ux-critic` finding (V-071 AC8 review, live-reproduced): keying a
+// cluster on `cluster[0].id` broke the moment the instructor resolved
+// one of its members -- the backend re-sorts unresolved-before-overridden
+// (test_report_flags_live.py's own fixed ordering), which moves a
+// resolved flag to the end of the group and changes which flag is
+// "first" in `clusterFlags`'s order-preserving output. The URL's
+// `flags_clusters_open=<old first id>` then matched nothing on the next
+// load, silently re-collapsing a cluster the instructor had just acted
+// on. The min member id is stable across that reorder (ids never change,
+// only array position does), so it survives the exact transition that
+// broke the old key.
+function clusterKey(flags: FlagSummaryOut[]): number {
+  return Math.min(...flags.map((f) => f.id));
+}
+
+function worstSeverity(flags: FlagSummaryOut[]): Severity {
+  const rank: Record<Severity, number> = { high: 3, med: 2, low: 1 };
+  return flags.reduce<Severity>(
+    (worst, f) => (rank[f.severity as Severity] > rank[worst] ? (f.severity as Severity) : worst),
+    flags[0].severity as Severity,
+  );
+}
+
+// A resolved anchor within a duplicate cluster is genuinely per-anchor
+// (each duplicate is its own `Flag` row with its own `overridden`) --
+// unlike the parent group's all-or-nothing "All resolved" caption, a
+// cluster can be partly resolved, and the instructor needs to see that
+// to know how many of the N anchors still need attention.
+function clusterResolutionPill(flags: FlagSummaryOut[]) {
+  const resolved = flags.filter((f) => f.overridden).length;
+  if (resolved === 0) return null;
+  return (
+    <StatusPill tone="neutral">
+      {resolved === flags.length ? `All ${flags.length} resolved` : `${resolved} of ${flags.length} resolved`}
+    </StatusPill>
+  );
+}
+
+function DuplicateCluster({
+  flags,
+  open,
+  onToggle,
+  linkToDetail,
+}: {
+  flags: FlagSummaryOut[];
+  open: boolean;
+  onToggle: () => void;
+  linkToDetail: boolean;
+}) {
+  const first = flags[0];
+  const listId = `cluster-${clusterKey(flags)}-list`;
+  const mixedSeverity = new Set(flags.map((f) => f.severity)).size > 1;
+  return (
+    <div className="border-t border-border">
+      <div className="flex flex-col gap-1.5 px-3.5 py-3 text-sm">
+        <p className={flags.every((f) => f.overridden) ? "text-ink-tertiary" : "text-ink-secondary"}>
+          {truncateAtWord(first.evidence_excerpt, 140)}
+        </p>
+        {problemLabel(first.problem_kind) && (
+          <p className="text-xs font-medium text-ink-tertiary">{problemLabel(first.problem_kind)}</p>
+        )}
+        <div className="flex flex-wrap items-center gap-1.5">
+          <button
+            type="button"
+            aria-expanded={open}
+            aria-controls={listId}
+            onClick={onToggle}
+            className="flex min-h-11 items-center rounded-full bg-status-neutral-bg px-2 py-0.5 text-xs font-medium text-ink-tertiary sm:min-h-9"
+          >
+            {flags.length} locations
+          </button>
+          <SeverityTag severity={worstSeverity(flags)} />
+          {mixedSeverity && <span className="text-xs text-ink-tertiary">{severityBreakdown(flags)}</span>}
+          {clusterResolutionPill(flags)}
+        </div>
+      </div>
+      {open && (
+        <div id={listId}>
+          {flags.map((flag) => (
+            <FlagRow key={flag.id} flag={flag} showEyebrow={false} linkToDetail={linkToDetail} hideExcerpt />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function FlagGroup({
   kind,
   flags,
   open,
   onToggle,
   linkToDetail,
+  clustersOpen,
+  onToggleCluster,
 }: {
   kind: string;
   flags: FlagSummaryOut[];
   open: boolean;
   onToggle: () => void;
   linkToDetail: boolean;
+  clustersOpen: Set<string>;
+  onToggleCluster: (firstFlagId: number) => void;
 }) {
   if (flags.length === 1) {
     return <FlagRow flag={flags[0]} showEyebrow linkToDetail={linkToDetail} />;
   }
+  const clusters = clusterFlags(flags);
   return (
     <div className="border-t border-border">
       <button
@@ -206,9 +344,19 @@ function FlagGroup({
         <span className="text-xs text-ink-tertiary">{groupCaption(flags)}</span>
       </button>
       {open &&
-        flags.map((flag) => (
-          <FlagRow key={flag.id} flag={flag} showEyebrow={false} linkToDetail={linkToDetail} />
-        ))}
+        clusters.map((cluster) =>
+          cluster.length > 1 ? (
+            <DuplicateCluster
+              key={clusterKey(cluster)}
+              flags={cluster}
+              open={clustersOpen.has(String(clusterKey(cluster)))}
+              onToggle={() => onToggleCluster(clusterKey(cluster))}
+              linkToDetail={linkToDetail}
+            />
+          ) : (
+            <FlagRow key={cluster[0].id} flag={cluster[0]} showEyebrow={false} linkToDetail={linkToDetail} />
+          ),
+        )}
     </div>
   );
 }
@@ -225,6 +373,28 @@ const TOGGLED_PARAM = "flags_toggled";
 
 function readToggled(searchParams: URLSearchParams): Set<string> {
   const raw = searchParams.get(TOGGLED_PARAM);
+  return raw ? new Set(raw.split(",")) : new Set();
+}
+
+// V-071 AC8: which duplicate clusters the instructor has manually opened
+// -- same URL-param-not-component-state rationale as TOGGLED_PARAM above
+// (survives the FlagsPanel remount a Back navigation causes). Keyed by
+// `clusterKey` (the cluster's min member id), not by array position or
+// index -- `ux-critic` reproduced live that keying on "first flag in the
+// CURRENT order" broke the instant one member was resolved (the backend
+// re-sorts unresolved-before-overridden, changing which flag is first),
+// silently re-collapsing a cluster the instructor had just acted on. The
+// min id is stable across that reorder. Default is closed for every
+// cluster regardless of resolved/unresolved mix
+// (unlike a check_kind group's own default-open-if-unresolved rule): the
+// group header already surfaces the once-only excerpt, problem label,
+// severity, and resolution count -- FlagSummaryOut's own "enough to
+// decide whether to click" bar -- so auto-opening every cluster too would
+// reproduce the exact wall of repeated sentences this AC removes.
+const CLUSTERS_OPEN_PARAM = "flags_clusters_open";
+
+function readClustersOpen(searchParams: URLSearchParams): Set<string> {
+  const raw = searchParams.get(CLUSTERS_OPEN_PARAM);
   return raw ? new Set(raw.split(",")) : new Set();
 }
 
@@ -250,6 +420,7 @@ export function FlagsList({
   // group's open state rather than setting it directly.
   const [searchParams, setSearchParams] = useSearchParams();
   const toggledAwayFromDefault = readToggled(searchParams);
+  const clustersOpen = readClustersOpen(searchParams);
 
   if (flags.length === 0) {
     return (
@@ -289,6 +460,17 @@ export function FlagsList({
     setSearchParams(next, { replace: true });
   }
 
+  function toggleCluster(firstFlagId: number) {
+    const open = readClustersOpen(searchParams);
+    const key = String(firstFlagId);
+    if (open.has(key)) open.delete(key);
+    else open.add(key);
+    const next = new URLSearchParams(searchParams);
+    if (open.size > 0) next.set(CLUSTERS_OPEN_PARAM, [...open].join(","));
+    else next.delete(CLUSTERS_OPEN_PARAM);
+    setSearchParams(next, { replace: true });
+  }
+
   return (
     <section
       aria-labelledby="flags-heading"
@@ -324,6 +506,8 @@ export function FlagsList({
             open={open}
             onToggle={() => toggle(kind)}
             linkToDetail={linkToDetail}
+            clustersOpen={clustersOpen}
+            onToggleCluster={toggleCluster}
           />,
         ];
       })}

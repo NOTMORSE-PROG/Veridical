@@ -627,6 +627,10 @@ export interface FlagSummaryOut {
   // confirmed citation source from an ordinary override instead of
   // showing the same "Overridden" pill for both.
   confirmed_citation_source: boolean;
+  // V-071 AC9: `detail["kind"]` -- see backend FlagSummaryOut's own
+  // docstring. Mapped to a short problem label via
+  // `frontend/src/domain/problemLabel.ts`; null/unmapped renders nothing.
+  problem_kind: string | null;
 }
 
 // V-065: what the manuscript viewer's document pane can actually do with

@@ -105,6 +105,7 @@ async def _add_flag(
     severity: FlagSeverity,
     overridden: bool = False,
     criterion_id: int | None = None,
+    detail: dict | None = None,
 ) -> int:
     async with session_factory() as session:
         result = CheckResult(
@@ -126,6 +127,7 @@ async def _add_flag(
             page_anchor="page 4",
             overridden=overridden,
             override_reason="Checked by hand." if overridden else None,
+            detail=detail,
         )
         session.add(flag)
         await session.commit()
@@ -228,3 +230,31 @@ async def test_flag_without_a_criterion_has_null_criterion_text(session_factory)
     async with session_factory() as session:
         flags = await list_flags_for_run(session, check_run_id, instructor_id)
     assert flags[0].criterion_text is None
+
+
+async def test_problem_kind_surfaces_the_flags_own_detail_kind(session_factory):
+    """V-071 AC9: `problem_kind` reads `flag.detail["kind"]` -- the same
+    closed-vocabulary string `flag_ai_verdict_summary` reads -- so the
+    frontend can state a short, honest problem label on the summary row
+    instead of only an unlabeled excerpt."""
+    instructor_id, check_run_id, _ = await _seed_run(session_factory)
+    await _add_flag(
+        session_factory,
+        check_run_id,
+        kind=CheckKind.statistical_forensics,
+        severity=FlagSeverity.med,
+        detail={"kind": "grimmer_inconsistent", "reason": "not shown here"},
+    )
+    async with session_factory() as session:
+        flags = await list_flags_for_run(session, check_run_id, instructor_id)
+    assert flags[0].problem_kind == "grimmer_inconsistent"
+
+
+async def test_problem_kind_is_null_when_the_flag_has_no_detail(session_factory):
+    instructor_id, check_run_id, _ = await _seed_run(session_factory)
+    await _add_flag(
+        session_factory, check_run_id, kind=CheckKind.internal_agreement, severity=FlagSeverity.med
+    )
+    async with session_factory() as session:
+        flags = await list_flags_for_run(session, check_run_id, instructor_id)
+    assert flags[0].problem_kind is None

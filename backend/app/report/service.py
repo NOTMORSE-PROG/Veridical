@@ -521,6 +521,7 @@ async def flags_for_check_run(session: AsyncSession, check_run_id: int) -> list[
             is_passage_level=bool((flag.detail or {}).get("kind", "").endswith("_passage")),
             first_upload_context=bool((flag.detail or {}).get("first_upload_context")),
             confirmed_citation_source=flag.confirmed_citation_source,
+            problem_kind=(flag.detail or {}).get("kind"),
         )
         for flag, result in rows
     ]

@@ -376,7 +376,16 @@ class FlagSummaryOut(BaseModel):
     calibration and can increase blind acceptance. `confidence`,
     `override_reason`, `ai_verdict_summary`, `ai_reasoning`, and
     `annotation` stay detail-page-only (`/flags/{id}`, `ui-designer`
-    spec, 2026-08-13)."""
+    spec, 2026-08-13).
+
+    `problem_kind` (V-071 AC9) is not an exception to that rule -- it is
+    the same `detail["kind"]` closed-vocabulary string
+    `app.report.scoring.flag_ai_verdict_summary` already reads, a
+    category label (which of a small enumerated set this is), never
+    prose (why it matters or how confident the check was). The excluded
+    fields above all carry reasoning or a confidence signal; this one
+    carries neither, and sits alongside `check_kind`/`severity` in kind,
+    not alongside `ai_reasoning`."""
 
     id: int
     check_kind: str
@@ -403,6 +412,12 @@ class FlagSummaryOut(BaseModel):
     # `FlagDetail.tsx`'s own terminal banner is careful never to conflate
     # (confirming isn't disagreeing with anything).
     confirmed_citation_source: bool = False
+    # V-071 AC9: the flag's `detail["kind"]` (e.g. "grim_inconsistent",
+    # "unverifiable_not_found") -- the same closed vocabulary
+    # `flag_ai_verdict_summary` reads. The frontend maps a known subset to
+    # a short, honest problem label; an unmapped or absent kind renders no
+    # label rather than a guessed one (`frontend/src/domain/problemLabel.ts`).
+    problem_kind: str | None = None
 
 
 class FlagRegionOut(BaseModel):
