@@ -445,8 +445,8 @@ def test_criteria_listing_injects_the_scale_for_a_levelled_criterion_only():
         FakeCriterion(id=2, text="Ordinary pass/fail one", levels=None),
     ]
     listing = _criteria_listing(criteria)
-    assert "Beginner (1) = no clear structure" in listing
-    assert "Exemplary (4) = engaging and complete" in listing
+    assert 'level 1 is "Beginner" = no clear structure' in listing
+    assert 'level 4 is "Exemplary" = engaging and complete' in listing
     lines = listing.splitlines()
     assert "Beginner" not in lines[1]  # the non-levelled criterion's own line is untouched
 

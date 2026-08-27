@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 
 from app.checks.levels import (
     is_levelled,
+    level_scale_prompt_fragment,
     match_level,
     match_level_by_ordinal,
     max_points,
@@ -144,6 +145,58 @@ def test_outcome_and_score_all_zero_points_scale_escalates_never_silently_decide
     assert outcome == ResultOutcome.escalated
     assert score is None
     assert level is None
+
+
+# --- level_scale_prompt_fragment: BUG-135 regression -----------------------
+# A real rubric (this project's own TIP oral-presentation one) names each
+# rung "Exemplary 4"/"Proficient 3" style -- the name already ends in a
+# digit that duplicates its own ordinal. The prompt must not glue the
+# ordinal onto that name with no delimiter, or the model can't tell the
+# trailing "(4)" isn't part of "the exact level name" -- it echoes back
+# "Exemplary 4 (4)" and match_level's deliberately-exact comparison then
+# escalates every criterion on this scale for a formatting reason, not a
+# real grading difficulty.
+
+NAME_ENDS_IN_ORDINAL_SCALE = [
+    {"level": 1, "name": "Beginner 1", "descriptor": "no clear structure", "points": 1},
+    {"level": 2, "name": "Acceptable 2", "descriptor": "states the topic", "points": 2},
+    {"level": 3, "name": "Proficient 3", "descriptor": "states and previews", "points": 3},
+    {"level": 4, "name": "Exemplary 4", "descriptor": "engaging and complete", "points": 4},
+]
+
+
+def test_level_scale_prompt_fragment_quotes_the_name():
+    fragment = level_scale_prompt_fragment(FakeCriterion(levels=TIP_SCALE))
+    assert fragment is not None
+    assert '"Proficient"' in fragment
+    assert '"Exemplary"' in fragment
+
+
+def test_level_scale_prompt_fragment_does_not_glue_ordinal_onto_a_name_that_already_ends_in_one():
+    fragment = level_scale_prompt_fragment(FakeCriterion(levels=NAME_ENDS_IN_ORDINAL_SCALE))
+    assert fragment is not None
+    # The quoted name is reproducible verbatim by a model that follows the
+    # "EXACT quoted level name" instruction...
+    assert '"Exemplary 4"' in fragment
+    # ...and the old ambiguous glued form must never appear again.
+    assert "Exemplary 4 (4)" not in fragment
+
+
+def test_level_scale_prompt_fragment_none_for_non_levelled():
+    assert level_scale_prompt_fragment(FakeCriterion(levels=None)) is None
+
+
+def test_match_level_accepts_the_verdict_the_new_prompt_actually_teaches():
+    # The regression this whole bug was about: a level whose name already
+    # ends in its own ordinal digit must still match on the bare quoted
+    # name, with no trailing ordinal artifact.
+    criterion = FakeCriterion(levels=NAME_ENDS_IN_ORDINAL_SCALE)
+    match = match_level(criterion, "Exemplary 4")
+    assert match is not None
+    assert match.points == 4.0
+    # The old bug's literal failure mode must still correctly escalate --
+    # this proves the fix is in the prompt, not a loosened matcher.
+    assert match_level(criterion, "Exemplary 4 (4)") is None
 
 
 def test_outcome_and_score_levelled_criterion_rejects_pass_fail_vocabulary():

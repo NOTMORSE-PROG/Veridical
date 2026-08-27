@@ -135,12 +135,34 @@ def level_scale_prompt_fragment(criterion: Any) -> str | None:
     """The per-criterion scale text injected into the grading batch listing
     (`semantic.py::_criteria_listing`) so the model knows THIS criterion's
     own level names — `None` for a non-levelled criterion (nothing to
-    inject, the generic pass/partial/fail instruction already covers it)."""
+    inject, the generic pass/partial/fail instruction already covers it).
+
+    BUG-135: the level name is quoted and the ordinal kept OUTSIDE the
+    quotes, on purpose. The old `f"{name} ({level}) = ..."` glued the
+    ordinal directly onto the name with no delimiter — harmless for a
+    scale like "Proficient", but many real rubrics (this project's own
+    TIP oral-presentation rubric among them) name each rung "Exemplary 4"
+    /"Proficient 3" style, i.e. the name ITSELF already ends in a digit
+    that duplicates the ordinal. Shown as "Exemplary 4 (4) = ...", the
+    model has no way to tell the trailing "(4)" isn't part of "the exact
+    level name" it was told to echo, and reliably answers "Exemplary 4
+    (4)" — which then fails `match_level`'s deliberately-exact,
+    never-fuzzy comparison (charter rule 1: a wrong guess must escalate,
+    not silently snap to a rung), escalating nearly every levelled
+    criterion in a run for a self-inflicted formatting reason, not a real
+    grading difficulty. Quoting the name gives the model an unambiguous
+    boundary to copy verbatim; the ordinal stays available for the
+    model's own reasoning about level order without being part of the
+    string it must reproduce.
+    """
     levels = getattr(criterion, "levels", None)
     if not levels:
         return None
-    scale = "; ".join(f"{lvl['name']} ({lvl['level']}) = {lvl['descriptor']}" for lvl in levels)
+    scale = "; ".join(
+        f'level {lvl["level"]} is "{lvl["name"]}" = {lvl["descriptor"]}' for lvl in levels
+    )
     return (
         'Named performance levels for THIS criterion, set "verdict" to the '
-        f"EXACT level name below that the evidence best supports, not pass/partial/fail: {scale}"
+        "EXACT quoted level name below (verbatim, nothing else) that the evidence "
+        f"best supports, not pass/partial/fail: {scale}"
     )
