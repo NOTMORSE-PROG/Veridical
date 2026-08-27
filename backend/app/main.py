@@ -72,13 +72,27 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
         # DATABASE_URL happens to be configured.
         await _seed_programs_on_boot()
 
-    # Gated by settings (default off, V-018): every TestClient-based test
-    # imports this module, and a real polling loop must never start
-    # against a test's DATABASE_URL by surprise. Production (Render)
-    # turns this on — the "simplest job runner" the ticket's own research
-    # note asked for, no paid queue infrastructure.
+    # BUG-136: this used to be gated ONLY on `pipeline_worker_autostart`
+    # (default False), with a comment claiming "production (Render) turns
+    # this on" -- but nothing in the deploy actually set that env var, so
+    # production silently ran with the loop OFF since the day this
+    # shipped. A `quota_exhausted`/`api_down` block's "resumes
+    # automatically at <time>" promise (D-001's resumability requirement)
+    # was never true in prod: every check_run only ever advanced via the
+    # one-time `advance_once` kick at creation, and a run that blocked
+    # anywhere in its own single-request walk stayed parked forever,
+    # invisible until an instructor happened to notice. Same class of bug
+    # D-021 already fixed for migrations, and the same fix: gate on
+    # `veridical_env == "prod"` directly (matching the migration/seed
+    # gates just above), same reasoning as those -- every TestClient-based
+    # test imports this module and must never start a real polling loop
+    # against a test's DATABASE_URL by surprise, and a non-prod env can
+    # never satisfy this condition. `pipeline_worker_autostart` still
+    # exists as an explicit opt-in for exercising the loop outside prod
+    # (e.g. local manual testing) without faking `veridical_env`.
     task = None
-    if get_settings().pipeline_worker_autostart:
+    settings = get_settings()
+    if settings.veridical_env == "prod" or settings.pipeline_worker_autostart:
         task = asyncio.create_task(worker_loop())
     yield
     if task is not None:
