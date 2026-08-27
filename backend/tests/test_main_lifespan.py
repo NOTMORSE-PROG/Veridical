@@ -42,3 +42,55 @@ def test_dev_env_never_runs_a_migration_on_startup(monkeypatch):
         mock_upgrade.assert_not_called()
         mock_seed.assert_not_called()
     get_settings.cache_clear()
+
+
+def test_prod_env_autostarts_the_pipeline_worker_loop_even_with_the_flag_unset(monkeypatch):
+    """BUG-136: production ran for a long time with this loop silently
+    OFF -- `pipeline_worker_autostart` (default False) was never actually
+    set in Render's real environment, despite a since-corrected comment
+    claiming it was. A blocked check_run's "resumes automatically" promise
+    was never true. The fix removes the human-configured-dashboard-var
+    dependency entirely: prod always starts the loop, the same way it
+    always runs migrations, regardless of this flag."""
+    monkeypatch.setenv("VERIDICAL_ENV", "prod")
+    monkeypatch.delenv("PIPELINE_WORKER_AUTOSTART", raising=False)
+    get_settings.cache_clear()
+    from app.main import app
+
+    with (
+        patch("app.main._upgrade_to_head"),
+        patch("app.main._seed_programs_on_boot"),
+        patch("app.main.worker_loop") as mock_worker_loop,
+    ):
+        with TestClient(app):
+            pass
+        mock_worker_loop.assert_called_once()
+    get_settings.cache_clear()
+
+
+def test_dev_env_does_not_autostart_the_worker_loop_unless_explicitly_opted_in(monkeypatch):
+    monkeypatch.setenv("VERIDICAL_ENV", "dev")
+    monkeypatch.delenv("PIPELINE_WORKER_AUTOSTART", raising=False)
+    get_settings.cache_clear()
+    from app.main import app
+
+    with patch("app.main.worker_loop") as mock_worker_loop:
+        with TestClient(app):
+            pass
+        mock_worker_loop.assert_not_called()
+    get_settings.cache_clear()
+
+
+def test_explicit_flag_still_starts_the_worker_loop_outside_prod(monkeypatch):
+    """The flag survives as an opt-in for exercising the loop locally
+    without faking `veridical_env`."""
+    monkeypatch.setenv("VERIDICAL_ENV", "dev")
+    monkeypatch.setenv("PIPELINE_WORKER_AUTOSTART", "true")
+    get_settings.cache_clear()
+    from app.main import app
+
+    with patch("app.main.worker_loop") as mock_worker_loop:
+        with TestClient(app):
+            pass
+        mock_worker_loop.assert_called_once()
+    get_settings.cache_clear()

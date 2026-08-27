@@ -245,7 +245,12 @@ class Settings(BaseSettings):
     )
     # Off by default so importing the FastAPI app (every TestClient-based
     # test) never starts a real polling loop against whatever DATABASE_URL
-    # happens to be configured; production (Render) turns this on.
+    # happens to be configured. BUG-136: production does NOT need this set
+    # -- `main.py`'s lifespan autostarts the loop whenever
+    # `veridical_env == "prod"` regardless of this flag, so a real deploy
+    # can never silently ship with the loop off the way it did before this
+    # fix. This flag is now only an explicit opt-in for running the loop
+    # outside prod (e.g. local manual testing).
     pipeline_worker_autostart: bool = False
 
     # --- Dashboard accuracy self-reporting (V-021, D-012) --------------------
