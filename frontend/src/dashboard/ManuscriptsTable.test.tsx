@@ -391,6 +391,36 @@ describe("ManuscriptsTable", () => {
     expect(onRerun).toHaveBeenCalledWith(7);
   });
 
+  it("BUG-137: a manuscript whose very FIRST check run failed offers 'Start a fresh check', not a dead end", async () => {
+    vi.stubGlobal(
+      "fetch",
+      stubFetchByPath({
+        "/manuscripts": page([
+          {
+            id: 8,
+            group_label: "G-18",
+            ingest_status: "done",
+            ingest_failure_reason: null,
+            created_at: "2026-01-01T00:00:00Z",
+            latest_check_run_id: 22,
+            latest_check_run_status: "failed",
+            latest_done_check_run_id: null,
+          },
+        ]),
+      }),
+    );
+    const onStartCheck = vi.fn();
+    renderWithProviders(
+      <ManuscriptsTable page={1} onPageChange={() => {}} program={undefined} onProgramChange={() => {}} onUploadManuscript={() => {}} onRerun={() => {}} onStartCheck={onStartCheck} onSetGroup={() => {}} />,
+    );
+    await screen.findAllByText("Check failed");
+    expect(screen.queryByRole("button", { name: "Re-run" })).not.toBeInTheDocument();
+    const startButtons = screen.getAllByRole("button", { name: "Start a fresh check" });
+    expect(startButtons).toHaveLength(2); // mobile + desktop
+    fireEvent.click(startButtons[0]);
+    expect(onStartCheck).toHaveBeenCalledWith(8);
+  });
+
   it("BUG-016: an 'Ingestion failed' row explains why and never dead-ends", async () => {
     vi.stubGlobal(
       "fetch",

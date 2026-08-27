@@ -260,9 +260,22 @@ function RowActions({
         {/* An earlier DONE run still exists for this manuscript even
             though its latest attempt failed -- a real re-run candidate,
             not a dead end (V-041). */}
-        {row.latest_done_check_run_id && (
+        {row.latest_done_check_run_id ? (
           <button type="button" onClick={() => onRerun(row.id)} className={linkClass}>
             Re-run
+          </button>
+        ) : (
+          // BUG-137: a manuscript whose very FIRST-EVER check run failed
+          // has no `latest_done_check_run_id` for `onRerun`'s RerunModal
+          // to key off (that modal is scoped to re-running against a
+          // newly-activated rubric VERSION, V-041 -- it can't help here).
+          // Without this, "Why did this fail?" was the only control on
+          // the row, and the failure screen it links to says "try running
+          // it again" with nothing to press. `onStartCheck` reuses the
+          // same plain new-check flow "Start check"/"Start a fresh check"
+          // already use elsewhere on this same table.
+          <button type="button" onClick={() => onStartCheck(row.id)} className={linkClass}>
+            Start a fresh check
           </button>
         )}
         {setGroupLink}
