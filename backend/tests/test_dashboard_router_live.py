@@ -109,3 +109,11 @@ def test_manuscripts_list_is_paginated(logged_in):
     assert body["page_size"] == 5
     assert body["items"] == []
     assert body["total"] == 0
+
+
+def test_manuscripts_list_preserves_existing_page_size_200_contract(logged_in):
+    """V-071 critic regression: New Check already requests 200 rows."""
+    accepted = logged_in.get("/manuscripts?page=1&page_size=200")
+    assert accepted.status_code == 200
+    assert accepted.json()["page_size"] == 200
+    assert logged_in.get("/manuscripts?page_size=201").status_code == 422
