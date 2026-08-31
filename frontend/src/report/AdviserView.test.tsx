@@ -96,8 +96,9 @@ describe("AdviserViewPage", () => {
   it("shows a loading state, then the report", async () => {
     vi.stubGlobal("fetch", stubFetchByPath({ "/shared/tok123/report": shared() }));
     render();
-    expect(screen.getByText("Loading shared report.")).toBeInTheDocument();
+    expect(screen.getByText("Loading shared report…")).toBeInTheDocument();
     expect((await screen.findAllByText("Conditionally Ready")).length).toBeGreaterThan(0);
+    expect(screen.queryByText("72%")).not.toBeInTheDocument();
   });
 
   it("BUG-049: discloses a test-mode (fake-LLM) run to the adviser -- the audience with no other context at all", async () => {
@@ -106,14 +107,14 @@ describe("AdviserViewPage", () => {
       stubFetchByPath({ "/shared/tok123/report": shared({ report: { ...BASE_REPORT, llm_mode: "fake" } }) }),
     );
     render();
-    expect(await screen.findByText(/Test-mode run/)).toBeInTheDocument();
+    expect(await screen.findByText("Test-mode AI results")).toBeInTheDocument();
   });
 
   it("shows no test-mode disclosure for a real run", async () => {
     vi.stubGlobal("fetch", stubFetchByPath({ "/shared/tok123/report": shared() }));
     render();
     await screen.findAllByText("Conditionally Ready");
-    expect(screen.queryByText(/Test-mode run/)).not.toBeInTheDocument();
+    expect(screen.queryByText("Test-mode AI results")).not.toBeInTheDocument();
   });
 
   it("BUG-049 (backend-critic finding): discloses an unknown-mode run to the adviser, distinctly from real", async () => {
@@ -124,8 +125,8 @@ describe("AdviserViewPage", () => {
       }),
     );
     render();
-    expect(await screen.findByText(/AI mode unknown/)).toBeInTheDocument();
-    expect(screen.queryByText(/Test-mode run/)).not.toBeInTheDocument();
+    expect(await screen.findByText("AI mode could not be verified")).toBeInTheDocument();
+    expect(screen.queryByText("Test-mode AI results")).not.toBeInTheDocument();
   });
 
   it("BUG-052: discloses a rubric activated with a coverage warning to the adviser too", async () => {
@@ -143,7 +144,7 @@ describe("AdviserViewPage", () => {
     );
     render();
     expect(
-      await screen.findByText(/activated while the parser's own coverage check/),
+      await screen.findByText("The required format had parser uncertainty"),
     ).toBeInTheDocument();
   });
 
@@ -182,23 +183,20 @@ describe("AdviserViewPage", () => {
     vi.stubGlobal("fetch", stubFetchByPath({ "/shared/tok123/report": shared() }));
     render();
 
-    expect((await screen.findAllByText("Has an abstract")).length).toBe(2);
+    expect((await screen.findAllByText("Has an abstract")).length).toBe(1);
     // ui-designer P1: the escalated criterion must be VISIBLE, not
     // silently dropped the way Report.tsx's own filtered subset would.
-    expect(screen.getAllByText("States the research problem").length).toBe(2);
-    expect(screen.getAllByText("Awaiting review").length).toBe(2);
+    expect(screen.getAllByText("States the research problem").length).toBe(1);
+    expect(screen.getByText("Needs review")).toBeInTheDocument();
     // Rendered as part of a combined caption ("AI-graded · The instructor
     // has not resolved this criterion yet."), not its own isolated node.
-    expect(
-      screen.getAllByText(/The instructor has not resolved this criterion yet\./).length,
-    ).toBe(2);
   });
 
   it("shows the pending-review sentence in the explainer when items are still unresolved", async () => {
     vi.stubGlobal("fetch", stubFetchByPath({ "/shared/tok123/report": shared() }));
     render();
     expect(
-      await screen.findByText(/1 criterion still needs the instructor's review/),
+      await screen.findByText("Items still awaiting instructor review"),
     ).toBeInTheDocument();
   });
 
@@ -217,7 +215,7 @@ describe("AdviserViewPage", () => {
     render();
     await screen.findAllByText("Has an abstract");
     expect(
-      screen.getByText("The instructor has not made a final decision on this report yet."),
+      screen.getByText("No final instructor decision has been recorded"),
     ).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /Approve for defense/ })).not.toBeInTheDocument();
   });
@@ -237,8 +235,8 @@ describe("AdviserViewPage", () => {
       }),
     );
     render();
-    expect(await screen.findByText("Approved for defense")).toBeInTheDocument();
-    expect(screen.getByText(/Decided by the instructor on/)).toBeInTheDocument();
+    expect((await screen.findAllByText("Approved for defense")).length).toBeGreaterThan(0);
+    expect(screen.getByText(/Recorded by the instructor/)).toBeInTheDocument();
     expect(screen.getByText("Looks ready.")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Reopen this decision" })).not.toBeInTheDocument();
   });
@@ -256,10 +254,10 @@ describe("AdviserViewPage", () => {
     render();
     expect(await screen.findByText("Link not found")).toBeInTheDocument();
     expect(screen.getByText("This link doesn't exist.")).toBeInTheDocument();
-    expect(screen.getByText(/contact the instructor who sent you this link/)).toBeInTheDocument();
+    expect(screen.getByText(/Contact the instructor who sent this link/)).toBeInTheDocument();
     // BUG-069 item 5: must not claim "you're viewing a report shared by
     // the instructor" when there is, in fact, no report to view.
-    expect(screen.queryByText(/Read-only shared view/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Read-only shared report/)).not.toBeInTheDocument();
   });
 
   it("shows an honest 410 message when the link was revoked", async () => {
@@ -279,7 +277,7 @@ describe("AdviserViewPage", () => {
     expect(
       screen.getByText("This link has been turned off by the instructor."),
     ).toBeInTheDocument();
-    expect(screen.queryByText(/Read-only shared view/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Read-only shared report/)).not.toBeInTheDocument();
   });
 
   it("adds a noindex meta tag on mount and removes it on unmount", async () => {
@@ -298,7 +296,7 @@ describe("AdviserViewPage", () => {
     vi.stubGlobal("fetch", stubFetchByPath({ "/shared/tok123/report": shared() }));
     render();
     await screen.findAllByText("Has an abstract");
-    expect(screen.getByText(/Read-only shared view/)).toBeInTheDocument();
-    expect(screen.getByText(/isn't indexed by search engines/)).toBeInTheDocument();
+    expect(screen.getByText(/Read-only shared report/)).toBeInTheDocument();
+    expect(screen.getByText(/not indexed by search engines/)).toBeInTheDocument();
   });
 });

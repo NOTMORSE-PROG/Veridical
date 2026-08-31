@@ -37,12 +37,42 @@ describe("FlagDetailPage", () => {
     renderWithProviders(<FlagDetailPage />, { route: "/flags/5", path: "/flags/:flagId" });
     expect(await screen.findByText(/Wang, S\. \(2019\)/)).toBeInTheDocument();
     expect(screen.getByText("page 34")).toBeInTheDocument();
-    expect(screen.getByText("AI verdict: Not supported")).toBeInTheDocument();
+    expect(screen.getByText("AI suggestion")).toBeInTheDocument();
+    expect(screen.getByText("Not supported")).toBeInTheDocument();
     expect(screen.getByText("High severity")).toBeInTheDocument();
-    // The D-006 agreement number uses the same "Agreement" vocabulary as
-    // screens 4g/4h, never a second, competing "Confidence" word.
-    expect(screen.getByText("Agreement 100%")).toBeInTheDocument();
-    expect(screen.queryByText(/Confidence/)).not.toBeInTheDocument();
+    expect(screen.queryByText("Agreement 100%")).not.toBeInTheDocument();
+    expect(screen.getByText(/not shown as a percentage/)).toBeInTheDocument();
+  });
+
+  it("maps an internal agreement kind to instructor-facing problem copy", async () => {
+    vi.stubGlobal("fetch", stubFetchByPath({
+      "/flags/5": {
+        ...FLAG,
+        check_kind: "internal_agreement",
+        ai_verdict_summary: "agreement_unmatched_intent",
+      },
+    }));
+    renderWithProviders(<FlagDetailPage />, { route: "/flags/5", path: "/flags/:flagId" });
+
+    expect(await screen.findByText("Possible objective-to-outcome gap")).toBeInTheDocument();
+    expect(screen.queryByText("Agreement unmatched intent")).not.toBeInTheDocument();
+  });
+
+  it("removes a legacy reuse percentage from system reasoning but preserves passage evidence", async () => {
+    vi.stubGlobal("fetch", stubFetchByPath({
+      "/flags/5": {
+        ...FLAG,
+        check_kind: "originality_reuse",
+        ai_verdict_summary: "reuse_exact_duplicate_passage",
+        evidence_excerpt: "The recorded process completed 100% of the planned cases.",
+        ai_reasoning: "This passage appears to be a duplicate or near-duplicate (100.0% match) of archived manuscript #34.",
+      },
+    }));
+    renderWithProviders(<FlagDetailPage />, { route: "/flags/5", path: "/flags/:flagId" });
+
+    expect(await screen.findByText(/completed 100% of the planned cases/)).toBeInTheDocument();
+    expect(screen.getByText(/duplicate or near-duplicate of archived manuscript #34/i)).toBeInTheDocument();
+    expect(screen.queryByText(/100\.0% match/)).not.toBeInTheDocument();
   });
 
   it("BUG (overflow) regression guard: the evidence blockquote and AI-verdict chip both cap/wrap instead of overflowing on a long real string", async () => {
@@ -55,42 +85,42 @@ describe("FlagDetailPage", () => {
     renderWithProviders(<FlagDetailPage />, { route: "/flags/5", path: "/flags/:flagId" });
     await screen.findByText(/aaaaaaaaaa/);
     const blockquote = document.querySelector("blockquote");
-    expect(blockquote?.className).toContain("break-words");
-    const verdictChip = screen.getByText(/AI verdict:/).closest("span");
-    expect(verdictChip?.className).toContain("max-w-");
+    expect(blockquote?.className).toContain("signal-evidence-quote");
+    const verdictRecord = screen.getByText(/An unusually long verdict/).closest("p");
+    expect(verdictRecord?.className).toContain("signal-ai-suggestion");
   });
 
   it("BUG-049: discloses a test-mode (fake-LLM) run so its finding is never mistaken for real", async () => {
     vi.stubGlobal("fetch", stubFetchByPath({ "/flags/5": { ...FLAG, llm_mode: "fake" } }));
     renderWithProviders(<FlagDetailPage />, { route: "/flags/5", path: "/flags/:flagId" });
-    expect(await screen.findByText(/Test-mode run/)).toBeInTheDocument();
+    expect(await screen.findByText("Test-mode AI result")).toBeInTheDocument();
   });
 
   it("BUG-049: shows no test-mode disclosure for a real run", async () => {
     vi.stubGlobal("fetch", stubFetchByPath({ "/flags/5": FLAG }));
     renderWithProviders(<FlagDetailPage />, { route: "/flags/5", path: "/flags/:flagId" });
     await screen.findByText(/Wang, S\. \(2019\)/);
-    expect(screen.queryByText(/Test-mode run/)).not.toBeInTheDocument();
+    expect(screen.queryByText("Test-mode AI result")).not.toBeInTheDocument();
   });
 
   it("BUG-049 (backend-critic finding): discloses an unknown-mode flag distinctly from real", async () => {
     vi.stubGlobal("fetch", stubFetchByPath({ "/flags/5": { ...FLAG, llm_mode: "unknown" } }));
     renderWithProviders(<FlagDetailPage />, { route: "/flags/5", path: "/flags/:flagId" });
-    expect(await screen.findByText(/AI mode unknown/)).toBeInTheDocument();
-    expect(screen.queryByText(/Test-mode run/)).not.toBeInTheDocument();
+    expect(await screen.findByText("AI mode could not be verified")).toBeInTheDocument();
+    expect(screen.queryByText("Test-mode AI result")).not.toBeInTheDocument();
   });
 
   it("BUG-097: discloses a first-upload-context flag distinctly from an ordinary one", async () => {
     vi.stubGlobal("fetch", stubFetchByPath({ "/flags/5": { ...FLAG, first_upload_context: true } }));
     renderWithProviders(<FlagDetailPage />, { route: "/flags/5", path: "/flags/:flagId" });
-    expect(await screen.findByText(/First-ever check on this account/)).toBeInTheDocument();
+    expect(await screen.findByText("Limited first-upload comparison context")).toBeInTheDocument();
   });
 
   it("BUG-097: shows no first-upload-context disclosure for an ordinary flag", async () => {
     vi.stubGlobal("fetch", stubFetchByPath({ "/flags/5": { ...FLAG, first_upload_context: false } }));
     renderWithProviders(<FlagDetailPage />, { route: "/flags/5", path: "/flags/:flagId" });
     await screen.findByText(/Wang, S\. \(2019\)/);
-    expect(screen.queryByText(/First-ever check on this account/)).not.toBeInTheDocument();
+    expect(screen.queryByText("Limited first-upload comparison context")).not.toBeInTheDocument();
   });
 
   it("builds a breadcrumb back to the report using the manuscript label and check_run_id", async () => {
@@ -105,9 +135,7 @@ describe("FlagDetailPage", () => {
     renderWithProviders(<FlagDetailPage />, { route: "/flags/5", path: "/flags/:flagId" });
     await screen.findByText(/Wang, S\./);
     expect(screen.queryByRole("button", { name: /Accept AI verdict/ })).not.toBeInTheDocument();
-    expect(
-      screen.getByText("This finding stands as VERIDICAL reported it unless you override it below."),
-    ).toBeInTheDocument();
+    expect(screen.getByText("This finding remains open unless you record a reasoned override.")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Override" })).not.toBeDisabled();
   });
 
@@ -119,11 +147,11 @@ describe("FlagDetailPage", () => {
     renderWithProviders(<FlagDetailPage />, { route: "/flags/5", path: "/flags/:flagId" });
     await screen.findByText(/Wang, S\./);
     expect(
-      screen.queryByText("This finding stands as VERIDICAL reported it unless you override it below."),
+      screen.queryByText("This finding remains open unless you record a reasoned override."),
     ).not.toBeInTheDocument();
     expect(
       screen.getByText(
-        "VERIDICAL did not reach a determination on this one, so it doesn't count toward the readiness verdict unless you affirm it below.",
+        "VERIDICAL did not reach a determination, so this finding does not affect readiness unless you affirm it.",
       ),
     ).toBeInTheDocument();
   });
@@ -138,7 +166,7 @@ describe("FlagDetailPage", () => {
     fireEvent.click(confirm);
 
     expect(await screen.findByText("Enter a reason before confirming.")).toBeInTheDocument();
-    expect(screen.getByPlaceholderText("Why are you overriding this finding?")).toHaveAttribute(
+    expect(screen.getByRole("textbox", { name: "Reason (required)" })).toHaveAttribute(
       "aria-invalid",
       "true",
     );
@@ -158,12 +186,12 @@ describe("FlagDetailPage", () => {
     renderWithProviders(<FlagDetailPage />, { route: "/flags/5", path: "/flags/:flagId" });
     await screen.findByText(/Wang, S\./);
     fireEvent.click(screen.getByRole("button", { name: "Override" }));
-    fireEvent.change(await screen.findByPlaceholderText("Why are you overriding this finding?"), {
+    fireEvent.change(await screen.findByRole("textbox", { name: "Reason (required)" }), {
       target: { value: "Checked myself, not actually retracted." },
     });
     fireEvent.click(screen.getByRole("button", { name: "Confirm override" }));
 
-    const banner = await screen.findByText(/You overrode this finding\./);
+    const banner = await screen.findByText(/You overrode this possible inconsistency/);
     expect(banner).toBeInTheDocument();
     expect(screen.getByText(/Checked myself, not actually retracted\./)).toBeInTheDocument();
     // Original AI finding still shown, never destroyed (ticket AC):
@@ -220,7 +248,7 @@ describe("FlagDetailPage", () => {
     const box = screen.getByRole("textbox", { name: /Annotation/i });
     fireEvent.change(box, { target: { value: "Confirmed with the adviser." } });
     fireEvent.click(screen.getByRole("button", { name: "Save annotation" }));
-    const status = await screen.findByText("Saved.");
+    const status = await screen.findByText("Annotation saved.");
     expect(status).toHaveAttribute("role", "status");
   });
 
@@ -336,17 +364,16 @@ describe("FlagDetail — BUG-078 confirm-source", () => {
 
   it("shows the confirmable copy and button for a citation flag with a real key", async () => {
     renderFlag(makeFlag());
-    expect(await screen.findByText("Verify this source")).toBeInTheDocument();
+    expect(await screen.findByText("Verified the source yourself?")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Confirm this source" })).toBeInTheDocument();
-    // Override stays available alongside it, with the connective line.
-    expect(screen.getByText(/Or, override just this flag/)).toBeInTheDocument();
+    // Override stays available alongside source confirmation.
     expect(screen.getByRole("button", { name: "Override" })).toBeInTheDocument();
   });
 
   it("shows the nothing-to-confirm explanation, no button, when there's no key", async () => {
     renderFlag(makeFlag({ citation_source_key: null }));
-    expect(await screen.findByText("Verify this source")).toBeInTheDocument();
-    expect(screen.getByText(/couldn't find a DOI, ISBN, or title/)).toBeInTheDocument();
+    expect(await screen.findByText("No source record can be confirmed")).toBeInTheDocument();
+    expect(screen.getByText(/could not identify a DOI, ISBN, or title/)).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Confirm this source" })).not.toBeInTheDocument();
     // Override still offered as the fallback path the copy names.
     expect(screen.getByRole("button", { name: "Override" })).toBeInTheDocument();
@@ -361,13 +388,13 @@ describe("FlagDetail — BUG-078 confirm-source", () => {
       }),
     );
     await screen.findByRole("button", { name: "Override" });
-    expect(screen.queryByText("Verify this source")).not.toBeInTheDocument();
+    expect(screen.queryByText("Verified the source yourself?")).not.toBeInTheDocument();
   });
 
   it("never shows the section for a citation flag with a different verdict (e.g. retracted)", async () => {
     renderFlag(makeFlag({ ai_verdict_summary: "retracted_source", citation_source_key: null }));
     await screen.findByRole("button", { name: "Override" });
-    expect(screen.queryByText("Verify this source")).not.toBeInTheDocument();
+    expect(screen.queryByText("Verified the source yourself?")).not.toBeInTheDocument();
   });
 
   it("opening the modal requires a reason before it will submit", async () => {
@@ -429,17 +456,17 @@ describe("FlagDetail — BUG-078 confirm-source", () => {
     fireEvent.click(within(dialog).getByRole("button", { name: "Confirm this source" }));
 
     expect(
-      await screen.findByText(/You confirmed the source is legitimate, so this flag is resolved/),
+      await screen.findByText(/You confirmed the source after checking it/),
     ).toBeInTheDocument();
     expect(screen.getByText(/Verified on the publisher's own website\./)).toBeInTheDocument();
     expect(
-      screen.getByText(/This source is now marked verified across VERIDICAL/),
+      screen.getByText(/verified-source record also applies/),
     ).toBeInTheDocument();
     // The ordinary-override sentence must never appear on this path.
-    expect(screen.queryByText(/You overrode this finding/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/You overrode this possible inconsistency/)).not.toBeInTheDocument();
     expect(
       screen.getByText(
-        "This source was confirmed. The flag was resolved and the readiness report was recalculated.",
+        "Source confirmed. The readiness band was recalculated.",
       ),
     ).toBeInTheDocument();
 
@@ -454,7 +481,7 @@ describe("FlagDetail — BUG-078 confirm-source", () => {
         override_reason: "Not actually retracted.",
       }),
     );
-    expect(await screen.findByText(/You overrode this finding/)).toBeInTheDocument();
-    expect(screen.queryByText(/You confirmed the source is legitimate/)).not.toBeInTheDocument();
+    expect(await screen.findByText(/You overrode this possible inconsistency/)).toBeInTheDocument();
+    expect(screen.queryByText(/You confirmed the source after checking it/)).not.toBeInTheDocument();
   });
 });

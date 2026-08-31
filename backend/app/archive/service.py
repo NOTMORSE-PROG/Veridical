@@ -79,6 +79,7 @@ async def list_archive(
                 original_filename=m.original_filename,
                 created_at=m.created_at,
                 ingest_status=m.ingest_status.value,
+                dismissed_at=m.dismissed_at,
                 latest_check_run_status=latest_status_by_manuscript.get(m.id),
                 has_archive=m.id in archived_ids,
                 purged_at=m.purged_at,

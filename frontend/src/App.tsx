@@ -1,5 +1,5 @@
-// Route shell (V-014): auth-gated app routes render inside the one
-// AppShell. The dev-only /gallery component-review page (V-002) was
+// Route shell (V-014): auth-gated app routes render inside the shared
+// SignalShell. The dev-only /gallery component-review page (V-002) was
 // removed in V-056 — it was the last consumer of the LEGACY token block
 // and the four legacy-only components (Button/KpiCard/Panel/Pill); every
 // real screen has been on the current token system since V-055.
@@ -16,153 +16,57 @@ import { createBrowserRouter, createRoutesFromElements, Route, RouterProvider } 
 import { AuditLogPage } from "./audit/AuditLog";
 import { RequireAuth } from "./auth/RequireAuth";
 import { CheckProgressPage } from "./check/Progress";
-import { DocumentViewerPage } from "./document/DocumentViewer";
+import { SignalDocumentViewerPage } from "./document/SignalDocumentViewer";
 import { FlagDetailPage } from "./flags/FlagDetail";
-import { LibraryComparePage } from "./library/LibraryCompare";
-import { LibraryDetailPage } from "./library/LibraryDetail";
-import { LibraryPage } from "./library/Library";
+import { SignalLibraryComparePage } from "./library/SignalLibraryCompare";
+import { SignalLibraryDetailPage } from "./library/SignalLibraryDetail";
+import { SignalLibraryPage } from "./library/SignalLibrary";
 import { LandingRoute } from "./pages/Landing";
 import { DashboardPage } from "./pages/Dashboard";
 import { SignInPage } from "./pages/SignIn";
 import { AdviserViewPage } from "./report/AdviserView";
-import { ReportPage } from "./report/Report";
+import { SignalReportPage } from "./report/SignalReport";
+import { RouteFrame } from "./routing/RouteFrame";
 import { ManageRubricPage } from "./rubric/Manage";
-import { ReviewCriteriaPage } from "./rubric/ReviewCriteria";
+import { SignalReviewCriteriaPage } from "./rubric/SignalReviewCriteria";
 import { SettingsPage } from "./settings/Settings";
-import { AppShell } from "./shell/AppShell";
+import { SignalShell } from "./shell/SignalShell";
 
 const queryClient = new QueryClient();
 
 const router = createBrowserRouter(
   createRoutesFromElements(
-    <>
-      <Route path="/" element={<LandingRoute />} />
-      <Route path="/signin" element={<SignInPage />} />
-      {/* V-040 (screen 4l): deliberately outside RequireAuth/AppShell --
-          a public, unauthenticated read reached by a token in the URL,
-          not a session. */}
-      <Route path="/shared/:token" element={<AdviserViewPage />} />
-      <Route
-        path="/dashboard"
-        element={
-          <RequireAuth>
-            <AppShell>
-              <DashboardPage />
-            </AppShell>
-          </RequireAuth>
-        }
-      />
-      <Route
-        path="/rubric"
-        element={
-          <RequireAuth>
-            <AppShell>
-              <ManageRubricPage />
-            </AppShell>
-          </RequireAuth>
-        }
-      />
-      <Route
-        path="/library"
-        element={
-          <RequireAuth>
-            <AppShell>
-              <LibraryPage />
-            </AppShell>
-          </RequireAuth>
-        }
-      />
-      <Route
-        path="/library/compare"
-        element={
-          <RequireAuth>
-            <AppShell>
-              <LibraryComparePage />
-            </AppShell>
-          </RequireAuth>
-        }
-      />
-      <Route
-        path="/library/:manuscriptId"
-        element={
-          <RequireAuth>
-            <AppShell>
-              <LibraryDetailPage />
-            </AppShell>
-          </RequireAuth>
-        }
-      />
-      <Route
-        path="/settings"
-        element={
-          <RequireAuth>
-            <AppShell>
-              <SettingsPage />
-            </AppShell>
-          </RequireAuth>
-        }
-      />
-      <Route
-        path="/rubric/:rubricId/review"
-        element={
-          <RequireAuth>
-            <AppShell>
-              <ReviewCriteriaPage />
-            </AppShell>
-          </RequireAuth>
-        }
-      />
-      <Route
-        path="/checks/:checkRunId"
-        element={
-          <RequireAuth>
-            <AppShell>
-              <CheckProgressPage />
-            </AppShell>
-          </RequireAuth>
-        }
-      />
-      <Route
-        path="/report/:checkRunId"
-        element={
-          <RequireAuth>
-            <AppShell>
-              <ReportPage />
-            </AppShell>
-          </RequireAuth>
-        }
-      />
-      <Route
-        path="/report/:checkRunId/document"
-        element={
-          <RequireAuth>
-            <AppShell>
-              <DocumentViewerPage />
-            </AppShell>
-          </RequireAuth>
-        }
-      />
-      <Route
-        path="/flags/:flagId"
-        element={
-          <RequireAuth>
-            <AppShell>
-              <FlagDetailPage />
-            </AppShell>
-          </RequireAuth>
-        }
-      />
-      <Route
-        path="/audit"
-        element={
-          <RequireAuth>
-            <AppShell>
-              <AuditLogPage />
-            </AppShell>
-          </RequireAuth>
-        }
-      />
-    </>,
+    <Route element={<RouteFrame />}>
+        <Route path="/" element={<LandingRoute />} />
+        <Route path="/signin" element={<SignInPage />} />
+        {/* V-040 (screen 4l): deliberately outside RequireAuth/SignalShell --
+            a public, unauthenticated read reached by a token in the URL,
+            not a session. */}
+        <Route path="/shared/:token" element={<AdviserViewPage />} />
+        <Route
+          element={
+            <RequireAuth>
+              <SignalShell />
+            </RequireAuth>
+          }
+        >
+          {/* A single persistent shell keeps destination navigation stable
+              while instructors move between authenticated routes. */}
+          <Route path="/dashboard" element={<DashboardPage />} />
+          <Route path="/rubric" element={<ManageRubricPage />} />
+          <Route path="/library" element={<SignalLibraryPage />} />
+          <Route path="/library/compare" element={<SignalLibraryComparePage />} />
+          <Route path="/library/:manuscriptId" element={<SignalLibraryDetailPage />} />
+          <Route path="/settings" element={<SettingsPage />} />
+          <Route path="/rubric/:rubricId/review" element={<SignalReviewCriteriaPage />} />
+          <Route path="/checks/:checkRunId" element={<CheckProgressPage />} />
+          <Route path="/report/:checkRunId" element={<SignalReportPage />} />
+          <Route path="/report/:checkRunId/document" element={<SignalDocumentViewerPage />} />
+          <Route path="/flags/:flagId" element={<FlagDetailPage />} />
+          <Route path="/audit" element={<AuditLogPage />} />
+        </Route>
+      </Route>
+    ,
   ),
 );
 

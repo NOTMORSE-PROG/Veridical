@@ -13,6 +13,7 @@ single-pass, for anything that still wants the cheaper V2 behavior and for
 the existing unit-test suite it was built against).
 """
 
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Any
 
@@ -367,6 +368,7 @@ async def run_semantic_checks_with_consistency(
     extraction: ExtractionResult,
     llm: LLMClient,
     settings: Settings | None = None,
+    cancellation_boundary: Callable[[], Awaitable[None]] | None = None,
 ) -> list[CheckResult]:
     """Entry point for the pipeline's semantic stage (V-018/machine.py):
     same batching as V2 (`build_semantic_batches`), but every criterion is
@@ -377,24 +379,32 @@ async def run_semantic_checks_with_consistency(
     if not criteria:
         return []
     batches, missing = build_semantic_batches(criteria, extraction)
-    results = [
-        await _persist(
-            session,
-            check_run_id,
-            criterion,
-            ResultOutcome.failed,
-            {
-                "score": 0.0,
-                "basis": "structural-alignment",
-                "reason": f"Referenced section '{target}' was not found in the manuscript.",
-            },
+    results: list[CheckResult] = []
+    for criterion, target in missing:
+        results.append(
+            await _persist(
+                session,
+                check_run_id,
+                criterion,
+                ResultOutcome.failed,
+                {
+                    "score": 0.0,
+                    "basis": "structural-alignment",
+                    "reason": f"Referenced section '{target}' was not found in the manuscript.",
+                },
+            )
         )
-        for criterion, target in missing
-    ]
+        if cancellation_boundary is not None:
+            await cancellation_boundary()
     for batch, batch_criteria in batches:
         results.extend(
             await _vote_batch(
                 session, check_run_id, batch, batch_criteria, llm, settings, extraction.anchor_kind
             )
         )
+        # One batch is the bounded LLM unit: both passes finish and every
+        # returned result persists before this boundary. No later batch may
+        # spend quota after a cancellation request has become visible.
+        if cancellation_boundary is not None:
+            await cancellation_boundary()
     return results

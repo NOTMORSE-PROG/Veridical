@@ -7,6 +7,7 @@ export function useFlag(flagId: number) {
   return useQuery({
     queryKey: ["flag", flagId],
     queryFn: () => api.get<FlagOut>(`/flags/${flagId}`),
+    enabled: Number.isInteger(flagId) && flagId > 0,
   });
 }
 
