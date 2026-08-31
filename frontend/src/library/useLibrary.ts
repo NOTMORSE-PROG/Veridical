@@ -21,11 +21,12 @@ export function useLibrary(page: number, program: string | undefined, search: st
   });
 }
 
-export function useLibraryItem(manuscriptId: number | undefined) {
+export function useLibraryItem(manuscriptId: number | undefined, enabled = true) {
+  const validId = manuscriptId !== undefined && Number.isInteger(manuscriptId) && manuscriptId > 0;
   return useQuery({
     queryKey: ["library-item", manuscriptId],
     queryFn: () => api.get<LibraryItemOut>(`/library/${manuscriptId}`),
-    enabled: manuscriptId !== undefined,
+    enabled: enabled && validId,
   });
 }
 
@@ -33,26 +34,29 @@ export function useLibraryItem(manuscriptId: number | undefined) {
 // a NOT-owned manuscript; never for an owned one (the own-document query
 // below is what renders instead).
 export function useLibraryExcerpt(manuscriptId: number | undefined, enabled: boolean) {
+  const validId = manuscriptId !== undefined && Number.isInteger(manuscriptId) && manuscriptId > 0;
   return useQuery({
     queryKey: ["library-excerpt", manuscriptId],
     queryFn: () => api.get<LibraryExcerptOut>(`/library/${manuscriptId}/excerpt`),
-    enabled: enabled && manuscriptId !== undefined,
+    enabled: enabled && validId,
   });
 }
 
 export function useLibraryDocument(manuscriptId: number | undefined, enabled: boolean) {
+  const validId = manuscriptId !== undefined && Number.isInteger(manuscriptId) && manuscriptId > 0;
   return useQuery({
     queryKey: ["library-document", manuscriptId],
     queryFn: () => api.get<ManuscriptViewerOut>(`/library/${manuscriptId}/document`),
-    enabled: enabled && manuscriptId !== undefined,
+    enabled: enabled && validId,
   });
 }
 
 export function useLibraryParagraphs(manuscriptId: number | undefined, enabled: boolean) {
+  const validId = manuscriptId !== undefined && Number.isInteger(manuscriptId) && manuscriptId > 0;
   return useQuery({
     queryKey: ["library-paragraphs", manuscriptId],
     queryFn: () => api.get<DocumentParagraphsOut>(`/library/${manuscriptId}/document/paragraphs`),
-    enabled: enabled && manuscriptId !== undefined,
+    enabled: enabled && validId,
   });
 }
 
