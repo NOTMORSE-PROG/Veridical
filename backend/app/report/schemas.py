@@ -418,6 +418,11 @@ class FlagSummaryOut(BaseModel):
     # a short, honest problem label; an unmapped or absent kind renders no
     # label rather than a guessed one (`frontend/src/domain/problemLabel.ts`).
     problem_kind: str | None = None
+    # BUG-141: an opaque archive identifier used only to establish finding
+    # identity across whole-document/chapter/passage locations. This is the
+    # same non-identifying reference already disclosed by F7 evidence; never
+    # expose `matched_group_label` or any other instructor-private metadata.
+    matched_ref: int | None = None
 
 
 class FlagRegionOut(BaseModel):
