@@ -6,6 +6,7 @@ import { useEffect, useRef, useState } from "react";
 import { ApiError } from "../api/client";
 import type { EscalatedItemOut, EscalationResolution } from "../api/types";
 import { cx } from "../components/cx";
+import { RESOLUTION_REASON_MIN_LENGTH as CONFIGURED_REASON_MIN_LENGTH } from "../config/ui";
 import { useEscalatedItems, useResolveEscalation } from "./useReport";
 
 // BUG-096: mirrors `config.py`'s `resolution_reason_min_length` -- the
@@ -19,7 +20,7 @@ import { useEscalatedItems, useResolveEscalation } from "./useReport";
 // the PDF, and the public share link. Exported (BUG-095 follow-up) so
 // `DecisionModal.tsx` can reuse the same floor for the decision-note
 // field instead of hardcoding a second, possibly-drifting copy.
-export const RESOLUTION_REASON_MIN_LENGTH = 10;
+export const RESOLUTION_REASON_MIN_LENGTH = CONFIGURED_REASON_MIN_LENGTH;
 
 // Same glyph as StatusPill's "caution" tone (circle + centered exclamation)
 // — this panel IS the ambiguous-middle-case surface the caution tone
