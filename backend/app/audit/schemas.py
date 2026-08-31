@@ -14,6 +14,7 @@ class AuditLogSummary(BaseModel):
     id: int
     event_type: str
     check_run_id: int | None
+    manuscript_id: int | None = None
     manuscript_group_label: str | None
     prompt_type: str | None
     prompt_version: str | None

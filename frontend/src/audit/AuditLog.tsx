@@ -15,7 +15,7 @@
 // color alone) using data the backend already sends but this screen
 // never rendered.
 import { useEffect, useRef, useState } from "react";
-import { useSearchParams } from "react-router";
+import { Link, useSearchParams } from "react-router";
 import { ApiError } from "../api/client";
 import type { AuditLogSummary } from "../api/types";
 import { Chip } from "../components/Chip";
@@ -44,20 +44,65 @@ const EVENT_LABELS: Record<string, string> = {
   report_decided: "Decision recorded",
   report_reopened: "Decision reopened",
   manuscript_purged: "Archive purged",
+  check_run_cancel_requested: "Check cancellation requested",
+  check_run_cancelled: "Check cancelled",
+  citation_source_confirmed: "Citation source confirmed",
+  manuscript_ingestion_failure_dismissed: "Failed upload moved to Archive",
 };
 
+const PROMPT_LABELS: Record<string, string> = {
+  agreement_pairing: "Grading agreement review",
+  claim_support: "Claim and citation review",
+  image_table_extraction: "Image and table reading",
+  ping: "AI service check",
+  rubric_decomposition: "Required-format preparation",
+  semantic_grading: "Semantic criterion review",
+};
+
+const EVENT_EXPLANATIONS: Record<string, string> = {
+  llm_call: "VERIDICAL completed an AI-assisted review step and preserved the exact inputs and response for reproducibility.",
+  llm_cache_hit: "VERIDICAL reused a matching stored AI response instead of spending another service call.",
+  llm_call_failed: "An AI-assisted review step did not complete. The record preserves the failure context without treating it as an assessment.",
+  criterion_routing: "VERIDICAL recorded whether a criterion could be checked by a deterministic rule or needed AI-assisted review.",
+  escalation_resolved: "You resolved a criterion that VERIDICAL had left for instructor judgment.",
+  flag_overridden: "You changed how a system finding should affect the readiness review.",
+  flag_annotated: "You added instructor context to a system finding.",
+  rubric_parse_attempt: "VERIDICAL recorded an attempt to prepare review criteria from the uploaded required format.",
+  llm_model_exhausted: "The configured AI service choices were unavailable, so the affected work was not treated as assessed.",
+  report_decided: "You recorded the final instructor outcome for this readiness review.",
+  report_reopened: "You reopened a previously recorded instructor outcome for further review.",
+  manuscript_purged: "You permanently removed archived manuscript content while retaining the minimum audit history.",
+  check_run_cancel_requested: "You requested that an active manuscript check stop at its next safe boundary.",
+  check_run_cancelled: "VERIDICAL stopped the manuscript check and preserved its completed work and history.",
+  citation_source_confirmed: "You confirmed the source associated with a citation-integrity finding.",
+  manuscript_ingestion_failure_dismissed: "You moved a failed upload out of the active Review Desk and into Archive.",
+};
+
+function humanizeIdentifier(value: string): string {
+  const words = value.replace(/[_-]+/g, " ").replace(/\s+/g, " ").trim();
+  if (!words) return "Recorded activity";
+  return words[0].toUpperCase() + words.slice(1);
+}
+
 function eventLabel(row: AuditLogSummary): string {
-  return EVENT_LABELS[row.event_type] ?? row.event_type;
+  return EVENT_LABELS[row.event_type] ?? humanizeIdentifier(row.event_type);
+}
+
+function eventExplanation(row: AuditLogSummary): string {
+  return EVENT_EXPLANATIONS[row.event_type]
+    ?? "VERIDICAL preserved this activity as part of the review's immutable history.";
 }
 
 function eventSummary(row: AuditLogSummary): string {
   const parts: string[] = [];
-  if (row.prompt_type) parts.push(row.prompt_type);
+  if (row.prompt_type) parts.push(PROMPT_LABELS[row.prompt_type] ?? humanizeIdentifier(row.prompt_type));
   if (row.prompt_version) parts.push(`prompt v${row.prompt_version.replace(/^v/, "")}`);
-  if (row.agreement_score !== null) {
-    const asFraction = Math.round(row.agreement_score * 3);
-    parts.push(`agreement ${row.agreement_score.toFixed(2)} (~${asFraction}/3)`);
-  }
+  // `agreement_score` is deliberately absent from the instructor summary.
+  // The audit contract does not carry its denominator or provenance: a
+  // semantic score can come from two passes (a third runs only after a
+  // disagreement), while instructor override events reuse the same field
+  // for flag confidence. Turning it into a vote count would invent facts.
+  // The exact stored number remains available in the technical disclosure.
   return parts.join(" · ");
 }
 
@@ -112,7 +157,10 @@ function isInstructorEvent(eventType: string): boolean {
     eventType === "escalation_resolved" ||
     eventType === "report_decided" ||
     eventType === "report_reopened" ||
-    eventType === "manuscript_purged"
+    eventType === "manuscript_purged" ||
+    eventType === "check_run_cancel_requested" ||
+    eventType === "citation_source_confirmed" ||
+    eventType === "manuscript_ingestion_failure_dismissed"
   );
 }
 
@@ -165,7 +213,6 @@ function EventContent({ row }: { row: AuditLogSummary }) {
 function AuditDetailModal({ id, onClose }: { id: number; onClose: () => void }) {
   const { data, isLoading, isError, error, refetch } = useAuditLogDetail(id);
   const payloadPreview = data ? JSON.stringify(data.payload, null, 2) : "";
-  const capped = payloadPreview.length > 4000;
   const instructor = data ? isInstructorEvent(data.event_type) : false;
   const instructorId =
     data && typeof data.payload.instructor_id === "number" ? data.payload.instructor_id : null;
@@ -221,26 +268,46 @@ function AuditDetailModal({ id, onClose }: { id: number; onClose: () => void }) 
                 })}
               </span>
             </div>
-            {data.input_hash && (
-              <div className="rounded-md bg-page px-2.5 py-1.5 font-mono text-xs break-all text-ink-tertiary">
-                input_hash: {data.input_hash}
-              </div>
-            )}
-            <div>
-              <div className="mb-1 text-xs font-semibold tracking-header text-ink-tertiary uppercase">
-                Raw payload {capped && "(preview only, the stored record is never truncated)"}
-              </div>
-              <pre className="max-h-80 overflow-auto rounded-md border border-border bg-page p-2.5 text-xs whitespace-pre-wrap break-words text-ink">
-                {capped ? payloadPreview.slice(0, 4000) + "\n…" : payloadPreview}
-              </pre>
-            </div>
+            <section aria-labelledby={`audit-entry-${id}-meaning`} className="rounded-md border border-border bg-page p-3">
+              <h3 id={`audit-entry-${id}-meaning`} className="font-semibold text-ink">What this records</h3>
+              <p className="mt-1 text-ink-secondary">{eventExplanation(data)}</p>
+              {eventSummary(data) && (
+                <p className="mt-1 text-ink-secondary">Review context: {eventSummary(data)}.</p>
+              )}
+            </section>
             <p className="rounded-md bg-status-info-bg px-2.5 py-1.5 text-xs text-status-info-text">
-              This entry is immutable: it cannot be edited or deleted. Replay it exactly with the
-              command below.
+              This entry is immutable: it cannot be edited or deleted. Its exact stored values
+              remain available below for technical inspection and reproduction workflows, but
+              they are not required for the instructor's review task.
             </p>
-            <code className="block rounded-md border border-border bg-page px-2.5 py-1.5 font-mono text-xs break-all text-ink">
-              uv run python -m scripts.replay_call {id}
-            </code>
+            <details className="rounded-md border border-border bg-panel p-3">
+              <summary className="min-h-11 cursor-pointer font-semibold text-link">
+                Technical record for reproducibility
+              </summary>
+              <p className="mb-2 text-xs text-ink-secondary">
+                These are the exact stored system values. Field names and identifiers are shown
+                unchanged so a technical reviewer can inspect the record or use it in a
+                reproduction workflow.
+              </p>
+              {data.agreement_score !== null && (
+                <div className="rounded-md bg-page px-2.5 py-1.5 font-mono text-xs break-all text-ink-tertiary">
+                  agreement_score: {data.agreement_score}
+                </div>
+              )}
+              {data.input_hash && (
+                <div className="mt-2 rounded-md bg-page px-2.5 py-1.5 font-mono text-xs break-all text-ink-tertiary">
+                  input_hash: {data.input_hash}
+                </div>
+              )}
+              <div className="mt-2">
+                <div className="mb-1 text-xs font-semibold tracking-header text-ink-tertiary uppercase">
+                  Raw payload
+                </div>
+                <pre className="max-h-80 overflow-auto rounded-md border border-border bg-page p-2.5 text-xs whitespace-pre-wrap break-words text-ink">
+                  {payloadPreview}
+                </pre>
+              </div>
+            </details>
           </div>
         )}
       </Modal>
@@ -315,21 +382,32 @@ export function AuditLogPage() {
   const totalPages = data ? Math.max(1, Math.ceil(data.total / data.page_size)) : 1;
 
   return (
-    <div className="flex flex-col gap-4 p-4 sm:p-6">
-      <div>
+    <div className="signal-route signal-audit">
+      <header className="signal-route-header">
+        <div>
+          <p className="signal-eyebrow">Immutable activity record</p>
         <h1
           ref={headingRef}
           id="audit-log-heading"
           tabIndex={-1}
-          className="text-lg font-bold text-ink sm:text-xl"
         >
-          Audit log
+          Audit
         </h1>
-        <p className="text-sm text-ink-secondary">
-          Every AI call, escalation resolution, and override on your account. Nothing here can be
-          edited or deleted.
+        <p className="signal-route-header__intro">
+          Trace system activity and instructor actions. Audit entries cannot be edited or deleted.
         </p>
-      </div>
+        </div>
+      </header>
+
+      {checkRunId !== undefined && (
+        <aside className="signal-audit-context" aria-label="Audit scope">
+          <div>
+            <strong>Showing activity for check run {checkRunId}</strong>
+            <span>This filtered record follows the selected readiness review.</span>
+          </div>
+          <Link to={`/report/${checkRunId}`}>Return to readiness report</Link>
+        </aside>
+      )}
 
       <p role="status" aria-live="polite" className="sr-only">
         {announcement}

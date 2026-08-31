@@ -82,10 +82,14 @@ describe("AuditLogPage", () => {
     expect(screen.getAllByText("Instructor action:", { exact: false }).length).toBeGreaterThan(0);
   });
 
-  it("shows the agreement score in the event summary", async () => {
+  it("BUG-188: does not invent a vote count from an agreement field with unknown provenance", async () => {
     vi.stubGlobal("fetch", stubFetchByPath({ "/audit": PAGE }));
     renderWithProviders(<AuditLogPage />, { route: "/audit", path: "/audit" });
-    expect((await screen.findAllByText(/agreement 0\.67/)).length).toBeGreaterThan(0);
+    await screen.findAllByText("AI call");
+    expect(screen.queryByText(/grading passes agreed/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/0\.67/)).not.toBeInTheDocument();
+    expect(screen.queryByText("semantic_grading")).not.toBeInTheDocument();
+    expect(screen.getAllByText(/Semantic criterion review/).length).toBeGreaterThan(0);
   });
 
   it("shows an empty state honestly, not a blank table, and announces it", async () => {
@@ -98,7 +102,7 @@ describe("AuditLogPage", () => {
     expect(await screen.findByText("No audit events match this filter.", { selector: '[role="status"]' })).toBeInTheDocument();
   });
 
-  it("opens the detail drawer with the full stored payload", async () => {
+  it("BUG-188: opens with an instructor explanation and keeps exact data in a closed technical disclosure", async () => {
     vi.stubGlobal(
       "fetch",
       stubFetchByPath({ "/audit": PAGE, "/audit/42": DETAIL }),
@@ -107,8 +111,45 @@ describe("AuditLogPage", () => {
     await screen.findAllByText("AI call");
     fireEvent.click(screen.getAllByRole("button", { name: "Detail" })[0]);
     expect(await screen.findByText(`Audit entry #42`)).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "What this records" })).toBeInTheDocument();
+    expect(screen.getByText(/completed an AI-assisted review step/)).toBeInTheDocument();
+    const technical = screen.getByText("Technical record for reproducibility").closest("details");
+    expect(technical).not.toHaveAttribute("open");
+    expect(await screen.findByText(/agreement_score:\s*0\.667/)).toBeInTheDocument();
     expect(await screen.findByText(/input_hash:\s*abc123/)).toBeInTheDocument();
-    expect(screen.getByText(/uv run python -m scripts.replay_call 42/)).toBeInTheDocument();
+    expect(screen.getByText(/"prompt_type": "semantic_grading"/)).toBeInTheDocument();
+    expect(screen.queryByText(/uv run python -m scripts\.replay_call/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/can reproduce the record/i)).not.toBeInTheDocument();
+    expect(screen.getByText(/use it in a reproduction workflow/i)).toBeInTheDocument();
+  });
+
+  it("BUG-188: keeps override confidence exact in technical data without calling it grader agreement", async () => {
+    const override = {
+      ...PAGE.items[0],
+      id: 43,
+      event_type: "flag_overridden",
+      prompt_type: null,
+      prompt_version: null,
+      agreement_score: 0.91,
+    };
+    vi.stubGlobal(
+      "fetch",
+      stubFetchByPath({
+        "/audit": { items: [override], total: 1, page: 1, page_size: 25 },
+        "/audit/43": {
+          ...override,
+          input_hash: null,
+          payload: { flag_id: 19, confidence: 0.91, instructor_id: 1 },
+        },
+      }),
+    );
+    renderWithProviders(<AuditLogPage />, { route: "/audit", path: "/audit" });
+    await screen.findAllByText("Flag overridden");
+    expect(screen.queryByText(/grading passes|0\.91/)).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getAllByRole("button", { name: "Detail" })[0]);
+    expect(await screen.findByText(/agreement_score:\s*0\.91/)).toBeInTheDocument();
+    expect(screen.queryByText(/grading passes/)).not.toBeInTheDocument();
   });
 
   it("BUG-022: shows the manuscript's filename in the detail drawer, but not in the list rows (which stay light at volume)", async () => {
@@ -159,7 +200,7 @@ describe("AuditLogPage", () => {
     await screen.findAllByText("AI call");
     const heading = document.getElementById("audit-log-heading");
     expect(heading).not.toBeNull();
-    expect(heading?.textContent).toBe("Audit log");
+    expect(heading?.textContent).toBe("Audit");
   });
 
   it("BUG (ux-critic finding): the Detail modal shows a real error and retry, never stays stuck on 'Loading' forever", async () => {
@@ -207,5 +248,29 @@ describe("AuditLogPage", () => {
     expect(screen.getAllByText("AI model exhausted, failed over").length).toBe(2);
     expect(screen.queryAllByText("rubric_parse_attempt")).toHaveLength(0);
     expect(screen.queryAllByText("llm_model_exhausted")).toHaveLength(0);
+  });
+
+  it("BUG-188: labels current workflow events and humanizes future identifiers instead of exposing raw enums", async () => {
+    const workflowEvents = {
+      items: [
+        { ...PAGE.items[0], id: 60, event_type: "citation_source_confirmed" },
+        { ...PAGE.items[0], id: 61, event_type: "check_run_cancel_requested" },
+        { ...PAGE.items[0], id: 62, event_type: "check_run_cancelled" },
+        { ...PAGE.items[0], id: 63, event_type: "manuscript_ingestion_failure_dismissed" },
+        { ...PAGE.items[0], id: 64, event_type: "future_review_event" },
+      ],
+      total: 5,
+      page: 1,
+      page_size: 25,
+    };
+    vi.stubGlobal("fetch", stubFetchByPath({ "/audit": workflowEvents }));
+    renderWithProviders(<AuditLogPage />, { route: "/audit", path: "/audit" });
+
+    expect((await screen.findAllByText("Citation source confirmed")).length).toBe(2);
+    expect(screen.getAllByText("Check cancellation requested").length).toBe(2);
+    expect(screen.getAllByText("Check cancelled").length).toBe(2);
+    expect(screen.getAllByText("Failed upload moved to Archive").length).toBe(2);
+    expect(screen.getAllByText("Future review event").length).toBe(2);
+    expect(screen.queryByText(/citation_source_confirmed|future_review_event/)).not.toBeInTheDocument();
   });
 });

@@ -130,6 +130,44 @@ async def test_rows_with_no_check_run_id_are_excluded_not_leaked(session_factory
         assert page.total == 1
 
 
+async def test_direct_manuscript_attribution_is_visible_only_to_its_owner(session_factory):
+    """A pre-run lifecycle event remains traceable without leaking instructors."""
+    async with session_factory() as session:
+        mine = Instructor(email="direct-mine@test.local", display_name="Direct Mine")
+        theirs = Instructor(email="direct-theirs@test.local", display_name="Direct Theirs")
+        session.add_all([mine, theirs])
+        await session.flush()
+        manuscript = Manuscript(
+            instructor_id=mine.id,
+            group_label="Direct Team",
+            file_ref="broken.pdf",
+            original_filename="broken.pdf",
+        )
+        session.add(manuscript)
+        await session.flush()
+        event = AuditLog(
+            event_type="manuscript_ingestion_failure_dismissed",
+            check_run_id=None,
+            manuscript_id=manuscript.id,
+            payload={"manuscript_id": manuscript.id},
+        )
+        session.add(event)
+        await session.commit()
+
+        mine_page = await list_audit_log(session, mine.id)
+        assert mine_page.total == 1
+        assert mine_page.items[0].manuscript_id == manuscript.id
+        assert mine_page.items[0].check_run_id is None
+
+        detail = await get_audit_log_detail(session, mine.id, event.id)
+        assert detail.manuscript_original_filename == "broken.pdf"
+
+        theirs_page = await list_audit_log(session, theirs.id)
+        assert theirs_page.total == 0
+        with pytest.raises(NotFoundError):
+            await get_audit_log_detail(session, theirs.id, event.id)
+
+
 async def test_filters_by_check_run_id_and_event_type(session_factory):
     async with session_factory() as session:
         instructor = Instructor(email="f@test.local", display_name="F")

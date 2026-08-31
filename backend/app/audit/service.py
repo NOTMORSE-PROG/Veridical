@@ -3,13 +3,12 @@ written by `LLMQueue` (V-009/V-022); every escalation resolution/override
 writes its own row too (V-023/V-026). This module only ever READS —
 `audit_log` itself is DB-append-only (migration 0001's trigger).
 
-Scoping: only rows whose `check_run_id` resolves to one of THIS
-instructor's manuscripts are ever returned. Rows with no `check_run_id`
-(rubric decomposition, the ingestion vision pass — both happen before any
-check_run exists) aren't attributable to an instructor through this join
-and are excluded here — an honest, logged gap (STATE.md), not a silent
-one; nothing security-sensitive is lost since those events don't carry
-manuscript content specific to a single instructor's grading decision.
+Scoping: a row is returned only when either its `check_run_id` resolves to
+one of THIS instructor's manuscripts or its direct `manuscript_id` does.
+The direct attribution is for instructor-visible lifecycle events that can
+happen before a check run exists, such as dismissing a failed ingestion.
+Rows with neither attribution remain excluded rather than guessed into an
+instructor's history.
 """
 
 from datetime import datetime
@@ -29,8 +28,11 @@ from app.models.run import CheckRun
 def _scoped_query(instructor_id: int):
     return (
         select(AuditLog, Manuscript.group_label, Manuscript.original_filename)
-        .join(CheckRun, CheckRun.id == AuditLog.check_run_id)
-        .join(Manuscript, Manuscript.id == CheckRun.manuscript_id)
+        .outerjoin(CheckRun, CheckRun.id == AuditLog.check_run_id)
+        .join(
+            Manuscript,
+            Manuscript.id == func.coalesce(CheckRun.manuscript_id, AuditLog.manuscript_id),
+        )
         .where(Manuscript.instructor_id == instructor_id)
     )
 
@@ -41,6 +43,7 @@ def _summary(row: AuditLog, group_label: str | None) -> AuditLogSummary:
         id=row.id,
         event_type=row.event_type,
         check_run_id=row.check_run_id,
+        manuscript_id=row.manuscript_id,
         manuscript_group_label=group_label,
         prompt_type=payload.get("prompt_type"),
         prompt_version=row.prompt_version,
@@ -113,6 +116,7 @@ async def write_audit_event(
     event_type: str,
     check_run_id: int | None,
     payload: dict[str, Any],
+    manuscript_id: int | None = None,
     prompt_version: str | None = None,
     input_hash: str | None = None,
     agreement_score: float | None = None,
@@ -123,6 +127,7 @@ async def write_audit_event(
     entry = AuditLog(
         event_type=event_type,
         check_run_id=check_run_id,
+        manuscript_id=manuscript_id,
         prompt_version=prompt_version,
         input_hash=input_hash,
         agreement_score=_decimal_or_none(agreement_score),
