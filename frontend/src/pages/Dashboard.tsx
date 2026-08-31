@@ -80,7 +80,7 @@ function formatActivity(iso: string): string {
 }
 
 function recordProcess(row: ManuscriptListItem) {
-  // A check run can only reach a terminal or active pipeline state after the
+  // BUG-190: a check run can only reach a terminal or active pipeline state after the
   // manuscript became usable. Some legacy records still carry an older ingest
   // value, so the newer check-run evidence must win; otherwise one card can
   // claim both "Preparing manuscript" and "Record instructor decision."
