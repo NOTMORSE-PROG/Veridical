@@ -106,6 +106,12 @@ class Settings(BaseSettings):
     # 200MB "manuscript" should never reach the parser). Real capstone
     # PDFs run 5–25 MB.
     max_upload_mb: int = 40
+    # Manuscript list paging is consumed by both the Review Desk and New
+    # Check picker. The picker still requests the upper bound in one call;
+    # keep both values configurable so that contract can be tightened when
+    # server-side picker pagination ships without changing application code.
+    manuscript_list_default_page_size: int = 50
+    manuscript_list_max_page_size: int = 200
     # DOCX is a zip archive — `max_upload_mb` only caps the COMPRESSED size
     # on disk. A crafted archive can expand far beyond that in memory
     # during parsing (zip-bomb class risk, BUG-005/D-020). This caps total
@@ -624,6 +630,15 @@ class Settings(BaseSettings):
         if self.weight_importance_low_max_ratio >= self.weight_importance_high_min_ratio:
             raise ValueError(
                 "weight_importance_low_max_ratio must be less than weight_importance_high_min_ratio"
+            )
+        if (
+            self.manuscript_list_default_page_size < 1
+            or self.manuscript_list_max_page_size < 1
+            or self.manuscript_list_default_page_size > self.manuscript_list_max_page_size
+        ):
+            raise ValueError(
+                "manuscript_list_default_page_size must be between 1 and "
+                "manuscript_list_max_page_size"
             )
         return self
 

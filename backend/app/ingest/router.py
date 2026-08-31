@@ -19,12 +19,16 @@ from app.groups.service import DEFAULT_GROUP_LABEL, program_name_for
 from app.ingest.schemas import (
     ConfirmGroupRequest,
     ConfirmGroupResponse,
+    DismissedManuscriptOut,
     IngestSummary,
+    ManuscriptQueueStatus,
+    ManuscriptSort,
     PaginatedManuscripts,
     TitlePageProposalOut,
 )
 from app.ingest.service import (
     confirm_manuscript_group,
+    dismiss_failed_manuscript,
     get_group_proposal,
     ingest_upload,
     list_manuscripts,
@@ -33,6 +37,10 @@ from app.models.instructor import Instructor
 from app.ratelimit import enforce_action_rate_limit
 
 router = APIRouter(tags=["ingestion"])
+
+_settings = get_settings()
+_MANUSCRIPT_LIST_DEFAULT_PAGE_SIZE = _settings.manuscript_list_default_page_size
+_MANUSCRIPT_LIST_MAX_PAGE_SIZE = _settings.manuscript_list_max_page_size
 
 # Streaming read size for uploads; purely an I/O buffer, not a policy knob.
 _CHUNK_BYTES = 1024 * 1024
@@ -85,6 +93,23 @@ async def ingest_manuscript_upload(
     )
 
 
+@router.post(
+    "/manuscripts/{manuscript_id}/dismiss",
+    response_model=DismissedManuscriptOut,
+)
+async def dismiss_failed_manuscript_route(
+    manuscript_id: int,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    instructor: Annotated[Instructor, Depends(get_current_instructor)],
+) -> DismissedManuscriptOut:
+    manuscript = await dismiss_failed_manuscript(session, instructor.id, manuscript_id)
+    assert manuscript.dismissed_at is not None
+    return DismissedManuscriptOut(
+        manuscript_id=manuscript.id,
+        dismissed_at=manuscript.dismissed_at,
+    )
+
+
 @router.get("/manuscripts/{manuscript_id}/group-proposal", response_model=TitlePageProposalOut)
 async def get_group_proposal_route(
     manuscript_id: int,
@@ -132,13 +157,30 @@ async def confirm_manuscript_group_route(
 async def list_manuscripts_route(
     session: Annotated[AsyncSession, Depends(get_session)],
     instructor: Annotated[Instructor, Depends(get_current_instructor)],
-    page: int = 1,
-    page_size: int = 50,
+    page: Annotated[int, Query(ge=1)] = 1,
+    # Existing New Check requests 200 until its picker is server-paginated.
+    page_size: Annotated[int, Query(ge=1, le=_MANUSCRIPT_LIST_MAX_PAGE_SIZE)] = (
+        _MANUSCRIPT_LIST_DEFAULT_PAGE_SIZE
+    ),
+    q: str | None = None,
+    status: ManuscriptQueueStatus | None = None,
+    needs_review: bool | None = None,
+    group: str | None = None,
     # V-062 (AC5): filters to manuscripts whose group has this program.
     # `UNSET_PROGRAM_FILTER` ("__unset__") asks for manuscripts with no
     # program set instead -- a real filter state, not an unreachable one.
     program: str | None = None,
+    sort: ManuscriptSort = ManuscriptSort.newest,
 ) -> PaginatedManuscripts:
     return await list_manuscripts(
-        session, instructor.id, page=page, page_size=page_size, program=program
+        session,
+        instructor.id,
+        page=page,
+        page_size=page_size,
+        q=q,
+        status=status,
+        needs_review=needs_review,
+        group=group,
+        program=program,
+        sort=sort,
     )
