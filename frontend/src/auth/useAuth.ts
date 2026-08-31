@@ -29,6 +29,11 @@ export function useLogin() {
     mutationFn: (credentials: { email: string; password: string }) =>
       api.post<Instructor>("/auth/login", credentials),
     onSuccess: (instructor) => {
+      // BUG-183: an expired session can leave Instructor A's user-scoped
+      // queries in this tab even though the sign-in screen is showing. Clear
+      // the whole cache before Instructor B becomes current, matching the
+      // shared-machine boundary already enforced on explicit logout.
+      queryClient.clear();
       queryClient.setQueryData(ME_QUERY_KEY, instructor);
     },
   });
