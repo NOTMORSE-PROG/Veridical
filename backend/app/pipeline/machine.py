@@ -13,14 +13,16 @@ AC).
 """
 
 import copy
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.audit.service import write_audit_event
 from app.checks.agreement.service import (
     existing_internal_agreement_result,
     run_internal_agreement_check,
@@ -55,7 +57,7 @@ from app.models.citation import Citation
 from app.models.enums import CheckKind, CheckRunStatus, IngestStatus, ResultOutcome
 from app.models.manuscript import Manuscript
 from app.models.rubric import Rubric
-from app.models.run import CheckResult, CheckRun
+from app.models.run import CheckResult, CheckRun, ReadinessReport
 from app.report.service import aggregate_and_score
 
 _STAGE_AFTER: dict[CheckRunStatus, CheckRunStatus] = {
@@ -73,6 +75,151 @@ _INTEGRITY_STAGE_NOTE = (
     "forensics (GRIM/GRIMMER, p-value recalculation, sanity checks), and "
     "originality/reuse (archive similarity) all ran."
 )
+
+
+async def _finish_cancel_if_requested(session: AsyncSession, check_run: CheckRun) -> bool:
+    """Stop at a persistence boundary without presenting partial work as done.
+
+    The cancellation API writes only `cancel_requested_at` for an active run.
+    Refreshing that separate column prevents a concurrent request from being
+    lost when this worker commits its own stage transition.
+    """
+    locked = await session.scalar(
+        select(CheckRun)
+        .where(CheckRun.id == check_run.id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
+    if locked is None:
+        return True
+    check_run = locked
+    if check_run.status == CheckRunStatus.cancelled:
+        return True
+    if check_run.cancel_requested_at is None:
+        await session.commit()
+        return False
+
+    current_stage = check_run.status
+    stages = (check_run.stage_status or {}).get("stages", {})
+    stage_detail = stages.get(current_stage.value, {}) if isinstance(stages, dict) else {}
+    current_stage_finished = isinstance(stage_detail, dict) and stage_detail.get("status") == "done"
+    if current_stage == CheckRunStatus.queued:
+        stopped_before = CheckRunStatus.ingesting.value
+    elif current_stage_finished and current_stage in _STAGE_AFTER:
+        stopped_before = _STAGE_AFTER[current_stage].value
+    else:
+        stopped_before = current_stage.value
+    # Aggregation may have created a report in the same interval in which the
+    # instructor requested cancellation. Keep intermediate results and every
+    # audit row, but never leave a terminal report reachable for a cancelled
+    # run (V-071 AC12: a half-run must not look complete).
+    await session.execute(
+        delete(ReadinessReport).where(ReadinessReport.check_run_id == check_run.id)
+    )
+    check_run.status = CheckRunStatus.cancelled
+    check_run.finished_at = datetime.now(UTC)
+    status = dict(check_run.stage_status or {})
+    status["cancellation"] = {
+        "status": "cancelled",
+        "requested_at": check_run.cancel_requested_at.isoformat(),
+        "stopped_before": stopped_before,
+    }
+    check_run.stage_status = status
+    await write_audit_event(
+        session,
+        event_type="check_run_cancelled",
+        check_run_id=check_run.id,
+        payload={"stopped_before": stopped_before},
+    )
+    await session.commit()
+    return True
+
+
+class CancellationAccepted(Exception):
+    """Internal control flow after a persisted terminal cancellation."""
+
+
+CancellationBoundary = Callable[[], Awaitable[None]]
+
+
+async def _transition_after_boundary(
+    session: AsyncSession,
+    check_run: CheckRun,
+    completed_stage: CheckRunStatus,
+) -> bool:
+    """Persist one safe unit, then atomically advance only if not cancelled.
+
+    The conditional UPDATE is the database winner for the completion/cancel
+    race. A request timestamp written first prevents the next stage (including
+    terminal DONE) from being entered. A terminal transition written first
+    makes the cancellation endpoint return Conflict without persisting a
+    misleading request.
+    """
+    await session.commit()
+    if await _finish_cancel_if_requested(session, check_run):
+        return False
+
+    next_stage = _STAGE_AFTER[completed_stage]
+    values: dict[str, Any] = {"status": next_stage}
+    now = datetime.now(UTC)
+    if completed_stage == CheckRunStatus.queued:
+        values["started_at"] = func.coalesce(CheckRun.started_at, now)
+    if next_stage == CheckRunStatus.done:
+        values["finished_at"] = now
+
+    advanced = (
+        await session.execute(
+            update(CheckRun)
+            .where(
+                CheckRun.id == check_run.id,
+                CheckRun.status == completed_stage,
+                CheckRun.cancel_requested_at.is_(None),
+            )
+            .values(**values)
+            .returning(CheckRun.id)
+        )
+    ).first()
+    if advanced is None:
+        await session.refresh(check_run)
+        if check_run.cancel_requested_at is not None:
+            await _finish_cancel_if_requested(session, check_run)
+        return False
+
+    await session.commit()
+    await session.refresh(check_run)
+    return True
+
+
+async def _exception_target_if_not_cancelled(
+    session: AsyncSession, check_run: CheckRun
+) -> CheckRun | None:
+    """Lock the run after an exception and honor the terminal-state winner.
+
+    A cancellation request may commit while a stage is unwinding through an
+    exception. Roll back that stage's unsafe unit, then hold the row lock until
+    cancellation is finalized or the failure/blocked state is persisted. This
+    prevents every exception exit from overwriting an accepted instructor stop.
+    """
+    check_run_id = check_run.id
+    await session.rollback()
+    locked = await session.scalar(
+        select(CheckRun)
+        .where(CheckRun.id == check_run_id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
+    if locked is None:
+        return None
+    if locked.status == CheckRunStatus.cancelled:
+        await session.commit()
+        return None
+    if locked.cancel_requested_at is not None:
+        await _finish_cancel_if_requested(session, locked)
+        return None
+    if locked.status not in _STAGE_AFTER:
+        await session.commit()
+        return None
+    return locked
 
 
 @dataclass(frozen=True)
@@ -236,6 +383,7 @@ async def _run_semantic_stage(
     settings: Settings,
     manuscript: Manuscript,
     llm: LLMClient,
+    cancellation_boundary: CancellationBoundary,
 ) -> None:
     semantic_criterion_ids = [
         d.criterion_id for d in decisions if d.kind == CheckKind.semantic and not d.unroutable
@@ -246,7 +394,13 @@ async def _run_semantic_stage(
         extraction = load_raw_store(settings, manuscript.id)
         try:
             await run_semantic_checks_with_consistency(
-                session, check_run.id, pending, extraction, llm, settings
+                session,
+                check_run.id,
+                pending,
+                extraction,
+                llm,
+                settings,
+                cancellation_boundary,
             )
         except QuotaExhaustedError as exc:
             # AVAILABILITY FLOOR (V-050): the day's AI budget resets at
@@ -324,6 +478,7 @@ async def _run_integrity_stage(
     manuscript: Manuscript,
     settings: Settings,
     llm: LLMClient,
+    cancellation_boundary: CancellationBoundary,
 ) -> None:
     """F4 (internal agreement, V-034/V-035), F5 (citation integrity,
     V-027/V-028/V-029/V-030), F6 (statistical forensics, V-031/V-032/
@@ -342,6 +497,7 @@ async def _run_integrity_stage(
         agreement_flags = (
             agreement_existing.detail.get("n_flags", 0) if agreement_existing.detail else 0
         )
+    await cancellation_boundary()
 
     citation_existing = await existing_citation_integrity_result(session, check_run.id)
     if citation_existing is None:
@@ -364,6 +520,7 @@ async def _run_integrity_stage(
         citation_flags = (
             citation_existing.detail.get("n_flags", 0) if citation_existing.detail else 0
         )
+    await cancellation_boundary()
 
     forensics_existing = await existing_statistical_forensics_result(session, check_run.id)
     if forensics_existing is None:
@@ -375,6 +532,7 @@ async def _run_integrity_stage(
         forensics_flags = (
             forensics_existing.detail.get("n_flags", 0) if forensics_existing.detail else 0
         )
+    await cancellation_boundary()
 
     reuse_existing = await existing_originality_reuse_result(session, check_run.id)
     if reuse_existing is None:
@@ -384,6 +542,7 @@ async def _run_integrity_stage(
         reuse_detail = reuse_result.detail or {}
     else:
         reuse_detail = reuse_existing.detail or {}
+    await cancellation_boundary()
     reuse_flags = reuse_detail.get("n_flags", 0)
     # Cold-start disclosure (V-037 ticket AC): how many previously
     # processed manuscripts this run was actually compared against — shown
@@ -411,6 +570,9 @@ async def run_check_run(
 ) -> None:
     settings = settings or get_settings()
 
+    if await _finish_cancel_if_requested(session, check_run):
+        return
+
     manuscript = await session.get(Manuscript, check_run.manuscript_id)
     # V-052 (BYOK): resolved AFTER `manuscript` so the instructor's own
     # Gemini key (falling back to the shared pool on quota exhaustion) is
@@ -426,16 +588,20 @@ async def run_check_run(
         .options(selectinload(Rubric.criteria))
     )
 
+    async def cancellation_boundary() -> None:
+        if await _finish_cancel_if_requested(session, check_run):
+            raise CancellationAccepted
+
     try:
-        if check_run.status == CheckRunStatus.queued:
-            check_run.started_at = check_run.started_at or datetime.now(UTC)
-            check_run.status = _STAGE_AFTER[CheckRunStatus.queued]
-            await session.commit()
+        if check_run.status == CheckRunStatus.queued and not await _transition_after_boundary(
+            session, check_run, CheckRunStatus.queued
+        ):
+            return
 
         if check_run.status == CheckRunStatus.ingesting:
             await _run_ingesting_stage(check_run, manuscript)
-            check_run.status = _STAGE_AFTER[CheckRunStatus.ingesting]
-            await session.commit()
+            if not await _transition_after_boundary(session, check_run, CheckRunStatus.ingesting):
+                return
 
         criteria_by_id = {c.id: c for c in rubric.criteria}
         decisions = await _routed_decisions(session, check_run, rubric.criteria)
@@ -444,28 +610,42 @@ async def run_check_run(
             await _run_structural_stage(
                 session, check_run, criteria_by_id, decisions, settings, manuscript
             )
-            check_run.status = _STAGE_AFTER[CheckRunStatus.structural]
-            await session.commit()
+            if not await _transition_after_boundary(session, check_run, CheckRunStatus.structural):
+                return
 
         if check_run.status == CheckRunStatus.semantic:
             await _run_semantic_stage(
-                session, check_run, criteria_by_id, decisions, settings, manuscript, llm
+                session,
+                check_run,
+                criteria_by_id,
+                decisions,
+                settings,
+                manuscript,
+                llm,
+                cancellation_boundary,
             )
-            check_run.status = _STAGE_AFTER[CheckRunStatus.semantic]
-            await session.commit()
+            if not await _transition_after_boundary(session, check_run, CheckRunStatus.semantic):
+                return
 
         if check_run.status == CheckRunStatus.integrity:
-            await _run_integrity_stage(session, check_run, manuscript, settings, llm)
-            check_run.status = _STAGE_AFTER[CheckRunStatus.integrity]
-            await session.commit()
+            await _run_integrity_stage(
+                session,
+                check_run,
+                manuscript,
+                settings,
+                llm,
+                cancellation_boundary,
+            )
+            if not await _transition_after_boundary(session, check_run, CheckRunStatus.integrity):
+                return
 
         if check_run.status == CheckRunStatus.aggregating:
             await aggregate_and_score(session, check_run.id, settings)
             _record_stage(check_run, CheckRunStatus.aggregating, status="done")
-            check_run.status = _STAGE_AFTER[CheckRunStatus.aggregating]
-            check_run.finished_at = datetime.now(UTC)
-            await session.commit()
+            await _transition_after_boundary(session, check_run, CheckRunStatus.aggregating)
 
+    except CancellationAccepted:
+        return
     except PipelineBlockedError as exc:
         # BUG-032 finding: if the exception that landed us here came from a
         # DB-level failure mid-flush (an IntegrityError, a race with the
@@ -476,23 +656,26 @@ async def run_check_run(
         # lazy-load them on a plain sync attribute read afterward (raises
         # MissingGreenlet), so an explicit refresh is required before
         # `_record_blocked` touches `check_run.stage_status`.
-        await session.rollback()
-        await session.refresh(check_run)
-        _record_blocked(check_run, exc.block)
+        target = await _exception_target_if_not_cancelled(session, check_run)
+        if target is None:
+            return
+        _record_blocked(target, exc.block)
         await session.commit()
     except TerminalFailure as exc:
-        await session.rollback()
-        await session.refresh(check_run)  # see PipelineBlockedError note above
-        check_run.status = CheckRunStatus.failed
-        check_run.finished_at = datetime.now(UTC)
-        _record_failed(check_run, exc.code, exc.message)
+        target = await _exception_target_if_not_cancelled(session, check_run)
+        if target is None:
+            return
+        target.status = CheckRunStatus.failed
+        target.finished_at = datetime.now(UTC)
+        _record_failed(target, exc.code, exc.message)
         await session.commit()
     except FileMalformedError as exc:
-        await session.rollback()
-        await session.refresh(check_run)  # see PipelineBlockedError note above
-        check_run.status = CheckRunStatus.failed
-        check_run.finished_at = datetime.now(UTC)
-        _record_failed(check_run, "file_malformed", str(exc))
+        target = await _exception_target_if_not_cancelled(session, check_run)
+        if target is None:
+            return
+        target.status = CheckRunStatus.failed
+        target.finished_at = datetime.now(UTC)
+        _record_failed(target, "file_malformed", str(exc))
         await session.commit()
     except Exception as exc:
         # BUG-032: this runs inside a Starlette BackgroundTask (worker.py),
@@ -505,9 +688,10 @@ async def run_check_run(
         # so, not stay silent). Same generic-but-honest catch-all pattern as
         # IngestFailureReason (models/enums.py) — one bucket, not one per
         # exception type.
-        await session.rollback()
-        await session.refresh(check_run)  # see PipelineBlockedError note above
-        check_run.status = CheckRunStatus.failed
-        check_run.finished_at = datetime.now(UTC)
-        _record_failed(check_run, "unexpected_error", str(exc))
+        target = await _exception_target_if_not_cancelled(session, check_run)
+        if target is None:
+            return
+        target.status = CheckRunStatus.failed
+        target.finished_at = datetime.now(UTC)
+        _record_failed(target, "unexpected_error", str(exc))
         await session.commit()

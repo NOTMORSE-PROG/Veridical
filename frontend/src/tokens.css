@@ -122,6 +122,11 @@
      this is reasoned, not simulated. */
   --color-status-caution-bg: #f6e9f2;
   --color-status-caution-text: #7a3566; /* 8.30:1 on white, 7.06:1 on --color-status-caution-bg */
+  --color-reuse-passage-highlight: color-mix(
+    in srgb,
+    var(--color-status-caution-text) 20%,
+    transparent
+  );
 
   /* "Danger" status tone (readiness = Not Ready) — pure alias of the
      already-verified danger primitives, new StatusPillTone as of V-056.
@@ -224,6 +229,224 @@
  * Full rationale: context/DESIGN.md §1.9 (depth) and §1.10 (motion).
  */
 @theme static {
+  /*
+   * V-073 T.I.P. Signal Spine. These tokens coexist with the V-056 names
+   * only while routes are migrated. A route opts into the replacement system
+   * with `.signal-theme`; legacy and Signal components never mix in one route.
+   * The migration ends by deleting the legacy token block above.
+   */
+  --color-signal-brand: #ffc20f;
+  --color-signal-brand-hover: #e9af00;
+  --color-signal-brand-active: #d59f00;
+  --color-signal-foundation: #292929;
+  --color-signal-foundation-deep: #191a18;
+  --color-signal-canvas: #f4f1e8;
+  --color-signal-surface: #fffefa;
+  --color-signal-surface-muted: #eae6da;
+  --color-signal-ink: #191a18;
+  --color-signal-ink-secondary: #4d5350;
+  --color-signal-ink-muted: #676e6a;
+  --color-signal-border: #c6c2b8;
+  --color-signal-border-strong: #747972;
+  --color-signal-focus: #0b66d5;
+  --color-signal-focus-dark: #fffefa;
+  --color-signal-link: #1557a6;
+  --color-signal-link-hover: #0d4385;
+  --color-signal-scrim: rgba(25, 26, 24, 0.68);
+  --color-signal-border-on-dark: rgba(255, 254, 250, 0.22);
+  --color-signal-track-on-dark: rgba(255, 254, 250, 0.24);
+
+  --color-signal-ready-bg: #e2f4ef;
+  --color-signal-ready-text: #0b665b;
+  --color-signal-conditional-bg: #f1e9f8;
+  --color-signal-conditional-text: #693c99;
+  --color-signal-not-ready-bg: #fbe9ea;
+  --color-signal-not-ready-text: #9d2933;
+  --color-signal-review-bg: #e7f0fa;
+  --color-signal-review-text: #245f9b;
+  --color-signal-warning-bg: #faefe3;
+  --color-signal-warning-text: #7a4310;
+  --color-signal-neutral-bg: #eae6da;
+  --color-signal-neutral-text: #4d5350;
+
+  --font-signal-display: "Space Grotesk", "Segoe UI", system-ui, sans-serif;
+  --font-signal-interface: "IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
+  --signal-type-meta: 0.75rem;
+  --signal-type-label: 0.875rem;
+  --signal-type-body: 1rem;
+  --signal-type-body-lg: 1.125rem;
+  --signal-type-subhead: 1.25rem;
+  --signal-type-section: 1.5rem;
+  --signal-type-page: clamp(2rem, 2.5vw, 3rem);
+  --signal-type-hero: clamp(3rem, 6vw, 6.5rem);
+  --signal-type-auth-lead: clamp(2.5rem, 4vw, 4.5rem);
+  --signal-type-auth-lead-phone: clamp(2rem, 9vw, 3rem);
+  --signal-line-meta: 1.35;
+  --signal-line-label: 1.4;
+  --signal-line-body: 1.6;
+  --signal-line-control: 1.25;
+  --signal-line-section: 1.2;
+  --signal-line-page: 1.1;
+  --signal-line-hero: 1;
+  --signal-line-tight: 1;
+  --signal-weight-medium: 500;
+  --signal-weight-semibold: 600;
+  --signal-weight-bold: 700;
+  --signal-tracking-display: -0.025em;
+  --signal-tracking-label: 0.08em;
+
+  --signal-space-0: 0;
+  --signal-space-1: 0.25rem;
+  --signal-space-2: 0.5rem;
+  --signal-space-3: 0.75rem;
+  --signal-space-4: 1rem;
+  --signal-space-5: 1.5rem;
+  --signal-space-6: 2rem;
+  --signal-space-8: 2.5rem;
+  --signal-space-10: 3rem;
+  --signal-space-12: 4rem;
+  --signal-space-16: 5rem;
+  --signal-space-20: 6rem;
+  --signal-space-24: 8rem;
+
+  --signal-radius-compact: 0.25rem;
+  --signal-radius-control: 0.5rem;
+  --signal-radius-panel: 0.75rem;
+  --signal-radius-pill: 999px;
+  --signal-control-height: 2.75rem;
+  --signal-control-height-coarse: 3rem;
+  --signal-prose-width: 72ch;
+  --signal-form-width: 30rem;
+  --signal-workbench-width: 90rem;
+  --signal-spine-width: 5.5rem;
+  --signal-spine-width-tablet: 4.5rem;
+  --signal-spine-width-fluid: clamp(var(--signal-spine-width-tablet), 7vw, var(--signal-spine-width));
+  --signal-case-rail-width: 18.5rem;
+  --signal-inspector-width: 22.5rem;
+  --signal-library-card-min-width: 20rem;
+  --signal-document-toolbar-height: 3.5rem;
+  --signal-document-workbench-height: calc(100dvh - var(--signal-workspace-bar-height) - var(--signal-space-8));
+  --signal-workspace-bar-height: 5rem;
+  --signal-workspace-header-height: 5rem;
+  --signal-workspace-header-compact-height: 4rem;
+  --signal-phone-header-height: 4rem;
+  --signal-phone-nav-height: 0rem;
+  --signal-library-selection-mobile-reserve: 22rem;
+  --signal-spine-stage-number-size: 2rem;
+  --signal-account-panel-width: 17rem;
+  --signal-account-initials-size: 2rem;
+  --signal-phone-sheet-width: min(22rem, calc(100vw - 2rem));
+  --signal-stage-rail-offset: 1rem;
+  --signal-stage-rail-width: 2px;
+  --signal-stage-marker-size: 0.65rem;
+  --signal-workspace-padding: clamp(2rem, 4vw, 4.5rem);
+  --signal-record-grid: minmax(0, 1.4fr) minmax(0, 0.7fr) minmax(0, 0.7fr) minmax(0, 0.9fr);
+  --signal-queue-tab-min-width: 9rem;
+  --signal-empty-illustration-size: 4.5rem;
+  --signal-filter-field-min-width: 12rem;
+  --signal-status-marker-size: 0.625rem;
+  --signal-skeleton-line-height: 0.875rem;
+  --signal-skeleton-short-width: 38%;
+  --signal-skeleton-long-width: 72%;
+  --signal-record-action-width: 11rem;
+  --signal-visually-hidden-size: 1px;
+  --signal-desk-loading-width: 14rem;
+  --signal-desk-line-width: 68%;
+  --signal-first-use-measure: 44rem;
+  --signal-first-use-rail-height: 7rem;
+  --signal-dialog-width: min(34rem, calc(100vw - 2rem));
+  --signal-dialog-wide-width: min(48rem, calc(100vw - 2rem));
+  --signal-dialog-max-height: calc(100vh - 2rem);
+  --signal-active-format-grid: minmax(0, 1fr) auto;
+  --signal-active-format-rail-width: 4rem;
+  --signal-version-node-size: 1rem;
+  --signal-version-rail-offset: 0.5rem;
+  --signal-version-actions-width: 13rem;
+  --signal-family-switcher-width: 24rem;
+  --signal-criterion-number-size: 2.75rem;
+  --signal-criterion-fields-grid: minmax(0, 0.55fr) minmax(0, 1.45fr) minmax(0, 0.5fr);
+  --signal-criterion-weight-width: 8rem;
+  --signal-save-dock-offset: 1rem;
+  --signal-check-identity-grid: minmax(0, 1.4fr) minmax(18rem, 0.6fr);
+  --signal-check-stage-grid: var(--signal-criterion-number-size) minmax(0, 1fr) auto;
+  --signal-check-stage-grid-phone: var(--signal-criterion-number-size) minmax(0, 1fr);
+  --signal-report-hero-grid: minmax(0, 1.5fr) minmax(18rem, 0.5fr);
+  --signal-report-jump-grid: repeat(4, minmax(0, 1fr));
+  --signal-resolution-card-grid: minmax(0, 1.35fr) minmax(18rem, 0.65fr);
+  --signal-report-branch-width: 5rem;
+  --signal-report-branch-offset: 1.5rem;
+  --signal-report-jump-number-size: 1.75rem;
+  --signal-filter-count-size: 1.5rem;
+  --signal-viewport-min-height: 100vh;
+  --signal-focus-ring-width: 3px;
+  --signal-focus-ring-gap: 2px;
+  --signal-border-hairline: 1px;
+  --signal-border-emphasis: 2px;
+  --signal-border-error-rail: 5px;
+  --signal-border-service: 6px;
+  --signal-border-brand: 8px;
+  --signal-mark-size: 2.5rem;
+  --signal-mark-stroke-width: 2.5;
+  --signal-public-header-min-height: 4.5rem;
+  --signal-page-gutter-fluid: clamp(1rem, 4vw, 4rem);
+  --signal-project-label-width: 34rem;
+  --signal-public-process-min-width: 22rem;
+  --signal-public-main-min-height: min(48rem, calc(100vh - 10rem));
+  --signal-hero-padding-block: clamp(3rem, 8vw, 8rem);
+  --signal-hero-padding-inline: clamp(1.5rem, 8vw, 8rem);
+  --signal-hero-axis-inset: clamp(3rem, 9vw, 9rem);
+  --signal-hero-branch-start: 34%;
+  --signal-hero-branch-width: clamp(5rem, 18vw, 15rem);
+  --signal-hero-title-measure: 11ch;
+  --signal-hero-body-measure: 42rem;
+  --signal-hero-note-measure: 26rem;
+  --signal-process-padding-block: clamp(2.5rem, 6vw, 6rem);
+  --signal-process-padding-inline: clamp(1.5rem, 5vw, 5rem);
+  --signal-process-title-measure: 14ch;
+  --signal-pending-width: min(24rem, calc(100% - 2rem));
+  --signal-pending-track-height: 3px;
+  --signal-pending-fill-width: 42%;
+  --signal-service-panel-width: min(36rem, 100%);
+  --signal-service-panel-padding: clamp(1.5rem, 4vw, 3rem);
+  --signal-auth-card-min-width: 28rem;
+  --signal-auth-main-gap: clamp(3rem, 6vw, 6rem);
+  --signal-auth-main-padding: clamp(3rem, 6vw, 6rem);
+  --signal-auth-axis-inset: 18%;
+  --signal-auth-lead-measure: 15ch;
+  --signal-auth-copy-measure: 36rem;
+  --signal-auth-card-padding: clamp(1.5rem, 4vw, 3rem);
+  --signal-password-end-padding: 4rem;
+  --signal-password-toggle-min-width: 3.5rem;
+  --signal-phone-hero-min-height: 34rem;
+  --signal-phone-auth-split: 16rem;
+  --signal-skip-hidden-offset: -150%;
+  --signal-pending-travel-start: -40%;
+  --signal-pending-travel-end: 180%;
+  --signal-rail-opacity: 0.65;
+
+  --signal-shadow-raised: 0 1px 2px rgba(25, 26, 24, 0.08),
+    0 10px 30px rgba(25, 26, 24, 0.06);
+  --signal-shadow-floating: 0 18px 48px rgba(25, 26, 24, 0.18);
+  --signal-shadow-modal: 0 24px 64px rgba(25, 26, 24, 0.24);
+  --signal-motion-instant: 90ms;
+  --signal-motion-fast: 150ms;
+  --signal-motion-base: 220ms;
+  --signal-motion-slow: 320ms;
+  --signal-motion-distance-sm: 6px;
+  --signal-motion-distance-md: 12px;
+  --signal-motion-ease: cubic-bezier(0.16, 1, 0.3, 1);
+  --signal-motion-ease-exit: cubic-bezier(0.2, 0, 0, 1);
+  --signal-z-base: 0;
+  --signal-z-behind: -1;
+  --signal-z-raised: 10;
+  --signal-z-sticky: 100;
+  --signal-z-navigation: 200;
+  --signal-z-popover: 300;
+  --signal-z-drawer: 400;
+  --signal-z-overlay: 500;
+  --signal-z-modal: 600;
+  --signal-z-toast: 700;
+
   /* Layer scale. A raw z-index in a component is a defect (ground rule 7).
      Small values, not a 1000-series: this product imports no third-party
      component library, so there is no foreign stack to out-rank. Century

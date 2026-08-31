@@ -58,6 +58,10 @@ class Manuscript(Base, PkCreatedMixin):
     ingest_failure_reason: Mapped[IngestFailureReason | None] = mapped_column(
         Enum(IngestFailureReason, native_enum=False)
     )
+    # V-071 AC4: a permanently failed upload can leave the active Review
+    # Desk without erasing its history. It remains visible in the instructor's
+    # Archive and in the append-only audit trail. NULL means still active.
+    dismissed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     # Chapter/section hierarchy produced by ingestion (F1); shape owned by V-004.
     section_tree: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
     # Reserved for V7 (D-005): schema ready, feature absent. submitted_by has

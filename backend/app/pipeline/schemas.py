@@ -17,6 +17,7 @@ class CheckRunOut(BaseModel):
     rubric_id: int
     status: str
     stage_status: dict[str, Any] | None
+    cancel_requested_at: datetime | None
     queue_position: int | None
     started_at: datetime | None
     finished_at: datetime | None

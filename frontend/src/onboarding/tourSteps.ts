@@ -97,3 +97,24 @@ export function resolveTourStep(fromIndex: number, pathname: string): ResolvedSt
   }
   return null;
 }
+
+/** Resolve the nearest earlier step that is actually available on the
+ * current route. A numeric `index - 1` is not sufficient because the tour
+ * deliberately interleaves route-specific steps; on the Dashboard that
+ * made Back from "new check" skip the rubric-only step and immediately
+ * resolve "new check" again. */
+export function resolvePreviousTourStep(beforeIndex: number, pathname: string): ResolvedStep | null {
+  for (let i = Math.min(beforeIndex - 1, TOUR_STEPS.length - 1); i >= 0; i--) {
+    const step = TOUR_STEPS[i];
+    if (!step.routeMatch(pathname)) continue;
+    const el = step.anchorSelectors
+      .map((selector) => document.querySelector<HTMLElement>(selector))
+      .find((node): node is HTMLElement => {
+        if (!node) return false;
+        const rect = node.getBoundingClientRect();
+        return rect.width > 0 && rect.height > 0;
+      });
+    if (el) return { step, index: i, el };
+  }
+  return null;
+}

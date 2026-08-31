@@ -13,6 +13,7 @@ from app.models.manuscript import Manuscript
 from app.models.rubric import Rubric
 from app.pipeline.schemas import CheckRunOut, CreateCheckRunRequest, RerunEstimateOut
 from app.pipeline.service import (
+    cancel_check_run,
     create_check_run,
     estimate_rerun_calls,
     get_check_run,
@@ -38,6 +39,7 @@ async def _to_out(session: AsyncSession, check_run) -> CheckRunOut:
         rubric_id=check_run.rubric_id,
         status=check_run.status.value,
         stage_status=check_run.stage_status,
+        cancel_requested_at=check_run.cancel_requested_at,
         queue_position=position,
         started_at=check_run.started_at,
         finished_at=check_run.finished_at,
@@ -84,6 +86,22 @@ async def get_check_run_route(
     instructor: Annotated[Instructor, Depends(get_current_instructor)],
 ) -> CheckRunOut:
     check_run = await get_check_run(session, check_run_id, instructor.id)
+    return await _to_out(session, check_run)
+
+
+@router.post("/check-runs/{check_run_id}/cancel", response_model=CheckRunOut)
+async def cancel_check_run_route(
+    check_run_id: int,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    instructor: Annotated[Instructor, Depends(get_current_instructor)],
+) -> CheckRunOut:
+    """Request a cooperative stop at the next safe stage boundary.
+
+    The endpoint never claims already-spent quota was refunded. A queued run
+    can stop immediately; an active run exposes `cancel_requested_at` until
+    the worker records the terminal `cancelled` transition.
+    """
+    check_run = await cancel_check_run(session, check_run_id, instructor.id)
     return await _to_out(session, check_run)
 
 

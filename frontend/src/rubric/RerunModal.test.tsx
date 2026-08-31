@@ -30,6 +30,7 @@ function manuscript(overrides: Partial<ManuscriptListItem> = {}): ManuscriptList
     latest_check_run_status: "done",
     latest_done_check_run_id: 7,
     latest_decision: null,
+    latest_readiness: "ready",
     // Matches ACTIVE_FAMILY's own rubric_family_id by default -- tests
     // that need to exercise the cross-family exclusion override this
     // explicitly (see the dedicated test below).

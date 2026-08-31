@@ -2,7 +2,15 @@
 @import "@fontsource/public-sans/400.css";
 @import "@fontsource/public-sans/500.css";
 @import "@fontsource/public-sans/700.css";
+@import "@fontsource/space-grotesk/latin-500.css";
+@import "@fontsource/space-grotesk/latin-600.css";
+@import "@fontsource/space-grotesk/latin-700.css";
+@import "@fontsource/ibm-plex-sans/latin-400.css";
+@import "@fontsource/ibm-plex-sans/latin-500.css";
+@import "@fontsource/ibm-plex-sans/latin-600.css";
+@import "@fontsource/ibm-plex-sans/latin-700.css";
 @import "./tokens.css";
+@import "./ui/signal.css";
 
 @layer base {
   body {
@@ -132,6 +140,12 @@
       opacity: 1;
       transform: none;
     }
+  }
+}
+
+@layer components {
+  .reuse-passage-highlight {
+    background: var(--color-reuse-passage-highlight);
   }
 }
 

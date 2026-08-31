@@ -13,7 +13,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useLocation } from "react-router";
 import { useDismissOnboarding, useMe, useReplayOnboarding } from "../auth/useAuth";
-import { resolveTourStep, TOUR_STEPS } from "./tourSteps";
+import { resolvePreviousTourStep, resolveTourStep, TOUR_STEPS } from "./tourSteps";
 
 const POLL_MS = 400;
 const MAX_POLLS = 12; // ~4.8s -- covers async-loaded anchors (e.g. EscalatedPanel's own query) without polling forever
@@ -61,7 +61,8 @@ export function useTour() {
 
   function back() {
     if (!resolved) return;
-    setStepIndex(Math.max(0, resolved.index - 1));
+    const previous = resolvePreviousTourStep(resolved.index, location.pathname);
+    if (previous) setStepIndex(previous.index);
   }
 
   function dismissTour() {

@@ -6,9 +6,12 @@ router's job (`BackgroundTasks`), not this module's — this stays pure
 DB logic (CODING.md §2: services never import FastAPI).
 """
 
-from sqlalchemy import func, select
+from datetime import UTC, datetime
+
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.audit.service import write_audit_event
 from app.config import Settings, get_settings
 from app.errors import ConflictError, NotFoundError
 from app.models.audit import AuditLog
@@ -16,7 +19,7 @@ from app.models.enums import CheckRunStatus, IngestStatus, LLMMode
 from app.models.group import Group, Program
 from app.models.manuscript import Manuscript
 from app.models.rubric import Rubric
-from app.models.run import CheckRun
+from app.models.run import CheckRun, ReadinessReport
 from app.pipeline.schemas import RerunEstimateItem, RerunEstimateOut
 
 _LLM_CALL_EVENT_TYPES = ("llm_call", "llm_cache_hit")
@@ -115,6 +118,104 @@ async def get_check_run(session: AsyncSession, check_run_id: int, instructor_id:
     )
     if check_run is None:
         raise NotFoundError(f"No check run with id {check_run_id}.")
+    return check_run
+
+
+async def cancel_check_run(
+    session: AsyncSession, check_run_id: int, instructor_id: int
+) -> CheckRun:
+    """Persist an instructor's cancellation request without erasing history.
+
+    Active work stops cooperatively inside `pipeline.machine`; a queued run
+    has no in-flight stage and can become terminal immediately. Repeating a
+    request for an already-cancelled run is intentionally idempotent.
+    """
+    now = datetime.now(UTC)
+    # One conditional database transition decides the completion/cancellation
+    # race. PostgreSQL re-checks the WHERE clause after waiting on a concurrent
+    # terminal update: if DONE won first this updates zero rows and the request
+    # returns Conflict; if cancellation won, the worker's own conditional stage
+    # transition can no longer move to DONE (V-071 AC12).
+    row = (
+        await session.execute(
+            update(CheckRun)
+            .where(
+                CheckRun.id == check_run_id,
+                CheckRun.manuscript_id.in_(
+                    select(Manuscript.id).where(Manuscript.instructor_id == instructor_id)
+                ),
+                CheckRun.status.in_(_ACTIVE_STATUSES),
+                CheckRun.cancel_requested_at.is_(None),
+            )
+            .values(cancel_requested_at=now)
+            .returning(CheckRun.status, CheckRun.stage_status)
+        )
+    ).first()
+    if row is None:
+        check_run = await get_check_run(session, check_run_id, instructor_id)
+        if (
+            check_run.status == CheckRunStatus.cancelled
+            or check_run.cancel_requested_at is not None
+        ):
+            return check_run
+        if check_run.status in (CheckRunStatus.done, CheckRunStatus.failed):
+            raise ConflictError("This check has already finished and cannot be cancelled.")
+        # A closed state was added without being included in the transition
+        # contract. Fail honestly instead of accepting a request we did not
+        # persist.
+        raise ConflictError("This check cannot be cancelled in its current state.")
+
+    status_when_requested = row.status
+    stage_status_when_requested = row.stage_status or {}
+    await write_audit_event(
+        session,
+        event_type="check_run_cancel_requested",
+        check_run_id=check_run_id,
+        payload={"status_when_requested": status_when_requested.value},
+    )
+
+    stops_without_worker = (
+        status_when_requested == CheckRunStatus.queued or "blocked" in stage_status_when_requested
+    )
+    if stops_without_worker:
+        check_run = await session.get(CheckRun, check_run_id)
+        status = dict(check_run.stage_status or {})
+        stopped_before = (
+            CheckRunStatus.ingesting.value
+            if status_when_requested == CheckRunStatus.queued
+            else status_when_requested.value
+        )
+        status["cancellation"] = {
+            "status": "cancelled",
+            "requested_at": now.isoformat(),
+            "stopped_before": stopped_before,
+        }
+        await session.execute(
+            delete(ReadinessReport).where(ReadinessReport.check_run_id == check_run_id)
+        )
+        await session.execute(
+            update(CheckRun)
+            .where(
+                CheckRun.id == check_run_id,
+                CheckRun.status == status_when_requested,
+                CheckRun.cancel_requested_at == now,
+            )
+            .values(
+                status=CheckRunStatus.cancelled,
+                finished_at=now,
+                stage_status=status,
+            )
+        )
+        await write_audit_event(
+            session,
+            event_type="check_run_cancelled",
+            check_run_id=check_run_id,
+            payload={"stopped_before": stopped_before},
+        )
+
+    await session.commit()
+    check_run = await get_check_run(session, check_run_id, instructor_id)
+    await session.refresh(check_run)
     return check_run
 
 

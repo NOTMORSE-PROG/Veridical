@@ -24,6 +24,11 @@ class AuditLog(Base, PkCreatedMixin):
     # Plain id, deliberately NOT a ForeignKey: audit rows must outlive and
     # never block whatever they reference.
     check_run_id: Mapped[int | None] = mapped_column(BigInteger, index=True)
+    # V-071 AC4: some instructor-visible lifecycle events happen before a
+    # check run exists (for example dismissing a failed upload). This plain id
+    # attributes those rows securely through Manuscript ownership while, like
+    # check_run_id above, allowing the append-only audit to outlive a record.
+    manuscript_id: Mapped[int | None] = mapped_column(BigInteger, index=True)
     # Queryable AI-call metadata (TESTING.md §3); NULL for non-AI events.
     prompt_version: Mapped[str | None] = mapped_column(String(100))
     input_hash: Mapped[str | None] = mapped_column(String(128))

@@ -6,13 +6,16 @@ forensics both run for real; F7 is honestly noted as not implemented
 yet). Own scratch DB, same convention as the other V2 live tests.
 """
 
+import asyncio
 import os
 import time
+from datetime import UTC, datetime
 from decimal import Decimal
 
 import pytest
 from sqlalchemy import select, text
 
+import app.pipeline.machine as pipeline_machine
 from app.checks.rules.sections import identify_target_section
 from app.config import get_settings
 from app.errors import QuotaExhaustedError
@@ -28,7 +31,8 @@ from app.models.instructor import Instructor
 from app.models.manuscript import Manuscript
 from app.models.rubric import Criterion, Rubric
 from app.models.run import CheckResult, CheckRun, ReadinessReport
-from app.pipeline.machine import run_check_run
+from app.pipeline.machine import TerminalFailure, run_check_run
+from app.pipeline.service import cancel_check_run
 from tests.test_ingest_pdf import PdfBuilder
 
 live = pytest.mark.skipif(
@@ -221,6 +225,104 @@ async def test_full_happy_path_reaches_done_with_a_real_report(
             ReadinessStatus.not_ready,
             ReadinessStatus.needs_review,
         )
+
+
+async def test_cancel_request_stops_at_boundary_and_removes_terminal_report(
+    session_factory, tmp_path, monkeypatch
+):
+    """An active run may retain intermediate results, but must never expose a
+    readiness report after cancellation, even if aggregation created one in
+    the request/worker race window.
+    """
+    from app.models.audit import AuditLog
+
+    check_run_id, _, settings = await _seed(session_factory, tmp_path, monkeypatch)
+    async with session_factory() as session:
+        check_run = await session.get(CheckRun, check_run_id)
+        check_run.status = CheckRunStatus.aggregating
+        check_run.cancel_requested_at = datetime.now(UTC)
+        session.add(
+            ReadinessReport(
+                check_run_id=check_run.id,
+                composite_score=Decimal("80"),
+                status=ReadinessStatus.ready,
+            )
+        )
+        await session.commit()
+
+        await run_check_run(session, check_run, settings, FakeLLMClient())
+        assert check_run.status == CheckRunStatus.cancelled
+        assert check_run.finished_at is not None
+        assert check_run.stage_status["cancellation"]["stopped_before"] == "aggregating"
+
+    async with session_factory() as verify:
+        report = await verify.scalar(
+            select(ReadinessReport).where(ReadinessReport.check_run_id == check_run_id)
+        )
+        assert report is None
+        event_types = list(
+            (
+                await verify.scalars(
+                    select(AuditLog.event_type).where(AuditLog.check_run_id == check_run_id)
+                )
+            ).all()
+        )
+        assert event_types == ["check_run_cancelled"]
+
+
+async def test_cancellation_wins_when_the_active_stage_then_raises(
+    session_factory, tmp_path, monkeypatch
+):
+    """A stage exception cannot overwrite a cancellation committed mid-stage."""
+    from app.models.audit import AuditLog
+
+    check_run_id, _, settings = await _seed(session_factory, tmp_path, monkeypatch)
+    entered_stage = asyncio.Event()
+    release_failure = asyncio.Event()
+
+    async def fail_after_cancellation(*_args, **_kwargs):
+        entered_stage.set()
+        await release_failure.wait()
+        raise TerminalFailure("semantic_failed", "Semantic stage failed after cancellation.")
+
+    monkeypatch.setattr(pipeline_machine, "_run_semantic_stage", fail_after_cancellation)
+
+    async with session_factory() as setup:
+        run = await setup.get(CheckRun, check_run_id)
+        manuscript = await setup.get(Manuscript, run.manuscript_id)
+        instructor_id = manuscript.instructor_id
+        run.status = CheckRunStatus.semantic
+        await setup.commit()
+
+    async with session_factory() as worker:
+        run = await worker.get(CheckRun, check_run_id)
+        task = asyncio.create_task(run_check_run(worker, run, settings, FakeLLMClient()))
+        await entered_stage.wait()
+        async with session_factory() as request:
+            await cancel_check_run(request, check_run_id, instructor_id)
+        release_failure.set()
+        await task
+
+    async with session_factory() as verify:
+        run = await verify.get(CheckRun, check_run_id)
+        assert run.status == CheckRunStatus.cancelled
+        assert run.cancel_requested_at is not None
+        assert run.stage_status["cancellation"]["stopped_before"] == "semantic"
+        event_types = list(
+            (
+                await verify.scalars(
+                    select(AuditLog.event_type)
+                    .where(
+                        AuditLog.check_run_id == check_run_id,
+                        AuditLog.event_type.in_(
+                            ("check_run_cancel_requested", "check_run_cancelled")
+                        ),
+                    )
+                    .order_by(AuditLog.id)
+                )
+            ).all()
+        )
+        assert event_types == ["check_run_cancel_requested", "check_run_cancelled"]
 
 
 async def test_stage_status_survives_a_fresh_reload_every_stage(

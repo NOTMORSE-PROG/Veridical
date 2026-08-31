@@ -109,7 +109,7 @@ export function ConfirmCitationSourceModal({ flag, onClose }: ConfirmCitationSou
           </div>
           <p className="text-sm text-ink-secondary">
             Confirming this resolves this flag on this report, the same as an override.
-            VERIDICAL's readiness score recalculates immediately.
+            VERIDICAL's readiness band recalculates immediately.
           </p>
           <p className="text-sm text-ink-secondary">
             It also does one more thing. VERIDICAL checks this exact source, by its DOI, ISBN, or

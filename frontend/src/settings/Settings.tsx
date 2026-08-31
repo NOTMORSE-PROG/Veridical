@@ -15,9 +15,8 @@ import { cx } from "../components/cx";
 import { useChangePassword, useMe } from "../auth/useAuth";
 import { quotaRemaining } from "../domain/quotaTone";
 import { useRouteFocus } from "../routing/useRouteFocus";
+import { PASSWORD_MIN_LENGTH } from "../config/ui";
 import { useDeleteApiKey, useSetApiKey, useSettings } from "./useSettings";
-
-const MIN_PASSWORD_LENGTH = 8; // Matches the backend schema's own OWASP-baseline comment.
 
 function SectionCard({
   headingId,
@@ -31,7 +30,7 @@ function SectionCard({
   return (
     <section
       aria-labelledby={headingId}
-      className="rounded-lg border border-border bg-panel p-4 shadow-sm sm:p-5"
+      className="signal-settings-section rounded-lg border border-border bg-panel p-4 shadow-sm sm:p-5"
     >
       <h2 id={headingId} className="text-md mb-3 font-bold text-ink">
         {title}
@@ -80,7 +79,7 @@ function PasswordSection() {
   }, [change.isError]);
 
   const currentMissing = attempted && !current;
-  const nextTooShort = attempted && next.length < MIN_PASSWORD_LENGTH;
+  const nextTooShort = attempted && next.length < PASSWORD_MIN_LENGTH;
   const confirmMismatch = attempted && !nextTooShort && confirm !== next;
 
   function resetOnEdit() {
@@ -105,7 +104,7 @@ function PasswordSection() {
       currentRef.current?.focus();
       return;
     }
-    if (next.length < MIN_PASSWORD_LENGTH) {
+    if (next.length < PASSWORD_MIN_LENGTH) {
       nextRef.current?.focus();
       return;
     }
@@ -186,7 +185,7 @@ function PasswordSection() {
         </label>
         {nextTooShort && (
           <p id="new-password-err" className="text-sm text-status-attention-text">
-            Use at least {MIN_PASSWORD_LENGTH} characters.
+            Use at least {PASSWORD_MIN_LENGTH} characters.
           </p>
         )}
 
@@ -275,7 +274,7 @@ function ApiKeySection() {
 
   if (isPending) {
     return (
-      <SectionCard headingId="api-key-heading" title="Your own API key">
+      <SectionCard headingId="api-key-heading" title="Personal Gemini key">
         <div role="status" aria-live="polite" aria-busy="true" className="text-sm text-ink-tertiary">
           Loading your API key settings…
         </div>
@@ -284,7 +283,7 @@ function ApiKeySection() {
   }
   if (isError || !data) {
     return (
-      <SectionCard headingId="api-key-heading" title="Your own API key">
+      <SectionCard headingId="api-key-heading" title="Personal Gemini key">
         <div
           role="alert"
           className="rounded-md border border-status-attention-text/25 bg-status-attention-bg p-3 text-sm text-status-attention-text"
@@ -303,7 +302,7 @@ function ApiKeySection() {
 
   if (!byok_available) {
     return (
-      <SectionCard headingId="api-key-heading" title="Your own API key">
+      <SectionCard headingId="api-key-heading" title="Personal Gemini key">
         <p className="text-sm text-ink-secondary">
           VERIDICAL currently shares one free Gemini key across every instructor, so the AI
           capacity everyone sees is split between all of you. Bringing your own key lets your AI
@@ -359,7 +358,7 @@ function ApiKeySection() {
 
   if (has_own_api_key) {
     return (
-      <SectionCard headingId="api-key-heading" title="Your own API key">
+      <SectionCard headingId="api-key-heading" title="Personal Gemini key">
         <p ref={configuredRef} tabIndex={-1} className="text-sm text-ink">
           Your own Gemini API key is active. AI grading now uses your quota, not the shared pool.
         </p>
@@ -397,7 +396,7 @@ function ApiKeySection() {
   }
 
   return (
-    <SectionCard headingId="api-key-heading" title="Your own API key">
+    <SectionCard headingId="api-key-heading" title="Personal Gemini key">
       <p className="text-sm text-ink-secondary">
         VERIDICAL currently shares one free Gemini key across every instructor, so the AI
         capacity everyone sees is split between all of you. Add your own free Gemini API key and
@@ -604,7 +603,7 @@ function TransparencySection() {
 
   if (isLoading) {
     return (
-      <SectionCard headingId="transparency-heading" title="How VERIDICAL is scoring right now">
+      <SectionCard headingId="transparency-heading" title="Review rules and technical record">
         <div role="status" aria-live="polite" aria-busy="true" className="text-sm text-ink-tertiary">
           Loading scoring configuration…
         </div>
@@ -613,7 +612,7 @@ function TransparencySection() {
   }
   if (isError || !data) {
     return (
-      <SectionCard headingId="transparency-heading" title="How VERIDICAL is scoring right now">
+      <SectionCard headingId="transparency-heading" title="Review rules and technical record">
         <div
           role="alert"
           className="rounded-md border border-status-attention-text/25 bg-status-attention-bg p-3 text-sm text-status-attention-text"
@@ -629,17 +628,16 @@ function TransparencySection() {
   }
 
   const { thresholds, prompt_versions } = data;
-  const agreementOf3 = Math.round(thresholds.escalation_agreement_threshold * 3);
-
   return (
-    <SectionCard headingId="transparency-heading" title="How VERIDICAL is scoring right now">
+    <SectionCard headingId="transparency-heading" title="Review rules and technical record">
       <div className="flex flex-col gap-4 text-sm">
         <div>
-          <h3 className="font-semibold text-ink">Readiness thresholds</h3>
+          <h3 className="font-semibold text-ink">Readiness bands</h3>
           <ul className="mt-1 list-disc pl-5 text-ink-secondary">
-            <li>Ready: composite score at or above {thresholds.ready_min_score}%</li>
-            <li>Not ready: composite score below {thresholds.not_ready_max_score}%</li>
-            <li>A score between the two is Conditionally Ready</li>
+            <li>Ready: the recorded evidence supports proceeding to instructor decision.</li>
+            <li>Conditionally Ready: material revisions or instructor review remain.</li>
+            <li>Not Ready: the recorded criteria show substantial unresolved gaps.</li>
+            <li>Needs Review: VERIDICAL could not settle one or more criteria.</li>
           </ul>
           {!thresholds.editable && (
             <p className="mt-2 text-xs text-ink-tertiary">
@@ -652,13 +650,22 @@ function TransparencySection() {
         </div>
 
         <div>
-          <h3 className="font-semibold text-ink">Escalation threshold</h3>
+          <h3 className="font-semibold text-ink">Instructor escalation</h3>
           <p className="mt-1 text-ink-secondary">
-            Criteria are sent to you for review when the AI graders don't agree enough. Right now,
-            agreement needs to reach {thresholds.escalation_agreement_threshold.toFixed(2)} (about{" "}
-            {agreementOf3} of 3 graders) before a result is accepted automatically.
+            A criterion comes to you when VERIDICAL cannot record a sufficiently reliable outcome.
+            Unavailable grading is not treated as passed.
           </p>
         </div>
+
+        <details className="signal-settings-technical">
+          <summary>Technical calculation record</summary>
+          <p>These values are retained for reproducibility. They are calculation records, not the readiness wording shown as the instructor's judgment.</p>
+          <dl>
+            <div><dt>Ready composite cutoff</dt><dd>{thresholds.ready_min_score}</dd></div>
+            <div><dt>Not Ready composite cutoff</dt><dd>{thresholds.not_ready_max_score}</dd></div>
+            <div><dt>Escalation agreement cutoff</dt><dd>{thresholds.escalation_agreement_threshold.toFixed(2)}</dd></div>
+          </dl>
+        </details>
 
         <div>
           <h3 className="font-semibold text-ink">AI models and prompts in use</h3>
@@ -696,15 +703,18 @@ export function SettingsPage() {
   useRouteFocus("Settings - VERIDICAL", headingRef);
 
   return (
-    <div className="flex flex-col gap-4 p-4 sm:p-6">
-      <h1 ref={headingRef} tabIndex={-1} className="text-lg font-bold text-ink">
-        Settings
-      </h1>
-      <ProfileSection />
-      <PasswordSection />
-      <ApiKeySection />
-      <QuotaSection />
-      <TransparencySection />
+    <div className="signal-route signal-settings">
+      <header className="signal-route-header">
+        <div><p className="signal-eyebrow">Workspace utility</p><h1 ref={headingRef} tabIndex={-1}>Workspace settings</h1><p className="signal-route-header__intro">Manage account access, AI capacity, review rules, and technical records.</p></div>
+      </header>
+      <nav aria-label="Settings sections" className="signal-settings-nav"><a href="#profile-heading">Account</a><a href="#api-key-heading">Personal key</a><a href="#quota-heading">AI capacity</a><a href="#transparency-heading">Review rules</a></nav>
+      <div className="signal-settings-stack">
+        <ProfileSection />
+        <PasswordSection />
+        <ApiKeySection />
+        <QuotaSection />
+        <TransparencySection />
+      </div>
     </div>
   );
 }
