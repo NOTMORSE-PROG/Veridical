@@ -23,3 +23,14 @@ class InstructorOut(BaseModel):
     onboarding_dismissed_at: datetime | None = None
 
     model_config = {"from_attributes": True}
+
+
+class SessionStatusOut(BaseModel):
+    """Public, read-only browser-session projection.
+
+    A missing or expired session is an expected state on public routes, so this
+    projection returns ``instructor=None`` with HTTP 200. It grants no access;
+    protected routes continue to use ``get_current_instructor`` and return 401.
+    """
+
+    instructor: InstructorOut | None
