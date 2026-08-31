@@ -13,6 +13,22 @@ from app.errors import UnauthenticatedError
 from app.models.instructor import Instructor
 
 
+async def get_optional_instructor(
+    request: Request, session: Annotated[AsyncSession, Depends(get_session)]
+) -> Instructor | None:
+    """Resolve the browser session without treating signed-out as an error.
+
+    This is deliberately separate from ``get_current_instructor``: only the
+    read-only session-status route uses it. Authorization guards remain strict.
+    """
+
+    settings = get_settings()
+    token = request.cookies.get(settings.session_cookie_name)
+    if token is None:
+        return None
+    return await get_instructor_by_token(session, token)
+
+
 async def get_current_instructor(
     request: Request, session: Annotated[AsyncSession, Depends(get_session)]
 ) -> Instructor:

@@ -3,6 +3,7 @@ Needs a live Postgres (same convention as test_ingest_api.py).
 """
 
 import os
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from fastapi.testclient import TestClient
@@ -122,6 +123,69 @@ def test_login_success_sets_httponly_cookie_and_me_then_works(seeded):
 def test_me_without_a_session_is_401(seeded):
     resp = seeded.get("/auth/me")
     assert resp.status_code == 401
+
+
+def test_session_status_without_a_session_is_clean_signed_out(seeded):
+    resp = seeded.get("/auth/session")
+    assert resp.status_code == 200
+    assert resp.headers["cache-control"] == "no-store"
+    assert resp.json() == {"instructor": None}
+
+
+def test_session_status_returns_the_signed_in_instructor(seeded):
+    seeded.post("/auth/login", json={"email": "prof@tip.edu.ph", "password": "s3cret!"})
+
+    resp = seeded.get("/auth/session")
+
+    assert resp.status_code == 200
+    assert resp.json()["instructor"]["email"] == "prof@tip.edu.ph"
+
+
+def test_session_status_treats_an_invalid_cookie_as_signed_out_without_weakening_me(seeded):
+    cookie_name = get_settings().session_cookie_name
+    seeded.cookies.set(cookie_name, "not-a-valid-session-token")
+
+    status = seeded.get("/auth/session")
+
+    assert status.status_code == 200
+    assert status.json() == {"instructor": None}
+    assert seeded.get("/auth/me").status_code == 401
+
+
+def test_session_status_treats_an_expired_cookie_as_signed_out(seeded, api_scratch_url):
+    import asyncio
+
+    from sqlalchemy import update
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
+    from app.db import sqlalchemy_url
+    from app.models.session import Session
+
+    seeded.post("/auth/login", json={"email": "prof@tip.edu.ph", "password": "s3cret!"})
+    cookie_name = get_settings().session_cookie_name
+    token = seeded.cookies.get(cookie_name)
+
+    async def expire_session() -> None:
+        engine = create_async_engine(sqlalchemy_url(api_scratch_url))
+        try:
+            factory = async_sessionmaker(engine)
+            async with factory() as session:
+                await session.execute(
+                    update(Session)
+                    .where(Session.token == token)
+                    .values(expires_at=datetime.now(UTC) - timedelta(hours=1))
+                )
+                await session.commit()
+        finally:
+            await engine.dispose()
+
+    asyncio.run(expire_session())
+
+    status = seeded.get("/auth/session")
+
+    assert status.status_code == 200
+    assert status.json() == {"instructor": None}
+    assert seeded.get("/auth/me").status_code == 401
 
 
 def test_repeated_wrong_passwords_get_rate_limited(seeded, monkeypatch):

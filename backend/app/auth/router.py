@@ -5,8 +5,8 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Request, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.auth.dependencies import get_current_instructor
-from app.auth.schemas import ChangePasswordIn, InstructorOut, LoginRequest
+from app.auth.dependencies import get_current_instructor, get_optional_instructor
+from app.auth.schemas import ChangePasswordIn, InstructorOut, LoginRequest, SessionStatusOut
 from app.auth.service import (
     RateLimitedError,
     WrongPasswordError,
@@ -66,6 +66,19 @@ async def logout(
 @router.get("/me", response_model=InstructorOut)
 async def me(instructor: Annotated[Instructor, Depends(get_current_instructor)]) -> InstructorOut:
     return InstructorOut.model_validate(instructor)
+
+
+@router.get("/session", response_model=SessionStatusOut)
+async def session_status(
+    response: Response,
+    instructor: Annotated[Instructor | None, Depends(get_optional_instructor)],
+) -> SessionStatusOut:
+    """Return a clean signed-in/signed-out status for public-route probes."""
+
+    response.headers["Cache-Control"] = "no-store"
+    return SessionStatusOut(
+        instructor=InstructorOut.model_validate(instructor) if instructor is not None else None
+    )
 
 
 @router.post("/password")

@@ -3,7 +3,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router";
 import { ApiError, api } from "../api/client";
-import type { ChangePasswordIn, Instructor } from "../api/types";
+import type { ChangePasswordIn, Instructor, SessionStatusOut } from "../api/types";
 
 export const ME_QUERY_KEY = ["auth", "me"] as const;
 
@@ -12,8 +12,21 @@ export function useMe() {
     queryKey: ME_QUERY_KEY,
     queryFn: async () => {
       try {
-        return await api.get<Instructor>("/auth/me");
+        const status = await api.get<SessionStatusOut>("/auth/session");
+        return status.instructor;
       } catch (err) {
+        // Frontend-first rolling deploy: an older backend has no status route.
+        // Fall back only on 404; the legacy 401 may briefly appear in DevTools
+        // during that deploy window, while current backends keep the normal
+        // signed-out path at 200/null and console-clean.
+        if (err instanceof ApiError && err.status === 404) {
+          try {
+            return await api.get<Instructor>("/auth/me");
+          } catch (legacyErr) {
+            if (legacyErr instanceof ApiError && legacyErr.status === 401) return null;
+            throw legacyErr;
+          }
+        }
         if (err instanceof ApiError && err.status === 401) return null;
         throw err;
       }

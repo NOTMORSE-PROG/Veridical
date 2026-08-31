@@ -41,13 +41,22 @@ export function stubFetchByPath(handlers: Record<string, unknown>) {
   return vi.fn(async (input: RequestInfo | URL) => {
     const url = typeof input === "string" ? input : input.toString();
     const path = new URL(url, "http://localhost").pathname;
-    const handler = handlers[path];
+    // Auth screen fixtures written before BUG-186 use `/auth/me`. The live
+    // query now uses the clean `/auth/session` projection; keeping this alias
+    // lets those tests retain their signed-in/signed-out payload intent while
+    // focused BUG-186 tests exercise the new response shape directly.
+    const exactHandler = handlers[path];
+    const legacyAuthHandler = path === "/auth/session" ? handlers["/auth/me"] : undefined;
+    const handler = exactHandler ?? legacyAuthHandler;
     if (handler === undefined) {
       return new Response(JSON.stringify({ error: { code: "internal", message: "no handler" } }), {
         status: 404,
       });
     }
     if (handler instanceof Response) return handler;
-    return new Response(JSON.stringify(handler), { status: 200 });
+    const body = exactHandler === undefined && legacyAuthHandler !== undefined
+      ? { instructor: handler }
+      : handler;
+    return new Response(JSON.stringify(body), { status: 200 });
   });
 }
