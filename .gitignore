@@ -68,3 +68,6 @@ Desktop.ini
 .DS_Store
 .idea/
 .vscode/
+
+# Progress-report decks / generated presentation assets (internal, not part of the shipped product)
+presentation/

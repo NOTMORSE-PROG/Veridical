@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { resolveTourStep, TOUR_STEPS } from "./tourSteps";
+import { resolvePreviousTourStep, resolveTourStep, TOUR_STEPS } from "./tourSteps";
 
 function mountAnchor(dataTour: string) {
   const el = document.createElement("button");
@@ -66,5 +66,26 @@ describe("resolveTourStep", () => {
     el.getBoundingClientRect = () => ({ top: 0, left: 0, width: 0, height: 0, bottom: 0, right: 0 }) as DOMRect;
     const resolved = resolveTourStep(1, "/rubric/3/review");
     expect(resolved).toBeNull();
+  });
+});
+
+describe("resolvePreviousTourStep", () => {
+  afterEach(() => {
+    document.body.innerHTML = "";
+  });
+
+  it("skips route-specific gaps so Back reaches the previous visible Dashboard step", () => {
+    mountAnchor("upload-format-cta");
+    mountAnchor("new-check-cta");
+
+    const resolved = resolvePreviousTourStep(2, "/dashboard");
+
+    expect(resolved?.index).toBe(0);
+    expect(resolved?.step.id).toBe("upload-format");
+  });
+
+  it("returns null when there is no earlier step available on this route", () => {
+    mountAnchor("upload-format-cta");
+    expect(resolvePreviousTourStep(0, "/dashboard")).toBeNull();
   });
 });

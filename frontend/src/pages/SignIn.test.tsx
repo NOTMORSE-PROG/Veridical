@@ -1,13 +1,18 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { MemoryRouter, Route, Routes } from "react-router";
+import { MemoryRouter, Route, Routes, useLocation } from "react-router";
 import { renderWithProviders, stubFetchByPath } from "../test/renderWithProviders";
 import { SignInPage } from "./SignIn";
 
 const SIGNED_OUT = new Response(JSON.stringify({ error: { code: "unauthenticated", message: "x" } }), {
   status: 401,
 });
+
+function LocationProbe() {
+  const location = useLocation();
+  return <div>{`${location.pathname}${location.search}${location.hash}`}</div>;
+}
 
 describe("SignInPage", () => {
   afterEach(() => vi.unstubAllGlobals());
@@ -104,12 +109,21 @@ describe("SignInPage", () => {
       <QueryClientProvider client={queryClient}>
         <MemoryRouter
           initialEntries={[
-            { pathname: "/signin", state: { from: { pathname: "/report/42" } } },
+            {
+              pathname: "/signin",
+              state: {
+                from: {
+                  pathname: "/report/42",
+                  search: "?section=flags",
+                  hash: "#flag-9",
+                },
+              },
+            },
           ]}
         >
           <Routes>
             <Route path="/signin" element={<SignInPage />} />
-            <Route path="/report/:id" element={<div>Report page</div>} />
+            <Route path="/report/:id" element={<LocationProbe />} />
             <Route path="/dashboard" element={<div>Dashboard page</div>} />
           </Routes>
         </MemoryRouter>
@@ -123,7 +137,7 @@ describe("SignInPage", () => {
     fireEvent.change(screen.getByLabelText("Password"), { target: { value: "correct" } });
     fireEvent.click(screen.getByRole("button", { name: "Sign in" }));
 
-    expect(await screen.findByText("Report page")).toBeInTheDocument();
+    expect(await screen.findByText("/report/42?section=flags#flag-9")).toBeInTheDocument();
     expect(screen.queryByText("Dashboard page")).not.toBeInTheDocument();
   });
 
@@ -131,6 +145,6 @@ describe("SignInPage", () => {
     vi.stubGlobal("fetch", stubFetchByPath({ "/auth/me": SIGNED_OUT }));
     renderWithProviders(<SignInPage />);
     await waitFor(() => screen.getByRole("button", { name: "Sign in" }));
-    expect(screen.getByRole("link", { name: "VERIDICAL" })).toHaveAttribute("href", "/");
+    expect(screen.getByRole("link", { name: "VERIDICAL home" })).toHaveAttribute("href", "/");
   });
 });

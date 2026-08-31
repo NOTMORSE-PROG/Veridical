@@ -3,8 +3,8 @@
 // defect (found 2026-08-16, whole-product audit) was Manage.tsx implying
 // exactly one active rubric while NewCheck.tsx offered a choice of two
 // with no explanation. Both screens have long since been rebuilt (V-055
-// gave Manage.tsx its own honest "found N formats... switching not
-// available yet" disclosure; V-064 gave NewCheck.tsx a principled,
+// gave Manage.tsx an honest family count and selector; V-064 gave
+// NewCheck.tsx a principled,
 // disclosed program-eligibility explanation for why more than one is
 // offered) and both derive their family list from the exact same query
 // (`useRubricFamilies`, single `["rubric-families"]` key) -- this test
@@ -58,7 +58,7 @@ const CS_MANUSCRIPT = {
 describe("Manage.tsx / NewCheck.tsx rubric-count consistency (BUG-067)", () => {
   afterEach(() => vi.unstubAllGlobals());
 
-  it("Manage's 'found 2' and NewCheck's 'shown + excluded' both account for the same 2 active families", async () => {
+  it("Manage's family count and NewCheck's 'shown + excluded' both account for the same 2 active families", async () => {
     // Same two-family fixture fed to both screens' identical
     // `/rubric-families` endpoint -- proves neither screen invents its
     // own count, both read the one real list.
@@ -72,9 +72,7 @@ describe("Manage.tsx / NewCheck.tsx rubric-count consistency (BUG-067)", () => {
       }),
     );
     const manage = renderWithProviders(<ManageRubricPage />);
-    expect(
-      await screen.findByText(/VERIDICAL found 2 required formats on your account/),
-    ).toBeInTheDocument();
+    expect(await screen.findByText(/2 format families are available/)).toBeInTheDocument();
     manage.unmount();
     vi.unstubAllGlobals();
 

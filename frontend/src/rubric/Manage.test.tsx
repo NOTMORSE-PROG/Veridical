@@ -4,10 +4,8 @@ import type { RubricListItem } from "../api/types";
 import { renderWithProviders, stubFetchByPath } from "../test/renderWithProviders";
 import { ManageRubricPage } from "./Manage";
 
-// Mobile card + desktop table both render in the DOM simultaneously (CSS
-// `lg:hidden`/`hidden lg:block` — jsdom applies no media queries), so every
-// query here expects TWO matches, not one (same convention as
-// dashboard/ManuscriptsTable.test.tsx).
+// The Signal Studio has one responsive semantic timeline; CSS changes its
+// layout without duplicating controls in the DOM.
 
 const FAMILY_ID = "22222222-2222-2222-2222-222222222222";
 
@@ -51,13 +49,12 @@ describe("ManageRubricPage", () => {
     // V2 only appears in the version list (the header shows the ACTIVE
     // one, V1) — waiting on it proves the versions query actually
     // resolved, not just the family-list fallback used for the header.
-    expect((await screen.findAllByText("V2.pdf")).length).toBe(2);
-    // The summary panel (unlike the version-history table below it) has
-    // one shared responsive layout, not a separate mobile/desktop split.
-    expect(screen.getByText("v1 · Active")).toBeInTheDocument();
+    expect(await screen.findByText("V2.pdf")).toBeInTheDocument();
+    expect(screen.getByText("Version 1")).toBeInTheDocument();
+    expect(screen.getAllByText("Active").length).toBeGreaterThan(0);
     const versionCells = screen.getAllByText(/^v[12]$/);
-    expect(versionCells.map((el) => el.textContent)).toEqual(["v2", "v1", "v2", "v1"]);
-    expect(screen.getAllByText("3 pinned").length).toBe(2); // v1's report count
+    expect(versionCells.map((el) => el.textContent)).toEqual(["v2", "v1"]);
+    expect(screen.getByText("3 pinned reports")).toBeInTheDocument();
   });
 
   it("shows an empty state when no format has been uploaded yet", async () => {
@@ -79,13 +76,12 @@ describe("ManageRubricPage", () => {
       }),
     );
     renderWithProviders(<ManageRubricPage />);
-    expect(await screen.findByText("v1 · Not confirmed")).toBeInTheDocument();
-    expect(screen.queryByText(/v1 · Active/)).not.toBeInTheDocument();
-    expect(screen.getByText(/No version of this format is active yet/)).toBeInTheDocument();
+    expect(await screen.findByText("Latest draft")).toBeInTheDocument();
+    expect(screen.getByText("No active version")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Review and activate" })).toBeInTheDocument();
   });
 
-  it("discloses when more than one required format exists (no switcher is built yet)", async () => {
+  it("lets an instructor switch when more than one required format exists", async () => {
     const secondFamily: RubricListItem = {
       ...V1,
       id: 99,
@@ -101,8 +97,9 @@ describe("ManageRubricPage", () => {
     );
     renderWithProviders(<ManageRubricPage />);
     expect(
-      await screen.findByText(/VERIDICAL found 2 required formats on your account/),
+      await screen.findByText(/2 format families are available/),
     ).toBeInTheDocument();
+    expect(screen.getByLabelText("Required format")).toBeInTheDocument();
   });
 
   it("Activate calls the activate endpoint for that version", async () => {
@@ -122,8 +119,8 @@ describe("ManageRubricPage", () => {
     vi.stubGlobal("fetch", fetchMock);
     renderWithProviders(<ManageRubricPage />);
 
-    await screen.findAllByText("V2.pdf");
-    fireEvent.click(screen.getAllByRole("button", { name: "Activate" })[0]);
+    await screen.findByText("V2.pdf");
+    fireEvent.click(screen.getByRole("button", { name: "Activate" }));
 
     await waitFor(() =>
       expect(fetchMock).toHaveBeenCalledWith(
@@ -143,9 +140,8 @@ describe("ManageRubricPage", () => {
       }),
     );
     renderWithProviders(<ManageRubricPage />);
-    await screen.findAllByText("V2.pdf");
-    // Only v2 (not active) should offer Delete — doubled for the dual layout.
-    expect(screen.getAllByRole("button", { name: "Delete" })).toHaveLength(2);
+    await screen.findByText("V2.pdf");
+    expect(screen.getAllByRole("button", { name: "Delete" })).toHaveLength(1);
   });
 
   it("Delete requires confirmation before the endpoint is called (a misclick no longer destroys a version)", async () => {
@@ -164,8 +160,8 @@ describe("ManageRubricPage", () => {
     vi.stubGlobal("fetch", fetchMock);
     renderWithProviders(<ManageRubricPage />);
 
-    await screen.findAllByText("V2.pdf");
-    fireEvent.click(screen.getAllByRole("button", { name: "Delete" })[0]);
+    await screen.findByText("V2.pdf");
+    fireEvent.click(screen.getByRole("button", { name: "Delete" }));
 
     expect(await screen.findByText("Delete version 2?")).toBeInTheDocument();
     expect(fetchMock).not.toHaveBeenCalledWith(
@@ -204,8 +200,8 @@ describe("ManageRubricPage", () => {
     vi.stubGlobal("fetch", fetchMock);
     renderWithProviders(<ManageRubricPage />);
 
-    await screen.findAllByText("V2.pdf");
-    fireEvent.click(screen.getAllByRole("button", { name: "Delete" })[0]);
+    await screen.findByText("V2.pdf");
+    fireEvent.click(screen.getByRole("button", { name: "Delete" }));
     await screen.findByText("Delete version 2?");
     fireEvent.click(screen.getByRole("button", { name: "Delete version" }));
 
@@ -229,8 +225,8 @@ describe("ManageRubricPage", () => {
     vi.stubGlobal("fetch", fetchMock);
     renderWithProviders(<ManageRubricPage />);
 
-    await screen.findAllByText("V2.pdf");
-    fireEvent.click(screen.getAllByRole("button", { name: "Delete" })[0]);
+    await screen.findByText("V2.pdf");
+    fireEvent.click(screen.getByRole("button", { name: "Delete" }));
     expect(await screen.findByText("Delete version 2?")).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
@@ -251,8 +247,8 @@ describe("ManageRubricPage", () => {
       }),
     );
     renderWithProviders(<ManageRubricPage />);
-    await screen.findAllByText("V3.pdf");
-    expect(screen.getAllByText("Reports pinned").length).toBe(2);
+    await screen.findByText("V3.pdf");
+    expect(screen.getAllByText("Reports pinned").length).toBe(1);
   });
 
   it("V-064 AC1: shows 'Not set' when the family has no program, and offers real seeded programs to pick from", async () => {
@@ -334,7 +330,7 @@ describe("ManageRubricPage", () => {
       }),
     );
     renderWithProviders(<ManageRubricPage />);
-    await screen.findByText("v1 · Active");
+    await screen.findAllByText("Active");
     expect(screen.queryByLabelText("Program")).not.toBeInTheDocument();
   });
 });

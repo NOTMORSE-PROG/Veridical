@@ -46,7 +46,7 @@ function getFocusable(container: HTMLElement): HTMLElement[] {
 export function ModalBackdrop({ children }: { children: ReactNode }) {
   useInertBackground();
   return createPortal(
-    <div className="motion-safe:animate-scrim-in fixed inset-0 z-(--z-modal) flex items-center justify-center bg-scrim p-4">
+    <div className="signal-task-sheet-backdrop motion-safe:animate-scrim-in fixed inset-0 z-(--z-modal) flex items-center justify-center bg-scrim p-4">
       {children}
     </div>,
     document.body,
@@ -124,12 +124,13 @@ export function Modal({ title, children, footer, onClose, size = "md" }: ModalPr
       aria-labelledby={titleId}
       tabIndex={-1}
       className={cx(
-        "motion-safe:animate-dialog-in flex max-h-[90vh] w-full flex-col gap-4 overflow-y-auto rounded-lg border border-border bg-panel p-6 text-sm shadow-(--elevation-overlay)",
+        "signal-task-sheet motion-safe:animate-dialog-in flex max-h-[90vh] w-full flex-col gap-4 overflow-y-auto rounded-lg border border-border bg-panel p-6 text-sm shadow-(--elevation-overlay)",
+        size === "lg" ? "signal-task-sheet--large" : "signal-task-sheet--medium",
         SIZE_CLASS[size],
       )}
     >
-      <div className="flex items-start gap-3">
-        <h2 id={titleId} className="text-md font-bold text-ink">
+      <div className="signal-task-sheet__header flex items-start gap-3">
+        <h2 id={titleId} className="signal-task-sheet__title text-md font-bold text-ink">
           {title}
         </h2>
         <span className="flex-1" />
@@ -138,7 +139,7 @@ export function Modal({ title, children, footer, onClose, size = "md" }: ModalPr
             type="button"
             aria-label="Close"
             onClick={onClose}
-            className="flex h-8 w-8 flex-none items-center justify-center rounded-md text-ink-tertiary hover:bg-status-neutral-bg hover:text-ink"
+            className="signal-task-sheet__close flex h-8 w-8 flex-none items-center justify-center rounded-md text-ink-tertiary hover:bg-status-neutral-bg hover:text-ink"
           >
             <svg
               aria-hidden="true"
@@ -156,8 +157,8 @@ export function Modal({ title, children, footer, onClose, size = "md" }: ModalPr
           </button>
         )}
       </div>
-      {children}
-      {footer !== undefined && <div className="flex justify-end gap-2">{footer}</div>}
+      <div className="signal-task-sheet__body">{children}</div>
+      {footer !== undefined && <div className="signal-task-sheet__footer flex justify-end gap-2">{footer}</div>}
     </div>
   );
 }

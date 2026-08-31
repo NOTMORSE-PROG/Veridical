@@ -1,96 +1,112 @@
-// Screen 4v — pre-auth landing (V-055, collapsed to an internal front door
-// by V-067). `/` used to blind-redirect straight to /signin with zero
-// content ever painted (Nielsen "visibility of system status", Jakob's
-// Law, and the trust-first domain lens all named this a real gap —
-// context/RESEARCH.md §14/§20). LandingRoute fast-paths an
-// already-authenticated visitor straight to /dashboard without ever
-// rendering this page; only a confirmed-anonymous visitor sees it.
-//
-// V-067 (2026-08-18): every visitor is pre-authorized by an administrator
-// before they ever reach this page, so the marketing-shaped hero/stat-chips/
-// feature-cards/conversion-section content this used to carry had no one
-// left to persuade. Rebuilt as a GOV.UK-style start page (ui-designer spec,
-// cited in the ticket): name the product, say who it's for, one sign-in
-// action, nothing that argues for itself.
 import { useEffect, useRef, useState } from "react";
 import { Link, Navigate } from "react-router";
 import { useMe } from "../auth/useAuth";
+import { UI_TIMING } from "../config/ui";
 import { useRouteFocus } from "../routing/useRouteFocus";
+import { ActionLink } from "../ui/ActionLink";
+import { Button } from "../ui/Button";
+import { SignalMark, SignalWordmark } from "../ui/SignalMark";
 
-// Staged reveal: nothing visible for the first 400ms (avoids a loading
-// flash on the common warm-cache/fast-response case), a spinner after
-// that, and the free-tier cold-start message (FEATURES.md §9) after 5s if
-// the request is genuinely still in flight.
+const STAGES = [
+  {
+    name: "Prepare",
+    description: "Upload the required format, then confirm the criteria the system found.",
+  },
+  {
+    name: "Check",
+    description: "Add a manuscript and run the structural, semantic, and integrity checks.",
+  },
+  {
+    name: "Review",
+    description: "Inspect unresolved criteria and verify every possible issue against evidence.",
+  },
+  {
+    name: "Decide",
+    description: "Record the instructor decision, then export or share a read-only report.",
+  },
+] as const;
+
+function PublicHeader() {
+  return (
+    <header className="signal-public-header">
+      <Link to="/" className="signal-brand-link signal-on-dark" aria-label="VERIDICAL home">
+        <SignalMark inverse />
+        <SignalWordmark inverse />
+      </Link>
+      <p className="signal-project-label">
+        Student capstone at T.I.P. Manila. Not an official service.
+      </p>
+    </header>
+  );
+}
+
 function LandingPending() {
-  const [stage, setStage] = useState<"hidden" | "spinner" | "cold-start">("hidden");
+  const [stage, setStage] = useState<"hidden" | "checking" | "delayed">("hidden");
 
   useEffect(() => {
-    const toSpinner = setTimeout(() => setStage("spinner"), 400);
-    const toColdStart = setTimeout(() => setStage("cold-start"), 5000);
+    const revealChecking = window.setTimeout(
+      () => setStage("checking"),
+      UI_TIMING.authPendingRevealMs,
+    );
+    const revealDelayed = window.setTimeout(
+      () => setStage("delayed"),
+      UI_TIMING.serviceUnavailableRevealMs,
+    );
     return () => {
-      clearTimeout(toSpinner);
-      clearTimeout(toColdStart);
+      window.clearTimeout(revealChecking);
+      window.clearTimeout(revealDelayed);
     };
   }, []);
 
-  const liveText =
-    stage === "cold-start"
-      ? "Waking up the server. This can take up to a minute on the free tier."
+  const message =
+    stage === "delayed"
+      ? "The free server is still starting. Your work has not changed."
       : "Checking your sign-in status.";
 
   return (
-    <div className="flex min-h-screen flex-col bg-page">
-      <p role="status" aria-live="polite" aria-busy="true" className="sr-only">
-        {liveText}
-      </p>
-      <header className="border-b-[3px] border-accent bg-tip-chrome">
-        <div className="mx-auto flex h-14 max-w-[1120px] items-center px-4 sm:h-16 sm:px-6 lg:px-10">
-          <div className="flex items-center gap-2">
-            <span
-              aria-hidden="true"
-              className="flex h-7 w-7 items-center justify-center rounded-sm bg-accent text-sm font-bold text-on-tip-yellow sm:h-8 sm:w-8"
-            >
-              V
-            </span>
-            <span className="text-base font-bold tracking-header text-on-tip-chrome sm:text-md">
-              VERIDICAL
-            </span>
-          </div>
+    <div className="signal-theme signal-pending">
+      <div className="signal-pending__content">
+        <SignalMark inverse />
+        <SignalWordmark inverse />
+        {stage !== "hidden" && (
+          <>
+            <div aria-hidden="true" className="signal-pending__rail" />
+            <p role="status" aria-live="polite" aria-busy="true">
+              {message}
+            </p>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function ServiceUnavailable({ retry }: { retry: () => void }) {
+  const headingRef = useRef<HTMLHeadingElement>(null);
+  useRouteFocus("Service unavailable - VERIDICAL", headingRef);
+
+  return (
+    <div className="signal-theme signal-service-error">
+      <main className="signal-service-error__panel">
+        <SignalMark />
+        <h1 ref={headingRef} tabIndex={-1}>
+          VERIDICAL is temporarily unavailable.
+        </h1>
+        <p>Your work has not changed. Try the connection again in a moment.</p>
+        <div>
+          <Button type="button" variant="secondary" onClick={retry}>
+            Try again
+          </Button>
         </div>
-      </header>
-      {stage !== "hidden" && (
-        <div aria-hidden="true" className="flex flex-1 flex-col items-center justify-center gap-3 px-4 text-center">
-          <span className="h-8 w-8 animate-spin rounded-full border-4 border-neutral-200 border-t-neutral-900 motion-reduce:animate-none" />
-          <p className="text-sm text-ink-secondary">
-            {stage === "cold-start"
-              ? "Waking up the server. This can take up to a minute on the free tier."
-              : "Loading VERIDICAL."}
-          </p>
-        </div>
-      )}
+      </main>
     </div>
   );
 }
 
 export function LandingRoute() {
-  const { data: me, isPending, isError } = useMe();
+  const { data: me, isPending, isError, refetch } = useMe();
 
-  if (isError) {
-    return (
-      <div className="flex min-h-screen flex-col items-center justify-center gap-4 bg-page px-4 text-center">
-        <p role="status" aria-live="polite" aria-busy="false">
-          VERIDICAL is not reachable right now.
-        </p>
-        <button
-          type="button"
-          onClick={() => window.location.reload()}
-          className="flex h-11 items-center justify-center rounded-md border border-ink px-4 text-sm font-bold text-ink hover:bg-neutral-100"
-        >
-          Reload
-        </button>
-      </div>
-    );
-  }
+  if (isError) return <ServiceUnavailable retry={() => void refetch()} />;
   if (isPending) return <LandingPending />;
   if (me) return <Navigate to="/dashboard" replace />;
   return <LandingPage />;
@@ -101,108 +117,56 @@ function LandingPage() {
   useRouteFocus("VERIDICAL", headingRef);
 
   return (
-    <div className="flex min-h-screen flex-col bg-page">
-      <a
-        href="#main-content"
-        className="sr-only focus-visible:not-sr-only focus-visible:absolute focus-visible:top-2 focus-visible:left-2 focus-visible:z-(--z-skip-link) focus-visible:rounded-md focus-visible:bg-panel focus-visible:px-4 focus-visible:py-2 focus-visible:text-sm focus-visible:font-medium focus-visible:text-ink"
-      >
+    <div className="signal-theme signal-public-frame" data-design="signal">
+      <a href="#main-content" className="signal-skip-link">
         Skip to main content
       </a>
+      <PublicHeader />
 
-      {/*
-       * V-067: the header used to also carry a "Sign in" link, making it
-       * one of three identical sign-in targets on the page (Hick's law tax
-       * with no benefit — an already-authorized visitor doesn't need a
-       * persistent fallback two lines above the one real CTA). Header is
-       * identity-only now; the single sign-in action lives in the content
-       * block below.
-       */}
-      <header className="border-b-[3px] border-accent bg-tip-chrome">
-        <div className="mx-auto flex h-14 max-w-[1120px] items-center px-4 sm:h-16 sm:px-6 lg:px-10">
-          <Link to="/" className="on-dark flex items-center gap-2 rounded-sm">
-            <span
-              aria-hidden="true"
-              className="flex h-7 w-7 items-center justify-center rounded-sm bg-accent text-sm font-bold text-on-tip-yellow sm:h-8 sm:w-8"
-            >
-              V
-            </span>
-            <span className="text-base font-bold tracking-header text-on-tip-chrome sm:text-md">
-              VERIDICAL
-            </span>
-          </Link>
-        </div>
-      </header>
-
-      {/*
-       * V-067 (ui-designer spec, 2026-08-18): a GOV.UK-style start page —
-       * name the product, say who it's for, one button, nothing that
-       * argues for itself. Every visitor here is already pre-authorized by
-       * an administrator, so the marketing-shaped hero/stat-chips/feature-
-       * cards/conversion-section content this page used to carry (V-055,
-       * V-056) had no one left to persuade. That also resolves Track E
-       * P3-1 (the stat chips' sr-only/visible text duplication) and P2-1
-       * (the "3 readiness tiers" claim contradicting the dashboard's real
-       * 4-tile KPI row) as a side effect: nothing on this page makes a
-       * tier-count claim anymore.
-       */}
-      <main
-        id="main-content"
-        tabIndex={-1}
-        className="flex flex-1 flex-col items-center justify-center px-4 py-16 sm:px-6"
-      >
-        <div className="w-full max-w-[480px] text-center">
-          <div className="flex flex-col items-center gap-2">
-            <span
-              aria-hidden="true"
-              className="flex h-10 w-10 items-center justify-center rounded-sm bg-accent text-md font-bold text-on-tip-yellow"
-            >
-              V
-            </span>
-            <span className="text-lg font-bold tracking-header text-ink">VERIDICAL</span>
-          </div>
-
-          <h1 ref={headingRef} tabIndex={-1} className="mt-6 text-lg font-bold text-ink sm:text-2xl">
-            Manuscript readiness checks for capstone instructors.
+      <main id="main-content" tabIndex={-1} className="signal-landing-grid">
+        <section className="signal-hero" aria-labelledby="landing-heading">
+          <p className="signal-eyebrow">BSIT capstone project at T.I.P. Manila</p>
+          <h1 id="landing-heading" ref={headingRef} tabIndex={-1}>
+            Check the manuscript. Keep the decision human.
           </h1>
-
-          <Link
-            to="/signin"
-            className="mt-6 flex h-12 w-full items-center justify-center rounded-md bg-action px-6 text-base font-bold text-on-action hover:bg-action-hover sm:mx-auto sm:inline-flex sm:w-auto sm:min-w-[200px]"
-          >
-            Sign in
-          </Link>
-
-          <p className="mt-3 text-sm text-ink-secondary">
-            Accounts are created by your program administrator.
+          <p className="signal-hero__body">
+            VERIDICAL helps capstone instructors prepare criteria, check manuscripts, review
+            evidence, and record a final decision.
           </p>
-          <p className="mt-2 text-sm text-ink-tertiary">
-            A student capstone project at T.I.P. Manila, not an official T.I.P. system.
-          </p>
-        </div>
+          <div className="signal-hero__actions">
+            <ActionLink to="/signin" variant="brand">
+              Sign in as instructor
+            </ActionLink>
+            <p className="signal-hero__account-note">
+              Accounts are issued by your program administrator.
+            </p>
+          </div>
+        </section>
+
+        <section className="signal-process" aria-labelledby="process-heading">
+          <p className="signal-eyebrow">One review path</p>
+          <h2 id="process-heading">Four stages from format to final decision.</h2>
+          <ol>
+            {STAGES.map((stage, index) => (
+              <li key={stage.name}>
+                <span aria-hidden="true" className="signal-process__number">
+                  {index + 1}
+                </span>
+                <div>
+                  <h3>{stage.name}</h3>
+                  <p>{stage.description}</p>
+                </div>
+              </li>
+            ))}
+          </ol>
+        </section>
       </main>
 
-      <footer className="border-t border-border py-8">
-        <div className="mx-auto flex max-w-[1120px] items-center gap-3 px-4 sm:px-6 lg:px-10">
-          {/*
-           * TIP mark, approved for use by the owner (2026-08-11) with this
-           * exact framing requirement: identify VERIDICAL as a student
-           * project AT T.I.P., never as an official TIP system. Asset
-           * fetched live from tip.edu.ph/assets/Uploads/
-           * TIP-INFORMAL-LOGO-04-2.png (2026-08-11) and stored locally —
-           * never hotlinked, their Cloudflare 403s non-browser clients.
-           */}
-          <img
-            src="/tip-logo.png"
-            alt="Technological Institute of the Philippines logo"
-            className="h-10 w-auto flex-none"
-            width={202}
-            height={140}
-          />
-          <p className="text-sm text-ink-secondary">
-            VERIDICAL is a capstone project by BSIT students at Technological Institute of the
-            Philippines, Manila, not an official T.I.P. system.
-          </p>
-        </div>
+      <footer className="signal-public-footer">
+        <p>
+          VERIDICAL is an independent capstone project by BSIT students at Technological
+          Institute of the Philippines, Manila. It is not an official T.I.P. service.
+        </p>
       </footer>
     </div>
   );

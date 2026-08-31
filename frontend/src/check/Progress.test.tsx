@@ -1,4 +1,4 @@
-import { fireEvent, screen, waitFor } from "@testing-library/react";
+import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { renderWithProviders, stubFetchByPath } from "../test/renderWithProviders";
 import { CheckProgressPage } from "./Progress";
@@ -106,7 +106,7 @@ describe("CheckProgressPage", () => {
     await screen.findByText("AI grading");
     expect(screen.getByText("Ingestion")).toBeInTheDocument();
     expect(screen.getByText("Structural checks")).toBeInTheDocument();
-    expect(screen.getByText("AI grading")).toHaveClass("font-semibold");
+    expect(screen.getByText("AI grading").closest("li")).toHaveClass("signal-check-stage--running");
     expect(screen.getByText("Integrity checks")).toBeInTheDocument();
     expect(screen.getByText("Readiness report")).toBeInTheDocument();
     expect(screen.getByText(/G-11, uploaded/)).toBeInTheDocument();
@@ -133,7 +133,10 @@ describe("CheckProgressPage", () => {
       route: "/checks/5",
       path: "/checks/:checkRunId",
     });
-    expect(await screen.findByText("Waiting to start. Queue position 3.")).toBeInTheDocument();
+    const queued = (await screen.findByText("Waiting to start")).closest("[role='status']");
+    expect(queued).not.toBeNull();
+    expect(queued).toHaveTextContent("Waiting to start");
+    expect(queued).toHaveTextContent("Queue position 3");
   });
 
   it("hides the queue position pill once a run is actively running, even if queue_position is still non-null", async () => {
@@ -204,6 +207,31 @@ describe("CheckProgressPage", () => {
     expect(screen.queryByRole("link", { name: "View readiness report" })).not.toBeInTheDocument();
   });
 
+  it("requires confirmation before cancelling and records the request through the run endpoint", async () => {
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      if (init?.method === "POST") {
+        return new Response(JSON.stringify({ ...RUNNING, cancel_requested_at: "2026-01-01T00:05:00Z" }), { status: 200 });
+      }
+      return new Response(JSON.stringify({ ...RUNNING, cancel_requested_at: null }), { status: 200 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    renderWithProviders(<CheckProgressPage />, {
+      route: "/checks/5",
+      path: "/checks/:checkRunId",
+    });
+
+    fireEvent.click(await screen.findByRole("button", { name: "Cancel check" }));
+    expect(screen.getByRole("dialog", { name: "Cancel this check?" })).toBeInTheDocument();
+    expect(fetchMock.mock.calls.some(([, init]) => init?.method === "POST")).toBe(false);
+
+    fireEvent.click(within(screen.getByRole("dialog", { name: "Cancel this check?" })).getByRole("button", { name: "Cancel check" }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringContaining("/check-runs/5/cancel"),
+      expect.objectContaining({ method: "POST" }),
+    ));
+    expect(await screen.findByText("Cancellation requested")).toBeDisabled();
+  });
+
   it("renders a done-but-skipped stage as visually and textually distinct from a done stage (never conflated as passed)", async () => {
     vi.stubGlobal("fetch", stubFetchByPath({ "/check-runs/5": DONE }));
     renderWithProviders(<CheckProgressPage />, {
@@ -245,7 +273,7 @@ describe("CheckProgressPage", () => {
       path: "/checks/:checkRunId",
     });
     const alert = await screen.findByRole("alert");
-    expect(alert).toHaveTextContent("Could not load this check's progress.");
+    expect(alert).toHaveTextContent("Could not load this check's progress");
     fireEvent.click(screen.getByRole("button", { name: "Try again" }));
     await waitFor(() => expect(screen.getByText("AI grading")).toBeInTheDocument());
   });

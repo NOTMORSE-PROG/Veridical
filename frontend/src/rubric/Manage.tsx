@@ -1,37 +1,17 @@
-// Screen 4m — Rubric management: versions (F2.4). A version list per
-// family: activate any version, view any version's criteria (read-only
-// for superseded ones, ReviewCriteria.tsx), delete a version blocked
-// when reports are pinned to it. F2.5 (criterion library import) is
-// proposed-only in FEATURES.md — not built here.
-//
-// V-055 rebuild: the summary bar used to render a hardcoded "Active"
-// pill regardless of whether the shown family's shown version was
-// actually active — found live against the demo account's real data
-// (a genuinely-unconfirmed draft family rendered "v1 * Active"). Fixed
-// by deriving status from the real data instead of asserting it
-// (ground rule 1/3). Also: a real delete confirmation (previously a
-// single misclick destroyed a version), a dual desktop-table/mobile-
-// card layout (the old 6-column grid overflowed the page at 375px,
-// WCAG 1.4.10), 44px touch targets on mobile (WCAG 2.5.8), route focus
-// management, and an honest multi-family disclosure (only the first
-// family shows; the backend already supports more).
-//
-// Honest scope note: a multi-family switcher isn't built — this shows
-// one family only, and says so when more than one exists. Two families
-// coexisting is proven at the data/API layer (list_rubric_families
-// returns one row per family, tested), but nothing in this screen lets
-// an instructor switch between them yet.
+// V-073 screen 4m — Rubric Studio. The active format is the workspace;
+// versions form an explicit timeline and never look like interchangeable rows.
 import { useEffect, useId, useRef, useState } from "react";
 import { Link } from "react-router";
 import { ApiError } from "../api/client";
 import type { RubricListItem } from "../api/types";
-import { Chip } from "../components/Chip";
-import { Modal, ModalBackdrop } from "../components/Modal";
-import type { StatusPillTone } from "../components/StatusPill";
-import { StatusPill } from "../components/StatusPill";
 import { usePrograms } from "../dashboard/useDashboard";
 import { useRouteFocus } from "../routing/useRouteFocus";
+import { ActionLink } from "../ui/ActionLink";
+import { Alert } from "../ui/Alert";
+import { Button } from "../ui/Button";
+import { Dialog } from "../ui/Dialog";
 import { RerunModal } from "./RerunModal";
+import { UploadRubricModal } from "./UploadRubricModal";
 import {
   useActivateRubric,
   useDeleteRubric,
@@ -39,87 +19,6 @@ import {
   useRubricVersions,
   useSetRubricFamilyProgram,
 } from "./useRubric";
-import { UploadRubricModal } from "./UploadRubricModal";
-
-// V-064 (AC1): lets the instructor set/clear the WHOLE family's program
-// -- the one control this ticket's ACs actually require (filtering reads
-// this value everywhere else; nothing else needs to write it). A plain
-// labeled `<select>`, same precedent as the dashboard's program filter
-// (`ManuscriptsTable.tsx`'s `ProgramFilter`) -- the program list is
-// data-driven, not a fixed small set.
-function ProgramControl({
-  familyId,
-  program,
-}: {
-  familyId: string;
-  program: string | null;
-}) {
-  const { data: programs, isLoading } = usePrograms();
-  const setProgram = useSetRubricFamilyProgram();
-  const [error, setError] = useState<string | null>(null);
-  const selectId = useId();
-
-  if (isLoading || !Array.isArray(programs) || programs.length === 0) return null;
-
-  // `program` (from RubricListItem) is the NAME, but the <select>'s
-  // options are keyed by id (matching the mutation's own program_id
-  // shape) -- resolve name -> id so an already-set program shows as
-  // actually selected, not blank.
-  const currentProgramId = program ? programs.find((p) => p.name === program)?.id : undefined;
-
-  async function handleChange(value: string) {
-    setError(null);
-    const programId = value === "" ? null : Number(value);
-    try {
-      await setProgram.mutateAsync({ familyId, programId });
-    } catch (err) {
-      setError(err instanceof ApiError ? err.message : "Could not update the program. Try again.");
-    }
-  }
-
-  return (
-    <div className="flex flex-col gap-1">
-      <div className="flex items-center gap-2">
-        <label htmlFor={selectId} className="text-sm font-medium text-ink">
-          Program
-        </label>
-        <select
-          id={selectId}
-          value={currentProgramId ?? ""}
-          disabled={setProgram.isPending}
-          onChange={(event) => handleChange(event.target.value)}
-          className="h-9 rounded-md border border-border-input bg-panel px-2.5 text-sm text-ink disabled:opacity-60"
-        >
-          <option value="">Not set</option>
-          {programs.map((p) => (
-            <option key={p.id} value={p.id}>
-              {p.name}
-            </option>
-          ))}
-        </select>
-      </div>
-      {error && (
-        <p role="alert" className="text-sm font-medium text-danger">
-          <span className="sr-only">Error: </span>
-          {error}
-        </p>
-      )}
-    </div>
-  );
-}
-
-function formatDate(iso: string): string {
-  return new Date(iso).toLocaleDateString();
-}
-
-function rowStatus(
-  version: RubricListItem,
-  maxVersion: number | undefined,
-): { label: string; tone: StatusPillTone } {
-  if (version.is_active) return { label: "Active", tone: "success" };
-  if (version.version === maxVersion) return { label: "Draft", tone: "attention" };
-  return { label: "Superseded", tone: "neutral" };
-}
 
 interface DeleteTarget {
   id: number;
@@ -127,526 +26,246 @@ interface DeleteTarget {
   title: string;
 }
 
-interface JustChanged {
-  version: number;
-  verb: "deleted" | "activated";
+function formatDate(iso: string): string {
+  return new Intl.DateTimeFormat(undefined, { dateStyle: "medium" }).format(new Date(iso));
 }
 
-function DeleteConfirmModal({
-  target,
-  isPending,
-  error,
-  onCancel,
-  onConfirm,
-}: {
-  target: DeleteTarget;
-  isPending: boolean;
-  error: string | null;
-  onCancel: () => void;
-  onConfirm: () => void;
-}) {
+function ProgramControl({ familyId, program }: { familyId: string; program: string | null }) {
+  const { data: programs, isPending } = usePrograms();
+  const updateProgram = useSetRubricFamilyProgram();
+  const [error, setError] = useState<string>();
+  const fieldId = useId();
+  if (isPending || !programs?.length) return null;
+  const currentId = program ? programs.find((item) => item.name === program)?.id : undefined;
+
+  async function onChange(value: string) {
+    setError(undefined);
+    try {
+      await updateProgram.mutateAsync({
+        familyId,
+        programId: value ? Number(value) : null,
+      });
+    } catch (cause) {
+      setError(cause instanceof ApiError ? cause.message : "Could not update the program. Try again.");
+    }
+  }
+
   return (
-    <ModalBackdrop>
-      <Modal
-        title={`Delete version ${target.version}?`}
-        onClose={isPending ? undefined : onCancel}
-        footer={
-          <>
-            <button
-              type="button"
-              onClick={onCancel}
-              disabled={isPending}
-              className="flex h-11 items-center justify-center rounded-md border border-border-input bg-panel px-4 text-sm font-bold text-ink hover:bg-status-neutral-bg disabled:opacity-45"
-            >
-              Cancel
-            </button>
-            <button
-              type="button"
-              onClick={onConfirm}
-              disabled={isPending}
-              className="flex h-11 items-center justify-center rounded-md bg-danger px-4 text-sm font-bold text-on-danger hover:bg-danger-hover disabled:opacity-60"
-            >
-              {isPending ? "Deleting" : "Delete version"}
-            </button>
-          </>
-        }
+    <div className="signal-studio-field">
+      <label htmlFor={fieldId}>Program</label>
+      <select
+        id={fieldId}
+        value={currentId ?? ""}
+        disabled={updateProgram.isPending}
+        onChange={(event) => onChange(event.target.value)}
       >
-        <div className="flex flex-col gap-3 text-sm" aria-busy={isPending}>
-          <p className="text-ink">
-            You are about to permanently delete <b>{target.title}</b>, version {target.version}.
-            This cannot be undone.
-          </p>
-          <p className="text-ink-secondary">
-            It has no reports pinned to it, so no existing readiness report will be affected.
-          </p>
-          {isPending && (
-            <p role="status" className="text-sm text-ink-secondary">
-              Deleting version {target.version}.
-            </p>
-          )}
-          {error && (
-            <p role="alert" className="text-sm font-medium text-danger">
-              <span className="sr-only">Error: </span>
-              {error}
-            </p>
-          )}
-        </div>
-      </Modal>
-    </ModalBackdrop>
+        <option value="">Not set</option>
+        {programs.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
+      </select>
+      {error && <p role="alert">{error}</p>}
+    </div>
   );
 }
 
-const desktopActionLinkClass = "inline-flex min-h-8 items-center text-sm font-medium underline";
-const mobileActionLinkClass = "inline-flex min-h-11 items-center text-sm font-medium underline";
-
-function VersionActions({
-  version,
-  status,
-  onActivate,
-  onDelete,
-  activatePending,
-  linkClass,
-  staticClass,
-}: {
-  version: RubricListItem;
-  status: { label: string; tone: StatusPillTone };
-  onActivate: () => void;
-  onDelete: () => void;
-  activatePending: boolean;
-  linkClass: string;
-  staticClass: string;
-}) {
-  const reviewLabel = status.label === "Draft" ? "Review" : "View";
-  return (
-    <>
-      <Link to={`/rubric/${version.id}/review`} className={`${linkClass} text-link hover:text-link-hover`}>
-        {reviewLabel}
-      </Link>
-      {status.label !== "Active" && (
-        <button
-          type="button"
-          onClick={onActivate}
-          disabled={activatePending}
-          className={`${linkClass} text-link hover:text-link-hover disabled:opacity-45`}
-        >
-          Activate
-        </button>
-      )}
-      {status.label !== "Active" &&
-        (version.report_count > 0 ? (
-          <span className={staticClass}>Reports pinned</span>
-        ) : (
-          <button
-            type="button"
-            onClick={onDelete}
-            className={`${linkClass} text-danger hover:text-danger-hover`}
-          >
-            Delete
-          </button>
-        ))}
-    </>
-  );
+function VersionState({ version, latest }: { version: RubricListItem; latest: number }) {
+  const label = version.is_active ? "Active" : version.version === latest ? "Draft" : "Superseded";
+  return <span className={`signal-version-state signal-version-state--${label.toLowerCase()}`}>{label}</span>;
 }
 
 export function ManageRubricPage() {
   const headingRef = useRef<HTMLHeadingElement>(null);
-  useRouteFocus("Rubric - VERIDICAL", headingRef);
+  const historyHeadingRef = useRef<HTMLHeadingElement>(null);
+  useRouteFocus("Rubric Studio - VERIDICAL", headingRef);
 
   const { data: families, isPending, isError, refetch } = useRubricFamilies();
-  const activeFamilies = (families ?? []).filter((f) => f.is_active);
-  const family = activeFamilies[0] ?? families?.[0];
+  const defaultFamily = (families ?? []).find((item) => item.is_active) ?? families?.[0];
+  const [selectedFamilyId, setSelectedFamilyId] = useState<string>();
+  const family = (families ?? []).find((item) => item.rubric_family_id === selectedFamilyId)
+    ?? defaultFamily;
   const { data: versions } = useRubricVersions(family?.rubric_family_id);
   const activate = useActivateRubric();
-  const del = useDeleteRubric();
+  const remove = useDeleteRubric();
   const [uploadOpen, setUploadOpen] = useState(false);
-  const [actionError, setActionError] = useState<string | null>(null);
-  const [deleteTarget, setDeleteTarget] = useState<DeleteTarget | null>(null);
-  const [deleteError, setDeleteError] = useState<string | null>(null);
-  const [liveMessage, setLiveMessage] = useState("");
-  const [justChanged, setJustChanged] = useState<JustChanged | null>(null);
-  const historyHeadingRef = useRef<HTMLHeadingElement>(null);
-  // V-041: a persistent (not one-shot) signal that a version was just
-  // activated -- unlike `justChanged` (nulled the same tick it's read,
-  // only driving a one-time focus+announce effect), this survives until
-  // explicitly dismissed or acted on, since an instructor who doesn't
-  // re-run manuscripts in that exact moment (e.g. triages first, comes
-  // back later) would otherwise have no way to rediscover the offer.
-  const [recentActivation, setRecentActivation] = useState<number | null>(null);
   const [rerunOpen, setRerunOpen] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<DeleteTarget>();
+  const [deleteError, setDeleteError] = useState<string>();
+  const [actionError, setActionError] = useState<string>();
+  const [liveMessage, setLiveMessage] = useState("");
+  const [recentActivation, setRecentActivation] = useState<number>();
 
   useEffect(() => {
-    if (!justChanged) return;
-    historyHeadingRef.current?.focus();
-    setLiveMessage(
-      justChanged.verb === "deleted"
-        ? `Version ${justChanged.version} deleted.`
-        : `Version ${justChanged.version} is now active.`,
-    );
-    setJustChanged(null);
-  }, [justChanged]);
+    if (selectedFamilyId || !defaultFamily) return;
+    setSelectedFamilyId(defaultFamily.rubric_family_id);
+  }, [defaultFamily, selectedFamilyId]);
 
-  async function handleActivate(id: number, version: number) {
-    setActionError(null);
+  async function activateVersion(version: RubricListItem) {
+    setActionError(undefined);
     try {
-      await activate.mutateAsync(id);
-      setJustChanged({ version, verb: "activated" });
-      setRecentActivation(version);
-    } catch (err) {
-      setActionError(err instanceof ApiError ? err.message : "Activate failed. Try again.");
+      await activate.mutateAsync(version.id);
+      setLiveMessage(`Version ${version.version} is now active.`);
+      setRecentActivation(version.version);
+      historyHeadingRef.current?.focus();
+    } catch (cause) {
+      setActionError(cause instanceof ApiError ? cause.message : "Could not activate this version. Try again.");
     }
   }
 
-  async function confirmDelete() {
+  async function deleteVersion() {
     if (!deleteTarget) return;
-    setDeleteError(null);
+    setDeleteError(undefined);
     try {
-      await del.mutateAsync(deleteTarget.id);
-      setJustChanged({ version: deleteTarget.version, verb: "deleted" });
-      setDeleteTarget(null);
-    } catch (err) {
-      setDeleteError(err instanceof ApiError ? err.message : "Delete failed. Try again.");
+      await remove.mutateAsync(deleteTarget.id);
+      setLiveMessage(`Version ${deleteTarget.version} deleted.`);
+      setDeleteTarget(undefined);
+      historyHeadingRef.current?.focus();
+    } catch (cause) {
+      setDeleteError(cause instanceof ApiError ? cause.message : "Could not delete this version. Try again.");
     }
   }
 
   if (isPending) {
     return (
-      <div className="flex flex-col gap-4 p-4 sm:p-6">
-        <h1 ref={headingRef} tabIndex={-1} className="text-lg font-bold text-ink sm:text-xl">
-          Rubric
-        </h1>
-        <p role="status" aria-live="polite" aria-busy="true" className="text-sm text-ink-tertiary">
-          Loading your rubric.
-        </p>
+      <div className="signal-route signal-rubric-studio">
+        <header className="signal-route-header"><div><p className="signal-eyebrow">Prepare</p><h1 ref={headingRef} tabIndex={-1}>Rubric Studio</h1></div></header>
+        <div className="signal-desk-loading" role="status" aria-busy="true"><span>Loading required formats…</span><i /><i /></div>
       </div>
     );
   }
 
   if (isError) {
     return (
-      <div className="flex flex-col gap-4 p-4 sm:p-6">
-        <h1 ref={headingRef} tabIndex={-1} className="text-lg font-bold text-ink sm:text-xl">
-          Rubric
-        </h1>
-        <div
-          role="alert"
-          className="rounded-lg border border-status-attention-text/25 bg-status-attention-bg p-4 text-sm text-status-attention-text"
-        >
-          Could not load your required format.{" "}
-          <button type="button" onClick={() => refetch()} className="underline">
-            Try again
-          </button>
-          .
-        </div>
+      <div className="signal-route signal-rubric-studio">
+        <header className="signal-route-header"><div><p className="signal-eyebrow">Prepare</p><h1 ref={headingRef} tabIndex={-1}>Rubric Studio</h1></div></header>
+        <Alert title="Could not load required formats" tone="error" role="alert">
+          <p>Your formats have not changed.</p><Button variant="secondary" onClick={() => refetch()}>Try again</Button>
+        </Alert>
       </div>
     );
   }
 
   if (!family) {
     return (
-      <div className="flex flex-col gap-4 p-4 sm:p-6">
-        <h1 ref={headingRef} tabIndex={-1} className="text-lg font-bold text-ink sm:text-xl">
-          Rubric
-        </h1>
-        <div className="flex flex-col items-center gap-3 rounded-lg border-2 border-dashed border-border-input bg-page p-8 text-center">
-          <h2 className="text-md font-bold text-ink">No required format yet</h2>
-          <p className="max-w-md text-sm text-ink-secondary">
-            Upload the rubric or format document (PDF or DOCX) to get started. VERIDICAL parses it
-            into criteria for your review before anything is checked.
-          </p>
-          <button
-            type="button"
-            onClick={() => setUploadOpen(true)}
-            className="mt-1 flex h-11 items-center justify-center rounded-md bg-action px-4 text-sm font-bold text-on-action hover:bg-action-hover"
-          >
-            Upload required format
-          </button>
-        </div>
+      <div className="signal-route signal-rubric-studio">
+        <header className="signal-route-header">
+          <div><p className="signal-eyebrow">Prepare</p><h1 ref={headingRef} tabIndex={-1}>Rubric Studio</h1><p className="signal-route-header__intro">Prepare the criteria VERIDICAL will use. You review every criterion before any manuscript check.</p></div>
+        </header>
+        <section className="signal-first-use" aria-labelledby="no-format-heading">
+          <p className="signal-eyebrow">Required format</p><h2 id="no-format-heading">No required format yet</h2>
+          <p>Upload a PDF or DOCX. VERIDICAL prepares a draft set of criteria for your review.</p>
+          <Button variant="brand" onClick={() => setUploadOpen(true)}>Upload required format</Button>
+        </section>
         {uploadOpen && <UploadRubricModal onClose={() => setUploadOpen(false)} />}
       </div>
     );
   }
 
-  const maxVersion = versions?.[0]?.version;
-  const activeVersion = versions?.find((v) => v.is_active);
-  const hasActive = activeVersion !== undefined;
-  const displayVersion = activeVersion ?? versions?.[0] ?? family;
-  const multiFamily = (families?.length ?? 0) > 1;
+  const orderedVersions = [...(versions ?? [family])].sort((a, b) => b.version - a.version);
+  const latestVersion = orderedVersions[0]?.version ?? family.version;
+  const activeVersion = orderedVersions.find((item) => item.is_active);
+  const displayVersion = activeVersion ?? orderedVersions[0] ?? family;
 
   return (
-    <div className="flex flex-col gap-4 p-4 sm:p-6">
-      <div>
-        <h1 ref={headingRef} tabIndex={-1} className="text-lg font-bold text-ink sm:text-xl">
-          Rubric
-        </h1>
-        <p className="text-sm text-ink-secondary">Manage your required format and its version history.</p>
-      </div>
+    <div className="signal-route signal-rubric-studio">
+      <header className="signal-route-header">
+        <div>
+          <p className="signal-eyebrow">Prepare</p>
+          <h1 ref={headingRef} tabIndex={-1}>Rubric Studio</h1>
+          <p className="signal-route-header__intro">Manage the required format, review prepared criteria, and keep report-producing versions traceable.</p>
+        </div>
+        <div className="signal-route-actions"><Button variant="brand" onClick={() => setUploadOpen(true)}>Upload new format</Button></div>
+      </header>
 
-      <p role="status" aria-live="polite" className="sr-only">
-        {liveMessage}
-      </p>
+      <p className="signal-live-region" role="status" aria-live="polite">{liveMessage}</p>
+      {actionError && <Alert title="Could not update this format" tone="error" role="alert">{actionError}</Alert>}
 
-      {multiFamily && (
-        <p className="rounded-md border border-border bg-status-neutral-bg px-3 py-2 text-sm text-ink-secondary">
-          VERIDICAL found {families?.length} required formats on your account. Showing{" "}
-          <b className="font-semibold text-ink">{displayVersion.title}</b>; switching between
-          formats is not available yet.
-        </p>
+      {(families?.length ?? 0) > 1 && (
+        <div className="signal-family-switcher">
+          <label htmlFor="required-format-family">Required format</label>
+          <select
+            id="required-format-family"
+            value={family.rubric_family_id}
+            onChange={(event) => setSelectedFamilyId(event.target.value)}
+          >
+            {families?.map((item) => <option key={item.rubric_family_id} value={item.rubric_family_id}>{item.title}</option>)}
+          </select>
+          <p>{families?.length} format families are available. Reports remain pinned to the version that produced them.</p>
+        </div>
       )}
 
-      <section
-        aria-labelledby="format-summary-heading"
-        className="flex flex-col gap-3 rounded-lg border border-border bg-panel p-4 shadow-sm sm:p-5"
-      >
-        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-          <div className="flex min-w-0 flex-col gap-1.5 sm:flex-row sm:items-center sm:gap-2.5">
-            <span id="format-summary-heading" className="text-xs font-semibold tracking-header text-ink-tertiary uppercase">
-              {hasActive ? "Active format" : "This format"}
-            </span>
-            <Chip maxWidthClass="max-w-[260px]" title={displayVersion.title}>
-              {displayVersion.title}
-            </Chip>
-            <StatusPill tone={hasActive ? "success" : "attention"}>
-              {hasActive ? `v${displayVersion.version} · Active` : `v${displayVersion.version} · Not confirmed`}
-            </StatusPill>
-            <Chip>
-              {displayVersion.criteria_count} {displayVersion.criteria_count === 1 ? "criterion" : "criteria"}
-            </Chip>
+      <section className="signal-active-format" aria-labelledby="active-format-heading">
+        <div className="signal-active-format__rail" aria-hidden="true"><span /></div>
+        <div>
+          <p className="signal-eyebrow">{activeVersion ? "Active format" : "Latest draft"}</p>
+          <h2 id="active-format-heading">{displayVersion.title}</h2>
+          <div className="signal-active-format__facts">
+            <span>Version {displayVersion.version}</span>
+            <span>{displayVersion.criteria_count} {displayVersion.criteria_count === 1 ? "criterion" : "criteria"}</span>
+            <VersionState version={displayVersion} latest={latestVersion} />
           </div>
-          <div className="flex flex-none flex-wrap items-center gap-2">
-            {hasActive ? (
-              <>
-                <Link
-                  to={`/rubric/${displayVersion.id}/review`}
-                  className="flex h-11 items-center justify-center whitespace-nowrap rounded-md border border-border-input bg-panel px-4 text-sm font-bold text-ink hover:bg-status-neutral-bg"
-                >
-                  View criteria
-                </Link>
-                <button
-                  type="button"
-                  onClick={() => setRerunOpen(true)}
-                  className="flex h-11 items-center justify-center whitespace-nowrap rounded-md border border-border-input bg-panel px-4 text-sm font-bold text-ink hover:bg-status-neutral-bg"
-                >
-                  Re-run manuscripts
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setUploadOpen(true)}
-                  className="flex h-11 items-center justify-center whitespace-nowrap rounded-md bg-action px-4 text-sm font-bold text-on-action hover:bg-action-hover"
-                >
-                  Upload new format
-                </button>
-              </>
-            ) : (
-              <>
-                <button
-                  type="button"
-                  onClick={() => setUploadOpen(true)}
-                  className="flex h-11 items-center justify-center whitespace-nowrap rounded-md border border-border-input bg-panel px-4 text-sm font-bold text-ink hover:bg-status-neutral-bg"
-                >
-                  Upload new format
-                </button>
-                <Link
-                  to={`/rubric/${displayVersion.id}/review`}
-                  className="flex h-11 items-center justify-center whitespace-nowrap rounded-md bg-action px-4 text-sm font-bold text-on-action hover:bg-action-hover"
-                >
-                  Review and activate
-                </Link>
-              </>
-            )}
-          </div>
+          <ProgramControl familyId={family.rubric_family_id} program={displayVersion.program} />
+          {!activeVersion && <Alert title="No active version" tone="warning">Review and activate a version before starting manuscript checks.</Alert>}
         </div>
-        {!hasActive && (
-          <p className="rounded-md bg-status-attention-bg px-3 py-2 text-sm text-status-attention-text">
-            No version of this format is active yet. Review and confirm a version before VERIDICAL
-            can check manuscripts against it.
-          </p>
-        )}
-        <ProgramControl familyId={family.rubric_family_id} program={displayVersion.program} />
+        <div className="signal-active-format__actions">
+          <ActionLink to={`/rubric/${displayVersion.id}/review`} variant={activeVersion ? "secondary" : "brand"}>
+            {activeVersion ? "View criteria" : "Review and activate"}
+          </ActionLink>
+          {activeVersion && <Button variant="secondary" onClick={() => setRerunOpen(true)}>Re-run manuscripts</Button>}
+        </div>
       </section>
 
-      {recentActivation !== null && (
-        <div
-          role="status"
-          className="flex flex-wrap items-center justify-between gap-2 rounded-md bg-status-info-bg px-3 py-2.5 text-sm text-status-info-text"
-        >
-          <span>
-            Version {recentActivation} is now active. Manuscripts already checked under a
-            previous version can be re-run against it.
-          </span>
-          <div className="flex flex-none items-center gap-3">
-            <button
-              type="button"
-              onClick={() => {
-                setRerunOpen(true);
-                setRecentActivation(null);
-              }}
-              className="text-sm font-semibold underline hover:no-underline"
-            >
-              Re-run manuscripts
-            </button>
-            <button
-              type="button"
-              aria-label="Dismiss"
-              onClick={() => setRecentActivation(null)}
-              className="flex h-8 w-8 flex-none items-center justify-center rounded-md hover:bg-status-neutral-bg"
-            >
-              <svg aria-hidden="true" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-                <line x1="5" y1="5" x2="19" y2="19" />
-                <line x1="19" y1="5" x2="5" y2="19" />
-              </svg>
-            </button>
-          </div>
-        </div>
+      {recentActivation !== undefined && (
+        <Alert title={`Version ${recentActivation} is now active`} tone="success" role="status">
+          <p>Existing reports stay with their original version. You can choose which manuscripts to run again.</p>
+          <Button variant="secondary" onClick={() => { setRecentActivation(undefined); setRerunOpen(true); }}>Choose manuscripts</Button>
+        </Alert>
       )}
 
-      {rerunOpen && <RerunModal onClose={() => setRerunOpen(false)} />}
-
-      {actionError && (
-        <div
-          role="alert"
-          className="rounded-lg border border-status-attention-text/25 bg-status-attention-bg p-3 text-sm font-medium text-status-attention-text"
-        >
-          {actionError}
+      <section className="signal-version-history" aria-labelledby="version-history-heading">
+        <div className="signal-section-heading">
+          <div><p className="signal-eyebrow">Traceability</p><h2 ref={historyHeadingRef} tabIndex={-1} id="version-history-heading">Version history</h2></div>
+          <p>Newest first. Used versions cannot be rewritten.</p>
         </div>
-      )}
-
-      <h2
-        ref={historyHeadingRef}
-        tabIndex={-1}
-        id="version-history-heading"
-        className="text-md font-bold text-ink"
-      >
-        Version history
-      </h2>
-
-      {/* Mobile: card-per-row, 44px touch targets (WCAG 2.5.8). The fixed
-          desktop columns below need ~750px before content even starts, so
-          this stays a card list all the way to `lg:` (measured against
-          AppShell's own 1007-1009px shell-breakpoint finding), not the
-          narrower `sm:` most other screens switch at. */}
-      <ul aria-labelledby="version-history-heading" className="flex flex-col gap-2 lg:hidden">
-        {versions?.map((version) => {
-          const status = rowStatus(version, maxVersion);
-          return (
-            <li key={version.id} className="rounded-lg border border-border bg-panel p-3">
-              <div className="flex items-start justify-between gap-2">
-                <span className="min-w-0 flex-1 truncate text-sm font-medium text-ink" title={version.title}>
-                  {version.title}
-                </span>
-                <StatusPill tone={status.tone}>{status.label}</StatusPill>
-              </div>
-              <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-ink-tertiary">
-                <span>v{version.version}</span>
-                <span>
-                  {version.criteria_count} {version.criteria_count === 1 ? "criterion" : "criteria"}
-                </span>
+        <ol>
+          {orderedVersions.map((version) => (
+            <li key={version.id}>
+              <span className="signal-version-history__node" aria-hidden="true" />
+              <div className="signal-version-history__summary">
+                <p><strong>v{version.version}</strong><span>{version.title}</span></p>
                 <span>{formatDate(version.created_at)}</span>
-                <span>{version.report_count > 0 ? `${version.report_count} pinned` : "No reports yet"}</span>
               </div>
-              <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-2 text-sm">
-                <VersionActions
-                  version={version}
-                  status={status}
-                  onActivate={() => handleActivate(version.id, version.version)}
-                  onDelete={() => setDeleteTarget(version)}
-                  activatePending={activate.isPending}
-                  linkClass={mobileActionLinkClass}
-                  staticClass="inline-flex min-h-11 items-center text-sm text-ink-tertiary"
-                />
+              <div className="signal-version-history__facts">
+                <VersionState version={version} latest={latestVersion} />
+                <span>{version.criteria_count} criteria</span>
+                <span>{version.report_count} pinned {version.report_count === 1 ? "report" : "reports"}</span>
+              </div>
+              <div className="signal-version-history__actions">
+                <Link to={`/rubric/${version.id}/review`}>{version.is_active ? "View" : "Review"}</Link>
+                {!version.is_active && <button type="button" disabled={activate.isPending} onClick={() => activateVersion(version)}>Activate</button>}
+                {!version.is_active && (version.report_count > 0
+                  ? <span>Reports pinned</span>
+                  : <button type="button" onClick={() => setDeleteTarget({ id: version.id, version: version.version, title: version.title })}>Delete</button>)}
               </div>
             </li>
-          );
-        })}
-        {versions?.length === 0 && (
-          <li className="rounded-lg border border-border bg-panel p-4 text-sm text-ink-tertiary">
-            No versions yet.
-          </li>
-        )}
-      </ul>
-
-      {/* Desktop: the grid table. */}
-      <div
-        role="table"
-        aria-labelledby="version-history-heading"
-        className="hidden overflow-hidden rounded-lg border border-border lg:block"
-      >
-        <div
-          role="row"
-          className="grid grid-cols-[64px_120px_minmax(0,1fr)_72px_100px_104px_minmax(190px,auto)] gap-3 border-b border-border bg-status-neutral-bg px-4 py-2.5 text-xs font-semibold tracking-header text-ink-tertiary uppercase"
-        >
-          <span role="columnheader">Version</span>
-          <span role="columnheader">Status</span>
-          <span role="columnheader">File</span>
-          <span role="columnheader">Criteria</span>
-          <span role="columnheader">Uploaded</span>
-          <span role="columnheader">Reports</span>
-          <span role="columnheader">
-            <span className="sr-only">Actions</span>
-          </span>
-        </div>
-        {versions?.map((version) => {
-          const status = rowStatus(version, maxVersion);
-          return (
-            <div
-              key={version.id}
-              role="row"
-              className="grid grid-cols-[64px_120px_minmax(0,1fr)_72px_100px_104px_minmax(190px,auto)] items-center gap-3 border-t border-border px-4 py-3 text-sm"
-            >
-              <span role="cell" className="font-bold text-ink">
-                v{version.version}
-              </span>
-              <span role="cell">
-                <StatusPill tone={status.tone}>{status.label}</StatusPill>
-              </span>
-              <span role="cell" className="min-w-0 truncate text-ink" title={version.title}>
-                {version.title}
-              </span>
-              <span role="cell" className="text-ink-tertiary">
-                {version.criteria_count}
-              </span>
-              <span role="cell" className="text-ink-tertiary">
-                {formatDate(version.created_at)}
-              </span>
-              <span role="cell" className="text-ink-tertiary">
-                {version.report_count > 0 ? `${version.report_count} pinned` : "None yet"}
-              </span>
-              <span role="cell" className="flex items-center justify-end gap-3 whitespace-nowrap">
-                <VersionActions
-                  version={version}
-                  status={status}
-                  onActivate={() => handleActivate(version.id, version.version)}
-                  onDelete={() => setDeleteTarget(version)}
-                  activatePending={activate.isPending}
-                  linkClass={desktopActionLinkClass}
-                  staticClass="text-sm text-ink-tertiary"
-                />
-              </span>
-            </div>
-          );
-        })}
-        {versions?.length === 0 && (
-          <p className="px-4 py-3 text-sm text-ink-tertiary">No versions yet.</p>
-        )}
-      </div>
-
-      <p className="text-sm text-ink-tertiary">
-        A rubric change is a measurement change. Reports stay pinned to the version they were
-        graded against so results stay comparable over time.
-      </p>
-
-      {uploadOpen && (
-        <UploadRubricModal onClose={() => setUploadOpen(false)} familyId={family.rubric_family_id} />
-      )}
+          ))}
+        </ol>
+      </section>
 
       {deleteTarget && (
-        <DeleteConfirmModal
-          target={deleteTarget}
-          isPending={del.isPending}
-          error={deleteError}
-          onCancel={() => setDeleteTarget(null)}
-          onConfirm={confirmDelete}
-        />
+        <Dialog
+          title={`Delete version ${deleteTarget.version}?`}
+          onClose={remove.isPending ? undefined : () => setDeleteTarget(undefined)}
+          actions={<><Button variant="secondary" disabled={remove.isPending} onClick={() => setDeleteTarget(undefined)}>Cancel</Button><Button variant="danger" busy={remove.isPending} onClick={deleteVersion}>{remove.isPending ? "Deleting" : "Delete version"}</Button></>}
+        >
+          <div className="signal-dialog-copy" aria-busy={remove.isPending}>
+            <p>You are about to permanently delete <strong>{deleteTarget.title}</strong>, version {deleteTarget.version}. This cannot be undone.</p>
+            <p>It has no reports pinned to it, so existing readiness reports will not change.</p>
+            {remove.isPending && <p role="status">Deleting version {deleteTarget.version}.</p>}
+            {deleteError && <Alert title="Could not delete this version" tone="error" role="alert">{deleteError}</Alert>}
+          </div>
+        </Dialog>
       )}
+      {uploadOpen && <UploadRubricModal onClose={() => setUploadOpen(false)} />}
+      {rerunOpen && <RerunModal onClose={() => setRerunOpen(false)} />}
     </div>
   );
 }

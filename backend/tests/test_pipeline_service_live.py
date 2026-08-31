@@ -3,20 +3,25 @@ ingestion/activation preconditions) and `queue_position`'s FIFO ordering
 (ticket AC: "second upload while running -> queued, position shown").
 """
 
+import asyncio
 import os
 import time
 from datetime import UTC, datetime
+from decimal import Decimal
 
 import pytest
-from sqlalchemy import select, text
+from sqlalchemy import func, select, text
 
 from app.errors import ConflictError, NotFoundError
-from app.models.enums import IngestStatus
+from app.models.audit import AuditLog
+from app.models.enums import CheckRunStatus, IngestStatus, ReadinessStatus
 from app.models.group import Group, Program
 from app.models.instructor import Instructor
 from app.models.manuscript import Manuscript
 from app.models.rubric import Rubric
-from app.pipeline.service import create_check_run, queue_position
+from app.models.run import CheckRun, ReadinessReport
+from app.pipeline.machine import _transition_after_boundary
+from app.pipeline.service import cancel_check_run, create_check_run, queue_position
 
 live = pytest.mark.skipif(
     "DATABASE_URL" not in os.environ,
@@ -58,7 +63,8 @@ async def _clean_tables(session_factory):
     async with session_factory() as session:
         await session.execute(
             text(
-                "TRUNCATE check_run, criterion, rubric, manuscript, instructor "
+                "TRUNCATE audit_log, readiness_report, check_run, criterion, "
+                "rubric, manuscript, instructor "
                 "RESTART IDENTITY CASCADE"
             )
         )
@@ -263,3 +269,186 @@ async def test_queue_position_is_none_once_terminal(session_factory):
         run.status = "done"
         await session.commit()
         assert await queue_position(session, run) is None
+
+
+async def test_concurrent_queued_cancellation_writes_one_event_pair(session_factory):
+    """Two requests may race, but the immutable history records one action."""
+    instructor_id, manuscript_id, rubric_id = await _seed_instructor_manuscript_rubric(
+        session_factory
+    )
+    async with session_factory() as session:
+        run = await create_check_run(session, instructor_id, manuscript_id, rubric_id)
+        run_id = run.id
+
+    async def cancel_once():
+        async with session_factory() as session:
+            return await cancel_check_run(session, run_id, instructor_id)
+
+    first, second = await asyncio.gather(cancel_once(), cancel_once())
+    assert first.status == CheckRunStatus.cancelled
+    assert second.status == CheckRunStatus.cancelled
+
+    async with session_factory() as verify:
+        event_counts = dict(
+            (
+                await verify.execute(
+                    select(AuditLog.event_type, func.count())
+                    .where(
+                        AuditLog.check_run_id == run_id,
+                        AuditLog.event_type.in_(
+                            ("check_run_cancel_requested", "check_run_cancelled")
+                        ),
+                    )
+                    .group_by(AuditLog.event_type)
+                )
+            ).all()
+        )
+        assert event_counts == {
+            "check_run_cancel_requested": 1,
+            "check_run_cancelled": 1,
+        }
+
+
+async def test_cancellation_advances_past_a_completed_persisted_stage(session_factory):
+    """The cancellation record names the next stage when the current one is done."""
+    instructor_id, manuscript_id, rubric_id = await _seed_instructor_manuscript_rubric(
+        session_factory
+    )
+    async with session_factory() as setup:
+        run = await create_check_run(setup, instructor_id, manuscript_id, rubric_id)
+        run.status = CheckRunStatus.structural
+        run.stage_status = {"stages": {"structural": {"status": "done"}}}
+        await setup.commit()
+        run_id = run.id
+
+    async with session_factory() as request:
+        requested = await cancel_check_run(request, run_id, instructor_id)
+        assert requested.status == CheckRunStatus.structural
+        assert requested.cancel_requested_at is not None
+
+    async with session_factory() as worker:
+        run = await worker.get(CheckRun, run_id)
+        advanced = await _transition_after_boundary(worker, run, CheckRunStatus.structural)
+        assert advanced is False
+
+    async with session_factory() as verify:
+        run = await verify.get(CheckRun, run_id)
+        assert run.status == CheckRunStatus.cancelled
+        assert run.stage_status["cancellation"]["stopped_before"] == "semantic"
+        cancelled_event = await verify.scalar(
+            select(AuditLog).where(
+                AuditLog.check_run_id == run_id,
+                AuditLog.event_type == "check_run_cancelled",
+            )
+        )
+        assert cancelled_event.payload["stopped_before"] == "semantic"
+
+
+async def test_completion_and_cancellation_have_one_atomic_winner(session_factory):
+    """The terminal row, report, timestamp, and audit trail cannot disagree."""
+    instructor_id, manuscript_id, rubric_id = await _seed_instructor_manuscript_rubric(
+        session_factory
+    )
+    async with session_factory() as setup:
+        run = await create_check_run(setup, instructor_id, manuscript_id, rubric_id)
+        run.status = CheckRunStatus.aggregating
+        run.stage_status = {"stages": {"aggregating": {"status": "done"}}}
+        setup.add(
+            ReadinessReport(
+                check_run_id=run.id,
+                composite_score=Decimal("80"),
+                status=ReadinessStatus.ready,
+            )
+        )
+        await setup.commit()
+        run_id = run.id
+
+    async def request_cancel():
+        async with session_factory() as session:
+            try:
+                await cancel_check_run(session, run_id, instructor_id)
+            except ConflictError:
+                return "completion"
+            return "cancellation"
+
+    async def finish_run():
+        async with session_factory() as session:
+            run = await session.get(CheckRun, run_id)
+            advanced = await _transition_after_boundary(session, run, CheckRunStatus.aggregating)
+            return "completion" if advanced else "cancellation"
+
+    await asyncio.gather(request_cancel(), finish_run())
+
+    async with session_factory() as verify:
+        run = await verify.get(CheckRun, run_id)
+        report = await verify.scalar(
+            select(ReadinessReport).where(ReadinessReport.check_run_id == run_id)
+        )
+        event_counts = dict(
+            (
+                await verify.execute(
+                    select(AuditLog.event_type, func.count())
+                    .where(
+                        AuditLog.check_run_id == run_id,
+                        AuditLog.event_type.in_(
+                            ("check_run_cancel_requested", "check_run_cancelled")
+                        ),
+                    )
+                    .group_by(AuditLog.event_type)
+                )
+            ).all()
+        )
+
+        if run.status == CheckRunStatus.done:
+            assert run.cancel_requested_at is None
+            assert report is not None
+            assert event_counts == {}
+        else:
+            assert run.status == CheckRunStatus.cancelled
+            assert run.cancel_requested_at is not None
+            assert report is None
+            assert event_counts == {
+                "check_run_cancel_requested": 1,
+                "check_run_cancelled": 1,
+            }
+
+
+async def test_cancelling_a_parked_run_finishes_without_waiting_for_resume(session_factory):
+    """A parked worker is absent, so the request endpoint owns the safe stop."""
+    instructor_id, manuscript_id, rubric_id = await _seed_instructor_manuscript_rubric(
+        session_factory
+    )
+    async with session_factory() as setup:
+        run = await create_check_run(setup, instructor_id, manuscript_id, rubric_id)
+        run.status = CheckRunStatus.semantic
+        run.stage_status = {
+            "blocked": {
+                "code": "api_down",
+                "message": "The service is unavailable.",
+                "resume_at": None,
+            }
+        }
+        await setup.commit()
+        run_id = run.id
+
+    async with session_factory() as session:
+        cancelled = await cancel_check_run(session, run_id, instructor_id)
+        assert cancelled.status == CheckRunStatus.cancelled
+        assert cancelled.stage_status["cancellation"]["stopped_before"] == "semantic"
+
+    async with session_factory() as verify:
+        event_types = list(
+            (
+                await verify.scalars(
+                    select(AuditLog.event_type)
+                    .where(
+                        AuditLog.check_run_id == run_id,
+                        AuditLog.event_type.in_(
+                            ("check_run_cancel_requested", "check_run_cancelled")
+                        ),
+                    )
+                    .order_by(AuditLog.id)
+                )
+            ).all()
+        )
+        assert event_types == ["check_run_cancel_requested", "check_run_cancelled"]

@@ -117,7 +117,7 @@ export function useRerunEstimate(manuscriptIds: number[], rubricId: number | und
   });
 }
 
-const TERMINAL_STATUSES = new Set(["done", "failed"]);
+const TERMINAL_STATUSES = new Set(["done", "failed", "cancelled"]);
 
 export function useCheckRun(id: number) {
   return useQuery({
@@ -137,6 +137,18 @@ export function useCheckRun(id: number) {
       if (query.state.status === "error") return false;
       const status = query.state.data?.status;
       return status && TERMINAL_STATUSES.has(status) ? false : 2_000;
+    },
+  });
+}
+
+export function useCancelCheckRun(id: number) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: () => api.post<CheckRun>(`/check-runs/${id}/cancel`, {}),
+    onSuccess: (run) => {
+      queryClient.setQueryData(["check-run", id], run);
+      queryClient.invalidateQueries({ queryKey: ["manuscripts"] });
+      queryClient.invalidateQueries({ queryKey: ["check-runs"] });
     },
   });
 }

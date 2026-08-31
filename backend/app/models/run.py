@@ -43,6 +43,11 @@ class CheckRun(Base, PkCreatedMixin):
     # Per-stage progress + failure taxonomy state, rendered by screens 4f–4g;
     # stage granularity is what makes quota-exhausted runs resumable (D-001).
     stage_status: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    # V-071 AC12: cancellation is cooperative at stage persistence
+    # boundaries. The request timestamp is separate from terminal `status`
+    # so a concurrent API request cannot be overwritten by the worker's
+    # next stage transition before the worker sees it.
+    cancel_requested_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 

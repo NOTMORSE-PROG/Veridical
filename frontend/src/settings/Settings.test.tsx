@@ -56,7 +56,7 @@ const SETTINGS: SettingsOut = {
 
 function baseHandlers(overrides: Record<string, unknown> = {}) {
   return {
-    "/auth/me": ME,
+    "/auth/session": { instructor: ME },
     "/quota": QUOTA,
     "/settings": SETTINGS,
     ...overrides,
@@ -204,15 +204,17 @@ describe("SettingsPage", () => {
     expect(screen.getAllByText("gemini-3.5-flash").length).toBe(2); // mobile card + desktop grid
   });
 
-  it("renders fixed thresholds with a non-editable disclosure and real prompt/model versions", async () => {
+  it("renders named readiness bands, keeps raw cutoffs in the technical record, and shows real prompt/model versions", async () => {
     vi.stubGlobal("fetch", stubFetchByPath(baseHandlers()));
     renderWithProviders(<SettingsPage />);
     await screen.findByText("Prof Cruz");
 
-    expect(await screen.findByText(/Ready: composite score at or above 85%/)).toBeInTheDocument();
-    expect(screen.getByText(/Not ready: composite score below 60%/)).toBeInTheDocument();
+    expect(await screen.findByText(/Ready: the recorded evidence supports proceeding/)).toBeInTheDocument();
+    expect(screen.getByText(/Not Ready: the recorded criteria show substantial unresolved gaps/)).toBeInTheDocument();
     expect(screen.getByText(/These thresholds are fixed for every instructor right now/)).toBeInTheDocument();
-    expect(screen.getByText(/about 3 of 3 graders/)).toBeInTheDocument();
+    expect(screen.getByText("Ready composite cutoff").closest("div")).toHaveTextContent("85");
+    expect(screen.getByText("Not Ready composite cutoff").closest("div")).toHaveTextContent("60");
+    expect(screen.getByText("Escalation agreement cutoff").closest("div")).toHaveTextContent("1.00");
     expect(screen.getByText(/semantic_grading/)).toBeInTheDocument();
   });
 

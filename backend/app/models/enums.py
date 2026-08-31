@@ -54,6 +54,10 @@ class CheckRunStatus(StrEnum):
     aggregating = "aggregating"
     done = "done"
     failed = "failed"
+    # V-071 AC12: an instructor-requested terminal stop. Distinct from
+    # `failed`: the system did not break, and any quota already spent stays
+    # visible in the audit trail rather than being described as an error.
+    cancelled = "cancelled"
 
 
 class CheckKind(StrEnum):

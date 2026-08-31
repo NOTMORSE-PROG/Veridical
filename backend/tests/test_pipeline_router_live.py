@@ -165,6 +165,77 @@ def test_create_get_and_list_check_run(logged_in):
     assert any(r["id"] == body["id"] for r in listed.json())
 
 
+def test_cancel_queued_run_is_terminal_idempotent_and_audited(
+    logged_in, monkeypatch, api_scratch_url
+):
+    import asyncio
+
+    from sqlalchemy import select
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
+    import app.pipeline.router as pipeline_router
+    from app.db import sqlalchemy_url
+    from app.models.audit import AuditLog
+
+    async def do_not_advance(*_args, **_kwargs):
+        return None
+
+    # Hold the newly-created run in the queued state so this test exercises
+    # the immediate-cancel branch deterministically instead of racing the
+    # background worker.
+    monkeypatch.setattr(pipeline_router, "advance_once", do_not_advance)
+
+    client, manuscript_id, rubric_id = logged_in
+    created = client.post(
+        "/check-runs", json={"manuscript_id": manuscript_id, "rubric_id": rubric_id}
+    )
+    assert created.status_code == 201
+    run_id = created.json()["id"]
+
+    cancelled = client.post(f"/check-runs/{run_id}/cancel")
+    assert cancelled.status_code == 200
+    body = cancelled.json()
+    assert body["status"] == "cancelled"
+    assert body["cancel_requested_at"] is not None
+    assert body["finished_at"] is not None
+    assert body["queue_position"] is None
+    assert body["stage_status"]["cancellation"]["stopped_before"] == "ingesting"
+
+    repeated = client.post(f"/check-runs/{run_id}/cancel")
+    assert repeated.status_code == 200
+    assert repeated.json()["status"] == "cancelled"
+
+    async def audit_types():
+        engine = create_async_engine(sqlalchemy_url(api_scratch_url))
+        try:
+            factory = async_sessionmaker(engine, expire_on_commit=False)
+            async with factory() as session:
+                return list(
+                    (
+                        await session.scalars(
+                            select(AuditLog.event_type)
+                            .where(
+                                AuditLog.check_run_id == run_id,
+                                AuditLog.event_type.in_(
+                                    (
+                                        "check_run_cancel_requested",
+                                        "check_run_cancelled",
+                                    )
+                                ),
+                            )
+                            .order_by(AuditLog.id)
+                        )
+                    ).all()
+                )
+        finally:
+            await engine.dispose()
+
+    assert asyncio.run(audit_types()) == [
+        "check_run_cancel_requested",
+        "check_run_cancelled",
+    ]
+
+
 def test_create_check_run_rejects_unconfirmed_rubric(logged_in):
     client, manuscript_id, _ = logged_in
     resp = client.post("/check-runs", json={"manuscript_id": manuscript_id, "rubric_id": 999999})
