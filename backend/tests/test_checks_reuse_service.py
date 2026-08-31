@@ -9,8 +9,8 @@ regression test."""
 
 import pytest
 
-from app.checks.reuse.query import SimilarityMatch
-from app.checks.reuse.service import _match_to_flag_draft
+from app.checks.reuse.query import PassageMatch, SimilarityMatch
+from app.checks.reuse.service import _match_to_flag_draft, _passage_match_to_flag_draft
 from app.models.enums import FlagSeverity
 
 OTHER_GROUP = "BSIT-4A Attendance Monitoring System Group"
@@ -46,12 +46,50 @@ def test_reason_never_leaks_matched_identity_or_heading(level, chapter_title, ex
     # Bounded, non-identifying reference (BUG-050 item 5): identifiable,
     # never identifying.
     assert "#42" in reason
+    assert "%" not in reason
 
     # `detail` stays internal bookkeeping only -- confirmed elsewhere
     # (app/flags/service.py) that it is never wholesale-serialized to
     # any API response, so it deliberately still carries the raw fields.
     assert detail["matched_group_label"] == OTHER_GROUP
     assert detail["matched_chapter_title"] == chapter_title
+    assert detail["similarity"] == pytest.approx(0.83)
+
+
+def test_passage_reason_uses_a_named_band_while_raw_similarity_remains_internal():
+    match = PassageMatch(
+        own_passage_index=3,
+        level="high_similarity",
+        similarity=0.84,
+        matched_manuscript_id=42,
+        matched_group_label=OTHER_GROUP,
+        own_chapter_index=1,
+        own_page=4,
+        own_paragraph=8,
+        own_char_start=0,
+        own_char_end=38,
+        own_text="The manuscript's own bounded passage.",
+        own_context_text="The manuscript's own bounded passage.",
+        own_is_reference_list=False,
+        own_is_block_quote=False,
+        matched_chapter_index=2,
+        matched_page=7,
+        matched_paragraph=14,
+        matched_char_start=0,
+        matched_char_end=29,
+        matched_text="The archived bounded passage.",
+        matched_context_text="The archived bounded passage.",
+        matched_is_reference_list=False,
+        matched_is_block_quote=False,
+    )
+
+    severity, evidence, _anchor, detail = _passage_match_to_flag_draft(match)
+
+    assert severity == FlagSeverity.med
+    assert evidence == match.own_text
+    assert "%" not in detail["reason"]
+    assert "high textual similarity" in detail["reason"]
+    assert detail["similarity"] == pytest.approx(0.84)
 
 
 def test_first_upload_context_flags_detail_but_never_changes_severity_or_reason():

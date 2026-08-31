@@ -143,11 +143,11 @@ export function ReuseExplorePanel({
 
       <div>
         <p className="border-b border-border px-3.5 py-2 text-xs font-semibold tracking-header text-ink-tertiary uppercase">
-          In this report's score
+          Included in readiness review
         </p>
         {scoredPassageFlags.length === 0 ? (
           <p className="border-b border-border px-3.5 py-3 text-sm text-ink-secondary">
-            No passage-level match affected this manuscript's score.
+            No passage-level match was included in this manuscript's readiness review.
           </p>
         ) : (
           scoredPassageFlags.map((flag) => (
@@ -173,7 +173,7 @@ export function ReuseExplorePanel({
       {anyToggleOn && (
         <div>
           <p className="border-b border-border px-3.5 py-2 text-xs font-semibold tracking-header text-ink-tertiary uppercase">
-            Excluded from score, for verification only
+            Not included in readiness, for verification only
           </p>
           {isPending && (
             <p className="flex items-center gap-1.5 px-3.5 py-3 text-sm text-ink-secondary">
@@ -209,7 +209,7 @@ export function ReuseExplorePanel({
                     <span className="flex min-w-0 flex-1 flex-col gap-1.5">
                       <span className="text-ink-secondary">{truncateAtWord(match.own_excerpt, 140)}</span>
                       <span className="flex flex-wrap items-center gap-1.5">
-                        <StatusPill tone="neutral">Not scored</StatusPill>
+                        <StatusPill tone="neutral">Not included in readiness</StatusPill>
                         {match.excluded_reason.map((r) => (
                           <span
                             key={r}
