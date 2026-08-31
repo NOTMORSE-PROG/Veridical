@@ -11,10 +11,19 @@
 //   full document, never a live read of the other account's file.
 // - purged (either ownership): one honest notice, no content pane at all.
 import { BASE_URL } from "../api/client";
+import type { ManuscriptViewerOut } from "../api/types";
 import { PassageBlock } from "../document/PassagePairPanel";
 import { PdfPane } from "../document/PdfPane";
 import { DocxPane } from "../document/DocxPane";
-import { useLibraryDocument, useLibraryExcerpt, useLibraryParagraphs } from "./useLibrary";
+import { useLibraryExcerpt, useLibraryParagraphs } from "./useLibrary";
+
+export interface OwnDocumentState {
+  viewer: ManuscriptViewerOut | undefined;
+  isPending: boolean;
+  isError: boolean;
+  removedAt: string | null;
+  onRetry: () => void;
+}
 
 function SpinnerNote({ children }: { children: string }) {
   return (
@@ -40,8 +49,14 @@ function PurgedNotice({ text }: { text: string }) {
   );
 }
 
-function OwnDocumentPane({ manuscriptId }: { manuscriptId: number }) {
-  const { data: viewer, isPending, isError, refetch } = useLibraryDocument(manuscriptId, true);
+function OwnDocumentPane({
+  manuscriptId,
+  documentState,
+}: {
+  manuscriptId: number;
+  documentState: OwnDocumentState;
+}) {
+  const { viewer, isPending, isError, onRetry } = documentState;
   const isDocx = viewer?.available === true && viewer.source_format === "docx";
   const {
     data: paragraphsData,
@@ -55,12 +70,13 @@ function OwnDocumentPane({ manuscriptId }: { manuscriptId: number }) {
     return (
       <div className="p-4">
         <ErrorNote>This manuscript couldn't be loaded.</ErrorNote>
-        <button type="button" onClick={() => refetch()} className="mt-2 text-sm font-medium text-link underline">
+        <button type="button" onClick={onRetry} className="mt-2 text-sm font-medium text-link underline">
           Try again
         </button>
       </div>
     );
   }
+  if (!viewer) return <ErrorNote>This manuscript's availability could not be checked.</ErrorNote>;
   if (!viewer.available) return <PurgedNotice text={viewer.unavailable_reason ?? "This manuscript can't be viewed."} />;
 
   if (viewer.source_format === "pdf") {
@@ -149,9 +165,24 @@ function ExcerptPane({ manuscriptId }: { manuscriptId: number }) {
   );
 }
 
-export function LibraryContentPane({ manuscriptId, isOwn }: { manuscriptId: number; isOwn: boolean }) {
+export function LibraryContentPane({
+  manuscriptId,
+  isOwn,
+  ownDocument,
+}: {
+  manuscriptId: number;
+  isOwn: boolean;
+  ownDocument?: OwnDocumentState;
+}) {
+  if (isOwn && !ownDocument) {
+    return <ErrorNote>This manuscript's availability could not be checked.</ErrorNote>;
+  }
+  if (isOwn && ownDocument?.removedAt) {
+    return <PurgedNotice text="This manuscript is no longer stored in the Library." />;
+  }
+
   return isOwn ? (
-    <OwnDocumentPane manuscriptId={manuscriptId} />
+    <OwnDocumentPane manuscriptId={manuscriptId} documentState={ownDocument!} />
   ) : (
     <ExcerptPane manuscriptId={manuscriptId} />
   );
