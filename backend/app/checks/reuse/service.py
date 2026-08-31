@@ -42,23 +42,23 @@ from app.models.run import CheckResult, Flag
 # confirmed never serialized to any API response (`app/flags/service.py`
 # reads only `verdict`/`basis` off `detail`).
 EXACT_DUPLICATE_WHOLE_DOC_WORDING = (
-    "This manuscript appears to be a duplicate or near-duplicate ({pct}% match) of "
+    "This manuscript appears to be an exact or near-exact textual duplicate of "
     "archived manuscript #{ref} in VERIDICAL's shared originality library: "
     "possible resubmission or reuse. Please verify manually."
 )
 HIGH_SIMILARITY_WHOLE_DOC_WORDING = (
-    "This manuscript shows high similarity ({pct}% match) to archived manuscript "
+    "This manuscript shows high textual similarity to archived manuscript "
     "#{ref} in VERIDICAL's shared originality library: possible shared content "
     "or reuse. Please verify manually."
 )
 EXACT_DUPLICATE_CHAPTER_WORDING = (
-    'The section "{own_chapter}" appears to be a duplicate or near-duplicate '
-    "({pct}% match) of a section in archived manuscript #{ref} in VERIDICAL's "
+    'The section "{own_chapter}" appears to be an exact or near-exact textual '
+    "duplicate of a section in archived manuscript #{ref} in VERIDICAL's "
     "shared originality library: possible resubmission or reuse of that section. "
     "Please verify manually."
 )
 HIGH_SIMILARITY_CHAPTER_WORDING = (
-    'The section "{own_chapter}" shows high similarity ({pct}% match) to a section '
+    'The section "{own_chapter}" shows high textual similarity to a section '
     "in archived manuscript #{ref} in VERIDICAL's shared originality library: "
     "possible reuse of that section. Please verify manually."
 )
@@ -79,12 +79,12 @@ HIGH_SIMILARITY_CHAPTER_WORDING = (
 # docstring), unlike today's whole-doc/chapter flags, which only ever
 # resolve to a coarse `section`/`whole_document` region.
 EXACT_DUPLICATE_PASSAGE_WORDING = (
-    "This passage appears to be a duplicate or near-duplicate ({pct}% match) of a "
+    "This passage appears to be an exact or near-exact textual duplicate of a "
     "passage in archived manuscript #{ref} in VERIDICAL's shared originality "
     "library: possible resubmission or reuse of this passage. Please verify manually."
 )
 HIGH_SIMILARITY_PASSAGE_WORDING = (
-    "This passage shows high similarity ({pct}% match) to a passage in archived "
+    "This passage shows high textual similarity to a passage in archived "
     "manuscript #{ref} in VERIDICAL's shared originality library: possible reuse "
     "of this passage. Please verify manually."
 )
@@ -110,7 +110,6 @@ HIGH_SIMILARITY_PASSAGE_WORDING = (
 def _match_to_flag_draft(
     match: SimilarityMatch, *, first_upload: bool = False
 ) -> tuple[FlagSeverity, str, dict]:
-    pct = round(match.similarity * 100, 1)
     is_chapter = match.matched_chapter_title is not None
     if match.level == "exact_duplicate":
         severity = FlagSeverity.high
@@ -124,7 +123,6 @@ def _match_to_flag_draft(
         )
 
     reason = template.format(
-        pct=pct,
         ref=match.matched_manuscript_id,
         own_chapter=match.own_chapter_title,
     )
@@ -148,14 +146,13 @@ def _passage_match_to_flag_draft(
     different shape from `_match_to_flag_draft` above (see the wording
     templates' own comment for why: real passage text as the excerpt,
     the explanatory sentence in `detail["reason"]` instead)."""
-    pct = round(match.similarity * 100, 1)
     if match.level == "exact_duplicate":
         severity = FlagSeverity.high
         template = EXACT_DUPLICATE_PASSAGE_WORDING
     else:
         severity = FlagSeverity.med
         template = HIGH_SIMILARITY_PASSAGE_WORDING
-    reason = template.format(pct=pct, ref=match.matched_manuscript_id)
+    reason = template.format(ref=match.matched_manuscript_id)
 
     page_anchor = (
         f"p. {match.own_page}" if match.own_page is not None else f"¶{match.own_paragraph}"

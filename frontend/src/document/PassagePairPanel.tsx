@@ -6,10 +6,6 @@
 import { Link } from "react-router";
 import type { PassagePairOut } from "../api/types";
 
-const HIGHLIGHT_STYLE = {
-  background: "color-mix(in srgb, var(--color-status-caution-text) 20%, transparent)",
-};
-
 // V-066: exported so the library's bounded-excerpt view (a non-owned
 // manuscript's detail/compare pane) can reuse the identical block
 // primitive instead of a second, near-identical one.
@@ -29,7 +25,7 @@ export function PassageBlock({
       <p className="mb-1 text-xs font-semibold tracking-header text-ink-tertiary uppercase">{label}</p>
       <div className="rounded-lg border border-border bg-page px-4 py-3 text-sm break-words text-ink">
         {before && <span className="text-ink-tertiary">{before} </span>}
-        <span style={HIGHLIGHT_STYLE}>{excerpt}</span>
+        <span className="reuse-passage-highlight">{excerpt}</span>
         {after && <span className="text-ink-tertiary"> {after}</span>}
       </div>
     </div>
@@ -47,7 +43,7 @@ export function PassagePairPanel({
   variant: "flag" | "excluded";
   excludedReason?: ("reference_list" | "block_quote")[];
 }) {
-  const pct = Math.round(pair.similarity * 100 * 10) / 10;
+  const similarityBand = pair.level === "exact_duplicate" ? "Exact duplicate" : "High textual similarity";
 
   const excludedLead = (() => {
     if (excludedReason.length === 0) return null;
@@ -57,7 +53,7 @@ export function PassagePairPanel({
         : excludedReason[0] === "reference_list"
           ? "the reference list"
           : "a detected block quote";
-    return `This passage was excluded from scoring because it falls inside ${label}. Shown here for your own check, not as a finding.`;
+    return `This passage was not included in readiness because it falls inside ${label}. Shown here for your own check, not as a finding.`;
   })();
 
   return (
@@ -70,7 +66,7 @@ export function PassagePairPanel({
           ? "Possible reuse. Compare the two passages below and verify against the matched source yourself."
           : excludedLead}
       </p>
-      <p className="text-xs text-ink-secondary">{pct}% textual similarity to the passage below.</p>
+      <p className="text-xs text-ink-secondary"><b>{similarityBand}.</b> Compare the text itself below; the raw reproducibility value remains in Audit.</p>
       <div className="flex flex-col gap-3 xl:flex-row">
         <PassageBlock
           label={ownAnchor ? `Your manuscript · ${ownAnchor}` : "Your manuscript"}
