@@ -312,7 +312,7 @@ describe("Signal manuscript library", () => {
     expect(excerptAttempts).toBe(2);
   });
 
-  it("keeps a full selection understandable and identifies an untitled record by its visible fallback", async () => {
+  it("BUG-187: keeps a full selection understandable and identifies an untitled record by its visible fallback", async () => {
     const page = { ...PAGE, items: [OWN, SHARED, UNTITLED], total: 3 };
     vi.stubGlobal("fetch", stubFetchByPath({
       "/library": page,
@@ -340,7 +340,7 @@ describe("Signal manuscript library", () => {
     expect(blocked).not.toHaveAttribute("aria-describedby");
   });
 
-  it("gives visually identical titles distinct comparison names using visible record details", async () => {
+  it("BUG-187: gives visually identical titles distinct comparison names using visible record details", async () => {
     const secondVersion: LibraryItemOut = {
       ...OWN,
       manuscript_id: 4,

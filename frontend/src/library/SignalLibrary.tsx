@@ -166,7 +166,10 @@ function useComparisonAvailability(
   };
 }
 
-function comparisonChoiceName(
+// BUG-187: repeated checkboxes need a unique, record-specific accessible name;
+// the visible metadata is the privacy-safe disambiguator shared by sighted and
+// screen-reader users.
+function accessibleComparisonChoiceName(
   item: LibraryItemOut,
   items: LibraryItemOut[],
   selected: boolean,
@@ -521,7 +524,7 @@ export function SignalLibraryPage() {
               compareMode={compareMode}
               selected={selected.includes(item.manuscript_id)}
               selectionFull={selected.length === 2}
-              accessibleSelectionName={comparisonChoiceName(
+              accessibleSelectionName={accessibleComparisonChoiceName(
                 item,
                 data.items,
                 selected.includes(item.manuscript_id),
