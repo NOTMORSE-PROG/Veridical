@@ -250,6 +250,27 @@ async def test_problem_kind_surfaces_the_flags_own_detail_kind(session_factory):
     assert flags[0].problem_kind == "grimmer_inconsistent"
 
 
+async def test_reuse_summary_exposes_only_the_opaque_matched_reference(session_factory):
+    """BUG-141: routed clustering needs finding identity, not private metadata."""
+    instructor_id, check_run_id, _ = await _seed_run(session_factory)
+    await _add_flag(
+        session_factory,
+        check_run_id,
+        kind=CheckKind.originality_reuse,
+        severity=FlagSeverity.high,
+        detail={
+            "kind": "reuse_exact_duplicate_passage",
+            "matched_manuscript_id": 73,
+            "matched_group_label": "Private student group",
+        },
+    )
+    async with session_factory() as session:
+        flags = await list_flags_for_run(session, check_run_id, instructor_id)
+
+    assert flags[0].matched_ref == 73
+    assert "matched_group_label" not in flags[0].model_dump()
+
+
 async def test_problem_kind_is_null_when_the_flag_has_no_detail(session_factory):
     instructor_id, check_run_id, _ = await _seed_run(session_factory)
     await _add_flag(

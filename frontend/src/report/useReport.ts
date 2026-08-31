@@ -36,6 +36,7 @@ export function useFlags(checkRunId: number) {
   return useQuery({
     queryKey: ["report", checkRunId, "flags"],
     queryFn: () => api.get<FlagSummaryOut[]>(`/check-runs/${checkRunId}/flags`),
+    enabled: Number.isInteger(checkRunId) && checkRunId > 0,
   });
 }
 
@@ -48,6 +49,7 @@ export function useManuscriptViewer(checkRunId: number) {
   return useQuery({
     queryKey: ["report", checkRunId, "document"],
     queryFn: () => api.get<ManuscriptViewerOut>(`/check-runs/${checkRunId}/document`),
+    enabled: Number.isInteger(checkRunId) && checkRunId > 0,
   });
 }
 
@@ -61,7 +63,7 @@ export function useManuscriptParagraphs(checkRunId: number, enabled: boolean) {
     queryKey: ["report", checkRunId, "document", "paragraphs"],
     queryFn: () =>
       api.get<DocumentParagraphsOut>(`/check-runs/${checkRunId}/document/paragraphs`),
-    enabled,
+    enabled: enabled && Number.isInteger(checkRunId) && checkRunId > 0,
   });
 }
 
@@ -92,6 +94,7 @@ export function useExcludedReuseMatches(
       });
       return api.get<ReuseMatchesOut>(`/check-runs/${checkRunId}/document/reuse-matches?${params}`);
     },
+    enabled: Number.isInteger(checkRunId) && checkRunId > 0,
   });
 }
 

@@ -18,6 +18,7 @@ import { CHECK_KIND_ORDER, CHECK_KIND_SHORT_LABEL } from "../domain/checkKind";
 import { worstFlagTone } from "../domain/flagTone";
 import { problemLabel } from "../domain/problemLabel";
 import { truncateAtWord } from "../format/text";
+import { clusterFlagFindings } from "./flagClusters";
 import { useFlags } from "./useReport";
 
 function SpinnerIcon() {
@@ -191,30 +192,16 @@ function FlagRow({
   );
 }
 
-// V-071 AC8: flags sharing the same finding -- same check_kind, the same
-// excerpt text, and the same problem_kind -- differ only by which page
-// they were found on. A real run produced 12 GRIM flags reading the
-// literal same sentence; clustering them collapses that into one card
-// with N anchors instead of N repeats of one sentence. `problem_kind` is
-// required to match too (not just excerpt text) so two flags that
-// coincidentally quote the same words for two DIFFERENT underlying
-// problems never merge into one misleading card. Order-preserving (first
-// occurrence order), not sorted, so this never fights the backend's own
-// fixed severity/resolution ordering (test_report_flags_live.py).
+// V-071 AC8 / BUG-141: delegate identity decisions to the shared helper
+// used by the routed report. Reuse findings require the same problem and
+// archived-manuscript reference; other checks require the same problem,
+// criterion, and exact excerpt. Missing identity stays a singleton. That
+// keeps two different problems from disappearing into one card while still
+// collapsing per-page locations of one finding. The helper preserves first
+// occurrence order, so it does not fight the backend's fixed
+// severity/resolution ordering (test_report_flags_live.py).
 function clusterFlags(flags: FlagSummaryOut[]): FlagSummaryOut[][] {
-  const order: string[] = [];
-  const byKey = new Map<string, FlagSummaryOut[]>();
-  for (const flag of flags) {
-    const key = `${flag.check_kind} ${flag.evidence_excerpt.trim()} ${flag.problem_kind ?? ""}`;
-    let cluster = byKey.get(key);
-    if (!cluster) {
-      cluster = [];
-      byKey.set(key, cluster);
-      order.push(key);
-    }
-    cluster.push(flag);
-  }
-  return order.map((key) => byKey.get(key)!);
+  return clusterFlagFindings(flags).map((cluster) => cluster.flags);
 }
 
 // `ux-critic` finding (V-071 AC8 review, live-reproduced): keying a

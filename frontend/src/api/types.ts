@@ -10,6 +10,10 @@ export interface Instructor {
   onboarding_dismissed_at: string | null;
 }
 
+export interface SessionStatusOut {
+  instructor: Instructor | null;
+}
+
 // BUG-092: "not_assessable" -- a real defense-day/physical requirement
 // (e.g. "brings three bound copies") no manuscript could ever settle.
 // Routed to a terminal `not_applicable` result, never AI-graded, never
@@ -91,6 +95,7 @@ export interface ManuscriptListItem {
   // V-038: the latest DONE run's decision, if any -- sourced from the
   // SAME run latest_done_check_run_id points at.
   latest_decision: Decision | null;
+  latest_readiness: ReadinessStatus | null;
   // V-041 / ux-critic finding: which rubric FAMILY the latest DONE run
   // used -- lets a bulk re-run UI exclude a manuscript checked only
   // under a completely unrelated format, instead of defaulting it to
@@ -201,7 +206,14 @@ export type CheckRunStatus =
   | "integrity"
   | "aggregating"
   | "done"
-  | "failed";
+  | "failed"
+  | "cancelled";
+
+export type ReadinessStatus =
+  | "ready"
+  | "conditionally_ready"
+  | "not_ready"
+  | "needs_review";
 
 export interface StageEntry {
   status: string;
@@ -226,6 +238,7 @@ export interface CheckRun {
   rubric_id: number;
   status: CheckRunStatus;
   stage_status: StageStatus | null;
+  cancel_requested_at: string | null;
   queue_position: number | null;
   started_at: string | null;
   finished_at: string | null;
@@ -631,6 +644,10 @@ export interface FlagSummaryOut {
   // docstring. Mapped to a short problem label via
   // `frontend/src/domain/problemLabel.ts`; null/unmapped renders nothing.
   problem_kind: string | null;
+  // BUG-141: opaque archive id used to group one F7 finding across multiple
+  // manuscript locations. Optional for rolling-deploy responses from an older
+  // backend; never a private group label or student identity.
+  matched_ref?: number | null;
 }
 
 // V-065: what the manuscript viewer's document pane can actually do with
