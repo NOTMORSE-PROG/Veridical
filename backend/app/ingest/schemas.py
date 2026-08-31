@@ -14,11 +14,34 @@ branches on file format.
 
 from dataclasses import dataclass, field
 from datetime import datetime
+from enum import StrEnum
 from typing import Literal
 
 from pydantic import BaseModel, Field
 
 Bbox = tuple[float, float, float, float]
+
+
+class ManuscriptQueueStatus(StrEnum):
+    """Stable queue vocabulary for the instructor's Review Desk (V-071 AC2)."""
+
+    needs_attention = "needs_attention"
+    ingestion_failed = "ingestion_failed"
+    not_checked = "not_checked"
+    checking = "checking"
+    check_failed = "check_failed"
+    cancelled = "cancelled"
+    checked = "checked"
+    decided = "decided"
+
+
+class ManuscriptSort(StrEnum):
+    """Server-side orderings exposed by ``GET /manuscripts`` (V-071 AC2)."""
+
+    newest = "newest"
+    oldest = "oldest"
+    group_asc = "group_asc"
+    needs_review_desc = "needs_review_desc"
 
 
 @dataclass
@@ -237,6 +260,10 @@ class ManuscriptListItem(BaseModel):
     # SAME latest-done run `latest_done_check_run_id` points at, never a
     # different one, so the two can't silently disagree.
     latest_decision: str | None = None
+    # The system's named readiness band for the same latest completed run.
+    # It is display context for the Review Desk, never the instructor's
+    # decision and never a percentage headline.
+    latest_readiness: str | None = None
     # V-041 / ux-critic finding (P1, live-reproduced): without this, a
     # bulk re-run UI has no signal to exclude a manuscript whose latest
     # done run was under a COMPLETELY UNRELATED rubric family -- it would
@@ -262,6 +289,13 @@ class PaginatedManuscripts(BaseModel):
     total: int
     page: int
     page_size: int
+
+
+class DismissedManuscriptOut(BaseModel):
+    """A failed upload retained outside the active Review Desk (V-071 AC4)."""
+
+    manuscript_id: int
+    dismissed_at: datetime
 
 
 class ExtractionResult(BaseModel):

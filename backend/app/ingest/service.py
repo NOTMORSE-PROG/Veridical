@@ -9,15 +9,18 @@ import asyncio
 import zipfile
 from collections.abc import AsyncIterator, Callable
 from dataclasses import asdict
+from datetime import UTC, datetime
 from pathlib import Path
 
-from sqlalchemy import delete, func, or_, select
+from sqlalchemy import and_, delete, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app import messages
+from app.audit.service import write_audit_event
 from app.config import Settings, get_settings
 from app.errors import (
     ApiDownError,
+    ConflictError,
     FileMalformedError,
     FileTooLargeError,
     NotFoundError,
@@ -31,7 +34,13 @@ from app.groups.service import (
 )
 from app.ingest import docx, pdf, references, vision
 from app.ingest.patterns import load_patterns
-from app.ingest.schemas import ExtractionResult, ManuscriptListItem, PaginatedManuscripts
+from app.ingest.schemas import (
+    ExtractionResult,
+    ManuscriptListItem,
+    ManuscriptQueueStatus,
+    ManuscriptSort,
+    PaginatedManuscripts,
+)
 from app.ingest.titlepage import AnchoredValue, TitlePageProposal, extract_title_page
 from app.llm import LLMNotConfiguredError, get_llm_client_for
 from app.models.citation import Citation
@@ -262,7 +271,12 @@ async def list_manuscripts(
     *,
     page: int = 1,
     page_size: int = 50,
+    q: str | None = None,
+    status: ManuscriptQueueStatus | None = None,
+    needs_review: bool | None = None,
+    group: str | None = None,
     program: str | None = None,
+    sort: ManuscriptSort = ManuscriptSort.newest,
 ) -> PaginatedManuscripts:
     """Server-paginated listing (V-021 edge case: 100+ manuscripts in
     defense season) for both the dashboard table (4e) and the New Check
@@ -270,6 +284,12 @@ async def list_manuscripts(
     large page). Each row carries its own latest check_run id/status so
     the dashboard can link "view progress"/"open report" with zero extra
     per-row requests.
+
+    V-071 AC2 applies every search/filter/sort before pagination. ``q``
+    searches the instructor-visible group and filename; ``group`` is an
+    exact, case-insensitive group filter; ``status`` is the closed Review
+    Desk queue vocabulary; and ``needs_review`` is based on criterion-level
+    escalations in the same latest DONE run used by the row's report link.
 
     `program` (V-062, AC5) filters to manuscripts whose group is assigned
     that program -- an inner join, so a manuscript with no group or a
@@ -279,27 +299,157 @@ async def list_manuscripts(
     those excluded rows instead -- a real, selectable filter state, not an
     edge case to hide (`ui-designer` finding while speccing the dashboard
     control this powers)."""
+    latest_run_status = (
+        select(CheckRun.status)
+        .where(CheckRun.manuscript_id == Manuscript.id)
+        .order_by(CheckRun.created_at.desc(), CheckRun.id.desc())
+        .limit(1)
+        .correlate(Manuscript)
+        .scalar_subquery()
+    )
+    latest_done_run_id = (
+        select(CheckRun.id)
+        .where(
+            CheckRun.manuscript_id == Manuscript.id,
+            CheckRun.status == CheckRunStatus.done,
+        )
+        .order_by(CheckRun.created_at.desc(), CheckRun.id.desc())
+        .limit(1)
+        .correlate(Manuscript)
+        .scalar_subquery()
+    )
+    escalation_count = (
+        select(func.count(CheckResult.id))
+        .where(
+            CheckResult.check_run_id == latest_done_run_id,
+            CheckResult.criterion_id.is_not(None),
+            CheckResult.outcome == ResultOutcome.escalated,
+        )
+        .correlate(Manuscript)
+        .scalar_subquery()
+    )
+    has_decision = (
+        select(ReadinessReport.id)
+        .where(
+            ReadinessReport.check_run_id == latest_done_run_id,
+            ReadinessReport.decision.is_not(None),
+        )
+        .correlate(Manuscript)
+        .exists()
+    )
+
     filters = [Manuscript.instructor_id == instructor_id]
-    count_stmt = select(func.count()).select_from(Manuscript)
-    manuscripts_stmt = select(Manuscript)
+    filters.append(Manuscript.dismissed_at.is_(None))
+    count_stmt = (
+        select(func.count())
+        .select_from(Manuscript)
+        .outerjoin(Group, Group.id == Manuscript.group_id)
+        .outerjoin(Program, Program.id == Group.program_id)
+    )
+    manuscripts_stmt = (
+        select(Manuscript)
+        .outerjoin(Group, Group.id == Manuscript.group_id)
+        .outerjoin(Program, Program.id == Group.program_id)
+    )
+
+    normalized_q = q.strip() if q else None
+    if normalized_q:
+        pattern = f"%{normalized_q}%"
+        filters.append(
+            or_(
+                Manuscript.group_label.ilike(pattern),
+                Manuscript.original_filename.ilike(pattern),
+            )
+        )
+
+    normalized_group = group.strip() if group else None
+    if normalized_group:
+        filters.append(func.lower(Manuscript.group_label) == normalized_group.casefold())
+
     if program == UNSET_PROGRAM_FILTER:
-        count_stmt = count_stmt.outerjoin(Group, Group.id == Manuscript.group_id)
-        manuscripts_stmt = manuscripts_stmt.outerjoin(Group, Group.id == Manuscript.group_id)
-        filters.append(or_(Manuscript.group_id.is_(None), Group.program_id.is_(None)))
+        filters.append(Program.id.is_(None))
     elif program is not None:
-        count_stmt = count_stmt.join(Group, Group.id == Manuscript.group_id).join(
-            Program, Program.id == Group.program_id
-        )
-        manuscripts_stmt = manuscripts_stmt.join(Group, Group.id == Manuscript.group_id).join(
-            Program, Program.id == Group.program_id
-        )
         filters.append(Program.name == program)
+
+    if status == ManuscriptQueueStatus.needs_attention:
+        # One reachable instructor-work queue owns both unresolved criterion
+        # tasks and recovery states. Keep the union on the server so tenant
+        # scoping, filters, totals, sorting, and pagination remain truthful.
+        filters.append(
+            or_(
+                and_(latest_run_status == CheckRunStatus.done, escalation_count > 0),
+                latest_run_status.in_((CheckRunStatus.failed, CheckRunStatus.cancelled)),
+                and_(
+                    latest_run_status.is_(None),
+                    Manuscript.ingest_status == IngestStatus.failed,
+                ),
+            )
+        )
+    elif status == ManuscriptQueueStatus.ingestion_failed:
+        filters.append(Manuscript.ingest_status == IngestStatus.failed)
+    elif status == ManuscriptQueueStatus.not_checked:
+        filters.extend(
+            [
+                Manuscript.ingest_status == IngestStatus.done,
+                latest_run_status.is_(None),
+            ]
+        )
+    elif status == ManuscriptQueueStatus.checking:
+        filters.append(
+            latest_run_status.in_(
+                (
+                    CheckRunStatus.queued,
+                    CheckRunStatus.ingesting,
+                    CheckRunStatus.structural,
+                    CheckRunStatus.semantic,
+                    CheckRunStatus.integrity,
+                    CheckRunStatus.aggregating,
+                )
+            )
+        )
+    elif status == ManuscriptQueueStatus.check_failed:
+        filters.append(latest_run_status == CheckRunStatus.failed)
+    elif status == ManuscriptQueueStatus.cancelled:
+        filters.append(latest_run_status == CheckRunStatus.cancelled)
+    elif status == ManuscriptQueueStatus.checked:
+        # Queue statuses are mutually useful instructor work states:
+        # `checked` means the absolute-latest run finished and its report is
+        # waiting for a human decision, while `decided` below means that
+        # decision is already recorded. An older DONE report remains
+        # readable while a re-run is active/failed/cancelled, but it must not
+        # place that manuscript in two contradictory work queues at once.
+        filters.extend([latest_run_status == CheckRunStatus.done, ~has_decision])
+    elif status == ManuscriptQueueStatus.decided:
+        filters.extend([latest_run_status == CheckRunStatus.done, has_decision])
+
+    if needs_review is True:
+        # An older report's escalation remains readable, but it is not a
+        # current instructor task while a newer run is active or terminal in
+        # a different state. This keeps the work queues mutually coherent.
+        filters.extend([latest_run_status == CheckRunStatus.done, escalation_count > 0])
+    elif needs_review is False:
+        filters.append(escalation_count == 0)
+
+    order_by = {
+        ManuscriptSort.newest: (Manuscript.created_at.desc(), Manuscript.id.desc()),
+        ManuscriptSort.oldest: (Manuscript.created_at.asc(), Manuscript.id.asc()),
+        ManuscriptSort.group_asc: (
+            func.lower(Manuscript.group_label).asc(),
+            Manuscript.created_at.desc(),
+            Manuscript.id.desc(),
+        ),
+        ManuscriptSort.needs_review_desc: (
+            escalation_count.desc(),
+            Manuscript.created_at.desc(),
+            Manuscript.id.desc(),
+        ),
+    }[sort]
 
     total = await session.scalar(count_stmt.where(*filters))
     manuscripts = (
         await session.scalars(
             manuscripts_stmt.where(*filters)
-            .order_by(Manuscript.created_at.desc())
+            .order_by(*order_by)
             .offset((page - 1) * page_size)
             .limit(page_size)
         )
@@ -320,7 +470,11 @@ async def list_manuscripts(
             await session.scalars(
                 select(CheckRun)
                 .where(CheckRun.manuscript_id.in_(manuscript_ids))
-                .order_by(CheckRun.manuscript_id, CheckRun.created_at.desc())
+                .order_by(
+                    CheckRun.manuscript_id,
+                    CheckRun.created_at.desc(),
+                    CheckRun.id.desc(),
+                )
             )
         ).all()
         for run in runs:
@@ -346,21 +500,30 @@ async def list_manuscripts(
     # decision, keyed by check_run_id then remapped by manuscript_id below
     # -- avoids an N+1 (one query per row) at defense-season density.
     decision_by_run: dict[int, str] = {}
+    readiness_by_run: dict[int, str] = {}
     done_run_ids = [run.id for run in latest_done_by_manuscript.values()]
     if done_run_ids:
         rows = (
             await session.execute(
-                select(ReadinessReport.check_run_id, ReadinessReport.decision).where(
-                    ReadinessReport.check_run_id.in_(done_run_ids),
-                    ReadinessReport.decision.is_not(None),
-                )
+                select(
+                    ReadinessReport.check_run_id,
+                    ReadinessReport.decision,
+                    ReadinessReport.status,
+                ).where(ReadinessReport.check_run_id.in_(done_run_ids))
             )
         ).all()
-        decision_by_run = {run_id: decision.value for run_id, decision in rows}
+        decision_by_run = {
+            run_id: decision.value for run_id, decision, _status in rows if decision is not None
+        }
+        readiness_by_run = {run_id: status.value for run_id, _decision, status in rows}
 
     def _latest_decision(manuscript_id: int) -> str | None:
         run = latest_done_by_manuscript.get(manuscript_id)
         return decision_by_run.get(run.id) if run is not None else None
+
+    def _latest_readiness(manuscript_id: int) -> str | None:
+        run = latest_done_by_manuscript.get(manuscript_id)
+        return readiness_by_run.get(run.id) if run is not None else None
 
     # V-041 / ux-critic finding (P1, live-reproduced against real
     # multi-family seeded data): without this, RerunModal had no signal
@@ -402,6 +565,7 @@ async def list_manuscripts(
                 select(CheckResult.check_run_id, func.count())
                 .where(
                     CheckResult.check_run_id.in_(done_run_ids),
+                    CheckResult.criterion_id.is_not(None),
                     CheckResult.outcome == ResultOutcome.escalated,
                 )
                 .group_by(CheckResult.check_run_id)
@@ -447,12 +611,66 @@ async def list_manuscripts(
             latest_check_run_status=_latest_status(m.id),
             latest_done_check_run_id=_latest_done_id(m.id),
             latest_decision=_latest_decision(m.id),
+            latest_readiness=_latest_readiness(m.id),
             latest_done_rubric_family_id=_latest_done_rubric_family_id(m.id),
             escalations_awaiting_review=_escalations_awaiting_review(m.id),
         )
         for m in manuscripts
     ]
     return PaginatedManuscripts(items=items, total=total or 0, page=page, page_size=page_size)
+
+
+async def dismiss_failed_manuscript(
+    session: AsyncSession, instructor_id: int, manuscript_id: int
+) -> Manuscript:
+    """Move a permanently failed upload out of the active Review Desk.
+
+    This is intentionally retention, not deletion: the manuscript row remains
+    in the instructor's Archive and an immutable audit event records the
+    transition. Repeating the request is idempotent.
+    """
+    dismissed_at = datetime.now(UTC)
+    manuscript = await session.scalar(
+        update(Manuscript)
+        .where(
+            Manuscript.id == manuscript_id,
+            Manuscript.instructor_id == instructor_id,
+            Manuscript.ingest_status == IngestStatus.failed,
+            Manuscript.dismissed_at.is_(None),
+        )
+        .values(dismissed_at=dismissed_at)
+        .returning(Manuscript)
+    )
+    if manuscript is None:
+        current = await session.scalar(
+            select(Manuscript).where(
+                Manuscript.id == manuscript_id,
+                Manuscript.instructor_id == instructor_id,
+            )
+        )
+        if current is None:
+            raise NotFoundError(f"No manuscript with id {manuscript_id}.")
+        if current.ingest_status != IngestStatus.failed:
+            raise ConflictError("Only a permanently failed upload can be dismissed.")
+        return current
+
+    await write_audit_event(
+        session,
+        event_type="manuscript_ingestion_failure_dismissed",
+        check_run_id=None,
+        manuscript_id=manuscript.id,
+        payload={
+            "manuscript_id": manuscript.id,
+            "ingest_failure_reason": (
+                manuscript.ingest_failure_reason.value
+                if manuscript.ingest_failure_reason is not None
+                else None
+            ),
+        },
+    )
+    await session.commit()
+    await session.refresh(manuscript)
+    return manuscript
 
 
 def load_raw_store(settings: Settings, manuscript_id: int) -> ExtractionResult:
