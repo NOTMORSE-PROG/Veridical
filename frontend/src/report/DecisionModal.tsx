@@ -130,7 +130,7 @@ export function DecisionModal({ decision, report, manuscriptLabel, onClose }: De
           </>
         }
       >
-        <div className="flex flex-col gap-3" aria-busy={decide.isPending}>
+        <div className="signal-group-flow" aria-busy={decide.isPending}>
           {/* Re-states the report's own verdict at the moment of
               commitment, not just up in the page header where it may
               have scrolled out of view on a long report (recognition

@@ -271,7 +271,7 @@ export function NewCheckModal({
           </>
         }
       >
-        <div className="flex flex-col gap-3">
+        <div className="signal-group-flow">
           {currentProblems.length > 0 && (
             <div
               ref={summaryRef}

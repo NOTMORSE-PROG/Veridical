@@ -72,7 +72,7 @@ export function ReopenModal({ decision, checkRunId, onClose }: ReopenModalProps)
           </>
         }
       >
-        <div className="flex flex-col gap-3" aria-busy={reopen.isPending}>
+        <div className="signal-group-flow" aria-busy={reopen.isPending}>
           <p className="text-sm text-ink-secondary">
             This report is currently marked {DECISION_LABEL[decision]}. Reopening removes that
             decision so you can make a new one. The previous decision stays in the audit trail.

@@ -61,9 +61,15 @@ export function SignalReportPage() {
   }
 
   const identity = report ? manuscriptIdentity(report.manuscript_group_label, report.manuscript_original_filename) : undefined;
+  const hasReportNotices = report && (
+    report.previous_status
+    || report.llm_mode !== "real"
+    || report.rubric_needs_review
+    || (report.integrity_check_status ?? []).length > 0
+  );
 
   return (
-    <div className="signal-route signal-report">
+    <div className="signal-route signal-page-flow signal-report">
       <header className="signal-route-header signal-report-header">
         <div>
           <nav aria-label="Breadcrumb"><Link to="/dashboard?queue=needs_review">Review Desk</Link><span aria-hidden="true">/</span><span>Readiness report</span></nav>
@@ -88,24 +94,32 @@ export function SignalReportPage() {
             <dl><div><dt>Unresolved criteria</dt><dd>{report.pending_review_count}</dd></div><div><dt>Open high-severity signals</dt><dd>{report.unresolved_high_flag_count}</dd></div><div><dt>Instructor decision</dt><dd>{report.decision ? "Recorded" : "Not recorded"}</dd></div></dl>
           </section>
 
-          <nav className="signal-report-jumps" aria-label="Report review order"><a href="#review-criteria" onClick={focusReportJumpTarget}><span>1</span>Resolve criteria</a><a href="#integrity-signals" onClick={focusReportJumpTarget}><span>2</span>Inspect signals</a><a href="#criteria-results-heading" onClick={focusReportJumpTarget}><span>3</span>Read criterion record</a><a href="#final-decision" onClick={focusReportJumpTarget}><span>4</span>Make decision</a></nav>
+          <div className="signal-section-flow signal-report-orientation">
+            <nav className="signal-report-jumps" aria-label="Report review order"><a href="#review-criteria" onClick={focusReportJumpTarget}><span>1</span>Resolve criteria</a><a href="#integrity-signals" onClick={focusReportJumpTarget}><span>2</span>Inspect signals</a><a href="#criteria-results-heading" onClick={focusReportJumpTarget}><span>3</span>Read criterion record</a><a href="#final-decision" onClick={focusReportJumpTarget}><span>4</span>Make decision</a></nav>
 
-          <div className="signal-report-actions">
-            <ActionLink to={`/report/${report.check_run_id}/document`} variant="secondary">Open manuscript</ActionLink>
-            <ActionLink to={`/audit?check_run_id=${report.check_run_id}`} variant="secondary">View Audit</ActionLink>
-            <Button variant="secondary" busy={exportPdf.isPending} onClick={exportReport}>{exportPdf.isPending ? "Preparing PDF" : "Export PDF"}</Button>
-            <Button variant="secondary" onClick={() => setShareOpen(true)}>{shareLink ? "Manage active share link" : "Share report"}</Button>
+            <div className="signal-attached-flow signal-report-tools">
+              <div className="signal-report-actions signal-control-cluster">
+                <ActionLink to={`/report/${report.check_run_id}/document`} variant="secondary">Open manuscript</ActionLink>
+                <ActionLink to={`/audit?check_run_id=${report.check_run_id}`} variant="secondary">View Audit</ActionLink>
+                <Button variant="secondary" busy={exportPdf.isPending} onClick={exportReport}>{exportPdf.isPending ? "Preparing PDF" : "Export PDF"}</Button>
+                <Button variant="secondary" onClick={() => setShareOpen(true)}>{shareLink ? "Manage active share link" : "Share report"}</Button>
+              </div>
+              <p className="signal-field-hint">Downloaded PDFs are not optimized for screen readers. Use this on-screen report for accessible review.</p>
+              {exportPdf.isError && <div ref={exportErrorRef} tabIndex={-1}><Alert title="Could not export this report" tone="error" role="alert">{exportPdf.error instanceof ApiError ? exportPdf.error.message : "Try again."}</Alert></div>}
+            </div>
           </div>
-          <p className="signal-field-hint">Downloaded PDFs are not optimized for screen readers. Use this on-screen report for accessible review.</p>
-          {exportPdf.isError && <div ref={exportErrorRef} tabIndex={-1}><Alert title="Could not export this report" tone="error" role="alert">{exportPdf.error instanceof ApiError ? exportPdf.error.message : "Try again."}</Alert></div>}
 
-          {report.previous_status && <section className="signal-report-history" aria-label="Previous check comparison"><span>Previous run</span><ReadinessBand status={report.previous_status} /><span aria-hidden="true">→</span><span>Current run</span><ReadinessBand status={report.status} /><p>Bands come from separate historical runs. Open Audit for the underlying reproducible values.</p></section>}
+          {hasReportNotices && (
+            <div className="signal-group-flow signal-report-notices">
+              {report.previous_status && <section className="signal-report-history" aria-label="Previous check comparison"><span>Previous run</span><ReadinessBand status={report.previous_status} /><span aria-hidden="true">→</span><span>Current run</span><ReadinessBand status={report.status} /><p>Bands come from separate historical runs. Open Audit for the underlying reproducible values.</p></section>}
 
-          {report.llm_mode !== "real" && <Alert title={report.llm_mode === "fake" ? "Test-mode AI results" : "AI mode could not be verified"} tone="warning">{report.llm_mode === "fake" ? "This report was produced with fixture responses, not real AI grading. Do not treat it as a finding about the manuscript." : "This run predates reliable AI-mode tracking. Treat AI-derived outcomes cautiously."}</Alert>}
+              {report.llm_mode !== "real" && <Alert title={report.llm_mode === "fake" ? "Test-mode AI results" : "AI mode could not be verified"} tone="warning">{report.llm_mode === "fake" ? "This report was produced with fixture responses, not real AI grading. Do not treat it as a finding about the manuscript." : "This run predates reliable AI-mode tracking. Treat AI-derived outcomes cautiously."}</Alert>}
 
-          {report.rubric_needs_review && <Alert title="The required format had unresolved parser uncertainty" tone="warning"><p>The instructor activated it despite the parser warning. Check the criterion record against the original format.</p>{report.rubric_parse_issues?.length ? <ul>{report.rubric_parse_issues.map((issue) => <li key={issue}>{issue}</li>)}</ul> : null}</Alert>}
+              {report.rubric_needs_review && <Alert title="The required format had unresolved parser uncertainty" tone="warning"><p>The instructor activated it despite the parser warning. Check the criterion record against the original format.</p>{report.rubric_parse_issues?.length ? <ul>{report.rubric_parse_issues.map((issue) => <li key={issue}>{issue}</li>)}</ul> : null}</Alert>}
 
-          {(report.integrity_check_status ?? []).map((status) => <IntegrityDisclosure key={status.check_kind} status={status} />)}
+              {(report.integrity_check_status ?? []).map((status) => <IntegrityDisclosure key={status.check_kind} status={status} />)}
+            </div>
+          )}
 
           <SignalEscalatedPanel checkRunId={report.check_run_id} />
           <SignalFlagsPanel checkRunId={report.check_run_id} />

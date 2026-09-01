@@ -120,7 +120,7 @@ export function CheckProgressPage() {
   }, [run?.status]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
-    <div className="signal-route signal-check-progress">
+    <div className="signal-route signal-page-flow signal-check-progress">
       <header className="signal-route-header signal-check-progress__header">
         <div>
           <nav aria-label="Breadcrumb"><Link to="/dashboard?queue=checking">Review Desk</Link><span aria-hidden="true">/</span><span>Check progress</span></nav>

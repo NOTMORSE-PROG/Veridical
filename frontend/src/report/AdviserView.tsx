@@ -50,14 +50,14 @@ export function AdviserViewPage() {
     if (isError) errorRef.current?.focus();
   }, [isError]);
 
-  if (isPending) return <SharedChrome><div className="signal-shared-route"><header className="signal-route-header"><div><p className="signal-eyebrow">Shared faculty review</p><h1 ref={headingRef} tabIndex={-1}>Readiness report</h1></div></header><div role="status" aria-live="polite" aria-busy="true" className="signal-desk-loading"><span>Loading shared report…</span><i /><i /></div></div></SharedChrome>;
+  if (isPending) return <SharedChrome><div className="signal-shared-route signal-page-flow"><header className="signal-route-header"><div><p className="signal-eyebrow">Shared faculty review</p><h1 ref={headingRef} tabIndex={-1}>Readiness report</h1></div></header><div role="status" aria-live="polite" aria-busy="true" className="signal-desk-loading"><span>Loading shared report…</span><i /><i /></div></div></SharedChrome>;
 
   if (isError || !data) {
     const notFound = error instanceof ApiError && error.code === "not_found";
     const gone = error instanceof ApiError && error.code === "gone";
     const title = notFound ? "Link not found" : gone ? "Link no longer available" : "Could not load this report";
     const message = error instanceof ApiError && (notFound || gone) ? error.message : "This shared report could not be loaded right now.";
-    return <SharedChrome reportAvailable={false}><div className="signal-shared-route signal-shared-error"><p className="signal-eyebrow">Shared faculty review</p><h1 ref={errorRef} tabIndex={-1}>{title}</h1><Alert title={message} tone="error" role="alert">{notFound || gone ? "Contact the instructor who sent this link if you believe it should still be available." : <Button variant="secondary" onClick={() => window.location.reload()}>Reload</Button>}</Alert></div></SharedChrome>;
+    return <SharedChrome reportAvailable={false}><div className="signal-shared-route signal-page-flow signal-shared-error"><header className="signal-route-header"><div><p className="signal-eyebrow">Shared faculty review</p><h1 ref={errorRef} tabIndex={-1}>{title}</h1></div></header><Alert title={message} tone="error" role="alert">{notFound || gone ? "Contact the instructor who sent this link if you believe it should still be available." : <Button variant="secondary" onClick={() => window.location.reload()}>Reload</Button>}</Alert></div></SharedChrome>;
   }
 
   const { report, flags } = data;
@@ -66,7 +66,7 @@ export function AdviserViewPage() {
 
   return (
     <SharedChrome>
-      <div className="signal-shared-route">
+      <div className="signal-shared-route signal-page-flow">
         <header className="signal-route-header signal-shared-report-header"><div><p className="signal-eyebrow">Shared faculty review</p><h1 ref={headingRef} tabIndex={-1}>Readiness report</h1><p className="signal-route-header__intro">{identity.primary} · checked against {report.rubric_title}</p></div><ReadinessBand status={report.status} /></header>
 
         <section className="signal-shared-verdict" aria-labelledby="shared-band-heading"><div><p className="signal-section-kicker">VERIDICAL readiness band</p><h2 id="shared-band-heading">{report.status === "ready" ? "Ready" : report.status === "conditionally_ready" ? "Conditionally Ready" : report.status === "not_ready" ? "Not Ready" : "Needs Review"}</h2><p>{report.reason ?? "This band comes from the recorded criterion outcomes and integrity signals. It does not approve or block a defense."}</p></div><dl><div><dt>Items still awaiting instructor review</dt><dd>{pendingCount}</dd></div><div><dt>Instructor decision</dt><dd>{report.decision ? DECISION_LABEL[report.decision] : "Not recorded"}</dd></div></dl></section>

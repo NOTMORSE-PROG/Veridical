@@ -382,7 +382,7 @@ export function AuditLogPage() {
   const totalPages = data ? Math.max(1, Math.ceil(data.total / data.page_size)) : 1;
 
   return (
-    <div className="signal-route signal-audit">
+    <div className="signal-route signal-page-flow signal-audit">
       <header className="signal-route-header">
         <div>
           <p className="signal-eyebrow">Immutable activity record</p>
@@ -409,9 +409,10 @@ export function AuditLogPage() {
         </aside>
       )}
 
-      <p role="status" aria-live="polite" className="sr-only">
-        {announcement}
-      </p>
+      <div className="signal-section-flow signal-audit-workspace">
+        <p role="status" aria-live="polite" className="sr-only">
+          {announcement}
+        </p>
 
       <div className="flex flex-wrap items-center gap-2">
         <div role="group" aria-label="Filter by event type" className="flex flex-wrap items-center gap-1.5">
@@ -463,6 +464,7 @@ export function AuditLogPage() {
         )}
       </div>
 
+      <div className="signal-group-flow signal-audit-records">
       {isLoading && (
         <div
           role="status"
@@ -689,6 +691,8 @@ export function AuditLogPage() {
           </button>
         </div>
       )}
+      </div>
+      </div>
 
       {detailId !== null && (
         <AuditDetailModal id={detailId} onClose={() => setParam("detail", null)} />

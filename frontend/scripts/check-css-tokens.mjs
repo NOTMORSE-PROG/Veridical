@@ -31,6 +31,20 @@ const SIGNAL_ROUTE_FILES = new Set([
   "shell/SignalShell.tsx",
 ]);
 const SIGNAL_SELF_BOUNDARY_FILES = new Set(["pages/Landing.tsx", "pages/SignIn.tsx"]);
+const SIGNAL_PAGE_FLOW_FILES = new Set([
+  "pages/Dashboard.tsx",
+  "check/Progress.tsx",
+  "rubric/Manage.tsx",
+  "rubric/SignalReviewCriteria.tsx",
+  "report/SignalReport.tsx",
+  "flags/FlagDetail.tsx",
+  "document/SignalDocumentViewer.tsx",
+  "library/SignalLibrary.tsx",
+  "library/SignalLibraryDetail.tsx",
+  "library/SignalLibraryCompare.tsx",
+  "settings/Settings.tsx",
+  "audit/AuditLog.tsx",
+]);
 
 // Utilities bound to VERIDICAL color tokens (see src/tokens.css @theme).
 const TOKEN_CLASS_RE =
@@ -99,12 +113,183 @@ const REQUIRED_IN_BUILD = [
   "--signal-motion-base",
   "--signal-z-modal",
   "--signal-border-emphasis",
+  "--signal-rhythm-attached",
+  "--signal-rhythm-control",
+  "--signal-rhythm-copy",
+  "--signal-rhythm-group",
+  "--signal-rhythm-related",
+  "--signal-rhythm-related-compact",
+  "--signal-rhythm-section",
+  "--signal-rhythm-section-compact",
+  "--signal-rhythm-dialog",
 ];
 for (const token of REQUIRED_IN_BUILD) {
   if (!builtCss.includes(token)) {
     failures.push(`${token} is declared but absent from the built CSS (tree-shaken? needs @theme static)`);
   }
 }
+
+const REQUIRED_RHYTHM_SELECTORS = [
+  ".signal-page-flow",
+  ".signal-section-flow",
+  ".signal-group-flow",
+  ".signal-copy-flow",
+  ".signal-attached-flow",
+  ".signal-control-cluster",
+];
+for (const selector of REQUIRED_RHYTHM_SELECTORS) {
+  if (!builtCss.includes(selector)) {
+    failures.push(`built CSS does not emit required rhythm selector ${selector}`);
+  }
+}
+
+// BUG-196: presence is not behavior. Pin the semantic aliases to the approved
+// primitive scale and the flow selectors to their semantic roles, including
+// the established compact media block. A selector that survives the build but
+// silently regresses to `gap: 0` must fail this guard.
+const tokenSource = readFileSync(join(SRC_DIR, "tokens.css"), "utf8");
+const rhythmSource = readFileSync(SIGNAL_CSS_FILE, "utf8");
+const REQUIRED_RHYTHM_VALUES = new Map([
+  ["--signal-rhythm-attached", "var(--signal-space-2)"],
+  ["--signal-rhythm-control", "var(--signal-space-3)"],
+  ["--signal-rhythm-copy", "var(--signal-space-4)"],
+  ["--signal-rhythm-group", "var(--signal-space-5)"],
+  ["--signal-rhythm-related", "var(--signal-space-6)"],
+  ["--signal-rhythm-related-compact", "var(--signal-space-5)"],
+  ["--signal-rhythm-section", "var(--signal-space-10)"],
+  ["--signal-rhythm-section-compact", "var(--signal-space-8)"],
+  ["--signal-rhythm-dialog", "var(--signal-space-5)"],
+]);
+
+function customPropertyValues(source, name) {
+  const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return [...source.matchAll(new RegExp(`${escaped}\\s*:\\s*([^;]+);`, "g"))]
+    .map((match) => match[1].trim());
+}
+
+function cssBlockAfter(source, marker) {
+  const markerIndex = source.indexOf(marker);
+  const openIndex = markerIndex < 0 ? -1 : source.indexOf("{", markerIndex + marker.length);
+  if (openIndex < 0) return "";
+  let depth = 0;
+  for (let index = openIndex; index < source.length; index += 1) {
+    if (source[index] === "{") depth += 1;
+    if (source[index] === "}") {
+      depth -= 1;
+      if (depth === 0) return source.slice(openIndex + 1, index);
+    }
+  }
+  return "";
+}
+
+function cssBlocksAfterAll(source, marker) {
+  const blocks = [];
+  let fromIndex = 0;
+  let markerIndex = source.indexOf(marker, fromIndex);
+  while (markerIndex >= 0) {
+    blocks.push(cssBlockAfter(source.slice(markerIndex), marker));
+    fromIndex = markerIndex + marker.length;
+    markerIndex = source.indexOf(marker, fromIndex);
+  }
+  return blocks;
+}
+
+function rulePropertyValues(source, selector, property) {
+  const escapedSelector = selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const escapedProperty = property.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const rules = source.matchAll(
+    new RegExp(`(?:^|[{},])\\s*${escapedSelector}\\s*\\{([^{}]*)\\}`, "gm"),
+  );
+  const values = [];
+  for (const rule of rules) {
+    const value = rule[1].match(new RegExp(`${escapedProperty}\\s*:\\s*([^;]+);`))?.[1].trim();
+    if (value !== undefined) values.push(value);
+  }
+  return values;
+}
+
+function validateRhythmContract(candidateTokens, candidateRhythm) {
+  const violations = [];
+
+  for (const [name, expectedValue] of REQUIRED_RHYTHM_VALUES) {
+    const actualValues = customPropertyValues(candidateTokens, name);
+    if (actualValues.length !== 1 || actualValues[0] !== expectedValue) {
+      violations.push(
+        `${name} must have exactly one ${expectedValue} declaration; found ${actualValues.join(", ") || "missing"}`,
+      );
+    }
+  }
+
+  const requiredFlowGaps = new Map([
+    [".signal-page-flow", ["var(--signal-rhythm-section)", "var(--signal-rhythm-section-compact)"]],
+    [".signal-section-flow", ["var(--signal-rhythm-related)", "var(--signal-rhythm-related-compact)"]],
+    [".signal-group-flow", ["var(--signal-rhythm-group)"]],
+    [".signal-copy-flow", ["var(--signal-rhythm-copy)"]],
+    [".signal-attached-flow", ["var(--signal-rhythm-attached)"]],
+    [".signal-control-cluster", ["var(--signal-rhythm-control)"]],
+  ]);
+  for (const [selector, expectedValues] of requiredFlowGaps) {
+    const actualValues = rulePropertyValues(candidateRhythm, selector, "gap");
+    if (
+      actualValues.length !== expectedValues.length
+      || actualValues.some((value, index) => value !== expectedValues[index])
+    ) {
+      violations.push(
+        `${selector} gap declarations must be ${expectedValues.join(" then ")}; found ${actualValues.join(" then ") || "missing"}`,
+      );
+    }
+  }
+
+  const settingsNavOffsets = rulePropertyValues(
+    candidateRhythm,
+    ".signal-settings-nav",
+    "inset-block-start",
+  );
+  const expectedSettingsNavOffsets = [
+    "var(--signal-workspace-header-height)",
+    "var(--signal-workspace-header-compact-height)",
+  ];
+  if (
+    settingsNavOffsets.length !== expectedSettingsNavOffsets.length
+    || settingsNavOffsets.some((value, index) => value !== expectedSettingsNavOffsets[index])
+  ) {
+    violations.push(
+      `.signal-settings-nav offsets must clear the desktop then compact workspace headers; found ${settingsNavOffsets.join(" then ") || "missing"}`,
+    );
+  }
+
+  const workspaceHorizontalOverflow = rulePropertyValues(
+    candidateRhythm,
+    ".signal-workspace-main",
+    "overflow-x",
+  );
+  if (
+    workspaceHorizontalOverflow.length !== 1
+    || workspaceHorizontalOverflow[0] !== "clip"
+  ) {
+    violations.push(
+      `.signal-workspace-main must use overflow-x: clip so compact sticky descendants follow the viewport; found ${workspaceHorizontalOverflow.join(", ") || "missing"}`,
+    );
+  }
+
+  const compactRhythmSource = cssBlocksAfterAll(candidateRhythm, "@media (max-width: 767px)")
+    .find((block) => block.includes(".signal-page-flow")) ?? "";
+  for (const [selector, expectedValue] of [
+    [".signal-page-flow", "var(--signal-rhythm-section-compact)"],
+    [".signal-section-flow", "var(--signal-rhythm-related-compact)"],
+  ]) {
+    const actualValues = rulePropertyValues(compactRhythmSource, selector, "gap");
+    if (actualValues.length !== 1 || actualValues[0] !== expectedValue) {
+      violations.push(
+        `compact ${selector} gap must have exactly one ${expectedValue} declaration; found ${actualValues.join(", ") || "missing"}`,
+      );
+    }
+  }
+
+  return violations;
+}
+
+failures.push(...validateRhythmContract(tokenSource, rhythmSource));
 
 // BUG-085: raw z-index values. Eleven layering sites now carry a --z-* token
 // (9 class-based + 2 inline in CoachMark); before the migration the skip link
@@ -255,6 +440,24 @@ for (const name of sourceFiles) {
   }
 }
 
+for (const normalized of SIGNAL_PAGE_FLOW_FILES) {
+  const source = readFileSync(join(SRC_DIR, normalized), "utf8");
+  const routeRoots = source.match(/className="signal-route(?:\s[^"]*)?"/g) ?? [];
+  const missingFlow = routeRoots.filter((root) => !root.includes("signal-page-flow"));
+  if (routeRoots.length === 0 || missingFlow.length > 0) {
+    failures.push(`${normalized} has ${missingFlow.length} route root(s) without signal-page-flow`);
+  }
+}
+
+const adviserSource = readFileSync(join(SRC_DIR, "report", "AdviserView.tsx"), "utf8");
+const sharedRouteRoots = adviserSource.match(/className="signal-shared-route[^"]*"/g) ?? [];
+if (
+  sharedRouteRoots.length === 0
+  || sharedRouteRoots.some((root) => !root.includes("signal-page-flow"))
+) {
+  failures.push("report/AdviserView.tsx has a shared route root without signal-page-flow");
+}
+
 const signalCss = readFileSync(SIGNAL_CSS_FILE, "utf8");
 scanSignalCss(signalCss, failures);
 
@@ -307,6 +510,22 @@ const negativeControls = [
     scanSignalCss(".x { animation: pulse 1s infinite; }", found);
     return found;
   }],
+  ["later rhythm-token override", () => validateRhythmContract(
+    `${tokenSource}\n:root { --signal-rhythm-attached: 0; }`,
+    rhythmSource,
+  )],
+  ["later flow-gap override", () => validateRhythmContract(
+    tokenSource,
+    `${rhythmSource}\n.signal-page-flow { gap: 0; }`,
+  )],
+  ["settings navigation header collision", () => validateRhythmContract(
+    tokenSource,
+    `${rhythmSource}\n.signal-settings-nav { inset-block-start: 0; }`,
+  )],
+  ["mobile sticky overflow container", () => validateRhythmContract(
+    tokenSource,
+    `${rhythmSource}\n.signal-workspace-main { overflow-x: hidden; }`,
+  )],
 ];
 
 for (const [label, run] of negativeControls) {

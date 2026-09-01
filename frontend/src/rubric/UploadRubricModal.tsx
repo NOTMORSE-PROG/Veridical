@@ -121,7 +121,7 @@ export function UploadRubricModal({ onClose, familyId }: UploadRubricModalProps)
           </>
         }
       >
-        <div className="flex flex-col gap-4" aria-busy={upload.isPending}>
+        <div className="signal-group-flow" aria-busy={upload.isPending}>
           <div className="flex flex-col gap-1.5">
             <span className="text-sm font-medium text-ink">Format document</span>
             <p id={hintId} className="text-sm text-ink-secondary">

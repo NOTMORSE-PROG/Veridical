@@ -256,7 +256,7 @@ export function RerunModal({ onClose, initialManuscriptIds }: RerunModalProps) {
   return (
     <ModalBackdrop>
       <Modal title="Re-run manuscripts" onClose={isSubmitting ? undefined : onClose} size="lg" footer={footer}>
-        <div className="flex flex-col gap-3" aria-busy={isSubmitting}>
+        <div className="signal-group-flow" aria-busy={isSubmitting}>
           <p aria-live="polite" className="sr-only">
             {announcement}
           </p>

@@ -22,11 +22,6 @@ interface ModalProps {
   size?: "md" | "lg";
 }
 
-const SIZE_CLASS: Record<"md" | "lg", string> = {
-  md: "max-w-lg",
-  lg: "max-w-2xl",
-};
-
 const FOCUSABLE_SELECTOR =
   'a[href], button:not([disabled]), textarea:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
@@ -124,12 +119,11 @@ export function Modal({ title, children, footer, onClose, size = "md" }: ModalPr
       aria-labelledby={titleId}
       tabIndex={-1}
       className={cx(
-        "signal-task-sheet motion-safe:animate-dialog-in flex max-h-[90vh] w-full flex-col gap-4 overflow-y-auto rounded-lg border border-border bg-panel p-6 text-sm shadow-(--elevation-overlay)",
+        "signal-task-sheet motion-safe:animate-dialog-in text-sm",
         size === "lg" ? "signal-task-sheet--large" : "signal-task-sheet--medium",
-        SIZE_CLASS[size],
       )}
     >
-      <div className="signal-task-sheet__header flex items-start gap-3">
+      <div className="signal-task-sheet__header">
         <h2 id={titleId} className="signal-task-sheet__title text-md font-bold text-ink">
           {title}
         </h2>
@@ -158,7 +152,7 @@ export function Modal({ title, children, footer, onClose, size = "md" }: ModalPr
         )}
       </div>
       <div className="signal-task-sheet__body">{children}</div>
-      {footer !== undefined && <div className="signal-task-sheet__footer flex justify-end gap-2">{footer}</div>}
+      {footer !== undefined && <div className="signal-task-sheet__footer">{footer}</div>}
     </div>
   );
 }

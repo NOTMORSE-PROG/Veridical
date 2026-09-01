@@ -74,7 +74,7 @@ export function SignalLibraryComparePage() {
   const itemB = useLibraryItem(b);
 
   return (
-    <div className="signal-route signal-library-compare">
+    <div className="signal-route signal-page-flow signal-library-compare">
       <header className="signal-route-header signal-library-compare__header">
         <div>
           <nav className="signal-breadcrumb" aria-label="Breadcrumb">
@@ -100,7 +100,7 @@ export function SignalLibraryComparePage() {
       )}
 
       {a && b && (
-        <>
+        <div className="signal-section-flow signal-library-compare-workspace">
           {itemA.data && itemB.data && (
             <aside className="signal-library-privacy">
               <strong>Visibility for this comparison</strong>
@@ -115,7 +115,7 @@ export function SignalLibraryComparePage() {
             <ComparisonPane manuscriptId={a} active={active === "a"} />
             <ComparisonPane manuscriptId={b} active={active === "b"} />
           </div>
-        </>
+        </div>
       )}
     </div>
   );
