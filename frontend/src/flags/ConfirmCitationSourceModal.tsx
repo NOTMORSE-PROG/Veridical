@@ -80,7 +80,7 @@ export function ConfirmCitationSourceModal({ flag, onClose }: ConfirmCitationSou
           </>
         }
       >
-        <div className="flex flex-col gap-3" aria-busy={confirm.isPending}>
+        <div className="signal-group-flow" aria-busy={confirm.isPending}>
           <div className="flex flex-col gap-1">
             <span className="text-xs font-semibold tracking-header text-ink-tertiary uppercase">
               Source

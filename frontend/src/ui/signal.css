@@ -918,6 +918,56 @@
     padding: var(--signal-workspace-padding);
   }
 
+  /* BUG-196 composition grammar. Routes opt into page flow explicitly so
+     full-height workbenches and tightly attached field/help pairs are never
+     spaced by an indiscriminate universal-child rule. */
+  .signal-page-flow,
+  .signal-section-flow,
+  .signal-group-flow,
+  .signal-copy-flow,
+  .signal-attached-flow {
+    min-width: 0;
+    display: grid;
+    align-content: start;
+  }
+
+  .signal-page-flow {
+    gap: var(--signal-rhythm-section);
+  }
+
+  .signal-section-flow {
+    gap: var(--signal-rhythm-related);
+  }
+
+  .signal-group-flow {
+    gap: var(--signal-rhythm-group);
+  }
+
+  .signal-copy-flow {
+    gap: var(--signal-rhythm-copy);
+  }
+
+  .signal-attached-flow {
+    gap: var(--signal-rhythm-attached);
+  }
+
+  .signal-control-cluster {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--signal-rhythm-control);
+  }
+
+  :is(
+    .signal-page-flow,
+    .signal-section-flow,
+    .signal-group-flow,
+    .signal-copy-flow,
+    .signal-attached-flow
+  ) > * {
+    min-width: 0;
+    margin-block: 0;
+  }
+
   .signal-route-header {
     display: flex;
     align-items: flex-start;
@@ -1476,6 +1526,8 @@
   }
 
   .signal-dialog__body {
+    display: grid;
+    gap: var(--signal-rhythm-dialog);
     overflow-y: auto;
     padding: var(--signal-space-6);
   }
@@ -1486,7 +1538,7 @@
     justify-content: flex-end;
     gap: var(--signal-space-3);
     border-block-start: var(--signal-border-hairline) solid var(--color-signal-border);
-    padding: var(--signal-space-4) var(--signal-space-6);
+    padding: var(--signal-space-5) var(--signal-space-6);
     background: var(--color-signal-surface-muted);
   }
 
@@ -1503,6 +1555,8 @@
     width: var(--signal-dialog-width);
     max-width: none;
     max-height: var(--signal-dialog-max-height);
+    display: flex;
+    flex-direction: column;
     gap: 0;
     overflow: hidden;
     border: var(--signal-border-hairline) solid var(--color-signal-border-strong);
@@ -1519,7 +1573,9 @@
   }
 
   .signal-task-sheet__header {
+    display: flex;
     align-items: center;
+    gap: var(--signal-rhythm-control);
     border-block-end: var(--signal-border-hairline) solid var(--color-signal-border);
     padding: var(--signal-space-5) var(--signal-space-6);
   }
@@ -1539,6 +1595,8 @@
 
   .signal-task-sheet__body {
     min-height: 0;
+    display: grid;
+    gap: var(--signal-rhythm-dialog);
     overflow-y: auto;
     padding: var(--signal-space-6);
   }
@@ -1551,9 +1609,12 @@
   }
 
   .signal-task-sheet__footer {
+    display: flex;
     flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: var(--signal-rhythm-control);
     border-block-start: var(--signal-border-hairline) solid var(--color-signal-border);
-    padding: var(--signal-space-4) var(--signal-space-6);
+    padding: var(--signal-space-5) var(--signal-space-6);
     background: var(--color-signal-surface-muted);
   }
 
@@ -1804,7 +1865,7 @@
 
   .signal-dialog-copy {
     display: grid;
-    gap: var(--signal-space-4);
+    gap: var(--signal-rhythm-copy);
   }
 
   .signal-dialog-copy p {
@@ -3028,7 +3089,7 @@
   .signal-settings-nav {
     position: sticky;
     z-index: var(--signal-z-raised);
-    inset-block-start: 0;
+    inset-block-start: var(--signal-workspace-header-height);
     display: flex;
     flex-wrap: wrap;
     gap: var(--signal-space-2);
@@ -3054,11 +3115,10 @@
 
   .signal-settings-stack {
     display: grid;
-    gap: var(--signal-space-5);
+    gap: var(--signal-rhythm-section);
   }
 
   .signal-settings-section {
-    scroll-margin-block-start: var(--signal-space-20);
     border-color: var(--color-signal-border);
     border-block-start: var(--signal-border-brand) solid var(--color-signal-brand);
     border-radius: var(--signal-radius-panel);
@@ -3068,6 +3128,7 @@
   }
 
   .signal-settings-section > h2 {
+    scroll-margin-block-start: calc(var(--signal-workspace-header-height) + var(--signal-space-20));
     margin-block-end: var(--signal-space-5);
     font-family: var(--font-signal-display);
     font-size: var(--signal-type-section);
@@ -3493,7 +3554,7 @@
 
   .signal-library-purge-copy {
     display: grid;
-    gap: var(--signal-space-3);
+    gap: var(--signal-rhythm-copy);
   }
 
   .signal-library-purge-copy p {
@@ -3642,8 +3703,8 @@
     text-underline-offset: var(--signal-link-underline-offset);
   }
 
-  .signal-audit > div[role="group"],
-  .signal-audit > .flex.flex-wrap.items-center {
+  :is(.signal-audit, .signal-audit-workspace) > div[role="group"],
+  :is(.signal-audit, .signal-audit-workspace) > .flex.flex-wrap.items-center {
     border: var(--signal-border-hairline) solid var(--color-signal-border);
     border-radius: var(--signal-radius-panel);
     padding: var(--signal-space-3);
@@ -3692,7 +3753,7 @@
 
   .signal-shared-route {
     display: grid;
-    gap: var(--signal-space-5);
+    gap: var(--signal-rhythm-section);
   }
 
   .signal-shared-report-header {
@@ -4351,7 +4412,7 @@
       scroll-margin-block-start: var(--signal-phone-header-height);
       scroll-margin-block-end: var(--signal-phone-nav-height);
       padding-block-end: var(--signal-space-4);
-      overflow-x: hidden;
+      overflow-x: clip;
     }
 
     .signal-route {
@@ -4648,6 +4709,47 @@
     }
   }
 
+  /* Component rules above may carry historical one-off margins. Explicit flow
+     ownership wins after those rules so the semantic gap is the sole source
+     of inter-region spacing. */
+  :is(
+    .signal-page-flow,
+    .signal-section-flow,
+    .signal-group-flow,
+    .signal-copy-flow,
+    .signal-attached-flow
+  ) > * {
+    min-width: 0;
+    margin-block: 0;
+  }
+
+  @media (max-width: 767px) {
+    .signal-page-flow {
+      gap: var(--signal-rhythm-section-compact);
+    }
+
+    .signal-shared-route {
+      gap: var(--signal-rhythm-section-compact);
+    }
+
+    .signal-section-flow {
+      gap: var(--signal-rhythm-related-compact);
+    }
+
+    .signal-settings-stack {
+      gap: var(--signal-rhythm-section-compact);
+    }
+
+    .signal-dialog > header,
+    .signal-dialog__body,
+    .signal-dialog > footer,
+    .signal-task-sheet__header,
+    .signal-task-sheet__body,
+    .signal-task-sheet__footer {
+      padding: var(--signal-space-5);
+    }
+  }
+
   /* V-073 corrected destination shell. Global navigation names places, not
      workflow progress, and collapses before it can crowd evidence content. */
   .signal-app {
@@ -4782,6 +4884,14 @@
       align-items: center;
       gap: var(--signal-space-3);
       padding-inline: var(--signal-space-5);
+    }
+
+    .signal-settings-nav {
+      inset-block-start: var(--signal-workspace-header-compact-height);
+    }
+
+    .signal-settings-section > h2 {
+      scroll-margin-block-start: calc(var(--signal-workspace-header-compact-height) + var(--signal-space-20));
     }
 
     .signal-primary-navigation,
@@ -4942,6 +5052,14 @@
   @media (max-width: 767px) {
     .signal-workspace-header__inner {
       padding-inline: var(--signal-space-4);
+    }
+
+    .signal-settings-section > h2 {
+      scroll-margin-block-start: calc(
+        var(--signal-workspace-header-compact-height)
+        + var(--signal-space-24)
+        + var(--signal-space-6)
+      );
     }
 
     .signal-workspace-header .signal-wordmark {

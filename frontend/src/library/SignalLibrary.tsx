@@ -429,7 +429,7 @@ export function SignalLibraryPage() {
   }
 
   return (
-    <div className="signal-route signal-library" data-compare={compareMode || undefined}>
+    <div className="signal-route signal-page-flow signal-library" data-compare={compareMode || undefined}>
       <header className="signal-route-header signal-library-header">
         <div>
           <p className="signal-eyebrow">Shared comparison corpus</p>
@@ -447,6 +447,7 @@ export function SignalLibraryPage() {
         </Button>
       </header>
 
+      <div className="signal-section-flow signal-library-workspace">
       <aside className="signal-library-privacy">
         <strong>Privacy boundary</strong>
         <p>
@@ -490,6 +491,7 @@ export function SignalLibraryPage() {
         </p>
       )}
 
+      <div className="signal-group-flow signal-library-results">
       {isLoading && <div className="signal-library-state" role="status" aria-live="polite" aria-busy="true">Loading library records.</div>}
       {isError && (
         <div className="signal-library-state" role="alert">
@@ -547,6 +549,8 @@ export function SignalLibraryPage() {
           <Button type="button" variant="secondary" disabled={page === totalPages} onClick={() => changePage(page + 1)}>Next</Button>
         </nav>
       )}
+      </div>
+      </div>
 
       {compareMode && (
         <aside className="signal-library-selection" aria-label="Comparison selection">
@@ -611,7 +615,7 @@ export function SignalLibraryPage() {
             </>
           }
         >
-          <div className="signal-library-purge-copy">
+          <div className="signal-library-purge-copy signal-copy-flow">
             <p>The stored file and its future comparison data will be permanently removed.</p>
             <p>Existing check history, readiness reports, instructor decisions, and audit entries remain available.</p>
             <p>This action cannot be undone and never happens automatically.</p>

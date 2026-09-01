@@ -119,7 +119,7 @@ export function SignalLibraryDetailPage() {
   }
 
   return (
-    <div className="signal-route signal-library-detail">
+    <div className="signal-route signal-page-flow signal-library-detail">
       <header className="signal-route-header signal-library-detail__header">
         <div>
           <nav className="signal-breadcrumb" aria-label="Breadcrumb">

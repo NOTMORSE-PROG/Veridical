@@ -235,7 +235,7 @@ export function ShareModal({
   return (
     <ModalBackdrop>
       <Modal title="Share this report" onClose={onClose} size="md">
-        <div className="flex flex-col gap-3 text-sm">
+        <div className="signal-group-flow text-sm">
           {/* ux-critic finding (P1, this session): a screen-reader
               instructor who revokes or regenerates got total silence --
               no focus move (fixed above) and no announcement. Kept

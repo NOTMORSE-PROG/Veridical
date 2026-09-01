@@ -174,7 +174,7 @@ export function SignalDocumentViewerPage() {
   }
 
   return (
-    <div className="signal-route signal-document-viewer">
+    <div className="signal-route signal-page-flow signal-document-viewer">
       <header className="signal-route-header signal-document-header">
         <div><nav aria-label="Breadcrumb"><Link to={`/report/${id}`}>Readiness report</Link><span aria-hidden="true">/</span><span>Source manuscript</span></nav><p className="signal-eyebrow">Review · Source evidence</p><h1 ref={headingRef} tabIndex={-1}>Source manuscript</h1>{viewer?.original_filename && <p className="signal-route-header__intro">{viewer.original_filename}</p>}</div>
         {validId && <ActionLink to={`/report/${id}`} variant="secondary">Back to readiness report</ActionLink>}

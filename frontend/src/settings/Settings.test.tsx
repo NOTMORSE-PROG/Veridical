@@ -76,6 +76,24 @@ describe("SettingsPage", () => {
     ).toBeInTheDocument();
   });
 
+  it("moves focus to the visible heading for every in-page section link", async () => {
+    vi.stubGlobal("fetch", stubFetchByPath(baseHandlers()));
+    renderWithProviders(<SettingsPage />);
+    await screen.findByText("Prof Cruz");
+
+    for (const [linkName, headingName] of [
+      ["Account", "Profile"],
+      ["Personal key", "Personal Gemini key"],
+      ["AI capacity", "AI capacity"],
+      ["Review rules", "Review rules and technical record"],
+    ]) {
+      const heading = screen.getByRole("heading", { name: headingName });
+      expect(heading).toHaveAttribute("tabindex", "-1");
+      fireEvent.click(screen.getByRole("link", { name: linkName }));
+      expect(document.activeElement).toBe(heading);
+    }
+  });
+
   it("blocks submit and shows an inline error when the current password is missing", async () => {
     vi.stubGlobal("fetch", stubFetchByPath(baseHandlers()));
     renderWithProviders(<SettingsPage />);

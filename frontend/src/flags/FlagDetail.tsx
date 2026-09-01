@@ -203,7 +203,7 @@ export function FlagDetailPage() {
   const sourceLinkId = flag ? `flag-source-link-${flag.id}` : "";
 
   return (
-    <div className="signal-route signal-flag-detail">
+    <div className="signal-route signal-page-flow signal-flag-detail">
       <header className="signal-route-header signal-flag-header">
         <div>
           <nav aria-label="Breadcrumb"><Link to="/dashboard?queue=needs_review">Review Desk</Link><span aria-hidden="true">/</span>{flag && <><Link to={`/report/${flag.check_run_id}`}>{flag.manuscript_group_label}</Link><span aria-hidden="true">/</span></>}<span>Evidence</span></nav>

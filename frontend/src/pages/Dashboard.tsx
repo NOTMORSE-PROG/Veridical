@@ -532,7 +532,7 @@ export function DashboardPage() {
   }
 
   return (
-    <div className="signal-route signal-review-desk">
+    <div className="signal-route signal-page-flow signal-review-desk">
       <header className="signal-route-header">
         <div>
           <p className="signal-eyebrow">Instructor work queue</p>

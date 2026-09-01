@@ -6,7 +6,14 @@
 // lens DESIGN.md §1.7 already applies to withholding polish from any
 // unresolved-AI-judgment surface, extended here since this section's whole
 // purpose is "check this yourself."
-import { type FormEvent, type ReactNode, useEffect, useRef, useState } from "react";
+import {
+  type FormEvent,
+  type MouseEvent as ReactMouseEvent,
+  type ReactNode,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
 import { useQuota } from "../api/useQuota";
 import { ApiError } from "../api/client";
 import type { ModelQuotaStatus } from "../api/types";
@@ -32,12 +39,23 @@ function SectionCard({
       aria-labelledby={headingId}
       className="signal-settings-section rounded-lg border border-border bg-panel p-4 shadow-sm sm:p-5"
     >
-      <h2 id={headingId} className="text-md mb-3 font-bold text-ink">
+      <h2 id={headingId} tabIndex={-1} className="text-md mb-3 font-bold text-ink">
         {title}
       </h2>
       {children}
     </section>
   );
+}
+
+function focusSettingsSection(event: ReactMouseEvent<HTMLAnchorElement>) {
+  event.preventDefault();
+  const targetId = event.currentTarget.hash.slice(1);
+  const target = document.getElementById(targetId);
+  if (!target) return;
+
+  window.history.pushState(null, "", `#${targetId}`);
+  target.scrollIntoView?.({ block: "start" });
+  target.focus({ preventScroll: true });
 }
 
 function ProfileSection() {
@@ -703,12 +721,12 @@ export function SettingsPage() {
   useRouteFocus("Settings - VERIDICAL", headingRef);
 
   return (
-    <div className="signal-route signal-settings">
+    <div className="signal-route signal-page-flow signal-settings">
       <header className="signal-route-header">
         <div><p className="signal-eyebrow">Workspace utility</p><h1 ref={headingRef} tabIndex={-1}>Workspace settings</h1><p className="signal-route-header__intro">Manage account access, AI capacity, review rules, and technical records.</p></div>
       </header>
-      <nav aria-label="Settings sections" className="signal-settings-nav"><a href="#profile-heading">Account</a><a href="#api-key-heading">Personal key</a><a href="#quota-heading">AI capacity</a><a href="#transparency-heading">Review rules</a></nav>
-      <div className="signal-settings-stack">
+      <nav aria-label="Settings sections" className="signal-settings-nav"><a href="#profile-heading" onClick={focusSettingsSection}>Account</a><a href="#api-key-heading" onClick={focusSettingsSection}>Personal key</a><a href="#quota-heading" onClick={focusSettingsSection}>AI capacity</a><a href="#transparency-heading" onClick={focusSettingsSection}>Review rules</a></nav>
+      <div className="signal-settings-stack signal-page-flow">
         <ProfileSection />
         <PasswordSection />
         <ApiKeySection />

@@ -309,6 +309,19 @@
   --signal-space-20: 6rem;
   --signal-space-24: 8rem;
 
+  /* BUG-196: semantic vertical rhythm. These aliases separate structural
+     whitespace from primitive size choices so route sections, related groups,
+     controls, and attached help cannot silently collapse into one cadence. */
+  --signal-rhythm-attached: var(--signal-space-2);
+  --signal-rhythm-control: var(--signal-space-3);
+  --signal-rhythm-copy: var(--signal-space-4);
+  --signal-rhythm-group: var(--signal-space-5);
+  --signal-rhythm-related: var(--signal-space-6);
+  --signal-rhythm-related-compact: var(--signal-space-5);
+  --signal-rhythm-section: var(--signal-space-10);
+  --signal-rhythm-section-compact: var(--signal-space-8);
+  --signal-rhythm-dialog: var(--signal-space-5);
+
   --signal-radius-compact: 0.25rem;
   --signal-radius-control: 0.5rem;
   --signal-radius-panel: 0.75rem;

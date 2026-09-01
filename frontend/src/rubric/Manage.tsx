@@ -125,7 +125,7 @@ export function ManageRubricPage() {
 
   if (isPending) {
     return (
-      <div className="signal-route signal-rubric-studio">
+      <div className="signal-route signal-page-flow signal-rubric-studio">
         <header className="signal-route-header"><div><p className="signal-eyebrow">Prepare</p><h1 ref={headingRef} tabIndex={-1}>Rubric Studio</h1></div></header>
         <div className="signal-desk-loading" role="status" aria-busy="true"><span>Loading required formats…</span><i /><i /></div>
       </div>
@@ -134,7 +134,7 @@ export function ManageRubricPage() {
 
   if (isError) {
     return (
-      <div className="signal-route signal-rubric-studio">
+      <div className="signal-route signal-page-flow signal-rubric-studio">
         <header className="signal-route-header"><div><p className="signal-eyebrow">Prepare</p><h1 ref={headingRef} tabIndex={-1}>Rubric Studio</h1></div></header>
         <Alert title="Could not load required formats" tone="error" role="alert">
           <p>Your formats have not changed.</p><Button variant="secondary" onClick={() => refetch()}>Try again</Button>
@@ -145,7 +145,7 @@ export function ManageRubricPage() {
 
   if (!family) {
     return (
-      <div className="signal-route signal-rubric-studio">
+      <div className="signal-route signal-page-flow signal-rubric-studio">
         <header className="signal-route-header">
           <div><p className="signal-eyebrow">Prepare</p><h1 ref={headingRef} tabIndex={-1}>Rubric Studio</h1><p className="signal-route-header__intro">Prepare the criteria VERIDICAL will use. You review every criterion before any manuscript check.</p></div>
         </header>
@@ -165,7 +165,7 @@ export function ManageRubricPage() {
   const displayVersion = activeVersion ?? orderedVersions[0] ?? family;
 
   return (
-    <div className="signal-route signal-rubric-studio">
+    <div className="signal-route signal-page-flow signal-rubric-studio">
       <header className="signal-route-header">
         <div>
           <p className="signal-eyebrow">Prepare</p>

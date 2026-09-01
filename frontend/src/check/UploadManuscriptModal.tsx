@@ -205,7 +205,7 @@ export function UploadManuscriptModal({ onClose, onUploadSuccess }: UploadManusc
         }
       >
         {summary ? (
-          <div className="flex flex-col gap-3">
+          <div className="signal-group-flow">
             <p className="rounded-md bg-status-success-bg px-3 py-2 text-sm text-status-success-text">
               {summary.citations > 0
                 ? `Uploaded. ${summary.page_count} page(s) parsed, ${summary.citations} citation(s) found.`
@@ -232,7 +232,7 @@ export function UploadManuscriptModal({ onClose, onUploadSuccess }: UploadManusc
             )}
           </div>
         ) : (
-          <div className="flex flex-col gap-4" aria-busy={ingest.isPending}>
+          <div className="signal-group-flow" aria-busy={ingest.isPending}>
             <div className="flex flex-col gap-1.5">
               <span className="text-sm font-medium text-ink">Manuscript file</span>
               <p id={hintId} className="text-sm text-ink-secondary">

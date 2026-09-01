@@ -208,10 +208,10 @@ export function SignalReviewCriteriaPage() {
   }, [blocker.state]);
 
   if (isPending || (!isError && rubric && !rows)) {
-    return <div className="signal-route"><CriteriaHeader headingRef={headingRef} /><div className="signal-desk-loading" role="status" aria-busy="true"><span>Loading prepared criteria…</span><i /><i /></div></div>;
+    return <div className="signal-route signal-page-flow"><CriteriaHeader headingRef={headingRef} /><div className="signal-desk-loading" role="status" aria-busy="true"><span>Loading prepared criteria…</span><i /><i /></div></div>;
   }
   if (isError || !rubric || !rows) {
-    return <div className="signal-route"><CriteriaHeader headingRef={headingRef} /><Alert title="Could not load these criteria" tone="error" role="alert"><Button variant="secondary" onClick={() => refetch()}>Try again</Button></Alert></div>;
+    return <div className="signal-route signal-page-flow"><CriteriaHeader headingRef={headingRef} /><Alert title="Could not load these criteria" tone="error" role="alert"><Button variant="secondary" onClick={() => refetch()}>Try again</Button></Alert></div>;
   }
 
   const currentRows = rows;
@@ -288,55 +288,62 @@ export function SignalReviewCriteriaPage() {
   const saveError = save.error instanceof Error ? save.error.message : save.error ? "Save failed. Try again." : undefined;
 
   return (
-    <div className="signal-route signal-criteria-review">
+    <div className="signal-route signal-page-flow signal-criteria-review">
       <CriteriaHeader headingRef={headingRef} title={rubric.title} count={currentRows.length} />
-      {readOnly
-        ? <Alert title="Read-only version" tone="info">A newer version exists. Reports remain pinned to this history version for traceability.</Alert>
-        : <Alert title="Review before anything runs" tone="info">Correct the prepared criteria, evidence, type, and relative importance. Nothing checks a manuscript until you confirm.</Alert>}
-      {rubric.parse_status === "needs_review" && (
-        <Alert title="Needs manual completion" tone="warning" role="status">
-          <p>{rubric.is_active ? "This format was activated with parser uncertainty. Review and save any corrections." : "VERIDICAL could not confirm every criterion after several attempts. Check each one against the original format before confirming."}</p>
-          {rubric.parse_issues?.length ? <ul>{rubric.parse_issues.map((issue) => <li key={issue}>{issue}</li>)}</ul> : null}
-        </Alert>
+      <div className="signal-section-flow signal-criteria-guidance">
+        {readOnly
+          ? <Alert title="Read-only version" tone="info">A newer version exists. Reports remain pinned to this history version for traceability.</Alert>
+          : <Alert title="Review before anything runs" tone="info">Correct the prepared criteria, evidence, type, and relative importance. Nothing checks a manuscript until you confirm.</Alert>}
+        {rubric.parse_status === "needs_review" && (
+          <Alert title="Needs manual completion" tone="warning" role="status">
+            <p>{rubric.is_active ? "This format was activated with parser uncertainty. Review and save any corrections." : "VERIDICAL could not confirm every criterion after several attempts. Check each one against the original format before confirming."}</p>
+            {rubric.parse_issues?.length ? <ul>{rubric.parse_issues.map((issue) => <li key={issue}>{issue}</li>)}</ul> : null}
+          </Alert>
+        )}
+        {problems.length > 0 && (
+          <div ref={summaryRef} tabIndex={-1} role="alert" className="signal-error-summary signal-criteria-errors">
+            <h2>Fix these items before {attempted === "confirm" ? "confirming" : "saving"}</h2>
+            <ul>{problems.map((problem) => <li key={problem.key}><button type="button" onClick={() => { if ("selector" in problem && problem.selector) document.querySelector<HTMLElement>(problem.selector)?.focus(); else addRef.current?.focus(); }}>{problem.message}</button></li>)}</ul>
+          </div>
+        )}
+      </div>
+      {currentRows.length > 0 ? (
+        <ol className="signal-criteria-list" aria-label="Rubric criteria">
+          {currentRows.map((row, index) => (
+            <CriterionCard
+              key={row.key}
+              row={row}
+              index={index}
+              average={average}
+              readOnly={readOnly}
+              showErrors={attempted === "confirm"}
+              onChange={(patch) => updateRow(row.key, patch)}
+              onRemove={() => removeCriterion(row.key)}
+            />
+          ))}
+        </ol>
+      ) : (
+        <div className="signal-desk-empty"><h2>No criteria yet</h2><p>Add at least one criterion before saving.</p></div>
       )}
-      {problems.length > 0 && (
-        <div ref={summaryRef} tabIndex={-1} role="alert" className="signal-error-summary signal-criteria-errors">
-          <h2>Fix these items before {attempted === "confirm" ? "confirming" : "saving"}</h2>
-          <ul>{problems.map((problem) => <li key={problem.key}><button type="button" onClick={() => { if ("selector" in problem && problem.selector) document.querySelector<HTMLElement>(problem.selector)?.focus(); else addRef.current?.focus(); }}>{problem.message}</button></li>)}</ul>
-        </div>
-      )}
-      <ol className="signal-criteria-list" aria-label="Rubric criteria">
-        {currentRows.map((row, index) => (
-          <CriterionCard
-            key={row.key}
-            row={row}
-            index={index}
-            average={average}
-            readOnly={readOnly}
-            showErrors={attempted === "confirm"}
-            onChange={(patch) => updateRow(row.key, patch)}
-            onRemove={() => removeCriterion(row.key)}
-          />
-        ))}
-      </ol>
-      {currentRows.length === 0 && <div className="signal-desk-empty"><h2>No criteria yet</h2><p>Add at least one criterion before saving.</p></div>}
       <p className="signal-live-region" aria-live="polite">{announcement}</p>
-      {!readOnly && (
-        <div className="signal-save-dock">
-          <div>
-            <Button ref={addRef} variant="quiet" onClick={addCriterion}>Add criterion</Button>
-            <Button variant="secondary" onClick={distributeWeights}>Set equal relative weights</Button>
-            <p>Weights are relative. VERIDICAL shows importance as Low, Medium, or High.</p>
+      <div className="signal-copy-flow signal-criteria-save-region">
+        {!readOnly && (
+          <div className="signal-save-dock">
+            <div>
+              <Button ref={addRef} variant="quiet" onClick={addCriterion}>Add criterion</Button>
+              <Button variant="secondary" onClick={distributeWeights}>Set equal relative weights</Button>
+              <p>Weights are relative. VERIDICAL shows importance as Low, Medium, or High.</p>
+            </div>
+            <div>
+              <Button variant="secondary" busy={save.isPending} onClick={() => attemptSave(false)}>Save draft</Button>
+              <Button variant="brand" busy={save.isPending} data-tour="confirm-rubric-cta" onClick={() => attemptSave(true)}>Confirm and activate format</Button>
+            </div>
           </div>
-          <div>
-            <Button variant="secondary" busy={save.isPending} onClick={() => attemptSave(false)}>Save draft</Button>
-            <Button variant="brand" busy={save.isPending} data-tour="confirm-rubric-cta" onClick={() => attemptSave(true)}>Confirm and activate format</Button>
-          </div>
-        </div>
-      )}
-      {save.isPending && <p role="status">Saving criteria…</p>}
-      {saveError && <Alert title="Could not save these criteria" tone="error" role="alert">{saveError}</Alert>}
-      {rubric.is_active && <Alert title="This format is active" tone="success">New checks use this version.</Alert>}
+        )}
+        {save.isPending && <p role="status">Saving criteria…</p>}
+        {saveError && <Alert title="Could not save these criteria" tone="error" role="alert">{saveError}</Alert>}
+        {rubric.is_active && <Alert title="This format is active" tone="success">New checks use this version.</Alert>}
+      </div>
       {blocker.state === "blocked" && (
         <Dialog
           title="Leave without saving your changes?"
