@@ -462,7 +462,7 @@
     position: relative;
     isolation: isolate;
     display: grid;
-    grid-template-columns: minmax(0, 3fr) minmax(var(--signal-auth-card-min-width), 2fr);
+    grid-template-columns: minmax(0, 1fr) minmax(var(--signal-auth-card-min-width), var(--signal-auth-card-width));
     align-items: center;
     gap: var(--signal-auth-main-gap);
     overflow: hidden;
@@ -493,7 +493,7 @@
 
   .signal-auth-card {
     width: 100%;
-    max-width: var(--signal-form-width);
+    max-width: var(--signal-auth-card-width);
     justify-self: end;
     border-block-start: var(--signal-border-brand) solid var(--color-signal-brand);
     border-radius: var(--signal-radius-panel);

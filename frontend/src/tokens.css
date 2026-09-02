@@ -422,6 +422,12 @@
   --signal-service-panel-width: min(36rem, 100%);
   --signal-service-panel-padding: clamp(1.5rem, 4vw, 3rem);
   --signal-auth-card-min-width: 28rem;
+  --signal-auth-card-max-width: 37.5rem;
+  --signal-auth-card-width: clamp(
+    var(--signal-auth-card-min-width),
+    22vw + 17rem,
+    var(--signal-auth-card-max-width)
+  );
   --signal-auth-main-gap: clamp(3rem, 6vw, 6rem);
   --signal-auth-main-padding: clamp(3rem, 6vw, 6rem);
   --signal-auth-axis-inset: 18%;
