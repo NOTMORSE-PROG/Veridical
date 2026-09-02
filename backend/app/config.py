@@ -573,6 +573,22 @@ class Settings(BaseSettings):
     # F7.4 candidacy at all.
     block_quote_min_words: int = 15
 
+    # --- Durable object storage (BUG-138) -------------------------------------
+    # Render's free-tier disk is EPHEMERAL -- wiped on every redeploy and every
+    # 15-minute-idle wake, so it can never be the only copy of an uploaded
+    # manuscript or its derived extraction JSON. "local" (default) keeps
+    # today's dev/CI behavior: `data_dir` IS the store, zero credentials
+    # needed. "r2" additionally persists both to Cloudflare R2 -- chosen
+    # 2026-09-02 (10 GB-month free storage, free egress at any volume) over
+    # Neon-in-DB storage (0.5GB/project, already shared with the reuse
+    # archive's embeddings) and Render's paid persistent disk (ground rule 2).
+    # `data_dir` stays the local CACHE in both modes -- see `app/storage/`.
+    storage_backend: str = "local"
+    r2_bucket: str | None = None
+    r2_endpoint_url: str | None = None
+    r2_access_key_id: str | None = None
+    r2_secret_access_key: str | None = None
+
     # --- CORS (V-048) --------------------------------------------------------
     # Comma-separated origins allowed to call the API from a browser. Empty
     # in dev (no browser cross-origin caller yet); production sets it to

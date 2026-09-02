@@ -42,6 +42,9 @@ dependencies = [
     # directly (Fernet) to encrypt instructor-supplied Gemini keys at rest.
     # Prebuilt manylinux wheels, no native build toolchain (Render-safe).
     "cryptography>=43",
+    # BUG-138: R2 is S3-compatible -- boto3's S3 client works against it
+    # unmodified with just a custom endpoint_url (app/storage/__init__.py).
+    "boto3>=1.35",
 ]
 
 [dependency-groups]

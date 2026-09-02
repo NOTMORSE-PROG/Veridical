@@ -48,7 +48,7 @@ from app.config import Settings, get_settings
 from app.errors import ApiDownError, FileMalformedError, QuotaExhaustedError
 from app.external.http import build_http_client
 from app.ingest.patterns import load_patterns
-from app.ingest.service import load_raw_store
+from app.ingest.service import load_raw_store_async
 from app.llm import get_llm_client_for
 from app.llm.base import LLMClient
 from app.llm.queue import next_reset_for
@@ -391,7 +391,7 @@ async def _run_semantic_stage(
     done_ids = await _existing_result_criterion_ids(session, check_run.id, CheckKind.semantic)
     pending = [criteria_by_id[cid] for cid in semantic_criterion_ids if cid not in done_ids]
     if pending:
-        extraction = load_raw_store(settings, manuscript.id)
+        extraction = await load_raw_store_async(settings, manuscript.id)
         try:
             await run_semantic_checks_with_consistency(
                 session,
@@ -483,7 +483,7 @@ async def _run_integrity_stage(
     """F4 (internal agreement, V-034/V-035), F5 (citation integrity,
     V-027/V-028/V-029/V-030), F6 (statistical forensics, V-031/V-032/
     V-033), and F7 (originality/reuse, V-036/V-037) all run for real."""
-    extraction = load_raw_store(settings, manuscript.id)
+    extraction = await load_raw_store_async(settings, manuscript.id)
 
     agreement_existing = await existing_internal_agreement_result(session, check_run.id)
     if agreement_existing is None:

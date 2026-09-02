@@ -8,6 +8,7 @@ from fastapi.responses import FileResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.dependencies import get_current_instructor
+from app.config import get_settings
 from app.db import get_session
 from app.models.instructor import Instructor
 from app.report.export import build_report_pdf
@@ -144,7 +145,7 @@ async def get_manuscript_file_route(
     """PDF sources only -- the frontend's PDF.js pane fetches the actual
     submitted bytes here (V-065 Q1: never re-rasterized server-side). A
     purged manuscript raises `GoneError` (410), not a silent empty body."""
-    path = await get_manuscript_file_path(session, check_run_id, instructor.id)
+    path = await get_manuscript_file_path(session, check_run_id, instructor.id, get_settings())
     return FileResponse(path, media_type="application/pdf")
 
 
