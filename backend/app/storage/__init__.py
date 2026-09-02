@@ -133,8 +133,7 @@ def get_storage(settings: Settings) -> Storage:
         # two real values are legal; everything else fails loudly, the same
         # posture as the incomplete-credentials case above.
         raise RuntimeError(
-            f"Unknown STORAGE_BACKEND={settings.storage_backend!r} -- must be "
-            '"local" or "r2".'
+            f'Unknown STORAGE_BACKEND={settings.storage_backend!r} -- must be "local" or "r2".'
         )
     return LocalDiskStorage(settings.data_dir)
 
