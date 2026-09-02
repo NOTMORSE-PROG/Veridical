@@ -286,7 +286,7 @@ Each tier escalates only its uncertain residue upward, ending at the instructor 
 - **Self-consistency as confidence:** N=3 passes, majority vote; the agreement score *is* the confidence signal that drives escalation (F3.5) — one mechanism, validated once, used everywhere
 
 ### 7.3 Debugging & observability
-- Every AI call logged to the audit table: prompt version, input hash, raw response, parsed result, agreement score → any bad grade can be **traced and replayed** exactly
+- Every AI call logged to the audit table — prompt version, raw prompt and response (byte-for-byte), parsed result — so any bad grade can be **traced exactly** and **re-graded under the same pinned model, temperature, and prompt version**. Two fields are conditional, not universal: an input hash is attached only in real-API mode (keyed to the response cache; fake-LLM mode has no cache to key, so it has none), and an agreement score is attached at the escalation/flag level, not on every individual call. In fake-LLM mode the re-grade is bit-identical (canned responses); against the real Gemini API, pinning guarantees the same inputs and settings but not bit-identical output — a documented property of hosted LLM APIs, not something this pinning alone can close
 - Structured error taxonomy: *API down* ≠ *source unverifiable* ≠ *check not applicable* — each renders differently in the report so a network hiccup never reads as an integrity problem
 - Per-stage status in Flow B doubles as the debugging view: a stuck run shows exactly which stage and which external call
 - Local dev: `docker-compose` (API + Postgres/pgvector) mirrors production; `.env`-switchable fake-LLM mode (canned responses) so the UI and pipeline are testable without burning Gemini quota
