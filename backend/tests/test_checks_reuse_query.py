@@ -4,11 +4,13 @@ Live Postgres (own scratch DB, same convention as `test_checks_reuse_store.py`)
 manuscripts, which no fake/mock can stand in for."""
 
 import os
+from datetime import UTC, datetime
 
 import pytest
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
+from app.checks.reuse.query import same_instructor_hash_duplicate
 from app.checks.reuse.service import (
     existing_originality_reuse_result,
     run_originality_reuse_check,
@@ -239,6 +241,287 @@ async def test_reuploaded_duplicate_produces_a_high_severity_flag(session_factor
         "reuse_exact_duplicate_chapter",
         "reuse_exact_duplicate_passage",
     }
+
+
+async def test_same_instructor_whole_document_resubmission_collapses_to_one_low_flag(
+    session_factory,
+):
+    """BUG-140: the SAME instructor re-uploading their own manuscript must
+    never reproduce `test_reuploaded_duplicate_produces_a_high_severity_flag`
+    above's 5-high-severity-flag flood -- that's a resubmission question,
+    not a plagiarism verdict (owner ruling, 2026-09-03). Both manuscripts
+    are deliberately left ungrouped (`group_id=None`) so BUG-050's own
+    group-sibling exclusion (a DIFFERENT mechanism) can't be the reason
+    nothing flags here -- this proves the NEW suppression fires on its own.
+    `content_hash=None` on the second call deliberately isolates the
+    EMBEDDING-based resubmission path from the hash-based one (tested
+    separately below)."""
+    settings = get_settings()
+    instructor_id = await _seed_instructor(session_factory)
+
+    manuscript_a, check_run_a = await _seed_manuscript_in_group(
+        session_factory, instructor_id=instructor_id, group_id=None
+    )
+    async with session_factory() as session:
+        await run_originality_reuse_check(
+            session,
+            manuscript_a,
+            check_run_a,
+            _extraction(CH1, CH2),
+            settings,
+            instructor_id=instructor_id,
+            content_hash=None,
+        )
+
+    manuscript_b, check_run_b = await _seed_manuscript_in_group(
+        session_factory, instructor_id=instructor_id, group_id=None
+    )
+    async with session_factory() as session:
+        result = await run_originality_reuse_check(
+            session,
+            manuscript_b,
+            check_run_b,
+            _extraction(CH1, CH2),
+            settings,
+            instructor_id=instructor_id,
+            content_hash=None,
+        )
+        assert result.outcome == ResultOutcome.passed
+        assert result.detail["n_flags"] == 1
+
+        rows = (
+            await session.execute(
+                text(
+                    "SELECT severity, detail->>'kind' AS kind, detail->>'reason' AS reason "
+                    "FROM flag WHERE check_result_id = :id"
+                ),
+                {"id": result.id},
+            )
+        ).all()
+    assert len(rows) == 1
+    assert rows[0].severity == "low"
+    assert rows[0].kind == "reuse_same_instructor_resubmission"
+    assert f"#{manuscript_a}" in rows[0].reason
+    assert "your own earlier upload" in rows[0].reason
+    # Ground rule 3: never worded as an accusation.
+    assert "plagiar" not in rows[0].reason.lower()
+
+
+async def test_same_instructor_resubmission_names_the_actual_duplicate_source(
+    session_factory,
+):
+    """The suppression is keyed on `matched_manuscript_id`, not just "any
+    same-instructor exact duplicate" -- with TWO prior manuscripts on
+    record (an unrelated one plus the real duplicate source), the single
+    resubmission flag must still point at the actual duplicate (`manuscript_a`),
+    not the unrelated one, and `n_flags` must stay at 1 rather than double-
+    counting because the archive now has more than one prior entry."""
+    settings = get_settings()
+    instructor_id = await _seed_instructor(session_factory)
+
+    # Own earlier upload of CH1/CH2 -- the resubmission source.
+    manuscript_a, check_run_a = await _seed_manuscript_in_group(
+        session_factory, instructor_id=instructor_id, group_id=None
+    )
+    async with session_factory() as session:
+        await run_originality_reuse_check(
+            session,
+            manuscript_a,
+            check_run_a,
+            _extraction(CH1, CH2),
+            settings,
+            instructor_id=instructor_id,
+            content_hash=None,
+        )
+
+    # A genuinely different manuscript, same instructor, unrelated content --
+    # must never be pulled into the archive as a "match" by this test's own
+    # construction (no third manuscript uploaded), just establishing the
+    # instructor has more than one prior manuscript on record.
+    other_manuscript, other_check_run = await _seed_manuscript_in_group(
+        session_factory, instructor_id=instructor_id, group_id=None
+    )
+    async with session_factory() as session:
+        await run_originality_reuse_check(
+            session,
+            other_manuscript,
+            other_check_run,
+            _extraction(
+                "An entirely unrelated introduction about renewable energy policy.",
+                "An entirely unrelated methodology about survey sampling.",
+            ),
+            settings,
+            instructor_id=instructor_id,
+            content_hash=None,
+        )
+
+    # Re-upload of the FIRST manuscript's content -- must resubmission-collapse
+    # against manuscript_a specifically, not against the unrelated one.
+    manuscript_c, check_run_c = await _seed_manuscript_in_group(
+        session_factory, instructor_id=instructor_id, group_id=None
+    )
+    async with session_factory() as session:
+        result = await run_originality_reuse_check(
+            session,
+            manuscript_c,
+            check_run_c,
+            _extraction(CH1, CH2),
+            settings,
+            instructor_id=instructor_id,
+            content_hash=None,
+        )
+        assert result.detail["n_flags"] == 1
+        rows = (
+            await session.execute(
+                text(
+                    "SELECT detail->>'matched_manuscript_id' AS ref FROM flag "
+                    "WHERE check_result_id = :id"
+                ),
+                {"id": result.id},
+            )
+        ).all()
+    assert len(rows) == 1
+    assert int(rows[0].ref) == manuscript_a
+
+
+async def test_same_instructor_hash_duplicate_query(session_factory):
+    """`same_instructor_hash_duplicate` in isolation (BUG-140) -- the
+    signal `run_originality_reuse_check` uses BEFORE any embedding
+    comparison runs, so it must be correct on its own: matches same
+    instructor + same hash, excludes self, excludes a different
+    instructor's identical hash, excludes a purged manuscript, and returns
+    `None` for `content_hash=None` (a manuscript ingested before this
+    column existed)."""
+    instructor_id = await _seed_instructor(session_factory)
+    other_instructor_id = await _seed_instructor(session_factory)
+    same_hash = "a" * 64
+
+    async with session_factory() as session:
+        mine = Manuscript(
+            instructor_id=instructor_id,
+            group_label="Group A",
+            file_ref="a.pdf",
+            content_hash=same_hash,
+        )
+        mine_no_match = Manuscript(
+            instructor_id=instructor_id,
+            group_label="Group A",
+            file_ref="b.pdf",
+            content_hash="b" * 64,
+        )
+        purged_twin = Manuscript(
+            instructor_id=instructor_id,
+            group_label="Group A",
+            file_ref="c.pdf",
+            content_hash=same_hash,
+        )
+        others_twin = Manuscript(
+            instructor_id=other_instructor_id,
+            group_label="Group Z",
+            file_ref="d.pdf",
+            content_hash=same_hash,
+        )
+        session.add_all([mine, mine_no_match, purged_twin, others_twin])
+        await session.commit()
+
+        purged_twin.purged_at = datetime.now(UTC)
+        await session.commit()
+
+        new_upload = Manuscript(
+            instructor_id=instructor_id,
+            group_label="Group A",
+            file_ref="e.pdf",
+            content_hash=same_hash,
+        )
+        session.add(new_upload)
+        await session.commit()
+
+        found = await same_instructor_hash_duplicate(
+            session, new_upload.id, instructor_id, same_hash
+        )
+        assert found == mine.id  # lowest-id match, deterministic
+
+        assert (
+            await same_instructor_hash_duplicate(session, mine_no_match.id, instructor_id, "b" * 64)
+            is None
+        )
+        assert (
+            await same_instructor_hash_duplicate(session, new_upload.id, instructor_id, None)
+            is None
+        )
+        # Passing the OTHER instructor's id finds THEIR own twin, never `mine`
+        # -- the scoping is a real instructor filter, not just a hash match.
+        assert (
+            await same_instructor_hash_duplicate(
+                session, new_upload.id, other_instructor_id, same_hash
+            )
+            == others_twin.id
+        )
+
+
+async def test_repeated_resubmissions_never_grow_the_archive(session_factory):
+    """`backend-critic` finding (BUG-140 review): suppressing the FLAGS
+    alone isn't enough -- the ticket's own fix item 1 requires a
+    byte-identical re-upload to "never become an independent archive
+    entry", not just to stop producing flags. If a resubmission still got
+    archived, `_best_chapter_matches`/`_best_passage_match_for`'s
+    independent top-1 HNSW queries (no similarity tiebreak) could resolve
+    a FUTURE resubmission's per-chapter/per-passage match against a
+    DIFFERENT sibling than the one whole-document match picked as the
+    suppression target, leaking un-suppressed flags back in exactly the
+    shape production's own 5-copy pollution produced. Three same-content
+    uploads in a row must leave exactly ONE archive entry and, critically,
+    resubmission #3 must still resolve deterministically to #1 (the only
+    real entry) with n_flags staying at 1 -- not degrade as more
+    resubmissions pile up."""
+    settings = get_settings()
+    instructor_id = await _seed_instructor(session_factory)
+
+    manuscript_a, check_run_a = await _seed_manuscript_in_group(
+        session_factory, instructor_id=instructor_id, group_id=None
+    )
+    async with session_factory() as session:
+        await run_originality_reuse_check(
+            session,
+            manuscript_a,
+            check_run_a,
+            _extraction(CH1, CH2),
+            settings,
+            instructor_id=instructor_id,
+            content_hash=None,
+        )
+
+    for _ in range(2):  # two more resubmissions of the identical content
+        manuscript_n, check_run_n = await _seed_manuscript_in_group(
+            session_factory, instructor_id=instructor_id, group_id=None
+        )
+        async with session_factory() as session:
+            result = await run_originality_reuse_check(
+                session,
+                manuscript_n,
+                check_run_n,
+                _extraction(CH1, CH2),
+                settings,
+                instructor_id=instructor_id,
+                content_hash=None,
+            )
+            assert result.detail["n_flags"] == 1
+            rows = (
+                await session.execute(
+                    text(
+                        "SELECT detail->>'matched_manuscript_id' AS ref FROM flag "
+                        "WHERE check_result_id = :id"
+                    ),
+                    {"id": result.id},
+                )
+            ).all()
+            assert len(rows) == 1
+            assert int(rows[0].ref) == manuscript_a  # always the original, never a sibling
+
+            archive_count = await session.scalar(text("SELECT count(*) FROM manuscript_archive"))
+            # Only manuscript_a's own write-back -- neither resubmission
+            # added a new row.
+            assert archive_count == 1
 
 
 async def test_first_upload_context_flagged_but_severity_untouched(session_factory):

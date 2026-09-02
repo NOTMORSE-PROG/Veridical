@@ -20,6 +20,7 @@ from app.checks.reuse.query import (
     is_first_upload_for_instructor,
     query_similar_manuscripts,
     query_similar_passages,
+    same_instructor_hash_duplicate,
 )
 from app.checks.reuse.store import store_document_embeddings, store_passage_embeddings
 from app.config import Settings
@@ -89,6 +90,21 @@ HIGH_SIMILARITY_PASSAGE_WORDING = (
     "of this passage. Please verify manually."
 )
 
+# BUG-140 (owner ruling, 2026-09-03): a whole-document exact duplicate
+# against the SAME instructor's own earlier upload is a resubmission
+# question, never a plagiarism verdict -- collapsed into this one
+# low-severity confirmation flag instead of the whole-doc/chapter/passage
+# flood a re-upload otherwise produces (measured: 82 flags from one
+# re-upload, ticket's own evidence). Deliberately distinct wording from the
+# EXACT_DUPLICATE_* templates above: "your own earlier upload", never
+# "possible reuse" -- this is not the same finding softened, it names a
+# different, non-accusatory situation (charter ground rule 3).
+SAME_INSTRUCTOR_RESUBMISSION_WORDING = (
+    "This manuscript appears to be the same document as your own earlier upload, "
+    "archived manuscript #{ref}. This is most likely a resubmission or revision, "
+    "not reuse. Please confirm this is intentional."
+)
+
 # BUG-097 (presentation-only remedy, owner ruling 2026-08-24): drives
 # `detail["first_upload_context"]` below, which surfaces as the report's
 # distinct `FirstUploadContextBanner`/`FirstUploadContextGroupNote`
@@ -139,6 +155,16 @@ def _match_to_flag_draft(
     return severity, reason, detail
 
 
+def _resubmission_flag_draft(matched_manuscript_id: int) -> tuple[FlagSeverity, str, dict]:
+    reason = SAME_INSTRUCTOR_RESUBMISSION_WORDING.format(ref=matched_manuscript_id)
+    detail = {
+        "kind": "reuse_same_instructor_resubmission",
+        "reason": reason,
+        "matched_manuscript_id": matched_manuscript_id,
+    }
+    return FlagSeverity.low, reason, detail
+
+
 def _passage_match_to_flag_draft(
     match: PassageMatch, *, first_upload: bool = False
 ) -> tuple[FlagSeverity, str, str, dict]:
@@ -183,22 +209,60 @@ async def run_originality_reuse_check(
     check_run_id: int,
     extraction: ExtractionResult,
     settings: Settings,
+    *,
+    # BUG-140: keyword-only, optional, default `None` -- every existing
+    # caller (and every fixture in this suite that predates this ticket)
+    # keeps producing EXACTLY its old behavior unchanged. Only a caller
+    # that actually has this manuscript's own instructor/hash (the real
+    # pipeline, `app/pipeline/machine.py`) opts into same-instructor
+    # resubmission detection by passing them.
+    instructor_id: int | None = None,
+    content_hash: str | None = None,
 ) -> CheckResult:
     embeddings = compute_document_embeddings(extraction, settings)
 
+    # BUG-140: checked before anything else -- a content-hash match is a
+    # CERTAIN "this is the same file" signal, unlike embedding similarity,
+    # and it still works when there is no embeddable content to compare at
+    # all (the branch immediately below, e.g. an image-only re-scan).
+    hash_duplicate_id = (
+        await same_instructor_hash_duplicate(session, manuscript_id, instructor_id, content_hash)
+        if instructor_id is not None
+        else None
+    )
+
     if embeddings.whole_document is None:
+        has_resubmission = hash_duplicate_id is not None
         result = CheckResult(
             check_run_id=check_run_id,
             criterion_id=None,
             kind=CheckKind.originality_reuse,
-            outcome=ResultOutcome.not_applicable,
+            outcome=ResultOutcome.passed if has_resubmission else ResultOutcome.not_applicable,
             detail={
-                "archive_size_n": 0,
-                "n_flags": 0,
+                # `backend-critic` finding (BUG-140 review): 0 alongside a
+                # real flag read as internally inconsistent -- the
+                # embedding-based archive comparison never ran (nothing to
+                # embed), but the hash lookup DID find one real comparable
+                # entry, and cold-start disclosure exists precisely to be
+                # honest about what was actually compared against.
+                "archive_size_n": 1 if has_resubmission else 0,
+                "n_flags": 1 if has_resubmission else 0,
                 "note": "No embeddable content was extracted from this manuscript.",
             },
         )
         session.add(result)
+        await session.flush()
+        if has_resubmission:
+            severity, reason, detail = _resubmission_flag_draft(hash_duplicate_id)
+            session.add(
+                Flag(
+                    check_result_id=result.id,
+                    severity=severity,
+                    evidence_excerpt=reason,
+                    page_anchor="whole document",
+                    detail=detail,
+                )
+            )
         await session.commit()
         return result
 
@@ -218,6 +282,44 @@ async def run_originality_reuse_check(
     # docstring for why this changes wording/context only, never severity.
     first_upload = await is_first_upload_for_instructor(session, manuscript_id)
 
+    # BUG-140: a same-instructor WHOLE-DOCUMENT exact duplicate (by hash
+    # above, or by embedding similarity here if the hash check didn't
+    # already find one -- e.g. a hash-less legacy row) is a resubmission
+    # question, not a plagiarism verdict. Collapse it, and every chapter/
+    # passage match against that SAME archived manuscript (the identical
+    # finding restated at finer grain), into one low-severity confirmation
+    # flag instead of the flood a re-upload otherwise produces (measured:
+    # 82 high-severity flags from one re-upload, ticket's own evidence).
+    resubmission_source_id = hash_duplicate_id
+    if resubmission_source_id is None and instructor_id is not None:
+        for match in query_result.matches:
+            if (
+                match.matched_chapter_title is None  # whole-document match only
+                and match.level == "exact_duplicate"
+                and match.matched_instructor_id == instructor_id
+            ):
+                resubmission_source_id = match.matched_manuscript_id
+                break
+
+    if resubmission_source_id is not None:
+        whole_and_chapter_matches = [
+            m for m in query_result.matches if m.matched_manuscript_id != resubmission_source_id
+        ]
+        passage_matches = [
+            p
+            for p in passage_query_result.matches
+            if p.matched_manuscript_id != resubmission_source_id
+        ]
+    else:
+        whole_and_chapter_matches = query_result.matches
+        passage_matches = passage_query_result.matches
+
+    n_flags = (
+        len(whole_and_chapter_matches)
+        + len(passage_matches)
+        + (1 if resubmission_source_id is not None else 0)
+    )
+
     result = CheckResult(
         check_run_id=check_run_id,
         criterion_id=None,
@@ -226,13 +328,24 @@ async def run_originality_reuse_check(
         detail={
             "archive_size_n": query_result.archive_size_n,
             "passage_archive_size_n": passage_query_result.passage_archive_size_n,
-            "n_flags": len(query_result.matches) + len(passage_query_result.matches),
+            "n_flags": n_flags,
             "first_upload_context": first_upload,
         },
     )
     session.add(result)
     await session.flush()  # need result.id before attaching flags
-    for match in query_result.matches:
+    if resubmission_source_id is not None:
+        severity, reason, detail = _resubmission_flag_draft(resubmission_source_id)
+        session.add(
+            Flag(
+                check_result_id=result.id,
+                severity=severity,
+                evidence_excerpt=reason,
+                page_anchor="whole document",
+                detail=detail,
+            )
+        )
+    for match in whole_and_chapter_matches:
         severity, reason, detail = _match_to_flag_draft(match, first_upload=first_upload)
         anchor = match.own_chapter_title or "whole document"
         session.add(
@@ -244,7 +357,7 @@ async def run_originality_reuse_check(
                 detail=detail,
             )
         )
-    for passage_match in passage_query_result.matches:
+    for passage_match in passage_matches:
         severity, evidence_excerpt, page_anchor, detail = _passage_match_to_flag_draft(
             passage_match, first_upload=first_upload
         )
@@ -262,9 +375,30 @@ async def run_originality_reuse_check(
     # Write-back AFTER the check + its flags are committed (ticket AC,
     # F7.3) — never match against self. Passage write-back follows the
     # same ordering for the same reason.
-    await store_document_embeddings(session, manuscript_id, embeddings)
-    if passages:
-        await store_passage_embeddings(session, manuscript_id, passages, settings)
+    #
+    # BUG-140: SKIPPED for a recognized same-instructor resubmission -- the
+    # ticket's own fix item 1 ("a byte-identical re-upload ... must never
+    # become an independent archive entry that later reads as a rival
+    # submission") means archiving it AGAIN is exactly the mistake, not
+    # just the flags it produces. Two compounding reasons this matters
+    # beyond tidiness: (1) every prior fix attempt that only suppressed
+    # flags left the archive growing unboundedly with each resubmission,
+    # so the instructor's OWN duplicate pile keeps getting bigger forever;
+    # (2) `_best_chapter_matches`/`_best_passage_match_for` each run an
+    # independent top-1 HNSW query with no similarity tiebreak
+    # (`backend-critic` finding, BUG-140 review) -- with MULTIPLE
+    # byte-identical same-instructor archive entries (production's own
+    # unrecovered pre-fix pollution, ticket item 4), a chapter/passage
+    # sub-query could resolve its tie to a DIFFERENT sibling id than the
+    # one whole-document match picked as `resubmission_source_id`, letting
+    # that one flag slip past the suppression above. Never writing a NEW
+    # duplicate keeps that risk from growing past today's fixed, already-
+    # disclosed legacy set instead of compounding with every future
+    # resubmission.
+    if resubmission_source_id is None:
+        await store_document_embeddings(session, manuscript_id, embeddings)
+        if passages:
+            await store_passage_embeddings(session, manuscript_id, passages, settings)
 
     return result
 

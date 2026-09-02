@@ -537,7 +537,13 @@ async def _run_integrity_stage(
     reuse_existing = await existing_originality_reuse_result(session, check_run.id)
     if reuse_existing is None:
         reuse_result = await run_originality_reuse_check(
-            session, manuscript.id, check_run.id, extraction, settings
+            session,
+            manuscript.id,
+            check_run.id,
+            extraction,
+            settings,
+            instructor_id=manuscript.instructor_id,
+            content_hash=manuscript.content_hash,
         )
         reuse_detail = reuse_result.detail or {}
     else:

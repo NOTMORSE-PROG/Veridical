@@ -72,6 +72,15 @@ class Manuscript(Base, PkCreatedMixin):
     # stored files. The Manuscript row, check-run history, and any decision
     # are deliberately kept -- NULL means "never purged", never fabricated.
     purged_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # BUG-140: SHA-256 hex digest of the raw uploaded bytes, computed once at
+    # `ingest_upload` time. Content IDENTITY, distinct from the embedding
+    # similarity `checks/reuse/` already computes -- a hash match is certain
+    # ("this is the same file") where cosine similarity is only ever
+    # confident ("this reads as the same document"), and it still works when
+    # a manuscript produces no embeddable content at all (image-only scan).
+    # NULL only for rows ingested before this column existed -- never
+    # backfilled from a file that may no longer be on disk (BUG-138).
+    content_hash: Mapped[str | None] = mapped_column(String(64), index=True)
 
     instructor: Mapped["Instructor"] = relationship(back_populates="manuscripts")
     archive: Mapped["ManuscriptArchive | None"] = relationship(back_populates="manuscript")
