@@ -85,7 +85,7 @@ async def get_library_file_route(
     session: Annotated[AsyncSession, Depends(get_session)],
     instructor: Annotated[Instructor, Depends(get_current_instructor)],
 ) -> FileResponse:
-    path = await get_library_file_path(session, instructor.id, manuscript_id)
+    path = await get_library_file_path(session, instructor.id, manuscript_id, get_settings())
     return FileResponse(path, media_type="application/pdf")
 
 

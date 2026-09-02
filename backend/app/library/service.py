@@ -213,10 +213,10 @@ async def get_library_document(
 
 
 async def get_library_file_path(
-    session: AsyncSession, instructor_id: int, manuscript_id: int
+    session: AsyncSession, instructor_id: int, manuscript_id: int, settings: Settings
 ) -> Path:
     manuscript = await _resolve_owned_manuscript(session, instructor_id, manuscript_id)
-    return manuscript_file_path_for(manuscript)
+    return manuscript_file_path_for(manuscript, settings)
 
 
 async def get_library_paragraphs(

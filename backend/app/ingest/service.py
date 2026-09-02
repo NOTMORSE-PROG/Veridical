@@ -49,6 +49,7 @@ from app.models.group import Group, GroupMember, Program
 from app.models.manuscript import Manuscript
 from app.models.rubric import Rubric
 from app.models.run import CheckResult, CheckRun, ReadinessReport
+from app.storage import ensure_local_file, get_storage, storage_key_for
 
 # One extractor per supported suffix. Each is a sync callable executed off
 # the event loop. Legacy .doc is deliberately absent: rejected with a clear
@@ -158,8 +159,16 @@ async def ingest_manuscript(
             # must not be thrown away over an unrelated image-reading
             # problem.
             result.vision_status = "unavailable"
+        raw_path = raw_store_path(settings, manuscript.id)
+        await loop.run_in_executor(None, _write_raw_store, result, raw_path)
+        # BUG-138: same durability as the upload itself -- without this, the
+        # extraction JSON survives only until the next redeploy/idle-wake,
+        # and every resumed check run past that point dies deep in the
+        # pipeline with a raw FileNotFoundError (the exact failure this
+        # ticket measured on check run 5, `GROUND.pdf`).
+        storage = get_storage(settings)
         await loop.run_in_executor(
-            None, _write_raw_store, result, raw_store_path(settings, manuscript.id)
+            None, storage.put_file, raw_path, storage_key_for(settings, str(raw_path))
         )
     except FileMalformedError:
         # Stage boundary (CODING.md §2): the failure is recorded on the row,
@@ -242,6 +251,13 @@ async def ingest_upload(
         manuscript.ingest_failure_reason = IngestFailureReason.file_too_large
         await session.commit()
         raise
+    # BUG-138: durably persist the upload BEFORE the row claims it exists --
+    # a failed R2 write raises here rather than leaving `file_ref` pointing
+    # at a copy that only ever lived on Render's ephemeral disk.
+    storage = get_storage(settings)
+    await asyncio.get_running_loop().run_in_executor(
+        None, storage.put_file, dest, storage_key_for(settings, str(dest))
+    )
     manuscript.file_ref = str(dest)
     await session.commit()
     result = await ingest_manuscript(session, manuscript, dest, settings)
@@ -676,9 +692,29 @@ async def dismiss_failed_manuscript(
 def load_raw_store(settings: Settings, manuscript_id: int) -> ExtractionResult:
     """Reads back what `_write_raw_store` wrote — the structural check
     engine (V-016) is the first consumer of the full extraction (blocks,
-    tables, geometry) beyond the ingestion pass itself."""
-    return ExtractionResult.model_validate_json(
-        raw_store_path(settings, manuscript_id).read_text(encoding="utf-8")
+    tables, geometry) beyond the ingestion pass itself.
+
+    BUG-138: re-populates the local cache from durable storage first if
+    Render's ephemeral disk lost it since it was written (a redeploy or
+    idle-wake between ingest and this call, e.g. a resumed check run) --
+    every existing caller's `except FileNotFoundError` keeps working
+    unchanged for the genuinely-gone case (pre-migration rows, a purged
+    manuscript)."""
+    storage = get_storage(settings)
+    path = ensure_local_file(settings, storage, str(raw_store_path(settings, manuscript_id)))
+    return ExtractionResult.model_validate_json(path.read_text(encoding="utf-8"))
+
+
+async def load_raw_store_async(settings: Settings, manuscript_id: int) -> ExtractionResult:
+    """`load_raw_store`, off the event loop (`backend-critic` finding,
+    BUG-138 review): every caller of `load_raw_store` runs from async
+    context, and since BUG-138 a cache miss now means a real network fetch
+    from durable storage, not just a local read — calling it directly, as
+    every one of those sites originally did, would block the whole server
+    on exactly the request pattern most likely right after a redeploy/
+    idle-wake (many resumed check runs hitting a cold cache at once)."""
+    return await asyncio.get_running_loop().run_in_executor(
+        None, load_raw_store, settings, manuscript_id
     )
 
 
@@ -728,7 +764,7 @@ async def get_group_proposal(
                 extraction_failed=False,
             )
 
-    result = load_raw_store(settings, manuscript_id)
+    result = await load_raw_store_async(settings, manuscript_id)
     patterns = load_patterns(settings.ingest_patterns_file)
     return extract_title_page(result, patterns)
 

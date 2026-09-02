@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.checks.rules import RuleContext
 from app.config import Settings, get_settings
-from app.ingest.service import load_raw_store
+from app.ingest.service import load_raw_store_async
 from app.models.citation import Citation
 from app.models.manuscript import Manuscript
 
@@ -17,7 +17,7 @@ async def build_rule_context(
     session: AsyncSession, manuscript: Manuscript, settings: Settings | None = None
 ) -> RuleContext:
     settings = settings or get_settings()
-    extraction = load_raw_store(settings, manuscript.id)
+    extraction = await load_raw_store_async(settings, manuscript.id)
     citations = (
         (
             await session.execute(

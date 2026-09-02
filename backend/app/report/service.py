@@ -73,6 +73,7 @@ from app.report.scoring import (
     scoring_result_as_dict,
 )
 from app.report.weight_importance import WeightImportance, weight_importance
+from app.storage import ensure_local_file, get_storage
 
 
 async def _load_scorable_results(session: AsyncSession, check_run_id: int) -> list[ScorableResult]:
@@ -565,7 +566,7 @@ async def get_manuscript_viewer(
 
 
 def _open_manuscript_source(
-    manuscript: Manuscript,
+    manuscript: Manuscript, settings: Settings
 ) -> tuple[pymupdf.Document | None, Literal["pdf", "docx", "unknown"], str | None]:
     """Shared file-opening/purge-guard logic behind BOTH the manuscript
     viewer (V-065, `manuscript_viewer_for` below) and the PDF export's
@@ -601,10 +602,44 @@ def _open_manuscript_source(
     if source_format == "docx":
         return None, source_format, None
     try:
-        doc = pymupdf.open(manuscript.file_ref)
-    except (pymupdf.FileDataError, pymupdf.FileNotFoundError, RuntimeError, ValueError):
+        # BUG-138: re-populates the local cache from durable storage first
+        # if Render's ephemeral disk lost it since upload -- the honest
+        # "could not be opened" reason below now only fires for a
+        # genuinely-gone file (pre-migration rows), not every file past the
+        # next redeploy.
+        local_path = ensure_local_file(settings, get_storage(settings), manuscript.file_ref)
+        doc = pymupdf.open(local_path)
+    except (
+        FileNotFoundError,
+        pymupdf.FileDataError,
+        pymupdf.FileNotFoundError,
+        RuntimeError,
+        ValueError,
+        OSError,
+    ):
         return None, source_format, "This manuscript's source file could not be opened."
     return doc, source_format, None
+
+
+def _open_manuscript_pdf_or_none(
+    manuscript: Manuscript, settings: Settings
+) -> pymupdf.Document | None:
+    """`list_reuse_passage_matches`'s own open -- same durable-storage
+    fallback as `_open_manuscript_source`, but excluded-match rendering is a
+    nice-to-have (the caller falls back to unavailable regions), so a
+    failure here is silent rather than reasoned like the viewer's."""
+    try:
+        local_path = ensure_local_file(settings, get_storage(settings), manuscript.file_ref)
+        return pymupdf.open(local_path)
+    except (
+        FileNotFoundError,
+        pymupdf.FileDataError,
+        pymupdf.FileNotFoundError,
+        RuntimeError,
+        ValueError,
+        OSError,
+    ):
+        return None
 
 
 async def manuscript_viewer_for(
@@ -637,7 +672,13 @@ async def manuscript_viewer_for(
             for flag in flags
         ]
 
-    doc, source_format, hard_reason = _open_manuscript_source(manuscript)
+    # BUG-138 (`backend-critic` finding): `_open_manuscript_source` can now
+    # do a real durable-storage network fetch on a cache miss, not just a
+    # local read -- off the event loop, same as every other PyMuPDF-touching
+    # call in this file (CODING.md's rule).
+    doc, source_format, hard_reason = await asyncio.get_running_loop().run_in_executor(
+        None, _open_manuscript_source, manuscript, settings
+    )
     if hard_reason is not None:
         return ManuscriptViewerOut(
             manuscript_id=manuscript.id,
@@ -699,7 +740,7 @@ def render_flag_page_images_for(
     (CODING.md's PyMuPDF/embeddings rule; this export renders full pages
     via `get_pixmap`, materially heavier than the viewer's
     `search_for`-only path above)."""
-    doc, source_format, unavailable_reason = _open_manuscript_source(manuscript)
+    doc, source_format, unavailable_reason = _open_manuscript_source(manuscript, settings)
     section_tree = SectionTree.model_validate(manuscript.section_tree or {"source": "none"})
     try:
         return build_page_evidence_images(
@@ -788,10 +829,11 @@ async def list_reuse_passage_matches(
     section_tree = SectionTree.model_validate(manuscript.section_tree or {"source": "none"})
     doc = None
     if Path(manuscript.file_ref).suffix.lower() == ".pdf" and manuscript.purged_at is None:
-        try:
-            doc = pymupdf.open(manuscript.file_ref)
-        except (pymupdf.FileDataError, pymupdf.FileNotFoundError, RuntimeError, ValueError):
-            doc = None
+        # BUG-138 (`backend-critic` finding): off the event loop, same reason
+        # as `_open_manuscript_source` above.
+        doc = await asyncio.get_running_loop().run_in_executor(
+            None, _open_manuscript_pdf_or_none, manuscript, settings
+        )
 
     try:
         results: list[ExcludedReuseMatchOut] = []
@@ -848,7 +890,7 @@ async def list_reuse_passage_matches(
 
 
 async def get_manuscript_file_path(
-    session: AsyncSession, check_run_id: int, instructor_id: int
+    session: AsyncSession, check_run_id: int, instructor_id: int, settings: Settings | None = None
 ) -> Path:
     """V-065 AC1: the raw-bytes half of the viewer, split from
     `get_manuscript_viewer`'s JSON metadata per the ui-designer spec's Β§2.2
@@ -857,20 +899,31 @@ async def get_manuscript_file_path(
     text pane is served from `section_tree`, not raw bytes) and never a
     purged manuscript -- both are the router's job to enforce with the
     right HTTP status (410/404), not this function's."""
+    settings = settings or get_settings()
     check_run = await _owned_check_run(session, check_run_id, instructor_id)
     manuscript = await session.get(Manuscript, check_run.manuscript_id)
-    return manuscript_file_path_for(manuscript)
+    # BUG-138 (`backend-critic` finding): off the event loop -- a cache miss
+    # now means a real durable-storage network fetch, not just a local read.
+    return await asyncio.get_running_loop().run_in_executor(
+        None, manuscript_file_path_for, manuscript, settings
+    )
 
 
-def manuscript_file_path_for(manuscript: Manuscript) -> Path:
+def manuscript_file_path_for(manuscript: Manuscript, settings: Settings) -> Path:
     """The ownership-independent core of `get_manuscript_file_path` (V-066,
     same extraction rationale as `manuscript_viewer_for` above). Callers
-    own resolving AND authorizing `manuscript` first."""
+    own resolving AND authorizing `manuscript` first.
+
+    BUG-138: fetches from durable storage into the local cache first if
+    Render's ephemeral disk lost it. A genuinely missing file (pre-migration
+    row, storage misconfigured) still raises `FileNotFoundError` uncaught --
+    an honest 404/410 for THIS specific dead end is BUG-139's own scope, not
+    duplicated here."""
     if manuscript.purged_at is not None:
         raise GoneError("This manuscript's source file was purged and can no longer be read.")
     if Path(manuscript.file_ref).suffix.lower() != ".pdf":
         raise ConflictError("This manuscript's source file isn't a PDF.")
-    return Path(manuscript.file_ref)
+    return ensure_local_file(settings, get_storage(settings), manuscript.file_ref)
 
 
 async def get_manuscript_paragraphs(
@@ -884,7 +937,12 @@ async def get_manuscript_paragraphs(
     settings = settings or get_settings()
     check_run = await _owned_check_run(session, check_run_id, instructor_id)
     manuscript = await session.get(Manuscript, check_run.manuscript_id)
-    return manuscript_paragraphs_for(manuscript, settings)
+    # BUG-138 (`backend-critic` finding): off the event loop, same reason as
+    # `get_manuscript_file_path` above (`load_raw_store` inside this can now
+    # hit durable storage over the network on a cache miss).
+    return await asyncio.get_running_loop().run_in_executor(
+        None, manuscript_paragraphs_for, manuscript, settings
+    )
 
 
 def manuscript_paragraphs_for(manuscript: Manuscript, settings: Settings) -> DocumentParagraphsOut:

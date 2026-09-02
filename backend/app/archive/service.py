@@ -28,6 +28,7 @@ from app.models.manuscript import (
     ManuscriptPassageArchive,
 )
 from app.models.run import CheckRun
+from app.storage import get_storage, storage_key_for
 
 
 async def list_archive(
@@ -126,12 +127,18 @@ async def purge_manuscript(
     # `str(data_dir / "uploads" / ...)`) -- used as-is, never re-joined.
     # Missing files (already gone, or an image-only manuscript that never
     # wrote a raw store) are a normal state, not an error.
+    #
+    # BUG-138: purge must also remove the DURABLE copy, or "purged" is a lie
+    # once R2 exists -- the bytes would outlive their own deletion forever
+    # instead of just until the next ephemeral-disk wipe.
+    storage = get_storage(settings)
     for path in (
         Path(manuscript.file_ref) if manuscript.file_ref.strip() else None,
         raw_store_path(settings, manuscript_id),
     ):
         if path is None:
             continue
+        storage.delete(storage_key_for(settings, str(path)))
         path.unlink(missing_ok=True)
 
     manuscript.purged_at = datetime.now(UTC)
