@@ -32,6 +32,7 @@ def test_reason_never_leaks_matched_identity_or_heading(level, chapter_title, ex
         level=level,
         similarity=0.83,
         matched_manuscript_id=42,
+        matched_instructor_id=99,
         matched_group_label=OTHER_GROUP,
         matched_chapter_title=chapter_title,
         own_chapter_title=OWN_CHAPTER if chapter_title else None,
@@ -62,6 +63,7 @@ def test_passage_reason_uses_a_named_band_while_raw_similarity_remains_internal(
         level="high_similarity",
         similarity=0.84,
         matched_manuscript_id=42,
+        matched_instructor_id=99,
         matched_group_label=OTHER_GROUP,
         own_chapter_index=1,
         own_page=4,
@@ -107,6 +109,7 @@ def test_first_upload_context_flags_detail_but_never_changes_severity_or_reason(
         level="exact_duplicate",
         similarity=0.97,
         matched_manuscript_id=7,
+        matched_instructor_id=99,
         matched_group_label=OTHER_GROUP,
     )
     plain_severity, plain_reason, plain_detail = _match_to_flag_draft(match, first_upload=False)

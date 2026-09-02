@@ -64,6 +64,11 @@ class SimilarityMatch:
     similarity: float
     matched_manuscript_id: int
     matched_group_label: str
+    # BUG-140: internal only, same convention as `matched_group_label` --
+    # never serialized instructor-facing. Lets the caller (service.py)
+    # tell "this match is against my OWN earlier upload" from "this is a
+    # genuinely different instructor's document" without a second query.
+    matched_instructor_id: int
     # None for a whole-document match; both set for a chapter-level match.
     matched_chapter_title: str | None = None
     own_chapter_title: str | None = None
@@ -117,6 +122,7 @@ async def _best_whole_document_match(
                 ManuscriptArchive.manuscript_id,
                 (1 - distance_expr).label("similarity"),
                 Manuscript.group_label,
+                Manuscript.instructor_id,
             )
             .join(Manuscript, Manuscript.id == ManuscriptArchive.manuscript_id)
             .where(
@@ -136,6 +142,7 @@ async def _best_whole_document_match(
         level=level,
         similarity=float(row.similarity),
         matched_manuscript_id=row.manuscript_id,
+        matched_instructor_id=row.instructor_id,
         matched_group_label=row.group_label,
     )
 
@@ -157,6 +164,7 @@ async def _best_chapter_matches(
                     ManuscriptChapterArchive.title,
                     (1 - distance_expr).label("similarity"),
                     Manuscript.group_label,
+                    Manuscript.instructor_id,
                 )
                 .join(Manuscript, Manuscript.id == ManuscriptChapterArchive.manuscript_id)
                 .where(
@@ -177,12 +185,42 @@ async def _best_chapter_matches(
                 level=level,
                 similarity=float(row.similarity),
                 matched_manuscript_id=row.manuscript_id,
+                matched_instructor_id=row.instructor_id,
                 matched_group_label=row.group_label,
                 matched_chapter_title=row.title,
                 own_chapter_title=chapter.title,
             )
         )
     return matches
+
+
+async def same_instructor_hash_duplicate(
+    session: AsyncSession, manuscript_id: int, instructor_id: int, content_hash: str | None
+) -> int | None:
+    """BUG-140: a stronger, embedding-independent "same file" signal --
+    exact content-hash equality is certain where cosine similarity is only
+    ever confident, and it still catches a byte-identical re-upload even
+    when the manuscript produces no embeddable content at all (an
+    image-only scan, where the embedding-similarity path below never runs
+    a comparison in the first place). Returns the OTHER manuscript's id, or
+    `None` if there's no match (including when `content_hash` itself is
+    `None` -- a manuscript ingested before this column existed)."""
+    if content_hash is None:
+        return None
+    row = (
+        await session.execute(
+            select(Manuscript.id)
+            .where(
+                Manuscript.instructor_id == instructor_id,
+                Manuscript.content_hash == content_hash,
+                Manuscript.id != manuscript_id,
+                Manuscript.purged_at.is_(None),
+            )
+            .order_by(Manuscript.id)
+            .limit(1)
+        )
+    ).first()
+    return row[0] if row is not None else None
 
 
 async def is_first_upload_for_instructor(session: AsyncSession, manuscript_id: int) -> bool:
@@ -306,6 +344,8 @@ class PassageMatch:
     # Internal only, same BUG-050/097 convention as `SimilarityMatch` above
     # — never serialized to an instructor-facing response.
     matched_group_label: str
+    # BUG-140: internal only, same purpose as `SimilarityMatch.matched_instructor_id`.
+    matched_instructor_id: int
     matched_chapter_index: int
     matched_page: int | None
     matched_paragraph: int | None
@@ -388,6 +428,7 @@ async def _best_passage_match_for(
                 ManuscriptPassageArchive,
                 (1 - distance_expr).label("similarity"),
                 Manuscript.group_label,
+                Manuscript.instructor_id,
             )
             .join(Manuscript, Manuscript.id == ManuscriptPassageArchive.manuscript_id)
             .where(*conditions)
@@ -415,6 +456,7 @@ async def _best_passage_match_for(
         level=level,
         similarity=float(row.similarity),
         matched_manuscript_id=archive_row.manuscript_id,
+        matched_instructor_id=row.instructor_id,
         matched_group_label=row.group_label,
         matched_chapter_index=archive_row.chapter_index,
         matched_page=archive_row.page,

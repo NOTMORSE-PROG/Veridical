@@ -6,6 +6,7 @@ transitions on the manuscript row and the raw-store write.
 """
 
 import asyncio
+import hashlib
 import zipfile
 from collections.abc import AsyncIterator, Callable
 from dataclasses import asdict
@@ -123,6 +124,17 @@ async def save_upload(chunks: AsyncIterator[bytes], dest: Path, settings: Settin
         dest.unlink(missing_ok=True)
         raise
     return dest
+
+
+def _hash_file(path: Path) -> str:
+    """SHA-256 hex digest of the file's raw bytes (BUG-140 content
+    identity) — chunked read, never loads the whole (up to
+    `max_upload_mb`) file into memory at once."""
+    digest = hashlib.sha256()
+    with path.open("rb") as fh:
+        for chunk in iter(lambda: fh.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
 async def ingest_manuscript(
@@ -251,6 +263,12 @@ async def ingest_upload(
         manuscript.ingest_failure_reason = IngestFailureReason.file_too_large
         await session.commit()
         raise
+    # BUG-140: content identity, computed once here (off the event loop --
+    # a chunked SHA-256 read of up to `max_upload_mb`) rather than derived
+    # later from bytes that may no longer be on local disk (BUG-138).
+    manuscript.content_hash = await asyncio.get_running_loop().run_in_executor(
+        None, _hash_file, dest
+    )
     # BUG-138: durably persist the upload BEFORE the row claims it exists --
     # a failed R2 write raises here rather than leaving `file_ref` pointing
     # at a copy that only ever lived on Render's ephemeral disk.
