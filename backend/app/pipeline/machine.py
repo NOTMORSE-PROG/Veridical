@@ -139,7 +139,25 @@ class CancellationAccepted(Exception):
     """Internal control flow after a persisted terminal cancellation."""
 
 
+class ClaimLost(Exception):
+    """Internal control flow (BUG-144, `backend-critic` follow-up finding):
+    raised when `heartbeat()` reports the claim was reassigned to another
+    driver -- this one made no progress for `pipeline_claim_stale_seconds`
+    and someone else now legitimately owns the run. Same "another driver
+    already has this, stop silently" shape as `CancellationAccepted`, NOT
+    a real failure: without this, the original finding was that a lost
+    heartbeat was silently swallowed (its `None` return discarded) and the
+    stale holder kept right on working, which the fencing-token release
+    logic alone does not prevent -- it only stops the stale holder's
+    eventual cleanup from stealing the claim BACK, not the wasted/
+    colliding work it does in between."""
+
+
 CancellationBoundary = Callable[[], Awaitable[None]]
+# BUG-144: same shape as `CancellationBoundary`, distinct name -- a
+# zero-arg async callback, but for claim-refresh rather than cancellation.
+# Raises `ClaimLost` if the claim was reassigned (see `ClaimLost` above).
+Heartbeat = Callable[[], Awaitable[None]]
 
 
 async def _transition_after_boundary(
@@ -573,7 +591,16 @@ async def run_check_run(
     check_run: CheckRun,
     settings: Settings | None = None,
     llm: LLMClient | None = None,
+    heartbeat: Heartbeat | None = None,
 ) -> None:
+    """`heartbeat` (BUG-144, `backend-critic` finding): an optional
+    zero-arg callback `worker.py` wires up to refresh `check_run.claimed_at`
+    -- called from the SAME per-batch checkpoints `cancellation_boundary`
+    already uses below, so a genuinely-alive-but-slow run (many criteria,
+    LLM retries) keeps its claim fresh as it makes progress, and only a
+    run that's made NO progress at all for `pipeline_claim_stale_seconds`
+    is ever treated as abandoned. `None` (every caller except `worker.py`,
+    including every test) means no claim exists to refresh -- a no-op."""
     settings = settings or get_settings()
 
     if await _finish_cancel_if_requested(session, check_run):
@@ -595,6 +622,8 @@ async def run_check_run(
     )
 
     async def cancellation_boundary() -> None:
+        if heartbeat is not None:
+            await heartbeat()
         if await _finish_cancel_if_requested(session, check_run):
             raise CancellationAccepted
 
@@ -651,6 +680,13 @@ async def run_check_run(
             await _transition_after_boundary(session, check_run, CheckRunStatus.aggregating)
 
     except CancellationAccepted:
+        return
+    except ClaimLost:
+        # BUG-144: another driver now legitimately owns this run (see
+        # `ClaimLost`'s own docstring) -- back off silently, the same as
+        # an accepted cancellation. Whatever that driver has or hasn't
+        # persisted yet is its own concern; this call must not touch
+        # `check_run`'s status at all.
         return
     except PipelineBlockedError as exc:
         # BUG-032 finding: if the exception that landed us here came from a

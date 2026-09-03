@@ -236,6 +236,14 @@ class Settings(BaseSettings):
     # An api_down stage doesn't have a precise reset time the way quota
     # does (D-001) — retry after a fixed backoff instead.
     pipeline_api_down_retry_seconds: float = 300.0
+    # BUG-144: a `check_run.claimed_at` older than this is treated as
+    # abandoned (the process holding it crashed mid-run) and can be
+    # re-claimed by either driver -- without this, one crash mid-run would
+    # strand that check_run claimed forever, unpickable by anything.
+    # Generous relative to `pipeline_worker_poll_seconds` and every stage's
+    # own per-attempt timeouts (`gemini_request_timeout_seconds` etc.) so a
+    # genuinely slow-but-alive run is never mistaken for an abandoned one.
+    pipeline_claim_stale_seconds: float = 600.0
     # AVAILABILITY FLOOR (V-050, D-015). When the day's AI budget is spent,
     # FINISH the run — deterministic checks stand, and the criteria the AI
     # never reached go to the instructor as an honest `quota_exhausted`

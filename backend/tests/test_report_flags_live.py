@@ -9,7 +9,7 @@ import os
 from decimal import Decimal
 
 import pytest
-from sqlalchemy import text
+from sqlalchemy import select, text
 
 from app.errors import NotFoundError
 from app.models.enums import CheckKind, CheckRunStatus, FlagSeverity, ResultOutcome
@@ -108,17 +108,37 @@ async def _add_flag(
     detail: dict | None = None,
 ) -> int:
     async with session_factory() as session:
-        result = CheckResult(
-            check_run_id=check_run_id,
-            criterion_id=criterion_id,
-            kind=kind,
-            outcome=ResultOutcome.failed if criterion_id else ResultOutcome.escalated,
-            score=None,
-            detail={},
+        # BUG-144: production's real shape is ONE CheckResult per
+        # (check_run_id, kind, criterion_id), holding MANY Flag rows --
+        # matches the new `uq_check_result_run_kind`/
+        # `uq_check_result_run_criterion` constraints. Reuse an existing
+        # result instead of creating a second, now-illegal one for a
+        # repeat call with the same kind/criterion (multiple flags on one
+        # F4-F7 result is the normal shape, e.g. checks/reuse/service.py).
+        criterion_filter = (
+            CheckResult.criterion_id == criterion_id
+            if criterion_id is not None
+            else CheckResult.criterion_id.is_(None)
         )
-        session.add(result)
-        await session.commit()
-        await session.refresh(result)
+        result = await session.scalar(
+            select(CheckResult).where(
+                CheckResult.check_run_id == check_run_id,
+                CheckResult.kind == kind,
+                criterion_filter,
+            )
+        )
+        if result is None:
+            result = CheckResult(
+                check_run_id=check_run_id,
+                criterion_id=criterion_id,
+                kind=kind,
+                outcome=ResultOutcome.failed if criterion_id else ResultOutcome.escalated,
+                score=None,
+                detail={},
+            )
+            session.add(result)
+            await session.commit()
+            await session.refresh(result)
 
         flag = Flag(
             check_result_id=result.id,
