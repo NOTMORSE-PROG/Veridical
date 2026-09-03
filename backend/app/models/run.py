@@ -50,6 +50,17 @@ class CheckRun(Base, PkCreatedMixin):
     cancel_requested_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # BUG-144: the claim that stops `advance_once` (route-kicked) and
+    # `worker_loop` (5s poll) from both entering `run_check_run` for the
+    # SAME run at once -- NULL means unclaimed. Set atomically (a
+    # conditional UPDATE, `app/pipeline/worker.py`'s own compare-and-swap
+    # pattern, the same technique `_transition_after_boundary` already uses
+    # for stage transitions) before either driver starts work, cleared in a
+    # `finally` after `run_check_run` returns. A claim older than
+    # `settings.pipeline_claim_stale_seconds` is treated as abandoned (the
+    # process holding it crashed) and can be re-claimed -- otherwise a
+    # single crash mid-run would strand that check_run unclaimed forever.
+    claimed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     results: Mapped[list["CheckResult"]] = relationship(back_populates="check_run")
     report: Mapped["ReadinessReport | None"] = relationship(back_populates="check_run")

@@ -513,15 +513,22 @@ async def test_escalations_awaiting_review_is_surfaced_per_manuscript(session_fa
         rubric = Rubric(instructor_id=instructor.id, title="Format", source_file="r.pdf")
         session.add_all([has_escalations, clean, rubric])
         await session.commit()
-        criterion = Criterion(
-            rubric_id=rubric.id,
-            type=CriterionType.semantic,
-            text="The methodology states the research design.",
-            evidence="Methodology chapter",
-            weight=Decimal("1"),
-            position=0,
-        )
-        session.add(criterion)
+        # BUG-144: three DISTINCT criteria -- one CheckResult per
+        # (check_run_id, criterion_id) is now a real DB constraint
+        # (`uq_check_result_run_criterion`), matching production's actual
+        # shape (a criterion is graded exactly once per run).
+        criteria = [
+            Criterion(
+                rubric_id=rubric.id,
+                type=CriterionType.semantic,
+                text=f"Semantic criterion {i}.",
+                evidence="Some chapter",
+                weight=Decimal("1"),
+                position=i,
+            )
+            for i in range(3)
+        ]
+        session.add_all(criteria)
         await session.commit()
 
         run_a = CheckRun(
@@ -534,25 +541,25 @@ async def test_escalations_awaiting_review_is_surfaced_per_manuscript(session_fa
             [
                 CheckResult(
                     check_run_id=run_a.id,
-                    criterion_id=criterion.id,
+                    criterion_id=criteria[0].id,
                     kind=CheckKind.semantic,
                     outcome=ResultOutcome.escalated,
                 ),
                 CheckResult(
                     check_run_id=run_a.id,
-                    criterion_id=criterion.id,
+                    criterion_id=criteria[1].id,
                     kind=CheckKind.semantic,
                     outcome=ResultOutcome.escalated,
                 ),
                 CheckResult(
                     check_run_id=run_a.id,
-                    criterion_id=criterion.id,
+                    criterion_id=criteria[2].id,
                     kind=CheckKind.semantic,
                     outcome=ResultOutcome.passed,
                 ),
                 CheckResult(
                     check_run_id=run_b.id,
-                    criterion_id=criterion.id,
+                    criterion_id=criteria[0].id,
                     kind=CheckKind.semantic,
                     outcome=ResultOutcome.passed,
                 ),
