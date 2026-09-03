@@ -431,9 +431,7 @@ async def test_two_passes_spelling_a_corrupted_level_name_differently_still_agre
     corrupts the D-006 confidence signal this whole mechanism exists to
     produce."""
     criteria = [FakeCriterion(id=1, text="Levelled criterion", levels=SPLIT_MID_WORD_SCALE)]
-    llm = ScriptedLLM(
-        [_verdict_response("EXEMPLAR Y 4"), _verdict_response("EXEMPLARY 4")]
-    )
+    llm = ScriptedLLM([_verdict_response("EXEMPLAR Y 4"), _verdict_response("EXEMPLARY 4")])
     session = FakeSession()
     results = await run_semantic_checks_with_consistency(session, 1, criteria, _extraction(), llm)
     # No tie-break spent -- only the two real passes.
