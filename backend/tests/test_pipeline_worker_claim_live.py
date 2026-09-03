@@ -153,9 +153,7 @@ async def test_stale_claim_is_reclaimable_after_a_simulated_crash(session_factor
     check_run_id = await _seed_check_run(session_factory)
     settings = get_settings()
 
-    stale_moment = datetime.now(UTC) - timedelta(
-        seconds=settings.pipeline_claim_stale_seconds + 60
-    )
+    stale_moment = datetime.now(UTC) - timedelta(seconds=settings.pipeline_claim_stale_seconds + 60)
     async with session_factory() as session:
         check_run = await session.get(CheckRun, check_run_id)
         check_run.claimed_at = stale_moment
@@ -197,9 +195,7 @@ async def test_a_fresh_claim_is_not_reclaimable(session_factory, monkeypatch):
     assert entries == []  # never entered -- the run was already (freshly) claimed
 
 
-async def test_heartbeat_keeps_a_slow_but_alive_run_from_going_stale(
-    session_factory, monkeypatch
-):
+async def test_heartbeat_keeps_a_slow_but_alive_run_from_going_stale(session_factory, monkeypatch):
     """`backend-critic` finding (BUG-144 review): a static
     `pipeline_claim_stale_seconds` timeout risks reintroducing double
     execution for a genuinely-alive-but-slow run (many criteria, LLM
@@ -213,9 +209,7 @@ async def test_heartbeat_keeps_a_slow_but_alive_run_from_going_stale(
     settings = get_settings()
 
     # Claim set well in the past -- would be stale on its own.
-    stale_moment = datetime.now(UTC) - timedelta(
-        seconds=settings.pipeline_claim_stale_seconds + 60
-    )
+    stale_moment = datetime.now(UTC) - timedelta(seconds=settings.pipeline_claim_stale_seconds + 60)
     async with session_factory() as session:
         check_run = await session.get(CheckRun, check_run_id)
         check_run.claimed_at = stale_moment
@@ -259,9 +253,7 @@ async def test_a_stolen_claims_original_holder_cannot_release_the_new_holders_cl
     settings = get_settings()
 
     # Holder A's claim, already stale.
-    stale_moment = datetime.now(UTC) - timedelta(
-        seconds=settings.pipeline_claim_stale_seconds + 60
-    )
+    stale_moment = datetime.now(UTC) - timedelta(seconds=settings.pipeline_claim_stale_seconds + 60)
     async with session_factory() as session:
         check_run = await session.get(CheckRun, check_run_id)
         check_run.claimed_at = stale_moment
@@ -305,9 +297,7 @@ async def test_run_check_run_stops_cleanly_when_heartbeat_reports_claim_lost(
         )
         session.add(instructor)
         await session.commit()
-        manuscript = Manuscript(
-            instructor_id=instructor.id, group_label="G", file_ref="t.pdf"
-        )
+        manuscript = Manuscript(instructor_id=instructor.id, group_label="G", file_ref="t.pdf")
         session.add(manuscript)
         rubric = Rubric(instructor_id=instructor.id, title="Format", source_file="r.pdf")
         session.add(rubric)
