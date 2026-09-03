@@ -79,22 +79,66 @@ def match_level_by_ordinal(criterion: Any, ordinal: int | None) -> LevelMatch | 
     return None
 
 
+def normalize_verdict(text: str) -> str:
+    """BUG-146: a real capstone rubric laid out as a table with narrow
+    column headers routinely wraps a level name mid-word at extraction
+    time — sometimes as a genuine line-break `app/ingest/normalize.py`
+    correctly collapses to a space, sometimes (measured directly against
+    `Rubric-for-Oral-Presentation.pdf`'s own PDF content stream) as a
+    space VERIDICAL never introduced and no extraction setting removes.
+    "Repair the extracted name" was ruled out as unreliable (root-cause
+    section, this ticket) — instead, both sides of a comparison are
+    normalized THE SAME WAY, so a level name split by whitespace still
+    matches (`match_level` below), and two grading passes that agree on
+    the same level but echo the corrupted name slightly differently still
+    count as agreement, not a manufactured split vote
+    (`checks/consistency.py`'s `_tally`, same ticket's own named second
+    symptom — the D-006 confidence signal). Case-sensitive on purpose,
+    unchanged from before this fix
+    (`test_match_level_returns_none_for_an_unrecognized_string`'s own
+    existing, deliberate assertion) — the ticket named case-insensitivity
+    as a further option, but nothing in this ticket's own evidence needed
+    it (the reproduced corruption is whitespace-only), so it stays out of
+    this surgical fix rather than loosening a behavior an existing test
+    already documents as intentional. Harmless when applied to a plain
+    pass/partial/fail verdict too -- those never contain whitespace to
+    begin with."""
+    return "".join(text.split())
+
+
 def match_level(criterion: Any, verdict: str) -> LevelMatch | None:
     """`None` means `verdict` doesn't name any of THIS criterion's own
     levels — never guessed or fuzzy-matched (a level name the model
     invented, or answered in the wrong criterion's vocabulary in a mixed
     batch, must escalate to the instructor, not silently snap to the
-    nearest-looking rung)."""
+    nearest-looking rung). BUG-146: compared whitespace-normalized (see
+    `normalize_verdict`) — this is NOT fuzzy matching, every other
+    character (including case) must still match exactly; it only stops a
+    PDF extraction artifact in VERIDICAL's OWN stored name (never the
+    model's) from making a verdict that actually names the right level
+    read as unrecognized.
+
+    `backend-critic` finding (BUG-146 review, live-reproduced): whitespace
+    collapsing can make two GENUINELY DIFFERENT level names on the same
+    criterion's own scale ("Very Good" / "VeryGood") normalize to the
+    same string — returning the first list match would silently resolve
+    an unambiguous verdict to the WRONG rung with no escalation, exactly
+    the "silently snap to the nearest-looking rung" this function's own
+    docstring rules out. If normalization produces more than one match,
+    that is itself unrecognized (ambiguous), never a guess at which one
+    was meant."""
     levels = getattr(criterion, "levels", None) or []
-    for lvl in levels:
-        if lvl["name"] == verdict:
-            return LevelMatch(
-                name=lvl["name"],
-                ordinal=int(lvl["level"]),
-                points=float(lvl["points"]),
-                max_points=max_points(criterion) or 0.0,
-            )
-    return None
+    target = normalize_verdict(verdict)
+    matches = [lvl for lvl in levels if normalize_verdict(lvl["name"]) == target]
+    if len(matches) != 1:
+        return None
+    lvl = matches[0]
+    return LevelMatch(
+        name=lvl["name"],
+        ordinal=int(lvl["level"]),
+        points=float(lvl["points"]),
+        max_points=max_points(criterion) or 0.0,
+    )
 
 
 def outcome_and_score(

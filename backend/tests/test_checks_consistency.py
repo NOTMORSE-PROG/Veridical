@@ -410,6 +410,40 @@ async def test_two_agreeing_passes_on_a_levelled_criterion_produce_a_decided_lev
     assert results[0].detail["verdict"] == "Proficient"
 
 
+SPLIT_MID_WORD_SCALE = [
+    {"level": 1, "name": "Beginner", "descriptor": "no clear structure", "points": 1},
+    {"level": 2, "name": "Acceptable", "descriptor": "states the topic", "points": 2},
+    {"level": 3, "name": "Proficient", "descriptor": "states and previews", "points": 3},
+    {"level": 4, "name": "EXEMPLAR Y 4", "descriptor": "engaging and complete", "points": 4},
+]
+
+
+async def test_two_passes_spelling_a_corrupted_level_name_differently_still_agree():
+    """BUG-146 (`backend-critic` finding, live-reproduced): a corrupted
+    stored level name (this ticket's own root cause -- a PDF table cell
+    wrapping "EXEMPLARY" mid-word) means the model doesn't reliably echo
+    it identically across two independent grading passes -- one pass
+    obeys "echo character-for-character" and reproduces the corruption,
+    the other "corrects" it. Both passes agree on the SAME level; before
+    this fix, `_tally`'s raw string comparison read that as a genuine
+    disagreement, spending a real Gemini tie-break call (quota waste,
+    ground rule 2) and risking a manufactured "no majority" that
+    corrupts the D-006 confidence signal this whole mechanism exists to
+    produce."""
+    criteria = [FakeCriterion(id=1, text="Levelled criterion", levels=SPLIT_MID_WORD_SCALE)]
+    llm = ScriptedLLM(
+        [_verdict_response("EXEMPLAR Y 4"), _verdict_response("EXEMPLARY 4")]
+    )
+    session = FakeSession()
+    results = await run_semantic_checks_with_consistency(session, 1, criteria, _extraction(), llm)
+    # No tie-break spent -- only the two real passes.
+    assert llm.passes == ["pass_1", "pass_2"]
+    assert results[0].outcome == ResultOutcome.passed
+    assert results[0].score == 100.0
+    assert results[0].detail["agreement"] == 1.0
+    assert results[0].detail["level"]["ordinal"] == 4
+
+
 async def test_disagreeing_levels_on_a_levelled_criterion_escalate_like_any_other_split():
     criteria = [FakeCriterion(id=1, text="Levelled criterion", levels=TIP_SCALE)]
     llm = ScriptedLLM(

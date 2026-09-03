@@ -27,7 +27,7 @@ from app.checks.annotators import (
 )
 from app.checks.escalation import gate_vote
 from app.checks.injection import detect_injection_signal
-from app.checks.levels import outcome_and_score
+from app.checks.levels import normalize_verdict, outcome_and_score
 from app.checks.semantic import (
     PROMPT_VERSION,
     GradedVerdict,
@@ -102,10 +102,26 @@ def _tally(votes: list[str]) -> tuple[str | None, float]:
     """Majority + agreement fraction over however many real votes came in
     (2 or 3 — never a blind N=3). A tie (e.g. 1-1-1 across three distinct
     verdicts) has no majority at all: `None`, never picked "by
-    technicality" (ticket edge case)."""
+    technicality" (ticket edge case).
+
+    BUG-146 (`backend-critic` finding, live-reproduced): grouped by
+    `normalize_verdict`, not raw string equality — a corrupted stored
+    level name (this ticket's own root cause) means the model doesn't
+    reliably echo it identically across independent passes, so two votes
+    naming the SAME level in slightly different spellings used to count
+    as disagreement, manufacturing a false "no majority" and corrupting
+    the D-006 confidence signal this function exists to produce (the
+    ticket's own second named symptom, BOARD.md: "manufactures fake 'no
+    majority' split votes"). The returned string is always one of the
+    REAL votes from the winning group (never synthesized), so callers
+    that find `g.verdict == majority` by raw equality (e.g.
+    `_vote_for_criterion` below) keep working unchanged."""
     n = len(votes)
-    counts = {v: votes.count(v) for v in set(votes)}
-    verdict, count = max(counts.items(), key=lambda kv: kv[1])
+    groups: dict[str, list[str]] = {}
+    for v in votes:
+        groups.setdefault(normalize_verdict(v), []).append(v)
+    _key, group = max(groups.items(), key=lambda kv: len(kv[1]))
+    verdict, count = group[0], len(group)
     if count * 2 > n:
         return verdict, round(count / n, 3)
     return None, round(count / n, 3)
@@ -132,7 +148,11 @@ async def _vote_for_criterion(
         unverified = _collect_unverified_quotes(g1, g2)
         return VoteResult(None, 0.0, [g1.verdict, g2.verdict], None, "; ".join(reasons), unverified)
 
-    if g1.verdict == g2.verdict:
+    if normalize_verdict(g1.verdict) == normalize_verdict(g2.verdict):
+        # BUG-146: whitespace-normalized, same reasoning as `_tally` above
+        # -- both passes agreeing on the same (corrupted-or-not) level
+        # name is real agreement, a real Gemini tie-break call must not be
+        # spent over a spelling difference in VERIDICAL's own stored name.
         return VoteResult(g1.verdict, 1.0, [g1.verdict, g2.verdict], g1, None)
 
     if skip_tie_break:

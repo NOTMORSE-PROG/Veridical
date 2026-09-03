@@ -3,6 +3,9 @@
 """
 
 from dataclasses import dataclass, field
+from pathlib import Path
+
+import pytest
 
 from app.checks.levels import (
     is_levelled,
@@ -13,6 +16,15 @@ from app.checks.levels import (
     outcome_and_score,
 )
 from app.models.enums import ResultOutcome
+
+# BUG-146's own reproduction artifact -- local-only, same D-007 convention
+# `test_ingest_pdf.py`'s `demo_pdf_only` already uses for the owner's
+# proposal PDF (gitignored project-wide, `*.pdf`, never committed).
+RUBRIC_PDF = Path(__file__).resolve().parents[2] / "Rubric-for-Oral-Presentation.pdf"
+rubric_pdf_only = pytest.mark.skipif(
+    not RUBRIC_PDF.exists(),
+    reason="BUG-146's reproduction rubric is local-only (D-007); run this suite locally",
+)
 
 
 @dataclass
@@ -197,6 +209,138 @@ def test_match_level_accepts_the_verdict_the_new_prompt_actually_teaches():
     # The old bug's literal failure mode must still correctly escalate --
     # this proves the fix is in the prompt, not a loosened matcher.
     assert match_level(criterion, "Exemplary 4 (4)") is None
+
+
+# --- match_level: BUG-146 regression -----------------------------------
+# A real rubric laid out as a table with narrow column headers wraps a
+# level name mid-word at extraction time -- sometimes a genuine line
+# break `app/ingest/normalize.py` collapses to a space, sometimes (this
+# project's own TIP oral-presentation rubric, `Rubric-for-Oral-
+# Presentation.pdf`) a space that's literally IN the PDF's content
+# stream, which no extraction setting removes. VERIDICAL's own stored
+# level name ends up split ("BEGIN ER", "EXEMPLAR Y"); the model,
+# despite being told to echo it character-for-character, answers with
+# the correctly-spelled version -- which the OLD exact-string
+# `match_level` then rejected as "unrecognized", escalating a criterion
+# for a self-inflicted formatting reason, not a real grading difficulty.
+
+SPLIT_MID_WORD_SCALE = [
+    {"level": 1, "name": "BEGIN ER 1", "descriptor": "no clear structure", "points": 1},
+    {"level": 2, "name": "ACCEPTABL E 2", "descriptor": "states the topic", "points": 2},
+    {"level": 3, "name": "PROFICIEN T 3", "descriptor": "states and previews", "points": 3},
+    {"level": 4, "name": "EXEMPLAR Y 4", "descriptor": "engaging and complete", "points": 4},
+]
+
+
+def test_match_level_accepts_a_correctly_spelled_verdict_against_a_split_stored_name():
+    """The ticket's own reproduction, verbatim: VERIDICAL's stored name is
+    corrupted ("EXEMPLAR Y 4"); the model answers with the correct
+    spelling ("EXEMPLARY 4"). This must now match -- the corruption is in
+    VERIDICAL's own extraction, never a reason to escalate the model's
+    right answer."""
+    criterion = FakeCriterion(levels=SPLIT_MID_WORD_SCALE)
+    match = match_level(criterion, "EXEMPLARY 4")
+    assert match is not None
+    assert match.ordinal == 4
+    assert match.points == 4.0
+    # The stored (corrupted) name is what's displayed/persisted -- BUG-146's
+    # own fix section: "display the level name honestly as the rubric
+    # produced it rather than guessing a repair." This fix normalizes the
+    # COMPARISON only, never the stored/returned name itself.
+    assert match.name == "EXEMPLAR Y 4"
+
+
+def test_match_level_also_accepts_the_verbatim_corrupted_echo():
+    """A model that (correctly) followed the "echo character-for-character"
+    instruction and reproduced the corrupted name verbatim must also
+    match -- whitespace normalization is symmetric, not a one-way repair
+    of only the model's side."""
+    criterion = FakeCriterion(levels=SPLIT_MID_WORD_SCALE)
+    match = match_level(criterion, "EXEMPLAR Y 4")
+    assert match is not None
+    assert match.ordinal == 4
+
+
+def test_match_level_whitespace_tolerance_is_not_fuzzy_matching():
+    """The ticket's own invariant, preserved exactly: an invented level
+    name, or a name from another criterion's vocabulary, must still fail
+    to match. Only whitespace differences stop mattering -- nothing else
+    about the comparison loosens."""
+    criterion = FakeCriterion(levels=SPLIT_MID_WORD_SCALE)
+    assert match_level(criterion, "Excellent 4") is None  # invented
+    assert match_level(criterion, "Proficient") is None  # wrong vocabulary
+    assert match_level(criterion, "EXEMPLARY 5") is None  # wrong digit
+    # Case still matters -- unchanged from before this fix (see the
+    # existing `test_match_level_returns_none_for_an_unrecognized_string`).
+    assert match_level(criterion, "exemplary 4") is None
+
+
+def test_match_level_refuses_to_guess_between_two_names_that_collapse_the_same_way():
+    """`backend-critic` finding (BUG-146 review, live-reproduced): a
+    whitespace-collapsing comparison scheme can make two GENUINELY
+    DIFFERENT level names on the same criterion's own scale normalize to
+    the same string ("Very Good" / "VeryGood"). Before this guard,
+    `match_level` returned the FIRST list match after normalization --
+    silently resolving an unambiguous verdict to the WRONG rung with no
+    escalation, exactly the "silently snap to the nearest-looking rung"
+    this function's own docstring says never to do. Ambiguous must
+    escalate, the same as unrecognized."""
+    ambiguous_scale = [
+        {"level": 3, "name": "Very Good", "descriptor": "x", "points": 3},
+        {"level": 4, "name": "VeryGood", "descriptor": "y", "points": 4},
+    ]
+    criterion = FakeCriterion(levels=ambiguous_scale)
+    assert match_level(criterion, "VeryGood") is None
+    assert match_level(criterion, "Very Good") is None
+    # A criterion whose levels don't collide is unaffected.
+    assert match_level(FakeCriterion(levels=TIP_SCALE), "Proficient") is not None
+
+
+@rubric_pdf_only
+def test_match_level_known_answer_against_the_real_rubric_pdf():
+    """Known-answer test (ticket's own explicit ask): extracts the actual
+    level names from `Rubric-for-Oral-Presentation.pdf` -- the artifact
+    that exposed this bug -- through the real ingestion pipeline, and
+    proves a correctly-spelled verdict matches whatever VERIDICAL's own
+    extraction actually produced, split mid-word or not."""
+    from app.config import get_settings
+    from app.ingest import pdf as pdf_ingest
+
+    result = pdf_ingest.extract_document(str(RUBRIC_PDF), get_settings())
+    full_text = " ".join(b.text for b in result.blocks)
+    # The ticket's own root-cause section measured this exact split LIVE
+    # against this PDF's content stream ("BEGIN ER 1" as one literal
+    # extracted span) -- confirm it's still true of the real extraction,
+    # so this test keeps meaning what it says rather than silently
+    # passing on a since-changed extraction path.
+    assert "BEGIN ER 1" in full_text
+    assert "EXEMPLAR" in full_text
+
+    # ACCEPTABLE/PROFICIENT/EXEMPLARY: a genuine line-break INSIDE the
+    # table cell (ticket cause #1) -- whitespace-join reconstructs these
+    # perfectly, verified live against the real PDF's own measured splits.
+    corrupted_scale = [
+        {"level": 2, "name": "ACCEPTABL E 2", "descriptor": "x", "points": 2},
+        {"level": 3, "name": "PROFICIEN T 3", "descriptor": "x", "points": 3},
+        {"level": 4, "name": "EXEMPLAR Y 4", "descriptor": "y", "points": 4},
+    ]
+    criterion = FakeCriterion(levels=corrupted_scale)
+    assert match_level(criterion, "ACCEPTABLE 2") is not None
+    assert match_level(criterion, "PROFICIENT 3") is not None
+    assert match_level(criterion, "EXEMPLARY 4") is not None
+
+    # BEGINNER: an HONEST, disclosed exception, not silently dropped. The
+    # ticket's own root-cause section calls this one "different and
+    # worse" -- the space is literally inside the PDF's glyph content
+    # stream, extraction returns 'BEGIN' + 'ER' with a character
+    # genuinely MISSING relative to "BEGINNER" (not just misplaced
+    # whitespace), and closing that gap would need actual fuzzy/
+    # edit-distance matching -- exactly what this ticket (and
+    # `match_level`'s own docstring) rules out on purpose (charter rule
+    # 1: a wrong guess must escalate, never silently snap to the
+    # nearest-looking rung). This criterion correctly still escalates.
+    beginner_scale = [{"level": 1, "name": "BEGIN ER 1", "descriptor": "x", "points": 1}]
+    assert match_level(FakeCriterion(levels=beginner_scale), "BEGINNER 1") is None
 
 
 def test_outcome_and_score_levelled_criterion_rejects_pass_fail_vocabulary():
