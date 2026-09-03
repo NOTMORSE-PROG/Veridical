@@ -68,9 +68,7 @@ async def _try_claim(
     return claimed[0] if claimed is not None else None
 
 
-async def _heartbeat(
-    session: AsyncSession, check_run_id: int, token: datetime
-) -> datetime | None:
+async def _heartbeat(session: AsyncSession, check_run_id: int, token: datetime) -> datetime | None:
     """Refreshes the claim ONLY if `token` still matches what's stored --
     i.e. only if this caller still genuinely holds it. Returns the new
     token on success (the caller must use IT for the next heartbeat/
