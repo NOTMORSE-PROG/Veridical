@@ -10,12 +10,48 @@ regression test."""
 import pytest
 
 from app.checks.reuse.query import PassageMatch, SimilarityMatch
-from app.checks.reuse.service import _match_to_flag_draft, _passage_match_to_flag_draft
+from app.checks.reuse.service import (
+    _match_to_flag_draft,
+    _passage_match_to_flag_draft,
+    _supporting_passage_detail,
+    _supporting_passage_from_precomputed,
+)
 from app.models.enums import FlagSeverity
 
 OTHER_GROUP = "BSIT-4A Attendance Monitoring System Group"
 OTHER_CHAPTER = "CHAPTER 2 REVIEW OF RELATED LITERATURE AND STUDIES"
 OWN_CHAPTER = "Related Work"
+
+
+def _passage_match(**overrides) -> PassageMatch:
+    defaults = dict(
+        own_passage_index=0,
+        own_chapter_index=0,
+        own_page=1,
+        own_paragraph=None,
+        own_char_start=0,
+        own_char_end=10,
+        own_text="own text",
+        own_context_text="own text",
+        own_is_reference_list=False,
+        own_is_block_quote=False,
+        level="high_similarity",
+        similarity=0.6,
+        matched_manuscript_id=42,
+        matched_group_label=OTHER_GROUP,
+        matched_instructor_id=99,
+        matched_chapter_index=0,
+        matched_page=1,
+        matched_paragraph=None,
+        matched_char_start=0,
+        matched_char_end=10,
+        matched_text="matched text",
+        matched_context_text="matched text",
+        matched_is_reference_list=False,
+        matched_is_block_quote=False,
+    )
+    defaults.update(overrides)
+    return PassageMatch(**defaults)
 
 
 @pytest.mark.parametrize(
@@ -119,3 +155,62 @@ def test_first_upload_context_flags_detail_but_never_changes_severity_or_reason(
     assert plain_detail["first_upload_context"] is False
     assert first_detail["first_upload_context"] is True
     assert first_reason == plain_reason  # no duplicate disclosure in the reason text
+
+
+def test_supporting_passage_detail_uses_the_passages_own_level_not_the_parents():
+    """BUG-153 (`backend-critic` finding, live-reproduced): an earlier
+    version echoed the PARENT whole-doc/chapter match's own `level` onto
+    the supporting passage, reasoning the two should visually "agree" --
+    live-reproduced to overstate a weak supporting passage as "Exact
+    duplicate" purely because a stronger AGGREGATE match happened to
+    contain it (the more dangerous direction: a flag can still force Not
+    Ready under BUG-150 while showing evidence stronger than it is). Fixed
+    to always use the supporting passage's OWN, independently classified
+    level -- both callers (`query_similar_passages` and
+    `best_supporting_passage`) only ever hand back a `PassageMatch` with a
+    real, non-fabricated `level`, so this is never a guess."""
+    weak_supporting_passage = _passage_match(level="high_similarity", similarity=0.6)
+    detail = _supporting_passage_detail(weak_supporting_passage)
+    assert detail["level"] == "high_similarity"
+    assert detail["similarity"] == pytest.approx(0.6)
+
+    strong_supporting_passage = _passage_match(level="exact_duplicate", similarity=0.99)
+    detail = _supporting_passage_detail(strong_supporting_passage)
+    assert detail["level"] == "exact_duplicate"
+    assert detail["similarity"] == pytest.approx(0.99)
+
+
+def test_supporting_passage_from_precomputed_is_scoped_to_the_matched_chapter_pair():
+    """BUG-153 (`backend-critic` finding, live-reproduced): without this
+    scoping, a Chapter 1 flag could be handed a supporting passage that
+    actually pairs Chapter 2 content on one or both sides -- real text,
+    but contradicting the very chapter the flag names. A whole-document
+    match (both indices `None`) stays unscoped -- "any passage anywhere
+    in the doc" is exactly what that granularity claims, live-verified
+    separately in `test_checks_reuse_query.py`'s DB-level regression."""
+    same_manuscript_wrong_chapter = _passage_match(
+        own_chapter_index=1, matched_chapter_index=0, similarity=0.99
+    )
+    right_chapter_pair = _passage_match(
+        own_chapter_index=0, matched_chapter_index=1, similarity=0.7
+    )
+    candidates = [same_manuscript_wrong_chapter, right_chapter_pair]
+
+    scoped = _supporting_passage_from_precomputed(
+        42, candidates, own_chapter_index=0, matched_chapter_index=1
+    )
+    assert scoped is right_chapter_pair  # the weaker but correctly-scoped candidate wins
+
+    # A candidate scoped to the wrong own-chapter alone is excluded too.
+    only_wrong_own_chapter = [_passage_match(own_chapter_index=1, matched_chapter_index=1)]
+    assert (
+        _supporting_passage_from_precomputed(
+            42, only_wrong_own_chapter, own_chapter_index=0, matched_chapter_index=1
+        )
+        is None
+    )
+
+    # Whole-document match (no chapter claim to violate): unscoped, picks
+    # the single strongest candidate regardless of chapter.
+    unscoped = _supporting_passage_from_precomputed(42, candidates)
+    assert unscoped is same_manuscript_wrong_chapter  # higher similarity, no scoping applied

@@ -72,6 +72,14 @@ class SimilarityMatch:
     # None for a whole-document match; both set for a chapter-level match.
     matched_chapter_title: str | None = None
     own_chapter_title: str | None = None
+    # BUG-153 (backend-critic finding, live-reproduced): the index twins
+    # of the titles above -- needed to SCOPE a chapter-level match's
+    # supporting-passage lookup to the two specific chapters this match
+    # is actually about. Titles alone can't do that (not a stable join
+    # key, and never guaranteed unique). None for a whole-document match,
+    # same convention as the titles.
+    matched_chapter_index: int | None = None
+    own_chapter_index: int | None = None
 
 
 @dataclass(frozen=True)
@@ -162,6 +170,7 @@ async def _best_chapter_matches(
                 select(
                     ManuscriptChapterArchive.manuscript_id,
                     ManuscriptChapterArchive.title,
+                    ManuscriptChapterArchive.chapter_index,
                     (1 - distance_expr).label("similarity"),
                     Manuscript.group_label,
                     Manuscript.instructor_id,
@@ -189,6 +198,8 @@ async def _best_chapter_matches(
                 matched_group_label=row.group_label,
                 matched_chapter_title=row.title,
                 own_chapter_title=chapter.title,
+                matched_chapter_index=row.chapter_index,
+                own_chapter_index=chapter.chapter_index,
             )
         )
     return matches
@@ -468,6 +479,122 @@ async def _best_passage_match_for(
         matched_is_reference_list=archive_row.is_reference_list,
         matched_is_block_quote=archive_row.is_block_quote,
     )
+
+
+async def best_supporting_passage(
+    session: AsyncSession,
+    passages: list[PassageEmbedding],
+    matched_manuscript_id: int,
+    settings: Settings,
+    *,
+    own_chapter_index: int | None = None,
+    matched_chapter_index: int | None = None,
+) -> PassageMatch | None:
+    """BUG-153: the single strongest passage-level pairing between THIS
+    manuscript and one SPECIFIC already-matched manuscript -- real,
+    checkable evidence (a quote, an anchor on both sides) for a
+    whole-document/chapter-level flag, which otherwise carries only a
+    templated accusation sentence (see `checks.reuse.service`'s wording
+    templates' own docstring: no real quotable text exists at that
+    granularity). Scoped to ONE manuscript, unlike `query_similar_passages`
+    above, which answers a different question ("what's the best passage
+    match anywhere in the corpus"). Same per-own-passage query loop as
+    `_best_passage_match_for` (proven fast at this archive size, 2026-08-20
+    research note above) -- just keeps the single best result across every
+    own passage instead of one match per own passage, and is deliberately
+    NOT gated by `_classify_passage`'s own threshold: this passage does not
+    need to independently clear the passage-level similarity bar to serve
+    as supporting evidence for a match already established at the coarser
+    whole-document/chapter granularity.
+
+    `own_chapter_index`/`matched_chapter_index` (both `None` for a
+    whole-document match, both set for a chapter-level one -- the caller's
+    own convention, `SimilarityMatch`'s docstring) scope the search to the
+    TWO SPECIFIC chapters a chapter-level match is actually about
+    (`backend-critic` finding, BUG-153 review, live-reproduced): without
+    this, the code picked the single best pairing ANYWHERE in either
+    manuscript, which could -- and in the live repro, did -- attach a
+    Chapter 1 flag's own text from Chapter 2, self-contradicting the
+    finding it was meant to evidence the moment an instructor reads it.
+    A whole-document match has no such claim to violate ("any passage
+    anywhere in the doc" is exactly what it asserts), so it stays
+    unscoped.
+
+    Returns `None` when no passage exists in the (scoped) search space at
+    all -- either `matched_manuscript_id` has no passage archive (an
+    image-only match, or one ingested before V-072/F7.4 existed), or, for
+    a chapter-level match, this specific chapter pair has no passage on
+    one or both sides even though OTHER chapters do. The caller treats
+    both as "this finding cannot be evidenced" (ticket's own fallback) --
+    a real, honest outcome, not a bug: a chapter-level aggregate match can
+    be driven by diffuse similarity spread across many passages rather
+    than one strong pairing, and that is exactly the case this ticket says
+    must not stay high severity."""
+    best: PassageMatch | None = None
+    best_similarity = -1.0
+    for passage in passages:
+        if passage.is_reference_list or passage.is_block_quote:
+            continue
+        if own_chapter_index is not None and passage.chapter_index != own_chapter_index:
+            continue
+        distance_expr = ManuscriptPassageArchive.embedding.cosine_distance(passage.embedding)
+        conditions = [
+            ManuscriptPassageArchive.model_id == settings.embedding_model_id,
+            ManuscriptPassageArchive.manuscript_id == matched_manuscript_id,
+            ManuscriptPassageArchive.is_reference_list.is_(False),
+            ManuscriptPassageArchive.is_block_quote.is_(False),
+            Manuscript.purged_at.is_(None),
+        ]
+        if matched_chapter_index is not None:
+            conditions.append(ManuscriptPassageArchive.chapter_index == matched_chapter_index)
+        row = (
+            await session.execute(
+                select(
+                    ManuscriptPassageArchive,
+                    (1 - distance_expr).label("similarity"),
+                    Manuscript.group_label,
+                    Manuscript.instructor_id,
+                )
+                .join(Manuscript, Manuscript.id == ManuscriptPassageArchive.manuscript_id)
+                .where(*conditions)
+                .order_by(distance_expr)
+                .limit(1)
+            )
+        ).first()
+        if row is None:
+            continue
+        similarity = float(row.similarity)
+        if similarity <= best_similarity:
+            continue
+        archive_row: ManuscriptPassageArchive = row[0]
+        best_similarity = similarity
+        best = PassageMatch(
+            own_passage_index=passage.passage_index,
+            own_chapter_index=passage.chapter_index,
+            own_page=passage.page,
+            own_paragraph=passage.paragraph,
+            own_char_start=passage.char_start,
+            own_char_end=passage.char_end,
+            own_text=passage.text,
+            own_context_text=passage.context_text,
+            own_is_reference_list=passage.is_reference_list,
+            own_is_block_quote=passage.is_block_quote,
+            level=_classify_passage(similarity, settings) or "high_similarity",
+            similarity=similarity,
+            matched_manuscript_id=archive_row.manuscript_id,
+            matched_instructor_id=row.instructor_id,
+            matched_group_label=row.group_label,
+            matched_chapter_index=archive_row.chapter_index,
+            matched_page=archive_row.page,
+            matched_paragraph=archive_row.paragraph,
+            matched_char_start=archive_row.char_start,
+            matched_char_end=archive_row.char_end,
+            matched_text=archive_row.text,
+            matched_context_text=archive_row.context_text,
+            matched_is_reference_list=archive_row.is_reference_list,
+            matched_is_block_quote=archive_row.is_block_quote,
+        )
+    return best
 
 
 @dataclass(frozen=True)

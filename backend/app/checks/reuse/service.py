@@ -17,6 +17,7 @@ from app.checks.reuse.embed import compute_document_embeddings, compute_passage_
 from app.checks.reuse.query import (
     PassageMatch,
     SimilarityMatch,
+    best_supporting_passage,
     is_first_upload_for_instructor,
     query_similar_manuscripts,
     query_similar_passages,
@@ -153,6 +154,81 @@ def _match_to_flag_draft(
         "first_upload_context": first_upload,
     }
     return severity, reason, detail
+
+
+def _supporting_passage_from_precomputed(
+    matched_manuscript_id: int,
+    passage_matches: list[PassageMatch],
+    *,
+    own_chapter_index: int | None = None,
+    matched_chapter_index: int | None = None,
+) -> PassageMatch | None:
+    """BUG-153: `passage_matches` is `query_similar_passages`'s
+    corpus-wide, already-computed "best match anywhere, per own passage"
+    result (`run_originality_reuse_check` always runs it, for the
+    passage-level flags above) — free to filter down to one specific
+    matched manuscript, at zero extra queries. Returns `None` when that
+    manuscript never won ANY own-passage's corpus-wide top-1 slot in the
+    (scoped) candidate pool, which does not mean no real pairing exists (a
+    weaker rival could have beaten it on every single passage) -- the
+    caller falls back to `best_supporting_passage`'s scoped,
+    manuscript-specific query only in that case, so the expensive path is
+    the exception, not the rule.
+
+    `own_chapter_index`/`matched_chapter_index` (`backend-critic` finding,
+    BUG-153 review, live-reproduced): a chapter-level match's own claim is
+    about TWO SPECIFIC chapters, not "anywhere in either manuscript" --
+    without this filter a Chapter 1 flag could be attached a supporting
+    passage that actually lives in Chapter 2, which is real text but
+    self-contradicts the very finding it's shown to evidence. Left `None`
+    (no filter) for a whole-document match, which makes no such claim.
+    NOTE: this is a genuinely weaker guarantee than the scoped fallback
+    query below within a chapter pair too -- a candidate here only exists
+    if that same own-passage ALSO happened to win its OWN corpus-wide
+    top-1 slot before this filter was ever applied, so a real but
+    non-corpus-winning pairing within the target chapter pair can still
+    be missed here and only found by the fallback."""
+    candidates = [p for p in passage_matches if p.matched_manuscript_id == matched_manuscript_id]
+    if own_chapter_index is not None:
+        candidates = [p for p in candidates if p.own_chapter_index == own_chapter_index]
+    if matched_chapter_index is not None:
+        candidates = [p for p in candidates if p.matched_chapter_index == matched_chapter_index]
+    if not candidates:
+        return None
+    return max(candidates, key=lambda p: p.similarity)
+
+
+def _supporting_passage_detail(supporting: PassageMatch) -> dict:
+    """BUG-153: distinct key names from `_passage_match_to_flag_draft`'s
+    detail above on purpose — `evidence_excerpt` for a whole-doc/chapter
+    flag is the templated accusation sentence (see this module's wording
+    templates' own docstring), so it can never double as `own_text` the
+    way a genuine passage-level flag's `evidence_excerpt` does.
+
+    `level` is `supporting`'s OWN band (`_classify_passage` on its real
+    similarity, always a genuine classification -- both
+    `query_similar_passages` and `best_supporting_passage` only ever
+    return a `PassageMatch` with a real, non-fabricated `level`), not the
+    parent whole-doc/chapter match's band. An earlier version of this fix
+    echoed the parent's level instead, reasoning that the two should
+    "agree" -- `backend-critic` found (live-reproduced, BUG-153 review)
+    that this could overstate a weak supporting passage as "Exact
+    duplicate" purely because a stronger aggregate match happened to
+    contain it, which is the more dangerous direction (a flag can still
+    force Not Ready under BUG-150 while showing evidence stronger than it
+    is). The passage panel's own band describes the QUOTED PASSAGE, not
+    the flag as a whole -- the flag's own severity badge is shown
+    separately -- so there is no real inconsistency in the two differing,
+    only in overstating one from the other."""
+    return {
+        "own_text": supporting.own_text,
+        "own_context_text": supporting.own_context_text,
+        "matched_text": supporting.matched_text,
+        "matched_context_text": supporting.matched_context_text,
+        "matched_manuscript_id": supporting.matched_manuscript_id,
+        "similarity": round(supporting.similarity, 3),
+        "level": supporting.level,
+    }
 
 
 def _resubmission_flag_draft(matched_manuscript_id: int) -> tuple[FlagSeverity, str, dict]:
@@ -348,6 +424,48 @@ async def run_originality_reuse_check(
     for match in whole_and_chapter_matches:
         severity, reason, detail = _match_to_flag_draft(match, first_upload=first_upload)
         anchor = match.own_chapter_title or "whole document"
+        # BUG-153: a whole-document/chapter match must carry the same
+        # class of evidence its passage-level sibling already does. Try
+        # the free, already-computed corpus-wide passage result first;
+        # only fall back to a scoped, manuscript-specific query when this
+        # SPECIFIC matched manuscript (and, for a chapter-level match, the
+        # SPECIFIC chapter pair the flag is actually about -- see both
+        # helpers' own docstrings) never won any own-passage's corpus-wide
+        # top-1 slot (rare, but not "no real pairing exists"). Both index
+        # fields are `None` for a whole-document match (no chapter claim
+        # to scope), set for a chapter-level one.
+        supporting = _supporting_passage_from_precomputed(
+            match.matched_manuscript_id,
+            passage_matches,
+            own_chapter_index=match.own_chapter_index,
+            matched_chapter_index=match.matched_chapter_index,
+        )
+        if supporting is None:
+            supporting = await best_supporting_passage(
+                session,
+                passages,
+                match.matched_manuscript_id,
+                settings,
+                own_chapter_index=match.own_chapter_index,
+                matched_chapter_index=match.matched_chapter_index,
+            )
+        if supporting is not None:
+            detail["supporting_passage"] = _supporting_passage_detail(supporting)
+        elif severity == FlagSeverity.high:
+            # Ticket's own fallback clause: "If a finding genuinely cannot
+            # be evidenced, it should not be high severity." No real
+            # supporting passage could be found anywhere in the (scoped)
+            # search space -- either the matched manuscript has no
+            # passage archive at all (an image-only match, or one
+            # ingested before F7.4 existed), or, for a chapter-level
+            # match, this specific chapter pair has no passage on one or
+            # both sides even though other chapters do (a chapter-level
+            # aggregate match can be driven by diffuse similarity spread
+            # across many passages, not one strong pairing) -- this
+            # finding can no longer force Not Ready (BUG-150) on evidence
+            # the instructor has no way to check (charter judgment rule 1).
+            severity = FlagSeverity.med
+            detail["evidence_unavailable"] = True
         session.add(
             Flag(
                 check_result_id=result.id,

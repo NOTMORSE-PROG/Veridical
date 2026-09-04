@@ -31,24 +31,51 @@ from app.report.service import aggregate_and_score, raise_if_decided
 
 def _passage_pair_from_detail(evidence_excerpt: str, detail: dict) -> PassagePairOut | None:
     kind = detail.get("kind") or ""
-    if not kind.endswith("_passage"):
+    if kind.endswith("_passage"):
+        own_before, own_after = split_context(detail.get("own_context_text", ""), evidence_excerpt)
+        matched_excerpt = detail.get("matched_text", "")
+        matched_before, matched_after = split_context(
+            detail.get("matched_context_text", ""), matched_excerpt
+        )
+        return PassagePairOut(
+            own_excerpt=evidence_excerpt,
+            own_context_before=own_before,
+            own_context_after=own_after,
+            matched_ref=detail["matched_manuscript_id"],
+            matched_excerpt=matched_excerpt,
+            matched_context_before=matched_before,
+            matched_context_after=matched_after,
+            context_words_each_side=get_settings().reuse_passage_context_words,
+            similarity=detail.get("similarity", 0.0),
+            level="exact_duplicate" if "exact_duplicate" in kind else "high_similarity",
+        )
+    # BUG-153: a whole-document/chapter-level match (`kind` has no
+    # "_passage" suffix) carries its own SUPPORTING passage under a
+    # distinct detail key, set by `checks.reuse.service`'s flag-drafting
+    # loop -- `evidence_excerpt` here is the templated accusation sentence
+    # (see that module's wording templates' own docstring), never real
+    # manuscript text, so it can't double as `own_excerpt` the way it does
+    # for a genuine passage-level flag above.
+    supporting = detail.get("supporting_passage")
+    if supporting is None:
         return None
-    own_before, own_after = split_context(detail.get("own_context_text", ""), evidence_excerpt)
-    matched_excerpt = detail.get("matched_text", "")
+    own_excerpt = supporting.get("own_text", "")
+    own_before, own_after = split_context(supporting.get("own_context_text", ""), own_excerpt)
+    matched_excerpt = supporting.get("matched_text", "")
     matched_before, matched_after = split_context(
-        detail.get("matched_context_text", ""), matched_excerpt
+        supporting.get("matched_context_text", ""), matched_excerpt
     )
     return PassagePairOut(
-        own_excerpt=evidence_excerpt,
+        own_excerpt=own_excerpt,
         own_context_before=own_before,
         own_context_after=own_after,
-        matched_ref=detail["matched_manuscript_id"],
+        matched_ref=supporting["matched_manuscript_id"],
         matched_excerpt=matched_excerpt,
         matched_context_before=matched_before,
         matched_context_after=matched_after,
         context_words_each_side=get_settings().reuse_passage_context_words,
-        similarity=detail.get("similarity", 0.0),
-        level="exact_duplicate" if "exact_duplicate" in kind else "high_similarity",
+        similarity=supporting.get("similarity", 0.0),
+        level=supporting.get("level", "high_similarity"),
     )
 
 
@@ -143,6 +170,7 @@ async def _to_flag_out(
         llm_mode=check_run.llm_mode.value,
         passage_pair=_passage_pair_from_detail(flag.evidence_excerpt, detail),
         first_upload_context=bool(detail.get("first_upload_context")),
+        evidence_unavailable=bool(detail.get("evidence_unavailable")),
         citation_source_key=_citation_source_key(detail),
         confirmed_citation_source=flag.confirmed_citation_source,
     )

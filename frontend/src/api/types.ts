@@ -601,6 +601,16 @@ export interface FlagOut {
   // for an F7 flag produced on the account's first-ever manuscript upload.
   // Never changes `severity`.
   first_upload_context: boolean;
+  // BUG-153: true only for a whole-document/chapter F7 flag that could
+  // not be evidenced with even one real supporting passage -- the backend
+  // downgrades such a flag from high to med severity rather than leave it
+  // forcing Not Ready on evidence nobody can check, but the wording stays
+  // the same either way. Not currently rendered distinctly by any screen
+  // (considered and declined for this ticket -- a dedicated disclosure
+  // needs a `ui-designer` spec, same as BUG-097's first-upload banner
+  // got); declared here so the API contract is complete and a future
+  // screen can use it without a backend change.
+  evidence_unavailable: boolean;
   // BUG-078: present only for a citation flag with a real DOI/ISBN/title
   // to key a confirmation on — gates the "Confirm this source" button vs.
   // the "nothing to confirm" explanation.

@@ -84,6 +84,17 @@ class FlagOut(BaseModel):
     # instructor knows to verify the match with extra care, without the
     # product silently deciding the match is less trustworthy.
     first_upload_context: bool = False
+    # BUG-153 (backend-critic finding, live-reproduced): True only for a
+    # whole-document/chapter F7 flag that could not be evidenced with even
+    # one real supporting passage -- `checks.reuse.service`'s own
+    # fallback clause downgrades such a flag from high to med severity,
+    # but the WORDING stays the same templated accusation sentence either
+    # way (there is nothing else honest to say). Without this field there
+    # was no way, in the API response or the UI, to tell "downgraded
+    # because unevidenceable" apart from "genuinely medium-confidence
+    # match" -- both looked identical. Never True for a passage-level flag
+    # (those either have real evidence or were never scored at all).
+    evidence_unavailable: bool = False
     # BUG-078/FEATURES.md §9: present only for a citation flag with a real
     # DOI/ISBN/title to key a confirmation on (null for the "no identifier
     # at all" not_found case, and null for every non-citation-integrity

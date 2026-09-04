@@ -243,6 +243,135 @@ async def test_reuploaded_duplicate_produces_a_high_severity_flag(session_factor
     }
 
 
+async def test_whole_document_and_chapter_flags_carry_real_supporting_passage_evidence(
+    session_factory,
+):
+    """BUG-153: the flags that used to carry NULL `passage_pair` (no
+    quote, no anchor, no matched text -- the ticket's own production
+    evidence, flags 132/173/133/134) must now carry a real supporting
+    passage, quoted from both sides, whenever the matched manuscript has
+    one. Reuses the exact fixture shape as
+    `test_reuploaded_duplicate_produces_a_high_severity_flag` above (a
+    cross-instructor re-upload -- not a BUG-140 same-instructor
+    resubmission, which collapses to a single low-severity flag and is
+    tested separately below)."""
+    settings = get_settings()
+
+    manuscript_a, check_run_a = await _seed_manuscript_and_run(
+        session_factory, group_label="Group A"
+    )
+    async with session_factory() as session:
+        await run_originality_reuse_check(
+            session, manuscript_a, check_run_a, _extraction(CH1, CH2), settings
+        )
+
+    manuscript_b, check_run_b = await _seed_manuscript_and_run(
+        session_factory, group_label="Group A (resubmission)"
+    )
+    async with session_factory() as session:
+        result = await run_originality_reuse_check(
+            session, manuscript_b, check_run_b, _extraction(CH1, CH2), settings
+        )
+        rows = (
+            await session.execute(
+                text(
+                    "SELECT severity, detail->>'kind' AS kind, "
+                    "detail->'supporting_passage'->>'own_text' AS supporting_own_text, "
+                    "detail->'supporting_passage'->>'matched_text' AS supporting_matched_text, "
+                    "detail->'supporting_passage'->>'level' AS supporting_level "
+                    "FROM flag WHERE check_result_id = :id"
+                ),
+                {"id": result.id},
+            )
+        ).all()
+
+    whole_doc_and_chapter = [r for r in rows if not r.kind.endswith("_passage")]
+    assert len(whole_doc_and_chapter) == 3  # whole-doc + 2 chapters
+    for row in whole_doc_and_chapter:
+        assert row.severity == "high"  # evidenced -- no fallback downgrade
+        # Real, checkable manuscript text on BOTH sides -- CH1/CH2 are
+        # each short enough to form exactly one passage per chapter
+        # (comment on the sibling test above), so the supporting passage
+        # is the chapter's own heading plus its full body text (the same
+        # span `_chapter_span_blocks` builds for chapter-level embedding),
+        # not a fabricated placeholder.
+        assert row.supporting_own_text.endswith(CH1) or row.supporting_own_text.endswith(CH2)
+        assert row.supporting_matched_text.endswith(CH1) or row.supporting_matched_text.endswith(
+            CH2
+        )
+        # Echoes the parent flag's own level (both "exact_duplicate" here
+        # -- see `_supporting_passage_detail`'s own docstring for why).
+        assert row.supporting_level == "exact_duplicate"
+
+
+def _extraction_flat_no_chapters(body_text: str) -> ExtractionResult:
+    """No detected chapter structure (`SectionTree(source="none")`) --
+    `compute_document_embeddings`'s own flat-structure fallback still
+    produces a real whole-document vector from every block directly, but
+    `compute_passage_embeddings` produces ZERO passages for this exact
+    shape (its module docstring: "No chapter structure -> no passages at
+    all... an honest, named scope limit"). Exactly the one real case in
+    this codebase where a genuine whole-document match can have no
+    supporting passage anywhere -- used below to exercise BUG-153's own
+    fallback clause."""
+    return ExtractionResult(
+        page_count=1,
+        anchor_kind="page",
+        image_only=False,
+        text_chars=len(body_text),
+        section_tree=SectionTree(source="none", nodes=[]),
+        blocks=[_block(body_text, page=1)],
+        images=[],
+    )
+
+
+async def test_unevidenceable_whole_document_match_is_downgraded_from_high_severity(
+    session_factory,
+):
+    """Ticket's own fallback clause: "If a finding genuinely cannot be
+    evidenced, it should not be high severity." A flat-structure
+    manuscript still produces a real whole-document exact-duplicate match,
+    but has no passage archive at all on either side, so no supporting
+    passage can exist for it anywhere -- the flag must not stay high
+    severity forcing Not Ready (BUG-150) on evidence the instructor has no
+    way to check (charter judgment rule 1)."""
+    settings = get_settings()
+
+    manuscript_a, check_run_a = await _seed_manuscript_and_run(
+        session_factory, group_label="Group A"
+    )
+    async with session_factory() as session:
+        await run_originality_reuse_check(
+            session, manuscript_a, check_run_a, _extraction_flat_no_chapters(CH1), settings
+        )
+
+    manuscript_b, check_run_b = await _seed_manuscript_and_run(
+        session_factory, group_label="Group A (resubmission)"
+    )
+    async with session_factory() as session:
+        result = await run_originality_reuse_check(
+            session, manuscript_b, check_run_b, _extraction_flat_no_chapters(CH1), settings
+        )
+        rows = (
+            await session.execute(
+                text(
+                    "SELECT severity, detail->>'kind' AS kind, "
+                    "detail->>'evidence_unavailable' AS evidence_unavailable, "
+                    "detail->'supporting_passage' AS supporting_passage "
+                    "FROM flag WHERE check_result_id = :id"
+                ),
+                {"id": result.id},
+            )
+        ).all()
+
+    assert len(rows) == 1
+    row = rows[0]
+    assert row.kind == "reuse_exact_duplicate"
+    assert row.severity == "med"  # downgraded from the usual high
+    assert row.evidence_unavailable == "true"
+    assert row.supporting_passage is None
+
+
 async def test_same_instructor_whole_document_resubmission_collapses_to_one_low_flag(
     session_factory,
 ):
@@ -846,6 +975,130 @@ async def test_transplanted_chapter_produces_a_chapter_level_flag(session_factor
     assert len(chapter_flags) == 1
     assert chapter_flags[0].own_chapter == "Chapter 1: Introduction"
     assert "chapter" in chapter_flags[0].kind
+
+
+CH2_EXTENDED = (
+    "We used a hybrid rule-based and AI approach to grading capstone manuscripts, "
+    "combining deterministic checks with confidence-based escalation to the "
+    "instructor. Structural criteria such as page counts, required sections, and "
+    "formatting rules are verified deterministically against the parsed document "
+    "tree, while semantic criteria are graded by a large language model configured "
+    "with a fixed temperature and a versioned prompt so that repeated runs stay "
+    "reproducible for audit purposes. Any grading result the model reports with "
+    "low confidence is routed to the instructor for manual review rather than "
+    "silently accepted, following the human-in-the-loop principle that governs the "
+    "whole platform. The pipeline also runs four independent integrity checks in "
+    "parallel: internal agreement across repeated gradings, citation integrity "
+    "against external bibliographic sources, statistical forensics on any "
+    "reported numeric results, and originality checking against a shared "
+    "cross-account archive of previously processed manuscripts, each contributing "
+    "its own evidence to the final readiness report shown to the instructor."
+)
+GENUINE_UNRELATED_FILLER = (
+    "This chapter presents background on renewable energy adoption among small "
+    "business owners in rural municipalities, framing the barriers reported in "
+    "prior community surveys and outlining the scope of the present "
+    "investigation. Local government units have started offering incentive "
+    "programs, yet uptake remains uneven across different sectors, and very few "
+    "studies document the specific obstacles that small store owners and "
+    "manufacturers actually encounter when they consider installing solar "
+    "panels or transitioning away from diesel generators for daily operations. "
+    "The researchers conducted preliminary site visits across three "
+    "municipalities, interviewing twelve business owners informally before "
+    "designing the structured survey instrument used later in this study. "
+    "These early conversations revealed recurring concerns about upfront cost, "
+    "unreliable installation contractors, and confusion about available "
+    "government subsidies, themes that recur throughout the literature "
+    "reviewed in the following section and that ultimately shaped every "
+    "research question this chapter goes on to state formally for the "
+    "remainder of the present manuscript and its later chapters."
+)
+
+
+async def test_chapter_flag_supporting_passage_is_scoped_to_the_matched_chapter(session_factory):
+    """`backend-critic` finding (BUG-153 review, live-reproduced): without
+    chapter-index scoping, the supporting-passage lookup picked the single
+    best pairing ANYWHERE in either manuscript, which could attach a
+    Chapter 1 flag a passage that actually belongs to Chapter 2 -- real
+    text, but self-contradicting the very finding it's shown to evidence
+    the moment an instructor reads it. Reproduces that exact shape:
+    manuscript B's Chapter 1 contains a genuine, unrelated ~150-word
+    passage PLUS a second, separately-flushed passage verbatim-copied from
+    archived manuscript A's Chapter 2 (both padded past
+    `reuse_passage_chunk_words` so `_build_passages` flushes them as two
+    DISTINCT passages rather than merging two short paragraphs into one --
+    see `_build_passages`'s own per-block flush-on-threshold logic). The
+    supporting passage attached to B's Chapter 1 flag must come from B's
+    own Chapter 1 span, never leak text whose real position is Chapter 2."""
+    settings = get_settings()
+
+    manuscript_a, check_run_a = await _seed_manuscript_and_run(
+        session_factory, group_label="Group A"
+    )
+    async with session_factory() as session:
+        await run_originality_reuse_check(
+            session, manuscript_a, check_run_a, _extraction(CH1, CH2_EXTENDED), settings
+        )
+
+    unrelated_ch2 = (
+        "This study evaluates the nutritional content of canteen meals served "
+        "across five campuses and proposes a standardized menu review process."
+    )
+    blocks = [
+        _block("Chapter 1: Introduction", page=1),
+        _block(GENUINE_UNRELATED_FILLER, page=1),
+        _block(CH2_EXTENDED, page=2),  # verbatim copy of A's Chapter 2, inside B's Chapter 1
+        _block("Chapter 2: Methodology", page=5),
+        _block(unrelated_ch2, page=5),
+    ]
+    nodes = [
+        SectionNode(title="Chapter 1: Introduction", level=1, page=1),
+        SectionNode(title="Chapter 2: Methodology", level=1, page=5),
+    ]
+    extraction_b = ExtractionResult(
+        page_count=5,
+        anchor_kind="page",
+        image_only=False,
+        text_chars=sum(len(b.text) for b in blocks),
+        section_tree=SectionTree(source="heuristics", nodes=nodes),
+        blocks=blocks,
+        images=[],
+    )
+
+    manuscript_b, check_run_b = await _seed_manuscript_and_run(
+        session_factory, group_label="Group B"
+    )
+    async with session_factory() as session:
+        result = await run_originality_reuse_check(
+            session, manuscript_b, check_run_b, extraction_b, settings
+        )
+        rows = (
+            await session.execute(
+                text(
+                    "SELECT severity, detail->>'kind' AS kind, "
+                    "detail->>'own_chapter_title' AS own_chapter, "
+                    "detail->'supporting_passage'->>'own_text' AS supporting_own_text "
+                    "FROM flag WHERE check_result_id = :id"
+                ),
+                {"id": result.id},
+            )
+        ).all()
+
+    chapter1_flags = [r for r in rows if r.own_chapter == "Chapter 1: Introduction"]
+    assert len(chapter1_flags) == 1
+    flag = chapter1_flags[0]
+    assert "chapter" in flag.kind
+    assert flag.supporting_own_text is not None
+    # The regression itself: the supporting passage's OWN text must come
+    # from B's own Chapter 1 span (either the genuine filler or the
+    # verbatim copy, both of which genuinely live there) -- never the
+    # archived manuscript's Chapter 2 text/heading bleeding in as if it
+    # were B's own words from a chapter this flag never claims.
+    assert flag.supporting_own_text in (GENUINE_UNRELATED_FILLER, CH2_EXTENDED)
+    assert "Chapter 2: Methodology" not in flag.supporting_own_text
+    # The genuinely useful case: the copy, not the unrelated filler, is
+    # what actually evidences this finding.
+    assert flag.supporting_own_text == CH2_EXTENDED
 
 
 async def test_same_topic_different_wording_does_not_flag(session_factory):

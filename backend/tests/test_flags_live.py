@@ -446,6 +446,69 @@ async def test_ai_reasoning_is_suppressed_when_identical_to_evidence_excerpt(ses
         assert distinct_out.ai_reasoning == "This appears to contradict Y."
 
 
+async def test_evidence_unavailable_flag_reaches_the_api_distinguishably(session_factory):
+    """BUG-153 (`backend-critic` finding, live-reproduced): `checks.reuse.
+    service` downgrades an unevidenceable whole-doc/chapter flag from high
+    to med severity, but its WORDING stays the same templated accusation
+    sentence either way (there is nothing else honest to say) -- without
+    `evidence_unavailable` reaching `FlagOut`, this looked identical to a
+    genuinely medium-confidence match, both in the API response and on
+    every screen. Seeded directly (same convention as the fixtures above)
+    rather than through the full reuse pipeline -- this is specifically
+    about `_to_flag_out`'s wiring, not about how the upstream check
+    decided to set the key."""
+    async with session_factory() as session:
+        instructor = Instructor(email=f"evidenceunavail-{id(session)}@test.local", display_name="T")
+        session.add(instructor)
+        await session.commit()
+        manuscript = Manuscript(instructor_id=instructor.id, group_label="G", file_ref="x.pdf")
+        rubric = Rubric(instructor_id=instructor.id, title="Format", source_file="r.pdf")
+        session.add_all([manuscript, rubric])
+        await session.commit()
+        check_run = CheckRun(
+            manuscript_id=manuscript.id, rubric_id=rubric.id, status=CheckRunStatus.done
+        )
+        session.add(check_run)
+        await session.commit()
+        result = CheckResult(
+            check_run_id=check_run.id,
+            criterion_id=None,
+            kind=CheckKind.originality_reuse,
+            outcome=ResultOutcome.passed,
+            detail={},
+        )
+        session.add(result)
+        await session.commit()
+        downgraded_flag = Flag(
+            check_result_id=result.id,
+            severity=FlagSeverity.med,  # already downgraded from high by the caller
+            evidence_excerpt="This manuscript appears to be an exact or near-exact textual "
+            "duplicate of archived manuscript #9: possible resubmission or reuse. "
+            "Please verify manually.",
+            page_anchor="whole document",
+            detail={"kind": "reuse_exact_duplicate", "evidence_unavailable": True},
+        )
+        genuinely_medium_flag = Flag(
+            check_result_id=result.id,
+            severity=FlagSeverity.med,
+            evidence_excerpt="This manuscript shows high textual similarity to archived "
+            "manuscript #4: possible shared content or reuse. Please verify manually.",
+            page_anchor="whole document",
+            detail={"kind": "reuse_high_similarity"},
+        )
+        session.add_all([downgraded_flag, genuinely_medium_flag])
+        await session.commit()
+
+        downgraded_out = await get_flag(session, downgraded_flag.id, instructor.id)
+        assert downgraded_out.severity == "med"
+        assert downgraded_out.evidence_unavailable is True
+        assert downgraded_out.passage_pair is None
+
+        medium_out = await get_flag(session, genuinely_medium_flag.id, instructor.id)
+        assert medium_out.severity == "med"
+        assert medium_out.evidence_unavailable is False
+
+
 async def test_no_verdict_high_flag_does_not_force_not_ready_live(session_factory):
     """BUG-053 Option A, end to end: a high-severity flag whose underlying
     check left no real finding behind (no "kind"/"reason"/"verdict"/
