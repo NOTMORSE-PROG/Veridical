@@ -60,7 +60,13 @@ jobs:
           # be faked without defeating the point of the test. Confirmed
           # 2026-08-17 -- do not raise further without checking which
           # specific tests are newly skipping and why.
-          VERIDICAL_MAX_SKIPS: "9"
+          # Raised 9 -> 10 (BUG-146): a new known-answer test
+          # (`test_checks_levels.py::test_match_level_known_answer_against_
+          # the_real_rubric_pdf`) extracts `Rubric-for-Oral-Presentation.pdf`
+          # -- BUG-146's own reproduction artifact, also local-only/
+          # gitignored (D-007), same convention as `test_ingest_pdf.py`'s
+          # existing `demo_pdf_only` marker already counted in the 9 above.
+          VERIDICAL_MAX_SKIPS: "10"
 
   frontend:
     runs-on: ubuntu-latest
