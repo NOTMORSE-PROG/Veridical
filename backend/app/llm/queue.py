@@ -118,6 +118,7 @@ class LLMQueue:
         clock: ClockFn | None = None,
         sleep: SleepFn | None = None,
         instructor_id: int | None = None,
+        cache_bypass: bool = False,
     ) -> None:
         if pool is None:
             # Single-model form: still supported so a caller (or a test) can
@@ -137,6 +138,11 @@ class LLMQueue:
         # island (see LLMQuotaCounter's own docstring for the partial-index
         # reasoning). Threaded into every quota-table read/write below.
         self._instructor_id = instructor_id
+        # BUG-162: off by default -- every existing caller keeps today's
+        # cache-saving behavior unchanged. True only for a deliberate
+        # `backend/scripts/stability_probe.py` run (`Settings.llm_cache_bypass`,
+        # config.py's own docstring for why this exists).
+        self._cache_bypass = cache_bypass
         self._temperature = temperature
         self._max_retries = max_retries
         self._retry_base_seconds = retry_base_seconds
@@ -224,6 +230,14 @@ class LLMQueue:
 
         async with self._session_factory() as session:
             for spec in candidates:
+                if self._cache_bypass:
+                    # BUG-162: a deliberate stability probe -- skip the
+                    # READ so this call always reaches the real transport,
+                    # even though an identical prompt was already answered
+                    # (that's the whole point: measuring the model's own
+                    # run-to-run variance, not replaying a stored answer).
+                    # `_write_cache` below still runs as normal.
+                    continue
                 cached = await self._get_cached(session, hashes[spec.model])
                 if cached is None:
                     continue

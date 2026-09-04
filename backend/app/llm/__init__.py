@@ -54,6 +54,22 @@ def _build_real_client(
         raise LLMNotConfiguredError(
             "VERIDICAL_FAKE_LLM=0 requires GEMINI_API_KEY to be set (real Gemini client, V-009)."
         )
+    if settings.llm_cache_bypass:
+        # backend-critic finding (BUG-162 review, P2): before this, a
+        # `LLM_CACHE_BYPASS=1` left on by accident (a typo, a copy-pasted
+        # local .env, a forgotten toggle after a manual stability run) had
+        # NO operational trail anywhere -- every subsequent identical
+        # re-run of the same manuscript/rubric, which D-011's whole design
+        # exists to make free, would silently spend a real call every
+        # time forever, with the only symptom being "quota depletes
+        # faster than expected." This runs once per process (singleton
+        # client), so it shows up unmissably in every startup log.
+        logger.warning(
+            "LLM_CACHE_BYPASS is set -- every identical LLM call will spend real "
+            "quota instead of hitting the response cache. This should be on ONLY "
+            "for a deliberate stability probe (backend/scripts/stability_probe.py), "
+            "never left on in a normal deployment."
+        )
     # Imported lazily: transport.py is the only module that imports the
     # google-genai SDK, and fake-LLM mode (dev/CI default) must never need
     # it installed.
@@ -71,6 +87,7 @@ def _build_real_client(
         retry_base_seconds=settings.llm_retry_base_seconds,
         reset_timezone=settings.llm_quota_reset_timezone,
         instructor_id=instructor_id,
+        cache_bypass=settings.llm_cache_bypass,
     )
     return GeminiLLMClient(queue)
 

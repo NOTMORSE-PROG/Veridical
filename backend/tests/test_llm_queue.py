@@ -278,6 +278,46 @@ async def test_cache_hit_skips_transport_and_quota_but_is_still_audited(session_
     assert hit.prompt_version == "v1"
 
 
+async def test_cache_bypass_forces_a_real_call_every_time(session_factory):
+    """BUG-162: `cache_bypass=True` (`Settings.llm_cache_bypass`, wired up
+    only for `tools/stability_probe.py`) exists so a run-to-run stability
+    measurement is a real, supported operation instead of the DB-edit
+    D-011's own caching made it -- an IDENTICAL prompt must reach the
+    transport every single time, never replay a stored answer. The write
+    side is deliberately UNCHANGED (`test_cache_hit_skips_transport_and_
+    quota_but_is_still_audited` above proves the normal, non-bypassed path
+    still works exactly as before -- this test only proves the opt-in
+    bypass, never the default)."""
+    transport = ScriptedTransport(responses=[{"verdict": "pass"}, {"verdict": "fail"}])
+    queue = _make_queue(session_factory, transport, cache_bypass=True)
+
+    first = await queue.submit(prompt_type="t", prompt="same prompt", prompt_version="v1")
+    second = await queue.submit(prompt_type="t", prompt="same prompt", prompt_version="v1")
+    # The real point: two genuinely independent answers, not one cached
+    # answer served twice -- if this ever silently regresses back to a
+    # cache hit, the ScriptedTransport's second scripted response would
+    # never be consumed and both calls would return the FIRST response.
+    assert first == {"verdict": "pass"}
+    assert second == {"verdict": "fail"}
+    assert len(transport.calls) == 2  # neither call was served from cache
+
+    status = await queue.get_quota_status()
+    assert status["calls_used"] == 2
+    assert status["cache_hits_today"] == 0
+
+    # Writes are unaffected -- a THIRD queue, cache_bypass=False (the
+    # default), sees a real cached row from the bypassed run above and
+    # hits it normally. Proves bypass only ever skips READS.
+    normal_queue = _make_queue(session_factory, ScriptedTransport(), cache_bypass=False)
+    replayed = await normal_queue.submit(prompt_type="t", prompt="same prompt", prompt_version="v1")
+    # `_write_cache` is `on_conflict_do_nothing` on `input_hash` -- the
+    # FIRST bypassed write wins the cache row, later ones for the same
+    # hash are silent no-ops, same as any other identical-key write race.
+    assert replayed == first
+    normal_status = await normal_queue.get_quota_status()
+    assert normal_status["cache_hits_today"] == 1
+
+
 def _pool(*specs: tuple[str, int, int]) -> tuple[ModelSpec, ...]:
     return tuple(
         ModelSpec(model=model, rpm=100, daily_quota=quota, vision=vision == 1)
@@ -321,6 +361,36 @@ async def test_pool_fails_over_to_the_next_model_when_an_island_is_spent(session
     assert first == {"served_by": "small"}
     assert second == {"served_by": "big"}, "the second call must not die on the spent island"
     assert transport.calls == ["small", "big"]
+
+
+async def test_cache_bypass_skips_every_candidate_in_a_multi_model_pool(session_factory):
+    """backend-critic finding (BUG-162 review, P3): the single-model bypass
+    test above doesn't demonstrate the skip across a pool with more than
+    one candidate -- the cache-read loop is `for spec in candidates: if
+    self._cache_bypass: continue`, so an identical prompt submitted twice
+    against a 2-model pool must reach the transport BOTH times, on the
+    SAME head model both times (neither model is exhausted here, so
+    normal fail-over never triggers -- this isolates the bypass claim from
+    the fail-over mechanism `test_pool_fails_over_to_the_next_model_when_
+    an_island_is_spent` above already covers separately)."""
+    transport = PerModelTransport()
+    queue = _make_queue(
+        session_factory,
+        transport,
+        pool=_pool(("head", 50, 1), ("reserve", 50, 1)),
+        cache_bypass=True,
+    )
+
+    first = await queue.submit(prompt_type="t", prompt="same prompt", prompt_version="v1")
+    second = await queue.submit(prompt_type="t", prompt="same prompt", prompt_version="v1")
+
+    assert first == {"served_by": "head"}
+    assert second == {"served_by": "head"}
+    assert transport.calls == ["head", "head"]  # never short-circuited to a cache hit
+
+    status = await queue.get_quota_status()
+    assert status["calls_used"] == 2
+    assert status["cache_hits_today"] == 0
 
 
 async def test_a_per_day_429_closes_that_island_instead_of_being_retried(session_factory):

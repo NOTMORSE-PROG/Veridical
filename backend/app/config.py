@@ -147,6 +147,18 @@ class Settings(BaseSettings):
     llm_quota_reset_timezone: str = "America/Los_Angeles"
     llm_max_retries: int = 3
     llm_retry_base_seconds: float = 1.0
+    # BUG-162: the response cache (D-011) is keyed on prompt content, not
+    # check_run_id, by design -- so a normal re-run of the same manuscript
+    # against the same rubric version is a cache REPLAY, not an independent
+    # regrading. That's correct for saving quota, but it means there was no
+    # supported way to actually MEASURE run-to-run grading stability (V3's
+    # own exit checkpoint). Off by default (every existing deployment keeps
+    # today's cache-saving behavior unchanged); set only for a deliberate
+    # stability probe (backend/scripts/stability_probe.py) -- only cache READS are
+    # skipped (forcing a real call every time), writes still land in
+    # `llm_response_cache` as normal, so a probe run leaves the cache in a
+    # normal, usable state afterward rather than disturbing it.
+    llm_cache_bypass: bool = False
 
     # --- Structural check engine (V-016, F3.2) -------------------------------
     # Override the packaged criterion-matching keyword lists / bound-phrase
