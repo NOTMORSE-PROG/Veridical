@@ -18,6 +18,7 @@ from app.ingest.schemas import (
     ImageBlock,
     Line,
     PageGeometry,
+    TableBlock,
     TextBlock,
 )
 from app.messages import FILE_ENCRYPTED, FILE_UNREADABLE
@@ -44,12 +45,32 @@ def _extract_open_document(
 ) -> ExtractionResult:
     lines_by_page: dict[int, list[Line]] = {}
     images: list[ImageBlock] = []
+    tables: list[TableBlock] = []
     geometry: list[PageGeometry] = []
     page_heights: dict[int, float] = {}
 
     for index in range(doc.page_count):
         page = doc[index]
         pno = index + 1  # 1-based everywhere outside PyMuPDF
+        # BUG-163: native table extraction existed for DOCX only --
+        # `ExtractionResult.tables` stayed empty for every PDF, so
+        # `forensics/extract.py`'s `extract_descriptive_stats(extraction.
+        # tables)` had nothing to read on the format everyone actually
+        # submits. Same flat `rows: list[list[str]]` shape DOCX already
+        # produces (`ingest/docx.py`) -- no header/caption detection here
+        # either, matching that precedent exactly rather than introducing
+        # a format-specific difference downstream code doesn't expect.
+        for table in page.find_tables().tables:
+            tables.append(
+                TableBlock(
+                    page=pno,
+                    # `.extract()` returns `None` for a cell PyMuPDF's table
+                    # reader couldn't resolve (e.g. a merged/spanning cell)
+                    # -- an honest empty string, not a crash on this page's
+                    # whole extraction over one unreadable cell.
+                    rows=[[normalize(cell or "") for cell in row] for row in table.extract()],
+                )
+            )
         page_lines: list[Line] = []
         for block_no, block in enumerate(page.get_text("dict", sort=True)["blocks"]):
             bbox: Bbox = tuple(block["bbox"])
@@ -101,6 +122,7 @@ def _extract_open_document(
         section_tree=tree,
         blocks=blocks,
         images=images,
+        tables=tables,
         geometry=geometry,
     )
 
