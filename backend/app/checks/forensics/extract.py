@@ -69,6 +69,18 @@ class ReportedStat:
     source: Literal["text", "table", "image_table"]
     raw_text: str
     low_confidence: bool = False
+    # BUG-164 (`backend-critic` finding, live-reproduced): `anchor` is
+    # derived from page/paragraph alone (`_anchor_for` below), NOT a
+    # table identity -- two distinct tables printed on the same PDF page
+    # (a common layout: several small single-row summary tables stacked
+    # on one page) share the identical `anchor` string. Any logic that
+    # groups descriptive stats "by table" using `anchor` alone silently
+    # merges rows from genuinely unrelated tables. `table_index` is the
+    # real position of the table this stat came from within
+    # `ExtractionResult.tables` (set only by `extract_descriptive_stats`
+    # below, which is the only place a table identity is actually known;
+    # `None` for an inferential stat, which has no table at all).
+    table_index: int | None = None
     # --- inferential (from body text) ---
     test_type: str | None = None  # "t" | "F" | "r" | "Chi2" | "Z" | "Q" | "Qb" | "Qw"
     df1: float | None = None
@@ -191,7 +203,7 @@ def extract_descriptive_stats(
 ) -> list[ReportedStat]:
     keywords = keywords or load_keywords()
     out: list[ReportedStat] = []
-    for table in tables:
+    for table_index, table in enumerate(tables):
         if table.low_confidence or not table.rows:
             # V-007 contract: a vision read the model itself wasn't sure
             # about must never feed a forensics check (ticket AC).
@@ -224,6 +236,7 @@ def extract_descriptive_stats(
                         stat_name=stat_name,  # type: ignore[arg-type]
                         value=value,
                         group_label=group_label,
+                        table_index=table_index,
                     )
                 )
     return out

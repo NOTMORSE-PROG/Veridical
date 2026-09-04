@@ -23,6 +23,7 @@ silently worked around.
 """
 
 import re
+from collections import Counter
 from dataclasses import dataclass
 from typing import Any
 
@@ -32,14 +33,14 @@ from app.models.enums import FlagSeverity
 
 GRIM_INCONSISTENT_WORDING = (
     "The reported mean ({mean}) appears mathematically inconsistent with "
-    "the sample size (n = {n}) — possible rounding error or typo. No "
+    "the sample size (n = {n}), possible rounding error or typo. No "
     "integer combination of {n} responses averages to {mean} at the "
     "reported precision."
 )
 GRIMMER_INCONSISTENT_WORDING = (
     "The reported standard deviation ({sd}) appears mathematically "
     "inconsistent with the reported mean ({mean}) and sample size "
-    "(n = {n}) — possible rounding error or typo."
+    "(n = {n}), possible rounding error or typo."
 )
 
 
@@ -61,29 +62,103 @@ def _decimal_places(raw_text: str) -> int:
     return len(match.group(1)) if match else 0
 
 
-_GroupKey = tuple[str, str | None]
+# BUG-164 (`backend-critic` finding, live-reproduced): `anchor` alone is
+# a PAGE string, not a table identity -- two distinct tables printed on
+# the same page (a common layout: several small single-row summary
+# tables stacked together) share the identical anchor, so grouping on
+# `(anchor, group_label)` alone silently merged rows from genuinely
+# unrelated tables. `table_index` (real position within `ExtractionResult.
+# tables`, `extract.py`'s own docstring for why it exists) disambiguates
+# them without changing `anchor`'s own displayed string (still used
+# as-is for `page_anchor`/`evidence_excerpt`).
+_GroupKey = tuple[str, int | None, str | None]
 
 
 def _group_descriptive_stats(stats: list[ReportedStat]) -> dict[_GroupKey, dict[str, ReportedStat]]:
     """Reconstructs table rows: every descriptive stat V-031 extracted
-    from the SAME table row shares (anchor, group_label) — group them
-    back into {n, mean, sd} triples per row."""
-    grouped: dict[tuple[str, str | None], dict[str, ReportedStat]] = {}
+    from the SAME table row shares (anchor, table_index, group_label) —
+    group them back into {n, mean, sd} triples per row."""
+    grouped: dict[_GroupKey, dict[str, ReportedStat]] = {}
     for stat in stats:
         if stat.kind != "descriptive" or stat.low_confidence:
             continue  # V-007 contract, same as V-031's own extraction gate
-        key = (stat.anchor, stat.group_label)
+        key = (stat.anchor, stat.table_index, stat.group_label)
         grouped.setdefault(key, {})[stat.stat_name] = stat
     return grouped
 
 
-def evaluate_grim_grimmer(stats: list[ReportedStat]) -> list[ForensicsFlagDraft]:
+@dataclass(frozen=True)
+class GrimGrimmerResult:
+    flags: list[ForensicsFlagDraft]
+    # BUG-164: rows deliberately never evaluated because they look like a
+    # multi-item composite mean, not GRIM/GRIMMER's assumed single-item
+    # mean -- disclosed here (surfaces in `CheckResult.detail`) rather
+    # than silently omitted, the module's own "skip when unsure, log why"
+    # discipline applied to the one case its own docstring named but
+    # didn't implement.
+    skipped_composite_rows: int
+
+
+_TableKey = tuple[str, int | None]
+
+
+def _likely_composite_tables(
+    grouped: dict[_GroupKey, dict[str, ReportedStat]],
+) -> set[_TableKey]:
+    """BUG-164: GRIM/GRIMMER assume n respondents each contributing ONE
+    integer item response -- violated by the single most common capstone
+    table shape, a multi-item instrument summary (ISO 25010
+    characteristics, a Likert survey) reporting a WEIGHTED mean of k
+    sub-items over the SAME n respondents, once per criterion/indicator
+    row. Measured: 67-81% false-positive rate on genuinely correct means
+    when this assumption is violated (ticket's own 2,000-trial
+    simulation). No scale/item-count metadata exists anywhere in this
+    pipeline to know k directly (this module's own docstring is honest
+    about that gap) -- but a real, purely STRUCTURAL signal is available
+    without guessing content, matching this module's existing discipline
+    of never deciding "looks like a Likert item" from table text: when
+    the SAME n value repeats across two or more DIFFERENT rows of the
+    SAME table, that table is reporting multiple criteria/items over one
+    shared respondent pool, not independent single-item measurements
+    each with their own n -- exactly the shape the ticket names.
+
+    Keyed on `(anchor, table_index)`, NOT `anchor` alone (`backend-critic`
+    finding, live-reproduced): `anchor` is a PAGE string, and two
+    genuinely distinct, unrelated single-row tables printed on the same
+    page -- a real, common layout -- would otherwise be merged into one
+    "composite" group purely because they share a page and happen to
+    report the same n, silently suppressing a real GRIM inconsistency in
+    either one. Returns the set of tables where this holds; every row in
+    such a table is skipped, honestly, rather than guessing the true
+    item count."""
+    n_counts_by_table: dict[_TableKey, Counter[int]] = {}
+    for (anchor, table_index, _group_label), row in grouped.items():
+        n_stat = row.get("n")
+        if n_stat is None:
+            continue
+        n_counts_by_table.setdefault((anchor, table_index), Counter())[int(n_stat.value)] += 1
+    return {
+        table_key
+        for table_key, counts in n_counts_by_table.items()
+        if any(c >= 2 for c in counts.values())
+    }
+
+
+def evaluate_grim_grimmer(stats: list[ReportedStat]) -> GrimGrimmerResult:
     flags: list[ForensicsFlagDraft] = []
-    for (anchor, group_label), row in _group_descriptive_stats(stats).items():
+    grouped = _group_descriptive_stats(stats)
+    composite_tables = _likely_composite_tables(grouped)
+    skipped_composite_rows = 0
+
+    for (anchor, table_index, group_label), row in grouped.items():
         n_stat = row.get("n")
         mean_stat = row.get("mean")
         if n_stat is None or mean_stat is None:
             continue  # GRIM needs both — no guessing a missing n or mean
+
+        if (anchor, table_index) in composite_tables:
+            skipped_composite_rows += 1
+            continue
 
         n = int(n_stat.value)
         mean = mean_stat.value
@@ -135,4 +210,4 @@ def evaluate_grim_grimmer(stats: list[ReportedStat]) -> list[ForensicsFlagDraft]
                     },
                 )
             )
-    return flags
+    return GrimGrimmerResult(flags=flags, skipped_composite_rows=skipped_composite_rows)

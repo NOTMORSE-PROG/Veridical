@@ -37,8 +37,9 @@ async def run_statistical_forensics_check(
 
     full_text = "\n".join(b.text for b in extraction.blocks if not b.is_furniture)
 
+    grim_grimmer = evaluate_grim_grimmer(stats)
     flag_drafts: list[ForensicsFlagDraft] = [
-        *evaluate_grim_grimmer(stats),
+        *grim_grimmer.flags,
         *evaluate_p_recalc(inferential, full_text),
         *evaluate_percentage_sums(stats),
         *evaluate_group_counts(stats),
@@ -53,6 +54,12 @@ async def run_statistical_forensics_check(
             "n_inferential_stats": len(inferential),
             "n_descriptive_stats": len(descriptive),
             "n_flags": len(flag_drafts),
+            # BUG-164: disclosed, never silently omitted -- rows GRIM/
+            # GRIMMER deliberately never evaluated because they look like
+            # a multi-item composite mean (the same n repeats across
+            # other rows of the same table), not the single-item mean
+            # the test's own math assumes.
+            "n_grim_skipped_likely_composite": grim_grimmer.skipped_composite_rows,
         },
     )
     session.add(result)

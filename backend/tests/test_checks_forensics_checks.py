@@ -14,7 +14,14 @@ from app.models.enums import FlagSeverity
 
 
 def _descriptive(
-    stat_name, value, raw_text, *, anchor="p. 20", group_label="Control", low_confidence=False
+    stat_name,
+    value,
+    raw_text,
+    *,
+    anchor="p. 20",
+    group_label="Control",
+    low_confidence=False,
+    table_index=0,
 ):
     return ReportedStat(
         kind="descriptive",
@@ -27,6 +34,7 @@ def _descriptive(
         stat_name=stat_name,
         value=value,
         group_label=group_label,
+        table_index=table_index,
     )
 
 
@@ -37,7 +45,7 @@ def test_seeded_grim_impossible_mean_is_flagged_with_arithmetic():
         _descriptive("n", 10.0, "10"),
         _descriptive("mean", 3.33, "3.33"),
     ]
-    flags = evaluate_grim_grimmer(stats)
+    flags = evaluate_grim_grimmer(stats).flags
     assert len(flags) == 1
     flag = flags[0]
     assert flag.severity == FlagSeverity.med
@@ -58,7 +66,7 @@ def test_consistent_mean_produces_no_flag():
         _descriptive("n", 10.0, "10"),
         _descriptive("mean", 3.30, "3.30"),
     ]
-    assert evaluate_grim_grimmer(stats) == []
+    assert evaluate_grim_grimmer(stats).flags == []
 
 
 def test_grimmer_inconsistent_sd_flagged_when_mean_is_consistent():
@@ -67,7 +75,7 @@ def test_grimmer_inconsistent_sd_flagged_when_mean_is_consistent():
         _descriptive("mean", 3.44, "3.44"),
         _descriptive("sd", 2.47, "2.47"),
     ]
-    flags = evaluate_grim_grimmer(stats)
+    flags = evaluate_grim_grimmer(stats).flags
     assert len(flags) == 1
     assert flags[0].detail["kind"] == "grimmer_inconsistent"
     assert flags[0].severity == FlagSeverity.med
@@ -84,7 +92,7 @@ def test_grim_failure_does_not_also_run_grimmer():
         _descriptive("mean", 3.33, "3.33"),
         _descriptive("sd", 1.2, "1.2"),
     ]
-    flags = evaluate_grim_grimmer(stats)
+    flags = evaluate_grim_grimmer(stats).flags
     assert len(flags) == 1
     assert flags[0].detail["kind"] == "grim_inconsistent"
 
@@ -92,15 +100,15 @@ def test_grim_failure_does_not_also_run_grimmer():
 def test_missing_n_or_mean_skipped_not_guessed():
     """Ticket AC #3: unknown/incomplete data is skipped, never guessed."""
     only_mean = [_descriptive("mean", 3.33, "3.33")]
-    assert evaluate_grim_grimmer(only_mean) == []
+    assert evaluate_grim_grimmer(only_mean).flags == []
 
     only_n = [_descriptive("n", 10.0, "10")]
-    assert evaluate_grim_grimmer(only_n) == []
+    assert evaluate_grim_grimmer(only_n).flags == []
 
 
 def test_missing_sd_skips_grimmer_but_grim_still_runs():
     stats = [_descriptive("n", 10.0, "10"), _descriptive("mean", 3.33, "3.33")]
-    flags = evaluate_grim_grimmer(stats)
+    flags = evaluate_grim_grimmer(stats).flags
     assert len(flags) == 1
     assert flags[0].detail["kind"] == "grim_inconsistent"
 
@@ -112,7 +120,7 @@ def test_low_confidence_vision_table_row_skipped():
         _descriptive("n", 10.0, "10", low_confidence=True),
         _descriptive("mean", 3.33, "3.33", low_confidence=True),
     ]
-    assert evaluate_grim_grimmer(stats) == []
+    assert evaluate_grim_grimmer(stats).flags == []
 
 
 def test_different_groups_evaluated_independently():
@@ -122,7 +130,7 @@ def test_different_groups_evaluated_independently():
         _descriptive("n", 20.0, "20", group_label="Treatment"),
         _descriptive("mean", 3.50, "3.50", group_label="Treatment"),  # consistent (70/20)
     ]
-    flags = evaluate_grim_grimmer(stats)
+    flags = evaluate_grim_grimmer(stats).flags
     assert len(flags) == 1
     assert "Control" in flags[0].evidence_excerpt
     assert "Treatment" not in flags[0].evidence_excerpt
@@ -136,7 +144,80 @@ def test_different_tables_never_cross_paired():
         _descriptive("n", 10.0, "10", anchor="p. 5"),
         _descriptive("mean", 3.33, "3.33", anchor="p. 9"),
     ]
-    assert evaluate_grim_grimmer(stats) == []
+    assert evaluate_grim_grimmer(stats).flags == []
+
+
+def test_repeated_n_within_one_table_skips_the_whole_table_not_guessed():
+    """BUG-164: the single most common capstone table shape reports a
+    WEIGHTED mean of k sub-items over the SAME n respondents, once per
+    criterion/indicator row — GRIM's own math assumes n respondents each
+    contributing ONE integer item response, violated here, and measured
+    at a 67-81% false-positive rate on genuinely correct means (ticket's
+    own 2,000-trial simulation). No scale/item-count metadata exists to
+    know k directly, but the repeated n across three "criteria" rows of
+    the SAME table (anchor) is a real, purely structural signal that
+    this is a multi-item summary, not three independent single-item
+    measurements — n=10 with mean=3.33 alone would be GRIM-inconsistent
+    (the seeded-demo scenario above), but paired with two sibling rows
+    sharing the identical n=10, every row in this table must be SKIPPED,
+    never flagged, and the skip must be disclosed, not silently
+    dropped."""
+    stats = [
+        _descriptive("n", 10.0, "10", group_label="Functionality"),
+        _descriptive("mean", 3.33, "3.33", group_label="Functionality"),  # GRIM-impossible alone
+        _descriptive("n", 10.0, "10", group_label="Usability"),
+        _descriptive("mean", 3.50, "3.50", group_label="Usability"),
+        _descriptive("n", 10.0, "10", group_label="Overall"),
+        _descriptive("mean", 3.40, "3.40", group_label="Overall"),
+    ]
+    result = evaluate_grim_grimmer(stats)
+    assert result.flags == []
+    assert result.skipped_composite_rows == 3
+
+
+def test_two_distinct_single_row_tables_on_the_same_page_are_never_merged():
+    """`backend-critic` finding (BUG-164 review, live-reproduced): `anchor`
+    is a PAGE string ("p. 20"), not a table identity — PyMuPDF's own
+    per-page `find_tables()` (BUG-163) commonly returns SEVERAL distinct
+    tables on one page (e.g. two small single-row summary tables stacked
+    together, a real capstone layout). Two genuinely unrelated tables
+    that happen to share both a page and an n value must NOT be merged
+    into one "composite" group and both silently skipped — that would
+    suppress a real GRIM inconsistency in either one. `table_index`
+    (the real position within `ExtractionResult.tables`) is what
+    disambiguates them; without it, this exact scenario returned zero
+    flags and `skipped_composite_rows == 2` instead of the one real
+    finding below."""
+    stats = [
+        # Table 0: a genuinely GRIM-impossible single-item mean.
+        _descriptive("n", 10.0, "10", group_label="Usability", table_index=0),
+        _descriptive("mean", 3.33, "3.33", group_label="Usability", table_index=0),
+        # Table 1: an unrelated table, same page, same n by coincidence,
+        # genuinely single-item and GRIM-consistent.
+        _descriptive("n", 10.0, "10", group_label="Reliability", table_index=1),
+        _descriptive("mean", 3.30, "3.30", group_label="Reliability", table_index=1),
+    ]
+    result = evaluate_grim_grimmer(stats)
+    assert result.skipped_composite_rows == 0
+    assert len(result.flags) == 1
+    assert result.flags[0].detail["kind"] == "grim_inconsistent"
+    assert "Usability" in result.flags[0].evidence_excerpt
+    assert "Reliability" not in result.flags[0].evidence_excerpt
+
+
+def test_a_single_row_table_with_no_repeated_n_still_runs_grim_normally():
+    """The composite-table guard must not become a blanket "never run
+    GRIM" regression — a table with exactly one criterion/row (no
+    opportunity for n to repeat) is exactly F6.2's own seeded-demo shape
+    and must still be evaluated, unaffected by BUG-164's fix."""
+    stats = [
+        _descriptive("n", 10.0, "10"),
+        _descriptive("mean", 3.33, "3.33"),
+    ]
+    result = evaluate_grim_grimmer(stats)
+    assert len(result.flags) == 1
+    assert result.flags[0].detail["kind"] == "grim_inconsistent"
+    assert result.skipped_composite_rows == 0
 
 
 def test_wording_never_uses_accusatory_language():
