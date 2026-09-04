@@ -63,6 +63,24 @@ const UNTITLED: LibraryItemOut = {
   created_at: "2026-08-12T08:00:00Z",
 };
 
+// BUG-147: the REAL shape the backend now returns for another
+// instructor's manuscript -- matches `_item_out`'s redacted branch
+// exactly (`group_label` is the non-identifying placeholder, `title`/
+// `original_filename` are null, `authors` is empty), unlike `SHARED`
+// above, which still carries fixture identity data for unrelated tests
+// that predate this fix and aren't about redaction.
+const REDACTED: LibraryItemOut = {
+  manuscript_id: 99,
+  group_label: "Archived manuscript #99",
+  title: null,
+  authors: [],
+  program: "IT",
+  original_filename: null,
+  created_at: "2026-08-13T08:00:00Z",
+  purged_at: null,
+  is_own: false,
+};
+
 const VIEWER: ManuscriptViewerOut = {
   manuscript_id: 1,
   original_filename: "portal.pdf",
@@ -512,5 +530,29 @@ describe("Signal manuscript library", () => {
     expect(await screen.findByText(/may show its stored source/)).toBeInTheDocument();
     expect(screen.getByText("Your manuscript")).toBeInTheDocument();
     expect(screen.getByText("Bounded shared excerpt")).toBeInTheDocument();
+  });
+
+  // BUG-147 (`ux-critic` finding): the backend redaction had no frontend
+  // test guarding the copy an instructor actually reads -- a future
+  // refactor could silently regress "Withheld..." back to "Not listed"
+  // (which misleadingly implies no authors were ever recorded) and
+  // nothing would catch it. These two close that gap on the list card
+  // and the detail screen.
+  it("BUG-147: names the redaction reason on the list card, distinct from a genuinely empty own record", async () => {
+    const page = { ...PAGE, items: [REDACTED], total: 1 };
+    vi.stubGlobal("fetch", stubFetchByPath({ "/library": page, "/programs": [] }));
+    renderWithProviders(<SignalLibraryPage />, { route: "/library", path: "/library" });
+
+    expect(await screen.findByText("Withheld for another instructor's manuscript")).toBeInTheDocument();
+    expect(screen.queryByText("Not listed")).not.toBeInTheDocument();
+    // The anonymized placeholder is what's shown, never the real identity.
+    expect(screen.getByText("Archived manuscript #99")).toBeInTheDocument();
+  });
+
+  it("BUG-147: names the redaction reason on the detail screen too", async () => {
+    vi.stubGlobal("fetch", stubFetchByPath({ "/library/99": REDACTED }));
+    renderWithProviders(<SignalLibraryDetailPage />, { route: "/library/99", path: "/library/:manuscriptId" });
+
+    expect(await screen.findByText("Withheld for another instructor's manuscript")).toBeInTheDocument();
   });
 });

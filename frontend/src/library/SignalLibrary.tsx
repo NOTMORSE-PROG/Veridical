@@ -295,7 +295,13 @@ function LibraryCard({
           </div>
           <div>
             <dt>Authors</dt>
-            <dd>{item.authors.length ? item.authors.join(", ") : "Not listed"}</dd>
+            <dd>
+              {item.authors.length
+                ? item.authors.join(", ")
+                : item.is_own
+                  ? "Not listed"
+                  : "Withheld for another instructor's manuscript"}
+            </dd>
           </div>
           <div>
             <dt>Processed</dt>
@@ -451,7 +457,7 @@ export function SignalLibraryPage() {
       <aside className="signal-library-privacy">
         <strong>Privacy boundary</strong>
         <p>
-          Your account can open its retained source files when they are viewable. Another instructor's record exposes only bounded chapter excerpts.
+          Your account can open its retained source files when they are viewable. Another instructor's record shows only a bounded chapter excerpt, program, and processing date. Student names, the manuscript title, the team name, and the file name are withheld.
           Removing stored content keeps prior reports, decisions, and audit history intact.
         </p>
       </aside>

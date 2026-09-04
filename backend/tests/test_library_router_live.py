@@ -120,10 +120,16 @@ def seeded(client, api_scratch_url, tmp_path):
                     instructor_id=stranger.id,
                     name="Stranger Group",
                     name_normalized="stranger group",
+                    # BUG-147 (`backend-critic` finding): a real title,
+                    # unchanged from before this fix -- without one, the
+                    # redaction test can't tell "title was stripped" from
+                    # "title was never set", since both look like `None`.
+                    title="A Confidential Stranger Capstone Title",
                 )
                 session.add_all([own_group, stranger_group])
                 await session.commit()
                 session.add(GroupMember(group_id=own_group.id, name="Author One"))
+                session.add(GroupMember(group_id=stranger_group.id, name="Maria Santos"))
                 await session.commit()
 
                 mine = Manuscript(
@@ -138,6 +144,7 @@ def seeded(client, api_scratch_url, tmp_path):
                     group_label="Stranger Group",
                     group_id=stranger_group.id,
                     file_ref="",
+                    original_filename="stranger_capstone.pdf",
                     ingest_status=IngestStatus.done,
                 )
                 session.add_all([mine, theirs])
@@ -206,6 +213,41 @@ def test_list_library_spans_both_accounts_unlike_archive(seeded):
     assert by_id[ids["theirs"]]["program"] is None
 
 
+def test_list_library_never_exposes_another_accounts_identity(seeded):
+    """BUG-147 (Critical): `list_library` used to return every OTHER
+    instructor's full team name, capstone title, member names, and
+    original filename to every account with no consent step -- a Data
+    Privacy Act (RA 10173) exposure, confirmed live. The shared corpus
+    itself stays intentional (BUG-050) -- what changes is the PAYLOAD for
+    a row this requester doesn't own: only a non-identifying reference,
+    program, and date, exactly the ticket's own worked example ("archived
+    manuscript #3, IT, Aug 2026")."""
+    client, ids = seeded
+    resp = client.get("/library")
+    assert resp.status_code == 200, resp.text
+    by_id = {item["manuscript_id"]: item for item in resp.json()["items"]}
+    theirs = by_id[ids["theirs"]]
+    assert theirs["is_own"] is False
+    assert theirs["title"] is None
+    assert theirs["authors"] == []
+    assert theirs["original_filename"] is None
+    assert theirs["group_label"] == f"Archived manuscript #{ids['theirs']}"
+    assert "Stranger Group" not in theirs["group_label"]
+    # Whole-payload check (`backend-critic` finding, BUG-147 review): the
+    # enriched fixture now gives `theirs` a real title, member, and
+    # filename, so these strings would appear SOMEWHERE in the raw
+    # response if the fix regressed, even if not on the exact field this
+    # test happens to check first.
+    assert "Confidential Stranger" not in str(theirs)
+    assert "Maria Santos" not in str(theirs)
+    assert "stranger_capstone" not in str(theirs)
+    # The requester's OWN row is completely unaffected by this fix.
+    mine = by_id[ids["mine"]]
+    assert mine["title"] == "A Real Capstone Title"
+    assert mine["authors"] == ["Author One"]
+    assert mine["group_label"] == "Own Group"
+
+
 def test_list_library_filters_by_program(seeded):
     client, ids = seeded
     resp = client.get("/library?program=IT")
@@ -215,6 +257,10 @@ def test_list_library_filters_by_program(seeded):
 
 
 def test_list_library_searches_group_title_and_author(seeded):
+    """The search filter runs against the real stored `Group`/
+    `GroupMember` rows server-side (never against the anonymized response
+    payload), scoped to the CALLER's own manuscripts (BUG-147's search-
+    scoping fix, see the adversarial test below for why)."""
     client, ids = seeded
     for q in ["Real Capstone", "Own Group", "Author One"]:
         resp = client.get(f"/library?search={q}")
@@ -222,13 +268,60 @@ def test_list_library_searches_group_title_and_author(seeded):
         assert {item["manuscript_id"] for item in resp.json()["items"]} == {ids["mine"]}
 
 
+def test_search_cannot_be_used_to_confirm_another_accounts_real_identity(seeded):
+    """BUG-147 (`ux-critic` finding, live-reproduced before this fix): the
+    Library screen's own redaction is worthless if an instructor who
+    already suspects a name (a rumor, a cover page glimpsed elsewhere) can
+    type it into Search and get a hit back with program and date attached
+    -- that CONFIRMS the name exists in another account's manuscript even
+    though the row itself never displays it. `owner` searches for
+    `stranger`'s real, never-displayed identity (team name, capstone
+    title, member name) and must get ZERO results, the same as searching
+    for a name that doesn't exist anywhere at all."""
+    client, ids = seeded
+    for needle in [
+        "Stranger Group",
+        "Confidential Stranger",  # the redacted title
+        "Maria Santos",  # the redacted member name
+        "stranger_capstone",  # the redacted original filename
+    ]:
+        resp = client.get(f"/library?search={needle}")
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert body["total"] == 0, (
+            f"search={needle!r} returned a hit -- confirms another account's "
+            "real identity exists even though the row itself is redacted"
+        )
+        assert body["items"] == []
+
+    # A genuinely nonexistent name is indistinguishable from a real,
+    # redacted one -- both correctly return nothing.
+    control = client.get("/library?search=Zzyzx Nonexistent Name")
+    assert control.status_code == 200, control.text
+    assert control.json()["total"] == 0
+
+
 def test_library_item_detail_visible_for_a_strangers_manuscript_too(seeded):
+    """BUG-147: the RECORD is visible (identity-is-the-point-of-the-library,
+    BUG-050's decided direction) but the record's real identity is not.
+    `get_library_item` has its own field-population logic ahead of the
+    shared `_item_out` (`backend-critic` finding, BUG-147 review) -- a
+    separate code path from `list_library`'s, so it needs its own full
+    assertion, not just `group_label`, or a future change that broke only
+    THIS endpoint's redaction would go uncaught."""
     client, ids = seeded
     resp = client.get(f"/library/{ids['theirs']}")
     assert resp.status_code == 200, resp.text
     body = resp.json()
     assert body["is_own"] is False
-    assert body["group_label"] == "Stranger Group"
+    assert body["title"] is None
+    assert body["authors"] == []
+    assert body["original_filename"] is None
+    assert body["group_label"] == f"Archived manuscript #{ids['theirs']}"
+    assert "Stranger Group" not in body["group_label"]
+    assert "Confidential Stranger" not in str(body)
+    assert "Maria Santos" not in str(body)
+    assert "stranger_capstone" not in str(body)
 
 
 def test_library_excerpt_is_bounded_and_available_for_any_manuscript(seeded):

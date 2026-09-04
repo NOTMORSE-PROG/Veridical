@@ -20,7 +20,7 @@
 
 from pathlib import Path
 
-from sqlalchemy import func, or_, select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.checks.reuse.embed import split_context
@@ -86,6 +86,28 @@ def _item_out(
     authors: list[str],
     requesting_instructor_id: int,
 ) -> LibraryItemOut:
+    """BUG-147 (Critical, owner-decision-documented fix -- ticket's own
+    "cheapest first" option 1): another instructor's manuscript keeps
+    ONLY what F7 needs to stay explainable -- a non-identifying reference,
+    program, and processing date, exactly the ticket's own worked example
+    ("archived manuscript #3, IT, Aug 2026"). Real student names, the
+    capstone title, the team name, and the original filename are never
+    returned for a row this requester doesn't own. The originality corpus
+    itself stays shared by design (BUG-050, owner decision, 2026-08-16,
+    restated in FEATURES.md) -- this fixes the PAYLOAD, not the sharing."""
+    is_own = manuscript.instructor_id == requesting_instructor_id
+    if not is_own:
+        return LibraryItemOut(
+            manuscript_id=manuscript.id,
+            group_label=f"Archived manuscript #{manuscript.id}",
+            title=None,
+            authors=[],
+            program=program_name,
+            original_filename=None,
+            created_at=manuscript.created_at,
+            purged_at=manuscript.purged_at,
+            is_own=False,
+        )
     return LibraryItemOut(
         manuscript_id=manuscript.id,
         group_label=manuscript.group_label,
@@ -95,7 +117,7 @@ def _item_out(
         original_filename=manuscript.original_filename,
         created_at=manuscript.created_at,
         purged_at=manuscript.purged_at,
-        is_own=manuscript.instructor_id == requesting_instructor_id,
+        is_own=True,
     )
 
 
@@ -138,12 +160,26 @@ async def list_library(
         member_match = select(GroupMember.id).where(
             GroupMember.group_id == Group.id, GroupMember.name.ilike(needle)
         )
+        # BUG-147 (`ux-critic` finding, live-reproduced): a search hit is
+        # itself a disclosure -- typing another instructor's real student
+        # name, capstone title, team name, or filename into this box and
+        # getting ANY result back (even one whose row shows only the
+        # anonymized placeholder) confirms that name exists in the shared
+        # corpus, with program and date attached. That defeats the whole
+        # point of `_item_out`'s redaction: an instructor doesn't need to
+        # SEE a name to have it CONFIRMED. Scoped to the requester's own
+        # manuscripts, matching this endpoint's ticket-cited purpose
+        # ("search by title/author") -- a name search can only ever
+        # search names the requester is already allowed to see.
         filters.append(
-            or_(
-                Group.name.ilike(needle),
-                Group.title.ilike(needle),
-                Manuscript.original_filename.ilike(needle),
-                member_match.exists(),
+            and_(
+                Manuscript.instructor_id == instructor_id,
+                or_(
+                    Group.name.ilike(needle),
+                    Group.title.ilike(needle),
+                    Manuscript.original_filename.ilike(needle),
+                    member_match.exists(),
+                ),
             )
         )
 
