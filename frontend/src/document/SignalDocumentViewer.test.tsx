@@ -56,6 +56,7 @@ const FLAG: FlagOut = {
   llm_mode: "real",
   passage_pair: null,
   first_upload_context: false,
+  evidence_unavailable: false,
   citation_source_key: null,
   confirmed_citation_source: false,
 };
