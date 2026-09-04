@@ -60,6 +60,32 @@ class PdfBuilder:
         self.page.insert_image(pymupdf.Rect(*rect), stream=pix.tobytes("png"))
         return self
 
+    def table(self, rows: list[list[str]], *, col_width: float = 100.0) -> "PdfBuilder":
+        """BUG-163: a real, ruled grid (`find_tables()` needs actual line
+        art, not just column-aligned text, to detect a table at all) --
+        text per cell plus horizontal/vertical rule lines around it, same
+        minimal-typeset spirit as `.line()`/`.image()` above."""
+        x0, y0 = MARGIN_X, self.y
+        row_height = LINE_STEP
+        for r, row in enumerate(rows):
+            for c, cell in enumerate(row):
+                self.page.insert_text(
+                    (x0 + c * col_width, y0 + r * row_height), cell, fontsize=BODY, fontname=FONT
+                )
+        top = y0 - LINE_STEP + 4
+        for r in range(len(rows) + 1):
+            self.page.draw_line(
+                (x0 - 5, top + r * row_height),
+                (x0 - 5 + col_width * len(rows[0]), top + r * row_height),
+            )
+        for c in range(len(rows[0]) + 1):
+            self.page.draw_line(
+                (x0 - 5 + c * col_width, top),
+                (x0 - 5 + c * col_width, top + row_height * len(rows)),
+            )
+        self.y = top + row_height * len(rows) + LINE_STEP
+        return self
+
     def save(self, path: Path) -> Path:
         self.doc.save(str(path))
         self.doc.close()
@@ -154,6 +180,29 @@ def test_image_blocks_inventoried_with_bbox_and_page(thesis):
     assert img.page == 5
     x0, y0, x1, y1 = img.bbox
     assert x1 > x0 and y1 > y0
+
+
+def test_native_table_extracted_with_page_anchor_and_rows(tmp_path):
+    """BUG-163: `ExtractionResult.tables` used to stay empty for every PDF
+    -- `forensics/extract.py`'s `extract_descriptive_stats(extraction.
+    tables)` had nothing to read on the format everyone actually submits
+    (production run 12: zero forensics flags). `page.find_tables()`
+    (PyMuPDF 1.28.0, confirmed present) is now wired in, same flat
+    `rows: list[list[str]]` shape `ingest/docx.py`'s native table
+    extraction already produces -- no header/caption detection on either
+    side, deliberately consistent between formats."""
+    b = PdfBuilder()
+    b.new_page().line("CHAPTER 4 RESULTS AND DISCUSSION", bold=True)
+    b.line("Table 1 summarizes the descriptive statistics for the two groups.")
+    b.table([["Group", "n", "M"], ["Respondents", "10", "3.33"]])
+    path = b.save(tmp_path / "table.pdf")
+
+    result = extract_document(str(path), get_settings())
+    assert len(result.tables) == 1
+    table = result.tables[0]
+    assert table.page == 1
+    assert table.source == "native"
+    assert table.rows == [["Group", "n", "M"], ["Respondents", "10", "3.33"]]
 
 
 def test_page_furniture_is_flagged_not_deleted(thesis):

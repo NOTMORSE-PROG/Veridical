@@ -8,10 +8,15 @@ that didn't exist as a real file before this ticket — built here for the
 first time. Runs the REAL pipeline (real ingestion, real citation/
 forensics checks) against two DOCX manuscripts built in this file: one
 with all four seeded errors, one with clean, verifiably-correct versions
-of the same four claims. DOCX, not PDF: native table extraction (needed
-for the GRIM-impossible-mean seed) is only implemented for DOCX — PDF
-ingestion never populates `ExtractionResult.tables` at all (a real,
-disclosed gap, not something this suite works around).
+of the same four claims. DOCX, not PDF -- kept that way even after
+BUG-163 wired `page.find_tables()` into `ingest/pdf.py` (PDF native
+table extraction is no longer the disclosed gap it was; see
+`test_ingest_pdf.py::test_native_table_extracted_with_page_anchor_and_rows`
+for that ingestion-level regression guard, and `tests/test_checks_forensics_extract.py`
+for `extract_descriptive_stats`'s own format-agnostic coverage) -- DOCX's
+`doc.add_table()` API stays the simpler, more deterministic way to build
+THIS suite's specific fixture, not a statement about which format the
+product actually supports.
 
 Hits the real CrossRef API (DOI existence/retraction) — same "verify
 against the real world, not just fixtures" standard V-027/V-028/V-029
