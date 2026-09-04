@@ -43,6 +43,8 @@ def _ctx(
     section_tree: SectionTree | None = None,
     geometry: list[PageGeometry] | None = None,
     tables: list[TableBlock] | None = None,
+    vision_status: str = "none",
+    has_images: bool = False,
     citations: list | None = None,
 ) -> RuleContext:
     settings = get_settings()
@@ -53,6 +55,8 @@ def _ctx(
         section_tree=section_tree or SectionTree(source="heuristics", nodes=[]),
         geometry=geometry or [],
         tables=tables or [],
+        vision_status=vision_status,
+        has_images=has_images,
         citations=citations or [],
         margin_tolerance_pts=settings.structural_margin_tolerance_pts,
         citation_style_min_ratio=settings.structural_citation_style_min_ratio,
@@ -458,10 +462,80 @@ def test_bug_048_table_format_rule_still_matches_a_real_table_criterion():
 
 
 def test_table_formatting_fails_when_no_tables_present():
+    """No tables AND no images at all -- a genuinely conclusive absence,
+    real `failed` regardless of `vision_status` (default "none" here is
+    the ordinary "nothing to check" case, not an unresolved one)."""
     spec = get_rule(TABLE_FORMAT_RULE_ID)
     criterion = FakeCriterion(text="Tables must be properly formatted with captions")
     assert spec.matches(criterion)
-    outcome = spec.run(criterion, _ctx(tables=[]))
+    outcome = spec.run(criterion, _ctx(tables=[], vision_status="none", has_images=False))
+    assert outcome.outcome == ResultOutcome.failed
+
+
+def test_table_formatting_still_fails_when_vision_ran_and_genuinely_found_none():
+    """`vision_status="done"` -- the image-reading pass genuinely
+    completed and merged nothing in -- must NOT be treated the same as
+    unresolved, even when the manuscript DOES have (non-table) images. A
+    real, checked absence stays a real `failed`."""
+    spec = get_rule(TABLE_FORMAT_RULE_ID)
+    criterion = FakeCriterion(text="Tables must be properly formatted with captions")
+    outcome = spec.run(criterion, _ctx(tables=[], vision_status="done", has_images=True))
+    assert outcome.outcome == ResultOutcome.failed
+
+
+@pytest.mark.parametrize("vision_status", ["unavailable", "none"])
+def test_table_formatting_is_not_applicable_when_images_exist_but_were_never_confirmed_read(
+    vision_status,
+):
+    """BUG-175, live-reproduced against real production data:
+    `backend/data/4.extraction.json` and `26.extraction.json` are the
+    SAME source document (identical text_chars=55351, blocks=853) with
+    the SAME 19 embedded images, yet produced OPPOSITE verdicts on this
+    exact rule -- `failed` (0 tables) on the pass that landed
+    `vision_status="none"` (`select_images`'s own size/count filtering
+    excluded every image that time -- config/threshold drift between
+    ingestion times, not a property of the document), `passed` (12
+    tables) on the pass that completed. `vision_status="unavailable"`
+    (the ticket's other named cause: no LLM client, or the day's quota
+    was spent) must be treated identically -- both are "images exist,
+    never confirmed read," not "this manuscript has no tables." Ground
+    rule 9: api-down is not "unverifiable", vision-unavailable is not
+    "this manuscript has no tables". Native PDF tables (BUG-163) are
+    unaffected by vision status and still populate `ctx.tables` when
+    they exist, so this branch is reached only when there is genuinely
+    nothing else to go on. `anchor_kind` defaults to "page" (PDF) in
+    `_ctx()` -- the DOCX counter-case is tested separately below."""
+    spec = get_rule(TABLE_FORMAT_RULE_ID)
+    criterion = FakeCriterion(text="Tables must be properly formatted with captions")
+    outcome = spec.run(criterion, _ctx(tables=[], vision_status=vision_status, has_images=True))
+    assert outcome.outcome == ResultOutcome.not_applicable
+    assert "not confirmed read" in outcome.detail["reason"]
+
+
+def test_table_formatting_still_fails_for_docx_even_with_images_and_unresolved_vision():
+    """`backend-critic` finding (BUG-175 review, live-reproduced): vision
+    (F1.3) is PDF-only (`ingest/vision.py`'s own docstring) -- DOCX
+    images always carry `bbox=None` (`ingest/docx.py`), so
+    `select_images`'s size-area filter can NEVER pass one, and
+    `vision_status` can NEVER become anything but "none" for a DOCX
+    manuscript, regardless of quota or config. Without gating the new
+    branch to `anchor_kind == "page"`, a DOCX manuscript with any
+    embedded image (a cover-page seal, a single figure -- extremely
+    common) and zero native tables would get `not_applicable` instead of
+    a real `failed`, PERMANENTLY, not just on a bad quota day -- silently
+    losing this criterion's ability to ever fail a DOCX manuscript. DOCX
+    must keep the old, correct, native-table-only `failed` path."""
+    spec = get_rule(TABLE_FORMAT_RULE_ID)
+    criterion = FakeCriterion(text="Tables must be properly formatted with captions")
+    outcome = spec.run(
+        criterion,
+        _ctx(
+            anchor_kind="paragraph",
+            tables=[],
+            vision_status="none",
+            has_images=True,
+        ),
+    )
     assert outcome.outcome == ResultOutcome.failed
 
 
