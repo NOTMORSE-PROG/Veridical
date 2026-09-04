@@ -41,6 +41,24 @@ def _run(criterion, ctx: RuleContext) -> RuleOutcome:
                 )
             },
         )
+    # BUG-174: zero satisfies every maximum bound ("must not exceed 100
+    # pages" trivially passes at 0), so an extraction that silently
+    # produced nothing -- verified live in `backend/data/`, ~19% of the
+    # stored raw store has `page_count=0, blocks=0, text_chars=0` on a
+    # PDF -- looked like a clean pass instead of an honest unknown.
+    # Same class of guard as the `anchor_kind` check directly above:
+    # zero pages is meaningless for a rule about page counts.
+    if ctx.page_count == 0:
+        return RuleOutcome(
+            outcome=ResultOutcome.not_applicable,
+            anchor="document",
+            detail={
+                "reason": (
+                    "No pages were extracted from this manuscript, so a page-count "
+                    "bound cannot be checked."
+                )
+            },
+        )
     text = full_text(criterion)
     bound = extract_bound(text)
     if bound is None:

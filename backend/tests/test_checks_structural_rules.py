@@ -365,6 +365,31 @@ def test_page_limit_pdf(text, page_count, expected):
     assert outcome.outcome == expected
 
 
+@pytest.mark.parametrize(
+    "text",
+    [
+        "must not exceed 100 pages",  # max bound: 0 satisfies it trivially
+        "must be at least 60 pages",  # min bound: 0 trivially fails it
+    ],
+)
+def test_page_limit_zero_pages_is_not_applicable_not_a_verdict(text):
+    """BUG-174: a zero-page extraction (production: ~19% of the local raw
+    store, ids 6/7/13/23/24 -- `page_count=0, blocks=0, text_chars=0`)
+    used to PASS "must not exceed 100 pages" outright, because zero
+    satisfies every maximum -- feeding a fabricated pass into the
+    composite score (ground rule 9: "N/A is not passed"). The symmetric
+    min-bound case ("must be at least 60 pages" -> failed at 0) is
+    EQUALLY dishonest even though it happens to look like a correct
+    verdict: zero pages here doesn't mean the manuscript genuinely has no
+    pages, it means the extraction produced nothing, and that is an
+    unknown, not a fact -- the same unconditional-guard convention the
+    sibling `anchor_kind != "page"` check directly above already uses in
+    this function."""
+    spec = get_rule(PAGE_LIMIT_RULE_ID)
+    outcome = spec.run(FakeCriterion(text=text), _ctx(anchor_kind="page", page_count=0))
+    assert outcome.outcome == ResultOutcome.not_applicable
+
+
 # --- geometry.py: margins_spacing ------------------------------------------------
 
 
