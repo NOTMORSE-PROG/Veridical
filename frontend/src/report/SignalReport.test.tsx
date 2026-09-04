@@ -140,6 +140,46 @@ describe("SignalReportPage", () => {
     expect(screen.getByRole("button", { name: "Reject manuscript" })).toBeDisabled();
   });
 
+  it("makes a chosen-but-unconfirmed resolution legible as a pending step, not a done one (BUG-145)", async () => {
+    stubReport(BASE_REPORT, [ESCALATED]);
+    renderWithProviders(<SignalReportPage />, { route: "/report/5", path: "/report/:checkRunId" });
+
+    fireEvent.click(await screen.findByRole("button", { name: "Meets criterion" }));
+
+    // The chosen resolution is a real heading, not inline text -- and the
+    // page states plainly that nothing is saved yet, so the two-step
+    // choose-then-confirm flow can't be mistaken for a completed action
+    // (the original bug: the options vanishing read exactly like success).
+    expect(screen.getByRole("heading", { name: "Mark as meets criterion", level: 4 })).toBeInTheDocument();
+    expect(screen.getByText("Step 2 of 2: nothing is saved yet")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Confirm resolution" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Cancel" })).toBeInTheDocument();
+    // Nothing was submitted by choosing -- the resolve mutation only fires on Confirm.
+    expect(screen.getByText("1 unresolved")).toBeInTheDocument();
+
+    // The pending state must be announced to assistive tech even though
+    // autoFocus moves keyboard/AT focus straight into the reason textarea
+    // on the same render (ux-critic finding: without this, a screen-reader
+    // user never hears "nothing is saved yet" at all). A live region is
+    // announced from its CONTENT, not its accessible name (which stays
+    // empty with no aria-label), so this checks the role exists and wraps
+    // the pending copy, not a computed name.
+    const status = screen.getByRole("status");
+    expect(within(status).getByText("Step 2 of 2: nothing is saved yet")).toBeInTheDocument();
+    expect(within(status).getByText("Mark as meets criterion")).toBeInTheDocument();
+  });
+
+  it("returns focus to the criterion heading on Cancel, not to <body> (BUG-145)", async () => {
+    stubReport(BASE_REPORT, [ESCALATED]);
+    renderWithProviders(<SignalReportPage />, { route: "/report/5", path: "/report/:checkRunId" });
+
+    fireEvent.click(await screen.findByRole("button", { name: "Meets criterion" }));
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+
+    expect(screen.getByRole("heading", { name: ESCALATED.criterion_text })).toHaveFocus();
+    expect(screen.getByRole("button", { name: "Meets criterion" })).toBeInTheDocument();
+  });
+
   it("shows bounded integrity evidence and honest partial-run and test-mode disclosures", async () => {
     const report: ReportOut = {
       ...BASE_REPORT,

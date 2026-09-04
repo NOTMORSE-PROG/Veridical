@@ -2431,6 +2431,32 @@
     margin: 0;
   }
 
+  .signal-resolution-form__pending {
+    grid-column: 1 / -1;
+    display: grid;
+    gap: var(--signal-space-1);
+  }
+
+  /* BUG-145 (ux-critic review, round 2): this region is always mounted
+     (see SignalReviewSections.tsx) so a screen reader is monitoring it
+     before it has content, not just when a resolution is pending -- it
+     must take no visual space and not add a stray grid gap when empty. */
+  .signal-resolution-form__pending:empty {
+    display: none;
+  }
+
+  .signal-resolution-form__pending p {
+    margin: 0;
+  }
+
+  .signal-resolution-form__pending h4 {
+    margin: 0;
+    font-family: var(--font-signal-display);
+    font-size: var(--signal-type-body);
+    font-weight: var(--signal-weight-bold);
+    line-height: var(--signal-line-section);
+  }
+
   .signal-resolution-form label,
   .signal-decision-dialog label,
   .signal-share-dialog label {

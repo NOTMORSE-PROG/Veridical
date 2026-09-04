@@ -332,11 +332,22 @@ function SignalResolutionCard({ item, checkRunId, onResolved }: {
   const resolve = useResolveEscalation(checkRunId);
   const reasonInvalid = attempted && reason.trim().length < RESOLUTION_REASON_MIN_LENGTH;
   const reasonErrorId = `signal-resolution-reason-${item.check_result_id}`;
+  const criterionHeadingRef = useRef<HTMLHeadingElement>(null);
 
   function choose(resolution: EscalationResolution, level?: number) {
     setPending({ resolution, level });
     setReason("");
     setAttempted(false);
+  }
+
+  function cancel() {
+    setPending(undefined);
+    // BUG-145 (ux-critic review): Confirm already moves focus to the
+    // section heading on success; Cancel dropped focus to <body> instead
+    // of returning it anywhere, losing a keyboard/screen-reader user's
+    // place. This heading is outside the pending/options conditional, so
+    // it's already mounted -- no need to wait for the next render.
+    criterionHeadingRef.current?.focus();
   }
 
   function confirm() {
@@ -364,7 +375,7 @@ function SignalResolutionCard({ item, checkRunId, onResolved }: {
   return (
     <article className="signal-resolution-card">
       <div className="signal-resolution-card__context">
-        <div><p className="signal-section-kicker">Criterion requiring judgment</p><h3>{item.criterion_text}</h3></div>
+        <div><p className="signal-section-kicker">Criterion requiring judgment</p><h3 ref={criterionHeadingRef} tabIndex={-1}>{item.criterion_text}</h3></div>
         <p className="signal-resolution-card__vote">{voteSummary(item)}</p>
         {item.reason && <p>{item.reason}</p>}
         {item.injection_suspected && item.injection_matched_snippet && (
@@ -372,6 +383,23 @@ function SignalResolutionCard({ item, checkRunId, onResolved }: {
         )}
         {item.unverified_evidence && item.unverified_evidence.length > 0 && (
           <div className="signal-unverified-evidence"><strong>Could not verify against the source</strong>{item.unverified_evidence.map((quote) => <blockquote key={quote}>“{quote}”</blockquote>)}</div>
+        )}
+      </div>
+
+      {/* BUG-145 (ux-critic review, round 2): this region must be mounted
+          BEFORE it has content, not created already-populated in the same
+          render as `pending` becoming truthy -- a live region announced
+          from birth is not reliably picked up by assistive tech (Soueidan,
+          "Accessible Notifications with ARIA Live Regions"), and the
+          textarea's autoFocus below moves focus past it on the same
+          render regardless. Empty and out of layout flow (`:empty` in
+          signal.css) whenever nothing is pending. */}
+      <div className="signal-resolution-form__pending" role="status" aria-live="polite">
+        {pending && (
+          <>
+            <p className="signal-section-kicker">Step 2 of 2: nothing is saved yet</p>
+            <h4>{resolutionLabel(item, pending.resolution, pending.level)}</h4>
+          </>
         )}
       </div>
 
@@ -385,12 +413,11 @@ function SignalResolutionCard({ item, checkRunId, onResolved }: {
         </div>
       ) : (
         <div className="signal-resolution-form">
-          <p><strong>Pending resolution:</strong> {resolutionLabel(item, pending.resolution, pending.level)}</p>
           <label><span>Reason (required)</span><textarea autoFocus rows={3} value={reason} aria-invalid={reasonInvalid || undefined} aria-describedby={reasonInvalid ? reasonErrorId : undefined} onChange={(event) => { setReason(event.target.value); if (attempted) setAttempted(false); }} /></label>
           <p className="signal-field-hint">This reason appears in the report, export, and any active share link.</p>
           {reasonInvalid && <p id={reasonErrorId} role="alert" className="signal-field-error">{reason.trim() ? `Enter at least ${RESOLUTION_REASON_MIN_LENGTH} characters.` : "Enter a reason before confirming."}</p>}
           {resolve.error && <Alert title="Could not save this resolution" tone="error" role="alert">{resolve.error instanceof Error ? resolve.error.message : "Try again."}</Alert>}
-          <div><Button variant="secondary" disabled={resolve.isPending} onClick={() => setPending(undefined)}>Cancel</Button><Button variant="brand" busy={resolve.isPending} onClick={confirm}>Confirm resolution</Button></div>
+          <div><Button variant="secondary" disabled={resolve.isPending} onClick={cancel}>Cancel</Button><Button variant="brand" busy={resolve.isPending} onClick={confirm}>Confirm resolution</Button></div>
         </div>
       )}
     </article>
