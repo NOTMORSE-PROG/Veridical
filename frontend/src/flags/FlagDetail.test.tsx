@@ -317,6 +317,7 @@ function makeFlag(overrides: Partial<FlagOut> = {}): FlagOut {
     llm_mode: "real",
     passage_pair: null,
     first_upload_context: false,
+    evidence_unavailable: false,
     citation_source_key: { kind: "doi", value: "10.9999/local-source" },
     confirmed_citation_source: false,
     ...overrides,
