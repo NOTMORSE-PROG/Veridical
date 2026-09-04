@@ -30,6 +30,7 @@ from app.errors import ConflictError, GoneError, NotFoundError
 from app.ingest.regions import _flatten, recover_region
 from app.ingest.schemas import SectionTree
 from app.ingest.service import load_raw_store
+from app.models.audit import AuditLog
 from app.models.enums import (
     CheckKind,
     CheckRunStatus,
@@ -165,6 +166,44 @@ async def aggregate_and_score(
     else:
         report.composite_score = composite
         report.status = scoring.status
+    # BUG-151: a verdict-derivation event, so the number on the report
+    # screen is traceable to something (charter judgment 4) -- pairs with
+    # BUG-150's own open question about the deduction cap. Written on a
+    # genuine re-aggregation (a flag override, an escalation resolution
+    # changed the number), not just the first -- but NOT unconditionally on
+    # every call: `aggregate_and_score` recomputes from scratch every time,
+    # including on pipeline resume after a crash between this function's
+    # own commit and the stage-status advance that follows it
+    # (`pipeline/machine.py`'s `_transition_after_boundary`), which would
+    # otherwise write a second, indistinguishable row for identical input
+    # (backend-critic finding, live-reproduced: two calls with nothing
+    # changed produced two byte-identical audit rows). Every F4-F7 check
+    # already guards its own write this way via `existing_*_result`
+    # idempotency checks; this compares against the run's own last recorded
+    # verdict instead, since a report row (unlike a check_result) is
+    # legitimately re-written every call regardless of whether anything
+    # changed.
+    new_verdict_payload = {
+        "composite_score": scoring.composite_score,
+        "status": scoring.status.value,
+        "reason": scoring.reason,
+        "thresholds": scoring.thresholds,
+        "flag_deduction": scoring.flag_deduction,
+        "unresolved_high_flag_count": scoring.unresolved_high_flag_count,
+    }
+    last_verdict_payload = await session.scalar(
+        select(AuditLog.payload)
+        .where(AuditLog.check_run_id == check_run_id, AuditLog.event_type == "verdict_computed")
+        .order_by(AuditLog.id.desc())
+        .limit(1)
+    )
+    if last_verdict_payload != new_verdict_payload:
+        await write_audit_event(
+            session,
+            event_type="verdict_computed",
+            check_run_id=check_run_id,
+            payload=new_verdict_payload,
+        )
     await session.commit()
     await session.refresh(report)
     return report

@@ -17,6 +17,7 @@ actual findings).
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.audit.service import write_audit_event
 from app.checks.forensics.checks import ForensicsFlagDraft, evaluate_grim_grimmer
 from app.checks.forensics.extract import extract_all_stats
 from app.checks.forensics.pcheck import evaluate_p_recalc
@@ -74,6 +75,15 @@ async def run_statistical_forensics_check(
                 detail=draft.detail,
             )
         )
+    # BUG-151: F6 makes zero LLM calls, so it wrote nothing to the audit
+    # log at all -- see `checks/reuse/service.py`'s sibling call for the
+    # same fix applied to F7 (charter judgment 4: traceable verdicts).
+    await write_audit_event(
+        session,
+        event_type="statistical_forensics_check_computed",
+        check_run_id=check_run_id,
+        payload={**result.detail, "outcome": result.outcome.value},
+    )
     await session.commit()
     return result
 

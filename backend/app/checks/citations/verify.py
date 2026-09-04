@@ -18,6 +18,7 @@ import httpx
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.audit.service import write_audit_event
 from app.checks.citations.extract import (
     CitationFlagDraft,
     cross_match,
@@ -377,6 +378,24 @@ async def run_citation_integrity_check(
                 detail=draft.detail,
             )
         )
+    # BUG-151: a check-level summary event, distinct from whatever per-
+    # source `llm_call`/external-provider audit trail already exists --
+    # see `checks/reuse/service.py`'s sibling call for the same fix
+    # applied to F7 (charter judgment 4). `citation_cache_stale_days`
+    # decides whether a cached verification is trusted or re-fetched
+    # (backend-critic finding, same reconstructability reasoning already
+    # applied to F4's thresholds: this is env-configurable, so a past
+    # verdict needs its own record of what was in force).
+    await write_audit_event(
+        session,
+        event_type="citation_integrity_check_computed",
+        check_run_id=check_run_id,
+        payload={
+            **result.detail,
+            "outcome": result.outcome.value,
+            "thresholds": {"cache_stale_days": settings.citation_cache_stale_days},
+        },
+    )
     await session.commit()
     return result
 

@@ -62,9 +62,9 @@ async def _clean(session_factory):
     async with session_factory() as session:
         await session.execute(
             text(
-                "TRUNCATE flag, check_result, check_run, rubric, manuscript_chapter_archive, "
+                "TRUNCATE audit_log, flag, check_result, check_run, manuscript_chapter_archive, "
                 "manuscript_passage_archive, manuscript_archive, manuscript, manuscript_group, "
-                "group_member, instructor RESTART IDENTITY CASCADE"
+                "group_member, rubric, instructor RESTART IDENTITY CASCADE"
             )
         )
         await session.commit()
@@ -1158,6 +1158,90 @@ async def test_write_back_happens_after_check_never_matches_self(session_factory
             {"id": manuscript_id},
         )
     assert count == 1
+
+
+async def test_bug_151_writes_a_check_computed_audit_event_with_real_matched_ids(
+    session_factory,
+):
+    """BUG-151: F7 made zero LLM calls, so it wrote nothing to the audit
+    log at all -- the check that forced 82 of one production run's 99
+    flags had no record of how its verdict was reached (charter judgment
+    4). A real `originality_reuse_check_computed` row must exist,
+    carrying the thresholds in force and the OPAQUE matched manuscript
+    ids (never `matched_group_label`, the BUG-050 identity-leak guard
+    extended to the audit log, not assumed to not apply there)."""
+    settings = get_settings()
+    manuscript_a, check_run_a = await _seed_manuscript_and_run(
+        session_factory, group_label="Group A"
+    )
+    async with session_factory() as session:
+        await run_originality_reuse_check(
+            session, manuscript_a, check_run_a, _extraction(CH1, CH2), settings
+        )
+
+    manuscript_b, check_run_b = await _seed_manuscript_and_run(
+        session_factory, group_label="Group B"
+    )
+    async with session_factory() as session:
+        await run_originality_reuse_check(
+            session, manuscript_b, check_run_b, _extraction(CH1, CH2), settings
+        )
+
+    async with session_factory() as session:
+        row = (
+            await session.execute(
+                text(
+                    "SELECT payload FROM audit_log WHERE check_run_id = :id "
+                    "AND event_type = 'originality_reuse_check_computed'"
+                ),
+                {"id": check_run_b},
+            )
+        ).first()
+    assert row is not None
+    payload = row.payload
+    assert payload["matched_manuscript_ids"] == [manuscript_a]
+    assert payload["thresholds"]["exact_duplicate"] == settings.reuse_exact_duplicate_threshold
+    assert payload["n_flags"] > 0
+    assert "matched_group_label" not in payload  # BUG-050: never leaked, even here
+
+
+async def test_bug_151_no_embeddable_content_still_writes_a_check_computed_audit_event(
+    session_factory,
+):
+    """BUG-151 (backend-critic: the diff's own test only covered the main
+    path): the early "nothing to embed" branch (an image-only re-scan, or
+    any manuscript with no chapter text at all) must also leave a real
+    audit row, not just the resubmission-flag path already covered above."""
+    manuscript_id, check_run_id = await _seed_manuscript_and_run(
+        session_factory, group_label="Group A"
+    )
+    empty_extraction = ExtractionResult(
+        page_count=1,
+        anchor_kind="page",
+        image_only=True,
+        text_chars=0,
+        section_tree=SectionTree(source="none", nodes=[]),
+        blocks=[],
+        images=[],
+    )
+    async with session_factory() as session:
+        result = await run_originality_reuse_check(
+            session, manuscript_id, check_run_id, empty_extraction, get_settings()
+        )
+        assert result.detail["note"] == "No embeddable content was extracted from this manuscript."
+
+        row = (
+            await session.execute(
+                text(
+                    "SELECT payload FROM audit_log WHERE check_run_id = :id "
+                    "AND event_type = 'originality_reuse_check_computed'"
+                ),
+                {"id": check_run_id},
+            )
+        ).first()
+    assert row is not None
+    assert row.payload["outcome"] == "not_applicable"
+    assert row.payload["matched_manuscript_ids"] == []
 
 
 async def test_existing_result_guard_finds_the_completed_run(session_factory):

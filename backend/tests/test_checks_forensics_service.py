@@ -54,7 +54,7 @@ async def _clean(session_factory):
     async with session_factory() as session:
         await session.execute(
             text(
-                "TRUNCATE flag, check_result, check_run, rubric, "
+                "TRUNCATE audit_log, flag, check_result, check_run, rubric, "
                 "manuscript, instructor RESTART IDENTITY CASCADE"
             )
         )
@@ -141,6 +141,32 @@ async def test_seeded_grim_impossible_mean_produces_a_real_flag_row(session_fact
     assert len(rows) == 1
     assert rows[0].severity == "med"
     assert rows[0].page_anchor == "p. 5"
+
+
+async def test_bug_151_writes_a_check_computed_audit_event(session_factory):
+    """BUG-151: F6 makes zero LLM calls, so before this fix it wrote
+    NOTHING to the audit log -- a run's forensics verdict had no record of
+    how it was reached (charter judgment 4). Covers the main (has-stats)
+    path; the reuse check's own sibling test covers the pattern's early-
+    return branch (backend-critic: only one of five new call sites had any
+    test coverage before this)."""
+    check_run_id = await _seed_check_run(session_factory)
+    extraction = _extraction(blocks=[_block("The result was significant, t(28) = 2.45, p = .021.")])
+    async with session_factory() as session:
+        await run_statistical_forensics_check(session, check_run_id, extraction)
+
+        row = (
+            await session.execute(
+                text(
+                    "SELECT payload FROM audit_log WHERE check_run_id = :id "
+                    "AND event_type = 'statistical_forensics_check_computed'"
+                ),
+                {"id": check_run_id},
+            )
+        ).first()
+    assert row is not None
+    assert row.payload["outcome"] == "passed"
+    assert row.payload["n_inferential_stats"] == 1
 
 
 async def test_wrong_p_value_and_grim_impossible_mean_both_flagged_together(session_factory):

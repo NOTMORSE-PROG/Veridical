@@ -16,6 +16,7 @@ own convention). **BUG-073**: a run that skipped even one candidate pair
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.audit.service import write_audit_event
 from app.checks.agreement.extract import extract_statements
 from app.checks.agreement.pair import run_agreement_pairing
 from app.config import Settings
@@ -23,6 +24,19 @@ from app.ingest.schemas import ExtractionResult
 from app.llm.base import LLMClient
 from app.models.enums import CheckKind, ResultOutcome
 from app.models.run import CheckResult, Flag
+
+
+def _agreement_thresholds(settings: Settings) -> dict[str, float]:
+    """BUG-151 (backend-critic finding): both env-configurable thresholds
+    that decide this check's own behavior -- `dedup` narrows candidate
+    intent/outcome statements before pairing (`extract.py`), `pairing_floor`
+    excludes a candidate pair from ever reaching the LLM (`pair.py`) -- so a
+    past verdict is reconstructable after either changes, the same guarantee
+    F7's own audit event already gives `reuse_*_threshold`."""
+    return {
+        "dedup_similarity_threshold": settings.agreement_dedup_similarity_threshold,
+        "pairing_similarity_floor": settings.agreement_pairing_similarity_floor,
+    }
 
 
 async def run_internal_agreement_check(
@@ -49,6 +63,22 @@ async def run_internal_agreement_check(
             },
         )
         session.add(result)
+        # BUG-151: a check-level summary event, distinct from the per-call
+        # `llm_call` rows F4's own pairing calls already write (V-009) --
+        # neither this early "nothing to check" branch nor the main path
+        # below had ANY audit trail of the check's own overall verdict
+        # before this fix. See `checks/reuse/service.py`'s sibling call
+        # for the same fix applied to F7 (charter judgment 4).
+        await write_audit_event(
+            session,
+            event_type="internal_agreement_check_computed",
+            check_run_id=check_run_id,
+            payload={
+                **result.detail,
+                "outcome": result.outcome.value,
+                "thresholds": _agreement_thresholds(settings),
+            },
+        )
         await session.commit()
         return result
 
@@ -100,6 +130,16 @@ async def run_internal_agreement_check(
                 detail=draft.detail,
             )
         )
+    await write_audit_event(
+        session,
+        event_type="internal_agreement_check_computed",
+        check_run_id=check_run_id,
+        payload={
+            **result.detail,
+            "outcome": result.outcome.value,
+            "thresholds": _agreement_thresholds(settings),
+        },
+    )
     await session.commit()
     return result
 

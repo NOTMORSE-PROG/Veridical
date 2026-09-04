@@ -58,7 +58,7 @@ async def _clean_tables(session_factory):
     async with session_factory() as session:
         await session.execute(
             text(
-                "TRUNCATE readiness_report, check_result, check_run, criterion, "
+                "TRUNCATE audit_log, readiness_report, check_result, check_run, criterion, "
                 "rubric, manuscript, instructor RESTART IDENTITY CASCADE"
             )
         )
@@ -127,6 +127,68 @@ async def test_aggregate_and_score_persists_a_real_report(session_factory):
             )
         ).scalar_one()
         assert stored.composite_score == Decimal("70.00")
+
+
+async def test_bug_151_writes_one_verdict_audit_row_per_genuine_change_not_per_call(
+    session_factory,
+):
+    """BUG-151 (backend-critic, live-reproduced): `aggregate_and_score`
+    recomputes on every call, including a resumed run re-entering this
+    function after a crash between its own commit and the stage-status
+    advance that follows it (`pipeline/machine.py`'s
+    `_transition_after_boundary`) -- unlike every check_result table, which
+    an `existing_*_result` guard protects from exactly this re-entry, a
+    report row IS legitimately re-written every call. The audit event must
+    not be: identical input must produce exactly one row, not a new
+    indistinguishable one per call, while genuinely different input (a
+    real re-aggregation) must still get its own record."""
+    check_run_id = await _seed(
+        session_factory,
+        [(70, "passed", 100.0), (30, "failed", 0.0)],
+    )
+
+    async def _verdict_rows():
+        async with session_factory() as session:
+            return (
+                await session.execute(
+                    text(
+                        "SELECT payload FROM audit_log WHERE check_run_id = :id "
+                        "AND event_type = 'verdict_computed' ORDER BY id"
+                    ),
+                    {"id": check_run_id},
+                )
+            ).all()
+
+    async with session_factory() as session:
+        await aggregate_and_score(session, check_run_id)
+    rows = await _verdict_rows()
+    assert len(rows) == 1
+    assert rows[0].payload["composite_score"] == 70.0
+
+    # Simulated crash/resume: called again with NOTHING changed underneath.
+    async with session_factory() as session:
+        await aggregate_and_score(session, check_run_id)
+    rows = await _verdict_rows()
+    assert len(rows) == 1  # still one -- not a duplicate, indistinguishable row
+
+    # A genuine re-aggregation (e.g. an override/escalation resolution
+    # changed a result) DOES change the number and must get its own record.
+    async with session_factory() as session:
+        result = (
+            (
+                await session.execute(
+                    select(CheckResult).where(CheckResult.check_run_id == check_run_id)
+                )
+            )
+            .scalars()
+            .first()
+        )
+        result.score = Decimal("50.0")
+        await session.commit()
+        await aggregate_and_score(session, check_run_id)
+    rows = await _verdict_rows()
+    assert len(rows) == 2
+    assert rows[1].payload["composite_score"] != rows[0].payload["composite_score"]
 
 
 async def test_build_report_payload_matches_persisted_score(session_factory):

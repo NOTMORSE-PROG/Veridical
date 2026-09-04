@@ -71,7 +71,7 @@ async def _clean(session_factory):
     async with session_factory() as session:
         await session.execute(
             text(
-                "TRUNCATE flag, check_result, check_run, rubric, "
+                "TRUNCATE audit_log, flag, check_result, check_run, rubric, "
                 "manuscript, instructor RESTART IDENTITY CASCADE"
             )
         )
@@ -128,6 +128,45 @@ async def test_manuscript_with_no_statements_is_not_applicable(session_factory):
     assert result.detail["n_intents"] == 0
     assert result.detail["n_outcomes"] == 0
     assert llm.calls == []
+
+
+async def test_bug_151_no_statements_still_writes_a_check_computed_audit_event_with_thresholds(
+    session_factory,
+):
+    """BUG-151: before this fix, F4 wrote nothing to the audit log at all
+    -- not even this early "nothing to check" branch. backend-critic found
+    the first version of the fix omitted `thresholds` here (the ticket's
+    own stated goal is reconstructability after
+    `agreement_pairing_similarity_floor`/`agreement_dedup_similarity_threshold`
+    change in .env, exactly the reasoning already applied to F7's reuse
+    thresholds) -- both must be present, not just on the main (has-
+    statements) path covered by `test_idempotent_rerun...`'s sibling."""
+    check_run_id = await _seed_check_run(session_factory)
+    extraction = _extraction([_block("This chapter is purely descriptive prose.")])
+    llm = ScriptedLLM([])
+    settings = get_settings()
+    async with session_factory() as session:
+        await run_internal_agreement_check(session, llm, check_run_id, extraction, settings)
+
+        row = (
+            await session.execute(
+                text(
+                    "SELECT payload FROM audit_log WHERE check_run_id = :id "
+                    "AND event_type = 'internal_agreement_check_computed'"
+                ),
+                {"id": check_run_id},
+            )
+        ).first()
+    assert row is not None
+    assert row.payload["outcome"] == "not_applicable"
+    assert (
+        row.payload["thresholds"]["dedup_similarity_threshold"]
+        == settings.agreement_dedup_similarity_threshold
+    )
+    assert (
+        row.payload["thresholds"]["pairing_similarity_floor"]
+        == settings.agreement_pairing_similarity_floor
+    )
 
 
 async def test_seeded_contradiction_produces_a_real_flag_row(session_factory):
