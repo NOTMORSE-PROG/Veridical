@@ -47,6 +47,31 @@ class RuleContext:
     section_tree: SectionTree
     geometry: list[PageGeometry]
     tables: list[TableBlock]
+    # BUG-175: "no tables in `tables`" and "table extraction did not run"
+    # were conflated -- a quota-exhausted/unavailable vision pass looked
+    # identical to a manuscript that genuinely has no tables. Same
+    # `Literal["none", "done", "unavailable"]` vocabulary as
+    # `ExtractionResult.vision_status` (its own docstring for what each
+    # value means); only `rules/tables.py` reads this today.
+    vision_status: str
+    # BUG-175 (live-reproduced against real production data, `backend/
+    # data/4.extraction.json` vs `26.extraction.json`): `vision_status ==
+    # "none"` does NOT reliably mean "this manuscript has no images worth
+    # checking" -- `ingest/vision.py::select_images`'s own size-area floor
+    # and `INGEST_VISION_MAX_IMAGES` cap can filter EVERY real embedded
+    # image out of selection, landing at the exact same "none" status a
+    # genuinely image-free manuscript gets. Confirmed live: those two
+    # files are the SAME source document (identical text_chars=55351,
+    # blocks=853) with the SAME 19 embedded images, yet one processing
+    # pass landed on `vision_status="none"` (0 tables found) and the
+    # other on `"done"` (12 tables found) -- config/threshold drift
+    # between the two ingestion times, not a property of the document.
+    # `has_images` lets `rules/tables.py` tell "genuinely nothing to
+    # check" (no images at all -- `vision_status` is fully conclusive
+    # either way) apart from "images exist but were never confirmed
+    # read" (real uncertainty, regardless of whether that uncertainty
+    # shows up as "none" or "unavailable").
+    has_images: bool
     citations: list[CitationLike]
     # Config values a rule needs but shouldn't reach into Settings for
     # directly (keeps rules pure functions of their inputs, easy to test).

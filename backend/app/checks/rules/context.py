@@ -36,6 +36,8 @@ async def build_rule_context(
         section_tree=extraction.section_tree,
         geometry=extraction.geometry,
         tables=extraction.tables,
+        vision_status=extraction.vision_status,
+        has_images=bool(extraction.images),
         citations=list(citations),
         margin_tolerance_pts=settings.structural_margin_tolerance_pts,
         citation_style_min_ratio=settings.structural_citation_style_min_ratio,
