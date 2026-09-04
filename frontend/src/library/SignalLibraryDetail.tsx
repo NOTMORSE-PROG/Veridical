@@ -205,7 +205,16 @@ export function SignalLibraryDetailPage() {
                 </div>
                 <div><dt>Group</dt><dd>{item.group_label}</dd></div>
                 <div><dt>Program</dt><dd>{item.program ?? "Not set"}</dd></div>
-                <div><dt>Authors</dt><dd>{item.authors.length ? item.authors.join(", ") : "Not listed"}</dd></div>
+                <div>
+                  <dt>Authors</dt>
+                  <dd>
+                    {item.authors.length
+                      ? item.authors.join(", ")
+                      : item.is_own
+                        ? "Not listed"
+                        : "Withheld for another instructor's manuscript"}
+                  </dd>
+                </div>
                 <div><dt>Processed</dt><dd>{formatDate(item.created_at)}</dd></div>
                 <div>
                   <dt>Storage</dt>
