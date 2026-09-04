@@ -13,6 +13,7 @@ compares this manuscript against itself.
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.audit.service import write_audit_event
 from app.checks.reuse.embed import compute_document_embeddings, compute_passage_embeddings
 from app.checks.reuse.query import (
     PassageMatch,
@@ -339,6 +340,26 @@ async def run_originality_reuse_check(
                     detail=detail,
                 )
             )
+        # BUG-151: F6/F7 make zero LLM calls, so they wrote nothing to the
+        # audit log at all -- the check that forced 82 of one production
+        # run's 99 flags had no record of how its verdict was reached
+        # (charter judgment 4). One event per check, every path, including
+        # this early "nothing to compare" branch. Only the OPAQUE matched
+        # manuscript id ever goes in the payload, never `matched_group_
+        # label`/`matched_chapter_title` -- the same BUG-050 IDENTIFIABLE-
+        # not-IDENTIFYING bar the flags themselves already hold, extended
+        # here rather than assumed to not apply just because the audience
+        # is this check's own owning instructor.
+        await write_audit_event(
+            session,
+            event_type="originality_reuse_check_computed",
+            check_run_id=check_run_id,
+            payload={
+                **result.detail,
+                "outcome": result.outcome.value,
+                "matched_manuscript_ids": [hash_duplicate_id] if has_resubmission else [],
+            },
+        )
         await session.commit()
         return result
 
@@ -488,6 +509,39 @@ async def run_originality_reuse_check(
                 detail=detail,
             )
         )
+
+    # BUG-151: F6/F7 make zero LLM calls, so they wrote nothing to the
+    # audit log at all -- the check that forced 82 of one production run's
+    # 99 flags had no record of how its verdict was reached (charter
+    # judgment 4). `reuse_exact_duplicate_threshold`/`reuse_high_
+    # similarity_threshold` are env-configurable (ground rule 7), so this
+    # is the only way a past verdict is ever reconstructable after either
+    # changes. Only the OPAQUE matched manuscript id ever goes in the
+    # payload, never `matched_group_label`/`matched_chapter_title` -- the
+    # same BUG-050 IDENTIFIABLE-not-IDENTIFYING bar the flags themselves
+    # already hold, extended here rather than assumed to not apply just
+    # because the audience is this check's own owning instructor.
+    matched_manuscript_ids = sorted(
+        {m.matched_manuscript_id for m in whole_and_chapter_matches}
+        | {p.matched_manuscript_id for p in passage_matches}
+        | ({resubmission_source_id} if resubmission_source_id is not None else set())
+    )
+    await write_audit_event(
+        session,
+        event_type="originality_reuse_check_computed",
+        check_run_id=check_run_id,
+        payload={
+            **result.detail,
+            "thresholds": {
+                "exact_duplicate": settings.reuse_exact_duplicate_threshold,
+                "high_similarity": settings.reuse_high_similarity_threshold,
+                "passage_exact_duplicate": settings.reuse_passage_exact_duplicate_threshold,
+                "passage_high_similarity": settings.reuse_passage_high_similarity_threshold,
+            },
+            "matched_manuscript_ids": matched_manuscript_ids,
+            "resubmission_source_id": resubmission_source_id,
+        },
+    )
     await session.commit()
 
     # Write-back AFTER the check + its flags are committed (ticket AC,

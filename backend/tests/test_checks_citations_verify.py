@@ -70,7 +70,7 @@ async def _clean(session_factory):
     async with session_factory() as session:
         await session.execute(
             text(
-                "TRUNCATE citation_cache, flag, check_result, check_run, rubric, "
+                "TRUNCATE audit_log, citation_cache, flag, check_result, check_run, rubric, "
                 "manuscript, instructor RESTART IDENTITY CASCADE"
             )
         )
@@ -517,3 +517,20 @@ async def test_run_citation_integrity_check_persists_result_and_flags(session_fa
         flag_query = text("SELECT severity FROM flag WHERE check_result_id = :id")
         flags = (await session.execute(flag_query, {"id": result.id})).scalars().all()
         assert sorted(flags) == ["high", "low", "low"]
+
+        audit_row = (
+            await session.execute(
+                text(
+                    "SELECT payload FROM audit_log WHERE check_run_id = :id "
+                    "AND event_type = 'citation_integrity_check_computed'"
+                ),
+                {"id": check_run_id},
+            )
+        ).first()
+    # BUG-151: F5 wrote nothing to the audit log before this fix.
+    assert audit_row is not None
+    assert audit_row.payload["n_flags"] == 3
+    assert (
+        audit_row.payload["thresholds"]["cache_stale_days"]
+        == get_settings().citation_cache_stale_days
+    )
