@@ -2,6 +2,7 @@ import { useEffect, useId, useRef, useState } from "react";
 import { Link, useLocation, useParams } from "react-router";
 import { ApiError } from "../api/client";
 import type { FlagOut } from "../api/types";
+import { PassagePairPanel } from "../document/PassagePairPanel";
 import { checkKindMeta, humanize } from "../domain/checkKind";
 import { problemLabel } from "../domain/problemLabel";
 import { systemFindingCopy } from "../domain/systemFindingCopy";
@@ -237,6 +238,17 @@ export function FlagDetailPage() {
             <div className="signal-section-heading"><div><p className="signal-section-kicker">Checkable record</p><h2 id="evidence-heading">Evidence from the manuscript</h2></div></div>
             <blockquote className="signal-evidence-quote"><span>“{systemFindingCopy(flag.evidence_excerpt, flag.ai_verdict_summary, "evidence")}”</span><cite>{flag.page_anchor}</cite></blockquote>
             {flag.ai_reasoning && <div className="signal-reasoning"><h3>Recorded reasoning</h3><p>{systemFindingCopy(flag.ai_reasoning, flag.ai_verdict_summary, "reasoning")}</p></div>}
+            {/* BUG-154: the API has always returned a complete
+                passage_pair for a matched flag (own/matched excerpt +
+                context both sides, similarity, level) -- this page fetched
+                it and rendered none of it, so an instructor asking "where
+                did this come from" had no answer except a link into the
+                document viewer, which was itself broken until BUG-138.
+                Same component, same props, same "flag" variant already
+                shipped on SignalDocumentViewer.tsx -- no new design here. */}
+            {flag.passage_pair && (
+              <PassagePairPanel pair={flag.passage_pair} ownAnchor={flag.page_anchor} variant="flag" />
+            )}
             <ActionLink
               id={sourceLinkId}
               to={sourcePath}

@@ -75,6 +75,42 @@ describe("FlagDetailPage", () => {
     expect(screen.queryByText(/100\.0% match/)).not.toBeInTheDocument();
   });
 
+  it("BUG-154: renders the side-by-side passage comparison when the API returns one, instead of leaving the instructor with only a link into the (previously broken) document viewer", async () => {
+    vi.stubGlobal("fetch", stubFetchByPath({
+      "/flags/5": {
+        ...FLAG,
+        check_kind: "originality_reuse",
+        ai_verdict_summary: "reuse_exact_duplicate_passage",
+        page_anchor: "p. 31",
+        passage_pair: {
+          own_excerpt: "The system uses a hybrid rule-based and AI approach.",
+          own_context_before: "Chapter 3 begins here.",
+          own_context_after: "It continues below.",
+          matched_ref: 3,
+          matched_excerpt: "The system uses a hybrid rule-based and AI approach.",
+          matched_context_before: "Prior context.",
+          matched_context_after: "Later context.",
+          context_words_each_side: 60,
+          similarity: 1.0,
+          level: "exact_duplicate",
+        },
+      },
+    }));
+    renderWithProviders(<FlagDetailPage />, { route: "/flags/5", path: "/flags/:flagId" });
+
+    expect(await screen.findByText("Passage comparison", { selector: "h3" })).toBeInTheDocument();
+    expect(screen.getByText("Your manuscript · p. 31")).toBeInTheDocument();
+    expect(screen.getByText("Archived manuscript #3")).toBeInTheDocument();
+    expect(screen.getAllByText(/hybrid rule-based and AI approach/)).toHaveLength(2);
+  });
+
+  it("shows no passage comparison when the API returns none (the ordinary, non-reuse case)", async () => {
+    vi.stubGlobal("fetch", stubFetchByPath({ "/flags/5": FLAG }));
+    renderWithProviders(<FlagDetailPage />, { route: "/flags/5", path: "/flags/:flagId" });
+    await screen.findByText(/Wang, S\. \(2019\)/);
+    expect(screen.queryByText("Passage comparison", { selector: "h3" })).not.toBeInTheDocument();
+  });
+
   it("BUG (overflow) regression guard: the evidence blockquote and AI-verdict chip both cap/wrap instead of overflowing on a long real string", async () => {
     const longFlag = {
       ...FLAG,
