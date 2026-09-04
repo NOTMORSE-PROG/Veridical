@@ -146,14 +146,199 @@ def test_flag_ai_verdict_summary_reads_kind_before_calling_it_unavailable():
     assert flag_ai_verdict_summary(None) is None
 
 
+# --- BUG-150: 82 anchors on one finding must not count as 82 findings ------
+
+
+def test_many_anchors_on_one_reuse_match_count_as_one_finding_for_the_gate():
+    """82 passage-level flags against the SAME archived manuscript are 82
+    rows but one fact -- the same `(check_kind, problem_kind, matched_ref)`
+    boundary `flagClusters.ts` already uses to show "1 finding" on the
+    report screen, not 82. The verdict-forcing count must agree with it."""
+    results = [_result(1, 100, ResultOutcome.passed, 100.0)]
+    flags = [
+        ScorableFlag(
+            severity=FlagSeverity.high,
+            overridden=False,
+            id=i,
+            check_kind="originality_reuse",
+            problem_kind="reuse_exact_duplicate_passage",
+            matched_ref=99,
+        )
+        for i in range(82)
+    ]
+    scoring = score_check_run(results, flags, get_settings())
+    assert scoring.status == ReadinessStatus.not_ready  # still forces Not Ready -- one real match
+    assert scoring.unresolved_high_flag_count == 1  # but as ONE finding, not 82
+
+
+def test_two_distinct_reuse_matches_still_count_as_two_findings():
+    """Different `matched_ref` archives are genuinely different facts and
+    must not be collapsed into each other."""
+    results = [_result(1, 100, ResultOutcome.passed, 100.0)]
+    flags = [
+        ScorableFlag(
+            severity=FlagSeverity.high,
+            overridden=False,
+            id=1,
+            check_kind="originality_reuse",
+            problem_kind="reuse_exact_duplicate_passage",
+            matched_ref=99,
+        ),
+        ScorableFlag(
+            severity=FlagSeverity.high,
+            overridden=False,
+            id=2,
+            check_kind="originality_reuse",
+            problem_kind="reuse_exact_duplicate_passage",
+            matched_ref=100,
+        ),
+    ]
+    scoring = score_check_run(results, flags, get_settings())
+    assert scoring.unresolved_high_flag_count == 2
+
+
+def test_a_reuse_flag_with_no_matched_ref_stays_its_own_singleton():
+    """No persisted field to safely cluster on -- must not be guessed into
+    someone else's finding just because problem_kind happens to match."""
+    results = [_result(1, 100, ResultOutcome.passed, 100.0)]
+    flags = [
+        ScorableFlag(
+            severity=FlagSeverity.high,
+            overridden=False,
+            id=1,
+            check_kind="originality_reuse",
+            problem_kind="reuse_whole_document",
+            matched_ref=None,
+        ),
+        ScorableFlag(
+            severity=FlagSeverity.high,
+            overridden=False,
+            id=2,
+            check_kind="originality_reuse",
+            problem_kind="reuse_whole_document",
+            matched_ref=None,
+        ),
+    ]
+    scoring = score_check_run(results, flags, get_settings())
+    assert scoring.unresolved_high_flag_count == 2
+
+
+def test_non_reuse_flags_cluster_on_criterion_and_evidence_text():
+    """A repeated F4/F5/F6 finding (no matched_ref concept) clusters on
+    (check_kind, problem_kind, criterion_text, evidence_excerpt), same as
+    the frontend's `flagClusters.ts`; genuinely different evidence text
+    stays distinct."""
+    results = [_result(1, 100, ResultOutcome.passed, 100.0)]
+    flags = [
+        ScorableFlag(
+            severity=FlagSeverity.high,
+            overridden=False,
+            id=1,
+            check_kind="statistical_forensics",
+            problem_kind="grim_inconsistent",
+            criterion_text="Results",
+            evidence_excerpt="Table 3: n=15, M=2.40",
+        ),
+        ScorableFlag(
+            severity=FlagSeverity.high,
+            overridden=False,
+            id=2,
+            check_kind="statistical_forensics",
+            problem_kind="grim_inconsistent",
+            criterion_text="Results",
+            evidence_excerpt="Table 3: n=15, M=2.40",
+        ),
+        ScorableFlag(
+            severity=FlagSeverity.high,
+            overridden=False,
+            id=3,
+            check_kind="statistical_forensics",
+            problem_kind="grim_inconsistent",
+            criterion_text="Results",
+            evidence_excerpt="Table 4: n=20, M=3.10",
+        ),
+    ]
+    scoring = score_check_run(results, flags, get_settings())
+    assert scoring.unresolved_high_flag_count == 2
+
+
 def test_flag_deduction_is_capped():
     settings = get_settings()
     results = [_result(1, 100, ResultOutcome.passed, 100.0)]
-    # Many low-severity flags would deduct far past the cap without one.
-    flags = [ScorableFlag(severity=FlagSeverity.low, overridden=False) for _ in range(50)]
+    # 50 DISTINCT findings (real, unique ids -- a real `Flag.id` is always
+    # unique, unlike this test's own default before BUG-150's per-finding
+    # deduction made an unset `id` collapse every no-identity flag into one
+    # shared singleton) would deduct far past the cap without one.
+    flags = [ScorableFlag(severity=FlagSeverity.low, overridden=False, id=i) for i in range(50)]
     scoring = score_check_run(results, flags, settings)
     assert scoring.flag_deduction == settings.scoring_flag_deduction_cap
     assert scoring.composite_score == 100.0 - settings.scoring_flag_deduction_cap
+
+
+def test_multiple_anchors_on_one_finding_deduct_once_not_per_anchor():
+    """BUG-150 (backend-critic, second pass): below the cap, the composite
+    score itself must not move purely because one real fact happened to
+    produce 2+ anchor rows instead of 1 -- the identical multiplicity
+    defect the ticket names for the verdict gate, just below the point
+    where the cap happened to hide it for the deduction sum."""
+    settings = get_settings()
+    results = [_result(1, 100, ResultOutcome.passed, 100.0)]
+    one_row = [
+        ScorableFlag(
+            severity=FlagSeverity.high,
+            overridden=False,
+            id=1,
+            check_kind="originality_reuse",
+            problem_kind="reuse_exact_duplicate_passage",
+            matched_ref=99,
+        ),
+    ]
+    two_rows_same_finding = [
+        ScorableFlag(
+            severity=FlagSeverity.high,
+            overridden=False,
+            id=i,
+            check_kind="originality_reuse",
+            problem_kind="reuse_exact_duplicate_passage",
+            matched_ref=99,
+        )
+        for i in (1, 2)
+    ]
+    scoring_one = score_check_run(results, one_row, settings)
+    scoring_two = score_check_run(results, two_rows_same_finding, settings)
+    assert scoring_one.flag_deduction == settings.scoring_flag_deduction_high
+    assert scoring_two.flag_deduction == scoring_one.flag_deduction  # same fact, same deduction
+    assert scoring_two.composite_score == scoring_one.composite_score
+
+
+def test_a_finding_deducts_at_its_worst_members_severity():
+    """A finding whose own anchors happen to carry mixed severities (the
+    identity key doesn't forbid this) deducts once, at the WORST severity
+    among its members -- the same "worst wins" rule the report screen's
+    own `flagClusters.ts::worstSeverity` already uses to badge it."""
+    settings = get_settings()
+    results = [_result(1, 100, ResultOutcome.passed, 100.0)]
+    flags = [
+        ScorableFlag(
+            severity=FlagSeverity.med,
+            overridden=False,
+            id=1,
+            check_kind="originality_reuse",
+            problem_kind="reuse_exact_duplicate_passage",
+            matched_ref=99,
+        ),
+        ScorableFlag(
+            severity=FlagSeverity.high,
+            overridden=False,
+            id=2,
+            check_kind="originality_reuse",
+            problem_kind="reuse_exact_duplicate_passage",
+            matched_ref=99,
+        ),
+    ]
+    scoring = score_check_run(results, flags, settings)
+    assert scoring.flag_deduction == settings.scoring_flag_deduction_high
+    assert scoring.unresolved_high_flag_count == 1
 
 
 def test_thresholds_are_visible_in_the_result():

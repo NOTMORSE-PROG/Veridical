@@ -76,6 +76,21 @@ class ScorableFlag:
     # True keeps every existing call site (and test) that never names it
     # counting exactly as before.
     has_verdict: bool = True
+    # BUG-150: identity fields for `_finding_identity` below, mirroring
+    # `frontend/src/report/flagClusters.ts`'s `findingIdentity` exactly (the
+    # same boundary the report screen already uses to show "1 finding"
+    # instead of 82 rows, V-071/BUG-141) — otherwise the count that decides
+    # Not Ready would disagree with what the instructor sees as findings.
+    # All default to "this flag is its own singleton finding" so every
+    # existing call site that never names them (this module's own tests,
+    # none of which construct more than one unresolved high flag at once)
+    # keeps counting exactly as before.
+    id: int = 0
+    check_kind: str = ""
+    problem_kind: str | None = None
+    matched_ref: int | None = None
+    criterion_text: str | None = None
+    evidence_excerpt: str = ""
 
 
 @dataclass(frozen=True)
@@ -114,6 +129,27 @@ def _contribution(result: ScorableResult) -> CriterionContribution:
     )
 
 
+def _finding_identity(flag: ScorableFlag) -> tuple[str | int | None, ...]:
+    """BUG-150: 82 anchors on one reuse match (or one repeated citation/
+    forensics finding) are 82 `Flag` rows but ONE fact — this is the exact
+    boundary `flagClusters.ts`'s `findingIdentity` already uses to show the
+    instructor "1 finding" instead of 82 (V-071/BUG-141), ported here so the
+    verdict gate can't disagree with what's on screen. A flag with no
+    `problem_kind` (or a reuse flag with no `matched_ref`) has no persisted
+    field to safely group on, so it stays its own singleton rather than
+    being guessed into a cluster from similar-looking prose."""
+    if not flag.problem_kind:
+        return ("flag", flag.id)
+    if flag.check_kind == "originality_reuse":
+        if flag.matched_ref is None:
+            return ("flag", flag.id)
+        return (flag.check_kind, flag.problem_kind, flag.matched_ref)
+    return (flag.check_kind, flag.problem_kind, flag.criterion_text, flag.evidence_excerpt.strip())
+
+
+_SEVERITY_RANK = {FlagSeverity.low: 1, FlagSeverity.med: 2, FlagSeverity.high: 3}
+
+
 def _flag_deduction(flags: list[ScorableFlag], settings: Settings) -> tuple[float, int]:
     per_severity = {
         FlagSeverity.high: settings.scoring_flag_deduction_high,
@@ -125,9 +161,31 @@ def _flag_deduction(flags: list[ScorableFlag], settings: Settings) -> tuple[floa
     # force `not_ready` or deduct points by default, only a human-affirmed
     # finding may do that (charter rule 1).
     unresolved = [f for f in flags if not f.overridden and f.has_verdict]
-    total = sum(per_severity[f.severity] for f in unresolved)
+
+    # BUG-150 (backend-critic, second pass): the deduction was left summed
+    # per ROW on the first pass, on the ticket's own word that it "behaved
+    # correctly (capped at 40)" -- true only once multiplicity is large
+    # enough to SATURATE the cap. Below that (e.g. 2 anchors on one real
+    # reuse match, an ordinary shape per F7's own "flags at every matching
+    # level" behavior), the composite score still moved purely from anchor
+    # count with nothing actually different about the manuscript -- the
+    # identical defect class this ticket names, just below the point where
+    # the cap happened to hide it. One deduction per distinct finding now,
+    # same clustering boundary as the gate above; a finding with mixed
+    # severities among its own anchors (rare, but the identity key doesn't
+    # forbid it) deducts at its WORST member's severity, the same
+    # "worst wins" rule `flagClusters.ts`'s own `worstSeverity` already
+    # uses to badge a multi-anchor finding on screen.
+    worst_by_finding: dict[tuple[str | int | None, ...], FlagSeverity] = {}
+    for f in unresolved:
+        identity = _finding_identity(f)
+        current = worst_by_finding.get(identity)
+        if current is None or _SEVERITY_RANK[f.severity] > _SEVERITY_RANK[current]:
+            worst_by_finding[identity] = f.severity
+
+    total = sum(per_severity[severity] for severity in worst_by_finding.values())
     capped = min(total, settings.scoring_flag_deduction_cap)
-    high_count = sum(1 for f in unresolved if f.severity == FlagSeverity.high)
+    high_count = sum(1 for severity in worst_by_finding.values() if severity == FlagSeverity.high)
     return capped, high_count
 
 

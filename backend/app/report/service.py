@@ -103,6 +103,18 @@ async def _load_scorable_flags(session: AsyncSession, check_run_id: int) -> list
             .where(CheckResult.check_run_id == check_run_id)
         )
     ).all()
+
+    # BUG-150: the same criterion-text lookup `flags_for_check_run` already
+    # does for the report's own flags panel, needed here too so the verdict
+    # gate's finding-identity clustering agrees with what the instructor sees.
+    criterion_ids = {r.criterion_id for _, r in rows if r.criterion_id is not None}
+    criteria_by_id: dict[int, Criterion] = {}
+    if criterion_ids:
+        criteria = (
+            await session.execute(select(Criterion).where(Criterion.id.in_(criterion_ids)))
+        ).scalars()
+        criteria_by_id = {c.id: c for c in criteria}
+
     return [
         ScorableFlag(
             severity=flag.severity,
@@ -114,6 +126,16 @@ async def _load_scorable_flags(session: AsyncSession, check_run_id: int) -> list
             # duplication that let "999%"/"1082%" ship as two disagreeing
             # numbers at once (Track D's Critical 2, D-023).
             has_verdict=flag_ai_verdict_summary(flag.detail or result.detail) is not None,
+            id=flag.id,
+            check_kind=result.kind.value,
+            problem_kind=(flag.detail or {}).get("kind"),
+            matched_ref=(flag.detail or {}).get("matched_manuscript_id"),
+            criterion_text=(
+                criteria_by_id[result.criterion_id].text
+                if result.criterion_id in criteria_by_id
+                else None
+            ),
+            evidence_excerpt=flag.evidence_excerpt,
         )
         for flag, result in rows
     ]
