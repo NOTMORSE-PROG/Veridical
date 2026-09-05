@@ -227,6 +227,30 @@ def _anchor_at_position(
     return None
 
 
+def _drop_claimed_quotes(
+    quotes: list[str], anchors: list[str], claimed: set[str]
+) -> tuple[list[str], list[str]]:
+    """BUG-176/BUG-155: `_verify_quotes` only checks PROVENANCE (does this
+    text exist in the manuscript) — at whole-document batch scope, that
+    degenerates to "this text exists somewhere", so an arbitrary sentence
+    verifies identically as evidence for every criterion in the batch. The
+    minimum-viable half of the fix (both tickets' own "at minimum" ask):
+    a quote's mere existence never establishes it is ABOUT the criterion
+    it's attached to, but the one thing structurally provable without a
+    relevance model is that the SAME quote cannot honestly be the
+    strongest evidence for two different criteria at once. Drops any
+    quote (and its paired anchor) already claimed by an earlier criterion
+    in this same batch, preserving the 1:1 quote<->anchor pairing
+    `_verify_quotes` already returns."""
+    kept_quotes: list[str] = []
+    kept_anchors: list[str] = []
+    for quote, anchor in zip(quotes, anchors, strict=True):
+        if _normalize(quote) not in claimed:
+            kept_quotes.append(quote)
+            kept_anchors.append(anchor)
+    return kept_quotes, kept_anchors
+
+
 def _verify_quotes(
     quotes: list[str], blocks: list[TextBlock], anchor_kind: str
 ) -> list[str] | None:
@@ -380,6 +404,49 @@ class GradedVerdict:
     escalation_reason: str | None
 
 
+def _downgrade_if_claimed(verdict: GradedVerdict, claimed: set[str]) -> GradedVerdict:
+    """BUG-176/BUG-155 (backend-critic finding, live-reproduced): applies
+    the same anti-reuse guard `grade_batch_verdicts` already applies
+    WITHIN one grading pass, but at the self-consistency VOTE level —
+    `app.checks.consistency.vote_batch` calls `grade_batch_verdicts`
+    TWICE independently (pass_1, pass_2) plus a per-criterion tie-break,
+    each with no visibility into what a SIBLING criterion's WINNING
+    evidence already used. Two internally-clean passes can still each
+    borrow the same quote for two DIFFERENT criteria if pass_1's winner
+    is criterion A and pass_2's winner (via tie-break) is criterion B —
+    the exact BUG-176 disease, reachable one layer higher than the
+    within-pass fix alone reaches. `claimed` is threaded in from
+    `vote_batch`, spanning the whole batch across every pass and any
+    tie-break, not just one grading call. A verdict whose quotes are
+    ENTIRELY already claimed is downgraded to no-verdict (never promote
+    unverified/borrowed evidence to a decided pass/fail, charter rule 1);
+    a verdict with SOME surviving quotes keeps its verdict with only the
+    unclaimed ones."""
+    if verdict.verdict is None or not verdict.quotes or not verdict.anchors:
+        return verdict
+    kept_quotes, kept_anchors = _drop_claimed_quotes(verdict.quotes, verdict.anchors, claimed)
+    if kept_quotes:
+        if len(kept_quotes) == len(verdict.quotes):
+            return verdict
+        return GradedVerdict(
+            verdict.criterion_id,
+            verdict.verdict,
+            verdict.reasoning,
+            kept_quotes,
+            kept_anchors,
+            None,
+        )
+    return GradedVerdict(
+        verdict.criterion_id,
+        None,
+        verdict.reasoning,
+        verdict.quotes,
+        None,
+        "Every quoted piece of evidence for this criterion was already used "
+        "for a different criterion in this batch.",
+    )
+
+
 async def grade_batch_verdicts(
     batch: SemanticBatch,
     batch_criteria: list[Any],
@@ -421,11 +488,18 @@ async def grade_batch_verdicts(
 
     by_index = {v.index: v for v in parsed.verdicts}
     out: dict[int, GradedVerdict] = {}
+    # BUG-176/BUG-155: quotes already attached to an earlier criterion in
+    # THIS batch are never valid evidence for a later one -- tracked
+    # across the whole loop, not reset per-criterion.
+    claimed_quotes: set[str] = set()
     for i, criterion in enumerate(batch_criteria):
         verdict = by_index.get(i)
-        anchors = (
-            _verify_quotes(verdict.evidence_quotes, batch.blocks, anchor_kind) if verdict else None
-        )
+        quotes = verdict.evidence_quotes if verdict else None
+        anchors = _verify_quotes(quotes, batch.blocks, anchor_kind) if quotes else None
+        if anchors is not None:
+            quotes, anchors = _drop_claimed_quotes(quotes, anchors, claimed_quotes)
+            if not quotes:
+                anchors = None  # every quote was borrowed -- same as hallucinated
         if verdict is None or anchors is None:
             retry = await _grade_single_criterion(
                 criterion, batch, llm, check_run_id, anchor_kind, consistency_pass=consistency_pass
@@ -445,7 +519,7 @@ async def grade_batch_verdicts(
                         criterion.id,
                         None,
                         verdict.reasoning,
-                        verdict.evidence_quotes,
+                        quotes if quotes else verdict.evidence_quotes,
                         None,
                         "Could not verify the quoted evidence after a retry.",
                     )
@@ -460,10 +534,17 @@ async def grade_batch_verdicts(
                     )
                 continue
             retry_verdict, retry_anchors = retry
+            if retry_anchors is not None:
+                retry_quotes, retry_anchors = _drop_claimed_quotes(
+                    retry_verdict.evidence_quotes, retry_anchors, claimed_quotes
+                )
+                if not retry_quotes:
+                    retry_anchors = None
             if retry_anchors is None:
                 # The retry reached a verdict but its quotes ALSO failed
-                # containment — never promote unverified quotes to a
-                # decided pass/fail (charter rule 1), but the raw
+                # containment (or were themselves already claimed by a
+                # sibling criterion) — never promote unverified quotes to
+                # a decided pass/fail (charter rule 1), but the raw
                 # quotes/reasoning are real model output, worth carrying
                 # to the panel as "could not verify" rather than dropping
                 # (V-068 Q1/Q2).
@@ -476,9 +557,10 @@ async def grade_batch_verdicts(
                     "Could not verify the quoted evidence after a retry.",
                 )
                 continue
-            verdict, anchors = retry_verdict, retry_anchors
+            verdict, quotes, anchors = retry_verdict, retry_quotes, retry_anchors
+        claimed_quotes.update(_normalize(q) for q in quotes)
         out[criterion.id] = GradedVerdict(
-            criterion.id, verdict.verdict, verdict.reasoning, verdict.evidence_quotes, anchors, None
+            criterion.id, verdict.verdict, verdict.reasoning, quotes, anchors, None
         )
     return out
 

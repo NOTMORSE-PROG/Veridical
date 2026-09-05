@@ -469,6 +469,15 @@ async def test_a_mixed_batch_grades_each_criterion_against_its_own_vocabulary():
         FakeCriterion(id=2, text="Ordinary pass/fail criterion", levels=None),
     ]
 
+    # BUG-176: each criterion needs its OWN quote -- the same text shared
+    # across both indices would now be correctly rejected as evidence
+    # already claimed by an earlier criterion in this batch, which isn't
+    # what this test is about (it's testing per-criterion scale grading).
+    quotes = [
+        "The methodology is described in detail.",
+        "The results are summarized in the final chapter.",
+    ]
+
     def _batch_response(verdicts: list[str]) -> dict:
         return {
             "verdicts": [
@@ -476,7 +485,7 @@ async def test_a_mixed_batch_grades_each_criterion_against_its_own_vocabulary():
                     "index": i,
                     "verdict": v,
                     "reasoning": f"Reasoned to {v}.",
-                    "evidence_quotes": ["The methodology is described in detail."],
+                    "evidence_quotes": [quotes[i]],
                 }
                 for i, v in enumerate(verdicts)
             ]
@@ -486,12 +495,99 @@ async def test_a_mixed_batch_grades_each_criterion_against_its_own_vocabulary():
         [_batch_response(["Exemplary", "pass"]), _batch_response(["Exemplary", "pass"])]
     )
     session = FakeSession()
-    results = await run_semantic_checks_with_consistency(session, 1, criteria, _extraction(), llm)
+    tree = SectionTree(source="heuristics", nodes=[])
+    blocks = [TextBlock(page=1, text=q, max_font_size=11, bold_ratio=0.0) for q in quotes]
+    extraction = ExtractionResult(
+        page_count=1,
+        anchor_kind="page",
+        image_only=False,
+        text_chars=sum(len(b.text) for b in blocks),
+        section_tree=tree,
+        blocks=blocks,
+        images=[],
+    )
+    results = await run_semantic_checks_with_consistency(session, 1, criteria, extraction, llm)
     by_criterion = {r.criterion_id: r for r in results}
     assert by_criterion[1].score == 100.0
     assert by_criterion[1].detail["level"]["name"] == "Exemplary"
     assert by_criterion[2].score == 100.0
     assert "level" not in by_criterion[2].detail
+
+
+async def test_a_quote_claimed_by_one_criterions_pass_1_cannot_win_another_criterions_pass_2():
+    """BUG-176/BUG-155 (backend-critic finding, live-reproduced): pass_1
+    and pass_2 are each their own independent call to `grade_batch_verdicts`,
+    each internally clean on its own (no quote reused WITHIN one pass) --
+    but nothing compared their WINNING evidence against each other once
+    voting mixes them together. Criterion A agrees on both passes with
+    quote X (winner = quote X, claimed first since A is processed first).
+    Criterion B's passes DISAGREE (pass_1 says fail with its own real
+    quote; pass_2 says pass with the SAME quote X A already claimed) --
+    without the fix, B's pass_2 verdict would win the ensuing tie-break
+    call and persist A's exact evidence as its own. With the fix, B's
+    pass_2 verdict is downgraded before a tie-break is ever spent."""
+    criteria = [FakeCriterion(id=1, text="A"), FakeCriterion(id=2, text="B")]
+    tree = SectionTree(source="heuristics", nodes=[])
+    blocks = [
+        TextBlock(
+            page=1, text="The first shared quote in the document.", max_font_size=11, bold_ratio=0.0
+        ),
+        TextBlock(
+            page=2, text="A distinct quote that only supports B.", max_font_size=11, bold_ratio=0.0
+        ),
+        TextBlock(
+            page=3,
+            text="A third quote pass_2 uses for A instead.",
+            max_font_size=11,
+            bold_ratio=0.0,
+        ),
+    ]
+    extraction = ExtractionResult(
+        page_count=3,
+        anchor_kind="page",
+        image_only=False,
+        text_chars=sum(len(b.text) for b in blocks),
+        section_tree=tree,
+        blocks=blocks,
+        images=[],
+    )
+
+    def _response(a_verdict: str, a_quote: str, b_verdict: str, b_quote: str) -> dict:
+        return {
+            "verdicts": [
+                {"index": 0, "verdict": a_verdict, "reasoning": "A.", "evidence_quotes": [a_quote]},
+                {"index": 1, "verdict": b_verdict, "reasoning": "B.", "evidence_quotes": [b_quote]},
+            ]
+        }
+
+    shared_quote = "The first shared quote in the document."
+    b_own_quote = "A distinct quote that only supports B."
+    a_pass_2_quote = "A third quote pass_2 uses for A instead."
+    llm = ScriptedLLM(
+        [
+            _response("pass", shared_quote, "fail", b_own_quote),  # pass_1
+            # pass_2: A uses a DIFFERENT quote than pass_1 (so this call has
+            # no WITHIN-pass conflict of its own -- A and B's quotes here
+            # don't collide with each other); since pass_1/pass_2 AGREE on
+            # "pass" for A, the winner is always pass_1's own quote
+            # (`_vote_for_criterion`'s exact-agreement branch), so A's
+            # real winning evidence is still `shared_quote`, claimed once
+            # A is processed -- B's pass_2 verdict borrowing that exact
+            # quote is the cross-pass contamination this test targets.
+            _response("pass", a_pass_2_quote, "pass", shared_quote),
+        ]
+    )
+    session = FakeSession()
+    results = await run_semantic_checks_with_consistency(session, 1, criteria, extraction, llm)
+    by_criterion = {r.criterion_id: r for r in results}
+    assert by_criterion[1].outcome == ResultOutcome.passed
+    assert by_criterion[1].detail["evidence"][0]["quote"] == shared_quote
+    # B never gets to win on borrowed evidence -- downgraded before any
+    # tie-break call is spent, not silently duplicating A's quote.
+    assert by_criterion[2].outcome == ResultOutcome.escalated
+    assert "already used" in by_criterion[2].detail["reason"]
+    assert "tie_break" not in llm.passes
+    assert len(llm.passes) == 2
 
 
 async def test_both_passes_agree_on_an_unrecognized_level_name_escalates_with_a_real_reason():

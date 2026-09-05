@@ -32,7 +32,9 @@ from app.checks.semantic import (
     PROMPT_VERSION,
     GradedVerdict,
     SemanticBatch,
+    _downgrade_if_claimed,
     _grade_single_criterion,
+    _normalize,
     _persist,
     build_semantic_batches,
     grade_batch_verdicts,
@@ -138,7 +140,18 @@ async def _vote_for_criterion(
     *,
     prompt_version: str = PROMPT_VERSION,
     skip_tie_break: bool = False,
+    claimed_quotes: set[str] | None = None,
 ) -> VoteResult:
+    # BUG-176/BUG-155: pass_1 and pass_2 are each internally clean (no
+    # quote reused WITHIN one pass, `grade_batch_verdicts`'s own guard),
+    # but nothing before this compared ACROSS the two independent passes
+    # -- pass_1's evidence for criterion A and pass_2's evidence for
+    # criterion B could still be the identical borrowed quote. `claimed`
+    # spans the whole batch across every pass and any tie-break (threaded
+    # in from `vote_batch`), not just one grading call.
+    claimed = claimed_quotes if claimed_quotes is not None else set()
+    g1 = _downgrade_if_claimed(g1, claimed)
+    g2 = _downgrade_if_claimed(g2, claimed)
     if g1.verdict is None or g2.verdict is None:
         # dict.fromkeys, not a plain list: the two grading passes fail with
         # the SAME reason far more often than not (same manuscript, same
@@ -201,14 +214,32 @@ async def _vote_for_criterion(
             "Could not verify the quoted evidence after a retry.",
             unverified or None,
         )
-    g3 = GradedVerdict(
-        criterion.id,
-        tie_verdict.verdict,
-        tie_verdict.reasoning,
-        tie_verdict.evidence_quotes,
-        tie_anchors,
-        None,
+    g3 = _downgrade_if_claimed(
+        GradedVerdict(
+            criterion.id,
+            tie_verdict.verdict,
+            tie_verdict.reasoning,
+            tie_verdict.evidence_quotes,
+            tie_anchors,
+            None,
+        ),
+        claimed,
     )
+    if g3.verdict is None:
+        # The tie-break reached a real verdict, but every quote it offered
+        # was already claimed by an earlier criterion in this batch --
+        # same treatment as the tie_anchors-is-None branch above (never
+        # promote borrowed evidence to a decided majority), not a crash
+        # waiting to happen in `_tally` below (which assumes every vote is
+        # a real string).
+        return VoteResult(
+            None,
+            0.0,
+            [g1.verdict, g2.verdict, None],
+            None,
+            g3.escalation_reason,
+            _collect_unverified_quotes(g1, g2) or list(tie_verdict.evidence_quotes or []),
+        )
     votes = [g1.verdict, g2.verdict, g3.verdict]
     majority, agreement = _tally(votes)
     winner = next((g for g in (g1, g2, g3) if g.verdict == majority), None)
@@ -270,7 +301,21 @@ async def vote_batch(
     and V-023's escalation gate — no DB writes, no `check_run_id` required
     (`None` is a valid, harness-only value; it only ever rides along in
     LLM-call audit rows and cache keys, never a persisted foreign key
-    here)."""
+    here).
+
+    BUG-176/BUG-155's `claimed_quotes` (below) is a fresh, empty set on
+    every call and never needs to survive a restart: this function
+    returns nothing to the caller until every criterion in the batch is
+    voted, and `_vote_batch` doesn't persist a single row until THIS
+    whole call returns -- a `QuotaExhaustedError` anywhere inside (the
+    batch call, a retry, a tie-break) propagates out before any of this
+    batch's criteria are written, so a resumed run always re-grades the
+    ENTIRE topical cohort fresh (`backend-critic`, traced live: the
+    resumability test's own fixture puts its two semantic criteria in
+    DIFFERENT batches precisely so a quota cut lands on a batch boundary,
+    never mid-batch). If a future change ever persists criteria
+    incrementally WITHIN one batch, this invariant would need
+    re-examining before claimed_quotes could safely stay ephemeral."""
     # Each pass reads the SAME text under a genuinely different stance
     # (V-054/D-017). Before this, both passes were the same model, same
     # prompt, at temperature 0 — a repeated near-deterministic sample, so
@@ -304,6 +349,14 @@ async def vote_batch(
     injection_signal = detect_injection_signal(batch.context_text)
 
     voted: list[VotedCriterion] = []
+    # BUG-176/BUG-155: spans every criterion in this batch AND every pass/
+    # tie-break that graded them -- pass_1 and pass_2 are each internally
+    # clean on their own (grade_batch_verdicts' own within-pass guard),
+    # but nothing before this compared the WINNING evidence across
+    # criteria once voting mixes passes together (backend-critic finding,
+    # live-reproduced: pass_1's winner for criterion A and pass_2's winner
+    # for criterion B could still be the identical borrowed quote).
+    claimed_quotes: set[str] = set()
     for criterion in batch_criteria:
         vote = await _vote_for_criterion(
             criterion,
@@ -315,7 +368,10 @@ async def vote_batch(
             pass_2[criterion.id],
             prompt_version=prompt_version,
             skip_tie_break=injection_signal.suspected,
+            claimed_quotes=claimed_quotes,
         )
+        if vote.winner is not None and vote.winner.quotes:
+            claimed_quotes.update(_normalize(q) for q in vote.winner.quotes)
         outcome, score = gate_vote(
             vote.majority_verdict, vote.agreement, settings, criterion=criterion
         )
