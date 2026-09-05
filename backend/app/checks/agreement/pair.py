@@ -28,6 +28,7 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 from app.checks.agreement.extract import Statement
+from app.checks.injection import InjectionSignal, detect_injection_signal
 from app.config import Settings
 from app.errors import ApiDownError, QuotaExhaustedError, VeridicalError
 from app.llm.base import LLMClient
@@ -54,6 +55,22 @@ PARTIAL_WORDING = (
 CANNOT_DETERMINE_WORDING = (
     "Could not determine whether this result addresses this objective. Please "
     "check manually if this matters for your review."
+)
+# BUG-160: F4's judgment is a single Gemini call per pair, not a two-pass
+# vote (D-006) — there is no "agreement" here for an injected instruction to
+# spoil, so `consistency.py`'s "override the vote's outcome" response doesn't
+# apply. What DOES apply: `_candidate_to_flag` returns None (silence) on a
+# "consistent" verdict, and silence is exactly what must not happen when the
+# text behind that verdict is suspect — a manipulated "consistent" would
+# otherwise vanish with no trace. Both intent and outcome are the student's
+# own manuscript text (unlike F5's fetched abstracts below), so this is
+# worded the same way as `INJECTION_SUSPECTED_REASON` in consistency.py: a
+# fact about the document, never an accusation.
+AGREEMENT_INJECTION_SUSPECTED_WORDING = (
+    "This objective and this result appear consistent, but this part of the "
+    "document also contains text that appears to address an automated "
+    "grader rather than the reader, so that verdict should not be trusted "
+    'without a direct look. Objective: "{intent}" | Result: "{outcome}"'
 )
 
 
@@ -177,7 +194,9 @@ async def _judge_batch(
     return {v.index: v for v in parsed.verdicts}
 
 
-def _candidate_to_flag(candidate: Candidate, verdict: PairVerdict) -> AgreementFlagDraft | None:
+def _candidate_to_flag(
+    candidate: Candidate, verdict: PairVerdict, injection: InjectionSignal
+) -> AgreementFlagDraft | None:
     anchor = candidate.intent.anchor
     common_detail = {
         "similarity": round(candidate.similarity, 3),
@@ -187,8 +206,29 @@ def _candidate_to_flag(candidate: Candidate, verdict: PairVerdict) -> AgreementF
         "outcome_anchor": candidate.outcome.anchor,
         "gemini_reasoning": verdict.reasoning,
     }
+    if injection.suspected:
+        # Traceable regardless of verdict (ground rule 4) — a
+        # contradictory/partial/cannot_determine verdict is already a flag,
+        # so this only ADDS evidence; "consistent" is the branch below where
+        # it changes the outcome (silence -> a flag).
+        common_detail["injection_suspected"] = True
+        common_detail["injection_matched_pattern"] = injection.matched_pattern_id
+        common_detail["injection_matched_snippet"] = injection.matched_snippet
     if verdict.verdict == "consistent":
-        return None  # confirmed = silence, same convention as F5/F6
+        if not injection.suspected:
+            return None  # confirmed = silence, same convention as F5/F6
+        return AgreementFlagDraft(
+            severity=FlagSeverity.low,
+            evidence_excerpt=candidate.intent.text,
+            page_anchor=anchor,
+            detail={
+                "kind": "agreement_injection_suspected",
+                "reason": AGREEMENT_INJECTION_SUSPECTED_WORDING.format(
+                    intent=candidate.intent.text, outcome=candidate.outcome.text
+                ),
+                **common_detail,
+            },
+        )
     if verdict.verdict == "contradictory":
         return AgreementFlagDraft(
             severity=FlagSeverity.high,
@@ -300,7 +340,12 @@ async def run_agreement_pairing(
                 # issue.
                 n_parse_failure += 1
                 continue
-            draft = _candidate_to_flag(candidate, verdict)
+            # Cheap regex, no LLM call — computed per candidate, not per
+            # chunk, since each pair draws on a different, unrelated part
+            # of the manuscript (unlike consistency.py's batch.context_text,
+            # which several criteria genuinely share).
+            injection = detect_injection_signal(f"{candidate.intent.text} {candidate.outcome.text}")
+            draft = _candidate_to_flag(candidate, verdict, injection)
             if draft is not None:
                 flags.append(draft)
 
