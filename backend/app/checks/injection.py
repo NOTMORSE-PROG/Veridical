@@ -32,6 +32,70 @@ class InjectionPattern:
     label: str
 
 
+# BUG-160 item 3: a handful of Cyrillic/Greek characters that are visually
+# identical (or near-identical) to a Latin letter -- swapping a few
+# characters for their homoglyph twin is a well-known, trivial way to defeat
+# literal pattern matching. Deliberately NOT exhaustive: there is no
+# complete confusables table that doesn't also risk misreading genuinely
+# Cyrillic/Greek prose as Latin, so this stays narrow, same "honest, not
+# complete" spirit as the patterns list itself (see the data file's
+# _readme). Character-for-character (1 codepoint -> 1 codepoint), so a
+# match position found in the normalized text is still a valid offset into
+# the ORIGINAL text -- the snippet shown to the instructor is built from
+# the original, unsubstituted characters, so an obfuscation attempt is
+# visible in the evidence rather than silently repaired away.
+_HOMOGLYPH_MAP = str.maketrans(
+    {
+        "а": "a",
+        "е": "e",
+        "о": "o",
+        "р": "p",
+        "с": "c",
+        "х": "x",
+        "у": "y",
+        "і": "i",
+        "ѕ": "s",
+        "ј": "j",
+        "һ": "h",
+        "ԁ": "d",
+        "А": "A",
+        "В": "B",
+        "Е": "E",
+        "К": "K",
+        "М": "M",
+        "Н": "H",
+        "О": "O",
+        "Р": "P",
+        "С": "C",
+        "Т": "T",
+        "Х": "X",
+        "Ѕ": "S",
+        "Α": "A",
+        "Β": "B",
+        "Ε": "E",
+        "Ζ": "Z",
+        "Η": "H",
+        "Ι": "I",
+        "Κ": "K",
+        "Μ": "M",
+        "Ν": "N",
+        "Ο": "O",
+        "Ρ": "P",
+        "Τ": "T",
+        "Υ": "Y",
+        "Χ": "X",
+        "ο": "o",
+        "ν": "v",
+        "α": "a",
+        "ι": "i",
+    }
+)
+
+
+def _normalize_homoglyphs(text: str) -> str:
+    return text.translate(_HOMOGLYPH_MAP)
+
+
 @dataclass(frozen=True)
 class InjectionSignal:
     """`suspected=False` is the default, unremarkable case -- most
@@ -73,13 +137,16 @@ def detect_injection_signal(
     """Pure function over manuscript text. Checks patterns in listed order
     and returns on the first match -- which pattern matched first is not
     meaningful, only whether any did."""
+    normalized = _normalize_homoglyphs(text)
     for pattern in patterns if patterns is not None else load_injection_patterns():
-        match = pattern.regex.search(text)
+        match = pattern.regex.search(normalized)
         if match:
             return InjectionSignal(
                 suspected=True,
                 matched_pattern_id=pattern.id,
                 matched_label=pattern.label,
+                # Built from the ORIGINAL text, not `normalized` -- same
+                # positions (the substitution is 1:1), real characters.
                 matched_snippet=_snippet_around(text, match.start(), match.end()),
             )
     return InjectionSignal(suspected=False)

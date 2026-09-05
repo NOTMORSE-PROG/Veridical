@@ -47,7 +47,54 @@
     "imply the injection risk is closed.",
     "",
     "These are DATA, not code (ground rule 7): adding a pattern must never",
-    "need a code change or a redeploy of app/checks/injection.py."
+    "need a code change or a redeploy of app/checks/injection.py.",
+    "",
+    "FALSE-NEGATIVE SURFACE, STATED HONESTLY (BUG-160, 2026-09-05) -- this",
+    "list's false-POSITIVE cost is measured above; its false-NEGATIVE surface",
+    "is real and, assessed honestly, larger. A guard whose limits are",
+    "written down is defensible; one that reads as complete is not.",
+    "",
+    "1. PARAPHRASE. Every pattern is a fairly literal phrasing. 'ignore",
+    "prior instructions' needs the literal word 'instructions'; 'ignore",
+    "earlier directives' does not match anything here. No amount of",
+    "additional literal patterns closes this -- backend-critic (2026-08-24)",
+    "evaded most of a 13-variant adversarial probe with plain paraphrase, no",
+    "leetspeak or encoding needed. Regex matches wording, not intent; closing",
+    "this needs a semantic check, which is a different (Tier-2, quota-",
+    "costing) design, not a patch to this list.",
+    "2. HOMOGLYPHS -- PARTIALLY CLOSED, NOT SOLVED. `detect_injection_signal`",
+    "now normalizes a small, deliberately non-exhaustive table of visually-",
+    "identical Cyrillic/Greek characters to their Latin twin before matching",
+    "(app.checks.injection._HOMOGLYPH_MAP). A character outside that table --",
+    "any other confusables-list entry, full-width Unicode variants, or a",
+    "mixed-script trick this table doesn't cover -- still defeats every",
+    "pattern here. Widening the table is cheap; claiming it is complete",
+    "would not be honest.",
+    "3. INTRA-WORD LINE BREAKS -- KNOWN, OPEN, NOT ATTEMPTED HERE. BUG-146",
+    "proved this extraction pipeline splits words across line boundaries in",
+    "narrow table cells ('ACCEPTABL' / 'E'), and every pattern here requires",
+    "each of its literal words to be an intact, unbroken token. BUG-146's own",
+    "fix for level-name matching (whitespace-strip BOTH sides, compare whole",
+    "known strings) does not transfer cleanly to pattern matching over",
+    "unbounded free text: stripping all whitespace from the haystack also",
+    "destroys the word boundaries (`\\b`) these patterns anchor on, so a",
+    "correct fix needs either per-token fuzzy spacing (regex-explosive, and,",
+    "per BUG-146's own docstring reasoning, exactly the kind of unmeasured",
+    "fuzziness ground rule 1 warns against shipping without a real false-",
+    "positive evaluation) or a different matching strategy entirely. Left",
+    "open rather than shipping a guessed, unmeasured mitigation -- BUG-146",
+    "itself left an analogous case (the 'BEGINNER' split) open for the same",
+    "reason.",
+    "4. FILIPINO COVERAGE IS TARGETED PHRASING, NOT A LANGUAGE MODEL. The",
+    "`_fil` patterns below translate the same handful of English intents",
+    "(ignore instructions, disregard criteria, address the grader, a pre-",
+    "written verdict, a direct output command) into common Filipino",
+    "phrasings the author of this list could construct; they are not the",
+    "product of a native-speaker linguistic review and do not claim to cover",
+    "regional variation, code-switching (Taglish), or phrasings a fluent",
+    "speaker would recognize as equivalent but weren't anticipated here.",
+    "5. ANY OTHER LANGUAGE. Still nothing. English and now some Filipino are",
+    "the full extent of coverage."
   ],
   "patterns": [
     {
@@ -99,6 +146,56 @@
       "id": "record_dont_grade",
       "regex": "\\b(record|log)\\s+(that\\s+)?(this\\s+)?(prior\\s+)?(finding|result|verdict|approval)\\b|\\bnot\\s+a\\s+(new\\s+)?grading\\s+(judgment|judgement|decision)\\b",
       "label": "reframes grading as a data-entry step recording a pre-decided result"
+    },
+    {
+      "id": "ignore_instructions_fil",
+      "regex": "\\b(huwag|wag)\\s+(mo\\s+)?(nang?\\s+)?(pansinin|intindihin)\\s+(ang\\s+)?(mga\\s+)?(naunang|nakaraang|dating|mga\\s+dating)\\s+(tagubilin|utos|instruksyon)\\b",
+      "label": "Filipino: instructs the reader to ignore prior instructions"
+    },
+    {
+      "id": "system_override_fil",
+      "regex": "\\b(utos|mensahe)\\s+(mula\\s+sa\\s+)?(sistema|system)\\b",
+      "label": "Filipino: claims to be a system-level message or override"
+    },
+    {
+      "id": "grader_instruction_fil",
+      "regex": "\\btagubilin\\s+para\\s+sa\\s+(taga-?grade|tagasuri|grader)\\b",
+      "label": "Filipino: labels itself as an instruction for the grader"
+    },
+    {
+      "id": "addressed_to_grader_fil",
+      "regex": "\\b(paalala|mensahe)\\s+para\\s+sa\\s+(taga-?grade|tagasuri|grader|guro|propesor|AI)\\b",
+      "label": "Filipino: directly addresses the grading system or instructor rather than a human reader"
+    },
+    {
+      "id": "disregard_criteria_fil",
+      "regex": "\\b(huwag|wag)\\s+(mo\\s+)?(nang?\\s+)?(pansinin|sundin)\\s+(ang\\s+)?(mga\\s+)?(pamantayan|panuntunan|rubric|kriterya)\\b",
+      "label": "Filipino: instructs the reader to disregard the grading criteria"
+    },
+    {
+      "id": "you_must_output_fil",
+      "regex": "\\b(kailangan|dapat)\\s+mong\\s+(sumagot|mag-?output|magbigay|isulat|ideklara)\\s+(ng\\s+)?(pasado|passed|verdict|marka|grado)\\b",
+      "label": "Filipino: issues a direct output command naming a grading verdict"
+    },
+    {
+      "id": "do_not_evaluate_fil",
+      "regex": "\\b(huwag|wag)\\s+(mo\\s+)?(nang?\\s+)?(suriin|beriipikahin|i-?evaluate)\\s+(ang\\s+)?(dokumento|manuskrito|papel)\\b",
+      "label": "Filipino: instructs the reader not to evaluate the document"
+    },
+    {
+      "id": "prewritten_verdict_fil",
+      "regex": "\\b(natutugunan|tumutugon|sumusunod)\\s+(ng|ang)\\s+(dokumentong\\s+ito|manuskritong\\s+ito)\\s+sa\\s+lahat\\s+(ng\\s+)?(pamantayan|requirements|kailangan)\\b",
+      "label": "Filipino: asserts a pre-written blanket verdict inside the document text itself"
+    },
+    {
+      "id": "false_prior_approval_fil",
+      "regex": "\\b(na-?)?(review|suri|aprub)(ado|han)?\\s+na\\s+(ito|ng\\s+guro|ng\\s+propesor|ang\\s+dokumentong\\s+ito)\\b[\\s\\S]{0,100}\\b(ituring|markahan|tratuhin|isaalang-?alang|itala)\\s+(na\\s+lang\\s+)?(na\\s+|bilang\\s+)(pasado|aprubado|approved|passed)\\b",
+      "label": "Filipino: claims a prior human review already approved the document, directing a canned pass"
+    },
+    {
+      "id": "record_dont_grade_fil",
+      "regex": "\\b(itala|i-?record)\\s+(na\\s+lang\\s+)?(ang\\s+)?(naunang|nakaraang|dating)\\s+(resulta|kinalabasan|verdict|grado|marka)\\b",
+      "label": "Filipino: reframes grading as a data-entry step recording a pre-decided result"
     }
   ]
 }

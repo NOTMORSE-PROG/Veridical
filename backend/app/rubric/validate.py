@@ -14,12 +14,30 @@ from dataclasses import dataclass
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.checks.injection import InjectionSignal, detect_injection_signal
 from app.config import Settings
 from app.ingest.schemas import TextBlock
 from app.llm.base import LLMClient
 from app.models.audit import AuditLog
 from app.rubric.decompose import RubricParseError, decompose_rubric
 from app.rubric.schemas import ParsedCriterion
+
+# BUG-160: worded as a fact about the document, never an accusation against
+# whoever uploaded it (ground rule 3) -- the same language could describe a
+# false positive (a rubric that legitimately discusses AI grading/security)
+# without being wrong about either case. Unlike BUG-045's sibling message in
+# `checks/consistency.py` (which explains why one grading batch's agreement
+# can't be trusted), this is about PERSISTENCE: text surviving decomposition
+# into a criterion rides into every later grading prompt for every
+# manuscript checked against this rubric, not just one batch.
+RUBRIC_INJECTION_SUSPECTED_REASON = (
+    "This document contains text that appears to address an automated "
+    "grading system rather than a human reader. Because parsed criteria "
+    "are embedded directly into every later grading prompt, an instruction "
+    "here would not affect one check -- it would ride along into every "
+    "manuscript graded against this rubric. Please review the parsed "
+    "criteria carefully before activating it."
+)
 
 # Significant words only (skip 1-3 letter function words: "the", "and",
 # "for", ...) — a coarse but dependency-free overlap signal; no NLP model
@@ -126,13 +144,26 @@ async def attempt_decomposition(
     last_criteria: list[ParsedCriterion] = []
     last_issues: list[str] = ["no attempt produced a schema-valid response"]
 
+    # BUG-160: `raw_text` is identical across every retry in this loop, so
+    # checking it once up front (rather than per-attempt) is not a missed
+    # case — it's the same input every time. A suspected match doesn't
+    # change what the gate checks; it's an independent concern that must
+    # survive even a clean gate pass (see below).
+    injection = detect_injection_signal(raw_text)
+
     for attempt in range(1, total_attempts + 1):
         try:
             criteria = await decompose_rubric(raw_text, llm, feedback=feedback)
         except RubricParseError as exc:
             last_issues = [str(exc)]
             await _log_attempt(
-                session, rubric_id, attempt, ok=False, issues=last_issues, coverage=None
+                session,
+                rubric_id,
+                attempt,
+                ok=False,
+                issues=last_issues,
+                coverage=None,
+                injection=injection,
             )
             feedback = last_issues[0]
             continue
@@ -145,8 +176,16 @@ async def attempt_decomposition(
             ok=gate.ok,
             issues=gate.reasons,
             coverage=gate.coverage_ratio,
+            injection=injection,
         )
         if gate.ok:
+            if injection.suspected:
+                return DecompositionOutcome(
+                    criteria=criteria,
+                    needs_review=True,
+                    issues=[RUBRIC_INJECTION_SUSPECTED_REASON],
+                    attempts=attempt,
+                )
             return DecompositionOutcome(
                 criteria=criteria, needs_review=False, issues=[], attempts=attempt
             )
@@ -154,6 +193,8 @@ async def attempt_decomposition(
         last_issues = gate.reasons
         feedback = "; ".join(gate.reasons)
 
+    if injection.suspected and RUBRIC_INJECTION_SUSPECTED_REASON not in last_issues:
+        last_issues = [*last_issues, RUBRIC_INJECTION_SUSPECTED_REASON]
     return DecompositionOutcome(
         criteria=last_criteria, needs_review=True, issues=last_issues, attempts=total_attempts
     )
@@ -167,6 +208,7 @@ async def _log_attempt(
     ok: bool,
     issues: list[str],
     coverage: float | None,
+    injection: InjectionSignal | None = None,
 ) -> None:
     """rubric_id lives in the payload, not a typed column — audit_log's
     typed FK-shaped column (check_run_id) means something else, and this
@@ -180,6 +222,8 @@ async def _log_attempt(
                 "ok": ok,
                 "issues": issues,
                 "coverage_ratio": coverage,
+                "injection_suspected": injection.suspected if injection else False,
+                "injection_pattern_id": injection.matched_pattern_id if injection else None,
             },
         )
     )

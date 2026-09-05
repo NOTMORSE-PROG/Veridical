@@ -28,6 +28,7 @@ from typing import Literal
 from pydantic import BaseModel, Field, field_validator
 
 from app.checks.citations.extract import CitationFlagDraft
+from app.checks.injection import InjectionSignal, detect_injection_signal
 from app.config import Settings
 from app.errors import ApiDownError, QuotaExhaustedError, VeridicalError
 from app.llm.base import LLMClient
@@ -48,6 +49,38 @@ CANNOT_DETERMINE_WORDING = (
     "Could not determine whether this source supports the claim it's "
     "attached to (the abstract may not cover the specific point cited), "
     "please check manually if this matters for your review."
+)
+# BUG-160: like F4, this is a single judgment call with no vote to distrust,
+# so the response is the same as pair.py's — don't let a manipulated
+# "supported" verdict vanish as silence. But F5 has a wrinkle F4 doesn't:
+# the abstract is fetched automatically from CrossRef/Semantic Scholar, not
+# authored by the student, so a match there is not even a fact about the
+# manuscript. Two wordings, chosen by where the match actually was, so the
+# instructor isn't pointed at the student's own claim for a third party's
+# text (ground rule 3 cuts both ways: don't accuse the wrong party either).
+#
+# `ABSTRACT_INJECTION_SUSPECTED_WORDING` names the matched abstract snippet
+# directly (backend-critic finding, BUG-160 review): `evidence_excerpt` on
+# this check family is always `claim_sentence`, never the abstract, so
+# without the snippet embedded here an instructor would be told a fetched
+# abstract "contains suspicious language" with nothing they could actually
+# check without independently refetching and re-reading it themselves — an
+# unverifiable claim (charter judgment-heuristic 1). The claim-side wording
+# doesn't need this: `evidence_excerpt`/`Claim: "{claim}"` already show the
+# full claim sentence the match came from.
+CLAIM_INJECTION_SUSPECTED_WORDING = (
+    "This citation appears to support the claim, but the manuscript text "
+    "here also contains language that appears to address an automated "
+    "grader rather than the reader, so that verdict should not be trusted "
+    'without a direct look. Claim: "{claim}"'
+)
+ABSTRACT_INJECTION_SUSPECTED_WORDING = (
+    "This citation appears to support the claim, but the source's own "
+    "abstract (fetched automatically from its indexed record, not written "
+    "by the student) contains language that appears to address an "
+    "automated grader rather than the reader, so that verdict should not "
+    'be trusted without a direct look. Claim: "{claim}" | Abstract text: '
+    '"{snippet}"'
 )
 
 
@@ -116,11 +149,43 @@ async def _judge_batch(
 
 
 def _verdict_to_flag(
-    pair: ClaimSupportInput, verdict: ClaimSupportVerdict
+    pair: ClaimSupportInput,
+    verdict: ClaimSupportVerdict,
+    claim_injection: InjectionSignal,
+    abstract_injection: InjectionSignal,
 ) -> CitationFlagDraft | None:
     anchor = f"reference #{pair.citation.order_index + 1}"
+    injection_detail: dict = {}
+    if claim_injection.suspected or abstract_injection.suspected:
+        # Traceable regardless of verdict (ground rule 4); which side
+        # matched is recorded so the instructor can tell manuscript text
+        # from third-party abstract text at a glance.
+        matched = abstract_injection if abstract_injection.suspected else claim_injection
+        injection_detail = {
+            "injection_suspected": True,
+            "injection_source": "abstract" if abstract_injection.suspected else "claim",
+            "injection_matched_pattern": matched.matched_pattern_id,
+            "injection_matched_snippet": matched.matched_snippet,
+        }
     if verdict.verdict == "supported":
-        return None  # matches the rest of this check family: confirmed = silence
+        if not injection_detail:
+            return None  # matches the rest of this check family: confirmed = silence
+        if abstract_injection.suspected:
+            reason = ABSTRACT_INJECTION_SUSPECTED_WORDING.format(
+                claim=pair.claim_sentence, snippet=abstract_injection.matched_snippet
+            )
+        else:
+            reason = CLAIM_INJECTION_SUSPECTED_WORDING.format(claim=pair.claim_sentence)
+        return CitationFlagDraft(
+            severity=FlagSeverity.low,
+            evidence_excerpt=pair.claim_sentence,
+            page_anchor=anchor,
+            detail={
+                "kind": "claim_support_injection_suspected",
+                "reason": reason,
+                **injection_detail,
+            },
+        )
     if verdict.verdict == "possibly_unsupported":
         excerpt = verdict.abstract_excerpt
         if not excerpt or not _excerpt_in_abstract(excerpt, pair.abstract):
@@ -134,6 +199,7 @@ def _verdict_to_flag(
                 detail={
                     "kind": "claim_support_cannot_determine",
                     "reason": CANNOT_DETERMINE_WORDING,
+                    **injection_detail,
                 },
             )
         return CitationFlagDraft(
@@ -146,13 +212,18 @@ def _verdict_to_flag(
                     claim=pair.claim_sentence, excerpt=excerpt
                 ),
                 "abstract_excerpt": excerpt,
+                **injection_detail,
             },
         )
     return CitationFlagDraft(  # cannot_determine
         severity=FlagSeverity.low,
         evidence_excerpt=pair.claim_sentence,
         page_anchor=anchor,
-        detail={"kind": "claim_support_cannot_determine", "reason": CANNOT_DETERMINE_WORDING},
+        detail={
+            "kind": "claim_support_cannot_determine",
+            "reason": CANNOT_DETERMINE_WORDING,
+            **injection_detail,
+        },
     )
 
 
@@ -213,7 +284,15 @@ async def run_claim_support_check(
                 # not a quota or availability issue.
                 n_parse_failure += 1
                 continue
-            draft = _verdict_to_flag(pair, verdict)
+            # Cheap regex, no LLM call — checked separately so the flag can
+            # name which side matched (the student's claim sentence, or the
+            # third-party abstract fetched for this citation).
+            draft = _verdict_to_flag(
+                pair,
+                verdict,
+                detect_injection_signal(pair.claim_sentence),
+                detect_injection_signal(pair.abstract),
+            )
             if draft is not None:
                 flags.append(draft)
     return ClaimSupportResult(flags, n_quota, n_api_down, n_parse_failure)

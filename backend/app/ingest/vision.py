@@ -14,6 +14,16 @@ The model's own uncertainty is preserved: `confidence: "low"` becomes
 the report says the image could not be reliably read (charter rule 3;
 never present an unsure transcription as fact). Charts are classified and
 skipped, never converted into invented tables.
+
+BUG-160 deliberately left this path unguarded by `detect_injection_signal`:
+the call here sends an IMAGE with a fixed prompt, not interpolated
+manuscript text, so there is no text string for a regex to scan before the
+call. This is a coupling assumption, not a structural guarantee (confirmed
+2026-09-05: `TableBlock.rows`/`caption` are never fed into another LLM
+call anywhere in the codebase today) — if a future change folds this
+module's extracted table/caption text back into a semantic-grading or
+integrity-check prompt, that new call site needs its own guard; this
+docstring note doesn't grant one retroactively.
 """
 
 import asyncio
