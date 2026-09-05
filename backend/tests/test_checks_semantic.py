@@ -265,6 +265,51 @@ async def test_malformed_response_retries_whole_batch_then_escalates_all():
     assert len(llm.calls) == 2
 
 
+async def test_duplicate_verdict_index_is_rejected_not_resolved_last_wins():
+    """BUG-177: `index` decides which criterion a verdict lands on --
+    duplicate index 0 must not silently resolve to whichever verdict
+    happened to be last in the list. Rejected the same way any other
+    malformed response is: whole-batch retry, then honest escalation."""
+    tree = SectionTree(source="heuristics", nodes=[])
+    blocks = [TextBlock(page=1, text="Prose.", max_font_size=11, bold_ratio=0.0)]
+    extraction = _extraction(blocks=blocks, tree=tree)
+    criteria = [FakeCriterion(id=1, text="A"), FakeCriterion(id=2, text="B")]
+
+    duplicate_response = {
+        "verdicts": [
+            {"index": 0, "verdict": "pass", "reasoning": "r1", "evidence_quotes": ["Prose."]},
+            {"index": 0, "verdict": "fail", "reasoning": "r2", "evidence_quotes": ["Prose."]},
+        ]
+    }
+    llm = ScriptedLLM([duplicate_response, duplicate_response])
+    session = FakeSession()
+    results = await run_semantic_checks(session, 1, criteria, extraction, llm)
+    assert all(r.outcome == ResultOutcome.escalated for r in results)
+    assert len(llm.calls) == 2  # rejected outright, never silently resolved
+
+
+async def test_out_of_range_verdict_index_is_rejected():
+    """BUG-177: an index outside `range(len(batch_criteria))` means the
+    model lost track of the batch it was given -- refuse the whole
+    response rather than guess which verdicts are trustworthy."""
+    tree = SectionTree(source="heuristics", nodes=[])
+    blocks = [TextBlock(page=1, text="Prose.", max_font_size=11, bold_ratio=0.0)]
+    extraction = _extraction(blocks=blocks, tree=tree)
+    criteria = [FakeCriterion(id=1, text="A"), FakeCriterion(id=2, text="B")]
+
+    out_of_range_response = {
+        "verdicts": [
+            {"index": 0, "verdict": "pass", "reasoning": "r1", "evidence_quotes": ["Prose."]},
+            {"index": 999, "verdict": "fail", "reasoning": "r2", "evidence_quotes": ["Prose."]},
+        ]
+    }
+    llm = ScriptedLLM([out_of_range_response, out_of_range_response])
+    session = FakeSession()
+    results = await run_semantic_checks(session, 1, criteria, extraction, llm)
+    assert all(r.outcome == ResultOutcome.escalated for r in results)
+    assert len(llm.calls) == 2
+
+
 async def test_missing_index_in_batch_response_triggers_single_retry():
     tree = SectionTree(source="heuristics", nodes=[])
     blocks = [TextBlock(page=1, text="Some real prose here.", max_font_size=11, bold_ratio=0.0)]
