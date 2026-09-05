@@ -1,0 +1,40 @@
+name: Keep-warm ping (owner-gated, defense weeks only)
+
+# BUG-142: Render's free web-service tier spins down after 15 min idle and
+# takes ~47s to wake (measured against production) -- the dominant part of
+# "the app is slow". D-004 (locked decision, context/DECISIONS.md) already
+# named the mitigation and its own boundary: "optional uptime ping in
+# defense weeks", not a permanent always-on service. The instance-hour
+# arithmetic in D-004/BUG-142 only works if this workspace runs no OTHER
+# free Render web service -- unverified from this environment (no Render
+# dashboard access), so this workflow never pings on its own say-so.
+#
+# Runs on a schedule but does NOTHING unless the owner has explicitly set
+# the repo variable KEEP_WARM_ENABLED=true (Settings -> Actions -> General
+# -> Variables, same mechanism production-smoke.yml already uses for
+# PROD_API_URL) -- flip it on before a defense session, back off after.
+# `workflow_dispatch` still works regardless, for a one-off manual wake.
+#
+# Scheduled workflows are auto-disabled on a repo with 60 days of zero
+# activity, and can be throttled under GitHub-wide load -- acceptable here
+# since this repo sees continuous commits, but not a guarantee. cron-job.org
+# (free, no GitHub-activity dependency) was the ticket's own first
+# preference; not set up here because it requires creating an external
+# account this session has no authority to do on the owner's behalf.
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "*/10 * * * *"
+
+jobs:
+  ping:
+    if: ${{ vars.KEEP_WARM_ENABLED == 'true' || github.event_name == 'workflow_dispatch' }}
+    runs-on: ubuntu-latest
+    env:
+      API_URL: ${{ vars.PROD_API_URL || 'https://veridical-api.onrender.com' }}
+    steps:
+      - name: Ping health endpoint
+        run: |
+          code="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 60 "$API_URL/health")"
+          echo "HTTP $code from $API_URL/health"
