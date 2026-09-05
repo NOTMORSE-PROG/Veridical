@@ -20,11 +20,28 @@ from functools import lru_cache
 from model2vec import StaticModel
 
 from app.config import Settings, get_settings
+from app.errors import ApiDownError
 
 
 @lru_cache(maxsize=1)
 def _load_model(model_id: str) -> StaticModel:
-    return StaticModel.from_pretrained(model_id)
+    # BUG-152: nothing previously handled the model host being unreachable
+    # on a cold process (Render's ephemeral disk means this is a real
+    # network dependency on every spin-down, not just the first-ever
+    # boot) -- a raw huggingface_hub/requests exception would otherwise
+    # propagate as `run_check_run`'s generic "unexpected_error" catch-all,
+    # honest about not hanging but not about WHY (charter rule 9: unverifiable
+    # is not fake, api-down is not unverifiable -- this is neither, it's a
+    # third check-couldn't-run cause and deserves its own name). `lru_cache`
+    # does not cache a raised exception, so a transient failure here is
+    # retried in full on the very next call, not stuck.
+    try:
+        return StaticModel.from_pretrained(model_id)
+    except Exception as exc:  # noqa: BLE001 -- any load failure is the same honest cause here
+        raise ApiDownError(
+            f"Could not load the local embedding model ({model_id}). "
+            "The model host may be unreachable; try again shortly."
+        ) from exc
 
 
 def get_embedding_model(settings: Settings | None = None) -> StaticModel:

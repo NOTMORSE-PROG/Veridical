@@ -1,6 +1,7 @@
 """VERIDICAL API entry point."""
 
 import asyncio
+import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -24,6 +25,7 @@ from app.groups.service import seed_default_programs
 from app.ingest.router import router as ingest_router
 from app.library.router import router as library_router
 from app.llm.router import router as llm_router
+from app.ml.embeddings import get_embedding_model
 from app.pipeline.router import router as pipeline_router
 from app.pipeline.worker import worker_loop
 from app.report.router import router as report_router
@@ -52,6 +54,43 @@ async def _seed_programs_on_boot() -> None:
     await seed_default_programs()
 
 
+_logger = logging.getLogger(__name__)
+
+
+async def _prewarm_embedding_model_on_boot() -> None:
+    """BUG-152: the shared local embedding model (F4/F7's Tier 1 candidate
+    generation) is an `lru_cache`d per-process singleton that previously
+    loaded on whichever instructor's request happened to hit it first --
+    on Render, whose disk is ephemeral, that means a real HuggingFace
+    fetch stacked on top of the ~47s cold-wake this compounds (BUG-142),
+    paid by a real check_run instead of at boot where a failure is
+    ops-visible rather than silently degrading one instructor's run.
+    `asyncio.to_thread` (same reasoning as `_upgrade_to_head` above):
+    `StaticModel.from_pretrained` is sync and genuinely blocking, and
+    boot has no event-loop traffic to protect yet, but no reason to block
+    it anyway now that this runs off-thread everywhere else it's called.
+
+    **Never lets a failure here fail the boot** (`backend-critic` finding,
+    live-verified: an exception raised in a FastAPI lifespan BEFORE
+    `yield` prevents the app from serving ANY request -- Render's ENTIRE
+    process boots fresh on every spin-down, so an unguarded prewarm would
+    turn one transient HuggingFace hiccup into total downtime for every
+    instructor, not just the F4/F7 checks that actually need the model.
+    That is a strictly worse failure than the one this fix exists to
+    catch. `get_embedding_model()` is still called lazily, unchanged, on
+    first real use if this pre-warm attempt fails -- this is a best-effort
+    head start, never a hard boot dependency."""
+    try:
+        await asyncio.to_thread(get_embedding_model)
+    except Exception:  # noqa: BLE001 -- any failure here must never fail the boot
+        _logger.warning(
+            "Embedding model pre-warm failed at boot; will retry lazily on first "
+            "use. This is expected during a real HuggingFace outage and is not, "
+            "by itself, a reason the API should be unavailable.",
+            exc_info=True,
+        )
+
+
 @asynccontextmanager
 async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
     # Migrations were previously a manual "remember to run alembic upgrade
@@ -71,6 +110,9 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
         # never open a real DB connection by surprise against whatever
         # DATABASE_URL happens to be configured.
         await _seed_programs_on_boot()
+        # BUG-152: same prod-only gate -- a test importing this module
+        # must never make a real HuggingFace fetch by surprise.
+        await _prewarm_embedding_model_on_boot()
 
     # BUG-136: this used to be gated ONLY on `pipeline_worker_autostart`
     # (default False), with a comment claiming "production (Render) turns

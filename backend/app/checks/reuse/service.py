@@ -10,6 +10,8 @@ re-run of the SAME check_run (idempotency, ENGINEERING §4) never
 compares this manuscript against itself.
 """
 
+import asyncio
+
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -296,7 +298,14 @@ async def run_originality_reuse_check(
     instructor_id: int | None = None,
     content_hash: str | None = None,
 ) -> CheckResult:
-    embeddings = compute_document_embeddings(extraction, settings)
+    # BUG-152: off the event loop -- this runs the local model2vec encoder
+    # over every chapter plus the whole document, real CPU work with no
+    # I/O, on the single Render worker that also serves every other
+    # instructor's requests (including the 2s progress poll reporting on
+    # this exact check).
+    embeddings = await asyncio.get_running_loop().run_in_executor(
+        None, compute_document_embeddings, extraction, settings
+    )
 
     # BUG-140: checked before anything else -- a content-hash match is a
     # CERTAIN "this is the same file" signal, unlike embedding similarity,
@@ -372,7 +381,9 @@ async def run_originality_reuse_check(
     # granularity — same "flags at every matching level" precedent the
     # existing exact-duplicate test already documents for chapter vs
     # whole-doc).
-    passages = compute_passage_embeddings(extraction, settings)
+    passages = await asyncio.get_running_loop().run_in_executor(
+        None, compute_passage_embeddings, extraction, settings
+    )
     passage_query_result = await query_similar_passages(session, manuscript_id, passages, settings)
     # BUG-097 (presentation-only remedy): computed once, applied to every
     # match this run produces — see `is_first_upload_for_instructor`'s own

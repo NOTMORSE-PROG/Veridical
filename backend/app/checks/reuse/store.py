@@ -12,6 +12,8 @@ replaces its existing archive rows rather than duplicating them —
 between runs, e.g. after a re-upload, can't leave stale rows behind).
 """
 
+import asyncio
+
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -80,7 +82,17 @@ async def embed_and_store(
     extraction: ExtractionResult,
     settings: Settings,
 ) -> ManuscriptArchive | None:
-    embeddings = compute_document_embeddings(extraction, settings)
+    # BUG-152 (backend-critic finding): the real production caller
+    # (`checks/reuse/service.py`) bypasses this combinator entirely and
+    # calls `compute_document_embeddings` directly (already wrapped), so
+    # this one is unreachable from any shipped check today -- but it's a
+    # public, exported combinator sitting right next to its now-fixed
+    # siblings, exactly the shape a future backfill/re-embed action would
+    # reach for. Fixed the same way rather than leaving the identical bug
+    # live for its next caller.
+    embeddings = await asyncio.get_running_loop().run_in_executor(
+        None, compute_document_embeddings, extraction, settings
+    )
     return await store_document_embeddings(session, manuscript_id, embeddings)
 
 

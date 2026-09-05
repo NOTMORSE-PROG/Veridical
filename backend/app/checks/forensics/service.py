@@ -14,6 +14,9 @@ with EITHER inferential or descriptive stats gets `outcome=passed`
 actual findings).
 """
 
+import asyncio
+from dataclasses import dataclass
+
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -27,9 +30,25 @@ from app.models.enums import CheckKind, ResultOutcome
 from app.models.run import CheckResult, Flag
 
 
-async def run_statistical_forensics_check(
-    session: AsyncSession, check_run_id: int, extraction: ExtractionResult
-) -> CheckResult:
+@dataclass(frozen=True)
+class _ForensicsComputation:
+    n_inferential: int
+    n_descriptive: int
+    outcome: ResultOutcome
+    flag_drafts: list[ForensicsFlagDraft]
+    skipped_composite_rows: int
+
+
+def _compute_forensics_findings(extraction: ExtractionResult) -> _ForensicsComputation:
+    """BUG-152: the CPU-bound half of the check (regex stat extraction,
+    GRIM/GRIMMER, p-value recalculation, sanity checks over the whole
+    manuscript text) has no I/O and no DB access, so it's pulled out into
+    one plain function callable off the event loop in one executor
+    round-trip -- matching the codebase's own established convention
+    (`ingest/service.py`, `report/service.py:manuscript_file_path_for`,
+    `ingest/service.py::load_raw_store_async`) rather than blocking the
+    single Render worker (and the 2s progress poll reporting on this exact
+    work) for the run's duration."""
     stats = extract_all_stats(extraction)
     inferential = [s for s in stats if s.kind == "inferential"]
     descriptive = [s for s in stats if s.kind == "descriptive"]
@@ -45,6 +64,23 @@ async def run_statistical_forensics_check(
         *evaluate_percentage_sums(stats),
         *evaluate_group_counts(stats),
     ]
+    return _ForensicsComputation(
+        n_inferential=len(inferential),
+        n_descriptive=len(descriptive),
+        outcome=outcome,
+        flag_drafts=flag_drafts,
+        skipped_composite_rows=grim_grimmer.skipped_composite_rows,
+    )
+
+
+async def run_statistical_forensics_check(
+    session: AsyncSession, check_run_id: int, extraction: ExtractionResult
+) -> CheckResult:
+    computation = await asyncio.get_running_loop().run_in_executor(
+        None, _compute_forensics_findings, extraction
+    )
+    outcome = computation.outcome
+    flag_drafts = computation.flag_drafts
 
     result = CheckResult(
         check_run_id=check_run_id,
@@ -52,15 +88,15 @@ async def run_statistical_forensics_check(
         kind=CheckKind.statistical_forensics,
         outcome=outcome,
         detail={
-            "n_inferential_stats": len(inferential),
-            "n_descriptive_stats": len(descriptive),
+            "n_inferential_stats": computation.n_inferential,
+            "n_descriptive_stats": computation.n_descriptive,
             "n_flags": len(flag_drafts),
             # BUG-164: disclosed, never silently omitted -- rows GRIM/
             # GRIMMER deliberately never evaluated because they look like
             # a multi-item composite mean (the same n repeats across
             # other rows of the same table), not the single-item mean
             # the test's own math assumes.
-            "n_grim_skipped_likely_composite": grim_grimmer.skipped_composite_rows,
+            "n_grim_skipped_likely_composite": computation.skipped_composite_rows,
         },
     )
     session.add(result)
