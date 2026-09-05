@@ -255,6 +255,7 @@ async def _call_grade(
     llm: LLMClient,
     check_run_id: int | None,
     *,
+    expected_count: int,
     consistency_pass: str = "single",
     prompt_version: str = PROMPT_VERSION,
 ) -> GradeBatchResponse:
@@ -272,9 +273,29 @@ async def _call_grade(
         consistency_pass=consistency_pass,
     )
     try:
-        return GradeBatchResponse.model_validate(_unwrap_verdicts(response))
+        parsed = GradeBatchResponse.model_validate(_unwrap_verdicts(response))
     except ValidationError as exc:
         raise SemanticGradeError(f"Semantic grading response failed validation: {exc}") from exc
+    # BUG-177: `index` is the field that decides which criterion a verdict
+    # lands on, and it had no bound and no uniqueness check -- a duplicate
+    # index resolved last-wins with no signal the model contradicted
+    # itself, and an out-of-range index was silently retained/ignored.
+    # Same defensiveness `_unwrap_verdicts` already applies one field
+    # over (D-017: Gemini caught live returning structurally-wrong-but-
+    # parseable output): refuse an ambiguous response rather than guess
+    # which duplicate is real (charter rule 1) -- treated exactly like any
+    # other `SemanticGradeError`, so it gets the same whole-batch retry
+    # already in place, then an honest per-criterion escalation if the
+    # retry doesn't recover.
+    indices = [v.index for v in parsed.verdicts]
+    if len(indices) != len(set(indices)):
+        raise SemanticGradeError(f"Grading response had duplicate verdict indices: {indices}")
+    if any(i < 0 or i >= expected_count for i in indices):
+        raise SemanticGradeError(
+            f"Grading response had an out-of-range verdict index (expected 0-"
+            f"{expected_count - 1}): {indices}"
+        )
+    return parsed
 
 
 def _unwrap_verdicts(response: Any) -> Any:
@@ -331,6 +352,7 @@ async def _grade_single_criterion(
             prompt,
             llm,
             check_run_id,
+            expected_count=1,
             consistency_pass=consistency_pass,
             prompt_version=prompt_version,
         )
@@ -385,6 +407,7 @@ async def grade_batch_verdicts(
                 prompt,
                 llm,
                 check_run_id,
+                expected_count=len(batch_criteria),
                 consistency_pass=consistency_pass,
                 prompt_version=prompt_version,
             )

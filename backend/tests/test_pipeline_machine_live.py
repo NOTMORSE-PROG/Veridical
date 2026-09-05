@@ -459,21 +459,38 @@ async def test_integrity_stage_does_not_reread_the_extraction_when_already_done(
 class _FlakyThenFineLLM:
     """Simulates the process dying/quota running out mid-run: the first
     criterion's FULL self-consistency vote (V-022: pass_1 + pass_2, no
-    tie-break needed since the plain fake fixture agrees with itself)
-    succeeds normally, then the NEXT call raises QuotaExhaustedError —
-    exactly what a real exhausted daily quota looks like from the
-    orchestrator's point of view (V-009's queue raises the same type)."""
+    tie-break needed since both passes agree) succeeds normally, then the
+    NEXT call raises QuotaExhaustedError — exactly what a real exhausted
+    daily quota looks like from the orchestrator's point of view (V-009's
+    queue raises the same type).
+
+    BUG-177: returns a minimal, correctly-shaped single-verdict response
+    directly (index 0 only) rather than delegating to `FakeLLMClient`'s
+    shared `semantic_grading.json` fixture -- that fixture always returns
+    3 verdicts regardless of batch size, which the new out-of-range
+    validation correctly rejects for the single-criterion batches this
+    test's own call-counting model depends on (`_seed`'s two semantic
+    criteria each name a distinct section, so each grades as its own
+    1-criterion batch)."""
 
     def __init__(self, fail_after: int):
         self.fail_after = fail_after
         self.calls = 0
-        self._fake = FakeLLMClient()
 
     async def complete(self, *args, **kwargs):
         self.calls += 1
         if self.calls > self.fail_after:
             raise QuotaExhaustedError("simulated: daily Gemini quota exhausted")
-        return await self._fake.complete(*args, **kwargs)
+        return {
+            "verdicts": [
+                {
+                    "index": 0,
+                    "verdict": "pass",
+                    "reasoning": "The document clearly and directly satisfies this criterion.",
+                    "evidence_quotes": ["This is a test sentence used as evidence."],
+                }
+            ]
+        }
 
 
 async def test_quota_exhausted_parks_the_run_then_resumes_without_duplicate_calls(

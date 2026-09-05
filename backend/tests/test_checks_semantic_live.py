@@ -116,15 +116,44 @@ async def test_semantic_check_persists_real_results_fake_llm_mode(
         rubric = Rubric(instructor_id=instructor.id, title="Format", source_file="r.pdf")
         session.add(rubric)
         await session.commit()
-        criterion = Criterion(
-            rubric_id=rubric.id,
-            type="semantic",
-            text="The Abstract clearly states the study's purpose",
-            evidence=None,
-            weight=Decimal("10"),
-            position=0,
-        )
-        session.add(criterion)
+        # BUG-177: the shared `semantic_grading.json` fixture always
+        # returns 3 verdicts (indices 0-2) -- a batch of fewer criteria now
+        # correctly triggers the new out-of-range rejection (the fixture
+        # itself was never validated against a batch it didn't match, and
+        # nothing before this ticket checked). Three criteria, none naming
+        # a specific section (so all three land in the SAME whole-document
+        # batch, not scattered across separate single-criterion batches
+        # that would each independently mismatch the fixture) -- same
+        # non-section-naming phrasing
+        # `test_fake_llm_mode_returns_deterministic_fixture_verdicts`
+        # already uses for the identical reason.
+        criteria = [
+            Criterion(
+                rubric_id=rubric.id,
+                type="semantic",
+                text="The overall purpose of the study is clearly stated",
+                evidence=None,
+                weight=Decimal("10"),
+                position=0,
+            ),
+            Criterion(
+                rubric_id=rubric.id,
+                type="semantic",
+                text="The overall methodology is sound",
+                evidence=None,
+                weight=Decimal("10"),
+                position=1,
+            ),
+            Criterion(
+                rubric_id=rubric.id,
+                type="semantic",
+                text="The overall writing is clear throughout",
+                evidence=None,
+                weight=Decimal("10"),
+                position=2,
+            ),
+        ]
+        session.add_all(criteria)
         await session.commit()
 
         check_run = CheckRun(manuscript_id=manuscript.id, rubric_id=rubric.id)
@@ -132,15 +161,15 @@ async def test_semantic_check_persists_real_results_fake_llm_mode(
         await session.commit()
 
         results = await run_semantic_checks(
-            session, check_run.id, [criterion], extraction, FakeLLMClient(), settings
+            session, check_run.id, criteria, extraction, FakeLLMClient(), settings
         )
-        assert len(results) == 1
+        assert len(results) == 3
         assert results[0].outcome == ResultOutcome.passed
 
     async with session_factory() as verify_session:
         stored = (
             await verify_session.execute(
-                select(CheckResult).where(CheckResult.criterion_id == criterion.id)
+                select(CheckResult).where(CheckResult.criterion_id == criteria[0].id)
             )
         ).scalar_one()
         assert stored.kind == CheckKind.semantic
