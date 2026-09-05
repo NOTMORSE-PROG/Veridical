@@ -62,26 +62,26 @@ export function useLibraryParagraphs(manuscriptId: number | undefined, enabled: 
 
 // Purge itself is unchanged from V-042 (still `/archive/{id}`, still
 // ownership-gated server-side) -- Library just calls the same endpoint
-// Archive used to, and patches the SAME `library` query cache Archive used
-// to patch on its own `archive` cache, so a purge shows as "Content
-// removed" in place, not a refetch flicker.
+// Archive used to.
+//
+// BUG-148: the in-place `setQueriesData` patch this used to do (still
+// "Content removed" in place, no refetch flicker) only ever updated the
+// TOP-LEVEL representative row, keyed on `manuscript_id`. Since a purge
+// target can now be a SIBLING nested in `duplicate_uploads` (never a key
+// in `old.items` itself), that patch would silently no-op for exactly the
+// new interaction this ticket adds -- worse, purging the group's current
+// representative can change WHICH manuscript the server now considers
+// representative (an older still-stored sibling takes over), which a
+// client-side patch has no way to re-derive without duplicating the
+// backend's own tie-break rule. A real refetch is the only honest option
+// once collapsing is server-side and non-trivial -- correctness over the
+// no-flicker cosmetic.
 export function usePurgeManuscript() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (manuscriptId: number) => api.delete<PurgeOut>(`/archive/${manuscriptId}`),
     onSuccess: (result) => {
-      queryClient.setQueriesData<PaginatedLibrary>({ queryKey: ["library"] }, (old) =>
-        old
-          ? {
-              ...old,
-              items: old.items.map((item) =>
-                item.manuscript_id === result.manuscript_id
-                  ? { ...item, purged_at: result.purged_at }
-                  : item,
-              ),
-            }
-          : old,
-      );
+      queryClient.invalidateQueries({ queryKey: ["library"] });
       queryClient.invalidateQueries({ queryKey: ["library-item", result.manuscript_id] });
     },
   });
