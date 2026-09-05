@@ -420,6 +420,42 @@ async def test_integrity_stage_runs_all_four_integrity_checks(
         assert reuse_result.detail["n_flags"] == 0
 
 
+async def test_integrity_stage_does_not_reread_the_extraction_when_already_done(
+    session_factory, tmp_path, monkeypatch
+):
+    """BUG-152: a resumed run re-entering the integrity stage with all
+    four checks already recorded (the crash-before-transition window
+    BUG-151's `verdict_computed` dedup guards the same way) has no real
+    use for the extraction -- reading and fully re-validating it (a real,
+    sometimes-durable-storage-backed read, `load_raw_store_async`) is pure
+    waste on the resume path most likely to be under load."""
+    check_run_id, _, settings = await _seed(session_factory, tmp_path, monkeypatch)
+    async with session_factory() as session:
+        check_run = await session.get(CheckRun, check_run_id)
+        await run_check_run(session, check_run, settings, FakeLLMClient())
+        assert check_run.status == CheckRunStatus.done  # all four checks really did run
+
+    calls = 0
+    real_load = pipeline_machine.load_raw_store_async
+
+    async def _counting_load(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        return await real_load(*args, **kwargs)
+
+    monkeypatch.setattr(pipeline_machine, "load_raw_store_async", _counting_load)
+
+    async with session_factory() as session:
+        check_run = await session.get(CheckRun, check_run_id)
+        # Simulate the crash window: status still `integrity`, but every
+        # check_result this stage would have written already exists.
+        check_run.status = CheckRunStatus.integrity
+        await session.commit()
+        await run_check_run(session, check_run, settings, FakeLLMClient())
+
+    assert calls == 0  # never re-read -- every existing_*_result was already non-None
+
+
 class _FlakyThenFineLLM:
     """Simulates the process dying/quota running out mid-run: the first
     criterion's FULL self-consistency vote (V-022: pass_1 + pass_2, no

@@ -501,9 +501,23 @@ async def _run_integrity_stage(
     """F4 (internal agreement, V-034/V-035), F5 (citation integrity,
     V-027/V-028/V-029/V-030), F6 (statistical forensics, V-031/V-032/
     V-033), and F7 (originality/reuse, V-036/V-037) all run for real."""
-    extraction = await load_raw_store_async(settings, manuscript.id)
-
     agreement_existing = await existing_internal_agreement_result(session, check_run.id)
+    citation_existing = await existing_citation_integrity_result(session, check_run.id)
+    forensics_existing = await existing_statistical_forensics_result(session, check_run.id)
+    reuse_existing = await existing_originality_reuse_result(session, check_run.id)
+
+    # BUG-152: a resumed run that reaches this stage with all four checks
+    # already done (a crash between this stage's own `_record_stage` and
+    # the transition to `aggregating` that follows it, the same window
+    # BUG-151's `verdict_computed` dedup guards) has no real use for the
+    # extraction at all -- reading and fully re-validating it (a real,
+    # sometimes-durable-storage-backed read) is pure waste on the one path
+    # most likely to be under load. Same `if pending:` guard
+    # `_run_semantic_stage` already uses above.
+    extraction = None
+    if None in (agreement_existing, citation_existing, forensics_existing, reuse_existing):
+        extraction = await load_raw_store_async(settings, manuscript.id)
+
     if agreement_existing is None:
         agreement_result = await run_internal_agreement_check(
             session, llm, check_run.id, extraction, settings
@@ -517,7 +531,6 @@ async def _run_integrity_stage(
         )
     await cancellation_boundary()
 
-    citation_existing = await existing_citation_integrity_result(session, check_run.id)
     if citation_existing is None:
         citations = list(
             (
@@ -540,7 +553,6 @@ async def _run_integrity_stage(
         )
     await cancellation_boundary()
 
-    forensics_existing = await existing_statistical_forensics_result(session, check_run.id)
     if forensics_existing is None:
         forensics_result = await run_statistical_forensics_check(session, check_run.id, extraction)
         forensics_flags = (
@@ -552,7 +564,6 @@ async def _run_integrity_stage(
         )
     await cancellation_boundary()
 
-    reuse_existing = await existing_originality_reuse_result(session, check_run.id)
     if reuse_existing is None:
         reuse_result = await run_originality_reuse_check(
             session,

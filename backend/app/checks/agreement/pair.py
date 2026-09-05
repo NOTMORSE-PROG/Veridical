@@ -19,6 +19,8 @@ means agreement (`consistent` -> no flag), same convention as every other
 integrity check in this codebase (F5/F6).
 """
 
+import asyncio
+import functools
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
@@ -249,12 +251,23 @@ async def run_agreement_pairing(
     flag — ticket AC) + how many candidate pairs were skipped for quota
     (V-050's availability-floor pattern: a degraded run still finishes
     honestly, the judged pairs keep their real verdicts)."""
-    candidates, unmatched_intents, matched_outcome_indexes = generate_candidates(
-        intents,
-        outcomes,
-        similarity_floor=settings.agreement_pairing_similarity_floor,
-        max_candidates_per_intent=settings.agreement_pairing_max_candidates_per_intent,
-        settings=settings,
+    # BUG-152: off the event loop -- embeds every intent/outcome statement
+    # locally (model2vec), real CPU work with no I/O, same reasoning as
+    # the sibling fix in `checks/reuse/service.py`.
+    (
+        candidates,
+        unmatched_intents,
+        matched_outcome_indexes,
+    ) = await asyncio.get_running_loop().run_in_executor(
+        None,
+        functools.partial(
+            generate_candidates,
+            intents,
+            outcomes,
+            similarity_floor=settings.agreement_pairing_similarity_floor,
+            max_candidates_per_intent=settings.agreement_pairing_max_candidates_per_intent,
+            settings=settings,
+        ),
     )
 
     flags = [_unmatched_intent_flag(intent) for intent in unmatched_intents]
