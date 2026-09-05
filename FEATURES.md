@@ -72,7 +72,7 @@ Reads rubrics and manuscripts (PDF/DOCX) into structured text.
 | F1.2 | DOCX extraction via `python-docx` | 🟢 | Same fields from Word files |
 | F1.3 | Image-embedded tables/equations read via **Gemini multimodal** (replaces Nougat — see §5) | 🟢 | A table embedded as an image is converted to structured rows |
 | F1.4 | Section/heading structure detection (chapter map) | 🟢 | Output = ordered chapter/section tree used by all later checks |
-| F1.5 | Reference-list extraction into structured citations (authors, year, title, DOI/ISBN) | 🟢 | ≥90% of references in a well-formed APA list parsed correctly |
+| F1.5 | Reference-list extraction into structured citations (authors, year, title, DOI/ISBN) | 🟢 | 17 of 17 references correctly structured in the one APA reference list tested so far (100%, 0 LLM calls) — n=1 document, not yet a measured rate; a non-APA corpus is an open gap (BOARD.md G14) |
 | F1.6 | **Docling** table pipeline for local/batch runs | ⚪ | Optional flag; not required in the cloud path |
 | F1.7 | Scanned/image-only PDF OCR | ⚪ | Out of MVP; flag file as "image-only, limited checks" instead |
 
@@ -96,7 +96,7 @@ Routes structural items to deterministic rules and semantic items to AI grading 
 | F3.1 | Criterion router (structural vs. semantic) | 🟢 | Every parsed criterion is routed; none silently skipped |
 | F3.2 | Structural check engine: required sections, reference counts, formatting (margins, spacing, table format), page limits | 🟢 | Deterministic pass/fail with the located evidence (page/section) |
 | F3.3 | AI-assisted semantic grading via **Gemini Flash** | 🟢 | Each semantic criterion graded with cited evidence excerpts from the manuscript |
-| F3.4 | **Self-consistency**: N=3 grading passes, majority vote + agreement score | 🟢 | Agreement score stored per item |
+| F3.4 | **Self-consistency**: 2 differently-stanced grading passes + a conditional tie-break on disagreement, majority vote + agreement score | 🟢 | Two identical-temperature-0 passes would carry little more information than one; two genuinely different stances (V-054/D-017) do, at 2/3 the quota cost of a blind N=3. Agreement score stored per item |
 | F3.5 | **Confidence-based escalation**: low agreement ⇒ "Needs instructor review" flag, never auto-decided | 🟢 | Escalated items visually distinct in the report; count shown in summary |
 | F3.6 | Pinned model + temperature + prompt version per run | 🟢 | Recorded in audit log; two runs of the same manuscript+rubric are comparable |
 
@@ -230,7 +230,7 @@ Combines everything into one explainable output (Objective 4, Fig. 3.12).
 | Backend | Python, FastAPI | Python 3.12 + **FastAPI** ✔ unchanged | — |
 | Ingestion | GROBID, PyMuPDF, Docling, Nougat | **PyMuPDF + python-docx + Gemini multimodal**; Docling optional (local); GROBID via free HuggingFace Space as optional fallback | GROBID needs 2–4 GB RAM — no free tier provides it (Render free = 512 MB). Nougat needs a GPU. Gemini's multimodal free tier covers image tables/equations at zero cost |
 | AI/LLM | Groq API free tier | **Gemini Flash free tier** (primary LLM) | Groq free = 6K tokens/min, ~1K req/day — one 80-page manuscript (~60K+ tokens) would crawl. Gemini Flash free = 250K tokens/min, 1M-token context (whole manuscript in one call), **300 req/day measured across the model pool** (corrected 2026-08-16; the "~1,500/day" written here originally was retracted by D-001/D-014 — a single model allows 20/day) |
-| ML utilities | scikit-learn, cross-encoder NLI | ✔ unchanged (sentence-transformers cross-encoder for NLI/claim-support, runs CPU) | — |
+| ML utilities | scikit-learn, cross-encoder NLI | **model2vec (potion-base-8M) local embeddings for candidate-generation similarity only**; entailment/contradiction judgment is Gemini Tier 2, not a local NLI model | scikit-learn and a cross-encoder NLI model have zero occurrences in `backend/` — the cross-encoder was measured at 487MB RSS (V-030/V-035) and deliberately ruled out against Render's 512MB ceiling before this project's own free-tier constraint |
 | Statistical forensics | (to build) | **statcheck_python, pysprite, grim_test** (existing open source) | Validated implementations exist; reuse them, don't reimplement |
 | Database | PostgreSQL via Neon + pgvector | ✔ unchanged | Free tier confirmed adequate |
 | Frontend | React.js + TailwindCSS | ✔ unchanged (**Vite** build, deployed on Vercel) | — |
@@ -244,7 +244,7 @@ Combines everything into one explainable output (Objective 4, Fig. 3.12).
 To stay comfortably inside free-tier quota during defense season and to strengthen the hybrid-system claim, VERIDICAL grades through a **three-tier cascade** rather than LLM-first:
 
 1. **Tier 0 — deterministic signals**: structural rules plus a linguistic signal layer for semantic criteria (readability, length/vocabulary diversity, citation density, section coherence) — grounded in validated automated-essay-scoring research showing such features correlate r ≥ 0.6 with human grades, and that hybrid feature+LLM scoring beats LLM-only.
-2. **Tier 1 — local lightweight models** (CPU, in-process, free): static sentence embeddings (Model2Vec-class, ~8MB at ~90% of MiniLM quality) for similarity work, and a small quantized NLI cross-encoder for entailment/contradiction.
+2. **Tier 1 — local lightweight models** (CPU, in-process, free): static sentence embeddings (Model2Vec-class, ~8MB at ~90% of MiniLM quality) for candidate-generation similarity work only — a quantized NLI cross-encoder for entailment/contradiction was measured at 487MB RSS and deliberately ruled out against Render's 512MB ceiling (see the correction below); that judgment step is Tier 2 (Gemini), not local.
 3. **Tier 2 — Gemini as the arbiter**: called only where lower tiers are inconclusive or the criterion is irreducibly judgmental — batched, cached by input hash (re-runs cost ~0 calls), self-consistency as 2 passes + tie-break.
 
 Each tier escalates only its uncertain residue upward, ending at the instructor — the same human-in-the-loop principle, applied uniformly at every level. Estimated effect: worst-case ~103 Gemini calls/manuscript drops to ~17. **At the real measured budget of 300 req/day (pooled), that is ~17 manuscripts/day, with no headroom to spare** (D-011 as CORRECTED by D-014). Every verdict is labeled with its basis (rule / signal / local model / AI) in the report.
@@ -283,7 +283,7 @@ Each tier escalates only its uncertain residue upward, ending at the instructor 
 - **Golden dataset:** 10–20 real anonymized capstone excerpts, hand-graded by the Capstone Instructor (binary pass/fail per criterion + a one-line reason). Stored in the repo as JSONL, versioned
 - Every prompt or rubric-handling change re-runs the golden set; agreement with the instructor's grades is the regression metric — a change that drops agreement doesn't ship
 - **Pinning:** same model, same temperature, same prompt version across a run (a rubric or prompt change = a measurement change; comparisons across versions are invalid)
-- **Self-consistency as confidence:** N=3 passes, majority vote; the agreement score *is* the confidence signal that drives escalation (F3.5) — one mechanism, validated once, used everywhere
+- **Self-consistency as confidence:** 2 differently-stanced passes + a conditional tie-break on disagreement, majority vote; the agreement score *is* the confidence signal that drives escalation (F3.5) — one mechanism, validated once, used everywhere
 
 ### 7.3 Debugging & observability
 - Every AI call logged to the audit table — prompt version, raw prompt and response (byte-for-byte), parsed result — so any bad grade can be **traced exactly** and **re-graded under the same pinned model, temperature, and prompt version**. Two fields are conditional, not universal: an input hash is attached only in real-API mode (keyed to the response cache; fake-LLM mode has no cache to key, so it has none), and an agreement score is attached at the escalation/flag level, not on every individual call. In fake-LLM mode the re-grade is bit-identical (canned responses); against the real Gemini API, pinning guarantees the same inputs and settings but not bit-identical output — a documented property of hosted LLM APIs, not something this pinning alone can close
