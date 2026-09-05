@@ -10,13 +10,13 @@
       "index": 1,
       "verdict": "partial",
       "reasoning": "The document partially addresses this criterion, with notable gaps.",
-      "evidence_quotes": ["This is a test sentence used as evidence."]
+      "evidence_quotes": ["This is a second test sentence used as evidence."]
     },
     {
       "index": 2,
       "verdict": "fail",
       "reasoning": "The document does not address this criterion.",
-      "evidence_quotes": ["This is a test sentence used as evidence."]
+      "evidence_quotes": ["This is a third test sentence used as evidence."]
     }
   ]
 }

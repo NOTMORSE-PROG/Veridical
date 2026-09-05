@@ -134,13 +134,30 @@ async def test_fake_llm_mode_returns_deterministic_fixture_verdicts():
     from app.llm.fake import FakeLLMClient
 
     tree = SectionTree(source="heuristics", nodes=[])
+    # BUG-176: each index's canned quote must be genuinely DISTINCT (the
+    # fixture itself used to repeat one sentence for all three verdicts,
+    # which the new anti-reuse guard now correctly rejects as borrowed
+    # evidence) -- all three need to be present in the source for
+    # containment to still succeed for every criterion.
     blocks = [
         TextBlock(
             page=1,
             text="This is a test sentence used as evidence.",
             max_font_size=11,
             bold_ratio=0.0,
-        )
+        ),
+        TextBlock(
+            page=1,
+            text="This is a second test sentence used as evidence.",
+            max_font_size=11,
+            bold_ratio=0.0,
+        ),
+        TextBlock(
+            page=1,
+            text="This is a third test sentence used as evidence.",
+            max_font_size=11,
+            bold_ratio=0.0,
+        ),
     ]
     extraction = _extraction(blocks=blocks, tree=tree)
     criteria = [
@@ -310,9 +327,117 @@ async def test_out_of_range_verdict_index_is_rejected():
     assert len(llm.calls) == 2
 
 
+async def test_a_quote_already_claimed_by_an_earlier_criterion_is_not_reused():
+    """BUG-176/BUG-155: `_verify_quotes` only checks provenance (does this
+    text exist in the manuscript), never relevance -- at whole-document
+    scope a real sentence verifies identically for every criterion. The
+    minimum-viable fix: the SAME quote can't honestly be the evidence for
+    two different criteria in one batch. Criterion B's only offered quote
+    was already claimed by criterion A, so it must retry -- and if the
+    retry ALSO reoffers the same borrowed quote, it escalates honestly
+    rather than silently keeping someone else's evidence."""
+    tree = SectionTree(source="heuristics", nodes=[])
+    blocks = [
+        TextBlock(page=1, text="The one real sentence here.", max_font_size=11, bold_ratio=0.0)
+    ]
+    extraction = _extraction(blocks=blocks, tree=tree)
+    criteria = [FakeCriterion(id=1, text="A"), FakeCriterion(id=2, text="B")]
+
+    batch_response = {
+        "verdicts": [
+            {
+                "index": 0,
+                "verdict": "pass",
+                "reasoning": "A is satisfied.",
+                "evidence_quotes": ["The one real sentence here."],
+            },
+            {
+                "index": 1,
+                "verdict": "pass",
+                "reasoning": "B is also satisfied, apparently.",
+                "evidence_quotes": ["The one real sentence here."],  # borrowed from A
+            },
+        ]
+    }
+    # Criterion B's single-criterion retry re-offers the SAME borrowed quote.
+    retry_response = {
+        "verdicts": [
+            {
+                "index": 0,
+                "verdict": "pass",
+                "reasoning": "Still B, still this quote.",
+                "evidence_quotes": ["The one real sentence here."],
+            }
+        ]
+    }
+    llm = ScriptedLLM([batch_response, retry_response])
+    session = FakeSession()
+    results = await run_semantic_checks(session, 1, criteria, extraction, llm)
+    assert results[0].outcome == ResultOutcome.passed  # A keeps the quote it claimed first
+    assert results[0].detail["evidence"][0]["quote"] == "The one real sentence here."
+    assert results[1].outcome == ResultOutcome.escalated  # B never gets to borrow it
+    assert "verify" in results[1].detail["reason"]
+    assert len(llm.calls) == 2  # batch + exactly one single-criterion retry, no more
+
+
+async def test_a_retry_with_a_genuinely_new_quote_still_succeeds():
+    """The anti-reuse guard must not over-reject: a criterion whose batch
+    quote was borrowed can still succeed normally if its retry offers
+    real, DIFFERENT evidence."""
+    tree = SectionTree(source="heuristics", nodes=[])
+    blocks = [
+        TextBlock(page=1, text="The first real sentence.", max_font_size=11, bold_ratio=0.0),
+        TextBlock(
+            page=2, text="A second, different real sentence.", max_font_size=11, bold_ratio=0.0
+        ),
+    ]
+    extraction = _extraction(blocks=blocks, tree=tree)
+    criteria = [FakeCriterion(id=1, text="A"), FakeCriterion(id=2, text="B")]
+
+    batch_response = {
+        "verdicts": [
+            {
+                "index": 0,
+                "verdict": "pass",
+                "reasoning": "A is satisfied.",
+                "evidence_quotes": ["The first real sentence."],
+            },
+            {
+                "index": 1,
+                "verdict": "pass",
+                "reasoning": "B, borrowing A's quote.",
+                "evidence_quotes": ["The first real sentence."],  # borrowed from A
+            },
+        ]
+    }
+    retry_response = {
+        "verdicts": [
+            {
+                "index": 0,
+                "verdict": "pass",
+                "reasoning": "B has its own real evidence after all.",
+                "evidence_quotes": ["A second, different real sentence."],
+            }
+        ]
+    }
+    llm = ScriptedLLM([batch_response, retry_response])
+    session = FakeSession()
+    results = await run_semantic_checks(session, 1, criteria, extraction, llm)
+    assert results[0].outcome == ResultOutcome.passed
+    assert results[1].outcome == ResultOutcome.passed
+    assert results[1].detail["evidence"][0]["quote"] == "A second, different real sentence."
+
+
 async def test_missing_index_in_batch_response_triggers_single_retry():
     tree = SectionTree(source="heuristics", nodes=[])
-    blocks = [TextBlock(page=1, text="Some real prose here.", max_font_size=11, bold_ratio=0.0)]
+    # BUG-176: criterion A and criterion B's retry need genuinely DIFFERENT
+    # quotes -- the SAME text would now be correctly rejected as evidence
+    # already claimed by an earlier criterion in this batch, which isn't
+    # what this test is about (it's testing the missing-index retry ladder).
+    blocks = [
+        TextBlock(page=1, text="Some real prose here.", max_font_size=11, bold_ratio=0.0),
+        TextBlock(page=1, text="Some other real prose here.", max_font_size=11, bold_ratio=0.0),
+    ]
     extraction = _extraction(blocks=blocks, tree=tree)
     criteria = [FakeCriterion(id=1, text="A"), FakeCriterion(id=2, text="B")]
 
@@ -334,7 +459,7 @@ async def test_missing_index_in_batch_response_triggers_single_retry():
                         "index": 0,
                         "verdict": "fail",
                         "reasoning": "still missing",
-                        "evidence_quotes": ["Some real prose here."],
+                        "evidence_quotes": ["Some other real prose here."],
                     }
                 ]
             },
