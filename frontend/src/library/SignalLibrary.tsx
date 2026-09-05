@@ -21,6 +21,16 @@ import {
 interface PurgeTarget {
   manuscriptId: number;
   title: string;
+  // BUG-148: both set only when this manuscript is part of a byte-
+  // identical duplicate group -- lets the purge dialog disclose that
+  // removing THIS copy leaves others untouched, rather than reading as
+  // "the document is gone" when only one of several stored copies was
+  // removed. `groupTotal` is the group's fixed historical upload count
+  // (safe to state as a plain fact, never changes); `otherStoredCount`
+  // must be recomputed live at click time (see `otherStoredCount` in
+  // `LibraryCard`) -- it goes stale the moment another copy is purged.
+  groupTotal?: number;
+  otherStoredCount?: number;
 }
 
 function identity(item: LibraryItemOut) {
@@ -252,6 +262,32 @@ function LibraryCard({
 }) {
   const label = identity(item);
   const disabled = !selected && selectionFull;
+  const duplicates = item.duplicate_uploads ?? [];
+  const groupTotal = duplicates.length + 1;
+  // BUG-148: "stored" reads for the GROUP, not just this one representative
+  // row -- an instructor who purged the newest copy must not see "Content
+  // removed" while an older copy one click away is still fully retrievable.
+  const groupHasStoredContent = !item.purged_at || duplicates.some((dup) => !dup.purged_at);
+  const [duplicatesOpen, setDuplicatesOpen] = useState(false);
+  const duplicatesId = `signal-library-duplicates-${item.manuscript_id}`;
+
+  // `ux-critic` finding (BUG-148 review, live-reproduced across two
+  // sequential purges): `groupTotal` is a fixed historical count (every
+  // upload ever made, purged or not) -- reusing it for "leaves N other
+  // stored copies untouched" goes FALSE the moment any other copy in the
+  // group has already been removed, told to the instructor at the exact
+  // moment they're confirming an action the dialog itself calls
+  // irreversible. Recomputed fresh from live `purged_at` state at click
+  // time, same discipline `groupHasStoredContent` above already applies.
+  function otherStoredCount(excludingManuscriptId: number): number {
+    const members = [
+      { manuscriptId: item.manuscript_id, purgedAt: item.purged_at },
+      ...duplicates.map((dup) => ({ manuscriptId: dup.manuscript_id, purgedAt: dup.purged_at })),
+    ];
+    return members.filter(
+      (member) => member.manuscriptId !== excludingManuscriptId && !member.purgedAt,
+    ).length;
+  }
 
   return (
     <li className="signal-library-card">
@@ -262,9 +298,14 @@ function LibraryCard({
             <span className="signal-library-badge" data-tone={item.is_own ? "own" : "shared"}>
               {item.is_own ? "Your manuscript" : "Shared excerpt"}
             </span>
-            <span className="signal-library-badge" data-tone={item.purged_at ? "removed" : "stored"}>
-              {item.purged_at ? "Content removed" : "Content stored"}
+            <span className="signal-library-badge" data-tone={groupHasStoredContent ? "stored" : "removed"}>
+              {groupHasStoredContent ? "Content stored" : "Content removed"}
             </span>
+            {duplicates.length > 0 && (
+              <span className="signal-library-badge" data-tone="count">
+                Uploaded {groupTotal} times
+              </span>
+            )}
           </div>
           {compareMode && (
             <label className="signal-library-select" data-disabled={disabled || undefined}>
@@ -309,15 +350,89 @@ function LibraryCard({
           </div>
         </dl>
 
+        {duplicates.length > 0 && (
+          <>
+            <Button
+              type="button"
+              variant="quiet"
+              aria-expanded={duplicatesOpen}
+              aria-controls={duplicatesId}
+              onClick={() => setDuplicatesOpen((open) => !open)}
+            >
+              {duplicatesOpen ? "Hide" : "Show"} {duplicates.length} more upload
+              {duplicates.length === 1 ? "" : "s"}
+            </Button>
+            {duplicatesOpen && (
+              <ol id={duplicatesId} className="signal-library-duplicates">
+                {duplicates.map((upload) => (
+                  <li key={upload.manuscript_id} className="signal-library-duplicate">
+                    <div className="signal-library-duplicate__meta">
+                      <strong>{formatDateTime(upload.created_at)}</strong>
+                      {upload.original_filename && <span>{upload.original_filename}</span>}
+                      <span
+                        className="signal-library-badge"
+                        data-tone={upload.purged_at ? "removed" : "stored"}
+                      >
+                        {upload.purged_at ? "Content removed" : "Content stored"}
+                      </span>
+                    </div>
+                    <div className="signal-library-duplicate__actions">
+                      {upload.latest_done_check_run_id ? (
+                        <ActionLink to={`/report/${upload.latest_done_check_run_id}`} variant="secondary">
+                          Open report
+                        </ActionLink>
+                      ) : (
+                        <ActionLink to={`/library/${upload.manuscript_id}`} variant="secondary">
+                          Open record
+                        </ActionLink>
+                      )}
+                      {!upload.purged_at && (
+                        <Button
+                          type="button"
+                          variant="quiet"
+                          onClick={() =>
+                            onPurge({
+                              manuscriptId: upload.manuscript_id,
+                              title: label.primary,
+                              groupTotal,
+                              otherStoredCount: otherStoredCount(upload.manuscript_id),
+                            })
+                          }
+                        >
+                          Remove stored content
+                        </Button>
+                      )}
+                    </div>
+                  </li>
+                ))}
+              </ol>
+            )}
+          </>
+        )}
+
         <div className="signal-library-card__actions">
-          <ActionLink to={`/library/${item.manuscript_id}`} variant="secondary">
-            Open record
-          </ActionLink>
+          {item.latest_done_check_run_id ? (
+            <ActionLink to={`/report/${item.latest_done_check_run_id}`} variant="secondary">
+              Open report
+            </ActionLink>
+          ) : (
+            <ActionLink to={`/library/${item.manuscript_id}`} variant="secondary">
+              Open record
+            </ActionLink>
+          )}
           {item.is_own && !item.purged_at && (
             <Button
               type="button"
               variant="quiet"
-              onClick={() => onPurge({ manuscriptId: item.manuscript_id, title: label.primary })}
+              onClick={() =>
+                onPurge({
+                  manuscriptId: item.manuscript_id,
+                  title: label.primary,
+                  groupTotal: duplicates.length > 0 ? groupTotal : undefined,
+                  otherStoredCount:
+                    duplicates.length > 0 ? otherStoredCount(item.manuscript_id) : undefined,
+                })
+              }
             >
               Remove stored content
             </Button>
@@ -622,6 +737,20 @@ export function SignalLibraryPage() {
           }
         >
           <div className="signal-library-purge-copy signal-copy-flow">
+            {purgeTarget.groupTotal && purgeTarget.groupTotal > 1 && (
+              purgeTarget.otherStoredCount && purgeTarget.otherStoredCount > 0 ? (
+                <p>
+                  This document was uploaded {purgeTarget.groupTotal} times. Removing this copy
+                  leaves {purgeTarget.otherStoredCount} other stored{" "}
+                  {purgeTarget.otherStoredCount === 1 ? "copy" : "copies"} untouched.
+                </p>
+              ) : (
+                <p>
+                  This document was uploaded {purgeTarget.groupTotal} times, but every other copy
+                  has already been removed. This is the last one still stored.
+                </p>
+              )
+            )}
             <p>The stored file and its future comparison data will be permanently removed.</p>
             <p>Existing check history, readiness reports, instructor decisions, and audit entries remain available.</p>
             <p>This action cannot be undone and never happens automatically.</p>

@@ -398,3 +398,327 @@ def test_library_routes_require_auth(client):
     assert client.get("/library/1").status_code == 401
     assert client.get("/library/1/excerpt").status_code == 401
     assert client.get("/library/1/document").status_code == 401
+
+
+# --- BUG-148: collapse the requester's own byte-identical re-uploads -----
+
+
+@pytest.fixture()
+def dup_seeded(client, api_scratch_url):
+    """A dedicated, leaner seed for the content_hash collapsing behavior --
+    no chapter/passage archives needed here, just manuscripts and their
+    hashes/purge state, across two instructors so cross-tenant isolation
+    has something real to differ against."""
+    import asyncio
+
+    from sqlalchemy import text
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
+    from app.db import sqlalchemy_url
+    from app.models.enums import CheckRunStatus, IngestStatus
+    from app.models.instructor import Instructor
+    from app.models.manuscript import Manuscript
+    from app.models.rubric import Rubric
+    from app.models.run import CheckRun
+
+    ids: dict[str, int] = {}
+
+    async def seed():
+        engine = create_async_engine(sqlalchemy_url(api_scratch_url))
+        try:
+            factory = async_sessionmaker(engine, expire_on_commit=False)
+            async with factory() as session:
+                await session.execute(
+                    text(
+                        "TRUNCATE check_run, rubric, manuscript_passage_archive, "
+                        "manuscript_chapter_archive, manuscript_archive, group_member, "
+                        "manuscript, manuscript_group, program, session, instructor "
+                        "RESTART IDENTITY CASCADE"
+                    )
+                )
+                owner = Instructor(
+                    email="dupowner@tip.edu.ph",
+                    display_name="Dup Owner",
+                    password_hash=hash_password("s3cret!"),
+                )
+                other = Instructor(
+                    email="dupother@tip.edu.ph",
+                    display_name="Dup Other",
+                    password_hash=hash_password("other!"),
+                )
+                session.add_all([owner, other])
+                await session.commit()
+
+                # owner: 3 uploads of the SAME bytes (hash-a), oldest to
+                # newest, plus 1 unrelated upload (hash-b, no duplicates).
+                oldest = Manuscript(
+                    instructor_id=owner.id,
+                    group_label="Group A",
+                    file_ref="",
+                    original_filename="draft-v1.pdf",
+                    content_hash="hash-a",
+                    ingest_status=IngestStatus.done,
+                )
+                middle_purged = Manuscript(
+                    instructor_id=owner.id,
+                    group_label="Group A",
+                    file_ref="",
+                    original_filename="draft-v1-copy.pdf",
+                    content_hash="hash-a",
+                    ingest_status=IngestStatus.done,
+                )
+                newest = Manuscript(
+                    instructor_id=owner.id,
+                    group_label="Group A",
+                    file_ref="",
+                    original_filename="draft-v1-final.pdf",
+                    content_hash="hash-a",
+                    ingest_status=IngestStatus.done,
+                )
+                unrelated = Manuscript(
+                    instructor_id=owner.id,
+                    group_label="Group B",
+                    file_ref="",
+                    original_filename="unrelated.pdf",
+                    content_hash="hash-b",
+                    ingest_status=IngestStatus.done,
+                )
+                other_same_bytes = Manuscript(
+                    instructor_id=other.id,
+                    group_label="Other's Group",
+                    file_ref="",
+                    original_filename="coincidence.pdf",
+                    content_hash="hash-a",  # same bytes as owner's, different account
+                    ingest_status=IngestStatus.done,
+                )
+                session.add_all([oldest, middle_purged, newest, unrelated, other_same_bytes])
+                await session.commit()
+                # Distinct, explicit created_at (all three would otherwise
+                # tie, created in the same transaction) so "newest"/"oldest"
+                # are real, not incidental id order -- and middle_purged is
+                # marked purged directly, rather than routed through the
+                # real DELETE /archive endpoint, since this fixture only
+                # needs the resulting DB state, not the purge flow itself
+                # (already covered by test_purged_manuscript_stays_visible).
+                now = middle_purged.created_at
+                oldest.created_at = now.replace(year=now.year - 1)
+                middle_purged.created_at = now.replace(year=now.year - 1, month=6)
+                middle_purged.purged_at = now
+                await session.commit()
+
+                # One completed check run, on the REPRESENTATIVE ("newest")
+                # only -- proves `latest_done_check_run_id` reaches the
+                # representative row itself, not just a hidden sibling
+                # (`ux-critic` finding, BUG-148 review).
+                rubric = Rubric(instructor_id=owner.id, title="Format", source_file="r.pdf")
+                session.add(rubric)
+                await session.commit()
+                done_run = CheckRun(
+                    manuscript_id=newest.id, rubric_id=rubric.id, status=CheckRunStatus.done
+                )
+                session.add(done_run)
+                await session.commit()
+                ids["done_run"] = done_run.id
+
+                ids["oldest"] = oldest.id
+                ids["middle_purged"] = middle_purged.id
+                ids["newest"] = newest.id
+                ids["unrelated"] = unrelated.id
+                ids["other_same_bytes"] = other_same_bytes.id
+        finally:
+            await engine.dispose()
+
+    asyncio.run(seed())
+    client.post("/auth/login", json={"email": "dupowner@tip.edu.ph", "password": "s3cret!"})
+    return client, ids
+
+
+def test_collapses_byte_identical_reuploads_into_one_representative_row(dup_seeded):
+    client, ids = dup_seeded
+    resp = client.get("/library")
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    manuscript_ids = {item["manuscript_id"] for item in body["items"]}
+    # 3 duplicate-hash rows collapse to 1 (the newest), plus the unrelated
+    # hash-b row and the OTHER instructor's own coincidental hash-a row
+    # (never collapsed with owner's, see the isolation test below) -- 3
+    # rows total, not 5.
+    assert body["total"] == 3
+    assert manuscript_ids == {ids["newest"], ids["unrelated"], ids["other_same_bytes"]}
+    assert ids["oldest"] not in manuscript_ids
+    assert ids["middle_purged"] not in manuscript_ids
+
+    representative = next(item for item in body["items"] if item["manuscript_id"] == ids["newest"])
+    assert representative["original_filename"] == "draft-v1-final.pdf"
+    dup_ids = {dup["manuscript_id"] for dup in representative["duplicate_uploads"]}
+    assert dup_ids == {ids["oldest"], ids["middle_purged"]}
+    # The representative's own id never appears among its own duplicates.
+    assert ids["newest"] not in dup_ids
+
+    unrelated_item = next(
+        item for item in body["items"] if item["manuscript_id"] == ids["unrelated"]
+    )
+    assert unrelated_item["duplicate_uploads"] is None
+
+
+def test_all_purged_duplicate_group_falls_back_to_most_recent_overall(dup_seeded):
+    """Representative-selection rule: not-yet-purged wins first: if the
+    group's actual newest upload gets purged, an OLDER still-stored copy
+    becomes representative rather than surfacing a purged, unopenable row
+    as the group's face."""
+    client, ids = dup_seeded
+    purge = client.delete(f"/archive/{ids['newest']}")
+    assert purge.status_code == 200, purge.text
+
+    resp = client.get("/library")
+    body = resp.json()
+    manuscript_ids = {item["manuscript_id"] for item in body["items"]}
+    # middle_purged was ALREADY purged in the seed; oldest is the only
+    # still-stored instance left, so it becomes representative.
+    assert ids["oldest"] in manuscript_ids
+    assert ids["newest"] not in manuscript_ids
+    assert ids["middle_purged"] not in manuscript_ids
+
+    representative = next(item for item in body["items"] if item["manuscript_id"] == ids["oldest"])
+    dup_ids = {dup["manuscript_id"] for dup in representative["duplicate_uploads"]}
+    assert dup_ids == {ids["newest"], ids["middle_purged"]}
+
+
+def test_content_hash_collapsing_never_applies_across_instructors(dup_seeded):
+    """BUG-140's own same-instructor scoping, preserved here: two different
+    accounts uploading byte-identical files must never merge into one
+    entry, and neither account's response may even hint that the other
+    uploaded the same bytes."""
+    client, ids = dup_seeded
+    resp = client.get("/library")
+    body = resp.json()
+    by_id = {item["manuscript_id"]: item for item in body["items"]}
+    assert ids["other_same_bytes"] in by_id
+    other_item = by_id[ids["other_same_bytes"]]
+    assert other_item["is_own"] is False
+    assert other_item["duplicate_uploads"] is None
+    # The owner's own representative row's duplicates never include the
+    # other instructor's manuscript id.
+    representative = by_id[ids["newest"]]
+    dup_ids = {dup["manuscript_id"] for dup in representative["duplicate_uploads"]}
+    assert ids["other_same_bytes"] not in dup_ids
+
+
+def test_total_count_reflects_the_collapsed_row_count_not_raw_manuscripts(dup_seeded):
+    """Ground rule 8: a `total`/pagination count that still reflects the
+    pre-collapse row count while fewer cards actually render is a number
+    that lies, even though it isn't a percentage."""
+    client, ids = dup_seeded
+    resp = client.get("/library?page_size=1")
+    body = resp.json()
+    assert body["total"] == 3
+    assert len(body["items"]) == 1
+
+
+def test_representative_row_carries_its_own_latest_done_check_run_id(dup_seeded):
+    """`ux-critic` finding (BUG-148 review): a hidden duplicate-group
+    sibling could link straight to its own completed report while the far
+    more visible representative row could not -- confirms the fix reaches
+    BOTH the list endpoint and the single-item detail endpoint, which
+    share `_item_out` but populate this field via separate code paths."""
+    client, ids = dup_seeded
+    resp = client.get("/library")
+    by_id = {item["manuscript_id"]: item for item in resp.json()["items"]}
+    assert by_id[ids["newest"]]["latest_done_check_run_id"] == ids["done_run"]
+    # The unrelated (no-duplicate) row has never been checked.
+    assert by_id[ids["unrelated"]]["latest_done_check_run_id"] is None
+    # Another instructor's row never discloses this fact either way.
+    assert by_id[ids["other_same_bytes"]]["latest_done_check_run_id"] is None
+
+    detail = client.get(f"/library/{ids['newest']}")
+    assert detail.json()["latest_done_check_run_id"] == ids["done_run"]
+
+
+@pytest.fixture()
+def tied_timestamps_seeded(client, api_scratch_url):
+    """`backend-critic` finding (BUG-148 review), live-reproduced against
+    real Postgres: `created_at`'s `server_default=func.now()` returns the
+    IDENTICAL value for every row inserted in the same transaction -- a
+    real, common case for this corpus-wide endpoint (bulk seeding, or
+    simply two uploads landing in the same second), not a contrived one.
+    Without a tie-break, `ORDER BY created_at DESC` + OFFSET/LIMIT is not
+    guaranteed stable across pages: the same row can repeat on multiple
+    pages while another never appears at all. 5 manuscripts, same account,
+    all committed in ONE transaction so their `created_at` genuinely ties."""
+    import asyncio
+
+    from sqlalchemy import text
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
+    from app.db import sqlalchemy_url
+    from app.models.enums import IngestStatus
+    from app.models.instructor import Instructor
+    from app.models.manuscript import Manuscript
+
+    ids: list[int] = []
+
+    async def seed():
+        engine = create_async_engine(sqlalchemy_url(api_scratch_url))
+        try:
+            factory = async_sessionmaker(engine, expire_on_commit=False)
+            async with factory() as session:
+                await session.execute(
+                    text(
+                        "TRUNCATE check_run, rubric, manuscript_passage_archive, "
+                        "manuscript_chapter_archive, manuscript_archive, group_member, "
+                        "manuscript, manuscript_group, program, session, instructor "
+                        "RESTART IDENTITY CASCADE"
+                    )
+                )
+                owner = Instructor(
+                    email="tiedowner@tip.edu.ph",
+                    display_name="Tied Owner",
+                    password_hash=hash_password("s3cret!"),
+                )
+                session.add(owner)
+                await session.commit()
+
+                manuscripts = [
+                    Manuscript(
+                        instructor_id=owner.id,
+                        group_label=f"Group {i}",
+                        file_ref="",
+                        original_filename=f"paper-{i}.pdf",
+                        ingest_status=IngestStatus.done,
+                    )
+                    for i in range(5)
+                ]
+                session.add_all(manuscripts)
+                # ONE commit for all 5 -- this is what makes `created_at`
+                # genuinely tie under Postgres's real `now()` semantics,
+                # not a manually-forced equal timestamp.
+                await session.commit()
+                ids.extend(m.id for m in manuscripts)
+        finally:
+            await engine.dispose()
+
+    asyncio.run(seed())
+    client.post("/auth/login", json={"email": "tiedowner@tip.edu.ph", "password": "s3cret!"})
+    return client, ids
+
+
+def test_pagination_is_stable_when_created_at_ties(tied_timestamps_seeded):
+    """Walk the whole listing one row per page and confirm every real id
+    appears EXACTLY once across the walk -- not zero times (silently
+    unreachable) and not more than once (a page boundary re-showing a row
+    already seen), which is exactly what an unstable sort produces."""
+    client, ids = tied_timestamps_seeded
+    seen: list[int] = []
+    page = 1
+    while True:
+        resp = client.get(f"/library?page_size=1&page={page}")
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        if not body["items"]:
+            break
+        seen.append(body["items"][0]["manuscript_id"])
+        if page >= body["total"]:
+            break
+        page += 1
+    assert sorted(seen) == sorted(ids)
+    assert len(seen) == len(set(seen)), f"a row repeated across pages: {seen}"

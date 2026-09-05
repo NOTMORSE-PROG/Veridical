@@ -3473,6 +3473,49 @@
     padding-block-start: var(--signal-space-4);
   }
 
+  /* BUG-148: the disclosure listing a duplicate group's other uploads. */
+  .signal-library-duplicates {
+    display: grid;
+    gap: 0;
+    margin: 0;
+    border: var(--signal-border-hairline) solid var(--color-signal-border);
+    border-radius: var(--signal-radius-control);
+    padding: 0;
+    overflow: hidden;
+    list-style: none;
+  }
+
+  .signal-library-duplicate {
+    display: grid;
+    gap: var(--signal-space-2);
+    padding: var(--signal-space-4);
+    background: var(--color-signal-surface);
+  }
+
+  .signal-library-duplicate + .signal-library-duplicate {
+    border-block-start: var(--signal-border-hairline) solid var(--color-signal-border);
+  }
+
+  .signal-library-duplicate__meta {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--signal-space-2);
+    font-size: var(--signal-type-label);
+    color: var(--color-signal-ink-secondary);
+  }
+
+  .signal-library-duplicate__meta strong {
+    color: var(--color-signal-ink);
+    font-weight: var(--signal-weight-semibold);
+  }
+
+  .signal-library-duplicate__actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--signal-space-2);
+  }
+
   .signal-library-state {
     display: grid;
     max-width: var(--signal-prose-width);
@@ -4195,6 +4238,7 @@
     }
 
     .signal-library-card__actions > *,
+    .signal-library-duplicate__actions > *,
     .signal-library-selection > div:last-child,
     .signal-library-selection .signal-button {
       width: 100%;

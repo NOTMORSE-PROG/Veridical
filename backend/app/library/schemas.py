@@ -12,6 +12,21 @@ from datetime import datetime
 from pydantic import BaseModel
 
 
+class LibraryDuplicateUploadOut(BaseModel):
+    """BUG-148: one OTHER upload sharing this row's exact `content_hash`,
+    for the same instructor only -- see `LibraryItemOut.duplicate_uploads`."""
+
+    manuscript_id: int
+    created_at: datetime
+    purged_at: datetime | None
+    original_filename: str | None
+    # Same "no report yet" honesty as the dashboard's own
+    # `ManuscriptListItem.latest_done_check_run_id` (`app.ingest.service`) --
+    # null rather than a fabricated link when this specific upload was never
+    # successfully checked.
+    latest_done_check_run_id: int | None
+
+
 class LibraryItemOut(BaseModel):
     manuscript_id: int
     group_label: str
@@ -27,6 +42,25 @@ class LibraryItemOut(BaseModel):
     # request -- the one signal that decides which two-up mode the
     # frontend may use (full document vs. bounded excerpt, Q2's ruling).
     is_own: bool
+    # BUG-148: the OTHER instructor-owned manuscripts sharing this exact
+    # `content_hash` (never includes this row's own manuscript_id), newest
+    # first. Present only when `is_own` is True and at least one other of
+    # THIS instructor's own manuscripts is a byte-identical re-upload --
+    # `None` otherwise, including always for `is_own: False` (cross-tenant
+    # hash correlation is not a fact this endpoint discloses; same
+    # same-instructor scope BUG-140 already established for the reuse
+    # check). This row (`manuscript_id`, above) is always the GROUP's own
+    # representative (see `_dedup_own_rows` in `library/service.py`), never
+    # one of the entries listed here.
+    duplicate_uploads: list[LibraryDuplicateUploadOut] | None = None
+    # BUG-148 (`ux-critic` finding: a hidden duplicate-group sibling could
+    # link straight to its own completed report while the far more visible
+    # representative row could not -- a new asymmetry this ticket's own fix
+    # introduced next to it on the same card). Same "no report yet" honesty
+    # as `LibraryDuplicateUploadOut.latest_done_check_run_id` -- and, like
+    # `duplicate_uploads`, always `None` for `is_own: False` (never disclose
+    # whether another account has a completed report).
+    latest_done_check_run_id: int | None = None
 
 
 class PaginatedLibrary(BaseModel):

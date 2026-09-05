@@ -782,6 +782,16 @@ export interface PurgeOut {
 // screen above (a strict superset -- every own manuscript still gets its
 // archive state + purge action, plus every other account's, plus real
 // metadata Archive never showed).
+// BUG-148: another upload sharing this row's exact content_hash, same
+// instructor only -- see LibraryItemOut.duplicate_uploads.
+export interface LibraryDuplicateUploadOut {
+  manuscript_id: number;
+  created_at: string;
+  purged_at: string | null;
+  original_filename: string | null;
+  latest_done_check_run_id: number | null;
+}
+
 export interface LibraryItemOut {
   manuscript_id: number;
   group_label: string;
@@ -792,6 +802,16 @@ export interface LibraryItemOut {
   created_at: string;
   purged_at: string | null;
   is_own: boolean;
+  // BUG-148: the OTHER instructor-owned manuscripts sharing this exact
+  // content_hash (never includes this row's own manuscript_id), newest
+  // first. Only present when is_own is true and at least one byte-
+  // identical re-upload of this same file exists; always null for
+  // is_own: false.
+  duplicate_uploads: LibraryDuplicateUploadOut[] | null;
+  // BUG-148: same field/meaning as LibraryDuplicateUploadOut's own --
+  // null when this manuscript was never successfully checked, or when
+  // is_own is false (never disclose another account's report state).
+  latest_done_check_run_id: number | null;
 }
 
 export interface PaginatedLibrary {

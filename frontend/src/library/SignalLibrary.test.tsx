@@ -40,6 +40,8 @@ const OWN: LibraryItemOut = {
   created_at: "2026-08-10T08:00:00Z",
   purged_at: null,
   is_own: true,
+  duplicate_uploads: null,
+  latest_done_check_run_id: null,
 };
 
 const SHARED: LibraryItemOut = {
@@ -52,6 +54,8 @@ const SHARED: LibraryItemOut = {
   created_at: "2026-08-11T08:00:00Z",
   purged_at: null,
   is_own: false,
+  duplicate_uploads: null,
+  latest_done_check_run_id: null,
 };
 
 const UNTITLED: LibraryItemOut = {
@@ -79,6 +83,8 @@ const REDACTED: LibraryItemOut = {
   created_at: "2026-08-13T08:00:00Z",
   purged_at: null,
   is_own: false,
+  duplicate_uploads: null,
+  latest_done_check_run_id: null,
 };
 
 const VIEWER: ManuscriptViewerOut = {
@@ -554,5 +560,166 @@ describe("Signal manuscript library", () => {
     renderWithProviders(<SignalLibraryDetailPage />, { route: "/library/99", path: "/library/:manuscriptId" });
 
     expect(await screen.findByText("Withheld for another instructor's manuscript")).toBeInTheDocument();
+  });
+
+  // BUG-148: the library used to list one card per raw upload, so five
+  // copies of one document read as five unrelated manuscripts. These
+  // tests cover the collapsed-card rendering the frontend owns; the
+  // collapsing/representative-selection LOGIC itself is backend, covered
+  // in test_library_router_live.py.
+  describe("BUG-148: byte-identical duplicate uploads collapse onto one card", () => {
+    const WITH_DUPLICATES: LibraryItemOut = {
+      ...OWN,
+      duplicate_uploads: [
+        {
+          manuscript_id: 10,
+          created_at: "2026-08-09T08:00:00Z",
+          purged_at: null,
+          original_filename: "portal-draft.pdf",
+          latest_done_check_run_id: 55,
+        },
+        {
+          manuscript_id: 11,
+          created_at: "2026-08-08T08:00:00Z",
+          purged_at: "2026-08-09T12:00:00Z",
+          original_filename: null,
+          latest_done_check_run_id: null,
+        },
+      ],
+    };
+
+    it("shows an upload-count badge and keeps the disclosure closed by default", async () => {
+      const page = { ...PAGE, items: [WITH_DUPLICATES, SHARED] };
+      vi.stubGlobal("fetch", stubFetchByPath({ "/library": page, "/programs": [] }));
+      renderWithProviders(<SignalLibraryPage />, { route: "/library", path: "/library" });
+
+      expect(await screen.findByText("Uploaded 3 times")).toBeInTheDocument();
+      const toggle = screen.getByRole("button", { name: "Show 2 more uploads" });
+      expect(toggle).toHaveAttribute("aria-expanded", "false");
+      expect(screen.queryByText("portal-draft.pdf")).not.toBeInTheDocument();
+      // No such disclosure/badge at all for the record with no duplicates.
+      expect(screen.queryByText("Campus Energy Monitor")).toBeInTheDocument();
+      expect(screen.getAllByRole("button", { name: /more upload/i })).toHaveLength(1);
+    });
+
+    it("expands to show each individual upload with its own date, filename, and storage state", async () => {
+      const page = { ...PAGE, items: [WITH_DUPLICATES] };
+      vi.stubGlobal("fetch", stubFetchByPath({ "/library": page, "/programs": [] }));
+      renderWithProviders(<SignalLibraryPage />, { route: "/library", path: "/library" });
+
+      const toggle = await screen.findByRole("button", { name: "Show 2 more uploads" });
+      fireEvent.click(toggle);
+      expect(screen.getByRole("button", { name: "Hide 2 more uploads" })).toHaveAttribute(
+        "aria-expanded",
+        "true",
+      );
+
+      expect(screen.getByText("portal-draft.pdf")).toBeInTheDocument();
+      // The still-stored sibling links to its own latest DONE report.
+      expect(screen.getByRole("link", { name: "Open report" })).toHaveAttribute("href", "/report/55");
+      // The purged sibling (no latest_done_check_run_id) shows the
+      // removed-content badge and offers no purge action of its own.
+      expect(screen.getAllByText("Content removed")).not.toHaveLength(0);
+      expect(screen.getAllByText("Content stored").length).toBeGreaterThan(0);
+    });
+
+    it("ux-critic finding: the representative row itself gets an Open report link when one exists, not just its hidden siblings", async () => {
+      const withReport = { ...OWN, latest_done_check_run_id: 42 };
+      const page = { ...PAGE, items: [withReport] };
+      vi.stubGlobal("fetch", stubFetchByPath({ "/library": page, "/programs": [] }));
+      renderWithProviders(<SignalLibraryPage />, { route: "/library", path: "/library" });
+
+      await screen.findByText("Barangay Service Portal");
+      expect(screen.getByRole("link", { name: "Open report" })).toHaveAttribute("href", "/report/42");
+      expect(screen.queryByRole("link", { name: "Open record" })).not.toBeInTheDocument();
+    });
+
+    it("falls back to Open record when the representative has no completed check run", async () => {
+      const page = { ...PAGE, items: [OWN, SHARED] }; // OWN.latest_done_check_run_id is null
+      vi.stubGlobal("fetch", stubFetchByPath({ "/library": page, "/programs": [] }));
+      renderWithProviders(<SignalLibraryPage />, { route: "/library", path: "/library" });
+
+      await screen.findByText("Barangay Service Portal");
+      expect(screen.getAllByRole("link", { name: "Open record" }).length).toBeGreaterThan(0);
+      expect(screen.queryByRole("link", { name: "Open report" })).not.toBeInTheDocument();
+    });
+
+    it("shows the group's storage state as stored while ANY copy is still retrievable", async () => {
+      const representativePurged = {
+        ...WITH_DUPLICATES,
+        purged_at: "2026-08-12T08:00:00Z", // the representative itself is purged...
+        duplicate_uploads: [
+          { ...WITH_DUPLICATES.duplicate_uploads![0], purged_at: null }, // ...but a sibling isn't
+        ],
+      };
+      const page = { ...PAGE, items: [representativePurged] };
+      vi.stubGlobal("fetch", stubFetchByPath({ "/library": page, "/programs": [] }));
+      renderWithProviders(<SignalLibraryPage />, { route: "/library", path: "/library" });
+
+      await screen.findByText("Barangay Service Portal");
+      expect(screen.getByText("Content stored")).toBeInTheDocument();
+      expect(screen.queryByText("Content removed")).not.toBeInTheDocument();
+    });
+
+    it("discloses the group size in the purge confirmation, counting only what's ACTUALLY still stored", async () => {
+      // WITH_DUPLICATES has 2 recorded siblings, but one of them
+      // (manuscript 11) is already purged in the fixture -- only 1 of the
+      // representative's 2 siblings is genuinely still stored.
+      const page = { ...PAGE, items: [WITH_DUPLICATES] };
+      vi.stubGlobal("fetch", stubFetchByPath({ "/library": page, "/programs": [] }));
+      renderWithProviders(<SignalLibraryPage />, { route: "/library", path: "/library" });
+      await screen.findByText("Barangay Service Portal");
+
+      fireEvent.click(screen.getByRole("button", { name: "Remove stored content" }));
+      expect(
+        screen.getByText("This document was uploaded 3 times. Removing this copy leaves 1 other stored copy untouched."),
+      ).toBeInTheDocument();
+    });
+
+    it("ux-critic finding: the dialog never claims a stored copy remains once every other copy is actually gone", async () => {
+      // Reproduces the exact live-found P1: purge the one still-stored
+      // sibling first, THEN reopen the dialog on the representative --
+      // the group's historical count is still 3, but zero OTHER copies
+      // are left, so the sentence must say so honestly instead of
+      // repeating a stale "leaves N other stored copies" claim.
+      const purgedSibling = {
+        ...WITH_DUPLICATES.duplicate_uploads![0],
+        purged_at: "2026-08-09T09:00:00Z",
+      };
+      const afterFirstPurge = {
+        ...WITH_DUPLICATES,
+        duplicate_uploads: [purgedSibling, WITH_DUPLICATES.duplicate_uploads![1]],
+      };
+      const page = { ...PAGE, items: [afterFirstPurge] };
+      vi.stubGlobal("fetch", stubFetchByPath({ "/library": page, "/programs": [] }));
+      renderWithProviders(<SignalLibraryPage />, { route: "/library", path: "/library" });
+      await screen.findByText("Barangay Service Portal");
+
+      fireEvent.click(screen.getByRole("button", { name: "Remove stored content" }));
+      expect(
+        screen.getByText(
+          "This document was uploaded 3 times, but every other copy has already been removed. This is the last one still stored.",
+        ),
+      ).toBeInTheDocument();
+      expect(screen.queryByText(/leaves \d+ other stored/)).not.toBeInTheDocument();
+    });
+
+    it("discloses the group size correctly when purging from the sibling disclosure, not just the card's own action", async () => {
+      const page = { ...PAGE, items: [WITH_DUPLICATES] };
+      vi.stubGlobal("fetch", stubFetchByPath({ "/library": page, "/programs": [] }));
+      renderWithProviders(<SignalLibraryPage />, { route: "/library", path: "/library" });
+      await screen.findByText("Barangay Service Portal");
+
+      fireEvent.click(await screen.findByRole("button", { name: "Show 2 more uploads" }));
+      // manuscript 10 (not purged) is the only removable sibling; removing
+      // IT leaves the representative itself still stored (1), so "1 other
+      // stored copy" -- manuscript 11 is already purged and doesn't count.
+      const siblingRemoveButtons = screen.getAllByRole("button", { name: "Remove stored content" });
+      expect(siblingRemoveButtons).toHaveLength(2); // the card's own + manuscript 10's
+      fireEvent.click(siblingRemoveButtons[1]);
+      expect(
+        screen.getByText("This document was uploaded 3 times. Removing this copy leaves 1 other stored copy untouched."),
+      ).toBeInTheDocument();
+    });
   });
 });
