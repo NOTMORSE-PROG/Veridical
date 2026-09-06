@@ -2621,6 +2621,19 @@
     margin-block-start: var(--signal-space-3);
   }
 
+  /* BUG-169: wraps the multi-location branch's new "Review first
+     location" link alongside its existing "Show N locations" button --
+     the old direct-child rule above stops matching that button once it's
+     nested here, which is intentional; this rule's own margin replaces
+     it at the identical token value. */
+  .signal-flag-row__actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--signal-space-3);
+    margin-block-start: var(--signal-space-3);
+  }
+
   .signal-flag-location-list {
     display: grid;
     gap: 0;

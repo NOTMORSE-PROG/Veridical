@@ -237,16 +237,55 @@ function SignalFindingCard({
       )}
       {excerptsMatch
         ? <blockquote>“{systemFindingCopy(first.evidence_excerpt, first.problem_kind, "evidence")}”</blockquote>
-        : <p className="signal-flag-finding-context">{flags.length} manuscript locations point to this possible finding. Open the locations to verify each excerpt.</p>}
+        : <p className="signal-flag-finding-context">{flags.length} manuscript locations point to this possible finding, each with its own excerpt. Review one location below, or open all {flags.length} to compare them.</p>}
       {first.first_upload_context && <p className="signal-field-hint">First-upload context: the comparison archive was limited when this signal was created.</p>}
-      <Button
-        variant="quiet"
-        aria-expanded={expanded}
-        aria-controls={locationsId}
-        onClick={onToggle}
-      >
-        {expanded ? "Hide" : "Show"} {flags.length} locations
-      </Button>
+      <div className="signal-flag-row__actions">
+        {/* BUG-169: a multi-location cluster used to hide EVERY evidence
+            link behind the disclosure below -- fixed for all severities,
+            not just high, since the asymmetry is a location-count problem,
+            not a severity one. "-summary-" in the id avoids colliding with
+            flags[0]'s own per-location link once this cluster expands.
+            Deliberately says "one of N", never "first" -- `first` is just
+            array-position `flags[0]`, and the API re-sorts unresolved
+            before overridden, so which flag sits at index 0 can change
+            after a sibling gets resolved (ux-critic, live-reproduced:
+            reversing a 2-flag cluster's array order moved this link's
+            target and anchor text with it). Claiming a stable ordinal an
+            instructor could reasonably rely on ("I already checked the
+            first one") when the underlying order isn't stable would be
+            exactly the false precision ground rule 8 forbids for numbers,
+            applied to a word instead. */}
+        {showActions && (
+          <ActionLink
+            id={`signal-flag-review-summary-${first.id}`}
+            to={`/flags/${first.id}`}
+            variant="secondary"
+            // Deliberately NOT the same template the per-location links
+            // use ("Review evidence at {anchor}, location {i} of {N}") --
+            // once this cluster expands, flags[0]'s own per-location link
+            // gets exactly that string, and two links pointing at the
+            // same flag with the IDENTICAL accessible name is real,
+            // avoidable ambiguity for anyone navigating by link name.
+            aria-label={`Review evidence at ${first.page_anchor} (one of ${flags.length} locations)`}
+            state={{
+              routeReturnFocus: {
+                returnPath: location.pathname + location.search,
+                elementId: `signal-flag-review-summary-${first.id}`,
+              },
+            }}
+          >
+            Review evidence
+          </ActionLink>
+        )}
+        <Button
+          variant="quiet"
+          aria-expanded={expanded}
+          aria-controls={locationsId}
+          onClick={onToggle}
+        >
+          {expanded ? "Hide" : "Show"} {flags.length} locations
+        </Button>
+      </div>
       {expanded && (
         <ol id={locationsId} className="signal-flag-location-list">
           {flags.map((flag, locationIndex) => (

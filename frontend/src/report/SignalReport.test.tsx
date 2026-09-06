@@ -252,14 +252,30 @@ describe("SignalReportPage", () => {
     expect(await screen.findByText("1 open finding")).toBeInTheDocument();
     expect(screen.getByText("Showing 1 of 1 open finding across 12 locations.")).toBeInTheDocument();
     expect(screen.getByText("Possible match with archived manuscript #34")).toBeInTheDocument();
-    expect(screen.queryByRole("link", { name: /Review evidence at/ })).not.toBeInTheDocument();
+    // BUG-169: a multi-location cluster now surfaces ONE evidence link
+    // pre-expansion (the summary link -- both it and every per-location
+    // link share the visible text "Review evidence", so `aria-label`
+    // supplies the actual accessible name, which is how every one of
+    // these queries distinguishes them). Deliberately says "one of N",
+    // never "first": `flags[0]` isn't a stable ordinal (the API re-sorts
+    // unresolved before overridden, so array position moves as flags get
+    // resolved) -- ux-critic live-reproduced that claiming "first" would
+    // assert a fact the system can't back up.
+    expect(screen.getByRole("link", { name: "Review evidence at p. 1 (one of 12 locations)" })).toHaveAttribute("href", "/flags/1");
+    expect(screen.queryByRole("link", { name: /, location \d+ of 12/ })).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Show 12 locations" }));
     expect(screen.getByRole("button", { name: "Hide 12 locations" })).toHaveAttribute("aria-expanded", "true");
-    const locationLinks = screen.getAllByRole("link", { name: /Review evidence at p\./ });
+    // The template `, location {i} of {N}` is specific to the per-location
+    // links -- the summary link's own distinct "(one of N locations)"
+    // phrasing does not match it, so this count stays exactly 12.
+    const locationLinks = screen.getAllByRole("link", { name: /, location \d+ of 12/ });
     expect(locationLinks).toHaveLength(12);
     expect(new Set(locationLinks.map((link) => link.getAttribute("aria-label"))).size).toBe(12);
     expect(screen.getByRole("link", { name: "Review evidence at p. 1, location 2 of 12" })).toHaveAttribute("href", "/flags/2");
+    // The pre-expansion summary link is still present and un-duplicated
+    // by the per-location list -- distinct aria-label, same href.
+    expect(screen.getByRole("link", { name: "Review evidence at p. 1 (one of 12 locations)" })).toHaveAttribute("href", "/flags/1");
     expect(screen.getByText(/open and resolved locations, so those two filter counts may overlap/i)).toBeInTheDocument();
     expect(screen.getByText(/Distinct manuscript passage 12\./)).toBeInTheDocument();
   });
@@ -284,7 +300,11 @@ describe("SignalReportPage", () => {
 
     expect(await screen.findByRole("button", { name: "High: 1 finding" })).toHaveAttribute("aria-pressed", "true");
     expect(screen.getByRole("button", { name: "Hide 3 locations" })).toHaveAttribute("aria-expanded", "true");
-    expect(screen.getAllByRole("link", { name: /Review evidence at p\./ })).toHaveLength(3);
+    // 3 per-location links (expanded), distinguished from the always-
+    // present summary link (BUG-169) by the per-location-only ", location
+    // N of" phrasing.
+    expect(screen.getAllByRole("link", { name: /, location \d+ of 3/ })).toHaveLength(3);
+    expect(screen.getByRole("link", { name: "Review evidence at p. 1 (one of 3 locations)" })).toBeInTheDocument();
   });
 
   it("BUG-167: restores how many findings were revealed ('Show N more') from report URL state, not just the filter", async () => {
@@ -520,6 +540,63 @@ describe("SignalReportPage", () => {
     await screen.findByText("Showing 2 of 2 open findings across 2 locations.");
     expect(screen.getByRole("heading", { name: "Statement of the problem is coherent and well-supported" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Possible inconsistency" })).toBeInTheDocument();
+  });
+
+  it("BUG-169: surfaces a Review-evidence link on a multi-location card BEFORE expansion, regardless of severity", async () => {
+    // The ticket's own complaint was specifically about high-severity
+    // reuse findings, but the fix is scoped to every multi-location
+    // cluster -- the asymmetry is a location-count problem, not a
+    // severity one (a medium-severity multi-location cluster used to
+    // hide its evidence exactly the same way a high-severity one did).
+    const flags = [
+      { ...FLAG, id: 40, severity: "med" as const, check_kind: "internal_agreement", problem_kind: "agreement_partial", matched_ref: null, page_anchor: "p. 3" },
+      { ...FLAG, id: 41, severity: "med" as const, check_kind: "internal_agreement", problem_kind: "agreement_partial", matched_ref: null, page_anchor: "p. 9" },
+    ];
+    stubReport(BASE_REPORT, [], flags);
+    renderWithProviders(<SignalReportPage />, {
+      // Both flags are medium severity, so BUG-167's own default-view
+      // selection lands on "med" here, not "open" -- pinned explicitly so
+      // this test is about the evidence link, not that other feature.
+      route: "/report/5?flags_view=open",
+      path: "/report/:checkRunId",
+    });
+
+    await screen.findByText("Showing 1 of 1 open finding across 2 locations.");
+    expect(
+      screen.getByRole("link", { name: "Review evidence at p. 3 (one of 2 locations)" }),
+    ).toHaveAttribute("href", "/flags/40");
+  });
+
+  it("BUG-169: never labels the summary evidence link 'first' -- flags[0] is just array position, not a stable ordinal", async () => {
+    // ux-critic live-reproduced that the API re-sorts unresolved before
+    // overridden, so which flag sits at index 0 moves as siblings get
+    // resolved -- an instructor could reasonably read "first" as "the one
+    // I already checked" when the underlying order has changed under
+    // them. Regression: whichever flag the API hands back as index 0, the
+    // summary link must describe it as "one of N", never "first of N".
+    const flags = [
+      { ...FLAG, id: 41, severity: "med" as const, check_kind: "internal_agreement", problem_kind: "agreement_partial", matched_ref: null, page_anchor: "p. 9" },
+      { ...FLAG, id: 40, severity: "med" as const, check_kind: "internal_agreement", problem_kind: "agreement_partial", matched_ref: null, page_anchor: "p. 3" },
+    ];
+    stubReport(BASE_REPORT, [], flags);
+    renderWithProviders(<SignalReportPage />, { route: "/report/5?flags_view=open", path: "/report/:checkRunId" });
+
+    await screen.findByText("Showing 1 of 1 open finding across 2 locations.");
+    expect(
+      screen.getByRole("link", { name: "Review evidence at p. 9 (one of 2 locations)" }),
+    ).toHaveAttribute("href", "/flags/41");
+    expect(screen.queryByRole("link", { name: /first of/ })).not.toBeInTheDocument();
+  });
+
+  it("BUG-169: never adds the summary evidence link to a single-location card (already had one) or the public share view (no actions at all)", async () => {
+    stubReport(BASE_REPORT, [], [FLAG]);
+    renderWithProviders(<SignalReportPage />, { route: "/report/5", path: "/report/:checkRunId" });
+
+    await screen.findByText("Showing 1 of 1 open finding across 1 location.");
+    // Exactly the pre-existing single-location link, no duplicate summary
+    // control alongside it.
+    expect(screen.getAllByRole("link", { name: "Review evidence" })).toHaveLength(1);
+    expect(screen.queryByRole("link", { name: /first of/ })).not.toBeInTheDocument();
   });
 
   it("migrates legacy reuse percentages without rewriting quoted manuscript text", async () => {
