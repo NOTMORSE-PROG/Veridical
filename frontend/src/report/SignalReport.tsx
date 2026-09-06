@@ -31,10 +31,28 @@ function IntegrityDisclosure({ status }: { status: IntegrityCheckStatusOut }) {
   );
 }
 
-function focusReportJumpTarget(event: MouseEvent<HTMLAnchorElement>) {
+// `scrollIntoView` defaults to false: the existing plain `<a href="#...">`
+// jump-nav links below are same-page hash anchors the BROWSER's own
+// native navigation already scrolls to before this handler runs --
+// BUG-158 deliberately used `preventScroll: true` here to avoid a second,
+// conflicting scroll jump on top of that native one. The hero KPI link
+// (`ux-critic` finding, BUG-167 review, live-reproduced: `window.scrollY`
+// stayed 0 after clicking it) is different -- it's a react-router `Link`
+// whose href changes the SEARCH string, not just the hash, so react-router
+// intercepts the click and handles the whole navigation itself; no native
+// browser anchor-scroll ever happens for it. `scrollIntoView: true` opts
+// that one link into an explicit scroll instead of assuming one already
+// occurred.
+function focusReportJumpTarget(
+  event: MouseEvent<HTMLAnchorElement>,
+  { scrollIntoView = false }: { scrollIntoView?: boolean } = {},
+) {
   const targetId = decodeURIComponent(event.currentTarget.hash.slice(1));
   requestAnimationFrame(() => {
-    document.getElementById(targetId)?.focus({ preventScroll: true });
+    const target = document.getElementById(targetId);
+    if (!target) return;
+    if (scrollIntoView) target.scrollIntoView({ block: "start" });
+    target.focus({ preventScroll: true });
   });
 }
 
@@ -91,7 +109,26 @@ export function SignalReportPage() {
           <section className="signal-report-hero" aria-labelledby="readiness-band-heading">
             <div className="signal-report-hero__branch" aria-hidden="true"><i /><i /><i /></div>
             <div><p className="signal-section-kicker">VERIDICAL readiness band</p><h2 id="readiness-band-heading">{report.status === "ready" ? "Ready" : report.status === "conditionally_ready" ? "Conditionally Ready" : report.status === "not_ready" ? "Not Ready" : "Needs Review"}</h2><p>{report.reason ?? "This band is derived from the recorded criterion outcomes and integrity signals. Review the evidence below before deciding."}</p></div>
-            <dl><div><dt>Unresolved criteria</dt><dd>{report.pending_review_count}</dd></div><div><dt>Open high-severity signals</dt><dd>{report.unresolved_high_flag_count}</dd></div><div><dt>Instructor decision</dt><dd>{report.decision ? "Recorded" : "Not recorded"}</dd></div></dl>
+            <dl>
+              <div><dt>Unresolved criteria</dt><dd>{report.pending_review_count}</dd></div>
+              <div>
+                <dt>Open high-severity signals</dt>
+                <dd>
+                  {report.unresolved_high_flag_count > 0 ? (
+                    <Link
+                      to="?flags_view=high#integrity-signals"
+                      onClick={(event) => focusReportJumpTarget(event, { scrollIntoView: true })}
+                      className="signal-report-hero__kpi-link signal-on-dark"
+                      aria-label={`Open high-severity signals: ${report.unresolved_high_flag_count}. Jump to the integrity signals section, filtered to high severity.`}
+                    >
+                      {report.unresolved_high_flag_count}
+                      <span aria-hidden="true"> →</span>
+                    </Link>
+                  ) : report.unresolved_high_flag_count}
+                </dd>
+              </div>
+              <div><dt>Instructor decision</dt><dd>{report.decision ? "Recorded" : "Not recorded"}</dd></div>
+            </dl>
           </section>
 
           <div className="signal-section-flow signal-report-orientation">
@@ -122,7 +159,7 @@ export function SignalReportPage() {
           )}
 
           <SignalEscalatedPanel checkRunId={report.check_run_id} />
-          <SignalFlagsPanel checkRunId={report.check_run_id} />
+          <SignalFlagsPanel checkRunId={report.check_run_id} unresolvedHighFlagCount={report.unresolved_high_flag_count} />
           <SignalCriteriaResults results={report.results.filter((row) => row.outcome !== "escalated")} checkRunId={report.check_run_id} />
           <SignalDecisionPanel report={report} manuscriptLabel={identity?.primary ?? report.manuscript_group_label} />
         </>

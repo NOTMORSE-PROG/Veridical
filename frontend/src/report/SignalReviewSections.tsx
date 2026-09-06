@@ -6,11 +6,13 @@ import type {
   FlagSummaryOut,
   ResultRowCommon,
 } from "../api/types";
+import { useMe } from "../auth/useAuth";
 import {
   FLAG_LIST_BATCH_COUNT,
   FLAG_LIST_INITIAL_COUNT,
   RESOLUTION_REASON_MIN_LENGTH,
 } from "../config/ui";
+import { useViewedFlagIds } from "../domain/flagViewed";
 import { problemLabel } from "../domain/problemLabel";
 import { systemFindingCopy } from "../domain/systemFindingCopy";
 import { ActionLink } from "../ui/ActionLink";
@@ -37,6 +39,11 @@ const SEVERITY_LABEL: Record<FlagSummaryOut["severity"], string> = {
 
 type FlagView = "open" | "high" | "med" | "low" | "resolved" | "all";
 
+// BUG-167: a module-level constant so the default prop value doesn't
+// allocate a new Set every render for the common case (SignalPublicFlags,
+// which never tracks viewed state at all).
+const EMPTY_VIEWED: ReadonlySet<number> = new Set();
+
 const FLAG_VIEWS: ReadonlyArray<{ id: FlagView; label: string }> = [
   { id: "open", label: "Open" },
   { id: "high", label: "High" },
@@ -55,6 +62,14 @@ function flagMatchesView(flag: FlagSummaryOut, view: FlagView): boolean {
 
 const CLUSTERS_OPEN_PARAM = "flags_clusters_open";
 const FLAG_VIEW_PARAM = "flags_view";
+// BUG-167: "Show N more" used to be plain component state, so returning
+// from a flag's own detail page (either via browser Back or an in-app
+// link) always reset it -- silently discarding however many times the
+// instructor had already expanded the list, on top of whatever scroll/
+// focus problem also applied. Persisted the same way `view`/
+// `openClusters` already are, so a genuine remount (this IS one: leaving
+// `/report/:id` for `/flags/:id` unmounts this whole list) restores it.
+const VISIBLE_COUNT_PARAM = "flags_visible";
 
 function readFlagView(searchParams: URLSearchParams, fallback: FlagView): FlagView {
   const candidate = searchParams.get(FLAG_VIEW_PARAM);
@@ -79,9 +94,64 @@ function worstSeverity(flags: FlagSummaryOut[]): FlagSummaryOut["severity"] {
   );
 }
 
+// BUG-167: the list's DECLARATION order stays fixed check-kind-first
+// (BUG-033's own deliberate "flags never jump around" precedent) -- what
+// changes is which FILTER is selected by default, so what forces the
+// verdict doesn't require 11+ screens of scrolling past lower-severity
+// findings to reach. Keyed off `unresolvedHighFlagCount` (the same
+// aggregate `report/scoring.py`'s `high_flag_count > 0 => not_ready` gate
+// itself used), not recomputed from the raw flags array here -- that
+// backend value is authoritative for "does an unresolved high exist,"
+// and `FlagSummaryOut` doesn't expose the same has_verdict filter the
+// scoring engine applies, so recomputing client-side could silently
+// disagree with it in an edge case.
+function defaultFlagView(unresolvedHighFlagCount: number, flags: FlagSummaryOut[]): FlagView {
+  if (unresolvedHighFlagCount > 0) return "high";
+  if (flags.some((flag) => !flag.overridden && flag.severity === "med")) return "med";
+  return "open";
+}
+
 function readOpenClusters(searchParams: URLSearchParams): Set<string> {
   const raw = searchParams.get(CLUSTERS_OPEN_PARAM);
   return raw ? new Set(raw.split(",")) : new Set();
+}
+
+function readVisibleCount(searchParams: URLSearchParams, fallback: number): number {
+  const raw = searchParams.get(VISIBLE_COUNT_PARAM);
+  const parsed = raw ? Number(raw) : NaN;
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+// BUG-167: a bespoke inline SVG, matching `SeverityTag.tsx`'s existing
+// convention for this codebase's small status icons.
+function ViewedIcon() {
+  return (
+    <svg aria-hidden="true" viewBox="0 0 24 24" width="14" height="14">
+      <path
+        d="M4 12.5 L10 18 L20 6"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2.5"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+// BUG-167: only ever compares against UNRESOLVED locations -- an
+// overridden flag already shows "Resolved by instructor"/"Source
+// confirmed", which strictly supersedes "was this looked at" (a flag
+// cannot be overridden without having been opened first), so Viewed and
+// the resolution-state pills are mutually exclusive by construction,
+// never competing for attention on the same row.
+function viewedSummary(flags: FlagSummaryOut[], viewedIds: ReadonlySet<number>): string | null {
+  const unresolved = flags.filter((flag) => !flag.overridden);
+  const viewed = unresolved.filter((flag) => viewedIds.has(flag.id));
+  if (unresolved.length === 0 || viewed.length === 0) return null;
+  if (unresolved.length === 1) return "Viewed this location";
+  if (viewed.length === unresolved.length) return `Viewed all ${unresolved.length} open locations`;
+  return `Viewed ${viewed.length} of ${unresolved.length} open locations`;
 }
 
 function SignalFindingCard({
@@ -89,15 +159,22 @@ function SignalFindingCard({
   expanded,
   showActions,
   showResolutionSummary,
+  viewedIds,
   onToggle,
 }: {
   cluster: FlagFindingCluster;
   expanded: boolean;
   showActions: boolean;
   showResolutionSummary: boolean;
+  viewedIds: ReadonlySet<number>;
   onToggle: () => void;
 }) {
   const { flags } = cluster;
+  // BUG-167: `location.search` (not just `.pathname`) is part of the
+  // return path -- this list's own filter/expanded/pagination state lives
+  // in query params, and `FlagDetail.tsx`'s breadcrumb navigates back to
+  // this EXACT string, so returning by breadcrumb click restores the same
+  // view an instructor left, not a bare, stripped-down `/report/:id`.
   const location = useLocation();
   const first = flags[0];
   const severity = worstSeverity(flags);
@@ -114,6 +191,9 @@ function SignalFindingCard({
       <li className={first.overridden ? "signal-flag-row signal-flag-row--resolved" : "signal-flag-row"}>
         <div className="signal-flag-row__summary">
           <span className={`signal-severity signal-severity--${first.severity}`}>{SEVERITY_LABEL[first.severity]}</span>
+          {!first.overridden && viewedIds.has(first.id) && (
+            <span className="signal-viewed-state"><ViewedIcon />Viewed</span>
+          )}
           {first.overridden && <span className="signal-resolution-state">Resolved by instructor</span>}
           {first.confirmed_citation_source && <span className="signal-resolution-state">Source confirmed</span>}
         </div>
@@ -126,7 +206,7 @@ function SignalFindingCard({
             id={`signal-flag-review-${first.id}`}
             to={`/flags/${first.id}`}
             variant="secondary"
-            state={{ routeReturnFocus: { returnPath: location.pathname, elementId: `signal-flag-review-${first.id}` } }}
+            state={{ routeReturnFocus: { returnPath: location.pathname + location.search, elementId: `signal-flag-review-${first.id}` } }}
           >
             Review evidence
           </ActionLink>
@@ -139,6 +219,9 @@ function SignalFindingCard({
     <li className={allResolved ? "signal-flag-row signal-flag-row--resolved" : "signal-flag-row"}>
       <div className="signal-flag-row__summary">
         <span className={`signal-severity signal-severity--${severity}`}>{SEVERITY_LABEL[severity]}</span>
+        {viewedSummary(flags, viewedIds) && (
+          <span className="signal-viewed-state"><ViewedIcon />{viewedSummary(flags, viewedIds)}</span>
+        )}
         {showResolutionSummary && resolvedCount > 0 && (
           <span className="signal-resolution-state">
             {allResolved
@@ -172,6 +255,9 @@ function SignalFindingCard({
               <div className="signal-flag-location__meta">
                 <strong>{flag.page_anchor}</strong>
                 {mixedSeverity && <span className={`signal-severity signal-severity--${flag.severity}`}>{SEVERITY_LABEL[flag.severity]}</span>}
+                {!flag.overridden && viewedIds.has(flag.id) && (
+                  <span className="signal-viewed-state"><ViewedIcon />Viewed</span>
+                )}
                 {flag.overridden && <span className="signal-resolution-state">Resolved by instructor</span>}
                 {flag.confirmed_citation_source && <span className="signal-resolution-state">Source confirmed</span>}
               </div>
@@ -181,7 +267,7 @@ function SignalFindingCard({
                   to={`/flags/${flag.id}`}
                   variant="secondary"
                   aria-label={`Review evidence at ${flag.page_anchor}, location ${locationIndex + 1} of ${flags.length}`}
-                  state={{ routeReturnFocus: { returnPath: location.pathname, elementId: `signal-flag-review-${flag.id}` } }}
+                  state={{ routeReturnFocus: { returnPath: location.pathname + location.search, elementId: `signal-flag-review-${flag.id}` } }}
                 >
                   Review evidence
                 </ActionLink>
@@ -198,14 +284,30 @@ function SignalFlagList({
   flags,
   showActions,
   initialView,
+  trackViewed = false,
+  viewedIds = EMPTY_VIEWED,
 }: {
   flags: FlagSummaryOut[];
   showActions: boolean;
   initialView: FlagView;
+  // BUG-167: both optional, both default to the no-op/off state, so
+  // `SignalPublicFlags` (the adviser/share view) needs zero changes --
+  // "opened" tracking is an instructor-only convenience, never shown to
+  // an external reader.
+  trackViewed?: boolean;
+  viewedIds?: ReadonlySet<number>;
 }) {
   const [searchParams, setSearchParams] = useSearchParams();
-  const [view, setView] = useState<FlagView>(() => readFlagView(searchParams, initialView));
-  const [visibleCount, setVisibleCount] = useState(FLAG_LIST_INITIAL_COUNT);
+  // BUG-167 (`ui-designer` finding, live-reproduced before it could break
+  // the hero-KPI link below): a `useState` mirror initialized ONCE from
+  // `searchParams` goes stale the moment the URL changes any other way
+  // (e.g. the hero KPI link setting `flags_view=high` directly) -- the
+  // pressed filter button kept showing the PREVIOUS view while the URL
+  // already said otherwise. `openClusters` two lines down never had this
+  // bug because it was already derived fresh from `searchParams` on every
+  // render, no local-state mirror -- `view`/`visibleCount` now match it.
+  const view = readFlagView(searchParams, initialView);
+  const visibleCount = readVisibleCount(searchParams, FLAG_LIST_INITIAL_COUNT);
   const [focusClusterKey, setFocusClusterKey] = useState<string>();
   const canonicalClusters = clusterFlagFindings(flags);
   const filtered = clustersForView(canonicalClusters, view);
@@ -222,11 +324,10 @@ function SignalFlagList({
   }, [focusClusterKey, visibleCount]);
 
   function selectView(next: FlagView) {
-    setView(next);
-    setVisibleCount(FLAG_LIST_INITIAL_COUNT);
     const nextParams = new URLSearchParams(searchParams);
     if (next === initialView) nextParams.delete(FLAG_VIEW_PARAM);
     else nextParams.set(FLAG_VIEW_PARAM, next);
+    nextParams.delete(VISIBLE_COUNT_PARAM);
     setSearchParams(nextParams, { replace: true });
   }
 
@@ -242,8 +343,12 @@ function SignalFlagList({
 
   function showMore() {
     const firstNew = filtered[visibleCount];
-    setVisibleCount((count) => count + FLAG_LIST_BATCH_COUNT);
+    const nextCount = visibleCount + FLAG_LIST_BATCH_COUNT;
     setFocusClusterKey(firstNew?.key);
+    const nextParams = new URLSearchParams(searchParams);
+    if (nextCount === FLAG_LIST_INITIAL_COUNT) nextParams.delete(VISIBLE_COUNT_PARAM);
+    else nextParams.set(VISIBLE_COUNT_PARAM, String(nextCount));
+    setSearchParams(nextParams, { replace: true });
   }
 
   return (
@@ -266,9 +371,36 @@ function SignalFlagList({
             );
           })}
         </div>
+        {view === initialView && initialView === "high" && (
+          <p className="signal-field-hint">
+            High severity is shown first. An unresolved high-severity signal makes a report Not Ready by itself. Select Open or All to see every signal.
+          </p>
+        )}
+        {view === initialView && initialView === "med" && (
+          <p className="signal-field-hint">
+            Medium severity is shown first: no unresolved high-severity signals remain, and medium is the highest severity left to review. Select Open or All to see every signal.
+          </p>
+        )}
         <p role="status" aria-live="polite">
           Showing {visible.length} of {filtered.length} {viewLabel} finding{filtered.length === 1 ? "" : "s"} across {locationCount} location{locationCount === 1 ? "" : "s"}.
         </p>
+        {trackViewed && filtered.length > 0 && (() => {
+          const openClustersAll = clusterFlagFindings(flags.filter((flag) => !flag.overridden));
+          const openTotal = openClustersAll.length;
+          const openViewed = openClustersAll.filter((cluster) =>
+            cluster.flags.some((flag) => viewedIds.has(flag.id))
+          ).length;
+          return openTotal > 0 ? (
+            // `ux-critic` finding (BUG-167 review): another tab marking a
+            // flag viewed updates this count via `useViewedFlagIds`'s own
+            // cross-tab `storage` listener with nothing announced to a
+            // screen reader in THIS tab -- same `role`/`aria-live` as its
+            // sibling status line above.
+            <p className="signal-field-hint" role="status" aria-live="polite">
+              You have reviewed evidence for {openViewed} of {openTotal} open findings.
+            </p>
+          ) : null;
+        })()}
         <p className="signal-field-hint">
           One finding can contain both open and resolved locations, so those two filter counts may overlap. All counts each finding once.
         </p>
@@ -283,6 +415,7 @@ function SignalFlagList({
               expanded={openClusters.has(cluster.key)}
               showActions={showActions}
               showResolutionSummary={view === "all"}
+              viewedIds={viewedIds}
               onToggle={() => toggleCluster(cluster.key)}
             />
           ))}
@@ -450,18 +583,38 @@ export function SignalEscalatedPanel({ checkRunId }: { checkRunId: number }) {
   );
 }
 
-export function SignalFlagsPanel({ checkRunId }: { checkRunId: number }) {
+export function SignalFlagsPanel({
+  checkRunId,
+  unresolvedHighFlagCount,
+}: {
+  checkRunId: number;
+  unresolvedHighFlagCount: number;
+}) {
   const { data: flags, isPending, isError, refetch } = useFlags(checkRunId);
+  const { data: me } = useMe();
+  const viewedIds = useViewedFlagIds(me?.id);
   if (isPending) return <div role="status" aria-busy="true" className="signal-desk-loading"><span>Loading integrity signals…</span><i /><i /></div>;
   if (isError) return <Alert title="Could not load integrity signals" tone="error" role="alert"><Button variant="secondary" onClick={() => refetch()}>Try again</Button></Alert>;
   const openFindingCount = clusterFlagFindings(flags?.filter((flag) => !flag.overridden) ?? []).length;
+  // BUG-167: defaults the FILTER to the worst unresolved severity present,
+  // not the declaration order -- see `defaultFlagView`'s own comment for
+  // why this is a filter-default decision, not a reorder.
+  const initialView = flags ? defaultFlagView(unresolvedHighFlagCount, flags) : "open";
 
   return (
     <section id="integrity-signals" tabIndex={-1} className="signal-review-section" aria-labelledby="flags-heading">
       <div className="signal-review-section__heading"><div><p className="signal-section-kicker">Second review task</p><h2 id="flags-heading" tabIndex={-1}>Integrity signals</h2></div><span>{openFindingCount} open finding{openFindingCount === 1 ? "" : "s"}</span></div>
       <p className="signal-review-section__intro">These are possible inconsistencies, not accusations. Open a signal to inspect its excerpt, source anchor, and available instructor action.</p>
       {flags?.length
-        ? <SignalFlagList flags={flags} showActions initialView="open" />
+        ? (
+          <SignalFlagList
+            flags={flags}
+            showActions
+            initialView={initialView}
+            trackViewed
+            viewedIds={viewedIds}
+          />
+        )
         : <Alert title="No integrity signals" tone="success">This run produced no checkable integrity signals.</Alert>}
     </section>
   );

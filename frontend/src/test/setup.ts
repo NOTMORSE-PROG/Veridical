@@ -15,3 +15,14 @@ class ResizeObserverStub {
   disconnect() {}
 }
 globalThis.ResizeObserver ??= ResizeObserverStub as unknown as typeof ResizeObserver;
+
+// BUG-167: jsdom has no `scrollIntoView` at all (a well-known jsdom gap,
+// not tokenized/reflected in real layout either way) -- unmocked, a real
+// call throws asynchronously inside the `requestAnimationFrame` callback
+// that `SignalReport.tsx::focusReportJumpTarget` schedules, surfacing as
+// a vitest "Unhandled Error" *after* the triggering test has already
+// reported passed, not as that test's own failure. A no-op stub here is
+// the standard fix (real scroll behavior is exactly what a real browser,
+// not a real production risk, provides) -- a test that needs to assert
+// scrollIntoView WAS called still overrides this with its own `vi.fn()`.
+Element.prototype.scrollIntoView ??= () => {};

@@ -2147,6 +2147,22 @@
     font-weight: var(--signal-weight-bold);
   }
 
+  /* BUG-167: the hero's own "Open high-severity signals" KPI, made an
+     actual jump-to-filtered-list link instead of an inert number. */
+  .signal-report-hero__kpi-link {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--signal-space-1);
+    min-height: var(--signal-control-height);
+    color: var(--color-signal-brand);
+    text-decoration: underline;
+    text-underline-offset: var(--signal-link-underline-offset);
+  }
+
+  .signal-report-hero__kpi-link:hover {
+    color: var(--color-signal-brand-hover);
+  }
+
   .signal-report-hero__branch {
     position: absolute;
     inset-block-start: var(--signal-report-branch-offset);
@@ -2275,6 +2291,24 @@
     padding: var(--signal-space-1) var(--signal-space-3);
     font-size: var(--signal-type-meta);
     font-weight: var(--signal-weight-bold);
+    white-space: nowrap;
+  }
+
+  /* BUG-167: deliberately outline/transparent-background, unlike
+     .signal-severity/.signal-resolution-state (both solid-fill pills) --
+     filled pill = a system-determined fact (severity, resolution);
+     this ghost pill = the instructor's own private progress tracker,
+     visually quieter by construction so the card doesn't get noisy. */
+  .signal-viewed-state {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--signal-space-1);
+    border: var(--signal-border-hairline) solid var(--color-signal-border-strong);
+    border-radius: var(--signal-radius-pill);
+    padding: var(--signal-space-1) var(--signal-space-3);
+    color: var(--color-signal-ink-muted);
+    font-size: var(--signal-type-meta);
+    font-weight: var(--signal-weight-semibold);
     white-space: nowrap;
   }
 

@@ -215,7 +215,14 @@ describe("SignalReportPage", () => {
       problem_kind: `distinct_test_finding_${index + 1}`,
     }));
     stubReport(BASE_REPORT, [], flags);
-    renderWithProviders(<SignalReportPage />, { route: "/report/5", path: "/report/:checkRunId" });
+    // BUG-167: pinned to `flags_view=open` -- this test is about
+    // filter/pagination mechanics generally, not the new default-view
+    // selection (which would otherwise default to "high" here, since
+    // these flags include unresolved high-severity ones).
+    renderWithProviders(<SignalReportPage />, {
+      route: "/report/5?flags_view=open",
+      path: "/report/:checkRunId",
+    });
 
     expect(await screen.findByText("Showing 8 of 12 open findings across 12 locations.")).toBeInTheDocument();
     expect(screen.getAllByRole("link", { name: "Review evidence" })).toHaveLength(8);
@@ -278,6 +285,182 @@ describe("SignalReportPage", () => {
     expect(await screen.findByRole("button", { name: "High: 1 finding" })).toHaveAttribute("aria-pressed", "true");
     expect(screen.getByRole("button", { name: "Hide 3 locations" })).toHaveAttribute("aria-expanded", "true");
     expect(screen.getAllByRole("link", { name: /Review evidence at p\./ })).toHaveLength(3);
+  });
+
+  it("BUG-167: restores how many findings were revealed ('Show N more') from report URL state, not just the filter", async () => {
+    // Reproduces the ux-critic-confirmed defect: returning from a flag's
+    // own detail page used to always reset "Show N more" back to its
+    // default, discarding however many times the instructor had already
+    // expanded the list -- on a report large enough that the target flag
+    // lived behind that expansion, the return control could vanish
+    // entirely. Persisting this the same way `flags_view`/
+    // `flags_clusters_open` already are means a genuine remount (leaving
+    // `/report/:id` for `/flags/:id` and back IS one) restores it.
+    const flags = Array.from({ length: 12 }, (_, index): FlagSummaryOut => ({
+      ...FLAG,
+      id: index + 1,
+      evidence_excerpt: `Possible inconsistency ${index + 1}.`,
+      severity: index % 2 === 0 ? "high" : "med",
+      problem_kind: `distinct_test_finding_${index + 1}`,
+    }));
+    stubReport(BASE_REPORT, [], flags);
+    // `flags_view=open` pinned for the same reason as the test above --
+    // this test is about `flags_visible` persistence, not the new
+    // default-view selection.
+    renderWithProviders(<SignalReportPage />, {
+      route: "/report/5?flags_view=open&flags_visible=12",
+      path: "/report/:checkRunId",
+    });
+
+    expect(await screen.findByText("Showing 12 of 12 open findings across 12 locations.")).toBeInTheDocument();
+    expect(screen.getAllByRole("link", { name: "Review evidence" })).toHaveLength(12);
+    expect(screen.queryByRole("button", { name: /Show \d+ more/ })).not.toBeInTheDocument();
+  });
+
+  // BUG-167: the default FILTER (not the underlying declaration order,
+  // which stays fixed per BUG-033) is now the worst unresolved severity
+  // present, so what forces the verdict doesn't require scrolling past
+  // every lower-severity finding to reach.
+  it("defaults the flags filter to High when the report has unresolved high-severity signals", async () => {
+    const flags = [
+      { ...FLAG, id: 1, severity: "low" as const },
+      { ...FLAG, id: 2, severity: "high" as const },
+    ];
+    stubReport({ ...BASE_REPORT, unresolved_high_flag_count: 1 }, [], flags);
+    renderWithProviders(<SignalReportPage />, { route: "/report/5", path: "/report/:checkRunId" });
+
+    expect(await screen.findByRole("button", { name: "High: 1 finding" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByText(/High severity is shown first/)).toBeInTheDocument();
+    expect(screen.getByText("Showing 1 of 1 high finding across 1 location.")).toBeInTheDocument();
+  });
+
+  it("defaults to Medium when no unresolved high-severity signals remain but medium ones do", async () => {
+    const flags = [
+      { ...FLAG, id: 1, severity: "low" as const },
+      { ...FLAG, id: 2, severity: "med" as const },
+    ];
+    // unresolved_high_flag_count is the backend's own authoritative
+    // aggregate (report/scoring.py's own gate) -- deliberately trusted
+    // over recomputing from the raw flags array client-side.
+    stubReport({ ...BASE_REPORT, unresolved_high_flag_count: 0 }, [], flags);
+    renderWithProviders(<SignalReportPage />, { route: "/report/5", path: "/report/:checkRunId" });
+
+    expect(await screen.findByRole("button", { name: "Medium: 1 finding" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByText(/Medium severity is shown first/)).toBeInTheDocument();
+  });
+
+  it("defaults to Open (not High/Medium) when neither an unresolved high nor medium signal exists", async () => {
+    const flags = [{ ...FLAG, id: 1, severity: "low" as const }];
+    stubReport({ ...BASE_REPORT, unresolved_high_flag_count: 0 }, [], flags);
+    renderWithProviders(<SignalReportPage />, { route: "/report/5", path: "/report/:checkRunId" });
+
+    expect(await screen.findByRole("button", { name: "Open: 1 finding" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.queryByText(/severity is shown first/)).not.toBeInTheDocument();
+  });
+
+  it("BUG-167 (ui-designer-found live bug): the hero's high-severity KPI link jumps to and correctly filters the signals list, not a stale pressed state", async () => {
+    // Reproduces exactly what ui-designer found broken before the `view`/
+    // `visibleCount` useState-mirror fix: a URL change from something
+    // OTHER than the filter buttons themselves (here, the hero link)
+    // used to leave the pressed filter button showing the PREVIOUS view.
+    const flags = [
+      { ...FLAG, id: 1, severity: "low" as const },
+      { ...FLAG, id: 2, severity: "high" as const },
+    ];
+    stubReport({ ...BASE_REPORT, unresolved_high_flag_count: 1 }, [], flags);
+    renderWithProviders(<SignalReportPage />, {
+      route: "/report/5?flags_view=low",
+      path: "/report/:checkRunId",
+    });
+
+    expect(await screen.findByRole("button", { name: "Low: 1 finding" })).toHaveAttribute("aria-pressed", "true");
+    const kpiLink = screen.getByRole("link", { name: /Open high-severity signals: 1\./ });
+    expect(kpiLink).toHaveAttribute("href", expect.stringContaining("flags_view=high"));
+    fireEvent.click(kpiLink);
+
+    expect(await screen.findByRole("button", { name: "High: 1 finding" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("button", { name: "Low: 1 finding" })).toHaveAttribute("aria-pressed", "false");
+  });
+
+  it("BUG-167 (ux-critic finding, live-reproduced): the KPI link actually scrolls its target into view, unlike a plain hash-only jump link", async () => {
+    // jsdom has no real layout engine, so `window.scrollY` never reflects
+    // anything meaningful here -- this asserts the FIX's actual mechanism
+    // (an explicit `scrollIntoView` call) fires for the KPI link, which a
+    // react-router `Link` needs because changing the search string means
+    // react-router intercepts the click and no native browser anchor-
+    // scroll ever happens for it (unlike the plain `<a href="#...">`
+    // jump-nav links, which get that scroll for free and must NOT get a
+    // second, redundant one -- BUG-158's own reasoning, preserved here).
+    const scrollIntoView = vi.fn();
+    const originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
+    HTMLElement.prototype.scrollIntoView = scrollIntoView;
+    try {
+      stubReport({ ...BASE_REPORT, unresolved_high_flag_count: 1 }, [], [{ ...FLAG, severity: "high" }]);
+      renderWithProviders(<SignalReportPage />, { route: "/report/5", path: "/report/:checkRunId" });
+
+      fireEvent.click(await screen.findByRole("link", { name: /Inspect signals/ }));
+      expect(scrollIntoView).not.toHaveBeenCalled();
+
+      fireEvent.click(screen.getByRole("link", { name: /Open high-severity signals: 1\./ }));
+      await waitFor(() => expect(scrollIntoView).toHaveBeenCalledTimes(1));
+    } finally {
+      HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
+    }
+  });
+
+  it("renders the high-severity KPI as plain text, not a link, when there are none to jump to", async () => {
+    stubReport({ ...BASE_REPORT, unresolved_high_flag_count: 0 }, [], []);
+    renderWithProviders(<SignalReportPage />, { route: "/report/5", path: "/report/:checkRunId" });
+
+    await screen.findByRole("heading", { name: "Readiness report" });
+    expect(screen.queryByRole("link", { name: /Open high-severity signals/ })).not.toBeInTheDocument();
+  });
+
+  const ME_INSTRUCTOR = { id: 9, email: "me@tip.edu.ph", display_name: "Me", onboarding_dismissed_at: null };
+
+  it("BUG-167: marks a flag Viewed on the card after its evidence has actually been opened", async () => {
+    window.localStorage.clear();
+    window.localStorage.setItem("veridical.flags-viewed.v1.9", JSON.stringify([7]));
+    vi.stubGlobal("fetch", stubFetchByPath({
+      "/check-runs/5/report": BASE_REPORT,
+      "/check-runs/5/escalated": [],
+      // Distinct problem_kind/evidence -- otherwise `clusterFlagFindings`
+      // (correctly) merges two near-identical flags into ONE multi-
+      // location finding, which renders the "Viewed N of M locations"
+      // summary variant instead of the plain single-flag "Viewed" badge
+      // this test means to check.
+      "/check-runs/5/flags": [
+        FLAG,
+        { ...FLAG, id: 8, problem_kind: "unrelated_finding", evidence_excerpt: "A different excerpt entirely." },
+      ],
+      "/check-runs/5/share": null,
+      "/auth/me": ME_INSTRUCTOR,
+    }));
+    renderWithProviders(<SignalReportPage />, { route: "/report/5", path: "/report/:checkRunId" });
+
+    const viewedBadges = await screen.findAllByText("Viewed");
+    expect(viewedBadges).toHaveLength(1);
+    expect(screen.getByText("You have reviewed evidence for 1 of 2 open findings.")).toBeInTheDocument();
+    window.localStorage.clear();
+  });
+
+  it("shows no per-card Viewed badge, but an honest 0-of-N coverage line, when nothing has been opened yet", async () => {
+    // The coverage line is shown whenever an open finding exists at all,
+    // even at 0 reviewed -- "0 of 1" is itself real, honest information
+    // (ground rule 9), not noise to suppress until something's non-zero.
+    window.localStorage.clear();
+    vi.stubGlobal("fetch", stubFetchByPath({
+      "/check-runs/5/report": BASE_REPORT,
+      "/check-runs/5/escalated": [],
+      "/check-runs/5/flags": [FLAG],
+      "/check-runs/5/share": null,
+      "/auth/me": ME_INSTRUCTOR,
+    }));
+    renderWithProviders(<SignalReportPage />, { route: "/report/5", path: "/report/:checkRunId" });
+
+    await screen.findByText("Showing 1 of 1 open finding across 1 location.");
+    expect(screen.queryByText("Viewed")).not.toBeInTheDocument();
+    expect(screen.getByText("You have reviewed evidence for 0 of 1 open findings.")).toBeInTheDocument();
   });
 
   it("keeps near-identical citation evidence separate when problem kinds differ", async () => {

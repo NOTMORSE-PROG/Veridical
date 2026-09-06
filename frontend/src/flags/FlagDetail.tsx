@@ -2,8 +2,10 @@ import { useEffect, useId, useRef, useState } from "react";
 import { Link, useLocation, useParams } from "react-router";
 import { ApiError } from "../api/client";
 import type { FlagOut } from "../api/types";
+import { useMe } from "../auth/useAuth";
 import { PassagePairPanel } from "../document/PassagePairPanel";
 import { checkKindMeta, humanize } from "../domain/checkKind";
+import { markFlagViewed } from "../domain/flagViewed";
 import { problemLabel } from "../domain/problemLabel";
 import { systemFindingCopy } from "../domain/systemFindingCopy";
 import { rememberRouteReturnFocus, useRouteFocus } from "../routing/useRouteFocus";
@@ -185,6 +187,25 @@ export function FlagDetailPage() {
   const [announcement, setAnnouncement] = useState("");
   const returnFocus = (routeLocation.state as { routeReturnFocus?: { returnPath: string; elementId: string } } | null)?.routeReturnFocus;
   useRouteFocus("Evidence detail - VERIDICAL", headingRef, returnFocus);
+  // BUG-167: also drives the breadcrumb's own destination below --
+  // `returnPath` is the report's exact prior URL (filter/pagination
+  // included, not just its bare path), so a breadcrumb click restores the
+  // same view an instructor left, the same round trip `useRouteFocus`
+  // itself now also handles for a PUSH-style return. Falls back to the
+  // bare report path when this page was reached directly (no recorded
+  // origin to return to).
+  const { data: me } = useMe();
+
+  // BUG-167: "opened" means the evidence actually rendered, not merely
+  // that a link was clicked -- gated on `flag` being loaded, same
+  // condition that already excludes the isPending/isError branches below.
+  // `markFlagViewed` is idempotent (a no-op once already recorded), so
+  // depending on the whole `flag` object -- rather than just `flag.id` --
+  // costs nothing and matches this file's own sibling effect below.
+  useEffect(() => {
+    if (!flag) return;
+    markFlagViewed(me?.id, flag.id);
+  }, [flag, me?.id]);
 
   useEffect(() => {
     if (!flag) return;
@@ -207,7 +228,7 @@ export function FlagDetailPage() {
     <div className="signal-route signal-page-flow signal-flag-detail">
       <header className="signal-route-header signal-flag-header">
         <div>
-          <nav aria-label="Breadcrumb"><Link to="/dashboard?queue=needs_review">Review Desk</Link><span aria-hidden="true">/</span>{flag && <><Link to={`/report/${flag.check_run_id}`}>{flag.manuscript_group_label}</Link><span aria-hidden="true">/</span></>}<span>Evidence</span></nav>
+          <nav aria-label="Breadcrumb"><Link to="/dashboard?queue=needs_review">Review Desk</Link><span aria-hidden="true">/</span>{flag && <><Link to={returnFocus?.returnPath ?? `/report/${flag.check_run_id}`}>{flag.manuscript_group_label}</Link><span aria-hidden="true">/</span></>}<span>Evidence</span></nav>
           <p className="signal-eyebrow">Review · Possible inconsistency</p>
           <h1 ref={headingRef} tabIndex={-1}>{meta?.title ?? "Evidence detail"}</h1>
           {flag?.criterion_text && <p className="signal-route-header__intro">Related criterion: {flag.criterion_text}</p>}
