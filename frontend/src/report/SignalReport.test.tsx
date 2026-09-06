@@ -477,6 +477,51 @@ describe("SignalReportPage", () => {
     expect(screen.getAllByRole("link", { name: "Review evidence" })).toHaveLength(2);
   });
 
+  it("BUG-168: states the problem, in the product's own vocabulary, on the card heading -- not just the student's excerpt", async () => {
+    // Confirms end-to-end, on a real rendered card, that a kind
+    // `problemLabel.ts` only just gained (this ticket extended the table
+    // from 14 to 26 reachable kinds) actually reaches the card -- a unit
+    // test on `problemLabel()` alone can't prove the wiring itself works.
+    stubReport(BASE_REPORT, [], [
+      {
+        ...FLAG,
+        id: 30,
+        check_kind: "internal_agreement",
+        problem_kind: "agreement_contradictory",
+        criterion_text: null,
+        evidence_excerpt: "The methodology section describes a mixed-methods design.",
+      },
+    ]);
+    renderWithProviders(<SignalReportPage />, { route: "/report/5", path: "/report/:checkRunId" });
+
+    const heading = await screen.findByRole("heading", { name: "Objective and result may contradict each other" });
+    // The excerpt is still shown, but subordinate to (i.e. not replacing)
+    // the problem statement -- this is the ticket's own literal ask.
+    expect(within(heading.closest("li")!).getByText(/mixed-methods design/)).toBeInTheDocument();
+  });
+
+  it("falls back to the criterion text, then an honest generic label, for a kind with no mapped problem statement", async () => {
+    stubReport(BASE_REPORT, [], [
+      {
+        ...FLAG,
+        id: 31,
+        problem_kind: "not_yet_mapped_future_kind",
+        criterion_text: "Statement of the problem is coherent and well-supported",
+      },
+      {
+        ...FLAG,
+        id: 32,
+        problem_kind: "not_yet_mapped_future_kind",
+        criterion_text: null,
+      },
+    ]);
+    renderWithProviders(<SignalReportPage />, { route: "/report/5", path: "/report/:checkRunId" });
+
+    await screen.findByText("Showing 2 of 2 open findings across 2 locations.");
+    expect(screen.getByRole("heading", { name: "Statement of the problem is coherent and well-supported" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Possible inconsistency" })).toBeInTheDocument();
+  });
+
   it("migrates legacy reuse percentages without rewriting quoted manuscript text", async () => {
     const legacyWholeDocument: FlagSummaryOut = {
       ...FLAG,

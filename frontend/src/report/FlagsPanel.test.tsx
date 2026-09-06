@@ -126,7 +126,14 @@ describe("FlagsList — V-071 AC9 problem-stating flag cards", () => {
   });
 
   it("renders no problem label for an unmapped or absent problem_kind, never a guessed one", async () => {
-    const flags = [flag({ id: 1, check_kind: "internal_agreement", problem_kind: "agreement_contradictory" })];
+    // BUG-168: `agreement_contradictory` used to be exactly this test's
+    // own example of an unmapped kind -- it no longer is, now that
+    // `problemLabel.ts` covers every kind the F4-F7 checks can actually
+    // produce. A placeholder that will never be a real backend kind is
+    // what this test actually needs to check the fallback path, not any
+    // specific real one (which risks going stale again the next time
+    // real coverage genuinely improves).
+    const flags = [flag({ id: 1, check_kind: "internal_agreement", problem_kind: "not_yet_mapped_placeholder_kind" })];
     renderWithProviders(<FlagsList flags={flags} />);
 
     const excerpt = await screen.findByText(flags[0].evidence_excerpt);
