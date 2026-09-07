@@ -517,3 +517,122 @@ def test_oversized_upload_records_file_too_large_reason(tmp_path, monkeypatch, i
         await engine.dispose()
 
     asyncio.run(scenario())
+
+
+@live
+def test_bug180_page_cap_rejects_before_parsing_and_records_file_too_large(
+    tmp_path, monkeypatch, ingest_scratch_url
+):
+    """BUG-180: `max_upload_mb` bounds compressed file size, the wrong
+    dimension for a PDF (measured: 50,000 pages / 15.9MB, well inside a
+    40MB cap, produced 1.29M chars and would have written ~337,500 rows
+    into the shared reuse corpus at the real ceiling). `ingest_max_pages`
+    is checked before a single page is parsed. Also proves the
+    `ingest_manuscript` exception-handling gap this ticket found is fixed:
+    `FileTooLargeError` used to fall through to the generic handler and
+    record the less-specific `extraction_failed` reason instead of the
+    honest `file_too_large` `save_upload`'s own size-cap already uses for
+    the same failure class -- this exercises that same gap from the PDF
+    page-count path, not just the pre-existing DOCX zip-bomb path."""
+    from sqlalchemy import select
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
+    from app.db import sqlalchemy_url
+    from app.errors import FileTooLargeError
+    from app.ingest.service import ingest_upload
+    from app.models import Instructor, Manuscript
+    from app.models.enums import IngestFailureReason, IngestStatus
+
+    monkeypatch.setenv("DATA_DIR", str(tmp_path / "data"))
+    monkeypatch.setenv("INGEST_MAX_PAGES", "3")
+    get_settings.cache_clear()
+    settings = get_settings()
+
+    too_many_pages = PdfBuilder()
+    for _ in range(5):
+        too_many_pages.new_page().line("Filler page.")
+    pdf_path = too_many_pages.save(tmp_path / "toolong.pdf")
+    pdf_bytes = pdf_path.read_bytes()
+
+    async def chunks():
+        yield pdf_bytes
+
+    async def scenario():
+        engine = create_async_engine(sqlalchemy_url(ingest_scratch_url))
+        factory = async_sessionmaker(engine, expire_on_commit=False)
+        async with factory() as session:
+            instructor = Instructor(
+                email=f"ingest-toomanypages-{time.time_ns()}@test.local", display_name="T"
+            )
+            session.add(instructor)
+            await session.commit()
+
+            with pytest.raises(FileTooLargeError):
+                await ingest_upload(
+                    session, chunks(), "toolong.pdf", "G", settings, instructor_id=instructor.id
+                )
+
+            manuscript = await session.scalar(
+                select(Manuscript).where(Manuscript.instructor_id == instructor.id)
+            )
+            # The page cap fired (not some unrelated extraction error), AND
+            # the previously-missing except branch correctly recorded it.
+            assert manuscript.ingest_status == IngestStatus.failed
+            assert manuscript.ingest_failure_reason == IngestFailureReason.file_too_large
+        await engine.dispose()
+
+    asyncio.run(scenario())
+
+
+@live
+def test_bug180_extraction_timeout_records_file_too_large(
+    tmp_path, monkeypatch, ingest_scratch_url
+):
+    """BUG-180: a second, independent backstop for the case where
+    per-page cost is unexpectedly high even under `ingest_max_pages` --
+    `ingest_extraction_timeout_seconds` bounds how long the request waits.
+    A tiny timeout plus a real (if trivial) extraction reliably exceeds
+    it without needing a genuinely slow fixture."""
+    from sqlalchemy import select
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
+    from app.db import sqlalchemy_url
+    from app.errors import FileTooLargeError
+    from app.ingest.service import ingest_upload
+    from app.models import Instructor, Manuscript
+    from app.models.enums import IngestFailureReason, IngestStatus
+
+    monkeypatch.setenv("DATA_DIR", str(tmp_path / "data"))
+    monkeypatch.setenv("INGEST_EXTRACTION_TIMEOUT_SECONDS", "0.0000001")
+    get_settings.cache_clear()
+    settings = get_settings()
+
+    pdf_path = PdfBuilder().new_page().line("Ordinary page.").save(tmp_path / "ordinary.pdf")
+    pdf_bytes = pdf_path.read_bytes()
+
+    async def chunks():
+        yield pdf_bytes
+
+    async def scenario():
+        engine = create_async_engine(sqlalchemy_url(ingest_scratch_url))
+        factory = async_sessionmaker(engine, expire_on_commit=False)
+        async with factory() as session:
+            instructor = Instructor(
+                email=f"ingest-timeout-{time.time_ns()}@test.local", display_name="T"
+            )
+            session.add(instructor)
+            await session.commit()
+
+            with pytest.raises(FileTooLargeError):
+                await ingest_upload(
+                    session, chunks(), "ordinary.pdf", "G", settings, instructor_id=instructor.id
+                )
+
+            manuscript = await session.scalar(
+                select(Manuscript).where(Manuscript.instructor_id == instructor.id)
+            )
+            assert manuscript.ingest_status == IngestStatus.failed
+            assert manuscript.ingest_failure_reason == IngestFailureReason.file_too_large
+        await engine.dispose()
+
+    asyncio.run(scenario())

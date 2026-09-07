@@ -8,7 +8,7 @@ CPU-bound and synchronous on purpose — callers run it in a threadpool
 import pymupdf
 
 from app.config import Settings
-from app.errors import FileMalformedError
+from app.errors import FileMalformedError, FileTooLargeError
 from app.ingest import sections
 from app.ingest.normalize import furniture_key, match_key, normalize
 from app.ingest.patterns import HeadingPatterns, load_patterns
@@ -21,7 +21,7 @@ from app.ingest.schemas import (
     TableBlock,
     TextBlock,
 )
-from app.messages import FILE_ENCRYPTED, FILE_UNREADABLE
+from app.messages import FILE_ENCRYPTED, FILE_UNREADABLE, PDF_TOO_MANY_PAGES
 
 _BOLD_FLAG = 16  # PyMuPDF span flag bit for bold fonts
 
@@ -35,6 +35,17 @@ def extract_document(path: str, settings: Settings) -> ExtractionResult:
     try:
         if doc.needs_pass:
             raise FileMalformedError(FILE_ENCRYPTED)
+        # BUG-180: checked before a single page is parsed -- `max_upload_mb`
+        # bounds compressed file size, the wrong dimension for a PDF (a
+        # 50,000-page, 15.9MB file measured well inside that cap, 6.1s
+        # parse, 1.29M chars). Page count is what actually drives the
+        # unbounded `for index in range(doc.page_count)` loop below.
+        if doc.page_count > settings.ingest_max_pages:
+            raise FileTooLargeError(
+                PDF_TOO_MANY_PAGES.format(
+                    page_count=doc.page_count, limit=settings.ingest_max_pages
+                )
+            )
         return _extract_open_document(doc, patterns, settings)
     finally:
         doc.close()

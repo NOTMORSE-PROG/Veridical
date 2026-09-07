@@ -108,13 +108,27 @@ async def store_passage_embeddings(
     comes from `settings`, not the passage itself — same convention as
     `ChapterEmbedding`, which also doesn't carry its own model id (it's a
     single settings-level fact for the whole batch, recorded once on the
-    parent `DocumentEmbeddings.model_id` there)."""
+    parent `DocumentEmbeddings.model_id` there).
+
+    BUG-180: `passages` is truncated to `reuse_max_passages_per_manuscript`
+    (keeping the first N in document order) before any row is written --
+    unbounded, an oversized upload becomes hundreds of thousands of rows
+    in the GLOBALLY SHARED reuse corpus, degrading match quality and query
+    time for every other account, permanently. Truncates rather than
+    rejects the check: this runs deep into an already-passing check run
+    (structural/semantic results already exist), and throwing all of that
+    away over an internal corpus-writing limit would be a worse
+    instructor experience than this manuscript's own passage-level reuse
+    coverage quietly ending at passage N for a document that large --
+    `ingest_max_pages` is the guard that actually keeps ordinary uploads
+    well under this cap; this is a backstop for whatever gets through it
+    with an unusually dense text-per-page ratio."""
     await session.execute(
         delete(ManuscriptPassageArchive).where(
             ManuscriptPassageArchive.manuscript_id == manuscript_id
         )
     )
-    for passage in passages:
+    for passage in passages[: settings.reuse_max_passages_per_manuscript]:
         session.add(
             ManuscriptPassageArchive(
                 manuscript_id=manuscript_id,
