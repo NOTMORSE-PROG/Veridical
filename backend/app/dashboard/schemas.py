@@ -21,3 +21,11 @@ class DashboardStats(BaseModel):
     # (F8.5) had ever been used. Scoped to the exact same latest-done-run
     # set as every other count on this screen (BUG-012's own rule).
     decided_count: int
+    # BUG-211: the exact same predicate `list_manuscripts(status=checked,
+    # needs_review=False)` uses (latest run done, zero unresolved
+    # escalations, no decision yet) -- NOT derivable from the band counts
+    # above. A manuscript's readiness BAND (`needs_review_count` above) and
+    # whether it has unresolved escalations right now are different facts;
+    # the frontend used to subtract the former from `manuscripts_checked`
+    # as a stand-in for the latter, and the two silently diverged.
+    ready_to_decide_count: int

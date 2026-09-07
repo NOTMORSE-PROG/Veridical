@@ -14,6 +14,7 @@ const BASE: DashboardStats = {
   escalation_budget: 0.2,
   system_underperforming: false,
   decided_count: 2,
+  ready_to_decide_count: 2,
 };
 
 describe("KpiCards", () => {

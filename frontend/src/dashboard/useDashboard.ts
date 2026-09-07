@@ -17,6 +17,10 @@ export interface DashboardStats {
   // V-038: how many of the checked manuscripts above have a real
   // recorded decision.
   decided_count: number;
+  // BUG-211: the real ready-to-decide count (latest run done, zero
+  // unresolved escalations, no decision yet) -- NOT derivable from the
+  // band counts above, which is what this screen used to attempt.
+  ready_to_decide_count: number;
 }
 
 export function useDashboardStats() {

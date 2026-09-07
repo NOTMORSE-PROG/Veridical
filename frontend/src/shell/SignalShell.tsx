@@ -153,8 +153,19 @@ function MobileWorkspaceMenu() {
     return () => document.removeEventListener("keydown", onKeyDown);
   }, [open]);
 
+  // BUG-210: tabbing past the panel's last focusable item used to leave
+  // focus on the page underneath while the panel stayed open and visually
+  // covered it (WCAG 2.4.11) -- same defect BUG-102 fixed once already in
+  // the predecessor AppShell, reused here via the identical blur-to-outside
+  // pattern AccountDisclosure (above) already uses for its own panel.
+  function handleBlur(event: FocusEvent<HTMLDivElement>) {
+    const next = event.relatedTarget as Node | null;
+    if (next && (event.currentTarget.contains(next) || next === triggerRef.current)) return;
+    setOpen(false);
+  }
+
   return (
-    <div className="signal-mobile-menu">
+    <div className="signal-mobile-menu" onBlur={handleBlur}>
       <button
         ref={triggerRef}
         type="button"

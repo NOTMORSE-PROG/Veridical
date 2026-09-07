@@ -84,4 +84,21 @@ describe("SignalShell destination navigation", () => {
     expect(trigger).toHaveAttribute("aria-expanded", "false");
     expect(trigger).toHaveFocus();
   });
+
+  it("BUG-210 (WCAG 2.4.11): closes when focus tabs past its last item, instead of leaving a focused control hidden underneath the still-open panel", async () => {
+    renderShell();
+    const trigger = await screen.findByRole("button", { name: "Menu" });
+    fireEvent.click(trigger);
+    const signOut = screen.getByRole("button", { name: "Sign out" });
+    const pageContent = screen.getByText("Route content");
+
+    // Simulates what a real forward Tab past the panel's last focusable
+    // item does: focus lands on the underlying page while the panel is
+    // still mounted -- same mechanism BUG-102 fixed once already in the
+    // predecessor AppShell (see AppShell.test.tsx's identical test).
+    fireEvent.blur(signOut, { relatedTarget: pageContent });
+
+    expect(trigger).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByRole("button", { name: "Sign out" })).not.toBeInTheDocument();
+  });
 });
