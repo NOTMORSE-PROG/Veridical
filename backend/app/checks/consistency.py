@@ -403,6 +403,21 @@ async def vote_batch(
                     f"The grading response used an unrecognized verdict "
                     f"({vote.majority_verdict!r}) for this criterion's own scale."
                 )
+                # BUG-170: `detail["verdict"]` (set above by `_vote_detail`,
+                # kept -- not deleted -- so the panel can still honestly
+                # report that the passes agreed) is the exact string this
+                # branch just declared unrecognized. `resolve_escalation`'s
+                # `accept_majority` path re-runs `outcome_and_score` on it
+                # and always 409s ("no longer matches this criterion's
+                # scale"), so offering it as an acceptable choice is a
+                # guaranteed-to-fail affordance, not a risky one. Flagged
+                # here rather than omitting `verdict` outright (semantic.py's
+                # single-pass path's own approach) because THIS path's
+                # verdict is still real, checkable information -- both
+                # passes really did agree on something, just not a name this
+                # criterion's scale defines -- and the panel's "N of M passes
+                # agreed" line depends on `ai_majority_verdict` staying set.
+                detail["verdict_unrecognized"] = True
         if injection_signal.suspected:
             # Overrides the vote's own outcome regardless of what it
             # decided (including a "perfect agreement" auto-accept) --

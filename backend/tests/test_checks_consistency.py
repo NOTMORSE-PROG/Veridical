@@ -610,3 +610,11 @@ async def test_both_passes_agree_on_an_unrecognized_level_name_escalates_with_a_
     assert results[0].detail["reason"] == (
         "The grading response used an unrecognized verdict ('Good') for this criterion's own scale."
     )
+    # BUG-170: `verdict` stays in `detail` (the panel's "N of M passes
+    # agreed" line depends on it), but `resolve_escalation`'s
+    # `accept_majority` path always 409s on this exact verdict -- the panel
+    # needs a way to tell "real agreement" apart from "real agreement on
+    # something that can't be accepted" so it can stop offering a
+    # guaranteed-to-fail button while still reporting the agreement.
+    assert results[0].detail["verdict"] == "Good"
+    assert results[0].detail["verdict_unrecognized"] is True

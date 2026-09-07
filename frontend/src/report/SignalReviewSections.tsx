@@ -12,6 +12,7 @@ import {
   FLAG_LIST_INITIAL_COUNT,
   RESOLUTION_REASON_MIN_LENGTH,
 } from "../config/ui";
+import { isManuscriptQuote } from "../domain/evidenceDisplay";
 import { useViewedFlagIds } from "../domain/flagViewed";
 import { problemLabel } from "../domain/problemLabel";
 import { systemFindingCopy } from "../domain/systemFindingCopy";
@@ -198,7 +199,14 @@ function SignalFindingCard({
           {first.confirmed_citation_source && <span className="signal-resolution-state">Source confirmed</span>}
         </div>
         <h3 id={headingId} tabIndex={-1}>{problemLabel(first.problem_kind) ?? first.criterion_text ?? "Possible inconsistency"}</h3>
-        <blockquote>“{systemFindingCopy(first.evidence_excerpt, first.problem_kind, "evidence")}”</blockquote>
+        {/* BUG-170: a whole-document/chapter/resubmission reuse flag's
+            evidence_excerpt is a system-authored template sentence, never
+            manuscript text -- <blockquote> claims a quotation that isn't
+            one. No separate "reasoning" field exists at this summary
+            level, so the same text still renders, just not quote-styled. */}
+        {isManuscriptQuote(first)
+          ? <blockquote>“{systemFindingCopy(first.evidence_excerpt, first.problem_kind, "evidence")}”</blockquote>
+          : <p className="signal-flag-finding-context">{systemFindingCopy(first.evidence_excerpt, first.problem_kind, "evidence")}</p>}
         <p>{first.page_anchor}</p>
         {first.first_upload_context && <p className="signal-field-hint">First-upload context: the comparison archive was limited when this signal was created.</p>}
         {showActions && (
@@ -236,7 +244,9 @@ function SignalFindingCard({
         <p className="signal-flag-finding-context">Possible match with archived manuscript #{first.matched_ref}</p>
       )}
       {excerptsMatch
-        ? <blockquote>“{systemFindingCopy(first.evidence_excerpt, first.problem_kind, "evidence")}”</blockquote>
+        ? isManuscriptQuote(first)
+          ? <blockquote>“{systemFindingCopy(first.evidence_excerpt, first.problem_kind, "evidence")}”</blockquote>
+          : <p className="signal-flag-finding-context">{systemFindingCopy(first.evidence_excerpt, first.problem_kind, "evidence")}</p>
         : <p className="signal-flag-finding-context">{flags.length} manuscript locations point to this possible finding, each with its own excerpt. Review one location below, or open all {flags.length} to compare them.</p>}
       {first.first_upload_context && <p className="signal-field-hint">First-upload context: the comparison archive was limited when this signal was created.</p>}
       <div className="signal-flag-row__actions">
@@ -290,7 +300,9 @@ function SignalFindingCard({
         <ol id={locationsId} className="signal-flag-location-list">
           {flags.map((flag, locationIndex) => (
             <li key={flag.id} className={flag.overridden ? "signal-flag-location signal-flag-location--resolved" : "signal-flag-location"}>
-              <blockquote>“{systemFindingCopy(flag.evidence_excerpt, flag.problem_kind, "evidence")}”</blockquote>
+              {isManuscriptQuote(flag)
+                ? <blockquote>“{systemFindingCopy(flag.evidence_excerpt, flag.problem_kind, "evidence")}”</blockquote>
+                : <p className="signal-flag-finding-context">{systemFindingCopy(flag.evidence_excerpt, flag.problem_kind, "evidence")}</p>}
               <div className="signal-flag-location__meta">
                 <strong>{flag.page_anchor}</strong>
                 {mixedSeverity && <span className={`signal-severity signal-severity--${flag.severity}`}>{SEVERITY_LABEL[flag.severity]}</span>}
@@ -581,7 +593,15 @@ function SignalResolutionCard({ item, checkRunId, onResolved }: {
             ? item.levels.map((level) => <Button key={level.level} variant="secondary" onClick={() => choose("mark_level", level.level)}>{level.name}</Button>)
             : <><Button variant="secondary" onClick={() => choose("mark_pass")}>Meets criterion</Button><Button variant="secondary" onClick={() => choose("mark_fail")}>Does not meet</Button></>}
           <Button variant="quiet" onClick={() => choose("needs_document")}>Needs another document</Button>
-          {item.ai_majority_verdict !== null && <Button variant={item.review_reason === "injection_suspected" ? "quiet" : "secondary"} onClick={() => choose("accept_majority")}>Accept AI suggestion: {item.ai_majority_verdict}</Button>}
+          {/* BUG-170: `verdict_unrecognized` means accepting this verdict
+              is guaranteed to 409 server-side (the passes agreed on a
+              string that still doesn't name any of this criterion's own
+              levels) -- offering the button anyway would be the exact
+              "offers to accept a verdict it just told you it cannot
+              recognise" incoherence this ticket named. `item.reason`
+              already explains why, so removing the button loses no
+              information. */}
+          {item.ai_majority_verdict !== null && !item.verdict_unrecognized && <Button variant={item.review_reason === "injection_suspected" ? "quiet" : "secondary"} onClick={() => choose("accept_majority")}>Accept AI suggestion: {item.ai_majority_verdict}</Button>}
         </div>
       ) : (
         <div className="signal-resolution-form">

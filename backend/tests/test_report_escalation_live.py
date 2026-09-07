@@ -70,7 +70,9 @@ async def _clean_tables(session_factory):
     yield
 
 
-async def _seed_escalated_run(session, *, ai_majority_verdict="pass", agreement=0.667):
+async def _seed_escalated_run(
+    session, *, ai_majority_verdict="pass", agreement=0.667, verdict_unrecognized=False
+):
     """One check_run with one semantic criterion sitting at `escalated`,
     shaped exactly like `app.checks.consistency`'s own persisted output
     (agreement + votes + a majority verdict pending instructor review)."""
@@ -107,6 +109,12 @@ async def _seed_escalated_run(session, *, ai_majority_verdict="pass", agreement=
         detail["verdict"] = ai_majority_verdict
         detail["reasoning"] = "Two of three passes agreed."
         detail["evidence"] = [{"quote": "The problem is stated.", "anchor": "page 3"}]
+    if verdict_unrecognized:
+        detail["verdict_unrecognized"] = True
+        detail["reason"] = (
+            f"The grading response used an unrecognized verdict "
+            f"({ai_majority_verdict!r}) for this criterion's own scale."
+        )
     check_result = CheckResult(
         check_run_id=check_run.id,
         criterion_id=criterion.id,
@@ -227,6 +235,29 @@ async def test_accept_majority_without_an_ai_majority_is_rejected(session_factor
         instructor, check_run, check_result = await _seed_escalated_run(
             session, ai_majority_verdict=None, agreement=0.333
         )
+        with pytest.raises(ConflictError):
+            await resolve_escalation_for_run(
+                session, check_run.id, check_result.id, instructor.id, "accept_majority", "reason"
+            )
+
+
+async def test_bug170_verdict_unrecognized_item_reports_agreement_but_rejects_accept(
+    session_factory,
+):
+    """BUG-170: the passes really did agree (not a tied/no-opinion case,
+    unlike the test above) on a verdict this criterion's own scale doesn't
+    define -- `ai_majority_verdict` must stay set (the panel's "N of M
+    passes agreed" line depends on it) while `verdict_unrecognized` tells
+    the panel not to offer `accept_majority` as a live choice, since the
+    server rejects it exactly like the no-majority case, just for a
+    different reason."""
+    async with session_factory() as session:
+        instructor, check_run, check_result = await _seed_escalated_run(
+            session, ai_majority_verdict="Good", agreement=1.0, verdict_unrecognized=True
+        )
+        panel = await list_escalated_for_run(session, check_run.id, instructor.id)
+        assert panel[0].ai_majority_verdict == "Good"
+        assert panel[0].verdict_unrecognized is True
         with pytest.raises(ConflictError):
             await resolve_escalation_for_run(
                 session, check_run.id, check_result.id, instructor.id, "accept_majority", "reason"

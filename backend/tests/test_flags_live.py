@@ -503,10 +503,59 @@ async def test_evidence_unavailable_flag_reaches_the_api_distinguishably(session
         assert downgraded_out.severity == "med"
         assert downgraded_out.evidence_unavailable is True
         assert downgraded_out.passage_pair is None
+        # BUG-170: neither fixture's `detail["kind"]` ends in "_passage" --
+        # both are whole-document-level, so `evidence_excerpt` is a
+        # system-authored template sentence, never a manuscript quote, on
+        # both rows regardless of which one got downgraded.
+        assert downgraded_out.is_passage_level is False
 
         medium_out = await get_flag(session, genuinely_medium_flag.id, instructor.id)
         assert medium_out.severity == "med"
         assert medium_out.evidence_unavailable is False
+        assert medium_out.is_passage_level is False
+
+
+async def test_passage_level_flag_reaches_the_api_as_such(session_factory):
+    """BUG-170: `FlagOut.is_passage_level` mirrors `FlagSummaryOut`'s field
+    of the same name (same `detail["kind"].endswith("_passage")`
+    derivation) -- the flag evidence page uses it to tell a passage-level
+    flag (evidence_excerpt is real, quoted manuscript text) apart from a
+    whole-document/chapter/resubmission reuse flag (evidence_excerpt is a
+    system-authored template sentence, never a quote)."""
+    async with session_factory() as session:
+        instructor = Instructor(email=f"passagelevel-{id(session)}@test.local", display_name="T")
+        session.add(instructor)
+        await session.commit()
+        manuscript = Manuscript(instructor_id=instructor.id, group_label="G", file_ref="x.pdf")
+        rubric = Rubric(instructor_id=instructor.id, title="Format", source_file="r.pdf")
+        session.add_all([manuscript, rubric])
+        await session.commit()
+        check_run = CheckRun(
+            manuscript_id=manuscript.id, rubric_id=rubric.id, status=CheckRunStatus.done
+        )
+        session.add(check_run)
+        await session.commit()
+        result = CheckResult(
+            check_run_id=check_run.id,
+            criterion_id=None,
+            kind=CheckKind.originality_reuse,
+            outcome=ResultOutcome.passed,
+            detail={},
+        )
+        session.add(result)
+        await session.commit()
+        passage_flag = Flag(
+            check_result_id=result.id,
+            severity=FlagSeverity.high,
+            evidence_excerpt="The system uses a hybrid rule-based and AI approach.",
+            page_anchor="p. 31",
+            detail={"kind": "reuse_exact_duplicate_passage", "matched_manuscript_id": 3},
+        )
+        session.add(passage_flag)
+        await session.commit()
+
+        out = await get_flag(session, passage_flag.id, instructor.id)
+        assert out.is_passage_level is True
 
 
 async def test_no_verdict_high_flag_does_not_force_not_ready_live(session_factory):
