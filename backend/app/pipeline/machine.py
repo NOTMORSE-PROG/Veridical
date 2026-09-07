@@ -208,6 +208,7 @@ async def _transition_after_boundary(
     session: AsyncSession,
     check_run: CheckRun,
     completed_stage: CheckRunStatus,
+    settings: Settings,
 ) -> bool:
     """Persist one safe unit, then atomically advance only if not cancelled.
 
@@ -220,6 +221,23 @@ async def _transition_after_boundary(
     await session.commit()
     if await _finish_cancel_if_requested(session, check_run):
         return False
+    # BUG-181: checked at the SAME stage-boundary checkpoint cancellation
+    # already uses, so no new call site is needed anywhere else. Cancellation
+    # is checked first -- an instructor's own request always takes priority
+    # over a system-triggered deadline stop. `started_at` is unset only for
+    # a run that hasn't left `queued` yet (BUG-032 edge case, `func.
+    # coalesce` sets it on the first real transition below); nothing to
+    # bound before real work has begun.
+    if check_run.started_at is not None:
+        elapsed = (datetime.now(UTC) - check_run.started_at).total_seconds()
+        if elapsed > settings.pipeline_run_deadline_seconds:
+            raise TerminalFailure(
+                "run_deadline_exceeded",
+                f"This check has been running for over "
+                f"{settings.pipeline_run_deadline_seconds / 60:.0f} minutes and was "
+                "stopped so it doesn't hold up every other queued check. Start a "
+                "new check when you're ready to try again.",
+            )
 
     next_stage = _STAGE_AFTER[completed_stage]
     values: dict[str, Any] = {"status": next_stage}
@@ -684,13 +702,15 @@ async def run_check_run(
 
     try:
         if check_run.status == CheckRunStatus.queued and not await _transition_after_boundary(
-            session, check_run, CheckRunStatus.queued
+            session, check_run, CheckRunStatus.queued, settings
         ):
             return
 
         if check_run.status == CheckRunStatus.ingesting:
             await _run_ingesting_stage(check_run, manuscript)
-            if not await _transition_after_boundary(session, check_run, CheckRunStatus.ingesting):
+            if not await _transition_after_boundary(
+                session, check_run, CheckRunStatus.ingesting, settings
+            ):
                 return
 
         criteria_by_id = {c.id: c for c in rubric.criteria}
@@ -700,7 +720,9 @@ async def run_check_run(
             await _run_structural_stage(
                 session, check_run, criteria_by_id, decisions, settings, manuscript
             )
-            if not await _transition_after_boundary(session, check_run, CheckRunStatus.structural):
+            if not await _transition_after_boundary(
+                session, check_run, CheckRunStatus.structural, settings
+            ):
                 return
 
         if check_run.status == CheckRunStatus.semantic:
@@ -714,7 +736,9 @@ async def run_check_run(
                 llm,
                 cancellation_boundary,
             )
-            if not await _transition_after_boundary(session, check_run, CheckRunStatus.semantic):
+            if not await _transition_after_boundary(
+                session, check_run, CheckRunStatus.semantic, settings
+            ):
                 return
 
         if check_run.status == CheckRunStatus.integrity:
@@ -726,13 +750,17 @@ async def run_check_run(
                 llm,
                 cancellation_boundary,
             )
-            if not await _transition_after_boundary(session, check_run, CheckRunStatus.integrity):
+            if not await _transition_after_boundary(
+                session, check_run, CheckRunStatus.integrity, settings
+            ):
                 return
 
         if check_run.status == CheckRunStatus.aggregating:
             await aggregate_and_score(session, check_run.id, settings)
             _record_stage(check_run, CheckRunStatus.aggregating, status="done")
-            await _transition_after_boundary(session, check_run, CheckRunStatus.aggregating)
+            await _transition_after_boundary(
+                session, check_run, CheckRunStatus.aggregating, settings
+            )
 
     except CancellationAccepted:
         return

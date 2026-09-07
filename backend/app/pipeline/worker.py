@@ -11,12 +11,13 @@ import logging
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import or_, select, update
+from sqlalchemy import func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app import db
 from app.config import Settings, get_settings
 from app.models.enums import CheckRunStatus
+from app.models.manuscript import Manuscript
 from app.models.run import CheckRun
 from app.pipeline.machine import ClaimLost, is_blocked, run_check_run
 
@@ -132,23 +133,81 @@ def _make_heartbeat(
 async def pick_next_runnable(
     session: AsyncSession, settings: Settings | None = None
 ) -> tuple[CheckRun, datetime] | None:
-    """Oldest non-terminal, unclaimed run that isn't currently PARKED
-    (quota/api_down resume_at in the future) — one at a time, FIFO, per the
-    free-dyno constraint (ticket AC: a second upload while running just
-    queues).
+    """Per-instructor fair queuing (BUG-181): plain global FIFO let one
+    account's pile of queued runs sit ahead of every other instructor's
+    work for as long as it took to drain — twenty runs from one account
+    during defense season meant the whole cohort waited behind one person.
 
-    BUG-144: ATOMICALLY claims the run it returns (a conditional UPDATE,
-    not just a SELECT), so two concurrent callers of this function can
-    never both return the same run — returns `(run, claim_token)`; callers
-    own releasing the claim (`_release_claim`, with the LATEST token if a
-    heartbeat refreshed it) once `run_check_run` returns, success or
-    failure."""
+    Each instructor's OWN oldest non-terminal run (their queue's "head")
+    is tried first; WHICH instructor's head goes first is decided by who
+    was served longest ago — the most recent `started_at` across that
+    instructor's entire history (any status, not just their current
+    queue); never having had a run started outranks everyone who has.
+    Ranking heads by their own `created_at` instead (the simpler thing to
+    try) quietly degenerates back into plain FIFO: once an account's
+    finished run is removed, their NEXT run is promoted to head and is
+    just as "old" as before, so an account with an uninterrupted backlog
+    would keep winning the "oldest head" comparison forever. Keying on
+    when the instructor was last SERVED, not when their run was QUEUED, is
+    what actually rotates turns across accounts.
+
+    Only once every head is unrunnable (PARKED, or lost a claim race)
+    does this fall back to plain global FIFO among what's left, so free
+    capacity is never left idle for fairness's own sake — a solo
+    instructor with several queued runs still gets them worked in order,
+    back to back.
+
+    BUG-144: still ATOMICALLY claims the run it returns (a conditional
+    UPDATE, not just a SELECT), so two concurrent callers of this function
+    can never both return the same run — returns `(run, claim_token)`;
+    callers own releasing the claim (`_release_claim`, with the LATEST
+    token if a heartbeat refreshed it) once `run_check_run` returns,
+    success or failure."""
     settings = settings or get_settings()
-    candidates = await session.scalars(
-        select(CheckRun).where(CheckRun.status.in_(_NON_TERMINAL)).order_by(CheckRun.created_at)
+    rows = (
+        await session.execute(
+            select(CheckRun, Manuscript.instructor_id)
+            .join(Manuscript, CheckRun.manuscript_id == Manuscript.id)
+            .where(CheckRun.status.in_(_NON_TERMINAL))
+            .order_by(CheckRun.created_at)
+        )
+    ).all()
+    if not rows:
+        return None
+
+    instructor_ids = {instructor_id for _run, instructor_id in rows}
+    last_started_rows = await session.execute(
+        select(Manuscript.instructor_id, func.max(CheckRun.started_at))
+        .join(Manuscript, CheckRun.manuscript_id == Manuscript.id)
+        .where(Manuscript.instructor_id.in_(instructor_ids))
+        .group_by(Manuscript.instructor_id)
     )
+    last_started: dict[int, datetime | None] = dict(last_started_rows.all())
+
+    seen_instructors: set[int] = set()
+    heads: list[tuple[CheckRun, int]] = []
+    rest: list[CheckRun] = []
+    for run, instructor_id in rows:
+        if instructor_id in seen_instructors:
+            rest.append(run)
+        else:
+            seen_instructors.add(instructor_id)
+            heads.append((run, instructor_id))
+
+    # Stable sort: every "never started" instructor gets the identical
+    # sentinel key (comparing two `None`s with `<` would raise), so ties
+    # there — including "nobody's started anything yet" — fall through
+    # to `heads`'s existing created_at order instead.
+    _never_started = datetime.min.replace(tzinfo=UTC)
+
+    def _head_priority(item: tuple[CheckRun, int]) -> tuple[bool, datetime]:
+        started = last_started.get(item[1])
+        return (started is not None, started or _never_started)
+
+    heads.sort(key=_head_priority)
+
     now = datetime.now(UTC)
-    for run in candidates:
+    for run in (*(run for run, _instructor_id in heads), *rest):
         if is_blocked(run, now=now):
             continue
         token = await _try_claim(session, run.id, settings)

@@ -11,6 +11,7 @@ from app.auth.dependencies import get_current_instructor
 from app.config import get_settings
 from app.db import get_session
 from app.models.instructor import Instructor
+from app.ratelimit import enforce_action_rate_limit
 from app.report.export import build_report_pdf
 from app.report.schemas import (
     DecisionIn,
@@ -56,6 +57,7 @@ async def export_report_pdf_route(
     session: Annotated[AsyncSession, Depends(get_session)],
     instructor: Annotated[Instructor, Depends(get_current_instructor)],
 ) -> Response:
+    enforce_action_rate_limit(get_settings(), "report_export", instructor.id)
     data = await get_report_export_data(session, check_run_id, instructor.id)
     # V-070 made this meaningfully heavier (page rendering already happened
     # in `get_report_export_data`; this is now reportlab layout PLUS

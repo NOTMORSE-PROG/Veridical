@@ -9,6 +9,7 @@ from app.auth.dependencies import get_current_instructor
 from app.config import get_settings
 from app.db import get_session
 from app.models.instructor import Instructor
+from app.ratelimit import enforce_action_rate_limit
 from app.settings.schemas import SetApiKeyIn, SettingsOut
 from app.settings.service import (
     delete_instructor_api_key,
@@ -34,6 +35,7 @@ async def set_api_key_route(
     instructor: Annotated[Instructor, Depends(get_current_instructor)],
 ) -> SettingsOut:
     settings = get_settings()
+    enforce_action_rate_limit(settings, "settings_api_key", instructor.id)
     await set_instructor_api_key(session, settings, instructor, body.api_key)
     return await get_settings_view(session, settings, instructor)
 
