@@ -80,6 +80,32 @@ async def get_dashboard_stats(
     total_criterion_results = sum(outcome_counts.values())
     escalation_rate = escalated / total_criterion_results if total_criterion_results > 0 else None
 
+    # BUG-211: mirrors `list_manuscripts(status=checked, needs_review=False)`
+    # exactly (latest run done, no decision, zero unresolved escalations on
+    # THAT manuscript's own latest run) -- not derivable from the band
+    # counts above, which is what the frontend used to do and got wrong.
+    ready_to_decide_count = (
+        await session.scalar(
+            select(func.count())
+            .select_from(latest_done_run_ids)
+            .where(
+                ~select(ReadinessReport.id)
+                .where(
+                    ReadinessReport.check_run_id == latest_done_run_ids.c.run_id,
+                    ReadinessReport.decision.is_not(None),
+                )
+                .exists(),
+                ~select(CheckResult.id)
+                .where(
+                    CheckResult.check_run_id == latest_done_run_ids.c.run_id,
+                    CheckResult.criterion_id.is_not(None),
+                    CheckResult.outcome == ResultOutcome.escalated,
+                )
+                .exists(),
+            )
+        )
+    ) or 0
+
     return DashboardStats(
         manuscripts_checked=manuscripts_checked or 0,
         ready_count=status_counts.get(ReadinessStatus.ready, 0),
@@ -93,4 +119,5 @@ async def get_dashboard_stats(
             escalation_rate is not None and escalation_rate > settings.escalation_budget
         ),
         decided_count=decided_count,
+        ready_to_decide_count=ready_to_decide_count,
     )

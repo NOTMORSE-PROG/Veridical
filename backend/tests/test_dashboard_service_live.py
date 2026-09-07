@@ -288,6 +288,61 @@ async def test_decided_count_reflects_v038_decisions_scoped_to_latest_done_run(s
         assert stats.decided_count == 2
 
 
+async def test_bug211_ready_to_decide_count_excludes_a_manuscript_with_an_unresolved_escalation(
+    session_factory,
+):
+    """BUG-211: the frontend used to derive this count as `manuscripts_
+    checked - needs_review_count - decided_count`, silently assuming a
+    manuscript's readiness BAND (`needs_review_count`, a ReadinessReport.
+    status value) is the same fact as whether it currently has an
+    unresolved escalation. It isn't: a `not_ready`-band report can still
+    carry an unresolved escalated criterion. `ready_to_decide_count` must
+    mirror `list_manuscripts(status=checked, needs_review=False)`'s real
+    predicate -- latest run done, zero unresolved escalations, no decision
+    -- not the band."""
+    async with session_factory() as session:
+        instructor = Instructor(email="dash8@demo.local", display_name="Dash Test 8")
+        session.add(instructor)
+        await session.commit()
+
+        # Genuinely ready to decide: no escalation, no decision yet.
+        await _make_run(
+            session,
+            instructor,
+            run_status=CheckRunStatus.done,
+            report_status="conditionally_ready",
+            results=["passed", "passed"],
+        )
+        # Already decided -- must not count twice.
+        await _make_run(
+            session,
+            instructor,
+            run_status=CheckRunStatus.done,
+            report_status="ready",
+            results=["passed"],
+            decision="approved",
+        )
+        # The case the old arithmetic got wrong: `not_ready` band (not
+        # `needs_review` band), but a real unresolved escalation exists.
+        # The old formula would have counted this as ready-to-decide; the
+        # real backend queue (`status=checked, needs_review=False`) never
+        # would.
+        await _make_run(
+            session,
+            instructor,
+            run_status=CheckRunStatus.done,
+            report_status="not_ready",
+            results=["failed", "escalated"],
+        )
+
+        stats = await get_dashboard_stats(session, instructor.id)
+        assert stats.manuscripts_checked == 3
+        assert stats.decided_count == 1
+        assert stats.needs_review_count == 0  # no report actually carries this band
+        # The old buggy formula (3 - 0 - 1 = 2) would have failed this.
+        assert stats.ready_to_decide_count == 1
+
+
 async def test_a_superseded_runs_decision_does_not_linger_in_decided_count(session_factory):
     async with session_factory() as session:
         instructor = Instructor(email="dash7@demo.local", display_name="Dash Test 7")

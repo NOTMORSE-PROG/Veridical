@@ -28,6 +28,11 @@ const STATS = {
   escalation_budget: 0.2,
   system_underperforming: true,
   decided_count: 1,
+  // BUG-211: deliberately NOT what the old `manuscripts_checked -
+  // needs_review_count - decided_count` formula would produce (3 - 0 - 1
+  // = 2) -- if the badge ever regresses back to deriving this instead of
+  // reading the real field, this fixture makes that regression visible.
+  ready_to_decide_count: 1,
 };
 
 const MANUSCRIPTS_PAGE = {
@@ -177,6 +182,12 @@ describe("DashboardPage", () => {
     expect(screen.getByText("2").closest(".signal-record__assessment")).toHaveTextContent(
       "2 criterion tasks need you",
     );
+    // BUG-211: reads STATS.ready_to_decide_count (1) directly -- the old
+    // `manuscripts_checked - needs_review_count - decided_count` formula
+    // would have shown "2 manuscripts" here instead (3 - 0 - 1).
+    expect(
+      screen.getByRole("button", { name: /Ready to decide1 manuscript/ }),
+    ).toBeInTheDocument();
   });
 
   it("BUG-190: completed check evidence wins over a stale pending ingest state", async () => {

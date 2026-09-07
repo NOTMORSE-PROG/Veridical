@@ -108,12 +108,13 @@ function QueueCount({
   }
   if (!stats) return null;
   let count: number | null = null;
-  if (queue === "ready_to_decide") {
-    count = Math.max(
-      0,
-      stats.manuscripts_checked - stats.needs_review_count - stats.decided_count,
-    );
-  }
+  // BUG-211: `ready_to_decide_count` is the real predicate (latest run
+  // done, zero unresolved escalations, no decision yet) computed
+  // server-side -- it used to be guessed here as `manuscripts_checked -
+  // needs_review_count - decided_count`, which silently diverges because
+  // a manuscript's readiness BAND (needs_review_count) and whether it
+  // currently has unresolved escalations are different facts.
+  if (queue === "ready_to_decide") count = stats.ready_to_decide_count;
   if (queue === "complete") count = stats.decided_count;
   if (count === null) return null;
   return <span>{count} manuscript{count === 1 ? "" : "s"}</span>;
