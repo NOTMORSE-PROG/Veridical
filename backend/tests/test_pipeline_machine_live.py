@@ -284,6 +284,41 @@ async def test_cancel_request_stops_at_boundary_and_removes_terminal_report(
         assert event_types == ["check_run_cancelled"]
 
 
+async def test_bug181_run_deadline_stops_a_run_that_exceeds_it(
+    session_factory, tmp_path, monkeypatch
+):
+    """Per-CALL bounds already existed (`gemini_request_timeout_seconds`,
+    `external_http_timeout_seconds`, `ingest_extraction_timeout_seconds`)
+    but nothing bounded a WHOLE run -- with `pipeline_run_deadline_seconds`
+    set to 0, any positive elapsed time (even the sub-second gap between
+    two real stage transitions in this fixture) exceeds it, so this fires
+    reliably at the first checkpoint after `started_at` is actually set
+    (the queued->ingesting boundary itself never checks, since `started_at`
+    is still None at that exact point -- see the `if check_run.started_at
+    is not None` guard)."""
+    monkeypatch.setenv("PIPELINE_RUN_DEADLINE_SECONDS", "0")
+    check_run_id, _, settings = await _seed(session_factory, tmp_path, monkeypatch)
+    async with session_factory() as session:
+        check_run = await session.get(CheckRun, check_run_id)
+        await run_check_run(session, check_run, settings, FakeLLMClient())
+        assert check_run.status == CheckRunStatus.failed
+        assert check_run.finished_at is not None
+        assert check_run.stage_status["failed"]["code"] == "run_deadline_exceeded"
+        assert "stopped" in check_run.stage_status["failed"]["message"]
+
+
+async def test_bug181_generous_default_deadline_never_fires_on_an_ordinary_run(
+    session_factory, tmp_path, monkeypatch
+):
+    """The default (45 minutes) must not affect a real, ordinary run --
+    same convention as every other cap in this codebase."""
+    check_run_id, _, settings = await _seed(session_factory, tmp_path, monkeypatch)
+    async with session_factory() as session:
+        check_run = await session.get(CheckRun, check_run_id)
+        await run_check_run(session, check_run, settings, FakeLLMClient())
+        assert check_run.status == CheckRunStatus.done
+
+
 async def test_bug178_cancel_mid_integrity_withdraws_the_manuscript_from_the_corpus(
     session_factory, tmp_path, monkeypatch
 ):

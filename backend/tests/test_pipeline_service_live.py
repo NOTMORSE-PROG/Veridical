@@ -12,6 +12,7 @@ from decimal import Decimal
 import pytest
 from sqlalchemy import func, select, text
 
+from app.config import get_settings
 from app.errors import ConflictError, NotFoundError
 from app.models.audit import AuditLog
 from app.models.enums import CheckRunStatus, IngestStatus, ReadinessStatus
@@ -328,7 +329,9 @@ async def test_cancellation_advances_past_a_completed_persisted_stage(session_fa
 
     async with session_factory() as worker:
         run = await worker.get(CheckRun, run_id)
-        advanced = await _transition_after_boundary(worker, run, CheckRunStatus.structural)
+        advanced = await _transition_after_boundary(
+            worker, run, CheckRunStatus.structural, get_settings()
+        )
         assert advanced is False
 
     async with session_factory() as verify:
@@ -374,7 +377,9 @@ async def test_completion_and_cancellation_have_one_atomic_winner(session_factor
     async def finish_run():
         async with session_factory() as session:
             run = await session.get(CheckRun, run_id)
-            advanced = await _transition_after_boundary(session, run, CheckRunStatus.aggregating)
+            advanced = await _transition_after_boundary(
+                session, run, CheckRunStatus.aggregating, get_settings()
+            )
             return "completion" if advanced else "cancellation"
 
     await asyncio.gather(request_cancel(), finish_run())

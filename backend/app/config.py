@@ -318,6 +318,25 @@ class Settings(BaseSettings):
     # own per-attempt timeouts (`gemini_request_timeout_seconds` etc.) so a
     # genuinely slow-but-alive run is never mistaken for an abandoned one.
     pipeline_claim_stale_seconds: float = 600.0
+    # BUG-181: per-CALL bounds exist (`gemini_request_timeout_seconds`,
+    # `external_http_timeout_seconds`, `ingest_extraction_timeout_seconds`)
+    # but nothing bounded the WHOLE run -- a run makes many calls across
+    # many criteria/checks, and with no run-level deadline a single
+    # stuck-but-technically-progressing run could occupy the single-worker
+    # queue (D-001, one run at a time on the free dyno) far longer than any
+    # real manuscript needs, starving every other instructor queued behind
+    # it. 45 minutes is deliberately generous, not a tight fit: even a
+    # pathological case (dozens of criteria, every self-consistency vote
+    # needing its own tie-break, every call taking the full
+    # `gemini_request_timeout_seconds` ceiling) sits well under this, and a
+    # REAL run's actual call latencies are a small fraction of their own
+    # timeout ceilings in practice. Checked at the same stage-boundary
+    # checkpoint cancellation already uses (`_transition_after_boundary`)
+    # -- a run that exceeds it fails honestly (charter rule 9) via the
+    # existing `TerminalFailure` machinery, the same path every other
+    # genuine failure already uses, rather than hanging with no deadline
+    # to break the queue.
+    pipeline_run_deadline_seconds: float = 2700.0
     # AVAILABILITY FLOOR (V-050, D-015). When the day's AI budget is spent,
     # FINISH the run — deterministic checks stand, and the criteria the AI
     # never reached go to the instructor as an honest `quota_exhausted`
