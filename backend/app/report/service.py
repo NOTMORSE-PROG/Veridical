@@ -504,6 +504,7 @@ def _to_escalated_out(item: EscalatedItem) -> EscalatedItemOut:
         agreement=item.agreement,
         votes=item.votes,
         ai_majority_verdict=item.detail.get("verdict"),
+        verdict_unrecognized=bool(item.detail.get("verdict_unrecognized")),
         reason=item.reason,
         review_reason=item.review_reason,
         unverified_evidence=item.unverified_evidence,

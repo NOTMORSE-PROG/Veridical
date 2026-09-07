@@ -4,6 +4,7 @@ import { BASE_URL } from "../api/client";
 import type { FlagRegionOut, FlagSummaryOut } from "../api/types";
 import { CRITERION_ANCHOR_REGION_ID } from "../config/ui";
 import { checkKindMeta } from "../domain/checkKind";
+import { evidenceDisplayState } from "../domain/evidenceDisplay";
 import { problemLabel } from "../domain/problemLabel";
 import { systemFindingCopy } from "../domain/systemFindingCopy";
 import { truncateAtWord } from "../format/text";
@@ -89,15 +90,39 @@ function SelectedEvidence({ flagId, region, onBack, onExplore }: {
   if (isPending) return <div role="status" aria-live="polite" aria-busy="true" className="signal-desk-loading"><span>Loading selected evidence…</span><i /><i /></div>;
   if (isError || !flag) return <Alert title="Could not load this signal" tone="error" role="alert"><Button variant="secondary" onClick={() => refetch()}>Try again</Button></Alert>;
   const placement = region ? regionCopy(region) : "This evidence location could not be placed in the stored document. Review the recorded excerpt and anchor here.";
+  // BUG-170 (`ux-critic` finding): this panel used to render
+  // `evidence_excerpt` inside a <blockquote> unconditionally -- for a
+  // whole-document/chapter/resubmission reuse flag that's a system-
+  // authored template sentence, never a manuscript quote, the exact
+  // defect this ticket fixed on `FlagDetail.tsx` but had left live here,
+  // one click away (worse for a resubmission flag specifically: with no
+  // `ai_reasoning` and no fallback, this panel showed NOTHING except the
+  // mislabeled quote). Shared logic, not a second hand-written copy --
+  // that drift is how this gap opened in the first place.
+  const { showsManuscriptQuote, reasoningText, showsManuscriptEvidence, isResubmission } = evidenceDisplayState(flag);
   return (
     <div className="signal-document-selected">
       <Button variant="quiet" onClick={onBack}>Back to all evidence</Button>
       <div className="signal-document-inspector__heading"><p className="signal-section-kicker">Possible inconsistency</p><h2>{checkKindMeta(flag.check_kind).title}</h2><span className={`signal-severity signal-severity--${flag.severity}`}>{SEVERITY_LABEL[flag.severity]}</span></div>
       {placement && <Alert title="Source placement" tone="info">{placement}</Alert>}
-      <blockquote><span>“{systemFindingCopy(flag.evidence_excerpt, flag.ai_verdict_summary, "evidence")}”</span><cite>{flag.page_anchor}</cite></blockquote>
-      {flag.ai_reasoning && <p><strong>Recorded reasoning:</strong> {systemFindingCopy(flag.ai_reasoning, flag.ai_verdict_summary, "reasoning")}</p>}
+      {showsManuscriptQuote && (
+        <blockquote><span>“{systemFindingCopy(flag.evidence_excerpt, flag.ai_verdict_summary, "evidence")}”</span><cite>{flag.page_anchor}</cite></blockquote>
+      )}
+      {reasoningText && <p><strong>Recorded reasoning:</strong> {systemFindingCopy(reasoningText, flag.ai_verdict_summary, "reasoning")}</p>}
       {flag.passage_pair && <PassagePairPanel pair={flag.passage_pair} ownAnchor={flag.page_anchor} variant="flag" />}
       {flag.passage_pair && <Button variant="quiet" onClick={onExplore}>See other passage matches</Button>}
+      {!showsManuscriptEvidence && (
+        <Alert
+          title={isResubmission ? "No passage-level comparison applies" : "No supporting passage could be found"}
+          tone={isResubmission ? "info" : "warning"}
+        >
+          {isResubmission
+            ? "This finding compares the manuscript as a whole against your own earlier upload, so there is no specific passage to compare side by side."
+            : flag.evidence_unavailable
+              ? "VERIDICAL looked for a specific passage that matches the archived manuscript named above and did not find one close enough to show side by side. This finding's severity was lowered because no matching passage could be shown."
+              : "VERIDICAL looked for a specific passage that matches the archived manuscript named above and did not find one close enough to show side by side."}
+        </Alert>
+      )}
       <ActionLink to={`/flags/${flag.id}`} variant="secondary">Review full signal and instructor actions</ActionLink>
     </div>
   );

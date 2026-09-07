@@ -168,6 +168,11 @@ async def _to_flag_out(
         # the same convenience choice doesn't reintroduce the duplication.
         ai_reasoning=_distinct_reasoning(detail, flag.evidence_excerpt),
         llm_mode=check_run.llm_mode.value,
+        # BUG-170: same expression as `report/service.py`'s `FlagSummaryOut`
+        # field of the same name -- `flag.detail` directly (not the
+        # `detail` merge above), since F7 reuse checks always populate
+        # `flag.detail["kind"]` themselves (V-033 per-flag detail).
+        is_passage_level=bool((flag.detail or {}).get("kind", "").endswith("_passage")),
         passage_pair=_passage_pair_from_detail(flag.evidence_excerpt, detail),
         first_upload_context=bool(detail.get("first_upload_context")),
         evidence_unavailable=bool(detail.get("evidence_unavailable")),

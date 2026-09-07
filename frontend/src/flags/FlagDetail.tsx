@@ -5,6 +5,7 @@ import type { FlagOut } from "../api/types";
 import { useMe } from "../auth/useAuth";
 import { PassagePairPanel } from "../document/PassagePairPanel";
 import { checkKindMeta, humanize } from "../domain/checkKind";
+import { evidenceDisplayState } from "../domain/evidenceDisplay";
 import { markFlagViewed } from "../domain/flagViewed";
 import { problemLabel } from "../domain/problemLabel";
 import { systemFindingCopy } from "../domain/systemFindingCopy";
@@ -25,6 +26,87 @@ const SEVERITY_LABEL: Record<FlagOut["severity"], string> = {
 function humanizedVerdict(flag: FlagOut): string {
   if (!flag.ai_verdict_summary) return "No determination recorded";
   return problemLabel(flag.ai_verdict_summary) ?? humanize(flag.ai_verdict_summary);
+}
+
+// BUG-170: a whole-document/chapter/resubmission originality-reuse flag's
+// `evidence_excerpt` is always a system-authored template sentence, never
+// a quote from the manuscript (`systemFindingCopy.ts`'s own docstring
+// already draws this line) -- rendering it inside a <blockquote>/<cite>
+// pair styled identically to a real excerpt claimed it was checkable
+// manuscript text when it wasn't, directly under a heading promising
+// "Evidence from the manuscript". Only a passage-level reuse flag (or any
+// non-reuse check kind, which never has this system-authored-summary
+// shape at all) gets the quote treatment; every other reuse verdict gets
+// the same sentence rendered as reasoning instead, honestly labeled, and
+// the section's own heading changes when nothing manuscript-sourced is
+// left to show at all (`ui-designer` spec). The condition logic itself
+// lives in `domain/evidenceDisplay.ts`, shared with
+// `SignalDocumentViewer.tsx`'s own evidence panel -- `ux-critic` found
+// that screen had drifted (still rendering the fake quote unconditionally)
+// specifically because this logic was first written inline, here only.
+function EvidenceSection({
+  flag,
+  sourcePath,
+  sourceLinkId,
+}: {
+  flag: FlagOut;
+  sourcePath: string;
+  sourceLinkId: string;
+}) {
+  const { showsManuscriptQuote, reasoningText, showsManuscriptEvidence, isResubmission } = evidenceDisplayState(flag);
+  const headingId = showsManuscriptEvidence ? "evidence-heading" : "system-record-heading";
+
+  return (
+    <section className="signal-evidence-section" aria-labelledby={headingId}>
+      <div className="signal-section-heading">
+        <div>
+          <p className="signal-section-kicker">{showsManuscriptEvidence ? "Checkable record" : "System record"}</p>
+          <h2 id={headingId}>{showsManuscriptEvidence ? "Evidence from the manuscript" : "No manuscript excerpt is available"}</h2>
+        </div>
+      </div>
+      {showsManuscriptQuote && (
+        <blockquote className="signal-evidence-quote"><span>“{systemFindingCopy(flag.evidence_excerpt, flag.ai_verdict_summary, "evidence")}”</span><cite>{flag.page_anchor}</cite></blockquote>
+      )}
+      {reasoningText && <div className="signal-reasoning"><h3>Recorded reasoning</h3><p>{systemFindingCopy(reasoningText, flag.ai_verdict_summary, "reasoning")}</p></div>}
+      {/* BUG-154: the API has always returned a complete
+          passage_pair for a matched flag (own/matched excerpt +
+          context both sides, similarity, level) -- this page fetched
+          it and rendered none of it, so an instructor asking "where
+          did this come from" had no answer except a link into the
+          document viewer, which was itself broken until BUG-138.
+          Same component, same props, same "flag" variant already
+          shipped on SignalDocumentViewer.tsx -- no new design here. */}
+      {flag.passage_pair && (
+        <PassagePairPanel pair={flag.passage_pair} ownAnchor={flag.page_anchor} variant="flag" />
+      )}
+      {/* BUG-170: a reuse flag with no manuscript-sourced content at
+          all (no quote, no passage panel) still needs an honest reason
+          why -- "resubmission" never had a passage to compare (nothing
+          was searched for); anything else genuinely searched and found
+          nothing close enough, and only THAT case's own severity was
+          ever lowered because of it (BUG-153's own downgrade). */}
+      {!showsManuscriptEvidence && (
+        <Alert
+          title={isResubmission ? "No passage-level comparison applies" : "No supporting passage could be found"}
+          tone={isResubmission ? "info" : "warning"}
+        >
+          {isResubmission
+            ? "This finding compares the manuscript as a whole against your own earlier upload, so there is no specific passage to compare side by side. Open the manuscript location below to check it yourself."
+            : flag.evidence_unavailable
+              ? "VERIDICAL looked for a specific passage that matches the archived manuscript named above and did not find one close enough to show side by side. This finding's severity was lowered because no matching passage could be shown. Open the manuscript location below to check it yourself."
+              : "VERIDICAL looked for a specific passage that matches the archived manuscript named above and did not find one close enough to show side by side. Open the manuscript location below to check it yourself."}
+        </Alert>
+      )}
+      <ActionLink
+        id={sourceLinkId}
+        to={sourcePath}
+        variant="brand"
+        onClick={() => rememberRouteReturnFocus(`/flags/${flag.id}`, sourcePath.split("?")[0], sourceLinkId)}
+      >
+        View this location in the manuscript
+      </ActionLink>
+    </section>
+  );
 }
 
 function ModeDisclosure({ mode }: { mode: FlagOut["llm_mode"] }) {
@@ -255,30 +337,7 @@ export function FlagDetailPage() {
             <p>Repeated AI consistency is intentionally not shown as a percentage. The excerpt and source location below are the evidence to check.</p>
           </section>
 
-          <section className="signal-evidence-section" aria-labelledby="evidence-heading">
-            <div className="signal-section-heading"><div><p className="signal-section-kicker">Checkable record</p><h2 id="evidence-heading">Evidence from the manuscript</h2></div></div>
-            <blockquote className="signal-evidence-quote"><span>“{systemFindingCopy(flag.evidence_excerpt, flag.ai_verdict_summary, "evidence")}”</span><cite>{flag.page_anchor}</cite></blockquote>
-            {flag.ai_reasoning && <div className="signal-reasoning"><h3>Recorded reasoning</h3><p>{systemFindingCopy(flag.ai_reasoning, flag.ai_verdict_summary, "reasoning")}</p></div>}
-            {/* BUG-154: the API has always returned a complete
-                passage_pair for a matched flag (own/matched excerpt +
-                context both sides, similarity, level) -- this page fetched
-                it and rendered none of it, so an instructor asking "where
-                did this come from" had no answer except a link into the
-                document viewer, which was itself broken until BUG-138.
-                Same component, same props, same "flag" variant already
-                shipped on SignalDocumentViewer.tsx -- no new design here. */}
-            {flag.passage_pair && (
-              <PassagePairPanel pair={flag.passage_pair} ownAnchor={flag.page_anchor} variant="flag" />
-            )}
-            <ActionLink
-              id={sourceLinkId}
-              to={sourcePath}
-              variant="brand"
-              onClick={() => rememberRouteReturnFocus(`/flags/${flag.id}`, sourcePath.split("?")[0], sourceLinkId)}
-            >
-              View this location in the manuscript
-            </ActionLink>
-          </section>
+          <EvidenceSection flag={flag} sourcePath={sourcePath} sourceLinkId={sourceLinkId} />
 
           <div ref={resolutionRef} tabIndex={-1}><ResolutionControl flag={flag} /></div>
           <AnnotationPanel flag={flag} />

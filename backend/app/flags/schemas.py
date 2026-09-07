@@ -74,6 +74,14 @@ class FlagOut(BaseModel):
     # fabricated statistical-forensics finding rendered with no disclosure
     # at all.
     llm_mode: str
+    # BUG-170: mirrors `FlagSummaryOut.is_passage_level` exactly (same
+    # `detail["kind"].endswith("_passage")` derivation) -- lets the evidence
+    # detail page tell a passage-level flag (evidence_excerpt is real,
+    # quoted manuscript text) apart from a whole-document/chapter/
+    # resubmission reuse flag (evidence_excerpt is a system-authored
+    # template sentence, never a quote) without re-deriving the suffix
+    # check from `ai_verdict_summary` a second time in a different file.
+    is_passage_level: bool = False
     # V-072 (F7.4): present only for a passage-level reuse flag.
     passage_pair: PassagePairOut | None = None
     # BUG-097 (presentation-only remedy, owner ruling 2026-08-24): True only

@@ -300,6 +300,13 @@ class EscalatedItemOut(BaseModel):
     agreement: float | None
     votes: list[str | None]
     ai_majority_verdict: str | None
+    # BUG-170: True when `ai_majority_verdict` is a real, agreed-upon vote
+    # that `outcome_and_score` still cannot match to this criterion's own
+    # scale -- `resolve_escalation`'s `accept_majority` path always 409s in
+    # this case, so the panel must not offer it as a live choice while still
+    # honestly reporting that the passes agreed (`reason` already explains
+    # why the agreed verdict doesn't count).
+    verdict_unrecognized: bool = False
     reason: str | None
     # "low_confidence" = the AI graded it and hesitated; "not_graded" = the
     # AI never ran (quota spent / API down). The instructor must be able to

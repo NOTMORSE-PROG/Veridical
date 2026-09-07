@@ -499,6 +499,15 @@ export interface EscalatedItemOut {
   agreement: number | null;
   votes: (string | null)[];
   ai_majority_verdict: string | null;
+  /** BUG-170: true when `ai_majority_verdict` is a real, agreed-upon vote
+   * that still doesn't match any of this criterion's own levels --
+   * accepting it always fails server-side, so the panel must not offer it
+   * as a live choice, while `ai_majority_verdict` itself stays set so the
+   * panel can still honestly report that the passes agreed. Optional here
+   * (though the real API always sends it) so hand-written fixtures that
+   * predate BUG-170 don't need every one of them updated just to keep
+   * compiling -- same convention as `injection_suspected` below. */
+  verdict_unrecognized?: boolean;
   reason: string | null;
   /** "low_confidence" = AI graded it and hesitated; "not_graded" = the AI
    * never ran (daily capacity spent or API down); "injection_suspected"
@@ -596,6 +605,12 @@ export interface FlagOut {
   // BUG-049: the flag evidence page is exactly where the audit found a
   // fabricated statistical-forensics finding rendered with no disclosure.
   llm_mode: "fake" | "real" | "unknown";
+  // BUG-170: mirrors FlagSummaryOut.is_passage_level -- true only when
+  // evidence_excerpt is real, quoted manuscript text (a passage-level
+  // reuse flag, or any non-reuse check kind); false for a whole-document/
+  // chapter/resubmission reuse flag, where evidence_excerpt is always a
+  // system-authored template sentence, never a quote.
+  is_passage_level: boolean;
   passage_pair: PassagePairOut | null;
   // BUG-097 (presentation-only remedy, owner ruling 2026-08-24): true only
   // for an F7 flag produced on the account's first-ever manuscript upload.

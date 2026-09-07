@@ -180,6 +180,98 @@ describe("SignalReportPage", () => {
     expect(screen.getByRole("button", { name: "Meets criterion" })).toBeInTheDocument();
   });
 
+  it("BUG-170: never offers to accept a majority verdict the server has already declared unrecognized for this criterion's scale", async () => {
+    // Both passes genuinely agreed (a real ai_majority_verdict, unlike
+    // ESCALATED's own tied/no-majority fixture above) on a verdict this
+    // criterion's own scale doesn't define -- accepting it is guaranteed
+    // to 409 server-side (see the backend's own resolve_escalation guard),
+    // so offering the button at all is the exact "offers to accept a
+    // verdict it just told you it cannot recognise" incoherence BUG-170
+    // named. `reason` already explains why; the fix is to not ALSO offer
+    // a button that can only fail.
+    const unrecognized: EscalatedItemOut = {
+      ...ESCALATED,
+      check_result_id: 45,
+      agreement: 1.0,
+      votes: ["Good", "Good"],
+      ai_majority_verdict: "Good",
+      verdict_unrecognized: true,
+      reason: "The grading response used an unrecognized verdict ('Good') for this criterion's own scale.",
+    };
+    stubReport(BASE_REPORT, [unrecognized]);
+    renderWithProviders(<SignalReportPage />, { route: "/report/5", path: "/report/:checkRunId" });
+
+    await screen.findByRole("heading", { name: "Criteria needing your judgment" });
+    expect(screen.getByText(unrecognized.reason!)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Accept AI suggestion/ })).not.toBeInTheDocument();
+    // The rest of the resolution vocabulary is unaffected -- the guard
+    // removes only the one guaranteed-to-fail button.
+    expect(screen.getByRole("button", { name: "Meets criterion" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Does not meet" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Needs another document" })).toBeInTheDocument();
+  });
+
+  it("still offers to accept a real, matchable majority verdict (BUG-170 guard is scoped to verdict_unrecognized, not every majority)", async () => {
+    const recognized: EscalatedItemOut = {
+      ...ESCALATED,
+      check_result_id: 46,
+      agreement: 0.667,
+      votes: ["pass", "fail", "pass"],
+      ai_majority_verdict: "pass",
+      reason: "Two of three grading passes agreed.",
+    };
+    stubReport(BASE_REPORT, [recognized]);
+    renderWithProviders(<SignalReportPage />, { route: "/report/5", path: "/report/:checkRunId" });
+
+    await screen.findByRole("heading", { name: "Criteria needing your judgment" });
+    expect(screen.getByRole("button", { name: "Accept AI suggestion: pass" })).toBeInTheDocument();
+  });
+
+  it("BUG-170: never renders a whole-document reuse flag's system-authored summary sentence as a manuscript quote on the report's own flag card", async () => {
+    // ux-critic found this exact defect already fixed on FlagDetail.tsx
+    // and SignalDocumentViewer.tsx still live one screen earlier -- the
+    // report's own flag-card list (the first thing an instructor reads)
+    // rendered the same system-authored template sentence inside a real
+    // <blockquote>, unconditionally, for every check kind including
+    // whole-document/chapter reuse.
+    const flags = [{
+      ...FLAG,
+      id: 50,
+      check_kind: "originality_reuse",
+      problem_kind: "reuse_high_similarity",
+      is_passage_level: false,
+      evidence_excerpt: "This manuscript shows high textual similarity to archived manuscript #3 in VERIDICAL's shared originality library: possible shared content or reuse. Please verify manually.",
+      page_anchor: "whole document",
+    }];
+    stubReport(BASE_REPORT, [], flags);
+    renderWithProviders(<SignalReportPage />, { route: "/report/5", path: "/report/:checkRunId" });
+
+    await screen.findByText(/possible shared content or reuse/);
+    // Scoped to the flags section specifically -- the report's own
+    // criteria-record table renders unrelated blockquotes for ordinary
+    // semantic evidence, which is out of this test's scope.
+    const signals = screen.getByRole("region", { name: "Integrity signals" });
+    expect(signals.querySelector("blockquote")).not.toBeInTheDocument();
+  });
+
+  it("BUG-170: still quotes a passage-level reuse flag on the report's own flag card, unaffected by the fix above", async () => {
+    const flags = [{
+      ...FLAG,
+      id: 51,
+      check_kind: "originality_reuse",
+      problem_kind: "reuse_exact_duplicate_passage",
+      is_passage_level: true,
+      evidence_excerpt: "The system uses a hybrid rule-based and AI approach.",
+      page_anchor: "p. 31",
+    }];
+    stubReport(BASE_REPORT, [], flags);
+    renderWithProviders(<SignalReportPage />, { route: "/report/5", path: "/report/:checkRunId" });
+
+    await screen.findByText(/hybrid rule-based and AI approach/);
+    const signals = screen.getByRole("region", { name: "Integrity signals" });
+    expect(signals.querySelector("blockquote")).toBeInTheDocument();
+  });
+
   it("shows bounded integrity evidence and honest partial-run and test-mode disclosures", async () => {
     const report: ReportOut = {
       ...BASE_REPORT,

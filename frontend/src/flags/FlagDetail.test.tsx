@@ -21,6 +21,7 @@ const FLAG = {
   ai_verdict_summary: "not_supported",
   ai_reasoning: "This source appears in the Retraction Watch database.",
   llm_mode: "real",
+  is_passage_level: false,
   // BUG-078: this fixture's ai_verdict_summary ("not_supported") is never
   // "unverifiable_not_found", so the new "Verify this source" section
   // never gates on for any test below -- these two fields just need to be
@@ -64,6 +65,12 @@ describe("FlagDetailPage", () => {
         ...FLAG,
         check_kind: "originality_reuse",
         ai_verdict_summary: "reuse_exact_duplicate_passage",
+        // BUG-170: a passage-level flag's evidence_excerpt is real
+        // manuscript text and must still render as a quote -- this fixture
+        // predates `is_passage_level` (added to FlagOut this ticket) and
+        // needs it set explicitly since the backend always derives it from
+        // the same "_passage" suffix `ai_verdict_summary` already has here.
+        is_passage_level: true,
         evidence_excerpt: "The recorded process completed 100% of the planned cases.",
         ai_reasoning: "This passage appears to be a duplicate or near-duplicate (100.0% match) of archived manuscript #34.",
       },
@@ -109,6 +116,93 @@ describe("FlagDetailPage", () => {
     renderWithProviders(<FlagDetailPage />, { route: "/flags/5", path: "/flags/:flagId" });
     await screen.findByText(/Wang, S\. \(2019\)/);
     expect(screen.queryByText("Passage comparison", { selector: "h3" })).not.toBeInTheDocument();
+  });
+
+  it("BUG-170: never renders a whole-document reuse flag's system-authored summary sentence as a manuscript quote", async () => {
+    // evidence_excerpt here is the same templated accusation sentence
+    // real F7 whole-document flags carry -- never a real quote, unlike a
+    // passage-level flag's. Rendering it inside <blockquote>/<cite> would
+    // present it as checkable manuscript text when it isn't (the exact
+    // defect this ticket names). A real passage_pair is attached (BUG-153),
+    // so the section keeps its "Evidence from the manuscript" heading --
+    // real evidence still exists, just not as this sentence.
+    vi.stubGlobal("fetch", stubFetchByPath({
+      "/flags/5": {
+        ...FLAG,
+        check_kind: "originality_reuse",
+        ai_verdict_summary: "reuse_high_similarity",
+        is_passage_level: false,
+        evidence_excerpt: "This manuscript shows high textual similarity to archived manuscript #3 in VERIDICAL's shared originality library: possible shared content or reuse. Please verify manually.",
+        ai_reasoning: null,
+        page_anchor: "whole document",
+        passage_pair: {
+          own_excerpt: "Chapter 3: Methodology text.",
+          own_context_before: null,
+          own_context_after: null,
+          matched_ref: 3,
+          matched_excerpt: "Chapter 3: Research Methodology text.",
+          matched_context_before: null,
+          matched_context_after: null,
+          context_words_each_side: 60,
+          similarity: 0.91,
+          level: "high_similarity",
+        },
+      },
+    }));
+    renderWithProviders(<FlagDetailPage />, { route: "/flags/5", path: "/flags/:flagId" });
+
+    expect(await screen.findByRole("heading", { name: "Evidence from the manuscript" })).toBeInTheDocument();
+    expect(document.querySelector("blockquote.signal-evidence-quote")).not.toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Recorded reasoning" })).toBeInTheDocument();
+    expect(screen.getByText(/possible shared content or reuse/)).toBeInTheDocument();
+    expect(screen.getByText("Passage comparison", { selector: "h3" })).toBeInTheDocument();
+  });
+
+  it("BUG-170: labels a same-instructor resubmission honestly when no passage comparison ever applies", async () => {
+    vi.stubGlobal("fetch", stubFetchByPath({
+      "/flags/5": {
+        ...FLAG,
+        check_kind: "originality_reuse",
+        ai_verdict_summary: "reuse_same_instructor_resubmission",
+        is_passage_level: false,
+        severity: "low",
+        evidence_excerpt: "This manuscript appears to be the same document as your own earlier upload, archived manuscript #4.",
+        ai_reasoning: null,
+        page_anchor: "whole document",
+        passage_pair: null,
+        evidence_unavailable: false,
+      },
+    }));
+    renderWithProviders(<FlagDetailPage />, { route: "/flags/5", path: "/flags/:flagId" });
+
+    expect(await screen.findByRole("heading", { name: "No manuscript excerpt is available" })).toBeInTheDocument();
+    expect(document.querySelector("blockquote.signal-evidence-quote")).not.toBeInTheDocument();
+    expect(screen.getByText("No passage-level comparison applies")).toBeInTheDocument();
+    expect(screen.getByText(/no specific passage to compare side by side/)).toBeInTheDocument();
+    // Never claims a search failed -- none was ever applicable here.
+    expect(screen.queryByText(/did not find one close enough/)).not.toBeInTheDocument();
+  });
+
+  it("BUG-170: says severity was lowered only for the genuine BUG-153 unevidenceable-match downgrade, not the resubmission case", async () => {
+    vi.stubGlobal("fetch", stubFetchByPath({
+      "/flags/5": {
+        ...FLAG,
+        check_kind: "originality_reuse",
+        ai_verdict_summary: "reuse_high_similarity_chapter",
+        is_passage_level: false,
+        severity: "med",
+        evidence_excerpt: "This manuscript's Chapter 2 shows high textual similarity to a chapter in archived manuscript #9: possible shared content or reuse. Please verify manually.",
+        ai_reasoning: null,
+        page_anchor: "Chapter 2",
+        passage_pair: null,
+        evidence_unavailable: true,
+      },
+    }));
+    renderWithProviders(<FlagDetailPage />, { route: "/flags/5", path: "/flags/:flagId" });
+
+    expect(await screen.findByRole("heading", { name: "No manuscript excerpt is available" })).toBeInTheDocument();
+    expect(screen.getByText("No supporting passage could be found")).toBeInTheDocument();
+    expect(screen.getByText(/severity was lowered because no matching passage could be shown/)).toBeInTheDocument();
   });
 
   it("BUG (overflow) regression guard: the evidence blockquote and AI-verdict chip both cap/wrap instead of overflowing on a long real string", async () => {
@@ -351,6 +445,7 @@ function makeFlag(overrides: Partial<FlagOut> = {}): FlagOut {
     ai_verdict_summary: "unverifiable_not_found",
     ai_reasoning: null,
     llm_mode: "real",
+    is_passage_level: false,
     passage_pair: null,
     first_upload_context: false,
     evidence_unavailable: false,

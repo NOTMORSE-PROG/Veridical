@@ -54,6 +54,7 @@ const FLAG: FlagOut = {
   ai_verdict_summary: "possible_mismatch",
   ai_reasoning: "The recorded totals differ.",
   llm_mode: "real",
+  is_passage_level: false,
   passage_pair: null,
   first_upload_context: false,
   evidence_unavailable: false,
@@ -96,6 +97,77 @@ describe("SignalDocumentViewerPage", () => {
     expect(screen.getByTestId("pdf-pane")).toHaveAttribute("data-page", "12");
     expect(screen.getByRole("link", { name: "Review full signal and instructor actions" })).toHaveAttribute("href", "/flags/7");
     expect(screen.queryByText(/% textual similarity/)).not.toBeInTheDocument();
+  });
+
+  it("BUG-170: never renders a whole-document reuse flag's system-authored summary sentence as a manuscript quote", async () => {
+    // ux-critic finding: this panel used to render evidence_excerpt inside
+    // a <blockquote> unconditionally -- for a whole-document reuse flag
+    // that's a system-authored template sentence, never a quote, the
+    // exact defect this ticket fixed on FlagDetail.tsx but had left live
+    // here, one click away. A real passage_pair is attached (BUG-153), so
+    // real evidence still exists just below the (now-honest) reasoning.
+    vi.stubGlobal("fetch", stubFetchByPath({
+      "/check-runs/5/document": VIEWER,
+      "/check-runs/5/flags": [SUMMARY],
+      "/check-runs/5/document/reuse-matches": { passage_archive_size_n: 8, matches: [] },
+      "/flags/7": {
+        ...FLAG,
+        check_kind: "originality_reuse",
+        ai_verdict_summary: "reuse_high_similarity",
+        is_passage_level: false,
+        evidence_excerpt: "This manuscript shows high textual similarity to archived manuscript #3 in VERIDICAL's shared originality library: possible shared content or reuse. Please verify manually.",
+        ai_reasoning: null,
+        page_anchor: "whole document",
+        passage_pair: {
+          own_excerpt: "Chapter 3: Methodology text.",
+          own_context_before: null,
+          own_context_after: null,
+          matched_ref: 3,
+          matched_excerpt: "Chapter 3: Research Methodology text.",
+          matched_context_before: null,
+          matched_context_after: null,
+          context_words_each_side: 60,
+          similarity: 0.91,
+          level: "high_similarity",
+        },
+      },
+    }));
+    renderWithProviders(<SignalDocumentViewerPage />, { route: "/report/5/document?flag=7", path: "/report/:checkRunId/document" });
+
+    await screen.findByText(/possible shared content or reuse/);
+    expect(document.querySelector("blockquote")).not.toBeInTheDocument();
+    expect(screen.getByText("Recorded reasoning:")).toBeInTheDocument();
+  });
+
+  it("BUG-170: shows an honest explanation, not a mislabeled quote, for a resubmission flag with no passage to compare", async () => {
+    vi.stubGlobal("fetch", stubFetchByPath({
+      "/check-runs/5/document": VIEWER,
+      "/check-runs/5/flags": [SUMMARY],
+      "/check-runs/5/document/reuse-matches": { passage_archive_size_n: 8, matches: [] },
+      "/flags/7": {
+        ...FLAG,
+        check_kind: "originality_reuse",
+        ai_verdict_summary: "reuse_same_instructor_resubmission",
+        is_passage_level: false,
+        severity: "low",
+        evidence_excerpt: "This manuscript appears to be the same document as your own earlier upload, archived manuscript #4.",
+        ai_reasoning: null,
+        page_anchor: "whole document",
+        passage_pair: null,
+      },
+    }));
+    renderWithProviders(<SignalDocumentViewerPage />, { route: "/report/5/document?flag=7", path: "/report/:checkRunId/document" });
+
+    // Without the fix, this screen showed the mislabeled quote and
+    // NOTHING else (no ai_reasoning, no fallback) -- the resubmission
+    // sentence must still reach the instructor, honestly labeled. Both
+    // this sentence AND the Alert's own copy mention "your own earlier
+    // upload," so this is queried by its distinct "archived manuscript
+    // #4" tail rather than the shared phrase.
+    await screen.findByText(/archived manuscript #4/);
+    expect(document.querySelector("blockquote")).not.toBeInTheDocument();
+    expect(screen.getByText("Recorded reasoning:")).toBeInTheDocument();
+    expect(screen.getByText("No passage-level comparison applies")).toBeInTheDocument();
   });
 
   it("keeps unavailable source content honest while preserving a return to the report", async () => {
