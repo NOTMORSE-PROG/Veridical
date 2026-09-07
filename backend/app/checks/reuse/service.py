@@ -28,6 +28,7 @@ from app.checks.reuse.query import (
 )
 from app.checks.reuse.store import store_document_embeddings, store_passage_embeddings
 from app.config import Settings
+from app.db import advisory_lock
 from app.ingest.schemas import ExtractionResult
 from app.models.enums import CheckKind, FlagSeverity, ResultOutcome
 from app.models.run import CheckResult, Flag
@@ -579,9 +580,26 @@ async def run_originality_reuse_check(
     # disclosed legacy set instead of compounding with every future
     # resubmission.
     if resubmission_source_id is None:
-        await store_document_embeddings(session, manuscript_id, embeddings)
-        if passages:
-            await store_passage_embeddings(session, manuscript_id, passages, settings)
+        # BUG-178 (`backend-critic` finding): a cancelled check_run's own
+        # withdrawal logic (`archive.service.withdraw_manuscript_if_
+        # orphaned`) or an instructor's own purge (`archive.service.
+        # purge_manuscript`) can run CONCURRENTLY with this write-back for
+        # the SAME manuscript_id, from a genuinely different worker/
+        # session/request -- READ COMMITTED gives no protection, and
+        # nothing ties an archive row back to the check_run that wrote it,
+        # so either racing this write could silently destroy or resurrect
+        # data with no way to detect or recover it. `app.db.advisory_lock`
+        # (see its own docstring for why this is a DEDICATED connection,
+        # not a lock taken directly on `session` -- the first version of
+        # this fix broke under real connection-pool contention, since the
+        # two store calls below each commit their own transaction
+        # internally and an ORM session's physical connection isn't stable
+        # across commits), same key both of those paths take -- whichever
+        # side gets there first fully completes before the next proceeds.
+        async with advisory_lock(session, manuscript_id):
+            await store_document_embeddings(session, manuscript_id, embeddings)
+            if passages:
+                await store_passage_embeddings(session, manuscript_id, passages, settings)
 
     return result
 

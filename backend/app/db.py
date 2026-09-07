@@ -3,9 +3,11 @@
 
 import asyncio
 from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 import asyncpg
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
     AsyncSession,
@@ -83,6 +85,51 @@ async def get_session() -> AsyncIterator[AsyncSession]:
     """FastAPI dependency: one session per request (CODING.md §2)."""
     async with get_session_factory()() as session:
         yield session
+
+
+@asynccontextmanager
+async def advisory_lock(session: AsyncSession, key: int) -> AsyncIterator[None]:
+    """Holds a session-scoped Postgres advisory lock on `key` for the
+    duration of the `async with` block, on a DEDICATED connection
+    independent of `session`'s own connection lifecycle (BUG-178,
+    `backend-critic` finding, empirically proven against this app's own
+    engine/pool defaults: `pg_advisory_lock`/`pg_advisory_unlock` called
+    directly on a passed-in `AsyncSession` broke under real pool
+    contention -- a session's physical connection is NOT stable across
+    `session.commit()`, so the pool can hand back a DIFFERENT connection
+    for the next statement; a lock acquired on the session's connection
+    then gets "released" on a connection that never held it, while the
+    REAL lock stays orphaned on whatever connection the session moved to.
+    `pg_advisory_unlock`'s own return value caught this directly (`False`
+    -- Postgres itself reporting the caller didn't hold what it thought it
+    held); this function checks that return value and fails loud instead
+    of discarding the signal.
+
+    Bound to the SAME engine `session` itself uses (`session.get_bind()`),
+    never the process-wide `get_engine()` singleton directly -- so a
+    caller under test (a scratch-DB `session_factory` fixture) locks
+    against its own database, not whatever `get_engine()` happened to
+    cache first. `AsyncSession.get_bind()` returns the plain SYNC
+    `sqlalchemy.engine.Engine` facade (it delegates to the wrapped sync
+    Session internally), not an `AsyncEngine` -- wrapped back into one
+    here so `.connect()` supports `async with`; confirmed live that this
+    wrapping does not create a second, independent connection pool (it
+    shares the same underlying sync `Engine`/pool `session`'s own engine
+    already uses)."""
+    engine = AsyncEngine(session.get_bind())
+    async with engine.connect() as conn:
+        await conn.execute(text("SELECT pg_advisory_lock(:key)"), {"key": key})
+        try:
+            yield
+        finally:
+            released = await conn.scalar(text("SELECT pg_advisory_unlock(:key)"), {"key": key})
+            if not released:
+                raise RuntimeError(
+                    f"pg_advisory_unlock({key}) reported no lock was held by this "
+                    "connection -- this should be structurally impossible; treat "
+                    "any concurrent corpus withdrawal/write-back near this key as "
+                    "unverified until investigated."
+                )
 
 
 async def check_connectivity(dsn: str, timeout: float = 5.0) -> tuple[bool, str]:

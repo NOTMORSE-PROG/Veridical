@@ -18,6 +18,7 @@ from sqlalchemy import select, text
 import app.pipeline.machine as pipeline_machine
 from app.checks.rules.sections import identify_target_section
 from app.config import get_settings
+from app.db import advisory_lock
 from app.errors import QuotaExhaustedError
 from app.llm.fake import FakeLLMClient
 from app.models.enums import (
@@ -28,7 +29,12 @@ from app.models.enums import (
     ResultOutcome,
 )
 from app.models.instructor import Instructor
-from app.models.manuscript import Manuscript
+from app.models.manuscript import (
+    Manuscript,
+    ManuscriptArchive,
+    ManuscriptChapterArchive,
+    ManuscriptPassageArchive,
+)
 from app.models.rubric import Criterion, Rubric
 from app.models.run import CheckResult, CheckRun, ReadinessReport
 from app.pipeline.machine import TerminalFailure, run_check_run
@@ -267,7 +273,343 @@ async def test_cancel_request_stops_at_boundary_and_removes_terminal_report(
                 )
             ).all()
         )
+        # BUG-178: cancelling at/past `integrity` attempts a withdrawal
+        # from the shared corpus, but this fixture never actually ran the
+        # real reuse check (no archive rows exist for this manuscript at
+        # all) -- `delete_archive_rows` correctly reports nothing was
+        # removed, so no `manuscript_withdrawn_from_corpus` event is
+        # written (an audit row must never claim a withdrawal that didn't
+        # happen). See this file's own dedicated BUG-178 tests below for
+        # the case where a real write-back exists to withdraw.
         assert event_types == ["check_run_cancelled"]
+
+
+async def test_bug178_cancel_mid_integrity_withdraws_the_manuscript_from_the_corpus(
+    session_factory, tmp_path, monkeypatch
+):
+    """BUG-178's own proven reproduction: the reuse write-back happens
+    INSIDE the integrity stage, before that stage's own boundary check --
+    a cancel landing mid-integrity (not yet `current_stage_finished`) may
+    already have added this manuscript to the shared cross-instructor
+    archive. Real archive rows are seeded to stand in for that write-back
+    (this test doesn't need to run the real reuse check to prove the
+    withdrawal logic works)."""
+    check_run_id, _, settings = await _seed(session_factory, tmp_path, monkeypatch)
+    async with session_factory() as session:
+        check_run = await session.get(CheckRun, check_run_id)
+        session.add(
+            ManuscriptArchive(
+                manuscript_id=check_run.manuscript_id,
+                embedding=[0.0] * settings.embedding_dim,
+                model_id="test-model",
+            )
+        )
+        session.add(
+            ManuscriptChapterArchive(
+                manuscript_id=check_run.manuscript_id,
+                chapter_index=0,
+                title="Chapter 1",
+                page=1,
+                embedding=[0.0] * settings.embedding_dim,
+                model_id="test-model",
+            )
+        )
+        session.add(
+            ManuscriptPassageArchive(
+                manuscript_id=check_run.manuscript_id,
+                passage_index=0,
+                chapter_index=0,
+                page=1,
+                char_start=0,
+                char_end=10,
+                text="Some text.",
+                context_text="Some text.",
+                embedding=[0.0] * settings.embedding_dim,
+                model_id="test-model",
+            )
+        )
+        # `status = integrity`, no `stages.integrity.status == "done"` marker
+        # -- mid-stage, exactly the ticket's own reproduced shape.
+        check_run.status = CheckRunStatus.integrity
+        check_run.cancel_requested_at = datetime.now(UTC)
+        await session.commit()
+
+        await run_check_run(session, check_run, settings, FakeLLMClient())
+        assert check_run.status == CheckRunStatus.cancelled
+        assert check_run.stage_status["cancellation"]["stopped_before"] == "integrity"
+
+    async with session_factory() as verify:
+        assert (
+            await verify.scalar(
+                select(ManuscriptArchive).where(
+                    ManuscriptArchive.manuscript_id == check_run.manuscript_id
+                )
+            )
+        ) is None
+        assert (
+            await verify.scalar(
+                select(ManuscriptChapterArchive).where(
+                    ManuscriptChapterArchive.manuscript_id == check_run.manuscript_id
+                )
+            )
+        ) is None
+        assert (
+            await verify.scalar(
+                select(ManuscriptPassageArchive).where(
+                    ManuscriptPassageArchive.manuscript_id == check_run.manuscript_id
+                )
+            )
+        ) is None
+        from app.models.audit import AuditLog
+
+        event = await verify.scalar(
+            select(AuditLog).where(AuditLog.event_type == "manuscript_withdrawn_from_corpus")
+        )
+        assert event is not None
+        assert event.manuscript_id == check_run.manuscript_id
+        assert event.check_run_id == check_run_id
+
+
+async def test_bug178_cancel_before_integrity_never_touches_the_corpus(
+    session_factory, tmp_path, monkeypatch
+):
+    """The withdrawal guard must not fire (and must not even run the extra
+    query) for a cancel that never reached a stage where the reuse
+    write-back could possibly have happened."""
+    check_run_id, _, settings = await _seed(session_factory, tmp_path, monkeypatch)
+    async with session_factory() as session:
+        check_run = await session.get(CheckRun, check_run_id)
+        session.add(
+            ManuscriptArchive(
+                manuscript_id=check_run.manuscript_id,
+                embedding=[0.0] * settings.embedding_dim,
+                model_id="test-model",
+            )
+        )
+        # A real archive row already exists for this manuscript from some
+        # OTHER, unrelated source (a prior real check) -- this run itself
+        # never reaches integrity, so it must never be touched.
+        check_run.status = CheckRunStatus.semantic
+        check_run.cancel_requested_at = datetime.now(UTC)
+        await session.commit()
+
+        await run_check_run(session, check_run, settings, FakeLLMClient())
+        assert check_run.status == CheckRunStatus.cancelled
+        # Mid-`semantic`, never finished it -- correctly reported as
+        # stopping AT semantic, not "before integrity" (that phrasing only
+        # applies once a stage's own boundary is actually reached).
+        assert check_run.stage_status["cancellation"]["stopped_before"] == "semantic"
+
+    async with session_factory() as verify:
+        assert (
+            await verify.scalar(
+                select(ManuscriptArchive).where(
+                    ManuscriptArchive.manuscript_id == check_run.manuscript_id
+                )
+            )
+        ) is not None
+        from app.models.audit import AuditLog
+
+        event_types = list(
+            (
+                await verify.scalars(
+                    select(AuditLog.event_type).where(AuditLog.check_run_id == check_run_id)
+                )
+            ).all()
+        )
+        assert event_types == ["check_run_cancelled"]
+
+
+async def test_bug178_advisory_lock_survives_the_holders_own_internal_commits(session_factory):
+    """`backend-critic` Finding A (2nd review pass): an ORM `AsyncSession`'s
+    physical connection is NOT stable across `session.commit()` -- the
+    pool can hand back a DIFFERENT connection for the next statement, so a
+    lock acquired directly on a session (the first version of this fix)
+    can end up "released" on a connection that never held it, while the
+    real lock stays orphaned on whatever connection the session moved to.
+    Empirically proven by `backend-critic` against this app's own real
+    engine/pool. `app.db.advisory_lock` fixes this with a DEDICATED
+    connection, independent of whatever the wrapped session's own commits
+    do -- proven directly and deterministically here (no artificial
+    pool-size contention needed): the lock must still be held by a
+    SEPARATE connection's own non-blocking probe even after the holder
+    commits multiple times while the lock is open, the exact shape
+    `store_document_embeddings` + `store_passage_embeddings` exercise
+    inside the write-back's own locked section."""
+    key = 999999001  # arbitrary, test-scoped advisory-lock key
+    async with session_factory() as holder, advisory_lock(holder, key):
+        # The write-back's own multi-commit shape -- exactly what
+        # broke a session-level lock taken directly on `holder`.
+        await holder.commit()
+        await holder.commit()
+        async with session_factory() as prober:
+            still_held = await prober.scalar(
+                text("SELECT NOT pg_try_advisory_lock(:key)"), {"key": key}
+            )
+            assert still_held is True, (
+                "a separate connection acquired the lock while the holder's "
+                "own dedicated connection should still be holding it"
+            )
+
+    # Released cleanly once the `async with advisory_lock(...)` block exits.
+    async with session_factory() as prober:
+        acquired = await prober.scalar(text("SELECT pg_try_advisory_lock(:key)"), {"key": key})
+        assert acquired is True
+        await prober.execute(text("SELECT pg_advisory_unlock(:key)"), {"key": key})
+
+
+async def test_bug178_never_withdraws_a_manuscript_another_completed_run_legitimately_archived(
+    session_factory, tmp_path, monkeypatch
+):
+    """The guard past the ticket's own two named options: `store.py`'s
+    write-back REPLACES the manuscript's one archive row (unique
+    constraint), so a naive unconditional delete-on-cancel would strip a
+    manuscript a PRIOR, separate, successfully-DONE run already
+    legitimately archived (e.g. re-running a check against a newer rubric
+    version, then cancelling the re-run) -- the opposite failure, silently
+    dropping real prior work out of future reuse detection."""
+    check_run_id, _, settings = await _seed(session_factory, tmp_path, monkeypatch)
+    async with session_factory() as session:
+        check_run = await session.get(CheckRun, check_run_id)
+        # A SEPARATE, earlier check_run for the SAME manuscript that
+        # actually finished -- the real-world shape this guard exists for.
+        session.add(
+            CheckRun(
+                manuscript_id=check_run.manuscript_id,
+                rubric_id=check_run.rubric_id,
+                status=CheckRunStatus.done,
+            )
+        )
+        session.add(
+            ManuscriptArchive(
+                manuscript_id=check_run.manuscript_id,
+                embedding=[0.0] * settings.embedding_dim,
+                model_id="test-model",
+            )
+        )
+        check_run.status = CheckRunStatus.integrity
+        check_run.cancel_requested_at = datetime.now(UTC)
+        await session.commit()
+
+        await run_check_run(session, check_run, settings, FakeLLMClient())
+        assert check_run.status == CheckRunStatus.cancelled
+
+    async with session_factory() as verify:
+        assert (
+            await verify.scalar(
+                select(ManuscriptArchive).where(
+                    ManuscriptArchive.manuscript_id == check_run.manuscript_id
+                )
+            )
+        ) is not None
+        from app.models.audit import AuditLog
+
+        event_types = list(
+            (
+                await verify.scalars(
+                    select(AuditLog.event_type).where(AuditLog.check_run_id == check_run_id)
+                )
+            ).all()
+        )
+        assert event_types == ["check_run_cancelled"]
+
+
+async def test_bug178_concurrent_write_back_and_withdrawal_never_lose_data(
+    session_factory, tmp_path, monkeypatch
+):
+    """`backend-critic` finding: the first draft of this fix only guarded
+    against a sibling check_run that had already reached `done` -- it
+    could still destroy a DIFFERENT check_run's write-back that was
+    concurrently IN PROGRESS on a genuinely separate connection/session
+    (READ COMMITTED gives no protection, and no column ties an archive
+    row back to the check_run that wrote it). Real two-connection
+    concurrency, not simulated -- same proof shape `backend-critic` itself
+    cited from `test_pipeline_worker_claim_live.py`: an `asyncio.Event`-
+    gated critical section plus a real `asyncio.sleep` so the event loop
+    genuinely yields, proving the second session's own lock acquisition
+    is truly blocked at Postgres, not just luckily ordered. Run B's own
+    "write-back" goes through `app.db.advisory_lock` too (not a raw
+    session-level lock) -- a second review pass found that pattern itself
+    unsound (Finding A, see `test_bug178_advisory_lock_survives_the_
+    holders_own_internal_commits` above), so this test must not embed the
+    same unsound shape it exists to guard against."""
+    from app.archive.service import withdraw_manuscript_if_orphaned
+
+    check_run_id, _, settings = await _seed(session_factory, tmp_path, monkeypatch)
+    async with session_factory() as setup:
+        run_a = await setup.get(CheckRun, check_run_id)
+        manuscript_id = run_a.manuscript_id
+        # Run B: a second, genuinely concurrent check_run for the SAME
+        # manuscript -- an instructor re-running a check before the first
+        # attempt finished or was cancelled, the real-world shape this
+        # guard exists for.
+        run_b = CheckRun(
+            manuscript_id=manuscript_id, rubric_id=run_a.rubric_id, status=CheckRunStatus.integrity
+        )
+        setup.add(run_b)
+        await setup.commit()
+
+    order: list[str] = []
+    b_locked = asyncio.Event()
+    b_may_release = asyncio.Event()
+
+    async def run_b_write_back():
+        async with session_factory() as session, advisory_lock(session, manuscript_id):
+            order.append("b_locked")
+            b_locked.set()
+            await b_may_release.wait()
+            # The write-back run B was genuinely doing while holding
+            # the lock -- a real committed row, not a stand-in, and
+            # the SAME multi-commit shape the real write-back has
+            # (store_document_embeddings + store_passage_embeddings).
+            session.add(
+                ManuscriptArchive(
+                    manuscript_id=manuscript_id,
+                    embedding=[0.0] * settings.embedding_dim,
+                    model_id="test-model",
+                )
+            )
+            await session.commit()
+            order.append("b_write_committed")
+            await session.commit()
+
+    async def run_a_withdrawal():
+        async with session_factory() as session:
+            order.append("a_withdraw_call_start")
+            deleted = await withdraw_manuscript_if_orphaned(
+                session,
+                manuscript_id=manuscript_id,
+                check_run_id=check_run_id,
+                reached_integrity=True,
+            )
+            order.append("a_withdraw_call_end")
+            await session.commit()
+            return deleted
+
+    task_b = asyncio.create_task(run_b_write_back())
+    await b_locked.wait()  # B genuinely holds the DB-level advisory lock now
+    task_a = asyncio.create_task(run_a_withdrawal())
+    # Let A's coroutine actually reach and block on its own pg_advisory_lock
+    # call (a real network round-trip contended by B) before B is allowed
+    # to proceed -- this is what proves the block is real.
+    await asyncio.sleep(0.05)
+    assert "a_withdraw_call_end" not in order
+    b_may_release.set()
+
+    await asyncio.gather(task_b, task_a)
+    deleted = task_a.result()
+
+    assert order.index("b_write_committed") < order.index("a_withdraw_call_end")
+    # By the time A's lock finally released and its guard query ran, run B
+    # (a second, real check_run) existed -- A must NOT have destroyed the
+    # archive row B just committed.
+    assert deleted is False
+    async with session_factory() as verify:
+        assert (
+            await verify.scalar(
+                select(ManuscriptArchive).where(ManuscriptArchive.manuscript_id == manuscript_id)
+            )
+        ) is not None
 
 
 async def test_cancellation_wins_when_the_active_stage_then_raises(

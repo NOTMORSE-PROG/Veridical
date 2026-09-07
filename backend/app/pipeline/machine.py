@@ -22,6 +22,7 @@ from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.archive.service import withdraw_manuscript_if_orphaned
 from app.audit.service import write_audit_event
 from app.checks.agreement.service import (
     existing_internal_agreement_result,
@@ -131,6 +132,49 @@ async def _finish_cancel_if_requested(session: AsyncSession, check_run: CheckRun
         check_run_id=check_run.id,
         payload={"stopped_before": stopped_before},
     )
+    # BUG-178 (ticket routed this to the owner; decided here per the
+    # standing "work autonomously, document reasoning" instruction, not
+    # improvised silently -- ground rule 4 still applies, so the reasoning
+    # is recorded here, in the ticket's own Fix-implemented section, and
+    # in STATE.md, not just this comment). The reuse write-back happens
+    # INSIDE the integrity stage, before that stage's own cancellation
+    # boundary (this function's own docstring doesn't cover it) -- a
+    # cancel landing at or past `integrity` may already have added this
+    # manuscript to the shared cross-instructor originality corpus
+    # (BUG-050 Branch B), with nothing until now withdrawing it. Chose
+    # "cancel withdraws the write-back" over the ticket's other named
+    # option ("cancel is documented as not withdrawing it, purge offered
+    # at that moment") because the proven failure mode is a false
+    # accusation against a LATER, unrelated instructor's genuine
+    # submission -- charter judgment 1's precision-over-recall bias
+    # applies directly, and putting the burden of remembering a purge on
+    # the instructor who already cancelled and moved on is the weaker of
+    # the two designs. The actual withdrawal logic (safety guard against
+    # destroying a DIFFERENT run's legitimate data, and the advisory lock
+    # closing a real concurrent-write race `backend-critic` found in this
+    # fix's first draft) is shared with `pipeline.service.cancel_check_
+    # run`'s own cancellation-finalization path -- see `archive.service.
+    # withdraw_manuscript_if_orphaned`'s own docstring for the full
+    # reasoning, not duplicated here.
+    if await withdraw_manuscript_if_orphaned(
+        session,
+        manuscript_id=check_run.manuscript_id,
+        check_run_id=check_run.id,
+        reached_integrity=current_stage
+        not in (
+            CheckRunStatus.queued,
+            CheckRunStatus.ingesting,
+            CheckRunStatus.structural,
+            CheckRunStatus.semantic,
+        ),
+    ):
+        await write_audit_event(
+            session,
+            event_type="manuscript_withdrawn_from_corpus",
+            check_run_id=check_run.id,
+            manuscript_id=check_run.manuscript_id,
+            payload={"reason": "cancelled_after_reuse_write_back"},
+        )
     await session.commit()
     return True
 

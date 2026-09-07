@@ -11,6 +11,7 @@ from datetime import UTC, datetime
 from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.archive.service import withdraw_manuscript_if_orphaned
 from app.audit.service import write_audit_event
 from app.config import Settings, get_settings
 from app.errors import ConflictError, NotFoundError
@@ -212,6 +213,37 @@ async def cancel_check_run(
             check_run_id=check_run_id,
             payload={"stopped_before": stopped_before},
         )
+        # BUG-178 (`backend-critic` finding): this path finalizes a
+        # cancellation independently of `pipeline.machine._finish_cancel_
+        # if_requested` -- a queued or BLOCKED (quota_exhausted/api_down)
+        # run never re-enters the worker's own stage loop, so that
+        # function's own withdrawal logic never runs for it. Not reachable
+        # in a contaminated state TODAY only by two undocumented, brittle
+        # invariants (reuse is the LAST integrity sub-check and makes no
+        # LLM call itself, and aggregation never blocks either) -- a
+        # future reordering of the integrity sub-checks, or an LLM step
+        # added to aggregation, would silently reopen BUG-178 through
+        # exactly this path with no test catching it. Same shared helper,
+        # not a second divergent copy.
+        if await withdraw_manuscript_if_orphaned(
+            session,
+            manuscript_id=check_run.manuscript_id,
+            check_run_id=check_run.id,
+            reached_integrity=status_when_requested
+            not in (
+                CheckRunStatus.queued,
+                CheckRunStatus.ingesting,
+                CheckRunStatus.structural,
+                CheckRunStatus.semantic,
+            ),
+        ):
+            await write_audit_event(
+                session,
+                event_type="manuscript_withdrawn_from_corpus",
+                check_run_id=check_run_id,
+                manuscript_id=check_run.manuscript_id,
+                payload={"reason": "cancelled_after_reuse_write_back"},
+            )
 
     await session.commit()
     check_run = await get_check_run(session, check_run_id, instructor_id)
