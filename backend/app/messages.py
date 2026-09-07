@@ -39,6 +39,16 @@ DOCX_EXPANDS_TOO_LARGE = (
     "from Word."
 )
 
+PDF_TOO_MANY_PAGES = (
+    "This PDF has {page_count} pages, more than the {limit} page limit. "
+    "Please split it or upload a shorter version."
+)
+
+EXTRACTION_TIMED_OUT = (
+    "This document took too long to process and could not be checked. "
+    "Please try a shorter or simpler file."
+)
+
 IMAGE_ONLY_NOTE = (
     "This document contains little or no selectable text (it may be a "
     "scanned copy). Checks that need the text will be limited."

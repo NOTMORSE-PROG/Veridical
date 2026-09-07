@@ -7,16 +7,20 @@ cosine check. Live Postgres (own scratch DB, same convention as
 import os
 
 import pytest
-from sqlalchemy import text
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
-from app.checks.reuse.embed import compute_document_embeddings
-from app.checks.reuse.store import embed_and_store, store_document_embeddings
+from app.checks.reuse.embed import PassageEmbedding, compute_document_embeddings
+from app.checks.reuse.store import (
+    embed_and_store,
+    store_document_embeddings,
+    store_passage_embeddings,
+)
 from app.config import get_settings
 from app.db import sqlalchemy_url
 from app.ingest.schemas import ExtractionResult, SectionNode, SectionTree, TextBlock
 from app.models.instructor import Instructor
-from app.models.manuscript import Manuscript
+from app.models.manuscript import Manuscript, ManuscriptPassageArchive
 
 live = pytest.mark.skipif(
     "DATABASE_URL" not in os.environ,
@@ -54,8 +58,8 @@ async def _clean(session_factory):
     async with session_factory() as session:
         await session.execute(
             text(
-                "TRUNCATE manuscript_chapter_archive, manuscript_archive, manuscript, "
-                "instructor RESTART IDENTITY CASCADE"
+                "TRUNCATE manuscript_passage_archive, manuscript_chapter_archive, "
+                "manuscript_archive, manuscript, instructor RESTART IDENTITY CASCADE"
             )
         )
         await session.commit()
@@ -201,3 +205,70 @@ async def test_extraction_with_no_content_stores_nothing(session_factory):
             {"id": manuscript_id},
         )
     assert count == 0
+
+
+def _passage(index: int, dim: int) -> PassageEmbedding:
+    return PassageEmbedding(
+        passage_index=index,
+        chapter_index=0,
+        anchor_kind="page",
+        page=1,
+        paragraph=None,
+        char_start=0,
+        char_end=10,
+        text=f"Passage {index}.",
+        context_text=f"Passage {index}.",
+        is_reference_list=False,
+        is_block_quote=False,
+        embedding=[0.0] * dim,
+    )
+
+
+async def test_bug180_passage_write_back_is_capped(session_factory, monkeypatch):
+    """BUG-180: unbounded, an oversized upload becomes hundreds of
+    thousands of embedded rows in the GLOBALLY SHARED reuse corpus --
+    `reuse_max_passages_per_manuscript` truncates (keeps the first N in
+    document order) rather than rejecting the check, since this runs deep
+    into an already-passing check run."""
+    monkeypatch.setenv("REUSE_MAX_PASSAGES_PER_MANUSCRIPT", "3")
+    get_settings.cache_clear()
+    settings = get_settings()
+    manuscript_id = await _seed_manuscript(session_factory)
+    passages = [_passage(i, settings.embedding_dim) for i in range(10)]
+
+    async with session_factory() as session:
+        await store_passage_embeddings(session, manuscript_id, passages, settings)
+
+    async with session_factory() as session:
+        stored = (
+            await session.scalars(
+                select(ManuscriptPassageArchive)
+                .where(ManuscriptPassageArchive.manuscript_id == manuscript_id)
+                .order_by(ManuscriptPassageArchive.passage_index)
+            )
+        ).all()
+    assert [row.passage_index for row in stored] == [0, 1, 2]
+    get_settings.cache_clear()
+
+
+async def test_bug180_passage_write_back_untouched_under_the_cap(session_factory, monkeypatch):
+    """The cap must not affect an ordinary manuscript nowhere near it --
+    same convention as every other cap in this codebase (`ingest_max_
+    pages`, `max_docx_uncompressed_mb`): high enough that a real document
+    never notices it."""
+    monkeypatch.setenv("REUSE_MAX_PASSAGES_PER_MANUSCRIPT", "3")
+    get_settings.cache_clear()
+    settings = get_settings()
+    manuscript_id = await _seed_manuscript(session_factory)
+    passages = [_passage(i, settings.embedding_dim) for i in range(2)]
+
+    async with session_factory() as session:
+        await store_passage_embeddings(session, manuscript_id, passages, settings)
+
+    async with session_factory() as session:
+        count = await session.scalar(
+            text("SELECT count(*) FROM manuscript_passage_archive WHERE manuscript_id = :id"),
+            {"id": manuscript_id},
+        )
+    assert count == 2
+    get_settings.cache_clear()

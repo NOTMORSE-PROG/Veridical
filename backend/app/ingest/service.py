@@ -151,7 +151,22 @@ async def ingest_manuscript(
         # Dispatch by sniffed content (extensions lie) — inside the stage
         # boundary so an unreadable file leaves the row `failed`, not stuck.
         extractor = select_extractor(detect_format(file_path))
-        result = await loop.run_in_executor(None, extractor, str(file_path), settings)
+        # BUG-180: `ingest_max_pages`/`max_docx_uncompressed_mb` are the
+        # fix that actually bounds the work (checked before it starts);
+        # this timeout is a second, independent backstop for the case
+        # where per-file cost is unexpectedly high even under those caps.
+        # Disclosed limitation: `wait_for` bounds how long THIS REQUEST
+        # waits, not how long the underlying synchronous CPU work in the
+        # threadpool actually runs -- Python cannot forcibly cancel a
+        # running thread, so a timed-out extraction's thread keeps
+        # running to completion in the background, its result discarded.
+        try:
+            result = await asyncio.wait_for(
+                loop.run_in_executor(None, extractor, str(file_path), settings),
+                timeout=settings.ingest_extraction_timeout_seconds,
+            )
+        except TimeoutError as exc:
+            raise FileTooLargeError(messages.EXTRACTION_TIMED_OUT) from exc
         patterns = load_patterns(settings.ingest_patterns_file)
         drafts = await loop.run_in_executor(None, references.extract_references, result, patterns)
         try:
@@ -188,6 +203,20 @@ async def ingest_manuscript(
         # BUG-016: the row must say why, not just that it failed.
         manuscript.ingest_status = IngestStatus.failed
         manuscript.ingest_failure_reason = IngestFailureReason.unreadable_format
+        await session.commit()
+        raise
+    except FileTooLargeError:
+        # BUG-180 (found while adding this ticket's own page-count/timeout
+        # guards): `FileTooLargeError` -- already raised here by the
+        # pre-existing DOCX zip-bomb guard (BUG-159, `docx.py`), and now
+        # also by the PDF page-count cap and the extraction timeout below
+        # -- IS-A `Exception`, so without this explicit branch every one of
+        # those cases fell through to the generic handler below and
+        # recorded the wrong, less specific `extraction_failed` reason
+        # instead of the honest `file_too_large` `save_upload`'s own
+        # size-cap already uses for the exact same failure class.
+        manuscript.ingest_status = IngestStatus.failed
+        manuscript.ingest_failure_reason = IngestFailureReason.file_too_large
         await session.commit()
         raise
     except Exception:

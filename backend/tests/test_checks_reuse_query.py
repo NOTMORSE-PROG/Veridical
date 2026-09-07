@@ -190,6 +190,36 @@ async def test_first_manuscript_ever_is_cold_start_honest(session_factory):
     assert result.outcome == ResultOutcome.passed
     assert result.detail["archive_size_n"] == 0
     assert result.detail["n_flags"] == 0
+    # BUG-180: an ordinary manuscript, nowhere near the cap, must show
+    # every passage it produced as archived -- no silent gap.
+    assert result.detail["passages_found"] > 0
+    assert result.detail["passages_archived"] == result.detail["passages_found"]
+
+
+async def test_bug180_passage_truncation_is_recorded_honestly_not_silently(
+    session_factory, monkeypatch
+):
+    """`backend-critic` finding: a truncated write-back with no trace
+    anywhere reproduces BUG-096's own already-fixed failure class (a
+    partial result rendered indistinguishable from a complete one).
+    `reuse_max_passages_per_manuscript` set to 0 forces every real
+    passage this fixture produces to be truncated -- a decisive,
+    cap-count-independent proof that `passages_found`/`passages_archived`
+    genuinely diverge and are both recorded, not that the manuscript
+    merely happened to have few passages."""
+    monkeypatch.setenv("REUSE_MAX_PASSAGES_PER_MANUSCRIPT", "0")
+    get_settings.cache_clear()
+    settings = get_settings()
+    manuscript_id, check_run_id = await _seed_manuscript_and_run(
+        session_factory, group_label="Group A"
+    )
+    async with session_factory() as session:
+        result = await run_originality_reuse_check(
+            session, manuscript_id, check_run_id, _extraction(CH1, CH2), settings
+        )
+    assert result.detail["passages_found"] > 0
+    assert result.detail["passages_archived"] == 0
+    get_settings.cache_clear()
 
 
 async def test_reuploaded_duplicate_produces_a_high_severity_flag(session_factory):

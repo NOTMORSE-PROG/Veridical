@@ -429,6 +429,23 @@ async def run_originality_reuse_check(
         + (1 if resubmission_source_id is not None else 0)
     )
 
+    # BUG-180 (`backend-critic` finding): `store_passage_embeddings` below
+    # truncates what gets WRITTEN into the shared corpus for FUTURE
+    # manuscripts to be compared against -- it does NOT affect the query
+    # two lines above (`passage_query_result`), which already ran against
+    # every one of THIS manuscript's own passages, untruncated, so this
+    # run's own flags are never degraded by the cap. What silently went
+    # unrecorded before this fix: whether THIS manuscript's later passages
+    # (beyond the cap) will ever be discoverable by a LATER manuscript's
+    # reuse check. Recorded here, in the audit trail (judgment rule 4,
+    # traceability) -- a truncation with no trace anywhere is the same
+    # failure class BUG-096 already fixed once (a partial result rendered
+    # indistinguishable from a complete one).
+    passages_archived = (
+        min(len(passages), settings.reuse_max_passages_per_manuscript)
+        if resubmission_source_id is None
+        else 0
+    )
     result = CheckResult(
         check_run_id=check_run_id,
         criterion_id=None,
@@ -439,6 +456,8 @@ async def run_originality_reuse_check(
             "passage_archive_size_n": passage_query_result.passage_archive_size_n,
             "n_flags": n_flags,
             "first_upload_context": first_upload,
+            "passages_found": len(passages),
+            "passages_archived": passages_archived,
         },
     )
     session.add(result)

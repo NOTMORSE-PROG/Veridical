@@ -119,6 +119,68 @@ class Settings(BaseSettings):
     # 500MB is generous for a real manuscript's embedded images while still
     # bounding worst-case memory against Render's 512MB free-tier ceiling.
     max_docx_uncompressed_mb: int = 500
+    # BUG-180: `max_upload_mb` bounds the wrong dimension for a PDF -- a
+    # 50,000-page, 15.9MB file (well inside the 40MB cap) took 6.1s to
+    # parse and produced 1.29M chars; measured linear scaling projects
+    # ~304M chars and ~337,500 reuse-corpus passage rows at the 40MB
+    # ceiling from a single deliberately-constructed upload (a real 40MB
+    # PDF is usually images, not this many pages of dense text). 500 is
+    # generous headroom, not a tight fit: the real capstone manuscripts
+    # already on record in this repo's own tickets run 47 (BUG-043/049,
+    # the owner's own capstone), 80 (V-017's substitute manuscript), and
+    # 150 pages (BUG-155's extrapolation base) -- 3.3x-10.6x under this
+    # cap. Checked BEFORE any page is parsed, so the adversarial cost is
+    # paid for zero pages, not the whole document.
+    ingest_max_pages: int = 500
+    # Wall-clock ceiling on the extraction call (`pdf.py`/`docx.py`, run in
+    # the default threadpool with no timeout before this ticket). Honest
+    # limitation, disclosed rather than overclaimed: `asyncio.wait_for`
+    # bounds how long the REQUEST waits, not how long the underlying
+    # synchronous CPU work in the threadpool actually runs -- Python
+    # cannot forcibly cancel a running thread. `ingest_max_pages` above is
+    # the fix that actually bounds the work; this is a second, independent
+    # backstop for the case where per-page cost is unexpectedly high even
+    # under that cap (e.g. deeply nested structures PyMuPDF still has to
+    # walk). Matches `gemini_request_timeout_seconds`'s own value as a
+    # reasonable per-call ceiling.
+    ingest_extraction_timeout_seconds: float = 60.0
+    # BUG-180: `store_passage_embeddings` (F7.4) had no cap on how many
+    # rows one manuscript writes into the GLOBALLY SHARED reuse corpus --
+    # at `reuse_passage_chunk_words: 150`, an oversized upload becomes
+    # hundreds of thousands of embedded rows degrading match quality and
+    # query time for every other account, permanently. Measured (real
+    # `extract_document` + real chunker, four data points, cleanly
+    # linear): 1500 pages -> 8,798 passages, so 5000 is generous headroom
+    # above what `ingest_max_pages` (500) should ordinarily produce for a
+    # PDF (~2,900 passages at the measured ~5.9/page). Truncates (keeps
+    # the first N in document order), never rejects the check -- unlike
+    # the ingestion-time caps above, this fires deep into an already-
+    # passing check run, and throwing away real structural/semantic
+    # results over an internal corpus-writing limit would be a worse
+    # instructor experience than a manuscript's own later passages
+    # quietly not becoming part of what FUTURE manuscripts get compared
+    # against (this run's OWN flags are unaffected -- the query against
+    # the existing corpus already ran on every passage, untruncated,
+    # before this cap is ever applied; recorded honestly either way via
+    # `passages_found`/`passages_archived` in the check's own detail,
+    # never silently -- BUG-096 already fixed exactly this failure class
+    # once, a partial result rendered indistinguishable from a complete
+    # one).
+    #
+    # Disclosed gap, not fixed here (`backend-critic` finding, BUG-180
+    # review): this cap bounds what gets WRITTEN, not what gets COMPUTED
+    # -- `compute_passage_embeddings` still runs on the full, untruncated
+    # passage list before this cap is ever applied, so the CPU cost this
+    # was partly meant to bound is not actually capped by this setting.
+    # For a PDF, `ingest_max_pages` keeps this narrow (a 500-page PDF
+    # produces far fewer passages than this cap). The real residual risk
+    # is the DOCX path, which has no page-count-equivalent gate at all
+    # today (`max_docx_uncompressed_mb`, BUG-159, is itself a still-open
+    # ticket documenting that its own ceiling is set well above this
+    # dyno's real measured memory headroom) -- a dense, text-heavy DOCX
+    # could still drive this same unbounded-compute cost. Follow-up:
+    # BUG-208.
+    reuse_max_passages_per_manuscript: int = 5000
 
     # --- LLM queue (V-009, ENGINEERING §3) -----------------------------------
     # Pinned model id (not the "-latest" alias): golden-set comparisons
