@@ -230,18 +230,96 @@ def test_a_stranger_cannot_manage_another_instructors_share_link(logged_in_with_
     assert client.delete(f"/check-runs/{check_run_id}/share").status_code == 404
 
 
-def test_an_expired_link_is_410(logged_in_with_a_done_run):
+def test_an_expired_link_is_410(logged_in_with_a_done_run, api_scratch_url):
+    """BUG-062: creating a link with a past `expires_at` is now itself
+    rejected (422, see `test_a_past_dated_expiry_is_rejected` below) --
+    this test now simulates the real way a link actually expires (time
+    passing on a link that was valid when created), by creating it with a
+    real future expiry and then advancing it into the past directly in
+    the database, rather than at creation."""
+    import asyncio
+    from datetime import UTC, datetime
+
+    from sqlalchemy import text
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
+    from app.db import sqlalchemy_url
+
     client, check_run_id = logged_in_with_a_done_run
     created = client.post(
         f"/check-runs/{check_run_id}/share",
-        json={"expires_at": "2020-01-01T00:00:00Z"},
+        json={"expires_at": "2099-01-01T00:00:00Z"},
     )
     assert created.status_code == 200
     token = created.json()["token"]
 
+    async def expire_it():
+        engine = create_async_engine(sqlalchemy_url(api_scratch_url))
+        try:
+            factory = async_sessionmaker(engine, expire_on_commit=False)
+            async with factory() as session:
+                await session.execute(
+                    text("UPDATE share_link SET expires_at = :expires_at WHERE token = :t"),
+                    {"expires_at": datetime(2020, 1, 1, tzinfo=UTC), "t": token},
+                )
+                await session.commit()
+        finally:
+            await engine.dispose()
+
+    asyncio.run(expire_it())
+
     client.cookies.clear()
     resp = client.get(f"/shared/{token}/report")
     assert resp.status_code == 410
+
+
+def test_a_past_dated_expiry_is_rejected(logged_in_with_a_done_run):
+    """BUG-062: a past-dated `expires_at` used to be accepted (HTTP 200),
+    creating a link "born dead" -- a footgun (the instructor sees a
+    working create flow with no signal anything is wrong) even though the
+    link does correctly 410 rather than serving stale content. Now
+    rejected outright."""
+    client, check_run_id = logged_in_with_a_done_run
+    resp = client.post(
+        f"/check-runs/{check_run_id}/share",
+        json={"expires_at": "2020-01-01T00:00:00Z"},
+    )
+    assert resp.status_code == 422
+
+
+def test_a_naive_past_dated_expiry_is_also_rejected(logged_in_with_a_done_run):
+    """`backend-critic` finding (BUG-062 review): an earlier version of the
+    validator compared a naive (no UTC offset) `expires_at` against
+    `datetime.now()` -- the deploying CONTAINER's own ambient OS timezone,
+    unpinned anywhere in this stack -- live-reproduced to silently accept
+    an already-past UTC instant (or wrongly reject a genuinely future one)
+    depending on `TZ`. This offset-less shape isn't reachable through the
+    shipped frontend today (it always sends `.toISOString()`), but this is
+    a public API any other caller can reach. A naive input must be treated
+    as UTC, not ambient local time, regardless of the deploying host's
+    own clock configuration."""
+    client, check_run_id = logged_in_with_a_done_run
+    resp = client.post(
+        f"/check-runs/{check_run_id}/share",
+        json={"expires_at": "2020-01-01T00:00:00"},  # no "Z" -- naive
+    )
+    assert resp.status_code == 422
+
+
+def test_a_link_created_with_an_explicit_null_expiry_still_works(logged_in_with_a_done_run):
+    """BUG-062 changed the FRONTEND's own default selection, not the
+    backend's contract -- `expires_at: null` (an explicit "no expiry"
+    choice) must remain valid at the API layer. Sends the exact JSON shape
+    the real frontend actually produces (`expiryFromSelection("none", ...)`
+    returns `null`, which `JSON.stringify` always serializes as an explicit
+    key, never an omission) -- `backend-critic` finding: the previous
+    version of this test sent `{}` (an omitted key), which happens to be
+    equivalent today (pydantic v2 doesn't validate an omitted field's
+    default by, well, default) but doesn't match the real request shape."""
+    client, check_run_id = logged_in_with_a_done_run
+    resp = client.post(f"/check-runs/{check_run_id}/share", json={"expires_at": None})
+    assert resp.status_code == 200
+    assert resp.json()["expires_at"] is None
 
 
 def test_shared_report_exposes_zero_mutating_endpoints(logged_in_with_a_done_run):
