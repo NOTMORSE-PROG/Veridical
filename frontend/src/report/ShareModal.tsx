@@ -108,7 +108,12 @@ export function ShareModal({
   const { data: link, isPending: linkPending } = useShareLink(checkRunId);
   const create = useCreateShareLink(checkRunId);
   const revoke = useRevokeShareLink(checkRunId);
-  const [expirySelection, setExpirySelection] = useState<ExpirySelection>("none");
+  // BUG-062: the dialog's own copy warns this is a "semi-confidential"
+  // link, so a permanent, unauthenticated URL must be a deliberate choice
+  // the instructor makes, not the pre-selected default. "7d" is the
+  // shortest real option offered -- "No expiry" is still one click away,
+  // just no longer the one nobody had to choose.
+  const [expirySelection, setExpirySelection] = useState<ExpirySelection>("7d");
   const [confirming, setConfirming] = useState<"revoke" | "regenerate" | null>(null);
   const [copyState, setCopyState] = useState<"idle" | "copied" | "failed">("idle");
   const [announcement, setAnnouncement] = useState("");
@@ -273,10 +278,10 @@ export function ShareModal({
                     value={expirySelection}
                     onChange={setExpirySelection}
                     options={[
-                      { value: "none", label: "No expiry" },
                       { value: "7d", label: "7 days" },
                       { value: "30d", label: "30 days" },
                       { value: "90d", label: "90 days" },
+                      { value: "none", label: "No expiry" },
                     ]}
                   />
                   {serverError && (
@@ -343,10 +348,10 @@ export function ShareModal({
                           ? `Keep current (expires ${dateFormatter.format(new Date(link.expires_at))})`
                           : "Keep current (no expiry)",
                       },
-                      { value: "none", label: "No expiry" },
                       { value: "7d", label: "7 days" },
                       { value: "30d", label: "30 days" },
                       { value: "90d", label: "90 days" },
+                      { value: "none", label: "No expiry" },
                     ]}
                   />
                   {/* BUG-090: the summary line above (`Created … Expires

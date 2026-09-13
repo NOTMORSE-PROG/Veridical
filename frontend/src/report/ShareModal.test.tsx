@@ -336,4 +336,37 @@ describe("ShareModal", () => {
     expect(error.closest('[role="alert"]')).toBeInTheDocument();
     expect(document.activeElement).toBe(error.closest('[role="alert"]'));
   });
+
+  it("BUG-062: the create form defaults to 7 days, not No expiry, and sends that real expires_at without any change", async () => {
+    const NEW_LINK: ShareLinkOut = {
+      ...ACTIVE_LINK,
+      expires_at: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
+    };
+    let sentBody: unknown = null;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === "string" ? input : input.toString();
+      const path = new URL(url, "http://localhost").pathname;
+      if (path === "/check-runs/5/share" && init?.method === "POST") {
+        sentBody = init.body ? JSON.parse(init.body as string) : null;
+        return new Response(JSON.stringify(NEW_LINK), { status: 200 });
+      }
+      if (path === "/check-runs/5/share") return new Response(JSON.stringify(null), { status: 200 });
+      return new Response("{}", { status: 200 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    renderWithProviders(<ShareModal checkRunId={5} manuscriptLabel="G1" onClose={() => {}} />);
+
+    await screen.findByRole("button", { name: "Create link" });
+    // A permanent, unauthenticated link must be a deliberate opt-in, not
+    // the pre-selected option -- confirm the untouched select's own value
+    // before ever clicking Create.
+    expect(screen.getByLabelText("Link expires")).toHaveValue("7d");
+
+    fireEvent.click(screen.getByRole("button", { name: "Create link" }));
+    await screen.findByDisplayValue(`${window.location.origin}/shared/abc123token`);
+
+    const sentExpiresAt = new Date((sentBody as { expires_at: string }).expires_at).getTime();
+    const expectedExpiresAt = Date.now() + 7 * 24 * 60 * 60 * 1000;
+    expect(Math.abs(sentExpiresAt - expectedExpiresAt)).toBeLessThan(5000);
+  });
 });
