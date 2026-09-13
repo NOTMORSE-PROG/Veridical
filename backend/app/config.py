@@ -115,10 +115,21 @@ class Settings(BaseSettings):
     # DOCX is a zip archive — `max_upload_mb` only caps the COMPRESSED size
     # on disk. A crafted archive can expand far beyond that in memory
     # during parsing (zip-bomb class risk, BUG-005/D-020). This caps total
-    # UNCOMPRESSED member size before python-docx ever opens the archive;
-    # 500MB is generous for a real manuscript's embedded images while still
-    # bounding worst-case memory against Render's 512MB free-tier ceiling.
-    max_docx_uncompressed_mb: int = 500
+    # UNCOMPRESSED member size before python-docx ever opens the archive.
+    # BUG-159: the previous value (500MB) did NOT bound anything against
+    # Render's 512MB free-tier ceiling as its own comment claimed -- that
+    # ceiling is for the WHOLE CONTAINER, not the DOCX, and this file's own
+    # measurements 300+ lines below record only ~160-196MB of real headroom
+    # once the process's own baseline (rendering, code) is accounted for. A
+    # 500MB-permitted expansion would OOM the dyno long before this guard
+    # ever tripped. 150MB sits inside that measured headroom with margin to
+    # spare, while remaining far above any real manuscript's embedded
+    # images (this repo's own on-record capstones run single-digit MB
+    # uncompressed). `_check_uncompressed_size` (`ingest/docx.py`) also now
+    # verifies the REAL decompressed byte count, not just this declared
+    # ceiling -- `info.file_size` is attacker-controlled central-directory
+    # metadata a crafted archive can understate.
+    max_docx_uncompressed_mb: int = 150
     # BUG-180: `max_upload_mb` bounds the wrong dimension for a PDF -- a
     # 50,000-page, 15.9MB file (well inside the 40MB cap) took 6.1s to
     # parse and produced 1.29M chars; measured linear scaling projects
@@ -174,11 +185,12 @@ class Settings(BaseSettings):
     # was partly meant to bound is not actually capped by this setting.
     # For a PDF, `ingest_max_pages` keeps this narrow (a 500-page PDF
     # produces far fewer passages than this cap). The real residual risk
-    # is the DOCX path, which has no page-count-equivalent gate at all
-    # today (`max_docx_uncompressed_mb`, BUG-159, is itself a still-open
-    # ticket documenting that its own ceiling is set well above this
-    # dyno's real measured memory headroom) -- a dense, text-heavy DOCX
-    # could still drive this same unbounded-compute cost. Follow-up:
+    # is the DOCX path, which has no page-count-equivalent gate at all --
+    # `max_docx_uncompressed_mb` (BUG-159, fixed) now correctly bounds the
+    # UNPACKED archive size against this dyno's real measured memory
+    # headroom, but that guards decompression memory, not extracted TEXT
+    # volume or passage count; a dense, text-heavy DOCX well under that
+    # ceiling could still drive this same unbounded-compute cost. Follow-up:
     # BUG-208.
     reuse_max_passages_per_manuscript: int = 5000
 

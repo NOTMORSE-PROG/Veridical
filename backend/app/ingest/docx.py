@@ -13,6 +13,7 @@ should submit clean copies (recorded limitation, ticket edge case).
 CPU-bound and synchronous on purpose — callers run it in a threadpool.
 """
 
+import copy
 import re
 import zipfile
 from zipfile import BadZipFile
@@ -43,18 +44,58 @@ _HEADING_STYLE = re.compile(r"^heading (?P<level>\d+)$")
 _TITLE_STYLE = "title"
 
 
+_CHUNK_BYTES = 1024 * 1024
+# Larger than any real archive's declared `file_size` could plausibly need
+# to be, used only to defeat Python's own `zipfile` internals (below) --
+# never a real size.
+_UNBOUNDED_SENTINEL = 1 << 40
+
+
 def _check_uncompressed_size(path: str, settings: Settings) -> None:
     """A DOCX is a zip archive — `max_upload_mb` only caps the compressed
     size on disk. Reject before python-docx ever unpacks it if the
     UNCOMPRESSED total exceeds the configured ceiling (BUG-005/D-020:
-    zip-bomb class risk against Render's 512MB free-tier memory)."""
+    zip-bomb class risk against Render's free-tier memory).
+
+    Two passes, cheap-first: `info.file_size` (the zip central directory's
+    own declared size) rejects an honestly-oversized archive without
+    decompressing a single byte — the common case, and worth keeping fast.
+    But that field is attacker-controlled metadata (BUG-159): a crafted
+    archive can UNDERSTATE it and still expand arbitrarily when actually
+    read. The second pass re-verifies against the REAL bytes each member
+    decompresses to — and critically, it cannot simply call `zf.open(info)`
+    and count what comes back, because CPython's own `ZipExtFile` trusts
+    `info.file_size` for ITS OWN internal bookkeeping (`_left`), so reading
+    a member with a lied, understated `file_size` stops (with a CRC
+    mismatch, not a silent short read) at approximately that same lied
+    boundary — the exact high-level read this line does can never observe
+    more than the declared size, making a naive "count what `.read()`
+    returns" check a no-op against this specific attack (verified
+    empirically, not assumed). Passing a COPY of each `ZipInfo` with
+    `file_size` overridden to an absurdly large sentinel defeats that
+    internal accounting, letting the real DEFLATE stream run to its own
+    natural end (where its real CRC-32 correctly still matches, since the
+    underlying compressed bytes are genuine) — streamed in bounded chunks
+    so this check itself never buffers more than one chunk of a hostile
+    member in memory at once, regardless of what either size field claims.
+    """
     limit = settings.max_docx_uncompressed_mb * 1024 * 1024
-    total = 0
     with zipfile.ZipFile(path) as zf:
+        declared_total = 0
         for info in zf.infolist():
-            total += info.file_size
-            if total > limit:
+            declared_total += info.file_size
+            if declared_total > limit:
                 raise FileTooLargeError(DOCX_EXPANDS_TOO_LARGE)
+
+        actual_total = 0
+        for info in zf.infolist():
+            unbounded = copy.copy(info)
+            unbounded.file_size = _UNBOUNDED_SENTINEL
+            with zf.open(unbounded) as member:
+                while chunk := member.read(_CHUNK_BYTES):
+                    actual_total += len(chunk)
+                    if actual_total > limit:
+                        raise FileTooLargeError(DOCX_EXPANDS_TOO_LARGE)
 
 
 def extract_document(path: str, settings: Settings) -> ExtractionResult:
