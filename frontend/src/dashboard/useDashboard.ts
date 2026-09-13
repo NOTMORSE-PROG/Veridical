@@ -21,6 +21,12 @@ export interface DashboardStats {
   // unresolved escalations, no decision yet) -- NOT derivable from the
   // band counts above, which is what this screen used to attempt.
   ready_to_decide_count: number;
+  // BUG-212: real counts for the "Needs you"/"In progress" tab badges,
+  // mirroring `list_manuscripts`'s own `needs_attention`/`checking`
+  // predicates -- without these the badges had nothing to fall back on
+  // whenever that tab wasn't the currently selected one.
+  needs_attention_count: number;
+  checking_count: number;
 }
 
 export function useDashboardStats() {

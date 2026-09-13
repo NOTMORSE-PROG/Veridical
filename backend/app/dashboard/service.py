@@ -2,12 +2,12 @@
 queries over what V-018/V-019 already persist — no new state.
 """
 
-from sqlalchemy import func, select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import Settings, get_settings
 from app.dashboard.schemas import DashboardStats
-from app.models.enums import CheckRunStatus, ReadinessStatus, ResultOutcome
+from app.models.enums import CheckRunStatus, IngestStatus, ReadinessStatus, ResultOutcome
 from app.models.manuscript import Manuscript
 from app.models.run import CheckResult, CheckRun, ReadinessReport
 
@@ -106,6 +106,86 @@ async def get_dashboard_stats(
         )
     ) or 0
 
+    # BUG-212: "Needs you" and "In progress" tab badges need real counts
+    # too, mirroring `list_manuscripts`'s own `needs_attention`/`checking`
+    # predicates exactly (`ingest/service.py`) -- scoped to ALL of the
+    # instructor's non-dismissed manuscripts, not just `latest_done_run_
+    # ids` above, since both predicates explicitly include manuscripts
+    # whose latest run is NOT done (that's the whole point of "checking",
+    # and `needs_attention` also covers failed/cancelled runs and failed
+    # ingestion with no run at all).
+    latest_run_status = (
+        select(CheckRun.status)
+        .where(CheckRun.manuscript_id == Manuscript.id)
+        .order_by(CheckRun.created_at.desc(), CheckRun.id.desc())
+        .limit(1)
+        .correlate(Manuscript)
+        .scalar_subquery()
+    )
+    latest_done_run_id = (
+        select(CheckRun.id)
+        .where(CheckRun.manuscript_id == Manuscript.id, CheckRun.status == CheckRunStatus.done)
+        .order_by(CheckRun.created_at.desc(), CheckRun.id.desc())
+        .limit(1)
+        .correlate(Manuscript)
+        .scalar_subquery()
+    )
+    per_manuscript_escalation_count = (
+        select(func.count(CheckResult.id))
+        .where(
+            CheckResult.check_run_id == latest_done_run_id,
+            CheckResult.criterion_id.is_not(None),
+            CheckResult.outcome == ResultOutcome.escalated,
+        )
+        .correlate(Manuscript)
+        .scalar_subquery()
+    )
+    manuscript_scope = (
+        Manuscript.instructor_id == instructor_id,
+        Manuscript.dismissed_at.is_(None),
+    )
+
+    needs_attention_count = (
+        await session.scalar(
+            select(func.count())
+            .select_from(Manuscript)
+            .where(
+                *manuscript_scope,
+                or_(
+                    and_(
+                        latest_run_status == CheckRunStatus.done,
+                        per_manuscript_escalation_count > 0,
+                    ),
+                    latest_run_status.in_((CheckRunStatus.failed, CheckRunStatus.cancelled)),
+                    and_(
+                        latest_run_status.is_(None),
+                        Manuscript.ingest_status == IngestStatus.failed,
+                    ),
+                ),
+            )
+        )
+    ) or 0
+
+    checking_count = (
+        await session.scalar(
+            select(func.count())
+            .select_from(Manuscript)
+            .where(
+                *manuscript_scope,
+                latest_run_status.in_(
+                    (
+                        CheckRunStatus.queued,
+                        CheckRunStatus.ingesting,
+                        CheckRunStatus.structural,
+                        CheckRunStatus.semantic,
+                        CheckRunStatus.integrity,
+                        CheckRunStatus.aggregating,
+                    )
+                ),
+            )
+        )
+    ) or 0
+
     return DashboardStats(
         manuscripts_checked=manuscripts_checked or 0,
         ready_count=status_counts.get(ReadinessStatus.ready, 0),
@@ -120,4 +200,6 @@ async def get_dashboard_stats(
         ),
         decided_count=decided_count,
         ready_to_decide_count=ready_to_decide_count,
+        needs_attention_count=needs_attention_count,
+        checking_count=checking_count,
     )
