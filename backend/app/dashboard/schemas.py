@@ -29,3 +29,11 @@ class DashboardStats(BaseModel):
     # the frontend used to subtract the former from `manuscripts_checked`
     # as a stand-in for the latter, and the two silently diverged.
     ready_to_decide_count: int
+    # BUG-212: the exact same predicates `list_manuscripts` uses for
+    # `status=needs_attention` and `status=checking` -- scoped to ALL of
+    # the instructor's manuscripts, not just ones with a done latest run,
+    # since both predicates explicitly include manuscripts that don't have
+    # one yet. Without these the "Needs you"/"In progress" tab badges had
+    # no real count to fall back on whenever that tab wasn't selected.
+    needs_attention_count: int
+    checking_count: int

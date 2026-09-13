@@ -33,6 +33,10 @@ const STATS = {
   // = 2) -- if the badge ever regresses back to deriving this instead of
   // reading the real field, this fixture makes that regression visible.
   ready_to_decide_count: 1,
+  // BUG-212: used to have no backing field at all when its tab wasn't
+  // selected -- the "In progress" assertion below reads this directly.
+  needs_attention_count: 5,
+  checking_count: 3,
 };
 
 const MANUSCRIPTS_PAGE = {
@@ -188,6 +192,9 @@ describe("DashboardPage", () => {
     expect(
       screen.getByRole("button", { name: /Ready to decide1 manuscript/ }),
     ).toBeInTheDocument();
+    // BUG-212: "In progress" isn't the active tab here, and used to show
+    // no count at all -- now reads STATS.checking_count directly.
+    expect(screen.getByRole("button", { name: /In progress3 manuscripts/ })).toBeInTheDocument();
   });
 
   it("BUG-190: completed check evidence wins over a stale pending ingest state", async () => {

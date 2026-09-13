@@ -15,6 +15,8 @@ const BASE: DashboardStats = {
   system_underperforming: false,
   decided_count: 2,
   ready_to_decide_count: 2,
+  needs_attention_count: 1,
+  checking_count: 0,
 };
 
 describe("KpiCards", () => {

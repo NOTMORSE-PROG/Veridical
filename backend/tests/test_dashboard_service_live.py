@@ -343,6 +343,119 @@ async def test_bug211_ready_to_decide_count_excludes_a_manuscript_with_an_unreso
         assert stats.ready_to_decide_count == 1
 
 
+async def test_bug212_needs_attention_and_checking_counts_match_the_real_queue_predicates(
+    session_factory,
+):
+    """BUG-212: the dashboard's "Needs you"/"In progress" tab badges had no
+    real count backing them at all (unlike `ready_to_decide_count`/
+    `decided_count`) -- these two new counts must mirror `list_manuscripts`'s
+    own `needs_attention`/`checking` predicates exactly, including the cases
+    those predicates cover that `manuscripts_checked` and friends do NOT:
+    a failed run, a cancelled run, and a failed ingestion with no run at
+    all are all "needs attention" despite having no done latest run."""
+    from app.models.enums import IngestStatus
+
+    async with session_factory() as session:
+        instructor = Instructor(email="dash9@demo.local", display_name="Dash Test 9")
+        session.add(instructor)
+        await session.commit()
+
+        # needs_attention: a done run with an unresolved escalation.
+        await _make_run(
+            session,
+            instructor,
+            run_status=CheckRunStatus.done,
+            report_status="not_ready",
+            results=["failed", "escalated"],
+        )
+        # needs_attention: the latest run itself failed.
+        await _make_run(session, instructor, run_status=CheckRunStatus.failed)
+        # needs_attention: the latest run was cancelled.
+        await _make_run(session, instructor, run_status=CheckRunStatus.cancelled)
+        # needs_attention: failed ingestion, no check_run at all.
+        session.add(
+            Manuscript(
+                instructor_id=instructor.id,
+                group_label="G",
+                file_ref="failed.pdf",
+                ingest_status=IngestStatus.failed,
+            )
+        )
+        # checking: a run still in progress.
+        await _make_run(session, instructor, run_status=CheckRunStatus.semantic)
+        # Neither: a clean done run, no escalation, no decision -- this is
+        # the ready_to_decide case, not needs_attention or checking.
+        await _make_run(
+            session,
+            instructor,
+            run_status=CheckRunStatus.done,
+            report_status="ready",
+            results=["passed"],
+        )
+        await session.commit()
+
+        stats = await get_dashboard_stats(session, instructor.id)
+        assert stats.needs_attention_count == 4
+        assert stats.checking_count == 1
+
+
+async def test_bug212_a_superseded_run_never_double_counts_or_leaks_into_needs_attention(
+    session_factory,
+):
+    """`backend-critic` finding (BUG-212 review): the shipped test only ever
+    constructed single-run manuscripts, so it couldn't catch a stale run's
+    status/escalations leaking past a newer superseding run -- exactly the
+    class of bug BUG-012 named for this whole file. Two manuscripts, each
+    with two runs: one where a stale FAILED run is superseded by a clean
+    DONE run (must NOT count -- the newer run is what matters), and one
+    where a stale DONE-with-escalation run is superseded by a CANCELLED run
+    (must count exactly ONCE, via the cancelled latest run, not twice)."""
+    async with session_factory() as session:
+        instructor = Instructor(email="dash10@demo.local", display_name="Dash Test 10")
+        session.add(instructor)
+        await session.commit()
+
+        # Manuscript A: stale FAILED run, then a later clean DONE run.
+        # The stale failure must not leak forward -- this manuscript is
+        # NOT needs_attention.
+        manuscript_a = Manuscript(instructor_id=instructor.id, group_label="A", file_ref="a.pdf")
+        session.add(manuscript_a)
+        await session.commit()
+        await _make_run(
+            session, instructor, manuscript_id=manuscript_a.id, run_status=CheckRunStatus.failed
+        )
+        await _make_run(
+            session,
+            instructor,
+            manuscript_id=manuscript_a.id,
+            run_status=CheckRunStatus.done,
+            report_status="ready",
+            results=["passed"],
+        )
+
+        # Manuscript B: stale DONE-with-escalation run, then a later
+        # CANCELLED run. Must count exactly once (via the cancelled latest
+        # run), never twice, and never via the stale escalation.
+        manuscript_b = Manuscript(instructor_id=instructor.id, group_label="B", file_ref="b.pdf")
+        session.add(manuscript_b)
+        await session.commit()
+        await _make_run(
+            session,
+            instructor,
+            manuscript_id=manuscript_b.id,
+            run_status=CheckRunStatus.done,
+            report_status="not_ready",
+            results=["failed", "escalated"],
+        )
+        await _make_run(
+            session, instructor, manuscript_id=manuscript_b.id, run_status=CheckRunStatus.cancelled
+        )
+
+        stats = await get_dashboard_stats(session, instructor.id)
+        assert stats.needs_attention_count == 1  # only manuscript B, exactly once
+        assert stats.checking_count == 0
+
+
 async def test_a_superseded_runs_decision_does_not_linger_in_decided_count(session_factory):
     async with session_factory() as session:
         instructor = Instructor(email="dash7@demo.local", display_name="Dash Test 7")

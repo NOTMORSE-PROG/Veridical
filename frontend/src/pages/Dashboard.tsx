@@ -116,6 +116,11 @@ function QueueCount({
   // currently has unresolved escalations are different facts.
   if (queue === "ready_to_decide") count = stats.ready_to_decide_count;
   if (queue === "complete") count = stats.decided_count;
+  // BUG-212: `needs_review`/`checking` used to fall through to `null`
+  // here whenever they weren't the active tab -- no equivalent stat
+  // field existed for either predicate at all.
+  if (queue === "needs_review") count = stats.needs_attention_count;
+  if (queue === "checking") count = stats.checking_count;
   if (count === null) return null;
   return <span>{count} manuscript{count === 1 ? "" : "s"}</span>;
 }
