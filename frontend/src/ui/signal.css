@@ -3604,6 +3604,30 @@
     box-shadow: var(--signal-shadow-floating);
   }
 
+  /* BUG-191 (`ux-critic` finding, two rounds): the sticky panel had no
+     equivalent of the mobile-only bottom-clearance reservation below, so
+     it visually covered -- and, confirmed live via a real click-target
+     check, genuinely blocked pointer events on -- whichever card row
+     happened to scroll to the bottom of the viewport while comparison
+     mode was active. The first fix attempt (padding-block-end alone on
+     this element) was re-verified live and found NOT sufficient: on a
+     library page short enough to fit inside the viewport, `position:
+     sticky` clamps to its bottom-anchored position immediately, with no
+     scrolling ever occurring -- padding added AFTER the sticky element in
+     document flow doesn't retroactively create clearance above it if the
+     page never scrolls far enough to expose that padding. The results
+     wrapper below now carries a real minimum height tied to the viewport
+     itself, so genuine scroll distance always exists regardless of how
+     few records are on the page; this padding stays as the long-page
+     case's own clearance once real scrolling does happen. */
+  .signal-library[data-compare="true"] {
+    padding-block-end: var(--signal-library-selection-desktop-reserve);
+  }
+
+  .signal-library[data-compare="true"] .signal-library-results {
+    min-block-size: calc(100dvh - var(--signal-library-selection-desktop-reserve));
+  }
+
   .signal-library-selection > div:last-child {
     display: flex;
     gap: var(--signal-space-2);
@@ -4329,10 +4353,26 @@
       display: block;
     }
 
+    /* BUG-191: the desktop-only `min-block-size` reservation above exists
+       to guarantee scroll distance for a `position: sticky` panel on a
+       short page -- irrelevant here, since this breakpoint already uses
+       `position: fixed` (viewport-anchored regardless of page length),
+       and would otherwise force unnecessary empty space under a short
+       phone-width library list. */
+    .signal-library[data-compare="true"] .signal-library-results {
+      min-block-size: 0;
+    }
+
     .signal-library-selection {
       position: fixed;
       inset-inline: var(--signal-space-4);
       inset-block-end: calc(var(--signal-phone-nav-height) + var(--signal-space-2));
+      /* BUG-191: the desktop panel wraps its flex children intentionally.
+         After the phone layout switches that flex axis to a column, the
+         inherited wrapping moved the action group into an off-screen
+         second column when the panel hit its height cap. Keep one column;
+         the bounded panel scrolls vertically to the actions instead. */
+      flex-wrap: nowrap;
       max-block-size: calc(100dvh - var(--signal-phone-header-height) - var(--signal-phone-nav-height) - var(--signal-space-4));
       overflow-y: auto;
     }

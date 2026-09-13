@@ -99,6 +99,37 @@ describe("Modal", () => {
     expect(document.activeElement).toBe(continueBtn);
   });
 
+  it("BUG-188: a <details>/<summary> disclosure in the body counts as a real focusable element, not skipped by the trap", () => {
+    // `<summary>` is natively tabbable but matches none of the trap's
+    // element-type selectors on its own -- Audit's own "Technical record"
+    // disclosure is exactly this shape, and the trap used to compute
+    // Close as BOTH first and last (summary invisible to it entirely),
+    // so every Tab press from Close wrapped straight back to itself and
+    // summary was never reachable by keyboard at all.
+    render(
+      <Modal title="t" onClose={() => {}}>
+        <details>
+          <summary>Technical record</summary>
+          <p>detail</p>
+        </details>
+      </Modal>,
+    );
+    const closeBtn = screen.getByRole("button", { name: "Close" });
+    const summary = screen.getByText("Technical record");
+
+    // Old (broken) behavior: Shift+Tab from Close looped back to Close
+    // itself, since summary wasn't part of the recognized focusable set
+    // and Close was computed as both first AND last.
+    closeBtn.focus();
+    fireEvent.keyDown(document, { key: "Tab", shiftKey: true });
+    expect(document.activeElement).toBe(summary);
+
+    // And forward Tab from summary (the real last element now) wraps
+    // back to Close, same convention as every other wrap test above.
+    fireEvent.keyDown(document, { key: "Tab" });
+    expect(document.activeElement).toBe(closeBtn);
+  });
+
   it("restores focus to the trigger element on unmount (BUG-020)", () => {
     const trigger = document.createElement("button");
     trigger.textContent = "Open";

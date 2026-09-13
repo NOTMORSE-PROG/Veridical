@@ -344,7 +344,35 @@
   --signal-workspace-header-compact-height: 4rem;
   --signal-phone-header-height: 4rem;
   --signal-phone-nav-height: 0rem;
-  --signal-library-selection-mobile-reserve: 22rem;
+  /* BUG-191 (`ux-critic` finding, second round): this used to be a
+     guessed constant (22rem), sized against whatever two records
+     happened to be tested with rather than the panel's own real worst-
+     case height -- with two ordinary "available" selections and
+     realistic title-length demo data, the panel's actual rendered
+     height (bounded by its own `max-block-size` below) exceeded this
+     guess, leaving a real dead click zone and a WCAG 2.4.11 focus-hidden
+     defect on the single most common path through this screen. Derived
+     now, not guessed: this is the panel's own `max-block-size` formula
+     (`ui/signal.css`'s mobile `.signal-library-selection` rule) plus its
+     own `inset-block-end` gap above the nav bar, so the reserve can
+     never fall short of what the panel is physically capable of
+     rendering -- correct by construction, not by re-measuring one more
+     example and hoping the next one fits too. Kept in the same
+     `phone-nav-height`-excluded shape the usage site (`.signal-library
+     [data-compare="true"]`'s own `padding-block-end`) already adds it
+     back on top of, so the two compose to the exact right total rather
+     than double-counting it. */
+  --signal-library-selection-mobile-reserve: calc(
+    100dvh - var(--signal-phone-header-height) - var(--signal-phone-nav-height) - var(--signal-space-4) +
+      var(--signal-space-2)
+  );
+  /* BUG-191 finding: the desktop sticky selection panel had no
+     equivalent bottom-clearance reservation at all -- it visually
+     covered (and blocked pointer events on) whichever card row scrolled
+     to the bottom of the viewport while comparison mode was active. A
+     single-row summary+records+actions panel is far shorter than the
+     stacked mobile layout the reserve above sizes for. */
+  --signal-library-selection-desktop-reserve: 10rem;
   --signal-spine-stage-number-size: 2rem;
   --signal-account-panel-width: 17rem;
   --signal-account-initials-size: 2rem;
