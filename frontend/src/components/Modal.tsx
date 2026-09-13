@@ -22,8 +22,14 @@ interface ModalProps {
   size?: "md" | "lg";
 }
 
+// BUG-188 finding: `<summary>` is natively focusable/tabbable but matched
+// none of the patterns below, so a modal containing a `<details>`
+// disclosure (Audit's own "Technical record") had its trap compute the
+// WRONG "last" element -- Close ended up first AND last, so every Tab
+// press wrapped straight back to itself and the disclosure toggle was
+// never reachable by keyboard at all.
 const FOCUSABLE_SELECTOR =
-  'a[href], button:not([disabled]), textarea:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])';
+  'a[href], button:not([disabled]), textarea:not([disabled]), input:not([disabled]), select:not([disabled]), summary, [tabindex]:not([tabindex="-1"])';
 
 function getFocusable(container: HTMLElement): HTMLElement[] {
   return Array.from(container.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR));
