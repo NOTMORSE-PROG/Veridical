@@ -198,6 +198,55 @@ def test_docx_with_a_high_decompression_ratio_is_rejected_before_parsing(tmp_pat
         extract_document(str(path), settings)
 
 
+def test_docx_that_lies_about_its_uncompressed_size_is_still_rejected(tmp_path, monkeypatch):
+    """BUG-159: `ZipInfo.file_size` is attacker-controlled central-directory
+    metadata -- a crafted archive can UNDERSTATE it while the member still
+    decompresses to something far larger, which the ticket's own analysis
+    showed would sail past a check that only reads the declared field. This
+    builds exactly that archive (declared size lies small; the real
+    compressed data genuinely decompresses to something over the ceiling)
+    and confirms it's still rejected.
+
+    `backend-critic` finding (BUG-159 review): this is also a compatibility
+    canary, not just a security regression test. The fix's second pass
+    depends on an undocumented CPython `zipfile.ZipExtFile` implementation
+    detail (`_left`/`_compress_left` bookkeeping) to defeat the lie -- not a
+    contractual part of the public `zipfile` API. A green run on a future
+    Python version doesn't by itself prove that mechanism still has the same
+    shape; if this test ever starts failing after a Python version bump,
+    that is the first thing to suspect, not a regression in this file."""
+    monkeypatch.setenv("MAX_DOCX_UNCOMPRESSED_MB", "1")
+    get_settings.cache_clear()
+    settings = get_settings()
+
+    path = tmp_path / "lying_bomb.docx"
+    real_size = 5 * 1024 * 1024  # 5MB real content, over the 1MB ceiling.
+    with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr("word/document.xml", b"A" * real_size)
+
+    # Patch the CENTRAL DIRECTORY's declared uncompressed-size field (the
+    # exact field `_check_uncompressed_size`'s first, cheap pass reads) down
+    # to a small lie, WITHOUT touching the real compressed bytes or CRC-32 --
+    # the archive is still internally valid, just dishonest about its size.
+    raw = bytearray(path.read_bytes())
+    cd_signature_index = raw.find(b"PK\x01\x02")
+    assert cd_signature_index != -1
+    uncompressed_size_offset = cd_signature_index + 24
+    declared_lie = 100
+    raw[uncompressed_size_offset : uncompressed_size_offset + 4] = declared_lie.to_bytes(
+        4, "little"
+    )
+    path.write_bytes(raw)
+
+    # Confirm the lie actually landed -- this test would be meaningless
+    # against an unpatched archive.
+    with zipfile.ZipFile(path) as zf:
+        assert zf.infolist()[0].file_size == declared_lie
+
+    with pytest.raises(FileTooLargeError):
+        extract_document(str(path), settings)
+
+
 def test_legacy_doc_rejected_with_clear_message():
     with pytest.raises(FileMalformedError) as exc_info:
         select_extractor(".doc")
