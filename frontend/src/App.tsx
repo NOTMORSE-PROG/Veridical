@@ -23,6 +23,7 @@ import { SignalLibraryDetailPage } from "./library/SignalLibraryDetail";
 import { SignalLibraryPage } from "./library/SignalLibrary";
 import { LandingRoute } from "./pages/Landing";
 import { DashboardPage } from "./pages/Dashboard";
+import { NotFoundPage } from "./pages/NotFound";
 import { SignInPage } from "./pages/SignIn";
 import { AdviserViewPage } from "./report/AdviserView";
 import { SignalReportPage } from "./report/SignalReport";
@@ -65,6 +66,10 @@ const router = createBrowserRouter(
           <Route path="/flags/:flagId" element={<FlagDetailPage />} />
           <Route path="/audit" element={<AuditLogPage />} />
         </Route>
+        {/* BUG-222: catch-all -- must be the last route so every named path
+            above still wins; renders the app's own not-found screen instead
+            of React Router's developer-addressed default ErrorBoundary. */}
+        <Route path="*" element={<NotFoundPage />} />
       </Route>
     ,
   ),
