@@ -1328,6 +1328,12 @@
     background: var(--color-signal-surface-muted);
   }
 
+  /* BUG-108: split from one combined `button, a` rule -- a raw <button>
+     (an in-place action, e.g. "Run again") and a raw <a>/<Link> (real
+     navigation, e.g. "Open prior report") shared one visual rule with
+     nothing to tell them apart before a click. The `a` variant now reserves
+     space for a trailing chevron (see Dashboard.tsx), the same "this leaves
+     the page" marker `ActionLink` carries everywhere else. */
   .signal-record__actions details button,
   .signal-record__actions details a {
     min-height: var(--signal-control-height);
@@ -1342,6 +1348,10 @@
     text-align: start;
     text-decoration: none;
     cursor: pointer;
+  }
+
+  .signal-record__actions details a {
+    gap: var(--signal-space-2);
   }
 
   .signal-record__actions details button:hover,

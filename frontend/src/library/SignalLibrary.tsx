@@ -387,9 +387,15 @@ function LibraryCard({
                         </ActionLink>
                       )}
                       {!upload.purged_at && (
+                        // BUG-108 finding 2: was `variant="quiet"` (link-blue,
+                        // lowest emphasis) for the same irreversible purge
+                        // mutation that renders `variant="danger"` (solid red)
+                        // on the detail page -- one destructive action, two
+                        // opposite visual weights depending on which sibling
+                        // screen you're on.
                         <Button
                           type="button"
-                          variant="quiet"
+                          variant="danger"
                           onClick={() =>
                             onPurge({
                               manuscriptId: upload.manuscript_id,
@@ -421,9 +427,10 @@ function LibraryCard({
             </ActionLink>
           )}
           {item.is_own && !item.purged_at && (
+            // BUG-108 finding 2: same fix as the duplicate-row sibling above.
             <Button
               type="button"
-              variant="quiet"
+              variant="danger"
               onClick={() =>
                 onPurge({
                   manuscriptId: item.manuscript_id,
