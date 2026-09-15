@@ -22,7 +22,7 @@ import { useRouteFocus } from "../routing/useRouteFocus";
 import { RerunModal } from "../rubric/RerunModal";
 import { UploadRubricModal } from "../rubric/UploadRubricModal";
 import { useRubricFamilies } from "../rubric/useRubric";
-import { ActionLink } from "../ui/ActionLink";
+import { ActionLink, TrailingChevronIcon } from "../ui/ActionLink";
 import { Alert } from "../ui/Alert";
 import { Button } from "../ui/Button";
 import { ProcessStatus } from "../ui/ProcessStatus";
@@ -252,7 +252,14 @@ function WorkQueueRecord({
               <button type="button" onClick={() => onSetGroup(row.id)}>Review group details</button>
             )}
             {row.latest_done_check_run_id && row.latest_done_check_run_id !== row.latest_check_run_id && (
-              <Link to={`/report/${row.latest_done_check_run_id}`}>Open prior report</Link>
+              // BUG-108: this menu mixes real navigation (this Link) with
+              // in-place actions (the plain <button>s around it), sharing
+              // one CSS rule with nothing to tell them apart before a
+              // click -- same trailing-chevron marker ActionLink carries.
+              <Link to={`/report/${row.latest_done_check_run_id}`}>
+                Open prior report
+                <TrailingChevronIcon />
+              </Link>
             )}
             {row.latest_done_check_run_id ? (
               <button type="button" onClick={() => onRerun(row.id)}>Run again</button>
