@@ -104,9 +104,11 @@ def build_semantic_batches(
     document" when none is identifiable) so one Gemini call can grade
     every criterion that shares the same context. Returns
     `(batches, missing)`: `missing` is (criterion, target) pairs whose
-    named section genuinely does not exist in this manuscript — those are
-    graded `failed` immediately by the caller, without spending a call,
-    aligned with `required_section_present`'s identical situation.
+    named section could not be located by title match -- BUG-221: a lookup
+    miss is not proof of genuine absence (see `_title_candidates`'s own
+    BUG-048 comment), so these are escalated to the instructor by the
+    caller, without spending a call, never auto-failed. Same treatment as
+    `required_section_present`'s identical situation.
     """
     flat_nodes = list(walk_sections(extraction.section_tree))
     groups: dict[str, list[Any]] = {}
@@ -706,16 +708,29 @@ async def run_semantic_checks(
     if not criteria:
         return []
     batches, missing = build_semantic_batches(criteria, extraction)
+    # BUG-221 (charter rule 1): this used to grade `failed` immediately --
+    # a title-match miss is not proof the section is genuinely absent, only
+    # that the lookup couldn't find it (the same false-negative class
+    # BUG-048 already fixed once, for references specifically; nothing
+    # here rules it out for an arbitrary "chapter N" target). Stating
+    # "Does not meet" for a section the check never actually read is
+    # exactly the dishonest-verdict risk ground rule 3 exists to prevent.
+    # Escalated instead, same as `required_section_present`'s identical
+    # situation -- a human decides, nothing is auto-failed on a lookup miss.
     results = [
         await _persist(
             session,
             check_run_id,
             criterion,
-            ResultOutcome.failed,
+            ResultOutcome.escalated,
             {
-                "score": 0.0,
                 "basis": "structural-alignment",
-                "reason": f"Referenced section '{target}' was not found in the manuscript.",
+                "reason": (
+                    f"No section matching '{target}' was found in the manuscript's parsed "
+                    "structure. This may mean the section is genuinely missing, or that it "
+                    "exists under wording VERIDICAL doesn't yet recognize -- check the "
+                    "manuscript directly before deciding."
+                ),
             },
         )
         for criterion, target in missing

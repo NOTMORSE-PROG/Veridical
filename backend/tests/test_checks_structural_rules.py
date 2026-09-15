@@ -145,12 +145,17 @@ def test_required_section_present_matches_and_finds_a_numbered_chapter():
     assert outcome.anchor == "page 5"
 
 
-def test_required_section_present_fails_honestly_when_absent():
+def test_required_section_present_escalates_honestly_when_not_found():
+    # BUG-221: a title-match miss used to grade this `failed` outright --
+    # not proof the section is genuinely absent, only that the lookup
+    # couldn't find it (the same false-negative class BUG-048 already fixed
+    # once for references). Escalated to the instructor instead, never
+    # auto-failed on a lookup miss (charter rule 1).
     spec = get_rule(REQUIRED_SECTION_RULE_ID)
     criterion = FakeCriterion(text="The manuscript must include a Glossary")
     ctx = _ctx(section_tree=_tree(SectionNode(title="ABSTRACT", level=1, page=2)))
     outcome = spec.run(criterion, ctx)
-    assert outcome.outcome == ResultOutcome.failed
+    assert outcome.outcome == ResultOutcome.escalated
     assert "glossary" in outcome.detail["target"]
 
 
