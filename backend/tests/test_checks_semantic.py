@@ -186,8 +186,14 @@ async def test_missing_section_criterion_never_calls_the_llm():
     llm = ScriptedLLM([])  # would raise IndexError if ever called
     session = FakeSession()
     results = await run_semantic_checks(session, 1, criteria, extraction, llm)
-    assert results[0].outcome == ResultOutcome.failed
-    assert "not found" in results[0].detail["reason"]
+    # BUG-221: a title-match miss used to grade this `failed` outright --
+    # not proof the section is genuinely absent, only that the lookup
+    # couldn't find it (the same false-negative class BUG-048 already fixed
+    # once for references). Escalated to the instructor instead, never
+    # auto-failed on a lookup miss (charter rule 1).
+    assert results[0].outcome == ResultOutcome.escalated
+    assert results[0].score is None
+    assert "No section matching" in results[0].detail["reason"]
     assert llm.calls == []
 
 
