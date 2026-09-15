@@ -18,9 +18,10 @@ from typing import Any
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.audit.schemas import AuditLogDetail, AuditLogSummary, PaginatedAuditLog
+from app.audit.schemas import AuditLogDetail, AuditLogSummary, LLMExecutionMode, PaginatedAuditLog
 from app.errors import NotFoundError
 from app.models.audit import AuditLog
+from app.models.enums import LLMMode
 from app.models.manuscript import Manuscript
 from app.models.run import CheckRun
 
@@ -37,6 +38,30 @@ def _scoped_query(instructor_id: int):
     )
 
 
+def _llm_execution_mode(event_type: str, payload: dict[str, Any]) -> LLMExecutionMode | None:
+    """BUG-219: honest per-row provenance for the audit list/detail, derived
+    only from the already-stored `fake_llm` fact — never inferred from
+    anything else, and never defaulted to "real" for a row that simply
+    predates this field. Non-LLM events (overrides, decisions, routing...)
+    don't carry a `fake_llm` fact at all, because the concept doesn't apply
+    to them; `None` says that plainly rather than reporting a guess.
+
+    Same `fake`/`real`/`unknown` vocabulary BUG-049's `LLMMode` already made
+    instructor-facing on the report/flag/adviser surfaces — this is a
+    separate, per-ROW derivation (not a re-read of `CheckRun.llm_mode`)
+    because several audit event types (`rubric_parse_attempt`'s LLM calls,
+    a bare `ping`) have no `check_run_id` to join through at all, but it
+    reports the same fact using the same words on purpose."""
+    if not event_type.startswith("llm_"):
+        return None
+    fake_llm = payload.get("fake_llm")
+    if fake_llm is True:
+        return LLMMode.fake.value
+    if fake_llm is False:
+        return LLMMode.real.value
+    return LLMMode.unknown.value
+
+
 def _summary(row: AuditLog, group_label: str | None) -> AuditLogSummary:
     payload = row.payload or {}
     return AuditLogSummary(
@@ -48,6 +73,7 @@ def _summary(row: AuditLog, group_label: str | None) -> AuditLogSummary:
         prompt_type=payload.get("prompt_type"),
         prompt_version=row.prompt_version,
         agreement_score=float(row.agreement_score) if row.agreement_score is not None else None,
+        llm_execution_mode=_llm_execution_mode(row.event_type, payload),
         created_at=row.created_at,
     )
 
@@ -79,7 +105,16 @@ async def list_audit_log(
     total = await session.scalar(select(func.count()).select_from(query.subquery()))
     rows = (
         await session.execute(
-            query.order_by(AuditLog.created_at.desc())
+            # Tie-break on id: found live while testing BUG-219 (multiple
+            # rows written in one transaction share the exact same
+            # `created_at`, Postgres's own `server_default=func.now()`
+            # being transaction-start time, not per-statement) -- without
+            # it, OFFSET/LIMIT across ties is undefined, so a row can
+            # repeat on the next page or never appear on any. Same defect
+            # class BUG-207 already named for archive/service.py's sibling
+            # query; that ticket is updated with the other sites this same
+            # pass found.
+            query.order_by(AuditLog.created_at.desc(), AuditLog.id.desc())
             .offset((page - 1) * page_size)
             .limit(page_size)
         )

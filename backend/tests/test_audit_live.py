@@ -248,6 +248,34 @@ async def test_pagination(session_factory):
         assert len(page3.items) == 1
 
 
+async def test_pagination_is_stable_when_every_row_shares_one_created_at(session_factory):
+    """Found live while building BUG-219: these 5 rows are all written in
+    ONE transaction, so Postgres's `created_at` (`server_default=func.now()`,
+    transaction-start time) is byte-identical on every one of them -- a real,
+    common condition (bulk seeding, or several audit writes landing in the
+    same commit), not a contrived one. `test_pagination` above only ever
+    checked page LENGTHS under this exact setup and could not have caught
+    the defect this test is named for: with no secondary sort key, a tied
+    row's OFFSET/LIMIT position is undefined, so walking every page could
+    return the same row twice and never return another at all."""
+    async with session_factory() as session:
+        instructor = Instructor(email="stable@test.local", display_name="Stable")
+        session.add(instructor)
+        await session.commit()
+        run = await _make_run(session, instructor)
+        for _ in range(5):
+            session.add(AuditLog(event_type="llm_call", check_run_id=run.id, payload={}))
+        await session.commit()
+
+        seen_ids: list[int] = []
+        for page_num in (1, 2, 3):
+            page = await list_audit_log(session, instructor.id, page=page_num, page_size=2)
+            seen_ids.extend(row.id for row in page.items)
+
+        assert len(seen_ids) == 5
+        assert len(set(seen_ids)) == 5  # no id repeated across a page boundary
+
+
 async def test_detail_returns_full_payload_and_input_hash(session_factory):
     async with session_factory() as session:
         instructor = Instructor(email="det@test.local", display_name="Det")
@@ -294,3 +322,51 @@ async def test_detail_404s_for_another_instructors_row(session_factory):
 
         with pytest.raises(NotFoundError):
             await get_audit_log_detail(session, mine.id, their_row_id)
+
+
+async def test_llm_execution_mode_round_trips_through_real_postgres_jsonb(session_factory):
+    """BUG-219: the derivation is unit-tested pure in test_audit_service.py;
+    this proves it end to end through the real list/detail path, including
+    the one thing a pure test can't — that Postgres JSONB round-trips a
+    JSON boolean back into something Python's `is True`/`is False` still
+    matches, not e.g. the string "true"."""
+    async with session_factory() as session:
+        instructor = Instructor(email="mode@test.local", display_name="Mode")
+        session.add(instructor)
+        await session.commit()
+        run = await _make_run(session, instructor)
+        session.add_all(
+            [
+                AuditLog(
+                    event_type="llm_call",
+                    check_run_id=run.id,
+                    payload={"prompt_type": "semantic_grading", "fake_llm": True},
+                ),
+                AuditLog(
+                    event_type="llm_call",
+                    check_run_id=run.id,
+                    payload={"prompt_type": "semantic_grading", "fake_llm": False},
+                ),
+                AuditLog(
+                    event_type="llm_call",
+                    check_run_id=run.id,
+                    payload={"prompt_type": "semantic_grading"},
+                ),
+                AuditLog(event_type="escalation_resolved", check_run_id=run.id, payload={}),
+            ]
+        )
+        await session.commit()
+
+        # All four rows share one transaction's `created_at` -- look up by
+        # id rather than list position on principle (this test cares about
+        # per-row mode correctness, not ordering, which now has its own
+        # dedicated coverage: test_pagination_is_stable_when_every_row_
+        # shares_one_created_at, above).
+        page = await list_audit_log(session, instructor.id, page_size=10)
+        by_id = {row.id: row.llm_execution_mode for row in page.items}
+        modes = [by_id[row_id] for row_id in sorted(by_id)]
+        assert modes == ["fake", "real", "unknown", None]
+
+        non_llm_row_id = max(by_id)
+        detail = await get_audit_log_detail(session, instructor.id, non_llm_row_id)
+        assert detail.llm_execution_mode is None

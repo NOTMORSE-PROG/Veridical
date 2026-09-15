@@ -604,6 +604,14 @@ class LLMQueue:
                     # head — a replay (V-024) must reconstruct the real call,
                     # and a verdict's model is part of its provenance.
                     "model": model or self._model,
+                    # BUG-219: explicit, not just the absence of fake.py's
+                    # own `"fake_llm": True` — a row written before this fix
+                    # shipped has neither key, and the audit summary's
+                    # execution-mode derivation (app/audit/service.py) must
+                    # tell that "genuinely unknown" case apart from "known
+                    # real" rather than defaulting an unmarked old row to
+                    # either state by guessing.
+                    "fake_llm": False,
                     "temperature": self._temperature,
                     "context": self._json_safe(context or {}),
                     "prompt": prompt,

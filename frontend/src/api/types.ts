@@ -342,6 +342,14 @@ export interface CriterionResultOut extends ResultRowCommon {
  * `resolution` field -- see `ResultRowCommon`'s own comment. */
 export type PublicCriterionResultOut = ResultRowCommon;
 
+// BUG-049: "fake" (fixture data, no real Gemini call), "real", or "unknown"
+// (a row/run that predates this field). BUG-219 reuses this exact
+// vocabulary for the audit log's own per-row derivation rather than
+// inventing a second one for the same fact — previously duplicated inline
+// on ReportCommon.llm_mode and FlagOut.llm_mode; extracted here so a third
+// copy (AuditLogSummary.llm_execution_mode, below) doesn't make it three.
+export type LLMMode = "fake" | "real" | "unknown";
+
 export interface ReportCommon {
   status: "ready" | "conditionally_ready" | "not_ready" | "needs_review";
   composite_score: number | null;
@@ -361,11 +369,10 @@ export interface ReportCommon {
   // False when the rubric used for this run is no longer the active
   // version for its family.
   rubric_is_current: boolean;
-  // BUG-049: "fake" (fixture data, no real Gemini call), "real", or
-  // "unknown" (a run that predates this field) -- shown wherever this
-  // report's verdict is shown so fixture-derived flags/scores can never
-  // be mistaken for real findings about the manuscript.
-  llm_mode: "fake" | "real" | "unknown";
+  // BUG-049: shown wherever this report's verdict is shown so fixture-
+  // derived flags/scores can never be mistaken for real findings about
+  // the manuscript.
+  llm_mode: LLMMode;
   // BUG-052: whether the rubric this run graded against was confirmed
   // while the parser's own coverage gate still flagged it as needing
   // manual completion -- survives activation now (it used to be silently
@@ -473,6 +480,12 @@ export interface AuditLogSummary {
   prompt_type: string | null;
   prompt_version: string | null;
   agreement_score: number | null;
+  // BUG-219: which model actually produced an `llm_*` row, derived
+  // server-side from the stored `fake_llm` fact — `null` for every non-LLM
+  // event type (the concept doesn't apply), and "unknown" is a real,
+  // distinct state (a row written before this field existed) that must
+  // never be rendered as "real".
+  llm_execution_mode: LLMMode | null;
   created_at: string;
 }
 
@@ -604,7 +617,7 @@ export interface FlagOut {
   ai_reasoning: string | null;
   // BUG-049: the flag evidence page is exactly where the audit found a
   // fabricated statistical-forensics finding rendered with no disclosure.
-  llm_mode: "fake" | "real" | "unknown";
+  llm_mode: LLMMode;
   // BUG-170: mirrors FlagSummaryOut.is_passage_level -- true only when
   // evidence_excerpt is real, quoted manuscript text (a passage-level
   // reuse flag, or any non-reuse check kind); false for a whole-document/

@@ -7,8 +7,9 @@
 //
 // Two exports for two contexts, not one component with a branch: FlagDetail
 // shows exactly one flag (singular copy, page-level banner slot, same
-// bordered-pill treatment as TestModeBanner -- sits in the SAME slot and
-// stacks with it when both apply, see FlagDetail.tsx). FlagsPanel's flags
+// `Alert tone="warning"` treatment as its own local `ModeDisclosure` --
+// sits in the SAME slot and stacks with it when both apply, see
+// FlagDetail.tsx). FlagsPanel's flags
 // list can show several F7 matches from one run at once, and first_upload is
 // computed ONCE per run and applied uniformly to every match in it (never
 // mixed within one originality_reuse group) -- so one plural note scoped to
@@ -16,9 +17,9 @@
 // statistical-forensics flag two rows away from inheriting a caveat that
 // doesn't apply to it.
 //
-// `info` tone (not `caution`, which TestModeBanner's "unknown" state and
-// RubricNeedsReviewBanner both use): `caution` is reserved for the ambiguous
-// middle case a human must judge (Conditionally Ready, Medium severity).
+// `info` tone (not `caution`, which RubricNeedsReviewBanner uses): `caution`
+// is reserved for the ambiguous middle case a human must judge
+// (Conditionally Ready, Medium severity).
 // This is a neutral, factual disclosure -- "no track record yet" -- and
 // giving it `caution`'s visual weight would imply extra uncertainty or
 // severity, exactly what the owner rejected when declining to touch
