@@ -312,6 +312,36 @@ def test_oversized_upload_rejected_early_with_413(client, monkeypatch):
 
 
 @live
+def test_oversized_upload_leaves_a_row_with_the_specific_reason(client, monkeypatch):
+    """BUG-066: the 413 response tells the CALLER the real MB number, but
+    the Manuscript row it leaves behind (visible later on the Review Desk,
+    a different request entirely) used to only carry the generic
+    `file_too_large` enum -- ANY of three different underlying caps sets
+    that same enum, so a client rendering one blanket "over the MB limit"
+    sentence from it would misstate two of the three. Confirms the row
+    itself carries the same specific, real-number message the 413 body
+    does, not just the bucket."""
+    monkeypatch.setenv("MAX_UPLOAD_MB", "1")
+    get_settings.cache_clear()
+    r = _upload(client, "native.pdf", data=b"x" * (2 * 1024 * 1024))
+    assert r.status_code == 413
+
+    listed = client.get("/manuscripts", params={"page_size": 200})
+    assert listed.status_code == 200
+    # The scratch DB is module-scoped, not truncated between tests (this
+    # file's own established convention), so a sibling test's rows can
+    # coexist -- narrow to THIS upload's own row (highest id = most recent)
+    # rather than assuming this is the only failed row in the table.
+    rows = [
+        row for row in listed.json()["items"] if row["ingest_failure_reason"] == "file_too_large"
+    ]
+    assert rows
+    row = max(rows, key=lambda item: item["id"])
+    assert row["ingest_failure_detail"] is not None
+    assert "1 MB" in row["ingest_failure_detail"]
+
+
+@live
 def test_docx_renamed_to_pdf_is_sniffed_and_parsed(client):
     r = _upload(client, "docx_renamed.pdf")
     assert r.status_code == 200

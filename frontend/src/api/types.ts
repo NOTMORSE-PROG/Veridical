@@ -84,6 +84,12 @@ export interface ManuscriptListItem {
   original_filename: string | null;
   ingest_status: "pending" | "processing" | "done" | "failed";
   ingest_failure_reason: IngestFailureReason | null;
+  // BUG-066: the specific vetted message the failing check computed (real
+  // MB/page numbers from config), when a safe one exists. Null for the
+  // catch-all "extraction_failed" reason and for rows ingested before this
+  // field existed -- the UI falls back to a generic per-reason sentence,
+  // never fabricates a number.
+  ingest_failure_detail: string | null;
   created_at: string;
   latest_check_run_id: number | null;
   latest_check_run_status: CheckRunStatus | null;
