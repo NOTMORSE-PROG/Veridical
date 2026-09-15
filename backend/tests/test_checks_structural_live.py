@@ -153,3 +153,101 @@ async def test_structural_check_persists_a_real_pass_from_a_real_manuscript(
         assert stored.outcome == ResultOutcome.passed
         assert stored.kind == CheckKind.structural
         assert stored.score == 100.0
+
+
+async def test_a_raising_rule_degrades_to_not_applicable_instead_of_killing_the_run(
+    tmp_path, monkeypatch, session_factory
+):
+    """BUG-161: `_missing_rule_outcome` already gives an UNREGISTERED rule
+    an honest not_applicable instead of crashing the run -- nothing gave
+    the same treatment to a rule that IS registered but RAISES (bbox math,
+    reference parsing over arbitrary student PDF content is exactly what
+    produces the degenerate input that trips this). This criterion alone
+    must degrade; the caller must never see the exception."""
+    from app.ingest.service import ingest_manuscript
+
+    monkeypatch.setenv("DATA_DIR", str(tmp_path / "data"))
+    get_settings.cache_clear()
+    settings = get_settings()
+    pdf_path = _abstract_pdf(tmp_path)
+
+    # A real, registered rule spec whose `run` raises -- not a genuinely
+    # broken real rule (which would be fragile, coupled to that rule's own
+    # implementation detail), but the exact shape `get_rule` returns.
+    import app.checks.structural as structural_module
+    from app.checks.rules import RuleSpec
+
+    def _explode(criterion, ctx):
+        raise ZeroDivisionError("synthetic: degenerate bbox math")
+
+    raising_spec = RuleSpec(
+        rule_id="synthetic_raising_rule",
+        description="test-only rule that always raises",
+        matches=lambda criterion: True,
+        run=_explode,
+    )
+    monkeypatch.setattr(structural_module, "get_rule", lambda rule_id: raising_spec)
+
+    async with session_factory() as session:
+        instructor = Instructor(
+            email=f"structural-raise-{time.time_ns()}@test.local", display_name="Structural Test"
+        )
+        session.add(instructor)
+        await session.commit()
+
+        manuscript = Manuscript(
+            instructor_id=instructor.id, group_label="Group A", file_ref=str(pdf_path)
+        )
+        session.add(manuscript)
+        await session.commit()
+        await ingest_manuscript(session, manuscript, pdf_path, settings)
+
+        rubric = Rubric(instructor_id=instructor.id, title="Format", source_file="r.pdf")
+        session.add(rubric)
+        await session.commit()
+        criterion = Criterion(
+            rubric_id=rubric.id,
+            type="structural",
+            text="A criterion whose routed rule will raise",
+            evidence=None,
+            weight=Decimal("10"),
+            position=0,
+        )
+        session.add(criterion)
+        await session.commit()
+
+        check_run = CheckRun(manuscript_id=manuscript.id, rubric_id=rubric.id)
+        session.add(check_run)
+        await session.commit()
+
+        ctx = await build_rule_context(session, manuscript, settings)
+
+        from app.checks.router import RouteDecision
+
+        decision = RouteDecision(
+            criterion_id=criterion.id,
+            kind=CheckKind.structural,
+            rule_id="synthetic_raising_rule",
+            degraded=False,
+            note=None,
+        )
+        # Must not raise -- this is the whole point of the fix.
+        result = await run_structural_check(
+            session, check_run.id, criterion, criterion.id, decision, ctx
+        )
+        assert result.outcome == ResultOutcome.not_applicable
+        assert result.score is None
+        assert result.detail["rule_id"] == "synthetic_raising_rule"
+        # Instructor-facing reason (charter rule 3): honest, but must never
+        # leak a raw exception string -- backend-critic caught an earlier
+        # draft that put `type(exc).__name__` straight into this field.
+        assert "ZeroDivisionError" not in result.detail["reason"]
+        assert "synthetic_raising_rule" in result.detail["reason"]
+
+    async with session_factory() as verify_session:
+        stored = (
+            await verify_session.execute(
+                select(CheckResult).where(CheckResult.criterion_id == criterion.id)
+            )
+        ).scalar_one()
+        assert stored.outcome == ResultOutcome.not_applicable
