@@ -19,12 +19,12 @@ PERCENT_SUM_TOLERANCE = 1.0
 
 PERCENT_SUM_WORDING = (
     "The percentages in this table sum to {total:.1f}%, not 100% (±"
-    "{tolerance:.0f} pt rounding tolerance) — possible arithmetic error "
+    "{tolerance:.0f} pt rounding tolerance). Possible arithmetic error "
     "or a missing/mislabeled category."
 )
 GROUP_COUNT_EXCEEDS_TOTAL_WORDING = (
     "The reported group sample sizes sum to {group_sum} but the stated "
-    "total is {total} — possible arithmetic error or a double-counted "
+    "total is {total}. Possible arithmetic error or a double-counted "
     "group."
 )
 

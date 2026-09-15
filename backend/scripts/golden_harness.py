@@ -45,10 +45,10 @@ SET_FILE = GOLDEN_DIR / "set.jsonl"
 REPORTS_DIR = GOLDEN_DIR / "reports"
 
 PROVISIONAL_NOTE = (
-    "**PROVISIONAL** — graded by the AI session that built this harness "
+    "**PROVISIONAL**, graded by the AI session that built this harness "
     "(2026-07-25), NOT a real Capstone Instructor (see `set.README.md`). "
     "Real golden-data access is FEATURES.md Sec10 open question #3, "
-    "pending adviser/instructor access — an owner action, not obtainable "
+    "pending adviser/instructor access: an owner action, not obtainable "
     "this session. Never cite this number as real-world grading accuracy."
 )
 
@@ -65,7 +65,7 @@ class _GoldenCriterion:
 
 def _load_items() -> list[GoldenItem]:
     if not SET_FILE.is_file():
-        sys.exit(f"No golden set at {SET_FILE} — see set.README.md.")
+        sys.exit(f"No golden set at {SET_FILE}, see set.README.md.")
     items = []
     for line in SET_FILE.read_text(encoding="utf-8").splitlines():
         line = line.strip()
@@ -127,7 +127,7 @@ async def run(*, live: bool) -> None:
             pred = GoldenPrediction(
                 item=item, escalated=False, predicted=None, agreement=None, votes=[], error=str(exc)
             )
-            print(f"[!] {item.id}: ERRORED — {exc}")
+            print(f"[!] {item.id}: ERRORED, {exc}")
             predictions.append(pred)
             continue
         predictions.append(pred)
@@ -140,7 +140,7 @@ async def run(*, live: bool) -> None:
     report = score_golden_set(predictions)
     today = datetime.now(UTC).date().isoformat()
     mode = "live" if live else "fake"
-    title = f"Golden-set report — {mode} mode — {today}"
+    title = f"Golden-set report: {mode} mode, {today}"
     markdown = report_as_markdown(report, title=title, provisional_note=PROVISIONAL_NOTE)
 
     # D-012 mechanism #1: the promotion gate runs every time, honestly —
@@ -149,7 +149,7 @@ async def run(*, live: bool) -> None:
     markdown += (
         f"\n\n## Tier promotions ({len(promotions)})\n"
         "No Tier 0/1 class has a binary verdict function yet to shadow-"
-        "evaluate against these golden labels — the promotion GATE "
+        "evaluate against these golden labels. The promotion GATE "
         "(`app/checks/promotion.py`) is built, tested, and runs every "
         "harness pass; it has nothing to promote until a future ticket "
         "gives a signal class a pass/fail mapping.\n"
@@ -168,7 +168,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     mode = parser.add_mutually_exclusive_group(required=True)
     mode.add_argument("--fake", action="store_true", help="zero-quota mechanics dry run")
-    mode.add_argument("--live", action="store_true", help="real Gemini calls — the actual baseline")
+    mode.add_argument("--live", action="store_true", help="real Gemini calls, the actual baseline")
     args = parser.parse_args()
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(errors="replace")

@@ -34,8 +34,8 @@ async def seed() -> str:
     settings = get_settings()
     if settings.veridical_env != "dev":
         raise RefusedInProductionError(
-            f"seed_dev refuses to run against veridical_env={settings.veridical_env!r} "
-            "— it writes a publicly-known password (DEMO_PASSWORD) and must only ever "
+            f"seed_dev refuses to run against veridical_env={settings.veridical_env!r}, "
+            "it writes a publicly-known password (DEMO_PASSWORD) and must only ever "
             "touch a dev database."
         )
     engine = create_async_engine(sqlalchemy_url(settings.database_url))

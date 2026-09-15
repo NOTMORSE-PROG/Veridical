@@ -39,7 +39,7 @@ async def run(path: Path, group_label: str) -> None:
     async with session_factory() as session:
         instructor = await session.scalar(select(Instructor).where(Instructor.email == DEMO_EMAIL))
         if instructor is None:
-            sys.exit("Demo instructor missing — run `uv run python -m scripts.seed_dev` first.")
+            sys.exit("Demo instructor missing, run `uv run python -m scripts.seed_dev` first.")
         manuscript = Manuscript(
             instructor_id=instructor.id, group_label=group_label, file_ref=str(path)
         )
@@ -76,7 +76,7 @@ async def run(path: Path, group_label: str) -> None:
     print(f"citations: {len(citations)} ({parsed} parsed, {len(citations) - parsed} kept raw)")
     for c in citations[:5]:
         first = (c.authors or ["?"])[0]
-        print(f"  [{c.parse_status}] {first} ({c.year}) — {(c.title or c.raw_text)[:60]}")
+        print(f"  [{c.parse_status}] {first} ({c.year}): {(c.title or c.raw_text)[:60]}")
     print(f"elapsed: {elapsed:.2f}s")
 
 

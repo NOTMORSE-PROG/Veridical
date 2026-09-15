@@ -78,7 +78,7 @@ async def run(audit_id: int, *, fake: bool, live: bool) -> None:
     print(f"stored input_hash={row.input_hash}")
     if not prompt:
         print(
-            "\n(no `prompt` field on this row — it predates V-022's audit widening; "
+            "\n(no `prompt` field on this row, it predates V-022's audit widening; "
             "nothing to replay, only the response below.)"
         )
     if row.input_hash is None:
@@ -88,7 +88,7 @@ async def run(audit_id: int, *, fake: bool, live: bool) -> None:
         # row, which reads as tamper/corruption evidence for a completely
         # expected state (the honest-signal rule ground rule 3/9 asks for,
         # applied to this tool's own output).
-        print("(fake-LLM mode — no cached input_hash to replay against, not a mismatch)")
+        print("(fake-LLM mode, no cached input_hash to replay against, not a mismatch)")
     else:
         recomputed = _input_hash(prompt_version, model, prompt, context)
         match = "MATCH" if recomputed == row.input_hash else "MISMATCH"

@@ -155,28 +155,28 @@ def _statistics_section(report: GoldenReport, *, settings: Settings) -> list[str
     n = stats.matrix.n
     if n < settings.golden_min_viable_n:
         lines.append(
-            f"> ⚠️ **INDICATIVE ONLY — not a baseline.** {n} decided item(s) is below "
+            f"> ⚠️ **INDICATIVE ONLY, not a baseline.** {n} decided item(s) is below "
             f"the {settings.golden_min_viable_n}-item minimum for a viable golden set "
-            f"(30–50 is the published floor; 100–200 for production). Every figure "
-            f"below is real, but the interval is what it means — read the interval, "
+            f"(30-50 is the published floor; 100-200 for production). Every figure "
+            f"below is real, but the interval is what it means: read the interval, "
             f"not the point estimate."
         )
         lines.append("")
 
     accuracy = f"{stats.accuracy:.1%}" if stats.accuracy is not None else "N/A"
     interval = stats.accuracy_ci.as_percent() if stats.accuracy_ci else "N/A"
-    lines.append(f"- **Selective accuracy**: {accuracy} — 95% CI (Wilson) **{interval}**")
+    lines.append(f"- **Selective accuracy**: {accuracy}, 95% CI (Wilson) **{interval}**")
     lines.append(
         f"- **Coverage**: {stats.coverage:.1%} "
-        f"({n} decided, {stats.n_abstained} escalated). Abstention mode: EXCLUDE — "
-        f"escalated items are withheld, not scored, so the accuracy above is over "
+        f"({n} decided, {stats.n_abstained} escalated). Abstention mode: EXCLUDE. "
+        f"Escalated items are withheld, not scored, so the accuracy above is over "
         f"the covered subset ONLY."
         if stats.coverage is not None
         else "- Coverage: N/A"
     )
 
     def fmt(value: float | None) -> str:
-        return f"{value:.3f}" if value is not None else "N/A (degenerate — one label only)"
+        return f"{value:.3f}" if value is not None else "N/A (degenerate, one label only)"
 
     lines.append(f"- **Cohen's κ** (chance-corrected): {fmt(stats.kappa)}")
     lines.append(f"- **Gwet's AC1** (paradox-resistant): {fmt(stats.ac1)}")
@@ -188,8 +188,8 @@ def _statistics_section(report: GoldenReport, *, settings: Settings) -> list[str
     )
     if matrix.human_positive_rate is not None:
         lines.append(
-            f"- **Prevalence** (instructor pass-rate): {matrix.human_positive_rate:.1%} "
-            f"— κ is unstable when this is extreme, which is why AC1 is beside it."
+            f"- **Prevalence** (instructor pass-rate): {matrix.human_positive_rate:.1%}. "
+            f"κ is unstable when this is extreme, which is why AC1 is beside it."
         )
     if matrix.leniency is not None:
         direction = "LENIENT" if matrix.leniency > 0 else "HARSH" if matrix.leniency < 0 else "even"
@@ -201,7 +201,7 @@ def _statistics_section(report: GoldenReport, *, settings: Settings) -> list[str
         lines.append(
             "- ⚠️ Chance-corrected coefficients are **undefined** on this set (every "
             "item shares one label, or the judge never varied). Marked N/A rather "
-            "than 0 — 'no information' is not 'no correlation'."
+            "than 0: 'no information' is not 'no correlation'."
         )
     lines.append("")
     return lines
@@ -220,7 +220,7 @@ def report_as_markdown(
     if report.n_errored:
         lines.append(
             f"- ⚠️ api_down/quota_exhausted (never counted as escalated OR wrong, "
-            f"TESTING.md §5): {report.n_errored} — run incomplete, re-run when the "
+            f"TESTING.md §5): {report.n_errored}, run incomplete, re-run when the "
             f"underlying cause clears"
         )
     lines.append(
@@ -228,7 +228,7 @@ def report_as_markdown(
         f"({report.escalation_rate:.1%})"
     )
     if report.agreement_rate is None:
-        lines.append("- Agreement: N/A — every item escalated, nothing decided.")
+        lines.append("- Agreement: N/A. Every item escalated, nothing decided.")
     else:
         lines.append(
             f"- Agreement (decided items only): {report.n_agree}/{report.n_decided} "
@@ -240,7 +240,7 @@ def report_as_markdown(
     for c in report.by_criterion:
         rate = f"{c.agreement_rate:.1%}" if c.agreement_rate is not None else "N/A"
         lines.append(
-            f'- "{c.criterion_text[:70]}" — {c.n_agree}/{c.n_decided} ({rate}), '
+            f'- "{c.criterion_text[:70]}": {c.n_agree}/{c.n_decided} ({rate}), '
             f"{c.n_escalated} escalated, n={c.n}"
         )
     lines.append("")
@@ -250,12 +250,12 @@ def report_as_markdown(
     for d in report.disagreements:
         lines.append(
             f"- `{d.item.id}` predicted **{d.predicted}**, instructor graded "
-            f'**{d.item.instructor_grade}** — "{d.item.criterion_text[:70]}" '
+            f'**{d.item.instructor_grade}**: "{d.item.criterion_text[:70]}" '
             f"(agreement {d.agreement}, votes {d.votes})"
         )
     if report.errored:
         lines.append("")
-        lines.append(f"## Errored — never graded ({len(report.errored)})")
+        lines.append(f"## Errored, never graded ({len(report.errored)})")
         for e in report.errored:
             lines.append(f"- `{e.item.id}`: {e.error}")
     return "\n".join(lines)
