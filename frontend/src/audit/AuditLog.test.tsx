@@ -273,4 +273,167 @@ describe("AuditLogPage", () => {
     expect(screen.getAllByText("Future review event").length).toBe(2);
     expect(screen.queryByText(/citation_source_confirmed|future_review_event/)).not.toBeInTheDocument();
   });
+
+  it("still collapses consecutive automated rows that share one execution mode into one group (V-056 grouping, unchanged by BUG-219)", async () => {
+    const sameMode = {
+      items: [
+        { ...PAGE.items[0], id: 70, llm_execution_mode: "fake" as const },
+        { ...PAGE.items[0], id: 71, llm_execution_mode: "fake" as const },
+        { ...PAGE.items[0], id: 72, llm_execution_mode: "fake" as const },
+      ],
+      total: 3,
+      page: 1,
+      page_size: 25,
+    };
+    vi.stubGlobal("fetch", stubFetchByPath({ "/audit": sameMode }));
+    renderWithProviders(<AuditLogPage />, { route: "/audit", path: "/audit" });
+    // Only the desktop toggle is literally named "Show all" -- the mobile
+    // one is an aria-hidden +/- glyph inside a button whose accessible
+    // name is the group's own summary text, not this fixed string.
+    expect((await screen.findAllByRole("button", { name: "Show all" })).length).toBe(1);
+    expect(screen.queryAllByRole("button", { name: "Detail" })).toHaveLength(0);
+
+    // Shared expand state -- toggling the desktop control expands both.
+    fireEvent.click(screen.getByRole("button", { name: "Show all" }));
+    expect(await screen.findAllByRole("button", { name: "Detail" })).toHaveLength(6); // 3 rows x (mobile + desktop)
+  });
+
+  it("BUG-219: never collapses a fake-mode row and a real-mode row into one group, even when adjacent with the same event_type and manuscript", async () => {
+    const mixedMode = {
+      items: [
+        { ...PAGE.items[0], id: 80, llm_execution_mode: "fake" as const },
+        { ...PAGE.items[0], id: 81, llm_execution_mode: "real" as const },
+      ],
+      total: 2,
+      page: 1,
+      page_size: 25,
+    };
+    vi.stubGlobal("fetch", stubFetchByPath({ "/audit": mixedMode }));
+    renderWithProviders(<AuditLogPage />, { route: "/audit", path: "/audit" });
+    // Two ungrouped single rows, each with its own Detail button -- never
+    // one "2 x ..." summary that would have to pick just one mode to state.
+    expect((await screen.findAllByRole("button", { name: "Detail" })).length).toBe(4); // 2 rows x (mobile + desktop)
+    expect(screen.queryByRole("button", { name: "Show all" })).not.toBeInTheDocument();
+  });
+
+  it("BUG-219: tags a fake-mode row 'Test mode' and an unknown-mode row 'Mode unknown', but a real-mode row gets no tag at all", async () => {
+    const threeModes = {
+      items: [
+        { ...PAGE.items[0], id: 90, llm_execution_mode: "fake" as const },
+        { ...PAGE.items[0], id: 91, llm_execution_mode: "unknown" as const },
+        { ...PAGE.items[0], id: 92, llm_execution_mode: "real" as const },
+      ],
+      total: 3,
+      page: 1,
+      page_size: 25,
+    };
+    vi.stubGlobal("fetch", stubFetchByPath({ "/audit": threeModes }));
+    renderWithProviders(<AuditLogPage />, { route: "/audit", path: "/audit" });
+    expect((await screen.findAllByText("Test mode")).length).toBe(2); // mobile + desktop
+    expect(screen.getAllByText("Mode unknown").length).toBe(2);
+    // "AI call" itself renders 3x2 = 6 times (once per row per view) --
+    // asserting there are only 4 mode tags total is what proves the third
+    // (real-mode) row got none, without needing a query that can express
+    // "absent on exactly one of three rows."
+    expect(screen.queryAllByText("Test mode").length + screen.queryAllByText("Mode unknown").length).toBe(4);
+  });
+
+  it("BUG-219: a non-LLM event never carries a mode tag, even defensively (the frontend's own gate, not just trust in the backend's)", async () => {
+    vi.stubGlobal("fetch", stubFetchByPath({ "/audit": PAGE }));
+    renderWithProviders(<AuditLogPage />, { route: "/audit", path: "/audit" });
+    await screen.findAllByText("Escalation resolved");
+    expect(screen.queryByText("Test mode")).not.toBeInTheDocument();
+    expect(screen.queryByText("Mode unknown")).not.toBeInTheDocument();
+  });
+
+  it("BUG-219: the Detail explanation names test-mode/real/unknown honestly instead of always claiming 'completed an AI-assisted review step' with no qualifier", async () => {
+    const fakeRow = { ...PAGE.items[0], id: 95, llm_execution_mode: "fake" as const };
+    vi.stubGlobal(
+      "fetch",
+      stubFetchByPath({
+        "/audit": { items: [fakeRow], total: 1, page: 1, page_size: 25 },
+        "/audit/95": { ...fakeRow, input_hash: null, payload: { prompt_type: "semantic_grading", response: {} } },
+      }),
+    );
+    renderWithProviders(<AuditLogPage />, { route: "/audit", path: "/audit" });
+    fireEvent.click((await screen.findAllByRole("button", { name: "Detail" }))[0]);
+    expect(await screen.findByText(/using its own fixture responses, not a real external AI model/)).toBeInTheDocument();
+    expect(screen.getByText(/zero-budget default for development and demo use/)).toBeInTheDocument();
+  });
+
+  it("BUG-219 (backend-critic P1): a fixture or unknown-mode row's label and explanation never contain the literal phrases 'AI call' or 'AI-assisted' -- a real-mode row still does, per the ticket's own regression-test text", async () => {
+    const threeModes = {
+      items: [
+        { ...PAGE.items[0], id: 97, llm_execution_mode: "fake" as const },
+        { ...PAGE.items[0], id: 98, llm_execution_mode: "unknown" as const },
+        { ...PAGE.items[0], id: 99, llm_execution_mode: "real" as const },
+      ],
+      total: 3,
+      page: 1,
+      page_size: 25,
+    };
+    vi.stubGlobal(
+      "fetch",
+      stubFetchByPath({
+        "/audit": threeModes,
+        "/audit/97": { ...threeModes.items[0], input_hash: null, payload: {} },
+        "/audit/98": { ...threeModes.items[1], input_hash: null, payload: {} },
+        "/audit/99": { ...threeModes.items[2], input_hash: null, payload: {} },
+      }),
+    );
+    renderWithProviders(<AuditLogPage />, { route: "/audit", path: "/audit" });
+    await screen.findAllByText("Test mode");
+
+    // List: the bold label itself, not just the adjacent tag.
+    expect(screen.getAllByText("Test-mode call").length).toBe(2); // mobile + desktop
+    expect(screen.getAllByText("Automated review step").length).toBe(2);
+    expect(screen.getAllByText("AI call").length).toBe(2); // the real-mode row only
+
+    const detailButtons = screen.getAllByRole("button", { name: "Detail" });
+    for (const [index, mode] of [
+      [0, "fake"],
+      [1, "unknown"],
+      [2, "real"],
+    ] as const) {
+      fireEvent.click(detailButtons[index]);
+      const explanation = await screen.findByRole("heading", { name: "What this records" });
+      const text = explanation.parentElement?.textContent ?? "";
+      expect(text.includes("AI call")).toBe(false); // never, in any mode
+      // Only a confirmed real-model record affirmatively claims "AI-assisted" --
+      // the ticket's own wording for what that phrase must be reserved for.
+      expect(text.includes("AI-assisted")).toBe(mode === "real");
+      fireEvent.click(screen.getByRole("button", { name: "Close" }));
+    }
+  });
+
+  it("BUG-219: an unknown-mode row's Detail explanation says the mode was never recorded, not that it was real or fake", async () => {
+    const unknownRow = { ...PAGE.items[0], id: 96, llm_execution_mode: "unknown" as const };
+    vi.stubGlobal(
+      "fetch",
+      stubFetchByPath({
+        "/audit": { items: [unknownRow], total: 1, page: 1, page_size: 25 },
+        "/audit/96": { ...unknownRow, input_hash: null, payload: { prompt_type: "semantic_grading", response: {} } },
+      }),
+    );
+    renderWithProviders(<AuditLogPage />, { route: "/audit", path: "/audit" });
+    fireEvent.click((await screen.findAllByRole("button", { name: "Detail" }))[0]);
+    expect(
+      await screen.findByText(/predates VERIDICAL's AI-mode tracking, so whether it used a real or test-mode AI model was never recorded/),
+    ).toBeInTheDocument();
+  });
+
+  it("BUG-219: names VERIDICAL, not an unscoped absolute, as the actor disallowing edits/deletes, on both the page intro and the Detail modal", async () => {
+    vi.stubGlobal("fetch", stubFetchByPath({ "/audit": PAGE, "/audit/42": DETAIL }));
+    renderWithProviders(<AuditLogPage />, { route: "/audit", path: "/audit" });
+    await screen.findAllByText("AI call");
+    expect(
+      screen.getByText("Trace system activity and instructor actions. VERIDICAL does not allow an audit entry to be edited or deleted."),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/^Audit entries cannot be edited or deleted\.?$/)).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getAllByRole("button", { name: "Detail" })[0]);
+    expect(await screen.findByText(/VERIDICAL does not allow this entry to be edited or deleted/)).toBeInTheDocument();
+    expect(screen.getByText(/only a database administrator could disable/)).toBeInTheDocument();
+    expect(screen.queryByText(/^This entry is immutable/)).not.toBeInTheDocument();
+  });
 });

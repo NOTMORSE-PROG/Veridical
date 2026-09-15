@@ -134,6 +134,9 @@ def test_list_and_detail_return_the_seeded_row(logged_in_with_one_audit_row):
     assert body["total"] == 1
     assert body["items"][0]["event_type"] == "llm_call"
     assert body["items"][0]["check_run_id"] == check_run_id
+    # BUG-219: this fixture seeds a raw `llm_call` row with no `fake_llm`
+    # key at all -- the honest state is "unknown", never a guessed "external".
+    assert body["items"][0]["llm_execution_mode"] == "unknown"
 
     filtered = client.get(f"/audit?check_run_id={check_run_id}")
     assert filtered.json()["total"] == 1

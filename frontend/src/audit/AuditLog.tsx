@@ -17,7 +17,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router";
 import { ApiError } from "../api/client";
-import type { AuditLogSummary } from "../api/types";
+import type { AuditLogSummary, LLMMode } from "../api/types";
 import { Chip } from "../components/Chip";
 import { Modal, ModalBackdrop } from "../components/Modal";
 import { useRouteFocus } from "../routing/useRouteFocus";
@@ -78,6 +78,55 @@ const EVENT_EXPLANATIONS: Record<string, string> = {
   manuscript_ingestion_failure_dismissed: "You moved a failed upload out of the active Review Desk and into Archive.",
 };
 
+// BUG-219: mode-specific label/explanation replacements for the `llm_*`
+// events above. `backend-critic` finding (P1): the ticket's own written
+// Regression-test criterion says a fixture or unknown-mode record must
+// NEVER contain the phrases "AI call" or "AI-assisted" — an earlier draft
+// left the bold row LABEL unconditional (relying on the adjacent tag alone)
+// and left "AI-assisted" inside the fake/unknown explanation sentences
+// themselves. Fixed properly rather than just documented as a divergence:
+// both maps below now carry `fake`/`unknown` overlays that avoid both
+// phrases outright, so a fixture/unknown row's label AND explanation are
+// independently honest, not just tag-dependent. `real` rows are
+// deliberately UNCHANGED (kept in the base maps below, not duplicated here)
+// — "AI call"/"AI-assisted" is exactly correct there, matching the
+// ticket's own "a confirmed real-model record retains the real-AI label."
+//
+// `llm_model_exhausted` needed no explanation change (its real/base text
+// already said "AI service choices," never the two forbidden phrases) and
+// gets no `fake` entries in either map: `FakeLLMClient` (app/llm/fake.py)
+// only ever writes `event_type: "llm_call"` rows — it has no retry/cache/
+// failure simulation at all — so a fake-mode `llm_cache_hit`/
+// `llm_call_failed`/`llm_model_exhausted` row cannot exist going forward,
+// only a genuinely unrecorded legacy one can (confirmed by reading
+// `app/llm/fake.py` and `app/llm/queue.py`, not assumed).
+const EVENT_LABELS_BY_MODE: Partial<Record<string, Partial<Record<LLMMode, string>>>> = {
+  llm_call: { fake: "Test-mode call", unknown: "Automated review step" },
+  llm_cache_hit: { fake: "Test-mode call (cached)", unknown: "Automated review step (cached)" },
+  llm_call_failed: { fake: "Test-mode call failed", unknown: "Automated review step failed" },
+};
+
+const EVENT_EXPLANATIONS_BY_MODE: Partial<Record<string, Partial<Record<LLMMode, string>>>> = {
+  llm_call: {
+    real: "VERIDICAL completed an AI-assisted review step using a real external AI model and preserved the exact inputs and response for reproducibility.",
+    fake: "VERIDICAL completed a test-mode review step using its own fixture responses, not a real external AI model, and preserved the exact inputs and response for reproducibility. Test mode is VERIDICAL's documented zero-budget default for development and demo use, so seeing it here does not indicate a problem.",
+    unknown: "VERIDICAL completed an automated review step and preserved the exact inputs and response for reproducibility. This entry predates VERIDICAL's AI-mode tracking, so whether it used a real or test-mode AI model was never recorded and cannot be recovered now.",
+  },
+  llm_cache_hit: {
+    real: "VERIDICAL reused a matching stored response from a real external AI model instead of spending another service call.",
+    fake: "VERIDICAL reused a matching stored response from its test-mode AI fixture instead of spending another service call. The reused response is simulated, not a real model's output, consistent with VERIDICAL's zero-budget test-mode default.",
+    unknown: "VERIDICAL reused a matching stored AI response instead of spending another service call. This entry predates VERIDICAL's AI-mode tracking, so whether the reused response came from a real or test-mode AI model was never recorded and cannot be recovered now.",
+  },
+  llm_call_failed: {
+    real: "An AI-assisted review step using a real external AI model did not complete. The record preserves the failure context without treating it as an assessment.",
+    fake: "An automated test-mode review step using VERIDICAL's own fixture responses did not complete. The record preserves the failure context without treating it as an assessment. A failure in test mode does not indicate a problem with a real AI service.",
+    unknown: "An automated review step did not complete. The record preserves the failure context without treating it as an assessment. This entry predates VERIDICAL's AI-mode tracking, so whether it used a real or test-mode AI model was never recorded and cannot be recovered now.",
+  },
+  llm_model_exhausted: {
+    unknown: "The configured AI service choices were unavailable, so the affected work was not treated as assessed. This entry predates VERIDICAL's AI-mode tracking, so whether real or test-mode AI choices were involved was never recorded and cannot be recovered now.",
+  },
+};
+
 function humanizeIdentifier(value: string): string {
   const words = value.replace(/[_-]+/g, " ").replace(/\s+/g, " ").trim();
   if (!words) return "Recorded activity";
@@ -85,12 +134,75 @@ function humanizeIdentifier(value: string): string {
 }
 
 function eventLabel(row: AuditLogSummary): string {
-  return EVENT_LABELS[row.event_type] ?? humanizeIdentifier(row.event_type);
+  const byMode = row.llm_execution_mode && EVENT_LABELS_BY_MODE[row.event_type]?.[row.llm_execution_mode];
+  return byMode ?? EVENT_LABELS[row.event_type] ?? humanizeIdentifier(row.event_type);
 }
 
 function eventExplanation(row: AuditLogSummary): string {
-  return EVENT_EXPLANATIONS[row.event_type]
+  const byMode = row.llm_execution_mode && EVENT_EXPLANATIONS_BY_MODE[row.event_type]?.[row.llm_execution_mode];
+  return byMode
+    ?? EVENT_EXPLANATIONS[row.event_type]
     ?? "VERIDICAL preserved this activity as part of the review's immutable history.";
+}
+
+// BUG-219: a compact, per-row/per-group companion to `eventLabel` — never
+// fused into the label itself (that would multiply 4 event labels x 3
+// modes into a combinatorial set of strings, and would leave "real" with
+// no positive confirmation anywhere, only silence). Reuses the exact color
+// pair already shipped for this same fact on the report/flag/adviser
+// screens (`signal-warning`: `ui-designer` traced its contrast — 7.02:1 —
+// and confirmed it already cleared the palette's protanopia/deuteranopia
+// gate as part of that rollout) at a scale suited to a routine, possibly
+// per-row log rather than a page-level decision gate: full `Alert` banners
+// once per row would themselves overclaim urgency on a routine, documented,
+// zero-budget-by-design default. Referenced via Tailwind's arbitrary-value
+// syntax rather than a `bg-signal-warning-bg` utility name, because this
+// token pair is only ever consumed today through `signal.css`'s own
+// hand-written classes (`.signal-alert--warning`, etc.), not through a
+// generated Tailwind utility — this pulls the same token values without
+// depending on a class name nothing in this file's styling system has ever
+// emitted.
+//
+// `ux-critic` finding (P2): DESIGN.md's own color-vision rule for this
+// EXACT semantic pair (`System warning`) requires a non-color cue ("warning
+// triangle") on top of the text, not just the text itself — a first draft
+// of this comment justified text-alone by analogy to plain, non-semantic
+// metadata (`prompt v3`), which doesn't carry a color-coded state at all
+// and was the wrong comparison. `/report/14`'s own `Alert`/`ModeDisclosure`
+// already renders this identical fact with a shape cue (a colored left
+// rail); this tag was the one place that fact went out uncued. Fixed with
+// a small triangle glyph, not a full rail, since a page-level Alert's
+// border treatment doesn't scale down to an inline pill.
+function ExecutionModeTag({ mode }: { mode: LLMMode | null }) {
+  if (mode !== "fake" && mode !== "unknown") return null;
+  return (
+    // `ux-critic` finding (P3): every other inline segment in this row
+    // (eventSummary, manuscript_group_label) is preceded by " · ", giving a
+    // screen reader an audible pause between segments -- this tag had none,
+    // running "AI call Test mode" together with no separator.
+    <>
+      <span className="text-ink-tertiary"> · </span>
+      <span className="inline-flex items-center gap-1 rounded-full bg-[color:var(--color-signal-warning-bg)] px-2 py-0.5 text-xs font-semibold text-[color:var(--color-signal-warning-text)]">
+        <svg
+          aria-hidden="true"
+          viewBox="0 0 24 24"
+          width="11"
+          height="11"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          className="shrink-0"
+        >
+          <path d="M12 3.5 21.5 20.5 2.5 20.5Z" />
+          <path d="M12 9.5v4.5" />
+          <circle cx="12" cy="17.3" r="0.75" fill="currentColor" stroke="none" />
+        </svg>
+        {mode === "fake" ? "Test mode" : "Mode unknown"}
+      </span>
+    </>
+  );
 }
 
 function eventSummary(row: AuditLogSummary): string {
@@ -117,7 +229,14 @@ function eventSummary(row: AuditLogSummary): string {
 // volume, exactly the rows that should NOT recede).
 type AuditRowGroup =
   | { kind: "single"; row: AuditLogSummary }
-  | { kind: "group"; eventType: string; label: string; groupLabel: string | null; rows: AuditLogSummary[] };
+  | {
+      kind: "group";
+      eventType: string;
+      label: string;
+      groupLabel: string | null;
+      executionMode: LLMMode | null;
+      rows: AuditLogSummary[];
+    };
 
 function groupConsecutive(items: AuditLogSummary[]): AuditRowGroup[] {
   const out: AuditRowGroup[] = [];
@@ -128,7 +247,12 @@ function groupConsecutive(items: AuditLogSummary[]): AuditRowGroup[] {
       canGroup &&
       last?.kind === "group" &&
       last.eventType === row.event_type &&
-      last.groupLabel === (row.manuscript_group_label ?? null)
+      last.groupLabel === (row.manuscript_group_label ?? null) &&
+      // BUG-219: a fixture-mode run and a real-model run must never
+      // collapse into one summary row that can only state one label — this
+      // is what keeps a grouped batch from ever needing a separate "mixed"
+      // indicator, rather than adding one.
+      last.executionMode === row.llm_execution_mode
     ) {
       last.rows.push(row);
       continue;
@@ -139,6 +263,7 @@ function groupConsecutive(items: AuditLogSummary[]): AuditRowGroup[] {
         eventType: row.event_type,
         label: eventLabel(row),
         groupLabel: row.manuscript_group_label ?? null,
+        executionMode: row.llm_execution_mode,
         rows: [row],
       });
     } else {
@@ -202,6 +327,7 @@ function EventContent({ row }: { row: AuditLogSummary }) {
       <ActorIcon instructor={instructor} />{" "}
       <span className="sr-only">{instructor ? "Instructor action: " : "Automated: "}</span>
       <b>{eventLabel(row)}</b>
+      <ExecutionModeTag mode={row.llm_execution_mode} />
       {summary && <span className="text-ink-secondary"> · {summary}</span>}
       {row.manuscript_group_label && (
         <span className="text-ink-tertiary"> · {row.manuscript_group_label}</span>
@@ -276,9 +402,11 @@ function AuditDetailModal({ id, onClose }: { id: number; onClose: () => void }) 
               )}
             </section>
             <p className="rounded-md bg-status-info-bg px-2.5 py-1.5 text-xs text-status-info-text">
-              This entry is immutable: it cannot be edited or deleted. Its exact stored values
-              remain available below for technical inspection and reproduction workflows, but
-              they are not required for the instructor's review task.
+              VERIDICAL does not allow this entry to be edited or deleted. The database
+              independently rejects any direct attempt to change or remove it, a safeguard only a
+              database administrator could disable. Its exact stored values remain available below
+              for technical inspection and reproduction workflows, but they are not required for
+              the instructor's review task.
             </p>
             <details className="rounded-md border border-border bg-panel p-3">
               <summary className="min-h-11 cursor-pointer font-semibold text-link">
@@ -385,7 +513,7 @@ export function AuditLogPage() {
     <div className="signal-route signal-page-flow signal-audit">
       <header className="signal-route-header">
         <div>
-          <p className="signal-eyebrow">Immutable activity record</p>
+          <p className="signal-eyebrow">Activity record</p>
         <h1
           ref={headingRef}
           id="audit-log-heading"
@@ -394,7 +522,8 @@ export function AuditLogPage() {
           Audit
         </h1>
         <p className="signal-route-header__intro">
-          Trace system activity and instructor actions. Audit entries cannot be edited or deleted.
+          Trace system activity and instructor actions. VERIDICAL does not allow an audit entry to
+          be edited or deleted.
         </p>
         </div>
       </header>
@@ -530,6 +659,7 @@ export function AuditLogPage() {
                         {formatEventTime(entry.rows[entry.rows.length - 1].created_at)} and{" "}
                         {formatEventTime(entry.rows[0].created_at)}
                         {entry.groupLabel && <span className="text-ink-tertiary"> · {entry.groupLabel}</span>}
+                        <ExecutionModeTag mode={entry.executionMode} />
                       </span>
                       <span aria-hidden="true" className="flex-none text-ink-tertiary">
                         {expanded ? "−" : "+"}
@@ -620,6 +750,7 @@ export function AuditLogPage() {
                       <span role="cell" className="min-w-0 text-ink">
                         <b>{entry.rows.length}</b> x {entry.label} events
                         {entry.groupLabel && <span className="text-ink-tertiary"> · {entry.groupLabel}</span>}
+                        <ExecutionModeTag mode={entry.executionMode} />
                       </span>
                       <span role="cell" className="justify-self-end">
                         <button

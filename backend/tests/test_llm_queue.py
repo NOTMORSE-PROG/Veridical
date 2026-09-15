@@ -529,6 +529,23 @@ async def test_audit_row_records_the_model_that_actually_served_the_call(session
     assert row.payload["model"] == "reserve"
 
 
+async def test_audit_row_marks_fake_llm_false_for_a_real_call(session_factory):
+    """BUG-219: parity with FakeLLMClient._write_audit's own explicit
+    `"fake_llm": True` — the real queue must be equally explicit, so the
+    audit summary's execution-mode derivation never has to fall back to
+    guessing "no fake_llm key present" means real."""
+    transport = ScriptedTransport(responses=[{"ok": True}])
+    queue = _make_queue(session_factory, transport)
+
+    await queue.submit(prompt_type="t", prompt="one", prompt_version="v1")
+
+    async with session_factory() as session:
+        row = (
+            await session.execute(select(AuditLog).where(AuditLog.event_type == "llm_call"))
+        ).scalar_one()
+    assert row.payload["fake_llm"] is False
+
+
 async def test_check_run_id_is_excluded_from_the_cache_key(session_factory):
     """D-011: a Flow E re-run under a new check_run must still hit cache for
     the same rubric/prompt content — check_run_id is a run identifier, not
