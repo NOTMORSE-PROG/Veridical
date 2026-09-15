@@ -88,6 +88,37 @@ describe("SignalReviewCriteriaPage", () => {
     expect(body.criteria[1].levels).toEqual(LEVELS);
   });
 
+  // BUG-056: in-app navigation was correctly blocked by useBlocker (BUG-037),
+  // but no `beforeunload` handler existed at all -- reload silently
+  // discarded hand-corrected criteria with no warning, "asymmetric
+  // protection worse than none" per the ticket's own framing. Asserts the
+  // handler is registered once the form is dirty and removed once it's
+  // clean again (matching the ticket's own literal Regression-test ask),
+  // via the real browser event rather than inspecting React internals.
+  it("BUG-056: warns before an unload once the form is dirty, and stops once clean again", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify(RUBRIC), { status: 200 })));
+    renderPage();
+
+    const text = await screen.findByLabelText("Criterion 1 text");
+    const original = text.getAttribute("value") ?? "Includes a complete abstract";
+
+    const clean = new Event("beforeunload", { cancelable: true });
+    window.dispatchEvent(clean);
+    expect(clean.defaultPrevented).toBe(false);
+
+    fireEvent.change(text, { target: { value: "Includes an abstract within the required length" } });
+
+    const dirty = new Event("beforeunload", { cancelable: true });
+    window.dispatchEvent(dirty);
+    expect(dirty.defaultPrevented).toBe(true);
+
+    fireEvent.change(text, { target: { value: original } });
+
+    const cleanAgain = new Event("beforeunload", { cancelable: true });
+    window.dispatchEvent(cleanAgain);
+    expect(cleanAgain.defaultPrevented).toBe(false);
+  });
+
   it("blocks confirmation and focuses a linked summary when required fields are invalid", async () => {
     const fetchMock = vi.fn(async () => new Response(JSON.stringify(RUBRIC), { status: 200 }));
     vi.stubGlobal("fetch", fetchMock);
