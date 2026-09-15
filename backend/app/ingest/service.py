@@ -197,15 +197,19 @@ async def ingest_manuscript(
         await loop.run_in_executor(
             None, storage.put_file, raw_path, storage_key_for(settings, str(raw_path))
         )
-    except FileMalformedError:
+    except FileMalformedError as exc:
         # Stage boundary (CODING.md §2): the failure is recorded on the row,
         # then propagates — run-level stage bookkeeping arrives with V-018.
         # BUG-016: the row must say why, not just that it failed.
+        # BUG-066: `str(exc)` is safe to persist here ONLY because every
+        # `FileMalformedError` raise site passes a vetted `messages.py`
+        # template (FILE_UNREADABLE/FILE_ENCRYPTED), never raw file content.
         manuscript.ingest_status = IngestStatus.failed
         manuscript.ingest_failure_reason = IngestFailureReason.unreadable_format
+        manuscript.ingest_failure_detail = str(exc)
         await session.commit()
         raise
-    except FileTooLargeError:
+    except FileTooLargeError as exc:
         # BUG-180 (found while adding this ticket's own page-count/timeout
         # guards): `FileTooLargeError` -- already raised here by the
         # pre-existing DOCX zip-bomb guard (BUG-159, `docx.py`), and now
@@ -215,8 +219,16 @@ async def ingest_manuscript(
         # recorded the wrong, less specific `extraction_failed` reason
         # instead of the honest `file_too_large` `save_upload`'s own
         # size-cap already uses for the exact same failure class.
+        # BUG-066: `str(exc)` carries the SPECIFIC vetted message each raise
+        # site already computed (real MB/page numbers from config) -- three
+        # different underlying caps (raw upload MB, PDF page count, DOCX
+        # decompressed MB) share this one enum bucket, so a single generic
+        # "over the MB limit" sentence would be flatly wrong for two of the
+        # three. Never a raw caught exception's `str()` -- only ever this
+        # library's own vetted `VeridicalError` message.
         manuscript.ingest_status = IngestStatus.failed
         manuscript.ingest_failure_reason = IngestFailureReason.file_too_large
+        manuscript.ingest_failure_detail = str(exc)
         await session.commit()
         raise
     except Exception:
@@ -287,9 +299,14 @@ async def ingest_upload(
     dest = settings.data_dir / "uploads" / f"{manuscript.id}{suffix}"
     try:
         await save_upload(chunks, dest, settings)
-    except FileTooLargeError:
+    except FileTooLargeError as exc:
+        # BUG-066: same vetted-message capture as `ingest_manuscript`'s own
+        # `FileTooLargeError` branch above -- this is the raw-upload-size
+        # cap specifically (`save_upload`'s own `messages.FILE_TOO_LARGE`),
+        # the one case where `max_upload_mb` really is the right number.
         manuscript.ingest_status = IngestStatus.failed
         manuscript.ingest_failure_reason = IngestFailureReason.file_too_large
+        manuscript.ingest_failure_detail = str(exc)
         await session.commit()
         raise
     # BUG-140: content identity, computed once here (off the event loop --
@@ -669,6 +686,7 @@ async def list_manuscripts(
             ingest_failure_reason=(
                 m.ingest_failure_reason.value if m.ingest_failure_reason else None
             ),
+            ingest_failure_detail=m.ingest_failure_detail,
             created_at=m.created_at,
             latest_check_run_id=_latest_id(m.id),
             latest_check_run_status=_latest_status(m.id),
