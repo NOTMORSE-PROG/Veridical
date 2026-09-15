@@ -24,14 +24,14 @@ from app.models.enums import FlagSeverity
 
 PVALUE_MISMATCH_WORDING = (
     "The reported p-value ({reported_p}) differs from the recalculated "
-    "value ({computed_p}) for this {test_type} test — possible rounding "
+    "value ({computed_p}) for this {test_type} test. Possible rounding "
     "error or typo."
 )
 PVALUE_DECISION_ERROR_WORDING = (
     "The reported p-value ({reported_p}) differs from the recalculated "
     "value ({computed_p}) for this {test_type} test, AND the difference "
-    "changes whether the result would be called statistically significant "
-    "— possible rounding error or typo, please verify."
+    "changes whether the result would be called statistically significant. "
+    "Possible rounding error or typo, please verify."
 )
 
 _SUPPORTED_TYPES = {"t", "F", "r", "Chi2", "Z", "Q"}

@@ -172,11 +172,9 @@ async def run(*, live: bool, arm_a: str, arm_b: str) -> None:
     def fmt(value):
         return f"{value:.3f}" if value is not None else "N/A"
 
-    mode_label = (
-        "LIVE (real Gemini)" if live else "FAKE (mechanics only — numbers are not evidence)"
-    )
+    mode_label = "LIVE (real Gemini)" if live else "FAKE (mechanics only, numbers are not evidence)"
     lines = [
-        f"# A/B prompt comparison — {arm_a} vs {arm_b} — {datetime.now(UTC).date().isoformat()}",
+        f"# A/B prompt comparison: {arm_a} vs {arm_b}, {datetime.now(UTC).date().isoformat()}",
         "",
         f"Mode: {mode_label}",
         "",
@@ -197,7 +195,7 @@ async def run(*, live: bool, arm_a: str, arm_b: str) -> None:
         "",
         f"- Items decided by BOTH arms: {comparison.n}"
         + (
-            f" ({len(unpaired)} excluded — escalated/errored in at least one arm)"
+            f" ({len(unpaired)} excluded: escalated/errored in at least one arm)"
             if unpaired
             else ""
         ),
@@ -225,7 +223,7 @@ async def run(*, live: bool, arm_a: str, arm_b: str) -> None:
         "Accuracy percentages per arm are the weak comparison: most items are graded",
         "identically by both, so the difference between two rates is mostly noise.",
         "The discordant counts above are the evidence. A non-significant result means",
-        "'not detectable at this sample size' — never 'the two are equivalent'.",
+        "'not detectable at this sample size', never 'the two are equivalent'.",
         "",
     ]
     markdown = "\n".join(lines)
@@ -242,7 +240,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     mode = parser.add_mutually_exclusive_group(required=True)
     mode.add_argument("--fake", action="store_true", help="zero-quota mechanics run")
-    mode.add_argument("--live", action="store_true", help="real Gemini — spends quota")
+    mode.add_argument("--live", action="store_true", help="real Gemini, spends quota")
     parser.add_argument("--a", default="v1", help="baseline prompt version")
     parser.add_argument("--b", default="v2", help="candidate prompt version")
     args = parser.parse_args()

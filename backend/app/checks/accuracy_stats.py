@@ -143,7 +143,7 @@ def mcnemar_exact(comparison: PairedComparison, alpha: float = 0.05) -> McNemarR
     note = ""
     if n_disc < 10:
         note = (
-            f"Only {n_disc} discordant item(s) — below the usual minimum of 10. "
+            f"Only {n_disc} discordant item(s), below the usual minimum of 10. "
             f"Treat this as directional, not conclusive."
         )
     return McNemarResult(
