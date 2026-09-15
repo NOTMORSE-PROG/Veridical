@@ -109,12 +109,28 @@ def _run_required_section(criterion, ctx: RuleContext) -> RuleOutcome:
             anchor=_node_anchor(node),
             detail={"target": target, "matched_title": node.title},
         )
+    # BUG-221 (charter rule 1): a title-match miss here is NOT proof the
+    # section is genuinely absent -- it is equally consistent with the
+    # section being present under phrasing `_title_candidates`'s synonym
+    # set doesn't yet cover (exactly the false-negative class BUG-048 fixed
+    # for the references section specifically; nothing here rules it out
+    # for an arbitrary "chapter N" or other target). Reporting this as an
+    # ordinary `failed` -- "Does not meet" -- states a claim the rule did
+    # not actually verify: that the section is missing, not that the rule
+    # couldn't find it. `escalated` puts it in front of the instructor
+    # instead of deciding it silently, the same distinction `semantic.py`'s
+    # identical "missing" branch now makes.
     return RuleOutcome(
-        outcome=ResultOutcome.failed,
+        outcome=ResultOutcome.escalated,
         anchor="not found in document structure",
         detail={
             "target": target,
-            "reason": f"No section matching '{target}' was found in the parsed section tree.",
+            "reason": (
+                f"No section matching '{target}' was found in the parsed section tree. "
+                "This may mean the section is genuinely missing, or that it exists under "
+                "wording VERIDICAL doesn't yet recognize -- check the manuscript directly "
+                "before deciding."
+            ),
         },
     )
 
