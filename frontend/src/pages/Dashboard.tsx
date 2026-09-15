@@ -198,9 +198,16 @@ function WorkQueueRecord({
 }) {
   const dismiss = useDismissFailedManuscript();
   const identity = manuscriptIdentity(row.group_label, row.original_filename);
-  const failureCopy = row.ingest_failure_reason
-    ? FAILURE_COPY[row.ingest_failure_reason]
-    : "This file could not be prepared. A specific reason was not recorded.";
+  // BUG-066: prefer the specific reason the failing check itself computed
+  // (real MB/page numbers, e.g. "larger than the 40 MB upload limit") over
+  // the generic per-bucket sentence -- three different underlying caps
+  // (raw upload size, PDF page count, DOCX decompressed size) all set the
+  // same `file_too_large` reason, so a single blanket number would be
+  // wrong for two of the three. Falls back honestly, never guesses.
+  const failureCopy = row.ingest_failure_detail
+    ?? (row.ingest_failure_reason
+      ? FAILURE_COPY[row.ingest_failure_reason]
+      : "This file could not be prepared. A specific reason was not recorded.");
 
   return (
     <li className="signal-record">

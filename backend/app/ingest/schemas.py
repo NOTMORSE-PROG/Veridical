@@ -239,6 +239,12 @@ class ManuscriptListItem(BaseModel):
     # None unless ingest_status is "failed" AND the reason was captured
     # (BUG-016) — NULL, never fabricated, for pre-existing failed rows.
     ingest_failure_reason: str | None = None
+    # BUG-066: the specific vetted message the failing check computed (real
+    # MB/page numbers), when one exists — None for the catch-all
+    # `extraction_failed` reason (no safe specific text) and for rows
+    # ingested before this column existed. The client falls back to a
+    # generic per-reason sentence when this is None; never fabricates one.
+    ingest_failure_detail: str | None = None
     created_at: datetime
     # None until a check has been run against this manuscript at least
     # once; lets the dashboard table (V-021) link "view progress"/"open

@@ -120,6 +120,101 @@ describe("DashboardPage", () => {
     expect(screen.getByRole("button", { name: "Move to Archive" })).toBeInTheDocument();
   });
 
+  // BUG-066: `file_too_large` can come from three different underlying
+  // caps (raw upload MB, PDF page count, DOCX decompressed MB) -- a single
+  // blanket "over the MB limit" sentence would misstate two of the three.
+  // The row must show the SPECIFIC message the failing check computed
+  // (`ingest_failure_detail`), never a guessed generic one, whenever it's
+  // present.
+  it("BUG-066: a failed row shows the specific computed reason, not a generic one", async () => {
+    vi.stubGlobal(
+      "fetch",
+      stubFetchByPath({
+        "/auth/me": { id: 1, email: "a@b.com", display_name: "Demo Instructor" },
+        "/rubric-families": ACTIVE_FAMILY,
+        "/stats": STATS,
+        "/manuscripts": {
+          items: [
+            {
+              id: 72,
+              group_label: "Oversized PDF group",
+              original_filename: "huge.pdf",
+              ingest_status: "failed",
+              ingest_failure_reason: "file_too_large",
+              ingest_failure_detail: "This PDF has 900 pages, more than the 500 page limit. Please split it or upload a shorter version.",
+              created_at: "2026-01-01T00:00:00Z",
+              latest_check_run_id: null,
+              latest_check_run_status: null,
+              latest_done_check_run_id: null,
+              latest_readiness: null,
+              latest_decision: null,
+              latest_done_rubric_family_id: null,
+              escalations_awaiting_review: 0,
+              program: "BSIT",
+            },
+          ],
+          total: 1,
+          page: 1,
+          page_size: 20,
+        },
+      }),
+    );
+
+    renderWithProviders(<DashboardPage />);
+
+    await screen.findAllByText("Oversized PDF group");
+    expect(
+      screen.getByText("This PDF has 900 pages, more than the 500 page limit. Please split it or upload a shorter version."),
+    ).toBeInTheDocument();
+    // The generic per-bucket sentence (which would be wrong here -- this
+    // failure has nothing to do with the raw upload MB cap) must not render.
+    expect(screen.queryByText("The file was larger than VERIDICAL currently accepts.")).not.toBeInTheDocument();
+  });
+
+  // Older rows (ingested before `ingest_failure_detail` existed) and the
+  // catch-all `extraction_failed` reason never got a safe specific message
+  // -- the row must fall back honestly to the generic sentence, not blank
+  // or fabricate one.
+  it("BUG-066: falls back to the generic reason when no specific detail was recorded", async () => {
+    vi.stubGlobal(
+      "fetch",
+      stubFetchByPath({
+        "/auth/me": { id: 1, email: "a@b.com", display_name: "Demo Instructor" },
+        "/rubric-families": ACTIVE_FAMILY,
+        "/stats": STATS,
+        "/manuscripts": {
+          items: [
+            {
+              id: 73,
+              group_label: "Legacy failed group",
+              original_filename: "old.pdf",
+              ingest_status: "failed",
+              ingest_failure_reason: "file_too_large",
+              ingest_failure_detail: null,
+              created_at: "2026-01-01T00:00:00Z",
+              latest_check_run_id: null,
+              latest_check_run_status: null,
+              latest_done_check_run_id: null,
+              latest_readiness: null,
+              latest_decision: null,
+              latest_done_rubric_family_id: null,
+              escalations_awaiting_review: 0,
+              program: "BSIT",
+            },
+          ],
+          total: 1,
+          page: 1,
+          page_size: 20,
+        },
+      }),
+    );
+
+    renderWithProviders(<DashboardPage />);
+
+    await screen.findAllByText("Legacy failed group");
+    expect(screen.getByText("The file was larger than VERIDICAL currently accepts.")).toBeInTheDocument();
+  });
+
   it("renders the first-run empty state (screen 4b) with the 3-step guide", async () => {
     vi.stubGlobal(
       "fetch",

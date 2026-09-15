@@ -25,6 +25,7 @@ function manuscript(overrides: Partial<ManuscriptListItem> = {}): ManuscriptList
     original_filename: null,
     ingest_status: "done",
     ingest_failure_reason: null,
+    ingest_failure_detail: null,
     created_at: "2026-01-01T00:00:00Z",
     latest_check_run_id: 7,
     latest_check_run_status: "done",

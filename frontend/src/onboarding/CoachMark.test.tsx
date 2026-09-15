@@ -246,4 +246,52 @@ describe("CoachMark", () => {
 
     await waitFor(() => expect(screen.getByRole("dialog")).toHaveTextContent("Format comes first"));
   });
+
+  // BUG-063 item 2: "Back" used to be enabled and do nothing. Confirmed
+  // live 2026-09-02 that it now moves the step index -- this locks that in
+  // as a regression test rather than relying on the live recheck alone.
+  it("Back returns to the previous resolved step (BUG-063 item 2)", async () => {
+    vi.stubGlobal("fetch", stubFetchByPath({ "/auth/me": ME_NOT_DISMISSED }));
+    renderWithProviders(
+      <TourProvider>
+        <DashboardFixture />
+        <CoachMark />
+      </TourProvider>,
+      { route: "/dashboard" },
+    );
+    mountFixtureRects();
+    await screen.findByText("Format comes first");
+
+    fireEvent.click(screen.getByRole("button", { name: "Next" }));
+    await waitFor(() =>
+      expect(screen.getByRole("dialog")).toHaveTextContent("Run a check when you're ready"),
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Back" }));
+    await waitFor(() => expect(screen.getByRole("dialog")).toHaveTextContent("Format comes first"));
+  });
+
+  // BUG-063 item 3: the step dots carried position by size/colour alone,
+  // no text alternative (WCAG 1.4.1). CoachMark() already renders a
+  // sr-only aria-live announcement of "Step N of M: <title>" alongside the
+  // dots -- this asserts it exists and updates, since no prior test named it.
+  it("announces the step number and title to assistive tech (BUG-063 item 3)", async () => {
+    vi.stubGlobal("fetch", stubFetchByPath({ "/auth/me": ME_NOT_DISMISSED }));
+    renderWithProviders(
+      <TourProvider>
+        <DashboardFixture />
+        <CoachMark />
+      </TourProvider>,
+      { route: "/dashboard" },
+    );
+    mountFixtureRects();
+    await screen.findByText("Format comes first");
+
+    expect(screen.getByText(/^Step 1 of \d+: Format comes first$/)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Next" }));
+    await waitFor(() =>
+      expect(screen.getByText(/^Step \d+ of \d+: Run a check when you're ready$/)).toBeInTheDocument(),
+    );
+  });
 });

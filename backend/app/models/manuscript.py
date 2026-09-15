@@ -58,6 +58,14 @@ class Manuscript(Base, PkCreatedMixin):
     ingest_failure_reason: Mapped[IngestFailureReason | None] = mapped_column(
         Enum(IngestFailureReason, native_enum=False)
     )
+    # BUG-066: the specific, user-safe message the failing check already
+    # computed (real MB/page numbers from config, e.g. `messages.FILE_TOO_LARGE`
+    # / `PDF_TOO_MANY_PAGES`) -- ONLY ever set from a `VeridicalError`'s own
+    # vetted `.args[0]` (see `ingest/service.py`), never a raw caught
+    # exception's `str()`, which could leak internals. NULL for the
+    # catch-all `extraction_failed` branch (no safe specific text exists)
+    # and for rows ingested before this column existed.
+    ingest_failure_detail: Mapped[str | None] = mapped_column(Text)
     # V-071 AC4: a permanently failed upload can leave the active Review
     # Desk without erasing its history. It remains visible in the instructor's
     # Archive and in the append-only audit trail. NULL means still active.
