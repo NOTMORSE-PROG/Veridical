@@ -472,16 +472,29 @@ async def run_semantic_checks_with_consistency(
     batches, missing = build_semantic_batches(criteria, extraction)
     results: list[CheckResult] = []
     for criterion, target in missing:
+        # BUG-221: a title-match miss is not proof the section is genuinely
+        # absent, only that the lookup couldn't find it (the same
+        # false-negative class BUG-048 already fixed once, for references).
+        # This is the REAL pipeline's own entry point (see this module's
+        # own header docstring: `app.pipeline.machine` calls this, not
+        # `semantic.run_semantic_checks` directly) -- it had an independent
+        # copy of the exact bug already fixed in that other function, missed
+        # in the first pass because the two "missing" loops never shared
+        # code. Escalated instead of auto-failed, same as that fix.
         results.append(
             await _persist(
                 session,
                 check_run_id,
                 criterion,
-                ResultOutcome.failed,
+                ResultOutcome.escalated,
                 {
-                    "score": 0.0,
                     "basis": "structural-alignment",
-                    "reason": f"Referenced section '{target}' was not found in the manuscript.",
+                    "reason": (
+                        f"No section matching '{target}' was found in the manuscript's parsed "
+                        "structure. This may mean the section is genuinely missing, or that it "
+                        "exists under wording VERIDICAL doesn't yet recognize -- check the "
+                        "manuscript directly before deciding."
+                    ),
                 },
             )
         )
