@@ -120,7 +120,16 @@ export function RerunModal({ onClose, initialManuscriptIds }: RerunModalProps) {
   useEffect(() => {
     const handle = setTimeout(() => setDebouncedIds([...selected]), 400);
     return () => clearTimeout(handle);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // BUG-086: `selectedKey` is deliberately the ONLY dependency --
+    // it's a content fingerprint of `selected` built specifically so
+    // this effect re-debounces on a real selection change, not on every
+    // `Set` reference change; listing `selected` itself would defeat
+    // that entirely. `selected` is still read correctly when the timeout
+    // fires, since closures capture the render's live value. The OLD
+    // `eslint-disable` comment here suppressed nothing (eslint isn't
+    // installed; oxlint is, and DOES enforce this rule -- confirmed live).
+    // This is oxlint's own real directive syntax, verified to suppress it.
+    // oxlint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedKey]);
   const debouncedKey = [...debouncedIds].sort((a, b) => a - b).join(",");
 
