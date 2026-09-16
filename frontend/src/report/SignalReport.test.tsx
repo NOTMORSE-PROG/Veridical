@@ -589,6 +589,34 @@ describe("SignalReportPage", () => {
     expect(screen.getAllByRole("link", { name: "Review evidence" })).toHaveLength(2);
   });
 
+  it("BUG-065: each criterion's 'Review evidence and reasoning' disclosure has a distinguishing accessible name", async () => {
+    // The visible text is identical on every row by design -- a
+    // screen-reader links/buttons list must still be able to tell them
+    // apart. Two rows here, same visible summary text, different
+    // criterion text, asserting the accessible NAME (not the visible
+    // text) actually differs.
+    const report: ReportOut = {
+      ...BASE_REPORT,
+      results: [
+        { ...BASE_REPORT.results[0], criterion_id: 1, text: "Chapter 1 states the research problem" },
+        { ...BASE_REPORT.results[0], criterion_id: 2, text: "Findings answer the stated research questions" },
+      ],
+    };
+    stubReport(report);
+    renderWithProviders(<SignalReportPage />, { route: "/report/5", path: "/report/:checkRunId" });
+
+    await screen.findByText("Chapter 1 states the research problem");
+    // jsdom doesn't compute an implicit ARIA role for a bare <summary>
+    // (Chromium does: "button"), so query it directly rather than via
+    // getByRole -- the aria-label itself, which real assistive tech
+    // reads, is what this regression test actually needs to prove.
+    const summaries = Array.from(document.querySelectorAll("summary"));
+    expect(summaries.map((s) => s.getAttribute("aria-label"))).toEqual([
+      "Review evidence and reasoning: Chapter 1 states the research problem",
+      "Review evidence and reasoning: Findings answer the stated research questions",
+    ]);
+  });
+
   it("BUG-168: states the problem, in the product's own vocabulary, on the card heading -- not just the student's excerpt", async () => {
     // Confirms end-to-end, on a real rendered card, that a kind
     // `problemLabel.ts` only just gained (this ticket extended the table
