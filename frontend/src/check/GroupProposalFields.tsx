@@ -88,7 +88,16 @@ export function GroupProposalFields({
     if (!programs || proposal.program === null || programEdited) return;
     const match = programs.find((p) => p.name === proposal.program!.value);
     if (match) setProgramId(match.id);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // BUG-086: deliberately fires only when the program LIST changes --
+    // `proposal.program`/`programEdited` are read as a one-shot gate at
+    // that moment (correct, since closures capture the render's live
+    // value whenever this effect actually re-fires); listing them would
+    // re-run this resolution on every keystroke of an unrelated field.
+    // The OLD `eslint-disable` comment here suppressed nothing (eslint
+    // isn't installed; oxlint is, and DOES enforce this rule -- confirmed
+    // live). This is oxlint's own real directive syntax, verified to
+    // suppress it.
+    // oxlint-disable-next-line react-hooks/exhaustive-deps
   }, [programs]);
 
   useEffect(() => {

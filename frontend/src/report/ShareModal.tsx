@@ -139,6 +139,14 @@ export function ShareModal({
   // be mistaken for something that took effect.
   useEffect(() => {
     if (link) setExpirySelection("current");
+    // BUG-086: deliberately narrowed to `link.token` -- a background
+    // refetch can hand back a new `link` object with the SAME token,
+    // which must not reset an in-progress selection; only a genuine new
+    // token (create/regenerate) should. `link` itself was never listed,
+    // and never had an `eslint-disable` comment at all (eslint isn't
+    // installed; oxlint is, and DOES enforce this rule as a real,
+    // previously-unaddressed warning -- confirmed live).
+    // oxlint-disable-next-line react-hooks/exhaustive-deps
   }, [link?.token]);
 
   // ux-critic finding (P1, live-reproduced): opening a confirm sub-panel
