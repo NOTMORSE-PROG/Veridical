@@ -69,7 +69,12 @@ export function Modal({ title, children, footer, onClose, size = "md" }: ModalPr
     return () => {
       previouslyFocused.current?.focus();
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // BUG-086: `[]` is already the complete, correct array -- the body
+    // reads only refs (stable identity, exempt from exhaustive-deps by
+    // React's own rule), never a prop or piece of state. The
+    // `eslint-disable` this line used to carry suppressed nothing: eslint
+    // isn't installed in this project (oxlint is), so no check ever ran
+    // against it. Verified manually rather than assumed.
   }, []);
 
   // Lock background scroll while open (WAI-ARIA APG's own Dialog

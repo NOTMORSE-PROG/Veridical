@@ -128,7 +128,15 @@ export function NewCheckModal({
     );
     if (!structural) return;
     setFocusSummaryToken((t) => t + 1);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // BUG-086: deliberately fires only on the loading-state transition
+    // (see the comment above this effect) -- `computeProblems` is read
+    // as a one-shot snapshot at that moment, not tracked reactively,
+    // which is the whole point (listing it would re-fire on every
+    // keystroke/selection change this effect is meant to ignore). The OLD
+    // `eslint-disable` comment here suppressed nothing (eslint isn't
+    // installed; oxlint is, and DOES enforce this rule -- confirmed live).
+    // This is oxlint's own real directive syntax, verified to suppress it.
+    // oxlint-disable-next-line react-hooks/exhaustive-deps
   }, [manuscriptsPending, familiesPending, manuscriptsError, familiesError]);
 
   const selectedManuscript = readyManuscripts.find((m) => m.id === manuscriptId);

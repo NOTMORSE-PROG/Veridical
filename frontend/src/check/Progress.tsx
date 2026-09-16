@@ -117,7 +117,16 @@ export function CheckProgressPage() {
     else if (run.status === "failed") setAnnouncement("This check has failed. See the message below.");
     else if (run.status === "cancelled") setAnnouncement("This check was cancelled.");
     else setAnnouncement(`Now running: ${STAGE_LABEL[run.status] ?? run.status}.`);
-  }, [run?.status]); // eslint-disable-line react-hooks/exhaustive-deps
+    // BUG-086: deliberately narrowed to the one primitive field this
+    // effect actually needs to react to -- `run.status` (read again above
+    // for the label) is the same value, listing the whole `run` object
+    // would re-fire on every poll even when status hasn't changed. The
+    // OLD `eslint-disable` comment here suppressed nothing (eslint isn't
+    // installed; oxlint is, and DOES enforce this rule as a real, live
+    // warning -- confirmed by running `npx oxlint` directly). This is
+    // oxlint's own real directive syntax, verified to actually suppress it.
+    // oxlint-disable-next-line react-hooks/exhaustive-deps
+  }, [run?.status]);
 
   return (
     <div className="signal-route signal-page-flow signal-check-progress">

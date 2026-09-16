@@ -51,7 +51,11 @@ export function useTour() {
       setPollTick((t) => t + 1);
     }, POLL_MS);
     return () => clearTimeout(timer);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // BUG-086: `[active, resolved, pollTick]` is already the complete
+    // array -- every value the body reads (`active`, `resolved`) is
+    // listed; `pollCountRef` is a ref, exempt by React's own rule. The
+    // `eslint-disable` this line used to carry suppressed nothing: eslint
+    // isn't installed (oxlint is); verified manually, not assumed.
   }, [active, resolved, pollTick]);
 
   function next() {
