@@ -180,6 +180,34 @@ describe("SignalReportPage", () => {
     expect(screen.getByRole("button", { name: "Meets criterion" })).toBeInTheDocument();
   });
 
+  it("BUG-132: every resolution button is programmatically described by the vote summary and reason above it", async () => {
+    // A screen-reader user can tab directly to a button (not just read
+    // top-to-bottom); before this fix they heard only "Meets criterion,
+    // button" -- none of the context explaining WHY this criterion needs
+    // review. `ESCALATED` has both a vote summary (always present) and a
+    // `reason` (conditional) -- asserts BOTH are in the described-by set,
+    // resolving to real elements containing the real context text.
+    stubReport(BASE_REPORT, [ESCALATED]);
+    renderWithProviders(<SignalReportPage />, { route: "/report/5", path: "/report/:checkRunId" });
+
+    const button = await screen.findByRole("button", { name: "Meets criterion" });
+    const describedByIds = button.getAttribute("aria-describedby")?.split(" ") ?? [];
+    expect(describedByIds.length).toBeGreaterThan(0);
+    const describedText = describedByIds
+      .map((id) => document.getElementById(id)?.textContent ?? "")
+      .join(" ");
+    expect(describedText).toContain("Split vote: pass, fail.");
+    expect(describedText).toContain(ESCALATED.reason);
+
+    // Every other visible button in the row shares the identical
+    // described-by set -- the fix isn't scoped to just one button.
+    for (const name of ["Does not meet", "Needs another document"]) {
+      expect(screen.getByRole("button", { name }).getAttribute("aria-describedby")).toBe(
+        button.getAttribute("aria-describedby"),
+      );
+    }
+  });
+
   it("BUG-170: never offers to accept a majority verdict the server has already declared unrecognized for this criterion's scale", async () => {
     // Both passes genuinely agreed (a real ai_majority_verdict, unlike
     // ESCALATED's own tied/no-majority fixture above) on a verdict this

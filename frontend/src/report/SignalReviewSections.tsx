@@ -556,17 +556,42 @@ function SignalResolutionCard({ item, checkRunId, onResolved }: {
     );
   }
 
+  // BUG-132: all four decision buttons below carried no programmatic link
+  // to the criterion quote/vote summary/reason/evidence sitting visually
+  // above them -- a screen reader user who tabs directly to a button (a
+  // normal navigation pattern, not just top-to-bottom reading) heard only
+  // the button's own label, none of the context explaining WHY this
+  // criterion needs review, and for an injection-suspected item
+  // specifically, none of the warning that the AI's own agreement here
+  // can't be trusted. Stable ids + a conditional aria-describedby list
+  // (only the blocks that actually render, in document order) fixes this
+  // on every button, not just the group container -- a container-level
+  // aria-label isn't reliably announced on focus entering a nested
+  // interactive element, but a button's own aria-describedby always is.
+  const voteId = `signal-resolution-vote-${item.check_result_id}`;
+  const reasonId = `signal-resolution-context-reason-${item.check_result_id}`;
+  const injectionId = `signal-resolution-injection-${item.check_result_id}`;
+  const unverifiedId = `signal-resolution-unverified-${item.check_result_id}`;
+  const describedBy = [
+    voteId,
+    item.reason && reasonId,
+    item.injection_suspected && item.injection_matched_snippet && injectionId,
+    item.unverified_evidence && item.unverified_evidence.length > 0 && unverifiedId,
+  ]
+    .filter(Boolean)
+    .join(" ");
+
   return (
     <article className="signal-resolution-card">
       <div className="signal-resolution-card__context">
         <div><p className="signal-section-kicker">Criterion requiring judgment</p><h3 ref={criterionHeadingRef} tabIndex={-1}>{item.criterion_text}</h3></div>
-        <p className="signal-resolution-card__vote">{voteSummary(item)}</p>
-        {item.reason && <p>{item.reason}</p>}
+        <p id={voteId} className="signal-resolution-card__vote">{voteSummary(item)}</p>
+        {item.reason && <p id={reasonId}>{item.reason}</p>}
         {item.injection_suspected && item.injection_matched_snippet && (
-          <blockquote className="signal-unverified-evidence"><strong>Text addressed at an automated grader</strong><span>“{item.injection_matched_snippet}”</span></blockquote>
+          <blockquote id={injectionId} className="signal-unverified-evidence"><strong>Text addressed at an automated grader</strong><span>“{item.injection_matched_snippet}”</span></blockquote>
         )}
         {item.unverified_evidence && item.unverified_evidence.length > 0 && (
-          <div className="signal-unverified-evidence"><strong>Could not verify against the source</strong>{item.unverified_evidence.map((quote) => <blockquote key={quote}>“{quote}”</blockquote>)}</div>
+          <div id={unverifiedId} className="signal-unverified-evidence"><strong>Could not verify against the source</strong>{item.unverified_evidence.map((quote) => <blockquote key={quote}>“{quote}”</blockquote>)}</div>
         )}
       </div>
 
@@ -590,9 +615,9 @@ function SignalResolutionCard({ item, checkRunId, onResolved }: {
       {!pending ? (
         <div className="signal-resolution-options" aria-label={`Resolve: ${item.criterion_text}`}>
           {item.levels && item.levels.length > 0
-            ? item.levels.map((level) => <Button key={level.level} variant="secondary" onClick={() => choose("mark_level", level.level)}>{level.name}</Button>)
-            : <><Button variant="secondary" onClick={() => choose("mark_pass")}>Meets criterion</Button><Button variant="secondary" onClick={() => choose("mark_fail")}>Does not meet</Button></>}
-          <Button variant="quiet" onClick={() => choose("needs_document")}>Needs another document</Button>
+            ? item.levels.map((level) => <Button key={level.level} variant="secondary" aria-describedby={describedBy} onClick={() => choose("mark_level", level.level)}>{level.name}</Button>)
+            : <><Button variant="secondary" aria-describedby={describedBy} onClick={() => choose("mark_pass")}>Meets criterion</Button><Button variant="secondary" aria-describedby={describedBy} onClick={() => choose("mark_fail")}>Does not meet</Button></>}
+          <Button variant="quiet" aria-describedby={describedBy} onClick={() => choose("needs_document")}>Needs another document</Button>
           {/* BUG-170: `verdict_unrecognized` means accepting this verdict
               is guaranteed to 409 server-side (the passes agreed on a
               string that still doesn't name any of this criterion's own
@@ -601,7 +626,7 @@ function SignalResolutionCard({ item, checkRunId, onResolved }: {
               recognise" incoherence this ticket named. `item.reason`
               already explains why, so removing the button loses no
               information. */}
-          {item.ai_majority_verdict !== null && !item.verdict_unrecognized && <Button variant={item.review_reason === "injection_suspected" ? "quiet" : "secondary"} onClick={() => choose("accept_majority")}>Accept AI suggestion: {item.ai_majority_verdict}</Button>}
+          {item.ai_majority_verdict !== null && !item.verdict_unrecognized && <Button variant={item.review_reason === "injection_suspected" ? "quiet" : "secondary"} aria-describedby={describedBy} onClick={() => choose("accept_majority")}>Accept AI suggestion: {item.ai_majority_verdict}</Button>}
         </div>
       ) : (
         <div className="signal-resolution-form">
