@@ -27,7 +27,7 @@ a bug -- check the actual rendered page before treating one as real.
 """
 
 import contextlib
-from datetime import datetime
+from datetime import UTC, datetime
 from io import BytesIO
 from pathlib import Path
 from xml.sax.saxutils import escape
@@ -287,12 +287,22 @@ def _format_date(dt: datetime, *, with_time: bool = False) -> str:
     """`%-d`/`%-I` (no leading zero) are a glibc strftime extension --
     absent on Windows, so this dev environment can't use them even
     though the Linux production target could. Built manually instead of
-    depending on a platform-specific flag."""
+    depending on a platform-specific flag.
+
+    BUG-059: `with_time` output is explicitly labelled "UTC" (never
+    silently converted to an assumed instructor timezone -- this PDF is a
+    portable artifact that can be opened by an adviser anywhere, not just
+    the instructor who generated it). The caller is responsible for
+    passing a UTC instant; this only labels it, since a naive `datetime`
+    has no timezone to convert from safely. The bug's own measured
+    failure was a UTC-stamped PDF read as if it were local Asia/Manila
+    time with no zone marker at all, an 8-hour discrepancy on the record
+    whose purpose is to be one."""
     date_part = f"{dt:%b} {dt.day}, {dt:%Y}"
     if not with_time:
         return date_part
     hour12 = dt.hour % 12 or 12
-    return f"{date_part}, {hour12}:{dt:%M %p}"
+    return f"{date_part}, {hour12}:{dt:%M %p} UTC"
 
 
 def _explainer_base(report) -> str:
@@ -547,7 +557,7 @@ def build_report_pdf(data: ReportExportData) -> bytes:
         identity = f"{identity} · {report.manuscript_original_filename}"
     flow.append(Paragraph(escape(identity), styles["meta"]))
     flow.append(Paragraph(escape(report.rubric_title), styles["meta"]))
-    generated_at = _format_date(datetime.now(), with_time=True)
+    generated_at = _format_date(datetime.now(UTC), with_time=True)
     flow.append(
         Paragraph(
             f"Generated {generated_at} · Reference: check run #{report.check_run_id}",
