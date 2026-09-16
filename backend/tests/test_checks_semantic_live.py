@@ -182,6 +182,99 @@ async def test_semantic_check_persists_real_results_fake_llm_mode(
         assert anchor == "page 2"  # title page is page 1; ABSTRACT starts page 2
 
 
+async def test_self_consistency_reaches_a_real_verified_majority_in_fake_llm_mode(
+    tmp_path, monkeypatch, session_factory
+):
+    """BUG-119: this is the ticket's own literally-requested regression
+    test -- a live-DB run through `run_semantic_checks_with_consistency`
+    (the REAL pipeline's entry point, per consistency.py's own header
+    docstring) under `FakeLLMClient`, asserting a real, verified
+    self-consistency majority is reachable, not just hand-seeded past the
+    LLM entirely. Before this ticket's fix, `_verify_quotes` rejected the
+    fixture's placeholder quote against ANY real manuscript, so every
+    semantic criterion escalated with `votes: [null, null]` in fake mode
+    -- the project's zero-budget default for every session, CI run, and
+    demo -- making `accept_majority` (the frontend's "Accept AI")
+    structurally unreachable without a real Gemini key."""
+    from app.checks.consistency import run_semantic_checks_with_consistency
+    from app.ingest.service import ingest_manuscript, load_raw_store
+    from app.llm.fake import FakeLLMClient
+
+    monkeypatch.setenv("DATA_DIR", str(tmp_path / "data"))
+    get_settings.cache_clear()
+    settings = get_settings()
+    pdf_path = _abstract_pdf(tmp_path)
+
+    async with session_factory() as session:
+        instructor = Instructor(
+            email=f"consistency-{time.time_ns()}@test.local", display_name="Consistency Test"
+        )
+        session.add(instructor)
+        await session.commit()
+
+        manuscript = Manuscript(
+            instructor_id=instructor.id, group_label="Group A", file_ref=str(pdf_path)
+        )
+        session.add(manuscript)
+        await session.commit()
+        await ingest_manuscript(session, manuscript, pdf_path, settings)
+        extraction = load_raw_store(settings, manuscript.id)
+
+        rubric = Rubric(instructor_id=instructor.id, title="Format", source_file="r.pdf")
+        session.add(rubric)
+        await session.commit()
+        # Same 3-criteria/whole-document-batch shape as the sibling test
+        # above (the shared fixture always returns 3 verdicts, BUG-177).
+        criteria = [
+            Criterion(
+                rubric_id=rubric.id,
+                type="semantic",
+                text="The overall purpose of the study is clearly stated",
+                evidence=None,
+                weight=Decimal("10"),
+                position=0,
+            ),
+            Criterion(
+                rubric_id=rubric.id,
+                type="semantic",
+                text="The overall methodology is sound",
+                evidence=None,
+                weight=Decimal("10"),
+                position=1,
+            ),
+            Criterion(
+                rubric_id=rubric.id,
+                type="semantic",
+                text="The overall writing is clear throughout",
+                evidence=None,
+                weight=Decimal("10"),
+                position=2,
+            ),
+        ]
+        session.add_all(criteria)
+        await session.commit()
+
+        check_run = CheckRun(manuscript_id=manuscript.id, rubric_id=rubric.id)
+        session.add(check_run)
+        await session.commit()
+
+        results = await run_semantic_checks_with_consistency(
+            session, check_run.id, criteria, extraction, FakeLLMClient(), settings
+        )
+        assert len(results) == 3
+        # The fixture's index-0 verdict is "pass" on both passes (no
+        # __pass_1/__pass_2 variant exists, so both loads are identical) --
+        # a real majority, not an escalation, proves the quote genuinely
+        # verified on BOTH independent passes.
+        assert results[0].outcome == ResultOutcome.passed
+        assert results[0].detail["agreement"] == 1.0
+        assert results[0].detail["votes"] == ["pass", "pass"]
+        # Containment spot-check, same as the sibling test: the quote each
+        # pass produced really does exist in the real manuscript text.
+        quote = results[0].detail["evidence"][0]["quote"]
+        assert any(quote in b.text for b in extraction.blocks)
+
+
 # --- real Gemini smoke test (quota-risk retirement evidence, V2 focus) ----------
 
 gemini_live = pytest.mark.skipif(
