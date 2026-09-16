@@ -167,6 +167,25 @@ async def test_no_semantic_criteria_makes_no_llm_call():
     assert llm.passes == []
 
 
+async def test_missing_section_criterion_escalates_without_calling_the_llm():
+    # BUG-221: this module's own "missing" loop had an INDEPENDENT copy of
+    # the exact bug already fixed in semantic.py's run_semantic_checks --
+    # missed in that first pass because this is the REAL pipeline's own
+    # entry point (see this module's header docstring), not the same
+    # function. A title-match miss on a criterion's named section used to
+    # grade `failed` outright; not proof the section is genuinely absent,
+    # only that the lookup couldn't find it (the same false-negative class
+    # BUG-048 already fixed once for references). Escalated instead, never
+    # auto-failed on a lookup miss (charter rule 1).
+    criteria = [FakeCriterion(id=1, text="The Glossary must define all terms")]
+    llm = ScriptedLLM([])  # would raise IndexError if ever called
+    session = FakeSession()
+    results = await run_semantic_checks_with_consistency(session, 1, criteria, _extraction(), llm)
+    assert results[0].outcome == ResultOutcome.escalated
+    assert "No section matching" in results[0].detail["reason"]
+    assert llm.passes == []
+
+
 async def test_pass_failing_to_grade_at_all_escalates_without_a_tie_break():
     # pass_1 comes back malformed (fails the whole-batch AND single-
     # criterion retry ladder) — voting can't proceed, so there's nothing
