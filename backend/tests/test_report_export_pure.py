@@ -3,9 +3,10 @@ live server (same convention as `test_report_export_perf.py`).
 """
 
 import json
+from datetime import UTC, datetime
 from pathlib import Path
 
-from app.report.export import _source_caption
+from app.report.export import _format_date, _source_caption
 from app.report.schemas import CriterionResultOut, ResolutionOut
 
 _FIXTURE = (
@@ -35,6 +36,26 @@ def _row(case: dict) -> CriterionResultOut:
         evidence=[],
         resolution=_RESOLUTION if case["has_resolution"] else None,
     )
+
+
+def test_format_date_labels_a_time_explicitly_as_utc():
+    """BUG-059: the exported PDF used to stamp `datetime.now()` (naive,
+    the server's own local wall clock) with no zone marker at all -- read
+    as if it were the instructor's own local time (Asia/Manila), an
+    8-hour discrepancy on the record whose purpose is to be one. The
+    caller now passes a real UTC instant and the label makes it
+    unambiguous, rather than silently converting to an assumed viewer
+    timezone (this PDF can be opened by an adviser anywhere, not just the
+    instructor who generated it)."""
+    fixed = datetime(2026, 8, 16, 3, 42, tzinfo=UTC)
+    assert _format_date(fixed, with_time=True) == "Aug 16, 2026, 3:42 AM UTC"
+
+
+def test_format_date_without_time_has_no_zone_label():
+    # A date-only rendering (report.decided_at) carries no time-of-day,
+    # so a zone label would be noise, not honesty -- unchanged by BUG-059.
+    fixed = datetime(2026, 8, 16, 3, 42, tzinfo=UTC)
+    assert _format_date(fixed, with_time=False) == "Aug 16, 2026"
 
 
 def test_source_caption_matches_the_shared_contract_fixture():
