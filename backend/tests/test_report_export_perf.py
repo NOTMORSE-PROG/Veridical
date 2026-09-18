@@ -124,6 +124,7 @@ def _sixty_criterion_report() -> ReportExportData:
     ]
     report = ReportOut(
         check_run_id=1,
+        manuscript_id=1,
         manuscript_group_label="Test Group",
         manuscript_original_filename="thesis.pdf",
         rubric_title="TIP Format v2",

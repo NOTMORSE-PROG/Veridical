@@ -6,6 +6,7 @@ import { SignalReportPage } from "./SignalReport";
 
 const BASE_REPORT: ReportOut = {
   check_run_id: 5,
+  manuscript_id: 5,
   manuscript_group_label: "Group Syntax",
   manuscript_original_filename: "syntax-capstone.pdf",
   rubric_title: "T.I.P. Capstone Format",
@@ -319,8 +320,18 @@ describe("SignalReportPage", () => {
     renderWithProviders(<SignalReportPage />, { route: "/report/5", path: "/report/:checkRunId" });
 
     expect(await screen.findByText("Test-mode AI results")).toBeInTheDocument();
-    expect(screen.getByText("The required format had unresolved parser uncertainty")).toBeInTheDocument();
-    expect(screen.getByText("Citation integrity was not fully assessed")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Not every check finished" })).toBeInTheDocument();
+    expect(screen.getByText("Required format review")).toBeInTheDocument();
+    expect(screen.getByText("Citation integrity")).toBeInTheDocument();
+    expect(screen.getByText(/2 items skipped because a service was unavailable/)).toBeInTheDocument();
+    const rerunLink = screen.getByRole("link", { name: "Run again: citation integrity check for this manuscript" });
+    expect(rerunLink).toHaveAttribute("href", "/dashboard?rerun=5");
+    // BUG-127 (ux-critic): WCAG 2.5.3 Label in Name requires the
+    // accessible name to CONTAIN the visible text -- a link whose
+    // aria-label doesn't start with its own visible label fails a
+    // voice-control user trying to say "click Run again".
+    expect(rerunLink.textContent?.trim()).toBe("Run again");
+    expect(rerunLink.getAttribute("aria-label")?.toLowerCase().startsWith("run again")).toBe(true);
     expect(await screen.findByText(/abstract and findings report different participant totals/i)).toBeInTheDocument();
     expect(screen.getByText("High severity")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Review evidence" })).toHaveAttribute("href", "/flags/7");

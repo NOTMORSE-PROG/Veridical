@@ -422,6 +422,27 @@ describe("DashboardPage", () => {
     expect(await screen.findByRole("button", { name: "Add manuscript" })).toBeEnabled();
   });
 
+  // BUG-128: a report's integrity-check coverage gap used to name a
+  // problem with no path to close it. The remedy now deep-links here with
+  // `?rerun=<manuscript_id>` and opens the SAME modal the row-level "Run
+  // again" button already opens, reachable one click earlier.
+  it("BUG-128: ?rerun=<manuscript_id> opens the rerun modal preselected to that manuscript", async () => {
+    vi.stubGlobal(
+      "fetch",
+      stubFetchByPath({
+        "/auth/me": { id: 1, email: "a@b.com", display_name: "Demo Instructor" },
+        "/rubric-families": ACTIVE_FAMILY,
+        "/stats": STATS,
+        "/manuscripts": MANUSCRIPTS_PAGE,
+      }),
+    );
+
+    renderWithProviders(<DashboardPage />, { route: "/dashboard?rerun=1" });
+
+    const dialog = await screen.findByRole("dialog");
+    expect(await within(dialog).findByText("G-11")).toBeInTheDocument();
+  });
+
   it("V-059: end-to-end handoff — upload a manuscript, then it's preselected in New check", async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const path = new URL(typeof input === "string" ? input : input.toString(), "http://localhost").pathname;

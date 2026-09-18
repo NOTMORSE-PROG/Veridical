@@ -1,12 +1,13 @@
 import { type MouseEvent, useEffect, useRef, useState } from "react";
 import { Link, useParams } from "react-router";
 import { ApiError } from "../api/client";
-import type { IntegrityCheckStatusOut } from "../api/types";
+import type { IntegrityCheckStatusOut, ReportOut } from "../api/types";
 import { manuscriptIdentity } from "../domain/manuscriptLabel";
 import { useRouteFocus } from "../routing/useRouteFocus";
 import { ActionLink } from "../ui/ActionLink";
 import { Alert } from "../ui/Alert";
 import { Button } from "../ui/Button";
+import { type CoverageStatementItem, CoverageStatement } from "../ui/CoverageStatement";
 import { ReadinessBand } from "../ui/ReadinessBand";
 import { SignalDecisionPanel } from "./SignalDecisionPanel";
 import { SignalCriteriaResults, SignalEscalatedPanel, SignalFlagsPanel } from "./SignalReviewSections";
@@ -19,16 +20,64 @@ const INTEGRITY_LABEL: Record<IntegrityCheckStatusOut["check_kind"], string> = {
   citation_integrity: "Citation integrity",
 };
 
-function IntegrityDisclosure({ status }: { status: IntegrityCheckStatusOut }) {
+// BUG-127/BUG-128: this used to be one `Alert` per gap (up to 3-4 stacked,
+// identically-shaped colored boxes -- banner blindness, `ux-critic`/
+// `professor` both measured it live) and each one named a gap with no way
+// to close it (Norman's gulf of execution). Consolidated into the single
+// `CoverageStatement` DESIGN.md §8/§11 already specified for exactly this,
+// and each item now links to the real, existing remedy: the required-
+// format review screen, or the same "Run again" rerun mechanism the
+// Dashboard row action already uses (BUG-128's own fix, `manuscript_id`
+// newly threaded onto `ReportOut` for this).
+function integrityCoverageItem(status: IntegrityCheckStatusOut, manuscriptId: number): CoverageStatementItem {
   const unavailable = status.n_skipped_api_down;
   const capacity = status.n_skipped_quota;
   const parse = status.n_skipped_parse_failure;
-  return (
-    <Alert title={`${INTEGRITY_LABEL[status.check_kind]} was not fully assessed`} tone="warning">
-      <p>The check recorded {status.outcome === "api_down" ? "a service interruption" : status.outcome === "quota_exhausted" ? "a free-capacity limit" : "an unverifiable result"}. Nothing skipped is presented as passed.</p>
-      <ul>{unavailable > 0 && <li>{unavailable} item{unavailable === 1 ? "" : "s"} skipped because a service was unavailable.</li>}{capacity > 0 && <li>{capacity} item{capacity === 1 ? "" : "s"} skipped because daily AI capacity was spent.</li>}{parse > 0 && <li>{parse} item{parse === 1 ? "" : "s"} skipped because the source could not be parsed reliably.</li>}</ul>
-    </Alert>
-  );
+  const outcomeText =
+    status.outcome === "api_down"
+      ? "a service interruption"
+      : status.outcome === "quota_exhausted"
+        ? "a free-capacity limit"
+        : "an unverifiable result";
+  const subIssues: string[] = [];
+  if (unavailable > 0) subIssues.push(`${unavailable} item${unavailable === 1 ? "" : "s"} skipped because a service was unavailable.`);
+  if (capacity > 0) subIssues.push(`${capacity} item${capacity === 1 ? "" : "s"} skipped because daily AI capacity was spent.`);
+  if (parse > 0) subIssues.push(`${parse} item${parse === 1 ? "" : "s"} skipped because the source could not be parsed reliably.`);
+  const label = INTEGRITY_LABEL[status.check_kind];
+  return {
+    key: status.check_kind,
+    label,
+    detail: `The check recorded ${outcomeText}. Nothing skipped is presented as passed.`,
+    subIssues,
+    action: {
+      to: `/dashboard?rerun=${manuscriptId}`,
+      label: "Run again",
+      // `ux-critic` (BUG-127 review): WCAG 2.5.3 Label in Name requires
+      // the accessible name to CONTAIN the visible text as a substring --
+      // "Run the X check again" doesn't, since "Run" and "again" aren't
+      // contiguous. Fixed to lead with the visible label verbatim, same
+      // shape as this codebase's own correct precedent two sections down
+      // (`SignalReviewSections.tsx`'s "Review evidence and reasoning: ${row.text}").
+      ariaLabel: `Run again: ${label.toLowerCase()} check for this manuscript`,
+    },
+  };
+}
+
+function coverageItems(report: ReportOut): CoverageStatementItem[] {
+  const items: CoverageStatementItem[] = [];
+  if (report.rubric_needs_review) {
+    items.push({
+      key: "rubric_needs_review",
+      label: "Required format review",
+      detail: "The required format was activated with unresolved parser uncertainty. Check the criterion record against the original document.",
+      subIssues: report.rubric_parse_issues ?? undefined,
+      action: { to: "/rubric", label: "Review required format" },
+    });
+  }
+  for (const status of report.integrity_check_status ?? []) {
+    items.push(integrityCoverageItem(status, report.manuscript_id));
+  }
+  return items;
 }
 
 // `scrollIntoView` defaults to false: the existing plain `<a href="#...">`
@@ -152,9 +201,13 @@ export function SignalReportPage() {
 
               {report.llm_mode !== "real" && <Alert title={report.llm_mode === "fake" ? "Test-mode AI results" : "AI mode could not be verified"} tone="warning">{report.llm_mode === "fake" ? "This report was produced with fixture responses, not real AI grading. Do not treat it as a finding about the manuscript." : "This run predates reliable AI-mode tracking. Treat AI-derived outcomes cautiously."}</Alert>}
 
-              {report.rubric_needs_review && <Alert title="The required format had unresolved parser uncertainty" tone="warning"><p>The instructor activated it despite the parser warning. Check the criterion record against the original format.</p>{report.rubric_parse_issues?.length ? <ul>{report.rubric_parse_issues.map((issue) => <li key={issue}>{issue}</li>)}</ul> : null}</Alert>}
-
-              {(report.integrity_check_status ?? []).map((status) => <IntegrityDisclosure key={status.check_kind} status={status} />)}
+              <CoverageStatement
+                state="partial"
+                headingId="coverage-statement-heading"
+                heading="Not every check finished"
+                intro="Nothing skipped here is presented as passed. Each item below names what did not finish and how to close it."
+                items={coverageItems(report)}
+              />
             </div>
           )}
 

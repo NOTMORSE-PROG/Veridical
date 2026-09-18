@@ -6,6 +6,7 @@ import { AdviserViewPage } from "./AdviserView";
 
 const BASE_REPORT: ReportOut = {
   check_run_id: 5,
+  manuscript_id: 5,
   manuscript_group_label: "G-Adviser",
   manuscript_original_filename: null,
   rubric_title: "TIP Format",
