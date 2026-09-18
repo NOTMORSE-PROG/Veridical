@@ -1,6 +1,6 @@
 // Single source of truth for how a check_kind (F4-F7 integrity checks)
-// maps to display strings — extracted from FlagDetail.tsx (BUG-033) so
-// FlagsPanel.tsx and FlagDetail.tsx can never independently drift on the
+// maps to display strings — extracted from FlagDetail.tsx (BUG-033) so it
+// and IntegrityCheckStatusBanner.tsx can never independently drift on the
 // same vocabulary, same reasoning as readinessTone.ts's own extraction.
 export const CHECK_KIND_META: Record<string, { eyebrow: string; title: string }> = {
   internal_agreement: { eyebrow: "Internal agreement check", title: "Possible internal contradiction" },
