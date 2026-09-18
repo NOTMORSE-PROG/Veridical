@@ -171,8 +171,15 @@
   }
 
   .signal-alert__title {
+    display: flex;
+    align-items: center;
+    gap: var(--signal-space-2);
     margin: 0;
     font-weight: var(--signal-weight-bold);
+  }
+
+  .signal-alert__title svg {
+    flex: none;
   }
 
   .signal-alert__body {
@@ -2328,6 +2335,52 @@
     border-block-start: var(--signal-border-hairline) solid var(--color-signal-border);
     padding: var(--signal-space-4) var(--signal-space-6);
     color: var(--color-signal-ink-secondary);
+  }
+
+  /* BUG-127: rows inside one already-labelled `CoverageStatement` section,
+     not N separate alerts -- banner blindness (NN/g) is about repeated,
+     separately-prominent, page-level widgets competing for the same scan
+     pass, not about rows inside a list already read as one table (the
+     "Criterion record" list a few sections down repeats row shapes the
+     same way and has never been flagged as banner-blind). The accent
+     lives once, on the section's own `--attention` left border; item rows
+     stay on plain surface with only the icon/label colored. */
+  .signal-coverage-list {
+    display: flex;
+    flex-direction: column;
+    gap: var(--signal-space-4);
+    margin: 0;
+    padding: var(--signal-space-6);
+    padding-block-start: 0;
+    list-style: none;
+  }
+
+  .signal-coverage-list__item {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    gap: var(--signal-space-3);
+    align-items: start;
+    border: var(--signal-border-hairline) solid var(--color-signal-border);
+    border-radius: var(--signal-radius-control);
+    padding: var(--signal-space-4);
+    background: var(--color-signal-surface);
+  }
+
+  .signal-coverage-list__item svg {
+    flex: none;
+    color: var(--color-signal-warning-text);
+    margin-block-start: var(--signal-space-1);
+  }
+
+  .signal-coverage-list__label {
+    margin: 0;
+    font-weight: var(--signal-weight-bold);
+    color: var(--color-signal-warning-text);
+  }
+
+  .signal-coverage-list__body p + p,
+  .signal-coverage-list__body ul {
+    margin-block-start: var(--signal-space-2);
   }
 
   .signal-resolution-list,
@@ -4833,6 +4886,19 @@
     .signal-decision-choice,
     .signal-decision-record {
       padding: var(--signal-space-4);
+    }
+
+    .signal-coverage-list {
+      padding: var(--signal-space-4);
+      padding-block-start: 0;
+    }
+
+    .signal-coverage-list__item {
+      grid-template-columns: auto minmax(0, 1fr);
+    }
+
+    .signal-coverage-list__item .signal-button {
+      grid-column: 1 / -1;
     }
 
     .signal-resolution-options,

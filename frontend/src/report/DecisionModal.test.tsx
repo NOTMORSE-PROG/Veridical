@@ -7,6 +7,7 @@ import { DecisionModal } from "./DecisionModal";
 function reportWithStatus(status: ReportOut["status"], score: number | null): ReportOut {
   return {
     check_run_id: 5,
+    manuscript_id: 5,
     manuscript_group_label: "Ungrouped",
     manuscript_original_filename: null,
     rubric_title: "TIP Format",

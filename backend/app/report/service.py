@@ -462,6 +462,7 @@ async def report_out_for_check_run(
 
     return ReportOut(
         check_run_id=check_run_id,
+        manuscript_id=check_run.manuscript_id,
         manuscript_group_label=manuscript.group_label,
         manuscript_original_filename=manuscript.original_filename,
         rubric_title=rubric.title,

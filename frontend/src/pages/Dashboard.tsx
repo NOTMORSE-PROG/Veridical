@@ -1,7 +1,7 @@
 // V-073 screen 4b/4e — Signal Review Desk. The page is a prioritized work
 // queue, not an analytics dashboard: each record names what happened, what
 // still needs the instructor, and one honest next action.
-import { type FormEvent, useMemo, useRef, useState } from "react";
+import { type FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router";
 import type { ManuscriptListItem } from "../api/types";
 import { GroupProposalDialog } from "../check/GroupProposalDialog";
@@ -540,6 +540,30 @@ export function DashboardPage() {
   const [setGroupManuscriptId, setSetGroupManuscriptId] = useState<number>();
   const headingRef = useRef<HTMLHeadingElement>(null);
   useRouteFocus("Review Desk - VERIDICAL", headingRef);
+
+  // BUG-128: a report's integrity-check coverage gap (SignalReport.tsx's
+  // `CoverageStatement`) links here with `?rerun=<manuscript_id>` instead
+  // of duplicating the rerun mechanism -- this opens the SAME modal the
+  // row-level "Run again" button already opens, just reachable one click
+  // earlier. Stripped from the URL immediately so it can't re-fire on a
+  // later back-navigation or refresh.
+  const [rerunParams, setRerunParams] = useSearchParams();
+  // Genuinely safe to list both real deps (no suppression comment needed):
+  // the first run strips "rerun" from the URL, which changes `rerunParams`
+  // and re-fires this effect, but the second run finds `raw === null` and
+  // bails immediately -- self-terminating, not a loop.
+  useEffect(() => {
+    const raw = rerunParams.get("rerun");
+    if (raw === null) return;
+    const manuscriptId = Number(raw);
+    if (Number.isInteger(manuscriptId) && manuscriptId > 0) {
+      setRerunInitialIds([manuscriptId]);
+      setRerunOpen(true);
+    }
+    const next = new URLSearchParams(rerunParams);
+    next.delete("rerun");
+    setRerunParams(next, { replace: true });
+  }, [rerunParams, setRerunParams]);
 
   const hasActiveRubric = useMemo(
     () => (families ?? []).some((family) => family.is_active),
