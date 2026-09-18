@@ -422,6 +422,10 @@ export interface IntegrityCheckStatusOut {
 
 export interface ReportOut extends ReportCommon {
   check_run_id: number;
+  // BUG-128: instructor-only -- lets the report deep-link an integrity-
+  // check remedy straight into the Dashboard's existing "Run again"
+  // (RerunModal) mechanism, which already keys off this id.
+  manuscript_id: number;
   manuscript_group_label: string;
   manuscript_original_filename: string | null;
   rubric_title: string;

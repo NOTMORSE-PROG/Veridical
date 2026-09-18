@@ -460,6 +460,7 @@ function makeFlag(overrides: Partial<FlagOut> = {}): FlagOut {
 // ConfirmCitationSourceOut's `report: ReportOut` field shape.
 const REPORT: ReportOut = {
   check_run_id: 44,
+  manuscript_id: 44,
   manuscript_group_label: "VERIDICAL",
   manuscript_original_filename: null,
   rubric_title: "TIP Format",

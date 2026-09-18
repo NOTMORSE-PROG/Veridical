@@ -121,6 +121,12 @@ class IntegrityCheckStatusOut(BaseModel):
 
 class ReportOut(BaseModel):
     check_run_id: int
+    # BUG-128: instructor-only (never added to `PublicReportOut` below,
+    # which has no instructor actions by design) -- lets the frontend
+    # deep-link an integrity-check remedy straight into the existing
+    # Dashboard "Run again" mechanism (`RerunModal`), which already keys
+    # off this id, without a second lookup.
+    manuscript_id: int
     manuscript_group_label: str
     # BUG-022: group_label defaults to "Ungrouped" and can't distinguish
     # two manuscripts alone; None for rows ingested before this column
