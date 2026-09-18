@@ -222,6 +222,52 @@ describe("SettingsPage", () => {
     expect(screen.getAllByText("gemini-3.5-flash").length).toBe(2); // mobile card + desktop grid
   });
 
+  it("BUG-084: the desktop quota grid's ARIA rows have a real table ancestor, and every row has one cell per column header", async () => {
+    // Per ARIA 1.2, `role="row"`/`role="columnheader"` require a
+    // `table`/`grid`/`treegrid` ancestor or they're orphaned -- invisible
+    // to a screen reader as a table at all. Two models here (one
+    // exhausted, one not) proves the Status cell is always present, never
+    // conditionally omitted -- a row with fewer cells than column headers
+    // is exactly the "cell count vs header count" class BUG-055 already
+    // named for this ticket's own sibling file.
+    const baseModel = QUOTA.models![0];
+    vi.stubGlobal(
+      "fetch",
+      stubFetchByPath(
+        baseHandlers({
+          "/quota": {
+            ...QUOTA,
+            models: [baseModel, { ...baseModel, model: "gemini-3.5-pro", exhausted: true }],
+          },
+        }),
+      ),
+    );
+    const { container } = renderWithProviders(<SettingsPage />);
+    await screen.findByText("Prof Cruz");
+    await screen.findAllByText("gemini-3.5-pro");
+
+    const table = container.querySelector('[role="table"]');
+    expect(table).toBeInTheDocument();
+
+    const columnHeaderCount = table!.querySelectorAll('[role="columnheader"]').length;
+    expect(columnHeaderCount).toBeGreaterThan(0);
+
+    const rows = table!.querySelectorAll('[role="row"]');
+    expect(rows.length).toBeGreaterThan(0);
+    for (const row of Array.from(rows)) {
+      // Every role="row" resolves to the SAME table via .closest -- none
+      // orphaned outside it.
+      expect(row.closest('[role="table"]')).toBe(table);
+    }
+    // The header row's own cells are columnheaders, not plain cells; every
+    // DATA row (the rest) carries exactly one role="cell" per column.
+    const dataRows = Array.from(rows).slice(1);
+    expect(dataRows.length).toBe(2); // one per model
+    for (const row of dataRows) {
+      expect(row.querySelectorAll('[role="cell"]').length).toBe(columnHeaderCount);
+    }
+  });
+
   it("renders named readiness bands, keeps raw cutoffs in the technical record, and shows real prompt/model versions", async () => {
     vi.stubGlobal("fetch", stubFetchByPath(baseHandlers()));
     renderWithProviders(<SettingsPage />);
