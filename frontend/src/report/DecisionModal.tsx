@@ -10,8 +10,8 @@ import type { Decision, ReportOut } from "../api/types";
 import { Modal, ModalBackdrop } from "../components/Modal";
 import { StatusPill } from "../components/StatusPill";
 import { cx } from "../components/cx";
+import { RESOLUTION_REASON_MIN_LENGTH } from "../config/ui";
 import { READINESS_LABEL, READINESS_TONE } from "../domain/readinessTone";
-import { RESOLUTION_REASON_MIN_LENGTH } from "./EscalatedPanel";
 import { useDecideReport } from "./useReport";
 
 const NOTE_MAX_LENGTH = 1000;
