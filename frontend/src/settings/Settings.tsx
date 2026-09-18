@@ -488,18 +488,27 @@ function ApiKeySection() {
 const quotaGridCols = "grid-cols-[minmax(0,1fr)_110px_110px_110px_80px_120px]";
 
 function ModelRow({ model }: { model: ModelQuotaStatus }) {
+  // BUG-084: `role="cell"` on every child -- the ARIA 1.2 spec that
+  // `role="row"` (this row's own container, set by the caller) requires
+  // also requires each child to carry a cell role, invalid otherwise.
+  // The Status cell is ALWAYS rendered, empty when not exhausted, rather
+  // than conditionally omitted -- a `role="row"` with a variable number
+  // of cells (5 here, 6 for an exhausted model) leaves a screen reader
+  // unable to align this row against the 6 `columnheader`s above it,
+  // the same "cell count vs header count" class BUG-055 already named
+  // for this ticket's own sibling file.
   return (
     <>
-      <span className="truncate text-ink" title={model.model}>
+      <span role="cell" className="truncate text-ink" title={model.model}>
         {model.model}
       </span>
-      <span className="text-ink-tertiary">
+      <span role="cell" className="text-ink-tertiary">
         {model.calls_used} / {model.daily_limit}
       </span>
-      <span className="text-ink-tertiary">{model.calls_remaining}</span>
-      <span className="text-ink-tertiary">{model.cache_hits_today}</span>
-      <span className="text-ink-tertiary">{model.vision ? "Yes" : "No"}</span>
-      {model.exhausted && <StatusPill tone="attention">Exhausted</StatusPill>}
+      <span role="cell" className="text-ink-tertiary">{model.calls_remaining}</span>
+      <span role="cell" className="text-ink-tertiary">{model.cache_hits_today}</span>
+      <span role="cell" className="text-ink-tertiary">{model.vision ? "Yes" : "No"}</span>
+      <span role="cell">{model.exhausted && <StatusPill tone="attention">Exhausted</StatusPill>}</span>
     </>
   );
 }
@@ -588,7 +597,13 @@ function QuotaSection() {
               </li>
             ))}
           </ul>
-          <div className="hidden overflow-hidden rounded-lg border border-border lg:block">
+          {/* BUG-084: `role="row"`/`role="columnheader"` below require a
+              `table`/`grid`/`treegrid` ancestor per ARIA 1.2, or they're
+              orphaned -- unannounced as a table, inert to a screen reader.
+              This wrapper had none; the three other grids in this codebase
+              that get this right (AuditLog.tsx, ResultsTable.tsx) all use
+              exactly this flat `table > row > columnheader/cell` shape. */}
+          <div role="table" className="hidden overflow-hidden rounded-lg border border-border lg:block">
             <div
               role="row"
               className={`grid ${quotaGridCols} gap-3 border-b border-border bg-status-neutral-bg px-3 py-2 text-xs font-semibold tracking-header text-ink-tertiary uppercase`}
