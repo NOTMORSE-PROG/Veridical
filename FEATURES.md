@@ -121,7 +121,7 @@ Narrow, realistic scope per the proposal: **intent statements vs. outcome statem
 |---|---|---|---|
 | F4.1 | Intent-statement extraction (objectives, hypotheses, "the system will…") | 🟡 | Extracted with chapter/page anchors |
 | F4.2 | Outcome-statement extraction (findings, conclusions, test results) | 🟡 | Same |
-| F4.3 | Intent↔outcome pairing via semantic similarity + NLI cross-encoder | 🟡 | Pairs above threshold matched; rule-based extraction + AI judgment (not AI alone) |
+| F4.3 | Intent↔outcome pairing: local embedding similarity for candidate generation (Tier 1, quota-free), Gemini for entailment/contradiction judgment (Tier 2) — a local NLI cross-encoder was measured combined with the real app and ruled out against Render's free-tier ceiling (D-011 addendum) | 🟡 | Pairs above threshold matched; rule-based extraction + AI judgment (not AI alone) |
 | F4.4 | Flagging: contradictory pair = **high severity**; unmatched intent (claimed but never shown done) = **low severity** early warning | 🟡 | Matches Fig. 3.9 |
 
 ### F5 — Citation Integrity Check 🟢
@@ -132,7 +132,7 @@ Three layers: exists → not retracted → actually supports the claim (Objectiv
 | F5.1 | In-text citation ↔ reference-list cross-match | 🟢 | Orphan citations and uncited references flagged |
 | F5.2 | Existence check: **CrossRef** (DOI/metadata), **Semantic Scholar** (secondary), **Open Library → Google Books** (books) | 🟢 | Unresolvable source ⇒ "unverifiable" flag (manual review), not "fake" |
 | F5.3 | Retraction check via **Crossref/Retraction Watch** (now free — see §5) | 🟢 | Retracted source ⇒ immediate high-severity flag |
-| F5.4 | Claim-support check: retrieve abstract/full text, compare against the claim (similarity + NLI) | 🟢 | Mismatch ⇒ "citation may not support claim" flag with both texts shown |
+| F5.4 | Claim-support check: retrieve abstract/full text, compare against the claim via Gemini judgment (Tier 2) — no local embedding/NLI step, the same local-NLI design was measured at 487MB RSS and ruled out against Render's free-tier ceiling (D-011), and no candidate set exists here to prefilter anyway (one claim, one already-resolved source) | 🟢 | Mismatch ⇒ "citation may not support claim" flag with both texts shown |
 | F5.5 | Books/paywalled sources: existence-only + honest "content not checkable" flag | 🟢 | Matches the limitation stated in §1.5 of the proposal |
 | F5.6 | Citation cache (per-DOI results stored) | 🟢 | Re-runs don't re-hit external APIs; respects rate limits |
 
