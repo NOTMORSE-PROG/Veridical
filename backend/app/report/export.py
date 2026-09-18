@@ -197,7 +197,6 @@ def _styles(font: str) -> dict[str, ParagraphStyle]:
             "meta", fontName=font, fontSize=10, leading=14, textColor=_INK_SECONDARY
         ),
         "verdict": ParagraphStyle("verdict", fontName=bold, fontSize=16, leading=20),
-        "score": ParagraphStyle("score", fontName=bold, fontSize=20, leading=24, textColor=_INK),
         "h2": ParagraphStyle(
             "h2",
             fontName=bold,
@@ -644,8 +643,25 @@ def build_report_pdf(data: ReportExportData) -> bytes:
         )
         flow.append(draft_tag)
     flow.append(Spacer(1, 6))
+    # BUG-133 (ground rule 8): this used to render in `styles["score"]"
+    # (20pt bold) -- twice the size of the readiness-band badge above it
+    # (`body_bold`, 10pt) and completely unlabeled, so the composite
+    # percentage visually dominated the band it's supposed to be
+    # subordinate to. Ground rule 8's own text: "the verdict the
+    # instructor sees is the band... The number still exists -- it just
+    # is not what the instructor reads... still appears in... the
+    # exported detail." Restyled to the same small, explicitly-attributed
+    # treatment already established for `levelled_rating` a few lines
+    # below (owner-approved 2026-08-25) -- reproducible, present, never
+    # the headline.
     if report.composite_score is not None:
-        flow.append(Paragraph(f"{report.composite_score}%", styles["score"]))
+        flow.append(
+            Paragraph(
+                f"Composite score: {report.composite_score}% (reproducible detail, "
+                "not the verdict; see the readiness band above).",
+                styles["caption"],
+            )
+        )
     flow.append(
         Paragraph(
             f"Ready at {report.thresholds['ready_min_score']}% or above. "
@@ -657,9 +673,10 @@ def build_report_pdf(data: ReportExportData) -> bytes:
     flow.append(Paragraph(escape(_explainer(report)), styles["body"]))
     # V-069 AC2/AC5: the rubric's own institutional RATING, transcribed --
     # owner-approved treatment (2026-08-25): shown as a small, clearly-
-    # attributed line, never in the large `styles["score"]` treatment
-    # reserved for the banded readiness verdict above (ground rule 8).
-    # Absent whenever no criterion in this rubric is levelled (AC3).
+    # attributed line (ground rule 8) -- the same treatment BUG-133 later
+    # extended to the composite score above, once both existed side by
+    # side and made the contrast concrete. Absent whenever no criterion in
+    # this rubric is levelled (AC3).
     if report.levelled_rating is not None:
         lr = report.levelled_rating
         flow.append(Spacer(1, 4))
