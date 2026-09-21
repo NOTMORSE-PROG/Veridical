@@ -13,7 +13,7 @@ from typing import Any, Literal
 
 import pymupdf
 from pydantic import ValidationError
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.audit.service import write_audit_event
@@ -1250,10 +1250,36 @@ async def decide_report(
                 f"{minimum} characters, so the audit trail records the disagreement."
             )
 
-    report.decision = decision_enum
-    report.decided_at = datetime.now(UTC)
-    report.decided_by_instructor_id = instructor_id
-    report.decision_note = stripped_note
+    # BUG-184: the read-then-write above (`report.decision is not None`
+    # checked, then set later) is a TOCTOU race — concurrent requests can
+    # all observe `decision IS NULL` and all proceed. A conditional
+    # `UPDATE ... WHERE decision IS NULL` is the database winner for that
+    # race, the same pattern `pipeline.machine._transition_after_boundary`
+    # already uses for the completion/cancel race: a request that loses
+    # gets 0 rows back and 409s honestly instead of 200-ing into an audit
+    # trail that records a decision which never took effect.
+    decided_at = datetime.now(UTC)
+    won = (
+        await session.execute(
+            update(ReadinessReport)
+            .where(ReadinessReport.id == report.id, ReadinessReport.decision.is_(None))
+            .values(
+                decision=decision_enum,
+                decided_at=decided_at,
+                decided_by_instructor_id=instructor_id,
+                decision_note=stripped_note,
+            )
+            .returning(ReadinessReport.id)
+        )
+    ).first()
+    if won is None:
+        raise ConflictError(
+            "This report has already been decided. Reopen it first to change the decision."
+        )
+    # The audit event is written only on the write that actually won —
+    # never before it, so a losing request can never leave behind a
+    # `report_decided` row for a decision that didn't persist.
+    #
     # `backend-critic` finding: without a snapshot of what the instructor
     # was actually looking at, a later score drift (a flag override or
     # escalation resolved after this decision — both now blocked by
@@ -1267,7 +1293,7 @@ async def decide_report(
         payload={
             "instructor_id": instructor_id,
             "decision": decision,
-            "note": report.decision_note,
+            "note": stripped_note,
             "composite_score": (
                 float(report.composite_score) if report.composite_score is not None else None
             ),

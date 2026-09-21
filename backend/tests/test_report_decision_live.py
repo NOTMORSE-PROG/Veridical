@@ -593,6 +593,114 @@ async def test_reopen_writes_a_distinct_audit_event_preserving_the_prior_decisio
         assert reopened.payload["reason"] == "Instructor changed their mind."
 
 
+async def test_bug184_a_decision_committed_mid_race_is_rejected_not_silently_recorded(
+    session_factory, monkeypatch
+):
+    """BUG-184: `decide_report` used to read `decision IS NULL`, then
+    later write it -- a real production probe found that under genuine
+    concurrent load, a second request's own read could land in that
+    window before the first request's write committed, so both proceeded
+    to "succeed," the audit log permanently recorded a decision that
+    never took effect, and audit id order disagreed with `created_at`
+    order.
+
+    An earlier version of this test tried to reproduce the race with
+    plain `asyncio.gather` over independent sessions and hoped for
+    genuine interleaving -- it didn't happen: five unsynchronized
+    attempts against fast local Postgres consistently ran near-
+    sequentially (verified empirically, including against the
+    pre-fix code, where the naive test still showed only one winner).
+    This version forces the exact interleaving deterministically instead
+    of hoping for luck: Session A's own read of `report.decision is
+    None` is allowed to complete, then Session B's ENTIRE `decide_report`
+    call (read, write, commit) runs before Session A is released to
+    continue into its own write -- reproducing the precise ordering
+    BUG-184's real probe hit."""
+    import asyncio
+
+    import app.report.service as report_service
+    from app.models.audit import AuditLog
+
+    async with session_factory() as seed_session:
+        instructor, check_run = await _seed_decidable_run(seed_session)
+        instructor_id, check_run_id = instructor.id, check_run.id
+
+    real_get_owned_report = report_service._get_owned_report
+    session_a_read_done = asyncio.Event()
+    session_b_committed = asyncio.Event()
+    call_count = 0
+
+    async def patched(*args, **kwargs):
+        nonlocal call_count
+        call_count += 1
+        result = await real_get_owned_report(*args, **kwargs)
+        if call_count == 1:
+            # Session A's own read just returned -- decision is still
+            # None at this real instant. Hold it here (simulating the
+            # scheduler giving Session B a full turn) until Session B has
+            # read, written, AND committed.
+            session_a_read_done.set()
+            await session_b_committed.wait()
+        return result
+
+    monkeypatch.setattr(report_service, "_get_owned_report", patched)
+
+    async def session_a() -> str:
+        async with session_factory() as session:
+            try:
+                await decide_report(
+                    session,
+                    check_run_id,
+                    instructor_id,
+                    "rejected",
+                    "Session A -- read first, should still lose.",
+                )
+                return "ok"
+            except ConflictError:
+                return "conflict"
+
+    async def session_b() -> None:
+        await session_a_read_done.wait()
+        async with session_factory() as session:
+            await decide_report(
+                session,
+                check_run_id,
+                instructor_id,
+                "approved",
+                "Session B -- reads second, commits first, should win.",
+            )
+        session_b_committed.set()
+
+    result_a, _ = await asyncio.gather(session_a(), session_b())
+
+    # Session A read `decision IS NULL` first, but Session B committed
+    # first -- Session A must lose, not silently overwrite the winner.
+    assert result_a == "conflict"
+
+    async with session_factory() as session:
+        report = await session.scalar(
+            select(ReadinessReport).where(ReadinessReport.check_run_id == check_run_id)
+        )
+        assert report.decision == "approved"
+
+        rows = (
+            (
+                await session.execute(
+                    select(AuditLog).where(
+                        AuditLog.check_run_id == check_run_id,
+                        AuditLog.event_type == "report_decided",
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        # Exactly one audit row, ever -- Session A's loss must leave no
+        # trace of a "rejected" decision that never actually took effect.
+        assert len(rows) == 1
+        assert rows[0].payload["decision"] == "approved"
+
+
 async def test_rubric_is_current_reflects_a_superseded_version(session_factory):
     async with session_factory() as session:
         instructor, check_run = await _seed_decidable_run(session, rubric_is_active=False)
