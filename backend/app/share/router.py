@@ -7,7 +7,7 @@ design.
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Response
+from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.dependencies import get_current_instructor
@@ -22,6 +22,13 @@ from app.share.service import (
 )
 
 router = APIRouter(tags=["share"])
+
+PUBLIC_SHARE_PATH_PREFIX = "/shared/"
+PUBLIC_SHARE_RESPONSE_HEADERS = (
+    ("Cache-Control", "no-store"),
+    ("X-Robots-Tag", "noindex, nofollow"),
+)
+PUBLIC_SHARE_SERVER_ERROR_BODY = "Internal Server Error"
 
 
 @router.get("/check-runs/{check_run_id}/share", response_model=ShareLinkOut | None)
@@ -56,11 +63,6 @@ async def revoke_share_link_route(
 @router.get("/shared/{token}/report", response_model=SharedReportOut)
 async def get_shared_report_route(
     token: str,
-    response: Response,
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> SharedReportOut:
-    # AC: token not indexed -- belt-and-suspenders with the frontend's
-    # own <meta name="robots"> on the adviser-view page (a search engine
-    # honors whichever it sees; a raw API response only has the header).
-    response.headers["X-Robots-Tag"] = "noindex, nofollow"
     return await get_shared_report(session, token)

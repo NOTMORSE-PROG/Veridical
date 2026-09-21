@@ -13,6 +13,7 @@ AC).
 """
 
 import copy
+import logging
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -22,6 +23,7 @@ from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app import messages
 from app.archive.service import withdraw_manuscript_if_orphaned
 from app.audit.service import write_audit_event
 from app.checks.agreement.service import (
@@ -60,6 +62,8 @@ from app.models.manuscript import Manuscript
 from app.models.rubric import Rubric
 from app.models.run import CheckResult, CheckRun, ReadinessReport
 from app.report.service import aggregate_and_score
+
+_logger = logging.getLogger(__name__)
 
 _STAGE_AFTER: dict[CheckRunStatus, CheckRunStatus] = {
     CheckRunStatus.queued: CheckRunStatus.ingesting,
@@ -802,7 +806,7 @@ async def run_check_run(
         target.finished_at = datetime.now(UTC)
         _record_failed(target, "file_malformed", str(exc))
         await session.commit()
-    except Exception as exc:
+    except Exception:
         # BUG-032: this runs inside a Starlette BackgroundTask (worker.py),
         # which does not propagate exceptions anywhere — no client-visible
         # error, no DB write. Without this catch-all, any stage-level bug
@@ -813,10 +817,11 @@ async def run_check_run(
         # so, not stay silent). Same generic-but-honest catch-all pattern as
         # IngestFailureReason (models/enums.py) — one bucket, not one per
         # exception type.
+        _logger.exception("Unexpected pipeline failure for check run %s.", check_run.id)
         target = await _exception_target_if_not_cancelled(session, check_run)
         if target is None:
             return
         target.status = CheckRunStatus.failed
         target.finished_at = datetime.now(UTC)
-        _record_failed(target, "unexpected_error", str(exc))
+        _record_failed(target, "unexpected_error", messages.UNEXPECTED_PIPELINE_ERROR)
         await session.commit()

@@ -112,6 +112,11 @@ class Settings(BaseSettings):
     # server-side picker pagination ships without changing application code.
     manuscript_list_default_page_size: int = 50
     manuscript_list_max_page_size: int = 200
+    # Audit history has its own paging policy because it can grow far beyond
+    # the manuscript list and exposes the full traceability record.
+    audit_list_default_page_size: int = 50
+    audit_list_max_page_size: int = 200
+    audit_list_max_page: int = 10_000
     # DOCX is a zip archive — `max_upload_mb` only caps the COMPRESSED size
     # on disk. A crafted archive can expand far beyond that in memory
     # during parsing (zip-bomb class risk, BUG-005/D-020). This caps total
@@ -769,6 +774,16 @@ class Settings(BaseSettings):
                 "manuscript_list_default_page_size must be between 1 and "
                 "manuscript_list_max_page_size"
             )
+        if (
+            self.audit_list_default_page_size < 1
+            or self.audit_list_max_page_size < 1
+            or self.audit_list_default_page_size > self.audit_list_max_page_size
+        ):
+            raise ValueError(
+                "audit_list_default_page_size must be between 1 and audit_list_max_page_size"
+            )
+        if self.audit_list_max_page < 1:
+            raise ValueError("audit_list_max_page must be at least 1")
         return self
 
 
