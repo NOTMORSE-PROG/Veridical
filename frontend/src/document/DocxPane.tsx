@@ -7,9 +7,11 @@
 // paragraph," which needs no render race to guard against at all.
 import { useEffect, useRef, useState } from "react";
 import type { DocumentParagraphOut, FlagRegionOut, FlagSummaryOut } from "../api/types";
-import { CHECK_KIND_SHORT_LABEL } from "../domain/checkKind";
 import { SeverityTag, type Severity } from "../components/SeverityTag";
+import { CHECK_KIND_SHORT_LABEL } from "../domain/checkKind";
+import { severityLabel } from "../domain/severity";
 import { truncateAtWord } from "../format/text";
+import { regionPrecision } from "./regionCopy";
 
 function SpinnerIcon() {
   return (
@@ -19,6 +21,8 @@ function SpinnerIcon() {
     </svg>
   );
 }
+
+const EMPTY_FINDING_NUMBERS: ReadonlyMap<number, number> = new Map();
 
 export function DocxPane({
   paragraphs,
@@ -30,6 +34,7 @@ export function DocxPane({
   selectedFlagId,
   onSelectFlag,
   isVisible,
+  findingNumbers = EMPTY_FINDING_NUMBERS,
 }: {
   paragraphs: DocumentParagraphOut[] | undefined;
   paragraphsPending: boolean;
@@ -49,6 +54,7 @@ export function DocxPane({
   // Passed down so the effect can retry once the pane genuinely becomes
   // visible, not just once per selection.
   isVisible: boolean;
+  findingNumbers?: ReadonlyMap<number, number>;
 }) {
   const [hoveredFlagId, setHoveredFlagId] = useState<number | null>(null);
   const highlightRefs = useRef<Map<number, HTMLButtonElement>>(new Map());
@@ -92,7 +98,10 @@ export function DocxPane({
     return () => window.removeEventListener("keydown", onKeyDown);
   }, []);
 
-  const popoverFlag = hoveredFlagId !== null ? flagsById.get(hoveredFlagId) : null;
+  const popoverFlag = hoveredFlagId !== null && hoveredFlagId !== selectedFlagId
+    ? flagsById.get(hoveredFlagId)
+    : null;
+  const scopeRegions = regions.filter((region) => region.kind !== "paragraph_only");
 
   // A selected flag whose region is `paragraph_only` but whose paragraph
   // index isn't in the fetched list at all -- e.g. the parser skipped an
@@ -106,15 +115,41 @@ export function DocxPane({
     !paragraphs.some((p) => p.paragraph === selectedRegion.paragraph);
 
   return (
-    <div className="flex h-full min-h-0 flex-col">
-      <div className="border-b border-border bg-panel px-3 py-2 text-sm">
-        <p className="text-ink-secondary">
-          Reconstructed text. This is VERIDICAL's extracted paragraph text, not the original
-          file's exact layout, tables, or images. Select a highlighted paragraph or its numbered
-          finding to see the finding.
+    <div className="signal-document-source">
+      <div className="signal-document-toolbar">
+        <div className="signal-document-toolbar__identity">
+          <strong>Full manuscript</strong>
+          <span>DOCX · Reconstructed text</span>
+        </div>
+      </div>
+      <div className="signal-document-reconstruction-note">
+        <p>
+          This view preserves extracted text order and headings. Page layout, tables, and images
+          may differ from the uploaded file.
         </p>
       </div>
-      <div className="min-h-0 flex-1 overflow-y-auto bg-page p-4">
+      {scopeRegions.length > 0 && (
+        <div className="signal-document-scope-markers" role="group" aria-label="Findings without an exact paragraph location">
+          {scopeRegions.map((region) => {
+            const flag = flagsById.get(region.flag_id);
+            const number = findingNumbers.get(region.flag_id) ?? 1;
+            const precision = regionPrecision(region);
+            return (
+              <button key={region.flag_id} type="button" aria-pressed={region.flag_id === selectedFlagId} onClick={() => onSelectFlag(region.flag_id)}>
+                <span aria-hidden="true">{number}</span>
+                <span>Finding {number} · {precision.label}{flag ? ` · ${CHECK_KIND_SHORT_LABEL[flag.check_kind] ?? flag.check_kind}` : ""}</span>
+              </button>
+            );
+          })}
+        </div>
+      )}
+      <div role="region" tabIndex={0} aria-label="Full manuscript, scrollable" className="signal-document-scroll signal-document-scroll--docx">
+        <article className="signal-document-docx-paper" aria-label="Reconstructed manuscript text">
+          <header className="signal-document-docx-paper__header">
+            <span>Reconstructed manuscript</span>
+            <span>{paragraphs ? `${paragraphs.length} extracted ${paragraphs.length === 1 ? "paragraph" : "paragraphs"}` : "Extracting text"}</span>
+          </header>
+          <div className="signal-document-docx-paper__body">
         {paragraphsError && (
           <p role="alert" className="p-4 text-sm text-status-attention-text">
             This manuscript's text couldn't be loaded.{" "}
@@ -136,7 +171,7 @@ export function DocxPane({
         )}
         {selectedParagraphMissing && (
           <p className="mb-3 rounded-lg bg-status-neutral-bg px-4 py-2.5 text-xs text-status-neutral-text">
-            VERIDICAL could not locate paragraph {selectedRegion?.paragraph} in the reconstructed
+            VERIDICAL could not locate the recorded paragraph in the reconstructed
             text below. The evidence panel on the right is everything VERIDICAL recorded for this
             flag.
           </p>
@@ -194,20 +229,18 @@ export function DocxPane({
                     if (el) highlightRefs.current.set(primaryFlagId, el);
                     else highlightRefs.current.delete(primaryFlagId);
                   }}
-                  aria-label={`${CHECK_KIND_SHORT_LABEL[primaryFlag.check_kind] ?? primaryFlag.check_kind} flag, ${primaryFlag.severity} severity, paragraph ${p.paragraph}`}
-                  aria-describedby={`docx-region-popover-${primaryFlagId}`}
+                  aria-label={`Finding ${findingNumbers.get(primaryFlagId) ?? 1}: ${CHECK_KIND_SHORT_LABEL[primaryFlag.check_kind] ?? primaryFlag.check_kind}. ${severityLabel(primaryFlag.severity)}. Extracted paragraph ${p.paragraph + 1}. Paragraph location.${primaryFlagId === selectedFlagId ? " Selected." : ""}`}
+                  aria-pressed={primaryFlagId === selectedFlagId}
+                  aria-describedby={popoverFlag?.id === primaryFlagId ? `docx-region-popover-${primaryFlagId}` : undefined}
                   onMouseEnter={() => setHoveredFlagId(primaryFlagId)}
                   onMouseLeave={() => setHoveredFlagId((id) => (id === primaryFlagId ? null : id))}
                   onFocus={() => setHoveredFlagId(primaryFlagId)}
                   onBlur={() => setHoveredFlagId((id) => (id === primaryFlagId ? null : id))}
                   onClick={() => onSelectFlag(primaryFlagId)}
-                  className={`block w-full rounded-md px-2 py-1.5 ${textClassName}`}
-                  style={{
-                    background: "color-mix(in srgb, var(--color-status-caution-text) 20%, transparent)",
-                    border: `${primaryFlagId === selectedFlagId ? 3 : 2}px solid var(--color-status-caution-text)`,
-                  }}
+                  className={`signal-document-docx-location${primaryFlagId === selectedFlagId ? " is-selected" : ""} ${textClassName}`}
                 >
-                  {p.text}
+                  <span className="signal-document-marker signal-document-marker--inline" aria-hidden="true">{findingNumbers.get(primaryFlagId) ?? 1}</span>
+                  <span>{p.text}</span>
                 </button>
               );
               return HeadingTag ? (
@@ -222,13 +255,7 @@ export function DocxPane({
             }
 
             const multiFlagBlock = (
-              <div
-                className="rounded-md px-2 py-1.5"
-                style={{
-                  background: "color-mix(in srgb, var(--color-status-caution-text) 20%, transparent)",
-                  border: "2px solid var(--color-status-caution-text)",
-                }}
-              >
+              <div className="signal-document-docx-location signal-document-docx-location--multiple">
                 <p className={textClassName}>{p.text}</p>
                 <div className="mt-1.5 flex flex-wrap gap-1" role="group" aria-label={`${paragraphFlagIds.length} findings in this paragraph`}>
                   {paragraphFlagIds.map((flagId, i) => {
@@ -242,20 +269,17 @@ export function DocxPane({
                           if (el) highlightRefs.current.set(flagId, el);
                           else highlightRefs.current.delete(flagId);
                         }}
-                        aria-label={`Finding ${i + 1} of ${paragraphFlagIds.length}: ${CHECK_KIND_SHORT_LABEL[flag.check_kind] ?? flag.check_kind}, ${flag.severity} severity`}
-                        aria-describedby={`docx-region-popover-${flagId}`}
+                        aria-label={`Finding ${findingNumbers.get(flagId) ?? i + 1}: ${CHECK_KIND_SHORT_LABEL[flag.check_kind] ?? flag.check_kind}. ${severityLabel(flag.severity)}. Extracted paragraph ${p.paragraph + 1}. Paragraph location.${flagId === selectedFlagId ? " Selected." : ""}`}
+                        aria-pressed={flagId === selectedFlagId}
+                        aria-describedby={popoverFlag?.id === flagId ? `docx-region-popover-${flagId}` : undefined}
                         onMouseEnter={() => setHoveredFlagId(flagId)}
                         onMouseLeave={() => setHoveredFlagId((id) => (id === flagId ? null : id))}
                         onFocus={() => setHoveredFlagId(flagId)}
                         onBlur={() => setHoveredFlagId((id) => (id === flagId ? null : id))}
                         onClick={() => onSelectFlag(flagId)}
-                        className="flex min-h-6 min-w-6 items-center justify-center rounded-full px-2 py-0.5 text-xs font-semibold text-ink"
-                        style={{
-                          background: "var(--color-panel)",
-                          border: `${flagId === selectedFlagId ? 3 : 1}px solid var(--color-status-caution-text)`,
-                        }}
+                        className={`signal-document-co-located-marker${flagId === selectedFlagId ? " is-selected" : ""}`}
                       >
-                        {i + 1}
+                        {findingNumbers.get(flagId) ?? i + 1}
                       </button>
                     );
                   })}
@@ -273,6 +297,11 @@ export function DocxPane({
               </div>
             );
           })}
+          </div>
+          {!paragraphsPending && !paragraphsError && paragraphs && paragraphs.length > 0 && (
+            <footer className="signal-document-docx-paper__footer">End of reconstructed manuscript</footer>
+          )}
+        </article>
       </div>
       {popoverFlag && (
         (() => {

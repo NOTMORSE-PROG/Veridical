@@ -276,7 +276,10 @@ describe("DashboardPage", () => {
     expect(screen.getByRole("button", { name: "Start a check" })).toBeEnabled();
     expect((await screen.findAllByText("G-11")).length).toBeGreaterThan(0);
     expect(screen.getByText("Conditionally Ready")).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Review 2 unresolved criteria" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Review 2 unresolved criteria. Opens the manuscript and analysis." })).toHaveAttribute(
+      "href",
+      "/report/7/document",
+    );
     expect(screen.getByRole("button", { name: /Needs you1 manuscript/ })).toBeInTheDocument();
     expect(screen.getByText("2").closest(".signal-record__assessment")).toHaveTextContent(
       "2 criterion tasks need you",
@@ -324,9 +327,9 @@ describe("DashboardPage", () => {
     await screen.findAllByText("V069 Demo Group");
     expect(screen.getByText("Check complete")).toBeInTheDocument();
     expect(screen.queryByText("Preparing manuscript")).not.toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Record instructor decision" })).toHaveAttribute(
+    expect(screen.getByRole("link", { name: "Review manuscript and decide. Opens the manuscript and analysis." })).toHaveAttribute(
       "href",
-      "/report/52",
+      "/report/52/document",
     );
   });
 
@@ -362,7 +365,7 @@ describe("DashboardPage", () => {
 
     await screen.findAllByText("Preparing Group");
     expect(screen.getByText("Preparing manuscript")).toBeInTheDocument();
-    expect(screen.queryByRole("link", { name: "Record instructor decision" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: /Review manuscript and decide/ })).not.toBeInTheDocument();
     expect(screen.getByText("No action yet. The file is still being prepared.")).toBeInTheDocument();
   });
 

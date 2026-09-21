@@ -1,84 +1,19 @@
 import { type MouseEvent, useEffect, useRef, useState } from "react";
 import { Link, useParams } from "react-router";
 import { ApiError } from "../api/client";
-import type { IntegrityCheckStatusOut, ReportOut } from "../api/types";
 import { manuscriptIdentity } from "../domain/manuscriptLabel";
 import { useRouteFocus } from "../routing/useRouteFocus";
 import { ActionLink } from "../ui/ActionLink";
 import { Alert } from "../ui/Alert";
 import { Button } from "../ui/Button";
-import { type CoverageStatementItem, CoverageStatement } from "../ui/CoverageStatement";
+import { CoverageStatement } from "../ui/CoverageStatement";
 import { ReadinessBand } from "../ui/ReadinessBand";
 import { SignalDecisionPanel } from "./SignalDecisionPanel";
 import { SignalCriteriaResults, SignalEscalatedPanel, SignalFlagsPanel } from "./SignalReviewSections";
 import { SignalShareDialog } from "./SignalShareDialog";
+import { coverageItems } from "./reportCoverage";
 import { useExportReportPdf, useReport } from "./useReport";
 import { useShareLink } from "./useShare";
-
-const INTEGRITY_LABEL: Record<IntegrityCheckStatusOut["check_kind"], string> = {
-  internal_agreement: "Internal agreement",
-  citation_integrity: "Citation integrity",
-};
-
-// BUG-127/BUG-128: this used to be one `Alert` per gap (up to 3-4 stacked,
-// identically-shaped colored boxes -- banner blindness, `ux-critic`/
-// `professor` both measured it live) and each one named a gap with no way
-// to close it (Norman's gulf of execution). Consolidated into the single
-// `CoverageStatement` DESIGN.md §8/§11 already specified for exactly this,
-// and each item now links to the real, existing remedy: the required-
-// format review screen, or the same "Run again" rerun mechanism the
-// Dashboard row action already uses (BUG-128's own fix, `manuscript_id`
-// newly threaded onto `ReportOut` for this).
-function integrityCoverageItem(status: IntegrityCheckStatusOut, manuscriptId: number): CoverageStatementItem {
-  const unavailable = status.n_skipped_api_down;
-  const capacity = status.n_skipped_quota;
-  const parse = status.n_skipped_parse_failure;
-  const outcomeText =
-    status.outcome === "api_down"
-      ? "a service interruption"
-      : status.outcome === "quota_exhausted"
-        ? "a free-capacity limit"
-        : "an unverifiable result";
-  const subIssues: string[] = [];
-  if (unavailable > 0) subIssues.push(`${unavailable} item${unavailable === 1 ? "" : "s"} skipped because a service was unavailable.`);
-  if (capacity > 0) subIssues.push(`${capacity} item${capacity === 1 ? "" : "s"} skipped because daily AI capacity was spent.`);
-  if (parse > 0) subIssues.push(`${parse} item${parse === 1 ? "" : "s"} skipped because the source could not be parsed reliably.`);
-  const label = INTEGRITY_LABEL[status.check_kind];
-  return {
-    key: status.check_kind,
-    label,
-    detail: `The check recorded ${outcomeText}. Nothing skipped is presented as passed.`,
-    subIssues,
-    action: {
-      to: `/dashboard?rerun=${manuscriptId}`,
-      label: "Run again",
-      // `ux-critic` (BUG-127 review): WCAG 2.5.3 Label in Name requires
-      // the accessible name to CONTAIN the visible text as a substring --
-      // "Run the X check again" doesn't, since "Run" and "again" aren't
-      // contiguous. Fixed to lead with the visible label verbatim, same
-      // shape as this codebase's own correct precedent two sections down
-      // (`SignalReviewSections.tsx`'s "Review evidence and reasoning: ${row.text}").
-      ariaLabel: `Run again: ${label.toLowerCase()} check for this manuscript`,
-    },
-  };
-}
-
-function coverageItems(report: ReportOut): CoverageStatementItem[] {
-  const items: CoverageStatementItem[] = [];
-  if (report.rubric_needs_review) {
-    items.push({
-      key: "rubric_needs_review",
-      label: "Required format review",
-      detail: "The required format was activated with unresolved parser uncertainty. Check the criterion record against the original document.",
-      subIssues: report.rubric_parse_issues ?? undefined,
-      action: { to: "/rubric", label: "Review required format" },
-    });
-  }
-  for (const status of report.integrity_check_status ?? []) {
-    items.push(integrityCoverageItem(status, report.manuscript_id));
-  }
-  return items;
-}
 
 // `scrollIntoView` defaults to false: the existing plain `<a href="#...">`
 // jump-nav links below are same-page hash anchors the BROWSER's own

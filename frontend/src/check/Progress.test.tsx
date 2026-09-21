@@ -187,14 +187,15 @@ describe("CheckProgressPage", () => {
     expect(banner).not.toHaveTextContent("extraction.json");
   });
 
-  it("shows a View readiness report link only once done", async () => {
+  it("opens the manuscript review directly once the check is done", async () => {
     vi.stubGlobal("fetch", stubFetchByPath({ "/check-runs/5": DONE }));
     renderWithProviders(<CheckProgressPage />, {
       route: "/checks/5",
       path: "/checks/:checkRunId",
     });
-    const link = await screen.findByRole("link", { name: "View readiness report" });
-    expect(link).toHaveAttribute("href", "/report/5");
+    const link = await screen.findByRole("link", { name: "Open manuscript review" });
+    expect(link).toHaveAttribute("href", "/report/5/document");
+    expect(screen.getByText("Check complete. Your manuscript review is ready.")).toBeInTheDocument();
   });
 
   it("does not show the report link for a still-running check", async () => {
@@ -204,7 +205,7 @@ describe("CheckProgressPage", () => {
       path: "/checks/:checkRunId",
     });
     await screen.findByText("AI grading");
-    expect(screen.queryByRole("link", { name: "View readiness report" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Open manuscript review" })).not.toBeInTheDocument();
   });
 
   it("requires confirmation before cancelling and records the request through the run endpoint", async () => {
@@ -238,7 +239,7 @@ describe("CheckProgressPage", () => {
       route: "/checks/5",
       path: "/checks/:checkRunId",
     });
-    await screen.findByRole("link", { name: "View readiness report" });
+    await screen.findByRole("link", { name: "Open manuscript review" });
     expect(screen.getByText("Skipped")).toBeInTheDocument();
     // "Done" tags exist for the genuinely-completed stages, distinct text
     // from "Skipped" for the honestly-not-implemented integrity stage.
@@ -251,7 +252,7 @@ describe("CheckProgressPage", () => {
       route: "/checks/5",
       path: "/checks/:checkRunId",
     });
-    await screen.findByRole("link", { name: "View readiness report" });
+    await screen.findByRole("link", { name: "Open manuscript review" });
     expect(screen.getByText("Needs review")).toBeInTheDocument();
     expect(
       screen.getByText(/3 of 12 criteria were not graded by AI \(today's free AI capacity was reached\)\. 9 criteria were graded normally\./),

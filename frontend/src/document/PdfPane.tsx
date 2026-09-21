@@ -1,32 +1,298 @@
-// V-065 AC1-4: PDF.js pane -- renders the ACTUAL submitted file in the
-// browser (V-065.md Q1, owner-approved 2026-08-19: server-side
-// rasterization was ruled out on measured RAM headroom, so this pane
-// fetches raw bytes and pdf.js does every render). Single page at a time,
-// not continuous scroll (ui-designer spec §4.1): every entry into this
-// screen is anchor-driven, so "jump to the right page" is the real task,
-// and N eagerly-rendered canvases is real client memory this session
-// didn't measure.
-import { useEffect, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+  type RefObject,
+} from "react";
 import * as pdfjsLib from "pdfjs-dist";
 import type { PDFDocumentProxy, PDFPageProxy, RenderTask } from "pdfjs-dist";
 import type { FlagRegionOut, FlagSummaryOut } from "../api/types";
-import { CHECK_KIND_SHORT_LABEL } from "../domain/checkKind";
 import { SeverityTag, type Severity } from "../components/SeverityTag";
+import { CHECK_KIND_SHORT_LABEL } from "../domain/checkKind";
+import { severityLabel } from "../domain/severity";
 import { truncateAtWord } from "../format/text";
+import { regionPrecision } from "./regionCopy";
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
   "pdfjs-dist/build/pdf.worker.min.mjs",
   import.meta.url,
 ).toString();
 
-interface HighlightBox {
-  flagId: number;
+interface PageMetric {
+  pageNumber: number;
+  width: number;
+  height: number;
+}
+
+interface HighlightRect {
   left: number;
   top: number;
   width: number;
   height: number;
+}
+
+interface HighlightRegion {
+  flagId: number;
+  findingNumber: number;
   selected: boolean;
-  ordinal: number;
+  rects: HighlightRect[];
+}
+
+const EMPTY_FINDING_NUMBERS: ReadonlyMap<number, number> = new Map();
+const PDF_ZOOM_MIN = 0.8;
+const PDF_ZOOM_MAX = 1.8;
+const PDF_ZOOM_STEP = 0.2;
+
+function SpinnerIcon() {
+  return (
+    <svg aria-hidden="true" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" className="motion-safe:animate-spin motion-reduce:animate-none">
+      <path d="M20 12a8 8 0 1 0-2.5 5.8" />
+      <path d="M20 8v4h-4" />
+    </svg>
+  );
+}
+
+function ContinuousPdfPage({
+  pdf,
+  metric,
+  totalPages,
+  scrollRoot,
+  regions,
+  flagsById,
+  selectedFlagId,
+  findingNumbers,
+  onSelectFlag,
+  onVisibility,
+  registerPage,
+}: {
+  pdf: PDFDocumentProxy;
+  metric: PageMetric;
+  totalPages: number;
+  scrollRoot: RefObject<HTMLDivElement | null>;
+  regions: FlagRegionOut[];
+  flagsById: ReadonlyMap<number, FlagSummaryOut>;
+  selectedFlagId: number | null;
+  findingNumbers: ReadonlyMap<number, number>;
+  onSelectFlag: (flagId: number) => void;
+  onVisibility: (page: number, ratio: number) => void;
+  registerPage: (page: number, element: HTMLElement | null) => void;
+}) {
+  const pageRef = useRef<HTMLElement>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const textLayerRef = useRef<HTMLDivElement>(null);
+  const markerRefs = useRef<Map<number, HTMLButtonElement>>(new Map());
+  const renderTaskRef = useRef<RenderTask | null>(null);
+  const textLayerTaskRef = useRef<pdfjsLib.TextLayer | null>(null);
+  const [isNear, setIsNear] = useState(metric.pageNumber <= 2);
+  const [displayWidth, setDisplayWidth] = useState(0);
+  const [viewport, setViewport] = useState<ReturnType<PDFPageProxy["getViewport"]> | null>(null);
+  const [hoveredFlagId, setHoveredFlagId] = useState<number | null>(null);
+
+  useEffect(() => {
+    const element = pageRef.current;
+    const root = scrollRoot.current;
+    if (!element || !root) return;
+    registerPage(metric.pageNumber, element);
+    const nearObserver = new IntersectionObserver(
+      ([entry]) => setIsNear(entry.isIntersecting),
+      { root, rootMargin: "100% 0px" },
+    );
+    const visibilityObserver = new IntersectionObserver(
+      ([entry]) => onVisibility(metric.pageNumber, entry.intersectionRatio),
+      { root, threshold: [0, 0.25, 0.5, 0.75, 1] },
+    );
+    nearObserver.observe(element);
+    visibilityObserver.observe(element);
+    return () => {
+      registerPage(metric.pageNumber, null);
+      nearObserver.disconnect();
+      visibilityObserver.disconnect();
+    };
+  }, [metric.pageNumber, onVisibility, registerPage, scrollRoot]);
+
+  useEffect(() => {
+    const element = pageRef.current;
+    if (!element) return;
+    const observer = new ResizeObserver(([entry]) => setDisplayWidth(entry.contentRect.width));
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, []);
+
+  useEffect(() => {
+    if (!isNear || displayWidth <= 0 || !canvasRef.current) return;
+    let cancelled = false;
+    let pageProxy: PDFPageProxy | null = null;
+    const canvas = canvasRef.current;
+    const textContainer = textLayerRef.current;
+
+    pdf.getPage(metric.pageNumber).then(async (page) => {
+      if (cancelled) return;
+      pageProxy = page;
+      const unscaled = page.getViewport({ scale: 1, rotation: page.rotate });
+      const displayScale = displayWidth / unscaled.width;
+      const displayViewport = page.getViewport({ scale: displayScale, rotation: page.rotate });
+      const outputScale = window.devicePixelRatio || 1;
+      const renderViewport = page.getViewport({ scale: displayScale * outputScale, rotation: page.rotate });
+      const context = canvas.getContext("2d");
+      if (!context) return;
+
+      canvas.width = Math.ceil(renderViewport.width);
+      canvas.height = Math.ceil(renderViewport.height);
+      canvas.style.width = `${displayViewport.width}px`;
+      canvas.style.height = `${displayViewport.height}px`;
+      renderTaskRef.current?.cancel();
+      const renderTask = page.render({ canvas, canvasContext: context, viewport: renderViewport });
+      renderTaskRef.current = renderTask;
+      await renderTask.promise;
+      if (cancelled) return;
+      setViewport(displayViewport);
+
+      if (textContainer) {
+        textLayerTaskRef.current?.cancel();
+        textContainer.replaceChildren();
+        const textContent = await page.getTextContent();
+        if (cancelled) return;
+        textContainer.style.setProperty("--total-scale-factor", String(displayScale));
+        const textLayer = new pdfjsLib.TextLayer({
+          textContentSource: textContent,
+          container: textContainer,
+          viewport: displayViewport,
+        });
+        textLayerTaskRef.current = textLayer;
+        await textLayer.render();
+      }
+    }).catch((error: unknown) => {
+      if (cancelled || (error as { name?: string })?.name === "RenderingCancelledException") return;
+      setViewport(null);
+    });
+
+    return () => {
+      cancelled = true;
+      renderTaskRef.current?.cancel();
+      textLayerTaskRef.current?.cancel();
+      pageProxy?.cleanup();
+    };
+  }, [displayWidth, isNear, metric.pageNumber, pdf]);
+
+  useEffect(() => {
+    if (selectedFlagId === null || !isNear) return;
+    markerRefs.current.get(selectedFlagId)?.focus({ preventScroll: false });
+  }, [isNear, selectedFlagId, viewport]);
+
+  useEffect(() => {
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") setHoveredFlagId(null);
+    }
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, []);
+
+  const highlights = useMemo<HighlightRegion[]>(() => {
+    if (!viewport) return [];
+    return regions.flatMap((region) => {
+      if (region.kind !== "page_bbox" || region.page !== metric.pageNumber || !region.bbox) return [];
+      if (selectedFlagId !== null && region.flag_id !== selectedFlagId) return [];
+      const sourceRects = region.all_bboxes.length > 0 ? region.all_bboxes : [region.bbox];
+      const rects = sourceRects.map(([x0, y0, x1, y1]) => {
+        const [vx0, vy0] = viewport.convertToViewportPoint(x0, y0);
+        const [vx1, vy1] = viewport.convertToViewportPoint(x1, y1);
+        return {
+          left: Math.min(vx0, vx1),
+          top: Math.min(vy0, vy1),
+          width: Math.max(Math.abs(vx1 - vx0), 24),
+          height: Math.max(Math.abs(vy1 - vy0), 24),
+        };
+      });
+      return [{
+        flagId: region.flag_id,
+        findingNumber: findingNumbers.get(region.flag_id) ?? 1,
+        selected: region.flag_id === selectedFlagId,
+        rects,
+      }];
+    });
+  }, [findingNumbers, metric.pageNumber, regions, selectedFlagId, viewport]);
+
+  const popoverFlag = hoveredFlagId !== null && hoveredFlagId !== selectedFlagId
+    ? flagsById.get(hoveredFlagId)
+    : null;
+  const aspectStyle = { aspectRatio: `${metric.width} / ${metric.height}` } as CSSProperties;
+
+  return (
+    <section
+      ref={(element) => {
+        pageRef.current = element;
+      }}
+      className="signal-document-pdf-page"
+      style={aspectStyle}
+      aria-label={`Page ${metric.pageNumber} of ${totalPages}`}
+      data-page={metric.pageNumber}
+    >
+      {isNear ? (
+        <>
+          <canvas ref={canvasRef} role="img" aria-label={`Rendered page ${metric.pageNumber} of the manuscript`} />
+          <div ref={textLayerRef} className="signal-document-pdf-text-layer" aria-hidden="true" />
+          <div className="signal-document-pdf-evidence-layer">
+            {highlights.map((highlight) => {
+              const flag = flagsById.get(highlight.flagId);
+              return highlight.rects.map((rect, index) => {
+                const position = {
+                  left: rect.left,
+                  top: rect.top,
+                  width: rect.width,
+                  height: rect.height,
+                } as CSSProperties;
+                if (index > 0) {
+                  return (
+                    <span
+                      key={`${highlight.flagId}-${index}`}
+                      aria-hidden="true"
+                      className={`signal-document-evidence-region signal-document-evidence-region--continuation${highlight.selected ? " is-selected" : ""}`}
+                      style={position}
+                    />
+                  );
+                }
+                return (
+                  <button
+                    key={highlight.flagId}
+                    type="button"
+                    ref={(element) => {
+                      if (element) markerRefs.current.set(highlight.flagId, element);
+                      else markerRefs.current.delete(highlight.flagId);
+                    }}
+                    className={`signal-document-evidence-region${highlight.selected ? " is-selected" : ""}`}
+                    style={position}
+                    aria-label={flag
+                      ? `Finding ${highlight.findingNumber}: ${CHECK_KIND_SHORT_LABEL[flag.check_kind] ?? flag.check_kind}. ${severityLabel(flag.severity)}. Page ${metric.pageNumber}. Exact passage.${highlight.selected ? " Selected." : ""}`
+                      : `Finding ${highlight.findingNumber} on page ${metric.pageNumber}. Exact passage.${highlight.selected ? " Selected." : ""}`}
+                    aria-pressed={highlight.selected}
+                    aria-describedby={popoverFlag?.id === highlight.flagId ? `region-popover-${highlight.flagId}` : undefined}
+                    onMouseEnter={() => setHoveredFlagId(highlight.flagId)}
+                    onMouseLeave={() => setHoveredFlagId((id) => id === highlight.flagId ? null : id)}
+                    onFocus={() => setHoveredFlagId(highlight.flagId)}
+                    onBlur={() => setHoveredFlagId((id) => id === highlight.flagId ? null : id)}
+                    onClick={() => onSelectFlag(highlight.flagId)}
+                  >
+                    <span className="signal-document-marker" aria-hidden="true">{highlight.findingNumber}</span>
+                  </button>
+                );
+              });
+            })}
+          </div>
+          {popoverFlag && (
+            <div id={`region-popover-${popoverFlag.id}`} role="tooltip" className="signal-document-marker-tooltip">
+              <p>{CHECK_KIND_SHORT_LABEL[popoverFlag.check_kind] ?? popoverFlag.check_kind}</p>
+              <p>{truncateAtWord(popoverFlag.evidence_excerpt, 140)}</p>
+              <SeverityTag severity={popoverFlag.severity as Severity} />
+            </div>
+          )}
+        </>
+      ) : <span className="signal-document-page-placeholder" aria-hidden="true" />}
+      <span className="signal-document-page-number" aria-hidden="true">{metric.pageNumber}</span>
+    </section>
+  );
 }
 
 export function PdfPane({
@@ -36,298 +302,157 @@ export function PdfPane({
   selectedFlagId,
   onSelectFlag,
   requestedPage,
+  findingNumbers = EMPTY_FINDING_NUMBERS,
 }: {
-  // V-066: was `checkRunId: number` (built the URL internally, always
-  // `/check-runs/{id}/document/file`) -- generalized to the URL itself so
-  // the library's own-manuscript two-up can feed this the SAME component
-  // pointed at `/library/{id}/document/file` instead of forking a second
-  // PDF pane (Pre-implementation research Q3, `tickets/V8-real-use/open/
-  // V-066.md`). Callers own building the right URL for their own route.
   fileUrl: string;
   regions: FlagRegionOut[];
   flags: FlagSummaryOut[];
   selectedFlagId: number | null;
   onSelectFlag: (flagId: number) => void;
   requestedPage: number | null;
+  findingNumbers?: ReadonlyMap<number, number>;
 }) {
   const [pdf, setPdf] = useState<PDFDocumentProxy | null>(null);
+  const [metrics, setMetrics] = useState<PageMetric[]>([]);
   const [loadError, setLoadError] = useState(false);
-  const [page, setPage] = useState(1);
+  const [currentPage, setCurrentPage] = useState(1);
   const [pageInput, setPageInput] = useState("1");
-  const [viewport, setViewport] = useState<ReturnType<PDFPageProxy["getViewport"]> | null>(null);
-  const [boxes, setBoxes] = useState<HighlightBox[]>([]);
-  const [hoveredFlagId, setHoveredFlagId] = useState<number | null>(null);
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-  const wrapRef = useRef<HTMLDivElement>(null);
-  const highlightRefs = useRef<Map<number, HTMLButtonElement>>(new Map());
-  // pdf.js throws if a second render() starts on the same canvas before
-  // the first completes (reproduced live: clicking a flag right after
-  // mount raced the initial page-1 render against the jump-to-page-5
-  // render). Cancelling any in-flight task before starting a new one is
-  // pdf.js's own documented fix for this, not a workaround.
-  const renderTaskRef = useRef<RenderTask | null>(null);
-
-  const flagsById = new Map(flags.map((f) => [f.id, f]));
+  const [zoom, setZoom] = useState(1);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const pageRefs = useRef<Map<number, HTMLElement>>(new Map());
+  const pageVisibility = useRef<Map<number, number>>(new Map());
+  const flagsById = useMemo(() => new Map(flags.map((flag) => [flag.id, flag])), [flags]);
 
   useEffect(() => {
     let cancelled = false;
-    pdfjsLib
-      .getDocument({ url: fileUrl, withCredentials: true })
-      .promise.then((doc) => {
-        if (!cancelled) setPdf(doc);
-      })
-      .catch(() => {
-        if (!cancelled) setLoadError(true);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [fileUrl]);
-
-  // Jump to a flag's page when it's selected/activated from the analysis
-  // pane (AC3 direction 2).
-  useEffect(() => {
-    if (requestedPage !== null) setPage(requestedPage);
-  }, [requestedPage]);
-
-  // Found live (`ux-critic`, 2026-08-19): Prev/Next update `page` directly
-  // via a functional updater, which never touched `pageInput` -- the
-  // field showed a stale number after the very first Prev/Next click, and
-  // its own native spin arrows then operated on that stale value instead
-  // of the page actually on screen. `page` is the single source of truth;
-  // the input mirrors it unconditionally (it's an editable readout with
-  // its own onBlur/Enter commit path, not free-typing state that needs
-  // protecting from this sync).
-  useEffect(() => {
-    setPageInput(String(page));
-  }, [page]);
-
-  // Renders the canvas. Only depends on [pdf, page] -- selecting a
-  // different flag on the SAME page must never re-render the page, only
-  // recompute which boxes are drawn over it (below).
-  useEffect(() => {
-    if (!pdf || !canvasRef.current) return;
-    let cancelled = false;
-    pdf.getPage(page).then((pdfPage) => {
+    setPdf(null);
+    setMetrics([]);
+    setLoadError(false);
+    const task = pdfjsLib.getDocument({ url: fileUrl, withCredentials: true });
+    task.promise.then(async (document) => {
       if (cancelled) return;
-      const containerWidth = wrapRef.current?.clientWidth ?? 800;
-      const unscaled = pdfPage.getViewport({ scale: 1, rotation: pdfPage.rotate });
-      const scale = Math.max(0.5, Math.min(2.5, containerWidth / unscaled.width));
-      const nextViewport = pdfPage.getViewport({ scale, rotation: pdfPage.rotate });
-      const canvas = canvasRef.current;
-      if (!canvas) return;
-      const ctx = canvas.getContext("2d");
-      if (!ctx) return;
-      canvas.width = nextViewport.width;
-      canvas.height = nextViewport.height;
-      renderTaskRef.current?.cancel();
-      const task = pdfPage.render({ canvas, canvasContext: ctx, viewport: nextViewport });
-      renderTaskRef.current = task;
-      task.promise
-        .then(() => {
-          if (cancelled) return;
-          setViewport(nextViewport);
-        })
-        .catch((err: unknown) => {
-          // A cancelled render rejects with a RenderingCancelledException --
-          // expected when a newer page request superseded this one, not a
-          // real failure.
-          if (cancelled || (err as { name?: string })?.name === "RenderingCancelledException") return;
-          setLoadError(true);
-        });
+      setPdf(document);
+      const pageMetrics = await Promise.all(
+        Array.from({ length: document.numPages }, async (_, index) => {
+          const page = await document.getPage(index + 1);
+          const viewport = page.getViewport({ scale: 1, rotation: page.rotate });
+          return { pageNumber: index + 1, width: viewport.width, height: viewport.height };
+        }),
+      );
+      if (!cancelled) setMetrics(pageMetrics);
+    }).catch(() => {
+      if (!cancelled) setLoadError(true);
     });
     return () => {
       cancelled = true;
-      renderTaskRef.current?.cancel();
+      task.destroy();
     };
-  }, [pdf, page]);
+  }, [fileUrl]);
 
-  // Recomputes highlight boxes from the already-rendered viewport --
-  // cheap, no canvas work, safe to run on every selection change.
-  //
-  // Found live (`ux-critic`, 2026-08-19): with a flag selected, showing
-  // every OTHER flag's box on the same page too meant a flag with no
-  // recoverable region of its own (e.g. an F7 section-kind flag) could
-  // land the instructor on a page where a DIFFERENT flag's box is the
-  // only one visible -- nothing distinguished it as "not yours," so it
-  // read as confidently, specifically wrong. In detail mode (a flag
-  // selected), only that flag's own box renders, if it has one; browsing
-  // (no selection) still shows every flag on the page.
-  useEffect(() => {
-    if (!viewport) return;
-    const pageBoxes: HighlightBox[] = [];
-    let ordinal = 0;
-    for (const region of regions) {
-      if (region.kind !== "page_bbox" || region.page !== page || !region.bbox) continue;
-      if (selectedFlagId !== null && region.flag_id !== selectedFlagId) continue;
-      ordinal += 1;
-      // pdfjs-dist v6's PageViewport dropped `convertToViewportRectangle`
-      // (present in older examples/tutorials, reproduced live: calling it
-      // throws "not a function") -- the two-corner-point form is the real
-      // v6 API (`page_viewport.d.ts`: only `convertToViewportPoint` exists).
-      const [x0, y0, x1, y1] = region.bbox;
-      const [vx0, vy0] = viewport.convertToViewportPoint(x0, y0);
-      const [vx1, vy1] = viewport.convertToViewportPoint(x1, y1);
-      const left = Math.min(vx0, vx1);
-      const top = Math.min(vy0, vy1);
-      const width = Math.max(Math.abs(vx1 - vx0), 24);
-      const height = Math.max(Math.abs(vy1 - vy0), 24);
-      pageBoxes.push({
-        flagId: region.flag_id,
-        left,
-        top,
-        width,
-        height,
-        selected: region.flag_id === selectedFlagId,
-        ordinal,
-      });
-    }
-    setBoxes(pageBoxes);
-  }, [viewport, page, regions, selectedFlagId]);
+  useEffect(() => setPageInput(String(currentPage)), [currentPage]);
 
-  // AC3: activating a finding from the Analysis pane focuses its
-  // highlight on the document, once rendered -- a real DOM focus move,
-  // not just a scroll.
-  useEffect(() => {
-    if (selectedFlagId === null) return;
-    const el = highlightRefs.current.get(selectedFlagId);
-    el?.focus({ preventScroll: false });
-  }, [selectedFlagId, boxes]);
-
-  // `ux-critic` finding (V-072 review, 2026-08-20): the highlight's own
-  // popover (opened by the focus-move effect above, since a focused
-  // element also counts as hovered for keyboard users) had no way to
-  // dismiss -- it stayed open indefinitely and, at narrow widths, visibly
-  // overlapped other content. V-072's passage flags made this far more
-  // common than it was under V-065 alone (many more flags now resolve to
-  // a real `page_bbox`, so the auto-focus-on-select effect above fires
-  // far more often). Escape is this app's own established dismiss
-  // convention (Modal.tsx already uses it) -- reused here, not invented.
-  useEffect(() => {
-    function onKeyDown(e: KeyboardEvent) {
-      if (e.key === "Escape") setHoveredFlagId(null);
-    }
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
+  const registerPage = useCallback((page: number, element: HTMLElement | null) => {
+    if (element) pageRefs.current.set(page, element);
+    else pageRefs.current.delete(page);
   }, []);
 
-  function commitPageInput() {
-    const n = Number(pageInput);
-    if (Number.isFinite(n) && pdf) {
-      const clamped = Math.max(1, Math.min(pdf.numPages, Math.round(n)));
-      setPage(clamped);
-      setPageInput(String(clamped));
-    } else {
-      setPageInput(String(page));
+  const updateVisibility = useCallback((page: number, ratio: number) => {
+    pageVisibility.current.set(page, ratio);
+    let mostVisiblePage = page;
+    let mostVisibleRatio = -1;
+    for (const [candidatePage, candidateRatio] of pageVisibility.current) {
+      if (candidateRatio > mostVisibleRatio) {
+        mostVisiblePage = candidatePage;
+        mostVisibleRatio = candidateRatio;
+      }
     }
+    if (mostVisibleRatio > 0) setCurrentPage(mostVisiblePage);
+  }, []);
+
+  const scrollToPage = useCallback((page: number, behavior: ScrollBehavior = "smooth") => {
+    const total = pdf?.numPages ?? metrics.length;
+    if (total <= 0) return;
+    const target = Math.max(1, Math.min(total, Math.round(page)));
+    pageRefs.current.get(target)?.scrollIntoView({ behavior, block: "start" });
+    setCurrentPage(target);
+    setPageInput(String(target));
+  }, [metrics.length, pdf?.numPages]);
+
+  useEffect(() => {
+    if (requestedPage === null || metrics.length === 0) return;
+    requestAnimationFrame(() => scrollToPage(requestedPage, "auto"));
+  }, [metrics.length, requestedPage, scrollToPage]);
+
+  function commitPageInput() {
+    const page = Number(pageInput);
+    if (Number.isFinite(page)) scrollToPage(page);
+    else setPageInput(String(currentPage));
   }
 
-  const activePopoverFlagId = hoveredFlagId;
-  const popoverFlag = activePopoverFlagId !== null ? flagsById.get(activePopoverFlagId) : null;
+  const scopeRegions = regions.filter((region) => region.kind !== "page_bbox");
+  const pagesLabel = pdf ? `${pdf.numPages} ${pdf.numPages === 1 ? "page" : "pages"}` : "Loading pages";
+  const zoomStyle = { inlineSize: `${zoom * 100}%` } as CSSProperties;
 
   return (
-    <div className="flex h-full min-h-0 flex-col">
-      <div className="flex items-center justify-between gap-2 border-b border-border bg-panel px-3 py-2 text-sm">
-        <button
-          type="button"
-          onClick={() => pdf && setPage((p) => Math.max(1, p - 1))}
-          disabled={!pdf || page <= 1}
-          className="min-h-9 rounded-md border border-border-input px-2.5 disabled:opacity-40"
-        >
-          ← Prev
-        </button>
-        <span className="flex items-center gap-1.5">
-          Page{" "}
-          <input
-            type="number"
-            inputMode="numeric"
-            aria-label="Go to page"
-            min={1}
-            max={pdf?.numPages ?? 1}
-            value={pageInput}
-            onChange={(e) => setPageInput(e.target.value)}
-            onBlur={commitPageInput}
-            onKeyDown={(e) => e.key === "Enter" && commitPageInput()}
-            className="w-14 rounded-md border border-border-input bg-page px-1.5 py-1 text-center"
-          />{" "}
-          of {pdf?.numPages ?? "…"}
-        </span>
-        <button
-          type="button"
-          onClick={() => pdf && setPage((p) => Math.min(pdf.numPages, p + 1))}
-          disabled={!pdf || page >= (pdf?.numPages ?? 1)}
-          className="min-h-9 rounded-md border border-border-input px-2.5 disabled:opacity-40"
-        >
-          Next →
-        </button>
+    <div className="signal-document-source">
+      <div className="signal-document-toolbar">
+        <div className="signal-document-toolbar__identity">
+          <strong>Full manuscript</strong>
+          <span>Original PDF · {pagesLabel}</span>
+        </div>
+        <div className="signal-document-toolbar__controls" role="group" aria-label="PDF page and zoom controls">
+          <button type="button" onClick={() => setZoom((value) => Math.max(PDF_ZOOM_MIN, Number((value - PDF_ZOOM_STEP).toFixed(1))))} disabled={zoom <= PDF_ZOOM_MIN}>Zoom out</button>
+          <button type="button" onClick={() => setZoom(1)} disabled={zoom === 1}>Fit width</button>
+          <button type="button" onClick={() => setZoom((value) => Math.min(PDF_ZOOM_MAX, Number((value + PDF_ZOOM_STEP).toFixed(1))))} disabled={zoom >= PDF_ZOOM_MAX}>Zoom in</button>
+          <label><span>Go to page</span><input type="number" inputMode="numeric" min={1} max={pdf?.numPages ?? 1} value={pageInput} onChange={(event) => setPageInput(event.target.value)} onBlur={commitPageInput} onKeyDown={(event) => event.key === "Enter" && commitPageInput()} /></label>
+          <output aria-live="polite">Page {currentPage} of {pdf?.numPages ?? "…"}</output>
+        </div>
       </div>
-      <div ref={wrapRef} className="relative min-h-0 flex-1 overflow-auto bg-page p-4">
-        {loadError && (
-          <p role="alert" className="p-4 text-sm text-status-attention-text">
-            This document couldn't be loaded.
-          </p>
-        )}
-        {!pdf && !loadError && (
-          <p role="status" aria-live="polite" aria-busy="true" className="p-4 text-sm text-ink-secondary">
-            Loading manuscript.
-          </p>
-        )}
-        <div className="relative mx-auto w-fit">
-          <canvas ref={canvasRef} role="img" aria-label={`Page ${page} of the manuscript`} />
-          {boxes.map((box) => {
-            const flag = flagsById.get(box.flagId);
+      {scopeRegions.length > 0 && (
+        <div className="signal-document-scope-markers" role="group" aria-label="Findings without an exact passage location">
+          {scopeRegions.map((region) => {
+            const flag = flagsById.get(region.flag_id);
+            const number = findingNumbers.get(region.flag_id) ?? 1;
+            const precision = regionPrecision(region);
             return (
-              <button
-                key={box.flagId}
-                type="button"
-                ref={(el) => {
-                  if (el) highlightRefs.current.set(box.flagId, el);
-                  else highlightRefs.current.delete(box.flagId);
-                }}
-                aria-label={
-                  flag
-                    ? `${CHECK_KIND_SHORT_LABEL[flag.check_kind] ?? flag.check_kind} flag, ${flag.severity} severity, page ${page}`
-                    : `Flag on page ${page}`
-                }
-                aria-describedby={`region-popover-${box.flagId}`}
-                onMouseEnter={() => setHoveredFlagId(box.flagId)}
-                onMouseLeave={() => setHoveredFlagId((id) => (id === box.flagId ? null : id))}
-                onFocus={() => setHoveredFlagId(box.flagId)}
-                onBlur={() => setHoveredFlagId((id) => (id === box.flagId ? null : id))}
-                onClick={() => onSelectFlag(box.flagId)}
-                style={{
-                  position: "absolute",
-                  left: box.left,
-                  top: box.top,
-                  width: box.width,
-                  height: box.height,
-                  background: "color-mix(in srgb, var(--color-status-caution-text) 20%, transparent)",
-                  border: `${box.selected ? 3 : 2}px solid var(--color-status-caution-text)`,
-                  borderRadius: "2px",
-                }}
-              >
-                <span className="sr-only">{box.ordinal}</span>
+              <button key={region.flag_id} type="button" aria-pressed={region.flag_id === selectedFlagId} onClick={() => onSelectFlag(region.flag_id)}>
+                <span aria-hidden="true">{number}</span>
+                <span>Finding {number} · {precision.label}{flag ? ` · ${CHECK_KIND_SHORT_LABEL[flag.check_kind] ?? flag.check_kind}` : ""}</span>
               </button>
             );
           })}
         </div>
-        {popoverFlag && (
-          <div
-            id={`region-popover-${popoverFlag.id}`}
-            role="tooltip"
-            className="pointer-events-none fixed z-raised max-w-xs rounded-md border border-border bg-panel p-2.5 text-xs shadow-sm"
-            style={{
-              left: (highlightRefs.current.get(popoverFlag.id)?.getBoundingClientRect().left ?? 0) + 8,
-              top: (highlightRefs.current.get(popoverFlag.id)?.getBoundingClientRect().bottom ?? 0) + 6,
-            }}
-          >
-            <p className="font-semibold tracking-header text-ink-tertiary uppercase">
-              {CHECK_KIND_SHORT_LABEL[popoverFlag.check_kind] ?? popoverFlag.check_kind}
-            </p>
-            <p className="mt-1 text-ink">{truncateAtWord(popoverFlag.evidence_excerpt, 140)}</p>
-            <div className="mt-1.5">
-              <SeverityTag severity={popoverFlag.severity as Severity} />
-            </div>
+      )}
+      <div ref={scrollRef} role="region" tabIndex={0} aria-label="Full manuscript, scrollable" className="signal-document-scroll signal-document-scroll--pdf">
+        {loadError ? (
+          <section className="signal-document-paper-state" role="alert">
+            <p className="signal-section-kicker">PDF display unavailable</p>
+            <h2>The PDF could not be displayed</h2>
+            <p>This source view failed to load. Any recorded review that loaded remains available on the right.</p>
+          </section>
+        ) : !pdf || metrics.length === 0 ? (
+          <section className="signal-document-pdf-skeleton" role="status" aria-live="polite" aria-busy="true">
+            <span><SpinnerIcon /> Loading full manuscript.</span>
+            <i /><i /><i />
+          </section>
+        ) : (
+          <div className="signal-document-pdf-pages" style={zoomStyle}>
+            {metrics.map((metric) => (
+              <ContinuousPdfPage
+                key={metric.pageNumber}
+                pdf={pdf}
+                metric={metric}
+                totalPages={pdf.numPages}
+                scrollRoot={scrollRef}
+                regions={regions}
+                flagsById={flagsById}
+                selectedFlagId={selectedFlagId}
+                findingNumbers={findingNumbers}
+                onSelectFlag={onSelectFlag}
+                onVisibility={updateVisibility}
+                registerPage={registerPage}
+              />
+            ))}
           </div>
         )}
       </div>

@@ -113,7 +113,7 @@ export function CheckProgressPage() {
   useEffect(() => {
     if (!run || run.status === prevStatusRef.current) return;
     prevStatusRef.current = run.status;
-    if (run.status === "done") setAnnouncement("Check complete. Your readiness report is ready.");
+    if (run.status === "done") setAnnouncement("Check complete. Your manuscript review is ready.");
     else if (run.status === "failed") setAnnouncement("This check has failed. See the message below.");
     else if (run.status === "cancelled") setAnnouncement("This check was cancelled.");
     else setAnnouncement(`Now running: ${STAGE_LABEL[run.status] ?? run.status}.`);
@@ -176,7 +176,7 @@ export function CheckProgressPage() {
 
           {cancel.error && <Alert title="Could not cancel this check" tone="error" role="alert">{cancel.error instanceof Error ? cancel.error.message : "Try again."}</Alert>}
 
-          {run.status === "done" && <section className="signal-check-complete" aria-labelledby="check-complete-heading"><div><p className="signal-section-kicker">Next: Review</p><h2 id="check-complete-heading">The readiness report is ready</h2><p>Review every escalation and its evidence before you make a final decision.</p></div><ActionLink to={`/report/${run.id}`} variant="brand">View readiness report</ActionLink></section>}
+          {run.status === "done" && <section className="signal-check-complete" aria-labelledby="check-complete-heading"><div><p className="signal-section-kicker">Next: Review</p><h2 id="check-complete-heading">Your manuscript review is ready</h2><p>Read the manuscript beside VERIDICAL's recorded criteria and integrity signals before you make a final decision.</p></div><ActionLink to={`/report/${run.id}/document`} variant="brand">Open manuscript review</ActionLink></section>}
 
           <div className="signal-check-actions">
             <ActionLink to="/dashboard?queue=checking" variant="quiet">Back to Review Desk</ActionLink>

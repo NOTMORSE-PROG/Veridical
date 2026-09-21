@@ -198,7 +198,7 @@ Combines everything into one explainable output (Objective 4, Fig. 3.12).
 1. From dashboard: "Check manuscript" → upload PDF/DOCX (+ group name/label)
 2. Progress view with per-stage status: Ingestion → Structural checks → AI grading → Integrity checks (each check shows running/done/N/A/error)
 3. External-API stages show queued progress (rate-limit aware), with graceful "API unavailable — marked unverifiable" states
-4. On completion → redirected to the Readiness Report
+4. On completion → opens the manuscript-first review workspace, with the full Readiness Report available as a secondary destination
 5. (Runs are queued; a second manuscript can be uploaded while one is processing)
 
 ### Flow C — Flag review & final decision 🟢

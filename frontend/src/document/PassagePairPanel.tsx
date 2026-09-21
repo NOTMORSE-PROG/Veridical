@@ -4,7 +4,23 @@
 // subordinate (owner's anti-Turnitin ruling, carried from V-058), never
 // a large colored percentage or a severity-styled badge.
 import { Link } from "react-router";
+import type { ReactNode } from "react";
 import type { PassagePairOut } from "../api/types";
+import type { TextRange } from "./sharedPassage";
+import { sharedPassageRanges } from "./sharedPassage";
+
+function HighlightedText({ text, ranges }: { text: string; ranges: TextRange[] }) {
+  if (ranges.length === 0) return <>{text}</>;
+  const nodes: ReactNode[] = [];
+  let cursor = 0;
+  for (const range of ranges) {
+    if (range.start > cursor) nodes.push(text.slice(cursor, range.start));
+    nodes.push(<mark key={`${range.start}-${range.end}`} className="reuse-shared-wording">{text.slice(range.start, range.end)}</mark>);
+    cursor = range.end;
+  }
+  if (cursor < text.length) nodes.push(text.slice(cursor));
+  return <>{nodes}</>;
+}
 
 // V-066: exported so the library's bounded-excerpt view (a non-owned
 // manuscript's detail/compare pane) can reuse the identical block
@@ -14,18 +30,20 @@ export function PassageBlock({
   before,
   excerpt,
   after,
+  sharedRanges = [],
 }: {
   label: string;
   before: string | null;
   excerpt: string;
   after: string | null;
+  sharedRanges?: TextRange[];
 }) {
   return (
     <div className="min-w-0 flex-1">
       <p className="mb-1 text-xs font-semibold tracking-header text-ink-tertiary uppercase">{label}</p>
       <div className="rounded-lg border border-border bg-page px-4 py-3 text-sm break-words text-ink">
         {before && <span className="text-ink-tertiary">{before} </span>}
-        <span className="reuse-passage-highlight">{excerpt}</span>
+        <span><HighlightedText text={excerpt} ranges={sharedRanges} /></span>
         {after && <span className="text-ink-tertiary"> {after}</span>}
       </div>
     </div>
@@ -44,6 +62,8 @@ export function PassagePairPanel({
   excludedReason?: ("reference_list" | "block_quote")[];
 }) {
   const similarityBand = pair.level === "exact_duplicate" ? "Exact duplicate" : "High textual similarity";
+  const shared = sharedPassageRanges(pair.own_excerpt, pair.matched_excerpt);
+  const hasExactSharedWording = shared.left.length > 0;
 
   const excludedLead = (() => {
     if (excludedReason.length === 0) return null;
@@ -63,16 +83,22 @@ export function PassagePairPanel({
       </h3>
       <p className="text-sm text-ink-secondary">
         {variant === "flag"
-          ? "Possible reuse. Compare the two passages below and verify against the matched source yourself."
+          ? "Compare these stored passages yourself. Similar wording can have legitimate explanations."
           : excludedLead}
       </p>
-      <p className="text-xs text-ink-secondary"><b>{similarityBand}.</b> Compare the text itself below; the raw reproducibility value remains in Audit.</p>
-      <div className="flex flex-col gap-3 xl:flex-row">
+      <p className="text-xs text-ink-secondary"><b>Match type: {similarityBand}.</b> Compare the text itself below; the raw reproducibility value remains in Audit.</p>
+      <p className="text-xs text-ink-secondary">
+        {hasExactSharedWording
+          ? "Highlighted wording appears in both recorded passages. Unhighlighted wording still matters to the comparison."
+          : "No stable exact phrase was found to highlight. The stored match may reflect broader textual similarity, so compare both passages manually."}
+      </p>
+      <div className="passage-pair__columns flex flex-col gap-3 xl:flex-row">
         <PassageBlock
           label={ownAnchor ? `Your manuscript · ${ownAnchor}` : "Your manuscript"}
           before={pair.own_context_before}
           excerpt={pair.own_excerpt}
           after={pair.own_context_after}
+          sharedRanges={shared.left}
         />
         <div className="min-w-0 flex-1">
           <PassageBlock
@@ -80,6 +106,7 @@ export function PassagePairPanel({
             before={pair.matched_context_before}
             excerpt={pair.matched_excerpt}
             after={pair.matched_context_after}
+            sharedRanges={shared.right}
           />
           <p className="mt-1 text-xs text-ink-tertiary">Stored excerpt, not the full document.</p>
           {/* V-066 (BUG-122 direction 2): "#N" used to be dead information
