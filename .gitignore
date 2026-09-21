@@ -50,6 +50,24 @@ frontend/dist/
 # ── Tooling artifacts ─────────────────────────────────────────────
 .codex/
 .playwright-mcp/
+# Authenticated browser output can contain manuscript text, account data,
+# request metadata, or session material. V-076 deliberately produces none;
+# these guards keep an accidental local diagnostic run out of the public repo.
+/frontend/test-results/
+/frontend/playwright-report/
+/frontend/blob-report/
+/frontend/playwright/.auth/
+/frontend/**/storageState*.json
+/tools/mobile-smoke/test-results/
+/tools/mobile-smoke/playwright-report/
+/tools/mobile-smoke/blob-report/
+/tools/mobile-smoke/.auth/
+/tools/mobile-smoke/.mobile-smoke-output/
+/tools/mobile-smoke/**/storageState*.json
+/tools/mobile-smoke/**/*.har
+/tools/mobile-smoke/**/*.png
+/tools/mobile-smoke/**/*.webm
+/tools/mobile-smoke/**/*.zip
 # Agent/session screenshots land at the repo root (ui-designer,
 # ux-critic, professor all write there by default). They show real
 # manuscript content, so they are local-only under D-007 — the same

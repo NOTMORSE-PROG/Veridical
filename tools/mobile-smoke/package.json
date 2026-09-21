@@ -1,0 +1,17 @@
+{
+  "name": "@veridical/mobile-smoke",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "test": "node --test tests/*.unit.test.mjs",
+    "test:production": "playwright test",
+    "verify:deployment": "node verify-deployment.mjs"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.63.0"
+  }
+}
