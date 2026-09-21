@@ -101,3 +101,59 @@ def test_audit_list_page_size_bounds_reject_invalid_values(default_page_size, ma
 def test_audit_list_max_page_rejects_non_positive_values():
     with pytest.raises(ValueError, match="audit_list_max_page"):
         _bare_settings(audit_list_max_page="0")
+
+
+def test_content_hash_recovery_bounds_are_configurable():
+    settings = _bare_settings(
+        content_hash_read_chunk_bytes="4096",
+        content_hash_read_max_chunk_bytes="8192",
+        content_hash_backfill_batch_size="7",
+        content_hash_backfill_max_batch_size="11",
+        content_hash_backfill_process_ceiling="12",
+    )
+
+    assert settings.content_hash_read_chunk_bytes == 4096
+    assert settings.content_hash_read_max_chunk_bytes == 8192
+    assert settings.content_hash_backfill_batch_size == 7
+    assert settings.content_hash_backfill_max_batch_size == 11
+    assert settings.content_hash_backfill_process_ceiling == 12
+
+
+@pytest.mark.parametrize(
+    "field",
+    (
+        "content_hash_read_chunk_bytes",
+        "content_hash_read_max_chunk_bytes",
+        "content_hash_backfill_batch_size",
+        "content_hash_backfill_max_batch_size",
+        "content_hash_backfill_process_ceiling",
+    ),
+)
+def test_content_hash_recovery_bounds_reject_non_positive_values(field):
+    with pytest.raises(ValueError, match=field):
+        _bare_settings(**{field: "0"})
+
+
+def test_content_hash_recovery_default_batch_cannot_exceed_maximum():
+    with pytest.raises(ValueError, match="content_hash_backfill_batch_size"):
+        _bare_settings(
+            content_hash_backfill_batch_size="8",
+            content_hash_backfill_max_batch_size="7",
+        )
+
+
+def test_content_hash_recovery_read_chunk_cannot_exceed_maximum():
+    with pytest.raises(ValueError, match="content_hash_read_chunk_bytes"):
+        _bare_settings(
+            content_hash_read_chunk_bytes="8193",
+            content_hash_read_max_chunk_bytes="8192",
+        )
+
+
+def test_content_hash_recovery_batch_maximum_cannot_exceed_process_ceiling():
+    with pytest.raises(ValueError, match="content_hash_backfill_max_batch_size"):
+        _bare_settings(
+            content_hash_backfill_batch_size="10",
+            content_hash_backfill_max_batch_size="101",
+            content_hash_backfill_process_ceiling="100",
+        )

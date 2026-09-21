@@ -126,13 +126,13 @@ async def save_upload(chunks: AsyncIterator[bytes], dest: Path, settings: Settin
     return dest
 
 
-def _hash_file(path: Path) -> str:
+def hash_file_sha256(path: Path, chunk_bytes: int) -> str:
     """SHA-256 hex digest of the file's raw bytes (BUG-140 content
     identity) — chunked read, never loads the whole (up to
     `max_upload_mb`) file into memory at once."""
     digest = hashlib.sha256()
     with path.open("rb") as fh:
-        for chunk in iter(lambda: fh.read(1024 * 1024), b""):
+        for chunk in iter(lambda: fh.read(chunk_bytes), b""):
             digest.update(chunk)
     return digest.hexdigest()
 
@@ -313,7 +313,7 @@ async def ingest_upload(
     # a chunked SHA-256 read of up to `max_upload_mb`) rather than derived
     # later from bytes that may no longer be on local disk (BUG-138).
     manuscript.content_hash = await asyncio.get_running_loop().run_in_executor(
-        None, _hash_file, dest
+        None, hash_file_sha256, dest, settings.content_hash_read_chunk_bytes
     )
     # BUG-138: durably persist the upload BEFORE the row claims it exists --
     # a failed R2 write raises here rather than leaving `file_ref` pointing
