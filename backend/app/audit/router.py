@@ -4,16 +4,22 @@ edge case: audit UI is instructor-only, never exposed via share links)."""
 from datetime import datetime
 from typing import Annotated
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.audit.schemas import AuditLogDetail, PaginatedAuditLog
 from app.audit.service import get_audit_log_detail, list_audit_log
 from app.auth.dependencies import get_current_instructor
+from app.config import get_settings
 from app.db import get_session
 from app.models.instructor import Instructor
 
 router = APIRouter(prefix="/audit", tags=["audit"])
+
+_settings = get_settings()
+_AUDIT_LIST_DEFAULT_PAGE_SIZE = _settings.audit_list_default_page_size
+_AUDIT_LIST_MAX_PAGE_SIZE = _settings.audit_list_max_page_size
+_AUDIT_LIST_MAX_PAGE = _settings.audit_list_max_page
 
 
 @router.get("", response_model=PaginatedAuditLog)
@@ -25,8 +31,10 @@ async def list_audit_log_route(
     event_type_prefix: str | None = None,
     date_from: datetime | None = None,
     date_to: datetime | None = None,
-    page: int = 1,
-    page_size: int = 50,
+    page: Annotated[int, Query(ge=1, le=_AUDIT_LIST_MAX_PAGE)] = 1,
+    page_size: Annotated[int, Query(ge=1, le=_AUDIT_LIST_MAX_PAGE_SIZE)] = (
+        _AUDIT_LIST_DEFAULT_PAGE_SIZE
+    ),
 ) -> PaginatedAuditLog:
     return await list_audit_log(
         session,

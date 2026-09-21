@@ -3,6 +3,7 @@ public, unauthenticated adviser view (screen 4l). Needs a live Postgres
 (same convention as test_report_router_live.py).
 """
 
+import logging
 import os
 from decimal import Decimal
 
@@ -12,6 +13,7 @@ from fastapi.testclient import TestClient
 import app.auth.service as auth_service
 from app.auth.security import hash_password
 from app.config import get_settings
+from app.share.router import PUBLIC_SHARE_SERVER_ERROR_BODY
 
 live = pytest.mark.skipif(
     "DATABASE_URL" not in os.environ,
@@ -20,6 +22,11 @@ live = pytest.mark.skipif(
 pytestmark = live
 
 SCRATCH_DB = "veridical_shareapitest"
+
+
+def _assert_public_share_security_headers(response) -> None:
+    assert response.headers["cache-control"] == "no-store"
+    assert response.headers["x-robots-tag"] == "noindex, nofollow"
 
 
 @pytest.fixture(scope="module")
@@ -174,7 +181,7 @@ def test_creating_a_link_makes_it_active_and_the_shared_report_reachable(
     shared = client.get(f"/shared/{token}/report")
     assert shared.status_code == 200
     assert shared.json()["report"]["check_run_id"] == check_run_id
-    assert shared.headers["x-robots-tag"] == "noindex, nofollow"
+    _assert_public_share_security_headers(shared)
 
 
 def test_regenerating_replaces_the_token_and_kills_the_old_one(logged_in_with_a_done_run):
@@ -186,8 +193,11 @@ def test_regenerating_replaces_the_token_and_kills_the_old_one(logged_in_with_a_
     client.cookies.clear()
     old = client.get(f"/shared/{first}/report")
     assert old.status_code == 410
+    assert old.json()["error"]["code"] == "gone"
+    _assert_public_share_security_headers(old)
     new = client.get(f"/shared/{second}/report")
     assert new.status_code == 200
+    _assert_public_share_security_headers(new)
 
 
 def test_revoking_returns_410_not_a_generic_404(logged_in_with_a_done_run):
@@ -203,6 +213,8 @@ def test_revoking_returns_410_not_a_generic_404(logged_in_with_a_done_run):
     client.cookies.clear()
     resp = client.get(f"/shared/{token}/report")
     assert resp.status_code == 410
+    assert resp.json()["error"]["code"] == "gone"
+    _assert_public_share_security_headers(resp)
 
 
 def test_revoking_with_nothing_active_is_a_clear_error_not_a_silent_noop(
@@ -218,6 +230,26 @@ def test_an_unknown_token_is_404_not_410(logged_in_with_a_done_run):
     client.cookies.clear()
     resp = client.get("/shared/this-token-was-never-issued/report")
     assert resp.status_code == 404
+    assert resp.json()["error"]["code"] == "not_found"
+    _assert_public_share_security_headers(resp)
+
+
+def test_an_unhandled_public_share_error_is_generic_and_uncacheable(client, monkeypatch, caplog):
+    private_detail = "private-diagnostic-detail"
+
+    async def raise_unexpected_error(*_args, **_kwargs):
+        raise RuntimeError(private_detail)
+
+    monkeypatch.setattr("app.share.router.get_shared_report", raise_unexpected_error)
+    with caplog.at_level(logging.ERROR, logger="app.main"):
+        response = client.get("/shared/review-control/report")
+
+    assert response.status_code == 500
+    assert response.text == PUBLIC_SHARE_SERVER_ERROR_BODY
+    assert private_detail not in response.text
+    _assert_public_share_security_headers(response)
+    assert private_detail in caplog.text
+    assert "RuntimeError" in caplog.text
 
 
 def test_a_stranger_cannot_manage_another_instructors_share_link(logged_in_with_a_done_run):
@@ -271,6 +303,8 @@ def test_an_expired_link_is_410(logged_in_with_a_done_run, api_scratch_url):
     client.cookies.clear()
     resp = client.get(f"/shared/{token}/report")
     assert resp.status_code == 410
+    assert resp.json()["error"]["code"] == "gone"
+    _assert_public_share_security_headers(resp)
 
 
 def test_a_past_dated_expiry_is_rejected(logged_in_with_a_done_run):

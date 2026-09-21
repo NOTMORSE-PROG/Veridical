@@ -72,3 +72,32 @@ def test_manuscript_list_page_size_bounds_reject_invalid_values(default_page_siz
             manuscript_list_default_page_size=default_page_size,
             manuscript_list_max_page_size=max_page_size,
         )
+
+
+def test_audit_list_page_size_bounds_are_configurable():
+    settings = _bare_settings(
+        audit_list_default_page_size="25",
+        audit_list_max_page_size="75",
+        audit_list_max_page="100",
+    )
+
+    assert settings.audit_list_default_page_size == 25
+    assert settings.audit_list_max_page_size == 75
+    assert settings.audit_list_max_page == 100
+
+
+@pytest.mark.parametrize(
+    ("default_page_size", "max_page_size"),
+    (("0", "200"), ("50", "0"), ("201", "200")),
+)
+def test_audit_list_page_size_bounds_reject_invalid_values(default_page_size, max_page_size):
+    with pytest.raises(ValueError, match="audit_list_default_page_size"):
+        _bare_settings(
+            audit_list_default_page_size=default_page_size,
+            audit_list_max_page_size=max_page_size,
+        )
+
+
+def test_audit_list_max_page_rejects_non_positive_values():
+    with pytest.raises(ValueError, match="audit_list_max_page"):
+        _bare_settings(audit_list_max_page="0")

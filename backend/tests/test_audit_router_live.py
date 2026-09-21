@@ -132,6 +132,8 @@ def test_list_and_detail_return_the_seeded_row(logged_in_with_one_audit_row):
     assert listing.status_code == 200
     body = listing.json()
     assert body["total"] == 1
+    assert body["page"] == 1
+    assert body["page_size"] == get_settings().audit_list_default_page_size
     assert body["items"][0]["event_type"] == "llm_call"
     assert body["items"][0]["check_run_id"] == check_run_id
     # BUG-219: this fixture seeds a raw `llm_call` row with no `fake_llm`
@@ -144,6 +146,32 @@ def test_list_and_detail_return_the_seeded_row(logged_in_with_one_audit_row):
     detail = client.get(f"/audit/{body['items'][0]['id']}")
     assert detail.status_code == 200
     assert detail.json()["payload"]["prompt_type"] == "semantic_grading"
+
+
+def test_list_pagination_is_validated_before_querying(logged_in_with_one_audit_row):
+    client, _ = logged_in_with_one_audit_row
+    settings = get_settings()
+
+    for query in ("page=0", "page=-1", "page_size=0"):
+        response = client.get(f"/audit?{query}")
+        assert response.status_code == 422, (query, response.text)
+
+    max_page = client.get(f"/audit?page={settings.audit_list_max_page}")
+    assert max_page.status_code == 200, max_page.text
+    assert max_page.json()["page"] == settings.audit_list_max_page
+
+    above_max_page = client.get(f"/audit?page={settings.audit_list_max_page + 1}")
+    assert above_max_page.status_code == 422, above_max_page.text
+
+    overflowing_page = client.get("/audit?page=1000000000000000000000000000000")
+    assert overflowing_page.status_code == 422, overflowing_page.text
+
+    at_limit = client.get(f"/audit?page_size={settings.audit_list_max_page_size}")
+    assert at_limit.status_code == 200, at_limit.text
+    assert at_limit.json()["page_size"] == settings.audit_list_max_page_size
+
+    above_limit = client.get(f"/audit?page_size={settings.audit_list_max_page_size + 1}")
+    assert above_limit.status_code == 422, above_limit.text
 
 
 def test_detail_404s_for_a_nonexistent_row(logged_in_with_one_audit_row):

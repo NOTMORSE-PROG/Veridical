@@ -10,6 +10,8 @@ from alembic.config import Config
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from starlette.middleware.base import RequestResponseEndpoint
+from starlette.responses import PlainTextResponse, Response
 
 from alembic import command
 from app import db
@@ -31,7 +33,14 @@ from app.pipeline.worker import worker_loop
 from app.report.router import router as report_router
 from app.rubric.router import router as rubric_router
 from app.settings.router import router as settings_router
-from app.share.router import router as share_router
+from app.share.router import (
+    PUBLIC_SHARE_PATH_PREFIX,
+    PUBLIC_SHARE_RESPONSE_HEADERS,
+    PUBLIC_SHARE_SERVER_ERROR_BODY,
+)
+from app.share.router import (
+    router as share_router,
+)
 
 _ALEMBIC_INI = Path(__file__).resolve().parent.parent / "alembic.ini"
 
@@ -175,6 +184,33 @@ if _cors_origins:
         # cookie-based auth, so nothing exercised this gap until now).
         allow_credentials=True,
     )
+
+
+@app.middleware("http")
+async def add_public_share_response_headers(
+    request: Request, call_next: RequestResponseEndpoint
+) -> Response:
+    """Prevent storage or indexing of bearer-token report responses.
+
+    Starlette's user middleware wraps its handled-exception middleware, so
+    this applies after successful routing and the global VeridicalError
+    handler's fresh 404/410 responses. Its outer server-error middleware would
+    otherwise create a fresh headerless 500, so this path converts unexpected
+    failures to the same generic body after logging the traceback.
+    """
+    is_public_share = request.url.path.startswith(PUBLIC_SHARE_PATH_PREFIX)
+    try:
+        response = await call_next(request)
+    except Exception:  # noqa: BLE001 -- this boundary must also harden generic 500s
+        if not is_public_share:
+            raise
+        _logger.exception("Unhandled failure while serving a public shared report.")
+        response = PlainTextResponse(PUBLIC_SHARE_SERVER_ERROR_BODY, status_code=500)
+
+    if is_public_share:
+        for name, value in PUBLIC_SHARE_RESPONSE_HEADERS:
+            response.headers[name] = value
+    return response
 
 
 @app.exception_handler(VeridicalError)

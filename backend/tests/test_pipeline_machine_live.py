@@ -7,6 +7,7 @@ yet). Own scratch DB, same convention as the other V2 live tests.
 """
 
 import asyncio
+import logging
 import os
 import time
 from datetime import UTC, datetime
@@ -16,6 +17,7 @@ import pytest
 from sqlalchemy import select, text
 
 import app.pipeline.machine as pipeline_machine
+from app import messages
 from app.checks.rules.sections import identify_target_section
 from app.config import get_settings
 from app.db import advisory_lock
@@ -949,7 +951,7 @@ async def test_ingest_failed_manuscript_fails_the_run_as_file_malformed(
 
 
 async def test_missing_data_dir_cache_fails_the_run_instead_of_stalling_forever(
-    session_factory, tmp_path, monkeypatch
+    session_factory, tmp_path, monkeypatch, caplog
 ):
     """BUG-032: `data_dir` (config.py) is a real on-disk cache the pipeline
     reads on every check-run, not just at ingestion — a container recreate
@@ -967,14 +969,25 @@ async def test_missing_data_dir_cache_fails_the_run_instead_of_stalling_forever(
     check_run_id, _, settings = await _seed(session_factory, tmp_path, monkeypatch)
     async with session_factory() as session:
         manuscript_id = (await session.get(CheckRun, check_run_id)).manuscript_id
-    raw_store_path(settings, manuscript_id).unlink()
+    missing_path = raw_store_path(settings, manuscript_id)
+    missing_path.unlink()
+
+    with caplog.at_level(logging.ERROR, logger="app.pipeline.machine"):
+        async with session_factory() as session:
+            check_run = await session.get(CheckRun, check_run_id)
+            await run_check_run(session, check_run, settings, FakeLLMClient())
 
     async with session_factory() as session:
         check_run = await session.get(CheckRun, check_run_id)
-        await run_check_run(session, check_run, settings, FakeLLMClient())
         assert check_run.status == CheckRunStatus.failed
         assert check_run.finished_at is not None
-        assert check_run.stage_status["failed"]["code"] == "unexpected_error"
+        failure = check_run.stage_status["failed"]
+        assert failure["code"] == "unexpected_error"
+        assert failure["message"] == messages.UNEXPECTED_PIPELINE_ERROR
+        assert str(missing_path) not in failure["message"]
+
+    assert missing_path.name in caplog.text
+    assert "FileNotFoundError" in caplog.text
 
 
 async def test_routing_only_persists_once_across_multiple_advances(

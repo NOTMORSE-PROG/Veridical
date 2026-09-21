@@ -49,6 +49,11 @@ EXTRACTION_TIMED_OUT = (
     "Please try a shorter or simpler file."
 )
 
+UNEXPECTED_PIPELINE_ERROR = (
+    "This check stopped because of an unexpected system error. Run it again. "
+    "If the problem continues, contact the VERIDICAL team."
+)
+
 IMAGE_ONLY_NOTE = (
     "This document contains little or no selectable text (it may be a "
     "scanned copy). Checks that need the text will be limited."
