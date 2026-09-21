@@ -168,6 +168,15 @@ class TitlePageProposalOut(BaseModel):
     extraction_failed: bool
 
 
+class ExistingUploadOut(BaseModel):
+    """A prior byte-identical upload owned by the authenticated caller."""
+
+    manuscript_id: int
+    created_at: datetime
+    original_filename: str | None
+    purged_at: datetime | None
+
+
 class IngestSummary(BaseModel):
     """Response body of POST /manuscripts/ingest — what the upload screen
     (4c/4f) needs to show; the full extraction lives in the raw store."""
@@ -193,6 +202,10 @@ class IngestSummary(BaseModel):
     # V-063: the auto-proposed group/program, deterministically extracted
     # from the title page — the confirm dialog's own data source.
     group_proposal: TitlePageProposalOut
+    # BUG-234: exact byte identity inside this instructor's account only.
+    # This never reports a cross-account hash match and is not a semantic
+    # similarity or manuscript-version judgment.
+    existing_upload: ExistingUploadOut | None = None
 
 
 class ConfirmGroupRequest(BaseModel):

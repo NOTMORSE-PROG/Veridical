@@ -31,6 +31,7 @@ const SUMMARY = {
   vision_status: "none",
   notes: [],
   group_proposal: EMPTY_PROPOSAL,
+  existing_upload: null,
 };
 
 function chooseFile() {
@@ -92,6 +93,107 @@ describe("UploadManuscriptModal", () => {
     chooseFile();
     fireEvent.click(screen.getByRole("button", { name: "Upload manuscript" }));
     expect(await screen.findByText("Uploaded. 12 page(s) parsed. No citations were found.")).toBeInTheDocument();
+  });
+
+  it("BUG-234: explains a same-account exact re-upload and links to the earlier Library record", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        new Response(
+          JSON.stringify({
+            ...SUMMARY,
+            existing_upload: {
+              manuscript_id: 17,
+              created_at: "2026-09-20T04:30:00Z",
+              original_filename: "defense-manuscript.pdf",
+              purged_at: null,
+            },
+          }),
+          { status: 200 },
+        ),
+      ),
+    );
+    renderWithProviders(<UploadManuscriptModal onClose={() => {}} onUploadSuccess={() => {}} />);
+    chooseFile();
+    fireEvent.click(screen.getByRole("button", { name: "Upload manuscript" }));
+
+    const heading = await screen.findByRole("heading", { name: "Already in your Library" });
+    expect(heading).toBeInTheDocument();
+    await waitFor(() => expect(document.activeElement).toBe(heading));
+    expect(screen.getByText(/You uploaded “thesis\.pdf”.*exact same file as “defense-manuscript\.pdf”/)).toBeInTheDocument();
+    expect(screen.getByText(/keeps exact re-uploads together as one Library record/)).toBeInTheDocument();
+    expect(screen.getByText(/continue with this uploaded copy to start a separate check/)).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /Open earlier Library record/ })).toHaveAttribute(
+      "href",
+      "/library/17",
+    );
+    expect(screen.getByRole("button", { name: "Start a check with this manuscript" })).toBeInTheDocument();
+  });
+
+  it("BUG-234: honestly distinguishes a purged prior copy while keeping the new upload usable", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        new Response(
+          JSON.stringify({
+            ...SUMMARY,
+            existing_upload: {
+              manuscript_id: 17,
+              created_at: "2026-09-20T04:30:00Z",
+              original_filename: "defense-manuscript.pdf",
+              purged_at: "2026-09-21T01:00:00Z",
+            },
+          }),
+          { status: 200 },
+        ),
+      ),
+    );
+    renderWithProviders(<UploadManuscriptModal onClose={() => {}} onUploadSuccess={() => {}} />);
+    chooseFile();
+    fireEvent.click(screen.getByRole("button", { name: "Upload manuscript" }));
+
+    expect(await screen.findByRole("heading", { name: "Already in your Library" })).toBeInTheDocument();
+    expect(screen.getByText(/earlier copy's stored source was removed/)).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: /Open earlier Library record/ })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Start a check with this manuscript" })).toBeInTheDocument();
+  });
+
+  it("BUG-234: offers a visible shortcut past optional group details and focuses Start check", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = typeof input === "string" ? input : input.toString();
+        if (url.endsWith("/programs")) return new Response(JSON.stringify([]), { status: 200 });
+        return new Response(
+          JSON.stringify({
+            ...SUMMARY,
+            existing_upload: {
+              manuscript_id: 17,
+              created_at: "2026-09-20T04:30:00Z",
+              original_filename: "defense-manuscript.pdf",
+              purged_at: null,
+            },
+            group_proposal: {
+              ...EMPTY_PROPOSAL,
+              title: { value: "A Long Title", anchor: "p. 1" },
+            },
+          }),
+          { status: 200 },
+        );
+      }),
+    );
+    renderWithProviders(<UploadManuscriptModal onClose={() => {}} onUploadSuccess={() => {}} />);
+    chooseFile();
+    fireEvent.click(screen.getByRole("button", { name: "Upload manuscript" }));
+
+    const continueButton = await screen.findByRole("button", {
+      name: "Skip group details and continue",
+    });
+    fireEvent.click(continueButton);
+    const startButton = await screen.findByRole("button", {
+      name: "Start a check with this manuscript",
+    });
+    await waitFor(() => expect(document.activeElement).toBe(startButton));
   });
 
   it("surfaces the scanned-document note verbatim when the upload is image-only", async () => {

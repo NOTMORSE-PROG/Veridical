@@ -254,7 +254,7 @@ async def ingest_upload(
     settings: Settings | None = None,
     *,
     instructor_id: int,
-) -> tuple[Manuscript, ExtractionResult, int, TitlePageProposal]:
+) -> tuple[Manuscript, ExtractionResult, int, TitlePageProposal, Manuscript | None]:
     """Full upload flow for the HTTP surface: save (size-capped) → own row
     → ingest. `instructor_id` is the authenticated caller (BUG-002/D-020) —
     this endpoint used to attach uploads to whichever instructor had the
@@ -324,6 +324,26 @@ async def ingest_upload(
     )
     manuscript.file_ref = str(dest)
     await session.commit()
+    # BUG-234: the upload is now durably backed and its hash is committed.
+    # Query only this authenticated instructor's rows; exposing whether the
+    # same bytes exist in another account would create a cross-tenant oracle.
+    # Keeping the lookup after the commit also means that, for two concurrent
+    # uploads, whichever commit finishes second can see the first. The rows
+    # remain distinct check inputs and Library groups them as upload history.
+    existing_upload = await session.scalar(
+        select(Manuscript)
+        .where(
+            Manuscript.instructor_id == instructor_id,
+            Manuscript.content_hash == manuscript.content_hash,
+            Manuscript.id != manuscript.id,
+        )
+        .order_by(
+            Manuscript.purged_at.is_(None).desc(),
+            Manuscript.created_at.desc(),
+            Manuscript.id.desc(),
+        )
+        .limit(1)
+    )
     result = await ingest_manuscript(session, manuscript, dest, settings)
     n_citations = (
         await session.scalar(
@@ -337,7 +357,7 @@ async def ingest_upload(
     # never applies (the instructor confirms via a separate endpoint).
     patterns = load_patterns(settings.ingest_patterns_file)
     title_page_proposal = extract_title_page(result, patterns)
-    return manuscript, result, n_citations, title_page_proposal
+    return manuscript, result, n_citations, title_page_proposal, existing_upload
 
 
 def _write_raw_store(result: ExtractionResult, path: Path) -> None:

@@ -137,6 +137,165 @@ def test_two_ungrouped_manuscripts_are_distinguishable_by_filename(client):
 
 
 @live
+def test_exact_reupload_returns_prior_same_account_record_even_under_a_new_filename(client):
+    """BUG-234: identity is the uploaded bytes, never the filename."""
+    content = (FIXTURE_DIR / "native.pdf").read_bytes() + b"\n% bug-234 exact identity\n"
+    first = _upload(client, "native.pdf", as_name="first-name.pdf", data=content)
+    second = _upload(client, "native.pdf", as_name="renamed-copy.pdf", data=content)
+    assert first.status_code == 200, first.text
+    assert second.status_code == 200, second.text
+    assert first.json()["existing_upload"] is None
+    existing = second.json()["existing_upload"]
+    assert existing["manuscript_id"] == first.json()["manuscript_id"]
+    assert existing["original_filename"] == "first-name.pdf"
+    assert existing["purged_at"] is None
+
+
+@live
+def test_legacy_null_hash_is_not_falsely_claimed_as_an_exact_reupload(client, api_scratch_url):
+    """BUG-234 boundary: old rows without a persisted digest are unknown.
+
+    Some pre-BUG-140 source objects no longer exist, so the upload request
+    cannot safely scan and reconstruct every legacy hash.  Until the bounded
+    recovery task in BUG-235 fills a row's digest, the response must make no
+    exact-identity claim rather than infer one from its filename or text.
+    """
+    import asyncio
+
+    from sqlalchemy import update
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
+    from app.db import sqlalchemy_url
+    from app.models.manuscript import Manuscript
+
+    content = (FIXTURE_DIR / "native.pdf").read_bytes() + b"\n% bug-234 legacy null hash\n"
+    first = _upload(client, "native.pdf", as_name="legacy-source.pdf", data=content)
+    assert first.status_code == 200, first.text
+
+    async def clear_digest_to_simulate_legacy_row():
+        engine = create_async_engine(sqlalchemy_url(api_scratch_url))
+        try:
+            async with async_sessionmaker(engine, expire_on_commit=False)() as session:
+                await session.execute(
+                    update(Manuscript)
+                    .where(Manuscript.id == first.json()["manuscript_id"])
+                    .values(content_hash=None)
+                )
+                await session.commit()
+        finally:
+            await engine.dispose()
+
+    asyncio.run(clear_digest_to_simulate_legacy_row())
+
+    second = _upload(client, "native.pdf", as_name="legacy-copy.pdf", data=content)
+    assert second.status_code == 200, second.text
+    assert second.json()["existing_upload"] is None
+
+
+@live
+def test_same_filename_with_different_bytes_is_not_an_exact_reupload(client):
+    """BUG-234: a familiar name is display metadata, not content identity."""
+    native = (FIXTURE_DIR / "native.pdf").read_bytes() + b"\n% bug-234 content a\n"
+    changed = (FIXTURE_DIR / "native.pdf").read_bytes() + b"\n% bug-234 content b\n"
+    first = _upload(client, "native.pdf", as_name="same-name.pdf", data=native)
+    second = _upload(client, "native.pdf", as_name="same-name.pdf", data=changed)
+    assert first.status_code == 200, first.text
+    assert second.status_code == 200, second.text
+    assert first.json()["existing_upload"] is None
+    assert second.json()["existing_upload"] is None
+
+
+@live
+def test_exact_reupload_reports_a_purged_prior_source_honestly(client):
+    content = (FIXTURE_DIR / "native.pdf").read_bytes() + b"\n% bug-234 purged source\n"
+    first = _upload(client, "native.pdf", as_name="removed-copy.pdf", data=content)
+    assert first.status_code == 200, first.text
+    purged = client.delete(f"/archive/{first.json()['manuscript_id']}")
+    assert purged.status_code == 200, purged.text
+
+    second = _upload(client, "native.pdf", as_name="restored-copy.pdf", data=content)
+    assert second.status_code == 200, second.text
+    existing = second.json()["existing_upload"]
+    assert existing["manuscript_id"] == first.json()["manuscript_id"]
+    assert existing["purged_at"] is not None
+
+
+@live
+def test_exact_hash_in_another_account_is_not_disclosed(client, api_scratch_url):
+    """BUG-234: the response cannot become a cross-tenant hash oracle."""
+    import asyncio
+
+    from sqlalchemy import select
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
+    from app.db import sqlalchemy_url
+    from app.models.instructor import Instructor
+
+    content = (FIXTURE_DIR / "native.pdf").read_bytes() + b"\n% bug-234 tenant boundary\n"
+    owner = _upload(client, "native.pdf", as_name="owner-only.pdf", data=content)
+    assert owner.status_code == 200, owner.text
+
+    async def seed_other_instructor():
+        engine = create_async_engine(sqlalchemy_url(api_scratch_url))
+        try:
+            async with async_sessionmaker(engine, expire_on_commit=False)() as session:
+                existing = await session.scalar(
+                    select(Instructor).where(Instructor.email == "other@tip.edu.ph")
+                )
+                if existing is None:
+                    session.add(
+                        Instructor(
+                            email="other@tip.edu.ph",
+                            display_name="Other",
+                            password_hash=hash_password("other-secret!"),
+                        )
+                    )
+                    await session.commit()
+        finally:
+            await engine.dispose()
+
+    asyncio.run(seed_other_instructor())
+    client.post("/auth/logout")
+    login = client.post(
+        "/auth/login", json={"email": "other@tip.edu.ph", "password": "other-secret!"}
+    )
+    assert login.status_code == 200, login.text
+    other = _upload(client, "native.pdf", as_name="unknown-to-owner.pdf", data=content)
+    assert other.status_code == 200, other.text
+    assert other.json()["existing_upload"] is None
+
+
+@live
+def test_concurrent_exact_uploads_leave_at_least_one_response_linked(client):
+    """BUG-234: a read-before-write race must not make both uploads look new.
+
+    Upload-history rows intentionally remain distinct check inputs. The
+    contract is therefore explanatory rather than unique: after both durable
+    hash commits, at least the later commit recognizes the other row.
+    """
+    from concurrent.futures import ThreadPoolExecutor
+
+    content = (FIXTURE_DIR / "native.pdf").read_bytes() + b"\n% bug-234 concurrent\n"
+
+    def upload(name: str):
+        return _upload(client, "native.pdf", as_name=name, data=content)
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        responses = list(pool.map(upload, ["concurrent-a.pdf", "concurrent-b.pdf"]))
+
+    for response in responses:
+        assert response.status_code == 200, response.text
+    bodies = [response.json() for response in responses]
+    ids = {body["manuscript_id"] for body in bodies}
+    assert len(ids) == 2
+    assert any(
+        body["existing_upload"] is not None
+        and body["existing_upload"]["manuscript_id"] in ids - {body["manuscript_id"]}
+        for body in bodies
+    )
+
+
+@live
 def test_group_label_sent_as_form_field_is_persisted(client):
     """BUG-043: a bare scalar FastAPI parameter is a QUERY parameter, not a
     form field, even on a multipart endpoint. A client that sends
