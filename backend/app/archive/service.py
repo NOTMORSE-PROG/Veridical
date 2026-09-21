@@ -225,33 +225,41 @@ async def purge_manuscript(
     # has no "other check_run" guard -- an instructor's explicit purge
     # request is unconditional by design; the lock only ensures it can't
     # be raced by a write in flight at this exact moment.
+    # BUG-235: the lock spans the irreversible byte deletion AND the commit
+    # that records `purged_at`, not just archive-row deletion. The legacy
+    # identity recovery command holds this same per-manuscript lock while it
+    # reads/hashes/updates, so neither side can recreate bytes or persist an
+    # identity inside purge's former delete-before-commit race window.
     async with advisory_lock(session, manuscript_id):
+        await session.refresh(manuscript)
+        if manuscript.purged_at is not None:
+            raise ConflictError("This manuscript's archive has already been purged.")
         await delete_archive_rows(session, manuscript_id)
 
-    # `file_ref` is already an absolute path (ingest/service.py writes it as
-    # `str(data_dir / "uploads" / ...)`) -- used as-is, never re-joined.
-    # Missing files (already gone, or an image-only manuscript that never
-    # wrote a raw store) are a normal state, not an error.
-    #
-    # BUG-138: purge must also remove the DURABLE copy, or "purged" is a lie
-    # once R2 exists -- the bytes would outlive their own deletion forever
-    # instead of just until the next ephemeral-disk wipe.
-    storage = get_storage(settings)
-    for path in (
-        Path(manuscript.file_ref) if manuscript.file_ref.strip() else None,
-        raw_store_path(settings, manuscript_id),
-    ):
-        if path is None:
-            continue
-        storage.delete(storage_key_for(settings, str(path)))
-        path.unlink(missing_ok=True)
+        # `file_ref` is already an absolute path (ingest/service.py writes it as
+        # `str(data_dir / "uploads" / ...)`) -- used as-is, never re-joined.
+        # Missing files (already gone, or an image-only manuscript that never
+        # wrote a raw store) are a normal state, not an error.
+        #
+        # BUG-138: purge must also remove the DURABLE copy, or "purged" is a lie
+        # once R2 exists -- the bytes would outlive their own deletion forever
+        # instead of just until the next ephemeral-disk wipe.
+        storage = get_storage(settings)
+        for path in (
+            Path(manuscript.file_ref) if manuscript.file_ref.strip() else None,
+            raw_store_path(settings, manuscript_id),
+        ):
+            if path is None:
+                continue
+            storage.delete(storage_key_for(settings, str(path)))
+            path.unlink(missing_ok=True)
 
-    manuscript.purged_at = datetime.now(UTC)
-    await write_audit_event(
-        session,
-        event_type="manuscript_purged",
-        check_run_id=None,
-        payload={"manuscript_id": manuscript_id, "group_label": manuscript.group_label},
-    )
-    await session.commit()
+        manuscript.purged_at = datetime.now(UTC)
+        await write_audit_event(
+            session,
+            event_type="manuscript_purged",
+            check_run_id=None,
+            payload={"manuscript_id": manuscript_id, "group_label": manuscript.group_label},
+        )
+        await session.commit()
     return PurgeOut(manuscript_id=manuscript_id, purged_at=manuscript.purged_at)

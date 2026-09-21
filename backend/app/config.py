@@ -106,6 +106,15 @@ class Settings(BaseSettings):
     # 200MB "manuscript" should never reach the parser). Real capstone
     # PDFs run 5–25 MB.
     max_upload_mb: int = 40
+    # SHA-256 reads are chunked so exact-file identity never requires the
+    # complete manuscript in hashing memory. The legacy recovery command
+    # processes at most this many rows per explicit invocation; it never
+    # turns an upload request into a corpus scan (BUG-235).
+    content_hash_read_chunk_bytes: int = 1_048_576
+    content_hash_read_max_chunk_bytes: int = 8_388_608
+    content_hash_backfill_batch_size: int = 25
+    content_hash_backfill_max_batch_size: int = 100
+    content_hash_backfill_process_ceiling: int = 1_000
     # Manuscript list paging is consumed by both the Review Desk and New
     # Check picker. The picker still requests the upper bound in one call;
     # keep both values configurable so that contract can be tightened when
@@ -784,6 +793,35 @@ class Settings(BaseSettings):
             )
         if self.audit_list_max_page < 1:
             raise ValueError("audit_list_max_page must be at least 1")
+        if self.content_hash_read_chunk_bytes < 1:
+            raise ValueError("content_hash_read_chunk_bytes must be at least 1")
+        if (
+            self.content_hash_read_max_chunk_bytes < 1
+            or self.content_hash_read_chunk_bytes > self.content_hash_read_max_chunk_bytes
+        ):
+            raise ValueError(
+                "content_hash_read_chunk_bytes must be between 1 and "
+                "content_hash_read_max_chunk_bytes"
+            )
+        if self.content_hash_backfill_batch_size < 1:
+            raise ValueError("content_hash_backfill_batch_size must be at least 1")
+        if (
+            self.content_hash_backfill_max_batch_size < 1
+            or self.content_hash_backfill_batch_size > self.content_hash_backfill_max_batch_size
+        ):
+            raise ValueError(
+                "content_hash_backfill_batch_size must be between 1 and "
+                "content_hash_backfill_max_batch_size"
+            )
+        if (
+            self.content_hash_backfill_process_ceiling < 1
+            or self.content_hash_backfill_max_batch_size
+            > self.content_hash_backfill_process_ceiling
+        ):
+            raise ValueError(
+                "content_hash_backfill_max_batch_size must not exceed "
+                "content_hash_backfill_process_ceiling"
+            )
         return self
 
 
