@@ -75,10 +75,10 @@ class ConflictError(VeridicalError):
 
 
 class GoneError(VeridicalError):
-    """V-040: a share link that once worked but was deliberately revoked
-    or has expired — distinct from `not_found` (a token that never
-    existed) precisely so a revoked link's own visitor sees an honest
-    "this was turned off" message, not an ambiguous "wrong URL" one."""
+    """A known resource that once existed is no longer available, such as
+    a revoked/expired share link or a purged/missing stored source. Distinct
+    from `not_found`, which means the requested resource does not exist or
+    the caller is not authorized to know whether it exists."""
 
     code = "gone"
 

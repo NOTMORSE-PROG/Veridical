@@ -51,6 +51,13 @@ class FakeStorage:
         self.objects.pop(key, None)
 
 
+class UnavailableStorage:
+    """Storage stand-in for a transient backend/network outage."""
+
+    def get_bytes(self, _key: str) -> bytes:
+        raise TimeoutError("storage timed out")
+
+
 def test_ensure_local_file_recovers_after_the_local_cache_is_wiped(tmp_path):
     """The core mechanism, isolated from the DB/HTTP stack: once durable
     storage has a copy, deleting the local cache file is not data loss."""
@@ -95,6 +102,38 @@ def test_get_storage_refuses_r2_with_incomplete_credentials(tmp_path):
     settings = Settings(data_dir=tmp_path, storage_backend="r2", r2_bucket="veridical-uploads")
     with pytest.raises(RuntimeError, match="R2"):
         get_storage(settings)
+
+
+def test_manuscript_file_path_does_not_relabel_storage_outage(tmp_path, monkeypatch):
+    """BUG-139 maps a genuinely absent object only; a live storage outage
+    must remain a server failure rather than being reported as permanent loss."""
+    from app.config import Settings
+    from app.models.manuscript import Manuscript
+
+    settings = Settings(data_dir=tmp_path)
+    manuscript = Manuscript(file_ref=str(tmp_path / "uploads" / "1.pdf"), purged_at=None)
+    monkeypatch.setattr(report_service, "get_storage", lambda _settings: UnavailableStorage())
+
+    with pytest.raises(TimeoutError, match="storage timed out"):
+        report_service.manuscript_file_path_for(manuscript, settings)
+
+
+def test_manuscript_file_path_does_not_relabel_storage_config_error(tmp_path, monkeypatch):
+    """A broken storage configuration is likewise not proof that the object
+    is permanently absent, even though it fails before the fetch starts."""
+    from app.config import Settings
+    from app.models.manuscript import Manuscript
+
+    settings = Settings(data_dir=tmp_path)
+    manuscript = Manuscript(file_ref=str(tmp_path / "uploads" / "1.pdf"), purged_at=None)
+
+    def misconfigured_storage(_settings):
+        raise RuntimeError("storage is misconfigured")
+
+    monkeypatch.setattr(report_service, "get_storage", misconfigured_storage)
+
+    with pytest.raises(RuntimeError, match="storage is misconfigured"):
+        report_service.manuscript_file_path_for(manuscript, settings)
 
 
 @pytest.fixture(scope="module")
@@ -203,6 +242,74 @@ def test_manuscript_file_survives_a_simulated_ephemeral_disk_wipe(client):
     r = tc.get(f"/library/{manuscript_id}/document/file")
     assert r.status_code == 200, r.text
     assert r.content.startswith(b"%PDF")
+
+
+@live
+def test_truly_missing_source_is_structured_gone_on_both_file_routes(client, api_scratch_url):
+    """BUG-139: a DB record can outlive both the local cache and durable
+    object. Both authorized file routes share `manuscript_file_path_for`, so
+    both must report the same honest terminal state instead of a bare 500."""
+    import asyncio
+
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
+    from app.db import sqlalchemy_url
+    from app.models.enums import CheckRunStatus
+    from app.models.manuscript import Manuscript
+    from app.models.rubric import Rubric
+    from app.models.run import CheckRun
+
+    tc, storage = client
+    content = (FIXTURE_DIR / "native.pdf").read_bytes()
+    ingested = tc.post(
+        "/manuscripts/ingest",
+        files={"file": ("native.pdf", content, "application/octet-stream")},
+    )
+    assert ingested.status_code == 200, ingested.text
+    manuscript_id = ingested.json()["manuscript_id"]
+
+    async def seed_done_run() -> int:
+        engine = create_async_engine(sqlalchemy_url(api_scratch_url))
+        try:
+            async with async_sessionmaker(engine, expire_on_commit=False)() as session:
+                manuscript = await session.get(Manuscript, manuscript_id)
+                rubric = Rubric(
+                    instructor_id=manuscript.instructor_id,
+                    title="Missing-source regression rubric",
+                    source_file="rubric.pdf",
+                )
+                session.add(rubric)
+                await session.commit()
+                check_run = CheckRun(
+                    manuscript_id=manuscript_id,
+                    rubric_id=rubric.id,
+                    status=CheckRunStatus.done,
+                )
+                session.add(check_run)
+                await session.commit()
+                return check_run.id
+        finally:
+            await engine.dispose()
+
+    check_run_id = asyncio.run(seed_done_run())
+    settings = get_settings()
+    source_path = settings.data_dir / "uploads" / f"{manuscript_id}.pdf"
+    source_key = storage_key_for(settings, str(source_path))
+    source_path.unlink()
+    storage.objects.pop(source_key)
+
+    expected_message = (
+        "VERIDICAL could not find this manuscript's stored source file. "
+        "It is not recorded as deliberately removed. Upload the manuscript "
+        "again to create a new reviewable copy."
+    )
+    for route in (
+        f"/check-runs/{check_run_id}/document/file",
+        f"/library/{manuscript_id}/document/file",
+    ):
+        response = tc.get(route)
+        assert response.status_code == 410, (route, response.text)
+        assert response.json() == {"error": {"code": "gone", "message": expected_message}}
 
 
 @live

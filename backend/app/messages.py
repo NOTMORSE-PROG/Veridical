@@ -24,6 +24,12 @@ FILE_UNREADABLE = (
     "incomplete. Please re-export and upload it again."
 )
 
+MANUSCRIPT_SOURCE_MISSING = (
+    "VERIDICAL could not find this manuscript's stored source file. "
+    "It is not recorded as deliberately removed. Upload the manuscript "
+    "again to create a new reviewable copy."
+)
+
 FILE_ENCRYPTED = (
     "The file is password-protected, so its text cannot be read. Please upload an unlocked copy."
 )

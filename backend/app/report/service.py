@@ -16,6 +16,7 @@ from pydantic import ValidationError
 from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app import messages
 from app.audit.service import write_audit_event
 from app.checks.escalation import (
     NEEDS_REVIEW_OUTCOMES,
@@ -978,15 +979,18 @@ def manuscript_file_path_for(manuscript: Manuscript, settings: Settings) -> Path
     own resolving AND authorizing `manuscript` first.
 
     BUG-138: fetches from durable storage into the local cache first if
-    Render's ephemeral disk lost it. A genuinely missing file (pre-migration
-    row, storage misconfigured) still raises `FileNotFoundError` uncaught --
-    an honest 404/410 for THIS specific dead end is BUG-139's own scope, not
-    duplicated here."""
+    Render's ephemeral disk lost it. BUG-139: an authorized, known manuscript
+    whose source is absent from both storage layers is honestly gone; storage
+    configuration and network failures retain their own exception types."""
     if manuscript.purged_at is not None:
         raise GoneError("This manuscript's source file was purged and can no longer be read.")
     if Path(manuscript.file_ref).suffix.lower() != ".pdf":
         raise ConflictError("This manuscript's source file isn't a PDF.")
-    return ensure_local_file(settings, get_storage(settings), manuscript.file_ref)
+    storage = get_storage(settings)
+    try:
+        return ensure_local_file(settings, storage, manuscript.file_ref)
+    except FileNotFoundError:
+        raise GoneError(messages.MANUSCRIPT_SOURCE_MISSING) from None
 
 
 async def get_manuscript_paragraphs(
