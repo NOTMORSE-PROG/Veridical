@@ -3,11 +3,35 @@
 // and SignalDocumentViewer.tsx (both call `checkKindMeta()`) can never
 // independently drift on the same vocabulary, same reasoning as
 // readinessTone.ts's own extraction.
-export const CHECK_KIND_META: Record<string, { eyebrow: string; title: string }> = {
-  internal_agreement: { eyebrow: "Internal agreement check", title: "Possible internal contradiction" },
-  citation_integrity: { eyebrow: "Citation integrity check", title: "Possible citation issue" },
-  statistical_forensics: { eyebrow: "Statistical forensics check", title: "Possible statistical inconsistency" },
-  originality_reuse: { eyebrow: "Originality and reuse check", title: "Possible content overlap" },
+interface CheckKindMeta {
+  eyebrow: string;
+  title: string;
+  verificationPrompt: string;
+  verificationPromptWithoutComparison?: string;
+}
+
+export const CHECK_KIND_META: Record<string, CheckKindMeta> = {
+  internal_agreement: {
+    eyebrow: "Internal agreement check",
+    title: "Possible internal contradiction",
+    verificationPrompt: "Compare the linked manuscript locations and confirm whether they describe the same item consistently.",
+  },
+  citation_integrity: {
+    eyebrow: "Citation integrity check",
+    title: "Possible citation issue",
+    verificationPrompt: "Open the cited source and confirm that its author, title, year, and attached claim match the manuscript.",
+  },
+  statistical_forensics: {
+    eyebrow: "Statistical forensics check",
+    title: "Possible statistical inconsistency",
+    verificationPrompt: "Recalculate the reported values from the shown sample size and summary statistics, then check for a rounding or transcription issue.",
+  },
+  originality_reuse: {
+    eyebrow: "Originality and reuse check",
+    title: "Possible content overlap",
+    verificationPrompt: "Compare the passages and decide whether the shared wording is expected citation, common phrasing, or possible reuse.",
+    verificationPromptWithoutComparison: "Review the recorded scope and technical details, then decide whether the possible overlap has a legitimate source or explanation.",
+  },
 };
 
 // A shorter label for the flags panel's group headers (BUG-033) — the
@@ -37,6 +61,10 @@ export function humanize(snake: string): string {
   return words.map((w, i) => (i === 0 ? w[0]?.toUpperCase() + w.slice(1) : w)).join(" ");
 }
 
-export function checkKindMeta(kind: string): { eyebrow: string; title: string } {
-  return CHECK_KIND_META[kind] ?? { eyebrow: humanize(kind), title: "Possible inconsistency" };
+export function checkKindMeta(kind: string): CheckKindMeta {
+  return CHECK_KIND_META[kind] ?? {
+    eyebrow: humanize(kind),
+    title: "Possible inconsistency",
+    verificationPrompt: "Check the recorded evidence against the manuscript before deciding whether this finding needs action.",
+  };
 }

@@ -7,14 +7,15 @@
 // showed the high/medium colors converging under both conditions, so
 // the bar-count icon (not just color) is what actually keeps the three
 // levels distinguishable.
+import { severityLabel, type Severity } from "../domain/severity";
 import { cx } from "./cx";
 
-export type Severity = "high" | "med" | "low";
+export type { Severity } from "../domain/severity";
 
-const SEVERITY_META: Record<Severity, { label: string; bg: string; text: string; bars: number }> = {
-  high: { label: "High", bg: "bg-severity-high-bg", text: "text-severity-high-text", bars: 3 },
-  med: { label: "Medium", bg: "bg-severity-med-bg", text: "text-severity-med-text", bars: 2 },
-  low: { label: "Low", bg: "bg-severity-low-bg", text: "text-severity-low-text", bars: 1 },
+const SEVERITY_META: Record<Severity, { bg: string; text: string; bars: number }> = {
+  high: { bg: "bg-severity-high-bg", text: "text-severity-high-text", bars: 3 },
+  med: { bg: "bg-severity-med-bg", text: "text-severity-med-text", bars: 2 },
+  low: { bg: "bg-severity-low-bg", text: "text-severity-low-text", bars: 1 },
 };
 
 function LevelIcon({ bars }: { bars: number }) {
@@ -50,7 +51,7 @@ export function SeverityTag({ severity }: { severity: Severity }) {
       )}
     >
       <LevelIcon bars={m.bars} />
-      {m.label} severity
+      {severityLabel(severity)}
     </span>
   );
 }

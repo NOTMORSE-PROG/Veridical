@@ -19,6 +19,7 @@ export function useReport(checkRunId: number) {
   return useQuery({
     queryKey: ["report", checkRunId],
     queryFn: () => api.get<ReportOut>(`/check-runs/${checkRunId}/report`),
+    enabled: Number.isInteger(checkRunId) && checkRunId > 0,
   });
 }
 

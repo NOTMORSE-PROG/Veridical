@@ -163,9 +163,12 @@ function RecordPrimaryAction({
     const label = row.escalations_awaiting_review > 0
       ? `Review ${row.escalations_awaiting_review} unresolved ${row.escalations_awaiting_review === 1 ? "criterion" : "criteria"}`
       : row.latest_decision
-        ? "Open recorded decision"
-        : "Record instructor decision";
-    return <ActionLink to={`/report/${row.latest_check_run_id}`}>{label}</ActionLink>;
+        ? "Open manuscript review"
+        : "Review manuscript and decide";
+    const description = row.latest_decision
+      ? `${label}. Opens the manuscript and recorded analysis.`
+      : `${label}. Opens the manuscript and analysis.`;
+    return <ActionLink to={`/report/${row.latest_check_run_id}/document`} aria-label={description}>{label}</ActionLink>;
   }
   if (row.latest_check_run_status && row.latest_check_run_id) {
     if (row.latest_check_run_status === "cancelled") {

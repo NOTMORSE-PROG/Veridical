@@ -147,6 +147,13 @@
   .reuse-passage-highlight {
     background: var(--color-reuse-passage-highlight);
   }
+
+  .reuse-shared-wording {
+    border-radius: var(--radius-sm);
+    background: var(--color-reuse-passage-highlight);
+    color: inherit;
+    font-weight: var(--signal-weight-semibold);
+  }
 }
 
 /* Reduced motion: keep the fade, drop the movement. Unlayered on purpose so it

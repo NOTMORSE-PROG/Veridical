@@ -6,6 +6,39 @@
 // DOCX) -- none of these are invented placeholders.
 import type { FlagRegionOut } from "../api/types";
 
+export interface RegionPrecision {
+  label: string;
+  helper: string;
+  isExact: boolean;
+}
+
+export function regionPrecision(region: FlagRegionOut | null): RegionPrecision {
+  if (!region) {
+    return {
+      label: "Location unavailable",
+      helper: "VERIDICAL recorded the finding but could not place it on a page or paragraph.",
+      isExact: false,
+    };
+  }
+  switch (region.kind) {
+    case "page_bbox":
+      return { label: "Exact passage", helper: "VERIDICAL stored the exact passage shown.", isExact: true };
+    case "paragraph_only":
+      return { label: "Paragraph location", helper: "VERIDICAL stored this paragraph, not an exact sentence.", isExact: false };
+    case "page_only":
+      return { label: "Page only", helper: "VERIDICAL stored this page, not an exact passage.", isExact: false };
+    case "reference_list":
+    case "reference_position":
+      return { label: "Reference-list location", helper: "VERIDICAL stored a reference-list location, not an exact passage.", isExact: false };
+    case "section":
+      return { label: "Section scope", helper: "The shown page marks the section start, not an exact passage.", isExact: false };
+    case "whole_document":
+      return { label: "Whole manuscript", helper: "VERIDICAL recorded a whole-manuscript comparison. No single passage applies.", isExact: false };
+    case "unavailable":
+      return { label: "Location unavailable", helper: "VERIDICAL recorded the finding but could not place it on a page or paragraph.", isExact: false };
+  }
+}
+
 export function regionCopy(region: FlagRegionOut): string | null {
   switch (region.kind) {
     case "page_bbox":
