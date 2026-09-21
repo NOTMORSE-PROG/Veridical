@@ -1,0 +1,59 @@
+{
+  "testTimeoutMs": 360000,
+  "navigationTimeoutMs": 90000,
+  "assertionTimeoutMs": 30000,
+  "deploymentFetchTimeoutMs": 30000,
+  "healthFetchTimeoutMs": 90000,
+  "sessionCookieName": "veridical_session",
+  "minimumTargetCssPixels": 24,
+  "maxManuscriptPageSize": 20,
+  "maxAuditPageSize": 25,
+  "safeFindingKinds": [
+    "internal_agreement",
+    "citation_integrity",
+    "statistical_forensics"
+  ],
+  "syntheticReviewDeskPath": "/dashboard?queue=ready_to_decide&sort=newest&status=checked&needs_review=false",
+  "viewports": [
+    {
+      "label": "390x844",
+      "width": 390,
+      "height": 844
+    },
+    {
+      "label": "320x480",
+      "width": 320,
+      "height": 480
+    }
+  ],
+  "navigation": [
+    {
+      "label": "Review Desk",
+      "path": "/dashboard",
+      "heading": "Review Desk",
+      "exercise": true
+    },
+    {
+      "label": "Required format",
+      "path": "/rubric",
+      "heading": "Rubric Studio",
+      "exercise": true
+    },
+    {
+      "label": "Library",
+      "path": "/library",
+      "exercise": false
+    },
+    {
+      "label": "Audit",
+      "path": "/audit",
+      "heading": "Audit",
+      "exercise": true
+    },
+    {
+      "label": "Settings",
+      "path": "/settings",
+      "exercise": false
+    }
+  ]
+}
