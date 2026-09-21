@@ -20,6 +20,8 @@ import { useEffect, useId, useRef, useState } from "react";
 import { ApiError } from "../api/client";
 import { Modal, ModalBackdrop } from "../components/Modal";
 import type { ConfirmGroupResponse, TitlePageProposal } from "../api/types";
+import { ActionLink } from "../ui/ActionLink";
+import { Button } from "../ui/Button";
 import { GroupProposalFields } from "./GroupProposalFields";
 import { useIngestManuscript } from "./useCheckRun";
 
@@ -37,6 +39,16 @@ function hasProposalWorthShowing(proposal: TitlePageProposal): boolean {
     proposal.program !== null ||
     proposal.adviser !== null
   );
+}
+
+function formatUploadDate(value: string): string {
+  return new Date(value).toLocaleString(undefined, {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
 }
 
 interface UploadManuscriptModalProps {
@@ -91,7 +103,9 @@ export function UploadManuscriptModal({ onClose, onUploadSuccess }: UploadManusc
   const ingest = useIngestManuscript();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const errorRef = useRef<HTMLParagraphElement>(null);
+  const resultHeadingRef = useRef<HTMLHeadingElement>(null);
   const uploadAnotherRef = useRef<HTMLButtonElement>(null);
+  const startCheckRef = useRef<HTMLButtonElement>(null);
   const fileInputId = useId();
   const hintId = useId();
   const errorId = useId();
@@ -104,6 +118,14 @@ export function UploadManuscriptModal({ onClose, onUploadSuccess }: UploadManusc
   useEffect(() => {
     if (ingest.isError) errorRef.current?.focus();
   }, [ingest.isError]);
+
+  // BUG-234/ux-critic: the asynchronous form-to-result replacement used to
+  // unmount the focused Upload button and strand focus on <body>. A visible
+  // result heading gives keyboard and screen-reader users the same immediate
+  // feedback sighted pointer users receive.
+  useEffect(() => {
+    if (ingest.data) resultHeadingRef.current?.focus();
+  }, [ingest.data]);
 
   function handleUpload() {
     setFieldError(null);
@@ -152,8 +174,10 @@ export function UploadManuscriptModal({ onClose, onUploadSuccess }: UploadManusc
   // everywhere else this codebase enforces it: a control that unmounts
   // mid-interaction must hand focus somewhere real.
   useEffect(() => {
-    if (groupResolved) uploadAnotherRef.current?.focus();
-  }, [groupResolved]);
+    if (!groupResolved) return;
+    if (summary?.existing_upload) startCheckRef.current?.focus();
+    else uploadAnotherRef.current?.focus();
+  }, [groupResolved, summary?.existing_upload]);
 
   return (
     <ModalBackdrop>
@@ -173,6 +197,7 @@ export function UploadManuscriptModal({ onClose, onUploadSuccess }: UploadManusc
                   Upload another
                 </button>
                 <button
+                  ref={startCheckRef}
                   type="button"
                   onClick={() => onUploadSuccess(summary.manuscript_id)}
                   className="flex h-11 items-center justify-center rounded-md bg-action px-4 text-sm font-bold text-on-action hover:bg-action-hover"
@@ -206,6 +231,49 @@ export function UploadManuscriptModal({ onClose, onUploadSuccess }: UploadManusc
       >
         {summary ? (
           <div className="signal-group-flow">
+            <h3 ref={resultHeadingRef} tabIndex={-1} className="text-base font-bold text-ink">
+              {summary.existing_upload ? "Already in your Library" : "Upload complete"}
+            </h3>
+            <p role="status" aria-live="polite" aria-atomic="true" className="sr-only">
+              {summary.existing_upload
+                ? "Upload complete. VERIDICAL found an exact earlier copy in your Library."
+                : "Upload complete."}
+            </p>
+            {summary.existing_upload && (
+              <section className="signal-group-flow rounded-md border border-border bg-status-neutral-bg px-3 py-3 text-sm text-ink">
+                <div>
+                  <p className="text-ink-secondary">
+                    You uploaded {file?.name ? `“${file.name}”` : "this file"}. It is the exact same file as {summary.existing_upload.original_filename
+                      ? `“${summary.existing_upload.original_filename}”`
+                      : "an earlier upload"}, stored {formatUploadDate(summary.existing_upload.created_at)}.
+                    VERIDICAL keeps exact re-uploads together as one Library record with upload history.
+                  </p>
+                </div>
+                {summary.existing_upload.purged_at ? (
+                  <p className="text-ink-secondary">
+                    The earlier copy's stored source was removed. This new copy is stored and can still be checked.
+                  </p>
+                ) : null}
+                <p className="text-ink-secondary">
+                  Open the earlier record, or continue with this uploaded copy to start a separate check.
+                </p>
+                <div className="flex flex-col items-start gap-2 sm:flex-row">
+                  {!summary.existing_upload.purged_at && (
+                    <ActionLink
+                      to={`/library/${summary.existing_upload.manuscript_id}`}
+                      variant="secondary"
+                    >
+                      Open earlier Library record
+                    </ActionLink>
+                  )}
+                  {showGroupProposal && (
+                    <Button type="button" variant="secondary" onClick={() => setGroupResolved(true)}>
+                      Skip group details and continue
+                    </Button>
+                  )}
+                </div>
+              </section>
+            )}
             <p className="rounded-md bg-status-success-bg px-3 py-2 text-sm text-status-success-text">
               {summary.citations > 0
                 ? `Uploaded. ${summary.page_count} page(s) parsed, ${summary.citations} citation(s) found.`

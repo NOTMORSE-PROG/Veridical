@@ -20,6 +20,7 @@ from app.ingest.schemas import (
     ConfirmGroupRequest,
     ConfirmGroupResponse,
     DismissedManuscriptOut,
+    ExistingUploadOut,
     IngestSummary,
     ManuscriptQueueStatus,
     ManuscriptSort,
@@ -68,7 +69,7 @@ async def ingest_manuscript_upload(
 
     settings = get_settings()
     enforce_action_rate_limit(settings, "manuscript_ingest", instructor.id)
-    manuscript, result, n_citations, title_page_proposal = await ingest_upload(
+    manuscript, result, n_citations, title_page_proposal, existing_upload = await ingest_upload(
         session, chunks(), file.filename or "", resolved_group_label, instructor_id=instructor.id
     )
     notes = [messages.IMAGE_ONLY_NOTE] if result.image_only else []
@@ -89,6 +90,16 @@ async def ingest_manuscript_upload(
         notes=notes,
         group_proposal=TitlePageProposalOut.model_validate(
             title_page_proposal, from_attributes=True
+        ),
+        existing_upload=(
+            ExistingUploadOut(
+                manuscript_id=existing_upload.id,
+                created_at=existing_upload.created_at,
+                original_filename=existing_upload.original_filename,
+                purged_at=existing_upload.purged_at,
+            )
+            if existing_upload is not None
+            else None
         ),
     )
 

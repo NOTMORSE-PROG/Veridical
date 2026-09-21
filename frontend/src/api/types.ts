@@ -202,6 +202,14 @@ export interface IngestSummary {
   // V-063: the auto-proposed group/program, deterministically extracted
   // from the title page -- the confirm dialog's own data source.
   group_proposal: TitlePageProposal;
+  // BUG-234: a prior byte-identical upload owned by the signed-in
+  // instructor. Null for a new file and for every cross-account hash match.
+  existing_upload: {
+    manuscript_id: number;
+    created_at: string;
+    original_filename: string | null;
+    purged_at: string | null;
+  } | null;
 }
 
 export type CheckRunStatus =
