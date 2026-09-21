@@ -36,9 +36,11 @@ Exit 0 = consistent, exit 1 = something is in the wrong place.
 from __future__ import annotations
 
 import argparse
+import contextlib
 import pathlib
 import re
 import sys
+from collections import Counter
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
 TICKETS = REPO_ROOT / "tickets"
@@ -70,8 +72,11 @@ CLOSED_BUG = {"FIXED", "WONTFIX"}
 
 # Section markers on the board. Distinctive on purpose -- the board
 # discusses its own sections in prose, so a bare phrase match is wrong.
+OPEN_BUGS_MARKER = "Open bugs"
+OPEN_STORY_MARKER = "Open story tickets"
 CLOSED_MARKER = "── CLOSED BUGS ──"
-GAPS_MARKER = "## Carried-forward gaps"
+GAPS_MARKER = "Carried-forward gaps"
+BUG_ROW_RE = re.compile(r"^\|\s*`(BUG-\d+)`\s*\|", re.M)
 
 # Status: **TODO**  /  Status: TODO  /  · Status: DONE-via-BUG-033
 STATUS_RE = re.compile(r"Status:\s*\**\s*([A-Za-z][A-Za-z-]*)", re.I)
@@ -97,12 +102,35 @@ def board_text() -> str:
         return ""
 
 
+def board_section(text: str, start_marker: str, end_marker: str) -> str | None:
+    """Return the uniquely bounded section between two Markdown headings."""
+
+    def heading_matches(marker: str) -> list[re.Match[str]]:
+        pattern = re.compile(
+            rf"^#+[ \t]+{re.escape(marker)}(?:[ \t]+[^\r\n]*)?[ \t]*$",
+            re.M,
+        )
+        return list(pattern.finditer(text))
+
+    starts = heading_matches(start_marker)
+    ends = heading_matches(end_marker)
+    if len(starts) != 1 or len(ends) != 1:
+        return None
+    start = starts[0].end()
+    end = ends[0].start()
+    if end <= start:
+        return None
+    return text[start:end]
+
+
+def row_word(count: int) -> str:
+    return "row" if count == 1 else "rows"
+
+
 def main() -> int:
     for stream in (sys.stdout, sys.stderr):
-        try:
+        with contextlib.suppress(AttributeError, ValueError):
             stream.reconfigure(encoding="utf-8", errors="replace")
-        except (AttributeError, ValueError):
-            pass
 
     ap = argparse.ArgumentParser()
     ap.add_argument("--quiet", action="store_true")
@@ -143,8 +171,7 @@ def main() -> int:
                 if status not in allowed:
                     want = "done/" if status in DONE_STORY else "open/"
                     problems.append(
-                        f"{rel}: Status is {status} but it is in {label}/ "
-                        f"-- git mv it to {want}"
+                        f"{rel}: Status is {status} but it is in {label}/ -- git mv it to {want}"
                     )
                 if sub == "open":
                     n_open_story += 1
@@ -173,8 +200,7 @@ def main() -> int:
                 if status not in allowed:
                     want = "fixed/" if status in CLOSED_BUG else "open/"
                     problems.append(
-                        f"{rel}: Status is {status} but it is in {label}/ "
-                        f"-- git mv it to {want}"
+                        f"{rel}: Status is {status} but it is in {label}/ -- git mv it to {want}"
                     )
                 if sub == "open":
                     n_open_bug += 1
@@ -208,7 +234,11 @@ def main() -> int:
                 stale_dod.append((f.stem, "no disposition section (DoD 12b)"))
 
     # ---- V8 start gate and per-ticket blockers --------------------------
-    fixed_bugs = {f.stem for f in (TICKETS / "BUGS" / "fixed").glob("BUG-*.md")}         if (TICKETS / "BUGS" / "fixed").exists() else set()
+    fixed_bugs = (
+        {f.stem for f in (TICKETS / "BUGS" / "fixed").glob("BUG-*.md")}
+        if (TICKETS / "BUGS" / "fixed").exists()
+        else set()
+    )
     v8_done = TICKETS / "V8-real-use" / "done"
     if v8_done.exists():
         for f in sorted(v8_done.glob("V-*.md")):
@@ -227,8 +257,12 @@ def main() -> int:
 
     # ---- board cross-check ---------------------------------------------
     text = board_text()
-    if text:
+    if not text.strip():
+        problems.append("tickets/BOARD.md is missing, unreadable, or empty")
+    if text.strip():
         for tid in open_ids:
+            if tid in open_bug_ids:
+                continue
             if tid not in text:
                 problems.append(
                     f"{tid} is open on disk but never mentioned in tickets/BOARD.md "
@@ -246,6 +280,8 @@ def main() -> int:
         # described two WONTFIX-MOOT reverts as verified fixes. Exactly
         # the append-only blind spot the 2026-08-16 audit named.
         for tid in closed_ids:
+            if tid in closed_bug_ids:
+                continue
             if tid not in text:
                 problems.append(
                     f"{tid} is closed on disk but never mentioned in "
@@ -253,29 +289,61 @@ def main() -> int:
                     f"has to land somewhere (DoD 14)"
                 )
 
-        # Split on the section MARKER, not the bare phrase: the board's
-        # own prose says "CLOSED BUGS" in passing, and matching that
-        # swallowed the whole open-bug table into "the closed section".
-        closed_section = ""
-        if CLOSED_MARKER in text:
-            closed_section = text.split(CLOSED_MARKER, 1)[1].split(GAPS_MARKER)[0]
-        # Match a TABLE ROW, not a bare mention. The register's own preamble
-        # discusses individual bugs by id, so a substring test both misses a
-        # deleted row (the prose still mentions it) and fires on prose that
-        # merely names an open one. Rows start `| `BUG-###` |`.
-        registered = set(re.findall(r"^\|\s*`(BUG-\d+)`\s*\|", closed_section, re.M))
-        for tid in closed_bug_ids:
-            if tid not in registered:
-                problems.append(
-                    f"{tid} is in BUGS/fixed/ but has no row in the board's "
-                    f"CLOSED BUGS register"
-                )
-        for tid in open_bug_ids:
-            if tid in registered:
-                problems.append(
-                    f"{tid} is still open but has a row in the CLOSED BUGS "
-                    f"register -- a ticket lives in exactly one place"
-                )
+        # BUG-230: each bug register is a bijection with its folder. A bare
+        # mention anywhere in the board is not a row, and a set is not enough:
+        # converting rows to a set silently erases duplicate-row evidence.
+        open_section = board_section(text, OPEN_BUGS_MARKER, OPEN_STORY_MARKER)
+        closed_section = board_section(text, CLOSED_MARKER, GAPS_MARKER)
+        if open_section is None:
+            problems.append("BOARD.md must contain exactly one bounded Open bugs register")
+        if closed_section is None:
+            problems.append("BOARD.md must contain exactly one bounded CLOSED BUGS register")
+
+        if open_section is not None and closed_section is not None:
+            open_registered = Counter(BUG_ROW_RE.findall(open_section))
+            closed_registered = Counter(BUG_ROW_RE.findall(closed_section))
+            open_files = set(open_bug_ids)
+            closed_files = set(closed_bug_ids)
+            known_files = open_files | closed_files
+
+            for tid, count in sorted(open_registered.items()):
+                if count > 1:
+                    problems.append(f"{tid} has {count} rows in the board's Open bugs register")
+                if tid not in known_files:
+                    problems.append(f"{tid} has an Open bugs row but no matching BUG ticket file")
+
+            for tid, count in sorted(closed_registered.items()):
+                if count > 1:
+                    problems.append(f"{tid} has {count} rows in the board's CLOSED BUGS register")
+                if tid not in known_files:
+                    problems.append(f"{tid} has a CLOSED BUGS row but no matching BUG ticket file")
+
+            for tid in sorted(open_files):
+                open_count = open_registered[tid]
+                if open_count == 0:
+                    problems.append(
+                        f"{tid} is in BUGS/open/ but has 0 rows in the board's Open bugs register"
+                    )
+                closed_count = closed_registered[tid]
+                if closed_count:
+                    problems.append(
+                        f"{tid} is in BUGS/open/ but has {closed_count} "
+                        f"{row_word(closed_count)} in the board's CLOSED BUGS register"
+                    )
+
+            for tid in sorted(closed_files):
+                open_count = open_registered[tid]
+                if open_count:
+                    problems.append(
+                        f"{tid} is in BUGS/fixed/ but has {open_count} "
+                        f"{row_word(open_count)} in the board's Open bugs register"
+                    )
+                closed_count = closed_registered[tid]
+                if closed_count == 0:
+                    problems.append(
+                        f"{tid} is in BUGS/fixed/ but has 0 rows in the board's "
+                        "CLOSED BUGS register"
+                    )
 
         for heading, actual, what in (
             (r"##\s*Open bugs\s*[-—]+\s*(\d+)", n_open_bug, "open bugs"),
@@ -313,8 +381,9 @@ def main() -> int:
         return 1
 
     if not args.quiet:
-        print("placement OK: every ticket's folder matches its Status, "
-              "and the board's counts agree.")
+        print(
+            "placement OK: every ticket's folder matches its Status, and the board's counts agree."
+        )
     return 0
 
 
