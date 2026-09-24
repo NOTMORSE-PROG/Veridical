@@ -1,9 +1,34 @@
 import { readFileSync } from "node:fs";
 
+export function validateProductionOrigin(value) {
+  if (typeof value !== "string" || value.length === 0) {
+    throw new Error("invalid production origin configuration");
+  }
+  let url;
+  try {
+    url = new URL(value);
+  } catch {
+    throw new Error("invalid production origin configuration");
+  }
+  if (
+    url.protocol !== "https:"
+    || url.username
+    || url.password
+    || (url.pathname !== "/" && url.pathname !== "")
+    || url.search
+    || url.hash
+  ) {
+    throw new Error("invalid production origin configuration");
+  }
+  return url.origin;
+}
+
 export function loadSmokeConfig() {
   const config = JSON.parse(
     readFileSync(new URL("../smoke.config.json", import.meta.url), "utf8"),
   );
+  config.productionWebOrigin = validateProductionOrigin(config.productionWebOrigin);
+  config.productionApiOrigin = validateProductionOrigin(config.productionApiOrigin);
   if (!Array.isArray(config.viewports) || config.viewports.length !== 2) {
     throw new Error("invalid viewport configuration");
   }
@@ -24,7 +49,7 @@ export function loadSmokeConfig() {
 }
 
 export function readRuntimeEnvironment(environment = process.env) {
-  const rawUrl = environment.PROD_WEB_URL;
+  const config = loadSmokeConfig();
   const email = environment.PROD_SMOKE_EMAIL;
   const password = environment.PROD_SMOKE_PASSWORD;
   const rawCheckRunId = environment.PROD_SMOKE_CHECK_RUN_ID;
@@ -32,8 +57,7 @@ export function readRuntimeEnvironment(environment = process.env) {
   const rubricFamilyId = environment.PROD_SMOKE_RUBRIC_FAMILY_ID;
   const distDirectory = environment.PROD_SMOKE_DIST_DIR;
   if (
-    !rawUrl
-    || !email
+    !email
     || !password
     || !rawCheckRunId
     || !rawFlagId
@@ -41,18 +65,6 @@ export function readRuntimeEnvironment(environment = process.env) {
     || !distDirectory
   ) {
     throw new Error("required production smoke configuration is missing");
-  }
-
-  const url = new URL(rawUrl);
-  if (
-    url.protocol !== "https:"
-    || url.username
-    || url.password
-    || (url.pathname !== "/" && url.pathname !== "")
-    || url.search
-    || url.hash
-  ) {
-    throw new Error("production URL must be a credential-free HTTPS origin");
   }
 
   if (!/^\d+$/.test(rawCheckRunId)) {
@@ -76,8 +88,8 @@ export function readRuntimeEnvironment(environment = process.env) {
   }
 
   return {
-    baseURL: url.origin,
-    origin: url.origin,
+    baseURL: config.productionWebOrigin,
+    origin: config.productionWebOrigin,
     email,
     password,
     checkRunId,

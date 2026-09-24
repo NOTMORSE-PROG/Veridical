@@ -11,7 +11,6 @@ Supply these values only at runtime:
 
 | Name | Purpose |
 |---|---|
-| `PROD_WEB_URL` | Credential-free HTTPS production origin |
 | `PROD_SMOKE_EMAIL` | Dedicated synthetic instructor account |
 | `PROD_SMOKE_PASSWORD` | Random password for that account |
 | `PROD_SMOKE_CHECK_RUN_ID` | Purpose-seeded synthetic DOCX check run |
@@ -19,6 +18,13 @@ Supply these values only at runtime:
 | `PROD_SMOKE_RUBRIC_FAMILY_ID` | Exact synthetic required-format family UUID |
 | `PROD_SMOKE_DIST_DIR` | Exact checked-out frontend build directory |
 | `MOBILE_SMOKE_OUTPUT_DIR` | Disposable scratch directory outside the repository |
+
+The canonical frontend and API origins are pinned as non-secret deployment
+data in `smoke.config.json`. `PROD_WEB_URL` and `PROD_API_URL` are deliberately
+not inputs to this package, including when present in the environment. Moving
+either production endpoint requires a reviewed configuration commit; a local
+V-076 run always targets the checked-in production origins and cannot be
+redirected to an arbitrary staging host.
 
 The account must contain only publication-safe synthetic data, have onboarding
 already dismissed, and have no personal Gemini key. The configured finding is
