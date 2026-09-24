@@ -16,13 +16,19 @@ A capstone project of the Technological Institute of the Philippines (BSIT), by 
 
 Internal working documents — planning notes, decision logs, the ticket board (`tickets/`), project context (`context/`), and design sources (`design/`) — are **local-only by policy** and excluded via `.gitignore`. Only public docs and code are committed. If you are a teammate and need these, ask the repo owner directly.
 
-## Stack (all free-tier — total cost ₱0.00)
+## Stack (free-tier operating plan — usage monitored)
 
 - **Backend:** Python 3.12 + FastAPI · **Frontend:** React + Vite + TailwindCSS
 - **AI:** Gemini Flash free tier (grading, rubric decomposition, multimodal extraction)
 - **Ingestion:** PyMuPDF + python-docx · **Forensics:** statcheck_python, pysprite, grim_test
-- **DB:** PostgreSQL (Neon) + pgvector · **Hosting:** Render (API) + Vercel (web)
+- **Data:** PostgreSQL (Neon) + pgvector · private Cloudflare R2 Standard object storage
+- **Hosting:** Render (API) + Vercel (web)
 - **Citation APIs:** CrossRef (+ Retraction Watch), Semantic Scholar, Open Library, Google Books
+
+The deployment is designed to stay within current free-tier allowances, but
+that is an operating target rather than a provider-enforced spending cap.
+Cloudflare R2 usage beyond its included Standard allowance is billable, and
+budget alerts notify rather than pausing usage.
 
 ## Getting started (dev)
 
