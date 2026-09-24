@@ -1,4 +1,6 @@
 {
+  "productionWebOrigin": "https://veridical-app.vercel.app",
+  "productionApiOrigin": "https://veridical-api.onrender.com",
   "testTimeoutMs": 360000,
   "navigationTimeoutMs": 90000,
   "assertionTimeoutMs": 30000,

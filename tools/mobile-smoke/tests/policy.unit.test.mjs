@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { classifyRequest, createRequestGuard } from "../lib/request-policy.mjs";
-import { loadSmokeConfig, readRuntimeEnvironment } from "../lib/runtime.mjs";
+import {
+  loadSmokeConfig,
+  readRuntimeEnvironment,
+  validateProductionOrigin
+} from "../lib/runtime.mjs";
 
 const config = loadSmokeConfig();
 const origin = "https://example.test";
@@ -17,6 +21,15 @@ test("the acceptance viewports remain the required ordered pair", () => {
   ]);
 });
 
+test("checked-in production origins must be credential-free HTTPS origins", () => {
+  assert.equal(validateProductionOrigin("https://example.test/"), "https://example.test");
+  assert.throws(() => validateProductionOrigin("http://example.test"));
+  assert.throws(() => validateProductionOrigin("https://user@example.test"));
+  assert.throws(() => validateProductionOrigin("https://example.test/path"));
+  assert.throws(() => validateProductionOrigin("https://example.test?redirect=elsewhere"));
+  assert.throws(() => validateProductionOrigin("https://example.test#fragment"));
+});
+
 function classify(requestUrl, method = "GET", allowedFlagIds = new Set()) {
   return classifyRequest({
     requestUrl,
@@ -30,23 +43,35 @@ function classify(requestUrl, method = "GET", allowedFlagIds = new Set()) {
   });
 }
 
-test("runtime accepts an HTTPS origin and positive synthetic check-run id", () => {
-  const runtime = readRuntimeEnvironment({
-    PROD_WEB_URL: origin,
-    PROD_SMOKE_EMAIL: "synthetic@example.test",
-    PROD_SMOKE_PASSWORD: "not-a-real-secret",
-    PROD_SMOKE_CHECK_RUN_ID: "41",
-    PROD_SMOKE_FLAG_ID: "7",
-    PROD_SMOKE_RUBRIC_FAMILY_ID: rubricFamilyId,
-    PROD_SMOKE_DIST_DIR: "synthetic-dist"
-  });
-  assert.equal(runtime.origin, origin);
-  assert.equal(runtime.checkRunId, checkRunId);
-  assert.equal(runtime.flagId, flagId);
-  assert.equal(runtime.rubricFamilyId, rubricFamilyId);
+test("runtime uses the checked-in production origin and ignores URL environment values", () => {
+  const hostileOrigins = [
+    "https://veridical-app.vercel.app.evil.invalid",
+    "https://sub.veridical-app.vercel.app",
+    "https://veridical-app.vercel.app:444",
+    "https://user:pass@veridical-app.vercel.app",
+    "https://veridical-app.vercel.app?redirect=elsewhere",
+    "https://veridical-app.vercel.app#fragment"
+  ];
+  for (const hostileOrigin of hostileOrigins) {
+    const runtime = readRuntimeEnvironment({
+      PROD_WEB_URL: hostileOrigin,
+      PROD_API_URL: hostileOrigin,
+      PROD_SMOKE_EMAIL: "synthetic@example.test",
+      PROD_SMOKE_PASSWORD: "not-a-real-secret",
+      PROD_SMOKE_CHECK_RUN_ID: "41",
+      PROD_SMOKE_FLAG_ID: "7",
+      PROD_SMOKE_RUBRIC_FAMILY_ID: rubricFamilyId,
+      PROD_SMOKE_DIST_DIR: "synthetic-dist"
+    });
+    assert.equal(runtime.origin, config.productionWebOrigin);
+    assert.equal(runtime.baseURL, config.productionWebOrigin);
+    assert.equal(runtime.checkRunId, checkRunId);
+    assert.equal(runtime.flagId, flagId);
+    assert.equal(runtime.rubricFamilyId, rubricFamilyId);
+  }
 });
 
-test("runtime rejects non-origin URLs, plaintext HTTP, and invalid identifiers", () => {
+test("runtime rejects invalid synthetic fixture identifiers", () => {
   const common = {
     PROD_SMOKE_EMAIL: "synthetic@example.test",
     PROD_SMOKE_PASSWORD: "not-a-real-secret",
@@ -55,21 +80,16 @@ test("runtime rejects non-origin URLs, plaintext HTTP, and invalid identifiers",
     PROD_SMOKE_RUBRIC_FAMILY_ID: rubricFamilyId,
     PROD_SMOKE_DIST_DIR: "synthetic-dist"
   };
-  assert.throws(() => readRuntimeEnvironment({ ...common, PROD_WEB_URL: "http://example.test" }));
-  assert.throws(() => readRuntimeEnvironment({ ...common, PROD_WEB_URL: `${origin}/signin` }));
   assert.throws(() => readRuntimeEnvironment({
     ...common,
-    PROD_WEB_URL: origin,
     PROD_SMOKE_CHECK_RUN_ID: "not-an-id"
   }));
   assert.throws(() => readRuntimeEnvironment({
     ...common,
-    PROD_WEB_URL: origin,
     PROD_SMOKE_FLAG_ID: "not-an-id"
   }));
   assert.throws(() => readRuntimeEnvironment({
     ...common,
-    PROD_WEB_URL: origin,
     PROD_SMOKE_RUBRIC_FAMILY_ID: "not-a-uuid"
   }));
 });
