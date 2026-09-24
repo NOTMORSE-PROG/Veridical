@@ -180,7 +180,7 @@ Combines everything into one explainable output (Objective 4, Fig. 3.12).
 |---|---|---|---|
 | F9.1 | Instructor login (email + password, hashed) | 🟢 | Table 3.6: authentication requirement |
 | F9.2 | Role-based access (instructor / read-only link / future student) | 🟢 | Current instructor/read-only boundaries enforced server-side; student authorization remains V7 work |
-| F9.3 | TLS everywhere + encrypted storage at rest | 🟢 | Render/Neon provide TLS; manuscripts stored privately |
+| F9.3 | TLS everywhere + encrypted storage at rest | 🟢 | Neon relational data and Cloudflare R2 manuscript objects are provider-encrypted at rest; provider links use TLS; the R2 manuscript bucket is private ([R2 data security](https://developers.cloudflare.com/r2/reference/data-security/)) |
 | F9.4 | 🟡 Student accounts + submission queue | 🟡 | Adviser approval reported 2026-09-21; approved for Phase 4, not yet implemented. Student authorization and scope guards must pass before this is described as available. |
 
 ---
@@ -235,10 +235,18 @@ After V7 is implemented and its role-isolation checks pass, the planned flow is:
 | Statistical forensics | (to build) | **statcheck_python, pysprite, grim_test** (existing open source) | Validated implementations exist; reuse them, don't reimplement |
 | Database | PostgreSQL via Neon + pgvector | ✔ unchanged | Free tier confirmed adequate |
 | Frontend | React.js + TailwindCSS | ✔ unchanged (**Vite** build, deployed on Vercel) | — |
-| Hosting | "free-tier cloud" | **Render free** (backend) + **Vercel free** (frontend) + **Neon free** (DB) | Render is the only remaining true free backend tier (2026); Railway/Fly dropped theirs. Caveat: 15-min spin-down → first request takes 30–60 s |
+| Hosting | "free-tier cloud" | **Render free** (backend) + **Vercel free** (frontend) + **Neon free** (DB) + **Cloudflare R2 Standard** (private durable manuscript objects) | Render is the only remaining true free backend tier (2026); Railway/Fly dropped theirs. R2 is required because Render's free filesystem is ephemeral; its included Standard allowance is usage-billed when exceeded. Caveat: Render's 15-min spin-down → first request takes 30–60 s |
 | Dev tools | VS Code, GitHub, Docker, Postman | ✔ unchanged | — |
 
-**Total cost: still ₱0.00** — every change keeps the zero-budget constraint while making the claims in Chapter 3 actually achievable.
+**Operating budget target: ₱0.00, not a provider-enforced hard cap.** The
+architecture is designed to stay inside current free-tier allowances.
+Cloudflare R2 Standard currently includes 10 GB-month, 1 million Class A
+requests, 10 million Class B requests, and free egress each month; usage above
+those inclusions is billable. Cloudflare budget alerts notify but do not pause
+or cap usage, so production usage must be monitored. See the official
+[R2 pricing](https://developers.cloudflare.com/r2/pricing/) and
+[budget-alert](https://developers.cloudflare.com/billing/manage/budget-alerts/)
+documentation.
 
 ### Amendment (2026-07-20): the LLM-last cascade
 
