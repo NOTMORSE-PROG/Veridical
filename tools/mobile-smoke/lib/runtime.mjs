@@ -39,6 +39,12 @@ export function loadSmokeConfig() {
     throw new Error("invalid session cookie configuration");
   }
   if (
+    !Number.isFinite(config.viewportEdgeToleranceCssPixels)
+    || config.viewportEdgeToleranceCssPixels < 0
+  ) {
+    throw new Error("invalid viewport edge tolerance configuration");
+  }
+  if (
     !Array.isArray(config.safeFindingKinds)
     || config.safeFindingKinds.length === 0
     || config.safeFindingKinds.some((kind) => typeof kind !== "string" || kind.length === 0)

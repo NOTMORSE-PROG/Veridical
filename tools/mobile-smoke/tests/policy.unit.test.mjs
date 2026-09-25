@@ -19,6 +19,7 @@ test("the acceptance viewports remain the required ordered pair", () => {
     { label: "390x844", width: 390, height: 844 },
     { label: "320x480", width: 320, height: 480 }
   ]);
+  assert.equal(config.viewportEdgeToleranceCssPixels, 1);
 });
 
 test("checked-in production origins must be credential-free HTTPS origins", () => {

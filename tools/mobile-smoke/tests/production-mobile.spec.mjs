@@ -1,4 +1,4 @@
-import { test } from "@playwright/test";
+import { expect, test } from "@playwright/test";
 import { buildManifest } from "../lib/deployment-fingerprint.mjs";
 import { createRequestGuard } from "../lib/request-policy.mjs";
 import { loadSmokeConfig, readRuntimeEnvironment } from "../lib/runtime.mjs";
@@ -43,7 +43,7 @@ function startsWithAccessibleName(label) {
 async function ensureTapTarget(locator, minimumSize) {
   await locator.waitFor({ state: "visible" });
   await locator.scrollIntoViewIfNeeded();
-  const usable = await locator.evaluate((element, minimum) => {
+  const usable = await locator.evaluate((element, measurement) => {
     const rectangle = element.getBoundingClientRect();
     const centerX = rectangle.left + rectangle.width / 2;
     const centerY = rectangle.top + rectangle.height / 2;
@@ -51,19 +51,22 @@ async function ensureTapTarget(locator, minimumSize) {
     const style = window.getComputedStyle(element);
     const disabled = element instanceof HTMLButtonElement && element.disabled;
     return Boolean(
-      rectangle.width >= minimum
-      && rectangle.height >= minimum
-      && rectangle.left >= 0
-      && rectangle.right <= window.innerWidth
-      && rectangle.top >= 0
-      && rectangle.bottom <= window.innerHeight
+      rectangle.width >= measurement.minimumSize
+      && rectangle.height >= measurement.minimumSize
+      && rectangle.left >= -measurement.edgeTolerance
+      && rectangle.right <= window.innerWidth + measurement.edgeTolerance
+      && rectangle.top >= -measurement.edgeTolerance
+      && rectangle.bottom <= window.innerHeight + measurement.edgeTolerance
       && topElement
       && element.contains(topElement)
       && style.visibility === "visible"
       && style.pointerEvents !== "none"
       && !disabled
     );
-  }, minimumSize);
+  }, {
+    minimumSize,
+    edgeTolerance: smokeConfig.viewportEdgeToleranceCssPixels
+  });
   ensure(usable);
 }
 
@@ -185,94 +188,154 @@ async function exerciseSafeNavigation(page, runtime, viewport) {
 }
 
 async function exerciseSyntheticReview(page, runtime, guard, viewport) {
-  await page.goto(smokeConfig.syntheticReviewDeskPath, { waitUntil: "domcontentloaded" });
-  await waitForPath(page, runtime, smokeConfig.syntheticReviewDeskPath);
-  await page.locator(".signal-desk").waitFor({ state: "visible" });
-  await ensurePageInvariants(page, viewport, "Review Desk");
+  await runStage("REVIEW_DESK_LOAD", async () => {
+    await page.goto(smokeConfig.syntheticReviewDeskPath, { waitUntil: "domcontentloaded" });
+    await waitForPath(page, runtime, smokeConfig.syntheticReviewDeskPath);
+    await page.locator(".signal-desk").waitFor({ state: "visible" });
+    await ensurePageInvariants(page, viewport, "Review Desk");
+  }, viewport.label);
 
   const documentPath = `/report/${runtime.checkRunId}/document`;
-  const seededRecord = page.locator(`a[href="${documentPath}"]`).first();
-  const flagSummaryResponse = guard.configuredFlagIsAuthorized()
-    ? undefined
-    : page.waitForResponse((response) => {
-      const url = new URL(response.url());
-      return (
-        response.request().method() === "GET"
-        && url.origin === runtime.origin
-        && url.pathname === `/api/check-runs/${runtime.checkRunId}/flags`
-        && url.search === ""
-      );
+  await runStage("REVIEW_DOCUMENT_OPEN", async () => {
+    const seededRecord = page.locator(`a[href="${documentPath}"]`).first();
+    const flagSummaryResponse = guard.configuredFlagIsAuthorized()
+      ? undefined
+      : page.waitForResponse((response) => {
+        const url = new URL(response.url());
+        return (
+          response.request().method() === "GET"
+          && url.origin === runtime.origin
+          && url.pathname === `/api/check-runs/${runtime.checkRunId}/flags`
+          && url.search === ""
+        );
+      });
+    await tapTarget(seededRecord);
+    await waitForPath(page, runtime, documentPath);
+    if (flagSummaryResponse) {
+      const response = await flagSummaryResponse;
+      ensure(response.ok());
+      const summaries = await response.json();
+      ensure(Array.isArray(summaries));
+      const configured = summaries.filter((summary) => summary?.id === runtime.flagId);
+      ensure(configured.length === 1);
+      guard.authorizeFlagSummary(configured[0]);
+    }
+  }, viewport.label);
+  await runStage("REVIEW_DOCUMENT", async () => {
+    await page.getByRole("region", { name: "Full manuscript, scrollable", exact: true }).waitFor({
+      state: "visible"
     });
-  await tapTarget(seededRecord);
-  await waitForPath(page, runtime, documentPath);
-  if (flagSummaryResponse) {
-    const response = await flagSummaryResponse;
-    ensure(response.ok());
-    const summaries = await response.json();
-    ensure(Array.isArray(summaries));
-    const configured = summaries.filter((summary) => summary?.id === runtime.flagId);
-    ensure(configured.length === 1);
-    guard.authorizeFlagSummary(configured[0]);
-  }
-  await page.getByRole("region", { name: "Full manuscript, scrollable", exact: true }).waitFor({
-    state: "visible"
-  });
-  await ensurePageInvariants(page, viewport, "Manuscript review");
+    await ensurePageInvariants(page, viewport, "Manuscript review");
+  }, viewport.label);
+  await runStage("REVIEW_QUEUE_OPEN", async () => {
+    const reviewTab = page.getByRole("tab", { name: /^Review/ });
+    await runStage("REVIEW_QUEUE_TAB", async () => {
+      await reviewTab.waitFor({ state: "visible" });
+      ensure(await reviewTab.count() === 1);
+    }, viewport.label);
+    await runStage(
+      "REVIEW_QUEUE_TARGET",
+      () => ensureTapTarget(reviewTab, smokeConfig.minimumTargetCssPixels),
+      viewport.label,
+    );
+    await runStage("REVIEW_QUEUE_TAP", () => reviewTab.tap(), viewport.label);
+    await runStage(
+      "REVIEW_QUEUE_SELECTED",
+      () => expect(reviewTab).toHaveAttribute("aria-selected", "true"),
+      viewport.label,
+    );
+  }, viewport.label);
 
-  const fullReport = page.getByRole("link", { name: "Open full readiness report", exact: true });
-  await tapTarget(fullReport);
-  await waitForPath(page, runtime, `/report/${runtime.checkRunId}`);
-  await page.getByRole("link", { name: "Open manuscript", exact: true }).waitFor({
-    state: "visible"
-  });
-  await ensurePageInvariants(page, viewport, "Readiness report");
+  await runStage("REVIEW_REPORT_OPEN", async () => {
+    const fullReport = page.getByRole("link", {
+      name: "Open full readiness report",
+      exact: true
+    });
+    await runStage("REVIEW_REPORT_LINK", async () => {
+      await fullReport.waitFor({ state: "visible" });
+      ensure(await fullReport.count() === 1);
+    }, viewport.label);
+    await runStage(
+      "REVIEW_REPORT_TARGET",
+      () => ensureTapTarget(fullReport, smokeConfig.minimumTargetCssPixels),
+      viewport.label,
+    );
+    await runStage("REVIEW_REPORT_TAP", () => fullReport.tap(), viewport.label);
+    await runStage(
+      "REVIEW_REPORT_ROUTE",
+      () => waitForPath(page, runtime, `/report/${runtime.checkRunId}`),
+      viewport.label,
+    );
+  }, viewport.label);
+  await runStage("REVIEW_REPORT", async () => {
+    await page.getByRole("link", { name: "Open manuscript", exact: true }).waitFor({
+      state: "visible"
+    });
+    await ensurePageInvariants(page, viewport, "Readiness report");
+  }, viewport.label);
 
-  const evidence = page
-    .locator(`a[href="/flags/${runtime.flagId}"]`)
-    .filter({ hasText: /^Review evidence/ });
-  ensure(await evidence.count() === 1);
-  await ensureTapTarget(evidence, smokeConfig.minimumTargetCssPixels);
-  const evidenceHref = await evidence.getAttribute("href");
-  ensure(Boolean(evidenceHref));
-  guard.requireAuthorizedFlagHref(evidenceHref);
-  await evidence.tap();
-  const evidenceUrl = new URL(evidenceHref, runtime.origin);
-  await waitForPath(page, runtime, `${evidenceUrl.pathname}${evidenceUrl.search}`);
-  await page.getByRole("heading", { name: "Recorded system finding", exact: true }).waitFor({
-    state: "visible"
-  });
-  ensure(await page.locator("main h1").count() === 1);
-  await ensureLayoutInvariants(page, viewport);
+  await runStage("REVIEW_EVIDENCE_OPEN", async () => {
+    const evidence = page
+      .locator(`a[href="/flags/${runtime.flagId}"]`)
+      .filter({ hasText: /^Review evidence/ });
+    ensure(await evidence.count() === 1);
+    await ensureTapTarget(evidence, smokeConfig.minimumTargetCssPixels);
+    const evidenceHref = await evidence.getAttribute("href");
+    ensure(Boolean(evidenceHref));
+    guard.requireAuthorizedFlagHref(evidenceHref);
+    await evidence.tap();
+    const evidenceUrl = new URL(evidenceHref, runtime.origin);
+    await waitForPath(page, runtime, `${evidenceUrl.pathname}${evidenceUrl.search}`);
+  }, viewport.label);
+  await runStage("REVIEW_EVIDENCE", async () => {
+    await page.getByRole("heading", { name: "Recorded system finding", exact: true }).waitFor({
+      state: "visible"
+    });
+    ensure(await page.locator("main h1").count() === 1);
+    await ensureLayoutInvariants(page, viewport);
+  }, viewport.label);
 
-  const source = page.getByRole("link", {
-    name: "View this location in the manuscript",
-    exact: true
-  });
-  await tapTarget(source);
-  await page.waitForURL((actual) => (
-    actual.origin === runtime.origin
-    && actual.pathname === documentPath
-    && actual.search === `?flag=${runtime.flagId}`
-  ));
-  await ensurePageInvariants(page, viewport, "Manuscript review");
-  await page.getByRole("region", { name: "Full manuscript, scrollable", exact: true }).waitFor({
-    state: "visible"
-  });
-  await page.locator('article[aria-label="Reconstructed manuscript text"]').waitFor({
-    state: "visible"
-  });
+  await runStage("REVIEW_SOURCE_OPEN", async () => {
+    const source = page.getByRole("link", {
+      name: "View this location in the manuscript",
+      exact: true
+    });
+    await tapTarget(source);
+    await page.waitForURL((actual) => (
+      actual.origin === runtime.origin
+      && actual.pathname === documentPath
+      && actual.search === `?flag=${runtime.flagId}`
+    ));
+  }, viewport.label);
+  await runStage("REVIEW_SOURCE", async () => {
+    await ensurePageInvariants(page, viewport, "Manuscript review");
+    await page.getByRole("region", { name: "Full manuscript, scrollable", exact: true }).waitFor({
+      state: "visible"
+    });
+    await page.locator('article[aria-label="Reconstructed manuscript text"]').waitFor({
+      state: "visible"
+    });
+  }, viewport.label);
 
-  const reviewTab = page.getByRole("tab", { name: /^Review/ });
-  await tapTarget(reviewTab);
-  ensure(await reviewTab.getAttribute("aria-selected") === "true");
-  const manuscriptTab = page.getByRole("tab", { name: "Manuscript", exact: true });
-  await tapTarget(manuscriptTab);
-  ensure(await manuscriptTab.getAttribute("aria-selected") === "true");
+  await runStage("REVIEW_TABS", async () => {
+    const reviewTab = page.getByRole("tab", { name: /^Review/ });
+    await tapTarget(reviewTab);
+    await expect(reviewTab).toHaveAttribute("aria-selected", "true");
+    const manuscriptTab = page.getByRole("tab", { name: "Manuscript", exact: true });
+    await tapTarget(manuscriptTab);
+    await expect(manuscriptTab).toHaveAttribute("aria-selected", "true");
+  }, viewport.label);
 
-  const reviewDesk = page.getByRole("link", { name: "Review Desk", exact: true }).first();
-  await tapTarget(reviewDesk);
-  await waitForPath(page, runtime, "/dashboard?queue=needs_review");
-  await ensurePageInvariants(page, viewport, "Review Desk");
+  await runStage("REVIEW_RETURN", async () => {
+    const { navigation } = await openMobileMenu(page);
+    const reviewDesk = navigation.getByRole("link", {
+      name: startsWithAccessibleName("Review Desk")
+    });
+    await tapTarget(reviewDesk);
+    await waitForPath(page, runtime, "/dashboard");
+    await navigation.waitFor({ state: "hidden" });
+    await ensurePageInvariants(page, viewport, "Review Desk");
+  }, viewport.label);
 }
 
 function installFailureCounters(page, guard, runtime) {
@@ -387,14 +450,33 @@ test("production instructor review journey under touch-enabled mobile emulation"
     }
 
     await runStage("AUTH", async () => {
-      await ensureHeading(page, "Sign in to VERIDICAL");
-      await page.getByLabel("Email address", { exact: true }).fill(runtime.email);
-      await page.getByLabel("Password", { exact: true }).fill(runtime.password);
-      await tapTarget(page.getByRole("button", { name: "Sign in", exact: true }));
-      await waitForPath(page, runtime, "/dashboard");
-      await page.locator(".signal-desk").waitFor({ state: "visible" });
-      const cookies = await context.cookies(runtime.origin);
-      ensure(cookies.some(isProductionSessionCookie));
+      await runStage("AUTH_FORM", async () => {
+        await ensureHeading(page, "Sign in to VERIDICAL");
+        await page.getByLabel("Email address", { exact: true }).fill(runtime.email);
+        await page.getByLabel("Password", { exact: true }).fill(runtime.password);
+      });
+      await runStage("AUTH_SUBMIT", () => (
+        tapTarget(page.getByRole("button", { name: "Sign in", exact: true }))
+      ));
+      await runStage("AUTH_ROUTE", () => waitForPath(page, runtime, "/dashboard"));
+      await runStage("AUTH_DESK", () => (
+        page.locator(".signal-desk").waitFor({ state: "visible" })
+      ));
+      await runStage("AUTH_COOKIE", async () => {
+        const cookies = await context.cookies(runtime.origin);
+        const sessionCookies = cookies.filter((cookie) => (
+          cookie.name === smokeConfig.sessionCookieName
+        ));
+        await runStage("AUTH_COOKIE_PRESENT", async () => ensure(sessionCookies.length === 1));
+        const [sessionCookie] = sessionCookies;
+        await runStage("AUTH_COOKIE_HTTP_ONLY", async () => ensure(sessionCookie.httpOnly));
+        await runStage("AUTH_COOKIE_SECURE", async () => ensure(sessionCookie.secure));
+        await runStage(
+          "AUTH_COOKIE_SAME_SITE",
+          async () => ensure(sessionCookie.sameSite === "Lax"),
+        );
+        ensure(isProductionSessionCookie(sessionCookie));
+      });
       authenticated = true;
     });
 

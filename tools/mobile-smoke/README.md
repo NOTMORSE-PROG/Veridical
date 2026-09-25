@@ -59,6 +59,11 @@ Do not enable traces, screenshots, video, HTML/blob/JSON/JUnit reports, HAR,
 storage state, or artifact uploads. The custom reporter intentionally emits
 only fixed stage and outcome codes.
 
+Target edges may differ from the integer visual viewport by at most the
+configured one CSS pixel to absorb browser subpixel scroll rounding. Minimum
+size, visibility, enabled state, and unobscured center hit-testing remain
+required.
+
 ## Deployment-byte check
 
 Build `frontend/dist` from the exact checked-out revision with
