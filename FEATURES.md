@@ -47,7 +47,7 @@ The output is a **Readiness Report** with one of three statuses:
 - No upload, review, or decision rights
 
 ### 🟡 Student (submission portal) — **APPROVED SCOPE; NOT YET IMPLEMENTED**
-The project owner reported on 2026-09-21 that the adviser approved Phase 4/V7. This clears the adviser-policy gate; it does not claim that the student portal exists today. Implementation remains sequenced after V6, then proceeds through V-045 → V-046 → V-047. The approved plan adds:
+The project owner reported on 2026-09-21 that the adviser approved Phase 4/V7. This clears the adviser-policy gate; it does not claim that the student portal exists today. Implementation remains sequenced after V6, whose operational G25R/G26 gates are cleared but whose D-012 current-release accuracy evidence remains open, then proceeds through V-045 → V-046 → V-047. The approved plan adds:
 
 | Addition | Detail |
 |---|---|
@@ -235,7 +235,7 @@ After V7 is implemented and its role-isolation checks pass, the planned flow is:
 | Statistical forensics | (to build) | **statcheck_python, pysprite, grim_test** (existing open source) | Validated implementations exist; reuse them, don't reimplement |
 | Database | PostgreSQL via Neon + pgvector | ✔ unchanged | Free tier confirmed adequate |
 | Frontend | React.js + TailwindCSS | ✔ unchanged (**Vite** build, deployed on Vercel) | — |
-| Hosting | "free-tier cloud" | **Render free** (backend) + **Vercel free** (frontend) + **Neon free** (DB) + **Cloudflare R2 Standard** (private durable manuscript objects) | Render is the only remaining true free backend tier (2026); Railway/Fly dropped theirs. R2 is required because Render's free filesystem is ephemeral; its included Standard allowance is usage-billed when exceeded. Caveat: Render's 15-min spin-down → first request takes 30–60 s |
+| Hosting | "free-tier cloud" | **Render free** (backend) + **Vercel free** (frontend) + **Neon free** (DB) + **Cloudflare R2 Standard** (private durable manuscript objects) | Render is the only remaining true free backend tier (2026); Railway/Fly dropped theirs. R2 is required because Render's free filesystem is ephemeral; its included Standard allowance is usage-billed when exceeded. Caveat: Render spins down after 15 idle minutes and documents a wake-up of about one minute; the 2026-09-25 G26 observation took 73.358 seconds |
 | Dev tools | VS Code, GitHub, Docker, Postman | ✔ unchanged | — |
 
 **Operating budget target: ₱0.00, not a provider-enforced hard cap.** The
@@ -300,14 +300,22 @@ Each tier escalates only its uncertain residue upward, ending at the instructor 
 - Per-stage status in Flow B doubles as the debugging view: a stuck run shows exactly which stage and which external call
 - Local dev: `docker-compose` (API + Postgres/pgvector) mirrors production; `.env`-switchable fake-LLM mode (canned responses) so the UI and pipeline are testable without burning Gemini quota
 
-### 7.4 Pilot validation (Ch. 3 "Testing and Validation" phase)
-- Run against a set of past defended manuscripts (with permission): high-scoring papers should trend Ready; papers that got major revisions should trend Conditionally/Not Ready
-- Feedback rounds with the Capstone Instructor and pilot advisers on flag usefulness (precision matters more than recall — false accusations are the failure mode that kills trust)
+### 7.4 Pilot validation — withdrawn from required completion scope
+
+On 2026-09-25, the project owner removed the past-manuscript pilot and
+instructor-feedback round from the required completion and V6 exit scope. No
+such pilot was conducted, so VERIDICAL makes no claim of validation against
+past defense outcomes and reports no pilot feedback findings. A future
+permissioned study may still be conducted, but it is not a prerequisite for
+the current release. This software-release scope decision does not waive any
+independent adviser or institutional methodology requirement for the capstone
+manuscript.
 
 ### 7.5 Production responsive-browser verification
-- A checked-in, production-safe browser gate is planned at `320×480` and `390×844` using touch-enabled Chromium emulation. As of 2026-09-21, it has not completed a production run, so no passing responsive-browser result is claimed.
-- If the gate passes, its evidence applies only to the named instructor review journey under browser emulation. It does not establish behavior on physical iOS or Android hardware, Safari or Firefox, browser chrome, virtual keyboards, native file pickers or cameras, device safe areas, mobile-network conditions, or mobile assistive technologies.
+- On 2026-09-25, the checked-in production-safe gate passed the named instructor review journey at `320×480` and `390×844` using touch-enabled Chromium emulation against the exact production frontend build. This is same-team Repeatable evidence for that bounded journey.
+- This result does not establish behavior on physical iOS or Android hardware, Safari or Firefox, browser chrome, virtual keyboards, native file pickers or cameras, device safe areas, mobile-network conditions, or mobile assistive technologies.
 - The production account and data used by this gate must be synthetic. Share-token and cross-corpus reuse reads are privacy-neutralized and excluded from the tested claim.
+- A separate genuine Render idle-window observation on 2026-09-25 showed the public page progress from sign-in checking, to the delayed free-server message, to the successful anonymous landing page. The cold session request completed in 73.358 seconds and an immediate warm repeat in 0.273 seconds. This is one operational observation, not a latency guarantee or SLA.
 
 ---
 
@@ -318,7 +326,7 @@ Each tier escalates only its uncertain residue upward, ending at the instructor 
 | **Phase 1 — Core loop** | F1 ingestion, F2 rubric parsing, F3 hybrid checking, F8 minimal report, F9 auth. *Demo: upload rubric + manuscript → readiness report* | Sprints 1–4, part of 9 |
 | **Phase 2 — Integrity checks I** | F5 Citation Integrity, F6 Statistical Forensics (the two with the strongest evidence base and existing libraries) | Sprints 6–7 |
 | **Phase 3 — Integrity checks II** | F4 Internal Agreement, F7 Originality/Reuse, F8 full dashboard (multi-group overview, share links, PDF export) | Sprints 5, 8–9 |
-| **Phase 4 — 🟡 Student portal** | Scope approval reported on 2026-09-21; not yet implemented. Begins only after V6 exits, then delivers student accounts, submission queue, and resubmission flow. | New (not in proposal) |
+| **Phase 4 — 🟡 Student portal** | Scope approval reported on 2026-09-21; not yet implemented. Begins after V6's remaining D-012 accuracy gate is satisfied, then proceeds through student accounts, submission queue, and resubmission flow. | New (not in proposal) |
 
 Each phase ends demo-able; the applicability gates (F6.5 etc.) mean partially-built checks report "N/A" honestly rather than blocking the pipeline.
 
@@ -329,7 +337,7 @@ Each phase ends demo-able; the applicability gates (F6.5 etc.) mean partially-bu
 | Risk | Impact | Mitigation |
 |---|---|---|
 | Gemini free daily quota (**300 req/day measured across the model pool** — corrected 2026-08-16 from the retracted ~1,500 figure, D-001/D-014) exhausted during defense season | Checks stall mid-batch. **At ~17 calls/manuscript this is ~17 manuscripts/day with no headroom — a real capacity ceiling, not a comfortable margin** | Batch criteria per call (1M context = whole manuscript in one prompt); dashboard quota meter; queue resumes next day; optional second Google Cloud project as spare quota |
-| Render free tier cold start (30–60 s after 15 min idle) | "Is it broken?" first impression | Frontend shows a "waking the server" state; optionally a free uptime pinger during defense weeks |
+| Render free tier cold start (after 15 min idle; Render says about one minute, while the 2026-09-25 G26 observation took 73.358 s) | "Is it broken?" first impression | Frontend shows sign-in checking, then an explicit delayed free-server state, and keeps the same request alive through a successful landing; the result remains a dated observation, not an SLA |
 | Citation APIs weak on local/Philippine sources | Legit local citations flagged unverifiable | Explicit "unverifiable ≠ fake" wording + manual-review flag (already the design); cache instructor's manual confirmations so the same source isn't re-flagged |
 | AI grading inconsistency | Trust collapse with instructor/panel | Self-consistency voting, escalation, golden-dataset regression (§7.2); instructor override always available |
 | Rubric parse errors on unusual formats | Wrong criteria checked | Mandatory instructor review screen (F2.3) before any rubric is used — human confirms the parse, matching the HITL principle |
