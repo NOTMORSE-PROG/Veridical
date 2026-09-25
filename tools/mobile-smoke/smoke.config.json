@@ -8,6 +8,7 @@
   "healthFetchTimeoutMs": 90000,
   "sessionCookieName": "veridical_session",
   "minimumTargetCssPixels": 24,
+  "viewportEdgeToleranceCssPixels": 1,
   "maxManuscriptPageSize": 20,
   "maxAuditPageSize": 25,
   "safeFindingKinds": [
