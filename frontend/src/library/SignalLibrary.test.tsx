@@ -514,25 +514,16 @@ describe("Library record (4x)", () => {
     expect(await screen.findByRole("heading", { name: "This Library record is not available" })).toBeInTheDocument();
   });
 
-  it("uses real tabs with arrow-key movement", async () => {
-    vi.stubGlobal(
-      "fetch",
-      libraryFetch({ "/library/1": OWN, "/library/1/document": VIEWER, "/library": page([OWN]), "/programs": [] }),
-    );
+  it("keeps the manuscript and record details visible together", async () => {
+    vi.stubGlobal("fetch", libraryFetch({
+      "/library/1": OWN, "/library/1/document": VIEWER,
+      "/library": page([OWN]), "/programs": [],
+    }));
     renderWithProviders(<SignalLibraryDetailPage />, { route: "/library/1", path: "/library/:manuscriptId" });
     await screen.findByRole("heading", { level: 1, name: "Barangay Service Portal" });
-
-    const source = screen.getByRole("tab", { name: "Manuscript" });
-    const details = screen.getByRole("tab", { name: "Record details" });
-    expect(source).toHaveAttribute("aria-selected", "true");
-    expect(document.getElementById(source.getAttribute("aria-controls") ?? "")).toHaveAttribute("role", "tabpanel");
-    expect(details).toHaveAttribute("tabindex", "-1");
-    source.focus();
-    fireEvent.keyDown(source, { key: "ArrowRight" });
-    expect(details).toHaveAttribute("aria-selected", "false");
-    expect(document.activeElement).toBe(details);
-    fireEvent.click(details);
-    expect(details).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("region", { name: "Manuscript" })).toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "Record details" })).toBeInTheDocument();
+    expect(screen.queryByRole("tablist")).not.toBeInTheDocument();
   });
 });
 
