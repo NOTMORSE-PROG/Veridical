@@ -2,12 +2,12 @@
 // manuscripts and the only originality corpus. No readiness band, score,
 // flag, report link, or similarity judgment appears anywhere here.
 import { useEffect, useId, useRef, useState } from "react";
-import { Link, useLocation, useNavigate, useSearchParams } from "react-router";
+import { useLocation, useNavigate, useSearchParams } from "react-router";
 import { ApiError } from "../api/client";
 import type { LibraryItemOut } from "../api/types";
 import { LIBRARY_SEARCH_DEBOUNCE_MS, UNSET_PROGRAM_FILTER } from "../config/ui";
 import { usePrograms } from "../dashboard/useDashboard";
-import { useRouteFocus } from "../routing/useRouteFocus";
+import { useLibraryRouteFocus } from "./useLibraryRouteFocus";
 import { ActionLink } from "../ui/ActionLink";
 import { Alert } from "../ui/Alert";
 import { Button } from "../ui/Button";
@@ -16,7 +16,6 @@ import { formatLibraryDate, libraryRecordName } from "./libraryFormat";
 import {
   useLibrary,
   useLibraryDocument,
-  useLibraryExcerpt,
   useLibraryItem,
   useLibraryParagraphs,
   useLibraryPending,
@@ -64,12 +63,10 @@ function useComparisonAvailability(
   const itemQuery = useLibraryItem(manuscriptId, Boolean(manuscriptId && !listedItem));
   const item = listedItem ?? itemQuery.data;
   const canReadContent = item?.status === "active";
-  const documentQuery = useLibraryDocument(manuscriptId, canReadContent && item?.is_own === true);
-  const excerptQuery = useLibraryExcerpt(manuscriptId, canReadContent && item?.is_own === false);
+  const documentQuery = useLibraryDocument(manuscriptId, canReadContent);
   const paragraphsQuery = useLibraryParagraphs(
     manuscriptId,
     canReadContent
-      && item?.is_own === true
       && documentQuery.data?.available === true
       && documentQuery.data.source_format === "docx",
   );
@@ -80,7 +77,7 @@ function useComparisonAvailability(
   } else if (item) {
     if (item.status !== "active") {
       status = "unavailable";
-    } else if (item.is_own) {
+    } else {
       if (documentQuery.isError) status = "error";
       else if (documentQuery.data) {
         if (!documentQuery.data.available) {
@@ -101,12 +98,6 @@ function useComparisonAvailability(
           status = "unavailable";
         }
       }
-    } else if (excerptQuery.isError) {
-      status = "error";
-    } else if (excerptQuery.data) {
-      status = excerptQuery.data.chapters.some((chapter) => Boolean(chapter.excerpt?.trim()))
-        ? "available"
-        : "unavailable";
     }
   }
 
@@ -123,12 +114,10 @@ function useComparisonAvailability(
     retry: () => {
       if (!item) void itemQuery.refetch();
       else if (
-        item.is_own
-        && documentQuery.data?.available === true
+        documentQuery.data?.available === true
         && documentQuery.data.source_format === "docx"
       ) void paragraphsQuery.refetch();
-      else if (item.is_own) void documentQuery.refetch();
-      else void excerptQuery.refetch();
+      else void documentQuery.refetch();
     },
   };
 }
@@ -238,76 +227,65 @@ function LibraryCard({
   onToggle: () => void;
 }) {
   const disabled = !selected && selectionFull;
+  const name = libraryRecordName(item);
+  const normalize = (value: string) => value.trim().replace(/\s+/g, " ").toLocaleLowerCase();
+  const showTeam = item.is_own && item.team_name && normalize(item.team_name) !== normalize(name);
+  const showFile = item.is_own && item.original_filename && normalize(item.original_filename) !== normalize(name);
+  const titleId = 'library-title-' + item.manuscript_id;
   return (
-    <li className="signal-library-card">
-      <div className="signal-library-card__rail" aria-hidden="true" />
-      <div className="signal-library-card__body">
-        <div className="signal-library-card__topline">
-          <span className="signal-library-ownership">
-            {item.is_own ? "Your record" : "Another instructor's record"}
-          </span>
-          {compareMode && (
-            <label className="signal-library-select" data-disabled={disabled || undefined}>
-              <input
-                type="checkbox"
-                checked={selected}
-                aria-label={accessibleSelectionName}
-                aria-disabled={disabled || undefined}
-                aria-describedby={disabled ? "signal-compare-limit" : undefined}
-                onChange={() => {
-                  if (!disabled) onToggle();
-                }}
-              />
-              <span>{selected ? "Selected" : "Select"}</span>
-            </label>
-          )}
+    <li>
+      <article className="signal-library-card" aria-labelledby={titleId}>
+        <div className="signal-library-card__rail" aria-hidden="true" />
+        <div className="signal-library-card__body">
+          <div className="signal-library-card__topline">
+            <span className="signal-library-ownership">
+              {item.is_own ? "Your record" : "Shared record"}
+            </span>
+            {compareMode && (
+              <label className="signal-library-select" data-disabled={disabled || undefined}>
+                <input
+                  type="checkbox"
+                  checked={selected}
+                  aria-label={accessibleSelectionName}
+                  aria-disabled={disabled || undefined}
+                  aria-describedby={disabled ? "signal-compare-limit" : undefined}
+                  onChange={() => { if (!disabled) onToggle(); }}
+                />
+                <span>{selected ? "Selected" : "Select"}</span>
+              </label>
+            )}
+          </div>
+          <div className="signal-library-card__identity">
+            <h2 id={titleId}>{name}</h2>
+          </div>
+          <dl className="signal-library-metadata">
+            {showTeam && <div className="signal-library-metadata__wide"><dt>Team</dt><dd>{item.team_name}</dd></div>}
+            {item.is_own && (
+              <div className="signal-library-metadata__wide">
+                <dt>Authors</dt><dd>{item.authors.length ? item.authors.join(", ") : "Not listed"}</dd>
+              </div>
+            )}
+            <div><dt>Program</dt><dd>{item.program ?? "Not set"}</dd></div>
+            <div><dt>School year</dt><dd>{item.school_year ?? "Not set"}</dd></div>
+            <div><dt>Added</dt><dd>{formatLibraryDate(item.added_at)}</dd></div>
+            <div><dt>Record</dt><dd>#{item.manuscript_id}</dd></div>
+            {showFile && (
+              <div className="signal-library-metadata__wide">
+                <dt>File</dt><dd className="signal-library-filename">{item.original_filename}</dd>
+              </div>
+            )}
+          </dl>
+          <footer className="signal-library-card__footer">
+            <ActionLink
+              to={'/library/' + item.manuscript_id}
+              variant="secondary"
+              aria-label={'View manuscript: ' + name}
+            >
+              View manuscript
+            </ActionLink>
+          </footer>
         </div>
-
-        <div className="signal-library-card__identity">
-          <h2>
-            <Link className="signal-library-card__link" to={`/library/${item.manuscript_id}`}>
-              {libraryRecordName(item)}
-            </Link>
-          </h2>
-          {item.is_own && item.team_name && <p>{item.team_name}</p>}
-        </div>
-
-        <dl className="signal-library-metadata">
-          {item.is_own && (
-            <div>
-              <dt>Authors</dt>
-              <dd>{item.authors.length ? item.authors.join(", ") : "Not listed"}</dd>
-            </div>
-          )}
-          <div>
-            <dt>Program</dt>
-            <dd>{item.program ?? "Not set"}</dd>
-          </div>
-          <div>
-            <dt>School year</dt>
-            <dd>{item.school_year ?? "Not set"}</dd>
-          </div>
-          <div>
-            <dt>Added</dt>
-            <dd>{formatLibraryDate(item.added_at)}</dd>
-          </div>
-          {item.is_own && (
-            <div>
-              <dt>Record</dt>
-              <dd>#{item.manuscript_id}</dd>
-            </div>
-          )}
-          {item.is_own && item.original_filename && (
-            <div>
-              <dt>File</dt>
-              <dd className="signal-library-filename">{item.original_filename}</dd>
-            </div>
-          )}
-        </dl>
-        {!item.is_own && (
-          <p className="signal-library-withheld">Title, team, authors, and file name are withheld.</p>
-        )}
-      </div>
+      </article>
     </li>
   );
 }
@@ -316,11 +294,12 @@ interface LibraryLocationState {
   removedTitle?: string;
   skippedTitle?: string;
   deletedTitle?: string;
+  comparisonSelection?: number[];
 }
 
 export function SignalLibraryPage() {
   const headingRef = useRef<HTMLHeadingElement>(null);
-  useRouteFocus("Manuscript Library - VERIDICAL", headingRef);
+  useLibraryRouteFocus("Manuscript Library - VERIDICAL", headingRef);
   const navigate = useNavigate();
   const location = useLocation();
   // Captured once on arrival: later URL updates (search, page) replace the
@@ -336,7 +315,10 @@ export function SignalLibraryPage() {
   const urlSearch = searchParams.get("q") ?? "";
   const [searchInput, setSearchInput] = useState(urlSearch);
   const compareFrom = Number(searchParams.get("compareFrom"));
-  const initialSelection = Number.isInteger(compareFrom) && compareFrom > 0 ? [compareFrom] : [];
+  const initialSelection = [...new Set(
+    arrivalNotice?.comparisonSelection
+      ?? (Number.isInteger(compareFrom) && compareFrom > 0 ? [compareFrom] : []),
+  )].filter((id) => Number.isInteger(id) && id > 0).slice(0, 2);
   const [compareMode, setCompareMode] = useState(initialSelection.length > 0);
   const [selected, setSelected] = useState<number[]>(initialSelection);
 
@@ -365,6 +347,9 @@ export function SignalLibraryPage() {
   }, [searchInput, urlSearch, setSearchParams]);
 
   const { data, isLoading, isError, refetch } = useLibrary(page, program, urlSearch);
+  // The result count belongs to this filter; comparison availability belongs
+  // to the whole Library. The common unfiltered query shares the same cache.
+  const collection = useLibrary(1, undefined, "");
   const pending = useLibraryPending();
   const pendingItems = pending.data?.items ?? [];
   const firstAvailability = useComparisonAvailability(
@@ -388,6 +373,7 @@ export function SignalLibraryPage() {
   const hasSearch = Boolean(urlSearch.trim());
   const hasFilters = Boolean(program || hasSearch);
   const total = data?.total ?? 0;
+  const corpusTotal = collection.data?.total ?? (!hasFilters ? data?.total : undefined);
   const libraryIsEmpty = Boolean(data && !hasFilters && total === 0);
 
   function changeProgram(nextProgram: string | undefined) {
@@ -437,8 +423,7 @@ export function SignalLibraryPage() {
           <p className="signal-eyebrow">Originality comparison source</p>
           <h1 ref={headingRef} tabIndex={-1}>Manuscript Library</h1>
           <p className="signal-route-header__intro">
-            VERIDICAL compares each checked manuscript against the manuscripts in this Library to look
-            for possible reuse. Manuscripts checked on the Review Desk are not added here automatically.
+            Store manuscripts for originality comparisons. Checking a manuscript does not add it here.
           </p>
         </div>
         <ActionLink to="/library/add" variant="brand">Add to Library</ActionLink>
@@ -460,56 +445,55 @@ export function SignalLibraryPage() {
         )}
 
         <aside className="signal-library-privacy">
-          <strong>Who can see Library records</strong>
+          <strong>Who can read Library manuscripts</strong>
           <p>
-            Other instructors can read a short excerpt of each Library record. They never see its title,
-            team name, authors, or file name, but the excerpt text itself may mention names.
+            Signed-in instructors can read the full manuscript for every active record. Identifying fields
+            on shared records stay hidden, but the manuscript itself may contain those details.
+            Only the instructor who added a record can edit or remove it.
           </p>
         </aside>
 
         {pendingItems.length > 0 && <PendingUploads items={pendingItems} />}
 
         {!libraryIsEmpty && (
-          <section className="signal-library-controls" aria-label="Library controls">
-            <label className="signal-library-filter signal-library-filter--search">
-              <span>Search your records</span>
-              <input
-                type="search"
-                value={searchInput}
-                onChange={(event) => setSearchInput(event.target.value)}
-                placeholder="Title, team, author, file name, or #record"
-                aria-describedby="signal-library-search-hint"
-              />
-              <small id="signal-library-search-hint" className="signal-field-hint">
-                Names and titles search your own records only. A record number such as #20 finds any record.
-              </small>
-            </label>
-            <ProgramFilter value={program} onChange={changeProgram} />
-            <div className="signal-library-count" aria-live="polite" hidden={!data}>
-              <strong>{total}</strong>
-              <span>
-                {hasFilters
-                  ? total === 1 ? "matching record" : "matching records"
-                  : total === 1 ? "record in the Library" : "records in the Library"}
-              </span>
-            </div>
-            {!hasFilters && total === 1 ? (
-              <p className="signal-field-hint signal-library-compare-hint">
-                Comparison needs at least two Library records.
+          <section className="signal-library-controls" aria-label="Search and filter Library">
+            <div className="signal-library-controls__fields">
+              <label className="signal-library-filter signal-library-filter--search">
+                <span>Search Library</span>
+                <input
+                  type="search"
+                  value={searchInput}
+                  onChange={(event) => setSearchInput(event.target.value)}
+                  placeholder="Title, team, author, file name, or #record"
+                  aria-describedby="signal-library-search-hint"
+                />
+              </label>
+              <p id="signal-library-search-hint" className="signal-field-hint">
+                Search your titles, teams, authors and file names. Use a record number such as #20 to find any Library record.
               </p>
-            ) : (
-              total >= 2 && (
-                <Button
-                  type="button"
-                  variant={compareMode ? "quiet" : "secondary"}
-                  onClick={() => compareMode ? closeCompareMode() : setCompareMode(true)}
-                >
-                  {compareMode ? "Exit comparison" : "Compare two records"}
-                </Button>
-              )
-            )}
+              <ProgramFilter value={program} onChange={changeProgram} />
+            </div>
           </section>
         )}
+
+        <div className="signal-library-results-header">
+          <h2 aria-live="polite" aria-atomic="true">
+            {data ? (
+              <><strong>{total}</strong> {hasFilters ? "matching" : "Library"} {total === 1 ? "manuscript" : "manuscripts"}</>
+            ) : "Library manuscripts"}
+          </h2>
+          {compareMode || (corpusTotal !== undefined && corpusTotal >= 2) ? (
+            <Button
+              type="button"
+              variant={compareMode ? "quiet" : "secondary"}
+              onClick={() => compareMode ? closeCompareMode() : setCompareMode(true)}
+            >
+              {compareMode ? "Exit comparison" : "Compare two records"}
+            </Button>
+          ) : (
+            corpusTotal === 1 && <p className="signal-field-hint">Comparison needs at least two Library records.</p>
+          )}
+        </div>
 
         {compareMode && (
           <div className="signal-library-compare-intro">
@@ -522,6 +506,60 @@ export function SignalLibraryPage() {
             </span>
           </div>
         )}
+
+      {compareMode && (
+        <aside className="signal-library-selection" aria-label="Comparison selection">
+          <div className="signal-library-selection__summary">
+            <strong>
+              {selected.length === 0
+                ? "Select two records"
+                : canCompare
+                  ? "Ready to compare"
+                  : selectionHasUnavailable
+                    ? "Choose another record"
+                    : selectionHasError
+                      ? "Check availability again"
+                      : "Checking the selected records can be shown"}
+            </strong>
+            <span>{selected.length} of 2 selected</span>
+          </div>
+          {selectionStates.length > 0 && (
+            <ul className="signal-library-selection__records" aria-label="Selected records">
+              {selectionStates.map((selection) => (
+                <li key={selection.manuscriptId} data-status={selection.status}>
+                  <strong>{selection.label}</strong>
+                  <span>{availabilityLabel(selection.status)}</span>
+                  {selection.status === "error" && (
+                    <button
+                      type="button"
+                      className="signal-library-selection__retry"
+                      aria-label={`Try availability check again for ${selection.label}`}
+                      onClick={selection.retry}
+                    >
+                      Try again
+                    </button>
+                  )}
+                </li>
+              ))}
+            </ul>
+          )}
+          <div className="signal-library-selection__actions">
+            <Button type="button" variant="quiet" disabled={!selected.length} onClick={() => setSelected([])}>
+              Clear
+            </Button>
+            <Button
+              type="button"
+              variant="brand"
+              disabled={!canCompare}
+              onClick={() => navigate(`/library/compare?a=${selected[0]}&b=${selected[1]}`, {
+                state: { collectionSearch: searchParams.toString() },
+              })}
+            >
+              Compare records
+            </Button>
+          </div>
+        </aside>
+      )}
 
         {compareMode && selected.length === 2 && (
           <p id="signal-compare-limit" className="sr-only">
@@ -607,57 +645,8 @@ export function SignalLibraryPage() {
         </div>
       </div>
 
-      {compareMode && (
-        <aside className="signal-library-selection" aria-label="Comparison selection">
-          <div className="signal-library-selection__summary">
-            <strong>
-              {selected.length === 0
-                ? "Select two records"
-                : canCompare
-                  ? "Ready to compare"
-                  : selectionHasUnavailable
-                    ? "Choose another record"
-                    : selectionHasError
-                      ? "Check availability again"
-                      : "Checking the selected records can be shown"}
-            </strong>
-            <span>{selected.length} of 2 selected</span>
-          </div>
-          {selectionStates.length > 0 && (
-            <ul className="signal-library-selection__records" aria-label="Selected records">
-              {selectionStates.map((selection) => (
-                <li key={selection.manuscriptId} data-status={selection.status}>
-                  <strong>{selection.label}</strong>
-                  <span>{availabilityLabel(selection.status)}</span>
-                  {selection.status === "error" && (
-                    <button
-                      type="button"
-                      className="signal-library-selection__retry"
-                      aria-label={`Try availability check again for ${selection.label}`}
-                      onClick={selection.retry}
-                    >
-                      Try again
-                    </button>
-                  )}
-                </li>
-              ))}
-            </ul>
-          )}
-          <div className="signal-library-selection__actions">
-            <Button type="button" variant="quiet" disabled={!selected.length} onClick={() => setSelected([])}>
-              Clear
-            </Button>
-            <Button
-              type="button"
-              variant="brand"
-              disabled={!canCompare}
-              onClick={() => navigate(`/library/compare?a=${selected[0]}&b=${selected[1]}`)}
-            >
-              Compare records
-            </Button>
-          </div>
-        </aside>
-      )}
+
+
     </div>
   );
 }

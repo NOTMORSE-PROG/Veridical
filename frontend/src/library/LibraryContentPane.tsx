@@ -1,23 +1,12 @@
-// V-066 (screen 4w): the content half of a single library record --
-// reused component-for-component by both Detail (one column) and Compare
-// (two columns), per design review's spec §6/§8. Three modes, decided by
-// data the caller already has (`isOwn`) or that each fetch honestly
-// reports (`available`/`purged_at`), never guessed:
-//
-// - own, not purged: the SAME `PdfPane`/`DocxPane` V-065's report viewer
-//   uses, pointed at the manuscript-scoped (not check-run-scoped) document
-//   endpoints, with no flags overlay -- a library record isn't a check run.
-// - not own, not purged: the bounded excerpt (Q2's ruling) -- never the
-//   full document, never a live read of the other account's file.
-// - purged (either ownership): one honest notice, no content pane at all.
+// V-079: one full PDF/DOCX reader for all authorized Library records.
+// Authentication and record visibility are checked by the Library API.
 import { BASE_URL } from "../api/client";
 import type { ManuscriptViewerOut } from "../api/types";
-import { PassageBlock } from "../document/PassagePairPanel";
 import { PdfPane } from "../document/PdfPane";
 import { DocxPane } from "../document/DocxPane";
-import { useLibraryExcerpt, useLibraryParagraphs } from "./useLibrary";
+import { useLibraryParagraphs } from "./useLibrary";
 
-export interface OwnDocumentState {
+export interface LibraryDocumentState {
   viewer: ManuscriptViewerOut | undefined;
   isPending: boolean;
   isError: boolean;
@@ -49,12 +38,12 @@ function PurgedNotice({ text }: { text: string }) {
   );
 }
 
-function OwnDocumentPane({
+function FullDocumentPane({
   manuscriptId,
   documentState,
 }: {
   manuscriptId: number;
-  documentState: OwnDocumentState;
+  documentState: LibraryDocumentState;
 }) {
   const { viewer, isPending, isError, onRetry } = documentState;
   const isDocx = viewer?.available === true && viewer.source_format === "docx";
@@ -109,81 +98,15 @@ function OwnDocumentPane({
   return <PurgedNotice text="This manuscript's source file format isn't supported for viewing." />;
 }
 
-function ExcerptPane({ manuscriptId }: { manuscriptId: number }) {
-  const { data, isPending, isError, refetch } = useLibraryExcerpt(manuscriptId, true);
-
-  if (isPending) return <SpinnerNote>Loading excerpt.</SpinnerNote>;
-  if (isError) {
-    return (
-      <div className="p-4">
-        <ErrorNote>This excerpt couldn't be loaded.</ErrorNote>
-        <button type="button" onClick={() => refetch()} className="mt-2 text-sm font-medium text-link underline">
-          Try again
-        </button>
-      </div>
-    );
-  }
-  if (data.purged_at) return <PurgedNotice text={data.limitations} />;
-
-  return (
-    // first-time-user review finding (V-066 review, 2026-08-23): this pane used to have
-    // no explicit height of its own, so `overflow-y-auto` never actually
-    // engaged -- it just grew to its full content height inside Compare's
-    // two-column grid, which is what produced the overlap (see
-    // LibraryCompare.tsx's own fix note). `h-full min-h-0` gives it the
-    // bounded height its `overflow-y-auto` needs to mean anything.
-    <div className="flex h-full min-h-0 flex-col gap-4 overflow-y-auto p-4">
-      <p className="rounded-md bg-status-neutral-bg px-3 py-2 text-sm text-status-neutral-text">
-        This manuscript belongs to another instructor's account. VERIDICAL shows a bounded excerpt
-        from each chapter, not the full document, to protect that instructor's manuscript. This is
-        the same limit VERIDICAL applies everywhere it compares your manuscript against the shared
-        library.
-      </p>
-      {data.chapters.length === 0 && (
-        <p className="text-sm text-ink-secondary">No chapter excerpt is available for this manuscript.</p>
-      )}
-      {data.chapters.map((chapter) => (
-        <div key={chapter.chapter_index} className="flex flex-col gap-1.5">
-          <h3 className="text-sm font-bold text-ink">{chapter.title}</h3>
-          {chapter.excerpt ? (
-            <>
-              <PassageBlock
-                label="Stored excerpt"
-                before={chapter.context_before}
-                excerpt={chapter.excerpt}
-                after={chapter.context_after}
-              />
-              <p className="text-xs text-ink-tertiary">Stored excerpt, not the full document.</p>
-            </>
-          ) : (
-            <p className="text-xs text-ink-tertiary">No excerpt available for this chapter.</p>
-          )}
-        </div>
-      ))}
-      <p className="text-xs text-ink-tertiary">{data.limitations}</p>
-    </div>
-  );
-}
-
 export function LibraryContentPane({
   manuscriptId,
-  isOwn,
-  ownDocument,
+  documentState,
 }: {
   manuscriptId: number;
-  isOwn: boolean;
-  ownDocument?: OwnDocumentState;
+  documentState: LibraryDocumentState;
 }) {
-  if (isOwn && !ownDocument) {
-    return <ErrorNote>This manuscript's availability could not be checked.</ErrorNote>;
-  }
-  if (isOwn && ownDocument?.removedAt) {
+  if (documentState.removedAt) {
     return <PurgedNotice text="This manuscript is no longer stored in the Library." />;
   }
-
-  return isOwn ? (
-    <OwnDocumentPane manuscriptId={manuscriptId} documentState={ownDocument!} />
-  ) : (
-    <ExcerptPane manuscriptId={manuscriptId} />
-  );
+  return <FullDocumentPane manuscriptId={manuscriptId} documentState={documentState} />;
 }

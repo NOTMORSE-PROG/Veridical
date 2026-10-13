@@ -190,7 +190,7 @@ if _cors_origins:
 async def add_public_share_response_headers(
     request: Request, call_next: RequestResponseEndpoint
 ) -> Response:
-    """Prevent storage or indexing of bearer-token report responses.
+    """Prevent caching of Library files and indexing of bearer-token reports.
 
     Starlette's user middleware wraps its handled-exception middleware, so
     this applies after successful routing and the global VeridicalError
@@ -199,17 +199,22 @@ async def add_public_share_response_headers(
     failures to the same generic body after logging the traceback.
     """
     is_public_share = request.url.path.startswith(PUBLIC_SHARE_PATH_PREFIX)
+    # V-079: active Library files are shared with authenticated instructors.
+    # Membership/auth errors must be just as uncacheable as successful reads.
+    is_library = request.url.path == "/library" or request.url.path.startswith("/library/")
     try:
         response = await call_next(request)
     except Exception:  # noqa: BLE001 -- this boundary must also harden generic 500s
-        if not is_public_share:
+        if not is_public_share and not is_library:
             raise
-        _logger.exception("Unhandled failure while serving a public shared report.")
+        _logger.exception("Unhandled failure while serving a protected document response.")
         response = PlainTextResponse(PUBLIC_SHARE_SERVER_ERROR_BODY, status_code=500)
 
     if is_public_share:
         for name, value in PUBLIC_SHARE_RESPONSE_HEADERS:
             response.headers[name] = value
+    if is_library:
+        response.headers["Cache-Control"] = "private, no-store"
     return response
 
 

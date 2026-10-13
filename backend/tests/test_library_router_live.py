@@ -376,7 +376,9 @@ async def _make_legacy_entry(url: str, manuscript_id: int) -> None:
         await engine.dispose()
 
 
-def test_other_instructors_see_active_entries_redacted_and_nothing_else(client, api_scratch_url):
+def test_other_instructors_can_read_active_files_but_not_private_uploads_or_write(
+    client, api_scratch_url, monkeypatch
+):
     _login(client, OWNER)
     active = _submit(
         client,
@@ -413,20 +415,96 @@ def test_other_instructors_see_active_entries_redacted_and_nothing_else(client, 
     assert client.get("/library", params={"search": "Secret"}).json()["total"] == 0
 
     assert client.get(f"/library/{active}").status_code == 200
-    assert client.get(f"/library/{active}/excerpt").status_code == 200
+    excerpt = client.get(f"/library/{active}/excerpt")
+    assert excerpt.status_code == 200
+    assert "open the full manuscript" in excerpt.json()["limitations"]
+    assert "never shows another" not in excerpt.json()["limitations"]
     assert client.get(f"/library/{failed}").status_code == 404
     assert client.get(f"/library/{failed}/excerpt").status_code == 404
+    viewer = client.get(f"/library/{active}/document")
+    assert viewer.status_code == 200, viewer.text
+    assert viewer.json()["available"] is True
+    assert viewer.json()["original_filename"] is None
+    file_response = client.get(f"/library/{active}/document/file")
+    assert file_response.status_code == 200
+    assert file_response.content == _pdf()
+    assert file_response.headers["Cache-Control"] == "private, no-store"
+    import app.library.service as library_service
+
+    storage_factory = library_service.get_storage
+    storage_threads = []
+
+    def checked_storage(settings):
+        # A cold storage client may block during credential discovery. The
+        # download must construct it on a worker, outside any running loop.
+        with pytest.raises(RuntimeError, match="no running event loop"):
+            asyncio.get_running_loop()
+        storage_threads.append(True)
+        return storage_factory(settings)
+
+    monkeypatch.setattr(library_service, "get_storage", checked_storage)
+    original = client.get(f"/library/{active}/document/original")
+    assert original.status_code == 200 and original.content == _pdf()
+    assert storage_threads
+    assert "secret-file-name" not in original.headers.get("Content-Disposition", "")
     for method, path, kwargs in (
         ("patch", f"/library/{active}", {"json": {"title": "mine now"}}),
         ("post", f"/library/{active}/remove", {}),
         ("post", f"/library/{active}/decision", {"json": {"action": "skip"}}),
-        ("get", f"/library/{active}/document", {}),
-        ("get", f"/library/{active}/document/file", {}),
-        ("get", f"/library/{active}/document/paragraphs", {}),
+        ("get", f"/library/{failed}/document", {}),
+        ("get", f"/library/{failed}/document/file", {}),
+        ("get", f"/library/{failed}/document/paragraphs", {}),
+        ("get", f"/library/{failed}/document/original", {}),
     ):
         r = getattr(client, method)(path, **kwargs)
         assert r.status_code == 404, (method, path, r.status_code, r.text)
     assert _corpus_rows(api_scratch_url, active) > 0
+
+
+def test_other_instructors_can_read_full_docx_text_and_lose_access_after_removal(client):
+    _login(client, OWNER)
+    item = _submit(client, (FIXTURES / "native.docx").read_bytes(), "source.docx")["item"]
+    mid = item["manuscript_id"]
+    expected = client.get(f"/library/{mid}/document/paragraphs").json()
+    assert expected["paragraphs"]
+    _login(client, STRANGER)
+    viewer = client.get(f"/library/{mid}/document").json()
+    assert viewer["source_format"] == "docx" and viewer["available"] is True
+    assert viewer["original_filename"] is None
+    response = client.get(f"/library/{mid}/document/paragraphs")
+    assert response.status_code == 200 and response.json() == expected
+    assert response.headers["Cache-Control"] == "private, no-store"
+    original = client.get(f"/library/{mid}/document/original")
+    assert original.status_code == 200
+    assert original.content == (FIXTURES / "native.docx").read_bytes()
+    assert original.headers["Content-Type"].startswith(
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    )
+    _login(client, OWNER)
+    assert client.post(f"/library/{mid}/remove").status_code == 200
+    _login(client, STRANGER)
+    for suffix in ("document", "document/file", "document/paragraphs", "document/original"):
+        response = client.get(f"/library/{mid}/{suffix}")
+        assert response.status_code == 404
+        assert response.headers["Cache-Control"] == "private, no-store"
+
+
+def test_shared_reading_never_exposes_non_library_uploads_or_anonymous_files(client):
+    _login(client, OWNER)
+    checked = client.post(
+        "/manuscripts/ingest", files={"file": ("private-check.pdf", _pdf(), "application/pdf")}
+    )
+    assert checked.status_code == 200
+    mid = checked.json()["manuscript_id"]
+    _login(client, STRANGER)
+    for suffix in ("document", "document/file", "document/paragraphs", "document/original"):
+        response = client.get(f"/library/{mid}/{suffix}")
+        assert response.status_code == 404
+    assert client.post("/auth/logout").status_code in (200, 204)
+    for suffix in ("document", "document/file", "document/paragraphs", "document/original"):
+        response = client.get(f"/library/{mid}/{suffix}")
+        assert response.status_code == 401
+        assert response.headers["Cache-Control"] == "private, no-store"
 
 
 def test_duplicate_detection_never_crosses_accounts(client):
