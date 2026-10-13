@@ -4405,15 +4405,7 @@
     font-size: var(--signal-type-label);
   }
 
-  @media (max-width: 767px) {
-    .signal-library-pending__row .signal-button,
-    .signal-library-batch__actions .signal-button,
-    .signal-library-header .signal-button {
-      width: 100%;
-      min-height: var(--signal-control-height-coarse);
-      justify-content: center;
-    }
-  }
+
 
   .signal-library-controls {
     display: grid;
@@ -4913,33 +4905,9 @@
     box-shadow: var(--signal-shadow-raised);
   }
 
-  .signal-library-tabs {
-    display: none;
-    border-block-end: var(--signal-border-hairline) solid var(--color-signal-border);
-    background: var(--color-signal-surface);
-  }
-
-  .signal-library-tabs button {
-    min-height: var(--signal-control-height);
-    flex: 1;
-    border: 0;
-    border-block-end: var(--signal-border-emphasis) solid transparent;
-    padding: var(--signal-space-3);
-    background: transparent;
-    color: var(--color-signal-ink-secondary);
-    font: inherit;
-    font-weight: var(--signal-weight-semibold);
-    cursor: pointer;
-  }
-
-  .signal-library-tabs button[aria-selected="true"] {
-    border-block-end-color: var(--color-signal-brand-active);
-    color: var(--color-signal-ink);
-  }
-
   .signal-library-workbench__grid {
     display: grid;
-    height: var(--signal-document-workbench-height);
+    height: max(var(--signal-library-workbench-min-height), var(--signal-document-workbench-height));
     grid-template-columns: minmax(0, 1fr) var(--signal-inspector-width);
   }
 
@@ -4980,7 +4948,7 @@
 
   .signal-library-compare-grid {
     display: grid;
-    height: var(--signal-document-workbench-height);
+    height: max(var(--signal-library-workbench-min-height), var(--signal-document-workbench-height));
     grid-template-columns: repeat(2, minmax(0, 1fr));
     overflow: hidden;
     border: var(--signal-border-hairline) solid var(--color-signal-border);
@@ -5482,121 +5450,9 @@
   }
 
   @media (max-width: 767px) {
-    .signal-library-controls__fields {
-      grid-template-areas: "search" "hint" "program";
-    }
-
-    .signal-library-header,
-    .signal-library-detail__header,
-    .signal-library-compare__header,
-    .signal-library-compare-intro,
-    .signal-library-selection,
     .signal-audit-context {
       align-items: stretch;
       flex-direction: column;
-    }
-
-    .signal-library-controls,
-    .signal-library-metadata {
-      grid-template-columns: minmax(0, 1fr);
-    }
-
-    .signal-library-count {
-      border-inline-start: 0;
-      border-block-start: var(--signal-border-emphasis) solid var(--color-signal-brand);
-      padding-block-start: var(--signal-space-3);
-      padding-inline-start: 0;
-    }
-
-    .signal-library-card__topline,
-    .signal-library-card__actions {
-      align-items: stretch;
-      flex-direction: column;
-    }
-
-    .signal-library-card__actions > *,
-    .signal-library-duplicate__actions > *,
-    .signal-library-selection > div:last-child,
-    .signal-library-selection .signal-button {
-      width: 100%;
-    }
-
-    .signal-library-selection > div:last-child {
-      display: grid;
-    }
-
-    .signal-library-workbench,
-    .signal-library-compare-grid {
-      border-inline: 0;
-      border-radius: 0;
-    }
-
-    .signal-library-tabs {
-      display: flex;
-    }
-
-    .signal-library-workbench__grid,
-    .signal-library-compare-grid {
-      display: block;
-      height: var(--signal-document-workbench-height);
-    }
-
-    .signal-library-source,
-    .signal-library-record,
-    .signal-library-compare-pane {
-      display: none;
-      height: 100%;
-      border: 0;
-    }
-
-    .signal-library-source[data-active="true"],
-    .signal-library-record[data-active="true"],
-    .signal-library-compare-pane[data-active="true"] {
-      display: flex;
-    }
-
-    .signal-library-source[data-active="true"] {
-      display: block;
-    }
-
-    /* BUG-191: the desktop-only `min-block-size` reservation above exists
-       to guarantee scroll distance for a `position: sticky` panel on a
-       short page -- irrelevant here, since this breakpoint already uses
-       `position: fixed` (viewport-anchored regardless of page length),
-       and would otherwise force unnecessary empty space under a short
-       phone-width library list. */
-    .signal-library[data-compare="true"] .signal-library-results {
-      min-block-size: 0;
-    }
-
-    .signal-library-selection {
-      position: fixed;
-      inset-inline: var(--signal-space-4);
-      inset-block-end: calc(var(--signal-phone-nav-height) + var(--signal-space-2));
-      /* BUG-191: the desktop panel wraps its flex children intentionally.
-         After the phone layout switches that flex axis to a column, the
-         inherited wrapping moved the action group into an off-screen
-         second column when the panel hit its height cap. Keep one column;
-         the bounded panel scrolls vertically to the actions instead. */
-      flex-wrap: nowrap;
-      max-block-size: calc(100dvh - var(--signal-phone-header-height) - var(--signal-phone-nav-height) - var(--signal-space-4));
-      overflow-y: auto;
-    }
-
-    .signal-library-selection__records {
-      width: 100%;
-      flex-basis: auto;
-      grid-template-columns: minmax(0, 1fr);
-    }
-
-    .signal-library-selection__summary {
-      flex-basis: auto;
-    }
-
-    .signal-library[data-compare="true"] {
-      padding-block-end: calc(
-        var(--signal-phone-nav-height) + var(--signal-library-selection-mobile-reserve)
-      );
     }
 
     .signal-document-viewer {
@@ -6601,13 +6457,7 @@
     grid-template-columns: minmax(0, 1fr) auto auto;
   }
 
-  @media (max-width: 767px) {
-    :root:has(.signal-library[data-compare="true"]) {
-      scroll-padding-block-end: calc(
-        var(--signal-phone-nav-height) + var(--signal-library-selection-mobile-reserve)
-      );
-    }
-  }
+
 
 
   /* V-077 newcomer pass: the details panel is a flex column; its children
@@ -6630,55 +6480,9 @@
     }
   }
 
-  @media (max-width: 1199px) {
-    .signal-library-tabs {
-      display: flex;
-    }
 
-    .signal-library-workbench__grid,
-    .signal-library-compare-grid {
-      display: block;
-      height: auto;
-    }
 
-    .signal-library-workbench .signal-library-source,
-    .signal-library-workbench .signal-library-record,
-    .signal-library-compare-grid .signal-library-compare-pane {
-      display: none;
-      height: auto;
-    }
 
-    .signal-library-workbench .signal-library-source[data-active="true"] {
-      display: block;
-    }
-
-    .signal-library-workbench .signal-library-record[data-active="true"] {
-      display: flex;
-      border-inline-start: 0;
-    }
-
-    .signal-library-compare-grid .signal-library-compare-pane[data-active="true"] {
-      display: flex;
-    }
-
-    .signal-library-source .signal-document-scroll,
-    .signal-library-compare-pane__source .signal-document-scroll {
-      flex: none;
-      block-size: var(--signal-library-reader-height);
-    }
-  }
-
-  @media (max-width: 767px) {
-    .signal-library-controls__fields,
-    .signal-library-metadata {
-      grid-template-columns: minmax(0, 1fr);
-    }
-
-    .signal-library-results-header > .signal-button {
-      width: 100%;
-      justify-content: center;
-    }
-  }
 
 }
 

@@ -337,9 +337,7 @@
   --signal-case-rail-width: 18.5rem;
   --signal-inspector-width: 22.5rem;
   --signal-library-card-min-width: 20rem;
-  /* Full-width Library reading keeps usable paper space on short screens;
-     the toolbar and comparison header retain their own natural height. */
-  --signal-library-reader-height: max(20rem, 60dvh);
+  --signal-library-workbench-min-height: 45rem;
   --signal-document-toolbar-height: 3.5rem;
   --signal-document-workbench-height: calc(100dvh - var(--signal-workspace-bar-height) - var(--signal-space-8));
   --signal-paper-max-inline-size: 52rem;

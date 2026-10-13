@@ -26,9 +26,6 @@ export const LIBRARY_STATUS_POLL_MS = 3000;
 export const LIBRARY_PENDING_PAGE_SIZE = 100;
 // V-077: Library page size; the backend caps it at 200.
 export const LIBRARY_PAGE_SIZE = 50;
-// V-079: full-width manuscript/details and comparison tabs at tablet widths
-// (mirrors the 1199px Library breakpoint in ui/signal.css).
-export const LIBRARY_TABS_MEDIA_QUERY = "(max-width: 1199px)";
 export const REVIEW_DESK_PAGE_SIZE = 20;
 export const FLAG_LIST_INITIAL_COUNT = 8;
 export const FLAG_LIST_BATCH_COUNT = 8;

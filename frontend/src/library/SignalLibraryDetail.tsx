@@ -2,18 +2,16 @@
 // manuscript and its details, never a verdict: no report link, readiness,
 // or score. The owner can edit details, resolve a possible duplicate, and
 // remove the record from the Library.
-import { useEffect, useId, useLayoutEffect, useRef, useState, type KeyboardEvent } from "react";
+import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { Link, useBlocker, useNavigate, useParams } from "react-router";
 import { ApiError, BASE_URL } from "../api/client";
 import type { LibraryItemOut } from "../api/types";
-import { LIBRARY_TABS_MEDIA_QUERY } from "../config/ui";
 import { usePrograms } from "../dashboard/useDashboard";
 import { useLibraryRouteFocus } from "./useLibraryRouteFocus";
 import { ActionLink } from "../ui/ActionLink";
 import { Alert } from "../ui/Alert";
 import { Button } from "../ui/Button";
 import { Dialog } from "../ui/Dialog";
-import { useMediaQuery } from "../ui/useMediaQuery";
 import { LibraryContentPane, type LibraryDocumentState } from "./LibraryContentPane";
 import { AuthorFields } from "./SignalLibraryAdd";
 import { formatLibraryDate, libraryRecordName, normalizeSchoolYear } from "./libraryFormat";
@@ -25,12 +23,6 @@ import {
   useRemoveLibraryEntry,
   useUpdateLibraryEntry,
 } from "./useLibrary";
-
-type TabKey = "source" | "details";
-const TABS: { key: TabKey; label: string }[] = [
-  { key: "source", label: "Manuscript" },
-  { key: "details", label: "Record details" },
-];
 
 function headerIntro(item: LibraryItemOut): string {
   if (!item.is_own) return "Another instructor's record. You can read the manuscript; its identifying record fields are hidden.";
@@ -325,9 +317,6 @@ export function SignalLibraryDetailPage() {
   const headingRef = useRef<HTMLHeadingElement>(null);
   const removeButtonRef = useRef<HTMLButtonElement>(null);
   const navigate = useNavigate();
-  const tabBaseId = useId();
-  const tabbed = useMediaQuery(LIBRARY_TABS_MEDIA_QUERY, true);
-  const [activeTab, setActiveTab] = useState<TabKey>("source");
   const [confirmingRemove, setConfirmingRemove] = useState(false);
   const [removeError, setRemoveError] = useState<string | null>(null);
   const [deciding, setDeciding] = useState<"add" | "skip" | null>(null);
@@ -385,17 +374,6 @@ export function SignalLibraryDetailPage() {
     } finally {
       setDeciding(null);
     }
-  }
-
-  function onTabKeyDown(event: KeyboardEvent<HTMLButtonElement>, index: number) {
-    let nextIndex = index;
-    if (event.key === "ArrowRight") nextIndex = (index + 1) % TABS.length;
-    else if (event.key === "ArrowLeft") nextIndex = (index - 1 + TABS.length) % TABS.length;
-    else if (event.key === "Home") nextIndex = 0;
-    else if (event.key === "End") nextIndex = TABS.length - 1;
-    else return;
-    event.preventDefault();
-    document.getElementById(`${tabBaseId}-tab-${TABS[nextIndex].key}`)?.focus();
   }
 
   const isSubmission = item?.source === "library_submission";
@@ -481,33 +459,11 @@ export function SignalLibraryDetailPage() {
             />
           )}
           <section className="signal-library-workbench">
-            {tabbed && (
-            <div className="signal-library-tabs" role="tablist" aria-label="Library record view">
-              {TABS.map((tab, index) => (
-                <button
-                  key={tab.key}
-                  id={`${tabBaseId}-tab-${tab.key}`}
-                  type="button"
-                  role="tab"
-                  aria-selected={activeTab === tab.key}
-                  aria-controls={`${tabBaseId}-panel-${tab.key}`}
-                  tabIndex={activeTab === tab.key ? 0 : -1}
-                  onClick={() => setActiveTab(tab.key)}
-                  onKeyDown={(event) => onTabKeyDown(event, index)}
-                >
-                  {tab.label}
-                </button>
-              ))}
-            </div>
-            )}
             <div className="signal-library-workbench__grid">
               <div
-                id={`${tabBaseId}-panel-source`}
-                role={tabbed ? "tabpanel" : "region"}
-                aria-labelledby={tabbed ? `${tabBaseId}-tab-source` : undefined}
-                aria-label={tabbed ? undefined : "Manuscript"}
+                role="region"
+                aria-label="Manuscript"
                 className="signal-library-source"
-                data-active={activeTab === "source"}
               >
                 <LibraryContentPane
                   manuscriptId={manuscriptId}
@@ -515,12 +471,9 @@ export function SignalLibraryDetailPage() {
                 />
               </div>
               <aside
-                id={`${tabBaseId}-panel-details`}
-                role={tabbed ? "tabpanel" : "region"}
-                aria-labelledby={tabbed ? `${tabBaseId}-tab-details` : undefined}
-                aria-label={tabbed ? undefined : "Record details"}
+                role="region"
+                aria-label="Record details"
                 className="signal-library-record"
-                data-active={activeTab === "details"}
               >
                 {item.is_own ? <OwnDetails item={item} /> : <ForeignDetails item={item} />}
               </aside>

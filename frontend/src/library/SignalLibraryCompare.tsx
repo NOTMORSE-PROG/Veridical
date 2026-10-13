@@ -1,4 +1,4 @@
-import { useId, useRef, useState, type KeyboardEvent } from "react";
+import { useRef, useState } from "react";
 import { Link, useLocation, useNavigate, useSearchParams } from "react-router";
 import { useLibraryRouteFocus } from "./useLibraryRouteFocus";
 import { ActionLink } from "../ui/ActionLink";
@@ -6,8 +6,6 @@ import { ApiError } from "../api/client";
 import type { LibraryItemOut } from "../api/types";
 import { Alert } from "../ui/Alert";
 import { Button } from "../ui/Button";
-import { LIBRARY_TABS_MEDIA_QUERY } from "../config/ui";
-import { useMediaQuery } from "../ui/useMediaQuery";
 import { Dialog } from "../ui/Dialog";
 import { LibraryContentPane, type LibraryDocumentState } from "./LibraryContentPane";
 import { libraryRecordName } from "./libraryFormat";
@@ -18,9 +16,7 @@ function ownershipNote(aOwn: boolean, bOwn: boolean): string {
   return "You can read both manuscripts in full. Identifying record fields from other instructors are hidden; the files may contain those details.";
 }
 
-function ComparisonPane({
-  manuscriptId, active, tabId, panelId, tabbed,
-}: { manuscriptId: number; active: boolean; tabId: string; panelId: string; tabbed: boolean }) {
+function ComparisonPane({ manuscriptId }: { manuscriptId: number }) {
   const { data: item, isPending, isError, refetch } = useLibraryItem(manuscriptId);
   const documentQuery = useLibraryDocument(
     manuscriptId,
@@ -34,20 +30,15 @@ function ComparisonPane({
     onRetry: () => void documentQuery.refetch(),
   };
 
-  const panelProps = {
-    id: panelId,
-    role: tabbed ? "tabpanel" : "region",
-    "aria-labelledby": tabbed ? tabId : undefined,
-    "aria-label": tabbed ? undefined : "Manuscript " + manuscriptId,
-  };
+  const panelProps = { role: "region", "aria-label": "Manuscript " + manuscriptId };
   if (isPending) return (
-    <section {...panelProps} className="signal-library-compare-pane signal-library-state" data-active={active}>
+    <section {...panelProps} className="signal-library-compare-pane signal-library-state">
       <p role="status" aria-live="polite">Loading comparison record.</p>
     </section>
   );
   if (isError || !item) {
     return (
-      <section {...panelProps} className="signal-library-compare-pane signal-library-state" data-active={active}>
+      <section {...panelProps} className="signal-library-compare-pane signal-library-state">
         <strong role="alert">This comparison record could not be loaded.</strong>
         <Button type="button" variant="secondary" onClick={() => refetch()}>Try again</Button>
       </section>
@@ -58,7 +49,6 @@ function ComparisonPane({
     <section
       {...panelProps}
       className="signal-library-compare-pane"
-      data-active={active}
     >
       <header>
         <span className="signal-library-ownership">
@@ -147,18 +137,6 @@ export function SignalLibraryComparePage() {
   const collectionSearch = (location.state as { collectionSearch?: string } | null)?.collectionSearch ?? "";
   const collectionRoute = { pathname: "/library", search: collectionSearch };
   const collectionState = { comparisonSelection: a && b ? [a, b] : [] };
-  const [active, setActive] = useState<"a" | "b">("a");
-  const tabsId = useId();
-  const tabbed = useMediaQuery(LIBRARY_TABS_MEDIA_QUERY, true);
-  function moveTab(event: KeyboardEvent<HTMLButtonElement>, current: "a" | "b") {
-    let next: "a" | "b";
-    if (event.key === "ArrowRight" || event.key === "ArrowLeft") next = current === "a" ? "b" : "a";
-    else if (event.key === "Home") next = "a";
-    else if (event.key === "End") next = "b";
-    else return;
-    event.preventDefault();
-    document.getElementById(tabsId + "-tab-" + next)?.focus();
-  }
   const headingRef = useRef<HTMLHeadingElement>(null);
   useLibraryRouteFocus("Compare records - VERIDICAL", headingRef);
   const itemA = useLibraryItem(a);
@@ -205,28 +183,9 @@ export function SignalLibraryComparePage() {
               <p>{ownershipNote(itemA.data.is_own, itemB.data.is_own)}</p>
             </aside>
           )}
-          {tabbed && (
-            <div className="signal-library-tabs" role="tablist" aria-label="Comparison manuscript">
-              {(["a", "b"] as const).map((key) => (
-                <button
-                  key={key}
-                  id={tabsId + "-tab-" + key}
-                  type="button"
-                  role="tab"
-                  aria-selected={active === key}
-                  aria-controls={tabsId + "-panel-" + key}
-                  tabIndex={active === key ? 0 : -1}
-                  onClick={() => setActive(key)}
-                  onKeyDown={(event) => moveTab(event, key)}
-                >
-                  {key === "a" ? "First record" : "Second record"}
-                </button>
-              ))}
-            </div>
-          )}
           <div className="signal-library-compare-grid">
-            <ComparisonPane manuscriptId={a} active={active === "a"} tabId={tabsId + "-tab-a"} panelId={tabsId + "-panel-a"} tabbed={tabbed} />
-            <ComparisonPane manuscriptId={b} active={active === "b"} tabId={tabsId + "-tab-b"} panelId={tabsId + "-panel-b"} tabbed={tabbed} />
+            <ComparisonPane manuscriptId={a} />
+            <ComparisonPane manuscriptId={b} />
           </div>
         </div>
       )}
