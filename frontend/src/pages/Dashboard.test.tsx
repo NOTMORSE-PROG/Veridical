@@ -525,7 +525,7 @@ describe("DashboardPage", () => {
     // name as the modal's submit button.
     fireEvent.click(within(dialog).getByRole("button", { name: "Upload manuscript" }));
 
-    await screen.findByText("Uploaded. 8 page(s) parsed, 3 citation(s) found.");
+    await screen.findByText("8 pages parsed. 3 reference records extracted.");
     fireEvent.click(screen.getByRole("button", { name: "Start a check with this manuscript" }));
 
     // Lands in New Check with the just-uploaded manuscript preselected,

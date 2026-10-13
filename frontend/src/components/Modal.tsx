@@ -14,11 +14,9 @@ interface ModalProps {
   children?: ReactNode;
   footer?: ReactNode;
   onClose?: () => void;
-  // V-041: RerunModal's picker + estimate + per-item progress list needs
-  // more room than every other modal's fixed 512px. Default "md" is
-  // byte-identical to what every existing consumer already renders --
-  // opting into "lg" (672px, the same width Progress.tsx's own page
-  // wrapper already uses) is a per-modal choice, not a system default.
+  className?: string;
+  // Substantial tasks opt into the wide dialog token; short confirmations
+  // keep the regular dialog token. Both widths retain their viewport cap.
   size?: "md" | "lg";
 }
 
@@ -54,7 +52,7 @@ export function ModalBackdrop({ children }: { children: ReactNode }) {
   );
 }
 
-export function Modal({ title, children, footer, onClose, size = "md" }: ModalProps) {
+export function Modal({ title, children, footer, onClose, size = "md", className }: ModalProps) {
   const titleId = useId();
   const dialogRef = useRef<HTMLDivElement>(null);
   const previouslyFocused = useRef<HTMLElement | null>(null);
@@ -132,6 +130,7 @@ export function Modal({ title, children, footer, onClose, size = "md" }: ModalPr
       className={cx(
         "signal-task-sheet motion-safe:animate-dialog-in text-sm",
         size === "lg" ? "signal-task-sheet--large" : "signal-task-sheet--medium",
+        className,
       )}
     >
       <div className="signal-task-sheet__header">

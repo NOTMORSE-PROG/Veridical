@@ -25,6 +25,8 @@ describe("GroupProposalDialog", () => {
       <GroupProposalDialog manuscriptId={7} onClose={() => {}} onDone={() => {}} />,
     );
     expect(await screen.findByLabelText("Group name")).toHaveValue("VERIDICAL");
+    expect(screen.getByRole("button", { name: "Confirm group" }).closest(".signal-task-sheet__footer"))
+      .toBeInTheDocument();
   });
 
   it("shows an honest error state when the proposal can't be loaded", async () => {

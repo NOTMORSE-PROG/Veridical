@@ -4,7 +4,8 @@
 // GroupProposalDialog (reopened later, AC6) render the byte-identical
 // form -- "dismiss now, decide later" only stays honest if both paths
 // show the exact same thing.
-import { useEffect, useId, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import { ApiError } from "../api/client";
 import { AnchorPill } from "../components/AnchorPill";
 import { useGroupCollisionCheck, usePrograms } from "../dashboard/useDashboard";
@@ -46,6 +47,13 @@ interface MemberField {
 }
 
 let memberFieldSeq = 0;
+
+/** V-080: the form keeps its handlers while a task sheet can place its one
+ * action set in a footer outside the scrolling content. */
+function ProposalActions({ target, children }: { target?: HTMLElement | null; children: ReactNode }) {
+  const actions = <div className="signal-group-proposal__actions">{children}</div>;
+  return target ? createPortal(actions, target) : actions;
+}
 function newMemberField(value: string, anchor: string | null): MemberField {
   memberFieldSeq += 1;
   return { id: memberFieldSeq, value, anchor, edited: anchor === null };
@@ -55,14 +63,17 @@ export function GroupProposalFields({
   manuscriptId,
   proposal,
   onDone,
+  actionsTarget,
 }: {
   manuscriptId: number;
   proposal: TitlePageProposal;
   /** `null` = the instructor skipped without confirming anything. */
   onDone: (result: ConfirmGroupResponse | null) => void;
+  actionsTarget?: HTMLElement | null;
 }) {
   const confirm = useConfirmGroup(manuscriptId);
   const { data: programs } = usePrograms();
+  const programFieldId = useId();
 
   const [groupName, setGroupName] = useState(proposal.short_name?.value ?? "");
   const [groupNameEdited, setGroupNameEdited] = useState(proposal.short_name === null);
@@ -234,21 +245,21 @@ export function GroupProposalFields({
             </>
           )}
         </div>
-        <div className="flex justify-end">
+        <ProposalActions target={actionsTarget}>
           <button
             type="button"
             onClick={() => onDone(result)}
-            className="flex h-11 items-center justify-center rounded-md bg-action px-4 text-sm font-bold text-on-action hover:bg-action-hover sm:h-9"
+            className="flex h-11 items-center justify-center rounded-md bg-action px-4 text-sm font-bold text-on-action hover:bg-action-hover"
           >
             Done
           </button>
-        </div>
+        </ProposalActions>
       </div>
     );
   }
 
   return (
-    <div className="flex flex-col gap-4">
+    <div className="signal-group-proposal">
       {proposal.extraction_failed ? (
         <p role="status" className="rounded-md bg-status-caution-bg px-3 py-2 text-sm text-status-caution-text">
           Couldn't read the title page. This can happen with a scanned image with no extractable
@@ -268,47 +279,84 @@ export function GroupProposalFields({
         </p>
       )}
 
-      <div className="flex flex-col gap-1.5">
-        <label htmlFor={groupNameId} className="text-sm font-medium text-ink">
-          Group name
-        </label>
-        <input
-          ref={groupNameRef}
-          id={groupNameId}
-          type="text"
-          value={groupName}
-          maxLength={200}
-          placeholder="e.g. VERIDICAL"
-          disabled={confirm.isPending}
-          aria-invalid={invalid ? "true" : undefined}
-          aria-describedby={invalid ? groupNameErrId : undefined}
-          onChange={(event) => {
-            setGroupName(event.target.value);
-            setGroupNameEdited(true);
-          }}
-          className={`min-h-11 w-full rounded-md border bg-panel px-3 text-base text-ink sm:h-9 ${invalid ? "border-2 border-status-attention-text" : "border-border-input"}`}
-        />
-        {!groupNameEdited && proposal.short_name ? (
-          <AnchorPill anchor={proposal.short_name.anchor} />
-        ) : groupNameEdited && proposal.short_name ? (
-          <span className="text-xs text-ink-tertiary italic">Edited.</span>
-        ) : !proposal.short_name ? (
-          <span className="text-xs text-ink-tertiary">Not found on the title page. Enter it yourself.</span>
-        ) : null}
-        {invalid && (
-          <p id={groupNameErrId} className="text-sm text-status-attention-text">
-            Enter a group name before confirming.
-          </p>
+      <div className="signal-group-proposal__identity" data-has-program={Boolean(programs?.length)}>
+        <div className="signal-group-proposal__field">
+          <label htmlFor={groupNameId} className="text-sm font-medium text-ink">
+            Group name
+          </label>
+          <input
+            ref={groupNameRef}
+            id={groupNameId}
+            type="text"
+            value={groupName}
+            maxLength={200}
+            placeholder="e.g. VERIDICAL"
+            disabled={confirm.isPending}
+            aria-invalid={invalid ? "true" : undefined}
+            aria-describedby={invalid ? groupNameErrId : undefined}
+            onChange={(event) => {
+              setGroupName(event.target.value);
+              setGroupNameEdited(true);
+            }}
+            className={`min-h-11 w-full rounded-md border bg-panel px-3 text-base text-ink ${invalid ? "border-2 border-status-attention-text" : "border-border-input"}`}
+          />
+          {!groupNameEdited && proposal.short_name ? (
+            <AnchorPill anchor={proposal.short_name.anchor} />
+          ) : groupNameEdited && proposal.short_name ? (
+            <span className="text-xs text-ink-tertiary italic">Edited.</span>
+          ) : !proposal.short_name ? (
+            <span className="text-xs text-ink-tertiary">Not found on the title page. Enter it yourself.</span>
+          ) : null}
+          {invalid && (
+            <p id={groupNameErrId} className="text-sm text-status-attention-text">
+              Enter a group name before confirming.
+            </p>
+          )}
+        </div>
+
+        {programs && programs.length > 0 && (
+          <div className="signal-group-proposal__field">
+            <label htmlFor={programFieldId} className="text-sm font-medium text-ink">Program</label>
+            <select
+              id={programFieldId}
+              value={programId ?? ""}
+              disabled={confirm.isPending}
+              onChange={(event) => {
+                setProgramId(event.target.value === "" ? null : Number(event.target.value));
+                setProgramEdited(true);
+              }}
+              className="min-h-11 w-full rounded-md border border-border-input bg-panel px-3 text-base text-ink"
+            >
+              <option value="">Not set</option>
+              {programs.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.name}
+                </option>
+              ))}
+            </select>
+            {programEdited ? (
+              <span className="text-xs text-ink-tertiary italic">Entered manually.</span>
+            ) : proposal.program === null ? (
+              <span className="text-xs text-ink-tertiary">Not found on the title page.</span>
+            ) : proposedProgramUnmatched ? (
+              <p className="text-xs text-ink-tertiary">
+                VERIDICAL read the degree as "{proposal.program.value}" but that isn't a program
+                you've set up. Choose one, or leave as Not set.
+              </p>
+            ) : (
+              <AnchorPill anchor={proposal.program.anchor} />
+            )}
+          </div>
         )}
       </div>
 
-      <div className="flex flex-col gap-1.5">
+      <div className="signal-group-proposal__field">
         <span className="text-sm font-medium text-ink">Group members</span>
         {members.length === 0 && (
           <p className="text-xs text-ink-tertiary">No members found on the title page.</p>
         )}
         {members.map((m, i) => (
-          <div key={m.id} className="flex items-center gap-2">
+          <div key={m.id} className="signal-group-proposal__member">
             <input
               type="text"
               value={m.value}
@@ -316,15 +364,17 @@ export function GroupProposalFields({
               disabled={confirm.isPending}
               aria-label={`Group member ${i + 1} name`}
               onChange={(event) => updateMember(m.id, event.target.value)}
-              className="h-11 flex-1 rounded-md border border-border-input bg-panel px-3 text-base text-ink sm:h-9"
+              className="h-11 rounded-md border border-border-input bg-panel px-3 text-base text-ink"
             />
-            {!m.edited && m.anchor ? (
-              <AnchorPill anchor={m.anchor} />
-            ) : (
-              <span className="text-xs whitespace-nowrap text-ink-tertiary italic">
-                {m.anchor ? "Edited" : "Added manually"}
-              </span>
-            )}
+            <span className="signal-group-proposal__member-note">
+              {!m.edited && m.anchor ? (
+                <AnchorPill anchor={m.anchor} />
+              ) : (
+                <span className="text-xs whitespace-nowrap text-ink-tertiary italic">
+                  {m.anchor ? "Edited" : "Added manually"}
+                </span>
+              )}
+            </span>
             <button
               type="button"
               ref={(el) => {
@@ -345,45 +395,11 @@ export function GroupProposalFields({
           ref={addMemberRef}
           disabled={confirm.isPending}
           onClick={addMember}
-          className="flex h-11 w-fit items-center rounded-md border border-border-input bg-panel px-3.5 text-sm font-medium text-ink hover:bg-status-neutral-bg disabled:opacity-45 sm:h-9"
+          className="flex h-11 w-fit items-center rounded-md border border-border-input bg-panel px-3.5 text-sm font-medium text-ink hover:bg-status-neutral-bg disabled:opacity-45"
         >
           Add member
         </button>
       </div>
-
-      {programs && programs.length > 0 && (
-        <div className="flex flex-col gap-1">
-          <label className="text-sm font-medium text-ink">Program</label>
-          <select
-            value={programId ?? ""}
-            disabled={confirm.isPending}
-            onChange={(event) => {
-              setProgramId(event.target.value === "" ? null : Number(event.target.value));
-              setProgramEdited(true);
-            }}
-            className="h-9 w-fit rounded-md border border-border-input bg-panel px-2.5 text-sm text-ink"
-          >
-            <option value="">Not set</option>
-            {programs.map((p) => (
-              <option key={p.id} value={p.id}>
-                {p.name}
-              </option>
-            ))}
-          </select>
-          {programEdited ? (
-            <span className="text-xs text-ink-tertiary italic">Entered manually.</span>
-          ) : proposal.program === null ? (
-            <span className="text-xs text-ink-tertiary">Not found on the title page.</span>
-          ) : proposedProgramUnmatched ? (
-            <p className="text-xs text-ink-tertiary">
-              VERIDICAL read the degree as "{proposal.program.value}" but that isn't a program
-              you've set up. Choose one, or leave as Not set.
-            </p>
-          ) : (
-            <AnchorPill anchor={proposal.program.anchor} />
-          )}
-        </div>
-      )}
 
       {proposal.adviser && (
         <p className="text-xs text-ink-tertiary">
@@ -418,12 +434,12 @@ export function GroupProposalFields({
         </p>
       )}
 
-      <div className="flex flex-wrap items-center justify-end gap-2">
+      <ProposalActions target={actionsTarget}>
         <button
           type="button"
           disabled={confirm.isPending}
           onClick={() => onDone(null)}
-          className="flex h-11 items-center justify-center rounded-md border border-border-input bg-panel px-4 text-sm font-bold text-ink hover:bg-status-neutral-bg disabled:opacity-45 sm:h-9"
+          className="flex h-11 items-center justify-center rounded-md border border-border-input bg-panel px-4 text-sm font-bold text-ink hover:bg-status-neutral-bg disabled:opacity-45"
         >
           Skip for now
         </button>
@@ -432,11 +448,11 @@ export function GroupProposalFields({
           disabled={confirm.isPending}
           aria-busy={confirm.isPending ? "true" : undefined}
           onClick={handleConfirm}
-          className="flex h-11 items-center justify-center rounded-md bg-action px-4 text-sm font-bold text-on-action hover:bg-action-hover disabled:opacity-60 sm:h-9"
+          className="flex h-11 items-center justify-center rounded-md bg-action px-4 text-sm font-bold text-on-action hover:bg-action-hover disabled:opacity-60"
         >
           {confirm.isPending ? "Confirming." : "Confirm group"}
         </button>
-      </div>
+      </ProposalActions>
     </div>
   );
 }

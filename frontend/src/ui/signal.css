@@ -1591,6 +1591,7 @@
 
   .signal-task-sheet__header {
     display: flex;
+    flex-shrink: 0;
     align-items: center;
     gap: var(--signal-rhythm-control);
     border-block-end: var(--signal-border-hairline) solid var(--color-signal-border);
@@ -1627,6 +1628,7 @@
 
   .signal-task-sheet__footer {
     display: flex;
+    flex-shrink: 0;
     flex-wrap: wrap;
     justify-content: flex-end;
     gap: var(--signal-rhythm-control);
@@ -1642,6 +1644,122 @@
 
   .signal-task-sheet__footer button[class*="bg-action"]:hover {
     background: var(--color-signal-brand-strong);
+  }
+
+  /* V-080, screen 4e: substantial upload review keeps a visible action
+     footer and a single expanded boundary for extraction coverage notes. */
+  .signal-upload-summary,
+  .signal-group-proposal {
+    min-width: 0;
+    display: grid;
+    gap: var(--signal-rhythm-dialog);
+  }
+
+  .signal-upload-summary > p,
+  .signal-group-proposal p {
+    margin: 0;
+    overflow-wrap: anywhere;
+  }
+
+  .signal-upload-summary__counts {
+    color: var(--color-signal-ink-secondary);
+    font-size: var(--signal-type-label);
+    line-height: var(--signal-line-body);
+  }
+
+  .signal-upload-summary__notes {
+    display: grid;
+    gap: var(--signal-rhythm-control);
+    border: var(--signal-border-hairline) solid var(--color-signal-border);
+    border-inline-start: var(--signal-border-brand) solid var(--color-signal-warning-text);
+    border-radius: var(--signal-radius-control);
+    padding: var(--signal-space-4);
+    background: var(--color-signal-warning-bg);
+  }
+
+  .signal-upload-summary__notes h4 {
+    margin: 0;
+    color: var(--color-signal-ink);
+    font-size: var(--signal-type-label);
+    font-weight: var(--signal-weight-semibold);
+  }
+
+  .signal-upload-summary__notes p {
+    margin: 0;
+    border-radius: 0;
+    padding: 0;
+    background: transparent;
+    overflow-wrap: anywhere;
+  }
+
+  .signal-group-proposal__identity {
+    min-width: 0;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: var(--signal-rhythm-group);
+    align-items: start;
+  }
+
+  .signal-group-proposal__identity[data-has-program="true"] {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .signal-group-proposal__field {
+    min-width: 0;
+    display: grid;
+    gap: var(--signal-rhythm-attached);
+    justify-items: start;
+  }
+
+  .signal-group-proposal__field input,
+  .signal-group-proposal__field select {
+    min-width: 0;
+    width: 100%;
+    min-height: var(--signal-control-height);
+  }
+
+  .signal-group-proposal__member {
+    width: 100%;
+    min-width: 0;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) var(--signal-control-height);
+    gap: var(--signal-rhythm-attached) var(--signal-rhythm-control);
+    align-items: start;
+  }
+
+  .signal-group-proposal__member > input {
+    grid-column: 1;
+    grid-row: 1;
+  }
+
+  .signal-group-proposal__member > button {
+    grid-column: 2;
+    grid-row: 1;
+  }
+
+  .signal-group-proposal__member-note {
+    grid-column: 1;
+    grid-row: 2;
+  }
+
+  .signal-group-proposal__actions {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: var(--signal-rhythm-control);
+  }
+
+  .signal-group-proposal__actions > button {
+    min-height: var(--signal-control-height);
+  }
+
+  .signal-task-sheet__footer .signal-group-proposal__actions button[class*="bg-action"] {
+    background: var(--color-signal-foundation-deep);
+    color: var(--color-signal-surface);
+  }
+
+  .signal-task-sheet__footer .signal-group-proposal__actions button[class*="bg-action"]:hover {
+    background: var(--color-signal-foundation);
   }
 
   .signal-live-region {
