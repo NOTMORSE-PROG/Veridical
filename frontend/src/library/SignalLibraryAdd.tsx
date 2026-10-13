@@ -526,7 +526,7 @@ export function SignalLibraryAddPage() {
               <legend>Details for this file (optional)</legend>
               <p className="signal-field-hint">
                 Leave blank to use what VERIDICAL reads from the title page. You can edit these later. Other
-                instructors never see them.
+                instructors cannot see these record fields, but they can read the manuscript.
               </p>
               <div className="signal-field">
                 <label htmlFor={titleId}>Title</label>
@@ -552,10 +552,11 @@ export function SignalLibraryAddPage() {
             <ol>
               <li>Instructors at your school can have their checks compared against it.</li>
               <li>
-                Other instructors see a short excerpt plus program, school year, and date added. Title, team
-                name, authors, and file name are withheld from them.
+                Signed-in instructors can read the full manuscript after it joins the Library. Its title, team,
+                authors, and file name are hidden in record fields; program, school year and date added are visible.
               </li>
-              <li>The excerpt is the manuscript's own text, so it may still mention student names or the title.</li>
+              <li>The full manuscript may contain names, its title, and other identifying details.</li>
+              <li>Only you can edit or remove your record. Anonymous visitors cannot open Library manuscripts.</li>
               <li>Add only manuscripts your program allows you to share with other instructors here.</li>
               <li>
                 The duplicate check when you add a file looks only at your own records. Matches with other

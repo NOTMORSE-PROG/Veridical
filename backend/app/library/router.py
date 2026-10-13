@@ -33,6 +33,7 @@ from app.library.service import (
     get_library_excerpt,
     get_library_file_path,
     get_library_item,
+    get_library_original_file_path,
     get_library_paragraphs,
     list_library,
     remove_library_entry,
@@ -178,8 +179,8 @@ async def get_library_document_route(
     session: Annotated[AsyncSession, Depends(get_session)],
     instructor: Annotated[Instructor, Depends(get_current_instructor)],
 ) -> ManuscriptViewerOut:
-    """Own Library entries only (404 otherwise); `/excerpt` is the only route
-    to another account's entry."""
+    """Full reader for active Library entries (V-079); private uploads stay
+    owner-only. Authentication and active membership authorize shared reads."""
     return await get_library_document(session, instructor.id, manuscript_id, get_settings())
 
 
@@ -200,3 +201,26 @@ async def get_library_paragraphs_route(
     instructor: Annotated[Instructor, Depends(get_current_instructor)],
 ) -> DocumentParagraphsOut:
     return await get_library_paragraphs(session, instructor.id, manuscript_id, get_settings())
+
+
+@router.get("/library/{manuscript_id}/document/original")
+async def get_library_original_file_route(
+    manuscript_id: int,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    instructor: Annotated[Instructor, Depends(get_current_instructor)],
+) -> FileResponse:
+    """Authenticated original download; a neutral name preserves record-field redaction."""
+    path = await get_library_original_file_path(
+        session, instructor.id, manuscript_id, get_settings()
+    )
+    suffix = path.suffix.lower()
+    media_type = (
+        "application/pdf"
+        if suffix == ".pdf"
+        else "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    )
+    return FileResponse(
+        path,
+        media_type=media_type,
+        filename=f"library-record-{manuscript_id}{suffix}",
+    )

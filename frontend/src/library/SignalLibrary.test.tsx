@@ -5,7 +5,6 @@
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type {
-  LibraryExcerptOut,
   LibraryItemOut,
   LibrarySubmissionOut,
   ManuscriptViewerOut,
@@ -18,9 +17,7 @@ import { SignalLibraryComparePage } from "./SignalLibraryCompare";
 import { SignalLibraryDetailPage } from "./SignalLibraryDetail";
 
 vi.mock("./LibraryContentPane", () => ({
-  LibraryContentPane: ({ isOwn }: { isOwn: boolean }) => (
-    <div>{isOwn ? "Full manuscript source" : "Bounded manuscript excerpt"}</div>
-  ),
+  LibraryContentPane: () => <div>Full manuscript source</div>,
 }));
 
 const OWN: LibraryItemOut = {
@@ -82,15 +79,6 @@ const VIEWER: ManuscriptViewerOut = {
   regions: [],
 };
 
-const EXCERPT: LibraryExcerptOut = {
-  manuscript_id: 2,
-  chapters: [
-    { chapter_index: 0, title: "Introduction", excerpt: "A bounded excerpt.", context_before: null, context_after: null },
-  ],
-  total_chapters: 1,
-  limitations: "Bounded excerpt only.",
-  purged_at: null,
-};
 
 function page(items: LibraryItemOut[]): PaginatedLibrary {
   return { items, total: items.length, page: 1, page_size: 50 };
@@ -122,28 +110,55 @@ function json(body: unknown, status = 200): Response {
 afterEach(() => vi.unstubAllGlobals());
 
 describe("Library collection (4z)", () => {
+  it("keeps comparison available when a filter shows one of several Library records", async () => {
+    vi.stubGlobal("fetch", libraryFetch(
+      { "/library": page([OWN, SHARED]), "/programs": [] },
+      page([]),
+      (url) => url.pathname === "/library" && url.searchParams.get("search") === "#1"
+        ? json(page([OWN])) : undefined,
+    ));
+    renderWithProviders(<SignalLibraryPage />, { route: "/library?q=%231", path: "/library" });
+    await screen.findByRole("heading", { name: "1 matching manuscript" });
+    expect(await screen.findByRole("button", { name: "Compare two records" })).toBeInTheDocument();
+    expect(screen.queryByText("Comparison needs at least two Library records.")).not.toBeInTheDocument();
+  });
+
+  it("restores both selected records when returning to change comparison selection", async () => {
+    vi.stubGlobal("fetch", libraryFetch({
+      "/library": page([OWN, SHARED]), "/programs": [],
+      "/library/1/document": VIEWER,
+      "/library/2/document": { ...VIEWER, manuscript_id: 2, original_filename: null },
+    }));
+    renderWithProviders(<SignalLibraryPage />, {
+      route: "/library", path: "/library", state: { comparisonSelection: [1, 2] },
+    });
+    await screen.findByRole("link", { name: "View manuscript: Barangay Service Portal" });
+    expect(screen.getAllByRole("checkbox").every((box) => (box as HTMLInputElement).checked)).toBe(true);
+    await waitFor(() => expect(screen.getByRole("button", { name: "Compare records" })).toBeEnabled());
+  });
+
   it("is a plain collection: an add action, a privacy note, and records with no verdict or report link", async () => {
     vi.stubGlobal("fetch", libraryFetch({ "/library": page([OWN, SHARED]), "/programs": [] }));
     renderWithProviders(<SignalLibraryPage />, { route: "/library", path: "/library" });
 
     expect(await screen.findByRole("heading", { name: "Manuscript Library" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: /Add to Library/ })).toHaveAttribute("href", "/library/add");
-    expect(screen.getByText("Who can see Library records")).toBeInTheDocument();
-    expect(screen.getByText(/not added here automatically/)).toBeInTheDocument();
+    expect(screen.getByText("Who can read Library manuscripts")).toBeInTheDocument();
+    expect(screen.getByText(/Checking a manuscript does not add it here/)).toBeInTheDocument();
 
-    const own = await screen.findByRole("link", { name: "Barangay Service Portal" });
+    const own = await screen.findByRole("link", { name: "View manuscript: Barangay Service Portal" });
     expect(own).toHaveAttribute("href", "/library/1");
     expect(screen.getByText("Ana Cruz, Ben Reyes")).toBeInTheDocument();
     // Own records show their number, so "Library record #N" in a finding is findable.
     expect(screen.getByText("#1")).toBeInTheDocument();
-    const foreign = screen.getByRole("link", { name: "Library record #2" });
+    const foreign = screen.getByRole("link", { name: "View manuscript: Library record #2" });
     expect(foreign).toHaveAttribute("href", "/library/2");
-    expect(screen.getByText("Title, team, authors, and file name are withheld.")).toBeInTheDocument();
+    expect(screen.getByText(/Identifying fields on shared records stay hidden/)).toBeInTheDocument();
 
     expect(screen.queryByText(/report/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/Ready|Not Ready|%/)).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /Remove/ })).not.toBeInTheDocument();
-    expect(screen.getByText("records in the Library")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "2 Library manuscripts" })).toBeInTheDocument();
   });
 
   it("explains an empty Library honestly and offers only the add path", async () => {
@@ -170,7 +185,7 @@ describe("Library collection (4z)", () => {
     expect(
       within(pending).getByRole("link", { name: "Review possible duplicate for portal-copy.docx" }),
     ).toHaveAttribute("href", "/library/3");
-    expect(screen.getByText("record in the Library")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "1 Library manuscript" })).toBeInTheDocument();
     expect(screen.getByText("Comparison needs at least two Library records.")).toBeInTheDocument();
   });
 
@@ -181,11 +196,11 @@ describe("Library collection (4z)", () => {
         "/library": page([OWN, SHARED]),
         "/programs": [],
         "/library/1/document": VIEWER,
-        "/library/2/excerpt": EXCERPT,
+        "/library/2/document": { ...VIEWER, manuscript_id: 2, original_filename: null },
       }),
     );
     renderWithProviders(<SignalLibraryPage />, { route: "/library", path: "/library" });
-    await screen.findByRole("link", { name: "Barangay Service Portal" });
+    await screen.findByRole("link", { name: "View manuscript: Barangay Service Portal" });
 
     fireEvent.click(screen.getByRole("button", { name: "Compare two records" }));
     fireEvent.click(screen.getByRole("checkbox", { name: "Select “Barangay Service Portal” for comparison" }));
@@ -202,6 +217,36 @@ describe("Library collection (4z)", () => {
     expect(await screen.findByRole("heading", { name: "No records match your search" })).toBeInTheDocument();
     expect(screen.getAllByText("Search covers your own records only.").length).toBeGreaterThan(0);
     expect(screen.getByRole("button", { name: "Clear search and filter" })).toBeInTheDocument();
+  });
+
+  it("keeps comparison exit available after a filter finds no records", async () => {
+    vi.stubGlobal("fetch", libraryFetch(
+      { "/library": page([OWN, SHARED]), "/programs": [] },
+      page([]),
+      (url) => url.pathname === "/library" && url.searchParams.get("search") === "missing"
+        ? json(page([])) : undefined,
+    ));
+    renderWithProviders(<SignalLibraryPage />, { route: "/library", path: "/library" });
+    await screen.findByRole("button", { name: "Compare two records" });
+    fireEvent.click(screen.getByRole("button", { name: "Compare two records" }));
+    fireEvent.change(screen.getByRole("searchbox"), { target: { value: "missing" } });
+    await screen.findByRole("heading", { name: "No records match your search" });
+    expect(screen.getByRole("button", { name: "Exit comparison" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Exit comparison" }));
+    expect(screen.queryByRole("complementary", { name: "Comparison selection" })).not.toBeInTheDocument();
+  });
+
+  it("gives each record an explicit manuscript action and avoids duplicate metadata", async () => {
+    const same = { ...OWN, title: "portal.pdf", original_filename: "portal.pdf", team_name: " PORTAL.pdf " };
+    vi.stubGlobal("fetch", libraryFetch({ "/library": page([same]), "/programs": [] }));
+    renderWithProviders(<SignalLibraryPage />, { route: "/library", path: "/library" });
+    const action = await screen.findByRole("link", { name: "View manuscript: portal.pdf" });
+    const card = action.closest("article");
+    expect(card).not.toBeNull();
+    expect(within(card!).getAllByText("portal.pdf")).toHaveLength(1);
+    expect(within(card!).queryByText("Team")).not.toBeInTheDocument();
+    expect(within(card!).queryByText("File")).not.toBeInTheDocument();
+    expect(within(card!).getByText("Ana Cruz, Ben Reyes")).toBeInTheDocument();
   });
 });
 
@@ -348,6 +393,19 @@ describe("Add manuscripts (4aa)", () => {
 });
 
 describe("Library record (4x)", () => {
+  it("returns keyboard focus to Edit details immediately after cancelling an edit", async () => {
+    vi.stubGlobal("fetch", libraryFetch({
+      "/library/1": OWN, "/library/1/document": VIEWER,
+      "/library": page([OWN, SHARED]), "/programs": [],
+    }));
+    renderWithProviders(<SignalLibraryDetailPage />, { route: "/library/1", path: "/library/:manuscriptId" });
+    await screen.findByRole("heading", { level: 1, name: "Barangay Service Portal" });
+    fireEvent.click(screen.getByRole("button", { name: "Edit details" }));
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(screen.getByRole("button", { name: "Edit details" })).toHaveFocus();
+    expect(screen.queryByLabelText("Title")).not.toBeInTheDocument();
+  });
+
   it("shows an own record's details, saves edits, and returns focus to Edit details", async () => {
     const patches: unknown[] = [];
     vi.stubGlobal(
@@ -439,13 +497,13 @@ describe("Library record (4x)", () => {
   it("shows another instructor's record without edit or remove controls", async () => {
     vi.stubGlobal(
       "fetch",
-      libraryFetch({ "/library/2": SHARED, "/library/2/excerpt": EXCERPT, "/library": page([OWN, SHARED]), "/programs": [] }),
+      libraryFetch({ "/library/2": SHARED, "/library/2/document": { ...VIEWER, manuscript_id: 2, original_filename: null }, "/library": page([OWN, SHARED]), "/programs": [] }),
     );
     renderWithProviders(<SignalLibraryDetailPage />, { route: "/library/2", path: "/library/:manuscriptId" });
 
     expect(await screen.findByRole("heading", { level: 1, name: "Library record #2" })).toBeInTheDocument();
-    expect(screen.getByText("Bounded manuscript excerpt")).toBeInTheDocument();
-    expect(screen.getByText(/which instructor added it are withheld for privacy/)).toBeInTheDocument();
+    expect(screen.getByText("Full manuscript source")).toBeInTheDocument();
+    expect(screen.getByText(/which instructor added it are withheld in record fields/)).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /Edit details|Remove/ })).not.toBeInTheDocument();
   });
 
@@ -464,15 +522,17 @@ describe("Library record (4x)", () => {
     renderWithProviders(<SignalLibraryDetailPage />, { route: "/library/1", path: "/library/:manuscriptId" });
     await screen.findByRole("heading", { level: 1, name: "Barangay Service Portal" });
 
-    const source = screen.getByRole("tab", { name: "Source" });
+    const source = screen.getByRole("tab", { name: "Manuscript" });
     const details = screen.getByRole("tab", { name: "Record details" });
     expect(source).toHaveAttribute("aria-selected", "true");
     expect(document.getElementById(source.getAttribute("aria-controls") ?? "")).toHaveAttribute("role", "tabpanel");
     expect(details).toHaveAttribute("tabindex", "-1");
     source.focus();
     fireEvent.keyDown(source, { key: "ArrowRight" });
-    expect(details).toHaveAttribute("aria-selected", "true");
+    expect(details).toHaveAttribute("aria-selected", "false");
     expect(document.activeElement).toBe(details);
+    fireEvent.click(details);
+    expect(details).toHaveAttribute("aria-selected", "true");
   });
 });
 

@@ -10,8 +10,7 @@ describe("LibraryContentPane", () => {
     render(
       <LibraryContentPane
         manuscriptId={1}
-        isOwn
-        ownDocument={{
+        documentState={{
           viewer: undefined,
           isPending: true,
           isError: false,

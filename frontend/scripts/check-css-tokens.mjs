@@ -353,9 +353,9 @@ const ANIMATION_DECLARATION = /\banimation(?:-name)?\s*:/i;
 const TOKENIZED_ANIMATION = /var\(--signal-motion-/;
 const FONT_FAMILY_DECLARATION = /\bfont-family\s*:\s*([^;]+)/i;
 // CSS custom properties cannot be used in media-query conditions. Keep the
-// small-screen and navigation-collapse thresholds as the only sanctioned
-// literal breakpoints, then reject every one-off breakpoint through this gate.
-const MEDIA_BREAKPOINT = /^@media \(max-width: (?:767|1023)px\) \{$/;
+// shell thresholds and the Library's document-reading threshold (DESIGN §6,
+// V-079) are sanctioned. Other one-off breakpoints still fail this gate.
+const MEDIA_BREAKPOINT = /^@media \(max-width: (?:767|1023|1199)px\) \{$/;
 
 function isCommentLine(code) {
   return code.startsWith("//") || code.startsWith("*") || code.startsWith("/*");

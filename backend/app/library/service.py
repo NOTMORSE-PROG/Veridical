@@ -26,8 +26,9 @@ Cross-account copies are collapsed at match time instead
 **Visibility.** Active entries are visible to every instructor (the corpus is
 shared, BUG-050), redacted for other accounts exactly as BUG-147/D-026
 require. Processing, needs-decision and failed entries are visible to their
-owner only. Removed entries are visible to no one. The full document routes
-are owner-only; the bounded excerpt never opens the owning account's file.
+owner only. Removed entries are visible to no one. V-079 makes active Library
+documents readable in full by signed-in instructors; structured shared identity
+fields remain redacted. Editing/removal and ordinary check sources stay private.
 """
 
 import asyncio
@@ -56,7 +57,7 @@ from app.checks.reuse.embed import (
 from app.checks.reuse.store import store_document_embeddings, store_passage_embeddings
 from app.config import Settings, get_settings
 from app.db import advisory_lock
-from app.errors import ConflictError, NotFoundError, VeridicalError
+from app.errors import ConflictError, GoneError, NotFoundError, VeridicalError
 from app.groups.service import DEFAULT_GROUP_LABEL, UNSET_PROGRAM_FILTER
 from app.ingest.patterns import load_patterns
 from app.ingest.schemas import ExtractionResult
@@ -102,7 +103,7 @@ from app.report.service import (
     manuscript_paragraphs_for,
     manuscript_viewer_for,
 )
-from app.storage import get_storage, storage_key_for
+from app.storage import ensure_local_file, get_storage, storage_key_for
 
 # Lengths come from the columns themselves, so a schema change cannot leave
 # a silent truncation mismatch behind.
@@ -968,32 +969,75 @@ async def update_library_entry(
     return await get_library_item(session, instructor_id, manuscript_id)
 
 
-async def _resolve_owned_library_manuscript(
+async def _resolve_readable_library_manuscript(
     session: AsyncSession, instructor_id: int, manuscript_id: int
 ) -> Manuscript:
-    _, manuscript = await _owned_entry(session, instructor_id, manuscript_id)
+    """V-079: active Library files are readable by authenticated instructors.
+
+    The same visibility predicate as the collection keeps ordinary check uploads
+    and removed records private; a pending/failed entry is readable only by its
+    owner. This authorization never grants edit, decision or removal rights.
+    """
+    manuscript = await session.scalar(
+        select(Manuscript)
+        .join(LibraryEntry, LibraryEntry.manuscript_id == Manuscript.id)
+        .where(Manuscript.id == manuscript_id, _visible_to(instructor_id))
+    )
+    if manuscript is None:
+        raise NotFoundError(f"No Library record with id {manuscript_id}.")
     return manuscript
 
 
 async def get_library_document(
     session: AsyncSession, instructor_id: int, manuscript_id: int, settings: Settings
 ) -> ManuscriptViewerOut:
-    manuscript = await _resolve_owned_library_manuscript(session, instructor_id, manuscript_id)
-    return await manuscript_viewer_for(manuscript, [], settings)
+    manuscript = await _resolve_readable_library_manuscript(session, instructor_id, manuscript_id)
+    viewer = await manuscript_viewer_for(manuscript, [], settings)
+    # Shared document prose may identify its authors; structured filenames stay
+    # redacted just like the collection's metadata (V-079 sharing boundary).
+    if manuscript.instructor_id != instructor_id:
+        return viewer.model_copy(update={"original_filename": None})
+    return viewer
 
 
 async def get_library_file_path(
     session: AsyncSession, instructor_id: int, manuscript_id: int, settings: Settings
 ) -> Path:
-    manuscript = await _resolve_owned_library_manuscript(session, instructor_id, manuscript_id)
-    return manuscript_file_path_for(manuscript, settings)
+    manuscript = await _resolve_readable_library_manuscript(session, instructor_id, manuscript_id)
+    return await asyncio.get_running_loop().run_in_executor(
+        None, manuscript_file_path_for, manuscript, settings
+    )
 
 
 async def get_library_paragraphs(
     session: AsyncSession, instructor_id: int, manuscript_id: int, settings: Settings
 ) -> DocumentParagraphsOut:
-    manuscript = await _resolve_owned_library_manuscript(session, instructor_id, manuscript_id)
-    return manuscript_paragraphs_for(manuscript, settings)
+    manuscript = await _resolve_readable_library_manuscript(session, instructor_id, manuscript_id)
+    return await asyncio.get_running_loop().run_in_executor(
+        None, manuscript_paragraphs_for, manuscript, settings
+    )
+
+
+async def get_library_original_file_path(
+    session: AsyncSession, instructor_id: int, manuscript_id: int, settings: Settings
+) -> Path:
+    """V-079: the original PDF/DOCX, including DOCX layout unavailable in the
+    extracted-text reader. Same active-Library authorization as the full reader."""
+    manuscript = await _resolve_readable_library_manuscript(session, instructor_id, manuscript_id)
+    if manuscript.purged_at is not None:
+        raise GoneError("This manuscript's source file was purged and can no longer be read.")
+    if Path(manuscript.file_ref).suffix.lower() not in {".pdf", ".docx"}:
+        raise ConflictError("This manuscript's source file format is not supported.")
+
+    def resolve_original() -> Path:
+        # Client construction can perform blocking credential discovery as well
+        # as retrieval; keep both operations off the request's event loop.
+        return ensure_local_file(settings, get_storage(settings), manuscript.file_ref)
+
+    try:
+        return await asyncio.get_running_loop().run_in_executor(None, resolve_original)
+    except FileNotFoundError:
+        raise GoneError(messages.MANUSCRIPT_SOURCE_MISSING) from None
 
 
 async def get_library_excerpt(
@@ -1080,8 +1124,8 @@ async def get_library_excerpt(
         chapters=[_chapter_out(c) for c in shown],
         total_chapters=total_chapters,
         limitations=(
-            "This is a bounded excerpt, not the full manuscript. VERIDICAL never shows another "
-            "account's full document; it shows one representative passage per chapter, up to "
-            f"{settings.library_excerpt_max_chapters} chapters."
+            "This preview shows one representative passage per chapter, up to "
+            f"{settings.library_excerpt_max_chapters} chapters. Signed-in instructors can "
+            "open the full manuscript for active Library records."
         ),
     )

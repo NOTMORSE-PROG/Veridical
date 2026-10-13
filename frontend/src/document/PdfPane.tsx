@@ -373,7 +373,18 @@ export function PdfPane({
     const total = pdf?.numPages ?? metrics.length;
     if (total <= 0) return;
     const target = Math.max(1, Math.min(total, Math.round(page)));
-    pageRefs.current.get(target)?.scrollIntoView({ behavior, block: "start" });
+    const root = scrollRef.current;
+    const element = pageRefs.current.get(target);
+    if (root && element) {
+      // Scroll the manuscript pane without moving the page toolbar beneath
+      // the application's fixed navigation.
+      const padding = Number.parseFloat(getComputedStyle(root).scrollPaddingTop) || 0;
+      root.scrollTo({
+        top: root.scrollTop + element.getBoundingClientRect().top
+          - root.getBoundingClientRect().top - root.clientTop - padding,
+        behavior,
+      });
+    }
     setCurrentPage(target);
     setPageInput(String(target));
   }, [metrics.length, pdf?.numPages]);
@@ -404,7 +415,23 @@ export function PdfPane({
           <button type="button" onClick={() => setZoom((value) => Math.max(PDF_ZOOM_MIN, Number((value - PDF_ZOOM_STEP).toFixed(1))))} disabled={zoom <= PDF_ZOOM_MIN}>Zoom out</button>
           <button type="button" onClick={() => setZoom(1)} disabled={zoom === 1}>Fit width</button>
           <button type="button" onClick={() => setZoom((value) => Math.min(PDF_ZOOM_MAX, Number((value + PDF_ZOOM_STEP).toFixed(1))))} disabled={zoom >= PDF_ZOOM_MAX}>Zoom in</button>
-          <label><span>Go to page</span><input type="number" inputMode="numeric" min={1} max={pdf?.numPages ?? 1} value={pageInput} onChange={(event) => setPageInput(event.target.value)} onBlur={commitPageInput} onKeyDown={(event) => event.key === "Enter" && commitPageInput()} /></label>
+          <label>
+            <span>Go to page</span>
+            <input
+              type="number"
+              inputMode="numeric"
+              min={1}
+              max={pdf?.numPages ?? 1}
+              value={pageInput}
+              onChange={(event) => setPageInput(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key !== "Enter") return;
+                event.preventDefault();
+                commitPageInput();
+              }}
+            />
+          </label>
+          <button type="button" aria-label="Go to entered page" onClick={commitPageInput} disabled={!pdf || !pageInput.trim()}>Go</button>
           <output aria-live="polite">Page {currentPage} of {pdf?.numPages ?? "…"}</output>
         </div>
       </div>

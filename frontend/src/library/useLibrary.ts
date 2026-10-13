@@ -57,8 +57,8 @@ export function useLibraryItem(manuscriptId: number | undefined, enabled = true)
   });
 }
 
-// The bounded, cross-tenant-safe view (Q2's ruling): always fetched for a
-// record the requester does not own; never for an own one.
+// Bounded excerpt API retained for existing evidence-reading callers.
+// V-079 uses the full document endpoint for active shared records.
 export function useLibraryExcerpt(manuscriptId: number | undefined, enabled: boolean) {
   return useQuery({
     queryKey: ["library-excerpt", manuscriptId],

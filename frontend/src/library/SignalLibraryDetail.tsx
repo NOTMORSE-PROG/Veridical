@@ -2,19 +2,19 @@
 // manuscript and its details, never a verdict: no report link, readiness,
 // or score. The owner can edit details, resolve a possible duplicate, and
 // remove the record from the Library.
-import { useEffect, useId, useRef, useState, type KeyboardEvent } from "react";
+import { useEffect, useId, useLayoutEffect, useRef, useState, type KeyboardEvent } from "react";
 import { Link, useBlocker, useNavigate, useParams } from "react-router";
-import { ApiError } from "../api/client";
+import { ApiError, BASE_URL } from "../api/client";
 import type { LibraryItemOut } from "../api/types";
 import { LIBRARY_TABS_MEDIA_QUERY } from "../config/ui";
 import { usePrograms } from "../dashboard/useDashboard";
-import { useRouteFocus } from "../routing/useRouteFocus";
+import { useLibraryRouteFocus } from "./useLibraryRouteFocus";
 import { ActionLink } from "../ui/ActionLink";
 import { Alert } from "../ui/Alert";
 import { Button } from "../ui/Button";
 import { Dialog } from "../ui/Dialog";
 import { useMediaQuery } from "../ui/useMediaQuery";
-import { LibraryContentPane, type OwnDocumentState } from "./LibraryContentPane";
+import { LibraryContentPane, type LibraryDocumentState } from "./LibraryContentPane";
 import { AuthorFields } from "./SignalLibraryAdd";
 import { formatLibraryDate, libraryRecordName, normalizeSchoolYear } from "./libraryFormat";
 import {
@@ -28,12 +28,12 @@ import {
 
 type TabKey = "source" | "details";
 const TABS: { key: TabKey; label: string }[] = [
-  { key: "source", label: "Source" },
+  { key: "source", label: "Manuscript" },
   { key: "details", label: "Record details" },
 ];
 
 function headerIntro(item: LibraryItemOut): string {
-  if (!item.is_own) return "Shared excerpt from another instructor's record.";
+  if (!item.is_own) return "Another instructor's record. You can read the manuscript; its identifying record fields are hidden.";
   const parts = [item.team_name, item.school_year].filter(Boolean);
   return parts.length ? parts.join(" · ") : "No team name or school year yet";
 }
@@ -235,14 +235,21 @@ function DetailsEditor({
 
 function OwnDetails({ item }: { item: LibraryItemOut }) {
   const editButtonRef = useRef<HTMLButtonElement>(null);
+  const restoreEditFocus = useRef(false);
   const [editing, setEditing] = useState(false);
   const [savedNotice, setSavedNotice] = useState(false);
   const proposed = item.proposed_fields;
 
+  useLayoutEffect(() => {
+    if (editing || !restoreEditFocus.current) return;
+    restoreEditFocus.current = false;
+    editButtonRef.current?.focus();
+  }, [editing]);
+
   function finishEditing(saved: boolean) {
+    restoreEditFocus.current = true;
     setEditing(false);
     setSavedNotice(saved);
-    requestAnimationFrame(() => editButtonRef.current?.focus());
   }
 
   return (
@@ -267,7 +274,7 @@ function OwnDetails({ item }: { item: LibraryItemOut }) {
             </p>
           )}
           <dl className="signal-library-record__metadata">
-            <div><dt>Title</dt><dd>{item.title ?? "Not set"}</dd></div>
+            {!item.title && <div><dt>Title</dt><dd>Not set</dd></div>}
             <div><dt>Team name</dt><dd>{item.team_name ?? "Not set"}</dd></div>
             <div><dt>Authors</dt><dd>{item.authors.length ? item.authors.join(", ") : "Not listed"}</dd></div>
             <div><dt>Program</dt><dd>{item.program ?? "Not set"}</dd></div>
@@ -304,8 +311,8 @@ function ForeignDetails({ item }: { item: LibraryItemOut }) {
         <div><dt>Added</dt><dd>{formatLibraryDate(item.added_at)}</dd></div>
       </dl>
       <p className="signal-library-withheld">
-        Title, team, authors, file name, and which instructor added it are withheld for privacy. If one of your checked
-        manuscripts matches this record, review the matched passages in that check's findings.
+        Title, team, authors, file name, and which instructor added it are withheld in record fields.
+        You can read the full manuscript, which may include those details. Only its owner can edit or remove it.
       </p>
     </div>
   );
@@ -332,8 +339,8 @@ export function SignalLibraryDetailPage() {
   // Compare needs a second active record somewhere in the Library.
   const collection = useLibrary(1, undefined, "");
   const canCompare = item?.status === "active" && (collection.data?.total ?? 0) >= 2;
-  const documentQuery = useLibraryDocument(manuscriptId, item?.is_own === true && item.status !== "removed");
-  const ownDocument: OwnDocumentState = {
+  const documentQuery = useLibraryDocument(manuscriptId, Boolean(item && item.status !== "removed"));
+  const documentState: LibraryDocumentState = {
     viewer: documentQuery.data,
     isPending: documentQuery.isPending,
     isError: documentQuery.isError,
@@ -343,7 +350,7 @@ export function SignalLibraryDetailPage() {
   const name = item ? libraryRecordName(item) : null;
   const notFound = isError && error instanceof ApiError && error.status === 404;
 
-  useRouteFocus(name ? `${name} - Manuscript Library - VERIDICAL` : "Manuscript Library - VERIDICAL", headingRef);
+  useLibraryRouteFocus(name ? `${name} - Manuscript Library - VERIDICAL` : "Manuscript Library - VERIDICAL", headingRef);
 
   async function confirmRemove() {
     if (!manuscriptId || !name) return;
@@ -388,7 +395,6 @@ export function SignalLibraryDetailPage() {
     else if (event.key === "End") nextIndex = TABS.length - 1;
     else return;
     event.preventDefault();
-    setActiveTab(TABS[nextIndex].key);
     document.getElementById(`${tabBaseId}-tab-${TABS[nextIndex].key}`)?.focus();
   }
 
@@ -417,6 +423,14 @@ export function SignalLibraryDetailPage() {
         </div>
         {item && (
           <div className="signal-control-cluster">
+            {documentQuery.data?.available && (
+              <a
+                className="signal-button signal-button--secondary"
+                href={BASE_URL + '/library/' + manuscriptId + '/document/original'}
+              >
+                Download original
+              </a>
+            )}
             {canCompare && (
               <ActionLink to={`/library?compareFrom=${item.manuscript_id}`} variant="secondary">
                 Compare with another record
@@ -491,14 +505,13 @@ export function SignalLibraryDetailPage() {
                 id={`${tabBaseId}-panel-source`}
                 role={tabbed ? "tabpanel" : "region"}
                 aria-labelledby={tabbed ? `${tabBaseId}-tab-source` : undefined}
-                aria-label={tabbed ? undefined : "Source"}
+                aria-label={tabbed ? undefined : "Manuscript"}
                 className="signal-library-source"
                 data-active={activeTab === "source"}
               >
                 <LibraryContentPane
                   manuscriptId={manuscriptId}
-                  isOwn={item.is_own}
-                  ownDocument={item.is_own ? ownDocument : undefined}
+                  documentState={documentState}
                 />
               </div>
               <aside
