@@ -102,7 +102,7 @@ export function PassagePairPanel({
         />
         <div className="min-w-0 flex-1">
           <PassageBlock
-            label={`Archived manuscript #${pair.matched_ref}`}
+            label={`Library record #${pair.matched_ref}`}
             before={pair.matched_context_before}
             excerpt={pair.matched_excerpt}
             after={pair.matched_context_after}

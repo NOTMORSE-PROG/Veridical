@@ -174,6 +174,7 @@ async def _to_flag_out(
         # `flag.detail["kind"]` themselves (V-033 per-flag detail).
         is_passage_level=bool((flag.detail or {}).get("kind", "").endswith("_passage")),
         passage_pair=_passage_pair_from_detail(flag.evidence_excerpt, detail),
+        matched_ref=detail.get("matched_manuscript_id"),
         first_upload_context=bool(detail.get("first_upload_context")),
         evidence_unavailable=bool(detail.get("evidence_unavailable")),
         citation_source_key=_citation_source_key(detail),

@@ -47,7 +47,13 @@ const EVENT_LABELS: Record<string, string> = {
   check_run_cancel_requested: "Check cancellation requested",
   check_run_cancelled: "Check cancelled",
   citation_source_confirmed: "Citation source confirmed",
-  manuscript_ingestion_failure_dismissed: "Failed upload moved to Archive",
+  manuscript_ingestion_failure_dismissed: "Failed upload removed from Review Desk",
+  library_entry_added: "Manuscript added to the Library",
+  library_entry_needs_decision: "Possible duplicate held for your decision",
+  library_entry_failed: "Library file could not be read",
+  library_entry_edited: "Library record details edited",
+  library_entry_removed: "Manuscript removed from the Library",
+  library_orphan_corpus_rows_removed: "Stray comparison data removed",
 };
 
 const PROMPT_LABELS: Record<string, string> = {
@@ -75,7 +81,13 @@ const EVENT_EXPLANATIONS: Record<string, string> = {
   check_run_cancel_requested: "You requested that an active manuscript check stop at its next safe boundary.",
   check_run_cancelled: "VERIDICAL stopped the manuscript check and preserved its completed work and history.",
   citation_source_confirmed: "You confirmed the source associated with a citation-integrity finding.",
-  manuscript_ingestion_failure_dismissed: "You moved a failed upload out of the active Review Desk and into Archive.",
+  manuscript_ingestion_failure_dismissed: "You removed a failed upload from the active Review Desk. Its record and history are kept.",
+  library_entry_added: "A manuscript became a Library record, so originality checks now compare against it.",
+  library_entry_needs_decision: "A file you added closely matched one of your Library records, so it waits for your decision instead of being added.",
+  library_entry_failed: "VERIDICAL could not read text from a file you added, so it was not added to the Library.",
+  library_entry_edited: "You changed the details of one of your Library records.",
+  library_entry_removed: "A manuscript left the Library, so originality checks no longer compare against it.",
+  library_orphan_corpus_rows_removed: "An operator cleanup removed comparison data that belonged to no Library record.",
 };
 
 // BUG-219: mode-specific label/explanation replacements for the `llm_*`

@@ -4183,20 +4183,259 @@
     text-underline-offset: var(--signal-link-underline-offset);
   }
 
+  /* V-077: a quiet note, not a dark banner pushing records below the fold. */
   .signal-library-privacy {
     display: grid;
     gap: var(--signal-space-1);
     margin-block-end: var(--signal-space-5);
     border-inline-start: var(--signal-border-brand) solid var(--color-signal-brand);
-    padding: var(--signal-space-4) var(--signal-space-5);
-    background: var(--color-signal-foundation);
-    color: var(--color-signal-surface);
+    padding: var(--signal-space-3) var(--signal-space-4);
+    background: var(--color-signal-surface-muted);
+    color: var(--color-signal-ink);
   }
 
   .signal-library-privacy p {
     max-width: var(--signal-prose-width);
     margin: 0;
-    color: var(--color-signal-surface-muted);
+    color: var(--color-signal-ink-secondary);
+  }
+
+  /* V-077 (D-028): the Library as a standalone collection. */
+  .signal-library-ownership,
+  .signal-library-withheld {
+    color: var(--color-signal-ink-secondary);
+    font-size: var(--signal-type-meta);
+  }
+
+  .signal-library-withheld {
+    margin: 0;
+  }
+
+  .signal-library-filename {
+    overflow-wrap: anywhere;
+  }
+
+  .signal-library-card__link {
+    color: var(--color-signal-ink);
+    text-decoration: underline;
+    text-decoration-thickness: var(--signal-border-hairline);
+    text-underline-offset: var(--signal-link-underline-offset);
+  }
+
+  /* One tab stop per card: the title link covers the whole card. */
+  .signal-library-card__link::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+  }
+
+  .signal-library-card__link:focus-visible {
+    outline: none;
+  }
+
+  .signal-library-card:has(.signal-library-card__link:focus-visible) {
+    outline: var(--signal-border-emphasis) solid var(--color-signal-focus);
+    outline-offset: var(--signal-border-emphasis);
+  }
+
+  .signal-library-select {
+    position: relative;
+    z-index: var(--signal-z-raised);
+  }
+
+  .signal-library-compare-hint {
+    align-self: center;
+    margin: 0;
+  }
+
+  .signal-library-pending {
+    display: grid;
+    gap: var(--signal-space-3);
+    margin-block-end: var(--signal-space-5);
+    border: var(--signal-border-hairline) solid var(--color-signal-border);
+    border-radius: var(--signal-radius-panel);
+    padding: var(--signal-space-4) var(--signal-space-5);
+    background: var(--color-signal-surface);
+  }
+
+  .signal-library-pending h2,
+  .signal-library-pending p {
+    margin: 0;
+  }
+
+  .signal-library-pending ul {
+    display: grid;
+    gap: var(--signal-space-3);
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  .signal-library-pending__row,
+  .signal-library-batch__row,
+  .signal-library-chosen li {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--signal-space-3);
+    border-block-start: var(--signal-border-hairline) solid var(--color-signal-border);
+    padding-block-start: var(--signal-space-3);
+  }
+
+  .signal-library-pending__identity,
+  .signal-library-batch__head {
+    display: flex;
+    min-width: 0;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--signal-space-2) var(--signal-space-3);
+  }
+
+  .signal-library-add__form,
+  .signal-library-batch,
+  .signal-library-editor {
+    display: grid;
+    max-width: var(--signal-prose-width);
+    gap: var(--signal-space-5);
+  }
+
+  .signal-library-add__label,
+  .signal-library-add__fieldset legend,
+  .signal-library-authors legend {
+    font-weight: var(--signal-weight-semibold);
+  }
+
+  .signal-library-add__fieldset,
+  .signal-library-authors {
+    display: grid;
+    gap: var(--signal-space-4);
+    margin: 0;
+    border: 0;
+    padding: 0;
+  }
+
+  .signal-library-add__form .signal-field input,
+  .signal-library-editor .signal-field input,
+  .signal-library-authors input {
+    min-height: var(--signal-control-height-coarse);
+    width: 100%;
+    border: var(--signal-border-emphasis) solid var(--color-signal-border-strong);
+    border-radius: var(--signal-radius-control);
+    padding: var(--signal-space-3) var(--signal-space-4);
+    background: var(--color-signal-surface);
+    color: var(--color-signal-ink);
+    font: inherit;
+  }
+
+  .signal-library-authors__row {
+    display: flex;
+    align-items: center;
+    gap: var(--signal-space-2);
+  }
+
+  .signal-library-dropzone {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--signal-space-3);
+    border: var(--signal-border-emphasis) dashed var(--color-signal-border-strong);
+    border-radius: var(--signal-radius-panel);
+    padding: var(--signal-space-4);
+    background: var(--color-signal-surface);
+  }
+
+  .signal-library-dropzone[data-invalid] {
+    border-color: var(--color-signal-not-ready-text);
+  }
+
+  .signal-library-dropzone:has(input:focus-visible) label {
+    outline: var(--signal-border-emphasis) solid var(--color-signal-focus);
+    outline-offset: var(--signal-border-emphasis);
+  }
+
+  .signal-library-chosen,
+  .signal-library-batch__rows {
+    display: grid;
+    gap: var(--signal-space-3);
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  .signal-library-batch__row {
+    display: grid;
+    justify-content: stretch;
+  }
+
+  .signal-library-batch__row p {
+    margin: 0;
+    color: var(--color-signal-ink-secondary);
+  }
+
+  .signal-library-batch__actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--signal-space-2);
+  }
+
+  .signal-library-batch__actions:empty {
+    display: none;
+  }
+
+  .signal-library-disclosure {
+    display: grid;
+    gap: var(--signal-space-2);
+    border-inline-start: var(--signal-border-brand) solid var(--color-signal-brand);
+    padding: var(--signal-space-3) var(--signal-space-4);
+    background: var(--color-signal-surface-muted);
+  }
+
+  .signal-library-disclosure h2 {
+    margin: 0;
+    font-size: var(--signal-type-body);
+  }
+
+  .signal-library-disclosure ol {
+    display: grid;
+    gap: var(--signal-space-1);
+    margin: 0;
+    padding-inline-start: var(--signal-space-5);
+    color: var(--color-signal-ink-secondary);
+  }
+
+  .signal-library-record__details {
+    display: grid;
+    gap: var(--signal-space-4);
+  }
+
+  .signal-library-record__heading {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--signal-space-3);
+  }
+
+  .signal-library-record__heading h2 {
+    margin: 0;
+  }
+
+  .signal-originality-scope {
+    max-width: var(--signal-prose-width);
+    margin: 0;
+    color: var(--color-signal-ink-secondary);
+    font-size: var(--signal-type-label);
+  }
+
+  @media (max-width: 767px) {
+    .signal-library-pending__row .signal-button,
+    .signal-library-batch__actions .signal-button,
+    .signal-library-header .signal-button {
+      width: 100%;
+      min-height: var(--signal-control-height-coarse);
+      justify-content: center;
+    }
   }
 
   .signal-library-controls {
@@ -6289,6 +6528,38 @@
     .signal-service-error__panel {
       border: var(--signal-border-emphasis) solid CanvasText;
     }
+  }
+
+  /* V-077 (UX review P1-2, WCAG 2.4.11): in compare mode a focused control
+     always scrolls clear of the selection bar. Appended last so it overrides
+     the phone rules above. The bar's footprint at very short viewports (high
+     zoom) is tracked by BUG-214; no unsanctioned height breakpoint here. */
+  :root:has(.signal-library[data-compare="true"]) {
+    scroll-padding-block-end: var(--signal-library-selection-desktop-reserve);
+  }
+
+  .signal-library-chosen li {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto auto;
+  }
+
+  @media (max-width: 767px) {
+    :root:has(.signal-library[data-compare="true"]) {
+      scroll-padding-block-end: calc(
+        var(--signal-phone-nav-height) + var(--signal-library-selection-mobile-reserve)
+      );
+    }
+  }
+
+
+  /* V-077 first-time-user review pass: the details panel is a flex column; its children
+     must not shrink, or the edit form's buttons are clipped. */
+  .signal-library-record > * {
+    flex-shrink: 0;
+  }
+
+  .signal-library-batch h2 {
+    scroll-margin-block-start: var(--signal-space-20);
   }
 }
 

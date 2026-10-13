@@ -21,6 +21,7 @@ import { FlagDetailPage } from "./flags/FlagDetail";
 import { SignalLibraryComparePage } from "./library/SignalLibraryCompare";
 import { SignalLibraryDetailPage } from "./library/SignalLibraryDetail";
 import { SignalLibraryPage } from "./library/SignalLibrary";
+import { SignalLibraryAddPage } from "./library/SignalLibraryAdd";
 import { LandingRoute } from "./pages/Landing";
 import { DashboardPage } from "./pages/Dashboard";
 import { NotFoundPage } from "./pages/NotFound";
@@ -57,6 +58,8 @@ const router = createBrowserRouter(
           <Route path="/rubric" element={<ManageRubricPage />} />
           <Route path="/library" element={<SignalLibraryPage />} />
           <Route path="/library/compare" element={<SignalLibraryComparePage />} />
+          {/* V-077: static paths stay ahead of the record route. */}
+          <Route path="/library/add" element={<SignalLibraryAddPage />} />
           <Route path="/library/:manuscriptId" element={<SignalLibraryDetailPage />} />
           <Route path="/settings" element={<SettingsPage />} />
           <Route path="/rubric/:rubricId/review" element={<SignalReviewCriteriaPage />} />

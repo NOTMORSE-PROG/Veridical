@@ -45,7 +45,13 @@ from app.ingest.schemas import (
 from app.ingest.titlepage import AnchoredValue, TitlePageProposal, extract_title_page
 from app.llm import LLMNotConfiguredError, get_llm_client_for
 from app.models.citation import Citation
-from app.models.enums import CheckRunStatus, IngestFailureReason, IngestStatus, ResultOutcome
+from app.models.enums import (
+    CheckRunStatus,
+    IngestFailureReason,
+    IngestStatus,
+    ManuscriptOrigin,
+    ResultOutcome,
+)
 from app.models.group import Group, GroupMember, Program
 from app.models.manuscript import Manuscript
 from app.models.rubric import Rubric
@@ -137,12 +143,26 @@ def hash_file_sha256(path: Path, chunk_bytes: int) -> str:
     return digest.hexdigest()
 
 
+def clean_original_filename(filename: str) -> str | None:
+    """Display-only filename (BUG-022): path components stripped OS-
+    independently, control characters (including NUL) dropped, cut to the
+    column's 255 limit. Never used on the filesystem."""
+    clean_name = "".join(ch for ch in filename.replace("\\", "/") if ch.isprintable())
+    return Path(clean_name).name[:255] or None
+
+
 async def ingest_manuscript(
     session: AsyncSession,
     manuscript: Manuscript,
     file_path: Path,
     settings: Settings | None = None,
+    *,
+    read_images: bool = True,
 ) -> ExtractionResult:
+    """`read_images=False` (V-077, Library submissions) skips the vision
+    pass, the only Gemini call in ingestion: a Library manuscript is stored
+    for text comparison only, so it costs zero quota. `vision_status` then
+    stays "none", an honest "not read", never "done"."""
     settings = settings or get_settings()
     manuscript.ingest_status = IngestStatus.processing
     await session.commit()
@@ -172,8 +192,9 @@ async def ingest_manuscript(
         try:
             # Vision pass (F1.3) merges image tables/equations into result
             # BEFORE the raw store is written, so the store is complete.
-            llm = await get_llm_client_for(session, settings, manuscript.instructor_id)
-            await vision.read_images(result, file_path, llm, patterns, settings)
+            if read_images:
+                llm = await get_llm_client_for(session, settings, manuscript.instructor_id)
+                await vision.read_images(result, file_path, llm, patterns, settings)
         except (LLMNotConfiguredError, ApiDownError, QuotaExhaustedError):
             # No client (real mode before V-009), or the queue's own
             # retries were exhausted, or the daily quota ran out: image
@@ -274,8 +295,7 @@ async def ingest_upload(
     # rejects NUL outright; backend review finding, BUG-022 review).
     # `[:255]` matches the column's own limit so an unusually long
     # filename never 500s here either.
-    clean_name = "".join(ch for ch in filename.replace("\\", "/") if ch.isprintable())
-    original_filename = Path(clean_name).name[:255] or None
+    original_filename = clean_original_filename(filename)
     # V-062: group_label is no longer stored verbatim -- it's resolved
     # against the instructor's existing groups first (case/whitespace
     # insensitive, AC1), so "Group 4" and "group 4" land on the same row
@@ -329,13 +349,15 @@ async def ingest_upload(
     # same bytes exist in another account would create a cross-tenant oracle.
     # Keeping the lookup after the commit also means that, for two concurrent
     # uploads, whichever commit finishes second can see the first. The rows
-    # remain distinct check inputs and Library groups them as upload history.
+    # remain distinct check inputs. V-077: only earlier dashboard uploads are
+    # "earlier uploads"; Library submissions are a separate collection.
     existing_upload = await session.scalar(
         select(Manuscript)
         .where(
             Manuscript.instructor_id == instructor_id,
             Manuscript.content_hash == manuscript.content_hash,
             Manuscript.id != manuscript.id,
+            Manuscript.origin == ManuscriptOrigin.check_upload,
         )
         .order_by(
             Manuscript.purged_at.is_(None).desc(),
@@ -440,6 +462,9 @@ async def list_manuscripts(
 
     filters = [Manuscript.instructor_id == instructor_id]
     filters.append(Manuscript.dismissed_at.is_(None))
+    # V-077 (D-028): Library submissions are not check inputs and never
+    # appear on the Review Desk.
+    filters.append(Manuscript.origin == ManuscriptOrigin.check_upload)
     count_stmt = (
         select(func.count())
         .select_from(Manuscript)
@@ -738,6 +763,7 @@ async def dismiss_failed_manuscript(
             Manuscript.instructor_id == instructor_id,
             Manuscript.ingest_status == IngestStatus.failed,
             Manuscript.dismissed_at.is_(None),
+            Manuscript.origin == ManuscriptOrigin.check_upload,
         )
         .values(dismissed_at=dismissed_at)
         .returning(Manuscript)
@@ -747,6 +773,7 @@ async def dismiss_failed_manuscript(
             select(Manuscript).where(
                 Manuscript.id == manuscript_id,
                 Manuscript.instructor_id == instructor_id,
+                Manuscript.origin == ManuscriptOrigin.check_upload,
             )
         )
         if current is None:
@@ -828,7 +855,11 @@ async def get_group_proposal(
     document -- the same evidence-honesty rule as an instructor's own
     edit, just sourced differently."""
     manuscript = await session.get(Manuscript, manuscript_id)
-    if manuscript is None or manuscript.instructor_id != instructor_id:
+    if (
+        manuscript is None
+        or manuscript.instructor_id != instructor_id
+        or manuscript.origin != ManuscriptOrigin.check_upload
+    ):
         raise NotFoundError(f"No manuscript with id {manuscript_id}.")
 
     current_group = await session.get(Group, manuscript.group_id)
@@ -875,7 +906,11 @@ async def confirm_manuscript_group(
     which is not necessarily the group's -- only the group's first confirm
     ever sets it."""
     manuscript = await session.get(Manuscript, manuscript_id)
-    if manuscript is None or manuscript.instructor_id != instructor_id:
+    if (
+        manuscript is None
+        or manuscript.instructor_id != instructor_id
+        or manuscript.origin != ManuscriptOrigin.check_upload
+    ):
         raise NotFoundError(f"No manuscript with id {manuscript_id}.")
     # backend review (V-063 review): reproduced live -- an unvalidated
     # program_id reached the FK and surfaced as a bare, unhandled 500

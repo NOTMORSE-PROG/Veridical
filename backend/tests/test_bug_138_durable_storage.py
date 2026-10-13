@@ -19,6 +19,7 @@ from fastapi.testclient import TestClient
 import app.archive.service as archive_service
 import app.auth.service as auth_service
 import app.ingest.service as ingest_service
+import app.library.service as library_service
 import app.report.service as report_service
 from app.auth.security import hash_password
 from app.config import get_settings
@@ -177,6 +178,7 @@ def client(api_scratch_url, tmp_path, monkeypatch):
     monkeypatch.setattr(ingest_service, "get_storage", lambda settings: shared_storage)
     monkeypatch.setattr(report_service, "get_storage", lambda settings: shared_storage)
     monkeypatch.setattr(archive_service, "get_storage", lambda settings: shared_storage)
+    monkeypatch.setattr(library_service, "get_storage", lambda settings: shared_storage)
 
     from app.main import app
 
@@ -219,12 +221,16 @@ def test_manuscript_file_survives_a_simulated_ephemeral_disk_wipe(client):
     SAME request after the SAME wipe succeeds."""
     tc, storage = client
     content = (FIXTURE_DIR / "native.pdf").read_bytes()
+    # V-077: the Library document route serves Library entries only, so the
+    # manuscript enters through the Library's own submission path (which
+    # stores durably exactly like a dashboard upload).
     r = tc.post(
-        "/manuscripts/ingest",
+        "/library/entries",
         files={"file": ("native.pdf", content, "application/octet-stream")},
     )
     assert r.status_code == 200, r.text
-    manuscript_id = r.json()["manuscript_id"]
+    assert r.json()["outcome"] == "added", r.text
+    manuscript_id = r.json()["item"]["manuscript_id"]
 
     # Prove durable storage actually received both the upload and the
     # extraction JSON before wiping anything.
@@ -254,7 +260,8 @@ def test_truly_missing_source_is_structured_gone_on_both_file_routes(client, api
     from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
     from app.db import sqlalchemy_url
-    from app.models.enums import CheckRunStatus
+    from app.models.enums import CheckRunStatus, LibraryEntrySource, LibraryEntryStatus
+    from app.models.library import LibraryEntry
     from app.models.manuscript import Manuscript
     from app.models.rubric import Rubric
     from app.models.run import CheckRun
@@ -286,6 +293,16 @@ def test_truly_missing_source_is_structured_gone_on_both_file_routes(client, api
                     status=CheckRunStatus.done,
                 )
                 session.add(check_run)
+                # V-077: a checked manuscript carried into the Library by
+                # migration 0037 is the one case where the same file is
+                # reachable through both routes.
+                session.add(
+                    LibraryEntry(
+                        manuscript_id=manuscript_id,
+                        source=LibraryEntrySource.legacy_check_upload,
+                        status=LibraryEntryStatus.active,
+                    )
+                )
                 await session.commit()
                 return check_run.id
         finally:

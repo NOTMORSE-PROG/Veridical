@@ -402,6 +402,9 @@ export interface ReportCommon {
   // the key), same fixture-compatibility convention used throughout this
   // file for a field added after existing hand-written test mocks.
   levelled_rating?: LevelledRating | null;
+  /** V-077: what the originality check compared against; null when the run
+   * has no originality result. */
+  originality_scope?: OriginalityScope | null;
 }
 
 // V-069 AC2: the rubric's own RATING formula, transcribed -- never merged
@@ -426,6 +429,16 @@ export interface IntegrityCheckStatusOut {
   n_skipped_quota: number;
   n_skipped_api_down: number;
   n_skipped_parse_failure: number;
+}
+
+/** V-077 (D-028): a count, not a judgment. "library" for checks since the
+ * Library became separate; "pre_library" for older checks that counted the
+ * former automatic archive. */
+export interface OriginalityScope {
+  compared_count: number | null;
+  corpus: "library" | "pre_library";
+  /** "no_text": no readable text, so no comparison ran at all. */
+  not_compared_reason?: "no_text" | null;
 }
 
 export interface ReportOut extends ReportCommon {
@@ -643,6 +656,8 @@ export interface FlagOut {
   // system-authored template sentence, never a quote.
   is_passage_level: boolean;
   passage_pair: PassagePairOut | null;
+  /** V-077: the matched Library record for an F7 finding, so it can be opened. */
+  matched_ref?: number | null;
   // BUG-097 (presentation-only remedy, owner ruling 2026-08-24): true only
   // for an F7 flag produced on the account's first-ever manuscript upload.
   // Never changes `severity`.
@@ -816,48 +831,57 @@ export interface QuotaStatus {
   models?: ModelQuotaStatus[];
 }
 
-// V-042: per-item purge of the F7 embedding archive (originally screen
-// 4t, now folded into the Library screen, V-066 -- Library is a strict
-// superset of what the old Archive screen showed).
+// V-042: per-item purge of the F7 embedding archive. The `/archive` route
+// still exists server-side; the V-077 Library no longer calls it.
 export interface PurgeOut {
   manuscript_id: number;
   purged_at: string;
 }
 
-// V-066 (screen 4w) — the shared-corpus library: replaces the Archive
-// screen above (a strict superset -- every own manuscript still gets its
-// archive state + purge action, plus every other account's, plus real
-// metadata Archive never showed).
-// BUG-148: another upload sharing this row's exact content_hash, same
-// instructor only -- see LibraryItemOut.duplicate_uploads.
-export interface LibraryDuplicateUploadOut {
+// V-077 (D-028): the Library is a standalone collection of manuscripts and
+// the only originality corpus. No field here carries a verdict, score,
+// flag, or report link.
+export type LibraryEntryStatus =
+  | "processing"
+  | "needs_decision"
+  | "active"
+  | "failed"
+  | "removed";
+
+export type LibraryEntrySource = "library_submission" | "legacy_check_upload";
+
+/** The requester's OWN Library record a submission duplicates or may
+ * duplicate. Never another account's (BUG-234). */
+export interface LibraryDuplicateRefOut {
   manuscript_id: number;
-  created_at: string;
-  purged_at: string | null;
+  label: string;
   original_filename: string | null;
-  latest_done_check_run_id: number | null;
+  added_at: string | null;
 }
 
 export interface LibraryItemOut {
   manuscript_id: number;
-  group_label: string;
+  is_own: boolean;
+  /** Own: title, team name, filename, or record label. Foreign: always
+   * "Library record #id". */
+  label: string;
   title: string | null;
+  team_name: string | null;
   authors: string[];
   program: string | null;
+  school_year: string | null;
   original_filename: string | null;
+  status: LibraryEntryStatus;
+  /** Null for another instructor's record. */
+  source: LibraryEntrySource | null;
+  added_at: string | null;
   created_at: string;
-  purged_at: string | null;
-  is_own: boolean;
-  // BUG-148: the OTHER instructor-owned manuscripts sharing this exact
-  // content_hash (never includes this row's own manuscript_id), newest
-  // first. Only present when is_own is true and at least one byte-
-  // identical re-upload of this same file exists; always null for
-  // is_own: false.
-  duplicate_uploads: LibraryDuplicateUploadOut[] | null;
-  // BUG-148: same field/meaning as LibraryDuplicateUploadOut's own --
-  // null when this manuscript was never successfully checked, or when
-  // is_own is false (never disclose another account's report state).
-  latest_done_check_run_id: number | null;
+  /** Own only: fields read from the title page and not edited since. */
+  proposed_fields: string[];
+  possible_duplicate_of: LibraryDuplicateRefOut | null;
+  failure_detail: string | null;
+  /** Own only: a processing entry whose request died mid-way; removable. */
+  stalled?: boolean;
 }
 
 export interface PaginatedLibrary {
@@ -865,6 +889,35 @@ export interface PaginatedLibrary {
   total: number;
   page: number;
   page_size: number;
+}
+
+export type LibrarySubmissionOutcome =
+  | "added"
+  | "exact_duplicate"
+  | "possible_duplicate"
+  | "failed";
+
+export interface LibrarySubmissionOut {
+  outcome: LibrarySubmissionOutcome;
+  item: LibraryItemOut | null;
+  duplicate_of: LibraryDuplicateRefOut | null;
+  message: string;
+}
+
+export interface LibraryEntryUpdate {
+  title?: string | null;
+  team_name?: string | null;
+  authors?: string[] | null;
+  program?: string | null;
+  school_year?: string | null;
+}
+
+export interface LibraryEntryStateOut {
+  manuscript_id: number;
+  status: LibraryEntryStatus;
+  added_at: string | null;
+  removed_at: string | null;
+  file_deleted: boolean;
 }
 
 export interface LibraryChapterExcerptOut {

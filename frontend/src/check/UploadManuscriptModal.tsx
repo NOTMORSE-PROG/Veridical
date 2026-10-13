@@ -20,7 +20,6 @@ import { useEffect, useId, useRef, useState } from "react";
 import { ApiError } from "../api/client";
 import { Modal, ModalBackdrop } from "../components/Modal";
 import type { ConfirmGroupResponse, TitlePageProposal } from "../api/types";
-import { ActionLink } from "../ui/ActionLink";
 import { Button } from "../ui/Button";
 import { GroupProposalFields } from "./GroupProposalFields";
 import { useIngestManuscript } from "./useCheckRun";
@@ -232,46 +231,32 @@ export function UploadManuscriptModal({ onClose, onUploadSuccess }: UploadManusc
         {summary ? (
           <div className="signal-group-flow">
             <h3 ref={resultHeadingRef} tabIndex={-1} className="text-base font-bold text-ink">
-              {summary.existing_upload ? "Already in your Library" : "Upload complete"}
+              {summary.existing_upload ? "You uploaded this file before" : "Upload complete"}
             </h3>
             <p role="status" aria-live="polite" aria-atomic="true" className="sr-only">
               {summary.existing_upload
-                ? "Upload complete. VERIDICAL found an exact earlier copy in your Library."
+                ? `Upload complete. This is the same file you uploaded on ${formatUploadDate(summary.existing_upload.created_at)}.`
                 : "Upload complete."}
             </p>
             {summary.existing_upload && (
               <section className="signal-group-flow rounded-md border border-border bg-status-neutral-bg px-3 py-3 text-sm text-ink">
-                <div>
-                  <p className="text-ink-secondary">
-                    You uploaded {file?.name ? `“${file.name}”` : "this file"}. It is the exact same file as {summary.existing_upload.original_filename
-                      ? `“${summary.existing_upload.original_filename}”`
-                      : "an earlier upload"}, stored {formatUploadDate(summary.existing_upload.created_at)}.
-                    VERIDICAL keeps exact re-uploads together as one Library record with upload history.
-                  </p>
-                </div>
-                {summary.existing_upload.purged_at ? (
-                  <p className="text-ink-secondary">
-                    The earlier copy's stored source was removed. This new copy is stored and can still be checked.
-                  </p>
-                ) : null}
                 <p className="text-ink-secondary">
-                  Open the earlier record, or continue with this uploaded copy to start a separate check.
+                  This is the exact same file you uploaded on {formatUploadDate(summary.existing_upload.created_at)}.
+                  {summary.existing_upload.original_filename
+                    && summary.existing_upload.original_filename !== file?.name
+                    && ` That upload was named “${summary.existing_upload.original_filename}”.`}
+                  {" "}This new copy was saved and can be checked on its own.
                 </p>
-                <div className="flex flex-col items-start gap-2 sm:flex-row">
-                  {!summary.existing_upload.purged_at && (
-                    <ActionLink
-                      to={`/library/${summary.existing_upload.manuscript_id}`}
-                      variant="secondary"
-                    >
-                      Open earlier Library record
-                    </ActionLink>
-                  )}
-                  {showGroupProposal && (
+                {summary.existing_upload.purged_at ? (
+                  <p className="text-ink-secondary">The earlier copy's stored file was removed.</p>
+                ) : null}
+                {showGroupProposal && (
+                  <div className="flex flex-col items-start gap-2 sm:flex-row">
                     <Button type="button" variant="secondary" onClick={() => setGroupResolved(true)}>
                       Skip group details and continue
                     </Button>
-                  )}
-                </div>
+                  </div>
+                )}
               </section>
             )}
             <p className="rounded-md bg-status-success-bg px-3 py-2 text-sm text-status-success-text">
@@ -304,7 +289,8 @@ export function UploadManuscriptModal({ onClose, onUploadSuccess }: UploadManusc
             <div className="flex flex-col gap-1.5">
               <span className="text-sm font-medium text-ink">Manuscript file</span>
               <p id={hintId} className="text-sm text-ink-secondary">
-                PDF or DOCX.
+                PDF or DOCX. Checked manuscripts are compared against the Library and are not added to it. To
+                add a finished manuscript to the Library, open Library and choose Add to Library.
               </p>
 
               <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-3">

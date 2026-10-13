@@ -16,7 +16,7 @@ from app.audit.service import write_audit_event
 from app.config import Settings, get_settings
 from app.errors import ConflictError, NotFoundError
 from app.models.audit import AuditLog
-from app.models.enums import CheckRunStatus, IngestStatus, LLMMode
+from app.models.enums import CheckRunStatus, IngestStatus, LLMMode, ManuscriptOrigin
 from app.models.group import Group, Program
 from app.models.manuscript import Manuscript
 from app.models.rubric import Rubric
@@ -43,7 +43,13 @@ async def create_check_run(
     settings: Settings | None = None,
 ) -> CheckRun:
     manuscript = await session.get(Manuscript, manuscript_id)
-    if manuscript is None or manuscript.instructor_id != instructor_id:
+    # V-077 (D-028): a Library submission is stored for comparison only and
+    # can never be checked; it is indistinguishable here from "not found".
+    if (
+        manuscript is None
+        or manuscript.instructor_id != instructor_id
+        or manuscript.origin != ManuscriptOrigin.check_upload
+    ):
         raise NotFoundError(f"No manuscript with id {manuscript_id}.")
     if manuscript.ingest_status != IngestStatus.done:
         raise ConflictError(
@@ -309,7 +315,9 @@ async def estimate_rerun_calls(
         (
             await session.scalars(
                 select(Manuscript.id).where(
-                    Manuscript.id.in_(manuscript_ids), Manuscript.instructor_id == instructor_id
+                    Manuscript.id.in_(manuscript_ids),
+                    Manuscript.instructor_id == instructor_id,
+                    Manuscript.origin == ManuscriptOrigin.check_upload,
                 )
             )
         ).all()

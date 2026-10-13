@@ -22,6 +22,8 @@ from app.config import Settings
 from app.db import advisory_lock
 from app.errors import ConflictError, NotFoundError
 from app.ingest.service import raw_store_path
+from app.models.enums import LibraryEntryStatus, LibraryRemovalReason, ManuscriptOrigin
+from app.models.library import LibraryEntry
 from app.models.manuscript import (
     Manuscript,
     ManuscriptArchive,
@@ -38,12 +40,18 @@ async def list_archive(
     total = await session.scalar(
         select(func.count())
         .select_from(Manuscript)
-        .where(Manuscript.instructor_id == instructor_id)
+        .where(
+            Manuscript.instructor_id == instructor_id,
+            Manuscript.origin == ManuscriptOrigin.check_upload,
+        )
     )
     manuscripts = (
         await session.scalars(
             select(Manuscript)
-            .where(Manuscript.instructor_id == instructor_id)
+            .where(
+                Manuscript.instructor_id == instructor_id,
+                Manuscript.origin == ManuscriptOrigin.check_upload,
+            )
             .order_by(Manuscript.created_at.desc())
             .offset((page - 1) * page_size)
             .limit(page_size)
@@ -192,6 +200,17 @@ async def withdraw_manuscript_if_orphaned(
     if not reached_integrity:
         return False
     async with advisory_lock(session, manuscript_id):
+        # V-077 (D-028): checks no longer write into the corpus, so any rows
+        # present for an active Library entry were written by the Library,
+        # never by this run. They are never this function's to withdraw.
+        in_library = await session.scalar(
+            select(LibraryEntry.id).where(
+                LibraryEntry.manuscript_id == manuscript_id,
+                LibraryEntry.status == LibraryEntryStatus.active,
+            )
+        )
+        if in_library is not None:
+            return False
         other_run_count = await session.scalar(
             select(func.count())
             .select_from(CheckRun)
@@ -200,6 +219,24 @@ async def withdraw_manuscript_if_orphaned(
         if other_run_count:
             return False
         return await delete_archive_rows(session, manuscript_id)
+
+
+def delete_stored_files(manuscript: Manuscript, settings: Settings) -> None:
+    """Delete a manuscript's stored upload and extraction, local and durable
+    (BUG-138: purge must also remove the R2 copy). Missing files (already
+    gone, or an image-only manuscript that never wrote a raw store) are a
+    normal state, not an error. Callers hold `advisory_lock` on the
+    manuscript and record `purged_at` themselves. `file_ref` is already an
+    absolute path (`ingest/service.py`), used as-is."""
+    storage = get_storage(settings)
+    for path in (
+        Path(manuscript.file_ref) if manuscript.file_ref.strip() else None,
+        raw_store_path(settings, manuscript.id),
+    ):
+        if path is None:
+            continue
+        storage.delete(storage_key_for(settings, str(path)))
+        path.unlink(missing_ok=True)
 
 
 async def purge_manuscript(
@@ -244,17 +281,21 @@ async def purge_manuscript(
         # BUG-138: purge must also remove the DURABLE copy, or "purged" is a lie
         # once R2 exists -- the bytes would outlive their own deletion forever
         # instead of just until the next ephemeral-disk wipe.
-        storage = get_storage(settings)
-        for path in (
-            Path(manuscript.file_ref) if manuscript.file_ref.strip() else None,
-            raw_store_path(settings, manuscript_id),
-        ):
-            if path is None:
-                continue
-            storage.delete(storage_key_for(settings, str(path)))
-            path.unlink(missing_ok=True)
+        delete_stored_files(manuscript, settings)
 
         manuscript.purged_at = datetime.now(UTC)
+        # V-077: a purged manuscript has no comparison data left, so a Library
+        # entry for it must not keep claiming to be an active source.
+        entry = await session.scalar(
+            select(LibraryEntry).where(
+                LibraryEntry.manuscript_id == manuscript_id,
+                LibraryEntry.status != LibraryEntryStatus.removed,
+            )
+        )
+        if entry is not None:
+            entry.status = LibraryEntryStatus.removed
+            entry.removed_at = manuscript.purged_at
+            entry.removal_reason = LibraryRemovalReason.purged
         await write_audit_event(
             session,
             event_type="manuscript_purged",

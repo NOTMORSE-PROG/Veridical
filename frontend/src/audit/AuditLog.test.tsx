@@ -269,7 +269,7 @@ describe("AuditLogPage", () => {
     expect((await screen.findAllByText("Citation source confirmed")).length).toBe(2);
     expect(screen.getAllByText("Check cancellation requested").length).toBe(2);
     expect(screen.getAllByText("Check cancelled").length).toBe(2);
-    expect(screen.getAllByText("Failed upload moved to Archive").length).toBe(2);
+    expect(screen.getAllByText("Failed upload removed from Review Desk").length).toBe(2);
     expect(screen.getAllByText("Future review event").length).toBe(2);
     expect(screen.queryByText(/citation_source_confirmed|future_review_event/)).not.toBeInTheDocument();
   });

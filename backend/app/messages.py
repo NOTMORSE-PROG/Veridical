@@ -65,6 +65,64 @@ IMAGE_ONLY_NOTE = (
     "scanned copy). Checks that need the text will be limited."
 )
 
+# --- Library submissions (V-077, D-028) -------------------------------------
+
+LIBRARY_ADDED = (
+    "Added to the Library. Manuscripts checked from now on will be compared against "
+    "it. Earlier reports are not updated."
+)
+
+LIBRARY_EXACT_DUPLICATE = "This exact file is already in your Library, so nothing new was added."
+
+LIBRARY_EXACT_DUPLICATE_PROCESSING = (
+    "This exact file is already being added to your Library, so nothing new was added."
+)
+
+LIBRARY_EXACT_DUPLICATE_WAITING = (
+    "This exact file is already among your uploads waiting for a duplicate "
+    "decision, so nothing new was added."
+)
+
+LIBRARY_EXACT_DUPLICATE_FAILED = (
+    "VERIDICAL could not read this exact file before, so it was not stored again."
+)
+
+LIBRARY_REMOVED_WHILE_READING = (
+    "This upload was removed before VERIDICAL finished reading it, so it was not added."
+)
+
+LIBRARY_STILL_READING = "VERIDICAL is still reading this file. Try again in a few minutes."
+
+LIBRARY_STORAGE_FAILED = (
+    "VERIDICAL could not store this file right now. Nothing was added. Try again."
+)
+
+LIBRARY_POSSIBLE_DUPLICATE = (
+    "This file's text is very similar to a manuscript already in your Library "
+    "(it may be the same manuscript in another file, or a revised version). It "
+    "has not been added yet. Compare them, then choose Add anyway or Skip."
+)
+
+LIBRARY_NO_READABLE_TEXT = (
+    "VERIDICAL could not find readable text in this file (it may be a scanned "
+    "copy), so it cannot be compared against other manuscripts. It was not "
+    "added to the Library."
+)
+
+LIBRARY_FILE_UNREADABLE = (
+    "VERIDICAL could not read this file, so it was not added to the Library. "
+    "Please re-export it and try again."
+)
+
+LIBRARY_NOT_AWAITING_DECISION = "This manuscript is not waiting for a duplicate decision."
+
+LIBRARY_SOURCE_MISSING = (
+    "VERIDICAL could not find this manuscript's stored text, so it cannot be "
+    "added. Remove it and add the file again."
+)
+
+LIBRARY_UNKNOWN_PROGRAM = "No program named {program}."
+
 # --- criterion routing (F3.1, V-015) ----------------------------------------
 
 STRUCTURAL_RULE_UNIMPLEMENTED = (

@@ -37,7 +37,7 @@ export const PROBLEM_LABEL: Partial<Record<string, string>> = {
   p_value_decision_error: "Reported p-value may change the significance decision",
   percentage_sum_off: "Table percentages may not sum to 100%",
   group_count_exceeds_total: "Group sample sizes may not match the stated total",
-  reuse_same_instructor_resubmission: "Possible resubmission of your own earlier upload",
+  reuse_same_instructor_resubmission: "Possible resubmission of your own Library record",
 };
 
 export function problemLabel(kind: string | null | undefined): string | null {

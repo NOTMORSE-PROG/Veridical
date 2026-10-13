@@ -3,11 +3,10 @@ whole-document AND chapter-level (ticket AC: "a chapter transplanted into
 a new doc -> chapter-level flag"), real pgvector `<=>` cosine-distance
 queries via `Vector.cosine_distance()`.
 
-**Never match against self**: the caller MUST query before writing this
-manuscript's own embeddings back (`app.checks.reuse.service` owns that
-ordering) — this module additionally excludes the current
-`manuscript_id` defensively, since a RE-RUN of an already-processed
-manuscript would otherwise find its own prior archive row.
+**Never match against self**: since V-077 a check never writes its own
+embeddings, but a manuscript can still have corpus rows of its own when it is
+itself an active Library entry (a legacy entry re-checked from the dashboard),
+so every query excludes the current `manuscript_id`.
 
 **Cross-model safety** (V-036's own ticket edge case): every query filters
 `model_id == settings.embedding_model_id` — a future model change makes
@@ -45,7 +44,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.checks.reuse.embed import DocumentEmbeddings, PassageEmbedding
 from app.config import Settings
 from app.groups.service import DEFAULT_GROUP_LABEL, normalize_group_name
+from app.models.enums import LibraryEntryStatus, ManuscriptOrigin
 from app.models.group import Group
+from app.models.library import LibraryEntry
 from app.models.manuscript import (
     Manuscript,
     ManuscriptArchive,
@@ -215,23 +216,88 @@ async def same_instructor_hash_duplicate(
     image-only scan, where the embedding-similarity path below never runs
     a comparison in the first place). Returns the OTHER manuscript's id, or
     `None` if there's no match (including when `content_hash` itself is
-    `None` -- a manuscript ingested before this column existed)."""
+    `None` -- a manuscript ingested before this column existed).
+
+    V-077 (D-028): scoped to the instructor's own ACTIVE Library entries.
+    Only those are comparison sources now; an earlier dashboard upload of the
+    same bytes is not in the Library, so naming it as the matched source
+    would describe a comparison that never happened."""
     if content_hash is None:
         return None
     row = (
         await session.execute(
             select(Manuscript.id)
+            .join(LibraryEntry, LibraryEntry.manuscript_id == Manuscript.id)
             .where(
                 Manuscript.instructor_id == instructor_id,
                 Manuscript.content_hash == content_hash,
                 Manuscript.id != manuscript_id,
                 Manuscript.purged_at.is_(None),
+                LibraryEntry.status == LibraryEntryStatus.active,
             )
             .order_by(Manuscript.id)
             .limit(1)
         )
     ).first()
     return row[0] if row is not None else None
+
+
+async def canonical_library_copies(
+    session: AsyncSession,
+    matched_manuscript_ids: set[int],
+    requesting_instructor_id: int | None,
+    *,
+    exclude_manuscript_ids: set[int],
+) -> dict[int, tuple[int, int]]:
+    """V-077: map each matched Library manuscript to ONE representative of
+    its byte-identical group (same `content_hash`, active entries only), so
+    two instructors adding the same file cannot split one source into two
+    findings. The requester's own copy is preferred when one exists (so the
+    BUG-140 same-instructor rule still sees it), then the lowest id. Returns
+    only ids that change, as `{matched_id: (canonical_id, canonical_owner)}`;
+    an id with no preferred identical sibling is absent. Nothing about the other
+    copies is disclosed beyond what an exact-duplicate match already reveals:
+    the representative is always byte-identical to a record that matched,
+    though it need not itself have been among the nearest results
+    (security review, 2026-10-13). `exclude_manuscript_ids` is the query's own exclusion set (the
+    checked manuscript and its group siblings), so a re-check of a Library
+    manuscript can never be redirected onto itself."""
+    if not matched_manuscript_ids:
+        return {}
+    hashes = dict(
+        (
+            await session.execute(
+                select(Manuscript.id, Manuscript.content_hash).where(
+                    Manuscript.id.in_(matched_manuscript_ids),
+                    Manuscript.content_hash.is_not(None),
+                )
+            )
+        ).all()
+    )
+    if not hashes:
+        return {}
+    siblings = (
+        await session.execute(
+            select(Manuscript.id, Manuscript.content_hash, Manuscript.instructor_id)
+            .join(LibraryEntry, LibraryEntry.manuscript_id == Manuscript.id)
+            .where(
+                Manuscript.content_hash.in_(set(hashes.values())),
+                Manuscript.id.notin_(exclude_manuscript_ids),
+                LibraryEntry.status == LibraryEntryStatus.active,
+            )
+        )
+    ).all()
+    best: dict[str, tuple[bool, int, int]] = {}
+    for sibling_id, content_hash, instructor_id in siblings:
+        key = (instructor_id != requesting_instructor_id, sibling_id, instructor_id)
+        if content_hash not in best or key < best[content_hash]:
+            best[content_hash] = key
+    remapped: dict[int, tuple[int, int]] = {}
+    for mid, content_hash in hashes.items():
+        if content_hash in best and best[content_hash][1] != mid:
+            _, canonical_id, canonical_owner = best[content_hash]
+            remapped[mid] = (canonical_id, canonical_owner)
+    return remapped
 
 
 async def is_first_upload_for_instructor(session: AsyncSession, manuscript_id: int) -> bool:
@@ -259,10 +325,17 @@ async def is_first_upload_for_instructor(session: AsyncSession, manuscript_id: i
     ).first()
     if row is None:
         return False
+    # V-077 (backend review): counts the instructor's other CHECK uploads only.
+    # Library submissions are not checks, so adding a past term to the Library
+    # does not silence this banner on the instructor's first real check.
     other_count = await session.scalar(
         select(func.count())
         .select_from(Manuscript)
-        .where(Manuscript.instructor_id == row.instructor_id, Manuscript.id != manuscript_id)
+        .where(
+            Manuscript.instructor_id == row.instructor_id,
+            Manuscript.id != manuscript_id,
+            Manuscript.origin == ManuscriptOrigin.check_upload,
+        )
     )
     return (other_count or 0) == 0
 
@@ -295,6 +368,12 @@ async def _group_sibling_manuscript_ids(session: AsyncSession, manuscript_id: in
             )
         ).all()
     )
+
+
+async def comparison_exclusions(session: AsyncSession, manuscript_id: int) -> set[int]:
+    """The ids every similarity query in this module excludes: the checked
+    manuscript itself and its own group's other uploads."""
+    return {manuscript_id} | await _group_sibling_manuscript_ids(session, manuscript_id)
 
 
 async def query_similar_manuscripts(

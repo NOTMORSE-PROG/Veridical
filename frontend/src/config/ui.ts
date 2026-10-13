@@ -20,6 +20,15 @@ export const INSTRUCTOR_NOTE_MAX_LENGTH = 1000;
 export const CRITERION_ANCHOR_REGION_ID = -2147483647;
 export const PASSWORD_MIN_LENGTH = 8;
 export const LIBRARY_SEARCH_DEBOUNCE_MS = 400;
+// V-077: how often an own Library record that is still being read refreshes
+// its status, and the most own pending uploads listed above the collection.
+export const LIBRARY_STATUS_POLL_MS = 3000;
+export const LIBRARY_PENDING_PAGE_SIZE = 100;
+// V-077: Library page size; the backend caps it at 200.
+export const LIBRARY_PAGE_SIZE = 50;
+// V-077: the Library record page shows Source/Record details as tabs only at
+// this width (mirrors the 767px phone breakpoint in ui/signal.css).
+export const LIBRARY_TABS_MEDIA_QUERY = "(max-width: 767px)";
 export const REVIEW_DESK_PAGE_SIZE = 20;
 export const FLAG_LIST_INITIAL_COUNT = 8;
 export const FLAG_LIST_BATCH_COUNT = 8;

@@ -7,7 +7,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import Settings, get_settings
 from app.dashboard.schemas import DashboardStats
-from app.models.enums import CheckRunStatus, IngestStatus, ReadinessStatus, ResultOutcome
+from app.models.enums import (
+    CheckRunStatus,
+    IngestStatus,
+    ManuscriptOrigin,
+    ReadinessStatus,
+    ResultOutcome,
+)
 from app.models.manuscript import Manuscript
 from app.models.run import CheckResult, CheckRun, ReadinessReport
 
@@ -143,6 +149,8 @@ async def get_dashboard_stats(
     manuscript_scope = (
         Manuscript.instructor_id == instructor_id,
         Manuscript.dismissed_at.is_(None),
+        # V-077 (D-028): Library submissions are not check inputs.
+        Manuscript.origin == ManuscriptOrigin.check_upload,
     )
 
     needs_attention_count = (

@@ -4,6 +4,7 @@ import type {
   EscalatedItemOut,
   EscalationResolution,
   FlagSummaryOut,
+  OriginalityScope as OriginalityScopeValue,
   ResultRowCommon,
 } from "../api/types";
 import { useMe } from "../auth/useAuth";
@@ -17,6 +18,8 @@ import { useViewedFlagIds } from "../domain/flagViewed";
 import { problemLabel } from "../domain/problemLabel";
 import { systemFindingCopy } from "../domain/systemFindingCopy";
 import { ActionLink } from "../ui/ActionLink";
+import { OriginalityScope } from "./OriginalityScope";
+import { originalityUnassessed } from "./originalityScopeState";
 import { Alert } from "../ui/Alert";
 import { Button } from "../ui/Button";
 import { clusterFlagFindings, type FlagFindingCluster } from "./flagClusters";
@@ -670,9 +673,11 @@ export function SignalEscalatedPanel({ checkRunId }: { checkRunId: number }) {
 export function SignalFlagsPanel({
   checkRunId,
   unresolvedHighFlagCount,
+  originalityScope,
 }: {
   checkRunId: number;
   unresolvedHighFlagCount: number;
+  originalityScope?: OriginalityScopeValue | null;
 }) {
   const { data: flags, isPending, isError, refetch } = useFlags(checkRunId);
   const { data: me } = useMe();
@@ -689,6 +694,7 @@ export function SignalFlagsPanel({
     <section id="integrity-signals" tabIndex={-1} className="signal-review-section" aria-labelledby="flags-heading">
       <div className="signal-review-section__heading"><div><p className="signal-section-kicker">Second review task</p><h2 id="flags-heading" tabIndex={-1}>Integrity signals</h2></div><span>{openFindingCount} open finding{openFindingCount === 1 ? "" : "s"}</span></div>
       <p className="signal-review-section__intro">These are possible inconsistencies, not accusations. Open a signal to inspect its excerpt, source anchor, and available instructor action.</p>
+      <OriginalityScope scope={originalityScope} showAddAction />
       {flags?.length
         ? (
           <SignalFlagList
@@ -699,20 +705,27 @@ export function SignalFlagsPanel({
             viewedIds={viewedIds}
           />
         )
-        : <Alert title="No integrity signals" tone="success">This run produced no checkable integrity signals.</Alert>}
+        : <Alert title="No integrity signals" tone={originalityUnassessed(originalityScope) ? "info" : "success"}>This run produced no checkable integrity signals.</Alert>}
     </section>
   );
 }
 
-export function SignalPublicFlags({ flags }: { flags: FlagSummaryOut[] }) {
+export function SignalPublicFlags({
+  flags,
+  originalityScope,
+}: {
+  flags: FlagSummaryOut[];
+  originalityScope?: OriginalityScopeValue | null;
+}) {
   const findingCount = clusterFlagFindings(flags).length;
   return (
     <section id="integrity-signals" tabIndex={-1} className="signal-review-section" aria-labelledby="flags-heading">
       <div className="signal-review-section__heading"><div><p className="signal-section-kicker">Integrity record</p><h2 id="flags-heading">Possible inconsistencies</h2></div><span>{findingCount} finding{findingCount === 1 ? "" : "s"}</span></div>
       <p className="signal-review-section__intro">These are possible inconsistencies, not accusations. This shared view shows the bounded evidence the instructor chose to share; it does not expose the private Audit trail.</p>
+      <OriginalityScope scope={originalityScope} />
       {flags.length
         ? <SignalFlagList flags={flags} showActions={false} initialView="all" />
-        : <Alert title="No integrity signals" tone="success">This run produced no shared integrity signals.</Alert>}
+        : <Alert title="No integrity signals" tone={originalityUnassessed(originalityScope) ? "info" : "success"}>This run produced no shared integrity signals.</Alert>}
     </section>
   );
 }

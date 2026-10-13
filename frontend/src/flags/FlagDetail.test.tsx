@@ -107,7 +107,7 @@ describe("FlagDetailPage", () => {
 
     expect(await screen.findByText("Passage comparison", { selector: "h3" })).toBeInTheDocument();
     expect(screen.getByText("Your manuscript · p. 31")).toBeInTheDocument();
-    expect(screen.getByText("Archived manuscript #3")).toBeInTheDocument();
+    expect(screen.getByText("Library record #3")).toBeInTheDocument();
     expect(screen.getAllByText(/hybrid rule-based and AI approach/)).toHaveLength(2);
   });
 
@@ -171,11 +171,15 @@ describe("FlagDetailPage", () => {
         page_anchor: "whole document",
         passage_pair: null,
         evidence_unavailable: false,
+        matched_ref: 4,
       },
     }));
     renderWithProviders(<FlagDetailPage />, { route: "/flags/5", path: "/flags/:flagId" });
 
     expect(await screen.findByRole("heading", { name: "No manuscript excerpt is available" })).toBeInTheDocument();
+    // V-077 (UX review P1-3): the matched record can be opened and verified,
+    // not only agreed with.
+    expect(screen.getByRole("link", { name: /Open Library record #4/ })).toHaveAttribute("href", "/library/4");
     expect(document.querySelector("blockquote.signal-evidence-quote")).not.toBeInTheDocument();
     expect(screen.getByText("No passage-level comparison applies")).toBeInTheDocument();
     expect(screen.getByText(/no specific passage to compare side by side/)).toBeInTheDocument();

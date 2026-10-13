@@ -107,10 +107,9 @@ export function ReuseExplorePanel({
       </div>
 
       <p className="border-b border-border bg-status-neutral-bg px-3.5 py-2 text-xs text-status-neutral-text">
-        VERIDICAL's shared originality library currently holds{" "}
-        {data?.passage_archive_size_n ?? "…"} other manuscript
-        {data?.passage_archive_size_n === 1 ? "" : "s"}. Coverage grows as more manuscripts are
-        checked here, so an empty result here is not the same as a clean bill of health.
+        {data
+          ? `The Library currently holds ${data.passage_archive_size_n} record${data.passage_archive_size_n === 1 ? "" : "s"}. Passage matches are found only against Library records, so an empty result here is not evidence of originality. Coverage grows as instructors add manuscripts to the Library.`
+          : "Counting Library records."}
       </p>
 
       <fieldset className="border-b border-border py-1.5">

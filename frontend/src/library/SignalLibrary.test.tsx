@@ -1,90 +1,74 @@
+// V-077 (D-028): the Library as a standalone collection and the only
+// originality corpus. Replaces the V-066 suite, whose subject (every
+// dashboard upload listed as a Library record, with purge and report links)
+// no longer exists.
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type {
-  DocumentParagraphsOut,
   LibraryExcerptOut,
   LibraryItemOut,
+  LibrarySubmissionOut,
   ManuscriptViewerOut,
   PaginatedLibrary,
 } from "../api/types";
 import { renderWithProviders, stubFetchByPath } from "../test/renderWithProviders";
 import { SignalLibraryPage } from "./SignalLibrary";
+import { SignalLibraryAddPage } from "./SignalLibraryAdd";
 import { SignalLibraryComparePage } from "./SignalLibraryCompare";
 import { SignalLibraryDetailPage } from "./SignalLibraryDetail";
 
 vi.mock("./LibraryContentPane", () => ({
-  LibraryContentPane: ({
-    isOwn,
-    ownDocument,
-  }: {
-    isOwn: boolean;
-    ownDocument?: { removedAt: string | null };
-  }) => (
-    <div>
-      {isOwn
-        ? ownDocument?.removedAt
-          ? "Stored content removed from source pane"
-          : "Full manuscript source"
-        : "Bounded manuscript excerpt"}
-    </div>
+  LibraryContentPane: ({ isOwn }: { isOwn: boolean }) => (
+    <div>{isOwn ? "Full manuscript source" : "Bounded manuscript excerpt"}</div>
   ),
 }));
 
 const OWN: LibraryItemOut = {
   manuscript_id: 1,
-  group_label: "Byte Builders",
-  title: "Barangay Service Portal",
-  authors: ["Ana Cruz", "Ben Lim"],
-  program: "BSIT",
-  original_filename: "portal.pdf",
-  created_at: "2026-08-10T08:00:00Z",
-  purged_at: null,
   is_own: true,
-  duplicate_uploads: null,
-  latest_done_check_run_id: null,
+  label: "Barangay Service Portal",
+  title: "Barangay Service Portal",
+  team_name: "Team Lakan",
+  authors: ["Ana Cruz", "Ben Reyes"],
+  program: "IT",
+  school_year: "2024-2025",
+  original_filename: "portal.pdf",
+  status: "active",
+  source: "library_submission",
+  added_at: "2026-10-01T02:00:00Z",
+  created_at: "2026-10-01T02:00:00Z",
+  proposed_fields: [],
+  possible_duplicate_of: null,
+  failure_detail: null,
 };
 
 const SHARED: LibraryItemOut = {
+  ...OWN,
   manuscript_id: 2,
-  group_label: "Circuit Team",
-  title: "Campus Energy Monitor",
-  authors: ["Cara Reyes"],
-  program: "BSCS",
-  original_filename: null,
-  created_at: "2026-08-11T08:00:00Z",
-  purged_at: null,
   is_own: false,
-  duplicate_uploads: null,
-  latest_done_check_run_id: null,
-};
-
-const UNTITLED: LibraryItemOut = {
-  ...SHARED,
-  manuscript_id: 3,
-  group_label: "Fallback Group",
+  label: "Library record #2",
   title: null,
-  original_filename: "fallback-study.docx",
-  created_at: "2026-08-12T08:00:00Z",
-};
-
-// BUG-147: the REAL shape the backend now returns for another
-// instructor's manuscript -- matches `_item_out`'s redacted branch
-// exactly (`group_label` is the non-identifying placeholder, `title`/
-// `original_filename` are null, `authors` is empty), unlike `SHARED`
-// above, which still carries fixture identity data for unrelated tests
-// that predate this fix and aren't about redaction.
-const REDACTED: LibraryItemOut = {
-  manuscript_id: 99,
-  group_label: "Archived manuscript #99",
-  title: null,
+  team_name: null,
   authors: [],
-  program: "IT",
   original_filename: null,
-  created_at: "2026-08-13T08:00:00Z",
-  purged_at: null,
-  is_own: false,
-  duplicate_uploads: null,
-  latest_done_check_run_id: null,
+  source: null,
+  program: "CS",
+};
+
+const WAITING: LibraryItemOut = {
+  ...OWN,
+  manuscript_id: 3,
+  label: "portal-copy.docx",
+  title: null,
+  original_filename: "portal-copy.docx",
+  status: "needs_decision",
+  added_at: null,
+  possible_duplicate_of: {
+    manuscript_id: 1,
+    label: "Barangay Service Portal",
+    original_filename: "portal.pdf",
+    added_at: "2026-10-01T02:00:00Z",
+  },
 };
 
 const VIEWER: ManuscriptViewerOut = {
@@ -98,628 +82,470 @@ const VIEWER: ManuscriptViewerOut = {
   regions: [],
 };
 
-const OWN_DOCX: LibraryItemOut = {
-  ...OWN,
-  manuscript_id: 4,
-  title: "Student Advising Assistant",
-  original_filename: "advising.docx",
-};
-
-const DOCX_VIEWER: ManuscriptViewerOut = {
-  ...VIEWER,
-  manuscript_id: 4,
-  original_filename: "advising.docx",
-  source_format: "docx",
-  page_count: null,
-};
-
-const DOCX_PARAGRAPHS: DocumentParagraphsOut = {
-  paragraphs: [
-    { paragraph: 1, text: "The system supports scheduled academic advising.", heading_level: null },
-  ],
-};
-
 const EXCERPT: LibraryExcerptOut = {
   manuscript_id: 2,
   chapters: [
-    {
-      chapter_index: 0,
-      title: "Introduction",
-      excerpt: "A bounded chapter excerpt for comparison.",
-      context_before: null,
-      context_after: null,
-    },
+    { chapter_index: 0, title: "Introduction", excerpt: "A bounded excerpt.", context_before: null, context_after: null },
   ],
   total_chapters: 1,
   limitations: "Bounded excerpt only.",
   purged_at: null,
 };
 
-const PAGE: PaginatedLibrary = {
-  items: [OWN, SHARED],
-  total: 2,
-  page: 1,
-  page_size: 50,
-};
+function page(items: LibraryItemOut[]): PaginatedLibrary {
+  return { items, total: items.length, page: 1, page_size: 50 };
+}
 
-describe("Signal manuscript library", () => {
-  afterEach(() => vi.unstubAllGlobals());
+/** `/library` serves both the collection and `scope=pending` from one path,
+ * so the shared path-keyed stub is wrapped to tell them apart. */
+function libraryFetch(
+  handlers: Record<string, unknown>,
+  pending: PaginatedLibrary = page([]),
+  onRequest?: (url: URL, init?: RequestInit) => Response | undefined,
+) {
+  const base = stubFetchByPath(handlers);
+  return vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = new URL(typeof input === "string" ? input : input.toString(), "http://localhost");
+    const custom = onRequest?.(url, init);
+    if (custom) return custom;
+    if (url.pathname === "/library" && url.searchParams.get("scope") === "pending") {
+      return new Response(JSON.stringify(pending), { status: 200 });
+    }
+    return base(input);
+  });
+}
 
-  it("opens in browse mode, explains the privacy boundary, and makes comparison an intentional mode", async () => {
-    vi.stubGlobal("fetch", stubFetchByPath({ "/library": PAGE, "/programs": [] }));
+function json(body: unknown, status = 200): Response {
+  return new Response(JSON.stringify(body), { status });
+}
+
+afterEach(() => vi.unstubAllGlobals());
+
+describe("Library collection (4z)", () => {
+  it("is a plain collection: an add action, a privacy note, and records with no verdict or report link", async () => {
+    vi.stubGlobal("fetch", libraryFetch({ "/library": page([OWN, SHARED]), "/programs": [] }));
     renderWithProviders(<SignalLibraryPage />, { route: "/library", path: "/library" });
 
     expect(await screen.findByRole("heading", { name: "Manuscript Library" })).toBeInTheDocument();
-    expect(screen.getByText("Privacy boundary")).toBeInTheDocument();
-    expect(screen.queryAllByRole("checkbox")).toHaveLength(0);
+    expect(screen.getByRole("link", { name: /Add to Library/ })).toHaveAttribute("href", "/library/add");
+    expect(screen.getByText("Who can see Library records")).toBeInTheDocument();
+    expect(screen.getByText(/not added here automatically/)).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "Compare manuscripts" }));
-    expect(screen.getAllByRole("checkbox")).toHaveLength(2);
-    expect(screen.getByText("Choose manuscripts to compare")).toBeInTheDocument();
-    expect(screen.getByRole("status")).toHaveTextContent("No manuscripts selected. Select two manuscripts.");
-    expect(screen.getByRole("button", { name: "Compare manuscripts" })).toBeDisabled();
+    const own = await screen.findByRole("link", { name: "Barangay Service Portal" });
+    expect(own).toHaveAttribute("href", "/library/1");
+    expect(screen.getByText("Ana Cruz, Ben Reyes")).toBeInTheDocument();
+    // Own records show their number, so "Library record #N" in a finding is findable.
+    expect(screen.getByText("#1")).toBeInTheDocument();
+    const foreign = screen.getByRole("link", { name: "Library record #2" });
+    expect(foreign).toHaveAttribute("href", "/library/2");
+    expect(screen.getByText("Title, team, authors, and file name are withheld.")).toBeInTheDocument();
+
+    expect(screen.queryByText(/report/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Ready|Not Ready|%/)).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Remove/ })).not.toBeInTheDocument();
+    expect(screen.getByText("records in the Library")).toBeInTheDocument();
   });
 
-  it("BUG-191: enables comparison only after two selected records have viewable content", async () => {
-    const fetchMock = stubFetchByPath({
-      "/library": PAGE,
-      "/programs": [],
-      "/library/1/document": VIEWER,
-      "/library/2/excerpt": EXCERPT,
-    });
-    vi.stubGlobal("fetch", fetchMock);
+  it("explains an empty Library honestly and offers only the add path", async () => {
+    vi.stubGlobal("fetch", libraryFetch({ "/library": page([]), "/programs": [] }));
     renderWithProviders(<SignalLibraryPage />, { route: "/library", path: "/library" });
-    await screen.findByText("Barangay Service Portal");
 
-    fireEvent.click(screen.getByRole("button", { name: "Compare manuscripts" }));
-    fireEvent.click(screen.getByRole("checkbox", { name: "Select “Barangay Service Portal” for comparison" }));
-    expect(screen.getByRole("status")).toHaveTextContent("One manuscript selected. Checking comparison content.");
-    expect(screen.getByRole("button", { name: "Compare manuscripts" })).toBeDisabled();
-    expect(await screen.findByText("Available to compare")).toBeInTheDocument();
-    expect(screen.getByRole("status")).toHaveTextContent("One manuscript selected and available. Select one more manuscript.");
-
-    fireEvent.click(screen.getByRole("checkbox", { name: "Select “Campus Energy Monitor” for comparison" }));
-    await waitFor(() => expect(screen.getByRole("button", { name: "Compare manuscripts" })).toBeEnabled());
-    expect(screen.getByText("Ready to compare")).toBeInTheDocument();
-    expect(screen.getByRole("status")).toHaveTextContent("Two manuscripts selected and available. You can compare them now.");
-    expect(screen.getByRole("checkbox", { name: "Remove “Barangay Service Portal” from comparison" })).toBeChecked();
-
-    const contentRequests = fetchMock.mock.calls
-      .map(([input]) => new URL(String(input), "http://localhost").pathname)
-      .filter((path) => path.endsWith("/document") || path.endsWith("/excerpt"));
-    expect(contentRequests).toEqual(["/library/1/document", "/library/2/excerpt"]);
+    expect(await screen.findByRole("heading", { name: "The Library has no manuscripts yet" })).toBeInTheDocument();
+    expect(screen.getByText(/right now they have nothing to compare against/)).toBeInTheDocument();
+    expect(screen.queryByRole("searchbox")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Compare/ })).not.toBeInTheDocument();
+    expect(screen.queryByText(/selected/)).not.toBeInTheDocument();
   });
 
-  it("BUG-191: identifies which selected record has no excerpt and keeps Compare disabled", async () => {
+  it("keeps own uploads that need attention apart from the collection count", async () => {
     vi.stubGlobal(
       "fetch",
-      stubFetchByPath({
-        "/library": PAGE,
+      libraryFetch({ "/library": page([OWN]), "/programs": [] }, page([WAITING])),
+    );
+    renderWithProviders(<SignalLibraryPage />, { route: "/library", path: "/library" });
+
+    const pending = await screen.findByRole("region", { name: "Your uploads not in the Library" });
+    expect(within(pending).getByText("Possible duplicate")).toBeInTheDocument();
+    expect(within(pending).getByText(/is very similar to your record “Barangay Service Portal”/)).toBeInTheDocument();
+    expect(
+      within(pending).getByRole("link", { name: "Review possible duplicate for portal-copy.docx" }),
+    ).toHaveAttribute("href", "/library/3");
+    expect(screen.getByText("record in the Library")).toBeInTheDocument();
+    expect(screen.getByText("Comparison needs at least two Library records.")).toBeInTheDocument();
+  });
+
+  it("enables comparison only after two selected records have viewable content", async () => {
+    vi.stubGlobal(
+      "fetch",
+      libraryFetch({
+        "/library": page([OWN, SHARED]),
         "/programs": [],
         "/library/1/document": VIEWER,
-        "/library/2/excerpt": { ...EXCERPT, chapters: [], total_chapters: 0 },
-      }),
-    );
-    renderWithProviders(<SignalLibraryPage />, { route: "/library", path: "/library" });
-    await screen.findByText("Barangay Service Portal");
-
-    fireEvent.click(screen.getByRole("button", { name: "Compare manuscripts" }));
-    fireEvent.click(screen.getByRole("checkbox", { name: "Select “Barangay Service Portal” for comparison" }));
-    fireEvent.click(screen.getByRole("checkbox", { name: "Select “Campus Energy Monitor” for comparison" }));
-
-    const selectedRecords = screen.getByRole("list", { name: "Selected manuscripts" });
-    const sharedRecord = (await within(selectedRecords).findByText(/Campus Energy Monitor/)).closest("li");
-    expect(await within(sharedRecord as HTMLElement).findByText("No viewable comparison content")).toBeInTheDocument();
-    expect(screen.getByRole("status")).toHaveTextContent(
-      "At least one selected manuscript has no viewable comparison content. Clear it and choose another.",
-    );
-    expect(screen.getByText("Choose another manuscript")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Compare manuscripts" })).toBeDisabled();
-  });
-
-  it("BUG-191: treats a retained but unopenable own source as unavailable before comparison", async () => {
-    vi.stubGlobal(
-      "fetch",
-      stubFetchByPath({
-        "/library": PAGE,
-        "/programs": [],
-        "/library/1/document": {
-          ...VIEWER,
-          available: false,
-          unavailable_reason: "The retained source could not be opened.",
-        },
         "/library/2/excerpt": EXCERPT,
       }),
     );
     renderWithProviders(<SignalLibraryPage />, { route: "/library", path: "/library" });
-    await screen.findByText("Barangay Service Portal");
+    await screen.findByRole("link", { name: "Barangay Service Portal" });
 
-    fireEvent.click(screen.getByRole("button", { name: "Compare manuscripts" }));
+    fireEvent.click(screen.getByRole("button", { name: "Compare two records" }));
     fireEvent.click(screen.getByRole("checkbox", { name: "Select “Barangay Service Portal” for comparison" }));
-    fireEvent.click(screen.getByRole("checkbox", { name: "Select “Campus Energy Monitor” for comparison" }));
-
-    const selectedRecords = screen.getByRole("list", { name: "Selected manuscripts" });
-    const ownRecord = (await within(selectedRecords).findByText(/Barangay Service Portal/)).closest("li");
-    expect(await within(ownRecord as HTMLElement).findByText("No viewable comparison content")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Compare manuscripts" })).toBeDisabled();
+    fireEvent.click(screen.getByRole("checkbox", { name: "Select “Library record #2” for comparison" }));
+    expect(screen.getByRole("button", { name: "Compare records" })).toBeDisabled();
+    await waitFor(() => expect(screen.getByRole("button", { name: "Compare records" })).toBeEnabled());
+    expect(screen.getByText("Comparison is a reading aid and does not assign a new similarity score.")).toBeInTheDocument();
   });
 
-  it("BUG-191: requires usable paragraphs before an owned DOCX is available to compare", async () => {
-    const docxPage = { ...PAGE, items: [OWN_DOCX, SHARED] };
-    const fetchMock = stubFetchByPath({
-      "/library": docxPage,
-      "/programs": [],
-      "/library/4/document": DOCX_VIEWER,
-      "/library/4/document/paragraphs": new Response(
-        JSON.stringify({ error: { code: "gone", message: "The extracted document is unavailable." } }),
-        { status: 410 },
-      ),
-      "/library/2/excerpt": EXCERPT,
-    });
-    vi.stubGlobal("fetch", fetchMock);
-    renderWithProviders(<SignalLibraryPage />, { route: "/library", path: "/library" });
-    await screen.findByText("Student Advising Assistant");
+  it("says a search covers own records only when nothing matches", async () => {
+    vi.stubGlobal("fetch", libraryFetch({ "/library": page([]), "/programs": [] }));
+    renderWithProviders(<SignalLibraryPage />, { route: "/library?q=Maria", path: "/library" });
 
-    fireEvent.click(screen.getByRole("button", { name: "Compare manuscripts" }));
-    fireEvent.click(screen.getByRole("checkbox", { name: "Select “Student Advising Assistant” for comparison" }));
-    fireEvent.click(screen.getByRole("checkbox", { name: "Select “Campus Energy Monitor” for comparison" }));
-
-    const selectedRecords = screen.getByRole("list", { name: "Selected manuscripts" });
-    const docxRecord = (await within(selectedRecords).findByText(/Student Advising Assistant/)).closest("li");
-    expect(await within(docxRecord as HTMLElement).findByText("No viewable comparison content")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Compare manuscripts" })).toBeDisabled();
-    const paths = fetchMock.mock.calls.map(([input]) => new URL(String(input), "http://localhost").pathname);
-    expect(paths).toContain("/library/4/document/paragraphs");
-  });
-
-  it("BUG-191: enables an owned DOCX only after its selected-only paragraph check succeeds", async () => {
-    const docxPage = { ...PAGE, items: [OWN_DOCX, SHARED] };
-    const fetchMock = stubFetchByPath({
-      "/library": docxPage,
-      "/programs": [],
-      "/library/4/document": DOCX_VIEWER,
-      "/library/4/document/paragraphs": DOCX_PARAGRAPHS,
-      "/library/2/excerpt": EXCERPT,
-    });
-    vi.stubGlobal("fetch", fetchMock);
-    renderWithProviders(<SignalLibraryPage />, { route: "/library", path: "/library" });
-    await screen.findByText("Student Advising Assistant");
-
-    fireEvent.click(screen.getByRole("button", { name: "Compare manuscripts" }));
-    fireEvent.click(screen.getByRole("checkbox", { name: "Select “Student Advising Assistant” for comparison" }));
-    fireEvent.click(screen.getByRole("checkbox", { name: "Select “Campus Energy Monitor” for comparison" }));
-
-    await waitFor(() => expect(screen.getByRole("button", { name: "Compare manuscripts" })).toBeEnabled());
-    expect(screen.getByRole("status")).toHaveTextContent(
-      "Two manuscripts selected and available. You can compare them now.",
-    );
-    const contentPaths = fetchMock.mock.calls
-      .map(([input]) => new URL(String(input), "http://localhost").pathname)
-      .filter((path) => path.includes("/document") || path.endsWith("/excerpt"));
-    expect(contentPaths).toEqual([
-      "/library/4/document",
-      "/library/2/excerpt",
-      "/library/4/document/paragraphs",
-    ]);
-  });
-
-  it("BUG-191: offers a selected-record retry after an availability request fails", async () => {
-    let excerptAttempts = 0;
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async (input: RequestInfo | URL) => {
-        const path = new URL(String(input), "http://localhost").pathname;
-        if (path === "/library") return new Response(JSON.stringify(PAGE), { status: 200 });
-        if (path === "/programs") return new Response(JSON.stringify([]), { status: 200 });
-        if (path === "/library/1/document") return new Response(JSON.stringify(VIEWER), { status: 200 });
-        if (path === "/library/2/excerpt") {
-          excerptAttempts += 1;
-          return excerptAttempts === 1
-            ? new Response(JSON.stringify({ error: { code: "internal", message: "Unavailable" } }), { status: 503 })
-            : new Response(JSON.stringify(EXCERPT), { status: 200 });
-        }
-        throw new Error(`Unexpected request: ${path}`);
-      }),
-    );
-    renderWithProviders(<SignalLibraryPage />, { route: "/library", path: "/library" });
-    await screen.findByText("Barangay Service Portal");
-
-    fireEvent.click(screen.getByRole("button", { name: "Compare manuscripts" }));
-    fireEvent.click(screen.getByRole("checkbox", { name: "Select “Barangay Service Portal” for comparison" }));
-    fireEvent.click(screen.getByRole("checkbox", { name: "Select “Campus Energy Monitor” for comparison" }));
-
-    const retry = await screen.findByRole("button", { name: /Try availability check again for Campus Energy Monitor/ });
-    expect(screen.getByRole("button", { name: "Compare manuscripts" })).toBeDisabled();
-    fireEvent.click(retry);
-
-    await waitFor(() => expect(screen.getByRole("button", { name: "Compare manuscripts" })).toBeEnabled());
-    expect(excerptAttempts).toBe(2);
-  });
-
-  it("BUG-187: keeps a full selection understandable and identifies an untitled record by its visible fallback", async () => {
-    const page = { ...PAGE, items: [OWN, SHARED, UNTITLED], total: 3 };
-    vi.stubGlobal("fetch", stubFetchByPath({
-      "/library": page,
-      "/programs": [],
-      "/library/1/document": VIEWER,
-      "/library/2/excerpt": EXCERPT,
-    }));
-    renderWithProviders(<SignalLibraryPage />, { route: "/library", path: "/library" });
-    await screen.findByText("Barangay Service Portal");
-
-    fireEvent.click(screen.getByRole("button", { name: "Compare manuscripts" }));
-    fireEvent.click(screen.getByRole("checkbox", { name: "Select “Barangay Service Portal” for comparison" }));
-    fireEvent.click(screen.getByRole("checkbox", { name: "Select “Campus Energy Monitor” for comparison" }));
-
-    const blocked = screen.getByRole("checkbox", { name: "Select “Fallback Group” for comparison" });
-    expect(blocked).toHaveAttribute("aria-disabled", "true");
-    expect(blocked).toHaveAttribute("aria-describedby", "signal-compare-limit");
-    expect(screen.getByText(/clear one selection to choose this manuscript/i)).toBeInTheDocument();
-
-    fireEvent.click(blocked);
-    expect(blocked).not.toBeChecked();
-    fireEvent.click(screen.getByRole("checkbox", { name: "Remove “Campus Energy Monitor” from comparison" }));
-    expect(screen.getByRole("status")).toHaveTextContent(/One manuscript selected/);
-    expect(blocked).not.toHaveAttribute("aria-disabled");
-    expect(blocked).not.toHaveAttribute("aria-describedby");
-  });
-
-  it("BUG-187: gives visually identical titles distinct comparison names using visible record details", async () => {
-    const secondVersion: LibraryItemOut = {
-      ...OWN,
-      manuscript_id: 4,
-      authors: ["Diego Ramos"],
-      original_filename: "portal-revision.pdf",
-    };
-    const page = { ...PAGE, items: [OWN, secondVersion], total: 2 };
-    vi.stubGlobal("fetch", stubFetchByPath({ "/library": page, "/programs": [] }));
-    renderWithProviders(<SignalLibraryPage />, { route: "/library", path: "/library" });
-    await screen.findAllByText("Barangay Service Portal");
-
-    fireEvent.click(screen.getByRole("button", { name: "Compare manuscripts" }));
-
-    expect(
-      screen.getByRole("checkbox", {
-        name: /Select “Barangay Service Portal”, Byte Builders, Ana Cruz, Ben Lim, uploaded .* for comparison/,
-      }),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByRole("checkbox", {
-        name: /Select “Barangay Service Portal”, Byte Builders, Diego Ramos, uploaded .* for comparison/,
-      }),
-    ).toBeInTheDocument();
-    expect(screen.getByText("Ana Cruz, Ben Lim")).toBeVisible();
-    expect(screen.getByText("Diego Ramos")).toBeVisible();
-  });
-
-  it("uses visible processed seconds when shared records otherwise have identical metadata", async () => {
-    const first: LibraryItemOut = {
-      ...UNTITLED,
-      manuscript_id: 27,
-      group_label: "G",
-      title: null,
-      authors: [],
-      program: null,
-      original_filename: null,
-      created_at: "2026-08-18T09:53:09.555236Z",
-    };
-    const second: LibraryItemOut = {
-      ...first,
-      manuscript_id: 28,
-      created_at: "2026-08-18T09:53:22.131200Z",
-    };
-    const page = { ...PAGE, items: [first, second], total: 2 };
-    vi.stubGlobal("fetch", stubFetchByPath({ "/library": page, "/programs": [] }));
-    renderWithProviders(<SignalLibraryPage />, { route: "/library", path: "/library" });
-    await screen.findAllByText("G");
-
-    fireEvent.click(screen.getByRole("button", { name: "Compare manuscripts" }));
-
-    const choices = screen.getAllByRole("checkbox");
-    const names = choices.map((choice) => choice.getAttribute("aria-label"));
-    const processedValues = screen
-      .getAllByText(/Aug 18, 2026/)
-      .map((value) => value.textContent);
-    expect(new Set(names).size).toBe(2);
-    expect(names.every((name) => name?.includes("processed"))).toBe(true);
-    expect(new Set(processedValues).size).toBe(2);
-    expect(processedValues.every((value) => /:\d{2}/.test(value ?? ""))).toBe(true);
-  });
-
-  it("does not issue a detail request for an invalid manuscript address", () => {
-    const fetchMock = vi.fn();
-    vi.stubGlobal("fetch", fetchMock);
-    renderWithProviders(<SignalLibraryDetailPage />, { route: "/library/not-a-number", path: "/library/:manuscriptId" });
-
-    expect(screen.getByRole("heading", { name: "This manuscript address is not valid" })).toBeInTheDocument();
-    expect(fetchMock).not.toHaveBeenCalled();
-  });
-
-  it("states the ownership boundary on a record before exposing its source", async () => {
-    vi.stubGlobal(
-      "fetch",
-      stubFetchByPath({
-        "/library/1": OWN,
-        "/library/1/document": VIEWER,
-      }),
-    );
-    renderWithProviders(<SignalLibraryDetailPage />, { route: "/library/1", path: "/library/:manuscriptId" });
-
-    expect(await screen.findByRole("heading", { name: "Barangay Service Portal" })).toBeInTheDocument();
-    expect(screen.getByText("Your manuscript")).toBeInTheDocument();
-    expect(await screen.findByText("Full source viewable")).toBeInTheDocument();
-    expect(screen.getByText("Stored in your Library")).toBeInTheDocument();
-    expect(screen.getByText("Available to view")).toBeInTheDocument();
-    expect(screen.getByText("Full manuscript source")).toBeInTheDocument();
-  });
-
-  it("separates ownership and storage from an unavailable own-source view", async () => {
-    vi.stubGlobal(
-      "fetch",
-      stubFetchByPath({
-        "/library/1": OWN,
-        "/library/1/document": {
-          ...VIEWER,
-          available: false,
-          unavailable_reason: "This manuscript's source file could not be opened.",
-        },
-      }),
-    );
-    renderWithProviders(<SignalLibraryDetailPage />, { route: "/library/1", path: "/library/:manuscriptId" });
-
-    expect(await screen.findByText("Stored source not viewable")).toBeInTheDocument();
-    expect(screen.getByText("Your manuscript")).toBeInTheDocument();
-    expect(screen.getByText("Stored in your Library")).toBeInTheDocument();
-    expect(screen.getByText("View unavailable")).toBeInTheDocument();
-    expect(screen.queryByText("Full source viewable")).not.toBeInTheDocument();
-  });
-
-  it("does not request a source document after stored content was removed", async () => {
-    const purged = { ...OWN, purged_at: "2026-08-20T08:00:00Z" };
-    const requestedPaths: string[] = [];
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async (input: RequestInfo | URL) => {
-        const path = new URL(String(input), "http://localhost").pathname;
-        requestedPaths.push(path);
-        if (path === "/library/1") {
-          return new Response(JSON.stringify(purged), { status: 200 });
-        }
-        throw new Error(`Unexpected request: ${path}`);
-      }),
-    );
-    renderWithProviders(<SignalLibraryDetailPage />, { route: "/library/1", path: "/library/:manuscriptId" });
-
-    expect(await screen.findByText("Stored content removed")).toBeInTheDocument();
-    expect(screen.getByText("Stored content removed from source pane")).toBeInTheDocument();
-    expect(requestedPaths).toEqual(["/library/1"]);
-  });
-
-  it("keeps a removed own source honest in comparison without requesting its document", async () => {
-    const purged = { ...OWN, purged_at: "2026-08-20T08:00:00Z" };
-    const requestedPaths: string[] = [];
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async (input: RequestInfo | URL) => {
-        const path = new URL(String(input), "http://localhost").pathname;
-        requestedPaths.push(path);
-        if (path === "/library/1") return new Response(JSON.stringify(purged), { status: 200 });
-        if (path === "/library/2") return new Response(JSON.stringify(SHARED), { status: 200 });
-        if (path === "/library/2/excerpt") {
-          return new Response(
-            JSON.stringify({ chapters: [], purged_at: null, limitations: "Bounded excerpt." }),
-            { status: 200 },
-          );
-        }
-        throw new Error(`Unexpected request: ${path}`);
-      }),
-    );
-    renderWithProviders(<SignalLibraryComparePage />, { route: "/library/compare?a=1&b=2", path: "/library/compare" });
-
-    expect(await screen.findByText("Stored content removed from source pane")).toBeInTheDocument();
-    expect(requestedPaths).not.toContain("/library/1/document");
-  });
-
-  it("compares full and bounded records without inventing a new similarity judgment", async () => {
-    vi.stubGlobal(
-      "fetch",
-      stubFetchByPath({
-        "/library/1": OWN,
-        "/library/2": SHARED,
-        "/library/1/document": VIEWER,
-      }),
-    );
-    renderWithProviders(<SignalLibraryComparePage />, { route: "/library/compare?a=1&b=2", path: "/library/compare" });
-
-    expect(await screen.findByRole("heading", { name: "Compare manuscripts" })).toBeInTheDocument();
-    expect(screen.getByText(/does not produce a new similarity judgment/)).toBeInTheDocument();
-    expect(await screen.findByText(/may show its stored source/)).toBeInTheDocument();
-    expect(screen.getByText("Your manuscript")).toBeInTheDocument();
-    expect(screen.getByText("Bounded shared excerpt")).toBeInTheDocument();
-  });
-
-  // BUG-147 (UX review finding): the backend redaction had no frontend
-  // test guarding the copy an instructor actually reads -- a future
-  // refactor could silently regress "Withheld..." back to "Not listed"
-  // (which misleadingly implies no authors were ever recorded) and
-  // nothing would catch it. These two close that gap on the list card
-  // and the detail screen.
-  it("BUG-147: names the redaction reason on the list card, distinct from a genuinely empty own record", async () => {
-    const page = { ...PAGE, items: [REDACTED], total: 1 };
-    vi.stubGlobal("fetch", stubFetchByPath({ "/library": page, "/programs": [] }));
-    renderWithProviders(<SignalLibraryPage />, { route: "/library", path: "/library" });
-
-    expect(await screen.findByText("Withheld for another instructor's manuscript")).toBeInTheDocument();
-    expect(screen.queryByText("Not listed")).not.toBeInTheDocument();
-    // The anonymized placeholder is what's shown, never the real identity.
-    expect(screen.getByText("Archived manuscript #99")).toBeInTheDocument();
-  });
-
-  it("BUG-147: names the redaction reason on the detail screen too", async () => {
-    vi.stubGlobal("fetch", stubFetchByPath({ "/library/99": REDACTED }));
-    renderWithProviders(<SignalLibraryDetailPage />, { route: "/library/99", path: "/library/:manuscriptId" });
-
-    expect(await screen.findByText("Withheld for another instructor's manuscript")).toBeInTheDocument();
-  });
-
-  // BUG-148: the library used to list one card per raw upload, so five
-  // copies of one document read as five unrelated manuscripts. These
-  // tests cover the collapsed-card rendering the frontend owns; the
-  // collapsing/representative-selection LOGIC itself is backend, covered
-  // in test_library_router_live.py.
-  describe("BUG-148: byte-identical duplicate uploads collapse onto one card", () => {
-    const WITH_DUPLICATES: LibraryItemOut = {
-      ...OWN,
-      duplicate_uploads: [
-        {
-          manuscript_id: 10,
-          created_at: "2026-08-09T08:00:00Z",
-          purged_at: null,
-          original_filename: "portal-draft.pdf",
-          latest_done_check_run_id: 55,
-        },
-        {
-          manuscript_id: 11,
-          created_at: "2026-08-08T08:00:00Z",
-          purged_at: "2026-08-09T12:00:00Z",
-          original_filename: null,
-          latest_done_check_run_id: null,
-        },
-      ],
-    };
-
-    it("shows an upload-count badge and keeps the disclosure closed by default", async () => {
-      const page = { ...PAGE, items: [WITH_DUPLICATES, SHARED] };
-      vi.stubGlobal("fetch", stubFetchByPath({ "/library": page, "/programs": [] }));
-      renderWithProviders(<SignalLibraryPage />, { route: "/library", path: "/library" });
-
-      expect(await screen.findByText("Uploaded 3 times")).toBeInTheDocument();
-      const toggle = screen.getByRole("button", { name: "Show 2 more uploads" });
-      expect(toggle).toHaveAttribute("aria-expanded", "false");
-      expect(screen.queryByText("portal-draft.pdf")).not.toBeInTheDocument();
-      // No such disclosure/badge at all for the record with no duplicates.
-      expect(screen.queryByText("Campus Energy Monitor")).toBeInTheDocument();
-      expect(screen.getAllByRole("button", { name: /more upload/i })).toHaveLength(1);
-    });
-
-    it("expands to show each individual upload with its own date, filename, and storage state", async () => {
-      const page = { ...PAGE, items: [WITH_DUPLICATES] };
-      vi.stubGlobal("fetch", stubFetchByPath({ "/library": page, "/programs": [] }));
-      renderWithProviders(<SignalLibraryPage />, { route: "/library", path: "/library" });
-
-      const toggle = await screen.findByRole("button", { name: "Show 2 more uploads" });
-      fireEvent.click(toggle);
-      expect(screen.getByRole("button", { name: "Hide 2 more uploads" })).toHaveAttribute(
-        "aria-expanded",
-        "true",
-      );
-
-      expect(screen.getByText("portal-draft.pdf")).toBeInTheDocument();
-      // The still-stored sibling links to its own latest DONE report.
-      expect(screen.getByRole("link", { name: "Open report" })).toHaveAttribute("href", "/report/55");
-      // The purged sibling (no latest_done_check_run_id) shows the
-      // removed-content badge and offers no purge action of its own.
-      expect(screen.getAllByText("Content removed")).not.toHaveLength(0);
-      expect(screen.getAllByText("Content stored").length).toBeGreaterThan(0);
-    });
-
-    it("UX review finding: the representative row itself gets an Open report link when one exists, not just its hidden siblings", async () => {
-      const withReport = { ...OWN, latest_done_check_run_id: 42 };
-      const page = { ...PAGE, items: [withReport] };
-      vi.stubGlobal("fetch", stubFetchByPath({ "/library": page, "/programs": [] }));
-      renderWithProviders(<SignalLibraryPage />, { route: "/library", path: "/library" });
-
-      await screen.findByText("Barangay Service Portal");
-      expect(screen.getByRole("link", { name: "Open report" })).toHaveAttribute("href", "/report/42");
-      expect(screen.queryByRole("link", { name: "Open record" })).not.toBeInTheDocument();
-    });
-
-    it("falls back to Open record when the representative has no completed check run", async () => {
-      const page = { ...PAGE, items: [OWN, SHARED] }; // OWN.latest_done_check_run_id is null
-      vi.stubGlobal("fetch", stubFetchByPath({ "/library": page, "/programs": [] }));
-      renderWithProviders(<SignalLibraryPage />, { route: "/library", path: "/library" });
-
-      await screen.findByText("Barangay Service Portal");
-      expect(screen.getAllByRole("link", { name: "Open record" }).length).toBeGreaterThan(0);
-      expect(screen.queryByRole("link", { name: "Open report" })).not.toBeInTheDocument();
-    });
-
-    it("shows the group's storage state as stored while ANY copy is still retrievable", async () => {
-      const representativePurged = {
-        ...WITH_DUPLICATES,
-        purged_at: "2026-08-12T08:00:00Z", // the representative itself is purged...
-        duplicate_uploads: [
-          { ...WITH_DUPLICATES.duplicate_uploads![0], purged_at: null }, // ...but a sibling isn't
-        ],
-      };
-      const page = { ...PAGE, items: [representativePurged] };
-      vi.stubGlobal("fetch", stubFetchByPath({ "/library": page, "/programs": [] }));
-      renderWithProviders(<SignalLibraryPage />, { route: "/library", path: "/library" });
-
-      await screen.findByText("Barangay Service Portal");
-      expect(screen.getByText("Content stored")).toBeInTheDocument();
-      expect(screen.queryByText("Content removed")).not.toBeInTheDocument();
-    });
-
-    it("discloses the group size in the purge confirmation, counting only what's ACTUALLY still stored", async () => {
-      // WITH_DUPLICATES has 2 recorded siblings, but one of them
-      // (manuscript 11) is already purged in the fixture -- only 1 of the
-      // representative's 2 siblings is genuinely still stored.
-      const page = { ...PAGE, items: [WITH_DUPLICATES] };
-      vi.stubGlobal("fetch", stubFetchByPath({ "/library": page, "/programs": [] }));
-      renderWithProviders(<SignalLibraryPage />, { route: "/library", path: "/library" });
-      await screen.findByText("Barangay Service Portal");
-
-      fireEvent.click(screen.getByRole("button", { name: "Remove stored content" }));
-      expect(
-        screen.getByText("This document was uploaded 3 times. Removing this copy leaves 1 other stored copy untouched."),
-      ).toBeInTheDocument();
-    });
-
-    it("UX review finding: the dialog never claims a stored copy remains once every other copy is actually gone", async () => {
-      // Reproduces the exact live-found P1: purge the one still-stored
-      // sibling first, THEN reopen the dialog on the representative --
-      // the group's historical count is still 3, but zero OTHER copies
-      // are left, so the sentence must say so honestly instead of
-      // repeating a stale "leaves N other stored copies" claim.
-      const purgedSibling = {
-        ...WITH_DUPLICATES.duplicate_uploads![0],
-        purged_at: "2026-08-09T09:00:00Z",
-      };
-      const afterFirstPurge = {
-        ...WITH_DUPLICATES,
-        duplicate_uploads: [purgedSibling, WITH_DUPLICATES.duplicate_uploads![1]],
-      };
-      const page = { ...PAGE, items: [afterFirstPurge] };
-      vi.stubGlobal("fetch", stubFetchByPath({ "/library": page, "/programs": [] }));
-      renderWithProviders(<SignalLibraryPage />, { route: "/library", path: "/library" });
-      await screen.findByText("Barangay Service Portal");
-
-      fireEvent.click(screen.getByRole("button", { name: "Remove stored content" }));
-      expect(
-        screen.getByText(
-          "This document was uploaded 3 times, but every other copy has already been removed. This is the last one still stored.",
-        ),
-      ).toBeInTheDocument();
-      expect(screen.queryByText(/leaves \d+ other stored/)).not.toBeInTheDocument();
-    });
-
-    it("discloses the group size correctly when purging from the sibling disclosure, not just the card's own action", async () => {
-      const page = { ...PAGE, items: [WITH_DUPLICATES] };
-      vi.stubGlobal("fetch", stubFetchByPath({ "/library": page, "/programs": [] }));
-      renderWithProviders(<SignalLibraryPage />, { route: "/library", path: "/library" });
-      await screen.findByText("Barangay Service Portal");
-
-      fireEvent.click(await screen.findByRole("button", { name: "Show 2 more uploads" }));
-      // manuscript 10 (not purged) is the only removable sibling; removing
-      // IT leaves the representative itself still stored (1), so "1 other
-      // stored copy" -- manuscript 11 is already purged and doesn't count.
-      const siblingRemoveButtons = screen.getAllByRole("button", { name: "Remove stored content" });
-      expect(siblingRemoveButtons).toHaveLength(2); // the card's own + manuscript 10's
-      fireEvent.click(siblingRemoveButtons[1]);
-      expect(
-        screen.getByText("This document was uploaded 3 times. Removing this copy leaves 1 other stored copy untouched."),
-      ).toBeInTheDocument();
-    });
+    expect(await screen.findByRole("heading", { name: "No records match your search" })).toBeInTheDocument();
+    expect(screen.getAllByText("Search covers your own records only.").length).toBeGreaterThan(0);
+    expect(screen.getByRole("button", { name: "Clear search and filter" })).toBeInTheDocument();
   });
 });
+
+function chooseFiles(...files: File[]) {
+  const input = document.querySelector('input[type="file"]') as HTMLInputElement;
+  fireEvent.change(input, { target: { files } });
+}
+
+function pdf(name: string): File {
+  return new File(["%PDF-1.4"], name, { type: "application/pdf", lastModified: 1 });
+}
+
+function submission(outcome: LibrarySubmissionOut["outcome"], item: LibraryItemOut | null, extra: Partial<LibrarySubmissionOut> = {}): LibrarySubmissionOut {
+  return { outcome, item, duplicate_of: null, message: "", ...extra };
+}
+
+describe("Add manuscripts (4aa)", () => {
+  it("requires at least one file and explains what adding does before anything is sent", async () => {
+    const fetchMock = libraryFetch({ "/programs": [] });
+    vi.stubGlobal("fetch", fetchMock);
+    renderWithProviders(<SignalLibraryAddPage />, { route: "/library/add", path: "/library/add" });
+
+    expect(await screen.findByRole("heading", { name: "Add manuscripts to the Library" })).toBeInTheDocument();
+    expect(screen.getByText(/does not check it and produces no grade or report/)).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Who can see what you add" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Add files to the Library" }));
+    // Announced, not just associated (UX review P2-7).
+    expect(screen.getByRole("alert")).toHaveTextContent("Choose at least one PDF or DOCX file.");
+    expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/library/entries"))).toBe(false);
+  });
+
+  it("rejects a file that is not a PDF or DOCX", async () => {
+    vi.stubGlobal("fetch", libraryFetch({ "/programs": [] }));
+    renderWithProviders(<SignalLibraryAddPage />, { route: "/library/add", path: "/library/add" });
+    await screen.findByRole("heading", { name: "Add manuscripts to the Library" });
+
+    chooseFiles(new File(["x"], "notes.txt", { type: "text/plain" }));
+    expect(screen.getByText("“notes.txt” is not a PDF or DOCX file, so it was not added to the list.")).toBeInTheDocument();
+  });
+
+  it("sends files one at a time and reports each outcome, including an exact copy", async () => {
+    const order: string[] = [];
+    let release: (() => void) | undefined;
+    const firstGate = new Promise<void>((resolve) => { release = resolve; });
+    const fetchMock = libraryFetch({ "/programs": [] }, page([]), (url, init) => {
+      if (url.pathname !== "/library/entries" || init?.method !== "POST") return undefined;
+      const name = ((init.body as FormData).get("file") as File).name;
+      order.push(name);
+      if (name === "first.pdf") {
+        return undefined;
+      }
+      return json(submission("exact_duplicate", null, {
+        duplicate_of: { manuscript_id: 1, label: "Barangay Service Portal", original_filename: "portal.pdf", added_at: "2026-10-01T02:00:00Z" },
+        message: "This exact file is already in your Library, so nothing new was added.",
+      }));
+    });
+    // The first file resolves only when released, proving the second waits.
+    const wrapped = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = new URL(typeof input === "string" ? input : input.toString(), "http://localhost");
+      if (url.pathname === "/library/entries" && init && ((init.body as FormData).get("file") as File).name === "first.pdf") {
+        order.push("first.pdf");
+        await firstGate;
+        return json(submission("added", { ...OWN, manuscript_id: 9, label: "First Capstone" }));
+      }
+      return fetchMock(input, init);
+    });
+    vi.stubGlobal("fetch", wrapped);
+    renderWithProviders(<SignalLibraryAddPage />, { route: "/library/add", path: "/library/add" });
+    await screen.findByRole("heading", { name: "Add manuscripts to the Library" });
+
+    chooseFiles(pdf("first.pdf"), pdf("second.pdf"));
+    fireEvent.click(screen.getByRole("button", { name: "Add 2 files to the Library" }));
+
+    expect(await screen.findByRole("heading", { name: "Adding 2 files" })).toBeInTheDocument();
+    await waitFor(() => expect(order).toEqual(["first.pdf"]));
+    release?.();
+    expect(await screen.findByText("Not added: you already uploaded this file")).toBeInTheDocument();
+    // The server's status-aware wording is shown, never a client guess.
+    expect(screen.getByText(/This exact file is already in your Library, so nothing new was added\./)).toBeInTheDocument();
+    expect(order).toEqual(["first.pdf", "second.pdf"]);
+    expect(screen.getByText(/Added as “First Capstone”/)).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Open record for first.pdf" })).toHaveAttribute("href", "/library/9");
+    expect(screen.getByRole("link", { name: "Open existing record for second.pdf" })).toHaveAttribute("href", "/library/1");
+    // Counts what was added, not what was processed (first-time-user review pass).
+    expect(await screen.findByRole("heading", { name: "Finished: 1 file added to the Library" })).toBeInTheDocument();
+    expect(screen.getByText("Added: 1. already uploaded: 1.")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /Go to Library/ })).toBeInTheDocument();
+  });
+
+  it("leaves a possible duplicate to the instructor and records Add anyway", async () => {
+    const decisions: string[] = [];
+    vi.stubGlobal(
+      "fetch",
+      libraryFetch({ "/programs": [] }, page([]), (url, init) => {
+        if (url.pathname === "/library/entries") {
+          return json(submission("possible_duplicate", WAITING, { duplicate_of: WAITING.possible_duplicate_of }));
+        }
+        if (url.pathname === "/library/3/decision") {
+          decisions.push(JSON.parse(String(init?.body)).action);
+          return json({ manuscript_id: 3, status: "active", added_at: "2026-10-12T00:00:00Z", removed_at: null, file_deleted: false });
+        }
+        return undefined;
+      }),
+    );
+    renderWithProviders(<SignalLibraryAddPage />, { route: "/library/add", path: "/library/add" });
+    await screen.findByRole("heading", { name: "Add manuscripts to the Library" });
+
+    chooseFiles(pdf("portal-copy.pdf"));
+    fireEvent.click(screen.getByRole("button", { name: "Add 1 file to the Library" }));
+
+    expect(await screen.findByText(/It has not been added/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Add anyway: portal-copy.pdf" }));
+    expect(await screen.findByText("Added anyway. It is now a comparison source.")).toBeInTheDocument();
+    expect(decisions).toEqual(["add"]);
+  });
+
+  it("validates the school year and normalizes an en dash separator", async () => {
+    const sent: (string | null)[] = [];
+    vi.stubGlobal(
+      "fetch",
+      libraryFetch({ "/programs": [] }, page([]), (url, init) => {
+        if (url.pathname !== "/library/entries") return undefined;
+        if (!init) return undefined;
+        sent.push((init.body as FormData).get("school_year") as string | null);
+        return json(submission("added", OWN));
+      }),
+    );
+    renderWithProviders(<SignalLibraryAddPage />, { route: "/library/add", path: "/library/add" });
+    await screen.findByRole("heading", { name: "Add manuscripts to the Library" });
+
+    chooseFiles(pdf("a.pdf"));
+    fireEvent.change(screen.getByLabelText("School year (optional)"), { target: { value: "last year" } });
+    fireEvent.click(screen.getByRole("button", { name: "Add 1 file to the Library" }));
+    expect(screen.getByText("Enter the school year as two consecutive years, for example 2025-2026.")).toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText("School year (optional)"), { target: { value: "2026-2025" } });
+    fireEvent.click(screen.getByRole("button", { name: "Add 1 file to the Library" }));
+    expect(screen.getByText("Enter the school year as two consecutive years, for example 2025-2026.")).toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText("School year (optional)"), { target: { value: "2025 – 2026" } });
+    fireEvent.click(screen.getByRole("button", { name: "Add 1 file to the Library" }));
+    await waitFor(() => expect(sent).toEqual(["2025-2026"]));
+  });
+});
+
+describe("Library record (4x)", () => {
+  it("shows an own record's details, saves edits, and returns focus to Edit details", async () => {
+    const patches: unknown[] = [];
+    vi.stubGlobal(
+      "fetch",
+      libraryFetch({ "/library/1": OWN, "/library/1/document": VIEWER, "/library": page([OWN, SHARED]), "/programs": [] }, page([]), (url, init) => {
+        if (url.pathname === "/library/1" && init?.method === "PATCH") {
+          const body = JSON.parse(String(init.body));
+          patches.push(body);
+          return json({ ...OWN, title: body.title, label: body.title });
+        }
+        return undefined;
+      }),
+    );
+    renderWithProviders(<SignalLibraryDetailPage />, { route: "/library/1", path: "/library/:manuscriptId" });
+
+    expect(await screen.findByRole("heading", { level: 1, name: "Barangay Service Portal" })).toBeInTheDocument();
+    expect(screen.getByText("Uploaded on the Library page")).toBeInTheDocument();
+    expect(screen.queryByText(/report/i)).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Edit details" }));
+    const titleInput = screen.getByLabelText("Title");
+    await waitFor(() => expect(document.activeElement).toBe(titleInput));
+    fireEvent.change(titleInput, { target: { value: "Renamed Capstone" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save details" }));
+
+    await waitFor(() => expect(patches).toHaveLength(1));
+    expect(patches[0]).toMatchObject({ title: "Renamed Capstone", authors: ["Ana Cruz", "Ben Reyes"], program: "IT" });
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByRole("button", { name: "Edit details" })));
+  });
+
+  it("words removal by where the record came from", async () => {
+    vi.stubGlobal(
+      "fetch",
+      libraryFetch({
+        "/library/1": { ...OWN, source: "legacy_check_upload" },
+        "/library/1/document": VIEWER,
+        "/library": page([OWN]),
+        "/programs": [],
+      }),
+    );
+    renderWithProviders(<SignalLibraryDetailPage />, { route: "/library/1", path: "/library/:manuscriptId" });
+    await screen.findByRole("heading", { level: 1, name: "Barangay Service Portal" });
+    expect(screen.getByText("Carried over from an earlier check")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Remove from Library" }));
+    const dialog = await screen.findByRole("dialog");
+    expect(within(dialog).getByText(/check report, instructor decision, and audit history are not affected/)).toBeInTheDocument();
+    expect(within(dialog).getByRole("button", { name: "Remove from Library" })).toBeInTheDocument();
+  });
+
+  it("warns that a Library submission's file is deleted on removal", async () => {
+    vi.stubGlobal(
+      "fetch",
+      libraryFetch({ "/library/1": OWN, "/library/1/document": VIEWER, "/library": page([OWN]), "/programs": [] }),
+    );
+    renderWithProviders(<SignalLibraryDetailPage />, { route: "/library/1", path: "/library/:manuscriptId" });
+    await screen.findByRole("heading", { level: 1, name: "Barangay Service Portal" });
+
+    fireEvent.click(screen.getByRole("button", { name: "Remove from Library" }));
+    const dialog = await screen.findByRole("dialog");
+    expect(within(dialog).getByText(/stored file and its comparison data will be deleted/)).toBeInTheDocument();
+    expect(within(dialog).getByRole("button", { name: "Delete file and remove" })).toBeInTheDocument();
+  });
+
+  it("asks the instructor to decide a possible duplicate", async () => {
+    vi.stubGlobal(
+      "fetch",
+      libraryFetch({ "/library/3": WAITING, "/library/3/document": VIEWER, "/library": page([OWN]), "/programs": [] }),
+    );
+    renderWithProviders(<SignalLibraryDetailPage />, { route: "/library/3", path: "/library/:manuscriptId" });
+
+    expect(await screen.findByText("Possible duplicate: your decision is needed")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Add anyway" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Skip this copy" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /Open that record/ })).toHaveAttribute("href", "/library/1");
+    expect(screen.getByRole("link", { name: /Compare the two/ })).toHaveAttribute("href", "/library/compare?a=3&b=1");
+    // Resolved by Add anyway or Skip this copy, never by a red "Remove from Library"
+    // for a record that is not in the Library (UX review P2-5).
+    expect(screen.queryByRole("button", { name: /Remove from Library|Delete upload/ })).not.toBeInTheDocument();
+    expect(screen.getByText("Your upload, not in the Library")).toBeInTheDocument();
+
+    // Skip deletes the uploaded copy, so it asks first and names the file.
+    fireEvent.click(screen.getByRole("button", { name: "Skip this copy" }));
+    const dialog = await screen.findByRole("dialog", { name: "Skip this copy?" });
+    expect(within(dialog).getByText(/“portal-copy\.docx” will not be added and will not be kept/)).toBeInTheDocument();
+    expect(within(dialog).getByText(/Your existing record “Barangay Service Portal” is not affected/)).toBeInTheDocument();
+  });
+
+  it("shows another instructor's record without edit or remove controls", async () => {
+    vi.stubGlobal(
+      "fetch",
+      libraryFetch({ "/library/2": SHARED, "/library/2/excerpt": EXCERPT, "/library": page([OWN, SHARED]), "/programs": [] }),
+    );
+    renderWithProviders(<SignalLibraryDetailPage />, { route: "/library/2", path: "/library/:manuscriptId" });
+
+    expect(await screen.findByRole("heading", { level: 1, name: "Library record #2" })).toBeInTheDocument();
+    expect(screen.getByText("Bounded manuscript excerpt")).toBeInTheDocument();
+    expect(screen.getByText(/which instructor added it are withheld for privacy/)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Edit details|Remove/ })).not.toBeInTheDocument();
+  });
+
+  it("says a removed or unknown record is not available", async () => {
+    vi.stubGlobal("fetch", libraryFetch({ "/library": page([]), "/programs": [] }));
+    renderWithProviders(<SignalLibraryDetailPage />, { route: "/library/77", path: "/library/:manuscriptId" });
+
+    expect(await screen.findByRole("heading", { name: "This Library record is not available" })).toBeInTheDocument();
+  });
+
+  it("uses real tabs with arrow-key movement", async () => {
+    vi.stubGlobal(
+      "fetch",
+      libraryFetch({ "/library/1": OWN, "/library/1/document": VIEWER, "/library": page([OWN]), "/programs": [] }),
+    );
+    renderWithProviders(<SignalLibraryDetailPage />, { route: "/library/1", path: "/library/:manuscriptId" });
+    await screen.findByRole("heading", { level: 1, name: "Barangay Service Portal" });
+
+    const source = screen.getByRole("tab", { name: "Source" });
+    const details = screen.getByRole("tab", { name: "Record details" });
+    expect(source).toHaveAttribute("aria-selected", "true");
+    expect(document.getElementById(source.getAttribute("aria-controls") ?? "")).toHaveAttribute("role", "tabpanel");
+    expect(details).toHaveAttribute("tabindex", "-1");
+    source.focus();
+    fireEvent.keyDown(source, { key: "ArrowRight" });
+    expect(details).toHaveAttribute("aria-selected", "true");
+    expect(document.activeElement).toBe(details);
+  });
+});
+
+describe("V-077 review fixes", () => {
+  it("keeps the removal notice after the page settles its search parameters", async () => {
+    vi.stubGlobal("fetch", libraryFetch({ "/library": page([OWN]), "/programs": [] }));
+    renderWithProviders(<SignalLibraryPage />, {
+      route: "/library",
+      path: "/library",
+      state: { removedTitle: "Barangay Service Portal" },
+    });
+
+    expect(await screen.findByText("“Barangay Service Portal” was removed from the Library.")).toBeInTheDocument();
+    await new Promise((resolve) => setTimeout(resolve, 600));
+    expect(screen.getByText("“Barangay Service Portal” was removed from the Library.")).toBeInTheDocument();
+  });
+
+  it("lets the owner delete a stalled upload, but not one still being read", async () => {
+    const reading: LibraryItemOut = { ...OWN, manuscript_id: 5, status: "processing", added_at: null };
+    vi.stubGlobal(
+      "fetch",
+      libraryFetch({ "/library/5": reading, "/library/5/document": VIEWER, "/library": page([]), "/programs": [] }),
+    );
+    const { unmount } = renderWithProviders(<SignalLibraryDetailPage />, { route: "/library/5", path: "/library/:manuscriptId" });
+    expect(await screen.findByText("Reading this file")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Delete upload|Remove/ })).not.toBeInTheDocument();
+    unmount();
+
+    vi.stubGlobal(
+      "fetch",
+      libraryFetch({ "/library/5": { ...reading, stalled: true }, "/library/5/document": VIEWER, "/library": page([]), "/programs": [] }),
+    );
+    renderWithProviders(<SignalLibraryDetailPage />, { route: "/library/5", path: "/library/:manuscriptId" });
+    expect(await screen.findByText("Reading this file stopped")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Delete upload" })).toBeInTheDocument();
+  });
+});
+
+describe("V-077 first-time-user review fixes", () => {
+  it("says plainly when a batch added nothing", async () => {
+    vi.stubGlobal(
+      "fetch",
+      libraryFetch({ "/programs": [] }, page([]), (url) => {
+        if (url.pathname !== "/library/entries") return undefined;
+        return json(submission("failed", null, { message: "VERIDICAL could not find readable text in this file." }));
+      }),
+    );
+    renderWithProviders(<SignalLibraryAddPage />, { route: "/library/add", path: "/library/add" });
+    await screen.findByRole("heading", { name: "Add manuscripts to the Library" });
+
+    chooseFiles(pdf("scan.pdf"));
+    fireEvent.click(screen.getByRole("button", { name: "Add 1 file to the Library" }));
+    expect(await screen.findByRole("heading", { name: "Finished: nothing was added to the Library" })).toBeInTheDocument();
+    expect(screen.getByText("Added: 0. could not be read: 1.")).toBeInTheDocument();
+  });
+
+  it("lets the instructor decide a possible duplicate beside the comparison", async () => {
+    vi.stubGlobal(
+      "fetch",
+      libraryFetch({
+        "/library/3": WAITING,
+        "/library/1": OWN,
+        "/library/3/document": VIEWER,
+        "/library/1/document": VIEWER,
+        "/programs": [],
+      }),
+    );
+    renderWithProviders(<SignalLibraryComparePage />, { route: "/library/compare?a=3&b=1", path: "/library/compare" });
+
+    expect(await screen.findByText("Decide about your upload “portal-copy.docx”")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Add anyway" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Skip this copy" }));
+    expect(await screen.findByRole("dialog", { name: "Skip this copy?" })).toBeInTheDocument();
+  });
+});
+

@@ -368,6 +368,73 @@ async def test_bug_125_a_cleanly_run_integrity_check_is_not_disclosed(session_fa
         assert report.integrity_check_status == []
 
 
+async def test_v077_report_states_what_the_originality_check_compared_against(
+    session_factory,
+):
+    """V-077 (D-028): the report carries the run's own recorded comparison
+    scope, so zero Library manuscripts can never read as a clean result.
+    A result written before D-028 (no "corpus" key) is labelled as such,
+    and a run with no originality result gets no scope at all."""
+    async with session_factory() as session:
+        instructor, check_run = await _seed_decidable_run(session)
+        report = await get_report(session, check_run.id, instructor.id)
+        assert report.originality_scope is None
+
+        session.add(
+            CheckResult(
+                check_run_id=check_run.id,
+                criterion_id=None,
+                kind=CheckKind.originality_reuse,
+                outcome=ResultOutcome.passed,
+                detail={"archive_size_n": 0, "corpus": "library", "n_flags": 0},
+            )
+        )
+        await session.commit()
+        report = await get_report(session, check_run.id, instructor.id)
+        assert report.originality_scope is not None
+        assert report.originality_scope.compared_count == 0
+        assert report.originality_scope.corpus == "library"
+
+    async with session_factory() as session:
+        instructor, check_run = await _seed_decidable_run(session)
+        session.add(
+            CheckResult(
+                check_run_id=check_run.id,
+                criterion_id=None,
+                kind=CheckKind.originality_reuse,
+                outcome=ResultOutcome.passed,
+                detail={"archive_size_n": 7, "n_flags": 0},
+            )
+        )
+        await session.commit()
+        report = await get_report(session, check_run.id, instructor.id)
+        assert report.originality_scope.compared_count == 7
+        assert report.originality_scope.corpus == "pre_library"
+
+    # No readable text: no comparison ran, which must never read as "the
+    # Library was empty" (backend review, 2026-10-13).
+    async with session_factory() as session:
+        instructor, check_run = await _seed_decidable_run(session)
+        session.add(
+            CheckResult(
+                check_run_id=check_run.id,
+                criterion_id=None,
+                kind=CheckKind.originality_reuse,
+                outcome=ResultOutcome.not_applicable,
+                detail={
+                    "archive_size_n": 0,
+                    "corpus": "library",
+                    "comparison_ran": False,
+                    "n_flags": 0,
+                },
+            )
+        )
+        await session.commit()
+        report = await get_report(session, check_run.id, instructor.id)
+        assert report.originality_scope.compared_count is None
+        assert report.originality_scope.not_compared_reason == "no_text"
+
+
 async def test_deciding_an_already_decided_report_is_rejected(session_factory):
     async with session_factory() as session:
         instructor, check_run = await _seed_decidable_run(session)

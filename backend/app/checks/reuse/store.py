@@ -32,11 +32,18 @@ from app.models.manuscript import (
 
 
 async def store_document_embeddings(
-    session: AsyncSession, manuscript_id: int, embeddings: DocumentEmbeddings
+    session: AsyncSession,
+    manuscript_id: int,
+    embeddings: DocumentEmbeddings,
+    *,
+    commit: bool = True,
 ) -> ManuscriptArchive | None:
     """Returns None (and stores nothing) when the manuscript produced no
     whole-document vector at all (an honest absence — e.g. a genuinely
-    empty extraction — never a fabricated placeholder row)."""
+    empty extraction — never a fabricated placeholder row).
+
+    `commit=False` (V-077) only flushes, so a caller can commit these rows
+    together with the Library entry's status change in one transaction."""
     existing = await session.scalar(
         select(ManuscriptArchive).where(ManuscriptArchive.manuscript_id == manuscript_id)
     )
@@ -49,7 +56,10 @@ async def store_document_embeddings(
     if embeddings.whole_document is None:
         if existing is not None:
             await session.delete(existing)
-        await session.commit()
+        if commit:
+            await session.commit()
+        else:
+            await session.flush()
         return None
 
     if existing is None:
@@ -71,6 +81,9 @@ async def store_document_embeddings(
             )
         )
 
+    if not commit:
+        await session.flush()
+        return existing
     await session.commit()
     await session.refresh(existing)
     return existing
@@ -101,6 +114,8 @@ async def store_passage_embeddings(
     manuscript_id: int,
     passages: list[PassageEmbedding],
     settings: Settings,
+    *,
+    commit: bool = True,
 ) -> None:
     """F7.4 (V-072) persistence — same idempotent delete-then-reinsert
     convention as the chapter archive above (a re-run's passage count/
@@ -146,4 +161,7 @@ async def store_passage_embeddings(
                 model_id=settings.embedding_model_id,
             )
         )
-    await session.commit()
+    if commit:
+        await session.commit()
+    else:
+        await session.flush()

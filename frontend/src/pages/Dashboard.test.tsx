@@ -117,7 +117,7 @@ describe("DashboardPage", () => {
     expect(screen.getByText("Upload needs attention")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Try a corrected file" })).toBeInTheDocument();
     fireEvent.click(screen.getByText("More actions"));
-    expect(screen.getByRole("button", { name: "Move to Archive" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Remove from Review Desk" })).toBeInTheDocument();
   });
 
   // BUG-066: `file_too_large` can come from three different underlying

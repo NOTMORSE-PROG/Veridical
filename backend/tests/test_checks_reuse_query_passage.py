@@ -4,18 +4,22 @@ self/group-sibling exclusion. Live Postgres, same scratch-DB convention as
 queries across multiple manuscripts' passage archives."""
 
 import os
+from datetime import UTC, datetime
 
 import pytest
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
-from app.checks.reuse.embed import compute_passage_embeddings
+from app.checks.reuse.embed import compute_document_embeddings, compute_passage_embeddings
 from app.checks.reuse.query import query_similar_passages
 from app.checks.reuse.service import run_originality_reuse_check
+from app.checks.reuse.store import store_document_embeddings, store_passage_embeddings
 from app.config import get_settings
 from app.db import sqlalchemy_url
 from app.ingest.schemas import ExtractionResult, SectionNode, SectionTree, TextBlock
+from app.models.enums import LibraryEntrySource, LibraryEntryStatus
 from app.models.instructor import Instructor
+from app.models.library import LibraryEntry
 from app.models.manuscript import Manuscript
 from app.models.rubric import Rubric
 from app.models.run import CheckRun
@@ -56,8 +60,9 @@ async def _clean(session_factory):
     async with session_factory() as session:
         await session.execute(
             text(
-                "TRUNCATE flag, check_result, check_run, rubric, manuscript_passage_archive, "
-                "manuscript_chapter_archive, manuscript_archive, manuscript, manuscript_group, "
+                "TRUNCATE library_entry, flag, check_result, check_run, rubric, "
+                "manuscript_passage_archive, manuscript_chapter_archive, manuscript_archive, "
+                "manuscript, manuscript_group, "
                 "group_member, instructor RESTART IDENTITY CASCADE"
             )
         )
@@ -129,6 +134,33 @@ def _extraction_with_references(body_text: str, reference_text: str) -> Extracti
     )
 
 
+async def _add_to_library(
+    session_factory, manuscript_id: int, extraction: ExtractionResult
+) -> None:
+    """V-077 (D-028): a check no longer writes into the corpus; a manuscript
+    becomes a comparison source only by entering the Library. Mirrors
+    `app.library.service._activate`: store its embeddings, mark its entry
+    active. Replaces what the pre-D-028 write-back after a check used to do
+    implicitly, so each test still seeds exactly the corpus it reasons about."""
+    settings = get_settings()
+    async with session_factory() as session:
+        await store_document_embeddings(
+            session, manuscript_id, compute_document_embeddings(extraction, settings)
+        )
+        passages = compute_passage_embeddings(extraction, settings)
+        if passages:
+            await store_passage_embeddings(session, manuscript_id, passages, settings)
+        session.add(
+            LibraryEntry(
+                manuscript_id=manuscript_id,
+                source=LibraryEntrySource.library_submission,
+                status=LibraryEntryStatus.active,
+                added_at=datetime.now(UTC),
+            )
+        )
+        await session.commit()
+
+
 async def test_reference_list_overlap_is_suppressed_by_default_and_revealed_when_toggled(
     session_factory,
 ):
@@ -148,6 +180,9 @@ async def test_reference_list_overlap_is_suppressed_by_default_and_revealed_when
             check_run_a,
             _extraction_with_references(BODY_TEXT, REFERENCE_ENTRY),
             settings,
+        )
+        await _add_to_library(
+            session_factory, manuscript_a, _extraction_with_references(BODY_TEXT, REFERENCE_ENTRY)
         )
 
     # Manuscript B: genuinely DIFFERENT body text, but cites the SAME
@@ -240,6 +275,7 @@ async def test_own_group_siblings_excluded_from_passage_matching(session_factory
     extraction = _extraction_with_references(BODY_TEXT, REFERENCE_ENTRY)
     async with session_factory() as session:
         await run_originality_reuse_check(session, manuscript_a, check_run_a, extraction, settings)
+        await _add_to_library(session_factory, manuscript_a, extraction)
 
     manuscript_b, check_run_b = await _seed_in_group()
     async with session_factory() as session:
@@ -258,6 +294,7 @@ async def test_different_groups_same_body_text_still_flags_at_passage_level(sess
     extraction = _extraction_with_references(BODY_TEXT, REFERENCE_ENTRY)
     async with session_factory() as session:
         await run_originality_reuse_check(session, manuscript_a, check_run_a, extraction, settings)
+        await _add_to_library(session_factory, manuscript_a, extraction)
 
     manuscript_b, check_run_b = await _seed_manuscript_and_run(
         session_factory, group_label="Group B"
@@ -277,3 +314,57 @@ async def test_different_groups_same_body_text_still_flags_at_passage_level(sess
         ).all()
     passage_flags = [r for r in rows if r.kind is not None and r.kind.endswith("_passage")]
     assert len(passage_flags) == 1
+
+
+async def test_exploration_toggle_recomputes_passages_for_a_manuscript_outside_the_library(
+    session_factory, tmp_path, monkeypatch
+):
+    """V-077 (D-028): a checked manuscript is never written into the corpus,
+    so the report's "Show excluded matches" toggle cannot read its own stored
+    passages any more. It must recompute them from the stored extraction
+    (local model, zero Gemini calls) and still reveal the excluded
+    reference-list overlap against a Library entry."""
+    from app.ingest.service import _write_raw_store, raw_store_path
+    from app.report.service import list_reuse_passage_matches
+
+    monkeypatch.setenv("DATA_DIR", str(tmp_path / "data"))
+    get_settings.cache_clear()
+    settings = get_settings()
+
+    manuscript_a, _ = await _seed_manuscript_and_run(session_factory, group_label="Group A")
+    await _add_to_library(
+        session_factory, manuscript_a, _extraction_with_references(BODY_TEXT, REFERENCE_ENTRY)
+    )
+    unrelated_body = (
+        "Our grading pipeline layers automated rule checks underneath an AI "
+        "reviewer, escalating uncertain cases to a human instructor rather than "
+        "deciding on its own, which is a completely different subject."
+    )
+    manuscript_b, check_run_b = await _seed_manuscript_and_run(
+        session_factory, group_label="Group B"
+    )
+    extraction_b = _extraction_with_references(unrelated_body, REFERENCE_ENTRY)
+    _write_raw_store(extraction_b, raw_store_path(settings, manuscript_b))
+
+    async with session_factory() as session:
+        await run_originality_reuse_check(
+            session, manuscript_b, check_run_b, extraction_b, settings
+        )
+        own_rows = await session.scalar(
+            text("SELECT count(*) FROM manuscript_passage_archive WHERE manuscript_id = :id"),
+            {"id": manuscript_b},
+        )
+        instructor_b = (await session.get(Manuscript, manuscript_b)).instructor_id
+        revealed = await list_reuse_passage_matches(
+            session,
+            check_run_b,
+            instructor_b,
+            include_reference_list=True,
+            include_block_quote=False,
+            settings=settings,
+        )
+    assert own_rows == 0
+    assert revealed.passage_archive_size_n >= 1
+    assert revealed.matches, "the recomputed passages should reveal the reference overlap"
+    assert all(m.matched_ref == manuscript_a for m in revealed.matches)
+    get_settings.cache_clear()

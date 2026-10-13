@@ -1,11 +1,15 @@
 import { useRef, useState } from "react";
-import { Link, useSearchParams } from "react-router";
-import { manuscriptIdentity } from "../domain/manuscriptLabel";
+import { Link, useNavigate, useSearchParams } from "react-router";
 import { useRouteFocus } from "../routing/useRouteFocus";
 import { ActionLink } from "../ui/ActionLink";
+import { ApiError } from "../api/client";
+import type { LibraryItemOut } from "../api/types";
+import { Alert } from "../ui/Alert";
 import { Button } from "../ui/Button";
+import { Dialog } from "../ui/Dialog";
 import { LibraryContentPane, type OwnDocumentState } from "./LibraryContentPane";
-import { useLibraryDocument, useLibraryItem } from "./useLibrary";
+import { libraryRecordName } from "./libraryFormat";
+import { useDecideLibraryEntry, useLibraryDocument, useLibraryItem } from "./useLibrary";
 
 function ownershipNote(aOwn: boolean, bOwn: boolean): string {
   if (aOwn && bOwn) return "Both records belong to your account. Their stored sources appear when they can be opened.";
@@ -17,13 +21,13 @@ function ComparisonPane({ manuscriptId, active }: { manuscriptId: number; active
   const { data: item, isPending, isError, refetch } = useLibraryItem(manuscriptId);
   const documentQuery = useLibraryDocument(
     manuscriptId,
-    item?.is_own === true && !item.purged_at,
+    item?.is_own === true && (item.status === "active" || item.status === "needs_decision"),
   );
   const ownDocument: OwnDocumentState = {
     viewer: documentQuery.data,
     isPending: documentQuery.isPending,
     isError: documentQuery.isError,
-    removedAt: item?.purged_at ?? null,
+    removedAt: null,
     onRetry: () => void documentQuery.refetch(),
   };
 
@@ -37,18 +41,14 @@ function ComparisonPane({ manuscriptId, active }: { manuscriptId: number; active
     );
   }
 
-  const identity = item.title
-    ? { primary: item.title, secondary: item.group_label }
-    : manuscriptIdentity(item.group_label, item.original_filename);
-
   return (
     <section className="signal-library-compare-pane" data-active={active}>
       <header>
-        <span className="signal-library-badge" data-tone={item.is_own ? "own" : "shared"}>
-          {item.is_own ? "Your manuscript" : "Bounded shared excerpt"}
+        <span className="signal-library-ownership">
+          {item.is_own ? "Your record" : "Another instructor's record"}
         </span>
-        <h2>{identity.primary}</h2>
-        {identity.secondary && <p>{identity.secondary}</p>}
+        <h2>{libraryRecordName(item)}</h2>
+        {item.is_own && item.team_name && <p>{item.team_name}</p>}
       </header>
       <div className="signal-library-compare-pane__source">
         <LibraryContentPane
@@ -61,6 +61,66 @@ function ComparisonPane({ manuscriptId, active }: { manuscriptId: number; active
   );
 }
 
+/** V-077 (first-time-user review pass): when one side is the instructor's own upload waiting
+ * for a duplicate decision, the decision sits beside the evidence. */
+function DecisionBar({ waiting }: { waiting: LibraryItemOut }) {
+  const navigate = useNavigate();
+  const decide = useDecideLibraryEntry();
+  const [confirmingSkip, setConfirmingSkip] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const fileName = waiting.original_filename ?? libraryRecordName(waiting);
+
+  async function run(action: "add" | "skip") {
+    setError(null);
+    try {
+      await decide.mutateAsync({ manuscriptId: waiting.manuscript_id, action });
+      if (action === "add") navigate(`/library/${waiting.manuscript_id}`);
+      else navigate("/library", { state: { skippedTitle: fileName } });
+    } catch (failure) {
+      setError(failure instanceof ApiError ? failure.message : "The decision could not be saved. Try again.");
+    }
+  }
+
+  return (
+    <Alert tone="warning" title={`Decide about your upload “${fileName}”`}>
+      <p>Its text is very similar to your other record shown here. It is not in the Library until you decide.</p>
+      <div className="signal-control-cluster">
+        <Button type="button" variant="secondary" busy={decide.isPending} onClick={() => void run("add")}>
+          Add anyway
+        </Button>
+        <Button type="button" variant="secondary" disabled={decide.isPending} onClick={() => setConfirmingSkip(true)}>
+          Skip this copy
+        </Button>
+        <ActionLink to={`/library/${waiting.manuscript_id}`} variant="quiet">Back to the upload</ActionLink>
+      </div>
+      {error && <p role="alert">{error}</p>}
+      {confirmingSkip && (
+        <Dialog
+          title="Skip this copy?"
+          onClose={() => setConfirmingSkip(false)}
+          actions={
+            <>
+              <Button type="button" variant="secondary" onClick={() => setConfirmingSkip(false)}>Keep deciding</Button>
+              <Button
+                type="button"
+                variant="danger"
+                onClick={() => {
+                  setConfirmingSkip(false);
+                  void run("skip");
+                }}
+              >
+                Skip and delete this copy
+              </Button>
+            </>
+          }
+        >
+          <p>The uploaded file “{fileName}” will not be added and will not be kept. Your other record is not affected.</p>
+        </Dialog>
+      )}
+    </Alert>
+  );
+}
+
 export function SignalLibraryComparePage() {
   const [searchParams] = useSearchParams();
   const parsedA = Number(searchParams.get("a"));
@@ -69,7 +129,7 @@ export function SignalLibraryComparePage() {
   const b = Number.isInteger(parsedB) && parsedB > 0 ? parsedB : undefined;
   const [active, setActive] = useState<"a" | "b">("a");
   const headingRef = useRef<HTMLHeadingElement>(null);
-  useRouteFocus("Compare manuscripts - VERIDICAL", headingRef);
+  useRouteFocus("Compare records - VERIDICAL", headingRef);
   const itemA = useLibraryItem(a);
   const itemB = useLibraryItem(b);
 
@@ -83,9 +143,10 @@ export function SignalLibraryComparePage() {
             <span>Compare</span>
           </nav>
           <p className="signal-eyebrow">Side-by-side evidence reading</p>
-          <h1 ref={headingRef} tabIndex={-1}>Compare manuscripts</h1>
+          <h1 ref={headingRef} tabIndex={-1}>Compare records</h1>
           <p className="signal-route-header__intro">
-            Read two stored records together. This view does not produce a new similarity judgment.
+            Read two records side by side. This view does not compare them for you; you decide what they have in
+            common.
           </p>
         </div>
         <ActionLink to="/library" variant="secondary">Change selection</ActionLink>
@@ -94,13 +155,19 @@ export function SignalLibraryComparePage() {
       {(!a || !b) && (
         <section className="signal-library-state" role="alert">
           <h2>Two valid records are required</h2>
-          <p>Return to the Library, enter comparison mode, and select two manuscripts.</p>
+          <p>Return to the Library, choose Compare two records, and select two records.</p>
           <ActionLink to="/library" variant="brand">Choose records</ActionLink>
         </section>
       )}
 
       {a && b && (
         <div className="signal-section-flow signal-library-compare-workspace">
+          {(() => {
+            const waiting = [itemA.data, itemB.data].find(
+              (item) => item?.is_own && item.status === "needs_decision",
+            );
+            return waiting ? <DecisionBar waiting={waiting} /> : null;
+          })()}
           {itemA.data && itemB.data && (
             <aside className="signal-library-privacy">
               <strong>Visibility for this comparison</strong>
