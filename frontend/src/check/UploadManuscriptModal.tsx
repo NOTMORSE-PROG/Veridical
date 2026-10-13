@@ -99,6 +99,7 @@ export function UploadManuscriptModal({ onClose, onUploadSuccess }: UploadManusc
   const [file, setFile] = useState<File | null>(null);
   const [fieldError, setFieldError] = useState<string | null>(null);
   const [groupResolved, setGroupResolved] = useState(false);
+  const [actionsTarget, setActionsTarget] = useState<HTMLDivElement | null>(null);
   const ingest = useIngestManuscript();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const errorRef = useRef<HTMLParagraphElement>(null);
@@ -158,8 +159,8 @@ export function UploadManuscriptModal({ onClose, onUploadSuccess }: UploadManusc
 
   // V-063: right after a successful upload, if the title page had
   // anything worth confirming, the group-proposal form takes over the
-  // footer (it carries its own "Skip for now"/"Confirm group" actions
-  // inline) instead of the plain post-upload footer below.
+  // footer through its action outlet, instead of the plain post-upload
+  // footer below.
   const showGroupProposal =
     summary !== undefined && !groupResolved && hasProposalWorthShowing(summary.group_proposal);
 
@@ -182,10 +183,12 @@ export function UploadManuscriptModal({ onClose, onUploadSuccess }: UploadManusc
     <ModalBackdrop>
       <Modal
         title="Upload manuscript"
+        size="lg"
+        className="signal-upload-sheet"
         onClose={ingest.isPending ? undefined : onClose}
         footer={
           summary ? (
-            showGroupProposal ? undefined : (
+            showGroupProposal ? <div ref={setActionsTarget} /> : (
               <>
                 <button
                   ref={uploadAnotherRef}
@@ -229,7 +232,7 @@ export function UploadManuscriptModal({ onClose, onUploadSuccess }: UploadManusc
         }
       >
         {summary ? (
-          <div className="signal-group-flow">
+          <div className="signal-group-flow signal-upload-summary">
             <h3 ref={resultHeadingRef} tabIndex={-1} className="text-base font-bold text-ink">
               {summary.existing_upload ? "You uploaded this file before" : "Upload complete"}
             </h3>
@@ -259,28 +262,32 @@ export function UploadManuscriptModal({ onClose, onUploadSuccess }: UploadManusc
                 )}
               </section>
             )}
-            <p className="rounded-md bg-status-success-bg px-3 py-2 text-sm text-status-success-text">
-              {summary.citations > 0
-                ? `Uploaded. ${summary.page_count} page(s) parsed, ${summary.citations} citation(s) found.`
-                : `Uploaded. ${summary.page_count} page(s) parsed. No citations were found.`}
+            <p className="signal-upload-summary__counts">
+              {summary.page_count} pages parsed. {summary.citations} reference records extracted.
             </p>
-            {showsImageOnlyNote && (
-              <p className="rounded-md bg-status-caution-bg px-3 py-2 text-sm text-status-caution-text">
-                {summary.notes[0]}
-              </p>
-            )}
-            {showsVisionUnavailable && (
-              <p className="rounded-md bg-status-caution-bg px-3 py-2 text-sm text-status-caution-text">
-                VERIDICAL could not analyze the images in this document right now (the image
-                reading model is unavailable). Checks that depend on image content may be
-                limited.
-              </p>
+            {(showsImageOnlyNote || showsVisionUnavailable) && (
+              <section className="signal-upload-summary__notes" aria-label="Extraction notes">
+                <h4>Extraction notes</h4>
+                {showsImageOnlyNote && (
+                  <p className="rounded-md bg-status-caution-bg px-3 py-2 text-sm text-status-caution-text">
+                    {summary.notes[0]}
+                  </p>
+                )}
+                {showsVisionUnavailable && (
+                  <p className="rounded-md bg-status-caution-bg px-3 py-2 text-sm text-status-caution-text">
+                    VERIDICAL could not analyze the images in this document right now (the image
+                    reading model is unavailable). Checks that depend on image content may be
+                    limited.
+                  </p>
+                )}
+              </section>
             )}
             {showGroupProposal && (
               <GroupProposalFields
                 manuscriptId={summary.manuscript_id}
                 proposal={summary.group_proposal}
                 onDone={handleGroupProposalDone}
+                actionsTarget={actionsTarget}
               />
             )}
           </div>

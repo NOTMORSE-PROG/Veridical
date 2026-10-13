@@ -1,4 +1,4 @@
-import { fireEvent, screen, waitFor } from "@testing-library/react";
+import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { renderWithProviders } from "../test/renderWithProviders";
 import { UploadManuscriptModal } from "./UploadManuscriptModal";
@@ -86,12 +86,12 @@ describe("UploadManuscriptModal", () => {
     chooseFile();
     fireEvent.click(screen.getByRole("button", { name: "Upload manuscript" }));
 
-    expect(await screen.findByText("Uploaded. 12 page(s) parsed, 5 citation(s) found.")).toBeInTheDocument();
+    expect(await screen.findByText("12 pages parsed. 5 reference records extracted.")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Start a check with this manuscript" }));
     expect(onUploadSuccess).toHaveBeenCalledWith(42);
   });
 
-  it("honestly states zero citations rather than silently omitting the fact", async () => {
+  it("states zero extracted reference records without claiming the manuscript has none", async () => {
     vi.stubGlobal(
       "fetch",
       vi.fn(async () => new Response(JSON.stringify({ ...SUMMARY, citations: 0 }), { status: 200 })),
@@ -99,7 +99,7 @@ describe("UploadManuscriptModal", () => {
     renderWithProviders(<UploadManuscriptModal onClose={() => {}} onUploadSuccess={() => {}} />);
     chooseFile();
     fireEvent.click(screen.getByRole("button", { name: "Upload manuscript" }));
-    expect(await screen.findByText("Uploaded. 12 page(s) parsed. No citations were found.")).toBeInTheDocument();
+    expect(await screen.findByText("12 pages parsed. 0 reference records extracted.")).toBeInTheDocument();
   });
 
   it("BUG-234/V-077: explains a same-account exact re-upload without calling it a Library record", async () => {
@@ -287,9 +287,13 @@ describe("UploadManuscriptModal", () => {
     chooseFile();
     fireEvent.click(screen.getByRole("button", { name: "Upload manuscript" }));
 
-    await screen.findByText(/^Uploaded\./);
+    await screen.findByRole("heading", { name: "Upload complete" });
     expect(screen.getByLabelText("Group name")).toHaveValue("VERIDICAL");
     expect(screen.getByDisplayValue("Juan Dela Cruz")).toBeInTheDocument();
+    const footer = document.querySelector(".signal-task-sheet__footer") as HTMLElement;
+    const body = document.querySelector(".signal-task-sheet__body") as HTMLElement;
+    expect(within(footer).getByRole("button", { name: "Confirm group" })).toBeInTheDocument();
+    expect(within(body).queryByRole("button", { name: "Confirm group" })).not.toBeInTheDocument();
     expect(
       screen.queryByRole("button", { name: "Start a check with this manuscript" }),
     ).not.toBeInTheDocument();
@@ -298,6 +302,7 @@ describe("UploadManuscriptModal", () => {
     expect(
       await screen.findByRole("button", { name: "Start a check with this manuscript" }),
     ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Upload another" })).toHaveFocus();
   });
 
   it("V-063: shows a caution banner and pre-cleared fields when the title page couldn't be read", async () => {
@@ -324,7 +329,7 @@ describe("UploadManuscriptModal", () => {
     chooseFile();
     fireEvent.click(screen.getByRole("button", { name: "Upload manuscript" }));
 
-    await screen.findByText(/^Uploaded\./);
+    await screen.findByRole("heading", { name: "Upload complete" });
     expect(await screen.findByText(/Couldn't read the title page/)).toBeInTheDocument();
     expect(screen.getByLabelText("Group name")).toHaveValue("");
   });
@@ -357,10 +362,12 @@ describe("UploadManuscriptModal", () => {
     chooseFile();
     fireEvent.click(screen.getByRole("button", { name: "Upload manuscript" }));
 
-    await screen.findByText(/^Uploaded\./);
+    await screen.findByRole("heading", { name: "Upload complete" });
     fireEvent.click(screen.getByRole("button", { name: "Confirm group" }));
 
     expect(await screen.findByText(/Created a new group/)).toBeInTheDocument();
+    expect(within(document.querySelector(".signal-task-sheet__footer") as HTMLElement)
+      .getByRole("button", { name: "Done" })).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Done" }));
     expect(
       await screen.findByRole("button", { name: "Start a check with this manuscript" }),
@@ -375,7 +382,7 @@ describe("UploadManuscriptModal", () => {
     renderWithProviders(<UploadManuscriptModal onClose={() => {}} onUploadSuccess={() => {}} />);
     chooseFile();
     fireEvent.click(screen.getByRole("button", { name: "Upload manuscript" }));
-    await screen.findByText(/^Uploaded\./);
+    await screen.findByRole("heading", { name: "Upload complete" });
     fireEvent.click(screen.getByRole("button", { name: "Upload another" }));
     expect(screen.getByLabelText("Choose file")).toBeInTheDocument();
     expect(screen.getByText("No file chosen yet.")).toBeInTheDocument();

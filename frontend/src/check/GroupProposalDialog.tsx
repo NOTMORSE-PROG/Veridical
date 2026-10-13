@@ -4,6 +4,7 @@
 // persisted) so skipping the confirm step at upload time is never a dead
 // end -- the exact same form is always one click away from the
 // dashboard.
+import { useState } from "react";
 import { Modal, ModalBackdrop } from "../components/Modal";
 import type { ConfirmGroupResponse } from "../api/types";
 import { GroupProposalFields } from "./GroupProposalFields";
@@ -17,10 +18,11 @@ interface GroupProposalDialogProps {
 
 export function GroupProposalDialog({ manuscriptId, onClose, onDone }: GroupProposalDialogProps) {
   const proposal = useGroupProposal(manuscriptId);
+  const [actionsTarget, setActionsTarget] = useState<HTMLDivElement | null>(null);
 
   return (
     <ModalBackdrop>
-      <Modal title="Confirm group" onClose={onClose} size="lg">
+      <Modal title="Confirm group" onClose={onClose} size="lg" footer={proposal.data ? <div ref={setActionsTarget} /> : undefined}>
         {proposal.isPending && (
           <p role="status" className="text-sm text-ink-secondary">
             Loading what VERIDICAL read from this manuscript's title page.
@@ -32,7 +34,7 @@ export function GroupProposalDialog({ manuscriptId, onClose, onDone }: GroupProp
           </p>
         )}
         {proposal.data && (
-          <GroupProposalFields manuscriptId={manuscriptId} proposal={proposal.data} onDone={onDone} />
+          <GroupProposalFields manuscriptId={manuscriptId} proposal={proposal.data} onDone={onDone} actionsTarget={actionsTarget} />
         )}
       </Modal>
     </ModalBackdrop>
