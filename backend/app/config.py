@@ -539,7 +539,7 @@ class Settings(BaseSettings):
     # encodes a 200,000-word string without erroring).
     reuse_embedding_chunk_words: int = 800
 
-    # --- Originality/reuse: similarity query + write-back (V-037, F7.2/F7.3) --
+    # --- Originality/reuse: similarity query (V-037, F7.2; corpus = Library, V-077) --
     # Calibrated empirically against real paired text (ticket file, not
     # guessed): identical text -> 1.0, a lightly-edited near-duplicate
     # (resubmission-shaped edits) -> ~0.98, same-topic-but-genuinely-
@@ -682,6 +682,24 @@ class Settings(BaseSettings):
     # this many chapters, so the excerpt scales with how many chapters
     # exist without ever approaching a full read of a long manuscript.
     library_excerpt_max_chapters: int = 5
+    # V-077 (D-028): Library submissions spend zero Gemini quota (image
+    # reading is skipped; text and embeddings are local), but each one is real
+    # CPU and storage work on the single free-tier worker. Their own budget,
+    # separate from `action_rate_limit_max_attempts`, because seeding a past
+    # term can legitimately mean dozens of files in one sitting. Same window
+    # as the shared action limiter. Judgment value, not a measured number.
+    # 60/hour covers a past term in one sitting while bounding worst-case
+    # storage at 60 x `max_upload_mb` per account per hour (security review,
+    # 2026-10-13: 200/hour allowed ~8 GB/hour against a 10 GB free tier).
+    library_submission_rate_limit_max_attempts: int = 60
+    # A Library entry still "processing" after this long is treated as
+    # stalled (its request died mid-way): it no longer blocks re-adding the
+    # same file and its owner may remove it. Generous against the extraction
+    # timeout so a slow but live upload is never mistaken for a dead one.
+    library_processing_stalled_seconds: int = 600
+    # Upper bound on authors stored per Library entry (title-page proposals
+    # and instructor edits alike).
+    library_entry_max_authors: int = 20
 
     # --- Block-quote detection (V-072, F7.4 exclusion) -------------------------
     # PDF only (no bbox exists for DOCX blocks, `ingest/schemas.py`'s own

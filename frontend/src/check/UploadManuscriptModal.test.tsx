@@ -52,6 +52,13 @@ describe("UploadManuscriptModal", () => {
     );
   });
 
+  it("V-077: says before upload that checked manuscripts are compared against the Library, not added to it", () => {
+    renderWithProviders(<UploadManuscriptModal onClose={() => {}} onUploadSuccess={() => {}} />);
+    expect(
+      screen.getByText(/Checked manuscripts are compared against the Library and are not added to it/),
+    ).toBeInTheDocument();
+  });
+
   it("V-063 (owner's call, 2026-08-19): uploads as multipart form data with no group_label field at all -- the group-proposal dialog is the only place a real group gets set now", async () => {
     const fetchMock = vi.fn(
       async (_input: RequestInfo | URL, _init?: RequestInit) => new Response(JSON.stringify(SUMMARY), { status: 200 }),
@@ -95,7 +102,7 @@ describe("UploadManuscriptModal", () => {
     expect(await screen.findByText("Uploaded. 12 page(s) parsed. No citations were found.")).toBeInTheDocument();
   });
 
-  it("BUG-234: explains a same-account exact re-upload and links to the earlier Library record", async () => {
+  it("BUG-234/V-077: explains a same-account exact re-upload without calling it a Library record", async () => {
     vi.stubGlobal(
       "fetch",
       vi.fn(async () =>
@@ -117,16 +124,14 @@ describe("UploadManuscriptModal", () => {
     chooseFile();
     fireEvent.click(screen.getByRole("button", { name: "Upload manuscript" }));
 
-    const heading = await screen.findByRole("heading", { name: "Already in your Library" });
+    const heading = await screen.findByRole("heading", { name: "You uploaded this file before" });
     expect(heading).toBeInTheDocument();
     await waitFor(() => expect(document.activeElement).toBe(heading));
-    expect(screen.getByText(/You uploaded “thesis\.pdf”.*exact same file as “defense-manuscript\.pdf”/)).toBeInTheDocument();
-    expect(screen.getByText(/keeps exact re-uploads together as one Library record/)).toBeInTheDocument();
-    expect(screen.getByText(/continue with this uploaded copy to start a separate check/)).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: /Open earlier Library record/ })).toHaveAttribute(
-      "href",
-      "/library/17",
-    );
+    expect(screen.getByText(/exact same file you uploaded on .*That upload was named “defense-manuscript\.pdf”/)).toBeInTheDocument();
+    expect(screen.getByText(/new copy was saved and can be checked on its own/)).toBeInTheDocument();
+    // V-077 (D-028): a dashboard upload is never a Library record.
+    expect(screen.queryByText(/Library record/)).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: /Library/ })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Start a check with this manuscript" })).toBeInTheDocument();
   });
 
@@ -152,9 +157,8 @@ describe("UploadManuscriptModal", () => {
     chooseFile();
     fireEvent.click(screen.getByRole("button", { name: "Upload manuscript" }));
 
-    expect(await screen.findByRole("heading", { name: "Already in your Library" })).toBeInTheDocument();
-    expect(screen.getByText(/earlier copy's stored source was removed/)).toBeInTheDocument();
-    expect(screen.queryByRole("link", { name: /Open earlier Library record/ })).not.toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "You uploaded this file before" })).toBeInTheDocument();
+    expect(screen.getByText(/earlier copy's stored file was removed/)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Start a check with this manuscript" })).toBeInTheDocument();
   });
 

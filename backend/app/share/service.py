@@ -194,6 +194,7 @@ def _to_public_report(report: ReportOut) -> PublicReportOut:
         # V-069 AC2/AC5: the rubric's own RATING, same transcription-only
         # treatment as the instructor's own report view.
         levelled_rating=report.levelled_rating,
+        originality_scope=report.originality_scope,
     )
 
 

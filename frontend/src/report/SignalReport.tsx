@@ -147,7 +147,7 @@ export function SignalReportPage() {
           )}
 
           <SignalEscalatedPanel checkRunId={report.check_run_id} />
-          <SignalFlagsPanel checkRunId={report.check_run_id} unresolvedHighFlagCount={report.unresolved_high_flag_count} />
+          <SignalFlagsPanel checkRunId={report.check_run_id} unresolvedHighFlagCount={report.unresolved_high_flag_count} originalityScope={report.originality_scope} />
           <SignalCriteriaResults results={report.results.filter((row) => row.outcome !== "escalated")} checkRunId={report.check_run_id} />
           <SignalDecisionPanel report={report} manuscriptLabel={identity?.primary ?? report.manuscript_group_label} />
         </>

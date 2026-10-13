@@ -285,13 +285,13 @@ function WorkQueueRecord({
                 disabled={dismiss.isPending}
                 onClick={() => dismiss.mutate(row.id)}
               >
-                {dismiss.isPending ? "Moving…" : "Move to Archive"}
+                {dismiss.isPending ? "Removing…" : "Remove from Review Desk"}
               </button>
             )}
           </div>
         </details>
         {row.ingest_status === "failed" && (
-          <p className="signal-record__retention">Archive retains the failed record and its audit history.</p>
+          <p className="signal-record__retention">VERIDICAL keeps the failed record in the audit history.</p>
         )}
         {dismiss.isError && (
           <Alert tone="error" role="alert" title="Could not move this record">

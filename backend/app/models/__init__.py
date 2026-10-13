@@ -10,6 +10,7 @@ from app.models.citation import Citation
 from app.models.citation_cache import CitationCache
 from app.models.group import Group, GroupMember, Program
 from app.models.instructor import Instructor
+from app.models.library import LibraryEntry
 from app.models.llm import LLMQuotaCounter, LLMResponseCache
 from app.models.manuscript import Manuscript, ManuscriptArchive, ManuscriptChapterArchive
 from app.models.rubric import Criterion, Rubric
@@ -29,6 +30,7 @@ __all__ = [
     "Group",
     "GroupMember",
     "Instructor",
+    "LibraryEntry",
     "LLMQuotaCounter",
     "LLMResponseCache",
     "Manuscript",

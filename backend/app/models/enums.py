@@ -142,3 +142,45 @@ class LLMMode(StrEnum):
     fake = "fake"
     real = "real"
     unknown = "unknown"
+
+
+class ManuscriptOrigin(StrEnum):
+    """V-077 (D-028): why a `manuscript` row exists. A check upload is the
+    dashboard's input to a readiness check; a Library submission exists only
+    to be stored and compared against. The two are kept apart so a Library
+    submission never appears on the Dashboard/Review Desk and can never be
+    checked, and a checked manuscript never silently becomes a comparison
+    source."""
+
+    check_upload = "check_upload"
+    library_submission = "library_submission"
+
+
+class LibraryEntrySource(StrEnum):
+    """How a manuscript entered the Library. `legacy_check_upload` exists
+    ONLY for rows migration 0037 carried over from the pre-D-028 automatic
+    write-back; nothing new ever writes it."""
+
+    library_submission = "library_submission"
+    legacy_check_upload = "legacy_check_upload"
+
+
+class LibraryEntryStatus(StrEnum):
+    """Library entry lifecycle (V-077). Only `active` entries are comparison
+    sources, and only `active` entries have rows in the F7 embedding tables.
+    `needs_decision` is ground rule 1 applied to duplicates: a possible
+    duplicate waits for the instructor, it is never auto-added or auto-skipped."""
+
+    processing = "processing"
+    needs_decision = "needs_decision"
+    active = "active"
+    failed = "failed"
+    removed = "removed"
+
+
+class LibraryRemovalReason(StrEnum):
+    instructor = "instructor"
+    duplicate_skipped = "duplicate_skipped"
+    duplicate_cleanup = "duplicate_cleanup"
+    # The underlying stored file was purged through `/archive` (V-042).
+    purged = "purged"

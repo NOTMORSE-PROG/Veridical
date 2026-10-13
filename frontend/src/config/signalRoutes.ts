@@ -28,7 +28,7 @@ export const SIGNAL_NAVIGATION: readonly SignalNavigationRoute[] = [
   },
   {
     label: "Library",
-    description: "Stored manuscripts, comparison, and archive",
+    description: "Manuscripts that originality checks compare against",
     to: "/library",
     matches: (path) => path.startsWith("/library"),
   },

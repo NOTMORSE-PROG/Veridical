@@ -1,223 +1,257 @@
-"""V-066: the shared-corpus library. Two-up compare forks on ownership
-(Pre-implementation research Q3, `tickets/V8-real-use/open/V-066.md`):
+"""V-077 (D-028): the Library -- a standalone collection of manuscripts and
+the only F7 comparison corpus.
 
-- **Own manuscript** (`get_library_document`/`_file_path`/`_paragraphs`):
-  reuses `app.report.service`'s manuscript-keyed core helpers -- the exact
-  file-opening/purge-guard logic V-065's check-run-scoped viewer already
-  uses, just resolved by `manuscript_id` directly instead of through a
-  check run, and with no flags overlay (a library record isn't a check
-  run). 404s if the manuscript isn't the requester's own -- this codebase's
-  established "uniform 404, never 403" ownership convention (Track B,
-  2026-08-16 audit).
-- **Another instructor's manuscript** (`get_library_excerpt`): NEVER opens
-  the owning account's file. Re-serves the bounded excerpt V-072 already
-  computed and persisted at embed time (`ManuscriptChapterArchive`/
-  `ManuscriptPassageArchive`) -- the same data `PassagePairPanel` already
-  renders for a reuse flag. This is Q2's ruling (owner, 2026-08-11, carried
-  from V-058/BUG-050 Branch B) enforced at the API: identity plus a
-  bounded, configurable excerpt, never the full document.
+**One invariant, owned here:** the F7 embedding tables
+(`manuscript_archive`, `manuscript_chapter_archive`,
+`manuscript_passage_archive`) hold rows for a manuscript exactly when its
+`library_entry` is `active`. `_activate` writes them, `_remove` deletes them,
+both under the same per-manuscript advisory lock the archive purge uses
+(BUG-178). Every similarity query therefore searches the Library and nothing
+else, with no membership filter to erode HNSW recall.
+
+**Submission** (`submit_library_entry`) stores the file, extracts text with
+image reading skipped, and embeds with the local model: zero Gemini calls.
+No rubric, no grading, no verdict.
+
+**Duplicates are own-account only.** An exact copy (same bytes as one of the
+requester's own entries) creates nothing; a file whose text is very similar
+to one of the requester's own entries (which may be the same manuscript in
+another file, or a revised version) waits in `needs_decision` for the
+instructor (ground rule 1). Neither check
+ever correlates across accounts: BUG-234 ruled that telling one instructor
+another account holds the same bytes is a cross-tenant existence oracle.
+Cross-account copies are collapsed at match time instead
+(`app.checks.reuse.query.canonical_library_copies`).
+
+**Visibility.** Active entries are visible to every instructor (the corpus is
+shared, BUG-050), redacted for other accounts exactly as BUG-147/D-026
+require. Processing, needs-decision and failed entries are visible to their
+owner only. Removed entries are visible to no one. The full document routes
+are owner-only; the bounded excerpt never opens the owning account's file.
 """
 
+import asyncio
+import logging
+import os
+import uuid
+from collections.abc import AsyncIterator
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import Literal
 
-from sqlalchemy import and_, func, or_, select
+import numpy as np
+from sqlalchemy import Text, and_, cast, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import aliased
 
-from app.checks.reuse.embed import split_context
-from app.config import Settings
-from app.errors import NotFoundError
-from app.groups.service import UNSET_PROGRAM_FILTER
+from app import messages
+from app.archive.service import delete_archive_rows, delete_stored_files
+from app.audit.service import write_audit_event
+from app.checks.reuse.embed import (
+    DocumentEmbeddings,
+    PassageEmbedding,
+    compute_document_embeddings,
+    compute_passage_embeddings,
+    split_context,
+)
+from app.checks.reuse.store import store_document_embeddings, store_passage_embeddings
+from app.config import Settings, get_settings
+from app.db import advisory_lock
+from app.errors import ConflictError, NotFoundError, VeridicalError
+from app.groups.service import DEFAULT_GROUP_LABEL, UNSET_PROGRAM_FILTER
+from app.ingest.patterns import load_patterns
+from app.ingest.schemas import ExtractionResult
+from app.ingest.service import (
+    clean_original_filename,
+    detect_format,
+    hash_file_sha256,
+    ingest_manuscript,
+    load_raw_store_async,
+    save_upload,
+    select_extractor,
+)
+from app.ingest.titlepage import extract_title_page
 from app.library.schemas import (
     LibraryChapterExcerptOut,
-    LibraryDuplicateUploadOut,
+    LibraryDuplicateRefOut,
+    LibraryEntryStateOut,
+    LibraryEntryUpdate,
     LibraryExcerptOut,
     LibraryItemOut,
+    LibrarySubmissionIn,
+    LibrarySubmissionOut,
+    LibrarySubmissionOutcome,
     PaginatedLibrary,
 )
-from app.models.enums import CheckRunStatus
-from app.models.group import Group, GroupMember, Program
-from app.models.manuscript import Manuscript, ManuscriptChapterArchive, ManuscriptPassageArchive
-from app.models.run import CheckRun
+from app.models.enums import (
+    LibraryEntrySource,
+    LibraryEntryStatus,
+    LibraryRemovalReason,
+    ManuscriptOrigin,
+)
+from app.models.group import Program
+from app.models.library import LibraryEntry
+from app.models.manuscript import (
+    Manuscript,
+    ManuscriptArchive,
+    ManuscriptChapterArchive,
+    ManuscriptPassageArchive,
+)
 from app.report.schemas import DocumentParagraphsOut, ManuscriptViewerOut
 from app.report.service import (
     manuscript_file_path_for,
     manuscript_paragraphs_for,
     manuscript_viewer_for,
 )
+from app.storage import get_storage, storage_key_for
+
+# Lengths come from the columns themselves, so a schema change cannot leave
+# a silent truncation mismatch behind.
+_TITLE_MAX = LibraryEntry.__table__.c.title.type.length
+_TEAM_MAX = LibraryEntry.__table__.c.team_name.type.length
+_AUTHOR_MAX = 200
+
+logger = logging.getLogger(__name__)
+
+LibraryListScope = Literal["active", "pending"]
+
+_OWNER_ONLY_STATUSES = (
+    LibraryEntryStatus.processing,
+    LibraryEntryStatus.needs_decision,
+    LibraryEntryStatus.failed,
+)
 
 
-def _latest_done_check_run_id_col():
-    """BUG-148: same correlated-scalar-subquery pattern `app.ingest.service.
-    list_manuscripts` already uses for its own `ManuscriptListItem.
-    latest_done_check_run_id` -- reused here rather than re-derived, so
-    "the most recent successfully completed check for this manuscript"
-    means the same thing on the dashboard and in the library."""
-    return (
-        select(CheckRun.id)
-        .where(CheckRun.manuscript_id == Manuscript.id, CheckRun.status == CheckRunStatus.done)
-        .order_by(CheckRun.created_at.desc(), CheckRun.id.desc())
-        .limit(1)
-        .correlate(Manuscript)
-        .scalar_subquery()
+def _stalled_cutoff() -> datetime:
+    return datetime.now(UTC) - timedelta(seconds=get_settings().library_processing_stalled_seconds)
+
+
+def _is_stalled(entry: LibraryEntry) -> bool:
+    """A processing entry whose request died mid-way (crash, restart). It no
+    longer blocks re-adding the same file and its owner may remove it."""
+    return entry.status == LibraryEntryStatus.processing and entry.created_at < _stalled_cutoff()
+
+
+def _record_label(manuscript_id: int) -> str:
+    return f"Library record #{manuscript_id}"
+
+
+def _visible_to(instructor_id: int):
+    """Active entries for everyone; the owner also sees their own entries
+    that are still processing, waiting for a decision, or failed."""
+    return or_(
+        LibraryEntry.status == LibraryEntryStatus.active,
+        and_(
+            Manuscript.instructor_id == instructor_id,
+            LibraryEntry.status.in_(_OWNER_ONLY_STATUSES),
+        ),
     )
 
 
-async def _resolve_manuscript(session: AsyncSession, manuscript_id: int) -> Manuscript:
-    manuscript = await session.get(Manuscript, manuscript_id)
-    if manuscript is None:
-        raise NotFoundError(f"No manuscript with id {manuscript_id}.")
-    return manuscript
+def _own_label(entry: LibraryEntry, manuscript: Manuscript) -> str:
+    return (
+        entry.title
+        or entry.team_name
+        or manuscript.original_filename
+        or _record_label(manuscript.id)
+    )
 
 
-async def _resolve_owned_manuscript(
-    session: AsyncSession, instructor_id: int, manuscript_id: int
-) -> Manuscript:
-    """Same 404-not-403 convention `_owned_check_run`/`purge_manuscript`
-    already use elsewhere in this codebase (never disclose "exists but
-    isn't yours" as a distinct outcome from "doesn't exist")."""
-    manuscript = await _resolve_manuscript(session, manuscript_id)
-    if manuscript.instructor_id != instructor_id:
-        raise NotFoundError(f"No manuscript with id {manuscript_id}.")
-    return manuscript
-
-
-async def _authors_by_group_id(session: AsyncSession, group_ids: set[int]) -> dict[int, list[str]]:
-    if not group_ids:
-        return {}
-    rows = (
-        await session.execute(
-            select(GroupMember.group_id, GroupMember.name)
-            .where(GroupMember.group_id.in_(group_ids))
-            .order_by(GroupMember.id)
-        )
-    ).all()
-    authors: dict[int, list[str]] = {}
-    for group_id, name in rows:
-        authors.setdefault(group_id, []).append(name)
-    return authors
+def _duplicate_ref(entry: LibraryEntry, manuscript: Manuscript) -> LibraryDuplicateRefOut:
+    return LibraryDuplicateRefOut(
+        manuscript_id=manuscript.id,
+        label=_own_label(entry, manuscript),
+        original_filename=manuscript.original_filename,
+        added_at=entry.added_at,
+    )
 
 
 def _item_out(
+    entry: LibraryEntry,
     manuscript: Manuscript,
-    *,
-    title: str | None,
     program_name: str | None,
-    authors: list[str],
+    *,
     requesting_instructor_id: int,
-    duplicate_uploads: list[LibraryDuplicateUploadOut] | None = None,
-    latest_done_check_run_id: int | None = None,
+    duplicate_of: LibraryDuplicateRefOut | None = None,
 ) -> LibraryItemOut:
-    """BUG-147 (Critical, owner-decision-documented fix -- ticket's own
-    "cheapest first" option 1): another instructor's manuscript keeps
-    ONLY what F7 needs to stay explainable -- a non-identifying reference,
-    program, and processing date, exactly the ticket's own worked example
-    ("archived manuscript #3, IT, Aug 2026"). Real student names, the
-    capstone title, the team name, and the original filename are never
-    returned for a row this requester doesn't own. The originality corpus
-    itself stays shared by design (BUG-050, owner decision, 2026-08-16,
-    restated in FEATURES.md) -- this fixes the PAYLOAD, not the sharing."""
-    is_own = manuscript.instructor_id == requesting_instructor_id
-    if not is_own:
+    """BUG-147: another account's entry keeps only what the shared corpus
+    needs to stay explainable (record number, program, school year, date
+    added). Title, team, authors, filename, source, failure detail and
+    duplicate links are never returned for an entry the requester doesn't
+    own -- and never even passed in for one (callers resolve duplicates for
+    own entries only)."""
+    if manuscript.instructor_id != requesting_instructor_id:
         return LibraryItemOut(
             manuscript_id=manuscript.id,
-            group_label=f"Archived manuscript #{manuscript.id}",
+            is_own=False,
+            label=_record_label(manuscript.id),
             title=None,
+            team_name=None,
             authors=[],
             program=program_name,
+            school_year=entry.school_year,
             original_filename=None,
-            created_at=manuscript.created_at,
-            purged_at=manuscript.purged_at,
-            is_own=False,
+            status=entry.status,
+            source=None,
+            added_at=entry.added_at,
+            created_at=entry.created_at,
         )
     return LibraryItemOut(
         manuscript_id=manuscript.id,
-        group_label=manuscript.group_label,
-        title=title,
-        authors=authors,
-        program=program_name,
-        original_filename=manuscript.original_filename,
-        created_at=manuscript.created_at,
-        purged_at=manuscript.purged_at,
         is_own=True,
-        duplicate_uploads=duplicate_uploads or None,
-        latest_done_check_run_id=latest_done_check_run_id,
-    )
-
-
-def _representative_filter(instructor_id: int):
-    """BUG-148: an own-instructor row is kept in the listing only when no
-    OTHER manuscript of theirs, sharing the exact same `content_hash`, is
-    preferred over it -- i.e. it's the representative of its own
-    byte-identical-duplicate group. Preference order (highest wins):
-    not-yet-purged, then newest `created_at`, then highest id (a
-    deterministic tie-break for same-instant uploads). A manuscript with no
-    `content_hash` (still processing, or pre-BUG-140) can never match a
-    sibling via `==` on a NULL column -- SQL's `NULL = NULL` is unknown, not
-    true -- so it is always, correctly, its own representative.
-
-    Deliberately NOT applied to another instructor's rows (`is_own: False`
-    from the requester's point of view): collapsing here is a same-
-    instructor convenience, not a cross-tenant fact this endpoint has ever
-    disclosed (matching BUG-140's own same-instructor scoping) -- callers
-    must OR this with `Manuscript.instructor_id != instructor_id`."""
-    sibling = aliased(Manuscript)
-    sibling_preferred = or_(
-        and_(sibling.purged_at.is_(None), Manuscript.purged_at.is_not(None)),
-        and_(
-            sibling.purged_at.is_(None) == Manuscript.purged_at.is_(None),
-            sibling.created_at > Manuscript.created_at,
+        label=_own_label(entry, manuscript),
+        title=entry.title,
+        team_name=entry.team_name,
+        authors=list(entry.authors or []),
+        program=program_name,
+        school_year=entry.school_year,
+        original_filename=manuscript.original_filename,
+        status=entry.status,
+        source=entry.source,
+        added_at=entry.added_at,
+        created_at=entry.created_at,
+        proposed_fields=list(entry.proposed_fields or []),
+        possible_duplicate_of=(
+            duplicate_of if entry.status == LibraryEntryStatus.needs_decision else None
         ),
-        and_(
-            sibling.purged_at.is_(None) == Manuscript.purged_at.is_(None),
-            sibling.created_at == Manuscript.created_at,
-            sibling.id > Manuscript.id,
+        failure_detail=(
+            entry.failure_detail if entry.status == LibraryEntryStatus.failed else None
         ),
-    )
-    return ~(
-        select(sibling.id)
-        .where(
-            sibling.instructor_id == instructor_id,
-            sibling.content_hash == Manuscript.content_hash,
-            sibling.id != Manuscript.id,
-            sibling_preferred,
-        )
-        .correlate(Manuscript)
-        .exists()
+        stalled=_is_stalled(entry),
     )
 
 
-async def _duplicate_uploads_by_hash(
-    session: AsyncSession, instructor_id: int, content_hashes: set[str]
-) -> dict[str, list[LibraryDuplicateUploadOut]]:
-    """One flat query for every hash group on the current page, rather than
-    one query per representative row -- the group sizes involved are small
-    (single-digit re-uploads of one file, not the shared corpus)."""
-    if not content_hashes:
+def _entry_select():
+    return (
+        select(LibraryEntry, Manuscript, Program.name)
+        .join(Manuscript, Manuscript.id == LibraryEntry.manuscript_id)
+        .outerjoin(Program, Program.id == LibraryEntry.program_id)
+    )
+
+
+async def _duplicate_refs(
+    session: AsyncSession, instructor_id: int, entries: list[LibraryEntry]
+) -> dict[int, LibraryDuplicateRefOut]:
+    """One query for every needs-decision entry on the page, restricted to
+    the requester's own entries (BUG-234: never another account's)."""
+    target_ids = {
+        e.possible_duplicate_of_id
+        for e in entries
+        if e.status == LibraryEntryStatus.needs_decision and e.possible_duplicate_of_id
+    }
+    if not target_ids:
         return {}
-    latest_done_id = _latest_done_check_run_id_col()
     rows = (
         await session.execute(
-            select(Manuscript, latest_done_id)
+            select(LibraryEntry, Manuscript)
+            .join(Manuscript, Manuscript.id == LibraryEntry.manuscript_id)
             .where(
+                LibraryEntry.id.in_(target_ids),
                 Manuscript.instructor_id == instructor_id,
-                Manuscript.content_hash.in_(content_hashes),
+                LibraryEntry.status != LibraryEntryStatus.removed,
             )
-            .order_by(Manuscript.created_at.desc(), Manuscript.id.desc())
         )
     ).all()
-    by_hash: dict[str, list[LibraryDuplicateUploadOut]] = {}
-    for manuscript, latest_done_check_run_id in rows:
-        by_hash.setdefault(manuscript.content_hash, []).append(
-            LibraryDuplicateUploadOut(
-                manuscript_id=manuscript.id,
-                created_at=manuscript.created_at,
-                purged_at=manuscript.purged_at,
-                original_filename=manuscript.original_filename,
-                latest_done_check_run_id=latest_done_check_run_id,
-            )
-        )
-    return by_hash
+    return {entry.id: _duplicate_ref(entry, manuscript) for entry, manuscript in rows}
 
 
 async def list_library(
@@ -228,132 +262,89 @@ async def list_library(
     page_size: int = 50,
     program: str | None = None,
     search: str | None = None,
+    scope: LibraryListScope = "active",
 ) -> PaginatedLibrary:
-    """Spans the WHOLE corpus (no `instructor_id` filter on `Manuscript`
-    itself, unlike `app.archive.service.list_archive`) -- this IS the
-    screen that makes the shared library real instead of a claim on the
-    Archive screen's own disclosure text (`frontend/src/archive/
-    Archive.tsx`: "a match can reference a manuscript that isn't listed
-    here"). `search` matches group name, extracted title, original
-    filename, or any recorded member name -- AC2's "search by title/author"."""
-    filters = []
-    count_stmt = (
-        select(func.count())
-        .select_from(Manuscript)
-        .join(Group, Group.id == Manuscript.group_id, isouter=True)
-        .join(Program, Program.id == Group.program_id, isouter=True)
-    )
-    items_stmt = (
-        select(Manuscript, Group.title, Group.id, Program.name, _latest_done_check_run_id_col())
-        .join(Group, Group.id == Manuscript.group_id, isouter=True)
-        .join(Program, Program.id == Group.program_id, isouter=True)
-    )
+    """`scope="active"` is the collection itself: every active entry, own
+    and shared (the count a screen shows as "records in the Library").
+    `scope="pending"` is the requester's own uploads that are not
+    comparison sources yet (processing, needs decision, failed), kept apart
+    so the collection count never includes them.
 
+    `search` matches title, team name, authors, filename or school year,
+    and only ever over the requester's own entries (BUG-147: a hit on
+    another account's student name would itself confirm that name exists
+    in the corpus). `program` filters every listed entry."""
+    if scope == "pending":
+        filters = [
+            Manuscript.instructor_id == instructor_id,
+            LibraryEntry.status.in_(_OWNER_ONLY_STATUSES),
+        ]
+    else:
+        filters = [LibraryEntry.status == LibraryEntryStatus.active]
     if program == UNSET_PROGRAM_FILTER:
-        filters.append(or_(Manuscript.group_id.is_(None), Group.program_id.is_(None)))
+        filters.append(LibraryEntry.program_id.is_(None))
     elif program is not None:
         filters.append(Program.name == program)
-
-    if search and search.strip():
+    record_number = search.strip().lstrip("#") if search else ""
+    if record_number.isdigit():
+        # "#20" or "20": a record number is shown on every card, own or
+        # shared, and identifies no one, so it is searchable across the
+        # whole listed scope (unlike names and titles, BUG-147).
+        filters.append(Manuscript.id == int(record_number))
+    elif search and search.strip():
         needle = f"%{search.strip()}%"
-        member_match = select(GroupMember.id).where(
-            GroupMember.group_id == Group.id, GroupMember.name.ilike(needle)
-        )
-        # BUG-147 (`ux-critic` finding, live-reproduced): a search hit is
-        # itself a disclosure -- typing another instructor's real student
-        # name, capstone title, team name, or filename into this box and
-        # getting ANY result back (even one whose row shows only the
-        # anonymized placeholder) confirms that name exists in the shared
-        # corpus, with program and date attached. That defeats the whole
-        # point of `_item_out`'s redaction: an instructor doesn't need to
-        # SEE a name to have it CONFIRMED. Scoped to the requester's own
-        # manuscripts, matching this endpoint's ticket-cited purpose
-        # ("search by title/author") -- a name search can only ever
-        # search names the requester is already allowed to see.
         filters.append(
             and_(
                 Manuscript.instructor_id == instructor_id,
                 or_(
-                    Group.name.ilike(needle),
-                    Group.title.ilike(needle),
+                    LibraryEntry.title.ilike(needle),
+                    LibraryEntry.team_name.ilike(needle),
+                    LibraryEntry.school_year.ilike(needle),
+                    cast(LibraryEntry.authors, Text).ilike(needle),
                     Manuscript.original_filename.ilike(needle),
-                    member_match.exists(),
                 ),
             )
         )
 
-    # BUG-148: collapse the requester's own byte-identical re-uploads down
-    # to one row (the group's representative) BEFORE pagination -- doing
-    # this per-page instead would let duplicate siblings split across two
-    # pages and silently recreate the bug at a smaller scale. Known,
-    # disclosed gap (not fixed here): a search term matching ONLY a
-    # non-representative sibling's `original_filename` (the one field that
-    # can legitimately differ between byte-identical uploads, if renamed
-    # before re-upload) won't surface that sibling's group -- narrow enough,
-    # and costly enough to close properly, that it's named here rather than
-    # guessed around.
-    filters.append(
-        or_(Manuscript.instructor_id != instructor_id, _representative_filter(instructor_id))
-    )
-
-    total = await session.scalar(count_stmt.where(*filters)) or 0
+    total = (
+        await session.scalar(
+            select(func.count())
+            .select_from(LibraryEntry)
+            .join(Manuscript, Manuscript.id == LibraryEntry.manuscript_id)
+            .outerjoin(Program, Program.id == LibraryEntry.program_id)
+            .where(*filters)
+        )
+    ) or 0
     rows = (
         await session.execute(
-            items_stmt.where(*filters)
-            # `backend-critic` finding (BUG-148 review), live-reproduced
-            # against real Postgres: `created_at`'s `server_default=func.now()`
-            # returns the IDENTICAL value for every row inserted in the same
-            # transaction (a real, common case for this corpus-wide endpoint --
-            # bulk seeding, or simply two uploads landing in the same second),
-            # and `ORDER BY` over a non-unique column set makes OFFSET/LIMIT
-            # pagination non-deterministic: the same row can reappear on
-            # multiple pages while another never appears on any. `id.desc()`
-            # tie-break added, matching the discipline already applied to
-            # `_representative_filter` and `_duplicate_uploads_by_hash`'s own
-            # ordering -- this was the one `order_by` that hadn't been.
-            .order_by(Manuscript.created_at.desc(), Manuscript.id.desc())
+            _entry_select()
+            .where(*filters)
+            # `id` tie-break: rows created in one transaction share a
+            # timestamp, and OFFSET pagination over a non-unique order is
+            # non-deterministic (BUG-148 review finding).
+            .order_by(
+                func.coalesce(LibraryEntry.added_at, LibraryEntry.created_at).desc(),
+                LibraryEntry.id.desc(),
+            )
             .offset((page - 1) * page_size)
             .limit(page_size)
         )
     ).all()
-
-    group_ids = {group_id for _, _, group_id, _, _ in rows if group_id is not None}
-    authors_by_group = await _authors_by_group_id(session, group_ids)
-    own_hashes = {
-        manuscript.content_hash
-        for manuscript, _, _, _, _ in rows
-        if manuscript.instructor_id == instructor_id and manuscript.content_hash is not None
-    }
-    duplicates_by_hash = await _duplicate_uploads_by_hash(session, instructor_id, own_hashes)
-
+    own_entries = [e for e, m, _ in rows if m.instructor_id == instructor_id]
+    refs = await _duplicate_refs(session, instructor_id, own_entries)
     items = [
         _item_out(
+            entry,
             manuscript,
-            title=title,
-            program_name=program_name,
-            authors=authors_by_group.get(group_id, []),
+            program_name,
             requesting_instructor_id=instructor_id,
-            # `backend-critic` finding (BUG-148 review): `_item_out`'s own
-            # `is_own` branch already discards both of these for a row this
-            # requester doesn't own, so nothing leaks today -- but that
-            # safety lived SOLELY in that branch, not asserted here too, so
-            # a future refactor of `_item_out` could silently promote
-            # already-computed foreign data into a real BUG-147-class leak.
-            # Never even PASS a foreign row's values past this point.
-            duplicate_uploads=(
-                [
-                    dup
-                    for dup in duplicates_by_hash.get(manuscript.content_hash, [])
-                    if dup.manuscript_id != manuscript.id
-                ]
-                if manuscript.instructor_id == instructor_id and manuscript.content_hash
+            duplicate_of=(
+                refs.get(entry.possible_duplicate_of_id)
+                if manuscript.instructor_id == instructor_id
                 else None
             ),
-            latest_done_check_run_id=(
-                latest_done_check_run_id if manuscript.instructor_id == instructor_id else None
-            ),
         )
-        for manuscript, title, group_id, program_name, latest_done_check_run_id in rows
+        for entry, manuscript, program_name in rows
     ]
     return PaginatedLibrary(items=items, total=total, page=page, page_size=page_size)
 
@@ -361,101 +352,670 @@ async def list_library(
 async def get_library_item(
     session: AsyncSession, instructor_id: int, manuscript_id: int
 ) -> LibraryItemOut:
-    """AC3: a single record's detail -- visible for ANY manuscript in the
-    corpus (identity is the point of the library, BUG-050's DECIDED
-    direction), own or not."""
-    manuscript = await _resolve_manuscript(session, manuscript_id)
-    title: str | None = None
-    program_name: str | None = None
-    authors: list[str] = []
-    if manuscript.group_id is not None:
-        row = (
-            await session.execute(
-                select(Group.title, Program.name)
-                .join(Program, Program.id == Group.program_id, isouter=True)
-                .where(Group.id == manuscript.group_id)
+    row = (
+        await session.execute(
+            _entry_select().where(
+                LibraryEntry.manuscript_id == manuscript_id, _visible_to(instructor_id)
             )
-        ).first()
-        if row is not None:
-            title, program_name = row
-        authors = (await _authors_by_group_id(session, {manuscript.group_id})).get(
-            manuscript.group_id, []
         )
-    # BUG-148: `duplicate_uploads` is deliberately NOT populated here --
-    # `ui-designer`'s own spec scoped the duplicate-group disclosure to the
-    # list card only (`/library`), leaving this detail endpoint (`/library/
-    # {id}`) untouched; `latest_done_check_run_id` DOES need to match,
-    # though, since it's the same field on the same schema the list now
-    # populates (`ux-critic` finding) -- leaving it unset only here would
-    # trade one asymmetry for a different one.
-    latest_done_check_run_id = None
+    ).first()
+    if row is None:
+        raise NotFoundError(f"No Library record with id {manuscript_id}.")
+    entry, manuscript, program_name = row
+    duplicate_of = None
     if manuscript.instructor_id == instructor_id:
-        latest_done_check_run_id = await session.scalar(
-            select(CheckRun.id)
-            .where(CheckRun.manuscript_id == manuscript.id, CheckRun.status == CheckRunStatus.done)
-            .order_by(CheckRun.created_at.desc(), CheckRun.id.desc())
-            .limit(1)
+        duplicate_of = (await _duplicate_refs(session, instructor_id, [entry])).get(
+            entry.possible_duplicate_of_id
         )
     return _item_out(
+        entry,
         manuscript,
-        title=title,
-        program_name=program_name,
-        authors=authors,
+        program_name,
         requesting_instructor_id=instructor_id,
-        latest_done_check_run_id=latest_done_check_run_id,
+        duplicate_of=duplicate_of,
     )
+
+
+async def _owned_entry(
+    session: AsyncSession, instructor_id: int, manuscript_id: int
+) -> tuple[LibraryEntry, Manuscript]:
+    """Uniform 404 for "not yours", "not in the Library" and "removed"
+    (this codebase's 404-never-403 convention)."""
+    row = (
+        await session.execute(
+            select(LibraryEntry, Manuscript)
+            .join(Manuscript, Manuscript.id == LibraryEntry.manuscript_id)
+            .where(
+                LibraryEntry.manuscript_id == manuscript_id,
+                Manuscript.instructor_id == instructor_id,
+                LibraryEntry.status != LibraryEntryStatus.removed,
+            )
+        )
+    ).first()
+    if row is None:
+        raise NotFoundError(f"No Library record with id {manuscript_id}.")
+    return row[0], row[1]
+
+
+async def _program_id(session: AsyncSession, program: str | None) -> int | None:
+    name = (program or "").strip()
+    if not name or name == UNSET_PROGRAM_FILTER:
+        return None
+    program_id = await session.scalar(select(Program.id).where(Program.name == name))
+    if program_id is None:
+        raise NotFoundError(messages.LIBRARY_UNKNOWN_PROGRAM.format(program=name))
+    return program_id
+
+
+def _clean_text(value: str | None) -> str | None:
+    cleaned = (value or "").strip()
+    return cleaned or None
+
+
+def _clean_authors(authors: list[str] | None, settings: Settings) -> list[str]:
+    cleaned = [a.strip()[:_AUTHOR_MAX] for a in (authors or []) if a and a.strip()]
+    return cleaned[: settings.library_entry_max_authors]
+
+
+def _fill_from_title_page(
+    entry: LibraryEntry, result: ExtractionResult, settings: Settings
+) -> None:
+    """Deterministic V-063 extraction, no LLM call. Only fills fields the
+    instructor left blank, and records which ones it filled."""
+    proposal = extract_title_page(result, load_patterns(settings.ingest_patterns_file))
+    proposed: list[str] = []
+    if entry.title is None and proposal.title is not None:
+        entry.title = proposal.title.value[:_TITLE_MAX]
+        proposed.append("title")
+    # A short name equal to the title is the extractor reading the same line
+    # twice, not a team name (ux-critic, 2026-10-13).
+    if (
+        entry.team_name is None
+        and proposal.short_name is not None
+        and (proposal.title is None or proposal.short_name.value != proposal.title.value)
+    ):
+        entry.team_name = proposal.short_name.value[:_TEAM_MAX]
+        proposed.append("team_name")
+    if not entry.authors and proposal.members:
+        entry.authors = _clean_authors([m.value for m in proposal.members], settings)
+        if entry.authors:
+            proposed.append("authors")
+    entry.proposed_fields = proposed
+
+
+async def _own_entry_with_hash(
+    session: AsyncSession, instructor_id: int, content_hash: str
+) -> tuple[LibraryEntry, Manuscript] | None:
+    """Exact copy check over the requester's own entries only (BUG-234).
+    Active, waiting, failed and live processing entries all count: re-sending
+    bytes that already failed must not store another copy (security review,
+    2026-10-13). A stalled processing entry does not count, so a crashed
+    upload never blocks re-adding the file."""
+    row = (
+        await session.execute(
+            select(LibraryEntry, Manuscript)
+            .join(Manuscript, Manuscript.id == LibraryEntry.manuscript_id)
+            .where(
+                Manuscript.instructor_id == instructor_id,
+                Manuscript.content_hash == content_hash,
+                LibraryEntry.status != LibraryEntryStatus.removed,
+                or_(
+                    LibraryEntry.status != LibraryEntryStatus.processing,
+                    LibraryEntry.created_at >= _stalled_cutoff(),
+                ),
+            )
+            .order_by(LibraryEntry.id)
+            .limit(1)
+        )
+    ).first()
+    return (row[0], row[1]) if row is not None else None
+
+
+_EXACT_COPY_MESSAGES = {
+    LibraryEntryStatus.active: messages.LIBRARY_EXACT_DUPLICATE,
+    LibraryEntryStatus.processing: messages.LIBRARY_EXACT_DUPLICATE_PROCESSING,
+    LibraryEntryStatus.needs_decision: messages.LIBRARY_EXACT_DUPLICATE_WAITING,
+}
+
+
+async def _own_possible_duplicate(
+    session: AsyncSession,
+    instructor_id: int,
+    manuscript_id: int,
+    whole_document: list[float],
+    settings: Settings,
+) -> tuple[LibraryEntry, Manuscript, float] | None:
+    """Same text, different file: whole-document cosine similarity at or
+    above `reuse_exact_duplicate_threshold` against the requester's own
+    active entries. Computed exactly in Python over the requester's own
+    vectors (tens to hundreds), not through a filtered HNSW scan whose
+    post-filtering could miss the nearest own entry."""
+    rows = (
+        await session.execute(
+            select(LibraryEntry, Manuscript, ManuscriptArchive.embedding)
+            .join(Manuscript, Manuscript.id == LibraryEntry.manuscript_id)
+            .join(ManuscriptArchive, ManuscriptArchive.manuscript_id == Manuscript.id)
+            .where(
+                Manuscript.instructor_id == instructor_id,
+                Manuscript.id != manuscript_id,
+                LibraryEntry.status == LibraryEntryStatus.active,
+                ManuscriptArchive.model_id == settings.embedding_model_id,
+            )
+        )
+    ).all()
+    if not rows:
+        return None
+    query = np.asarray(whole_document, dtype=np.float64)
+    query_norm = np.linalg.norm(query)
+    if query_norm == 0:
+        return None
+    best: tuple[LibraryEntry, Manuscript, float] | None = None
+    for entry, manuscript, embedding in rows:
+        vector = np.asarray(embedding, dtype=np.float64)
+        norm = np.linalg.norm(vector)
+        if norm == 0:
+            continue
+        similarity = float(np.dot(query, vector) / (query_norm * norm))
+        if similarity >= settings.reuse_exact_duplicate_threshold and (
+            best is None or similarity > best[2]
+        ):
+            best = (entry, manuscript, similarity)
+    return best
+
+
+async def _embed(
+    result: ExtractionResult, settings: Settings
+) -> tuple[DocumentEmbeddings, list[PassageEmbedding]]:
+    """Local model2vec work, off the event loop (BUG-152)."""
+    loop = asyncio.get_running_loop()
+    document = await loop.run_in_executor(None, compute_document_embeddings, result, settings)
+    passages = await loop.run_in_executor(None, compute_passage_embeddings, result, settings)
+    return document, passages
+
+
+async def _discard_late_work(
+    session: AsyncSession, entry: LibraryEntry, manuscript: Manuscript, settings: Settings
+) -> None:
+    """The entry left the Library (removed, skipped, purged) while this
+    request was still reading or embedding it. Write nothing, and delete
+    whatever the late work re-created: ingestion may have rewritten the
+    extraction (locally and durably) after the removal deleted it. Caller
+    holds the manuscript's advisory lock."""
+    await delete_archive_rows(session, manuscript.id)
+    if entry.source == LibraryEntrySource.library_submission:
+        await asyncio.get_running_loop().run_in_executor(
+            None, delete_stored_files, manuscript, settings
+        )
+        if manuscript.purged_at is None:
+            manuscript.purged_at = datetime.now(UTC)
+    await session.commit()
+
+
+async def _still(
+    session: AsyncSession,
+    entry: LibraryEntry,
+    manuscript: Manuscript,
+    expected: LibraryEntryStatus,
+) -> bool:
+    """Re-read the entry under its advisory lock (caller holds it): a user
+    action on another request may have moved it since this request began."""
+    await session.refresh(entry)
+    await session.refresh(manuscript)
+    return entry.status == expected and manuscript.purged_at is None
+
+
+async def _activate(
+    session: AsyncSession,
+    entry: LibraryEntry,
+    manuscript: Manuscript,
+    document: DocumentEmbeddings,
+    passages: list[PassageEmbedding],
+    settings: Settings,
+    *,
+    expected: LibraryEntryStatus,
+    decision: str | None,
+) -> bool:
+    """Enter the Library: comparison rows and the status change commit in ONE
+    transaction, so a crash can never leave rows for a non-active entry. Under
+    the same lock `_remove` takes, and only if the entry is still in
+    `expected`; otherwise the late work is discarded and False returned
+    (security review / backend-critic, 2026-10-13: a removal during reading
+    used to be undone by this write)."""
+    async with advisory_lock(session, manuscript.id):
+        if not await _still(session, entry, manuscript, expected):
+            await _discard_late_work(session, entry, manuscript, settings)
+            return False
+        await store_document_embeddings(session, manuscript.id, document, commit=False)
+        if passages:
+            await store_passage_embeddings(session, manuscript.id, passages, settings, commit=False)
+        entry.status = LibraryEntryStatus.active
+        entry.added_at = datetime.now(UTC)
+        await write_audit_event(
+            session,
+            event_type="library_entry_added",
+            check_run_id=None,
+            manuscript_id=manuscript.id,
+            payload={
+                "source": entry.source.value,
+                "decision": decision,
+                "passages_stored": min(len(passages), settings.reuse_max_passages_per_manuscript),
+                "passages_found": len(passages),
+            },
+        )
+        await session.commit()
+        return True
+
+
+def _removed_while_reading() -> LibrarySubmissionOut:
+    return LibrarySubmissionOut(
+        outcome=LibrarySubmissionOutcome.failed,
+        item=None,
+        duplicate_of=None,
+        message=messages.LIBRARY_REMOVED_WHILE_READING,
+    )
+
+
+async def _fail(
+    session: AsyncSession,
+    entry: LibraryEntry,
+    manuscript: Manuscript,
+    detail: str,
+    settings: Settings,
+) -> LibrarySubmissionOut:
+    async with advisory_lock(session, manuscript.id):
+        if not await _still(session, entry, manuscript, LibraryEntryStatus.processing):
+            await _discard_late_work(session, entry, manuscript, settings)
+            return _removed_while_reading()
+        entry.status = LibraryEntryStatus.failed
+        entry.failure_detail = detail
+        await write_audit_event(
+            session,
+            event_type="library_entry_failed",
+            check_run_id=None,
+            manuscript_id=manuscript.id,
+            payload={"source": entry.source.value},
+        )
+        await session.commit()
+    return LibrarySubmissionOut(
+        outcome=LibrarySubmissionOutcome.failed,
+        item=await get_library_item(session, manuscript.instructor_id, manuscript.id),
+        duplicate_of=None,
+        message=detail,
+    )
+
+
+async def submit_library_entry(
+    session: AsyncSession,
+    chunks: AsyncIterator[bytes],
+    filename: str,
+    metadata: LibrarySubmissionIn,
+    *,
+    instructor_id: int,
+    settings: Settings,
+) -> LibrarySubmissionOut:
+    """One file per call; the client submits a batch one file at a time,
+    which keeps peak memory to one extraction on the free-tier worker.
+
+    Nothing is stored durably or recorded until the content is a readable
+    document type and is not a copy of one of the requester's own entries
+    (security review, 2026-10-13: any file type used to reach durable
+    storage, and identical failed retries each stored a new copy)."""
+    program_id = await _program_id(session, metadata.program)
+    loop = asyncio.get_running_loop()
+    suffix = Path(filename).suffix.lower()[:8]
+    uploads = settings.data_dir / "uploads"
+    # Server-owned names only: the original filename never touches the
+    # filesystem.
+    pending = uploads / f"library-pending-{uuid.uuid4().hex}{suffix}"
+    try:
+        try:
+            await save_upload(chunks, pending, settings)
+            select_extractor(await loop.run_in_executor(None, detect_format, pending))
+        except VeridicalError as exc:
+            return LibrarySubmissionOut(
+                outcome=LibrarySubmissionOutcome.failed,
+                item=None,
+                duplicate_of=None,
+                message=str(exc),
+            )
+        content_hash = await loop.run_in_executor(
+            None, hash_file_sha256, pending, settings.content_hash_read_chunk_bytes
+        )
+
+        existing = await _own_entry_with_hash(session, instructor_id, content_hash)
+        if existing is not None:
+            existing_entry, existing_manuscript = existing
+            if existing_entry.status == LibraryEntryStatus.failed:
+                return LibrarySubmissionOut(
+                    outcome=LibrarySubmissionOutcome.failed,
+                    item=await get_library_item(session, instructor_id, existing_manuscript.id),
+                    duplicate_of=None,
+                    message=messages.LIBRARY_EXACT_DUPLICATE_FAILED,
+                )
+            return LibrarySubmissionOut(
+                outcome=LibrarySubmissionOutcome.exact_duplicate,
+                item=None,
+                duplicate_of=_duplicate_ref(existing_entry, existing_manuscript),
+                message=_EXACT_COPY_MESSAGES[existing_entry.status],
+            )
+
+        team_name = _clean_text(metadata.team_name)
+        manuscript = Manuscript(
+            instructor_id=instructor_id,
+            origin=ManuscriptOrigin.library_submission,
+            group_id=None,
+            group_label=team_name or DEFAULT_GROUP_LABEL,
+            file_ref="",
+            original_filename=clean_original_filename(filename),
+            content_hash=content_hash,
+        )
+        session.add(manuscript)
+        await session.flush()
+        entry = LibraryEntry(
+            manuscript_id=manuscript.id,
+            source=LibraryEntrySource.library_submission,
+            status=LibraryEntryStatus.processing,
+            title=_clean_text(metadata.title),
+            team_name=team_name,
+            authors=_clean_authors(metadata.authors, settings),
+            program_id=program_id,
+            school_year=_clean_text(metadata.school_year),
+            proposed_fields=[],
+        )
+        session.add(entry)
+        await session.commit()
+
+        dest = uploads / f"{manuscript.id}{suffix}"
+        try:
+            await loop.run_in_executor(None, os.replace, pending, dest)
+            # BUG-138: durable copy before the row claims the file exists.
+            storage = get_storage(settings)
+            await loop.run_in_executor(
+                None, storage.put_file, dest, storage_key_for(settings, str(dest))
+            )
+        except Exception:
+            # Nothing references these rows yet: remove them entirely, so a
+            # transient storage failure neither leaves a stuck entry nor
+            # blocks re-adding the same file.
+            logger.exception("Library submission %s could not be stored", manuscript.id)
+            dest.unlink(missing_ok=True)
+            await session.delete(entry)
+            await session.delete(manuscript)
+            await session.commit()
+            return LibrarySubmissionOut(
+                outcome=LibrarySubmissionOutcome.failed,
+                item=None,
+                duplicate_of=None,
+                message=messages.LIBRARY_STORAGE_FAILED,
+            )
+        manuscript.file_ref = str(dest)
+        await session.commit()
+    finally:
+        # Every early return above, and any crash, still clears the pending
+        # upload; after `os.replace` this is a no-op.
+        pending.unlink(missing_ok=True)
+
+    try:
+        result = await ingest_manuscript(session, manuscript, dest, settings, read_images=False)
+    except VeridicalError:
+        return await _fail(
+            session,
+            entry,
+            manuscript,
+            manuscript.ingest_failure_detail or messages.LIBRARY_FILE_UNREADABLE,
+            settings,
+        )
+    except Exception:
+        logger.exception("Library submission %s failed during extraction", manuscript.id)
+        return await _fail(session, entry, manuscript, messages.LIBRARY_FILE_UNREADABLE, settings)
+
+    _fill_from_title_page(entry, result, settings)
+    # Committed now: only the detail columns change (never `status`), so this
+    # cannot undo a concurrent removal, and the guarded transitions below can
+    # re-read the entry without losing the title-page proposals.
+    await session.commit()
+    document, passages = await _embed(result, settings)
+    if document.whole_document is None:
+        return await _fail(session, entry, manuscript, messages.LIBRARY_NO_READABLE_TEXT, settings)
+
+    duplicate = await _own_possible_duplicate(
+        session, instructor_id, manuscript.id, document.whole_document, settings
+    )
+    if duplicate is not None:
+        duplicate_entry, duplicate_manuscript, similarity = duplicate
+        async with advisory_lock(session, manuscript.id):
+            if not await _still(session, entry, manuscript, LibraryEntryStatus.processing):
+                await _discard_late_work(session, entry, manuscript, settings)
+                return _removed_while_reading()
+            entry.status = LibraryEntryStatus.needs_decision
+            entry.possible_duplicate_of_id = duplicate_entry.id
+            await write_audit_event(
+                session,
+                event_type="library_entry_needs_decision",
+                check_run_id=None,
+                manuscript_id=manuscript.id,
+                payload={
+                    "possible_duplicate_of_manuscript_id": duplicate_manuscript.id,
+                    "similarity": round(similarity, 4),
+                    "threshold": settings.reuse_exact_duplicate_threshold,
+                },
+            )
+            await session.commit()
+        return LibrarySubmissionOut(
+            outcome=LibrarySubmissionOutcome.possible_duplicate,
+            item=await get_library_item(session, instructor_id, manuscript.id),
+            duplicate_of=_duplicate_ref(duplicate_entry, duplicate_manuscript),
+            message=messages.LIBRARY_POSSIBLE_DUPLICATE,
+        )
+
+    if not await _activate(
+        session,
+        entry,
+        manuscript,
+        document,
+        passages,
+        settings,
+        expected=LibraryEntryStatus.processing,
+        decision=None,
+    ):
+        return _removed_while_reading()
+    return LibrarySubmissionOut(
+        outcome=LibrarySubmissionOutcome.added,
+        item=await get_library_item(session, instructor_id, manuscript.id),
+        duplicate_of=None,
+        message=messages.LIBRARY_ADDED,
+    )
+
+
+async def _remove(
+    session: AsyncSession,
+    entry: LibraryEntry,
+    manuscript: Manuscript,
+    settings: Settings,
+    *,
+    reason: LibraryRemovalReason,
+) -> LibraryEntryStateOut:
+    """Leaving the Library deletes the comparison data. A Library-only
+    submission has no other purpose, so its stored file goes too. A legacy
+    entry is a checked manuscript whose report still needs its file, so
+    only the comparison data leaves."""
+    async with advisory_lock(session, manuscript.id):
+        await session.refresh(entry)
+        await session.refresh(manuscript)
+        if entry.status == LibraryEntryStatus.removed:
+            raise NotFoundError(f"No Library record with id {manuscript.id}.")
+        # A live upload is still being read on another request; removing it
+        # now would race that request. A stalled one is safe to remove.
+        if entry.status == LibraryEntryStatus.processing and not _is_stalled(entry):
+            raise ConflictError(messages.LIBRARY_STILL_READING)
+        await delete_archive_rows(session, manuscript.id)
+        now = datetime.now(UTC)
+        file_deleted = False
+        if entry.source == LibraryEntrySource.library_submission:
+            # Unconditional and idempotent: a file re-created after an
+            # earlier purge must not outlive this removal.
+            await asyncio.get_running_loop().run_in_executor(
+                None, delete_stored_files, manuscript, settings
+            )
+            if manuscript.purged_at is None:
+                manuscript.purged_at = now
+            file_deleted = True
+        entry.status = LibraryEntryStatus.removed
+        entry.removed_at = now
+        entry.removal_reason = reason
+        await write_audit_event(
+            session,
+            event_type="library_entry_removed",
+            check_run_id=None,
+            manuscript_id=manuscript.id,
+            payload={
+                "source": entry.source.value,
+                "reason": reason.value,
+                "file_deleted": file_deleted,
+            },
+        )
+        await session.commit()
+    return LibraryEntryStateOut(
+        manuscript_id=manuscript.id,
+        status=entry.status,
+        added_at=entry.added_at,
+        removed_at=entry.removed_at,
+        file_deleted=file_deleted,
+    )
+
+
+async def remove_library_entry(
+    session: AsyncSession, instructor_id: int, manuscript_id: int, settings: Settings
+) -> LibraryEntryStateOut:
+    entry, manuscript = await _owned_entry(session, instructor_id, manuscript_id)
+    return await _remove(
+        session, entry, manuscript, settings, reason=LibraryRemovalReason.instructor
+    )
+
+
+async def decide_library_entry(
+    session: AsyncSession,
+    instructor_id: int,
+    manuscript_id: int,
+    action: str,
+    settings: Settings,
+) -> LibraryEntryStateOut:
+    """Ground rule 1 for duplicates: only the instructor resolves a
+    `needs_decision` entry. "add" re-embeds from the stored extraction (the
+    vectors were not kept while the entry waited); "skip" removes it like
+    any other Library-only submission."""
+    entry, manuscript = await _owned_entry(session, instructor_id, manuscript_id)
+    if entry.status != LibraryEntryStatus.needs_decision:
+        raise ConflictError(messages.LIBRARY_NOT_AWAITING_DECISION)
+    if action == "skip":
+        return await _remove(
+            session, entry, manuscript, settings, reason=LibraryRemovalReason.duplicate_skipped
+        )
+    try:
+        result = await load_raw_store_async(settings, manuscript.id)
+    except FileNotFoundError as exc:
+        raise ConflictError(messages.LIBRARY_SOURCE_MISSING) from exc
+    document, passages = await _embed(result, settings)
+    if document.whole_document is None:
+        raise ConflictError(messages.LIBRARY_SOURCE_MISSING)
+    if not await _activate(
+        session,
+        entry,
+        manuscript,
+        document,
+        passages,
+        settings,
+        expected=LibraryEntryStatus.needs_decision,
+        decision="add_anyway",
+    ):
+        raise ConflictError(messages.LIBRARY_NOT_AWAITING_DECISION)
+    return LibraryEntryStateOut(
+        manuscript_id=manuscript.id,
+        status=entry.status,
+        added_at=entry.added_at,
+        removed_at=None,
+    )
+
+
+async def update_library_entry(
+    session: AsyncSession,
+    instructor_id: int,
+    manuscript_id: int,
+    update: LibraryEntryUpdate,
+    settings: Settings,
+) -> LibraryItemOut:
+    entry, _ = await _owned_entry(session, instructor_id, manuscript_id)
+    changed = sorted(update.model_fields_set)
+    for field in changed:
+        value = getattr(update, field)
+        if field == "authors":
+            entry.authors = _clean_authors(value, settings)
+        elif field == "program":
+            entry.program_id = await _program_id(session, value)
+        else:
+            setattr(entry, field, _clean_text(value))
+    # An edited field is no longer a title-page proposal.
+    entry.proposed_fields = [f for f in (entry.proposed_fields or []) if f not in changed]
+    if changed:
+        await write_audit_event(
+            session,
+            event_type="library_entry_edited",
+            check_run_id=None,
+            manuscript_id=manuscript_id,
+            payload={"fields": changed},
+        )
+    await session.commit()
+    return await get_library_item(session, instructor_id, manuscript_id)
+
+
+async def _resolve_owned_library_manuscript(
+    session: AsyncSession, instructor_id: int, manuscript_id: int
+) -> Manuscript:
+    _, manuscript = await _owned_entry(session, instructor_id, manuscript_id)
+    return manuscript
 
 
 async def get_library_document(
     session: AsyncSession, instructor_id: int, manuscript_id: int, settings: Settings
 ) -> ManuscriptViewerOut:
-    manuscript = await _resolve_owned_manuscript(session, instructor_id, manuscript_id)
+    manuscript = await _resolve_owned_library_manuscript(session, instructor_id, manuscript_id)
     return await manuscript_viewer_for(manuscript, [], settings)
 
 
 async def get_library_file_path(
     session: AsyncSession, instructor_id: int, manuscript_id: int, settings: Settings
 ) -> Path:
-    manuscript = await _resolve_owned_manuscript(session, instructor_id, manuscript_id)
+    manuscript = await _resolve_owned_library_manuscript(session, instructor_id, manuscript_id)
     return manuscript_file_path_for(manuscript, settings)
 
 
 async def get_library_paragraphs(
     session: AsyncSession, instructor_id: int, manuscript_id: int, settings: Settings
 ) -> DocumentParagraphsOut:
-    manuscript = await _resolve_owned_manuscript(session, instructor_id, manuscript_id)
+    manuscript = await _resolve_owned_library_manuscript(session, instructor_id, manuscript_id)
     return manuscript_paragraphs_for(manuscript, settings)
 
 
 async def get_library_excerpt(
-    session: AsyncSession, manuscript_id: int, settings: Settings
+    session: AsyncSession, instructor_id: int, manuscript_id: int, settings: Settings
 ) -> LibraryExcerptOut:
-    """No ownership check at all -- deliberately available for ANY
-    manuscript in the corpus, including the requester's own, because it is
-    bounded by construction and never touches a stored file. This is the
-    two-up source for the "not mine" side (Q2's ruling); the frontend
-    chooses between this and the full document based on `is_own`.
+    """The bounded, cross-tenant-safe view of a Library entry: one
+    representative passage per chapter, up to `library_excerpt_max_chapters`,
+    re-served from data persisted at embed time. Never opens a stored file.
 
-    `ui-designer` finding (V-066 spec pass, 2026-08-23), verified by reading
-    `app.archive.service.purge_manuscript` in full: purge deletes
-    `ManuscriptChapterArchive`/`ManuscriptArchive` and the stored files, but
-    NEVER `ManuscriptPassageArchive` -- passage-level bounded text survives
-    a purge today. That retention gap is real and is filed as its own bug
-    (`BUG-123`), not fixed here (fixing what a purge deletes is a
-    `purge_manuscript` change, out of this ticket's blast radius).
-
-    `backend-critic` (V-066 review, 2026-08-23) correctly notes the explicit
-    `purged_at` check below is not the ONLY thing protecting this endpoint
-    today: since `shown` is drawn from `ManuscriptChapterArchive`, which
-    purge already deletes, a purged manuscript would return zero chapters
-    even without this check. The check is kept anyway, as real
-    defense-in-depth against a future refactor that decouples excerpt
-    display from chapter-archive presence (e.g. reading straight from
-    `ManuscriptPassageArchive`, which does NOT get cleaned up by purge) --
-    but it is not, today, independently load-bearing the way "the belt"
-    implied. Both guards, not one, are what currently keeps this endpoint
-    honest."""
-    manuscript = await _resolve_manuscript(session, manuscript_id)
+    V-077: authorized by Library visibility, not merely by the id existing.
+    A checked manuscript that is not in the Library, or a removed entry,
+    returns the same 404 as an unknown id, so guessing ids confirms nothing."""
+    row = (
+        await session.execute(
+            select(Manuscript)
+            .join(LibraryEntry, LibraryEntry.manuscript_id == Manuscript.id)
+            .where(Manuscript.id == manuscript_id, _visible_to(instructor_id))
+        )
+    ).first()
+    if row is None:
+        raise NotFoundError(f"No Library record with id {manuscript_id}.")
+    manuscript = row[0]
     if manuscript.purged_at is not None:
         return LibraryExcerptOut(
             manuscript_id=manuscript_id,
@@ -478,14 +1038,10 @@ async def get_library_excerpt(
     total_chapters = len(chapter_rows)
     shown = chapter_rows[: settings.library_excerpt_max_chapters]
 
-    # One representative passage per shown chapter -- the FIRST body
-    # (non-reference-list, non-block-quote) passage in chapter order, same
-    # default-exclusion policy F7.4's own matching uses (ticket AC3, "on by
-    # default"). A chapter with no qualifying passage (very short, or
-    # entirely quotes/references) shows no excerpt rather than a fabricated
-    # one -- an honest gap, not an error. Split the same way
-    # `PassagePairPanel` already renders a matched passage
-    # (`split_context`), so this reuses the identical visual mechanism.
+    # One representative passage per shown chapter: the FIRST body passage
+    # (not reference list, not block quote) in chapter order, the same
+    # default-exclusion policy F7.4 matching uses. A chapter with no
+    # qualifying passage shows no excerpt rather than a fabricated one.
     excerpts: dict[int, tuple[str | None, str | None, str | None]] = {}
     if shown:
         chapter_indices = [c.chapter_index for c in shown]

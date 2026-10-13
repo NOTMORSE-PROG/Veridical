@@ -18,11 +18,12 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.config import get_settings
 from app.models.base import Base, PkCreatedMixin
-from app.models.enums import IngestFailureReason, IngestStatus
+from app.models.enums import IngestFailureReason, IngestStatus, ManuscriptOrigin
 
 if TYPE_CHECKING:
     from app.models.citation import Citation
     from app.models.instructor import Instructor
+    from app.models.library import LibraryEntry
 
 
 class Manuscript(Base, PkCreatedMixin):
@@ -89,6 +90,14 @@ class Manuscript(Base, PkCreatedMixin):
     # NULL only for rows ingested before this column existed -- never
     # backfilled from a file that may no longer be on disk (BUG-138).
     content_hash: Mapped[str | None] = mapped_column(String(64), index=True)
+    # V-077 (D-028): a dashboard check upload vs a Library submission. Every
+    # Dashboard/Review Desk/check path filters on `check_upload`; Library
+    # membership itself lives on `library_entry`, never inferred from this.
+    origin: Mapped[ManuscriptOrigin] = mapped_column(
+        Enum(ManuscriptOrigin, native_enum=False, length=32),
+        server_default=ManuscriptOrigin.check_upload,
+        index=True,
+    )
 
     instructor: Mapped["Instructor"] = relationship(back_populates="manuscripts")
     archive: Mapped["ManuscriptArchive | None"] = relationship(back_populates="manuscript")
@@ -99,6 +108,7 @@ class Manuscript(Base, PkCreatedMixin):
         back_populates="manuscript", cascade="all, delete-orphan"
     )
     citations: Mapped[list["Citation"]] = relationship(back_populates="manuscript")
+    library_entry: Mapped["LibraryEntry | None"] = relationship(back_populates="manuscript")
 
 
 class ManuscriptArchive(Base, PkCreatedMixin):

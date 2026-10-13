@@ -1,62 +1,26 @@
+// V-077 (D-028), screen 4z: the Library as a plain collection of
+// manuscripts and the only originality corpus. No readiness band, score,
+// flag, report link, or similarity judgment appears anywhere here.
 import { useEffect, useId, useRef, useState } from "react";
-import { useNavigate, useSearchParams } from "react-router";
+import { Link, useLocation, useNavigate, useSearchParams } from "react-router";
 import { ApiError } from "../api/client";
 import type { LibraryItemOut } from "../api/types";
 import { LIBRARY_SEARCH_DEBOUNCE_MS, UNSET_PROGRAM_FILTER } from "../config/ui";
 import { usePrograms } from "../dashboard/useDashboard";
-import { manuscriptIdentity } from "../domain/manuscriptLabel";
 import { useRouteFocus } from "../routing/useRouteFocus";
 import { ActionLink } from "../ui/ActionLink";
+import { Alert } from "../ui/Alert";
 import { Button } from "../ui/Button";
-import { Dialog } from "../ui/Dialog";
+import { LibraryEntryStatus } from "./LibraryEntryStatus";
+import { formatLibraryDate, libraryRecordName } from "./libraryFormat";
 import {
   useLibrary,
   useLibraryDocument,
   useLibraryExcerpt,
   useLibraryItem,
   useLibraryParagraphs,
-  usePurgeManuscript,
+  useLibraryPending,
 } from "./useLibrary";
-
-interface PurgeTarget {
-  manuscriptId: number;
-  title: string;
-  // BUG-148: both set only when this manuscript is part of a byte-
-  // identical duplicate group -- lets the purge dialog disclose that
-  // removing THIS copy leaves others untouched, rather than reading as
-  // "the document is gone" when only one of several stored copies was
-  // removed. `groupTotal` is the group's fixed historical upload count
-  // (safe to state as a plain fact, never changes); `otherStoredCount`
-  // must be recomputed live at click time (see `otherStoredCount` in
-  // `LibraryCard`) -- it goes stale the moment another copy is purged.
-  groupTotal?: number;
-  otherStoredCount?: number;
-}
-
-function identity(item: LibraryItemOut) {
-  return item.title
-    ? { primary: item.title, secondary: item.group_label }
-    : manuscriptIdentity(item.group_label, item.original_filename);
-}
-
-function formatDate(value: string): string {
-  return new Date(value).toLocaleDateString(undefined, {
-    year: "numeric",
-    month: "short",
-    day: "numeric",
-  });
-}
-
-function formatDateTime(value: string): string {
-  return new Date(value).toLocaleString(undefined, {
-    year: "numeric",
-    month: "short",
-    day: "numeric",
-    hour: "numeric",
-    minute: "2-digit",
-    second: "2-digit",
-  });
-}
 
 type ComparisonAvailabilityStatus = "checking" | "available" | "unavailable" | "error";
 
@@ -68,33 +32,27 @@ interface ComparisonAvailability {
 }
 
 function selectionStatus(selections: ComparisonAvailability[]): string {
-  if (selections.length === 0) return "No manuscripts selected. Select two manuscripts.";
+  if (selections.length === 0) return "No records selected. Select two records.";
   const hasUnavailable = selections.some((selection) => selection.status === "unavailable");
   const hasError = selections.some((selection) => selection.status === "error");
   const isChecking = selections.some((selection) => selection.status === "checking");
   if (selections.length === 1) {
-    if (hasUnavailable) return "The selected manuscript has no viewable comparison content. Clear it and choose another.";
-    if (hasError) return "The selected manuscript's availability could not be checked. Try again before choosing another.";
-    if (isChecking) return "One manuscript selected. Checking comparison content.";
-    return "One manuscript selected and available. Select one more manuscript.";
+    if (hasUnavailable) return "The selected record has no viewable content. Clear it and choose another.";
+    if (hasError) return "The selected record's availability could not be checked. Try again before choosing another.";
+    if (isChecking) return "One record selected. Checking its content.";
+    return "One record selected and available. Select one more record.";
   }
-  if (hasUnavailable) return "At least one selected manuscript has no viewable comparison content. Clear it and choose another.";
-  if (hasError) return "One or more selected manuscripts could not be checked. Try again before comparing.";
-  if (isChecking) return "Two manuscripts selected. Checking comparison content.";
-  return "Two manuscripts selected and available. You can compare them now.";
+  if (hasUnavailable) return "At least one selected record has no viewable content. Clear it and choose another.";
+  if (hasError) return "One or more selected records could not be checked. Try again before comparing.";
+  if (isChecking) return "Two records selected. Checking their content.";
+  return "Two records selected and available. You can compare them now.";
 }
 
 function availabilityLabel(status: ComparisonAvailabilityStatus): string {
-  if (status === "checking") return "Checking comparison content";
+  if (status === "checking") return "Checking content";
   if (status === "available") return "Available to compare";
-  if (status === "unavailable") return "No viewable comparison content";
+  if (status === "unavailable") return "No viewable content";
   return "Could not check availability";
-}
-
-function selectedRecordLabel(item: LibraryItemOut | undefined, manuscriptId: number | undefined): string {
-  if (!item) return manuscriptId ? `Manuscript record ${manuscriptId}` : "Manuscript record";
-  const label = identity(item);
-  return [label.primary, label.secondary, formatDate(item.created_at)].filter(Boolean).join(" · ");
 }
 
 function useComparisonAvailability(
@@ -105,15 +63,9 @@ function useComparisonAvailability(
   // compareFrom deep link may require one bounded metadata request.
   const itemQuery = useLibraryItem(manuscriptId, Boolean(manuscriptId && !listedItem));
   const item = listedItem ?? itemQuery.data;
-  const canReadContent = Boolean(item && !item.purged_at);
-  const documentQuery = useLibraryDocument(
-    manuscriptId,
-    canReadContent && item?.is_own === true,
-  );
-  const excerptQuery = useLibraryExcerpt(
-    manuscriptId,
-    canReadContent && item?.is_own === false,
-  );
+  const canReadContent = item?.status === "active";
+  const documentQuery = useLibraryDocument(manuscriptId, canReadContent && item?.is_own === true);
+  const excerptQuery = useLibraryExcerpt(manuscriptId, canReadContent && item?.is_own === false);
   const paragraphsQuery = useLibraryParagraphs(
     manuscriptId,
     canReadContent
@@ -126,7 +78,7 @@ function useComparisonAvailability(
   if (itemQuery.isError && !listedItem) {
     status = "error";
   } else if (item) {
-    if (item.purged_at) {
+    if (item.status !== "active") {
       status = "unavailable";
     } else if (item.is_own) {
       if (documentQuery.isError) status = "error";
@@ -149,19 +101,24 @@ function useComparisonAvailability(
           status = "unavailable";
         }
       }
-    } else {
-      if (excerptQuery.isError) status = "error";
-      else if (excerptQuery.data) {
-        status = excerptQuery.data.chapters.some((chapter) => Boolean(chapter.excerpt?.trim()))
-          ? "available"
-          : "unavailable";
-      }
+    } else if (excerptQuery.isError) {
+      status = "error";
+    } else if (excerptQuery.data) {
+      status = excerptQuery.data.chapters.some((chapter) => Boolean(chapter.excerpt?.trim()))
+        ? "available"
+        : "unavailable";
     }
   }
 
+  const label = item
+    ? [libraryRecordName(item), formatLibraryDate(item.added_at)].join(" · ")
+    : manuscriptId
+      ? `Library record #${manuscriptId}`
+      : "Library record";
+
   return {
     manuscriptId,
-    label: selectedRecordLabel(item, manuscriptId),
+    label,
     status,
     retry: () => {
       if (!item) void itemQuery.refetch();
@@ -176,42 +133,23 @@ function useComparisonAvailability(
   };
 }
 
-// BUG-187: repeated checkboxes need a unique, record-specific accessible name;
-// the visible metadata is the privacy-safe disambiguator shared by sighted and
-// screen-reader users.
+// BUG-187: repeated checkboxes need a unique, record-specific accessible
+// name; the visible, privacy-safe metadata disambiguates.
 function accessibleComparisonChoiceName(
   item: LibraryItemOut,
   items: LibraryItemOut[],
   selected: boolean,
 ): string {
-  const label = identity(item);
-  const matches = items.filter((candidate) => identity(candidate).primary === label.primary);
+  const name = libraryRecordName(item);
+  const sameName = items.filter((candidate) => libraryRecordName(candidate) === name);
   let disambiguator = "";
-  if (matches.length > 1) {
-    const uploaded = formatDate(item.created_at);
-    const sameDate = matches.filter((candidate) => formatDate(candidate.created_at) === uploaded);
-    if (sameDate.length === 1) {
-      disambiguator = `, uploaded ${uploaded}`;
-    } else {
-      const group = label.secondary ?? item.group_label;
-      const sameGroup = sameDate.filter(
-        (candidate) => (identity(candidate).secondary ?? candidate.group_label) === group,
-      );
-      if (sameGroup.length === 1) {
-        disambiguator = `, ${group}, uploaded ${uploaded}`;
-      } else {
-        const authors = item.authors.length ? item.authors.join(", ") : "authors not listed";
-        const sameAuthors = sameGroup.filter((candidate) =>
-          (candidate.authors.length ? candidate.authors.join(", ") : "authors not listed") === authors
-        );
-        disambiguator = sameAuthors.length === 1
-          ? `, ${group}, ${authors}, uploaded ${uploaded}`
-          : `, processed ${formatDateTime(item.created_at)}`;
-      }
-    }
+  if (sameName.length > 1) {
+    const added = formatLibraryDate(item.added_at);
+    const sameDate = sameName.filter((candidate) => formatLibraryDate(candidate.added_at) === added);
+    disambiguator = sameDate.length === 1 ? `, added ${added}` : `, record #${item.manuscript_id}`;
   }
   const action = selected ? "Remove" : "Select";
-  return `${action} “${label.primary}”${disambiguator} ${selected ? "from" : "for"} comparison`;
+  return `${action} “${name}”${disambiguator} ${selected ? "from" : "for"} comparison`;
 }
 
 function ProgramFilter({
@@ -241,72 +179,73 @@ function ProgramFilter({
   );
 }
 
+function pendingDetail(item: LibraryItemOut): string {
+  if (item.status === "processing") return "Still reading this file.";
+  if (item.status === "needs_decision") {
+    const other = item.possible_duplicate_of?.label;
+    return other
+      ? `Its text is very similar to your record “${other}”.`
+      : "Its text is very similar to one of your records.";
+  }
+  const detail = item.failure_detail ?? "VERIDICAL could not read this file.";
+  const firstSentence = detail.split(/(?<=\.)\s/)[0];
+  return firstSentence;
+}
+
+function PendingUploads({ items }: { items: LibraryItemOut[] }) {
+  return (
+    <section className="signal-library-pending" aria-labelledby="signal-library-pending-heading">
+      <h2 id="signal-library-pending-heading">Your uploads not in the Library</h2>
+      <p>
+        Still being read, waiting for your decision, or could not be read. None of these are used in originality
+        checks.
+      </p>
+      <ul>
+        {items.map((item) => (
+          <li key={item.manuscript_id} className="signal-library-pending__row">
+            <div className="signal-library-pending__identity">
+              <strong>{item.original_filename ?? libraryRecordName(item)}</strong>
+              <LibraryEntryStatus status={item.status} />
+              <span>{pendingDetail(item)}</span>
+            </div>
+            <ActionLink
+              to={`/library/${item.manuscript_id}`}
+              variant={item.status === "needs_decision" ? "secondary" : "quiet"}
+              aria-label={`${item.status === "needs_decision" ? "Review possible duplicate" : "Open record"} for ${item.original_filename ?? libraryRecordName(item)}`}
+            >
+              {item.status === "needs_decision" ? "Review possible duplicate" : "Open record"}
+            </ActionLink>
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
 function LibraryCard({
   item,
   compareMode,
   selected,
   selectionFull,
   accessibleSelectionName,
-  showProcessedTime,
   onToggle,
-  onPurge,
 }: {
   item: LibraryItemOut;
   compareMode: boolean;
   selected: boolean;
   selectionFull: boolean;
   accessibleSelectionName: string;
-  showProcessedTime: boolean;
   onToggle: () => void;
-  onPurge: (target: PurgeTarget) => void;
 }) {
-  const label = identity(item);
   const disabled = !selected && selectionFull;
-  const duplicates = item.duplicate_uploads ?? [];
-  const groupTotal = duplicates.length + 1;
-  // BUG-148: "stored" reads for the GROUP, not just this one representative
-  // row -- an instructor who purged the newest copy must not see "Content
-  // removed" while an older copy one click away is still fully retrievable.
-  const groupHasStoredContent = !item.purged_at || duplicates.some((dup) => !dup.purged_at);
-  const [duplicatesOpen, setDuplicatesOpen] = useState(false);
-  const duplicatesId = `signal-library-duplicates-${item.manuscript_id}`;
-
-  // `ux-critic` finding (BUG-148 review, live-reproduced across two
-  // sequential purges): `groupTotal` is a fixed historical count (every
-  // upload ever made, purged or not) -- reusing it for "leaves N other
-  // stored copies untouched" goes FALSE the moment any other copy in the
-  // group has already been removed, told to the instructor at the exact
-  // moment they're confirming an action the dialog itself calls
-  // irreversible. Recomputed fresh from live `purged_at` state at click
-  // time, same discipline `groupHasStoredContent` above already applies.
-  function otherStoredCount(excludingManuscriptId: number): number {
-    const members = [
-      { manuscriptId: item.manuscript_id, purgedAt: item.purged_at },
-      ...duplicates.map((dup) => ({ manuscriptId: dup.manuscript_id, purgedAt: dup.purged_at })),
-    ];
-    return members.filter(
-      (member) => member.manuscriptId !== excludingManuscriptId && !member.purgedAt,
-    ).length;
-  }
-
   return (
     <li className="signal-library-card">
       <div className="signal-library-card__rail" aria-hidden="true" />
       <div className="signal-library-card__body">
         <div className="signal-library-card__topline">
-          <div className="signal-library-badges">
-            <span className="signal-library-badge" data-tone={item.is_own ? "own" : "shared"}>
-              {item.is_own ? "Your manuscript" : "Shared excerpt"}
-            </span>
-            <span className="signal-library-badge" data-tone={groupHasStoredContent ? "stored" : "removed"}>
-              {groupHasStoredContent ? "Content stored" : "Content removed"}
-            </span>
-            {duplicates.length > 0 && (
-              <span className="signal-library-badge" data-tone="count">
-                Uploaded {groupTotal} times
-              </span>
-            )}
-          </div>
+          <span className="signal-library-ownership">
+            {item.is_own ? "Your record" : "Another instructor's record"}
+          </span>
           {compareMode && (
             <label className="signal-library-select" data-disabled={disabled || undefined}>
               <input
@@ -325,135 +264,71 @@ function LibraryCard({
         </div>
 
         <div className="signal-library-card__identity">
-          <h2>{label.primary}</h2>
-          {label.secondary && <p>{label.secondary}</p>}
+          <h2>
+            <Link className="signal-library-card__link" to={`/library/${item.manuscript_id}`}>
+              {libraryRecordName(item)}
+            </Link>
+          </h2>
+          {item.is_own && item.team_name && <p>{item.team_name}</p>}
         </div>
 
         <dl className="signal-library-metadata">
+          {item.is_own && (
+            <div>
+              <dt>Authors</dt>
+              <dd>{item.authors.length ? item.authors.join(", ") : "Not listed"}</dd>
+            </div>
+          )}
           <div>
             <dt>Program</dt>
             <dd>{item.program ?? "Not set"}</dd>
           </div>
           <div>
-            <dt>Authors</dt>
-            <dd>
-              {item.authors.length
-                ? item.authors.join(", ")
-                : item.is_own
-                  ? "Not listed"
-                  : "Withheld for another instructor's manuscript"}
-            </dd>
+            <dt>School year</dt>
+            <dd>{item.school_year ?? "Not set"}</dd>
           </div>
           <div>
-            <dt>Processed</dt>
-            <dd>{showProcessedTime ? formatDateTime(item.created_at) : formatDate(item.created_at)}</dd>
+            <dt>Added</dt>
+            <dd>{formatLibraryDate(item.added_at)}</dd>
           </div>
+          {item.is_own && (
+            <div>
+              <dt>Record</dt>
+              <dd>#{item.manuscript_id}</dd>
+            </div>
+          )}
+          {item.is_own && item.original_filename && (
+            <div>
+              <dt>File</dt>
+              <dd className="signal-library-filename">{item.original_filename}</dd>
+            </div>
+          )}
         </dl>
-
-        {duplicates.length > 0 && (
-          <>
-            <Button
-              type="button"
-              variant="quiet"
-              aria-expanded={duplicatesOpen}
-              aria-controls={duplicatesId}
-              onClick={() => setDuplicatesOpen((open) => !open)}
-            >
-              {duplicatesOpen ? "Hide" : "Show"} {duplicates.length} more upload
-              {duplicates.length === 1 ? "" : "s"}
-            </Button>
-            {duplicatesOpen && (
-              <ol id={duplicatesId} className="signal-library-duplicates">
-                {duplicates.map((upload) => (
-                  <li key={upload.manuscript_id} className="signal-library-duplicate">
-                    <div className="signal-library-duplicate__meta">
-                      <strong>{formatDateTime(upload.created_at)}</strong>
-                      {upload.original_filename && <span>{upload.original_filename}</span>}
-                      <span
-                        className="signal-library-badge"
-                        data-tone={upload.purged_at ? "removed" : "stored"}
-                      >
-                        {upload.purged_at ? "Content removed" : "Content stored"}
-                      </span>
-                    </div>
-                    <div className="signal-library-duplicate__actions">
-                      {upload.latest_done_check_run_id ? (
-                        <ActionLink to={`/report/${upload.latest_done_check_run_id}`} variant="secondary">
-                          Open report
-                        </ActionLink>
-                      ) : (
-                        <ActionLink to={`/library/${upload.manuscript_id}`} variant="secondary">
-                          Open record
-                        </ActionLink>
-                      )}
-                      {!upload.purged_at && (
-                        // BUG-108 finding 2: was `variant="quiet"` (link-blue,
-                        // lowest emphasis) for the same irreversible purge
-                        // mutation that renders `variant="danger"` (solid red)
-                        // on the detail page -- one destructive action, two
-                        // opposite visual weights depending on which sibling
-                        // screen you're on.
-                        <Button
-                          type="button"
-                          variant="danger"
-                          onClick={() =>
-                            onPurge({
-                              manuscriptId: upload.manuscript_id,
-                              title: label.primary,
-                              groupTotal,
-                              otherStoredCount: otherStoredCount(upload.manuscript_id),
-                            })
-                          }
-                        >
-                          Remove stored content
-                        </Button>
-                      )}
-                    </div>
-                  </li>
-                ))}
-              </ol>
-            )}
-          </>
+        {!item.is_own && (
+          <p className="signal-library-withheld">Title, team, authors, and file name are withheld.</p>
         )}
-
-        <div className="signal-library-card__actions">
-          {item.latest_done_check_run_id ? (
-            <ActionLink to={`/report/${item.latest_done_check_run_id}`} variant="secondary">
-              Open report
-            </ActionLink>
-          ) : (
-            <ActionLink to={`/library/${item.manuscript_id}`} variant="secondary">
-              Open record
-            </ActionLink>
-          )}
-          {item.is_own && !item.purged_at && (
-            // BUG-108 finding 2: same fix as the duplicate-row sibling above.
-            <Button
-              type="button"
-              variant="danger"
-              onClick={() =>
-                onPurge({
-                  manuscriptId: item.manuscript_id,
-                  title: label.primary,
-                  groupTotal: duplicates.length > 0 ? groupTotal : undefined,
-                  otherStoredCount:
-                    duplicates.length > 0 ? otherStoredCount(item.manuscript_id) : undefined,
-                })
-              }
-            >
-              Remove stored content
-            </Button>
-          )}
-        </div>
       </div>
     </li>
   );
+}
+
+interface LibraryLocationState {
+  removedTitle?: string;
+  skippedTitle?: string;
+  deletedTitle?: string;
 }
 
 export function SignalLibraryPage() {
   const headingRef = useRef<HTMLHeadingElement>(null);
   useRouteFocus("Manuscript Library - VERIDICAL", headingRef);
   const navigate = useNavigate();
+  const location = useLocation();
+  // Captured once on arrival: later URL updates (search, page) replace the
+  // history entry and would otherwise drop the notice (ux-critic P2-4).
+  const [arrivalNotice] = useState(() => location.state as LibraryLocationState | null);
+  const removedTitle = arrivalNotice?.removedTitle;
+  const skippedTitle = arrivalNotice?.skippedTitle;
+  const deletedTitle = arrivalNotice?.deletedTitle;
   const [searchParams, setSearchParams] = useSearchParams();
   const parsedPage = Number(searchParams.get("page") ?? "1");
   const page = Number.isInteger(parsedPage) && parsedPage > 0 ? parsedPage : 1;
@@ -464,9 +339,6 @@ export function SignalLibraryPage() {
   const initialSelection = Number.isInteger(compareFrom) && compareFrom > 0 ? [compareFrom] : [];
   const [compareMode, setCompareMode] = useState(initialSelection.length > 0);
   const [selected, setSelected] = useState<number[]>(initialSelection);
-  const [purgeTarget, setPurgeTarget] = useState<PurgeTarget | null>(null);
-  const [purgeError, setPurgeError] = useState<string | null>(null);
-  const purge = usePurgeManuscript();
 
   useEffect(() => {
     if (!searchParams.has("compareFrom")) return;
@@ -479,9 +351,10 @@ export function SignalLibraryPage() {
 
   useEffect(() => {
     const handle = window.setTimeout(() => {
+      const query = searchInput.trim();
+      if (query === urlSearch) return;
       setSearchParams((current) => {
         const next = new URLSearchParams(current);
-        const query = searchInput.trim();
         if (query) next.set("q", query);
         else next.delete("q");
         next.set("page", "1");
@@ -489,9 +362,11 @@ export function SignalLibraryPage() {
       }, { replace: true });
     }, LIBRARY_SEARCH_DEBOUNCE_MS);
     return () => window.clearTimeout(handle);
-  }, [searchInput, setSearchParams]);
+  }, [searchInput, urlSearch, setSearchParams]);
 
   const { data, isLoading, isError, refetch } = useLibrary(page, program, urlSearch);
+  const pending = useLibraryPending();
+  const pendingItems = pending.data?.items ?? [];
   const firstAvailability = useComparisonAvailability(
     selected[0],
     data?.items.find((item) => item.manuscript_id === selected[0]),
@@ -507,12 +382,13 @@ export function SignalLibraryPage() {
       : [firstAvailability, secondAvailability];
   const canCompare = selectionStates.length === 2
     && selectionStates.every((selection) => selection.status === "available");
-  const selectionHasUnavailable = selectionStates.some(
-    (selection) => selection.status === "unavailable",
-  );
+  const selectionHasUnavailable = selectionStates.some((selection) => selection.status === "unavailable");
   const selectionHasError = selectionStates.some((selection) => selection.status === "error");
   const totalPages = data ? Math.max(1, Math.ceil(data.total / data.page_size)) : 1;
-  const hasFilters = Boolean(program || urlSearch.trim());
+  const hasSearch = Boolean(urlSearch.trim());
+  const hasFilters = Boolean(program || hasSearch);
+  const total = data?.total ?? 0;
+  const libraryIsEmpty = Boolean(data && !hasFilters && total === 0);
 
   function changeProgram(nextProgram: string | undefined) {
     setSearchParams((current) => {
@@ -545,139 +421,190 @@ export function SignalLibraryPage() {
     setSelected([]);
   }
 
-  async function confirmPurge() {
-    if (!purgeTarget) return;
-    setPurgeError(null);
-    try {
-      await purge.mutateAsync(purgeTarget.manuscriptId);
-      setPurgeTarget(null);
-    } catch (error) {
-      setPurgeError(error instanceof ApiError ? error.message : "Stored content could not be removed. Try again.");
-    }
+  function clearFilters() {
+    setSearchInput("");
+    setSearchParams({});
   }
+
+  let emptyHeading = "No records match your search";
+  if (program && hasSearch) emptyHeading = "No records match your search and program";
+  else if (program) emptyHeading = "No records match this program";
 
   return (
     <div className="signal-route signal-page-flow signal-library" data-compare={compareMode || undefined}>
       <header className="signal-route-header signal-library-header">
         <div>
-          <p className="signal-eyebrow">Shared comparison corpus</p>
+          <p className="signal-eyebrow">Originality comparison source</p>
           <h1 ref={headingRef} tabIndex={-1}>Manuscript Library</h1>
           <p className="signal-route-header__intro">
-            Browse the records VERIDICAL can use to surface possible reuse across instructor accounts.
+            VERIDICAL compares each checked manuscript against the manuscripts in this Library to look
+            for possible reuse. Manuscripts checked on the Review Desk are not added here automatically.
           </p>
         </div>
-        <Button
-          type="button"
-          variant={compareMode ? "quiet" : "brand"}
-          onClick={() => compareMode ? closeCompareMode() : setCompareMode(true)}
-        >
-          {compareMode ? "Exit comparison" : "Compare manuscripts"}
-        </Button>
+        <ActionLink to="/library/add" variant="brand">Add to Library</ActionLink>
       </header>
 
       <div className="signal-section-flow signal-library-workspace">
-      <aside className="signal-library-privacy">
-        <strong>Privacy boundary</strong>
-        <p>
-          Your account can open its retained source files when they are viewable. Another instructor's record shows only a bounded chapter excerpt, program, and processing date. Student names, the manuscript title, the team name, and the file name are withheld.
-          Removing stored content keeps prior reports, decisions, and audit history intact.
-        </p>
-      </aside>
-
-      <section className="signal-library-controls" aria-label="Library controls">
-        <label className="signal-library-filter signal-library-filter--search">
-          <span>Search</span>
-          <input
-            type="search"
-            value={searchInput}
-            onChange={(event) => setSearchInput(event.target.value)}
-            placeholder="Title, author, or group"
+        {removedTitle && (
+          <Alert tone="success" role="status" title={`“${removedTitle}” was removed from the Library.`} />
+        )}
+        {skippedTitle && (
+          <Alert
+            tone="info"
+            role="status"
+            title={`The uploaded copy “${skippedTitle}” was skipped and not kept. Your existing record is unchanged.`}
           />
-        </label>
-        <ProgramFilter value={program} onChange={changeProgram} />
-        <div className="signal-library-count" aria-live="polite">
-          <strong>{data?.total ?? 0}</strong>
-          <span>processed records</span>
-        </div>
-      </section>
+        )}
+        {deletedTitle && (
+          <Alert tone="info" role="status" title={`The upload “${deletedTitle}” was deleted.`} />
+        )}
 
-      {compareMode && (
-        <div className="signal-library-compare-intro">
-          <div>
-            <strong>Choose manuscripts to compare</strong>
-            <span>Select two manuscripts. Comparison is a reading aid and does not assign a new similarity score.</span>
-          </div>
-          <span role="status" aria-live="polite" aria-atomic="true">
-            {selectionStatus(selectionStates)}
-          </span>
-        </div>
-      )}
-
-      {compareMode && selected.length === 2 && (
-        <p id="signal-compare-limit" className="sr-only">
-          Two manuscripts are already selected. Clear one selection to choose this manuscript.
-        </p>
-      )}
-
-      <div className="signal-group-flow signal-library-results">
-      {isLoading && <div className="signal-library-state" role="status" aria-live="polite" aria-busy="true">Loading library records.</div>}
-      {isError && (
-        <div className="signal-library-state" role="alert">
-          <strong>The library could not be loaded.</strong>
-          <Button type="button" variant="secondary" onClick={() => refetch()}>Try again</Button>
-        </div>
-      )}
-
-      {data && data.items.length === 0 && (
-        <section className="signal-library-state">
-          <p className="signal-eyebrow">No records shown</p>
-          <h2>{hasFilters ? "No manuscripts match these filters" : "The library is empty"}</h2>
+        <aside className="signal-library-privacy">
+          <strong>Who can see Library records</strong>
           <p>
-            {hasFilters
-              ? "Clear the search and program filter to restore the full corpus."
-              : "A record appears after an instructor uploads and checks a manuscript."}
+            Other instructors can read a short excerpt of each Library record. They never see its title,
+            team name, authors, or file name, but the excerpt text itself may mention names.
           </p>
-          {hasFilters ? (
-            <Button type="button" variant="secondary" onClick={() => { setSearchInput(""); setSearchParams({}); }}>Clear filters</Button>
-          ) : (
-            <ActionLink to="/dashboard" variant="brand">Go to Review Desk</ActionLink>
+        </aside>
+
+        {pendingItems.length > 0 && <PendingUploads items={pendingItems} />}
+
+        {!libraryIsEmpty && (
+          <section className="signal-library-controls" aria-label="Library controls">
+            <label className="signal-library-filter signal-library-filter--search">
+              <span>Search your records</span>
+              <input
+                type="search"
+                value={searchInput}
+                onChange={(event) => setSearchInput(event.target.value)}
+                placeholder="Title, team, author, file name, or #record"
+                aria-describedby="signal-library-search-hint"
+              />
+              <small id="signal-library-search-hint" className="signal-field-hint">
+                Names and titles search your own records only. A record number such as #20 finds any record.
+              </small>
+            </label>
+            <ProgramFilter value={program} onChange={changeProgram} />
+            <div className="signal-library-count" aria-live="polite" hidden={!data}>
+              <strong>{total}</strong>
+              <span>
+                {hasFilters
+                  ? total === 1 ? "matching record" : "matching records"
+                  : total === 1 ? "record in the Library" : "records in the Library"}
+              </span>
+            </div>
+            {!hasFilters && total === 1 ? (
+              <p className="signal-field-hint signal-library-compare-hint">
+                Comparison needs at least two Library records.
+              </p>
+            ) : (
+              total >= 2 && (
+                <Button
+                  type="button"
+                  variant={compareMode ? "quiet" : "secondary"}
+                  onClick={() => compareMode ? closeCompareMode() : setCompareMode(true)}
+                >
+                  {compareMode ? "Exit comparison" : "Compare two records"}
+                </Button>
+              )
+            )}
+          </section>
+        )}
+
+        {compareMode && (
+          <div className="signal-library-compare-intro">
+            <div>
+              <strong>Choose two records to compare</strong>
+              <span>Comparison is a reading aid and does not assign a new similarity score.</span>
+            </div>
+            <span role="status" aria-live="polite" aria-atomic="true">
+              {selectionStatus(selectionStates)}
+            </span>
+          </div>
+        )}
+
+        {compareMode && selected.length === 2 && (
+          <p id="signal-compare-limit" className="sr-only">
+            Two records are already selected. Clear one selection to choose this record.
+          </p>
+        )}
+
+        <div className="signal-group-flow signal-library-results">
+          {isLoading && (
+            <div className="signal-library-state" role="status" aria-live="polite" aria-busy="true">
+              Loading library records.
+            </div>
           )}
-        </section>
-      )}
+          {isError && (
+            <div className="signal-library-state" role="alert">
+              <strong>The library could not be loaded.</strong>
+              <Button type="button" variant="secondary" onClick={() => refetch()}>Try again</Button>
+            </div>
+          )}
 
-      {data && data.items.length > 0 && (
-        <ul className="signal-library-grid">
-          {data.items.map((item) => (
-            <LibraryCard
-              key={item.manuscript_id}
-              item={item}
-              compareMode={compareMode}
-              selected={selected.includes(item.manuscript_id)}
-              selectionFull={selected.length === 2}
-              accessibleSelectionName={accessibleComparisonChoiceName(
-                item,
-                data.items,
-                selected.includes(item.manuscript_id),
+          {libraryIsEmpty && (
+            <section className="signal-library-state">
+              {pendingItems.length > 0 ? (
+                <>
+                  <h2>No manuscripts are in the Library yet</h2>
+                  <p>Your uploads above join it once each one is resolved.</p>
+                </>
+              ) : (
+                <>
+                  <h2>The Library has no manuscripts yet</h2>
+                  <p>
+                    Originality checks compare only against Library manuscripts, so right now they have
+                    nothing to compare against. Add finished manuscripts, such as defended capstones from
+                    past terms.
+                  </p>
+                  <ActionLink to="/library/add" variant="secondary">Add to Library</ActionLink>
+                </>
               )}
-              showProcessedTime={
-                data.items.filter((candidate) => identity(candidate).primary === identity(item).primary)
-                  .length > 1
-              }
-              onToggle={() => toggleSelection(item.manuscript_id)}
-              onPurge={setPurgeTarget}
-            />
-          ))}
-        </ul>
-      )}
+            </section>
+          )}
 
-      {totalPages > 1 && (
-        <nav className="signal-library-pagination" aria-label="Library pages">
-          <Button type="button" variant="secondary" disabled={page === 1} onClick={() => changePage(page - 1)}>Previous</Button>
-          <span>Page {page} of {totalPages}</span>
-          <Button type="button" variant="secondary" disabled={page === totalPages} onClick={() => changePage(page + 1)}>Next</Button>
-        </nav>
-      )}
-      </div>
+          {data && hasFilters && data.items.length === 0 && (
+            <section className="signal-library-state">
+              <h2>{emptyHeading}</h2>
+              {hasSearch && <p>Search covers your own records only.</p>}
+              <Button type="button" variant="secondary" onClick={clearFilters}>
+                Clear search and filter
+              </Button>
+            </section>
+          )}
+
+          {data && data.items.length > 0 && (
+            <ul className="signal-library-grid">
+              {data.items.map((item) => (
+                <LibraryCard
+                  key={item.manuscript_id}
+                  item={item}
+                  compareMode={compareMode}
+                  selected={selected.includes(item.manuscript_id)}
+                  selectionFull={selected.length === 2}
+                  accessibleSelectionName={accessibleComparisonChoiceName(
+                    item,
+                    data.items,
+                    selected.includes(item.manuscript_id),
+                  )}
+                  onToggle={() => toggleSelection(item.manuscript_id)}
+                />
+              ))}
+            </ul>
+          )}
+
+          {totalPages > 1 && (
+            <nav className="signal-library-pagination" aria-label="Library pages">
+              <Button type="button" variant="secondary" disabled={page === 1} onClick={() => changePage(page - 1)}>
+                Previous
+              </Button>
+              <span>Page {page} of {totalPages}</span>
+              <Button type="button" variant="secondary" disabled={page === totalPages} onClick={() => changePage(page + 1)}>
+                Next
+              </Button>
+            </nav>
+          )}
+        </div>
       </div>
 
       {compareMode && (
@@ -685,19 +612,19 @@ export function SignalLibraryPage() {
           <div className="signal-library-selection__summary">
             <strong>
               {selected.length === 0
-                ? "Select two manuscripts"
+                ? "Select two records"
                 : canCompare
                   ? "Ready to compare"
                   : selectionHasUnavailable
-                    ? "Choose another manuscript"
+                    ? "Choose another record"
                     : selectionHasError
                       ? "Check availability again"
-                      : "Checking selected content"}
+                      : "Checking the selected records can be shown"}
             </strong>
             <span>{selected.length} of 2 selected</span>
           </div>
           {selectionStates.length > 0 && (
-            <ul className="signal-library-selection__records" aria-label="Selected manuscripts">
+            <ul className="signal-library-selection__records" aria-label="Selected records">
               {selectionStates.map((selection) => (
                 <li key={selection.manuscriptId} data-status={selection.status}>
                   <strong>{selection.label}</strong>
@@ -717,53 +644,19 @@ export function SignalLibraryPage() {
             </ul>
           )}
           <div className="signal-library-selection__actions">
-            <Button type="button" variant="quiet" disabled={!selected.length} onClick={() => setSelected([])}>Clear</Button>
+            <Button type="button" variant="quiet" disabled={!selected.length} onClick={() => setSelected([])}>
+              Clear
+            </Button>
             <Button
               type="button"
               variant="brand"
               disabled={!canCompare}
               onClick={() => navigate(`/library/compare?a=${selected[0]}&b=${selected[1]}`)}
             >
-              Compare manuscripts
+              Compare records
             </Button>
           </div>
         </aside>
-      )}
-
-      {purgeTarget && (
-        <Dialog
-          title={`Remove ${purgeTarget.title}'s stored content?`}
-          onClose={purge.isPending ? undefined : () => { setPurgeTarget(null); setPurgeError(null); }}
-          actions={
-            <>
-              <Button type="button" variant="secondary" disabled={purge.isPending} onClick={() => setPurgeTarget(null)}>Cancel</Button>
-              <Button type="button" variant="danger" busy={purge.isPending} onClick={confirmPurge}>
-                {purge.isPending ? "Removing content" : "Remove stored content"}
-              </Button>
-            </>
-          }
-        >
-          <div className="signal-library-purge-copy signal-copy-flow">
-            {purgeTarget.groupTotal && purgeTarget.groupTotal > 1 && (
-              purgeTarget.otherStoredCount && purgeTarget.otherStoredCount > 0 ? (
-                <p>
-                  This document was uploaded {purgeTarget.groupTotal} times. Removing this copy
-                  leaves {purgeTarget.otherStoredCount} other stored{" "}
-                  {purgeTarget.otherStoredCount === 1 ? "copy" : "copies"} untouched.
-                </p>
-              ) : (
-                <p>
-                  This document was uploaded {purgeTarget.groupTotal} times, but every other copy
-                  has already been removed. This is the last one still stored.
-                </p>
-              )
-            )}
-            <p>The stored file and its future comparison data will be permanently removed.</p>
-            <p>Existing check history, readiness reports, instructor decisions, and audit entries remain available.</p>
-            <p>This action cannot be undone and never happens automatically.</p>
-            {purgeError && <p role="alert">{purgeError}</p>}
-          </div>
-        </Dialog>
       )}
     </div>
   );

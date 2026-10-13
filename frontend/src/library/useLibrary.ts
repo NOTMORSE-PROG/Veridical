@@ -1,88 +1,158 @@
-// V-066 (screen 4w) — the shared-corpus library. Replaces the old
-// useArchive.ts (Archive is retired, Library is a strict superset).
+// V-077 (D-028): the Library as a standalone collection and the only
+// originality corpus. Replaces the V-066 hooks (purge, duplicate-upload
+// groups, report links), which belonged to the old "every upload is a
+// Library record" model.
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api/client";
 import type {
   DocumentParagraphsOut,
+  LibraryEntryStateOut,
+  LibraryEntryUpdate,
   LibraryExcerptOut,
   LibraryItemOut,
+  LibrarySubmissionOut,
   ManuscriptViewerOut,
   PaginatedLibrary,
-  PurgeOut,
 } from "../api/types";
+import { LIBRARY_PAGE_SIZE, LIBRARY_PENDING_PAGE_SIZE, LIBRARY_STATUS_POLL_MS } from "../config/ui";
 
+function isValidId(manuscriptId: number | undefined): manuscriptId is number {
+  return manuscriptId !== undefined && Number.isInteger(manuscriptId) && manuscriptId > 0;
+}
+
+/** The collection itself: active records only, own and shared. */
 export function useLibrary(page: number, program: string | undefined, search: string) {
-  const params = new URLSearchParams({ page: String(page), page_size: "50" });
+  const params = new URLSearchParams({ page: String(page), page_size: String(LIBRARY_PAGE_SIZE) });
   if (program) params.set("program", program);
   if (search.trim()) params.set("search", search.trim());
   return useQuery({
-    queryKey: ["library", page, program, search],
+    queryKey: ["library", "active", page, program, search],
+    queryFn: () => api.get<PaginatedLibrary>(`/library?${params.toString()}`),
+  });
+}
+
+/** The requester's own uploads that are not comparison sources yet
+ * (still reading, waiting for a duplicate decision, or unreadable). Kept
+ * apart from the collection so its count never includes them. */
+export function useLibraryPending() {
+  const params = new URLSearchParams({
+    scope: "pending",
+    page: "1",
+    page_size: String(LIBRARY_PENDING_PAGE_SIZE),
+  });
+  return useQuery({
+    queryKey: ["library", "pending"],
     queryFn: () => api.get<PaginatedLibrary>(`/library?${params.toString()}`),
   });
 }
 
 export function useLibraryItem(manuscriptId: number | undefined, enabled = true) {
-  const validId = manuscriptId !== undefined && Number.isInteger(manuscriptId) && manuscriptId > 0;
   return useQuery({
     queryKey: ["library-item", manuscriptId],
     queryFn: () => api.get<LibraryItemOut>(`/library/${manuscriptId}`),
-    enabled: enabled && validId,
+    enabled: enabled && isValidId(manuscriptId),
+    // A record still being read refreshes until it settles.
+    refetchInterval: (query) =>
+      query.state.data?.status === "processing" ? LIBRARY_STATUS_POLL_MS : false,
   });
 }
 
-// The bounded, cross-tenant-safe view (Q2's ruling) -- always fetched for
-// a NOT-owned manuscript; never for an owned one (the own-document query
-// below is what renders instead).
+// The bounded, cross-tenant-safe view (Q2's ruling): always fetched for a
+// record the requester does not own; never for an own one.
 export function useLibraryExcerpt(manuscriptId: number | undefined, enabled: boolean) {
-  const validId = manuscriptId !== undefined && Number.isInteger(manuscriptId) && manuscriptId > 0;
   return useQuery({
     queryKey: ["library-excerpt", manuscriptId],
     queryFn: () => api.get<LibraryExcerptOut>(`/library/${manuscriptId}/excerpt`),
-    enabled: enabled && validId,
+    enabled: enabled && isValidId(manuscriptId),
   });
 }
 
 export function useLibraryDocument(manuscriptId: number | undefined, enabled: boolean) {
-  const validId = manuscriptId !== undefined && Number.isInteger(manuscriptId) && manuscriptId > 0;
   return useQuery({
     queryKey: ["library-document", manuscriptId],
     queryFn: () => api.get<ManuscriptViewerOut>(`/library/${manuscriptId}/document`),
-    enabled: enabled && validId,
+    enabled: enabled && isValidId(manuscriptId),
   });
 }
 
 export function useLibraryParagraphs(manuscriptId: number | undefined, enabled: boolean) {
-  const validId = manuscriptId !== undefined && Number.isInteger(manuscriptId) && manuscriptId > 0;
   return useQuery({
     queryKey: ["library-paragraphs", manuscriptId],
     queryFn: () => api.get<DocumentParagraphsOut>(`/library/${manuscriptId}/document/paragraphs`),
-    enabled: enabled && validId,
+    enabled: enabled && isValidId(manuscriptId),
   });
 }
 
-// Purge itself is unchanged from V-042 (still `/archive/{id}`, still
-// ownership-gated server-side) -- Library just calls the same endpoint
-// Archive used to.
-//
-// BUG-148: the in-place `setQueriesData` patch this used to do (still
-// "Content removed" in place, no refetch flicker) only ever updated the
-// TOP-LEVEL representative row, keyed on `manuscript_id`. Since a purge
-// target can now be a SIBLING nested in `duplicate_uploads` (never a key
-// in `old.items` itself), that patch would silently no-op for exactly the
-// new interaction this ticket adds -- worse, purging the group's current
-// representative can change WHICH manuscript the server now considers
-// representative (an older still-stored sibling takes over), which a
-// client-side patch has no way to re-derive without duplicating the
-// backend's own tie-break rule. A real refetch is the only honest option
-// once collapsing is server-side and non-trivial -- correctness over the
-// no-flicker cosmetic.
-export function usePurgeManuscript() {
+export interface LibrarySubmission {
+  file: File;
+  program?: string;
+  schoolYear?: string;
+  title?: string;
+  teamName?: string;
+  authors?: string[];
+}
+
+/** One file per request; the add screen sends a batch one at a time. */
+export function submitLibraryEntry(submission: LibrarySubmission): Promise<LibrarySubmissionOut> {
+  const form = new FormData();
+  form.append("file", submission.file);
+  if (submission.program) form.append("program", submission.program);
+  if (submission.schoolYear) form.append("school_year", submission.schoolYear);
+  if (submission.title) form.append("title", submission.title);
+  if (submission.teamName) form.append("team_name", submission.teamName);
+  for (const author of submission.authors ?? []) {
+    if (author.trim()) form.append("authors", author.trim());
+  }
+  return api.post<LibrarySubmissionOut>("/library/entries", form);
+}
+
+function useInvalidateLibrary() {
+  const queryClient = useQueryClient();
+  return (manuscriptId?: number, removed = false) => {
+    void queryClient.invalidateQueries({ queryKey: ["library"] });
+    if (manuscriptId === undefined) return;
+    if (removed) {
+      // A removed record no longer exists for anyone; refetching it only
+      // produces a 404 (ux-critic, 2026-10-13).
+      queryClient.removeQueries({ queryKey: ["library-item", manuscriptId] });
+      queryClient.removeQueries({ queryKey: ["library-document", manuscriptId] });
+    } else {
+      void queryClient.invalidateQueries({ queryKey: ["library-item", manuscriptId] });
+    }
+  };
+}
+
+export function useLibraryInvalidation() {
+  return useInvalidateLibrary();
+}
+
+export function useUpdateLibraryEntry(manuscriptId: number) {
+  const invalidate = useInvalidateLibrary();
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (manuscriptId: number) => api.delete<PurgeOut>(`/archive/${manuscriptId}`),
-    onSuccess: (result) => {
-      queryClient.invalidateQueries({ queryKey: ["library"] });
-      queryClient.invalidateQueries({ queryKey: ["library-item", result.manuscript_id] });
+    mutationFn: (update: LibraryEntryUpdate) =>
+      api.patch<LibraryItemOut>(`/library/${manuscriptId}`, update),
+    onSuccess: (item) => {
+      queryClient.setQueryData(["library-item", manuscriptId], item);
+      invalidate();
     },
+  });
+}
+
+export function useDecideLibraryEntry() {
+  const invalidate = useInvalidateLibrary();
+  return useMutation({
+    mutationFn: ({ manuscriptId, action }: { manuscriptId: number; action: "add" | "skip" }) =>
+      api.post<LibraryEntryStateOut>(`/library/${manuscriptId}/decision`, { action }),
+    onSuccess: (state) => invalidate(state.manuscript_id, state.status === "removed"),
+  });
+}
+
+export function useRemoveLibraryEntry() {
+  const invalidate = useInvalidateLibrary();
+  return useMutation({
+    mutationFn: (manuscriptId: number) =>
+      api.post<LibraryEntryStateOut>(`/library/${manuscriptId}/remove`),
+    onSuccess: (state) => invalidate(state.manuscript_id, true),
   });
 }

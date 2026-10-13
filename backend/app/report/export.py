@@ -340,11 +340,27 @@ def _explainer(report) -> str:
     return f"{base} This includes a {points}-point deduction from unresolved flags."
 
 
-def _archive_disclosure(archive_size_n: int | None) -> str:
+def _archive_disclosure(archive_size_n: int | None, corpus: str | None = None) -> str:
+    """V-077 (D-028): names what the count measured. Since D-028 the check
+    compares against the Library only; older results counted the former
+    automatic archive. Zero is stated as "nothing to compare against", never
+    as a clean result."""
     if archive_size_n is None:
         return (
             "Originality and reuse check did not run for this manuscript "
             "(no comparable content could be extracted)."
+        )
+    if corpus == "library":
+        if archive_size_n == 0:
+            return (
+                "Originality and reuse check: no Library records were available to "
+                "compare against when this check ran, so no reuse could be found. This is "
+                "not evidence of originality."
+            )
+        noun = "record" if archive_size_n == 1 else "records"
+        return (
+            f"Originality and reuse check: compared against {archive_size_n} Library "
+            f"{noun} when this check ran. Manuscripts not in the Library were not compared."
         )
     if archive_size_n == 0:
         return (
@@ -353,7 +369,8 @@ def _archive_disclosure(archive_size_n: int | None) -> str:
         )
     return (
         f"Originality and reuse check: compared against {archive_size_n} previously "
-        "processed manuscripts in VERIDICAL's archive."
+        "processed manuscripts in VERIDICAL's archive, before the Library became a "
+        "separate collection."
     )
 
 
@@ -811,7 +828,13 @@ def build_report_pdf(data: ReportExportData) -> bytes:
                 )
                 flow.append(Spacer(1, 8))
     flow.append(Spacer(1, 4))
-    flow.append(Paragraph(_archive_disclosure(data.archive_size_n), styles["caption"]))
+    scope = data.report.originality_scope
+    flow.append(
+        Paragraph(
+            _archive_disclosure(data.archive_size_n, scope.corpus if scope else None),
+            styles["caption"],
+        )
+    )
     flow.append(Spacer(1, 10))
 
     # 5. Escalation resolutions.

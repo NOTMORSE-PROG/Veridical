@@ -1,12 +1,17 @@
-"""V-066: the shared-corpus library HTTP surface end-to-end. Needs a live
-Postgres (same convention as test_archive_router_live.py) -- two real
-instructors, each with their own manuscript, so ownership-gated behavior
-(document/file/paragraphs own-only, excerpt/detail available to anyone) has
-something real to differ against.
+"""V-077 (D-028): the Library as a standalone collection and the only F7
+corpus, end to end over HTTP against a live Postgres. Two real instructors,
+real fixture files, fake-LLM mode, and a recorded vision pass (a Library
+submission must cost zero Gemini calls; a dashboard upload may make one).
+
+Replaces the V-066 suite, whose subject (every dashboard upload listed as a
+Library record) no longer exists.
 """
 
+import asyncio
 import os
+from pathlib import Path
 
+import asyncpg
 import pytest
 from fastapi.testclient import TestClient
 
@@ -20,13 +25,14 @@ live = pytest.mark.skipif(
 )
 pytestmark = live
 
-SCRATCH_DB = "veridical_libraryapitest"
+SCRATCH_DB = "veridical_library_v077_test"
+FIXTURES = Path(__file__).parent / "fixtures" / "ingest"
+OWNER = ("owner@tip.edu.ph", "s3cret!")
+STRANGER = ("stranger@tip.edu.ph", "other!")
 
 
 @pytest.fixture(scope="module")
 def api_scratch_url():
-    import asyncio
-
     from alembic import command
     from tests.test_schema import _admin_execute, _alembic_config, _swap_db
 
@@ -39,16 +45,30 @@ def api_scratch_url():
     asyncio.run(_admin_execute(base, f'DROP DATABASE IF EXISTS "{SCRATCH_DB}" WITH (FORCE)'))
 
 
+VISION_CALLS: list[str] = []
+
+
 @pytest.fixture()
 def client(api_scratch_url, tmp_path, monkeypatch):
+    """Records every Gemini vision call: a dashboard upload may legitimately
+    make one, a Library submission never may (asserted per test)."""
     import app.db as db
+    import app.ingest.vision as vision
+    import app.ratelimit as ratelimit
 
+    async def record_vision(result, file_path, *args, **kwargs):
+        VISION_CALLS.append(str(file_path))
+
+    VISION_CALLS.clear()
     monkeypatch.setenv("DATABASE_URL", api_scratch_url)
     monkeypatch.setenv("DATA_DIR", str(tmp_path / "data"))
     monkeypatch.setenv("VERIDICAL_FAKE_LLM", "1")
     get_settings.cache_clear()
     db._engine = None
     auth_service._rate_limiter = None
+    ratelimit._limiters.clear()
+    asyncio.run(_reset(api_scratch_url))
+    monkeypatch.setattr(vision, "read_images", record_vision)
     from app.main import app
 
     with TestClient(app) as c:
@@ -57,668 +77,520 @@ def client(api_scratch_url, tmp_path, monkeypatch):
     auth_service._rate_limiter = None
 
 
-@pytest.fixture()
-def seeded(client, api_scratch_url, tmp_path):
-    """Two instructors, one manuscript each: `owner`'s is a real on-disk
-    PDF with a chapter + passage archive (own document view AND the
-    cross-tenant excerpt both need real data); `stranger`'s exists mainly
-    so `owner`'s library requests have a genuine "not mine" row to see."""
-    import asyncio
+async def _reset(url: str) -> None:
+    conn = await asyncpg.connect(url)
+    try:
+        await conn.execute(
+            "TRUNCATE library_entry, manuscript_passage_archive, manuscript_chapter_archive, "
+            "manuscript_archive, citation, audit_log, group_member, manuscript, manuscript_group, "
+            "program, session, instructor RESTART IDENTITY CASCADE"
+        )
+        for email, password in (OWNER, STRANGER):
+            await conn.execute(
+                "INSERT INTO instructor (email, display_name, password_hash) VALUES ($1, $2, $3)",
+                email,
+                email.split("@")[0],
+                hash_password(password),
+            )
+        await conn.execute("INSERT INTO program (name) VALUES ('IT'), ('CS')")
+    finally:
+        await conn.close()
 
-    from sqlalchemy import text
+
+def _fetchval(url: str, sql: str, *args):
+    async def run():
+        conn = await asyncpg.connect(url)
+        try:
+            return await conn.fetchval(sql, *args)
+        finally:
+            await conn.close()
+
+    return asyncio.run(run())
+
+
+def _login(client: TestClient, account: tuple[str, str]) -> None:
+    r = client.post("/auth/login", json={"email": account[0], "password": account[1]})
+    assert r.status_code == 200, r.text
+
+
+def _submit(client: TestClient, content: bytes, name: str, **form) -> dict:
+    r = client.post(
+        "/library/entries",
+        files={"file": (name, content, "application/octet-stream")},
+        data=form,
+    )
+    assert r.status_code == 200, r.text
+    return r.json()
+
+
+def _pdf() -> bytes:
+    return (FIXTURES / "native.pdf").read_bytes()
+
+
+def _same_text_other_bytes() -> bytes:
+    # Trailing bytes after %%EOF: a different file (different hash) whose
+    # extracted text is identical.
+    return _pdf() + b"\n% a re-exported copy\n"
+
+
+def _corpus_rows(url: str, manuscript_id: int) -> int:
+    return _fetchval(
+        url,
+        "SELECT (SELECT count(*) FROM manuscript_archive WHERE manuscript_id = $1)"
+        " + (SELECT count(*) FROM manuscript_chapter_archive WHERE manuscript_id = $1)"
+        " + (SELECT count(*) FROM manuscript_passage_archive WHERE manuscript_id = $1)",
+        manuscript_id,
+    )
+
+
+def test_submission_adds_an_active_entry_with_comparison_data(client, api_scratch_url):
+    _login(client, OWNER)
+    body = _submit(client, _pdf(), "native.pdf", program="IT", school_year="2025-2026")
+
+    assert body["outcome"] == "added", body
+    item = body["item"]
+    assert item["status"] == "active"
+    assert item["is_own"] is True
+    assert item["program"] == "IT"
+    assert item["school_year"] == "2025-2026"
+    assert item["source"] == "library_submission"
+    assert item["added_at"] is not None
+    manuscript_id = item["manuscript_id"]
+
+    assert (
+        _fetchval(api_scratch_url, "SELECT origin FROM manuscript WHERE id = $1", manuscript_id)
+        == "library_submission"
+    )
+    assert (
+        _fetchval(
+            api_scratch_url,
+            "SELECT count(*) FROM manuscript_archive WHERE manuscript_id = $1",
+            manuscript_id,
+        )
+        == 1
+    )
+    assert (
+        _fetchval(
+            api_scratch_url,
+            "SELECT count(*) FROM manuscript_passage_archive WHERE manuscript_id = $1",
+            manuscript_id,
+        )
+        > 0
+    )
+    assert (
+        _fetchval(
+            api_scratch_url,
+            "SELECT count(*) FROM audit_log WHERE event_type = 'library_entry_added'",
+        )
+        == 1
+    )
+
+    listing = client.get("/library").json()
+    assert listing["total"] == 1
+    assert listing["items"][0]["manuscript_id"] == manuscript_id
+    assert VISION_CALLS == [], "a Library submission ran the Gemini vision pass"
+
+
+def test_exact_copy_of_own_entry_creates_nothing(client, api_scratch_url):
+    _login(client, OWNER)
+    first = _submit(client, _pdf(), "native.pdf")["item"]["manuscript_id"]
+
+    again = _submit(client, _pdf(), "renamed-copy.pdf")
+
+    assert again["outcome"] == "exact_duplicate"
+    assert again["item"] is None
+    assert again["duplicate_of"]["manuscript_id"] == first
+    assert _fetchval(api_scratch_url, "SELECT count(*) FROM manuscript") == 1
+    uploads = get_settings().data_dir / "uploads"
+    assert not list(uploads.glob("library-pending-*")), "a duplicate left its upload behind"
+
+
+def test_same_text_in_another_file_waits_for_the_instructor_then_add_anyway(
+    client, api_scratch_url
+):
+    _login(client, OWNER)
+    first = _submit(client, _pdf(), "native.pdf")["item"]["manuscript_id"]
+
+    body = _submit(client, _same_text_other_bytes(), "native-reexport.pdf")
+
+    assert body["outcome"] == "possible_duplicate", body
+    waiting = body["item"]
+    assert client.get("/library").json()["total"] == 1
+    assert client.get("/library", params={"scope": "pending"}).json()["total"] == 1
+    assert waiting["status"] == "needs_decision"
+    assert body["duplicate_of"]["manuscript_id"] == first
+    assert waiting["possible_duplicate_of"]["manuscript_id"] == first
+    # Not a comparison source while it waits.
+    assert _corpus_rows(api_scratch_url, waiting["manuscript_id"]) == 0
+
+    decided = client.post(f"/library/{waiting['manuscript_id']}/decision", json={"action": "add"})
+    assert decided.status_code == 200, decided.text
+    assert decided.json()["status"] == "active"
+    assert _corpus_rows(api_scratch_url, waiting["manuscript_id"]) > 0
+
+
+def test_skip_removes_the_waiting_entry_and_deletes_its_file(client, api_scratch_url):
+    _login(client, OWNER)
+    _submit(client, _pdf(), "native.pdf")
+    waiting = _submit(client, _same_text_other_bytes(), "copy.pdf")["item"]
+    manuscript_id = waiting["manuscript_id"]
+    stored = Path(
+        _fetchval(api_scratch_url, "SELECT file_ref FROM manuscript WHERE id = $1", manuscript_id)
+    )
+    assert stored.exists()
+
+    skipped = client.post(f"/library/{manuscript_id}/decision", json={"action": "skip"})
+
+    assert skipped.status_code == 200, skipped.text
+    assert skipped.json()["status"] == "removed"
+    assert skipped.json()["file_deleted"] is True
+    assert not stored.exists()
+    assert client.get(f"/library/{manuscript_id}").status_code == 404
+
+
+def test_decision_on_an_entry_that_is_not_waiting_is_a_conflict(client):
+    _login(client, OWNER)
+    manuscript_id = _submit(client, _pdf(), "native.pdf")["item"]["manuscript_id"]
+    r = client.post(f"/library/{manuscript_id}/decision", json={"action": "add"})
+    assert r.status_code == 409
+
+
+def test_a_file_with_no_readable_text_fails_honestly(client, api_scratch_url):
+    _login(client, OWNER)
+    body = _submit(client, (FIXTURES / "scan_imageonly.pdf").read_bytes(), "scan.pdf")
+
+    assert body["outcome"] == "failed", body
+    assert body["item"]["status"] == "failed"
+    assert "readable text" in body["item"]["failure_detail"]
+    assert _corpus_rows(api_scratch_url, body["item"]["manuscript_id"]) == 0
+    # The owner can still see it and act on it.
+    assert client.get(f"/library/{body['item']['manuscript_id']}").status_code == 200
+    # Never counted in the collection; listed only among the owner's pending uploads.
+    assert client.get("/library").json()["total"] == 0
+    pending = client.get("/library", params={"scope": "pending"}).json()
+    assert [i["manuscript_id"] for i in pending["items"]] == [body["item"]["manuscript_id"]]
+
+
+def test_owner_edits_metadata(client):
+    _login(client, OWNER)
+    manuscript_id = _submit(client, _pdf(), "native.pdf")["item"]["manuscript_id"]
+
+    r = client.patch(
+        f"/library/{manuscript_id}",
+        json={
+            "title": "  An Edited Title ",
+            "authors": ["Ana Cruz", " ", "Ben Reyes"],
+            "program": "CS",
+        },
+    )
+    assert r.status_code == 200, r.text
+    item = r.json()
+    assert item["title"] == "An Edited Title"
+    assert item["authors"] == ["Ana Cruz", "Ben Reyes"]
+    assert item["program"] == "CS"
+    assert "title" not in item["proposed_fields"]
+    assert item["label"] == "An Edited Title"
+
+    assert client.patch(f"/library/{manuscript_id}", json={"program": "Nope"}).status_code == 404
+    assert client.patch(f"/library/{manuscript_id}", json={"title": "x" * 501}).status_code == 422
+
+
+def test_removing_a_library_submission_deletes_its_file_and_comparison_data(
+    client, api_scratch_url
+):
+    _login(client, OWNER)
+    manuscript_id = _submit(client, _pdf(), "native.pdf")["item"]["manuscript_id"]
+    stored = Path(
+        _fetchval(api_scratch_url, "SELECT file_ref FROM manuscript WHERE id = $1", manuscript_id)
+    )
+
+    r = client.post(f"/library/{manuscript_id}/remove")
+
+    assert r.status_code == 200, r.text
+    assert r.json()["file_deleted"] is True
+    assert _corpus_rows(api_scratch_url, manuscript_id) == 0
+    assert not stored.exists()
+    assert client.get("/library").json()["total"] == 0
+    assert client.post(f"/library/{manuscript_id}/remove").status_code == 404
+
+
+def test_removing_a_legacy_entry_keeps_the_checked_manuscripts_file(client, api_scratch_url):
+    """A record carried over by migration 0037 is a checked manuscript; its
+    report still needs the file, so only the comparison data leaves."""
+    _login(client, OWNER)
+    ingested = client.post(
+        "/manuscripts/ingest",
+        files={"file": ("native.pdf", _pdf(), "application/octet-stream")},
+    )
+    assert ingested.status_code == 200, ingested.text
+    manuscript_id = ingested.json()["manuscript_id"]
+    asyncio.run(_make_legacy_entry(api_scratch_url, manuscript_id))
+    assert _corpus_rows(api_scratch_url, manuscript_id) > 0
+    stored = Path(
+        _fetchval(api_scratch_url, "SELECT file_ref FROM manuscript WHERE id = $1", manuscript_id)
+    )
+
+    r = client.post(f"/library/{manuscript_id}/remove")
+
+    assert r.status_code == 200, r.text
+    assert r.json()["file_deleted"] is False
+    assert _corpus_rows(api_scratch_url, manuscript_id) == 0
+    assert stored.exists()
+    assert (
+        _fetchval(api_scratch_url, "SELECT purged_at FROM manuscript WHERE id = $1", manuscript_id)
+        is None
+    )
+
+
+async def _make_legacy_entry(url: str, manuscript_id: int) -> None:
     from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
+    from app.checks.reuse.embed import compute_document_embeddings, compute_passage_embeddings
+    from app.checks.reuse.store import store_document_embeddings, store_passage_embeddings
     from app.db import sqlalchemy_url
-    from app.models.enums import IngestStatus
-    from app.models.group import Group, GroupMember, Program
-    from app.models.instructor import Instructor
-    from app.models.manuscript import Manuscript, ManuscriptChapterArchive, ManuscriptPassageArchive
+    from app.ingest.service import load_raw_store
+    from app.models.enums import LibraryEntrySource, LibraryEntryStatus
+    from app.models.library import LibraryEntry
 
     settings = get_settings()
-    upload_dir = settings.data_dir / "uploads"
-    upload_dir.mkdir(parents=True, exist_ok=True)
-
-    ids: dict[str, int] = {}
-
-    async def seed():
-        engine = create_async_engine(sqlalchemy_url(api_scratch_url))
-        try:
-            factory = async_sessionmaker(engine, expire_on_commit=False)
-            async with factory() as session:
-                await session.execute(
-                    text(
-                        "TRUNCATE manuscript_passage_archive, manuscript_chapter_archive, "
-                        "manuscript_archive, group_member, manuscript, manuscript_group, "
-                        "program, session, instructor RESTART IDENTITY CASCADE"
-                    )
+    extraction = load_raw_store(settings, manuscript_id)
+    engine = create_async_engine(sqlalchemy_url(url))
+    try:
+        async with async_sessionmaker(engine, expire_on_commit=False)() as session:
+            await store_document_embeddings(
+                session, manuscript_id, compute_document_embeddings(extraction, settings)
+            )
+            await store_passage_embeddings(
+                session, manuscript_id, compute_passage_embeddings(extraction, settings), settings
+            )
+            session.add(
+                LibraryEntry(
+                    manuscript_id=manuscript_id,
+                    source=LibraryEntrySource.legacy_check_upload,
+                    status=LibraryEntryStatus.active,
+                    title="A Legacy Title",
                 )
-                owner = Instructor(
-                    email="owner@tip.edu.ph",
-                    display_name="Owner",
-                    password_hash=hash_password("s3cret!"),
-                )
-                stranger = Instructor(
-                    email="stranger2@tip.edu.ph",
-                    display_name="Stranger",
-                    password_hash=hash_password("other!"),
-                )
-                session.add_all([owner, stranger])
-                await session.commit()
-
-                program = Program(name="IT")
-                session.add(program)
-                await session.commit()
-
-                own_group = Group(
-                    instructor_id=owner.id,
-                    name="Own Group",
-                    name_normalized="own group",
-                    program_id=program.id,
-                    title="A Real Capstone Title",
-                )
-                stranger_group = Group(
-                    instructor_id=stranger.id,
-                    name="Stranger Group",
-                    name_normalized="stranger group",
-                    # BUG-147 (`backend-critic` finding): a real title,
-                    # unchanged from before this fix -- without one, the
-                    # redaction test can't tell "title was stripped" from
-                    # "title was never set", since both look like `None`.
-                    title="A Confidential Stranger Capstone Title",
-                )
-                session.add_all([own_group, stranger_group])
-                await session.commit()
-                session.add(GroupMember(group_id=own_group.id, name="Author One"))
-                session.add(GroupMember(group_id=stranger_group.id, name="Maria Santos"))
-                await session.commit()
-
-                mine = Manuscript(
-                    instructor_id=owner.id,
-                    group_label="Own Group",
-                    group_id=own_group.id,
-                    file_ref="",
-                    ingest_status=IngestStatus.done,
-                )
-                theirs = Manuscript(
-                    instructor_id=stranger.id,
-                    group_label="Stranger Group",
-                    group_id=stranger_group.id,
-                    file_ref="",
-                    original_filename="stranger_capstone.pdf",
-                    ingest_status=IngestStatus.done,
-                )
-                session.add_all([mine, theirs])
-                await session.commit()
-
-                upload_path = upload_dir / f"{mine.id}.pdf"
-                upload_path.write_bytes(
-                    b"%PDF-1.4\n1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj\n"
-                    b"2 0 obj<</Type/Pages/Kids[3 0 R]/Count 1>>endobj\n"
-                    b"3 0 obj<</Type/Page/Parent 2 0 R/MediaBox[0 0 200 200]>>endobj\n"
-                    b"trailer<</Root 1 0 R>>"
-                )
-                mine.file_ref = str(upload_path)
-                session.add(
-                    ManuscriptChapterArchive(
-                        manuscript_id=mine.id,
-                        chapter_index=0,
-                        title="Chapter 1",
-                        page=1,
-                        embedding=[0.0] * settings.embedding_dim,
-                        model_id="test-model",
-                    )
-                )
-                session.add(
-                    ManuscriptPassageArchive(
-                        manuscript_id=mine.id,
-                        passage_index=0,
-                        chapter_index=0,
-                        page=1,
-                        char_start=0,
-                        char_end=20,
-                        text="the matched passage",
-                        context_text="before words the matched passage after words",
-                        is_reference_list=False,
-                        is_block_quote=False,
-                        embedding=[0.0] * 256,
-                        model_id="test-model",
-                    )
-                )
-                await session.commit()
-
-                ids["mine"] = mine.id
-                ids["theirs"] = theirs.id
-                ids["owner_id"] = owner.id
-                ids["upload_path"] = str(upload_path)
-        finally:
-            await engine.dispose()
-
-    asyncio.run(seed())
-    client.post("/auth/login", json={"email": "owner@tip.edu.ph", "password": "s3cret!"})
-    return client, ids
+            )
+            await session.commit()
+    finally:
+        await engine.dispose()
 
 
-def test_list_library_spans_both_accounts_unlike_archive(seeded):
-    client, ids = seeded
-    resp = client.get("/library")
-    assert resp.status_code == 200, resp.text
-    body = resp.json()
-    assert body["total"] == 2  # BOTH manuscripts, not just the caller's own
-    by_id = {item["manuscript_id"]: item for item in body["items"]}
-    assert by_id[ids["mine"]]["is_own"] is True
-    assert by_id[ids["mine"]]["title"] == "A Real Capstone Title"
-    assert by_id[ids["mine"]]["authors"] == ["Author One"]
-    assert by_id[ids["mine"]]["program"] == "IT"
-    assert by_id[ids["theirs"]]["is_own"] is False
-    assert by_id[ids["theirs"]]["program"] is None
+def test_other_instructors_see_active_entries_redacted_and_nothing_else(client, api_scratch_url):
+    _login(client, OWNER)
+    active = _submit(
+        client,
+        _pdf(),
+        "secret-file-name.pdf",
+        title="A Confidential Capstone Title",
+        team_name="Secret Team",
+        authors=["Maria Santos"],
+        program="IT",
+        school_year="2024-2025",
+    )["item"]["manuscript_id"]
+    failed = _submit(client, (FIXTURES / "scan_imageonly.pdf").read_bytes(), "scan.pdf")["item"][
+        "manuscript_id"
+    ]
+
+    _login(client, STRANGER)
+    listing = client.get("/library").json()
+    assert listing["total"] == 1
+    seen = listing["items"][0]
+    assert seen["manuscript_id"] == active
+    assert seen["is_own"] is False
+    assert seen["label"] == f"Library record #{active}"
+    assert seen["title"] is None
+    assert seen["team_name"] is None
+    assert seen["authors"] == []
+    assert seen["original_filename"] is None
+    assert seen["source"] is None
+    assert seen["program"] == "IT"
+    assert seen["school_year"] == "2024-2025"
+    assert "Maria" not in str(listing) and "Confidential" not in str(listing)
+
+    # Identity search is own-only: a hit would confirm the name exists.
+    assert client.get("/library", params={"search": "Maria"}).json()["total"] == 0
+    assert client.get("/library", params={"search": "Secret"}).json()["total"] == 0
+
+    assert client.get(f"/library/{active}").status_code == 200
+    assert client.get(f"/library/{active}/excerpt").status_code == 200
+    assert client.get(f"/library/{failed}").status_code == 404
+    assert client.get(f"/library/{failed}/excerpt").status_code == 404
+    for method, path, kwargs in (
+        ("patch", f"/library/{active}", {"json": {"title": "mine now"}}),
+        ("post", f"/library/{active}/remove", {}),
+        ("post", f"/library/{active}/decision", {"json": {"action": "skip"}}),
+        ("get", f"/library/{active}/document", {}),
+        ("get", f"/library/{active}/document/file", {}),
+        ("get", f"/library/{active}/document/paragraphs", {}),
+    ):
+        r = getattr(client, method)(path, **kwargs)
+        assert r.status_code == 404, (method, path, r.status_code, r.text)
+    assert _corpus_rows(api_scratch_url, active) > 0
 
 
-def test_list_library_never_exposes_another_accounts_identity(seeded):
-    """BUG-147 (Critical): `list_library` used to return every OTHER
-    instructor's full team name, capstone title, member names, and
-    original filename to every account with no consent step -- a Data
-    Privacy Act (RA 10173) exposure, confirmed live. The shared corpus
-    itself stays intentional (BUG-050) -- what changes is the PAYLOAD for
-    a row this requester doesn't own: only a non-identifying reference,
-    program, and date, exactly the ticket's own worked example ("archived
-    manuscript #3, IT, Aug 2026")."""
-    client, ids = seeded
-    resp = client.get("/library")
-    assert resp.status_code == 200, resp.text
-    by_id = {item["manuscript_id"]: item for item in resp.json()["items"]}
-    theirs = by_id[ids["theirs"]]
-    assert theirs["is_own"] is False
-    assert theirs["title"] is None
-    assert theirs["authors"] == []
-    assert theirs["original_filename"] is None
-    assert theirs["group_label"] == f"Archived manuscript #{ids['theirs']}"
-    assert "Stranger Group" not in theirs["group_label"]
-    # Whole-payload check (`backend-critic` finding, BUG-147 review): the
-    # enriched fixture now gives `theirs` a real title, member, and
-    # filename, so these strings would appear SOMEWHERE in the raw
-    # response if the fix regressed, even if not on the exact field this
-    # test happens to check first.
-    assert "Confidential Stranger" not in str(theirs)
-    assert "Maria Santos" not in str(theirs)
-    assert "stranger_capstone" not in str(theirs)
-    # The requester's OWN row is completely unaffected by this fix.
-    mine = by_id[ids["mine"]]
-    assert mine["title"] == "A Real Capstone Title"
-    assert mine["authors"] == ["Author One"]
-    assert mine["group_label"] == "Own Group"
+def test_duplicate_detection_never_crosses_accounts(client):
+    """BUG-234: telling one instructor that another account holds the same
+    bytes would be a cross-tenant existence oracle."""
+    _login(client, OWNER)
+    _submit(client, _pdf(), "native.pdf")
+
+    _login(client, STRANGER)
+    body = _submit(client, _pdf(), "native.pdf")
+    assert body["outcome"] == "added", body
+    assert body["duplicate_of"] is None
 
 
-def test_list_library_filters_by_program(seeded):
-    client, ids = seeded
-    resp = client.get("/library?program=IT")
-    assert resp.status_code == 200, resp.text
-    ids_returned = {item["manuscript_id"] for item in resp.json()["items"]}
-    assert ids_returned == {ids["mine"]}
+def test_library_submissions_never_reach_the_review_desk_or_a_check(client):
+    _login(client, OWNER)
+    manuscript_id = _submit(client, _pdf(), "native.pdf")["item"]["manuscript_id"]
+
+    assert client.get("/manuscripts").json()["total"] == 0
+    stats = client.get("/stats").json()
+    assert stats["manuscripts_checked"] == 0
+    assert stats["needs_attention_count"] == 0
+    r = client.post("/check-runs", json={"manuscript_id": manuscript_id, "rubric_id": 1})
+    assert r.status_code == 404, r.text
+    assert client.get(f"/manuscripts/{manuscript_id}/group-proposal").status_code == 404
 
 
-def test_list_library_searches_group_title_and_author(seeded):
-    """The search filter runs against the real stored `Group`/
-    `GroupMember` rows server-side (never against the anonymized response
-    payload), scoped to the CALLER's own manuscripts (BUG-147's search-
-    scoping fix, see the adversarial test below for why)."""
-    client, ids = seeded
-    for q in ["Real Capstone", "Own Group", "Author One"]:
-        resp = client.get(f"/library?search={q}")
-        assert resp.status_code == 200, resp.text
-        assert {item["manuscript_id"] for item in resp.json()["items"]} == {ids["mine"]}
-
-
-def test_search_cannot_be_used_to_confirm_another_accounts_real_identity(seeded):
-    """BUG-147 (`ux-critic` finding, live-reproduced before this fix): the
-    Library screen's own redaction is worthless if an instructor who
-    already suspects a name (a rumor, a cover page glimpsed elsewhere) can
-    type it into Search and get a hit back with program and date attached
-    -- that CONFIRMS the name exists in another account's manuscript even
-    though the row itself never displays it. `owner` searches for
-    `stranger`'s real, never-displayed identity (team name, capstone
-    title, member name) and must get ZERO results, the same as searching
-    for a name that doesn't exist anywhere at all."""
-    client, ids = seeded
-    for needle in [
-        "Stranger Group",
-        "Confidential Stranger",  # the redacted title
-        "Maria Santos",  # the redacted member name
-        "stranger_capstone",  # the redacted original filename
-    ]:
-        resp = client.get(f"/library?search={needle}")
-        assert resp.status_code == 200, resp.text
-        body = resp.json()
-        assert body["total"] == 0, (
-            f"search={needle!r} returned a hit -- confirms another account's "
-            "real identity exists even though the row itself is redacted"
-        )
-        assert body["items"] == []
-
-    # A genuinely nonexistent name is indistinguishable from a real,
-    # redacted one -- both correctly return nothing.
-    control = client.get("/library?search=Zzyzx Nonexistent Name")
-    assert control.status_code == 200, control.text
-    assert control.json()["total"] == 0
-
-
-def test_library_item_detail_visible_for_a_strangers_manuscript_too(seeded):
-    """BUG-147: the RECORD is visible (identity-is-the-point-of-the-library,
-    BUG-050's decided direction) but the record's real identity is not.
-    `get_library_item` has its own field-population logic ahead of the
-    shared `_item_out` (`backend-critic` finding, BUG-147 review) -- a
-    separate code path from `list_library`'s, so it needs its own full
-    assertion, not just `group_label`, or a future change that broke only
-    THIS endpoint's redaction would go uncaught."""
-    client, ids = seeded
-    resp = client.get(f"/library/{ids['theirs']}")
-    assert resp.status_code == 200, resp.text
-    body = resp.json()
-    assert body["is_own"] is False
-    assert body["title"] is None
-    assert body["authors"] == []
-    assert body["original_filename"] is None
-    assert body["group_label"] == f"Archived manuscript #{ids['theirs']}"
-    assert "Stranger Group" not in body["group_label"]
-    assert "Confidential Stranger" not in str(body)
-    assert "Maria Santos" not in str(body)
-    assert "stranger_capstone" not in str(body)
-
-
-def test_library_excerpt_is_bounded_and_available_for_any_manuscript(seeded):
-    client, ids = seeded
-    resp = client.get(f"/library/{ids['mine']}/excerpt")
-    assert resp.status_code == 200, resp.text
-    body = resp.json()
-    assert body["total_chapters"] == 1
-    assert len(body["chapters"]) == 1
-    chapter = body["chapters"][0]
-    assert chapter["title"] == "Chapter 1"
-    assert chapter["excerpt"] == "the matched passage"
-    assert chapter["context_before"] == "before words"
-    assert chapter["context_after"] == "after words"
-    assert "bounded excerpt" in body["limitations"]
-
-
-def test_library_own_document_is_reachable(seeded):
-    client, ids = seeded
-    resp = client.get(f"/library/{ids['mine']}/document")
-    assert resp.status_code == 200, resp.text
-    body = resp.json()
-    assert body["available"] is True
-    assert body["source_format"] == "pdf"
-
-    file_resp = client.get(f"/library/{ids['mine']}/document/file")
-    assert file_resp.status_code == 200
-    assert file_resp.headers["content-type"] == "application/pdf"
-
-
-def test_library_document_for_a_strangers_manuscript_is_not_found(seeded):
-    """Q2's ruling, enforced at the API: the full document is never
-    reachable for another instructor's manuscript, regardless of what the
-    UI does or doesn't render."""
-    client, ids = seeded
-    assert client.get(f"/library/{ids['theirs']}/document").status_code == 404
-    assert client.get(f"/library/{ids['theirs']}/document/file").status_code == 404
-    assert client.get(f"/library/{ids['theirs']}/document/paragraphs").status_code == 404
-
-
-def test_purged_manuscript_stays_visible_with_purged_state(seeded):
-    """AC5: a purged manuscript's record and its purged state both stay
-    visible -- the row must not vanish from the corpus-wide list."""
-    client, ids = seeded
-    purge = client.delete(f"/archive/{ids['mine']}")
-    assert purge.status_code == 200, purge.text
-
-    listing = client.get("/library")
-    by_id = {item["manuscript_id"]: item for item in listing.json()["items"]}
-    assert by_id[ids["mine"]]["purged_at"] is not None
-    assert listing.json()["total"] == 2  # still both rows, not one fewer
-
-    excerpt = client.get(f"/library/{ids['mine']}/excerpt")
-    assert excerpt.status_code == 200, excerpt.text
-    # BUG-123 defense-in-depth: purged content is never re-served here,
-    # even though the underlying ManuscriptPassageArchive row still exists
-    # (the bug this endpoint guards against, not fixes).
-    assert excerpt.json()["chapters"] == []
-    assert excerpt.json()["purged_at"] is not None
-
-
-def test_out_of_range_pagination_is_a_clean_422_not_a_bare_500(seeded):
-    """security-auditor (V-066 review): reproduced live as an unhandled
-    500 before this bound existed."""
-    client, _ = seeded
-    assert client.get("/library?page=0").status_code == 422
-    assert client.get("/library?page=-1").status_code == 422
-    assert client.get("/library?page_size=0").status_code == 422
-    assert client.get("/library?page_size=99999").status_code == 422
-
-
-def test_library_routes_require_auth(client):
-    assert client.get("/library").status_code == 401
-    assert client.get("/library/1").status_code == 401
-    assert client.get("/library/1/excerpt").status_code == 401
-    assert client.get("/library/1/document").status_code == 401
-
-
-# --- BUG-148: collapse the requester's own byte-identical re-uploads -----
-
-
-@pytest.fixture()
-def dup_seeded(client, api_scratch_url):
-    """A dedicated, leaner seed for the content_hash collapsing behavior --
-    no chapter/passage archives needed here, just manuscripts and their
-    hashes/purge state, across two instructors so cross-tenant isolation
-    has something real to differ against."""
-    import asyncio
-
-    from sqlalchemy import text
-    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
-
-    from app.db import sqlalchemy_url
-    from app.models.enums import CheckRunStatus, IngestStatus
-    from app.models.instructor import Instructor
-    from app.models.manuscript import Manuscript
-    from app.models.rubric import Rubric
-    from app.models.run import CheckRun
-
-    ids: dict[str, int] = {}
-
-    async def seed():
-        engine = create_async_engine(sqlalchemy_url(api_scratch_url))
-        try:
-            factory = async_sessionmaker(engine, expire_on_commit=False)
-            async with factory() as session:
-                await session.execute(
-                    text(
-                        "TRUNCATE check_run, rubric, manuscript_passage_archive, "
-                        "manuscript_chapter_archive, manuscript_archive, group_member, "
-                        "manuscript, manuscript_group, program, session, instructor "
-                        "RESTART IDENTITY CASCADE"
-                    )
-                )
-                owner = Instructor(
-                    email="dupowner@tip.edu.ph",
-                    display_name="Dup Owner",
-                    password_hash=hash_password("s3cret!"),
-                )
-                other = Instructor(
-                    email="dupother@tip.edu.ph",
-                    display_name="Dup Other",
-                    password_hash=hash_password("other!"),
-                )
-                session.add_all([owner, other])
-                await session.commit()
-
-                # owner: 3 uploads of the SAME bytes (hash-a), oldest to
-                # newest, plus 1 unrelated upload (hash-b, no duplicates).
-                oldest = Manuscript(
-                    instructor_id=owner.id,
-                    group_label="Group A",
-                    file_ref="",
-                    original_filename="draft-v1.pdf",
-                    content_hash="hash-a",
-                    ingest_status=IngestStatus.done,
-                )
-                middle_purged = Manuscript(
-                    instructor_id=owner.id,
-                    group_label="Group A",
-                    file_ref="",
-                    original_filename="draft-v1-copy.pdf",
-                    content_hash="hash-a",
-                    ingest_status=IngestStatus.done,
-                )
-                newest = Manuscript(
-                    instructor_id=owner.id,
-                    group_label="Group A",
-                    file_ref="",
-                    original_filename="draft-v1-final.pdf",
-                    content_hash="hash-a",
-                    ingest_status=IngestStatus.done,
-                )
-                unrelated = Manuscript(
-                    instructor_id=owner.id,
-                    group_label="Group B",
-                    file_ref="",
-                    original_filename="unrelated.pdf",
-                    content_hash="hash-b",
-                    ingest_status=IngestStatus.done,
-                )
-                other_same_bytes = Manuscript(
-                    instructor_id=other.id,
-                    group_label="Other's Group",
-                    file_ref="",
-                    original_filename="coincidence.pdf",
-                    content_hash="hash-a",  # same bytes as owner's, different account
-                    ingest_status=IngestStatus.done,
-                )
-                session.add_all([oldest, middle_purged, newest, unrelated, other_same_bytes])
-                await session.commit()
-                # Distinct, explicit created_at (all three would otherwise
-                # tie, created in the same transaction) so "newest"/"oldest"
-                # are real, not incidental id order -- and middle_purged is
-                # marked purged directly, rather than routed through the
-                # real DELETE /archive endpoint, since this fixture only
-                # needs the resulting DB state, not the purge flow itself
-                # (already covered by test_purged_manuscript_stays_visible).
-                now = middle_purged.created_at
-                oldest.created_at = now.replace(year=now.year - 1)
-                middle_purged.created_at = now.replace(year=now.year - 1, month=6)
-                middle_purged.purged_at = now
-                await session.commit()
-
-                # One completed check run, on the REPRESENTATIVE ("newest")
-                # only -- proves `latest_done_check_run_id` reaches the
-                # representative row itself, not just a hidden sibling
-                # (`ux-critic` finding, BUG-148 review).
-                rubric = Rubric(instructor_id=owner.id, title="Format", source_file="r.pdf")
-                session.add(rubric)
-                await session.commit()
-                done_run = CheckRun(
-                    manuscript_id=newest.id, rubric_id=rubric.id, status=CheckRunStatus.done
-                )
-                session.add(done_run)
-                await session.commit()
-                ids["done_run"] = done_run.id
-
-                ids["oldest"] = oldest.id
-                ids["middle_purged"] = middle_purged.id
-                ids["newest"] = newest.id
-                ids["unrelated"] = unrelated.id
-                ids["other_same_bytes"] = other_same_bytes.id
-        finally:
-            await engine.dispose()
-
-    asyncio.run(seed())
-    client.post("/auth/login", json={"email": "dupowner@tip.edu.ph", "password": "s3cret!"})
-    return client, ids
-
-
-def test_collapses_byte_identical_reuploads_into_one_representative_row(dup_seeded):
-    client, ids = dup_seeded
-    resp = client.get("/library")
-    assert resp.status_code == 200, resp.text
-    body = resp.json()
-    manuscript_ids = {item["manuscript_id"] for item in body["items"]}
-    # 3 duplicate-hash rows collapse to 1 (the newest), plus the unrelated
-    # hash-b row and the OTHER instructor's own coincidental hash-a row
-    # (never collapsed with owner's, see the isolation test below) -- 3
-    # rows total, not 5.
-    assert body["total"] == 3
-    assert manuscript_ids == {ids["newest"], ids["unrelated"], ids["other_same_bytes"]}
-    assert ids["oldest"] not in manuscript_ids
-    assert ids["middle_purged"] not in manuscript_ids
-
-    representative = next(item for item in body["items"] if item["manuscript_id"] == ids["newest"])
-    assert representative["original_filename"] == "draft-v1-final.pdf"
-    dup_ids = {dup["manuscript_id"] for dup in representative["duplicate_uploads"]}
-    assert dup_ids == {ids["oldest"], ids["middle_purged"]}
-    # The representative's own id never appears among its own duplicates.
-    assert ids["newest"] not in dup_ids
-
-    unrelated_item = next(
-        item for item in body["items"] if item["manuscript_id"] == ids["unrelated"]
+def test_a_dashboard_upload_is_not_added_to_the_library(client):
+    _login(client, OWNER)
+    ingested = client.post(
+        "/manuscripts/ingest",
+        files={"file": ("native.pdf", _pdf(), "application/octet-stream")},
     )
-    assert unrelated_item["duplicate_uploads"] is None
+    assert ingested.status_code == 200, ingested.text
+    manuscript_id = ingested.json()["manuscript_id"]
+
+    assert client.get("/library").json()["total"] == 0
+    assert client.get(f"/library/{manuscript_id}").status_code == 404
+    assert client.get(f"/library/{manuscript_id}/excerpt").status_code == 404
+    assert client.get(f"/library/{manuscript_id}/document").status_code == 404
+    # Control for the vision assertion above: the dashboard path does read
+    # images, so an empty recorder there is meaningful, not vacuous.
+    assert VISION_CALLS, "the dashboard upload should have run the vision pass"
 
 
-def test_all_purged_duplicate_group_falls_back_to_most_recent_overall(dup_seeded):
-    """Representative-selection rule: not-yet-purged wins first: if the
-    group's actual newest upload gets purged, an OLDER still-stored copy
-    becomes representative rather than surfacing a purged, unopenable row
-    as the group's face."""
-    client, ids = dup_seeded
-    purge = client.delete(f"/archive/{ids['newest']}")
-    assert purge.status_code == 200, purge.text
-
-    resp = client.get("/library")
-    body = resp.json()
-    manuscript_ids = {item["manuscript_id"] for item in body["items"]}
-    # middle_purged was ALREADY purged in the seed; oldest is the only
-    # still-stored instance left, so it becomes representative.
-    assert ids["oldest"] in manuscript_ids
-    assert ids["newest"] not in manuscript_ids
-    assert ids["middle_purged"] not in manuscript_ids
-
-    representative = next(item for item in body["items"] if item["manuscript_id"] == ids["oldest"])
-    dup_ids = {dup["manuscript_id"] for dup in representative["duplicate_uploads"]}
-    assert dup_ids == {ids["newest"], ids["middle_purged"]}
+# --- V-077 review fixes (security-auditor / backend-critic / ux-critic, 2026-10-13) ---
 
 
-def test_content_hash_collapsing_never_applies_across_instructors(dup_seeded):
-    """BUG-140's own same-instructor scoping, preserved here: two different
-    accounts uploading byte-identical files must never merge into one
-    entry, and neither account's response may even hint that the other
-    uploaded the same bytes."""
-    client, ids = dup_seeded
-    resp = client.get("/library")
-    body = resp.json()
-    by_id = {item["manuscript_id"]: item for item in body["items"]}
-    assert ids["other_same_bytes"] in by_id
-    other_item = by_id[ids["other_same_bytes"]]
-    assert other_item["is_own"] is False
-    assert other_item["duplicate_uploads"] is None
-    # The owner's own representative row's duplicates never include the
-    # other instructor's manuscript id.
-    representative = by_id[ids["newest"]]
-    dup_ids = {dup["manuscript_id"] for dup in representative["duplicate_uploads"]}
-    assert ids["other_same_bytes"] not in dup_ids
+def _set_created_at_seconds_ago(url: str, manuscript_id: int, seconds: int) -> None:
+    _fetchval(
+        url,
+        "UPDATE library_entry SET created_at = now() - make_interval(secs => $2)"
+        " WHERE manuscript_id = $1 RETURNING id",
+        manuscript_id,
+        seconds,
+    )
 
 
-def test_total_count_reflects_the_collapsed_row_count_not_raw_manuscripts(dup_seeded):
-    """Ground rule 8: a `total`/pagination count that still reflects the
-    pre-collapse row count while fewer cards actually render is a number
-    that lies, even though it isn't a percentage."""
-    client, ids = dup_seeded
-    resp = client.get("/library?page_size=1")
-    body = resp.json()
-    assert body["total"] == 3
-    assert len(body["items"]) == 1
+def _make_processing_entry(url: str, owner_email: str, content: bytes) -> int:
+    """A processing entry as a still-running (or crashed) request leaves it."""
+    import hashlib
+
+    return _fetchval(
+        url,
+        "WITH m AS ("
+        " INSERT INTO manuscript (instructor_id, file_ref, group_label, origin, content_hash)"
+        " SELECT id, '', 'Ungrouped', 'library_submission', $2 FROM instructor WHERE email = $1"
+        " RETURNING id)"
+        " INSERT INTO library_entry (manuscript_id, source, status)"
+        " SELECT id, 'library_submission', 'processing' FROM m RETURNING manuscript_id",
+        owner_email,
+        hashlib.sha256(content).hexdigest(),
+    )
 
 
-def test_representative_row_carries_its_own_latest_done_check_run_id(dup_seeded):
-    """`ux-critic` finding (BUG-148 review): a hidden duplicate-group
-    sibling could link straight to its own completed report while the far
-    more visible representative row could not -- confirms the fix reaches
-    BOTH the list endpoint and the single-item detail endpoint, which
-    share `_item_out` but populate this field via separate code paths."""
-    client, ids = dup_seeded
-    resp = client.get("/library")
-    by_id = {item["manuscript_id"]: item for item in resp.json()["items"]}
-    assert by_id[ids["newest"]]["latest_done_check_run_id"] == ids["done_run"]
-    # The unrelated (no-duplicate) row has never been checked.
-    assert by_id[ids["unrelated"]]["latest_done_check_run_id"] is None
-    # Another instructor's row never discloses this fact either way.
-    assert by_id[ids["other_same_bytes"]]["latest_done_check_run_id"] is None
+def test_a_live_upload_cannot_be_removed_but_a_stalled_one_can(client, api_scratch_url):
+    """Removing during reading used to be undone by the reading request
+    (resurrecting the text as an active comparison source)."""
+    _login(client, OWNER)
+    manuscript_id = _make_processing_entry(api_scratch_url, OWNER[0], b"still being read")
 
-    detail = client.get(f"/library/{ids['newest']}")
-    assert detail.json()["latest_done_check_run_id"] == ids["done_run"]
+    r = client.post(f"/library/{manuscript_id}/remove")
+    assert r.status_code == 409, r.text
+    assert "still reading" in r.json()["error"]["message"]
+
+    _set_created_at_seconds_ago(api_scratch_url, manuscript_id, 3600)
+    item = client.get(f"/library/{manuscript_id}").json()
+    assert item["stalled"] is True
+    assert client.post(f"/library/{manuscript_id}/remove").status_code == 200
 
 
-@pytest.fixture()
-def tied_timestamps_seeded(client, api_scratch_url):
-    """`backend-critic` finding (BUG-148 review), live-reproduced against
-    real Postgres: `created_at`'s `server_default=func.now()` returns the
-    IDENTICAL value for every row inserted in the same transaction -- a
-    real, common case for this corpus-wide endpoint (bulk seeding, or
-    simply two uploads landing in the same second), not a contrived one.
-    Without a tie-break, `ORDER BY created_at DESC` + OFFSET/LIMIT is not
-    guaranteed stable across pages: the same row can repeat on multiple
-    pages while another never appears at all. 5 manuscripts, same account,
-    all committed in ONE transaction so their `created_at` genuinely ties."""
-    import asyncio
+def test_a_stalled_upload_never_blocks_re_adding_the_file(client, api_scratch_url):
+    _login(client, OWNER)
+    manuscript_id = _make_processing_entry(api_scratch_url, OWNER[0], _pdf())
+    assert _submit(client, _pdf(), "native.pdf")["outcome"] == "exact_duplicate"
 
-    from sqlalchemy import text
-    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
-
-    from app.db import sqlalchemy_url
-    from app.models.enums import IngestStatus
-    from app.models.instructor import Instructor
-    from app.models.manuscript import Manuscript
-
-    ids: list[int] = []
-
-    async def seed():
-        engine = create_async_engine(sqlalchemy_url(api_scratch_url))
-        try:
-            factory = async_sessionmaker(engine, expire_on_commit=False)
-            async with factory() as session:
-                await session.execute(
-                    text(
-                        "TRUNCATE check_run, rubric, manuscript_passage_archive, "
-                        "manuscript_chapter_archive, manuscript_archive, group_member, "
-                        "manuscript, manuscript_group, program, session, instructor "
-                        "RESTART IDENTITY CASCADE"
-                    )
-                )
-                owner = Instructor(
-                    email="tiedowner@tip.edu.ph",
-                    display_name="Tied Owner",
-                    password_hash=hash_password("s3cret!"),
-                )
-                session.add(owner)
-                await session.commit()
-
-                manuscripts = [
-                    Manuscript(
-                        instructor_id=owner.id,
-                        group_label=f"Group {i}",
-                        file_ref="",
-                        original_filename=f"paper-{i}.pdf",
-                        ingest_status=IngestStatus.done,
-                    )
-                    for i in range(5)
-                ]
-                session.add_all(manuscripts)
-                # ONE commit for all 5 -- this is what makes `created_at`
-                # genuinely tie under Postgres's real `now()` semantics,
-                # not a manually-forced equal timestamp.
-                await session.commit()
-                ids.extend(m.id for m in manuscripts)
-        finally:
-            await engine.dispose()
-
-    asyncio.run(seed())
-    client.post("/auth/login", json={"email": "tiedowner@tip.edu.ph", "password": "s3cret!"})
-    return client, ids
+    _set_created_at_seconds_ago(api_scratch_url, manuscript_id, 3600)
+    assert _submit(client, _pdf(), "native.pdf")["outcome"] == "added"
 
 
-def test_pagination_is_stable_when_created_at_ties(tied_timestamps_seeded):
-    """Walk the whole listing one row per page and confirm every real id
-    appears EXACTLY once across the walk -- not zero times (silently
-    unreachable) and not more than once (a page boundary re-showing a row
-    already seen), which is exactly what an unstable sort produces."""
-    client, ids = tied_timestamps_seeded
-    seen: list[int] = []
-    page = 1
-    while True:
-        resp = client.get(f"/library?page_size=1&page={page}")
-        assert resp.status_code == 200, resp.text
-        body = resp.json()
-        if not body["items"]:
-            break
-        seen.append(body["items"][0]["manuscript_id"])
-        if page >= body["total"]:
-            break
-        page += 1
-    assert sorted(seen) == sorted(ids)
-    assert len(seen) == len(set(seen)), f"a row repeated across pages: {seen}"
+def test_a_non_document_is_rejected_before_anything_is_stored(client, api_scratch_url):
+    _login(client, OWNER)
+    body = _submit(client, b"just some notes, not a manuscript", "notes.txt")
+
+    assert body["outcome"] == "failed"
+    assert body["item"] is None
+    assert _fetchval(api_scratch_url, "SELECT count(*) FROM manuscript") == 0
+    uploads = get_settings().data_dir / "uploads"
+    assert not uploads.exists() or not any(uploads.iterdir())
+
+
+def test_re_sending_an_unreadable_file_stores_nothing_new(client, api_scratch_url):
+    _login(client, OWNER)
+    scan = (FIXTURES / "scan_imageonly.pdf").read_bytes()
+    first = _submit(client, scan, "scan.pdf")
+    second = _submit(client, scan, "scan-again.pdf")
+
+    assert first["outcome"] == second["outcome"] == "failed"
+    assert second["item"]["manuscript_id"] == first["item"]["manuscript_id"]
+    assert "could not read this exact file before" in second["message"]
+    assert _fetchval(api_scratch_url, "SELECT count(*) FROM manuscript") == 1
+
+
+def test_a_pending_copy_is_never_called_in_the_library(client):
+    """ux-critic P1-1: a file waiting for a duplicate decision was reported as
+    "Already in your Library" while the Library said it was not."""
+    _login(client, OWNER)
+    _submit(client, _pdf(), "native.pdf")
+    waiting = _submit(client, _same_text_other_bytes(), "reexport.pdf")
+    assert waiting["outcome"] == "possible_duplicate"
+
+    again = _submit(client, _same_text_other_bytes(), "reexport.pdf")
+    assert again["outcome"] == "exact_duplicate"
+    assert again["duplicate_of"]["manuscript_id"] == waiting["item"]["manuscript_id"]
+    assert "waiting for a duplicate decision" in again["message"]
+    assert "already in your Library" not in again["message"]
+
+
+def test_a_storage_failure_leaves_no_rows_behind(client, api_scratch_url, monkeypatch):
+    import app.library.service as library_service
+
+    class BrokenStorage:
+        def put_file(self, *args, **kwargs):
+            raise OSError("durable storage unavailable")
+
+    _login(client, OWNER)
+    monkeypatch.setattr(library_service, "get_storage", lambda settings: BrokenStorage())
+    body = _submit(client, _pdf(), "native.pdf")
+    assert body["outcome"] == "failed"
+    assert "could not store this file" in body["message"]
+    assert _fetchval(api_scratch_url, "SELECT count(*) FROM manuscript") == 0
+
+    monkeypatch.undo()
+    assert _submit(client, _pdf(), "native.pdf")["outcome"] == "added"
+
+
+def test_a_record_number_is_searchable_but_names_stay_own_only(client):
+    _login(client, OWNER)
+    manuscript_id = _submit(client, _pdf(), "native.pdf", title="A Searchable Capstone")["item"][
+        "manuscript_id"
+    ]
+
+    _login(client, STRANGER)
+    by_number = client.get("/library", params={"search": f"#{manuscript_id}"}).json()
+    assert [i["manuscript_id"] for i in by_number["items"]] == [manuscript_id]
+    assert by_number["items"][0]["title"] is None
+    assert client.get("/library", params={"search": "Searchable"}).json()["total"] == 0

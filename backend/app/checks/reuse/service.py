@@ -2,15 +2,16 @@
 V-037's similarity query, into one `check_result` + real `Flag` rows —
 same shape as `app.checks.forensics.service.run_statistical_forensics_check`.
 
-**Write-back happens AFTER the check completes and the flags are
-persisted** (ticket AC, F7.3) — `query_similar_manuscripts` runs first
-against whatever is already in the archive, and only once that result is
-committed does this manuscript's own embedding get written in, so a
-re-run of the SAME check_run (idempotency, ENGINEERING §4) never
-compares this manuscript against itself.
+**V-077 (D-028): this module never writes the checked manuscript into the
+corpus.** The F7 embedding tables hold only active Library entries
+(`app.library.service` owns entering and leaving), so this module only reads
+them. Since D-028 a dashboard check adds no comparison source, and a re-run or
+cancelled run cannot add or orphan corpus rows; manuscripts checked before
+D-028 were carried into the Library as legacy entries (migration 0037).
 """
 
 import asyncio
+import dataclasses
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -21,14 +22,14 @@ from app.checks.reuse.query import (
     PassageMatch,
     SimilarityMatch,
     best_supporting_passage,
+    canonical_library_copies,
+    comparison_exclusions,
     is_first_upload_for_instructor,
     query_similar_manuscripts,
     query_similar_passages,
     same_instructor_hash_duplicate,
 )
-from app.checks.reuse.store import store_document_embeddings, store_passage_embeddings
 from app.config import Settings
-from app.db import advisory_lock
 from app.ingest.schemas import ExtractionResult
 from app.models.enums import CheckKind, FlagSeverity, ResultOutcome
 from app.models.run import CheckResult, Flag
@@ -49,24 +50,20 @@ from app.models.run import CheckResult, Flag
 # reads only `verdict`/`basis` off `detail`).
 EXACT_DUPLICATE_WHOLE_DOC_WORDING = (
     "This manuscript appears to be an exact or near-exact textual duplicate of "
-    "archived manuscript #{ref} in VERIDICAL's shared originality library: "
-    "possible resubmission or reuse. Please verify manually."
+    "Library record #{ref}: possible resubmission or reuse. Please verify manually."
 )
 HIGH_SIMILARITY_WHOLE_DOC_WORDING = (
-    "This manuscript shows high textual similarity to archived manuscript "
-    "#{ref} in VERIDICAL's shared originality library: possible shared content "
-    "or reuse. Please verify manually."
+    "This manuscript shows high textual similarity to Library record #{ref}: "
+    "possible shared content or reuse. Please verify manually."
 )
 EXACT_DUPLICATE_CHAPTER_WORDING = (
     'The section "{own_chapter}" appears to be an exact or near-exact textual '
-    "duplicate of a section in archived manuscript #{ref} in VERIDICAL's "
-    "shared originality library: possible resubmission or reuse of that section. "
-    "Please verify manually."
+    "duplicate of a section in Library record #{ref}: possible resubmission or "
+    "reuse of that section. Please verify manually."
 )
 HIGH_SIMILARITY_CHAPTER_WORDING = (
     'The section "{own_chapter}" shows high textual similarity to a section '
-    "in archived manuscript #{ref} in VERIDICAL's shared originality library: "
-    "possible reuse of that section. Please verify manually."
+    "in Library record #{ref}: possible reuse of that section. Please verify manually."
 )
 
 # F7.4 (V-072) passage-level wording. Deliberately different SHAPE from the
@@ -86,13 +83,12 @@ HIGH_SIMILARITY_CHAPTER_WORDING = (
 # resolve to a coarse `section`/`whole_document` region.
 EXACT_DUPLICATE_PASSAGE_WORDING = (
     "This passage appears to be an exact or near-exact textual duplicate of a "
-    "passage in archived manuscript #{ref} in VERIDICAL's shared originality "
-    "library: possible resubmission or reuse of this passage. Please verify manually."
+    "passage in Library record #{ref}: possible resubmission or reuse of this "
+    "passage. Please verify manually."
 )
 HIGH_SIMILARITY_PASSAGE_WORDING = (
-    "This passage shows high textual similarity to a passage in archived "
-    "manuscript #{ref} in VERIDICAL's shared originality library: possible reuse "
-    "of this passage. Please verify manually."
+    "This passage shows high textual similarity to a passage in Library record "
+    "#{ref}: possible reuse of this passage. Please verify manually."
 )
 
 # BUG-140 (owner ruling, 2026-09-03): a whole-document exact duplicate
@@ -105,9 +101,9 @@ HIGH_SIMILARITY_PASSAGE_WORDING = (
 # "possible reuse" -- this is not the same finding softened, it names a
 # different, non-accusatory situation (charter ground rule 3).
 SAME_INSTRUCTOR_RESUBMISSION_WORDING = (
-    "This manuscript appears to be the same document as your own earlier upload, "
-    "archived manuscript #{ref}. This is most likely a resubmission or revision, "
-    "not reuse. Please confirm this is intentional."
+    "This manuscript appears to be the same document as Library record #{ref}, "
+    "which is in your own Library records. This is most likely a resubmission "
+    "or revision, not reuse. Please confirm this is intentional."
 )
 
 # BUG-097 (presentation-only remedy, owner ruling 2026-08-24): drives
@@ -283,6 +279,17 @@ def _passage_match_to_flag_draft(
     return severity, match.own_text, page_anchor, detail
 
 
+def _remap(match, remapped: dict[int, tuple[int, int]]):
+    """Point a match at its canonical Library copy (`canonical_library_copies`)."""
+    target = remapped.get(match.matched_manuscript_id)
+    if target is None:
+        return match
+    canonical_id, canonical_owner = target
+    return dataclasses.replace(
+        match, matched_manuscript_id=canonical_id, matched_instructor_id=canonical_owner
+    )
+
+
 async def run_originality_reuse_check(
     session: AsyncSession,
     manuscript_id: int,
@@ -333,6 +340,10 @@ async def run_originality_reuse_check(
                 # entry, and cold-start disclosure exists precisely to be
                 # honest about what was actually compared against.
                 "archive_size_n": 1 if has_resubmission else 0,
+                "corpus": "library",
+                # V-077 (backend-critic): no text means no comparison ran; the
+                # zero above must never read as "the Library was empty".
+                "comparison_ran": False,
                 "n_flags": 1 if has_resubmission else 0,
                 "note": "No embeddable content was extracted from this manuscript.",
             },
@@ -386,6 +397,24 @@ async def run_originality_reuse_check(
         None, compute_passage_embeddings, extraction, settings
     )
     passage_query_result = await query_similar_passages(session, manuscript_id, passages, settings)
+    # V-077: byte-identical Library copies (two instructors adding the same
+    # file) are reported against ONE representative, so a single source can
+    # never read as two. Remaps only ids that already matched.
+    remapped = await canonical_library_copies(
+        session,
+        {m.matched_manuscript_id for m in query_result.matches}
+        | {p.matched_manuscript_id for p in passage_query_result.matches},
+        instructor_id,
+        exclude_manuscript_ids=await comparison_exclusions(session, manuscript_id),
+    )
+    if remapped:
+        query_result = dataclasses.replace(
+            query_result, matches=[_remap(m, remapped) for m in query_result.matches]
+        )
+        passage_query_result = dataclasses.replace(
+            passage_query_result,
+            matches=[_remap(p, remapped) for p in passage_query_result.matches],
+        )
     # BUG-097 (presentation-only remedy): computed once, applied to every
     # match this run produces — see `is_first_upload_for_instructor`'s own
     # docstring for why this changes wording/context only, never severity.
@@ -429,23 +458,6 @@ async def run_originality_reuse_check(
         + (1 if resubmission_source_id is not None else 0)
     )
 
-    # BUG-180 (`backend-critic` finding): `store_passage_embeddings` below
-    # truncates what gets WRITTEN into the shared corpus for FUTURE
-    # manuscripts to be compared against -- it does NOT affect the query
-    # two lines above (`passage_query_result`), which already ran against
-    # every one of THIS manuscript's own passages, untruncated, so this
-    # run's own flags are never degraded by the cap. What silently went
-    # unrecorded before this fix: whether THIS manuscript's later passages
-    # (beyond the cap) will ever be discoverable by a LATER manuscript's
-    # reuse check. Recorded here, in the audit trail (judgment rule 4,
-    # traceability) -- a truncation with no trace anywhere is the same
-    # failure class BUG-096 already fixed once (a partial result rendered
-    # indistinguishable from a complete one).
-    passages_archived = (
-        min(len(passages), settings.reuse_max_passages_per_manuscript)
-        if resubmission_source_id is None
-        else 0
-    )
     result = CheckResult(
         check_run_id=check_run_id,
         criterion_id=None,
@@ -453,11 +465,13 @@ async def run_originality_reuse_check(
         outcome=ResultOutcome.passed,
         detail={
             "archive_size_n": query_result.archive_size_n,
+            # V-077: what this count measured. Results written before D-028
+            # have no "corpus" key; they counted the pre-Library archive.
+            "corpus": "library",
             "passage_archive_size_n": passage_query_result.passage_archive_size_n,
             "n_flags": n_flags,
             "first_upload_context": first_upload,
             "passages_found": len(passages),
-            "passages_archived": passages_archived,
         },
     )
     session.add(result)
@@ -575,51 +589,6 @@ async def run_originality_reuse_check(
     )
     await session.commit()
 
-    # Write-back AFTER the check + its flags are committed (ticket AC,
-    # F7.3) — never match against self. Passage write-back follows the
-    # same ordering for the same reason.
-    #
-    # BUG-140: SKIPPED for a recognized same-instructor resubmission -- the
-    # ticket's own fix item 1 ("a byte-identical re-upload ... must never
-    # become an independent archive entry that later reads as a rival
-    # submission") means archiving it AGAIN is exactly the mistake, not
-    # just the flags it produces. Two compounding reasons this matters
-    # beyond tidiness: (1) every prior fix attempt that only suppressed
-    # flags left the archive growing unboundedly with each resubmission,
-    # so the instructor's OWN duplicate pile keeps getting bigger forever;
-    # (2) `_best_chapter_matches`/`_best_passage_match_for` each run an
-    # independent top-1 HNSW query with no similarity tiebreak
-    # (`backend-critic` finding, BUG-140 review) -- with MULTIPLE
-    # byte-identical same-instructor archive entries (production's own
-    # unrecovered pre-fix pollution, ticket item 4), a chapter/passage
-    # sub-query could resolve its tie to a DIFFERENT sibling id than the
-    # one whole-document match picked as `resubmission_source_id`, letting
-    # that one flag slip past the suppression above. Never writing a NEW
-    # duplicate keeps that risk from growing past today's fixed, already-
-    # disclosed legacy set instead of compounding with every future
-    # resubmission.
-    if resubmission_source_id is None:
-        # BUG-178 (`backend-critic` finding): a cancelled check_run's own
-        # withdrawal logic (`archive.service.withdraw_manuscript_if_
-        # orphaned`) or an instructor's own purge (`archive.service.
-        # purge_manuscript`) can run CONCURRENTLY with this write-back for
-        # the SAME manuscript_id, from a genuinely different worker/
-        # session/request -- READ COMMITTED gives no protection, and
-        # nothing ties an archive row back to the check_run that wrote it,
-        # so either racing this write could silently destroy or resurrect
-        # data with no way to detect or recover it. `app.db.advisory_lock`
-        # (see its own docstring for why this is a DEDICATED connection,
-        # not a lock taken directly on `session` -- the first version of
-        # this fix broke under real connection-pool contention, since the
-        # two store calls below each commit their own transaction
-        # internally and an ORM session's physical connection isn't stable
-        # across commits), same key both of those paths take -- whichever
-        # side gets there first fully completes before the next proceeds.
-        async with advisory_lock(session, manuscript_id):
-            await store_document_embeddings(session, manuscript_id, embeddings)
-            if passages:
-                await store_passage_embeddings(session, manuscript_id, passages, settings)
-
     return result
 
 
@@ -627,7 +596,7 @@ async def existing_originality_reuse_result(
     session: AsyncSession, check_run_id: int
 ) -> CheckResult | None:
     """Idempotency guard (ENGINEERING §4) — a resumed run must not
-    re-query-and-reflag (or double-write-back) work it already did."""
+    re-query-and-reflag work it already did."""
     return await session.scalar(
         select(CheckResult).where(
             CheckResult.check_run_id == check_run_id,

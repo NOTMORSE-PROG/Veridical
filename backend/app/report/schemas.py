@@ -119,6 +119,22 @@ class IntegrityCheckStatusOut(BaseModel):
     n_skipped_parse_failure: int
 
 
+class OriginalityScopeOut(BaseModel):
+    """V-077 (D-028): what the originality check compared against, shown on
+    screen so an empty result over an empty Library can never read as
+    evidence of originality. `compared_count` is the check's own recorded
+    count (`archive_size_n`), None when it was not recorded. `corpus` is
+    "library" for checks run since D-028 and "pre_library" for older ones,
+    which counted the former automatic archive instead. A count, not a
+    judgment (charter ground rule 8 applies to judgments only)."""
+
+    compared_count: int | None
+    corpus: Literal["library", "pre_library"]
+    # "no_text": the checked manuscript had no readable text, so no
+    # comparison ran at all (distinct from an empty Library).
+    not_compared_reason: Literal["no_text"] | None = None
+
+
 class ReportOut(BaseModel):
     check_run_id: int
     # BUG-128: instructor-only (never added to `PublicReportOut` below,
@@ -188,6 +204,9 @@ class ReportOut(BaseModel):
     # V-069 AC2/AC3: `None` whenever no criterion in this rubric is
     # levelled — a pass/fail rubric's report gains no new visible field.
     levelled_rating: LevelledRatingOut | None = None
+    # V-077: None when this run has no originality result (skipped, failed,
+    # or still running); CoverageStatement owns those states.
+    originality_scope: OriginalityScopeOut | None = None
 
 
 class PublicCriterionResultOut(BaseModel):
@@ -267,6 +286,10 @@ class PublicReportOut(BaseModel):
     rubric_needs_review: bool = False
     rubric_parse_issues: list[str] | None = None
     levelled_rating: LevelledRatingOut | None = None
+    # V-077: published deliberately (unlike `integrity_check_status`): it
+    # identifies no one, and without it an adviser could read "no reuse
+    # found" over an empty Library as a clean result.
+    originality_scope: OriginalityScopeOut | None = None
 
 
 class DecisionIn(BaseModel):

@@ -84,6 +84,11 @@ class FlagOut(BaseModel):
     is_passage_level: bool = False
     # V-072 (F7.4): present only for a passage-level reuse flag.
     passage_pair: PassagePairOut | None = None
+    # V-077: the matched Library record's number for an F7 finding (the same
+    # opaque reference already shown in the finding text and on the report's
+    # `FlagSummaryOut.matched_ref`), so the instructor can open the record and
+    # verify instead of only agreeing. None for every other check.
+    matched_ref: int | None = None
     # BUG-097 (presentation-only remedy, owner ruling 2026-08-24): True only
     # for an F7 originality/reuse flag produced on the account's first-ever
     # manuscript upload — never changes `severity` (see

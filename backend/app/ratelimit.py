@@ -11,11 +11,19 @@ from app.errors import RateLimitedError
 _limiters: dict[str, LoginRateLimiter] = {}
 
 
+def _max_attempts_for(settings: Settings, scope: str) -> int:
+    """V-077: a scope may carry its own budget; every other scope shares the
+    D-020 default."""
+    if scope == "library_submission":
+        return settings.library_submission_rate_limit_max_attempts
+    return settings.action_rate_limit_max_attempts
+
+
 def _get_limiter(settings: Settings, scope: str) -> LoginRateLimiter:
     limiter = _limiters.get(scope)
     if limiter is None:
         limiter = LoginRateLimiter(
-            max_attempts=settings.action_rate_limit_max_attempts,
+            max_attempts=_max_attempts_for(settings, scope),
             window_seconds=settings.action_rate_limit_window_seconds,
         )
         _limiters[scope] = limiter

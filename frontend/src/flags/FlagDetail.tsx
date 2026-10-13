@@ -91,11 +91,16 @@ function EvidenceSection({
           tone={isResubmission ? "info" : "warning"}
         >
           {isResubmission
-            ? "This finding compares the manuscript as a whole against your own earlier upload, so there is no specific passage to compare side by side. Open the manuscript location below to check it yourself."
+            ? "This finding compares the manuscript as a whole against your own Library record named above, so there is no specific passage to compare side by side. Open that record and the manuscript location below to check it yourself."
             : flag.evidence_unavailable
-              ? "VERIDICAL looked for a specific passage that matches the archived manuscript named above and did not find one close enough to show side by side. This finding's severity was lowered because no matching passage could be shown. Open the manuscript location below to check it yourself."
-              : "VERIDICAL looked for a specific passage that matches the archived manuscript named above and did not find one close enough to show side by side. Open the manuscript location below to check it yourself."}
+              ? "VERIDICAL looked for a specific passage that matches the Library record named above and did not find one close enough to show side by side. This finding's severity was lowered because no matching passage could be shown. Open the manuscript location below to check it yourself."
+              : "VERIDICAL looked for a specific passage that matches the Library record named above and did not find one close enough to show side by side. Open the manuscript location below to check it yourself."}
         </Alert>
+      )}
+      {flag.matched_ref != null && (
+        <ActionLink to={`/library/${flag.matched_ref}`} variant="secondary">
+          Open Library record #{flag.matched_ref}
+        </ActionLink>
       )}
       <ActionLink
         id={sourceLinkId}
@@ -328,7 +333,7 @@ export function FlagDetailPage() {
         <>
           <p aria-live="polite" className="signal-live-region">{announcement}</p>
           <ModeDisclosure mode={flag.llm_mode} />
-          {flag.first_upload_context && <Alert title="Limited first-upload comparison context" tone="info">This signal was created before this account had a deeper comparison archive. The severity was not changed by that limitation.</Alert>}
+          {flag.first_upload_context && <Alert title="Limited first-upload comparison context" tone="info">This signal was created while there were few manuscripts to compare against. The severity was not changed by that limitation.</Alert>}
 
           <section className="signal-evidence-hero" aria-labelledby="finding-heading">
             <div className="signal-evidence-hero__meta"><span>{meta?.eyebrow ?? humanize(flag.check_kind)}</span><span>Signal #{flag.id}</span></div>

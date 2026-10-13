@@ -570,6 +570,10 @@ def test_shared_report_public_schema_is_an_exact_allow_list(
         # view gets, and `None` for the common (non-levelled) case this
         # fixture actually seeds.
         "levelled_rating",
+        # V-077: deliberately published -- a count, not an identity, and
+        # without it an adviser could read "no reuse found" over an empty
+        # Library as a clean result.
+        "originality_scope",
     }
     assert set(shared["report"]["results"][0].keys()) == {
         "criterion_id",

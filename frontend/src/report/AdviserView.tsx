@@ -74,7 +74,7 @@ export function AdviserViewPage() {
         {report.llm_mode !== "real" && <Alert title={report.llm_mode === "fake" ? "Test-mode AI results" : "AI mode could not be verified"} tone="warning">{report.llm_mode === "fake" ? "Fixture responses produced this report. Do not treat AI-derived content as findings about the manuscript." : "This run predates reliable AI-mode tracking. Treat AI-derived outcomes cautiously."}</Alert>}
         {report.rubric_needs_review && <Alert title="The required format had parser uncertainty" tone="warning"><p>The instructor activated it despite the warning.</p>{report.rubric_parse_issues?.length ? <ul>{report.rubric_parse_issues.map((issue) => <li key={issue}>{issue}</li>)}</ul> : null}</Alert>}
 
-        <SignalPublicFlags flags={flags} />
+        <SignalPublicFlags flags={flags} originalityScope={report.originality_scope} />
         <SignalCriteriaResults results={report.results} checkRunId={report.check_run_id} publicView />
 
         <section className="signal-shared-decision" aria-labelledby="shared-decision-heading"><div><p className="signal-section-kicker">Instructor authority</p><h2 id="shared-decision-heading">Final decision</h2></div>{report.decision ? <><span className={`signal-decision signal-decision--${report.decision}`}>{DECISION_LABEL[report.decision]}</span><p>Recorded by the instructor. VERIDICAL did not make this decision.</p>{report.decision_note && <blockquote><strong>Decision note</strong><span>{report.decision_note}</span></blockquote>}</> : <Alert title="No final instructor decision has been recorded" tone="info">The readiness band above is an aid for review, not an approval or block.</Alert>}</section>

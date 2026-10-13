@@ -6,6 +6,7 @@ an instructor resolves an escalation).
 """
 
 import asyncio
+import dataclasses
 from datetime import UTC, datetime
 from decimal import Decimal
 from pathlib import Path
@@ -24,13 +25,17 @@ from app.checks.escalation import (
     list_escalated,
     resolve_escalation,
 )
-from app.checks.reuse.embed import PassageEmbedding, split_context
-from app.checks.reuse.query import query_similar_passages
+from app.checks.reuse.embed import PassageEmbedding, compute_passage_embeddings, split_context
+from app.checks.reuse.query import (
+    canonical_library_copies,
+    comparison_exclusions,
+    query_similar_passages,
+)
 from app.config import Settings, get_settings
 from app.errors import ConflictError, GoneError, NotFoundError
 from app.ingest.regions import _flatten, recover_region
 from app.ingest.schemas import SectionTree
-from app.ingest.service import load_raw_store
+from app.ingest.service import load_raw_store, load_raw_store_async
 from app.models.audit import AuditLog
 from app.models.enums import (
     CheckKind,
@@ -59,6 +64,7 @@ from app.report.schemas import (
     IntegrityCheckStatusOut,
     LevelledRatingOut,
     ManuscriptViewerOut,
+    OriginalityScopeOut,
     PageEvidenceImageOut,
     ReportExportData,
     ReportOut,
@@ -443,6 +449,26 @@ async def report_out_for_check_run(
         for row in integrity_rows
     ]
 
+    # V-077 (D-028): what the originality check compared against. Read from
+    # the run's own F7 result, never recomputed from today's Library size,
+    # so an old report keeps describing the comparison it actually made.
+    originality_row = await session.scalar(
+        select(CheckResult).where(
+            CheckResult.check_run_id == check_run_id,
+            CheckResult.kind == CheckKind.originality_reuse,
+        )
+    )
+    originality_scope = None
+    if originality_row is not None:
+        originality_detail = originality_row.detail or {}
+        compared = originality_detail.get("archive_size_n")
+        ran = originality_detail.get("comparison_ran", "note" not in originality_detail)
+        originality_scope = OriginalityScopeOut(
+            compared_count=compared if isinstance(compared, int) and ran else None,
+            corpus="library" if originality_detail.get("corpus") == "library" else "pre_library",
+            not_compared_reason=None if ran else "no_text",
+        )
+
     # V-069 AC2: `None` whenever no criterion in `rows` is levelled (AC3 —
     # a pass/fail rubric's report gains no new visible field). Reuses the
     # SAME `rows` this function already loaded, never a second query.
@@ -493,6 +519,7 @@ async def report_out_for_check_run(
             else None
         ),
         integrity_check_status=integrity_check_status,
+        originality_scope=originality_scope,
         levelled_rating=levelled_rating,
     )
 
@@ -831,10 +858,9 @@ async def list_reuse_passage_matches(
     settings: Settings | None = None,
 ) -> ReuseMatchesOut:
     """V-072 (F7.4), `ui-designer` spec §4.2/§6: the exploration toggle's
-    live data source. Reads THIS manuscript's own already-persisted
-    passage archive (written by `run_originality_reuse_check`'s
-    write-back, `app.checks.reuse.store.store_passage_embeddings`) rather
-    than re-embedding — the check already computed these vectors once.
+    live data source. Uses THIS manuscript's own persisted passage rows when
+    it is itself an active Library entry, otherwise recomputes them from
+    its stored extraction (V-077: checks no longer write into the corpus).
     Returns only matches the DEFAULT policy would exclude (own or matched
     side is a reference-list/block-quote passage) — a match between two
     ordinary body passages is already a real, scored `Flag` and has no
@@ -872,6 +898,22 @@ async def list_reuse_passage_matches(
         )
         for r in archive_rows
     ]
+    if not passages:
+        # V-077 (D-028): a checked manuscript is no longer written into the
+        # corpus, so its own passages are recomputed from its stored
+        # extraction (local model, deterministic, zero Gemini calls). A
+        # Library manuscript re-checked from the dashboard still has stored
+        # rows and takes the branch above.
+        # A genuinely gone extraction (purged manuscript, pre-BUG-138 row)
+        # leaves nothing to explore, the same empty state as before.
+        try:
+            extraction = await load_raw_store_async(settings, manuscript.id)
+        except FileNotFoundError:
+            extraction = None
+        if extraction is not None:
+            passages = await asyncio.get_running_loop().run_in_executor(
+                None, compute_passage_embeddings, extraction, settings
+            )
 
     query_result = await query_similar_passages(
         session,
@@ -889,6 +931,25 @@ async def list_reuse_passage_matches(
         or m.matched_is_reference_list
         or m.matched_is_block_quote
     ]
+    # V-077 (AC6): byte-identical Library copies name one record here too,
+    # exactly as they do in the check's own findings.
+    remapped = await canonical_library_copies(
+        session,
+        {m.matched_manuscript_id for m in excluded},
+        manuscript.instructor_id,
+        exclude_manuscript_ids=await comparison_exclusions(session, manuscript.id),
+    )
+    if remapped:
+        excluded = [
+            dataclasses.replace(
+                m,
+                matched_manuscript_id=remapped[m.matched_manuscript_id][0],
+                matched_instructor_id=remapped[m.matched_manuscript_id][1],
+            )
+            if m.matched_manuscript_id in remapped
+            else m
+            for m in excluded
+        ]
 
     section_tree = SectionTree.model_validate(manuscript.section_tree or {"source": "none"})
     doc = None
@@ -1079,7 +1140,11 @@ async def get_report_export_data(
     )
     archive_size_n = (
         archive_check.detail.get("archive_size_n")
-        if archive_check is not None and archive_check.detail
+        if archive_check is not None
+        and archive_check.detail
+        # V-077: a check that found no text compared nothing, so the export
+        # says it did not run rather than "compared against 0".
+        and archive_check.detail.get("comparison_ran", "note" not in archive_check.detail)
         else None
     )
 

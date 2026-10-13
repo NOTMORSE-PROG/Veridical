@@ -1,66 +1,62 @@
-"""V-066: the shared-corpus library HTTP surface -- browse every manuscript
-VERIDICAL has ever ingested, across every instructor account (BUG-050
-Branch B, owner-decided: the corpus is shared by design, matching gets
-stronger as it grows). `is_own` is the only ownership signal this surface
-ever exposes about another account's manuscript -- never a raw
-`instructor_id` -- the same "identify the record, not the account" posture
-BUG-050's fix established for F7 flags.
+"""V-077 (D-028): the Library HTTP surface -- a standalone collection of
+manuscripts that is also the only F7 comparison corpus.
+
+The corpus is shared across instructor accounts (BUG-050), so another
+instructor's active entries are listed, but only through the redacted shape
+`_item_out` builds (BUG-147/D-026): record number, program, school year and
+date added, never title, team, authors, filename or full source. `is_own` is
+the only ownership signal ever exposed, never a raw `instructor_id`.
+
+No field here carries a readiness band, criterion result, flag, score or
+report link: the Library makes no judgment (owner, 2026-10-12).
 """
 
 from datetime import datetime
+from enum import StrEnum
+from typing import Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
+
+from app.models.enums import LibraryEntrySource, LibraryEntryStatus
 
 
-class LibraryDuplicateUploadOut(BaseModel):
-    """BUG-148: one OTHER upload sharing this row's exact `content_hash`,
-    for the same instructor only -- see `LibraryItemOut.duplicate_uploads`."""
+class LibraryDuplicateRefOut(BaseModel):
+    """The requester's OWN Library entry a submission duplicates (exact) or
+    may duplicate (same text). Never another account's: duplicate detection
+    is own-account only (BUG-234's existence-oracle ruling)."""
 
     manuscript_id: int
-    created_at: datetime
-    purged_at: datetime | None
+    label: str
     original_filename: str | None
-    # Same "no report yet" honesty as the dashboard's own
-    # `ManuscriptListItem.latest_done_check_run_id` (`app.ingest.service`) --
-    # null rather than a fabricated link when this specific upload was never
-    # successfully checked.
-    latest_done_check_run_id: int | None
+    added_at: datetime | None
 
 
 class LibraryItemOut(BaseModel):
     manuscript_id: int
-    group_label: str
-    # NULL = "not set" -- V-063's extraction found nothing, or the group
-    # predates this column (see `manuscript_group.title`'s own docstring).
+    is_own: bool
+    # Own: title, else team name, else filename, else the record label.
+    # Foreign: always "Library record #<id>".
+    label: str
     title: str | None
+    team_name: str | None
     authors: list[str]
     program: str | None
+    school_year: str | None
     original_filename: str | None
+    status: LibraryEntryStatus
+    # Own only (None for foreign): how this entry entered the Library.
+    source: LibraryEntrySource | None
+    added_at: datetime | None
     created_at: datetime
-    purged_at: datetime | None
-    # True only when this manuscript belongs to the instructor making the
-    # request -- the one signal that decides which two-up mode the
-    # frontend may use (full document vs. bounded excerpt, Q2's ruling).
-    is_own: bool
-    # BUG-148: the OTHER instructor-owned manuscripts sharing this exact
-    # `content_hash` (never includes this row's own manuscript_id), newest
-    # first. Present only when `is_own` is True and at least one other of
-    # THIS instructor's own manuscripts is a byte-identical re-upload --
-    # `None` otherwise, including always for `is_own: False` (cross-tenant
-    # hash correlation is not a fact this endpoint discloses; same
-    # same-instructor scope BUG-140 already established for the reuse
-    # check). This row (`manuscript_id`, above) is always the GROUP's own
-    # representative (see `_dedup_own_rows` in `library/service.py`), never
-    # one of the entries listed here.
-    duplicate_uploads: list[LibraryDuplicateUploadOut] | None = None
-    # BUG-148 (`ux-critic` finding: a hidden duplicate-group sibling could
-    # link straight to its own completed report while the far more visible
-    # representative row could not -- a new asymmetry this ticket's own fix
-    # introduced next to it on the same card). Same "no report yet" honesty
-    # as `LibraryDuplicateUploadOut.latest_done_check_run_id` -- and, like
-    # `duplicate_uploads`, always `None` for `is_own: False` (never disclose
-    # whether another account has a completed report).
-    latest_done_check_run_id: int | None = None
+    # Own only: fields read from the title page and not edited since.
+    proposed_fields: list[str] = Field(default_factory=list)
+    # Own only, while `needs_decision`.
+    possible_duplicate_of: LibraryDuplicateRefOut | None = None
+    # Own only, while `failed`.
+    failure_detail: str | None = None
+    # Own only: a processing entry whose request died mid-way. It no longer
+    # blocks re-adding the same file, and its owner may remove it.
+    stalled: bool = False
 
 
 class PaginatedLibrary(BaseModel):
@@ -68,6 +64,59 @@ class PaginatedLibrary(BaseModel):
     total: int
     page: int
     page_size: int
+
+
+class LibrarySubmissionOutcome(StrEnum):
+    added = "added"
+    exact_duplicate = "exact_duplicate"
+    possible_duplicate = "possible_duplicate"
+    failed = "failed"
+
+
+class LibrarySubmissionOut(BaseModel):
+    outcome: LibrarySubmissionOutcome
+    # The entry this submission created; None for `exact_duplicate` (nothing
+    # is created) and for a file rejected before an entry existed.
+    item: LibraryItemOut | None
+    duplicate_of: LibraryDuplicateRefOut | None
+    message: str
+
+
+class LibrarySubmissionIn(BaseModel):
+    """Optional metadata sent with one submitted file. Blank title, team name
+    and authors are proposed from the title page and stay editable."""
+
+    title: str | None = Field(default=None, max_length=500)
+    team_name: str | None = Field(default=None, max_length=200)
+    authors: list[str] = Field(default_factory=list)
+    program: str | None = Field(default=None, max_length=50)
+    school_year: str | None = Field(default=None, max_length=20)
+
+
+class LibraryEntryUpdate(BaseModel):
+    """PATCH semantics: only fields present in the body change; an empty
+    string or null clears a field."""
+
+    title: str | None = Field(default=None, max_length=500)
+    team_name: str | None = Field(default=None, max_length=200)
+    authors: list[str] | None = None
+    program: str | None = Field(default=None, max_length=50)
+    school_year: str | None = Field(default=None, max_length=20)
+
+
+class LibraryDecisionIn(BaseModel):
+    action: Literal["add", "skip"]
+
+
+class LibraryEntryStateOut(BaseModel):
+    manuscript_id: int
+    status: LibraryEntryStatus
+    added_at: datetime | None
+    removed_at: datetime | None
+    # True when the stored file itself was deleted (a Library-only
+    # submission); False when only comparison data left the Library and a
+    # checked manuscript's report keeps its file.
+    file_deleted: bool = False
 
 
 class LibraryChapterExcerptOut(BaseModel):
@@ -96,10 +145,4 @@ class LibraryExcerptOut(BaseModel):
     # what's shown, so a short list never silently implies a short document.
     total_chapters: int
     limitations: str
-    # V-066 (ui-designer finding, purge-retention gap): non-NULL means this
-    # manuscript's owner purged its stored content -- `chapters` is always
-    # `[]` in that case, defense-in-depth against `ManuscriptPassageArchive`
-    # rows outliving a purge (see `get_library_excerpt`'s own docstring;
-    # the retention gap itself is `BUG-123`, filed separately, not fixed
-    # here -- this is the belt, not the buckle).
     purged_at: datetime | None = None

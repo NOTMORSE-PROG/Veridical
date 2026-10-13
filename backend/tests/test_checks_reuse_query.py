@@ -1,4 +1,6 @@
-"""V-037 tests: similarity query + write-back + cold-start disclosure.
+"""V-037 tests: similarity query + cold-start disclosure. Since V-077
+(D-028) the corpus is the Library: tests seed it with `_add_to_library`, and
+a check never writes back.
 Live Postgres (own scratch DB, same convention as `test_checks_reuse_store.py`)
 — this module's whole point is real pgvector queries across multiple
 manuscripts, which no fake/mock can stand in for."""
@@ -10,18 +12,21 @@ import pytest
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
+from app.checks.reuse.embed import compute_document_embeddings, compute_passage_embeddings
 from app.checks.reuse.query import same_instructor_hash_duplicate
 from app.checks.reuse.service import (
     existing_originality_reuse_result,
     run_originality_reuse_check,
 )
+from app.checks.reuse.store import store_document_embeddings, store_passage_embeddings
 from app.config import get_settings
 from app.db import sqlalchemy_url
 from app.groups.service import DEFAULT_GROUP_LABEL, normalize_group_name
 from app.ingest.schemas import ExtractionResult, SectionNode, SectionTree, TextBlock
-from app.models.enums import ResultOutcome
+from app.models.enums import LibraryEntrySource, LibraryEntryStatus, ResultOutcome
 from app.models.group import Group
 from app.models.instructor import Instructor
+from app.models.library import LibraryEntry
 from app.models.manuscript import Manuscript
 from app.models.rubric import Rubric
 from app.models.run import CheckRun
@@ -62,8 +67,9 @@ async def _clean(session_factory):
     async with session_factory() as session:
         await session.execute(
             text(
-                "TRUNCATE audit_log, flag, check_result, check_run, manuscript_chapter_archive, "
-                "manuscript_passage_archive, manuscript_archive, manuscript, manuscript_group, "
+                "TRUNCATE library_entry, audit_log, flag, check_result, check_run, "
+                "manuscript_chapter_archive, manuscript_passage_archive, manuscript_archive, "
+                "manuscript, manuscript_group, "
                 "group_member, rubric, instructor RESTART IDENTITY CASCADE"
             )
         )
@@ -140,6 +146,33 @@ async def _seed_manuscript_in_group(
         return manuscript.id, check_run.id
 
 
+async def _add_to_library(
+    session_factory, manuscript_id: int, extraction: ExtractionResult
+) -> None:
+    """V-077 (D-028): a check no longer writes into the corpus; a manuscript
+    becomes a comparison source only by entering the Library. Mirrors
+    `app.library.service._activate`: store its embeddings, mark its entry
+    active. Replaces what the pre-D-028 write-back after a check used to do
+    implicitly, so each test still seeds exactly the corpus it reasons about."""
+    settings = get_settings()
+    async with session_factory() as session:
+        await store_document_embeddings(
+            session, manuscript_id, compute_document_embeddings(extraction, settings)
+        )
+        passages = compute_passage_embeddings(extraction, settings)
+        if passages:
+            await store_passage_embeddings(session, manuscript_id, passages, settings)
+        session.add(
+            LibraryEntry(
+                manuscript_id=manuscript_id,
+                source=LibraryEntrySource.library_submission,
+                status=LibraryEntryStatus.active,
+                added_at=datetime.now(UTC),
+            )
+        )
+        await session.commit()
+
+
 def _block(text_: str, *, page: int = 1) -> TextBlock:
     return TextBlock(text=text_, page=page, max_font_size=11.0, bold_ratio=0.0)
 
@@ -187,38 +220,71 @@ async def test_first_manuscript_ever_is_cold_start_honest(session_factory):
         result = await run_originality_reuse_check(
             session, manuscript_id, check_run_id, _extraction(CH1, CH2), settings
         )
+        # V-077 (D-028): the check compares against the Library and never
+        # writes the checked manuscript into it.
+        corpus_rows = await session.scalar(
+            text(
+                "SELECT (SELECT count(*) FROM manuscript_archive WHERE manuscript_id = :id)"
+                " + (SELECT count(*) FROM manuscript_passage_archive WHERE manuscript_id = :id)"
+            ),
+            {"id": manuscript_id},
+        )
     assert result.outcome == ResultOutcome.passed
     assert result.detail["archive_size_n"] == 0
+    assert result.detail["corpus"] == "library"
     assert result.detail["n_flags"] == 0
-    # BUG-180: an ordinary manuscript, nowhere near the cap, must show
-    # every passage it produced as archived -- no silent gap.
     assert result.detail["passages_found"] > 0
-    assert result.detail["passages_archived"] == result.detail["passages_found"]
+    assert "passages_archived" not in result.detail
+    assert corpus_rows == 0
 
 
 async def test_bug180_passage_truncation_is_recorded_honestly_not_silently(
     session_factory, monkeypatch
 ):
-    """`backend-critic` finding: a truncated write-back with no trace
-    anywhere reproduces BUG-096's own already-fixed failure class (a
-    partial result rendered indistinguishable from a complete one).
-    `reuse_max_passages_per_manuscript` set to 0 forces every real
-    passage this fixture produces to be truncated -- a decisive,
-    cap-count-independent proof that `passages_found`/`passages_archived`
-    genuinely diverge and are both recorded, not that the manuscript
-    merely happened to have few passages."""
+    """`backend-critic` finding (BUG-180): a truncated corpus write with no
+    trace anywhere reproduces BUG-096's already-fixed failure class (a
+    partial result rendered indistinguishable from a complete one). Since
+    V-077 the only corpus write is a manuscript entering the Library, so the
+    honesty record lives on `library_entry_added`.
+    `reuse_max_passages_per_manuscript=0` forces every real passage to be
+    truncated: a decisive proof that found/stored genuinely diverge and are
+    both recorded."""
+    from app.library.service import _activate
+
     monkeypatch.setenv("REUSE_MAX_PASSAGES_PER_MANUSCRIPT", "0")
     get_settings.cache_clear()
     settings = get_settings()
-    manuscript_id, check_run_id = await _seed_manuscript_and_run(
-        session_factory, group_label="Group A"
-    )
+    manuscript_id, _ = await _seed_manuscript_and_run(session_factory, group_label="Group A")
+    extraction = _extraction(CH1, CH2)
     async with session_factory() as session:
-        result = await run_originality_reuse_check(
-            session, manuscript_id, check_run_id, _extraction(CH1, CH2), settings
+        manuscript = await session.get(Manuscript, manuscript_id)
+        entry = LibraryEntry(
+            manuscript_id=manuscript_id,
+            source=LibraryEntrySource.library_submission,
+            status=LibraryEntryStatus.processing,
         )
-    assert result.detail["passages_found"] > 0
-    assert result.detail["passages_archived"] == 0
+        session.add(entry)
+        await session.commit()
+        await _activate(
+            session,
+            entry,
+            manuscript,
+            compute_document_embeddings(extraction, settings),
+            compute_passage_embeddings(extraction, settings),
+            settings,
+            expected=LibraryEntryStatus.processing,
+            decision=None,
+        )
+        payload = await session.scalar(
+            text("SELECT payload FROM audit_log WHERE event_type = 'library_entry_added'")
+        )
+        stored = await session.scalar(
+            text("SELECT count(*) FROM manuscript_passage_archive WHERE manuscript_id = :id"),
+            {"id": manuscript_id},
+        )
+    assert payload["passages_found"] > 0
+    assert payload["passages_stored"] == 0
+    assert stored == 0
     get_settings.cache_clear()
 
 
@@ -235,6 +301,7 @@ async def test_reuploaded_duplicate_produces_a_high_severity_flag(session_factor
         await run_originality_reuse_check(
             session, manuscript_a, check_run_a, _extraction(CH1, CH2), settings
         )
+        await _add_to_library(session_factory, manuscript_a, _extraction(CH1, CH2))
 
     # Same content, "renamed" (different group_label, different manuscript row).
     manuscript_b, check_run_b = await _seed_manuscript_and_run(
@@ -294,6 +361,7 @@ async def test_whole_document_and_chapter_flags_carry_real_supporting_passage_ev
         await run_originality_reuse_check(
             session, manuscript_a, check_run_a, _extraction(CH1, CH2), settings
         )
+        await _add_to_library(session_factory, manuscript_a, _extraction(CH1, CH2))
 
     manuscript_b, check_run_b = await _seed_manuscript_and_run(
         session_factory, group_label="Group A (resubmission)"
@@ -374,6 +442,7 @@ async def test_unevidenceable_whole_document_match_is_downgraded_from_high_sever
         await run_originality_reuse_check(
             session, manuscript_a, check_run_a, _extraction_flat_no_chapters(CH1), settings
         )
+        await _add_to_library(session_factory, manuscript_a, _extraction_flat_no_chapters(CH1))
 
     manuscript_b, check_run_b = await _seed_manuscript_and_run(
         session_factory, group_label="Group A (resubmission)"
@@ -431,6 +500,7 @@ async def test_same_instructor_whole_document_resubmission_collapses_to_one_low_
             instructor_id=instructor_id,
             content_hash=None,
         )
+        await _add_to_library(session_factory, manuscript_a, _extraction(CH1, CH2))
 
     manuscript_b, check_run_b = await _seed_manuscript_in_group(
         session_factory, instructor_id=instructor_id, group_id=None
@@ -461,7 +531,9 @@ async def test_same_instructor_whole_document_resubmission_collapses_to_one_low_
     assert rows[0].severity == "low"
     assert rows[0].kind == "reuse_same_instructor_resubmission"
     assert f"#{manuscript_a}" in rows[0].reason
-    assert "your own earlier upload" in rows[0].reason
+    # V-077: names a Library entry, never "an earlier upload" (only Library
+    # entries are comparison sources now).
+    assert "your own Library records" in rows[0].reason
     # Ground rule 3: never worded as an accusation.
     assert "plagiar" not in rows[0].reason.lower()
 
@@ -492,6 +564,7 @@ async def test_same_instructor_resubmission_names_the_actual_duplicate_source(
             instructor_id=instructor_id,
             content_hash=None,
         )
+        await _add_to_library(session_factory, manuscript_a, _extraction(CH1, CH2))
 
     # A genuinely different manuscript, same instructor, unrelated content --
     # must never be pulled into the archive as a "match" by this test's own
@@ -512,6 +585,14 @@ async def test_same_instructor_resubmission_names_the_actual_duplicate_source(
             settings,
             instructor_id=instructor_id,
             content_hash=None,
+        )
+        await _add_to_library(
+            session_factory,
+            other_manuscript,
+            _extraction(
+                "An entirely unrelated introduction about renewable energy policy.",
+                "An entirely unrelated methodology about survey sampling.",
+            ),
         )
 
     # Re-upload of the FIRST manuscript's content -- must resubmission-collapse
@@ -550,12 +631,25 @@ async def test_same_instructor_hash_duplicate_query(session_factory):
     instructor + same hash, excludes self, excludes a different
     instructor's identical hash, excludes a purged manuscript, and returns
     `None` for `content_hash=None` (a manuscript ingested before this
-    column existed)."""
+    column existed).
+
+    V-077 (D-028): only ACTIVE Library entries count. `earlier_dashboard_copy`
+    is the same instructor's same bytes with the LOWEST id, but it was never
+    added to the Library, so it is not a comparison source and must never
+    be named as one."""
     instructor_id = await _seed_instructor(session_factory)
     other_instructor_id = await _seed_instructor(session_factory)
     same_hash = "a" * 64
 
     async with session_factory() as session:
+        earlier_dashboard_copy = Manuscript(
+            instructor_id=instructor_id,
+            group_label="Group A",
+            file_ref="0.pdf",
+            content_hash=same_hash,
+        )
+        session.add(earlier_dashboard_copy)
+        await session.commit()
         mine = Manuscript(
             instructor_id=instructor_id,
             group_label="Group A",
@@ -582,6 +676,15 @@ async def test_same_instructor_hash_duplicate_query(session_factory):
         )
         session.add_all([mine, mine_no_match, purged_twin, others_twin])
         await session.commit()
+        for in_library in (mine, mine_no_match, purged_twin, others_twin):
+            session.add(
+                LibraryEntry(
+                    manuscript_id=in_library.id,
+                    source=LibraryEntrySource.library_submission,
+                    status=LibraryEntryStatus.active,
+                )
+            )
+        await session.commit()
 
         purged_twin.purged_at = datetime.now(UTC)
         await session.commit()
@@ -598,7 +701,10 @@ async def test_same_instructor_hash_duplicate_query(session_factory):
         found = await same_instructor_hash_duplicate(
             session, new_upload.id, instructor_id, same_hash
         )
-        assert found == mine.id  # lowest-id match, deterministic
+        # Lowest-id ACTIVE Library match, deterministic; the lower-id
+        # dashboard copy outside the Library is skipped.
+        assert found == mine.id
+        assert earlier_dashboard_copy.id < mine.id
 
         assert (
             await same_instructor_hash_duplicate(session, mine_no_match.id, instructor_id, "b" * 64)
@@ -649,6 +755,7 @@ async def test_repeated_resubmissions_never_grow_the_archive(session_factory):
             instructor_id=instructor_id,
             content_hash=None,
         )
+        await _add_to_library(session_factory, manuscript_a, _extraction(CH1, CH2))
 
     for _ in range(2):  # two more resubmissions of the identical content
         manuscript_n, check_run_n = await _seed_manuscript_in_group(
@@ -700,6 +807,7 @@ async def test_first_upload_context_flagged_but_severity_untouched(session_facto
         await run_originality_reuse_check(
             session, manuscript_a, check_run_a, _extraction(CH1, CH2), settings
         )
+        await _add_to_library(session_factory, manuscript_a, _extraction(CH1, CH2))
 
     # manuscript_b's instructor has NO other manuscript yet -- textbook
     # first upload.
@@ -780,6 +888,7 @@ async def test_same_groups_own_prior_submission_is_never_reuse(session_factory):
         await run_originality_reuse_check(
             session, manuscript_a, check_run_a, _extraction(CH1, CH2), settings
         )
+        await _add_to_library(session_factory, manuscript_a, _extraction(CH1, CH2))
 
     # Same team, same group, a revised/re-uploaded manuscript row.
     manuscript_b, check_run_b = await _seed_manuscript_in_group(
@@ -809,6 +918,7 @@ async def test_different_groups_still_flag_each_other(session_factory):
         await run_originality_reuse_check(
             session, manuscript_a, check_run_a, _extraction(CH1, CH2), settings
         )
+        await _add_to_library(session_factory, manuscript_a, _extraction(CH1, CH2))
 
     manuscript_b, check_run_b = await _seed_manuscript_in_group(
         session_factory, instructor_id=instructor_id, group_id=group_b
@@ -844,6 +954,7 @@ async def test_ungrouped_default_bucket_is_not_exempted(session_factory):
         await run_originality_reuse_check(
             session, manuscript_a, check_run_a, _extraction(CH1, CH2), settings
         )
+        await _add_to_library(session_factory, manuscript_a, _extraction(CH1, CH2))
 
     # A genuinely different team, also defaulted to "Ungrouped".
     manuscript_b, check_run_b = await _seed_manuscript_in_group(
@@ -917,6 +1028,11 @@ async def test_flag_text_never_leaks_matched_manuscripts_identity_or_headings(se
             _extraction_titled(other_ch1_title, CH1, other_ch2_title, CH2),
             settings,
         )
+        await _add_to_library(
+            session_factory,
+            manuscript_a,
+            _extraction_titled(other_ch1_title, CH1, other_ch2_title, CH2),
+        )
 
     manuscript_b, check_run_b = await _seed_manuscript_and_run(
         session_factory, group_label="Group B"
@@ -979,6 +1095,7 @@ async def test_transplanted_chapter_produces_a_chapter_level_flag(session_factor
         await run_originality_reuse_check(
             session, manuscript_a, check_run_a, _extraction(CH1, CH2), settings
         )
+        await _add_to_library(session_factory, manuscript_a, _extraction(CH1, CH2))
 
     # Manuscript B: chapter 1 is CH1 verbatim (transplanted), chapter 2 is
     # genuinely unrelated content — the WHOLE-doc vector should be diluted
@@ -1069,6 +1186,7 @@ async def test_chapter_flag_supporting_passage_is_scoped_to_the_matched_chapter(
         await run_originality_reuse_check(
             session, manuscript_a, check_run_a, _extraction(CH1, CH2_EXTENDED), settings
         )
+        await _add_to_library(session_factory, manuscript_a, _extraction(CH1, CH2_EXTENDED))
 
     unrelated_ch2 = (
         "This study evaluates the nutritional content of canteen meals served "
@@ -1153,6 +1271,7 @@ async def test_same_topic_different_wording_does_not_flag(session_factory):
         await run_originality_reuse_check(
             session, manuscript_a, check_run_a, _extraction(CH1, CH2), settings
         )
+        await _add_to_library(session_factory, manuscript_a, _extraction(CH1, CH2))
 
     manuscript_b, check_run_b = await _seed_manuscript_and_run(
         session_factory, group_label="Group C"
@@ -1168,10 +1287,10 @@ async def test_same_topic_different_wording_does_not_flag(session_factory):
     assert result.detail["n_flags"] == 0
 
 
-async def test_write_back_happens_after_check_never_matches_self(session_factory):
-    """Ticket AC (F7.3): write-back after the check completes — the
-    manuscript's own embedding must never appear as a match against
-    itself, and the archive gains exactly one new row per check."""
+async def test_a_check_never_writes_into_the_corpus_or_matches_self(session_factory):
+    """V-077 (D-028) replaces F7.3's write-back: a check compares against the
+    Library and adds nothing to it, so the checked manuscript never appears as
+    a match against itself and the corpus gains no row from a check."""
     settings = get_settings()
     manuscript_id, check_run_id = await _seed_manuscript_and_run(
         session_factory, group_label="Group A"
@@ -1187,7 +1306,7 @@ async def test_write_back_happens_after_check_never_matches_self(session_factory
             text("SELECT count(*) FROM manuscript_archive WHERE manuscript_id = :id"),
             {"id": manuscript_id},
         )
-    assert count == 1
+    assert count == 0
 
 
 async def test_bug_151_writes_a_check_computed_audit_event_with_real_matched_ids(
@@ -1208,6 +1327,7 @@ async def test_bug_151_writes_a_check_computed_audit_event_with_real_matched_ids
         await run_originality_reuse_check(
             session, manuscript_a, check_run_a, _extraction(CH1, CH2), settings
         )
+        await _add_to_library(session_factory, manuscript_a, _extraction(CH1, CH2))
 
     manuscript_b, check_run_b = await _seed_manuscript_and_run(
         session_factory, group_label="Group B"
@@ -1216,6 +1336,7 @@ async def test_bug_151_writes_a_check_computed_audit_event_with_real_matched_ids
         await run_originality_reuse_check(
             session, manuscript_b, check_run_b, _extraction(CH1, CH2), settings
         )
+        await _add_to_library(session_factory, manuscript_b, _extraction(CH1, CH2))
 
     async with session_factory() as session:
         row = (
@@ -1296,4 +1417,4 @@ async def test_existing_result_guard_finds_the_completed_run(session_factory):
             text("SELECT count(*) FROM manuscript_archive WHERE manuscript_id = :id"),
             {"id": manuscript_id},
         )
-    assert count == 1  # a naive re-run through the service would double-write
+    assert count == 0  # V-077: a check never writes into the corpus

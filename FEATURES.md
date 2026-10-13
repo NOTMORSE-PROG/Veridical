@@ -18,7 +18,7 @@
 
 ## 1. Overview
 
-VERIDICAL is an AI-assisted quality and integrity assurance platform that checks a CS/IT capstone manuscript against **whatever required format the Capstone Instructor uploads**, and additionally checks the paper itself for four kinds of honest mistakes: intent/outcome mismatches, citation problems, statistical inconsistencies, and reuse of previously processed manuscripts.
+VERIDICAL is an AI-assisted quality and integrity assurance platform that checks a CS/IT capstone manuscript against **whatever required format the Capstone Instructor uploads**, and additionally checks the paper itself for four kinds of honest mistakes: intent/outcome mismatches, citation problems, statistical inconsistencies, and reuse of manuscripts in VERIDICAL's Library.
 
 The output is a **Readiness Report** with one of three statuses:
 
@@ -149,13 +149,13 @@ Three layers: exists → not retracted → actually supports the claim (Objectiv
 | F6.6 | Percentage/total sanity checks (percentages sum ≈100%, counts ≤ n) | 🟡 | Basic arithmetic cross-checks on tables |
 
 ### F7 — Originality / Reuse Check 🟡
-Compares against VERIDICAL's own growing archive (no access to the school's historical archive — stated limitation).
+Compares a checked manuscript against VERIDICAL's **Library**: a shared collection of manuscripts that instructors add on the Library page (owner decision, 2026-10-12). Manuscripts checked before that date were carried into the Library automatically and stay until their owner removes them. A manuscript checked from the dashboard is compared against the Library and is never added to it. Stated limitations: (1) VERIDICAL has no access to the school's past capstone archive; it compares only against what instructors have added. (2) Two manuscripts checked from the dashboard are never compared with each other, in the same term or across terms, unless one of them is also in the Library. (3) Each report reflects the Library as it was when the check ran; manuscripts added later are not compared unless the check is run again, and a record removed later can no longer be opened from an earlier finding. (4) Library manuscripts are read without image reading, so content that exists only as images in a Library manuscript is not compared.
 
 | # | Feature | Status | Acceptance criteria |
 |---|---|---|---|
-| F7.1 | Content embedding per manuscript stored in **pgvector** | 🟡 | Generated on every processed manuscript |
-| F7.2 | Similarity query (exact + high-similarity thresholds) on upload | 🟡 | Match ⇒ flag with similarity score + matched source as evidence |
-| F7.3 | Archive write-back after check (Fig. 3.13) | 🟡 | Coverage grows over time; cold-start limitation documented in report footer |
+| F7.1 | Content embedding per Library manuscript stored in **pgvector** | 🟡 | Generated when a manuscript is added to the Library (text only, local model, no AI quota spent); deleted when it leaves the Library |
+| F7.2 | Similarity query (exact + high-similarity thresholds) on check | 🟡 | Match ⇒ flag with the matched Library record as evidence; byte-identical Library copies are reported as one source |
+| F7.3 | Library as the comparison corpus (replaces the proposal's automatic archive write-back, Fig. 3.13) | 🟡 | Instructors add manuscripts on the Library page; duplicates of the instructor's own records are identified on submission (an exact copy is not added; a file whose text is very similar to one of the instructor's own records waits for the instructor's decision); the Library page shows no verdicts; the report states how many Library records each check compared against, including explicit "no records to compare against" and "no readable text" states |
 | F7.4 | Section-level (not just whole-document) similarity | ⚪ | Catches a copied Chapter 2 inside an otherwise new paper |
 
 ### F8 — Readiness Report & Instructor Dashboard 🟢
@@ -352,7 +352,7 @@ Each phase ends demo-able; the applicability gates (F6.5 etc.) mean partially-bu
 
 1. **Readiness thresholds:** fixed (documented in the paper) or instructor-configurable (F8.9)?
 2. **Golden dataset access:** can we get 10–20 anonymized past capstone excerpts (and a few defended manuscripts) for validation (§7.2, §7.4)? This materially affects how defensible the accuracy claims are.
-3. **Archive retention:** how long do processed manuscripts stay in the Originality archive (F7), and who can purge them?
+3. **Library retention:** how long do manuscripts stay in the Library (F7), and who can remove them? Today the instructor who added a manuscript can remove it at any time.
 4. **Gemini disclosure:** manuscript text is sent to Google's API for grading — does the ethics/consent section of the paper need to state this explicitly?
 5. **Chapter 3 updates:** confirm we may update Tables 3.2/3.4 (Groq → Gemini, ingestion stack changes) per §5 of this document.
 
@@ -367,5 +367,5 @@ Each phase ends demo-able; the applicability gates (F6.5 etc.) mean partially-bu
 | Objective 3: four integrity checks | F4, F5, F6, F7 |
 | Objective 4: Readiness Report + Dashboard, instructor decides | F8 (Flows B, C) |
 | DFD P1–P9 (Fig. 3.5) | P1→F2, P2→F3.1, P3→F3.2, P4→F3.3–3.6, P5→F4, P6→F5, P7→F6, P8→F7, P9→F8.1 |
-| Limitations §1.5 (recommendation-only, narrow contradiction scope, books existence-only, archive cold start) | F8.5 (final decision human), F4 scope note, F5.5, F7.3 |
+| Limitations §1.5 (recommendation-only, narrow contradiction scope, books existence-only, Library coverage depends on instructors adding manuscripts) | F8.5 (final decision human), F4 scope note, F5.5, F7 intro, F7.3 |
 | Security Table 3.6 | F9, F8.10 |
