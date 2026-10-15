@@ -4,6 +4,12 @@
 
 A capstone project of the Technological Institute of the Philippines (BSIT), by Condino · Concepcion · Munoz.
 
+**Instructor-only scope:** instructors upload rubrics and manuscripts, run checks,
+manage the Library, and review reports. Student accounts, a student submission
+gate/queue, and student resubmission screens are outside the product scope.
+Instructors may still share read-only report links; recipients do not get upload,
+review, or decision rights.
+
 ## What's in this repo
 
 | Path | What it is |

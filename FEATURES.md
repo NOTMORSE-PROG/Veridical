@@ -34,30 +34,28 @@ The output is a **Readiness Report** with one of three statuses:
 
 ## 2. Actors & Roles
 
-### 🟢 Capstone Instructor (core — the only implemented account role today)
+### 🟢 Capstone Instructor (core — the only account role in scope)
 - Uploads the required format/rubric (PDF, Word, or other document)
 - Uploads manuscripts to check
 - Reviews parsed criteria, flagged items, and readiness reports
 - Annotates flags, overrides AI verdicts, and makes the final readiness decision
-- The deployed instructor workflow preserves the proposal's original single-human-actor core. The adviser-approved V7 student role is a planned extension and is not implemented yet.
+- VERIDICAL is instructor-only. Instructors supply the rubric and manuscripts, manage their groups and Library, and control the review workflow; there is no student submission gate.
 
 ### 🟡 Adviser (read-only report links)
 - The proposal says reports are "shared down to the student's individual adviser" (§1.4)
 - Implemented as **shareable read-only report links** (tokenized URL, no account needed) — the lightest way to honor that requirement
 - No upload, review, or decision rights
 
-### 🟡 Student (submission portal) — **APPROVED SCOPE; NOT YET IMPLEMENTED**
-The project owner reported on 2026-09-21 that the adviser approved Phase 4/V7. This clears the adviser-policy gate; it does not claim that the student portal exists today. Implementation remains sequenced after V6, whose operational G25R/G26 gates are cleared but whose D-012 current-release accuracy evidence remains open, then proceeds through V-045 → V-046 → V-047. The approved plan adds:
+### Out of scope — Student accounts and submission portal
+On 2026-10-15, the project owner withdrew the planned student submission gate and
+Phase 4/V7 extension. This supersedes the earlier approval reported on 2026-09-21.
+Student login, direct uploads, submission/status queues, and student return/resubmit
+screens are not planned deliverables or UAT prerequisites. This withdrawal is not
+a claim that those features were implemented or tested.
 
-| Addition | Detail |
-|---|---|
-| Student accounts | Email + password, tied to a capstone group |
-| Submission queue | Students upload their own manuscript; instructor sees a queue instead of uploading files one by one |
-| Resubmission flow | After revisions, students resubmit; the report shows a diff of statuses vs. the previous run |
-| Data model change | New `Student`/`Group` entities; `Manuscript` gains `submitted_by` and `version` fields |
-| Scope guard | Students see only "Submitted / Under review" — never the raw flags, so VERIDICAL doesn't become a "pre-grade" tool students game |
-
-**Implementation boundary:** the table above describes planned V7 behavior. Until V7 ships and passes its authorization and role-isolation tests, the deployed system remains instructor-only.
+Instructors continue to upload manuscripts and revised files themselves. Existing
+instructor-managed groups and instructor-controlled, read-only report links remain
+in scope; a report-link recipient is not a separate application account role.
 
 ---
 
@@ -179,9 +177,9 @@ Combines everything into one explainable output (Objective 4, Fig. 3.12).
 | # | Feature | Status | Acceptance criteria |
 |---|---|---|---|
 | F9.1 | Instructor login (email + password, hashed) | 🟢 | Table 3.6: authentication requirement |
-| F9.2 | Role-based access (instructor / read-only link / future student) | 🟢 | Current instructor/read-only boundaries enforced server-side; student authorization remains V7 work |
+| F9.2 | Instructor accounts and read-only report links | 🟢 | Instructor ownership and read-only link boundaries enforced server-side; no student account or submission portal |
 | F9.3 | TLS everywhere + encrypted storage at rest | 🟢 | Neon relational data and Cloudflare R2 manuscript objects are provider-encrypted at rest; provider links use TLS; the R2 manuscript bucket is private ([R2 data security](https://developers.cloudflare.com/r2/reference/data-security/)) |
-| F9.4 | 🟡 Student accounts + submission queue | 🟡 | Adviser approval reported 2026-09-21; approved for Phase 4, not yet implemented. Student authorization and scope guards must pass before this is described as available. |
+| F9.4 | Student accounts + submission queue | Withdrawn | Removed from scope by the owner on 2026-10-15; retained here only for traceability, not as an implementation or acceptance requirement |
 
 ---
 
@@ -209,13 +207,10 @@ Combines everything into one explainable output (Objective 4, Fig. 3.12).
 5. Set final decision: **Approve for defense / Return for revision / Reject**
 6. Export PDF or copy read-only share link for the group's adviser
 
-### Flow D — Student submission 🟡 *(approved plan; not yet implemented)*
-After V7 is implemented and its role-isolation checks pass, the planned flow is:
-1. A student will log in → see their group's submission page only
-2. The student will upload a manuscript → status "Submitted — under review" (students will never see raw flags)
-3. The instructor's dashboard will show a submission queue; opening one will run Flow B/C
-4. When the instructor returns it for revision, the student will see "Returned — revise and resubmit" + the instructor's chosen feedback notes
-5. The student will resubmit → a new version linked to the old; the report will show status change vs. the previous run
+### Flow D — Student submission *(withdrawn 2026-10-15)*
+This flow is outside the instructor-only product scope. The instructor uploads
+the manuscript or revised file through Flow B and reviews it through Flow C.
+No student login, submission gate, queue, or student resubmission step is required.
 
 ### Flow E — Rubric changed mid-term 🟢
 1. Instructor uploads new format → parsed as **v2** (Flow A steps 2–4)
@@ -326,7 +321,10 @@ manuscript.
 | **Phase 1 — Core loop** | F1 ingestion, F2 rubric parsing, F3 hybrid checking, F8 minimal report, F9 auth. *Demo: upload rubric + manuscript → readiness report* | Sprints 1–4, part of 9 |
 | **Phase 2 — Integrity checks I** | F5 Citation Integrity, F6 Statistical Forensics (the two with the strongest evidence base and existing libraries) | Sprints 6–7 |
 | **Phase 3 — Integrity checks II** | F4 Internal Agreement, F7 Originality/Reuse, F8 full dashboard (multi-group overview, share links, PDF export) | Sprints 5, 8–9 |
-| **Phase 4 — 🟡 Student portal** | Scope approval reported on 2026-09-21; not yet implemented. Begins after V6's remaining D-012 accuracy gate is satisfied, then proceeds through student accounts, submission queue, and resubmission flow. | New (not in proposal) |
+
+The former **Phase 4 student portal** was withdrawn by the owner on 2026-10-15.
+It is not a future phase or a completion/UAT gate. Remaining instructor workflow,
+security, evidence, and accuracy requirements are unchanged.
 
 Each phase ends demo-able; the applicability gates (F6.5 etc.) mean partially-built checks report "N/A" honestly rather than blocking the pipeline.
 
@@ -348,7 +346,10 @@ Each phase ends demo-able; the applicability gates (F6.5 etc.) mean partially-bu
 
 ## 10. Adviser Decisions and Open Questions
 
-**Resolved 2026-09-21 — Student portal:** the project owner reports that the adviser approved Phase 4/V7 scope. This clears the policy gate only; it does not establish implementation or validation.
+**Resolved 2026-10-15 — Instructor-only scope:** the owner withdrew the student
+submission gate and Phase 4/V7 portal, superseding the earlier approval reported
+on 2026-09-21. No student-portal approval or implementation is needed to complete
+the instructor product. This decision does not waive its separate validation gates.
 
 1. **Readiness thresholds:** fixed (documented in the paper) or instructor-configurable (F8.9)?
 2. **Golden dataset access:** can we get 10–20 anonymized past capstone excerpts (and a few defended manuscripts) for validation (§7.2, §7.4)? This materially affects how defensible the accuracy claims are.
