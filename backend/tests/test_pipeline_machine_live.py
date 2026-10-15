@@ -752,6 +752,8 @@ async def test_integrity_stage_runs_all_four_integrity_checks(
         assert "statistical forensics" in note.lower()
         assert "originality/reuse" in note.lower()
         assert "not implemented" not in note
+        assert "all ran" not in note
+        assert "does not mean every check was assessed" in note
 
     async with session_factory() as verify:
         citation_result = (
@@ -763,7 +765,8 @@ async def test_integrity_stage_runs_all_four_integrity_checks(
             )
         ).scalar_one()
         assert citation_result.criterion_id is None
-        assert citation_result.outcome == ResultOutcome.passed
+        assert citation_result.outcome == ResultOutcome.escalated
+        assert citation_result.detail["coverage_reason"] == "reference_list_unavailable"
         assert citation_result.detail["n_references"] == 0
         assert citation_result.detail["n_flags"] == 0
 
@@ -796,6 +799,8 @@ async def test_integrity_stage_runs_all_four_integrity_checks(
         # against 0 previously processed manuscripts, zero flags (nothing
         # to match against yet), never faked as "clean" without saying why.
         assert reuse_result.detail["archive_size_n"] == 0
+        assert reuse_result.outcome == ResultOutcome.not_applicable
+        assert reuse_result.detail["coverage_reason"] == "no_comparison_archive"
         assert reuse_result.detail["n_flags"] == 0
 
 

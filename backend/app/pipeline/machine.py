@@ -75,10 +75,9 @@ _STAGE_AFTER: dict[CheckRunStatus, CheckRunStatus] = {
 }
 
 _INTEGRITY_STAGE_NOTE = (
-    "Internal agreement (intent vs. outcome), citation integrity "
-    "(cross-match, existence, retraction, claim-support), statistical "
-    "forensics (GRIM/GRIMMER, p-value recalculation, sanity checks), and "
-    "originality/reuse (archive similarity) all ran."
+    "Internal agreement, citation integrity, statistical forensics, and originality/reuse "
+    "processing finished. Open the report for each check's findings "
+    "and assessment limits; a finished stage does not mean every check was assessed."
 )
 
 

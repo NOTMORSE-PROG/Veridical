@@ -93,7 +93,7 @@ def test_reason_never_leaks_matched_identity_or_heading(level, chapter_title, ex
     assert detail["similarity"] == pytest.approx(0.83)
 
 
-def test_passage_reason_uses_a_named_band_while_raw_similarity_remains_internal():
+def test_passage_reason_is_a_non_scoring_lead_while_similarity_remains_internal():
     match = PassageMatch(
         own_passage_index=3,
         level="high_similarity",
@@ -126,7 +126,10 @@ def test_passage_reason_uses_a_named_band_while_raw_similarity_remains_internal(
     assert severity == FlagSeverity.med
     assert evidence == match.own_text
     assert "%" not in detail["reason"]
-    assert "high textual similarity" in detail["reason"]
+    assert "Comparison lead" in detail["reason"]
+    assert "does not change readiness" in detail["reason"]
+    assert "#42" in detail["reason"]
+    assert OTHER_GROUP not in detail["reason"]
     assert detail["similarity"] == pytest.approx(0.84)
 
 

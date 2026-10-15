@@ -229,7 +229,8 @@ async def test_first_manuscript_ever_is_cold_start_honest(session_factory):
             ),
             {"id": manuscript_id},
         )
-    assert result.outcome == ResultOutcome.passed
+    assert result.outcome == ResultOutcome.not_applicable
+    assert result.detail["coverage_reason"] == "no_comparison_archive"
     assert result.detail["archive_size_n"] == 0
     assert result.detail["corpus"] == "library"
     assert result.detail["n_flags"] == 0

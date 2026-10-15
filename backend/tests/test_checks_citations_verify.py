@@ -28,7 +28,7 @@ from app.db import sqlalchemy_url
 from app.external.schemas import VerificationResult
 from app.ingest.schemas import ExtractionResult, SectionTree, TextBlock
 from app.models.citation import Citation
-from app.models.enums import CitationParseStatus, FlagSeverity
+from app.models.enums import CitationParseStatus, FlagSeverity, ResultOutcome
 from app.models.instructor import Instructor
 from app.models.manuscript import Manuscript
 from app.models.rubric import Rubric
@@ -461,7 +461,10 @@ async def test_a_run_with_skipped_claim_support_pairs_does_not_report_passed(ses
     assert result.detail["n_claim_support_skipped_parse_failure"] == 0
 
 
-async def test_run_citation_integrity_check_persists_result_and_flags(session_factory):
+@pytest.mark.parametrize("supported_body_style", [False, True])
+async def test_run_citation_integrity_check_persists_result_and_flags(
+    session_factory, supported_body_style
+):
     """End-to-end: orphan (V-027) + retraction (V-029) both land as real
     Flag rows on one shared check_result."""
     extraction = ExtractionResult(
@@ -484,6 +487,18 @@ async def test_run_citation_integrity_check_persists_result_and_flags(session_fa
 
     patterns = load_patterns(get_settings().ingest_patterns_file)
     citations = [_citation(0, doi="10.1/retracted-real")]
+    if supported_body_style:
+        # Add a linked citation as a separate positive control. The original
+        # orphan-only input cannot establish that the body style was covered.
+        citations.append(_citation(1, authors=["Reyes, J."], year=2024))
+        extraction.blocks.append(
+            TextBlock(
+                page=1,
+                text="Other work (Reyes, 2024) is discussed here.",
+                max_font_size=11,
+                bold_ratio=0,
+            )
+        )
     check_run_id = await _seed_check_run(session_factory)
 
     def handler(request):
@@ -511,12 +526,17 @@ async def test_run_citation_integrity_check_persists_result_and_flags(session_fa
             settings=get_settings(),
         )
         assert result.detail["n_orphans"] == 1  # "Nakamura, 2021" matches no reference
-        assert result.detail["n_uncited"] == 1  # the one reference is never cited in-text
-        assert result.detail["n_flags"] == 3  # orphan + uncited + retraction
+        assert result.detail["n_uncited"] == int(supported_body_style)
+        assert result.detail["n_linked"] == int(supported_body_style)
+        assert result.detail["n_flags"] == 2 + int(supported_body_style)
+        assert result.outcome == ResultOutcome.escalated
+        assert result.detail["n_metadata_skipped_insufficient"] == len(citations)
+        if not supported_body_style:
+            assert result.detail["n_linkage_unassessed"] == 1
 
         flag_query = text("SELECT severity FROM flag WHERE check_result_id = :id")
         flags = (await session.execute(flag_query, {"id": result.id})).scalars().all()
-        assert sorted(flags) == ["high", "low", "low"]
+        assert sorted(flags) == ["high", "low"] + (["low"] if supported_body_style else [])
 
         audit_row = (
             await session.execute(
@@ -529,7 +549,7 @@ async def test_run_citation_integrity_check_persists_result_and_flags(session_fa
         ).first()
     # BUG-151: F5 wrote nothing to the audit log before this fix.
     assert audit_row is not None
-    assert audit_row.payload["n_flags"] == 3
+    assert audit_row.payload["n_flags"] == 2 + int(supported_body_style)
     assert (
         audit_row.payload["thresholds"]["cache_stale_days"]
         == get_settings().citation_cache_stale_days

@@ -200,15 +200,23 @@ async def test_seeded_contradiction_produces_a_real_flag_row(session_factory):
         result = await run_internal_agreement_check(
             session, llm, check_run_id, extraction, get_settings()
         )
-        assert result.outcome == ResultOutcome.passed
+        assert result.outcome == ResultOutcome.escalated
+        assert result.detail["coverage_reason"] == "statement_roles_unverified"
         assert result.detail["n_intents"] == 1
         assert result.detail["n_outcomes"] == 1
         assert result.detail["n_flags"] == 1
 
-        flag_query = text("SELECT severity, page_anchor FROM flag WHERE check_result_id = :id")
+        flag_query = text(
+            "SELECT severity, page_anchor, detail FROM flag WHERE check_result_id = :id"
+        )
         rows = (await session.execute(flag_query, {"id": result.id})).all()
     assert len(rows) == 1
     assert rows[0].severity == "high"
+    assert rows[0].detail["intent_text"] == "To build a biometric login module for the mobile app."
+    assert "was not implemented" in rows[0].detail["outcome_text"]
+    from app.findings.policy import exclusion_reason
+
+    assert exclusion_reason("internal_agreement", rows[0].detail) == "statement_roles_unverified"
 
 
 async def test_unmatched_intent_produces_a_low_flag_no_llm_call(session_factory):

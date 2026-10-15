@@ -110,7 +110,10 @@ def test_upload_pdf_returns_summary(client):
     assert body["page_count"] == 6 and body["anchor_kind"] == "page"
     assert body["citations"] == 2
     assert body["section_tree"]["source"] == "heuristics"
-    assert body["notes"] == []
+    assert body["notes"] == [
+        "Some pages could not be read in a reliable order. Reference entries were retained "
+        "from a readable section. Extraction does not verify their sources."
+    ]
 
 
 @live

@@ -6,11 +6,10 @@ assembly), applied to F4.
 **Applicability gate**: a manuscript with no intent AND no outcome
 statements at all gets `outcome=not_applicable` — N/A is not "passed"
 (charter rule 9), never a silently-clean check_run when there was nothing
-to check. A manuscript with statements that all got fully judged gets
-`outcome=passed` (whether or not it also carries flags — matches F5/F6's
-own convention). **BUG-073**: a run that skipped even one candidate pair
-(quota/API/parse-failure — `pair.py`'s `PairingResult`) does NOT get
-`passed` — see this module's own outcome-priority comment below.
+to check. Extracted roles are not yet independently established as this
+study's own objectives/results, so comparisons remain escalated review
+leads, never readiness deductions. Quota/API/parse failures remain distinct
+outcomes with their actual skip counts.
 """
 
 from sqlalchemy import select
