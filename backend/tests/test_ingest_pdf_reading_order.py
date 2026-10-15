@@ -397,3 +397,62 @@ def test_atomic_mixed_margin_is_still_validated_as_canonical_source(repeated):
     assert all(record.reason == "overlapping_text" for record in result.reading_order)
     assert len(reading_order_issues(result)) == 3
     assert any("Overprinted" in block.text and not block.is_furniture for block in result.blocks)
+
+
+@pytest.mark.parametrize("adverse", [None, "no_common_x", "vertical_overlap"])
+def test_nested_interleaved_regions_require_original_single_column_proof(adverse):
+    from app.ingest.reading_order import Proposal, Region, order_page
+    from app.ingest.schemas import Line
+
+    boxes = [(70, 90, 170, 105), (70, 120, 280, 135), (70, 150, 220, 165)]
+    if adverse == "no_common_x":
+        # Pairwise/aggregate overlap does not prove a common column.
+        boxes = [(70, 90, 170, 105), (160, 120, 280, 135), (180, 150, 260, 165)]
+    elif adverse == "vertical_overlap":
+        boxes[1] = (70, 100, 280, 135)
+    lines = [
+        Line(1, index, box, f"Source {index}", 10, 0, source_id=f"1:{index}:0")
+        for index, box in enumerate(boxes)
+    ]
+    ids = [line.source_id for line in lines]
+    proposal = Proposal(
+        Region(
+            [Region([Region([], [ids[0]]), Region([], [ids[2]])], []), Region([], [ids[1]])], []
+        ),
+        dict(zip(ids, [100, 130, 160])),
+        set(),
+        "unchanged-source-hash",
+    )
+    before = [vars(line).copy() for line in lines]
+    ordered, record = order_page(
+        1, lines, proposal, has_tables=False, settings=Settings(_env_file=None)
+    )
+    assert [vars(line) for line in lines] == before
+    assert record.source_inventory_sha256 == "unchanged-source-hash"
+    assert ordered == lines
+    if adverse:
+        assert record.status == "unresolved"
+        assert record.reason == "ambiguous_region_overlap"
+    else:
+        assert record.status == "ordered"
+
+
+def test_original_structural_bibliography_preserves_source_and_two_references(tmp_path):
+    from app.ingest.references import extract_references
+    from tests.test_checks_structural_live import _abstract_pdf
+
+    with pymupdf.open(_abstract_pdf(tmp_path)) as doc:
+        inventory = native_lines(doc)
+        original = _extract_open_document(
+            doc, load_patterns(), Settings(_env_file=None, ingest_reading_order_strategy="legacy")
+        )
+        result = extract(doc)
+        assert native_lines(doc) == inventory
+    assert result.geometry == original.geometry
+    assert result.tables == original.tables and result.images == original.images
+    assert Counter((b.page, b.bbox, b.text) for b in result.blocks) == Counter(
+        (b.page, b.bbox, b.text) for b in original.blocks
+    )
+    assert all(record.status == "ordered" for record in result.reading_order)
+    assert all(record.source_inventory_sha256 for record in result.reading_order)
+    assert len(extract_references(result, load_patterns())) == 2

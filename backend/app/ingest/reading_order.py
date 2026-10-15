@@ -268,6 +268,17 @@ def order_page(
             # separately emitted TeX-logo glyph. Original line baselines and
             # x positions can order these without discarding their spans.
             return row_order([sid for part in parts for sid in part])
+        # Nested region extents can overlap even when their original lines form
+        # one unambiguous column. Require a common positive x intersection and
+        # disjoint full source boxes in the actual returned order; do not infer
+        # flow from aggregate region boxes or relax any earlier source guard.
+        single_column_ids = [sid for part in parts for sid in part]
+        if max(body[sid].bbox[0] for sid in single_column_ids) < min(
+            body[sid].bbox[2] for sid in single_column_ids
+        ):
+            row_ids = row_order(single_column_ids)
+            if all(body[left].bbox[3] <= body[right].bbox[1] for left, right in pairwise(row_ids)):
+                return row_ids
         raise UnresolvedOrder("ambiguous_region_overlap")
 
     def visit(region: Region) -> list[str]:
