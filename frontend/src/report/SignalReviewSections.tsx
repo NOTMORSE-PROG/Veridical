@@ -229,7 +229,7 @@ function SignalFindingCard({
   return (
     <li className={allResolved ? "signal-flag-row signal-flag-row--resolved" : "signal-flag-row"}>
       <div className="signal-flag-row__summary">
-        <span className={`signal-severity signal-severity--${severity}`}>{SEVERITY_LABEL[severity]}</span>
+        <span className={`signal-severity signal-severity--${first.affects_readiness === false ? "low" : severity}`}>{first.affects_readiness === false ? "Review lead: not scored" : SEVERITY_LABEL[severity]}</span>
         {viewedSummary(flags, viewedIds) && (
           <span className="signal-viewed-state"><ViewedIcon />{viewedSummary(flags, viewedIds)}</span>
         )}
@@ -492,7 +492,7 @@ function SignalFlagList({
 function voteSummary(item: EscalatedItemOut): string {
   if (item.review_reason === "not_graded") return "The AI did not grade this criterion.";
   if (item.review_reason === "injection_suspected") return "AI passes agreed, but that agreement cannot be trusted here.";
-  if (item.votes.length === 0) return "No AI votes were recorded.";
+  if (item.votes.length === 0) return "No AI assessment was recorded.";
   const realVotes = item.votes.filter((vote): vote is string => vote !== null);
   if (realVotes.length === 0) return `No valid verdict from ${item.votes.length} grading ${item.votes.length === 1 ? "pass" : "passes"}.`;
   if (item.ai_majority_verdict === null) return `Split vote: ${item.votes.map((vote) => vote ?? "no verdict").join(", ")}.`;
@@ -508,9 +508,10 @@ function resolutionLabel(item: EscalatedItemOut, resolution: EscalationResolutio
   return item.levels?.find((entry) => entry.level === level)?.name ?? "Selected rubric level";
 }
 
-function SignalResolutionCard({ item, checkRunId, onResolved }: {
+function SignalResolutionCard({ item, checkRunId, sharedReasonId, onResolved }: {
   item: EscalatedItemOut;
   checkRunId: number;
+  sharedReasonId?: string;
   onResolved: (message: string) => void;
 }) {
   const [pending, setPending] = useState<{ resolution: EscalationResolution; level?: number }>();
@@ -577,7 +578,7 @@ function SignalResolutionCard({ item, checkRunId, onResolved }: {
   const unverifiedId = `signal-resolution-unverified-${item.check_result_id}`;
   const describedBy = [
     voteId,
-    item.reason && reasonId,
+    sharedReasonId || (item.reason && reasonId),
     item.injection_suspected && item.injection_matched_snippet && injectionId,
     item.unverified_evidence && item.unverified_evidence.length > 0 && unverifiedId,
   ]
@@ -589,7 +590,9 @@ function SignalResolutionCard({ item, checkRunId, onResolved }: {
       <div className="signal-resolution-card__context">
         <div><p className="signal-section-kicker">Criterion requiring judgment</p><h3 ref={criterionHeadingRef} tabIndex={-1}>{item.criterion_text}</h3></div>
         <p id={voteId} className="signal-resolution-card__vote">{voteSummary(item)}</p>
-        {item.reason && <p id={reasonId}>{item.reason}</p>}
+        {sharedReasonId
+          ? <p>Unresolved. The shared review reason above applies to this criterion.</p>
+          : item.reason && <p id={reasonId}>{item.reason}</p>}
         {item.injection_suspected && item.injection_matched_snippet && (
           <blockquote id={injectionId} className="signal-unverified-evidence"><strong>Text addressed at an automated grader</strong><span>“{item.injection_matched_snippet}”</span></blockquote>
         )}
@@ -650,6 +653,12 @@ export function SignalEscalatedPanel({ checkRunId }: { checkRunId: number }) {
   const headingRef = useRef<HTMLHeadingElement>(null);
   const announcementRef = useRef<HTMLParagraphElement>(null);
   const hasItems = Boolean(items?.length);
+  // Share only identical recorded reasons, never inferred causes or
+  // item-specific evidence. A single item keeps its reason in its card.
+  const sharedReason = items && items.length > 1 && items[0].reason?.trim()
+    && items.every((item) => item.reason === items[0].reason)
+    ? items[0].reason : null;
+  const sharedReasonId = `signal-shared-review-reason-${checkRunId}`;
 
   useEffect(() => {
     if (!hasItems && announcement) announcementRef.current?.focus();
@@ -663,8 +672,9 @@ export function SignalEscalatedPanel({ checkRunId }: { checkRunId: number }) {
       <div className="signal-review-section__heading"><div><p className="signal-section-kicker">First review task</p><h2 id="escalated-heading" ref={headingRef} tabIndex={-1}>Criteria needing your judgment</h2></div><span>{items?.length ?? 0} unresolved</span></div>
       <p className="signal-review-section__intro">VERIDICAL did not settle these items. Review the evidence and record your own reasoned resolution; the final decision remains unavailable until they are resolved.</p>
       <p ref={announcementRef} tabIndex={-1} aria-live="polite" className="signal-live-region">{announcement}</p>
+      {sharedReason && <Alert title="Shared review reason" tone="warning"><p id={sharedReasonId}>{sharedReason}</p></Alert>}
       {hasItems
-        ? <div className="signal-resolution-list">{items?.map((item) => <SignalResolutionCard key={item.check_result_id} item={item} checkRunId={checkRunId} onResolved={(message) => { setAnnouncement(message); headingRef.current?.focus(); }} />)}</div>
+        ? <div className="signal-resolution-list">{items?.map((item) => <SignalResolutionCard key={item.check_result_id} item={item} checkRunId={checkRunId} sharedReasonId={sharedReason ? sharedReasonId : undefined} onResolved={(message) => { setAnnouncement(message); headingRef.current?.focus(); }} />)}</div>
         : <Alert title="No unresolved criteria" tone="success">Every criterion has a recorded outcome. Continue to the integrity signals.</Alert>}
     </section>
   );

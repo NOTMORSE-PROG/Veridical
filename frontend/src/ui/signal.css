@@ -2584,6 +2584,25 @@
     padding: var(--signal-space-6);
   }
 
+  /* 4w: a desktop inspector is narrower than the viewport. Keep the
+     criterion readable before presenting its resolution choices. */
+  .signal-document-inspector .signal-resolution-card {
+    grid-template-columns: minmax(0, 1fr);
+    gap: var(--signal-space-4);
+    padding: var(--signal-space-4);
+  }
+
+  .signal-document-inspector .signal-resolution-card__context,
+  .signal-document-inspector .signal-resolution-options {
+    min-inline-size: 0;
+  }
+
+  .signal-document-inspector .signal-resolution-options button {
+    max-inline-size: 100%;
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+
   .signal-resolution-card h3,
   .signal-flag-row h3,
   .signal-result-card h3 {

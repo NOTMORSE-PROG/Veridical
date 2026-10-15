@@ -97,11 +97,17 @@ function ContinuousPdfPage({
     if (!element || !root) return;
     registerPage(metric.pageNumber, element);
     const nearObserver = new IntersectionObserver(
-      ([entry]) => setIsNear(entry.isIntersecting),
+      (entries) => {
+        const latest = entries.at(-1);
+        if (latest) setIsNear(latest.isIntersecting);
+      },
       { root, rootMargin: "100% 0px" },
     );
     const visibilityObserver = new IntersectionObserver(
-      ([entry]) => onVisibility(metric.pageNumber, entry.intersectionRatio),
+      (entries) => {
+        const latest = entries.at(-1);
+        if (latest) onVisibility(metric.pageNumber, latest.intersectionRatio);
+      },
       { root, threshold: [0, 0.25, 0.5, 0.75, 1] },
     );
     nearObserver.observe(element);
@@ -328,6 +334,10 @@ export function PdfPane({
     setPdf(null);
     setMetrics([]);
     setLoadError(false);
+    pageRefs.current.clear();
+    pageVisibility.current.clear();
+    setCurrentPage(1);
+    setPageInput("1");
     const task = pdfjsLib.getDocument({ url: fileUrl, withCredentials: true });
     task.promise.then(async (document) => {
       if (cancelled) return;
@@ -353,7 +363,10 @@ export function PdfPane({
 
   const registerPage = useCallback((page: number, element: HTMLElement | null) => {
     if (element) pageRefs.current.set(page, element);
-    else pageRefs.current.delete(page);
+    else {
+      pageRefs.current.delete(page);
+      pageVisibility.current.delete(page);
+    }
   }, []);
 
   const updateVisibility = useCallback((page: number, ratio: number) => {
@@ -375,16 +388,15 @@ export function PdfPane({
     const target = Math.max(1, Math.min(total, Math.round(page)));
     const root = scrollRef.current;
     const element = pageRefs.current.get(target);
-    if (root && element) {
-      // Scroll the manuscript pane without moving the page toolbar beneath
-      // the application's fixed navigation.
-      const padding = Number.parseFloat(getComputedStyle(root).scrollPaddingTop) || 0;
-      root.scrollTo({
-        top: root.scrollTop + element.getBoundingClientRect().top
-          - root.getBoundingClientRect().top - root.clientTop - padding,
-        behavior,
-      });
-    }
+    if (!root || !element) return;
+    // Scroll the manuscript pane without moving the page toolbar beneath
+    // the application's fixed navigation.
+    const padding = Number.parseFloat(getComputedStyle(root).scrollPaddingTop) || 0;
+    root.scrollTo({
+      top: root.scrollTop + element.getBoundingClientRect().top
+        - root.getBoundingClientRect().top - root.clientTop - padding,
+      behavior,
+    });
     setCurrentPage(target);
     setPageInput(String(target));
   }, [metrics.length, pdf?.numPages]);

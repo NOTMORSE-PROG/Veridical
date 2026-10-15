@@ -102,6 +102,18 @@ describe("UploadManuscriptModal", () => {
     expect(await screen.findByText("12 pages parsed. 0 reference records extracted.")).toBeInTheDocument();
   });
 
+  it("displays source-reading limitations for an ordinary text PDF", async () => {
+    const note = "References were not extracted because some pages cannot be read reliably.";
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({
+      ...SUMMARY, citations: 0, image_only: false, notes: [note],
+    }), { status: 200 })));
+    renderWithProviders(<UploadManuscriptModal onClose={() => {}} onUploadSuccess={() => {}} />);
+    chooseFile();
+    fireEvent.click(screen.getByRole("button", { name: "Upload manuscript" }));
+    expect(await screen.findByText(note)).toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "Extraction notes" })).toHaveTextContent(note);
+  });
+
   it("BUG-234/V-077: explains a same-account exact re-upload without calling it a Library record", async () => {
     vi.stubGlobal(
       "fetch",

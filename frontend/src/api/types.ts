@@ -424,11 +424,17 @@ export interface LevelledRating {
  * it here until now. A narrow, explicit projection of `CheckResult.detail`,
  * never a passthrough. */
 export interface IntegrityCheckStatusOut {
-  check_kind: "internal_agreement" | "citation_integrity";
-  outcome: "unverifiable" | "api_down" | "quota_exhausted";
+  check_kind: "internal_agreement" | "citation_integrity" | "statistical_forensics" | "originality_reuse";
+  outcome: "unverifiable" | "api_down" | "quota_exhausted" | "escalated";
   n_skipped_quota: number;
   n_skipped_api_down: number;
   n_skipped_parse_failure: number;
+  coverage_reason?: string | null;
+  n_metadata_skipped_insufficient?: number;
+  n_linkage_unassessed?: number;
+  n_source_pages_unassessed?: number;
+  n_claim_support_unassessed?: number;
+  reference_list_page?: number | null;
 }
 
 /** V-077 (D-028): a count, not a judgment. "library" for checks since the
@@ -438,7 +444,7 @@ export interface OriginalityScope {
   compared_count: number | null;
   corpus: "library" | "pre_library";
   /** "no_text": no readable text, so no comparison ran at all. */
-  not_compared_reason?: "no_text" | null;
+  not_compared_reason?: "no_text" | "no_comparison_archive" | "source_unresolved" | null;
 }
 
 export interface ReportOut extends ReportCommon {
@@ -631,6 +637,8 @@ export interface CitationSourceKeyOut {
 }
 
 export interface FlagOut {
+  affects_readiness?: boolean;
+  readiness_exclusion_reason?: string | null;
   id: number;
   check_result_id: number;
   check_run_id: number;
@@ -695,6 +703,8 @@ export interface ConfirmCitationSourceOut extends FlagOut {
  * for why: a summary row's job is "enough to decide whether to click,"
  * not "enough to skip clicking"). */
 export interface FlagSummaryOut {
+  affects_readiness?: boolean;
+  readiness_exclusion_reason?: string | null;
   id: number;
   check_kind: string;
   severity: "high" | "med" | "low";

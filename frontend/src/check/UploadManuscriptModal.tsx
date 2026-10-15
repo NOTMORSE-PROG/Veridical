@@ -152,7 +152,7 @@ export function UploadManuscriptModal({ onClose, onUploadSuccess }: UploadManusc
   const message = fieldError ?? serverError;
   const summary = ingest.data;
 
-  const showsImageOnlyNote = summary?.image_only && summary.notes[0];
+  const extractionNotes = summary?.notes.filter((note) => note.trim()) ?? [];
   const showsVisionUnavailable =
     summary?.vision_status === "unavailable" &&
     summary.images + summary.tables + summary.equations > 0;
@@ -265,14 +265,14 @@ export function UploadManuscriptModal({ onClose, onUploadSuccess }: UploadManusc
             <p className="signal-upload-summary__counts">
               {summary.page_count} pages parsed. {summary.citations} reference records extracted.
             </p>
-            {(showsImageOnlyNote || showsVisionUnavailable) && (
+            {(extractionNotes.length > 0 || showsVisionUnavailable) && (
               <section className="signal-upload-summary__notes" aria-label="Extraction notes">
                 <h4>Extraction notes</h4>
-                {showsImageOnlyNote && (
-                  <p className="rounded-md bg-status-caution-bg px-3 py-2 text-sm text-status-caution-text">
-                    {summary.notes[0]}
+                {extractionNotes.map((note, index) => (
+                  <p key={index} className="rounded-md bg-status-caution-bg px-3 py-2 text-sm text-status-caution-text">
+                    {note}
                   </p>
-                )}
+                ))}
                 {showsVisionUnavailable && (
                   <p className="rounded-md bg-status-caution-bg px-3 py-2 text-sm text-status-caution-text">
                     VERIDICAL could not analyze the images in this document right now (the image

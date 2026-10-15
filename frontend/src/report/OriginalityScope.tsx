@@ -14,6 +14,9 @@ export function OriginalityScope({
   showAddAction?: boolean;
 }) {
   if (!scope) return null;
+  if (scope.not_compared_reason === "source_unresolved") {
+    return <p className="signal-originality-scope">Originality and reuse: not assessed because the manuscript could not be read reliably. The original paper is still available.</p>;
+  }
   if (scope.not_compared_reason === "no_text") {
     return (
       <p className="signal-originality-scope">

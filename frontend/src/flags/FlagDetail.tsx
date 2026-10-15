@@ -241,6 +241,15 @@ function ResolutionControl({ flag }: { flag: FlagOut }) {
     );
   }
 
+  if (flag.affects_readiness === false) {
+    return (
+      <section className="signal-evidence-section" aria-labelledby="resolution-options-heading">
+        <h2 id="resolution-options-heading">Review lead: not scored</h2>
+        <p>This comparison does not change readiness. You can inspect the evidence without writing a comment or recording an override.</p>
+      </section>
+    );
+  }
+
   return (
     <section className="signal-evidence-section signal-resolution-options" aria-labelledby="resolution-options-heading">
       <div className="signal-section-heading"><div><p className="signal-section-kicker">Instructor action</p><h2 id="resolution-options-heading">Resolve only after checking the evidence</h2></div></div>

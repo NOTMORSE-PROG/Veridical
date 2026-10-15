@@ -98,6 +98,32 @@ function reportWith(overrides: Record<string, unknown>) {
 describe("SignalEscalatedPanel / SignalResolutionCard", () => {
   afterEach(() => vi.unstubAllGlobals());
 
+  it("shows an identical shared reason once and associates every choice with it", async () => {
+    const reason = "The source reading order is unresolved. No assessment was made.";
+    const items = [REAL_MAJORITY, LEVELLED_ITEM].map((item) => ({
+      ...item, reason, votes: [], ai_majority_verdict: null,
+    }));
+    vi.stubGlobal("fetch", stubFetchByPath({ "/check-runs/5/escalated": items }));
+    renderWithProviders(<SignalEscalatedPanel checkRunId={5} />);
+    expect(await screen.findAllByText(reason)).toHaveLength(1);
+    expect(screen.getAllByText("No AI assessment was recorded.")).toHaveLength(2);
+    for (const button of screen.getAllByRole("button")) {
+      expect(button.getAttribute("aria-describedby")?.split(" "))
+        .toContain("signal-shared-review-reason-5");
+    }
+    expect(screen.queryByRole("button", { name: /Accept AI suggestion/ })).not.toBeInTheDocument();
+  });
+
+  it("keeps different reasons and item-specific warnings separate", async () => {
+    const other = { ...LEVELLED_ITEM, reason: "The method has conflicting descriptions." };
+    vi.stubGlobal("fetch", stubFetchByPath({ "/check-runs/5/escalated": [INJECTION_SUSPECTED, other] }));
+    renderWithProviders(<SignalEscalatedPanel checkRunId={5} />);
+    expect(await screen.findByText(other.reason)).toBeInTheDocument();
+    expect(screen.getByText(INJECTION_SUSPECTED.reason!)).toBeInTheDocument();
+    expect(screen.getByText("Text addressed at an automated grader")).toBeInTheDocument();
+    expect(screen.queryByText("Shared review reason")).not.toBeInTheDocument();
+  });
+
   it("BUG-045/BUG-131: an injection-suspected item's vote summary never shows a bare agreement fraction, and renders the matched evidence", async () => {
     vi.stubGlobal("fetch", stubFetchByPath({ "/check-runs/5/escalated": [INJECTION_SUSPECTED] }));
     renderWithProviders(<SignalEscalatedPanel checkRunId={5} />);
