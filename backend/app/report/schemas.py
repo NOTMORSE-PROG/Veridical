@@ -103,6 +103,7 @@ class CriterionResultOut(BaseModel):
 COVERAGE_REASONS = frozenset(
     {
         "source_reading_order_unresolved",
+        "source_reading_order_partial",
         "reference_metadata_insufficient",
         "author_year_citation_parse_unassessed",
         "numeric_citation_style_unassessed",
@@ -137,6 +138,10 @@ class IntegrityCheckStatusOut(BaseModel):
     n_source_pages_unassessed: int = 0
     n_claim_support_unassessed: int = 0
     reference_list_page: int | None = None
+    analysis_coverage: Literal["complete", "partial", "unsupported"] | None = None
+    assessment_scope: Literal["reference_metadata_only"] | None = None
+    n_reference_metadata_attempted: int = 0
+    n_metadata_api_down: int = 0
 
 
 class OriginalityScopeOut(BaseModel):
@@ -312,6 +317,8 @@ class PublicReportOut(BaseModel):
     # identifies no one, and without it an adviser could read "no reuse
     # found" over an empty Library as a clean result.
     originality_scope: OriginalityScopeOut | None = None
+    # Coverage fact only: no private rationale, raw detail, or source identity.
+    assessment_incomplete: bool = False
 
 
 class DecisionIn(BaseModel):

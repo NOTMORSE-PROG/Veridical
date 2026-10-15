@@ -37,7 +37,7 @@ from app.checks.citations.support import (
     ClaimSupportResult,
     run_claim_support_check,
 )
-from app.checks.source_quality import persist_source_limitation
+from app.checks.source_quality import persist_source_limitation, source_limitation_detail
 from app.config import Settings
 from app.errors import ApiDownError
 from app.external import cache
@@ -47,7 +47,14 @@ from app.external import openlibrary as openlibrary_client
 from app.external import s2 as s2_client
 from app.external.schemas import VerificationResult
 from app.ingest.patterns import HeadingPatterns
-from app.ingest.references import non_reference_blocks, reference_section_page, select_references
+from app.ingest.references import (
+    extract_references,
+    non_reference_blocks,
+    reference_entry_locations,
+    reference_reading_order_issues,
+    reference_section_page,
+    select_references,
+)
 from app.ingest.schemas import ExtractionResult
 from app.llm.base import LLMClient
 from app.models.citation import Citation
@@ -316,12 +323,41 @@ async def run_citation_integrity_check(
     settings: Settings,
     llm: LLMClient | None = None,
 ) -> CheckResult:
-    source_stop = await persist_source_limitation(
-        session, check_run_id, CheckKind.citation_integrity, extraction
-    )
-    if source_stop is not None:
-        return source_stop
-    body_blocks = non_reference_blocks(extraction, patterns)
+    source_limit = source_limitation_detail(extraction)
+    selection = select_references(extraction, patterns)
+    metadata_only = False
+    if source_limit is not None:
+        # Metadata verification has a bounded source: the complete bibliography.
+        # Admit it only when both source boundaries/provenance and the persisted
+        # entries agree. No body fragments are joined across unsupported pages.
+        drafts = extract_references(extraction, patterns)
+        source_fields = (
+            "order_index",
+            "raw_text",
+            "authors",
+            "title",
+            "year",
+            "doi",
+            "isbn",
+            "venue",
+            "url",
+            "parse_status",
+        )
+        metadata_only = bool(
+            drafts
+            and len(drafts) == len(citations)
+            and not selection.issues
+            and not reference_reading_order_issues(extraction, selection)
+            and all(
+                all(getattr(draft, field) == getattr(citation, field) for field in source_fields)
+                for draft, citation in zip(drafts, citations, strict=True)
+            )
+        )
+        if not metadata_only:
+            return await persist_source_limitation(
+                session, check_run_id, CheckKind.citation_integrity, extraction
+            )
+    body_blocks = [] if metadata_only else non_reference_blocks(extraction, patterns)
     gaps: set[str] = set()
     in_text = extract_in_text_citations(body_blocks, settings=settings, coverage_gaps=gaps)
     cross = cross_match(in_text, citations)
@@ -332,11 +368,10 @@ async def run_citation_integrity_check(
         context_file=settings.numeric_citation_context_file,
         source_block_index_by_id={id(block): i for i, block in enumerate(extraction.blocks)},
     )
-    selection = select_references(extraction, patterns)
     numbered = numeric.n_numbered_reference_entries > 0
     absence_candidates = numeric.confidently_uncited if numbered else cross.confidently_uncited
     # No supported body style or a partial scan cannot prove a reference unused.
-    if gaps or selection.issues or (not numbered and not cross.linked):
+    if metadata_only or gaps or selection.issues or (not numbered and not cross.linked):
         absence_candidates = []
     linkage_unassessed = (
         len(numeric.absence_unassessed_references)
@@ -348,7 +383,7 @@ async def run_citation_integrity_check(
             }
         )
     )
-    if gaps or selection.issues:
+    if metadata_only or gaps or selection.issues:
         linkage_unassessed = max(linkage_unassessed, len(citations))
     metadata_unassessed = []
     metadata_api_down = 0
@@ -382,9 +417,13 @@ async def run_citation_integrity_check(
             *uncited_flags(absence_candidates),
         ]
     )
-    if selection.issues or not citations:
+    if metadata_only or selection.issues or not citations:
         flag_drafts = []
     claim_support_pairs: list[ClaimSupportInput] = []
+    locations = {
+        (location.index, location.raw_text): location
+        for location in reference_entry_locations(extraction, patterns)
+    }
     for citation in citations:
         parsed = citation.parse_status == CitationParseStatus.parsed
         metadata_complete = bool(
@@ -418,6 +457,16 @@ async def run_citation_integrity_check(
         )
         draft = _verdict_flag_draft(citation, verdict)
         if draft is not None:
+            location = locations.get((citation.order_index + 1, citation.raw_text))
+            if location is not None:
+                anchor = (
+                    f"p. {location.page}"
+                    if location.page is not None
+                    else f"\u00b6{location.paragraph}"
+                    if location.paragraph is not None
+                    else draft.page_anchor
+                )
+                draft = replace(draft, page_anchor=anchor)
             flag_drafts.append(draft)
         claim_sentence = claim_by_order_index.get(citation.order_index)
         if claim_sentence and (
@@ -460,7 +509,9 @@ async def run_citation_integrity_check(
     # existing, most self-resolving state) last. The real per-cause counts
     # are always in `detail` regardless of which one outcome wins.
     coverage_reason = (
-        "reference_list_unavailable"
+        "source_reading_order_partial"
+        if metadata_only
+        else "reference_list_unavailable"
         if selection.issues or not citations
         else "reference_metadata_insufficient"
         if metadata_unassessed
@@ -493,6 +544,21 @@ async def run_citation_integrity_check(
         kind=CheckKind.citation_integrity,
         outcome=outcome,
         detail={
+            **(
+                {
+                    "analysis_coverage": "partial"
+                    if any(record["lookup_attempted"] for record in verification_records)
+                    else "unsupported",
+                    "assessment_scope": "reference_metadata_only",
+                    "source_issues": source_limit["source_issues"],
+                    "n_source_pages_unassessed": source_limit["n_source_pages_unassessed"],
+                    "n_reference_metadata_attempted": sum(
+                        record["lookup_attempted"] for record in verification_records
+                    ),
+                }
+                if metadata_only
+                else {}
+            ),
             "n_references": len(citations),
             "n_in_text_citations": len(in_text),
             "n_linked": len(cross.linked),

@@ -15,6 +15,23 @@ const INTEGRITY_LABEL: Record<IntegrityCheckStatusOut["check_kind"], string> = {
 function integrityCoverageItem(status: IntegrityCheckStatusOut, manuscriptId: number, checkRunId: number): CoverageStatementItem {
   const label = INTEGRITY_LABEL[status.check_kind];
   const reason = status.coverage_reason;
+  if (status.assessment_scope === "reference_metadata_only") {
+    const partial = status.analysis_coverage === "partial";
+    return {
+      key: status.check_kind,
+      label: `${label} · ${partial ? "Partially assessed" : "Not assessed"}`,
+      detail: partial
+        ? "Reference details were checked where possible. Citation matching across the manuscript was not assessed."
+        : "Reference entries were retained, but their details could not be checked. Citation matching across the manuscript was not assessed.",
+      subIssues: [
+        `${status.n_reference_metadata_attempted ?? 0} reference checks attempted. This does not mean every source was verified.`,
+        ...(status.n_metadata_skipped_insufficient ? [`${status.n_metadata_skipped_insufficient} references could not be checked because their details were incomplete.`] : []),
+        ...(status.n_metadata_api_down ? [`${status.n_metadata_api_down} source checks could not reach an external service.`] : []),
+        "Claim support across the manuscript was not assessed. Unchecked content is not treated as passed.",
+      ],
+      action: { to: `/report/${checkRunId}/document?view=decision`, label: "Open the paper" },
+    };
+  }
   const coverageCopy: Record<string, string> = {
     source_reading_order_unresolved: "Some pages could not be read reliably. This check was not assessed; this is not a finding against the paper.",
     reference_metadata_insufficient: "Some references are visible in the paper, but their author, title, or date could not be read reliably. They have not been verified.",

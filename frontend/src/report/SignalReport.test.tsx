@@ -320,7 +320,7 @@ describe("SignalReportPage", () => {
     renderWithProviders(<SignalReportPage />, { route: "/report/5", path: "/report/:checkRunId" });
 
     expect(await screen.findByText("Test-mode AI results")).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "Not every check finished" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Assessment limits" })).toBeInTheDocument();
     expect(screen.getByText("Required format review")).toBeInTheDocument();
     expect(screen.getByText("Citation integrity")).toBeInTheDocument();
     expect(screen.getByText(/2 items skipped because a service was unavailable/)).toBeInTheDocument();

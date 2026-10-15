@@ -118,6 +118,15 @@ describe("AdviserViewPage", () => {
     expect(screen.queryByText("Test-mode AI results")).not.toBeInTheDocument();
   });
 
+  it("discloses incomplete coverage without publishing private check details", async () => {
+    vi.stubGlobal("fetch", stubFetchByPath({
+      "/shared/tok123/report": shared({ report: { ...BASE_REPORT, assessment_incomplete: true } }),
+    }));
+    render();
+    expect(await screen.findByText("Assessment limits")).toBeInTheDocument();
+    expect(screen.getByText(/Unchecked content is not treated as passed/)).toBeInTheDocument();
+  });
+
   it("BUG-049 (backend review finding): discloses an unknown-mode run to the adviser, distinctly from real", async () => {
     vi.stubGlobal(
       "fetch",

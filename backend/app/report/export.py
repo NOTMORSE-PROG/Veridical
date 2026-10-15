@@ -757,11 +757,33 @@ def build_report_pdf(data: ReportExportData) -> bytes:
 
     # 4. Flags.
     if report.integrity_check_status:
-        flow.append(Paragraph("Checks not fully assessed", styles["h2"]))
+        flow.append(Paragraph("Assessment limits", styles["h2"]))
         for coverage in report.integrity_check_status:
             label = _CHECK_KIND_LABEL.get(coverage.check_kind, coverage.check_kind)
             reason = (coverage.coverage_reason or coverage.outcome).replace("_", " ")
+            if coverage.assessment_scope == "reference_metadata_only":
+                reason = (
+                    "Partially assessed. Reference details were checked where possible. "
+                    "Citation matching and claim support across the manuscript were not assessed"
+                    if coverage.analysis_coverage == "partial"
+                    else "Not assessed. Reference entries were retained, but their details "
+                    "could not be checked. Citation matching and claim support across the "
+                    "manuscript were not assessed"
+                )
+            elif coverage.analysis_coverage == "unsupported":
+                reason = (
+                    "Not assessed. VERIDICAL could not establish a reliable source for this check. "
+                    "No conclusion was made"
+                )
             counts = []
+            if coverage.assessment_scope == "reference_metadata_only":
+                counts.append(
+                    f"{coverage.n_reference_metadata_attempted} reference checks attempted"
+                )
+            if coverage.n_metadata_api_down:
+                counts.append(
+                    f"{coverage.n_metadata_api_down} source checks could not reach an external service"
+                )
             if coverage.n_source_pages_unassessed:
                 counts.append(f"{coverage.n_source_pages_unassessed} source pages unassessed")
             if coverage.n_metadata_skipped_insufficient:

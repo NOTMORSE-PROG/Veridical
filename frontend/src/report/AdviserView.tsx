@@ -73,6 +73,7 @@ export function AdviserViewPage() {
 
         {report.llm_mode !== "real" && <Alert title={report.llm_mode === "fake" ? "Test-mode AI results" : "AI mode could not be verified"} tone="warning">{report.llm_mode === "fake" ? "Fixture responses produced this report. Do not treat AI-derived content as findings about the manuscript." : "This run predates reliable AI-mode tracking. Treat AI-derived outcomes cautiously."}</Alert>}
         {report.rubric_needs_review && <Alert title="The required format had parser uncertainty" tone="warning"><p>The instructor activated it despite the warning.</p>{report.rubric_parse_issues?.length ? <ul>{report.rubric_parse_issues.map((issue) => <li key={issue}>{issue}</li>)}</ul> : null}</Alert>}
+        {report.assessment_incomplete && <Alert title="Assessment limits" tone="warning">Some integrity checks were not fully assessed. Unchecked content is not treated as passed. The instructor decision remains separate from these limitations.</Alert>}
 
         <SignalPublicFlags flags={flags} originalityScope={report.originality_scope} />
         <SignalCriteriaResults results={report.results} checkRunId={report.check_run_id} publicView />

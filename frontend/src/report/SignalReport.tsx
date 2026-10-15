@@ -139,8 +139,8 @@ export function SignalReportPage() {
               <CoverageStatement
                 state="partial"
                 headingId="coverage-statement-heading"
-                heading="Not every check finished"
-                intro="Nothing skipped here is presented as passed. Each item below names what did not finish and how to close it."
+                heading="Assessment limits"
+                intro="Results below cover only the checks that ran. Unchecked content is not treated as passed."
                 items={coverageItems(report)}
               />
             </div>

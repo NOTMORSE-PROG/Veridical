@@ -19,6 +19,7 @@ def source_limitation_detail(extraction: ExtractionResult) -> dict | None:
         return None
     return {
         "coverage_reason": SOURCE_READING_ORDER_UNRESOLVED,
+        "analysis_coverage": "unsupported",
         "reason": SOURCE_READING_ORDER_NOTE,
         "source_issues": issues,
         "n_source_pages_unassessed": len({i["page"] for i in issues if "page" in i}),

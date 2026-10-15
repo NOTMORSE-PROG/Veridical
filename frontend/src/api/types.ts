@@ -435,6 +435,10 @@ export interface IntegrityCheckStatusOut {
   n_source_pages_unassessed?: number;
   n_claim_support_unassessed?: number;
   reference_list_page?: number | null;
+  analysis_coverage?: "complete" | "partial" | "unsupported" | null;
+  assessment_scope?: "reference_metadata_only" | null;
+  n_reference_metadata_attempted?: number;
+  n_metadata_api_down?: number;
 }
 
 /** V-077 (D-028): a count, not a judgment. "library" for checks since the
@@ -477,6 +481,7 @@ export interface ReportOut extends ReportCommon {
  * payload. Deliberately does NOT extend `ReportOut` -- see
  * `ReportCommon`'s own comment for which fields were cut and why. */
 export interface PublicReportOut extends ReportCommon {
+  assessment_incomplete?: boolean;
   check_run_id: number;
   manuscript_group_label: string;
   manuscript_original_filename: string | null;

@@ -551,6 +551,16 @@ async def report_out_for_check_run(
             n_source_pages_unassessed=(row.detail or {}).get("n_source_pages_unassessed", 0),
             n_claim_support_unassessed=(row.detail or {}).get("n_claim_support_unassessed", 0),
             reference_list_page=(row.detail or {}).get("reference_list_page"),
+            analysis_coverage=(row.detail or {}).get("analysis_coverage")
+            if (row.detail or {}).get("analysis_coverage") in {"complete", "partial", "unsupported"}
+            else None,
+            assessment_scope="reference_metadata_only"
+            if (row.detail or {}).get("assessment_scope") == "reference_metadata_only"
+            else None,
+            n_reference_metadata_attempted=(row.detail or {}).get(
+                "n_reference_metadata_attempted", 0
+            ),
+            n_metadata_api_down=(row.detail or {}).get("n_metadata_api_down", 0),
         )
         for row in integrity_rows
     ]
