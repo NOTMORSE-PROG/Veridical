@@ -198,14 +198,8 @@ def select_references(result: ExtractionResult, patterns: HeadingPatterns) -> Re
 
 
 def extract_references(result: ExtractionResult, patterns: HeadingPatterns) -> list[CitationDraft]:
-    # Unknown sequence must not create authoritative-looking Citation rows.
-    # The persisted extraction reason distinguishes this from an absent list.
-    from app.ingest.quality import reading_order_issues
-
-    if reading_order_issues(result):
-        return []
     selection = select_references(result, patterns)
-    if selection.issues:
+    if selection.issues or reference_reading_order_issues(result, selection):
         return []
     groups = selection.groups
     urls = reference_urls(
@@ -232,12 +226,8 @@ def reference_entry_locations(
     boundary algorithm. Callers must also compare the stored flag's quoted
     reference text to ``raw_text`` before showing an exact page or box.
     """
-    from app.ingest.quality import reading_order_issues
-
-    if reading_order_issues(result):
-        return []
     selection = select_references(result, patterns)
-    if selection.issues:
+    if selection.issues or reference_reading_order_issues(result, selection):
         return []
     groups = selection.groups
     locations: list[ReferenceEntryLocation] = []
@@ -260,6 +250,76 @@ def reference_entry_locations(
             )
         )
     return locations
+
+
+def reference_reading_order_issues(
+    result: ExtractionResult, selection: ReferenceSelection
+) -> list[dict[str, int | str]]:
+    """Validate a complete bibliography scope, including its source boundaries.
+
+    The selected fragments retain their original block indices. Include the
+    preceding/following nonempty source blocks so an unsupported heading or
+    closing boundary cannot make a partial list appear complete. Also include
+    intervening pages, even when no text was recovered on them. Global metadata
+    and source-identity defects remain blocking in ``reading_order_issues``.
+
+    An empty selection cannot establish absence in a partly unreadable document.
+    Other consumers must still disclose document-wide citation/body coverage.
+    """
+    from app.ingest.quality import reading_order_issues
+
+    if not selection.span or result.anchor_kind != "page":
+        return reading_order_issues(result)
+    if not all(isinstance(block, SourceFragment) for block in selection.span):
+        return reading_order_issues(result)
+    first = min(selection.span, key=lambda block: (block.source_block_index, block.source_start))
+    last = max(selection.span, key=lambda block: (block.source_block_index, block.source_end))
+    start, end = first.source_block_index, last.source_block_index
+    # A split proves a local boundary only when the excluded source contains
+    # non-furniture text. Removing a page number or blank line proves nothing
+    # about where the bibliography starts or finishes.
+    if not _has_body_text(result.blocks[start], 0, first.source_start):
+        start = next(
+            (
+                index
+                for index in range(start - 1, -1, -1)
+                if result.blocks[index].text.strip() and not result.blocks[index].is_furniture
+            ),
+            start,
+        )
+    has_closing_text = _has_body_text(
+        result.blocks[end], last.source_end, len(result.blocks[end].text)
+    )
+    if not has_closing_text:
+        end = next(
+            (
+                index
+                for index in range(end + 1, len(result.blocks))
+                if result.blocks[index].text.strip() and not result.blocks[index].is_furniture
+            ),
+            end,
+        )
+    pages = {block.page for block in result.blocks[start : end + 1] if block.page is not None}
+    if not pages:
+        return reading_order_issues(result)
+    scope_end = max(pages)
+    if end == last.source_block_index and not has_closing_text:
+        # EOF in the recovered text is not necessarily EOF in the PDF. A later
+        # unreadable page could continue the list even when it yielded no block.
+        scope_end = result.page_count
+    return reading_order_issues(result, pages=set(range(min(pages), scope_end + 1)))
+
+
+def _has_body_text(block: TextBlock, start: int, end: int) -> bool:
+    """Whether an exact source interval contains more than blank/page furniture."""
+    if block.source_lines is None:
+        return bool(block.text[start:end].strip())
+    return any(
+        not line.is_furniture
+        and max(start, line.start) < min(end, line.end)
+        and block.text[max(start, line.start) : min(end, line.end)].strip()
+        for line in block.source_lines
+    )
 
 
 def non_reference_blocks(

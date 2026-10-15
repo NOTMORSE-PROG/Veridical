@@ -9,8 +9,13 @@ SOURCE_READING_ORDER_NOTE = (
     "This is a reading limitation, not a finding against the manuscript."
 )
 SOURCE_READING_ORDER_INGEST_NOTE = (
-    "References were not extracted because VERIDICAL could not read some pages "
-    "in a reliable order; this does not mean the paper has no references."
+    "Some pages could not be read in a reliable order. No references were extracted. "
+    "This does not mean the paper has no references."
+)
+SOURCE_READING_ORDER_WITH_REFERENCES_NOTE = (
+    "Some pages could not be read in a reliable order. "
+    "Reference entries were retained from a readable section. "
+    "Extraction does not verify their sources."
 )
 SOURCE_REFERENCE_BOUNDARY_INGEST_NOTE = (
     "References were not extracted because VERIDICAL could not reliably separate the entries. "
@@ -18,24 +23,43 @@ SOURCE_REFERENCE_BOUNDARY_INGEST_NOTE = (
 )
 
 
-def reading_order_issues(extraction: ExtractionResult) -> list[dict[str, int | str]]:
+def reading_order_ingest_note(extraction: ExtractionResult, reference_count: int) -> str | None:
+    """Report retained entries separately from source readability/verification."""
+    if not reading_order_issues(extraction):
+        return None
+    return (
+        SOURCE_READING_ORDER_WITH_REFERENCES_NOTE
+        if reference_count > 0
+        else SOURCE_READING_ORDER_INGEST_NOTE
+    )
+
+
+def reading_order_issues(
+    extraction: ExtractionResult, *, pages: set[int] | None = None
+) -> list[dict[str, int | str]]:
     """Legacy absence is unknown, not a newly asserted order result.
 
     New assessments must cover every PDF page and conserve their source IDs.
     Switching the current feature setting off cannot erase a persisted issue.
-    This first gate is document-wide; page-local check coverage is not inferred.
+    A caller may name the complete page scope of a bounded operation. Layout
+    uncertainty outside that scope does not invalidate its independently ordered
+    source. Metadata and source-identity validation still covers the ENTIRE
+    extraction; a scope can never hide damaged provenance or missing records.
+    The default remains document-wide, and this never mutates the source ledger.
     """
     records = extraction.reading_order
     if records is None:
         return []
     if extraction.anchor_kind != "page":
         return [{"reason": "reading_order_metadata_inconsistent"}]
-    pages = [record.page for record in records]
-    if sorted(pages) != list(range(1, extraction.page_count + 1)):
+    recorded_pages = [record.page for record in records]
+    if sorted(recorded_pages) != list(range(1, extraction.page_count + 1)):
         return [{"reason": "reading_order_metadata_incomplete"}]
+    if pages is not None and (not pages or not pages.issubset(recorded_pages)):
+        return [{"reason": "reading_order_scope_invalid"}]
     by_page: dict[int, list[str]] = {}
     for block in extraction.blocks:
-        if block.page not in pages or block.source_line_ids is None:
+        if block.page not in recorded_pages or block.source_line_ids is None:
             return [{"reason": "reading_order_source_identity_missing"}]
         if block.text.strip() and not block.source_line_ids:
             return [{"page": block.page, "reason": "reading_order_source_identity_missing"}]
@@ -52,7 +76,7 @@ def reading_order_issues(extraction: ExtractionResult) -> list[dict[str, int | s
             or len(set(ids)) != len(ids)
         ):
             issues.append({"page": record.page, "reason": "reading_order_source_identity_mismatch"})
-        elif record.status == "unresolved":
+        elif record.status == "unresolved" and (pages is None or record.page in pages):
             issues.append(
                 {"page": record.page, "reason": record.reason or "reading_order_unresolved"}
             )

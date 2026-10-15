@@ -1,5 +1,5 @@
 """Ingestion HTTP surface (V-008) — upload a manuscript, get the parsed
-summary. Feeds screen 4f's states; taxonomy errors surface through the
+summary. Feeds screen 4e's states; taxonomy errors surface through the
 app-wide exception handler as the structured envelope, never a bare 500.
 
 HTTP only (CODING.md §2): validation and response shaping here, all logic
@@ -73,10 +73,10 @@ async def ingest_manuscript_upload(
         session, chunks(), file.filename or "", resolved_group_label, instructor_id=instructor.id
     )
     notes = [messages.IMAGE_ONLY_NOTE] if result.image_only else []
-    from app.ingest.quality import SOURCE_READING_ORDER_INGEST_NOTE, reading_order_issues
+    from app.ingest.quality import reading_order_ingest_note
 
-    if reading_order_issues(result):
-        notes.append(SOURCE_READING_ORDER_INGEST_NOTE)
+    if source_note := reading_order_ingest_note(result, n_citations):
+        notes.append(source_note)
     return IngestSummary(
         manuscript_id=manuscript.id,
         group_label=manuscript.group_label,
