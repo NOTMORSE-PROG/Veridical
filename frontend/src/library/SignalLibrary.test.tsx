@@ -148,7 +148,7 @@ describe("Library collection (4z)", () => {
 
     const own = await screen.findByRole("link", { name: "View manuscript: Barangay Service Portal" });
     expect(own).toHaveAttribute("href", "/library/1");
-    expect(screen.getByText("Ana Cruz + 1 other")).toBeInTheDocument();
+    expect(screen.getByText("Ana Cruz").closest("p")).toHaveTextContent("Ana Cruz + 1 other");
     // Own records show their number, so "Library record #N" in a finding is findable.
     expect(screen.getByText("#1")).toBeInTheDocument();
     const foreign = screen.getByRole("link", { name: "View manuscript: Library record #2" });
@@ -246,7 +246,7 @@ describe("Library collection (4z)", () => {
     expect(within(card!).getAllByText("portal.pdf")).toHaveLength(1);
     expect(within(card!).queryByText("Team")).not.toBeInTheDocument();
     expect(within(card!).queryByText("File")).not.toBeInTheDocument();
-    expect(within(card!).getByText("Ana Cruz + 1 other")).toBeInTheDocument();
+    expect(within(card!).getByText("Ana Cruz").closest("p")).toHaveTextContent("Ana Cruz + 1 other");
   });
 });
 
