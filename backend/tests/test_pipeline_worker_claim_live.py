@@ -92,28 +92,43 @@ async def _seed_check_run(session_factory) -> int:
         return check_run.id
 
 
+@pytest.mark.parametrize("route_first", [True, False])
 async def test_advance_once_and_worker_tick_never_both_enter_the_same_run(
-    session_factory, monkeypatch
+    session_factory, monkeypatch, route_first
 ):
-    """The actual reproduction shape: driver A is mid-stage (still inside
-    `run_check_run`, simulated by a real `await asyncio.sleep` so the event
-    loop genuinely yields to another coroutine) when driver B arrives."""
+    """Hold driver A mid-stage until driver B has attempted the real claim.
+
+    A sleep does not establish overlap: opening B's connection may take longer
+    than A's whole stage, in which case a second sequential entry is legitimate.
+    """
     check_run_id = await _seed_check_run(session_factory)
     settings = get_settings()
 
     entries: list[int] = []
+    entered = asyncio.Event()
+    release = asyncio.Event()
 
     async def slow_run_check_run(session, check_run, settings, heartbeat=None):
         entries.append(check_run.id)
-        # Yields the event loop -- the exact window BUG-144 exploited.
-        await asyncio.sleep(0.05)
+        entered.set()
+        await release.wait()
 
     monkeypatch.setattr(worker, "run_check_run", slow_run_check_run)
 
-    await asyncio.gather(
-        worker.advance_once(check_run_id, session_factory, settings),
-        worker.worker_tick(session_factory, settings),
-    )
+    async def drive(route):
+        if route:
+            await worker.advance_once(check_run_id, session_factory, settings)
+        else:
+            await worker.worker_tick(session_factory, settings)
+
+    first = asyncio.create_task(drive(route_first))
+    try:
+        await asyncio.wait_for(entered.wait(), timeout=10)
+        await asyncio.wait_for(drive(not route_first), timeout=10)
+        assert entries == [check_run_id]
+    finally:
+        release.set()
+        await asyncio.wait_for(first, timeout=10)
 
     # Without the claim, BOTH drivers would have entered -- this is the
     # literal assertion that would have failed pre-fix (2 entries, 4 LLM

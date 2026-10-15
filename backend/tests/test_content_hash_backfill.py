@@ -470,6 +470,7 @@ async def test_real_purge_holds_shared_lock_through_delete_and_commit(
     session_factory, tmp_path, monkeypatch
 ):
     from app.archive import service as archive_service
+    from app.maintenance import content_hashes as recovery_service
 
     data_dir = tmp_path / "data"
     path = data_dir / "uploads" / "purge-race.pdf"
@@ -480,6 +481,14 @@ async def test_real_purge_holds_shared_lock_through_delete_and_commit(
     storage = FakeStorage({"uploads/purge-race.pdf": b"durable copy purge must remove"})
     purge_before_commit = asyncio.Event()
     allow_purge_commit = asyncio.Event()
+    candidate_selected = asyncio.Event()
+    recover_one = recovery_service._recover_one_under_lock
+
+    async def observe_selected_candidate(*args, **kwargs):
+        # The real batch has selected this ID and rolled back its selection
+        # transaction. Continue into the real lock, not a replacement lock.
+        candidate_selected.set()
+        return await recover_one(*args, **kwargs)
 
     async def hold_audit_before_commit(*args, **kwargs):
         del args, kwargs
@@ -488,6 +497,7 @@ async def test_real_purge_holds_shared_lock_through_delete_and_commit(
 
     monkeypatch.setattr(archive_service, "get_storage", lambda _settings: storage)
     monkeypatch.setattr(archive_service, "write_audit_event", hold_audit_before_commit)
+    monkeypatch.setattr(recovery_service, "_recover_one_under_lock", observe_selected_candidate)
 
     async with (
         session_factory() as purge_session,
@@ -501,20 +511,43 @@ async def test_real_purge_holds_shared_lock_through_delete_and_commit(
                 settings=settings,
             )
         )
-        await asyncio.wait_for(purge_before_commit.wait(), timeout=5)
-        recovery_task = asyncio.create_task(
-            backfill_content_hash_batch(
-                recovery_session,
-                settings,
-                through_id=ids[0],
-                apply=True,
-                storage=storage,
+        recovery_task = None
+        try:
+            await asyncio.wait_for(purge_before_commit.wait(), timeout=10)
+            recovery_task = asyncio.create_task(
+                backfill_content_hash_batch(
+                    recovery_session,
+                    settings,
+                    through_id=ids[0],
+                    apply=True,
+                    storage=storage,
+                )
             )
-        )
-        await asyncio.sleep(0.05)
-        assert not recovery_task.done()
-        allow_purge_commit.set()
-        _, recovery = await asyncio.gather(purge_task, recovery_task)
+            await asyncio.wait_for(candidate_selected.wait(), timeout=10)
+            # Observe PostgreSQL's actual wait state before releasing purge.
+            # A task merely not being done could still be opening a connection.
+            async with asyncio.timeout(10), session_factory() as observer:
+                while not await observer.scalar(
+                    text("""
+                        SELECT EXISTS (
+                            SELECT 1 FROM pg_locks
+                            WHERE locktype = 'advisory' AND NOT granted
+                              AND database = (SELECT oid FROM pg_database
+                                              WHERE datname = current_database())
+                              AND classid = :high_key AND objid = :low_key
+                              AND objsubid = 1
+                        )
+                    """),
+                    {"high_key": ids[0] >> 32, "low_key": ids[0] & 0xFFFFFFFF},
+                ):
+                    assert not recovery_task.done(), "Backfill bypassed purge's lock"
+                    await asyncio.sleep(0)
+            assert not recovery_task.done()
+        finally:
+            allow_purge_commit.set()
+            tasks = [purge_task] + ([recovery_task] if recovery_task is not None else [])
+            results = await asyncio.wait_for(asyncio.gather(*tasks), timeout=10)
+        _, recovery = results
 
     assert [(item.manuscript_id, item.outcome) for item in recovery.items] == [
         (ids[0], ContentHashBackfillOutcome.purged)
