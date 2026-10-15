@@ -91,6 +91,7 @@ class TableBlock(BaseModel):
 
     page: int | None = None
     paragraph: int | None = None
+    bbox: Bbox | None = None
     rows: list[list[str]]
     source: Literal["native", "vision"] = "native"
     low_confidence: bool = False

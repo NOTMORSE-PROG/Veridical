@@ -71,17 +71,7 @@ def _extract_open_document(
         # produces (`ingest/docx.py`) -- no header/caption detection here
         # either, matching that precedent exactly rather than introducing
         # a format-specific difference downstream code doesn't expect.
-        for table in page.find_tables().tables:
-            tables.append(
-                TableBlock(
-                    page=pno,
-                    # `.extract()` returns `None` for a cell PyMuPDF's table
-                    # reader couldn't resolve (e.g. a merged/spanning cell)
-                    # -- an honest empty string, not a crash on this page's
-                    # whole extraction over one unreadable cell.
-                    rows=[[normalize(cell or "") for cell in row] for row in table.extract()],
-                )
-            )
+        tables.extend(_native_tables_in_source_space(page, pno))
         page_lines: list[Line] = []
         for block_no, block in enumerate(page.get_text("dict", sort=True)["blocks"]):
             bbox: Bbox = tuple(block["bbox"])
@@ -136,6 +126,31 @@ def _extract_open_document(
         tables=tables,
         geometry=geometry,
     )
+
+
+def _native_tables_in_source_space(page: pymupdf.Page, pno: int) -> list[TableBlock]:
+    """Materialize native tables in unrotated, crop-relative source coordinates.
+
+    Rotated table detection can reset the visible crop. Restore page state even
+    on failure, before subsequent source extraction. Never rewrite the upload.
+    """
+    rotation, crop = page.rotation, pymupdf.Rect(page.cropbox)
+    try:
+        if rotation:
+            page.set_rotation(0)
+        return [
+            TableBlock(
+                page=pno,
+                bbox=tuple(table.bbox),
+                rows=[[normalize(cell or "") for cell in row] for row in table.extract()],
+            )
+            for table in page.find_tables().tables
+        ]
+    finally:
+        if page.cropbox != crop:
+            page.set_cropbox(crop)
+        if page.rotation != rotation:
+            page.set_rotation(rotation)
 
 
 def _page_geometry(page: pymupdf.Page, pno: int) -> PageGeometry:
