@@ -60,6 +60,8 @@ class FlagOut(BaseModel):
     page_anchor: str
     annotation: str | None
     overridden: bool
+    affects_readiness: bool = True
+    readiness_exclusion_reason: str | None = None
     override_reason: str | None
     # What the check itself concluded — from flag.detail when present
     # (F5/F6, V-033: many flags share one check_result), else

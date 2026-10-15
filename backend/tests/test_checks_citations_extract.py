@@ -98,12 +98,13 @@ def test_year_letter_suffix_disambiguation():
 def test_secondary_citation_parenthetical_is_excluded_from_matching():
     blocks = [_block("An earlier claim (Rabinowitz, 1989, as cited in Colman, 2019) still holds.")]
     out = extract_in_text_citations(blocks)
-    assert len(out) == 1
+    # The inner source is secondary; the actually consulted outer source
+    # must still be checked. The original text is unchanged.
+    assert len(out) == 2
     assert out[0].is_secondary
-    # A reference list containing NEITHER name still produces zero orphans,
-    # because secondary citations are never resolved (edge case, ticket).
+    assert not out[1].is_secondary
     result = cross_match(out, [])
-    assert result.orphans == []
+    assert [c.surnames for c in result.orphans] == [["Colman"]]
     assert result.linked == []
 
 

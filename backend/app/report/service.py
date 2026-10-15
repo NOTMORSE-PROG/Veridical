@@ -14,7 +14,7 @@ from typing import Any, Literal
 
 import pymupdf
 from pydantic import ValidationError
-from sqlalchemy import func, select, update
+from sqlalchemy import and_, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app import messages
@@ -33,6 +33,7 @@ from app.checks.reuse.query import (
 )
 from app.config import Settings, get_settings
 from app.errors import ConflictError, GoneError, NotFoundError
+from app.findings.policy import exclusion_reason, reuse_excerpt
 from app.ingest.regions import _flatten, recover_region
 from app.ingest.schemas import SectionTree
 from app.ingest.service import load_raw_store, load_raw_store_async
@@ -52,6 +53,7 @@ from app.models.run import CheckResult, CheckRun, Flag, ReadinessReport
 from app.report.page_images import build_page_evidence_images
 from app.report.rating import compute_levelled_rating
 from app.report.schemas import (
+    COVERAGE_REASONS,
     CriterionLevelOut,
     CriterionResultOut,
     DocumentParagraphOut,
@@ -133,7 +135,10 @@ async def _load_scorable_flags(session: AsyncSession, check_run_id: int) -> list
             # this two different ways in two places is exactly the
             # duplication that let "999%"/"1082%" ship as two disagreeing
             # numbers at once (Track D's Critical 2, D-023).
-            has_verdict=flag_ai_verdict_summary(flag.detail or result.detail) is not None,
+            has_verdict=(
+                flag_ai_verdict_summary(flag.detail or result.detail) is not None
+                and exclusion_reason(result.kind.value, flag.detail or result.detail) is None
+            ),
             id=flag.id,
             check_kind=result.kind.value,
             problem_kind=(flag.detail or {}).get("kind"),
@@ -149,13 +154,46 @@ async def _load_scorable_flags(session: AsyncSession, check_run_id: int) -> list
     ]
 
 
+async def _assessment_incomplete(session: AsyncSession, check_run_id: int) -> bool:
+    rows = (
+        (await session.execute(select(CheckResult).where(CheckResult.check_run_id == check_run_id)))
+        .scalars()
+        .all()
+    )
+    incomplete = {
+        ResultOutcome.escalated,
+        ResultOutcome.unverifiable,
+        ResultOutcome.api_down,
+        ResultOutcome.quota_exhausted,
+    }
+    return any(
+        (row.kind == CheckKind.internal_agreement and row.outcome == ResultOutcome.passed)
+        or row.outcome in incomplete
+        and (
+            row.criterion_id is not None
+            or row.kind
+            in {
+                CheckKind.internal_agreement,
+                CheckKind.citation_integrity,
+                CheckKind.statistical_forensics,
+            }
+        )
+        for row in rows
+    )
+
+
 async def aggregate_and_score(
     session: AsyncSession, check_run_id: int, settings: Settings | None = None
 ) -> ReadinessReport:
     settings = settings or get_settings()
     results = await _load_scorable_results(session, check_run_id)
     flags = await _load_scorable_flags(session, check_run_id)
-    scoring = score_check_run(results, flags, settings)
+    scoring = score_check_run(
+        results,
+        flags,
+        settings,
+        assessment_incomplete=await _assessment_incomplete(session, check_run_id),
+    )
 
     report = await session.scalar(
         select(ReadinessReport).where(ReadinessReport.check_run_id == check_run_id)
@@ -226,7 +264,14 @@ async def build_report_payload(
     settings = settings or get_settings()
     results = await _load_scorable_results(session, check_run_id)
     flags = await _load_scorable_flags(session, check_run_id)
-    return scoring_result_as_dict(score_check_run(results, flags, settings))
+    return scoring_result_as_dict(
+        score_check_run(
+            results,
+            flags,
+            settings,
+            assessment_incomplete=await _assessment_incomplete(session, check_run_id),
+        )
+    )
 
 
 def _to_criterion_result(
@@ -358,6 +403,39 @@ async def report_out_for_check_run(
     ]
 
     scoring_payload = await build_report_payload(session, check_run_id)
+    if report is not None and report.decision is not None:
+        # Preserve decided history, rather than replacing its recorded band
+        # using a later eligibility policy. New checks use current eligibility.
+        recorded = await session.scalar(
+            select(AuditLog.payload)
+            .where(
+                AuditLog.check_run_id == check_run_id,
+                AuditLog.event_type == "verdict_computed",
+            )
+            .order_by(AuditLog.id.desc())
+            .limit(1)
+        )
+        if recorded:
+            for key in ("thresholds", "flag_deduction", "unresolved_high_flag_count"):
+                if key in recorded:
+                    scoring_payload[key] = recorded[key]
+            scoring_payload.update(
+                status=report.status.value,
+                composite_score=float(report.composite_score)
+                if report.composite_score is not None
+                else None,
+                reason=(
+                    "Historical decided report. Its recorded readiness band is preserved; "
+                    "run a new check for the current assessment policy."
+                ),
+            )
+        else:
+            scoring_payload["reason"] = (
+                "Historical decision preserved with recorded band "
+                f"{report.status.value.replace('_', ' ')}. "
+                "Its original scoring breakdown is unavailable. The assessment displayed here is "
+                "recomputed under the current policy, not the original decision's calculation."
+            )
     pending_review_count = await session.scalar(
         select(func.count())
         .select_from(CheckResult)
@@ -423,14 +501,26 @@ async def report_out_for_check_run(
                     CheckResult.check_run_id == check_run_id,
                     CheckResult.criterion_id.is_(None),
                     CheckResult.kind.in_(
-                        (CheckKind.internal_agreement, CheckKind.citation_integrity)
-                    ),
-                    CheckResult.outcome.in_(
                         (
-                            ResultOutcome.unverifiable,
-                            ResultOutcome.api_down,
-                            ResultOutcome.quota_exhausted,
+                            CheckKind.internal_agreement,
+                            CheckKind.citation_integrity,
+                            CheckKind.statistical_forensics,
+                            CheckKind.originality_reuse,
                         )
+                    ),
+                    or_(
+                        and_(
+                            CheckResult.kind == CheckKind.internal_agreement,
+                            CheckResult.outcome == ResultOutcome.passed,
+                        ),
+                        CheckResult.outcome.in_(
+                            (
+                                ResultOutcome.escalated,
+                                ResultOutcome.unverifiable,
+                                ResultOutcome.api_down,
+                                ResultOutcome.quota_exhausted,
+                            )
+                        ),
                     ),
                 )
             )
@@ -441,10 +531,26 @@ async def report_out_for_check_run(
     integrity_check_status = [
         IntegrityCheckStatusOut(
             check_kind=row.kind.value,
-            outcome=row.outcome.value,
+            outcome="escalated"
+            if row.kind == CheckKind.internal_agreement and row.outcome == ResultOutcome.passed
+            else row.outcome.value,
             n_skipped_quota=_integrity_skip_count(row.kind, row.detail, "quota"),
             n_skipped_api_down=_integrity_skip_count(row.kind, row.detail, "api_down"),
             n_skipped_parse_failure=_integrity_skip_count(row.kind, row.detail, "parse_failure"),
+            coverage_reason=(
+                (row.detail or {}).get("coverage_reason")
+                if (row.detail or {}).get("coverage_reason") in COVERAGE_REASONS
+                else "statement_roles_unverified"
+                if row.kind == CheckKind.internal_agreement
+                else None
+            ),
+            n_metadata_skipped_insufficient=(row.detail or {}).get(
+                "n_metadata_skipped_insufficient", 0
+            ),
+            n_linkage_unassessed=(row.detail or {}).get("n_linkage_unassessed", 0),
+            n_source_pages_unassessed=(row.detail or {}).get("n_source_pages_unassessed", 0),
+            n_claim_support_unassessed=(row.detail or {}).get("n_claim_support_unassessed", 0),
+            reference_list_page=(row.detail or {}).get("reference_list_page"),
         )
         for row in integrity_rows
     ]
@@ -466,7 +572,15 @@ async def report_out_for_check_run(
         originality_scope = OriginalityScopeOut(
             compared_count=compared if isinstance(compared, int) and ran else None,
             corpus="library" if originality_detail.get("corpus") == "library" else "pre_library",
-            not_compared_reason=None if ran else "no_text",
+            not_compared_reason=(
+                "source_unresolved"
+                if originality_detail.get("coverage_reason") == "source_reading_order_unresolved"
+                else "no_comparison_archive"
+                if originality_detail.get("coverage_reason") == "no_comparison_archive"
+                else None
+                if ran
+                else "no_text"
+            ),
         )
 
     # V-069 AC2: `None` whenever no criterion in `rows` is levelled (AC3 —
@@ -483,7 +597,7 @@ async def report_out_for_check_run(
             n_decided=levelled_rating_result.n_decided,
             n_levelled=levelled_rating_result.n_levelled,
         )
-        if levelled_rating_result is not None
+        if levelled_rating_result is not None and levelled_rating_result.n_decided > 0
         else None
     )
 
@@ -493,12 +607,8 @@ async def report_out_for_check_run(
         manuscript_group_label=manuscript.group_label,
         manuscript_original_filename=manuscript.original_filename,
         rubric_title=rubric.title,
-        status=report.status.value if report is not None else scoring_payload["status"],
-        composite_score=(
-            float(report.composite_score)
-            if report is not None and report.composite_score is not None
-            else None
-        ),
+        status=scoring_payload["status"],
+        composite_score=scoring_payload["composite_score"],
         thresholds=scoring_payload["thresholds"],
         reason=scoring_payload["reason"],
         flag_deduction=scoring_payload["flag_deduction"],
@@ -607,9 +717,18 @@ async def flags_for_check_run(session: AsyncSession, check_run_id: int) -> list[
                 if result.criterion_id in criteria_by_id
                 else None
             ),
-            evidence_excerpt=flag.evidence_excerpt,
+            evidence_excerpt=(
+                reuse_excerpt(flag.detail or {}, flag.evidence_excerpt)
+                if result.kind == CheckKind.originality_reuse
+                else flag.evidence_excerpt
+            ),
             page_anchor=flag.page_anchor,
             overridden=flag.overridden,
+            affects_readiness=exclusion_reason(result.kind.value, flag.detail or result.detail)
+            is None,
+            readiness_exclusion_reason=exclusion_reason(
+                result.kind.value, flag.detail or result.detail
+            ),
             is_passage_level=bool((flag.detail or {}).get("kind", "").endswith("_passage")),
             first_upload_context=bool((flag.detail or {}).get("first_upload_context")),
             confirmed_citation_source=flag.confirmed_citation_source,
@@ -1299,9 +1418,15 @@ async def decide_report(
             f"{pending} criteri{'on' if pending == 1 else 'a'} still need your review before "
             "this report can be decided. Resolve them first."
         )
+    # Compute the current assessment without committing. Persist it only in
+    # the conditional decision write, so a losing concurrent request cannot
+    # rewrite the winner's frozen scoring record or audit.
+    current_scoring = await build_report_payload(session, check_run_id, settings)
+    current_status = ReadinessStatus(current_scoring["status"])
+    current_score = current_scoring["composite_score"]
     decision_enum = ReportDecision(decision)
     stripped_note = note.strip() if note and note.strip() else None
-    if (decision_enum, report.status) in DECISIONS_REQUIRING_A_REASON:
+    if (decision_enum, current_status) in DECISIONS_REQUIRING_A_REASON:
         # first-time-user review/backend review finding, live-reproduced: this used
         # to check presence only, so "ok" satisfied it -- the escalation-
         # resolution reason (BUG-096) enforces a real minimum on the exact
@@ -1315,7 +1440,7 @@ async def decide_report(
         if not stripped_note or len(stripped_note) < minimum:
             raise ConflictError(
                 f"This decision disagrees with VERIDICAL's own "
-                f"{report.status.value.replace('_', ' ')} verdict. Explain why in at least "
+                f"{current_status.value.replace('_', ' ')} verdict. Explain why in at least "
                 f"{minimum} characters, so the audit trail records the disagreement."
             )
 
@@ -1333,6 +1458,10 @@ async def decide_report(
             update(ReadinessReport)
             .where(ReadinessReport.id == report.id, ReadinessReport.decision.is_(None))
             .values(
+                status=current_status,
+                composite_score=Decimal(str(round(current_score, 2)))
+                if current_score is not None
+                else None,
                 decision=decision_enum,
                 decided_at=decided_at,
                 decided_by_instructor_id=instructor_id,
@@ -1345,6 +1474,22 @@ async def decide_report(
         raise ConflictError(
             "This report has already been decided. Reopen it first to change the decision."
         )
+    await write_audit_event(
+        session,
+        event_type="verdict_computed",
+        check_run_id=check_run_id,
+        payload={
+            key: current_scoring[key]
+            for key in (
+                "composite_score",
+                "status",
+                "reason",
+                "thresholds",
+                "flag_deduction",
+                "unresolved_high_flag_count",
+            )
+        },
+    )
     # The audit event is written only on the write that actually won —
     # never before it, so a losing request can never leave behind a
     # `report_decided` row for a decision that didn't persist.

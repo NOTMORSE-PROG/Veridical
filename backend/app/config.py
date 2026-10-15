@@ -7,6 +7,7 @@ and nothing secret is required unless a live integration is actually used.
 
 from functools import lru_cache
 from pathlib import Path
+from typing import Literal
 
 from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -70,6 +71,25 @@ class Settings(BaseSettings):
     ingest_patterns_file: Path | None = None
     # A line longer than this is prose, not a heading.
     ingest_heading_max_chars: int = 120
+    # Maximum PDF hyperlinks admitted for metadata/clip processing (all kinds),
+    # not a native parser memory cap. Destinations are never fetched.
+    ingest_uri_max_links: int = Field(default=2000, gt=0)
+    ingest_uri_max_chars: int = Field(default=4096, gt=0)
+    # Guarded source-preserving ordering. New unresolved pages fail closed;
+    # legacy extractions are unknown, never retrospectively labelled ordered.
+    ingest_reading_order_strategy: Literal["legacy", "native_regions_v1"] = "native_regions_v1"
+    ingest_reading_order_max_lines_per_page: int = Field(default=4000, gt=0)
+    ingest_reading_order_max_nodes_per_page: int = Field(default=8000, gt=0)
+    ingest_reading_order_max_depth: int = Field(default=32, gt=0)
+    ingest_reading_order_max_pair_comparisons: int = Field(default=100000, gt=0)
+    # Geometry comparisons use unrotated, crop-relative PDF points. Small
+    # typographic offsets are allowed within a row, not between text flows.
+    ingest_reading_order_geometry_tolerance_pts: float = Field(default=0.01, ge=0)
+    ingest_reading_order_row_tolerance_pts: float = Field(default=2.0, ge=0)
+    ingest_reading_order_direction_tolerance: float = Field(default=0.01, ge=0, lt=1)
+    # Font boxes overlap during ordinary leading. Reject coincident flows
+    # closer than this many smaller-font ems, not every box intersection.
+    ingest_reading_order_min_baseline_separation_em: float = Field(default=1.0, gt=0)
     # Share of a line's characters that must be bold for the line to count
     # as bold (styled runs inside prose stay below it).
     ingest_bold_ratio_min: float = 0.8
@@ -495,6 +515,18 @@ class Settings(BaseSettings):
     # A cached verification older than this is re-checked even on a cache
     # hit (retractions land late — ticket edge case: "don't trust an old
     # 'not retracted' forever").
+    numeric_citation_context_file: Path | None = None
+    numeric_citation_max_range_span: int = Field(default=20, gt=0)
+    reference_metadata_max_chars: int = Field(default=8192, ge=256, le=32768)
+    citation_author_max_chars: int = Field(default=160, ge=40, le=1000)
+    citation_author_max_tokens: int = Field(default=8, ge=2, le=40)
+    citation_unseparated_author_max_tokens: int = Field(default=3, ge=1, le=20)
+    citation_parenthetical_group_max_chars: int = Field(default=4000, ge=200, le=20000)
+    citation_parenthetical_entry_max_chars: int = Field(default=320, ge=40, le=2000)
+    citation_claim_excerpt_max_chars: int = Field(default=480, ge=80, le=4000)
+    citation_in_text_max_matches: int = Field(default=2000, ge=1, le=10000)
+    citation_wrap_font_size_tolerance_pt: float = Field(default=0.5, ge=0.0, le=4.0)
+
     citation_cache_stale_days: int = 30
     # Claim-support check (V-030, F5.4): batched into as few Gemini calls
     # as possible per manuscript (D-001/D-011). Local NLI was measured and

@@ -12,6 +12,7 @@ behavior when `OneTailedTxt=True` — not reimplemented here, just enabled.
 
 import contextlib
 import io
+import math
 import warnings
 from dataclasses import dataclass
 
@@ -35,6 +36,7 @@ PVALUE_DECISION_ERROR_WORDING = (
 )
 
 _SUPPORTED_TYPES = {"t", "F", "r", "Chi2", "Z", "Q"}
+_SIGNED_TYPES = {"t", "r", "Z"}
 
 
 @dataclass(frozen=True)
@@ -62,6 +64,13 @@ def recompute_p(
     if stat.test_value_precision is None or stat.p_value_precision is None:
         return None
 
+    # statcheck_python builds the rounding interval as value +/- half a unit
+    # and then reads "up" and "low" p from its two ends. For a NEGATIVE
+    # statistic the ends are swapped, so every correctly reported negative
+    # t/z/r became a mismatch (measured 2026-10-07: t(68) = -1.67, p = .100
+    # flagged although p = .0995). These tests are two-tailed and symmetric
+    # in sign, so the magnitude is the statistic statcheck must see.
+    test_value = abs(stat.test_value) if stat.test_type in _SIGNED_TYPES else stat.test_value
     try:
         with contextlib.redirect_stdout(io.StringIO()), warnings.catch_warnings():
             # Same defensive stdout suppression as V-031's extraction —
@@ -69,7 +78,7 @@ def recompute_p(
             warnings.simplefilter("ignore")
             df = process_stats(
                 stat.test_type,
-                test_stat=stat.test_value,
+                test_stat=test_value,
                 df1=stat.df1,
                 df2=stat.df2,
                 reported_p=stat.p_value,
@@ -89,8 +98,11 @@ def recompute_p(
         return None
 
     row = df.iloc[0]
+    computed_p = float(row["computed_p"])
+    if not math.isfinite(computed_p):
+        return None
     return PRecalcResult(
-        computed_p=float(row["computed_p"]),
+        computed_p=computed_p,
         error=bool(row["error"]),
         decision_error=bool(row["decision_error"]),
     )
@@ -105,7 +117,7 @@ def evaluate_p_recalc(stats: list[ReportedStat], full_text: str) -> list[Forensi
     flags: list[ForensicsFlagDraft] = []
     for stat in stats:
         result = recompute_p(stat, one_tailed_in_text=one_tailed_in_text)
-        if result is None or not result.error:
+        if result is None or not result.error or not stat.raw_text:
             continue
         p_prec = stat.p_value_precision or 3
         reported_str = f"{stat.p_comparison or '='} {stat.p_value:.{p_prec}f}"
@@ -127,7 +139,12 @@ def evaluate_p_recalc(stats: list[ReportedStat], full_text: str) -> list[Forensi
                     ),
                     "reported_p": stat.p_value,
                     "computed_p": result.computed_p,
+                    "reported_p_display": reported_str,
+                    "computed_p_display": f"≈ {computed_str}",
                     "test_type": stat.test_type,
+                    "test_value_display": f"{stat.test_value:.{stat.test_value_precision}f}",
+                    "df1": stat.df1,
+                    "df2": stat.df2,
                     "one_tailed_in_text": one_tailed_in_text,
                 },
             )

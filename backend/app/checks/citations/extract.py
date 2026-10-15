@@ -18,9 +18,13 @@ judgment #1): when a citation shape is ambiguous, don't flag.
 """
 
 import re
-from dataclasses import dataclass
+from bisect import bisect_right
+from dataclasses import dataclass, field
 from typing import Any, Protocol
 
+from app.checks.citations.numbered import reference_anchor
+from app.config import Settings, get_settings
+from app.findings.identity import FINDING_GROUP_FIELD, finding_group_fingerprint
 from app.ingest.schemas import TextBlock
 from app.models.enums import FlagSeverity
 
@@ -51,48 +55,132 @@ class ReferenceLike(Protocol):
 # inline `(?i:...)` group instead of a document-wide flag.
 
 _SECONDARY_MARK = re.compile(r"as\s+cited\s+in", re.IGNORECASE)
-
-# A small, explicit set of lowercase connectors allowed INSIDE a multi-word
-# name/phrase ("Commission on Higher Education", "de la Cruz") — bounded on
-# purpose (ground rule 7 spirit: no unbounded "any lowercase word" escape
-# hatch that would let prose bleed into an author capture the way `\w+`
-# continuation did before this fix).
-_CONNECTOR = r"(?:of|on|for|and|de|del|dela|van|von|der|the)"
-_NAME_WORD = r"[A-ZÀ-Þ][\w'’.\-]*"
-_NAME_PHRASE = rf"{_NAME_WORD}(?:\s(?:{_CONNECTOR}\s)?{_NAME_WORD})*"
-
-# One author-list segment: "Damoco", "Damoco et al.", "Smith & Jones",
-# "Smith, Jones, & Lee", "Smith and Jones", "Commission on Higher Education",
-# "Vasquez Ferrer" (two-word surname, no connector needed).
-_AUTHOR_SEGMENT = rf"{_NAME_PHRASE}(?:[\s,&]+(?:and\s+)?{_NAME_PHRASE})*(?:\s+et\s+al\.?)?"
+# The work a secondary citation was read in IS cited: "(Moreno, 1998, as
+# cited in Iommi, 2025)" cites Iommi 2025, which belongs in the reference list.
+_SECONDARY_OUTER = re.compile(r"as\s+cited\s+in\s+(?P<outer>[^()]+?)\s*$", re.IGNORECASE)
+# A look-back for "As cited in Jones (2020)" must stay inside its sentence: a
+# previous sentence ending "(..., as cited in X, 2020)." says nothing about
+# the next citation (2026-10-07: that leak marked cited sources as unused).
+_LOOKBACK_STOP = re.compile(r"[.!?;)]")
 
 # A whole parenthetical citation group: everything inside one set of parens
-# that contains a 4-digit year (optionally letter-suffixed). The content
-# (not the parens) is captured so it can be split on ';' for multi-cites.
-_PAREN_GROUP = re.compile(r"\(([^()]*\d{4}[a-z]?[^()]*)\)")
+# is captured without nesting. A year is checked separately, then each
+# bounded entry is token-parsed without the old nested author expression.
+_PAREN_GROUP = re.compile(r"\(([^()]*)\)")
+_YEAR_IN_GROUP = re.compile(r"\d{4}[a-z]?")
 
 # One citation within a parenthetical group (post ';' split): "Author(s),
 # Year" with an optional page/paragraph locator and/or secondary-source tail.
-_PAREN_ENTRY = re.compile(
-    rf"^(?P<authors>{_AUTHOR_SEGMENT}),\s*(?P<year>\d{{4}}[a-z]?)"
+_PAREN_YEAR = re.compile(r",\s*(?P<year>\d{4}[a-z]?)(?=,|\s*$)")
+_PAREN_EXTRA_YEARS = re.compile(r"(?:,\s*\d{4}[a-z]?(?=,|\s*$))+")
+_PAREN_TAIL = re.compile(
     r"(?:,\s*(?i:pp?\.?|para\.?|section)\s*[\w\-–]+)?"
-    r"(?:,\s*(?i:as\s+cited\s+in)\s+.+)?\s*$"
+    r"(?:,\s*(?i:as\s+cited\s+in)\s+[^()]*)?\s*$"
 )
 
-# Narrative citation: the author sits outside the parens, only the year
-# (optionally letter-suffixed, optionally with a secondary-source tail) is
-# inside — "Damoco et al. (2024)" / "Damoco (1990, as cited in Serquiña, 2025)".
-_NARRATIVE = re.compile(
-    rf"(?P<authors>{_AUTHOR_SEGMENT})\s\((?P<year>\d{{4}}[a-z]?)"
-    r"(?:,\s*(?i:as\s+cited\s+in)\s+[^)]*)?\)"
+# Find the year first. Searching the nested author grammar over an entire PDF
+# block can backtrack exponentially on capitalized glossary entries that have
+# no citation year at all. The author is parsed as a same-line token suffix
+# only after a year-shaped citation has been found.
+_NARRATIVE_YEAR = re.compile(r"\((?P<year>\d{4}[a-z]?)")
+# Hyphens include U+2010/U+2011, which publisher metadata and PDFs use in
+# names ("Crnojevic‐Bengin"); U+2060 marks a surname hyphenated across a line.
+_NARRATIVE_NAME_TOKEN = re.compile(r"[A-ZÀ-Þ][\w'’.\-‐‑⁠]*,?")
+# "Garcia-" at a line end + "Cobo" on the next line is one hyphenated name.
+_HYPHENATED_NAME_BREAK = re.compile(r"(?<=\w)[-‐‑]\n(?=[A-ZÀ-Þ])")
+# Lowercase name particles a surname may contain ("Soares dos Santos",
+# "de los Reyes", "bin Ahmad"), plus the joining words of an author list.
+_NARRATIVE_CONNECTORS = frozenset(
+    {
+        *("of", "on", "for", "and", "the", "&", ","),
+        *("de", "del", "dela", "delos", "los", "las", "van", "von", "der", "den", "ter", "ten"),
+        *("da", "das", "do", "dos", "di", "du", "la", "le", "y", "bin", "binti", "al", "el"),
+    }
 )
+
+# Lowercase words that may sit inside a surname (no capitalized prose).
+NAME_PARTICLES = _NARRATIVE_CONNECTORS - {"of", "on", "for", "and", "the", "&", ","}
 
 # Same convention as V-006's `_PART_SPLIT`: a period/!/? followed by
 # whitespace and a capital/digit/opening-quote starts a new sentence.
 _SENTENCE_BOUNDARY = re.compile(r"(?<=[.!?])\s+(?=[A-Z0-9(\"'])")
 
+# BUG-240: the rule above splits "Chen et al. (2024) showed X" after "al.",
+# because "(" is in its lookahead class. The real 47-page run therefore sent
+# claims like `Chen et al.` and `Li et al.` to claim-support grading. Those
+# are author fragments, not propositions an abstract can support or
+# contradict, so a schema-valid model answer to them is meaningless and the
+# quota is spent for nothing (charter judgment 2).
+#
+# These are orthographic invariants of academic prose, not a policy an
+# instructor could reasonably disagree with, so they live here beside the
+# boundary rule they correct rather than in a config file (ground rule 7
+# governs rubric/threshold policy, not spelling).
+_ABBREVIATIONS = frozenset(
+    {
+        # scholarly
+        "al",
+        "cf",
+        "e.g",
+        "etc",
+        "i.e",
+        "viz",
+        "vs",
+        "ca",
+        "approx",
+        # bibliographic
+        "ed",
+        "eds",
+        "edn",
+        "eq",
+        "eqs",
+        "fig",
+        "figs",
+        "no",
+        "p",
+        "pp",
+        "ref",
+        "refs",
+        "repr",
+        "rev",
+        "sec",
+        "tab",
+        "trans",
+        "vol",
+        "vols",
+        # titles and organisations that precede a capitalised name
+        "dept",
+        "dr",
+        "inc",
+        "jr",
+        "ltd",
+        "mr",
+        "mrs",
+        "ms",
+        "prof",
+        "sr",
+        "st",
+        "univ",
+    }
+)
+
+# The token immediately before a candidate boundary, with its closing period.
+_TRAILING_TOKEN = re.compile(r"([A-Za-z][A-Za-z.]*)\.$")
+
+# A line ending mid-word at a hyphen, e.g. "A neuro-" wrapping to "symbolic".
+# Requires a letter on both sides of the hyphen so a dash used as punctuation
+# ("the result -") does not swallow the following line's leading space.
+_HYPHEN_BREAK = re.compile(r"[^\W\d_]-$", re.UNICODE)
+
 _LOOKBACK_CHARS = 40  # window checked before a narrative match for a
 # preceding "as cited in" (the "As cited in Jones (2020), ..." phrasing).
+
+# A style/coverage detector, not numeric-citation linkage. Source-number
+# labels may lose a space during PDF extraction, or reference segmentation
+# may miss the bibliography entirely. A bracket-shaped body mark alone can
+# therefore trigger incomplete coverage, but never a link or accusation.
+_NUMBERED_REFERENCE = re.compile(r"^\s*(?:\[\d+\]|\(\d+\)|\d+[.)])(?:\s|(?=[A-Z])|$)")
+_BRACKETED_BODY_CANDIDATE = re.compile(r"(?<![\w])\[\s*[1-9]\d*(?:\s*[,;\-–]\s*[1-9]\d*)*\s*\]")
 
 
 @dataclass(frozen=True)
@@ -108,6 +196,7 @@ class InTextCitation:
     page: int | None
     paragraph: int | None
     claim_sentence: str
+    claim_excerpt_cropped: bool = False
 
 
 @dataclass(frozen=True)
@@ -115,7 +204,10 @@ class CrossMatchResult:
     in_text: list[InTextCitation]
     linked: list[tuple[InTextCitation, list[ReferenceLike]]]
     orphans: list[InTextCitation]  # in-text citations with no matching reference
-    uncited: list[ReferenceLike]  # reference entries never cited in-text
+    uncited: list[ReferenceLike]  # raw unmatched candidates, not proven unused
+    ambiguous: list[InTextCitation]  # several sources fit one in-text mark
+    possibly_cited: list[ReferenceLike] = field(default_factory=list)
+    confidently_uncited: list[ReferenceLike] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -129,6 +221,34 @@ class CitationFlagDraft:
     evidence_excerpt: str
     page_anchor: str
     detail: dict[str, Any]
+
+
+@dataclass(frozen=True)
+class NumberedStyleCoverage:
+    n_numbered_reference_entries: int
+    n_numeric_body_candidates: int
+
+    def linkage_unassessed(self, *, n_references: int, n_author_year_uncited: int) -> bool:
+        # Bracket marks can be mathematical notation in an otherwise fully
+        # linked author-year paper. A body mark alone is a gap only when no
+        # references were recovered or the author-year matcher has leftovers.
+        return self.n_numbered_reference_entries > 0 or (
+            self.n_numeric_body_candidates > 0 and (n_references == 0 or n_author_year_uncited > 0)
+        )
+
+
+def numbered_style_coverage(
+    blocks: list[TextBlock], references: list[ReferenceLike]
+) -> NumberedStyleCoverage:
+    """Count source shapes; do not infer linkage or genuine unused entries."""
+    return NumberedStyleCoverage(
+        n_numbered_reference_entries=sum(
+            bool(_NUMBERED_REFERENCE.match(ref.raw_text or "")) for ref in references
+        ),
+        n_numeric_body_candidates=sum(
+            len(_BRACKETED_BODY_CANDIDATE.findall(block.text or "")) for block in blocks
+        ),
+    )
 
 
 ORPHAN_WORDING = (
@@ -148,12 +268,22 @@ UNCITED_WORDING = (
 # --- extraction --------------------------------------------------------------
 
 
-def extract_in_text_citations(blocks: list[TextBlock]) -> list[InTextCitation]:
+def extract_in_text_citations(
+    blocks: list[TextBlock],
+    *,
+    settings: Settings | None = None,
+    coverage_gaps: set[str] | None = None,
+) -> list[InTextCitation]:
     """Scan `blocks` (already filtered to exclude the reference-list span
     and furniture — see `app.ingest.references.non_reference_blocks`) for
     APA in-text citation shapes."""
+    settings = settings or get_settings()
     out: list[InTextCitation] = []
-    for block in blocks:
+    gaps = coverage_gaps if coverage_gaps is not None else set()
+    # BUG-240 AC1: a PDF block is a physical line. Scanning them one at a
+    # time truncated claims at the line break ("Haan (2025), with"), and a
+    # half-line is not a proposition an abstract can support or contradict.
+    for block in merge_wrapped_lines(blocks):
         text = block.text
         if not text:
             continue
@@ -161,37 +291,118 @@ def extract_in_text_citations(blocks: list[TextBlock]) -> list[InTextCitation]:
         anchor = _anchor_for(block)
 
         for group_m in _PAREN_GROUP.finditer(text):
+            if len(out) >= settings.citation_in_text_max_matches:
+                gaps.add("citation_count_limit")
+                return out
+            if not _YEAR_IN_GROUP.search(group_m.group(1)):
+                continue
+            if len(group_m.group(1)) > settings.citation_parenthetical_group_max_chars:
+                gaps.add("parenthetical_group_limit")
+                continue
             for raw_entry in group_m.group(1).split(";"):
                 raw_entry = raw_entry.strip()
                 if not raw_entry:
                     continue
-                entry_m = _PAREN_ENTRY.match(raw_entry)
-                if not entry_m:
+                parsed = _parenthetical_entry(raw_entry, settings, gaps)
+                if parsed is None:
                     continue
-                surnames = _split_authors(entry_m.group("authors"))
-                if not surnames:
-                    continue
-                out.append(
-                    InTextCitation(
-                        surnames=surnames,
-                        year=entry_m.group("year"),
-                        is_narrative=False,
-                        is_secondary=bool(_SECONDARY_MARK.search(raw_entry)),
-                        raw_text=group_m.group(0),
-                        anchor=anchor,
-                        page=block.page,
-                        paragraph=block.paragraph,
-                        claim_sentence=_sentence_at(text, group_m.start(), spans),
-                    )
+                if len(out) >= settings.citation_in_text_max_matches:
+                    gaps.add("citation_count_limit")
+                    return out
+                surnames, year, extra_years = parsed
+                claim, cropped = _sentence_at(
+                    text,
+                    group_m.start(),
+                    group_m.end(),
+                    spans,
+                    max_chars=settings.citation_claim_excerpt_max_chars,
                 )
+                is_secondary = bool(_SECONDARY_MARK.search(raw_entry))
+                found = [(surnames, y, is_secondary) for y in (year, *extra_years)]
+                outer = _SECONDARY_OUTER.search(raw_entry) if is_secondary else None
+                if outer is not None:
+                    outer_parsed = _parenthetical_entry(outer.group("outer"), settings, gaps)
+                    if outer_parsed is not None:
+                        found.extend(
+                            (outer_parsed[0], y, False) for y in (outer_parsed[1], *outer_parsed[2])
+                        )
+                for found_surnames, found_year, found_secondary in found:
+                    out.append(
+                        InTextCitation(
+                            surnames=found_surnames,
+                            year=found_year,
+                            is_narrative=False,
+                            is_secondary=found_secondary,
+                            raw_text=group_m.group(0),
+                            anchor=anchor,
+                            page=block.page,
+                            paragraph=block.paragraph,
+                            claim_sentence=claim,
+                            claim_excerpt_cropped=cropped,
+                        )
+                    )
 
-        for m in _NARRATIVE.finditer(text):
-            surnames = _split_authors(m.group("authors"))
+        for m in _NARRATIVE_YEAR.finditer(text):
+            if len(out) >= settings.citation_in_text_max_matches:
+                gaps.add("citation_count_limit")
+                return out
+            year_end = _narrative_year_end(text, m.end(), settings, gaps)
+            if year_end is None:
+                continue
+            author_span = _narrative_author_span(
+                text,
+                m.start(),
+                settings.citation_author_max_chars,
+                settings.citation_author_max_tokens,
+                settings.citation_unseparated_author_max_tokens,
+                gaps,
+            )
+            if author_span is None:
+                continue
+            start, authors = author_span
+            surnames = _split_authors(authors)
             if not surnames:
                 continue
-            preceding = text[max(0, m.start() - _LOOKBACK_CHARS) : m.start()]
-            is_secondary = bool(_SECONDARY_MARK.search(m.group(0))) or bool(
+            preceding = text[max(0, start - _LOOKBACK_CHARS) : start]
+            stops = list(_LOOKBACK_STOP.finditer(preceding))
+            if stops:
+                preceding = preceding[stops[-1].end() :]
+            raw_text = text[start:year_end]
+            is_secondary = bool(_SECONDARY_MARK.search(raw_text)) or bool(
                 _SECONDARY_MARK.search(preceding)
+            )
+            outer = _SECONDARY_OUTER.search(raw_text[:-1]) if raw_text.endswith(")") else None
+            if outer is not None:
+                outer_parsed = _parenthetical_entry(outer.group("outer"), settings, gaps)
+                if outer_parsed is not None:
+                    claim, cropped = _sentence_at(
+                        text,
+                        start,
+                        year_end,
+                        spans,
+                        max_chars=settings.citation_claim_excerpt_max_chars,
+                    )
+                    for outer_year in (outer_parsed[1], *outer_parsed[2]):
+                        out.append(
+                            InTextCitation(
+                                surnames=outer_parsed[0],
+                                year=outer_year,
+                                is_narrative=False,
+                                is_secondary=False,
+                                raw_text=raw_text,
+                                anchor=anchor,
+                                page=block.page,
+                                paragraph=block.paragraph,
+                                claim_sentence=claim,
+                                claim_excerpt_cropped=cropped,
+                            )
+                        )
+            claim, cropped = _sentence_at(
+                text,
+                start,
+                year_end,
+                spans,
+                max_chars=settings.citation_claim_excerpt_max_chars,
             )
             out.append(
                 InTextCitation(
@@ -199,20 +410,317 @@ def extract_in_text_citations(blocks: list[TextBlock]) -> list[InTextCitation]:
                     year=m.group("year"),
                     is_narrative=True,
                     is_secondary=is_secondary,
-                    raw_text=m.group(0),
+                    raw_text=raw_text,
                     anchor=anchor,
                     page=block.page,
                     paragraph=block.paragraph,
-                    claim_sentence=_sentence_at(text, m.start(), spans),
+                    claim_sentence=claim,
+                    claim_excerpt_cropped=cropped,
                 )
             )
     return out
 
 
+def _parenthetical_entry(
+    entry: str, settings: Settings, gaps: set[str]
+) -> tuple[list[str], str, tuple[str, ...]] | None:
+    """Authors, first year, and any further years of the same authors.
+
+    APA cites several works by the same authors with one name list:
+    "(Biggs & Tang, 2007, 2011)". Before 2026-10-07 the second year made the
+    tail unreadable, which withheld every citation finding in the paper.
+    """
+    if len(entry) > settings.citation_parenthetical_entry_max_chars:
+        gaps.add("parenthetical_entry_limit")
+        return None
+    for year_match in _PAREN_YEAR.finditer(entry):
+        author = entry[: year_match.start()].strip()
+        if not _author_tokens_valid(
+            author,
+            settings.citation_author_max_chars,
+            settings.citation_author_max_tokens,
+            settings.citation_unseparated_author_max_tokens,
+        ):
+            if _author_limit_exceeded(
+                author,
+                settings.citation_author_max_chars,
+                settings.citation_author_max_tokens,
+                settings.citation_unseparated_author_max_tokens,
+            ):
+                gaps.add("author_limit")
+            continue
+        tail = entry[year_match.end() :]
+        extra = _PAREN_EXTRA_YEARS.match(tail)
+        extra_years = tuple(re.findall(r"\d{4}[a-z]?", extra.group(0))) if extra else ()
+        if extra:
+            tail = tail[extra.end() :]
+        if not _PAREN_TAIL.fullmatch(tail):
+            gaps.add("parenthetical_tail_unreadable")
+            return None
+        return _split_authors(author), year_match.group("year"), extra_years
+    return None
+
+
+def _author_limit_exceeded(
+    author: str, max_chars: int, max_tokens: int, max_unseparated_tokens: int
+) -> bool:
+    tokens = author.split()
+    has_author_separator = bool(re.search(r",|&|\bet\s+al\b", author)) or any(
+        token in _NARRATIVE_CONNECTORS for token in tokens
+    )
+    return (
+        len(author) > max_chars
+        or len(tokens) > max_tokens
+        or (len(tokens) > max_unseparated_tokens and not has_author_separator)
+    )
+
+
+def _author_tokens_valid(
+    author: str, max_chars: int, max_tokens: int, max_unseparated_tokens: int
+) -> bool:
+    if not author or _author_limit_exceeded(author, max_chars, max_tokens, max_unseparated_tokens):
+        return False
+    tokens = author.split()
+    if len(tokens) > max_tokens:
+        return False
+    if len(tokens) >= 2 and tokens[-2:] in (["et", "al."], ["et", "al"]):
+        tokens = tokens[:-2]
+    if not tokens or not _NARRATIVE_NAME_TOKEN.fullmatch(tokens[0]):
+        return False
+    if not _NARRATIVE_NAME_TOKEN.fullmatch(tokens[-1]):
+        return False
+    return all(
+        _NARRATIVE_NAME_TOKEN.fullmatch(token) or token in _NARRATIVE_CONNECTORS for token in tokens
+    )
+
+
+def _narrative_year_end(text: str, year_end: int, settings: Settings, gaps: set[str]) -> int | None:
+    if text[year_end : year_end + 1] == ")":
+        return year_end + 1
+    if text[year_end : year_end + 1] != ",":
+        return None
+    limit = min(len(text), year_end + settings.citation_parenthetical_entry_max_chars)
+    closing = text.find(")", year_end + 1, limit)
+    if closing < 0:
+        gaps.add("narrative_tail_unreadable")
+        return None
+    tail = text[year_end + 1 : closing]
+    if not re.fullmatch(r"\s*(?i:as\s+cited\s+in)\s+[^()]+", tail):
+        return None
+    return closing + 1
+
+
+def _narrative_author_span(
+    text: str,
+    year_start: int,
+    max_chars: int,
+    max_tokens: int,
+    max_unseparated_tokens: int,
+    gaps: set[str],
+) -> tuple[int, str] | None:
+    """Parse at most one wrapped author suffix in a bounded source window."""
+    if year_start == 0 or text[year_start - 1] not in " \t\n":
+        return None
+    window_start = max(0, year_start - max_chars)
+    # A surname hyphenated across a line is one token. The substitution keeps
+    # the length, so token offsets still index `text`.
+    prefix = _HYPHENATED_NAME_BREAK.sub(
+        lambda match: match.group(0)[0] + "⁠", text[window_start:year_start]
+    )
+    tokens = list(re.finditer(r"\S+", prefix))
+    if not tokens:
+        return None
+    last_break = prefix.rfind("\n")
+    current_line_has_name = any(
+        token.start() > last_break and _NARRATIVE_NAME_TOKEN.fullmatch(token.group())
+        for token in tokens
+    )
+    previous_line = prefix[:last_break].rstrip() if last_break >= 0 else ""
+    previous_tail = previous_line.split()[-1] if previous_line.split() else ""
+    crosses_line = (
+        not current_line_has_name
+        or previous_tail in _NARRATIVE_CONNECTORS
+        or previous_tail.endswith(",")
+    )
+    first_current_token = next(
+        (index for index, token in enumerate(tokens) if token.start() > last_break), len(tokens)
+    )
+    current_line_starts_with_connector = (
+        first_current_token < len(tokens)
+        and tokens[first_current_token].group() in _NARRATIVE_CONNECTORS
+    )
+    crosses_line = crosses_line or current_line_starts_with_connector
+    previous_line_fragments = [line.strip() for line in previous_line.split("\n")]
+    previous_line_fragment = previous_line_fragments[-1]
+    preceding_single_name_lines = len(previous_line_fragments) >= 2 and all(
+        len(line.split()) == 1 and _NARRATIVE_NAME_TOKEN.fullmatch(line)
+        for line in previous_line_fragments[-2:]
+    )
+    # Only the previous line's last sentence fragment can continue a name:
+    # "...work on records (Jun, 2010). Several" ends a sentence before
+    # "Several", so its "on" says nothing about an author list.
+    tail_fragment = re.split(r"[.!?;)]\s+", previous_line_fragment)[-1]
+    preceding_connector_line = any(
+        token in _NARRATIVE_CONNECTORS for token in tail_fragment.split()
+    )
+    earlier_line_ends_connector = (
+        len(previous_line_fragments) >= 2
+        and previous_line_fragments[-2].split()
+        and previous_line_fragments[-2].split()[-1] in _NARRATIVE_CONNECTORS
+    )
+    # The previous line can only hold part of this author list when the
+    # name run starts the current line. "...engagement. Bautista (2018)" has
+    # a complete sentence before the name on its own line.
+    run_end = len(tokens) - 1
+    if (
+        run_end > 0
+        and tokens[run_end].group() in {"al.", "al"}
+        and tokens[run_end - 1].group() == "et"
+    ):
+        run_end -= 2
+    run_start = run_end
+    while run_start > first_current_token and (
+        _NARRATIVE_NAME_TOKEN.fullmatch(tokens[run_start - 1].group())
+        or tokens[run_start - 1].group() in _NARRATIVE_CONNECTORS
+    ):
+        run_start -= 1
+    name_run_starts_line = run_start <= first_current_token
+    if (
+        not crosses_line
+        and name_run_starts_line
+        and last_break >= 0
+        and _NARRATIVE_NAME_TOKEN.fullmatch(previous_tail)
+        and (preceding_single_name_lines or preceding_connector_line or earlier_line_ends_connector)
+        and not previous_line.endswith((".", "!", "?", ";", ":"))
+    ):
+        gaps.add("author_line_wrap_ambiguous")
+        return None
+    lower_bound = 0 if crosses_line else first_current_token
+    index = len(tokens) - 1
+    if tokens[index].group() in {"al.", "al"} and index > 0 and tokens[index - 1].group() == "et":
+        index -= 2
+    if index < 0 or not _NARRATIVE_NAME_TOKEN.fullmatch(tokens[index].group()):
+        return None
+
+    first_name = index
+    line_breaks = 0
+    while first_name > lower_bound:
+        prior = first_name - 1
+        gap_text = prefix[tokens[prior].end() : tokens[first_name].start()]
+        line_breaks += gap_text.count("\n")
+        if line_breaks > 1:
+            gaps.add("author_line_wrap_limit")
+            return None
+        token = tokens[prior].group()
+        if _NARRATIVE_NAME_TOKEN.fullmatch(token) or token in _NARRATIVE_CONNECTORS:
+            first_name = prior
+        else:
+            break
+    while first_name < len(tokens) and not _NARRATIVE_NAME_TOKEN.fullmatch(
+        tokens[first_name].group()
+    ):
+        first_name += 1
+    if first_name >= len(tokens):
+        return None
+    start = window_start + tokens[first_name].start()
+    if first_name == 0 and window_start > 0 and text[window_start - 1] not in ".!?;:\n":
+        gaps.add("author_limit")
+        return None
+    author = text[start:year_start].strip()
+    if not _author_tokens_valid(author, max_chars, max_tokens, max_unseparated_tokens):
+        gaps.add(
+            "author_limit"
+            if _author_limit_exceeded(author, max_chars, max_tokens, max_unseparated_tokens)
+            else "author_unreadable"
+        )
+        return None
+    return start, author
+
+
 def _split_authors(raw: str) -> list[str]:
+    raw = _HYPHENATED_NAME_BREAK.sub("-", raw).replace("⁠", "")
     raw = re.sub(r"\bet\s+al\.?", "", raw, flags=re.IGNORECASE).strip().rstrip(",&").strip()
     parts = re.split(r",\s*&\s*|,\s+and\s+|\s+&\s+|\s+and\s+|,\s*", raw)
     return [p.strip() for p in parts if p.strip()]
+
+
+def _looks_unfinished(text: str) -> bool:
+    """True when a line was cut mid-sentence rather than ending one.
+
+    A PDF text block is a physical line, not a sentence. "...reported by
+    Haan (2025), with" is the whole block; the proposition continues on the
+    next one (BUG-240 AC1).
+    """
+    stripped = text.rstrip()
+    if not stripped:
+        return False
+    if stripped[-1] in ".!?:;":
+        # A real terminator, unless it is an abbreviation's period.
+        return stripped[-1] == "." and _closes_an_abbreviation(stripped + " ", len(stripped))
+    return True
+
+
+def merge_wrapped_lines(blocks: list[TextBlock]) -> list[TextBlock]:
+    """Join consecutive blocks that are one wrapped sentence (BUG-240 AC1).
+
+    Deliberately conservative on both axes:
+
+    * only blocks with the **same page and paragraph** merge, so a merged
+      block's anchor is never ambiguous and page/paragraph boundaries are
+      preserved exactly as the acceptance criterion requires; and
+    * only when the earlier block ends mid-sentence, so a heading followed
+      by body text, or two complete sentences, are never glued into one
+      false proposition.
+    """
+    tolerance = get_settings().citation_wrap_font_size_tolerance_pt
+    merged: list[TextBlock] = []
+    for block in blocks:
+        text = block.text or ""
+        if (
+            merged
+            and merged[-1].page == block.page
+            and merged[-1].paragraph == block.paragraph
+            and _looks_unfinished(merged[-1].text)
+            and _same_typography(merged[-1], block, tolerance)
+            and text.strip()
+        ):
+            previous = merged[-1]
+            head = previous.text.rstrip()
+            tail = text.lstrip()
+            # BUG-240 AC4, hyphenated wrap: justification breaks a word at a
+            # hyphen ("A neuro-" / "symbolic solver..."). Joining with a space
+            # would put one INSIDE the word and corrupt both the graded claim
+            # and the excerpt the instructor has to find in the PDF.
+            #
+            # The hyphen is kept rather than dissolved. "experi-" + "mental"
+            # really is "experimental", but the excerpt has to be findable in
+            # the source, where the hyphen is what is printed. Keeping it
+            # preserves the exact characters; removing it would invent a
+            # spelling that appears nowhere on the page. The cost is that a
+            # purely typographic break stays hyphenated in the excerpt, which
+            # is a readability wart and not a correctness claim.
+            separator = "" if _HYPHEN_BREAK.search(head) else " "
+            merged[-1] = previous.model_copy(update={"text": f"{head}{separator}{tail}"})
+            continue
+        merged.append(block)
+    return merged
+
+
+def _same_typography(previous: TextBlock, block: TextBlock, tolerance: float) -> bool:
+    """A heading has no terminal punctuation but is not a wrapped line.
+
+    PDF headings share a page (and no paragraph) with the body text after
+    them, so without this check "Review of Related Literature" was glued to
+    the next sentence's citation ("Review of Related Literature Gurmu et al.
+    (2025)"), inventing a multiword author and an ambiguous match.
+    """
+    if (
+        previous.max_font_size
+        and block.max_font_size
+        and abs(previous.max_font_size - block.max_font_size) > tolerance
+    ):
+        return False
+    return not (previous.bold_ratio >= 0.5 and block.bold_ratio < 0.5)
 
 
 def _anchor_for(block: TextBlock) -> str:
@@ -223,24 +731,69 @@ def _anchor_for(block: TextBlock) -> str:
     return "document"
 
 
+def _closes_an_abbreviation(text: str, boundary: int) -> bool:
+    """True when the period just before `boundary` ends an abbreviation.
+
+    `boundary` is the index of the whitespace that follows the period, so
+    `text[:boundary]` ends with that period (BUG-240).
+    """
+    match = _TRAILING_TOKEN.search(text[:boundary])
+    if match is None:
+        return False
+    token = match.group(1).rstrip(".")
+    if len(token) == 1 and token.isalpha():
+        # An author initial: "Smith, J. (2020) reported X" is one sentence.
+        return True
+    return token.lower() in _ABBREVIATIONS
+
+
 def _sentence_spans(text: str) -> list[tuple[int, int]]:
     spans: list[tuple[int, int]] = []
     start = 0
     for b in _SENTENCE_BOUNDARY.finditer(text):
+        if _closes_an_abbreviation(text, b.start()):
+            continue  # "et al.", "e.g.", "J." -- not a sentence end
         spans.append((start, b.start()))
         start = b.end()
     spans.append((start, len(text)))
     return spans
 
 
-def _sentence_at(text: str, pos: int, spans: list[tuple[int, int]]) -> str:
-    for s, e in spans:
-        if pos < e:
-            return text[s:e].strip()
-    return text[spans[-1][0] :].strip() if spans else text.strip()
+def _sentence_at(
+    text: str, pos: int, citation_end: int, spans: list[tuple[int, int]], *, max_chars: int
+) -> tuple[str, bool]:
+    """Keep an exact source substring without copying a whole long paragraph."""
+    if not spans:
+        return "", False
+    index = max(0, bisect_right(spans, (pos, len(text) + 1)) - 1)
+    start, end = spans[index]
+    if end - start <= max_chars:
+        return text[start:end].strip(), False
+    window_start = max(start, pos - max_chars // 2)
+    window_end = min(end, window_start + max_chars)
+    if citation_end > window_end:
+        window_end = min(end, citation_end)
+        window_start = max(start, window_end - max_chars)
+    return text[window_start:window_end].strip(), True
 
 
 # --- cross-match ---------------------------------------------------------------
+
+
+def _first_reference_surname(ref: ReferenceLike) -> str | None:
+    """The surname a correctly-formed citation to this reference must name.
+
+    APA and the styles this project targets cite by first author, and an
+    `et al.` form abbreviates everything after them, so a citation that names
+    only a *later* author is a citation-style defect, not a link (BUG-239
+    AC1). Same comma split as `_reference_surnames`, so particles survive:
+    "Dela Cruz, J." gives "dela cruz", not "j".
+    """
+    for author in ref.authors or []:
+        surname = author.split(",", 1)[0].strip() if "," in author else author.strip()
+        if surname:
+            return " ".join(surname.split()).casefold()
+    return None
 
 
 def _reference_surnames(ref: ReferenceLike) -> set[str]:
@@ -248,7 +801,7 @@ def _reference_surnames(ref: ReferenceLike) -> set[str]:
     for author in ref.authors or []:
         surname = author.split(",", 1)[0].strip() if "," in author else author.strip()
         if surname:
-            out.add(surname.casefold())
+            out.add(" ".join(surname.split()).casefold())
     return out
 
 
@@ -260,18 +813,32 @@ def cross_match(in_text: list[InTextCitation], references: list[ReferenceLike]) 
 
     linked: list[tuple[InTextCitation, list[ReferenceLike]]] = []
     orphans: list[InTextCitation] = []
+    ambiguous: list[InTextCitation] = []
     cited_order_indexes: set[int] = set()
+    possibly_cited: set[int] = set()
 
     for cite in in_text:
         if cite.is_secondary:
             continue  # edge case: don't resolve the inner source
+        surnames = list(cite.surnames)
         candidates: list[ReferenceLike] = []
         seen_ids: set[int] = set()
-        for surname in cite.surnames:
-            for ref in index.get(surname.casefold(), []):
+        for surname in surnames:
+            for ref in index.get(" ".join(surname.split()).casefold(), []):
                 if ref.order_index not in seen_ids:
                     seen_ids.add(ref.order_index)
                     candidates.append(ref)
+        if not candidates and len(surnames) == 1 and len(surnames[0].split()) > 1:
+            # Leading capitalized prose can be swept into a narrative author
+            # ("Recently Gurmu et al. (2025)"). The longest trailing run of
+            # words that IS a listed author's surname names the citation.
+            words = surnames[0].split()
+            for size in range(len(words) - 1, 0, -1):
+                suffix = " ".join(words[-size:]).casefold()
+                if suffix in index:
+                    surnames = [suffix]
+                    candidates = list(index[suffix])
+                    break
         year_digits = cite.year[:4]
         matches = [c for c in candidates if str(c.year) == year_digits]
         if len(matches) > 1 and cite.year[-1].isalpha():
@@ -281,14 +848,43 @@ def cross_match(in_text: list[InTextCitation], references: list[ReferenceLike]) 
             refined = [c for c in matches if cite.year in (c.raw_text or "")]
             if refined:
                 matches = refined
-        if matches:
+        # BUG-239 AC1: a shared coauthor surname plus a matching year is not
+        # a link. `index` holds EVERY author of every reference, so
+        # "(Schneider, 2024)" resolved to a Vladika-first paper, marked it
+        # cited, and handed its claim to support grading -- one candidate, so
+        # the ambiguity guard below never fired. Prefer references the
+        # citation actually names first; if it names none of them, the
+        # candidates are real but the author semantics disagree, which is the
+        # instructor's call and not ours (ground rule 1).
+        cite_surnames = {" ".join(s.split()).casefold() for s in surnames}
+        lead_matches = [c for c in matches if _first_reference_surname(c) in cite_surnames]
+        coauthor_only = bool(matches) and not lead_matches
+        if lead_matches:
+            matches = lead_matches
+        if coauthor_only or len(matches) > 1:
+            # No claim can be assigned to one of these sources honestly.
+            # Do not turn an ambiguous mark into several comparisons. Each
+            # candidate MAY be the source meant, so none of them can be
+            # called unused either (2026-10-07: this replaced withholding
+            # every finding in the paper over one ambiguous mark).
+            ambiguous.append(cite)
+            possibly_cited.update(c.order_index for c in matches)
+        elif matches:
             cited_order_indexes.update(c.order_index for c in matches)
             linked.append((cite, matches))
         else:
             orphans.append(cite)
 
     uncited = [r for r in references if r.order_index not in cited_order_indexes]
-    return CrossMatchResult(in_text=in_text, linked=linked, orphans=orphans, uncited=uncited)
+    return CrossMatchResult(
+        in_text=in_text,
+        linked=linked,
+        orphans=orphans,
+        uncited=uncited,
+        ambiguous=ambiguous,
+        possibly_cited=[r for r in references if r.order_index in possibly_cited],
+        confidently_uncited=[r for r in uncited if r.order_index not in possibly_cited],
+    )
 
 
 # --- flag-ready output -----------------------------------------------------------
@@ -306,10 +902,88 @@ def orphan_flags(orphans: list[InTextCitation]) -> list[CitationFlagDraft]:
                 "raw_text": cite.raw_text,
                 "surnames": cite.surnames,
                 "year": cite.year,
+                "claim_excerpt_cropped": cite.claim_excerpt_cropped,
+                # BUG-237/BUG-251 AC5: one in-text citation with no reference
+                # entry is ONE missing reference, however many times it is
+                # cited. Keyed on the cited work's own identity, never on the
+                # claim sentence, and never on the anchor: the page is the
+                # location. Every occurrence stays flagged and reachable.
+                FINDING_GROUP_FIELD: finding_group_fingerprint(
+                    "citation_integrity",
+                    "orphan_in_text_citation",
+                    "|".join(cite.surnames),
+                    cite.year or "",
+                ),
             },
         )
         for cite in orphans
     ]
+
+
+NUMERIC_ORPHAN_WORDING = (
+    "In-text citation {mark} points to source [{number}], but the numbered "
+    "reference list ends at [{last}]. Possible missing reference or a numbering "
+    "error. Please check manually."
+)
+NUMERIC_UNCITED_WORDING = (
+    "Reference list entry [{number}] does not appear to be cited anywhere in "
+    "the body text. Possible unused reference, or a citation form this checker "
+    "did not recognize. Please check manually."
+)
+
+
+def numeric_linkage_flags(
+    orphan_marks: list, uncited: list[ReferenceLike], n_entries: int
+) -> list[CitationFlagDraft]:
+    """Findings for a numbered list whose printed inventory is complete.
+
+    `orphan_marks` and `uncited` come from `analyze_numbered_citations`,
+    which already restricts both to strong citation context and withholds
+    absence claims when any mark is uncertain. One missing number is one
+    finding, however many marks cite it.
+    """
+    flags: list[CitationFlagDraft] = []
+    seen: set[int] = set()
+    for mark in orphan_marks:
+        for number in mark.numbers or ():
+            if number <= n_entries or number in seen:
+                continue
+            seen.add(number)
+            flags.append(
+                CitationFlagDraft(
+                    severity=FlagSeverity.low,
+                    evidence_excerpt=mark.claim_sentence or mark.raw_text,
+                    page_anchor=mark.anchor,
+                    detail={
+                        "kind": "orphan_in_text_citation",
+                        "reason": NUMERIC_ORPHAN_WORDING.format(
+                            mark=mark.raw_text, number=number, last=n_entries
+                        ),
+                        "raw_text": mark.raw_text,
+                        "number": number,
+                        "claim_excerpt_cropped": mark.excerpt_cropped,
+                        FINDING_GROUP_FIELD: finding_group_fingerprint(
+                            "citation_integrity", "orphan_in_text_citation", "numeric", str(number)
+                        ),
+                    },
+                )
+            )
+    for ref in uncited:
+        label = reference_anchor(ref.raw_text, ref.order_index).removeprefix("reference #")
+        flags.append(
+            CitationFlagDraft(
+                severity=FlagSeverity.low,
+                evidence_excerpt=ref.raw_text,
+                page_anchor=reference_anchor(ref.raw_text, ref.order_index),
+                detail={
+                    "kind": "uncited_reference",
+                    "reason": NUMERIC_UNCITED_WORDING.format(number=label),
+                    "order_index": ref.order_index,
+                    "number": int(label) if label.isdigit() else None,
+                },
+            )
+        )
+    return flags
 
 
 def uncited_flags(uncited: list[ReferenceLike]) -> list[CitationFlagDraft]:
@@ -317,7 +991,7 @@ def uncited_flags(uncited: list[ReferenceLike]) -> list[CitationFlagDraft]:
         CitationFlagDraft(
             severity=FlagSeverity.low,
             evidence_excerpt=ref.raw_text,
-            page_anchor="reference list",
+            page_anchor=reference_anchor(ref.raw_text, ref.order_index),
             detail={
                 "kind": "uncited_reference",
                 "reason": UNCITED_WORDING.format(

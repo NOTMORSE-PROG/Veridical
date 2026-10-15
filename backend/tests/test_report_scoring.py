@@ -149,11 +149,9 @@ def test_flag_ai_verdict_summary_reads_kind_before_calling_it_unavailable():
 # --- BUG-150: 82 anchors on one finding must not count as 82 findings ------
 
 
-def test_many_anchors_on_one_reuse_match_count_as_one_finding_for_the_gate():
-    """82 passage-level flags against the SAME archived manuscript are 82
-    rows but one fact -- the same `(check_kind, problem_kind, matched_ref)`
-    boundary `flagClusters.ts` already uses to show "1 finding" on the
-    report screen, not 82. The verdict-forcing count must agree with it."""
+def test_many_anchors_on_one_reuse_match_cannot_force_a_readiness_verdict():
+    """Repeated evidence anchors must not make a non-scoring reuse lead
+    into a verdict-forcing finding."""
     results = [_result(1, 100, ResultOutcome.passed, 100.0)]
     flags = [
         ScorableFlag(
@@ -167,13 +165,13 @@ def test_many_anchors_on_one_reuse_match_count_as_one_finding_for_the_gate():
         for i in range(82)
     ]
     scoring = score_check_run(results, flags, get_settings())
-    assert scoring.status == ReadinessStatus.not_ready  # still forces Not Ready -- one real match
-    assert scoring.unresolved_high_flag_count == 1  # but as ONE finding, not 82
+    # V-081: comparison leads retain their evidence but cannot score.
+    assert scoring.status == ReadinessStatus.ready
+    assert scoring.unresolved_high_flag_count == scoring.flag_deduction == 0
 
 
-def test_two_distinct_reuse_matches_still_count_as_two_findings():
-    """Different `matched_ref` archives are genuinely different facts and
-    must not be collapsed into each other."""
+def test_two_distinct_reuse_matches_are_both_non_scoring():
+    """Distinct comparison leads remain non-scoring as well."""
     results = [_result(1, 100, ResultOutcome.passed, 100.0)]
     flags = [
         ScorableFlag(
@@ -194,10 +192,10 @@ def test_two_distinct_reuse_matches_still_count_as_two_findings():
         ),
     ]
     scoring = score_check_run(results, flags, get_settings())
-    assert scoring.unresolved_high_flag_count == 2
+    assert scoring.unresolved_high_flag_count == scoring.flag_deduction == 0
 
 
-def test_a_reuse_flag_with_no_matched_ref_stays_its_own_singleton():
+def test_a_reuse_flag_with_no_matched_ref_still_cannot_score():
     """No persisted field to safely cluster on -- must not be guessed into
     someone else's finding just because problem_kind happens to match."""
     results = [_result(1, 100, ResultOutcome.passed, 100.0)]
@@ -220,7 +218,7 @@ def test_a_reuse_flag_with_no_matched_ref_stays_its_own_singleton():
         ),
     ]
     scoring = score_check_run(results, flags, get_settings())
-    assert scoring.unresolved_high_flag_count == 2
+    assert scoring.unresolved_high_flag_count == scoring.flag_deduction == 0
 
 
 def test_non_reuse_flags_cluster_on_criterion_and_evidence_text():
@@ -306,16 +304,13 @@ def test_multiple_anchors_on_one_finding_deduct_once_not_per_anchor():
     ]
     scoring_one = score_check_run(results, one_row, settings)
     scoring_two = score_check_run(results, two_rows_same_finding, settings)
-    assert scoring_one.flag_deduction == settings.scoring_flag_deduction_high
+    assert scoring_one.flag_deduction == 0
     assert scoring_two.flag_deduction == scoring_one.flag_deduction  # same fact, same deduction
     assert scoring_two.composite_score == scoring_one.composite_score
 
 
-def test_a_finding_deducts_at_its_worst_members_severity():
-    """A finding whose own anchors happen to carry mixed severities (the
-    identity key doesn't forbid this) deducts once, at the WORST severity
-    among its members -- the same "worst wins" rule the report screen's
-    own `flagClusters.ts::worstSeverity` already uses to badge it."""
+def test_a_reuse_lead_is_non_scoring_even_with_mixed_severities():
+    """A severity label cannot promote a comparison lead into a deduction."""
     settings = get_settings()
     results = [_result(1, 100, ResultOutcome.passed, 100.0)]
     flags = [
@@ -337,8 +332,8 @@ def test_a_finding_deducts_at_its_worst_members_severity():
         ),
     ]
     scoring = score_check_run(results, flags, settings)
-    assert scoring.flag_deduction == settings.scoring_flag_deduction_high
-    assert scoring.unresolved_high_flag_count == 1
+    assert scoring.flag_deduction == 0
+    assert scoring.unresolved_high_flag_count == 0
 
 
 def test_thresholds_are_visible_in_the_result():

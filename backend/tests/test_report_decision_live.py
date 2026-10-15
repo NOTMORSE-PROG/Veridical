@@ -314,9 +314,22 @@ async def test_a_partially_executed_integrity_check_never_blocks_or_inflates_pen
         report = await get_report(session, check_run.id, instructor.id)
         assert report.pending_review_count == 0  # the criterion-only count is unaffected
 
-        # And the decision itself is NOT blocked by it.
-        decided = await decide_report(session, check_run.id, instructor.id, "approved", None)
+        # The criterion queue is not inflated, but incomplete coverage must
+        # remain Needs Review. Approval now requires an explicit explanation;
+        # this is not a deadlock or a silent pass for the skipped check.
+        from app.errors import ConflictError
+
+        with pytest.raises(ConflictError, match="needs review"):
+            await decide_report(session, check_run.id, instructor.id, "approved", None)
+        decided = await decide_report(
+            session,
+            check_run.id,
+            instructor.id,
+            "approved",
+            "Reviewed the unresolved integrity evidence independently.",
+        )
         assert decided.decision == "approved"
+        assert decided.status == "needs_review"
 
 
 async def test_bug_125_a_partially_executed_integrity_check_is_disclosed_on_the_report(

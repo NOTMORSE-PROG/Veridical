@@ -19,6 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.audit.service import write_audit_event
 from app.checks.agreement.extract import extract_statements
 from app.checks.agreement.pair import run_agreement_pairing
+from app.checks.source_quality import persist_source_limitation
 from app.config import Settings
 from app.ingest.schemas import ExtractionResult
 from app.llm.base import LLMClient
@@ -46,6 +47,11 @@ async def run_internal_agreement_check(
     extraction: ExtractionResult,
     settings: Settings,
 ) -> CheckResult:
+    source_stop = await persist_source_limitation(
+        session, check_run_id, CheckKind.internal_agreement, extraction
+    )
+    if source_stop is not None:
+        return source_stop
     outcome_extraction = extract_statements(extraction, settings=settings)
     intents, outcomes = outcome_extraction.intents, outcome_extraction.outcomes
 
@@ -101,7 +107,7 @@ async def run_internal_agreement_check(
     elif pairing.n_skipped_quota > 0:
         outcome = ResultOutcome.quota_exhausted
     else:
-        outcome = ResultOutcome.passed
+        outcome = ResultOutcome.escalated
 
     result = CheckResult(
         check_run_id=check_run_id,
@@ -110,6 +116,12 @@ async def run_internal_agreement_check(
         outcome=outcome,
         detail={
             "n_intents": len(intents),
+            "coverage_reason": "statement_roles_unverified",
+            "reason": (
+                "Statement roles have not been verified as this study's own "
+                "objectives and results. "
+                "The retained comparisons are review leads, not readiness deductions."
+            ),
             "n_outcomes": len(outcomes),
             "n_flags": len(pairing.flags),
             "n_unmatched_outcomes": pairing.n_unmatched_outcomes,

@@ -29,7 +29,9 @@ from app.checks.reuse.query import (
     query_similar_passages,
     same_instructor_hash_duplicate,
 )
+from app.checks.source_quality import persist_source_limitation
 from app.config import Settings
+from app.findings.policy import reuse_reason
 from app.ingest.schemas import ExtractionResult
 from app.models.enums import CheckKind, FlagSeverity, ResultOutcome
 from app.models.run import CheckResult, Flag
@@ -145,6 +147,7 @@ def _match_to_flag_draft(
     )
     detail = {
         "kind": f"reuse_{match.level}{'_chapter' if is_chapter else ''}",
+        "affects_readiness": False,
         "reason": reason,
         "similarity": round(match.similarity, 3),
         "matched_manuscript_id": match.matched_manuscript_id,
@@ -153,6 +156,8 @@ def _match_to_flag_draft(
         "own_chapter_title": match.own_chapter_title,
         "first_upload_context": first_upload,
     }
+    reason = reuse_reason(detail)
+    detail["reason"] = reason
     return severity, reason, detail
 
 
@@ -235,9 +240,12 @@ def _resubmission_flag_draft(matched_manuscript_id: int) -> tuple[FlagSeverity, 
     reason = SAME_INSTRUCTOR_RESUBMISSION_WORDING.format(ref=matched_manuscript_id)
     detail = {
         "kind": "reuse_same_instructor_resubmission",
+        "affects_readiness": False,
         "reason": reason,
         "matched_manuscript_id": matched_manuscript_id,
     }
+    reason = reuse_reason(detail)
+    detail["reason"] = reason
     return FlagSeverity.low, reason, detail
 
 
@@ -261,6 +269,7 @@ def _passage_match_to_flag_draft(
     )
     detail = {
         "kind": f"reuse_{match.level}_passage",
+        "affects_readiness": False,
         "reason": reason,
         "first_upload_context": first_upload,
         "similarity": round(match.similarity, 3),
@@ -276,6 +285,7 @@ def _passage_match_to_flag_draft(
         "is_reference_list_match": match.own_is_reference_list or match.matched_is_reference_list,
         "is_block_quote_match": match.own_is_block_quote or match.matched_is_block_quote,
     }
+    detail["reason"] = reuse_reason(detail)
     return severity, match.own_text, page_anchor, detail
 
 
@@ -306,6 +316,11 @@ async def run_originality_reuse_check(
     instructor_id: int | None = None,
     content_hash: str | None = None,
 ) -> CheckResult:
+    source_stop = await persist_source_limitation(
+        session, check_run_id, CheckKind.originality_reuse, extraction
+    )
+    if source_stop is not None:
+        return source_stop
     # BUG-152: off the event loop -- this runs the local model2vec encoder
     # over every chapter plus the whole document, real CPU work with no
     # I/O, on the single Render worker that also serves every other
@@ -457,13 +472,20 @@ async def run_originality_reuse_check(
         + len(passage_matches)
         + (1 if resubmission_source_id is not None else 0)
     )
+    no_comparisons = (
+        query_result.archive_size_n == 0
+        and passage_query_result.passage_archive_size_n == 0
+        and n_flags == 0
+    )
 
     result = CheckResult(
         check_run_id=check_run_id,
         criterion_id=None,
         kind=CheckKind.originality_reuse,
-        outcome=ResultOutcome.passed,
+        outcome=ResultOutcome.not_applicable if no_comparisons else ResultOutcome.passed,
         detail={
+            "coverage_reason": "no_comparison_archive" if no_comparisons else None,
+            "comparison_ran": True,
             "archive_size_n": query_result.archive_size_n,
             # V-077: what this count measured. Results written before D-028
             # have no "corpus" key; they counted the pre-Library archive.

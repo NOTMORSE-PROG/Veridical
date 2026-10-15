@@ -100,6 +100,20 @@ class CriterionResultOut(BaseModel):
     level: CriterionLevelOut | None = None
 
 
+COVERAGE_REASONS = frozenset(
+    {
+        "source_reading_order_unresolved",
+        "reference_metadata_insufficient",
+        "author_year_citation_parse_unassessed",
+        "numeric_citation_style_unassessed",
+        "numeric_citation_scan_limit",
+        "reference_list_unavailable",
+        "claim_support_unavailable",
+        "statement_roles_unverified",
+    }
+)
+
+
 class IntegrityCheckStatusOut(BaseModel):
     """BUG-125: on-screen disclosure that an F4/F5 integrity check did not
     fully execute. BUG-073 (same day) made the underlying `CheckResult`
@@ -117,6 +131,12 @@ class IntegrityCheckStatusOut(BaseModel):
     n_skipped_quota: int
     n_skipped_api_down: int
     n_skipped_parse_failure: int
+    coverage_reason: str | None = None
+    n_metadata_skipped_insufficient: int = 0
+    n_linkage_unassessed: int = 0
+    n_source_pages_unassessed: int = 0
+    n_claim_support_unassessed: int = 0
+    reference_list_page: int | None = None
 
 
 class OriginalityScopeOut(BaseModel):
@@ -132,7 +152,9 @@ class OriginalityScopeOut(BaseModel):
     corpus: Literal["library", "pre_library"]
     # "no_text": the checked manuscript had no readable text, so no
     # comparison ran at all (distinct from an empty Library).
-    not_compared_reason: Literal["no_text"] | None = None
+    not_compared_reason: Literal["no_text", "no_comparison_archive", "source_unresolved"] | None = (
+        None
+    )
 
 
 class ReportOut(BaseModel):
@@ -430,6 +452,8 @@ class FlagSummaryOut(BaseModel):
     evidence_excerpt: str
     page_anchor: str
     overridden: bool
+    affects_readiness: bool = True
+    readiness_exclusion_reason: str | None = None
     # V-072 (F7.4): distinguishes a passage-level reuse flag from today's
     # whole-document/chapter-level ones (same `check_kind`,
     # `originality_reuse`) -- lets the passage-pair exploration panel

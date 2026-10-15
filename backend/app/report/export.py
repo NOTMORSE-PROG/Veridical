@@ -340,11 +340,20 @@ def _explainer(report) -> str:
     return f"{base} This includes a {points}-point deduction from unresolved flags."
 
 
-def _archive_disclosure(archive_size_n: int | None, corpus: str | None = None) -> str:
+def _archive_disclosure(
+    archive_size_n: int | None,
+    corpus: str | None = None,
+    not_compared_reason: str | None = None,
+) -> str:
     """V-077 (D-028): names what the count measured. Since D-028 the check
     compares against the Library only; older results counted the former
     automatic archive. Zero is stated as "nothing to compare against", never
     as a clean result."""
+    if not_compared_reason == "source_unresolved":
+        return (
+            "Originality and reuse check did not run because parts of the manuscript "
+            "could not be read reliably. No originality conclusion is available."
+        )
     if archive_size_n is None:
         return (
             "Originality and reuse check did not run for this manuscript "
@@ -694,7 +703,7 @@ def build_report_pdf(data: ReportExportData) -> bytes:
     # extended to the composite score above, once both existed side by
     # side and made the contrast concrete. Absent whenever no criterion in
     # this rubric is levelled (AC3).
-    if report.levelled_rating is not None:
+    if report.levelled_rating is not None and report.levelled_rating.n_decided > 0:
         lr = report.levelled_rating
         flow.append(Spacer(1, 4))
         flow.append(
@@ -747,6 +756,29 @@ def build_report_pdf(data: ReportExportData) -> bytes:
         flow.append(Spacer(1, 6))
 
     # 4. Flags.
+    if report.integrity_check_status:
+        flow.append(Paragraph("Checks not fully assessed", styles["h2"]))
+        for coverage in report.integrity_check_status:
+            label = _CHECK_KIND_LABEL.get(coverage.check_kind, coverage.check_kind)
+            reason = (coverage.coverage_reason or coverage.outcome).replace("_", " ")
+            counts = []
+            if coverage.n_source_pages_unassessed:
+                counts.append(f"{coverage.n_source_pages_unassessed} source pages unassessed")
+            if coverage.n_metadata_skipped_insufficient:
+                counts.append(f"{coverage.n_metadata_skipped_insufficient} references unverified")
+            if coverage.n_claim_support_unassessed:
+                counts.append(
+                    f"{coverage.n_claim_support_unassessed} sources with unassessed claim support"
+                )
+            text = f"{label}: {reason}. " + "; ".join(counts)
+            flow.append(Paragraph(escape(text), styles["body"]))
+        flow.append(
+            Paragraph(
+                "These are coverage limitations, not findings against the manuscript. "
+                "No flag does not mean that every check completed.",
+                styles["body"],
+            )
+        )
     flow.append(Paragraph(f"Flags ({len(data.flags)})", styles["h2"]))
     flow.append(
         Paragraph(
@@ -759,9 +791,8 @@ def build_report_pdf(data: ReportExportData) -> bytes:
     if not data.flags:
         flow.append(
             Paragraph(
-                "No integrity flags on this run. VERIDICAL's four integrity checks (internal "
-                "agreement, citation integrity, statistical forensics, and originality/reuse) "
-                "found nothing to report.",
+                "No integrity flags were recorded. Read the check coverage and originality "
+                "scope before interpreting this as an absence of issues.",
                 styles["body"],
             )
         )
@@ -792,6 +823,8 @@ def build_report_pdf(data: ReportExportData) -> bytes:
                 caption_text = f"Anchor: {escape(f.page_anchor)} · {escape(severity_label)}"
                 if f.overridden:
                     caption_text += " · Overridden"
+                if not f.affects_readiness:
+                    caption_text += " · Comparison lead: not scored"
                 header = Paragraph(caption_text, caption_style)
                 excerpt = Paragraph(escape(f.evidence_excerpt), styles["body"])
                 # design review finding, 2026-08-25 (measured against a
@@ -831,7 +864,11 @@ def build_report_pdf(data: ReportExportData) -> bytes:
     scope = data.report.originality_scope
     flow.append(
         Paragraph(
-            _archive_disclosure(data.archive_size_n, scope.corpus if scope else None),
+            _archive_disclosure(
+                data.archive_size_n,
+                scope.corpus if scope else None,
+                scope.not_compared_reason if scope else None,
+            ),
             styles["caption"],
         )
     )

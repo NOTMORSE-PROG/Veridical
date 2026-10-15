@@ -73,6 +73,10 @@ async def ingest_manuscript_upload(
         session, chunks(), file.filename or "", resolved_group_label, instructor_id=instructor.id
     )
     notes = [messages.IMAGE_ONLY_NOTE] if result.image_only else []
+    from app.ingest.quality import SOURCE_READING_ORDER_INGEST_NOTE, reading_order_issues
+
+    if reading_order_issues(result):
+        notes.append(SOURCE_READING_ORDER_INGEST_NOTE)
     return IngestSummary(
         manuscript_id=manuscript.id,
         group_label=manuscript.group_label,

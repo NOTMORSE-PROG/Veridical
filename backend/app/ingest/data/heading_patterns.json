@@ -50,6 +50,22 @@
     "works cited",
     "literature cited"
   ],
+  "reference_heading_prefix": "^(?:[IVXLCDM]+\\.|[1-9]\\d*(?:\\.\\d+)*[.)])\\s+",
+  "reference_end_headings": [
+    "^(?:appendix(?:es)?|appendices)(?:\\s+[A-Z0-9IVXLCDM]+)?(?:\\s*[:.\\-]\\s*.+)?$",
+    "^glossary$",
+    "^(?:supplement(?:ary|al)?(?:\\s+(?:material|materials|information|appendix))?)(?:\\s*[:.\\-]\\s*.+)?$"
+  ],
+  "reference_history_lines": [
+    "^(?:received|submitted)\\s+\\d{1,2}\\s+[^\\d;,]+\\s+\\d{4}(?:\\s*;\\s*(?:revised|accepted)\\s+\\d{1,2}\\s+[^\\d;,]+\\s+\\d{4})+\\.?$",
+    "^(?:received|submitted)\\s+\\d{4}-\\d{2}-\\d{2}(?:\\s*;\\s*(?:revised|accepted)\\s+\\d{4}-\\d{2}-\\d{2})+\\.?$"
+  ],
+  "reference_end_heading_style": {
+    "min_bold_ratio": 0.6,
+    "min_font_scale": 1.2
+  },
+  "reference_url_geometry_tolerance_pts": 2.0,
+  "standalone_heading_label": "^\\.?(?:[1-9]\\d*(?:\\.\\d+)*|[IVXLCDM]+)[.)]?$",
   "vision_priority_sections": [
     "results",
     "analysis",

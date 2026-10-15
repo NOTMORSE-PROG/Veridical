@@ -20,6 +20,7 @@ from app.checks.reuse.embed import split_context
 from app.config import get_settings
 from app.errors import ConflictError, NotFoundError
 from app.external import cache
+from app.findings.policy import exclusion_reason, reuse_excerpt, reuse_reasoning
 from app.flags.schemas import CitationSourceKeyOut, FlagOut, PassagePairOut
 from app.models.audit import AuditLog
 from app.models.manuscript import Manuscript
@@ -148,10 +149,16 @@ async def _to_flag_out(
         criterion_text=criterion_text,
         severity=flag.severity.value,
         confidence=float(flag.confidence) if flag.confidence is not None else None,
-        evidence_excerpt=flag.evidence_excerpt,
+        evidence_excerpt=(
+            reuse_excerpt(detail, flag.evidence_excerpt)
+            if result.kind.value == "originality_reuse"
+            else flag.evidence_excerpt
+        ),
         page_anchor=flag.page_anchor,
         annotation=flag.annotation,
         overridden=flag.overridden,
+        affects_readiness=exclusion_reason(result.kind.value, detail) is None,
+        readiness_exclusion_reason=exclusion_reason(result.kind.value, detail),
         override_reason=flag.override_reason,
         # BUG-053: was `detail.get("verdict") or detail.get("basis")` only
         # -- those two keys are semantic grading's own vocabulary (V-020),
@@ -166,7 +173,11 @@ async def _to_flag_out(
         # it here would render that sentence twice on screen 4i. A general
         # guard, not a check-specific patch, so any future check that makes
         # the same convenience choice doesn't reintroduce the duplication.
-        ai_reasoning=_distinct_reasoning(detail, flag.evidence_excerpt),
+        ai_reasoning=(
+            reuse_reasoning(detail, flag.evidence_excerpt)
+            if result.kind.value == "originality_reuse"
+            else _distinct_reasoning(detail, flag.evidence_excerpt)
+        ),
         llm_mode=check_run.llm_mode.value,
         # BUG-170: same expression as `report/service.py`'s `FlagSummaryOut`
         # field of the same name -- `flag.detail` directly (not the

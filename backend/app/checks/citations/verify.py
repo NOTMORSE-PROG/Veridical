@@ -23,14 +23,21 @@ from app.checks.citations.extract import (
     CitationFlagDraft,
     cross_match,
     extract_in_text_citations,
+    numeric_linkage_flags,
     orphan_flags,
     uncited_flags,
+)
+from app.checks.citations.numbered import (
+    NumberedCitationAssessment,
+    analyze_numbered_citations,
+    explicit_reference_label,
 )
 from app.checks.citations.support import (
     ClaimSupportInput,
     ClaimSupportResult,
     run_claim_support_check,
 )
+from app.checks.source_quality import persist_source_limitation
 from app.config import Settings
 from app.errors import ApiDownError
 from app.external import cache
@@ -40,11 +47,11 @@ from app.external import openlibrary as openlibrary_client
 from app.external import s2 as s2_client
 from app.external.schemas import VerificationResult
 from app.ingest.patterns import HeadingPatterns
-from app.ingest.references import non_reference_blocks
+from app.ingest.references import non_reference_blocks, reference_section_page, select_references
 from app.ingest.schemas import ExtractionResult
 from app.llm.base import LLMClient
 from app.models.citation import Citation
-from app.models.enums import CheckKind, FlagSeverity, ResultOutcome
+from app.models.enums import CheckKind, CitationParseStatus, FlagSeverity, ResultOutcome
 from app.models.run import CheckResult, Flag
 
 
@@ -94,6 +101,34 @@ UNVERIFIABLE_API_DOWN_WORDING = (
 )
 
 
+def _numeric_link_evidence(assessment: NumberedCitationAssessment) -> list[dict[str, object]]:
+    """One source span per possibly linked reference, bounded by list size.
+
+    This is audit detail, not a claim that a shape-only mark semantically
+    cites the source. Original extraction-block index plus character offset
+    can reconstruct the exact mark even after furniture filtering.
+    """
+    evidence_by_reference: dict[int, dict[str, object]] = {}
+    for mark, references in assessment.linked:
+        for ref in references:
+            existing = evidence_by_reference.get(ref.order_index)
+            if existing is not None and (
+                existing["strong_citation_context"] or not mark.strong_citation_context
+            ):
+                continue
+            evidence_by_reference[ref.order_index] = {
+                "reference_order_index": ref.order_index,
+                "source_number": explicit_reference_label(ref.raw_text),
+                "source_block_index": mark.block_index,
+                "source_offset": mark.start,
+                "page": mark.page,
+                "paragraph": mark.paragraph,
+                "raw_mark": mark.raw_text,
+                "strong_citation_context": mark.strong_citation_context,
+            }
+    return list(evidence_by_reference.values())
+
+
 async def verify_citation(
     session: AsyncSession, client: httpx.AsyncClient, citation: Citation, *, settings: Settings
 ) -> CitationVerdict:
@@ -134,10 +169,8 @@ async def verify_citation(
 
         async def _book_lookup() -> VerificationResult:
             result = await openlibrary_client.lookup_isbn(client, citation.isbn, settings=settings)
-            if not result.found:
-                result = await gbooks_client.search_title(
-                    client, citation.title or citation.raw_text, settings=settings
-                )
+            if not result.found and citation.title:
+                result = await gbooks_client.search_title(client, citation.title, settings=settings)
             return result
 
         return await _verify_keyed(
@@ -283,9 +316,48 @@ async def run_citation_integrity_check(
     settings: Settings,
     llm: LLMClient | None = None,
 ) -> CheckResult:
+    source_stop = await persist_source_limitation(
+        session, check_run_id, CheckKind.citation_integrity, extraction
+    )
+    if source_stop is not None:
+        return source_stop
     body_blocks = non_reference_blocks(extraction, patterns)
-    in_text = extract_in_text_citations(body_blocks)
+    gaps: set[str] = set()
+    in_text = extract_in_text_citations(body_blocks, settings=settings, coverage_gaps=gaps)
     cross = cross_match(in_text, citations)
+    numeric = analyze_numbered_citations(
+        body_blocks,
+        citations,
+        max_range_span=settings.numeric_citation_max_range_span,
+        context_file=settings.numeric_citation_context_file,
+        source_block_index_by_id={id(block): i for i, block in enumerate(extraction.blocks)},
+    )
+    selection = select_references(extraction, patterns)
+    numbered = numeric.n_numbered_reference_entries > 0
+    absence_candidates = numeric.confidently_uncited if numbered else cross.confidently_uncited
+    # No supported body style or a partial scan cannot prove a reference unused.
+    if gaps or selection.issues or (not numbered and not cross.linked):
+        absence_candidates = []
+    linkage_unassessed = (
+        len(numeric.absence_unassessed_references)
+        if numbered
+        else len(
+            {
+                ref.order_index
+                for ref in (cross.possibly_cited + (cross.uncited if not cross.linked else []))
+            }
+        )
+    )
+    if gaps or selection.issues:
+        linkage_unassessed = max(linkage_unassessed, len(citations))
+    metadata_unassessed = []
+    metadata_api_down = 0
+    metadata_not_found = 0
+    verification_records = []
+    usable_metadata = all(
+        c.parse_status == CitationParseStatus.parsed and c.authors and c.year is not None
+        for c in citations
+    )
 
     # First linked claim sentence per reference, for V-030's claim-support
     # pairing — a citation mentioned in-text more than once keeps whichever
@@ -295,20 +367,66 @@ async def run_citation_integrity_check(
     for in_text_cite, matched_refs in cross.linked:
         for ref in matched_refs:
             claim_by_order_index.setdefault(ref.order_index, in_text_cite.claim_sentence)
+    content_unassessed: set[int] = set()
+    for mark, matched_refs in numeric.linked:
+        if mark.strong_citation_context and not mark.excerpt_cropped and len(matched_refs) == 1:
+            claim_by_order_index.setdefault(matched_refs[0].order_index, mark.claim_sentence)
+        else:
+            content_unassessed.update(ref.order_index for ref in matched_refs)
 
-    flag_drafts: list[CitationFlagDraft] = [
-        *orphan_flags(cross.orphans),
-        *uncited_flags(cross.uncited),
-    ]
+    flag_drafts: list[CitationFlagDraft] = (
+        numeric_linkage_flags(numeric.orphan_marks, absence_candidates, len(citations))
+        if numbered
+        else [
+            *(orphan_flags(cross.orphans) if usable_metadata else []),
+            *uncited_flags(absence_candidates),
+        ]
+    )
+    if selection.issues or not citations:
+        flag_drafts = []
     claim_support_pairs: list[ClaimSupportInput] = []
     for citation in citations:
+        parsed = citation.parse_status == CitationParseStatus.parsed
+        metadata_complete = bool(
+            parsed and citation.title and citation.authors and citation.year is not None
+        )
+        lookup_eligible = parsed and (bool(citation.doi or citation.isbn) or metadata_complete)
+        if not metadata_complete:
+            metadata_unassessed.append(citation.order_index)
+        if not lookup_eligible:
+            verification_records.append(
+                {
+                    "reference_order_index": citation.order_index,
+                    "status": "unassessed",
+                    "reason": "unsupported_reference_structure",
+                    "lookup_attempted": False,
+                    "metadata_complete": False,
+                }
+            )
+            continue
         verdict = await verify_citation(session, client, citation, settings=settings)
+        metadata_api_down += verdict.kind == VerdictKind.api_down
+        metadata_not_found += verdict.kind == VerdictKind.not_found
+        verification_records.append(
+            {
+                "reference_order_index": citation.order_index,
+                "status": verdict.kind.value,
+                "lookup_attempted": True,
+                "lookup_kind": "doi" if citation.doi else "isbn" if citation.isbn else "title",
+                "metadata_complete": metadata_complete,
+            }
+        )
         draft = _verdict_flag_draft(citation, verdict)
         if draft is not None:
             flag_drafts.append(draft)
         claim_sentence = claim_by_order_index.get(citation.order_index)
+        if claim_sentence and (
+            not metadata_complete or verdict.result is None or not verdict.result.abstract
+        ):
+            content_unassessed.add(citation.order_index)
         if (
-            verdict.kind == VerdictKind.existence_confirmed
+            metadata_complete
+            and verdict.kind == VerdictKind.existence_confirmed
             and verdict.result is not None
             and verdict.result.abstract
             and claim_sentence
@@ -322,11 +440,15 @@ async def run_citation_integrity_check(
             )
 
     claim_support_result = ClaimSupportResult([], 0, 0, 0)
+    claim_support_checked = 0
     if llm is not None and claim_support_pairs:
         claim_support_result = await run_claim_support_check(
             llm, claim_support_pairs, check_run_id=check_run_id, settings=settings
         )
         flag_drafts.extend(claim_support_result.flags)
+        claim_support_checked = len(claim_support_pairs) - claim_support_result.n_skipped_total
+    elif claim_support_pairs:
+        content_unassessed.update(pair.citation.order_index for pair in claim_support_pairs)
 
     # BUG-073: a check that skipped even one pair did NOT fully execute --
     # `passed` is reserved for a run that judged everything it set out to
@@ -337,9 +459,28 @@ async def run_citation_integrity_check(
     # (retrying later plausibly helps), then `quota_exhausted` (the
     # existing, most self-resolving state) last. The real per-cause counts
     # are always in `detail` regardless of which one outcome wins.
-    if claim_support_result.n_skipped_parse_failure > 0:
+    coverage_reason = (
+        "reference_list_unavailable"
+        if selection.issues or not citations
+        else "reference_metadata_insufficient"
+        if metadata_unassessed
+        else "author_year_citation_parse_unassessed"
+        if gaps
+        else "numeric_citation_scan_limit"
+        if numeric.scan_limited and numbered
+        else "numeric_citation_style_unassessed"
+        if numbered and (linkage_unassessed or numeric.linkage_unassessed)
+        else "author_year_citation_parse_unassessed"
+        if linkage_unassessed or cross.ambiguous
+        else "claim_support_unavailable"
+        if content_unassessed
+        else None
+    )
+    if coverage_reason:
+        outcome = ResultOutcome.escalated
+    elif metadata_not_found or claim_support_result.n_skipped_parse_failure > 0:
         outcome = ResultOutcome.unverifiable
-    elif claim_support_result.n_skipped_api_down > 0:
+    elif metadata_api_down or claim_support_result.n_skipped_api_down > 0:
         outcome = ResultOutcome.api_down
     elif claim_support_result.n_skipped_quota > 0:
         outcome = ResultOutcome.quota_exhausted
@@ -356,9 +497,21 @@ async def run_citation_integrity_check(
             "n_in_text_citations": len(in_text),
             "n_linked": len(cross.linked),
             "n_orphans": len(cross.orphans),
-            "n_uncited": len(cross.uncited),
-            "n_claim_support_checked": len(claim_support_pairs)
-            - claim_support_result.n_skipped_total,
+            "n_uncited": len(absence_candidates),
+            "coverage_reason": coverage_reason,
+            "n_metadata_skipped_insufficient": len(metadata_unassessed),
+            "n_linkage_unassessed": linkage_unassessed,
+            "n_metadata_api_down": metadata_api_down,
+            "n_metadata_not_found": metadata_not_found,
+            "n_claim_support_unassessed": len(content_unassessed),
+            "n_numeric_candidate_links": len(numeric.linked),
+            "n_numeric_assessed_links": sum(m.strong_citation_context for m, _ in numeric.linked),
+            "numeric_link_evidence": _numeric_link_evidence(numeric),
+            "reference_metadata_coverage": verification_records,
+            "reference_list_page": reference_section_page(extraction, patterns),
+            "reference_selection_issues": list(selection.issues),
+            "citation_parse_issues": sorted(gaps),
+            "n_claim_support_checked": claim_support_checked,
             "n_claim_support_pairs_total": len(claim_support_pairs),
             "n_claim_support_skipped_quota": claim_support_result.n_skipped_quota,
             "n_claim_support_skipped_api_down": claim_support_result.n_skipped_api_down,

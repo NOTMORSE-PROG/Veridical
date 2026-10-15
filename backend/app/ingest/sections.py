@@ -89,10 +89,14 @@ def _clean_embedded_toc(
 
 
 def numbering_of(title: str, patterns: HeadingPatterns) -> str | None:
-    for pat in (patterns.chapter, patterns.numbered):
+    for pat in (patterns.chapter, patterns.numbered, patterns.top_numbered):
         m = pat.match(title)
         if m:
             return m.group("num")
+    prefix = patterns.reference_heading_prefix.match(title)
+    if prefix is not None and patterns.is_reference_heading(title):
+        marker = prefix.group().strip().rstrip(".)")
+        return marker if marker[:1].isdigit() else None
     return None
 
 
@@ -233,6 +237,12 @@ def _classify_text(text: str, page: int, patterns: HeadingPatterns) -> "Candidat
     m = patterns.top_numbered.match(text)
     if m:
         return Candidate(level=1, title=text, page=page, numbering=m.group("num"))
+    # A styled Roman-numbered reference title is a section even when this
+    # PDF has no usable outline. Ordinary Arabic headings retain the generic
+    # top-numbered classifier above, including their structural-order number.
+    prefix = patterns.reference_heading_prefix.match(text)
+    if prefix is not None and patterns.is_reference_heading(text):
+        return Candidate(level=1, title=text, page=page, numbering=numbering_of(text, patterns))
     return None
 
 

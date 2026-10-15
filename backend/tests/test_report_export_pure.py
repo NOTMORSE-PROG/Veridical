@@ -6,8 +6,15 @@ import json
 from datetime import UTC, datetime
 from pathlib import Path
 
-from app.report.export import _format_date, _source_caption, build_report_pdf
-from app.report.schemas import CriterionResultOut, ReportExportData, ReportOut, ResolutionOut
+from app.report.export import _archive_disclosure, _format_date, _source_caption, build_report_pdf
+from app.report.schemas import (
+    CriterionResultOut,
+    LevelledRatingOut,
+    OriginalityScopeOut,
+    ReportExportData,
+    ReportOut,
+    ResolutionOut,
+)
 
 _FIXTURE = (
     Path(__file__).resolve().parent.parent.parent
@@ -140,3 +147,56 @@ def test_composite_score_is_not_the_pdf_headline():
     assert all(size <= 9 for size in sizes), (
         f"composite score caption must render at caption size (<=9pt), got {sizes}"
     )
+
+
+def test_unassessed_rubric_does_not_export_a_zero_rating():
+    import fitz
+
+    report = ReportOut(
+        check_run_id=1,
+        manuscript_id=1,
+        manuscript_group_label="Test group",
+        manuscript_original_filename="test.pdf",
+        reason="Source reading is unresolved.",
+        rubric_title="Performance rubric",
+        status="needs_review",
+        composite_score=0,
+        thresholds={"ready_min_score": 85, "not_ready_max_score": 60},
+        flag_deduction=0,
+        unresolved_high_flag_count=0,
+        llm_mode="real",
+        results=[],
+        decision=None,
+        decided_at=None,
+        decision_note=None,
+        pending_review_count=5,
+        rubric_is_current=True,
+        previous_status=None,
+        previous_composite_score=None,
+        levelled_rating=LevelledRatingOut(
+            achieved_points=0,
+            max_points=20,
+            rating_percent=0,
+            n_decided=0,
+            n_levelled=5,
+        ),
+        originality_scope=OriginalityScopeOut(
+            compared_count=None,
+            corpus="library",
+            not_compared_reason="source_unresolved",
+        ),
+    )
+    pdf_bytes = build_report_pdf(ReportExportData(report=report, flags=[], archive_size_n=None))
+    with fitz.open(stream=pdf_bytes, filetype="pdf") as document:
+        text = " ".join(page.get_text().replace("\n", " ") for page in document)
+    assert "0/20 points" not in text
+    assert "RATING, transcribed" not in text
+    assert "could not be read reliably" in text
+    assert "no comparable content" not in text
+    assert "DRAFT" in text
+
+
+def test_export_distinguishes_source_failure_from_absent_content():
+    assert "could not be read reliably" in _archive_disclosure(None, "library", "source_unresolved")
+    assert "no comparable content" in _archive_disclosure(None, "library", "no_text")
+    assert "no Library records" in _archive_disclosure(0, "library", "no_comparison_archive")

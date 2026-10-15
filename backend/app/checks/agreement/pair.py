@@ -191,6 +191,9 @@ async def _judge_batch(
         parsed = PairVerdictBatchResponse.model_validate(response)
     except Exception as exc:  # noqa: BLE001 — bad shape degrades honestly, never crashes the run
         raise PairingError(f"agreement_pairing response failed validation: {exc}") from exc
+    indexes = [v.index for v in parsed.verdicts]
+    if len(indexes) != len(set(indexes)) or set(indexes) != set(range(len(pairs))):
+        raise PairingError("agreement_pairing returned duplicate, missing, or invalid pair indexes")
     return {v.index: v for v in parsed.verdicts}
 
 
@@ -199,6 +202,8 @@ def _candidate_to_flag(
 ) -> AgreementFlagDraft | None:
     anchor = candidate.intent.anchor
     common_detail = {
+        "affects_readiness": False,
+        "coverage_reason": "statement_roles_unverified",
         "similarity": round(candidate.similarity, 3),
         "intent_text": candidate.intent.text,
         "intent_anchor": candidate.intent.anchor,
@@ -274,6 +279,8 @@ def _unmatched_intent_flag(intent: Statement) -> AgreementFlagDraft:
         page_anchor=intent.anchor,
         detail={
             "kind": "agreement_unmatched_intent",
+            "affects_readiness": False,
+            "coverage_reason": "statement_roles_unverified",
             "reason": UNMATCHED_INTENT_WORDING.format(intent=intent.text),
         },
     )

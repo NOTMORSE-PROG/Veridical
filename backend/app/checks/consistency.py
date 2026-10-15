@@ -40,6 +40,7 @@ from app.checks.semantic import (
     grade_batch_verdicts,
 )
 from app.checks.signals import compute_shadow_signals, shadow_signals_as_detail
+from app.checks.source_quality import source_limitation_detail
 from app.config import Settings, get_settings
 from app.ingest.schemas import ExtractionResult
 from app.llm.base import LLMClient
@@ -469,6 +470,18 @@ async def run_semantic_checks_with_consistency(
     settings = settings or get_settings()
     if not criteria:
         return []
+    limitation = source_limitation_detail(extraction)
+    if limitation is not None:
+        return [
+            await _persist(
+                session,
+                check_run_id,
+                criterion,
+                ResultOutcome.escalated,
+                {"basis": "source-quality", **limitation},
+            )
+            for criterion in criteria
+        ]
     batches, missing = build_semantic_batches(criteria, extraction)
     results: list[CheckResult] = []
     for criterion, target in missing:

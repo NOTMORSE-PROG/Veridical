@@ -56,6 +56,10 @@ TS_ROOTS = ("frontend/src",)
 ALLOW_REGEX_FILES = {
     # citation page-range patterns match en-dashed ranges ("pp. 12–14")
     "backend/app/checks/citations/extract.py",
+    # Numbered citation input may use printed en/em dashes for ranges.
+    "backend/app/checks/citations/numbered.py",
+    # Bibliography metadata input includes en-dashed journal page ranges.
+    "backend/app/ingest/references.py",
     # Scale-name input cleanup strips printed dash separators; not output copy.
     "backend/app/rubric/decompose.py",
 }

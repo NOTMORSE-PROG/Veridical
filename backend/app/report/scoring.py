@@ -160,7 +160,13 @@ def _flag_deduction(flags: list[ScorableFlag], settings: Settings) -> tuple[floa
     # False) is excluded the same way an overridden one is — it must not
     # force `not_ready` or deduct points by default, only a human-affirmed
     # finding may do that (charter rule 1).
-    unresolved = [f for f in flags if not f.overridden and f.has_verdict]
+    unresolved = [
+        f
+        for f in flags
+        if not f.overridden
+        and f.has_verdict
+        and f.check_kind not in {"originality_reuse", "internal_agreement"}
+    ]
 
     # BUG-150 (backend review, second pass): the deduction was left summed
     # per ROW on the first pass, on the ticket's own word that it "behaved
@@ -193,6 +199,8 @@ def score_check_run(
     results: list[ScorableResult],
     flags: list[ScorableFlag],
     settings: Settings | None = None,
+    *,
+    assessment_incomplete: bool = False,
 ) -> ScoringResult:
     settings = settings or get_settings()
     thresholds = {
@@ -222,7 +230,9 @@ def score_check_run(
     raw_score = sum(c.weighted_contribution for c in counted) / weight_sum * 100.0
     composite = max(0.0, min(100.0, raw_score - deduction))
 
-    if high_flag_count > 0:
+    if assessment_incomplete:
+        status = ReadinessStatus.needs_review
+    elif high_flag_count > 0:
         # ENGINEERING.md §5 verbatim: "Not Ready ... or any unresolved
         # high-severity flag" — a high flag excludes Ready by definition
         # (Ready requires "no high-severity flags") AND independently
@@ -241,7 +251,12 @@ def score_check_run(
     return ScoringResult(
         composite_score=composite,
         status=status,
-        reason=None,
+        reason=(
+            "Some required checks remain unassessed. Review the coverage limitations; "
+            "the available results are not a complete readiness verdict."
+            if assessment_incomplete
+            else None
+        ),
         thresholds=thresholds,
         flag_deduction=deduction,
         unresolved_high_flag_count=high_flag_count,

@@ -24,6 +24,7 @@ from app.checks.levels import level_scale_prompt_fragment, outcome_and_score
 from app.checks.rules.sections import find_section_node, identify_target_section, walk_sections
 from app.checks.schemas import GradeBatchResponse, GradeVerdict
 from app.checks.signals import compute_shadow_signals, shadow_signals_as_detail
+from app.checks.source_quality import source_limitation_detail
 from app.config import Settings, get_settings
 from app.errors import VeridicalError
 from app.ingest.schemas import ExtractionResult, SectionNode, TextBlock
@@ -707,6 +708,18 @@ async def run_semantic_checks(
     settings = settings or get_settings()
     if not criteria:
         return []
+    limitation = source_limitation_detail(extraction)
+    if limitation is not None:
+        return [
+            await _persist(
+                session,
+                check_run_id,
+                criterion,
+                ResultOutcome.escalated,
+                {"basis": "source-quality", **limitation},
+            )
+            for criterion in criteria
+        ]
     batches, missing = build_semantic_batches(criteria, extraction)
     # BUG-221 (charter rule 1): this used to grade `failed` immediately --
     # a title-match miss is not proof the section is genuinely absent, only

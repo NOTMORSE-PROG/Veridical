@@ -12,12 +12,13 @@ downstream code handles anchors through this one contract and never
 branches on file format.
 """
 
+import math
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import StrEnum
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 Bbox = tuple[float, float, float, float]
 
@@ -56,6 +57,19 @@ class Line:
     max_size: float
     bold_ratio: float  # fraction of characters in bold spans
     is_furniture: bool = field(default=False)
+    source_id: str | None = None
+
+
+class SourceLineSpan(BaseModel):
+    """Original line geometry and furniture status at character offsets in a block."""
+
+    start: int = Field(ge=0)
+    end: int = Field(gt=0)
+    bbox: Bbox
+    max_font_size: float = Field(ge=0)
+    bold_ratio: float = Field(ge=0, le=1)
+    is_furniture: bool = False
+    source_id: str | None = None
 
 
 class TextBlock(BaseModel):
@@ -72,6 +86,26 @@ class TextBlock(BaseModel):
     # deleting document content. Always False for DOCX (headers/footers
     # live outside the body there and are never extracted).
     is_furniture: bool = False
+    source_line_ids: list[str] | None = None
+    source_lines: list[SourceLineSpan] | None = None
+
+
+class UriLink(BaseModel):
+    """Untrusted PDF hyperlink and the visible text inside its source rectangle."""
+
+    page: int = Field(gt=0)
+    bbox: Bbox
+    uri: str
+    text: str
+
+    @field_validator("bbox")
+    @classmethod
+    def finite_source_rectangle(cls, value: Bbox) -> Bbox:
+        if not all(math.isfinite(coordinate) for coordinate in value):
+            raise ValueError("Link rectangle must be finite")
+        if value[0] >= value[2] or value[1] >= value[3]:
+            raise ValueError("Link rectangle must have positive area")
+        return value
 
 
 class ImageBlock(BaseModel):
@@ -318,6 +352,19 @@ class DismissedManuscriptOut(BaseModel):
     dismissed_at: datetime
 
 
+class PageReadingOrder(BaseModel):
+    """Geometric policy outcome, not a measured semantic accuracy claim."""
+
+    page: int = Field(gt=0)
+    strategy: Literal["native_regions_v1"] = "native_regions_v1"
+    status: Literal["ordered", "unresolved"]
+    reason: str | None = None
+    source_line_count: int = Field(ge=0)
+    # None when a resource limit or invalid source prevented full inventory.
+    source_inventory_sha256: str | None
+    ordered_source_line_ids: list[str]
+
+
 class ExtractionResult(BaseModel):
     page_count: int  # DOCX: 0 — pages don't exist before rendering
     anchor_kind: Literal["page", "paragraph"]
@@ -331,6 +378,9 @@ class ExtractionResult(BaseModel):
     tables: list[TableBlock] = Field(default_factory=list)
     equations: list[EquationBlock] = Field(default_factory=list)
     geometry: list[PageGeometry] = Field(default_factory=list)
+    uri_links: list[UriLink] | None = None
+    uri_links_complete: bool = False
+    reading_order: list[PageReadingOrder] | None = None
     # F1.3 vision pass over embedded images: "none" = no images selected,
     # "done" = ran, "unavailable" = no LLM client configured (honest state
     # — ingestion continues, image content simply stays unread).

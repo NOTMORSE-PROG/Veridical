@@ -25,6 +25,7 @@ from app.checks.forensics.checks import ForensicsFlagDraft, evaluate_grim_grimme
 from app.checks.forensics.extract import extract_all_stats
 from app.checks.forensics.pcheck import evaluate_p_recalc
 from app.checks.forensics.sanity import evaluate_group_counts, evaluate_percentage_sums
+from app.checks.source_quality import persist_source_limitation
 from app.ingest.schemas import ExtractionResult
 from app.models.enums import CheckKind, ResultOutcome
 from app.models.run import CheckResult, Flag
@@ -76,6 +77,11 @@ def _compute_forensics_findings(extraction: ExtractionResult) -> _ForensicsCompu
 async def run_statistical_forensics_check(
     session: AsyncSession, check_run_id: int, extraction: ExtractionResult
 ) -> CheckResult:
+    source_stop = await persist_source_limitation(
+        session, check_run_id, CheckKind.statistical_forensics, extraction
+    )
+    if source_stop is not None:
+        return source_stop
     computation = await asyncio.get_running_loop().run_in_executor(
         None, _compute_forensics_findings, extraction
     )

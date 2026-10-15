@@ -1,8 +1,10 @@
 """GRIM/GRIMMER/SPRITE checks (F6.2/F6.3, V-032).
 
-GRIM (mean-consistency) and SPRITE (distribution plausibility) wrap
-`pysprite` directly — both are validated, actively maintained MIT-licensed
-Python libraries (D-003: reuse, never reimplement).
+SPRITE (distribution plausibility) wraps `pysprite` directly — a validated,
+actively maintained MIT-licensed Python library (D-003: reuse, never
+reimplement). GRIM (mean-consistency) also wrapped it until 2026-10-07; it is
+now the exact rational test in `grim_check`, because pysprite's float
+comparison misjudges exact halfway totals (measured, see that docstring).
 
 **GRIMMER (SD-consistency) has no maintained Python implementation as of
 this ticket's pickup (2026-08-06)** — only R's `rsprite2::GRIMMER_test`
@@ -27,6 +29,8 @@ implementation's own test vectors rather than trusted on inspection alone.
 
 import math
 from dataclasses import dataclass, field
+from decimal import Decimal
+from fractions import Fraction
 
 import pysprite
 
@@ -50,16 +54,30 @@ def _round_up(number: float, decimals: int, tolerance: float = _DUST) -> float:
 
 
 def grim_check(n: int, mean: float, prec: int = 2, n_items: int = 1) -> bool:
-    """Wraps `pysprite.grim` directly (D-003) — the ticket's own "GRIM on
-    means" check."""
-    return bool(pysprite.grim(n, mean, prec=prec, n_items=n_items))
+    """GRIM in exact rational arithmetic: is there an integer total whose
+    mean rounds to the reported value at `prec` decimals?
+
+    This used to wrap `pysprite.grim`, which decides exact halfway totals by
+    comparing binary floats. 4.825 is stored as 4.82499999..., so n=80 with a
+    correctly reported mean of 4.83 (386/80 = 4.825, rounded half up) was
+    called impossible. A halfway total may legitimately be printed either way
+    (rsprite2 accepts both
+    neighbours, as `_round_down`/`_round_up` below do), so the interval is
+    closed at both ends.
+    """
+    effective_n = n * n_items
+    if effective_n <= 0:
+        return False
+    reported = Fraction(Decimal(repr(float(mean))))
+    half = Fraction(1, 2 * 10**prec)
+    return math.ceil((reported - half) * effective_n) <= math.floor((reported + half) * effective_n)
 
 
 def _grim_possible_means(mean: float, n_obs: int, m_prec: int, n_items: int = 1) -> list[float]:
     """Port of `rsprite2::GRIM_test`'s possible-sums calculation — GRIMMER
     needs the actual candidate means, not just a pass/fail boolean, so
     this is used internally rather than reusing `grim_check`'s bool-only
-    `pysprite` wrapper."""
+    result."""
     effective_n = n_obs * n_items
     granule_mean = 0.5 * 10 ** (-m_prec)
     sum_lower_bound = (mean - granule_mean - _DUST) * effective_n

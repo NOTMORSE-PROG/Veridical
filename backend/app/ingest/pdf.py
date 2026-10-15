@@ -6,12 +6,14 @@ CPU-bound and synchronous on purpose — callers run it in a threadpool
 """
 
 import pymupdf
+from pydantic import ValidationError
 
 from app.config import Settings
 from app.errors import FileMalformedError, FileTooLargeError
 from app.ingest import sections
 from app.ingest.normalize import furniture_key, match_key, normalize
 from app.ingest.patterns import HeadingPatterns, load_patterns
+from app.ingest.reading_order import line_source_id, order_page, propose_regions
 from app.ingest.schemas import (
     Bbox,
     ExtractionResult,
@@ -20,6 +22,7 @@ from app.ingest.schemas import (
     PageGeometry,
     TableBlock,
     TextBlock,
+    UriLink,
 )
 from app.messages import FILE_ENCRYPTED, FILE_UNREADABLE, PDF_TOO_MANY_PAGES
 
@@ -59,10 +62,67 @@ def _extract_open_document(
     tables: list[TableBlock] = []
     geometry: list[PageGeometry] = []
     page_heights: dict[int, float] = {}
+    uri_links: list[UriLink] = []
+    uri_links_remaining = settings.ingest_uri_max_links
+    uri_links_complete = True
+    ordering_enabled = settings.ingest_reading_order_strategy == "native_regions_v1"
+    order_proposals = {}
 
     for index in range(doc.page_count):
         page = doc[index]
         pno = index + 1  # 1-based everywhere outside PyMuPDF
+        # Admit a whole page's links from the smaller xref inventory before
+        # materializing URI dictionaries/clips. Count internal links too; once
+        # exhausted, do not enumerate annotations on any subsequent page.
+        # Native PDF parsing/xref inventory is still bounded by upload/page
+        # limits, not by this downstream link-processing budget.
+        page_links = []
+        if uri_links_remaining <= 0:
+            uri_links_complete = False
+        else:
+            link_count = sum(kind == pymupdf.PDF_ANNOT_LINK for _, kind, _ in page.annot_xrefs())
+            if link_count > uri_links_remaining:
+                uri_links_remaining = 0
+                uri_links_complete = False
+            else:
+                uri_links_remaining -= link_count
+                page_links = page.get_links() if link_count else []
+                if len(page_links) > link_count:
+                    page_links = []
+                    uri_links_remaining = 0
+                    uri_links_complete = False
+        # Destinations are untrusted source strings, not verified sources.
+        # Reuse one text page instead of re-extracting it for every rectangle.
+        link_textpage = None
+        for link in page_links:
+            if link.get("kind") != pymupdf.LINK_URI:
+                continue
+            uri = link.get("uri")
+            rect = link.get("from")
+            # get_links() hotspots follow page rotation in the installed PDF
+            # reader; text and block geometry use unrotated crop-relative space.
+            rect = rect * page.derotation_matrix if rect is not None else None
+            visible_page = page.rect * page.derotation_matrix
+            if (
+                not isinstance(uri, str)
+                or len(uri) > settings.ingest_uri_max_chars
+                or rect is None
+                or rect.is_empty
+                or rect.is_infinite
+                or not visible_page.contains(rect)
+            ):
+                uri_links_complete = False
+                continue
+            if link_textpage is None:
+                link_textpage = page.get_textpage(flags=pymupdf.TEXTFLAGS_TEXT)
+            displayed = page.get_textbox(rect, textpage=link_textpage)
+            if len(displayed) > settings.ingest_uri_max_chars:
+                uri_links_complete = False
+                continue
+            try:
+                uri_links.append(UriLink(page=pno, bbox=tuple(rect), uri=uri, text=displayed))
+            except ValidationError:
+                uri_links_complete = False
         # BUG-163: native table extraction existed for DOCX only --
         # `ExtractionResult.tables` stayed empty for every PDF, so
         # `forensics/extract.py`'s `extract_descriptive_stats(extraction.
@@ -73,12 +133,13 @@ def _extract_open_document(
         # a format-specific difference downstream code doesn't expect.
         tables.extend(_native_tables_in_source_space(page, pno))
         page_lines: list[Line] = []
-        for block_no, block in enumerate(page.get_text("dict", sort=True)["blocks"]):
+        raw_blocks = page.get_text("dict", sort=True)["blocks"]
+        for block_no, block in enumerate(raw_blocks):
             bbox: Bbox = tuple(block["bbox"])
             if block["type"] == 1:
                 images.append(ImageBlock(page=pno, bbox=bbox))
                 continue
-            for line in block.get("lines", []):
+            for line_no, line in enumerate(block.get("lines", [])):
                 spans = [s for s in line.get("spans", []) if s["text"].strip()]
                 if not spans:
                     continue
@@ -95,15 +156,37 @@ def _extract_open_document(
                         text=text,
                         max_size=max(s["size"] for s in spans),
                         bold_ratio=bold_chars / chars,
+                        source_id=(
+                            line_source_id(pno, block, block_no, line_no)
+                            if ordering_enabled
+                            else None
+                        ),
                     )
                 )
+        if ordering_enabled:
+            order_proposals[pno] = propose_regions(page, raw_blocks, page_lines, settings)
         lines_by_page[pno] = page_lines
         page_heights[pno] = page.rect.height
         geometry.append(_page_geometry(page, pno))
 
     _mark_furniture(lines_by_page, page_heights, patterns, settings)
 
-    blocks = _assemble_blocks(lines_by_page)
+    reading_order = [] if ordering_enabled else None
+    native_furniture = {}
+    if ordering_enabled:
+        table_pages = {table.page for table in tables}
+        for pno, lines in lines_by_page.items():
+            for line in lines:
+                key = (pno, line.block_no)
+                native_furniture[key] = native_furniture.get(key, True) and line.is_furniture
+            lines_by_page[pno], order_record = order_page(
+                pno, lines, order_proposals[pno], has_tables=pno in table_pages, settings=settings
+            )
+            reading_order.append(order_record)
+
+    blocks = _assemble_blocks(
+        lines_by_page, preserve_sequence=ordering_enabled, native_furniture=native_furniture
+    )
     text_chars = sum(len(b.text) for b in blocks if not b.is_furniture)
     page_count = doc.page_count
     image_only = (
@@ -125,6 +208,9 @@ def _extract_open_document(
         images=images,
         tables=tables,
         geometry=geometry,
+        uri_links=uri_links,
+        uri_links_complete=uri_links_complete,
+        reading_order=reading_order,
     )
 
 
@@ -237,15 +323,47 @@ def _mark_furniture(
                 ln.is_furniture = True
 
 
-def _assemble_blocks(lines_by_page: dict[int, list[Line]]) -> list[TextBlock]:
+def _assemble_blocks(
+    lines_by_page: dict[int, list[Line]],
+    *,
+    preserve_sequence: bool = False,
+    native_furniture: dict[tuple[int, int], bool] | None = None,
+) -> list[TextBlock]:
     blocks: list[TextBlock] = []
     for pno in sorted(lines_by_page):
         by_block: dict[int, list[Line]] = {}
         for ln in lines_by_page[pno]:
             by_block.setdefault(ln.block_no, []).append(ln)
-        for block_no in sorted(by_block):
-            lines = by_block[block_no]
+        groups = []
+        if preserve_sequence:
+            # A native block can contain lines from both columns. Retain its
+            # identity but never merge noncontiguous runs back across a gutter.
+            for line in lines_by_page[pno]:
+                if not groups or groups[-1][0].block_no != line.block_no:
+                    groups.append([line])
+                else:
+                    groups[-1].append(line)
+        else:
+            groups = [by_block[block_no] for block_no in sorted(by_block)]
+        for lines in groups:
             chars = sum(len(ln.text) for ln in lines)
+            source_lines = None
+            if preserve_sequence:
+                source_lines = []
+                offset = 0
+                for line in lines:
+                    source_lines.append(
+                        {
+                            "start": offset,
+                            "end": offset + len(line.text),
+                            "bbox": line.bbox,
+                            "max_font_size": line.max_size,
+                            "bold_ratio": line.bold_ratio,
+                            "is_furniture": line.is_furniture,
+                            "source_id": line.source_id,
+                        }
+                    )
+                    offset += len(line.text) + 1
             blocks.append(
                 TextBlock(
                     page=pno,
@@ -260,7 +378,13 @@ def _assemble_blocks(lines_by_page: dict[int, list[Line]]) -> list[TextBlock]:
                     bold_ratio=(
                         sum(ln.bold_ratio * len(ln.text) for ln in lines) / chars if chars else 0.0
                     ),
-                    is_furniture=all(ln.is_furniture for ln in lines),
+                    is_furniture=(
+                        native_furniture[(pno, lines[0].block_no)]
+                        if native_furniture
+                        else all(ln.is_furniture for ln in lines)
+                    ),
+                    source_line_ids=([ln.source_id for ln in lines] if preserve_sequence else None),
+                    source_lines=source_lines,
                 )
             )
     return blocks

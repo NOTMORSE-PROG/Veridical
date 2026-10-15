@@ -1,0 +1,30 @@
+{
+  "lookback_chars": 72,
+  "max_number_digits": 9,
+  "evidence_excerpt_max_chars": 240,
+  "max_mark_chars": 120,
+  "max_list_items": 20,
+  "max_body_scan_chars": 1000000,
+  "max_body_marks": 512,
+  "noncitation_prefix_patterns": [
+    "(?:\\b(?:lie|lies|fell|fall|falls)\\s+(?:within|inside|in)|\\b(?:range|ranges|interval|intervals|domain|domains|bounds|coordinates)\\s+(?:is|are|was|were|of|from|within|in)?|\\b(?:array|matrix|element|index|indices|figure|fig\\.?|equation|eq\\.?|table))\\s*$",
+    "[∈≤≥=+*/<>]\\s*$"
+  ],
+  "citation_prefix_patterns": [
+    "\\b(?:prior|previous|related|existing)\\s+(?:work|works|studies|research|systems|sources)\\s*$",
+    "\\b(?:study|studies|paper|papers|source|sources|article|articles|researchers|references)\\s*$",
+    "\\b(?:see|see also|cited in|cites|cite|according to|as shown in|reported in|described in|proposed in)\\s*$"
+  ],
+  "prose_prefix_patterns": [
+    "[A-Za-zÀ-ɏ)”\\\"']\\s+$",
+    "\\]\\s*[,;]?\\s*$",
+    "\\bal\\.\\s+$",
+    "[.!?]\\s+$"
+  ],
+  "citation_suffix_patterns": [
+    "^\\s*[.,;:)]",
+    "^\\s*\\[",
+    "^\\s+[a-z]"
+  ],
+  "min_linked_fraction": 0.5
+}
