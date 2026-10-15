@@ -7,6 +7,7 @@ import { Alert } from "../ui/Alert";
 import { Button } from "../ui/Button";
 import { Dialog } from "../ui/Dialog";
 import { type CriterionEdit, useRubric, useSaveCriteria } from "./useRubric";
+import { UploadRubricModal } from "./UploadRubricModal";
 
 interface CriterionRow {
   key: string;
@@ -45,17 +46,18 @@ function toEdits(rows: CriterionRow[]): CriterionEdit[] {
   }));
 }
 
-function CriteriaHeader({ headingRef, title, count }: {
+function CriteriaHeader({ headingRef, title, count, readOnly = false }: {
   headingRef: React.RefObject<HTMLHeadingElement | null>;
   title?: string;
   count?: number;
+  readOnly?: boolean;
 }) {
   return (
     <header className="signal-route-header signal-criteria-header">
       <div>
         <nav aria-label="Breadcrumb"><Link to="/rubric">Rubric Studio</Link><span aria-hidden="true">/</span><span>Criteria review</span></nav>
         <p className="signal-eyebrow">Prepare · Human review gate</p>
-        <h1 ref={headingRef} tabIndex={-1}>Review prepared criteria</h1>
+        <h1 ref={headingRef} tabIndex={-1}>{readOnly ? "View criteria" : "Review prepared criteria"}</h1>
         {title && <p className="signal-route-header__intro">{title}{count !== undefined ? ` · ${count} ${count === 1 ? "criterion" : "criteria"}` : ""}</p>}
       </div>
     </header>
@@ -81,6 +83,24 @@ function CriterionCard({
 }) {
   const textError = showErrors && row.text.trim() === "";
   const weightError = showErrors && row.weight <= 0;
+  if (readOnly) return (
+    <li className="signal-criterion-card">
+      <div className="signal-criterion-card__number" aria-hidden="true">{index + 1}</div>
+      <div className="signal-criterion-card__body signal-copy-flow">
+        <div className="signal-criterion-card__heading"><p>Criterion {index + 1}</p></div>
+        <p>{row.text}</p>
+        <p><strong>Type: </strong>{TYPE_LABELS[row.type]}</p>
+        <p><strong>Evidence expected: </strong>{row.evidence || "Not specified in this version."}</p>
+        <p><strong>Relative weight: </strong>{row.weight} · {importance(row.weight, average)} importance</p>
+        {row.levels && row.levels.length > 0 && (
+          <details className="signal-levels">
+            <summary>Levelled criterion · {row.levels.length} levels</summary>
+            <ol>{row.levels.map((level) => <li key={level.level}><strong>{level.name}</strong><span>{level.descriptor}</span></li>)}</ol>
+          </details>
+        )}
+      </div>
+    </li>
+  );
   return (
     <li className="signal-criterion-card">
       <div className="signal-criterion-card__number" aria-hidden="true">{index + 1}</div>
@@ -158,8 +178,12 @@ function CriterionCard({
 
 export function SignalReviewCriteriaPage() {
   const { rubricId } = useParams<{ rubricId: string }>();
-  const id = Number(rubricId);
+  return <CriteriaEditor key={rubricId} id={Number(rubricId)} />;
+}
+
+function CriteriaEditor({ id }: { id: number }) {
   const { data: rubric, isPending, isError, refetch } = useRubric(id);
+  const [uploadOpen, setUploadOpen] = useState(false);
   const save = useSaveCriteria(id);
   const [rows, setRows] = useState<CriterionRow[]>();
   const [savedRows, setSavedRows] = useState<CriterionRow[]>();
@@ -186,7 +210,7 @@ export function SignalReviewCriteriaPage() {
     setSavedRows(next);
   }, [rows, rubric]);
 
-  const readOnly = rubric ? !rubric.is_latest_version : true;
+  const readOnly = rubric ? !rubric.is_latest_version || rubric.can_edit_criteria === false : true;
   const dirty = !readOnly && rows !== undefined && savedRows !== undefined
     && JSON.stringify(rows) !== JSON.stringify(savedRows);
   const blocker = useBlocker(({ currentLocation, nextLocation }) =>
@@ -289,14 +313,22 @@ export function SignalReviewCriteriaPage() {
 
   return (
     <div className="signal-route signal-page-flow signal-criteria-review">
-      <CriteriaHeader headingRef={headingRef} title={rubric.title} count={currentRows.length} />
+      <CriteriaHeader headingRef={headingRef} title={rubric.title} count={currentRows.length} readOnly={readOnly} />
       <div className="signal-section-flow signal-criteria-guidance">
         {readOnly
-          ? <Alert title="Read-only version" tone="info">A newer version exists. Reports remain pinned to this history version for traceability.</Alert>
+          ? <Alert title="Read-only version" tone="info">
+              <p>{rubric.is_latest_version
+                ? "A check already uses this version. Its criteria are locked so saved results do not change."
+                : "A newer version exists. Reports remain pinned to this history version for traceability."}</p>
+              <p>Upload a new version to make corrections. Existing reports keep their original criteria.</p>
+              <Button variant="secondary" onClick={() => setUploadOpen(true)}>Upload new version</Button>
+            </Alert>
           : <Alert title="Review before anything runs" tone="info">Correct the prepared criteria, evidence, type, and relative importance. Nothing checks a manuscript until you confirm.</Alert>}
         {rubric.parse_status === "needs_review" && (
           <Alert title="Needs manual completion" tone="warning" role="status">
-            <p>{rubric.is_active ? "This format was activated with parser uncertainty. Review and save any corrections." : "VERIDICAL could not confirm every criterion after several attempts. Check each one against the original format before confirming."}</p>
+            <p>{readOnly
+              ? "This version retains parser uncertainty. Check the original format and upload a new version if corrections are needed."
+              : rubric.is_active ? "This format was activated with parser uncertainty. Review and save any corrections." : "VERIDICAL could not confirm every criterion after several attempts. Check each one against the original format before confirming."}</p>
             {rubric.parse_issues?.length ? <ul>{rubric.parse_issues.map((issue) => <li key={issue}>{issue}</li>)}</ul> : null}
           </Alert>
         )}
@@ -353,6 +385,7 @@ export function SignalReviewCriteriaPage() {
           <div className="signal-dialog-copy"><p>Your unsaved criteria changes will be discarded if you leave now.</p>{saveError && <Alert title="Could not save" tone="error" role="alert">{saveError}</Alert>}</div>
         </Dialog>
       )}
+      {uploadOpen && <UploadRubricModal familyId={rubric.rubric_family_id} onClose={() => setUploadOpen(false)} />}
     </div>
   );
 }

@@ -576,6 +576,9 @@ function SignalResolutionCard({ item, checkRunId, sharedReasonId, onResolved }: 
   const reasonId = `signal-resolution-context-reason-${item.check_result_id}`;
   const injectionId = `signal-resolution-injection-${item.check_result_id}`;
   const unverifiedId = `signal-resolution-unverified-${item.check_result_id}`;
+  const levelDescriptionId = (level: number) => `signal-resolution-level-${item.check_result_id}-${level}`;
+  const selectedLevel = pending?.resolution === "mark_level"
+    ? item.levels?.find((level) => level.level === pending.level) : undefined;
   const describedBy = [
     voteId,
     sharedReasonId || (item.reason && reasonId),
@@ -618,10 +621,16 @@ function SignalResolutionCard({ item, checkRunId, sharedReasonId, onResolved }: 
         )}
       </div>
 
+      {item.levels && item.levels.length > 0 && (
+        <details className="signal-levels">
+          <summary aria-label={`View level descriptions for ${item.criterion_text}`}>View level descriptions ({item.levels.length})</summary>
+          <ol>{item.levels.map((level) => <li key={level.level}><strong>{level.name}</strong><span id={levelDescriptionId(level.level)}>{level.descriptor || "Description not recorded for this level."}</span></li>)}</ol>
+        </details>
+      )}
       {!pending ? (
         <div className="signal-resolution-options" aria-label={`Resolve: ${item.criterion_text}`}>
           {item.levels && item.levels.length > 0
-            ? item.levels.map((level) => <Button key={level.level} variant="secondary" aria-describedby={describedBy} onClick={() => choose("mark_level", level.level)}>{level.name}</Button>)
+            ? item.levels.map((level) => <Button key={level.level} variant="secondary" aria-describedby={`${describedBy} ${levelDescriptionId(level.level)}`} onClick={() => choose("mark_level", level.level)}>{level.name}</Button>)
             : <><Button variant="secondary" aria-describedby={describedBy} onClick={() => choose("mark_pass")}>Meets criterion</Button><Button variant="secondary" aria-describedby={describedBy} onClick={() => choose("mark_fail")}>Does not meet</Button></>}
           <Button variant="quiet" aria-describedby={describedBy} onClick={() => choose("needs_document")}>Needs another document</Button>
           {/* BUG-170: `verdict_unrecognized` means accepting this verdict
@@ -636,6 +645,7 @@ function SignalResolutionCard({ item, checkRunId, sharedReasonId, onResolved }: 
         </div>
       ) : (
         <div className="signal-resolution-form">
+          {selectedLevel && <div className="signal-copy-flow"><p><strong>Selected level: {selectedLevel.name}</strong></p><p>{selectedLevel.descriptor || "Description not recorded for this level."}</p></div>}
           <label><span>Reason (required)</span><textarea autoFocus rows={3} value={reason} aria-invalid={reasonInvalid || undefined} aria-describedby={reasonInvalid ? reasonErrorId : undefined} onChange={(event) => { setReason(event.target.value); if (attempted) setAttempted(false); }} /></label>
           <p className="signal-field-hint">This reason appears in the report, export, and any active share link.</p>
           {reasonInvalid && <p id={reasonErrorId} role="alert" className="signal-field-error">{reason.trim() ? `Enter at least ${RESOLUTION_REASON_MIN_LENGTH} characters.` : "Enter a reason before confirming."}</p>}

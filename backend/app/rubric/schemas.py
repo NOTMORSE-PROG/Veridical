@@ -110,6 +110,9 @@ class RubricOut(BaseModel):
     # its own family's only (hence latest) version, so this never blocks
     # the first-time confirm flow (V-012).
     is_latest_version: bool
+    # Authoritative edit gate: history and any version referenced by a check
+    # are immutable even when another version becomes active.
+    can_edit_criteria: bool = False
     # V-064 (AC1): a family-level attribute (see the ticket/migration
     # 0026 for why it's denormalized this way). None = "Not set" -- never
     # guessed, same convention as `ManuscriptListItem.program`.

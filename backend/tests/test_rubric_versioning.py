@@ -284,7 +284,9 @@ async def test_is_latest_version_flips_when_a_new_version_is_uploaded(
 
     v1 = await _upload(session_factory, tmp_path, monkeypatch, instructor_id, title="V1")
     async with session_factory() as session:
-        assert (await get_rubric(session, v1.id, instructor_id)).is_latest_version is True
+        first = await get_rubric(session, v1.id, instructor_id)
+        assert first.is_latest_version is True
+        assert first.can_edit_criteria is True
 
     v2 = await _upload(
         session_factory,
@@ -295,8 +297,10 @@ async def test_is_latest_version_flips_when_a_new_version_is_uploaded(
         title="V2",
     )
     async with session_factory() as session:
-        assert (await get_rubric(session, v1.id, instructor_id)).is_latest_version is False
-        assert (await get_rubric(session, v2.id, instructor_id)).is_latest_version is True
+        previous = await get_rubric(session, v1.id, instructor_id)
+        latest = await get_rubric(session, v2.id, instructor_id)
+        assert previous.is_latest_version is False and previous.can_edit_criteria is False
+        assert latest.is_latest_version is True and latest.can_edit_criteria is True
 
 
 async def test_list_rubric_versions_orders_newest_first_with_counts(
@@ -451,6 +455,61 @@ async def test_editing_an_active_version_with_reports_is_blocked(
         with pytest.raises(ConflictError):
             await update_criteria(
                 session, v1.id, UpdateCriteriaRequest(criteria=criteria), instructor_id
+            )
+
+
+async def test_inactive_used_latest_version_cannot_rewrite_criteria(
+    session_factory, tmp_path, monkeypatch, instructor_id
+):
+    from app.rubric.schemas import CriterionIn, UpdateCriteriaRequest
+    from app.rubric.service import get_rubric, update_criteria
+
+    rubric = await _upload(session_factory, tmp_path, monkeypatch, instructor_id, title="Used")
+    await _insert_check_run_against(session_factory, rubric.id, instructor_id)
+    async with session_factory() as session:
+        before = await get_rubric(session, rubric.id, instructor_id)
+        assert not before.is_active and before.is_latest_version
+        assert before.can_edit_criteria is False
+        original = [(c.id, c.text) for c in before.criteria]
+        edits = [
+            CriterionIn(id=c.id, type=c.type, text="rewritten", weight=c.weight)
+            for c in before.criteria
+        ]
+        with pytest.raises(ConflictError):
+            await update_criteria(
+                session, rubric.id, UpdateCriteriaRequest(criteria=edits), instructor_id
+            )
+        await session.rollback()
+        after = await get_rubric(session, rubric.id, instructor_id)
+        assert [(c.id, c.text) for c in after.criteria] == original
+
+
+async def test_unused_history_version_cannot_rewrite_criteria(
+    session_factory, tmp_path, monkeypatch, instructor_id
+):
+    from app.rubric.schemas import CriterionIn, UpdateCriteriaRequest
+    from app.rubric.service import get_rubric, update_criteria
+
+    previous = await _upload(
+        session_factory, tmp_path, monkeypatch, instructor_id, title="Previous"
+    )
+    await _upload(
+        session_factory,
+        tmp_path,
+        monkeypatch,
+        instructor_id,
+        family_id=previous.rubric_family_id,
+        title="Latest",
+    )
+    async with session_factory() as session:
+        before = await get_rubric(session, previous.id, instructor_id)
+        edits = [
+            CriterionIn(id=c.id, type=c.type, text="rewritten", weight=c.weight)
+            for c in before.criteria
+        ]
+        with pytest.raises(ConflictError):
+            await update_criteria(
+                session, previous.id, UpdateCriteriaRequest(criteria=edits), instructor_id
             )
 
 

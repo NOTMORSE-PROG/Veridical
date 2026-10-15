@@ -284,6 +284,26 @@ describe("SignalEscalatedPanel / SignalResolutionCard", () => {
     expect(screen.queryByRole("button", { name: "Does not meet" })).not.toBeInTheDocument();
   });
 
+  it("shows stored level descriptions before choosing and beside the unsaved selection", async () => {
+    const fetchMock = stubFetchByPath({ "/check-runs/5/escalated": [LEVELLED_ITEM] });
+    vi.stubGlobal("fetch", fetchMock);
+    renderWithProviders(<SignalEscalatedPanel checkRunId={5} />);
+    const choice = await screen.findByRole("button", { name: "Proficient" });
+    expect(choice.getAttribute("aria-describedby")?.split(" ")).toContain("signal-resolution-level-6-3");
+    const disclosure = screen.getByText("View level descriptions (4)").closest("details")!;
+    fireEvent.click(screen.getByText("View level descriptions (4)"));
+    expect(disclosure).toHaveAttribute("open");
+    fireEvent.click(choice);
+    expect(screen.getByText("Selected level: Proficient")).toBeInTheDocument();
+    expect(screen.getAllByText("states and previews")).toHaveLength(2);
+    expect(disclosure).toHaveAttribute("open");
+    expect(screen.getByRole("textbox", { name: "Reason (required)" })).toHaveValue("");
+    expect(fetchMock.mock.calls.some(([, init]) => (init as RequestInit | undefined)?.method === "POST")).toBe(false);
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(screen.queryByText("Selected level: Proficient")).not.toBeInTheDocument();
+    expect(disclosure).toHaveAttribute("open");
+  });
+
   it("V-069 AC4: picking a level submits mark_level with that level's own ordinal, and announces the real level, not a binary outcome", async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = typeof input === "string" ? input : input.toString();

@@ -528,7 +528,7 @@ export function ReviewCriteriaPage() {
 
   // F2.4 (V-013): a version another version has superseded is history —
   // read-only, never silently mutated.
-  const readOnly = !rubric.is_latest_version;
+  const readOnly = !rubric.is_latest_version || rubric.can_edit_criteria === false;
   const weightSum = rows.reduce((sum, r) => sum + r.weight, 0);
   const averageWeight = rows.length > 0 ? weightSum / rows.length : 0;
   const showErrors = attempted !== null;
@@ -636,8 +636,9 @@ export function ReviewCriteriaPage() {
 
       {readOnly ? (
         <p className="rounded-md border border-border bg-status-neutral-bg px-3 py-2.5 text-sm text-ink-secondary">
-          A newer version of this format exists. This version is read-only history: old reports
-          stay pinned to it for comparability.
+          {rubric.is_latest_version
+            ? "This version is read-only because it is used by a check. Upload a new version for corrections; old reports keep their original criteria."
+            : "A newer version of this format exists. This version is read-only history: old reports stay pinned to it for comparability."}
         </p>
       ) : (
         <p className="rounded-md bg-status-info-bg px-3 py-2 text-sm text-status-info-text">

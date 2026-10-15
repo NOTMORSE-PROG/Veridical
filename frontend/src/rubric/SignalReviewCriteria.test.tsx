@@ -1,5 +1,6 @@
 import { fireEvent, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { useNavigate } from "react-router";
 import type { Rubric } from "../api/types";
 import { renderWithProviders } from "../test/renderWithProviders";
 import { SignalReviewCriteriaPage } from "./SignalReviewCriteria";
@@ -45,6 +46,11 @@ function renderPage() {
     route: "/rubric/5/review",
     path: "/rubric/:rubricId/review",
   });
+}
+
+function VersionNavigationControl() {
+  const navigate = useNavigate();
+  return <button onClick={() => navigate("/rubric/6/review")}>Open next version</button>;
 }
 
 describe("SignalReviewCriteriaPage", () => {
@@ -143,8 +149,46 @@ describe("SignalReviewCriteriaPage", () => {
     renderPage();
 
     expect(await screen.findByText("Read-only version")).toBeInTheDocument();
-    expect(screen.getByLabelText("Criterion 1 text")).toBeDisabled();
+    expect(screen.getByText("Includes a complete abstract")).toBeInTheDocument();
+    expect(screen.queryByLabelText("Criterion 1 text")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Save draft" })).not.toBeInTheDocument();
     expect(screen.getByText(/Reports remain pinned to this history version/)).toBeInTheDocument();
+  });
+
+  it("locks the latest used version and offers a family-bound replacement", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({
+      ...RUBRIC, is_active: true, can_edit_criteria: false,
+      parse_status: "needs_review", parse_issues: ["Source wording needs review."],
+    }), { status: 200 })));
+    renderPage();
+    expect(await screen.findByText(/A check already uses this version/)).toBeInTheDocument();
+    expect(screen.getByText("Findings answer the research questions")).toBeInTheDocument();
+    expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Add criterion" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Confirm and activate format" })).not.toBeInTheDocument();
+    expect(screen.queryByText(/Review and save any corrections/)).not.toBeInTheDocument();
+    expect(screen.getByText(/upload a new version if corrections are needed/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Upload new version" }));
+    expect(await screen.findByRole("dialog")).toBeInTheDocument();
+  });
+
+  it("loads fresh rows and scale when navigation changes the rubric identity", async () => {
+    const replacement = { ...RUBRIC, id: 6, version: 3, criteria: [{
+      ...RUBRIC.criteria[1], id: 22, text: "Replacement criterion from the new source", levels: LEVELS.slice(0, 1),
+    }] };
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => new Response(JSON.stringify(
+      String(input).endsWith("/6") ? replacement : { ...RUBRIC, can_edit_criteria: false },
+    ), { status: 200 })));
+    renderWithProviders(<><SignalReviewCriteriaPage /><VersionNavigationControl /></>, {
+      route: "/rubric/5/review", path: "/rubric/:rubricId/review",
+    });
+    expect(await screen.findByText("Includes a complete abstract")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Open next version" }));
+    expect(await screen.findByLabelText("Criterion 1 text")).toHaveValue("Replacement criterion from the new source");
+    expect(screen.getByText("Levelled criterion · 1 levels")).toBeInTheDocument();
+    expect(screen.queryByText("Includes a complete abstract")).not.toBeInTheDocument();
+    const clean = new Event("beforeunload", { cancelable: true });
+    window.dispatchEvent(clean);
+    expect(clean.defaultPrevented).toBe(false);
   });
 });

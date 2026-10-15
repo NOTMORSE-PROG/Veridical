@@ -56,6 +56,7 @@ export interface Rubric {
   parse_issues: string[] | null;
   is_active: boolean;
   is_latest_version: boolean;
+  can_edit_criteria?: boolean;
   criteria: Criterion[];
 }
 
