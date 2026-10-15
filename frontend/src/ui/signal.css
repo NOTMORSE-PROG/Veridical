@@ -4656,7 +4656,7 @@
   .signal-library-grid {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(min(100%, var(--signal-library-card-min-width)), 1fr));
-    align-items: start;
+    align-items: stretch;
     gap: var(--signal-space-5);
     margin: 0;
     padding: 0;
@@ -4666,46 +4666,89 @@
   .signal-library-card {
     position: relative;
     isolation: isolate;
-    display: grid;
-    grid-template-columns: var(--signal-border-brand) minmax(0, 1fr);
+    box-sizing: border-box;
+    block-size: var(--signal-library-card-height);
+    min-width: 0;
     overflow: hidden;
     border: var(--signal-border-hairline) solid var(--color-signal-border);
     border-radius: var(--signal-radius-panel);
     background: var(--color-signal-surface);
-    box-shadow: var(--signal-shadow-raised);
   }
 
-  .signal-library-card__rail {
-    background: var(--color-signal-brand);
+  .signal-library-card[data-selected="true"] {
+    background: var(--signal-brand-selection-soft);
+    border-color: var(--color-signal-foundation);
   }
 
   .signal-library-card__body {
-    display: grid;
+    display: flex;
+    flex-direction: column;
+    block-size: 100%;
     min-width: 0;
-    align-content: start;
-    grid-auto-rows: min-content;
-    gap: var(--signal-space-4);
+    min-height: 0;
+    gap: var(--signal-space-2);
     padding: var(--signal-space-5);
   }
 
   .signal-library .signal-library-card__identity h2 {
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: var(--signal-library-card-title-lines);
+    block-size: calc(var(--signal-type-subhead) * var(--signal-line-section) * var(--signal-library-card-title-lines));
+    overflow: hidden;
     font-size: var(--signal-type-subhead);
     line-height: var(--signal-line-section);
+    font-weight: var(--signal-weight-semibold);
     overflow-wrap: anywhere;
   }
 
   .signal-library-card__footer {
+    flex-shrink: 0;
+    display: grid;
+    gap: var(--signal-space-2);
+    margin-block-start: auto;
     border-block-start: var(--signal-border-hairline) solid var(--color-signal-border);
-    padding-block-start: var(--signal-space-4);
+    padding-block-start: var(--signal-space-3);
+  }
+
+  .signal-library-card__context,
+  .signal-library-card__date {
+    margin: 0;
+    color: var(--color-signal-ink-secondary);
+    font-size: var(--signal-type-meta);
+    line-height: var(--signal-line-meta);
+  }
+
+  .signal-library-card__summary {
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: var(--signal-library-card-summary-lines);
+    flex-shrink: 0;
+    block-size: calc(var(--signal-type-label) * var(--signal-line-label) * var(--signal-library-card-summary-lines));
+    overflow: hidden;
+    overflow-wrap: anywhere;
+    margin: 0;
+    color: var(--color-signal-ink-secondary);
+    font-size: var(--signal-type-label);
+    line-height: var(--signal-line-label);
+  }
+
+  .signal-library-card__footer-actions {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--signal-space-2);
+    min-height: var(--signal-control-height);
   }
 
   .signal-library-card__footer .signal-button {
-    width: 100%;
-    justify-content: space-between;
+    min-width: 0;
+    padding-inline: 0;
+    color: var(--color-signal-link);
   }
 
-  .signal-library-metadata__wide {
-    grid-column: 1 / -1;
+  .signal-library-card__footer .signal-library-select {
+    flex-shrink: 0;
   }
 
   .signal-library-card__topline,
@@ -4788,25 +4831,16 @@
     color: var(--color-signal-ink-secondary);
   }
 
-  .signal-library-metadata,
   .signal-library-record__metadata {
     display: grid;
     gap: var(--signal-space-3);
     margin: 0;
   }
 
-  .signal-library-metadata {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    border-block-start: var(--signal-border-hairline) solid var(--color-signal-border);
-    padding-block-start: var(--signal-space-4);
-  }
-
-  .signal-library-metadata > div,
   .signal-library-record__metadata > div {
     min-width: 0;
   }
 
-  .signal-library-metadata dt,
   .signal-library-record__metadata dt {
     color: var(--color-signal-ink-muted);
     font-size: var(--signal-type-meta);
@@ -4815,7 +4849,6 @@
     text-transform: uppercase;
   }
 
-  .signal-library-metadata dd,
   .signal-library-record__metadata dd {
     margin: var(--signal-space-1) 0 0;
     overflow-wrap: anywhere;

@@ -228,61 +228,54 @@ function LibraryCard({
 }) {
   const disabled = !selected && selectionFull;
   const name = libraryRecordName(item);
-  const normalize = (value: string) => value.trim().replace(/\s+/g, " ").toLocaleLowerCase();
-  const showTeam = item.is_own && item.team_name && normalize(item.team_name) !== normalize(name);
-  const showFile = item.is_own && item.original_filename && normalize(item.original_filename) !== normalize(name);
+  const authors = item.is_own ? item.authors : [];
+  const otherAuthors = authors.length - 1;
+  const authorSummary = authors.length
+    ? authors[0] + (otherAuthors > 0 ? ` + ${otherAuthors} ${otherAuthors === 1 ? "other" : "others"}` : "")
+    : "";
+  const contextId = 'library-context-' + item.manuscript_id;
   const titleId = 'library-title-' + item.manuscript_id;
+  const programSummary = [item.program, item.school_year ? `School year ${item.school_year}` : null]
+    .filter(Boolean).join(" \u00b7 ");
   return (
     <li>
-      <article className="signal-library-card" aria-labelledby={titleId}>
-        <div className="signal-library-card__rail" aria-hidden="true" />
+      <article className="signal-library-card" aria-labelledby={titleId} data-selected={selected || undefined}>
         <div className="signal-library-card__body">
-          <div className="signal-library-card__topline">
-            <span className="signal-library-ownership">
-              {item.is_own ? "Your record" : "Shared record"}
-            </span>
-            {compareMode && (
-              <label className="signal-library-select" data-disabled={disabled || undefined}>
-                <input
-                  type="checkbox"
-                  checked={selected}
-                  aria-label={accessibleSelectionName}
-                  aria-disabled={disabled || undefined}
-                  aria-describedby={disabled ? "signal-compare-limit" : undefined}
-                  onChange={() => { if (!disabled) onToggle(); }}
-                />
-                <span>{selected ? "Selected" : "Select"}</span>
-              </label>
-            )}
-          </div>
+          <p id={contextId} className="signal-library-card__context">
+            {item.is_own ? <>Your record <span aria-hidden="true">&middot;</span> <span>#{item.manuscript_id}</span></> : "Shared record"}
+          </p>
           <div className="signal-library-card__identity">
             <h2 id={titleId}>{name}</h2>
           </div>
-          <dl className="signal-library-metadata">
-            {showTeam && <div className="signal-library-metadata__wide"><dt>Team</dt><dd>{item.team_name}</dd></div>}
-            {item.is_own && (
-              <div className="signal-library-metadata__wide">
-                <dt>Authors</dt><dd>{item.authors.length ? item.authors.join(", ") : "Not listed"}</dd>
-              </div>
-            )}
-            <div><dt>Program</dt><dd>{item.program ?? "Not set"}</dd></div>
-            <div><dt>School year</dt><dd>{item.school_year ?? "Not set"}</dd></div>
-            <div><dt>Added</dt><dd>{formatLibraryDate(item.added_at)}</dd></div>
-            <div><dt>Record</dt><dd>#{item.manuscript_id}</dd></div>
-            {showFile && (
-              <div className="signal-library-metadata__wide">
-                <dt>File</dt><dd className="signal-library-filename">{item.original_filename}</dd>
-              </div>
-            )}
-          </dl>
+          <p className="signal-library-card__summary" aria-hidden={!authorSummary || undefined}>{authorSummary}</p>
+          <p className="signal-library-card__summary" aria-hidden={!programSummary || undefined}>{programSummary}</p>
           <footer className="signal-library-card__footer">
-            <ActionLink
-              to={'/library/' + item.manuscript_id}
-              variant="secondary"
-              aria-label={'View manuscript: ' + name}
-            >
-              View manuscript
-            </ActionLink>
+            <p className="signal-library-card__date">
+              {item.added_at ? <>Added <time dateTime={item.added_at}>{formatLibraryDate(item.added_at)}</time></> : "Added date unavailable"}
+            </p>
+            <div className="signal-library-card__footer-actions">
+              <ActionLink
+                to={'/library/' + item.manuscript_id}
+                variant="quiet"
+                aria-label={'View manuscript: ' + name}
+                aria-describedby={contextId}
+              >
+                View manuscript
+              </ActionLink>
+              {compareMode && (
+                <label className="signal-library-select" data-disabled={disabled || undefined}>
+                  <input
+                    type="checkbox"
+                    checked={selected}
+                    aria-label={accessibleSelectionName}
+                    aria-disabled={disabled || undefined}
+                    aria-describedby={disabled ? "signal-compare-limit" : undefined}
+                    onChange={() => { if (!disabled) onToggle(); }}
+                  />
+                  <span>{selected ? "Selected" : "Select"}</span>
+                </label>
+              )}
+            </div>
           </footer>
         </div>
       </article>
