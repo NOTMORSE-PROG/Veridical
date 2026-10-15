@@ -230,29 +230,45 @@ function LibraryCard({
   const name = libraryRecordName(item);
   const authors = item.is_own ? item.authors : [];
   const otherAuthors = authors.length - 1;
-  const authorSummary = authors.length
-    ? authors[0] + (otherAuthors > 0 ? ` + ${otherAuthors} ${otherAuthors === 1 ? "other" : "others"}` : "")
-    : "";
   const contextId = 'library-context-' + item.manuscript_id;
   const titleId = 'library-title-' + item.manuscript_id;
-  const programSummary = [item.program, item.school_year ? `School year ${item.school_year}` : null]
-    .filter(Boolean).join(" \u00b7 ");
+  const normalized = (value: string | null) => value?.trim().toLocaleLowerCase();
+  const team = item.is_own ? item.team_name?.trim() : null;
+  const file = item.is_own ? item.original_filename?.trim() : null;
+  const showTeam = item.is_own && (!team || normalized(team) !== normalized(name));
+  const showFile = item.is_own && (!file || (
+    normalized(file) !== normalized(name) && normalized(file) !== normalized(team ?? null)
+  ));
   return (
     <li>
       <article className="signal-library-card" aria-labelledby={titleId} data-selected={selected || undefined}>
         <div className="signal-library-card__body">
-          <p id={contextId} className="signal-library-card__context">
-            {item.is_own ? <>Your record <span aria-hidden="true">&middot;</span> <span>#{item.manuscript_id}</span></> : "Shared record"}
-          </p>
-          <div className="signal-library-card__identity">
-            <h2 id={titleId}>{name}</h2>
-          </div>
-          <p className="signal-library-card__summary" aria-hidden={!authorSummary || undefined}>{authorSummary}</p>
-          <p className="signal-library-card__summary" aria-hidden={!programSummary || undefined}>{programSummary}</p>
-          <footer className="signal-library-card__footer">
+          <div className="signal-library-card__context-row">
+            <p id={contextId} className="signal-library-card__context">
+              {item.is_own ? "Your record" : "Shared record"} <span aria-hidden="true">&middot;</span> <span>#{item.manuscript_id}</span>
+            </p>
             <p className="signal-library-card__date">
               {item.added_at ? <>Added <time dateTime={item.added_at}>{formatLibraryDate(item.added_at)}</time></> : "Added date unavailable"}
             </p>
+          </div>
+          <div className="signal-library-card__identity">
+            <h2 id={titleId}>{name}</h2>
+            {item.is_own ? (
+              <p className="signal-library-card__authors">
+                <span>{authors[0] ?? "Authors not recorded"}</span>
+                {otherAuthors > 0 && <span> + {otherAuthors} {otherAuthors === 1 ? "other" : "others"}</span>}
+              </p>
+            ) : (
+              <p className="signal-library-card__shared-note">Open this shared manuscript to read the full document.</p>
+            )}
+          </div>
+          <dl className="signal-library-card__metadata">
+            {showTeam && <div><dt>Team</dt><dd>{team || "Not recorded"}</dd></div>}
+            <div><dt>Program</dt><dd>{item.program?.trim() || "Not recorded"}</dd></div>
+            <div><dt>School year</dt><dd>{item.school_year?.trim() || "Not recorded"}</dd></div>
+            {showFile && <div><dt>File</dt><dd>{file || "Not recorded"}</dd></div>}
+          </dl>
+          <footer className="signal-library-card__footer">
             <div className="signal-library-card__footer-actions">
               <ActionLink
                 to={'/library/' + item.manuscript_id}
