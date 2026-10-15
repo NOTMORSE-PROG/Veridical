@@ -8,7 +8,7 @@ and nothing secret is required unless a live integration is actually used.
 from functools import lru_cache
 from pathlib import Path
 
-from pydantic import field_validator, model_validator
+from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -289,6 +289,15 @@ class Settings(BaseSettings):
     # Share of a line's significant (4+ letter) words that must appear in
     # a criterion's text/evidence for that line to count as "covered".
     rubric_coverage_word_overlap_ratio: float = 0.3
+
+    # Draft-scale/checklist safety gates, unchanged from the evaluated v4 candidate.
+    rubric_feedback_criterion_max_chars: int = Field(default=60, ge=10)
+    rubric_atomicity_min_items: int = Field(default=10, ge=1)
+    rubric_atomicity_min_ratio: float = Field(default=0.35, ge=0.0, le=1.0)
+    rubric_list_item_pattern: str = (
+        r"^\s*(?:[\u2022\u25e6\u25aa\u2023\u2219\u25cb\u25cf\u25a0\u25a1\u2610"
+        r"\u2713\u2714\ue000-\uf8ff]|\d{1,2}[.)](?!\d))(?:\s|$)"
+    )
 
     # --- Aggregation & scoring (V-019, F8.1, ENGINEERING §5) -----------------
     # Three-way status thresholds — VISIBLE in the report payload, never a

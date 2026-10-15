@@ -10,12 +10,13 @@ partial criteria set) for the review screen (V-012), per charter rule 1
 """
 
 import re
+from collections import Counter
 from dataclasses import dataclass
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.checks.injection import InjectionSignal, detect_injection_signal
-from app.config import Settings
+from app.config import Settings, get_settings
 from app.ingest.schemas import TextBlock
 from app.llm.base import LLMClient
 from app.models.audit import AuditLog
@@ -37,6 +38,16 @@ RUBRIC_INJECTION_SUSPECTED_REASON = (
     "here would not affect one check -- it would ride along into every "
     "manuscript graded against this rubric. Please review the parsed "
     "criteria carefully before activating it."
+)
+
+# BUG-391 AC1 ("nothing is auto-filled"): a draft accepted only after a retry
+# was told what was wrong may have changed the rubric to satisfy the check
+# rather than the document (backend review, 2026-10-10, reproduced: a row
+# with three real levels came back with an invented fourth, and was accepted).
+RETRY_CHANGED_DRAFT_REASON = (
+    "An earlier draft of these criteria did not pass VERIDICAL's checks ({issues}). "
+    "A later draft did, but it may have added or removed something to do so. "
+    "Compare the criteria with the original document before activating them."
 )
 
 # Significant words only (skip 1-3 letter function words: "the", "and",
@@ -82,12 +93,85 @@ def coverage_ratio(
         haystack |= _words(c.text)
         if c.evidence_needed:
             haystack |= _words(c.evidence_needed)
+        # A rubric grid's level descriptors are source text the draft keeps
+        # (prompt v4 asks for them); left out, a faithful grid read as 50%
+        # covered (backend review, 2026-10-10, UST evaluation form).
+        for level in c.levels or []:
+            haystack |= _words(f"{level.name} {level.descriptor or ''}")
     covered = 0
     for line in lines:
         line_words = _words(line)
         if not line_words or len(line_words & haystack) / len(line_words) >= word_overlap_ratio:
             covered += 1
     return covered / len(lines)
+
+
+def _excerpt(text: str, limit: int) -> str:
+    return text if len(text) <= limit else text[: limit - 3].rstrip() + "..."
+
+
+def _scale(criterion: ParsedCriterion) -> tuple[float, ...]:
+    return tuple(sorted(level.points for level in criterion.levels or []))
+
+
+def level_scale_issues(
+    criteria: list[ParsedCriterion], settings: Settings | None = None
+) -> list[str]:
+    """BUG-391: a levelled criterion graded on part of the scale most other
+    levelled criteria share (1-3 beside 1-4) has probably lost a rung (TIP's
+    "Use of references" came back without Exemplary and was accepted). It is
+    named so the retry can restore the rung, or the instructor decides. A
+    criterion on a genuinely different scale (0-10 beside 1-4) is left alone."""
+    settings = settings or get_settings()
+    levelled = [c for c in criteria if c.levels]
+    if len(levelled) < 2:
+        return []
+    counts = Counter(_scale(c) for c in levelled)
+    common, sharing = counts.most_common(1)[0]
+    if sharing < 2 or sharing * 2 <= len(levelled):
+        return []  # no scale shared by most levelled criteria
+    common_names = {
+        level.name.casefold() for c in levelled if _scale(c) == common for level in c.levels or []
+    }
+    issues = []
+    for criterion in levelled:
+        scale = _scale(criterion)
+        if scale == common:
+            continue
+        names = {level.name.casefold() for level in criterion.levels or []}
+        # Both: a rung lost from the shared scale shows in its points AND its
+        # names; a criterion on a scale of its own (0/5/10 Poor/Good/
+        # Excellent) is left alone (backend review, 2026-10-10).
+        if set(scale) < set(common) and names < common_names:
+            issues.append(
+                f"'{_excerpt(criterion.text, settings.rubric_feedback_criterion_max_chars)}' "
+                f"is graded on {len(scale)} levels while "
+                f"{sharing} other criteria share a {len(common)}-level scale; a level "
+                "may have been left out, compare it with the original document"
+            )
+    return issues
+
+
+def folded_requirements(
+    criteria: list[ParsedCriterion], raw_text: str, settings: Settings
+) -> str | None:
+    """A checklist whose separate items came back folded into a few broad
+    criteria cannot be checked item by item (2026-10-09: a draft prompt
+    turned MTSU's 44-item checklist into 7 criteria). A rubric grid marks
+    each level descriptor with a box or glyph; drafted levels are those
+    items, so they count too (2026-10-09: the UST evaluation form's 20
+    descriptor glyphs read as 18 list items against 5 correct criteria)."""
+    pattern = re.compile(settings.rubric_list_item_pattern)
+    items = sum(1 for line in raw_text.splitlines() if pattern.match(line))
+    if items < settings.rubric_atomicity_min_items:
+        return None
+    drafted = len(criteria) + sum(len(c.levels or []) for c in criteria)
+    if drafted >= settings.rubric_atomicity_min_ratio * items:
+        return None
+    return (
+        f"the source lists {items} separate items but only {len(criteria)} criteria were "
+        "drafted; give each separately checkable requirement its own criterion"
+    )
 
 
 @dataclass
@@ -98,12 +182,20 @@ class GateResult:
 
 
 def run_gate(
-    blocks: list[TextBlock], criteria: list[ParsedCriterion], settings: Settings
+    blocks: list[TextBlock],
+    criteria: list[ParsedCriterion],
+    settings: Settings,
+    raw_text: str | None = None,
 ) -> GateResult:
     reasons: list[str] = []
     dupes = _duplicate_texts(criteria)
     if dupes:
         reasons.append(f"{len(dupes)} duplicate criterion text(s)")
+    reasons.extend(level_scale_issues(criteria, settings))
+    if raw_text is not None:
+        folded = folded_requirements(criteria, raw_text, settings)
+        if folded:
+            reasons.append(folded)
     ratio = coverage_ratio(
         blocks,
         criteria,
@@ -112,8 +204,8 @@ def run_gate(
     )
     if ratio < settings.rubric_coverage_min_ratio:
         reasons.append(
-            f"only {ratio:.0%} of the source text is reflected in the parsed criteria "
-            f"(need >= {settings.rubric_coverage_min_ratio:.0%})"
+            "the parsed criteria reflect too little of the required format's "
+            "substantive source text; compare them with the original document"
         )
     return GateResult(ok=not reasons, coverage_ratio=ratio, reasons=reasons)
 
@@ -141,8 +233,16 @@ async def attempt_decomposition(
     against the daily meter for nothing (ticket edge case)."""
     total_attempts = settings.rubric_parse_max_retries + 1
     feedback: str | None = None
-    last_criteria: list[ParsedCriterion] = []
+    # The schema-valid attempt with the fewest gate issues (then the most
+    # criteria) is what the review screen gets when no attempt passes: the
+    # last one could be the worst (backend review, 2026-10-10: 9 criteria
+    # then 4, and the 4 were shown).
+    best: tuple[list[ParsedCriterion], list[str]] | None = None
     last_issues: list[str] = ["no attempt produced a schema-valid response"]
+    # Every gate issue an earlier draft raised: a later draft that passes
+    # may have changed the rubric only to pass (invented a missing level,
+    # dropped a row), so the instructor confirms it (BUG-391 AC1).
+    earlier_gate_issues: list[str] = []
 
     # BUG-160: `raw_text` is identical across every retry in this loop, so
     # checking it once up front (rather than per-attempt) is not a missed
@@ -168,7 +268,7 @@ async def attempt_decomposition(
             feedback = last_issues[0]
             continue
 
-        gate = run_gate(blocks, criteria, settings)
+        gate = run_gate(blocks, criteria, settings, raw_text)
         await _log_attempt(
             session,
             rubric_id,
@@ -179,24 +279,31 @@ async def attempt_decomposition(
             injection=injection,
         )
         if gate.ok:
-            if injection.suspected:
-                return DecompositionOutcome(
-                    criteria=criteria,
-                    needs_review=True,
-                    issues=[RUBRIC_INJECTION_SUSPECTED_REASON],
-                    attempts=attempt,
-                )
-            return DecompositionOutcome(
-                criteria=criteria, needs_review=False, issues=[], attempts=attempt
+            issues = (
+                [RETRY_CHANGED_DRAFT_REASON.format(issues="; ".join(earlier_gate_issues))]
+                if earlier_gate_issues
+                else []
             )
-        last_criteria = criteria  # best-so-far partial — never discarded
+            if injection.suspected:
+                issues.append(RUBRIC_INJECTION_SUSPECTED_REASON)
+            return DecompositionOutcome(
+                criteria=criteria, needs_review=bool(issues), issues=issues, attempts=attempt
+            )
+        if best is None or (len(gate.reasons), -len(criteria)) < (len(best[1]), -len(best[0])):
+            best = (criteria, gate.reasons)  # best-so-far partial — never discarded
+        earlier_gate_issues.extend(
+            r
+            for r in gate.reasons
+            if r not in earlier_gate_issues and ("levels while" in r or "separate items" in r)
+        )
         last_issues = gate.reasons
         feedback = "; ".join(gate.reasons)
 
-    if injection.suspected and RUBRIC_INJECTION_SUSPECTED_REASON not in last_issues:
-        last_issues = [*last_issues, RUBRIC_INJECTION_SUSPECTED_REASON]
+    best_criteria, best_issues = best if best is not None else ([], last_issues)
+    if injection.suspected and RUBRIC_INJECTION_SUSPECTED_REASON not in best_issues:
+        best_issues = [*best_issues, RUBRIC_INJECTION_SUSPECTED_REASON]
     return DecompositionOutcome(
-        criteria=last_criteria, needs_review=True, issues=last_issues, attempts=total_attempts
+        criteria=best_criteria, needs_review=True, issues=best_issues, attempts=total_attempts
     )
 
 

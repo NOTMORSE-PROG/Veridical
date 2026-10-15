@@ -7,6 +7,7 @@ retry/coverage/review-fallback loop around a failed parse is V-011's job
 — it catches `RubricParseError` from here.
 """
 
+import re
 from pathlib import Path
 
 from pydantic import ValidationError
@@ -24,8 +25,13 @@ PROMPT_TYPE = "rubric_decomposition"
 # collapse a scale — v1/v2 just had nowhere structured to put it). BUG-092:
 # v2 adds a third "not_assessable" type for defense-day/physical
 # requirements no document could ever settle (v1 only knew
-# structural/semantic, so these had nowhere to go but AI grading).
-PROMPT_VERSION = "v3"
+# structural/semantic, so these had nowhere to go but AI grading). BUG-391:
+# v4 asks for whole-word level names without the point value, and for every
+# rung a shared scale header grades (TIP's wrapped "ACCEPTABL / E 2" header
+# came back verbatim in every name, and one row lost its top rung), and
+# states the one-criterion-per-requirement rule (a draft without it folded
+# MTSU's 44-item checklist into 7 criteria).
+PROMPT_VERSION = "v4"
 _PROMPT_FILE = Path(__file__).parent / "prompts" / f"{PROMPT_TYPE}_{PROMPT_VERSION}.txt"
 _PLACEHOLDER = "{rubric_text}"
 
@@ -44,6 +50,42 @@ def raw_text_for_decomposition(blocks: list[TextBlock]) -> str:
     preprocessing hack)."""
     lines = [b.text.strip() for b in blocks if not b.is_furniture and b.text.strip()]
     return "\n".join(lines)
+
+
+_NUMBER = re.compile(r"^\d+(?:\.\d+)?$")
+
+
+def _name_without_points(name: str, points: float) -> str:
+    tokens = name.split()
+    if len(tokens) < 2:
+        return name
+    for index in (-1, 0):
+        token = tokens[index].strip("()[]")
+        if _NUMBER.match(token) and float(token) == points:
+            # "4 - Exemplary" keeps no stray separator (backend review, 2026-10-10).
+            rest = " ".join(tokens[:-1] if index == -1 else tokens[1:])
+            return rest.strip(" -\u2013\u2014:|") or name
+    return name
+
+
+def _without_point_values(criterion: ParsedCriterion) -> ParsedCriterion:
+    """BUG-391: a wrapped scale header ("ACCEPTABL E 2") came back with each
+    rung's point value inside its name. The value is already `points`; it
+    leaves the name only when every rung's name still has letters and still
+    differs from the others ("Level 1 / Level 2" keeps its numbers)."""
+    if not criterion.levels:
+        return criterion
+    names = [_name_without_points(level.name, level.points) for level in criterion.levels]
+    if names == [level.name for level in criterion.levels]:
+        return criterion
+    distinct = len({name.casefold() for name in names}) == len(names)
+    if not distinct or not all(any(ch.isalpha() for ch in name) for name in names):
+        return criterion
+    levels = [
+        level.model_copy(update={"name": name})
+        for level, name in zip(criterion.levels, names, strict=True)
+    ]
+    return criterion.model_copy(update={"levels": levels})
 
 
 def _normalize_weights(criteria: list[ParsedCriterion]) -> list[ParsedCriterion]:
@@ -84,4 +126,4 @@ async def decompose_rubric(
         decomposition = RubricDecomposition.model_validate(response)
     except ValidationError as exc:
         raise RubricParseError(f"Rubric decomposition response failed validation: {exc}") from exc
-    return _normalize_weights(decomposition.criteria)
+    return _normalize_weights([_without_point_values(c) for c in decomposition.criteria])

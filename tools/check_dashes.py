@@ -56,6 +56,8 @@ TS_ROOTS = ("frontend/src",)
 ALLOW_REGEX_FILES = {
     # citation page-range patterns match en-dashed ranges ("pp. 12–14")
     "backend/app/checks/citations/extract.py",
+    # Scale-name input cleanup strips printed dash separators; not output copy.
+    "backend/app/rubric/decompose.py",
 }
 
 # Paths whose strings never reach a user.
