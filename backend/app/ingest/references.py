@@ -30,6 +30,7 @@ from statistics import median
 from app.config import get_settings
 from app.ingest.normalize import match_key, normalize
 from app.ingest.patterns import HeadingPatterns
+from app.ingest.reference_metadata_patterns import load_reference_metadata_patterns
 from app.ingest.reference_urls import reference_urls, text_url
 from app.ingest.schemas import ExtractionResult, SectionNode, TextBlock
 from app.ingest.source_slices import SourceFragment, SourceSlicer, line_inventory_valid, slice_block
@@ -407,6 +408,8 @@ def _parse_into(draft: CitationDraft, raw: str) -> None:
         # IEEE-style numbered entries print the year at the end, not in
         # parentheses; their title is the quoted span.
         _parse_ieee_into(draft, raw)
+        if draft.parse_status != CitationParseStatus.parsed:
+            _parse_unquoted_numbered_into(draft, raw)
         return  # otherwise no year backbone -> parse_failed, raw preserved
     draft.year = int(year_m.group(1))
 
@@ -585,6 +588,129 @@ def _parse_ieee_into(draft: CitationDraft, raw: str) -> None:
     draft.year = int(years[-1])
     draft.venue = after.strip(" ,.") or None
     draft.parse_status = CitationParseStatus.parsed
+
+
+def _parse_unquoted_numbered_into(draft: CitationDraft, raw: str) -> None:
+    """Recognize author-period-title/publication-tail references, not free prose.
+
+    Access dates and locator digits are not publication years. Full natural
+    names remain as printed; no family-name order or absent author delimiter is
+    invented. This is metadata extraction, never source verification.
+    """
+    if not _LEADING_LABEL.match(raw):
+        return
+    body = _LEADING_LABEL.sub("", raw, count=1)
+    settings = get_settings()
+    patterns = load_reference_metadata_patterns(settings.reference_metadata_patterns_file)
+    # Only a date-qualified or explicitly delimited access note is removed,
+    # not an access-related word that happens to occur inside a work's title.
+    access = patterns.access_note.search(body)
+    publication = body[: access.start()] if access else body
+    boundary = next(
+        (
+            match
+            for match in re.finditer(r"\.\s+", publication)
+            if not _INITIALS.fullmatch(publication[: match.start() + 1].split()[-1])
+        ),
+        None,
+    )
+    if boundary is None:
+        return
+    author_text = publication[: boundary.start()].strip()
+    remainder = publication[boundary.end() :].strip()
+    # Establish the title boundary before interpreting dates. A date printed
+    # inside the title is source text, not evidence of publication year.
+    title, tail = _split_title_venue(remainder)
+    locator = min(
+        [*_URL.finditer(remainder), *_DOI_TAIL.finditer(remainder)],
+        key=lambda match: match.start(),
+        default=None,
+    )
+    if locator and (tail is None or locator.start() < len(title)):
+        before_locator = remainder[: locator.start()].rstrip()
+        if not before_locator.endswith("."):
+            return
+        title, tail = before_locator[:-1].strip(), remainder[locator.start() :]
+    if tail is None:
+        return  # no independent title/publication boundary
+    if not title or not any(character.isalpha() for character in title):
+        return
+    # A whitespace-split locator is not reconstructed by guessing. Its trailing
+    # path can contain dates or punctuation; keep the raw entry for correction.
+    if re.search(r"https?://\s|\b10\.\d{4,9}/\s", tail):
+        return
+    for locator in [*_URL.finditer(tail), *_DOI_TAIL.finditer(tail)]:
+        continuation = tail[locator.end() :].lstrip()
+        if not continuation:
+            continue
+        following = continuation.lstrip(".,; ")
+        if _URL.match(following) or _DOI_TAIL.match(following):
+            continue  # separately printed next locator
+        if continuation[0] not in ".,;" and locator.group(0)[-1] not in ".,;":
+            return
+        # Terminal punctuation on the first fragment is not enough: it can be
+        # a split domain/path. Only a standalone date tail is supported here.
+        date_tail = f", {following}"
+        date = patterns.publication_year.match(date_tail)
+        if date is None or date_tail[date.end() :].strip(".,; "):
+            return
+
+    # Keep following punctuation: the comma outside a URL can introduce an
+    # independently printed publication year. Never remove dates from title.
+    def remove_locator(match: re.Match[str]) -> str:
+        value = match.group(0)
+        return value[len(value.rstrip(".,;")) :]
+
+    tail = _DOI_TAIL.sub(remove_locator, _URL.sub(remove_locator, tail)).strip()
+    dates = list(patterns.publication_year.finditer(tail))
+    years = {int(match.group("year")) for match in dates}
+    if len(years) != 1:
+        return
+    venue = patterns.publication_year.sub("", tail).strip(" ,.;") or None
+    # A numeric label alone is not a title, nor is locator/publication metadata
+    # after an undivided author/title phrase. Author punctuation needs its own
+    # evidence even when the year and title can be retained as partial fields.
+    if not author_text or any(character.isdigit() for character in author_text):
+        return
+    draft.title, draft.year, draft.venue = title, next(iter(years)), venue
+    corporate = any(
+        word.strip(".,()").casefold() in patterns.corporate_author_words
+        for word in author_text.split()
+    )
+    names = (
+        [author_text]
+        if corporate
+        else [
+            name.strip()
+            for name in re.split(r",\s*(?:and\s+)?|\s+(?:and|&)\s+", author_text)
+            if name.strip()
+        ]
+    )
+    authors = []
+    for name in names:
+        words = name.split()
+        substantive = [
+            word
+            for word in words
+            if not _INITIALS.fullmatch(word) and word.casefold() not in patterns.name_particles
+        ]
+        if not corporate and (
+            not substantive
+            or len(substantive) > settings.reference_unseparated_author_max_tokens
+            or any(
+                not re.fullmatch(r"[^\W\d_][\w'\u2019.\-]*", word)
+                or (not word[0].isupper() and word.casefold() not in patterns.name_particles)
+                for word in words
+            )
+        ):
+            return
+        author = _ieee_author(name)
+        if author is None:
+            return
+        authors.append(author)
+    if authors:
+        draft.authors = authors
+        draft.parse_status = CitationParseStatus.parsed
 
 
 # --- locating and segmenting the section -------------------------------------

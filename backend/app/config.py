@@ -518,6 +518,10 @@ class Settings(BaseSettings):
     numeric_citation_context_file: Path | None = None
     numeric_citation_max_range_span: int = Field(default=20, gt=0)
     reference_metadata_max_chars: int = Field(default=8192, ge=256, le=32768)
+    reference_metadata_patterns_file: Path | None = None
+    # Longer unseparated natural names may contain merged authors. Retain raw
+    # display text but do not assert an author count or complete metadata.
+    reference_unseparated_author_max_tokens: int = Field(default=3, ge=1, le=20)
     citation_author_max_chars: int = Field(default=160, ge=40, le=1000)
     citation_author_max_tokens: int = Field(default=8, ge=2, le=40)
     citation_unseparated_author_max_tokens: int = Field(default=3, ge=1, le=20)

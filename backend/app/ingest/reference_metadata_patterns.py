@@ -1,0 +1,44 @@
+"""Data-backed conventions for a bounded numbered-reference fallback (F1/F5)."""
+
+import json
+import re
+from dataclasses import dataclass
+from functools import lru_cache
+from pathlib import Path
+
+
+@dataclass(frozen=True)
+class ReferenceMetadataPatterns:
+    access_note: re.Pattern[str]
+    publication_year: re.Pattern[str]
+    name_particles: frozenset[str]
+    corporate_author_words: frozenset[str]
+
+
+@lru_cache
+def load_reference_metadata_patterns(path: Path | None = None) -> ReferenceMetadataPatterns:
+    source = path or Path(__file__).parent / "data" / "reference_metadata_patterns.json"
+    raw = json.loads(source.read_text(encoding="utf-8"))
+    for name in ("access_note_prefixes", "months", "name_particles", "corporate_author_words"):
+        values = raw[name]
+        if (
+            not isinstance(values, list)
+            or not values
+            or not all(isinstance(value, str) and value.strip() for value in values)
+        ):
+            raise ValueError(f"Reference metadata {name} must be a nonempty list of words")
+    access = "|".join(re.escape(value) for value in raw["access_note_prefixes"])
+    months = "|".join(re.escape(value) for value in raw["months"])
+    return ReferenceMetadataPatterns(
+        access_note=re.compile(
+            rf"\b(?:{access})\s*(?::|on\b|from\b|(?=(?:{months})\.?\s+\d|\d))",
+            re.IGNORECASE,
+        ),
+        publication_year=re.compile(
+            rf"(?:,\s*|\b(?:{months})\.?\s+(?:\d{{1,2}},?\s+)?)"
+            r"(?P<year>1[89]\d{2}|20\d{2})(?=[.,;\s]|$)",
+            re.IGNORECASE,
+        ),
+        name_particles=frozenset(word.casefold() for word in raw["name_particles"]),
+        corporate_author_words=frozenset(word.casefold() for word in raw["corporate_author_words"]),
+    )

@@ -807,9 +807,20 @@ def _reference_surnames(ref: ReferenceLike) -> set[str]:
 
 def cross_match(in_text: list[InTextCitation], references: list[ReferenceLike]) -> CrossMatchResult:
     index: dict[str, list[ReferenceLike]] = {}
+    possible_names: dict[str, list[ReferenceLike]] = {}
+    name_limit = get_settings().citation_author_max_tokens
     for ref in references:
         for surname in _reference_surnames(ref):
             index.setdefault(surname, []).append(ref)
+        for author in ref.authors or []:
+            if "," in author:
+                continue  # explicit family-name order has its existing exact match
+            words = author.split()
+            # A natural-order full name or organization does not establish a
+            # family-name boundary. Its suffix is a possible link, never a
+            # positive match or evidence that the reference is missing/unused.
+            for size in range(1, min(len(words), name_limit + 1)):
+                possible_names.setdefault(" ".join(words[-size:]).casefold(), []).append(ref)
 
     linked: list[tuple[InTextCitation, list[ReferenceLike]]] = []
     orphans: list[InTextCitation] = []
@@ -841,6 +852,26 @@ def cross_match(in_text: list[InTextCitation], references: list[ReferenceLike]) 
                     break
         year_digits = cite.year[:4]
         matches = [c for c in candidates if str(c.year) == year_digits]
+        matched_ids = {ref.order_index for ref in matches}
+        # A narrative prefix can also precede a natural-order name. Recover
+        # only possible suffix matches; never turn an inferred family-name
+        # boundary into a definite source link or an absence finding.
+        possible_keys = {
+            " ".join(words[-size:]).casefold()
+            for surname in cite.surnames
+            if (words := surname.split())
+            for size in range(1, min(len(words), name_limit) + 1)
+        }
+        uncertain_names = {
+            ref.order_index: ref
+            for key in possible_keys
+            for ref in possible_names.get(key, [])
+            if str(ref.year) == year_digits and ref.order_index not in matched_ids
+        }
+        if uncertain_names:
+            ambiguous.append(cite)
+            possibly_cited.update(matched_ids | uncertain_names.keys())
+            continue
         if len(matches) > 1 and cite.year[-1].isalpha():
             # Same-author-same-year disambiguation (2024a/b): V-006's parser
             # strips the letter suffix from the stored `year` int but keeps
