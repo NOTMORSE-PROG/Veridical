@@ -661,6 +661,7 @@ export interface FlagOut {
   ai_verdict_summary: string | null;
   ai_reasoning: string | null;
   p_value_comparison?: { reported: string; recalculated: string } | null;
+  agreement_pair?: { intent_text: string; intent_anchor: string | null; outcome_text: string; outcome_anchor: string | null } | null;
   // BUG-049: the flag evidence page is exactly where the audit found a
   // fabricated statistical-forensics finding rendered with no disclosure.
   llm_mode: LLMMode;

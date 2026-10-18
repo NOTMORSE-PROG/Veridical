@@ -74,6 +74,11 @@ export function isPValueFinding(kind: string | null | undefined): boolean {
 }
 
 export function findingVerificationPrompt(checkKind: string, problemKind: string | null, hasPair: boolean): string {
+  if (checkKind === "internal_agreement") {
+    return problemKind === "agreement_unmatched_intent"
+      ? "Check whether this statement is this study's objective. Read the results and surrounding text to see whether it was addressed; no paired result was recorded by the check."
+      : "Check that both statements describe this study and refer to the same objective. Read the surrounding text before deciding whether the result addresses the objective.";
+  }
   if (problemKind === "orphan_in_text_citation") {
     return "Check the manuscript's reference list for this author and year. Confirm whether the entry is missing or uses different spelling or a different year.";
   }

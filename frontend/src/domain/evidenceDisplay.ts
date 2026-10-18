@@ -1,5 +1,12 @@
 import type { FlagOut } from "../api/types";
 
+export function agreementEvidenceType(flag: Pick<FlagOut, "agreement_pair" | "ai_verdict_summary">): string {
+  if (flag.agreement_pair) return "Recorded statement pair";
+  return flag.ai_verdict_summary === "agreement_unmatched_intent"
+    ? "One recorded statement; no paired result"
+    : "Statement comparison unavailable";
+}
+
 /**
  * BUG-170: a whole-document/chapter/resubmission originality-reuse flag's
  * `evidence_excerpt` is always a system-authored template sentence, never

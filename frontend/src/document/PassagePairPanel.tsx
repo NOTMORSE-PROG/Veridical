@@ -61,7 +61,6 @@ export function PassagePairPanel({
   variant: "flag" | "excluded";
   excludedReason?: ("reference_list" | "block_quote")[];
 }) {
-  const similarityBand = pair.level === "exact_duplicate" ? "Exact duplicate" : "High textual similarity";
   const shared = sharedPassageRanges(pair.own_excerpt, pair.matched_excerpt);
   const hasExactSharedWording = shared.left.length > 0;
 
@@ -86,7 +85,8 @@ export function PassagePairPanel({
           ? "Compare these stored passages yourself. Similar wording can have legitimate explanations."
           : excludedLead}
       </p>
-      <p className="text-xs text-ink-secondary"><b>Match type: {similarityBand}.</b> Compare the text itself below; the raw reproducibility value remains in Audit.</p>
+      <p className="text-xs text-ink-secondary"><b>Comparison lead: possible textual similarity.</b> Compare the stored passages in context. This similarity result does not establish identical passages or files, copying, authorship, or which document came first.</p>
+      {variant === "flag" && <p className="text-xs text-ink-secondary">This lead does not change readiness. The raw reproducibility value remains in Audit.</p>}
       <p className="text-xs text-ink-secondary">
         {hasExactSharedWording
           ? "Highlighted wording appears in both recorded passages. Unhighlighted wording still matters to the comparison."

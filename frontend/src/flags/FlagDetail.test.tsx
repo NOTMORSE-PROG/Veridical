@@ -33,6 +33,14 @@ const FLAG = {
 describe("FlagDetailPage", () => {
   afterEach(() => vi.unstubAllGlobals());
 
+  it("renders the same stored agreement pair as the manuscript viewer", async () => {
+    vi.stubGlobal("fetch", stubFetchByPath({ "/flags/5": { ...FLAG, check_kind: "internal_agreement", agreement_pair: { intent_text: "To build a login module.", intent_anchor: "page 1", outcome_text: "The login module was not implemented.", outcome_anchor: "page 2" }, affects_readiness: false } }));
+    renderWithProviders(<FlagDetailPage />, { route: "/flags/5", path: "/flags/:flagId" });
+    expect(await screen.findByText("Statement selected as an objective")).toBeInTheDocument();
+    expect(screen.getByText("Statement selected as a result")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Open result location: page 2" })).toHaveAttribute("href", "/report/20/document?finding=5&anchor=page%202");
+  });
+
   it("shows the evidence excerpt, anchor, humanized AI verdict, and severity", async () => {
     vi.stubGlobal("fetch", stubFetchByPath({ "/flags/5": FLAG }));
     renderWithProviders(<FlagDetailPage />, { route: "/flags/5", path: "/flags/:flagId" });

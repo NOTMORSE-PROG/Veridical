@@ -5,13 +5,15 @@ import type { FlagRegionOut, ReportOut } from "../api/types";
 import { CRITERION_ANCHOR_REGION_ID } from "../config/ui";
 import { checkKindMeta, findingVerificationPrompt, isPValueFinding } from "../domain/checkKind";
 import { DECISION_LABEL } from "../domain/decisionTone";
-import { evidenceDisplayState } from "../domain/evidenceDisplay";
+import { agreementEvidenceType, evidenceDisplayState } from "../domain/evidenceDisplay";
 import { manuscriptIdentity } from "../domain/manuscriptLabel";
 import { problemLabel } from "../domain/problemLabel";
 import { severityLabel } from "../domain/severity";
 import { systemFindingCopy } from "../domain/systemFindingCopy";
+import { instructorAnchor } from "../domain/sourceAnchor";
 import { useFlag } from "../flags/useFlag";
 import { PValueComparison } from "../flags/PValueComparison";
+import { AgreementComparison } from "../flags/AgreementComparison";
 import { SignalDecisionPanel } from "../report/SignalDecisionPanel";
 import { SignalCriteriaResults, SignalEscalatedPanel } from "../report/SignalReviewSections";
 import { coverageItems } from "../report/reportCoverage";
@@ -76,12 +78,6 @@ function criterionAnchorRegion(anchor: string | null): FlagRegionOut | null {
 
 function parseFilter(value: string | null): ReviewFilter {
   return value === "resolved" || value === "all" ? value : "open";
-}
-
-function instructorAnchor(anchor: string): string {
-  return /^(?:\u00b6|\u00c2\u00b6|paragraph\s+)\d+$/i.test(anchor.trim())
-    ? "Reconstructed text"
-    : anchor;
 }
 
 function findingTitle(finding: ReviewFinding): string {
@@ -177,11 +173,12 @@ function ReviewQueue({ findings, regions, report, pending, error, filter, invali
   );
 }
 
-function SelectedFinding({ finding, total, locationFlagId, region, previous, next, onBack, onPrevious, onNext, onLocation, onExplore }: {
+function SelectedFinding({ finding, total, locationFlagId, region, sourceAnchor, previous, next, onBack, onPrevious, onNext, onLocation, onExplore }: {
   finding: ReviewFinding;
   total: number;
   locationFlagId: number;
   region: FlagRegionOut | null;
+  sourceAnchor: string | null;
   previous: ReviewFinding | null;
   next: ReviewFinding | null;
   onBack: () => void;
@@ -215,8 +212,8 @@ function SelectedFinding({ finding, total, locationFlagId, region, previous, nex
       <dl className="signal-document-finding-facts">
         <div><dt>Check</dt><dd>{kindMeta.eyebrow}</dd></div>
         <div><dt>How exact is this location?</dt><dd>{precision.label}</dd></div>
-        <div><dt>Recorded location</dt><dd>{instructorAnchor(flag.page_anchor)}</dd></div>
-        <div><dt>Evidence type</dt><dd>{comparative ? flag.passage_pair ? "Recorded passage comparison" : "Comparison without a stored pair" : "Single-location check"}</dd></div>
+        <div><dt>Recorded location</dt><dd>{instructorAnchor(sourceAnchor ?? flag.page_anchor)}</dd></div>
+        <div><dt>Evidence type</dt><dd>{flag.check_kind === "internal_agreement" ? agreementEvidenceType(flag) : comparative ? flag.passage_pair ? "Recorded passage comparison" : "Comparison without a stored pair" : "Single-location check"}</dd></div>
       </dl>
       <p className="signal-document-precision-note"><strong>{precision.label}.</strong> {precision.helper}</p>
       {finding.flags.length > 1 && (
@@ -235,9 +232,10 @@ function SelectedFinding({ finding, total, locationFlagId, region, previous, nex
         <h3 id="evidence-heading">Evidence to compare or check</h3>
         {flag.passage_pair && <p className="signal-field-hint"><strong>Highlight key:</strong> Yellow marks the selected manuscript location. Shaded wording below appears in both stored passages.</p>}
         {flag.passage_pair && <PassagePairPanel pair={flag.passage_pair} ownAnchor={instructorAnchor(flag.page_anchor)} variant="flag" />}
-        {!flag.passage_pair && showsManuscriptQuote && <blockquote><span>“{systemFindingCopy(flag.evidence_excerpt, flag.ai_verdict_summary, "evidence")}”</span><cite>{instructorAnchor(flag.page_anchor)}</cite></blockquote>}
+        {!flag.passage_pair && showsManuscriptQuote && flag.check_kind !== "internal_agreement" && <blockquote><span>“{systemFindingCopy(flag.evidence_excerpt, flag.ai_verdict_summary, "evidence")}”</span><cite>{instructorAnchor(flag.page_anchor)}</cite></blockquote>}
         <PValueComparison flag={flag} />
-        {flag.ai_verdict_summary === "orphan_in_text_citation" ? <p className="signal-field-hint">The saved check did not link this citation to a reference-list entry. A matching entry is not available for side-by-side comparison.</p> : !comparative && !pValueFinding && <p className="signal-field-hint">This check evaluates one manuscript location. A second passage does not apply.</p>}
+        <AgreementComparison flag={flag} findingNumber={finding.number} />
+        {flag.ai_verdict_summary === "orphan_in_text_citation" ? <p className="signal-field-hint">The saved check did not link this citation to a reference-list entry. A matching entry is not available for side-by-side comparison.</p> : !comparative && !pValueFinding && flag.check_kind !== "internal_agreement" && <p className="signal-field-hint">This check evaluates one manuscript location. A second passage does not apply.</p>}
       </section>
       {flag.passage_pair && <Button variant="quiet" onClick={onExplore}>See other passage matches</Button>}
       {!showsManuscriptEvidence && (
@@ -532,7 +530,7 @@ export function SignalDocumentViewerPage() {
               <aside ref={inspectorRef} id="review-panel" role="tabpanel" aria-labelledby="review-tab" data-active={activeTab === "review"} className="signal-document-inspector">
                 {isExploring ? <ReuseExplorePanel flags={flagsQuery.data} onSelectFlag={selectFinding} onBack={showQueue} includeReferenceList={includeReferenceList} includeBlockQuote={includeBlockQuote} onToggleReferenceList={(value) => setToggle("ref", value)} onToggleBlockQuote={(value) => setToggle("quote", value)} excludedMatchesQuery={excludedMatchesQuery} expandedMatchId={expandedMatchId} onExpandMatch={setMatch} />
                   : isDecision ? <ReadinessDecision checkRunId={id} report={reportQuery.data} pending={reportQuery.isPending} error={reportQuery.error} onRetry={() => reportQuery.refetch()} onBack={showQueue} />
-                    : selectedFinding && selectedLocationId ? <SelectedFinding finding={selectedFinding} total={findings.length} locationFlagId={selectedLocationId} region={selectedRegion} previous={previousFinding} next={nextFinding} onBack={showQueue} onPrevious={() => previousFinding && selectFinding(previousFinding.representative.id, true)} onNext={() => nextFinding && selectFinding(nextFinding.representative.id, true)} onLocation={selectFinding} onExplore={openExplore} />
+                    : selectedFinding && selectedLocationId ? <SelectedFinding finding={selectedFinding} total={findings.length} locationFlagId={selectedLocationId} region={selectedRegion} sourceAnchor={recordedAnchor} previous={previousFinding} next={nextFinding} onBack={showQueue} onPrevious={() => previousFinding && selectFinding(previousFinding.representative.id, true)} onNext={() => nextFinding && selectFinding(nextFinding.representative.id, true)} onLocation={selectFinding} onExplore={openExplore} />
                       : <ReviewHome checkRunId={id} report={reportQuery.data} reportPending={reportQuery.isPending} reportError={reportQuery.error} onReportRetry={() => reportQuery.refetch()} findings={findings} regions={viewer?.regions ?? []} flagsPending={flagsQuery.isPending} flagsError={flagsQuery.isError} filter={filter} invalidSelection={invalidSelection} onFilter={setFilter} onSelect={selectFinding} onExplore={openExplore} onDecision={openDecision} />}
               </aside>
             </div>

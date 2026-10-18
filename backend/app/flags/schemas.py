@@ -50,6 +50,15 @@ class PValueComparisonOut(BaseModel):
     recalculated: str
 
 
+class AgreementPairOut(BaseModel):
+    """Only the two stored candidate statements and their recorded locations."""
+
+    intent_text: str
+    intent_anchor: str | None
+    outcome_text: str
+    outcome_anchor: str | None
+
+
 class FlagOut(BaseModel):
     id: int
     check_result_id: int
@@ -78,6 +87,7 @@ class FlagOut(BaseModel):
     ai_verdict_summary: str | None
     ai_reasoning: str | None
     p_value_comparison: PValueComparisonOut | None = None
+    agreement_pair: AgreementPairOut | None = None
     # BUG-049: "fake" (fixture data — e.g. a vision-pass table that was
     # never in the manuscript), "real", or "unknown" (predates migration
     # 0024). The flag evidence page is exactly where the audit found a

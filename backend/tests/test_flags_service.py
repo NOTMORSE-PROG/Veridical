@@ -5,7 +5,52 @@ comes from."""
 
 import pytest
 
-from app.flags.service import _p_value_comparison, _passage_pair_from_detail
+from app.flags.service import _agreement_pair, _p_value_comparison, _passage_pair_from_detail
+
+
+def agreement_detail():
+    return {
+        "kind": "agreement_contradictory",
+        "intent_text": " To build a login module.\n",
+        "intent_anchor": "page 1",
+        "outcome_text": "The login module was not implemented.",
+        "outcome_anchor": "page 2",
+        "gemini_reasoning": "Private raw model response",
+        "private": "not exposed",
+    }
+
+
+def test_agreement_pair_is_whitelisted_exact_saved_evidence():
+    detail = agreement_detail()
+    assert _agreement_pair("internal_agreement", detail).model_dump() == {
+        key: detail[key]
+        for key in ("intent_text", "intent_anchor", "outcome_text", "outcome_anchor")
+    }
+    assert _agreement_pair("citation_integrity", detail) is None
+    assert (
+        _agreement_pair("internal_agreement", {**detail, "kind": "agreement_unmatched_intent"})
+        is None
+    )
+
+
+@pytest.mark.parametrize("missing", [None, "", "   ", 0, False, [], {}])
+@pytest.mark.parametrize("field", ["intent_text", "outcome_text"])
+def test_incomplete_agreement_pair_never_gets_fabricated(field, missing):
+    assert _agreement_pair("internal_agreement", {**agreement_detail(), field: missing}) is None
+
+
+@pytest.mark.parametrize("missing", [None, 0, False, [], {}])
+def test_agreement_missing_anchor_preserves_both_texts_without_inventing_location(missing):
+    pair = _agreement_pair("internal_agreement", {**agreement_detail(), "outcome_anchor": missing})
+    assert pair.outcome_text == agreement_detail()["outcome_text"]
+    assert pair.outcome_anchor is None
+
+
+@pytest.mark.parametrize("kind", [None, [], {}, "unknown"])
+def test_invalid_evidence_kind_degrades_without_an_exception(kind):
+    detail = {**agreement_detail(), "kind": kind}
+    assert _agreement_pair("internal_agreement", detail) is None
+    assert _p_value_comparison("statistical_forensics", detail) is None
 
 
 def test_p_value_comparison_is_exact_whitelisted_saved_display():

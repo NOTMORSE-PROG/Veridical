@@ -16,6 +16,7 @@ import { Button } from "../ui/Button";
 import { Dialog } from "../ui/Dialog";
 import { ConfirmCitationSourceModal } from "./ConfirmCitationSourceModal";
 import { PValueComparison } from "./PValueComparison";
+import { AgreementComparison } from "./AgreementComparison";
 import { useAnnotateFlag, useFlag, useOverrideFlag } from "./useFlag";
 
 const SEVERITY_LABEL: Record<FlagOut["severity"], string> = {
@@ -65,10 +66,11 @@ function EvidenceSection({
           <h2 id={headingId}>{showsManuscriptEvidence ? "Evidence from the manuscript" : "No manuscript excerpt is available"}</h2>
         </div>
       </div>
-      {showsManuscriptQuote && (
+      {showsManuscriptQuote && flag.check_kind !== "internal_agreement" && (
         <blockquote className="signal-evidence-quote"><span>“{systemFindingCopy(flag.evidence_excerpt, flag.ai_verdict_summary, "evidence")}”</span><cite>{flag.page_anchor}</cite></blockquote>
       )}
       <PValueComparison flag={flag} />
+      <AgreementComparison flag={flag} />
       {reasoningText && (!isPValueFinding(flag.ai_verdict_summary) || flag.p_value_comparison) && <div className="signal-reasoning"><h3>Recorded reasoning</h3><p>{systemFindingCopy(reasoningText, flag.ai_verdict_summary, "reasoning")}</p></div>}
       <div className="signal-reasoning"><h3>What the instructor should verify</h3><p>{findingVerificationPrompt(flag.check_kind, flag.ai_verdict_summary, !!flag.passage_pair)}</p></div>
       {/* BUG-154: the API has always returned a complete

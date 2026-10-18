@@ -134,6 +134,20 @@ describe("SignalDocumentViewerPage", () => {
     expect(screen.queryByText(/Open the cited source and confirm/)).not.toBeInTheDocument();
   });
 
+  it("shows both saved agreement statements with their own source actions, without a false single-location claim", async () => {
+    vi.stubGlobal("fetch", stubFetchByPath({
+      "/check-runs/5/document": VIEWER, "/check-runs/5/report": REPORT,
+      "/check-runs/5/escalated": [], "/check-runs/5/flags": [SUMMARY],
+      "/flags/7": { ...FLAG, affects_readiness: false, agreement_pair: { intent_text: "To build a login module.", intent_anchor: "page 1", outcome_text: "The login module was not implemented.", outcome_anchor: "page 2" } },
+    }));
+    renderWithProviders(<SignalDocumentViewerPage />, { route: "/report/5/document?finding=7", path: "/report/:checkRunId/document" });
+    expect(await screen.findByText("Statement selected as a result")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Open result location: page 2. Finding 1" })).toHaveAttribute("href", "/report/5/document?finding=7&anchor=page%202");
+    expect(screen.getByText("This review lead does not change readiness.")).toBeInTheDocument();
+    expect(screen.queryByText("Single-location check")).not.toBeInTheDocument();
+    expect(screen.queryByText(/A second passage does not apply/)).not.toBeInTheDocument();
+  });
+
   it("rejects an invalid route id without issuing a malformed request", async () => {
     const fetch = vi.fn();
     vi.stubGlobal("fetch", fetch);
