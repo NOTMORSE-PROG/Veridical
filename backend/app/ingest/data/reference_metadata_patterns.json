@@ -1,6 +1,7 @@
 {
   "_comment": "Conservative unquoted numbered-reference grammar. These conventions may be overridden; ambiguous names/dates remain unassessed.",
   "access_note_prefixes": ["accessed", "retrieved", "last accessed", "visited"],
+  "locator_labels": ["URL"],
   "months": ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December", "Jan", "Feb", "Mar", "Apr", "Jun", "Jul", "Aug", "Sep", "Sept", "Oct", "Nov", "Dec"],
   "name_particles": ["de", "del", "dela", "delos", "los", "las", "van", "von", "der", "den", "ter", "ten", "da", "das", "do", "dos", "di", "du", "la", "le", "y", "bin", "binti", "al", "el"],
   "corporate_author_words": ["university", "institute", "institution", "department", "council", "commission", "agency", "organization", "organisation", "association", "committee", "office", "laboratory", "team"]

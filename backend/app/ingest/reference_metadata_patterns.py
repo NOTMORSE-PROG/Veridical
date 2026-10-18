@@ -13,13 +13,19 @@ class ReferenceMetadataPatterns:
     publication_year: re.Pattern[str]
     name_particles: frozenset[str]
     corporate_author_words: frozenset[str]
+    locator_label: re.Pattern[str] | None
 
 
 @lru_cache
 def load_reference_metadata_patterns(path: Path | None = None) -> ReferenceMetadataPatterns:
     source = path or Path(__file__).parent / "data" / "reference_metadata_patterns.json"
     raw = json.loads(source.read_text(encoding="utf-8"))
-    for name in ("access_note_prefixes", "months", "name_particles", "corporate_author_words"):
+    for name in (
+        "access_note_prefixes",
+        "months",
+        "name_particles",
+        "corporate_author_words",
+    ):
         values = raw[name]
         if (
             not isinstance(values, list)
@@ -29,6 +35,15 @@ def load_reference_metadata_patterns(path: Path | None = None) -> ReferenceMetad
             raise ValueError(f"Reference metadata {name} must be a nonempty list of words")
     access = "|".join(re.escape(value) for value in raw["access_note_prefixes"])
     months = "|".join(re.escape(value) for value in raw["months"])
+    # Older instructor-owned pattern files need not opt into this addition.
+    # Missing/empty labels keep their previous behavior instead of breaking all
+    # otherwise-supported numbered references during metadata extraction.
+    locator_labels = raw.get("locator_labels", [])
+    if not isinstance(locator_labels, list) or not all(
+        isinstance(value, str) and value.strip() for value in locator_labels
+    ):
+        raise ValueError("Reference metadata locator_labels must be a list of words")
+    labels = "|".join(re.escape(value) for value in locator_labels)
     return ReferenceMetadataPatterns(
         access_note=re.compile(
             rf"\b(?:{access})\s*(?::|on\b|from\b|(?=(?:{months})\.?\s+\d|\d))",
@@ -41,4 +56,7 @@ def load_reference_metadata_patterns(path: Path | None = None) -> ReferenceMetad
         ),
         name_particles=frozenset(word.casefold() for word in raw["name_particles"]),
         corporate_author_words=frozenset(word.casefold() for word in raw["corporate_author_words"]),
+        locator_label=(
+            re.compile(rf"\b(?:{labels})\s*:?\s*(?=https?://)", re.IGNORECASE) if labels else None
+        ),
     )

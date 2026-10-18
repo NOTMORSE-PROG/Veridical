@@ -649,6 +649,11 @@ def _parse_unquoted_numbered_into(draft: CitationDraft, raw: str) -> None:
     # path can contain dates or punctuation; keep the raw entry for correction.
     if re.search(r"https?://\s|\b10\.\d{4,9}/\s", tail):
         return
+    # A separately labelled next URL is not a continuation of the preceding
+    # DOI. Remove only a configured label directly followed by a URL start,
+    # inside the already-established publication tail, never in source text.
+    if patterns.locator_label is not None:
+        tail = patterns.locator_label.sub("", tail)
     for locator in [*_URL.finditer(tail), *_DOI_TAIL.finditer(tail)]:
         continuation = tail[locator.end() :].lstrip()
         if not continuation:

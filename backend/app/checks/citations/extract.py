@@ -83,6 +83,8 @@ _PAREN_TAIL = re.compile(
 # no citation year at all. The author is parsed as a same-line token suffix
 # only after a year-shaped citation has been found.
 _NARRATIVE_YEAR = re.compile(r"\((?P<year>\d{4}[a-z]?)")
+_ET_AL_FINAL = re.compile(r"al\.?,?")
+_INITIALS_TOKEN = re.compile(r"(?:[^\W\d_]\.)+(?:-[^\W\d_]\.)*")
 # Hyphens include U+2010/U+2011, which publisher metadata and PDFs use in
 # names ("Crnojevic‐Bengin"); U+2060 marks a surname hyphenated across a line.
 _NARRATIVE_NAME_TOKEN = re.compile(r"[A-ZÀ-Þ][\w'’.\-‐‑⁠]*,?")
@@ -483,7 +485,7 @@ def _author_tokens_valid(
     tokens = author.split()
     if len(tokens) > max_tokens:
         return False
-    if len(tokens) >= 2 and tokens[-2:] in (["et", "al."], ["et", "al"]):
+    if len(tokens) >= 2 and tokens[-2] == "et" and _ET_AL_FINAL.fullmatch(tokens[-1]):
         tokens = tokens[:-2]
     if not tokens or not _NARRATIVE_NAME_TOKEN.fullmatch(tokens[0]):
         return False
@@ -574,7 +576,7 @@ def _narrative_author_span(
     run_end = len(tokens) - 1
     if (
         run_end > 0
-        and tokens[run_end].group() in {"al.", "al"}
+        and _ET_AL_FINAL.fullmatch(tokens[run_end].group())
         and tokens[run_end - 1].group() == "et"
     ):
         run_end -= 2
@@ -597,7 +599,11 @@ def _narrative_author_span(
         return None
     lower_bound = 0 if crosses_line else first_current_token
     index = len(tokens) - 1
-    if tokens[index].group() in {"al.", "al"} and index > 0 and tokens[index - 1].group() == "et":
+    if (
+        _ET_AL_FINAL.fullmatch(tokens[index].group())
+        and index > 0
+        and tokens[index - 1].group() == "et"
+    ):
         index -= 2
     if index < 0 or not _NARRATIVE_NAME_TOKEN.fullmatch(tokens[index].group()):
         return None
@@ -821,6 +827,19 @@ def cross_match(in_text: list[InTextCitation], references: list[ReferenceLike]) 
             # positive match or evidence that the reference is missing/unused.
             for size in range(1, min(len(words), name_limit + 1)):
                 possible_names.setdefault(" ".join(words[-size:]).casefold(), []).append(ref)
+            # A missing comma before trailing initials/credentials does not
+            # establish the family name. Retain the leading name as a POSSIBLE
+            # interpretation; never turn it into an exact match or an absence.
+            leading = list(words)
+            while (
+                len(leading) > 1
+                and leading[-1].isupper()
+                and _INITIALS_TOKEN.fullmatch(leading[-1])
+            ):
+                leading.pop()
+            if len(leading) < len(words):
+                for size in range(1, min(len(leading), name_limit) + 1):
+                    possible_names.setdefault(" ".join(leading[-size:]).casefold(), []).append(ref)
 
     linked: list[tuple[InTextCitation, list[ReferenceLike]]] = []
     orphans: list[InTextCitation] = []
