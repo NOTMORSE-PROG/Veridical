@@ -197,15 +197,12 @@ def _render_page_png(
     llm_disclosure: tuple[str, str] | None,
     settings: Settings,
 ) -> bytes:
-    """Renders ONE page, with every box in `boxes` marked -- `boxes` is the
-    UNION of every flag's own boxes that resolved to this page number
-    (`build_page_evidence_images` collects that union before calling this),
-    so a page carrying several distinct flags gets exactly one real
-    `get_pixmap` call, never one per flag (backend review finding,
-    2026-08-25: the previous per-(page, boxes) cache key rendered the SAME
-    page again for every distinct excerpt on it, defeating both the
-    ticket's own dedup requirement and `export_max_page_images`'s memory
-    argument, which prices the cap in DISTINCT PAGES)."""
+    """Render one source page with only the boxes shared by every consumer.
+
+    The caller supplies an empty tuple when findings on the page require
+    different marks. This preserves the distinct-page rendering budget
+    without attributing one finding's rectangles to another finding.
+    """
     page_height = page.rect.height
     annots = []
     merged = _merge_line_boxes(boxes, settings.export_box_line_merge_tolerance) if boxes else []
@@ -260,6 +257,12 @@ _REUSE_OTHER_SIDE_NOTE = (
     "comparison is not included in this export."
 )
 
+_SHARED_PAGE_NOTE = (
+    "Several findings use this source page with different locations. "
+    "This shared page image has no finding-specific marks; compare the excerpt "
+    "with the source or open the on-screen evidence view."
+)
+
 
 def build_page_evidence_images(
     doc: pymupdf.Document | None,
@@ -280,16 +283,13 @@ def build_page_evidence_images(
     viewer never state the reason two different ways for the same
     manuscript (the exact drift class BUG-082's history warns about).
 
-    Two passes on purpose (backend review finding, 2026-08-25): pass 1
-    classifies every flag's region and collects the UNION of boxes per
-    PAGE NUMBER (several flags routinely share a page); pass 2 renders
-    each DISTINCT page exactly once, bounded by `export_max_page_images`
-    counting real pages -- not once per flag, and not once per distinct
-    excerpt. Every flag whose region resolves to that page gets the SAME
-    shared image (with every box that belongs on that page marked, not
-    only its own) -- still real, honest marks; a reader matches a flag's
-    own excerpt text to its box the same way they would reading the raw
-    page directly."""
+    Each distinct source page is rendered once, within export_max_page_images.
+    All findings using that page receive the same image. Marks are retained
+    only if every consumer has the same box set; otherwise the page is shown
+    without marks and each finding gets an explicit shared-page disclosure.
+    An empty box set participates in this comparison, so page-only or whole-
+    document findings never inherit another finding's precise rectangles.
+    """
     if source_format == "docx":
         reason = (
             "Page images are available for PDF submissions only; this manuscript "
@@ -311,14 +311,19 @@ def build_page_evidence_images(
         )
         renders[flag.id] = _region_render(region)
 
-    # Pass 2: the union of boxes per page, across every flag anchored there.
-    boxes_by_page: dict[int, list[Bbox]] = {}
+    # Pass 2: preserve finding-specific meaning within a page-keyed cache.
+    boxes_by_page: dict[int, tuple[Bbox, ...]] = {}
+    differing_locations: set[int] = set()
     for rendered in renders.values():
         if rendered is None or rendered.page is None:
             continue
         if not (1 <= rendered.page <= doc.page_count):
             continue
-        boxes_by_page.setdefault(rendered.page, []).extend(rendered.boxes)
+        boxes = tuple(sorted(set(rendered.boxes)))
+        if rendered.page not in boxes_by_page:
+            boxes_by_page[rendered.page] = boxes
+        elif boxes_by_page[rendered.page] != boxes:
+            differing_locations.add(rendered.page)
 
     # Pass 3: render each distinct page once, capped by real page count.
     page_cache: dict[int, bytes] = {}
@@ -326,7 +331,10 @@ def build_page_evidence_images(
         if len(page_cache) >= settings.export_max_page_images:
             continue
         page_cache[page_no] = _render_page_png(
-            doc[page_no - 1], tuple(boxes), llm_disclosure=disclosure, settings=settings
+            doc[page_no - 1],
+            () if page_no in differing_locations else boxes,
+            llm_disclosure=disclosure,
+            settings=settings,
         )
 
     # Pass 4: assemble each flag's own result from the shared page cache.
@@ -352,6 +360,8 @@ def build_page_evidence_images(
             continue
 
         note = rendered.note
+        if rendered.page in differing_locations:
+            note = f"{note} {_SHARED_PAGE_NOTE}" if note else _SHARED_PAGE_NOTE
         # design review finding, 2026-08-25: a reuse flag anchored to a
         # chapter/whole-document span was disclosing WHICH page is shown
         # but not that the MATCHED manuscript (the other half of the

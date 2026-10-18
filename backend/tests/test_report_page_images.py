@@ -182,6 +182,45 @@ def test_two_flags_sharing_a_page_and_box_render_only_once(doc_and_tree, monkeyp
     result = _build(doc, tree, flags)
     assert result[10].image_png == result[11].image_png
     assert len(calls) == 1
+    assert result[10].reason is None
+    assert result[11].reason is None
+
+
+@pytest.mark.parametrize("reverse", [False, True])
+def test_different_precise_locations_share_an_unmarked_page_not_each_others_boxes(
+    doc_and_tree, reverse
+):
+    doc, tree = doc_and_tree
+    plain = doc[0].get_pixmap(dpi=get_settings().export_page_image_dpi).tobytes("png")
+    flags = [_flag(1, "p. 1", _REAL_QUOTE), _flag(2, "p. 1", "CHAPTER 1 INTRODUCTION")]
+    if reverse:
+        flags.reverse()
+    result = _build(doc, tree, flags)
+    for flag in flags:
+        assert result[flag.id].image_png == plain
+        assert "no finding-specific marks" in result[flag.id].reason
+    assert not list(doc[0].annots() or [])
+
+
+@pytest.mark.parametrize("anchor", ["p. 1", "whole document", "CHAPTER 1 INTRODUCTION"])
+def test_context_only_finding_never_inherits_a_precise_findings_marks(doc_and_tree, anchor):
+    doc, tree = doc_and_tree
+    plain = doc[0].get_pixmap(dpi=get_settings().export_page_image_dpi).tobytes("png")
+    result = _build(
+        doc,
+        tree,
+        [
+            _flag(1, "p. 1", _REAL_QUOTE),
+            _flag(2, anchor, _SYNTHESIZED_EXCERPT, "originality_reuse"),
+        ],
+    )
+    assert result[1].image_png == result[2].image_png == plain
+    assert "no finding-specific marks" in result[1].reason
+    assert "no finding-specific marks" in result[2].reason
+    if anchor != "p. 1":
+        assert "other manuscript" in result[2].reason
+    else:
+        assert "could not be located automatically" in result[2].reason
 
 
 def test_max_page_images_cap_skips_honestly_past_the_limit(doc_and_tree):
