@@ -21,6 +21,7 @@ from app.checks.reuse.service import (
 from app.checks.reuse.store import store_document_embeddings, store_passage_embeddings
 from app.config import get_settings
 from app.db import sqlalchemy_url
+from app.findings.policy import exclusion_reason
 from app.groups.service import DEFAULT_GROUP_LABEL, normalize_group_name
 from app.ingest.schemas import ExtractionResult, SectionNode, SectionTree, TextBlock
 from app.models.enums import LibraryEntrySource, LibraryEntryStatus, ResultOutcome
@@ -147,7 +148,11 @@ async def _seed_manuscript_in_group(
 
 
 async def _add_to_library(
-    session_factory, manuscript_id: int, extraction: ExtractionResult
+    session_factory,
+    manuscript_id: int,
+    extraction: ExtractionResult,
+    *,
+    legacy_document_only: bool = False,
 ) -> None:
     """V-077 (D-028): a check no longer writes into the corpus; a manuscript
     becomes a comparison source only by entering the Library. Mirrors
@@ -159,7 +164,7 @@ async def _add_to_library(
         await store_document_embeddings(
             session, manuscript_id, compute_document_embeddings(extraction, settings)
         )
-        passages = compute_passage_embeddings(extraction, settings)
+        passages = [] if legacy_document_only else compute_passage_embeddings(extraction, settings)
         if passages:
             await store_passage_embeddings(session, manuscript_id, passages, settings)
         session.add(
@@ -404,15 +409,7 @@ async def test_whole_document_and_chapter_flags_carry_real_supporting_passage_ev
 
 
 def _extraction_flat_no_chapters(body_text: str) -> ExtractionResult:
-    """No detected chapter structure (`SectionTree(source="none")`) --
-    `compute_document_embeddings`'s own flat-structure fallback still
-    produces a real whole-document vector from every block directly, but
-    `compute_passage_embeddings` produces ZERO passages for this exact
-    shape (its module docstring: "No chapter structure -> no passages at
-    all... an honest, named scope limit"). Exactly the one real case in
-    this codebase where a genuine whole-document match can have no
-    supporting passage anywhere -- used below to exercise BUG-153's own
-    fallback clause."""
+    """No detected chapters; verified body text still supports passage scope -1."""
     return ExtractionResult(
         page_count=1,
         anchor_kind="page",
@@ -428,12 +425,10 @@ async def test_unevidenceable_whole_document_match_is_downgraded_from_high_sever
     session_factory,
 ):
     """Ticket's own fallback clause: "If a finding genuinely cannot be
-    evidenced, it should not be high severity." A flat-structure
-    manuscript still produces a real whole-document exact-duplicate match,
-    but has no passage archive at all on either side, so no supporting
-    passage can exist for it anywhere -- the flag must not stay high
-    severity forcing Not Ready (BUG-150) on evidence the instructor has no
-    way to check (charter judgment rule 1)."""
+    evidenced, it should not be high severity." An active legacy Library
+    record can contain only document embeddings, without passage evidence.
+    Its lead must retain the fallback downgrade. Reuse leads are non-scoring
+    regardless of their persisted severity."""
     settings = get_settings()
 
     manuscript_a, check_run_a = await _seed_manuscript_and_run(
@@ -443,7 +438,26 @@ async def test_unevidenceable_whole_document_match_is_downgraded_from_high_sever
         await run_originality_reuse_check(
             session, manuscript_a, check_run_a, _extraction_flat_no_chapters(CH1), settings
         )
-        await _add_to_library(session_factory, manuscript_a, _extraction_flat_no_chapters(CH1))
+        await _add_to_library(
+            session_factory,
+            manuscript_a,
+            _extraction_flat_no_chapters(CH1),
+            legacy_document_only=True,
+        )
+        assert (
+            await session.scalar(
+                text("SELECT count(*) FROM manuscript_passage_archive WHERE manuscript_id = :id"),
+                {"id": manuscript_a},
+            )
+            == 0
+        )
+        assert (
+            await session.scalar(
+                text("SELECT count(*) FROM manuscript_archive WHERE manuscript_id = :id"),
+                {"id": manuscript_a},
+            )
+            == 1
+        )
 
     manuscript_b, check_run_b = await _seed_manuscript_and_run(
         session_factory, group_label="Group A (resubmission)"
@@ -470,6 +484,40 @@ async def test_unevidenceable_whole_document_match_is_downgraded_from_high_sever
     assert row.severity == "med"  # downgraded from the usual high
     assert row.evidence_unavailable == "true"
     assert row.supporting_passage is None
+
+
+async def test_flat_document_library_match_preserves_passage_evidence_without_scoring(
+    session_factory,
+):
+    settings = get_settings()
+    source_id, _ = await _seed_manuscript_and_run(session_factory, group_label="Library source")
+    await _add_to_library(session_factory, source_id, _extraction_flat_no_chapters(CH1))
+    manuscript_id, run_id = await _seed_manuscript_and_run(session_factory, group_label="Check")
+    async with session_factory() as session:
+        result = await run_originality_reuse_check(
+            session, manuscript_id, run_id, _extraction_flat_no_chapters(CH1), settings
+        )
+        rows = (
+            await session.execute(
+                text(
+                    "SELECT evidence_excerpt, page_anchor, detail FROM flag "
+                    "WHERE check_result_id = :id"
+                ),
+                {"id": result.id},
+            )
+        ).all()
+    passage_rows = [row for row in rows if row.detail["kind"].endswith("_passage")]
+    assert len(passage_rows) == 1
+    passage = passage_rows[0]
+    assert passage.evidence_excerpt == CH1
+    assert passage.page_anchor == "p. 1"
+    assert passage.detail["matched_text"] == CH1
+    assert passage.detail["matched_manuscript_id"] == source_id
+    assert all(exclusion_reason("originality_reuse", row.detail) is not None for row in rows)
+    whole = [row for row in rows if not row.detail["kind"].endswith("_passage")]
+    assert len(whole) == 1
+    assert whole[0].detail["supporting_passage"]["own_text"] == CH1
+    assert whole[0].detail["supporting_passage"]["matched_text"] == CH1
 
 
 async def test_same_instructor_whole_document_resubmission_collapses_to_one_low_flag(

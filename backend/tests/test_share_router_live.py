@@ -574,7 +574,10 @@ def test_shared_report_public_schema_is_an_exact_allow_list(
         # without it an adviser could read "no reuse found" over an empty
         # Library as a clean result.
         "originality_scope",
+        # V-081: public coverage fact only, not private source details.
+        "assessment_incomplete",
     }
+    assert type(shared["report"]["assessment_incomplete"]) is bool
     assert set(shared["report"]["results"][0].keys()) == {
         "criterion_id",
         "text",

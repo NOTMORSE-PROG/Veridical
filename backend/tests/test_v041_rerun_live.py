@@ -19,11 +19,17 @@ from app.db import sqlalchemy_url
 from app.errors import NotFoundError
 from app.models.audit import AuditLog
 from app.models.citation import Citation
-from app.models.enums import CheckRunStatus, CitationParseStatus
+from app.models.enums import (
+    CheckKind,
+    CheckRunStatus,
+    CitationParseStatus,
+    CriterionType,
+    ResultOutcome,
+)
 from app.models.instructor import Instructor
 from app.models.manuscript import Manuscript
-from app.models.rubric import Rubric
-from app.models.run import CheckRun, ReadinessReport
+from app.models.rubric import Criterion, Rubric
+from app.models.run import CheckResult, CheckRun, ReadinessReport
 from app.pipeline.service import estimate_rerun_calls
 from app.report.service import get_report
 
@@ -117,12 +123,39 @@ async def test_ac1_a_reruns_citation_check_hits_the_cache_not_the_network(sessio
     assert second.kind.value == "existence_confirmed"
 
 
-async def _seed_done_run(session, manuscript_id, rubric_id, *, status_label, score):
+async def _seed_done_run(
+    session, manuscript_id, rubric_id, *, status_label, score, with_assessment=True
+):
     check_run = CheckRun(
         manuscript_id=manuscript_id, rubric_id=rubric_id, status=CheckRunStatus.done
     )
     session.add(check_run)
     await session.commit()
+    if with_assessment:
+        criterion = Criterion(
+            rubric_id=rubric_id,
+            type=CriterionType.semantic,
+            text="The methodology explains participant selection.",
+            evidence="A source-grounded description of participant selection.",
+            weight=Decimal("100"),
+            position=0,
+        )
+        session.add(criterion)
+        await session.flush()
+        session.add(
+            CheckResult(
+                check_run_id=check_run.id,
+                criterion_id=criterion.id,
+                kind=CheckKind.semantic,
+                outcome=ResultOutcome.passed,
+                score=score,
+                detail={
+                    "basis": "llm",
+                    "anchor": "p. 1",
+                    "reasoning": "Stored assessment fixture.",
+                },
+            )
+        )
     session.add(
         ReadinessReport(check_run_id=check_run.id, status=status_label, composite_score=score)
     )
@@ -169,6 +202,48 @@ async def test_ac3_the_old_reports_report_is_unchanged_after_a_rerun_exists(sess
         old_report_after = await get_report(session, old_run.id, instructor.id)
         assert old_report_after.status == old_report_before.status == "conditionally_ready"
         assert old_report_after.composite_score == old_report_before.composite_score == 70.0
+        persisted = (
+            await session.execute(
+                text(
+                    "SELECT status, composite_score FROM readiness_report WHERE check_run_id = :id"
+                ),
+                {"id": old_run.id},
+            )
+        ).one()
+        assert persisted.status == "conditionally_ready"
+        assert persisted.composite_score == Decimal("70")
+
+
+async def test_unsupported_legacy_score_is_not_a_supported_assessment_or_rewritten(session_factory):
+    async with session_factory() as session:
+        instructor = Instructor(email="legacy@demo.local", display_name="Legacy Test")
+        session.add(instructor)
+        await session.flush()
+        manuscript = Manuscript(instructor_id=instructor.id, group_label="G", file_ref="x.pdf")
+        rubric = Rubric(instructor_id=instructor.id, title="Format", source_file="r.pdf")
+        session.add_all([manuscript, rubric])
+        await session.flush()
+        run = await _seed_done_run(
+            session,
+            manuscript.id,
+            rubric.id,
+            status_label="conditionally_ready",
+            score=Decimal("70"),
+            with_assessment=False,
+        )
+        report = await get_report(session, run.id, instructor.id)
+        assert report.status == "needs_review"
+        assert report.composite_score is None
+        persisted = (
+            await session.execute(
+                text(
+                    "SELECT status, composite_score FROM readiness_report WHERE check_run_id = :id"
+                ),
+                {"id": run.id},
+            )
+        ).one()
+        assert persisted.status == "conditionally_ready"
+        assert persisted.composite_score == Decimal("70")
 
 
 async def test_version_comparison_line_points_at_the_immediately_prior_run(session_factory):
