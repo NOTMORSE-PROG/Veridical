@@ -195,6 +195,8 @@ def _build_prompt(
 
 def _normalized_layout(
     blocks: list[TextBlock],
+    *,
+    preserve_case: bool = False,
 ) -> tuple[str, list[tuple[int, int, TextBlock]]]:
     """Joins block texts into one normalized string, remembering each
     block's [start, end) character span within it. Ingestion blocks are
@@ -208,7 +210,7 @@ def _normalized_layout(
     spans: list[tuple[int, int, TextBlock]] = []
     cursor = 0
     for block in blocks:
-        norm = _normalize(block.text)
+        norm = _WHITESPACE.sub(" ", block.text).strip() if preserve_case else _normalize(block.text)
         if not norm:
             continue
         parts.append(norm)
@@ -257,23 +259,34 @@ def _drop_claimed_quotes(
 def _verify_quotes(
     quotes: list[str], blocks: list[TextBlock], anchor_kind: str
 ) -> list[str] | None:
-    """None means at least one quote is hallucinated (not found verbatim,
-    contiguously, in the joined source) — the whole verdict is rejected
-    (charter rule 1: never show unverifiable evidence), not just the bad
-    quote."""
-    full_text, spans = _normalized_layout(blocks)
+    """Reject the verdict if any quote is absent or its source location
+    is missing or ambiguous. A supported page/paragraph is not a claim
+    of an exact bounding box or of the quote's relevance to the criterion."""
+    full_text, spans = _normalized_layout(blocks, preserve_case=True)
+    folded_layout = None
     anchors = []
     for quote in quotes:
-        normalized_quote = _normalize(quote)
+        normalized_quote = _WHITESPACE.sub(" ", quote).strip()
         if not normalized_quote:
             return None
-        pos = full_text.find(normalized_quote)
-        if pos == -1:
+        source_text, source_spans = full_text, spans
+        if normalized_quote not in source_text:
+            # Retain case-insensitive compatibility only when it identifies
+            # one supported location. Exact source spelling takes precedence.
+            if folded_layout is None:
+                folded_layout = _normalized_layout(blocks)
+            source_text, source_spans = folded_layout
+            normalized_quote = normalized_quote.lower()
+        locations: set[str | None] = set()
+        pos = source_text.find(normalized_quote)
+        while pos != -1:
+            locations.add(_anchor_at_position(pos, source_spans, anchor_kind))
+            pos = source_text.find(normalized_quote, pos + 1)
+        # Multiple occurrences on the same page support a page-only anchor,
+        # not an exact rectangle. Never choose between different locations.
+        if len(locations) != 1 or None in locations:
             return None
-        anchor = _anchor_at_position(pos, spans, anchor_kind)
-        if anchor is None:
-            return None
-        anchors.append(anchor)
+        anchors.append(next(iter(locations)))
     return anchors
 
 
