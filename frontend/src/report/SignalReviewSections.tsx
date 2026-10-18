@@ -196,7 +196,7 @@ function SignalFindingCard({
     return (
       <li className={first.overridden ? "signal-flag-row signal-flag-row--resolved" : "signal-flag-row"}>
         <div className="signal-flag-row__summary">
-          <span className={`signal-severity signal-severity--${first.severity}`}>{SEVERITY_LABEL[first.severity]}</span>
+          <span className={`signal-severity signal-severity--${first.affects_readiness === false ? "low" : first.severity}`}>{first.affects_readiness === false ? "Review lead: not scored" : SEVERITY_LABEL[first.severity]}</span>
           {!first.overridden && viewedIds.has(first.id) && (
             <span className="signal-viewed-state"><ViewedIcon />Viewed</span>
           )}
@@ -429,12 +429,12 @@ function SignalFlagList({
         </div>
         {view === initialView && initialView === "high" && (
           <p className="signal-field-hint">
-            High severity is shown first. An unresolved high-severity signal makes a report Not Ready by itself. Select Open or All to see every signal.
+            High severity is shown first. Filters use recorded severity, including review leads that do not change readiness. The readiness band also reflects criterion results and incomplete checks. Select Open or All to see every signal.
           </p>
         )}
         {view === initialView && initialView === "med" && (
           <p className="signal-field-hint">
-            Medium severity is shown first: no unresolved high-severity signals remain, and medium is the highest severity left to review. Select Open or All to see every signal.
+            Medium severity is shown first. Filters use recorded severity, including review leads that do not change readiness. The readiness band also reflects criterion results and incomplete checks. Select Open or All to see every signal.
           </p>
         )}
         <p role="status" aria-live="polite">

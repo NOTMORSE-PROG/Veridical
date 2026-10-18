@@ -96,14 +96,14 @@ export function SignalReportPage() {
             <dl>
               <div><dt>Unresolved criteria</dt><dd>{report.pending_review_count}</dd></div>
               <div>
-                <dt>Open high-severity signals</dt>
+                <dt>Open high-severity findings counted for readiness</dt>
                 <dd>
                   {report.unresolved_high_flag_count > 0 ? (
                     <Link
                       to="?flags_view=high#integrity-signals"
                       onClick={(event) => focusReportJumpTarget(event, { scrollIntoView: true })}
                       className="signal-report-hero__kpi-link signal-on-dark"
-                      aria-label={`Open high-severity signals: ${report.unresolved_high_flag_count}. Jump to the integrity signals section, filtered to high severity.`}
+                      aria-label={`Open high-severity findings counted for readiness: ${report.unresolved_high_flag_count}. Show the High severity filter, including review leads that are not scored.`}
                     >
                       {report.unresolved_high_flag_count}
                       <span aria-hidden="true"> →</span>

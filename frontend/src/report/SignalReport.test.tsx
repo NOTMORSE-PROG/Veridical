@@ -525,7 +525,7 @@ describe("SignalReportPage", () => {
     });
 
     expect(await screen.findByRole("button", { name: "Low: 1 finding" })).toHaveAttribute("aria-pressed", "true");
-    const kpiLink = screen.getByRole("link", { name: /Open high-severity signals: 1\./ });
+    const kpiLink = screen.getByRole("link", { name: /Open high-severity findings counted for readiness: 1\./ });
     expect(kpiLink).toHaveAttribute("href", expect.stringContaining("flags_view=high"));
     fireEvent.click(kpiLink);
 
@@ -552,7 +552,7 @@ describe("SignalReportPage", () => {
       fireEvent.click(await screen.findByRole("link", { name: /Inspect signals/ }));
       expect(scrollIntoView).not.toHaveBeenCalled();
 
-      fireEvent.click(screen.getByRole("link", { name: /Open high-severity signals: 1\./ }));
+      fireEvent.click(screen.getByRole("link", { name: /Open high-severity findings counted for readiness: 1\./ }));
       await waitFor(() => expect(scrollIntoView).toHaveBeenCalledTimes(1));
     } finally {
       HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
@@ -564,7 +564,45 @@ describe("SignalReportPage", () => {
     renderWithProviders(<SignalReportPage />, { route: "/report/5", path: "/report/:checkRunId" });
 
     await screen.findByRole("heading", { name: "Readiness report" });
-    expect(screen.queryByRole("link", { name: /Open high-severity signals/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: /Open high-severity findings counted for readiness/ })).not.toBeInTheDocument();
+  });
+
+  it("distinguishes readiness-counted High findings from High non-scoring leads", async () => {
+    const flags: FlagSummaryOut[] = [
+      { ...FLAG, id: 1, problem_kind: "agreement_contradictory", affects_readiness: false },
+      { ...FLAG, id: 2, check_kind: "originality_reuse", problem_kind: "reuse_exact_duplicate_passage", is_passage_level: true, affects_readiness: false },
+      { ...FLAG, id: 3, check_kind: "statistical_forensics", problem_kind: "p_value_decision_error", affects_readiness: true },
+    ];
+    stubReport({ ...BASE_REPORT, status: "needs_review", unresolved_high_flag_count: 1 }, [], flags);
+    renderWithProviders(<SignalReportPage />, { route: "/report/5", path: "/report/:checkRunId" });
+
+    expect(await screen.findByRole("button", { name: "High: 3 findings" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("link", { name: /Open high-severity findings counted for readiness: 1\./ })).toHaveTextContent("1");
+    expect(screen.getAllByText("Needs Review").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Review lead: not scored")).toHaveLength(2);
+    expect(screen.getAllByText("High severity", { exact: true })).toHaveLength(1);
+    expect(screen.getByText(/Filters use recorded severity, including review leads/)).toBeInTheDocument();
+    expect(screen.queryByText(/makes a report Not Ready by itself/)).not.toBeInTheDocument();
+  });
+
+  it.each([true, undefined])("retains recorded severity unless non-scoring is explicit (%s)", async (affects_readiness) => {
+    stubReport({ ...BASE_REPORT, unresolved_high_flag_count: 1 }, [], [{ ...FLAG, affects_readiness }]);
+    renderWithProviders(<SignalReportPage />, { route: "/report/5", path: "/report/:checkRunId" });
+    expect(await screen.findByText("High severity", { exact: true })).toBeInTheDocument();
+    expect(screen.queryByText("Review lead: not scored")).not.toBeInTheDocument();
+  });
+
+  it("keeps Medium help truthful when a High non-scoring lead remains", async () => {
+    stubReport({ ...BASE_REPORT, unresolved_high_flag_count: 0 }, [], [
+      { ...FLAG, id: 1, affects_readiness: false },
+      { ...FLAG, id: 2, severity: "med", check_kind: "citation_integrity", problem_kind: "orphan_citation", affects_readiness: true },
+    ]);
+    renderWithProviders(<SignalReportPage />, { route: "/report/5", path: "/report/:checkRunId" });
+    expect(await screen.findByRole("button", { name: "Medium: 1 finding" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByText(/Medium severity is shown first\. Filters use recorded severity/)).toBeInTheDocument();
+    expect(screen.queryByText(/no unresolved high-severity signals remain/)).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "High: 1 finding" }));
+    expect(await screen.findByText("Review lead: not scored")).toBeInTheDocument();
   });
 
   const ME_INSTRUCTOR = { id: 9, email: "me@tip.edu.ph", display_name: "Me", onboarding_dismissed_at: null };
