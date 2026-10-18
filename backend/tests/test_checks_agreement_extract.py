@@ -15,9 +15,9 @@ from pathlib import Path
 import pytest
 
 from app.checks.agreement.cues import load_cues
-from app.checks.agreement.extract import extract_statements
+from app.checks.agreement.extract import _statement_blocks, extract_statements
 from app.config import get_settings
-from app.ingest.schemas import ExtractionResult, SectionTree, TextBlock
+from app.ingest.schemas import ExtractionResult, SectionTree, SourceLineSpan, TextBlock
 
 CUES = load_cues()
 SETTINGS = get_settings()
@@ -37,6 +37,119 @@ def _extraction(blocks: list[TextBlock]) -> ExtractionResult:
         blocks=blocks,
         images=[],
     )
+
+
+def _native_block(lines: list[str], page: int) -> TextBlock:
+    source_lines = []
+    offset = 0
+    for i, text in enumerate(lines):
+        source_lines.append(
+            SourceLineSpan(
+                start=offset,
+                end=offset + len(text),
+                bbox=(50, i * 20, 500, i * 20 + 15),
+                max_font_size=11,
+                bold_ratio=0,
+                source_id=f"{page}:0:{i}",
+            )
+        )
+        offset += len(text) + 1
+    return _block("\n".join(lines), page=page).model_copy(
+        update={
+            "source_lines": source_lines,
+            "source_line_ids": [s.source_id for s in source_lines],
+        }
+    )
+
+
+def test_native_multiline_headings_and_items_use_exact_source_lines():
+    extraction = _extraction(
+        [
+            _native_block(["Ordinary introductory prose.", "Objectives"], 1),
+            _native_block(
+                [
+                    "1. To build a biometric login module for the",
+                    "document review service.",
+                    "Methodology",
+                ],
+                1,
+            ),
+            _native_block(
+                [
+                    "Summary of Findings",
+                    "1. The biometric login module was not implemented.",
+                    "Results",
+                    "The unrelated test reported t(28) = 2.45, p = .900.",
+                ],
+                2,
+            ),
+        ]
+    )
+    before = extraction.model_dump()
+    result = extract_statements(extraction, cues=CUES, settings=SETTINGS)
+    assert [s.text for s in result.intents] == [
+        "To build a biometric login module for the document review service."
+    ]
+    assert [s.text for s in result.outcomes] == ["The biometric login module was not implemented."]
+    assert result.intents[0].page == 1
+    assert result.outcomes[0].page == 2
+    projected = _statement_blocks(extraction)
+    assert len(projected) == 9
+    assert projected[1].text == "Objectives"
+    assert projected[1].bbox == extraction.blocks[0].source_lines[1].bbox
+    assert projected[1].source_line_ids == ["1:0:1"]
+    assert extraction.model_dump() == before
+
+
+def test_statement_projection_preserves_legacy_blocks_and_rejects_corrupt_lines():
+    legacy = _extraction([_block("Legacy paragraph with no line inventory.")])
+    assert _statement_blocks(legacy) == legacy.blocks
+    damaged = _extraction([_native_block(["Objectives", "1. To build a working module."], 1)])
+    damaged.blocks[0].source_lines[1].start += 1
+    from app.checks.source_quality import source_limitation_detail
+
+    limitation = source_limitation_detail(damaged)
+    assert limitation is not None
+    assert limitation["analysis_coverage"] == "unsupported"
+    assert limitation["source_issues"] == [{"page": 1, "reason": "invalid_source_line_inventory"}]
+    with pytest.raises(ValueError, match="Invalid source line inventory"):
+        extract_statements(damaged, cues=CUES, settings=SETTINGS)
+
+
+@pytest.mark.parametrize("separate_block", [False, True])
+def test_native_title_case_continuation_remains_in_the_list_item(separate_block):
+    extraction = _extraction(
+        [
+            _native_block(["Objectives"], 1),
+            _native_block(["1. To build a", "Document Review Module", "for instructors."], 1),
+        ]
+    )
+    if separate_block:
+        extraction.blocks[1:] = [
+            _native_block(["1. To build a"], 1),
+            _native_block(["Document Review Module", "for instructors."], 1),
+        ]
+    result = extract_statements(extraction, cues=CUES, settings=SETTINGS)
+    assert [s.text for s in result.intents] == [
+        "To build a Document Review Module for instructors."
+    ]
+
+
+def test_native_title_case_scope_guard_is_not_removed_from_modal_context():
+    extraction = _extraction(
+        [
+            _native_block(
+                [
+                    "The system will monitor attendance, but this is",
+                    "Outside The Scope Of This Study",
+                    "and is not part of the current implementation.",
+                ],
+                1,
+            )
+        ]
+    )
+    result = extract_statements(extraction, cues=CUES, settings=SETTINGS)
+    assert not result.intents
 
 
 # --- rule 1: objective/outcome list detection ---------------------------------

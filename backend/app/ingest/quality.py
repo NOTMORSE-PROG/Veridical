@@ -1,6 +1,7 @@
 """Persisted source-quality gates shared by ingestion and check services."""
 
 from app.ingest.schemas import ExtractionResult
+from app.ingest.source_slices import line_inventory_valid
 
 SOURCE_READING_ORDER_UNRESOLVED = "source_reading_order_unresolved"
 SOURCE_READING_ORDER_NOTE = (
@@ -47,6 +48,12 @@ def reading_order_issues(
     extraction; a scope can never hide damaged provenance or missing records.
     The default remains document-wide, and this never mutates the source ledger.
     """
+    for block in extraction.blocks:
+        if not line_inventory_valid(block):
+            issue: dict[str, int | str] = {"reason": "invalid_source_line_inventory"}
+            if block.page is not None:
+                issue["page"] = block.page
+            return [issue]
     records = extraction.reading_order
     if records is None:
         return []

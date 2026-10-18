@@ -103,20 +103,30 @@ def block_quote_block_ids(extraction: ExtractionResult, settings: Settings) -> s
             and start <= b.page
             and (end is None or b.page < end)
         ]
-        if len(span_blocks) < 2:
-            continue
-        # Round to the nearest point: real x0 values cluster tightly but
-        # rendering jitter keeps them from being bit-identical, which would
-        # make a raw Counter over floats useless (every value its own mode).
-        rounded = [round(b.bbox[0]) for b in span_blocks]
-        body_x0 = Counter(rounded).most_common(1)[0][0]
-        for b, x0 in zip(span_blocks, rounded, strict=True):
-            if (
-                x0 > body_x0 + settings.block_quote_indent_threshold_points
-                and _word_count(b) >= settings.block_quote_min_words
-            ):
-                quote_ids.add(id(b))
+        quote_ids.update(block_quote_ids_in_scope(span_blocks, settings))
     return quote_ids
+
+
+def block_quote_ids_in_scope(blocks: list[TextBlock], settings: Settings) -> set[int]:
+    """Apply the existing indentation rule to an exact chapter or body scope.
+
+    No geometry means no indentation signal, not proof that text is unquoted.
+    Returned identities refer to the supplied views, including source fragments.
+    """
+    supported = [
+        b for b in blocks if not b.is_furniture and b.bbox is not None and b.page is not None
+    ]
+    if len(supported) < 2:
+        return set()
+    # Round to the nearest point to group ordinary PDF rendering jitter.
+    rounded = [round(b.bbox[0]) for b in supported]
+    body_x0 = Counter(rounded).most_common(1)[0][0]
+    return {
+        id(b)
+        for b, x0 in zip(supported, rounded, strict=True)
+        if x0 > body_x0 + settings.block_quote_indent_threshold_points
+        and _word_count(b) >= settings.block_quote_min_words
+    }
 
 
 def _word_count(block: TextBlock) -> int:

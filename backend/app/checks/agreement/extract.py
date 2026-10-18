@@ -24,10 +24,10 @@ Two independent rule types, matching the ticket's own wording exactly
    heading matching `cues.objective_heading_synonyms` /
    `outcome_heading_synonyms` (data file, ENGINEERING §8) — the strong
    signal real capstones use ("1.3.2 Specific Objectives" -> "1. To build
-   a Rubric Parsing module that..."). PDF/DOCX extraction gives one
-   TextBlock per LINE, not per paragraph, so a single list item is
-   reassembled by merging continuation blocks until the next list marker
-   or heading.
+   a Rubric Parsing module that..."). Native PDF blocks can contain
+   multiple lines. A transient, validated source-line view exposes those
+   boundaries without changing the stored extraction. A single list item
+   is reassembled until the next list marker or heading.
 2. **Modal-phrase cues, anywhere in the document** ("the system will...",
    "results showed..."): sentence-level, position-independent, the part
    of this ticket general contradiction-detection scope explicitly does
@@ -47,6 +47,7 @@ from typing import Literal
 from app.checks.agreement.cues import AgreementCues, load_cues
 from app.config import Settings, get_settings
 from app.ingest.schemas import ExtractionResult, TextBlock
+from app.ingest.source_slices import SourceFragment, SourceSlicer, line_inventory_valid
 
 StatementKind = Literal["intent", "outcome"]
 
@@ -133,7 +134,11 @@ class ExtractionOutcome:
 
 
 def _extract_list_statements(
-    blocks: list[TextBlock], cues: AgreementCues, *, heading_max_words: int
+    blocks: list[TextBlock],
+    cues: AgreementCues,
+    *,
+    heading_max_words: int,
+    source_blocks: list[TextBlock],
 ) -> list[Statement]:
     out: list[Statement] = []
     section: Literal["objectives", "outcomes", "other"] = "other"
@@ -161,7 +166,19 @@ def _extract_list_statements(
             continue
         text = block.text.strip()
 
-        if _is_heading_like(text, max_words=heading_max_words):
+        native_continuation = (
+            isinstance(block, SourceFragment)
+            and isinstance(current_block, SourceFragment)
+            and bool(current_parts)
+            and not current_parts[-1].rstrip().endswith((".", "!", "?"))
+            and _heading_section(text, cues) == "other"
+            # Projection must not promote a Title Case continuation from an
+            # original prose block into a heading and truncate the objective.
+            and not _is_heading_like(
+                source_blocks[block.source_block_index].text.strip(), max_words=heading_max_words
+            )
+        )
+        if _is_heading_like(text, max_words=heading_max_words) and not native_continuation:
             _flush()
             current_kind, current_parts, current_block = None, [], None
             new_section = _heading_section(text, cues)
@@ -328,6 +345,28 @@ def _dedupe(statements: list[Statement], *, threshold: float) -> list[Statement]
 # --- entry point ---------------------------------------------------------------
 
 
+def _statement_blocks(extraction: ExtractionResult) -> list[TextBlock]:
+    """Expose evidenced line boundaries; never invent geometry for legacy blocks."""
+    blocks: list[TextBlock] = []
+    for index, block in enumerate(extraction.blocks):
+        if block.source_lines is None:
+            blocks.append(block)
+            continue
+        if not line_inventory_valid(block):
+            # The service's source-quality gate records this as unsupported.
+            # Direct consumers must not quietly use a corrupt line inventory.
+            raise ValueError("Invalid source line inventory for statement extraction")
+        fragment = SourceFragment(
+            **block.model_dump(),
+            source_block_index=index,
+            source_start=0,
+            source_end=len(block.text),
+        )
+        slicer = SourceSlicer(fragment)
+        blocks.extend(slicer.slice(line.start, line.end) for line in block.source_lines)
+    return blocks
+
+
 def extract_statements(
     extraction: ExtractionResult,
     *,
@@ -336,14 +375,20 @@ def extract_statements(
 ) -> ExtractionOutcome:
     settings = settings or get_settings()
     cues = cues or load_cues(settings.agreement_cues_file)
-    blocks = extraction.blocks
+    blocks = _statement_blocks(extraction)
 
     statements = [
         *_extract_list_statements(
-            blocks, cues, heading_max_words=settings.agreement_heading_max_words
+            blocks,
+            cues,
+            heading_max_words=settings.agreement_heading_max_words,
+            source_blocks=extraction.blocks,
         ),
         *_extract_modal_statements(
-            blocks,
+            # Keep sentence context intact. Projected Title Case continuation
+            # lines are not independently proved headings, and may carry a
+            # scope/future-work guard that must never disappear from a sentence.
+            extraction.blocks,
             cues,
             cue_max_lead_words=settings.agreement_cue_max_lead_words,
             heading_max_words=settings.agreement_heading_max_words,

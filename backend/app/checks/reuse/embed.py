@@ -38,12 +38,23 @@ from dataclasses import dataclass
 from typing import Literal
 
 from app.config import Settings, get_settings
-from app.ingest.blockquotes import block_quote_block_ids
+from app.ingest.blockquotes import block_quote_block_ids, block_quote_ids_in_scope
 from app.ingest.normalize import normalize
-from app.ingest.patterns import load_patterns
+from app.ingest.patterns import HeadingPatterns, load_patterns
 from app.ingest.references import non_reference_blocks
 from app.ingest.schemas import ExtractionResult, SectionNode, TextBlock
 from app.ml.embeddings import embed_texts
+
+# A passage scope, not a SectionNode/ChapterArchive index. Offsets in this scope
+# address its joined exact body fragments. Structured chapter indices start at 0.
+UNSTRUCTURED_BODY_SCOPE = -1
+
+
+def _unstructured_body_blocks(
+    extraction: ExtractionResult, patterns: HeadingPatterns
+) -> list[TextBlock]:
+    """Exclude only the selected bibliography and its exact source heading."""
+    return non_reference_blocks(extraction, patterns, exclude_heading=True)
 
 
 @dataclass(frozen=True)
@@ -185,13 +196,13 @@ def compute_document_embeddings(
             chunk_words=settings.reuse_embedding_chunk_words,
             settings=settings,
         )
-    elif not chapters:
+    elif not any(normalize(n.title).casefold() not in patterns.reference_titles for n in chapters):
         # No chapter structure detected at all (e.g. `section_tree.source
         # == "none"`, a scan or a document heuristics couldn't parse) —
         # fall back to every non-furniture, non-reference block so a
         # manuscript with a genuinely flat structure still gets SOME
         # archive coverage rather than silently opting out of F7 entirely.
-        text = "\n".join(b.text for b in content_blocks if not b.is_furniture and b.text.strip())
+        text = "\n".join(b.text for b in _unstructured_body_blocks(extraction, patterns))
         whole_document = embed_long_text(
             text, chunk_words=settings.reuse_embedding_chunk_words, settings=settings
         )
@@ -216,11 +227,9 @@ def compute_document_embeddings(
 # `compute_document_embeddings` to serve both would risk the F7.1-3 tests
 # this module already carries.
 #
-# **No chapter structure -> no passages at all** (`section_tree.source ==
-# "none"`): an honest, named scope limit for this ticket, not a silent
-# gap — F7.1's whole-document fallback (this module, above) still runs for
-# such a manuscript; only the finer F7.4 granularity is unavailable, same
-# spirit as V-065's own AC6 split (build what's real, name what isn't).
+# When no non-reference chapter exists, V-081 adds an explicit unstructured
+# body scope. It uses exact non-reference source fragments and the same chunker;
+# it never fabricates section nodes or changes structured front-matter policy.
 
 
 @dataclass(frozen=True)
@@ -230,7 +239,7 @@ class PassageEmbedding:
     anchor_kind: Literal["page", "paragraph"]
     page: int | None
     paragraph: int | None
-    # Offsets within the CHAPTER's own assembled text (the same
+    # Offsets within the CHAPTER (or UNSTRUCTURED_BODY_SCOPE) assembled text (the same
     # "\n".join(block texts) basis `_chapter_span_blocks` already produces
     # for chapter-level embedding) — not the whole document, and not a
     # byte offset into the original file. Real, but scoped to what this
@@ -449,6 +458,30 @@ def compute_passage_embeddings(
             draft["chapter_index"] = chapter_idx
             draft["context_text"] = _add_context(
                 full_chapter_text,
+                draft["char_start"],
+                draft["char_end"],
+                settings.reuse_passage_context_words,
+            )
+            drafts.append(draft)
+            texts.append(draft["text"])
+
+    if not any(normalize(n.title).casefold() not in patterns.reference_titles for n in chapters):
+        body_blocks = _unstructured_body_blocks(extraction, patterns)
+        full_body_text = "\n".join(b.text for b in body_blocks)
+        body_quote_ids = (
+            block_quote_ids_in_scope(body_blocks, settings)
+            if extraction.anchor_kind == "page"
+            else set()
+        )
+        for draft in _build_passages(
+            body_blocks,
+            chunk_words=settings.reuse_passage_chunk_words,
+            ref_ids=set(),  # exact complement already excludes reference intervals
+            quote_ids=body_quote_ids,
+        ):
+            draft["chapter_index"] = UNSTRUCTURED_BODY_SCOPE
+            draft["context_text"] = _add_context(
+                full_body_text,
                 draft["char_start"],
                 draft["char_end"],
                 settings.reuse_passage_context_words,

@@ -129,6 +129,7 @@ class ReferenceSelection:
     groups: list[list[TextBlock]]
     span: list[TextBlock]
     issues: tuple[str, ...] = ()
+    heading: TextBlock | None = None
 
 
 def select_references(result: ExtractionResult, patterns: HeadingPatterns) -> ReferenceSelection:
@@ -159,7 +160,10 @@ def select_references(result: ExtractionResult, patterns: HeadingPatterns) -> Re
         if block.text[start:].strip():
             projected.append(slicer.slice(start, len(block.text)))
     issues: list[str] = []
-    span = _reference_span_blocks(result.model_copy(update={"blocks": projected}), patterns, issues)
+    headings: list[TextBlock] = []
+    span = _reference_span_blocks(
+        result.model_copy(update={"blocks": projected}), patterns, issues, headings
+    )
     for block in span:
         for line in block.text.splitlines():
             marker = _REFERENCE_MARKER.match(line)
@@ -195,7 +199,9 @@ def select_references(result: ExtractionResult, patterns: HeadingPatterns) -> Re
             ]
             if labels != consumed:
                 issues.append("ambiguous_reference_entry_boundaries")
-    return ReferenceSelection(groups, span, tuple(issues))
+    return ReferenceSelection(
+        groups, span, tuple(issues), headings[0] if len(headings) == 1 else None
+    )
 
 
 def extract_references(result: ExtractionResult, patterns: HeadingPatterns) -> list[CitationDraft]:
@@ -328,13 +334,17 @@ def non_reference_blocks(
     patterns: HeadingPatterns,
     *,
     selection: ReferenceSelection | None = None,
+    exclude_heading: bool = False,
 ) -> list[TextBlock]:
     """Exact complement of bibliography/furniture intervals, not object identity."""
     selection = selection or select_references(result, patterns)
     if selection.issues:
         return []
     excluded: dict[int, list[tuple[int, int]]] = {}
-    for fragment in selection.span:
+    intervals = list(selection.span)
+    if exclude_heading and isinstance(selection.heading, SourceFragment):
+        intervals.append(selection.heading)
+    for fragment in intervals:
         excluded.setdefault(fragment.source_block_index, []).append(
             (fragment.source_start, fragment.source_end)
         )
@@ -729,7 +739,10 @@ def _reference_span(result: ExtractionResult, patterns: HeadingPatterns) -> list
 
 
 def _reference_span_blocks(
-    result: ExtractionResult, patterns: HeadingPatterns, issues: list[str]
+    result: ExtractionResult,
+    patterns: HeadingPatterns,
+    issues: list[str],
+    headings: list[TextBlock] | None = None,
 ) -> list[TextBlock]:
     """Blocks strictly between the references heading and the next heading
     of the same or higher rank (document order); [] when no reference
@@ -742,7 +755,9 @@ def _reference_span_blocks(
     blocks = [b for b in result.blocks if not b.is_furniture]
     if ref_pos is None:
         explicit = flat if result.section_tree.source in {"embedded_toc", "styles"} else []
-        return _span_by_bare_heading(blocks, patterns, explicit, result.anchor_kind, issues)
+        return _span_by_bare_heading(
+            blocks, patterns, explicit, result.anchor_kind, issues, headings
+        )
     node = flat[ref_pos]
     successor = next((n for n in flat[ref_pos + 1 :] if n.level <= node.level), None)
 
@@ -755,24 +770,39 @@ def _reference_span_blocks(
         if succ_idx is not None:
             end = succ_idx
     return _until_reference_end_heading(
-        _after_heading(blocks, start, end, patterns, issues), patterns, blocks[start], issues
+        _after_heading(blocks, start, end, patterns, issues, headings=headings),
+        patterns,
+        blocks[start],
+        issues,
     )
 
 
 def _after_heading(
-    blocks: list[TextBlock], start: int, end: int, patterns: HeadingPatterns, issues: list[str]
+    blocks: list[TextBlock],
+    start: int,
+    end: int,
+    patterns: HeadingPatterns,
+    issues: list[str],
+    *,
+    allow_numbered: bool = True,
+    headings: list[TextBlock] | None = None,
 ) -> list[TextBlock]:
     """A heading and the first reference may occupy the same native text block."""
     heading = blocks[start]
     offset = 0
     for line in heading.text.splitlines(keepends=True):
+        line_start = offset
         offset += len(line)
-        if patterns.is_reference_heading(line):
+        if patterns.is_reference_heading(line, allow_numbered=allow_numbered):
+            if headings is not None:
+                headings.append(slice_block(heading, line_start, offset))
             break
     else:
-        if not patterns.is_reference_heading(heading.text):
+        if not patterns.is_reference_heading(heading.text, allow_numbered=allow_numbered):
             issues.append("ambiguous_reference_heading")
             return []
+        if headings is not None:
+            headings.append(heading)
     tail = blocks[start + 1 : end]
     if heading.text[offset:].strip():
         return [slice_block(heading, offset, len(heading.text)), *tail]
@@ -801,15 +831,29 @@ def _span_by_bare_heading(
     explicit_nodes: list[SectionNode],
     anchor_kind: str,
     issues: list[str],
+    headings: list[TextBlock] | None = None,
 ) -> list[TextBlock]:
     """Tree didn't include the reference section (e.g. source='none'):
     fall back to a standalone, unnumbered line naming it. A numbered line
     without a tree could be a TOC listing, so fail closed. Stop at a
     configured later heading rather than treating an appendix as references."""
     for i, b in enumerate(blocks):
+        # Source-line provenance proves coordinates, not a line's semantic role.
+        # A later prose mention alone must not become a bibliography boundary.
         if patterns.is_reference_heading(b.text.splitlines()[0], allow_numbered=False):
             span = _until_reference_end_heading(
-                _after_heading(blocks, i, len(blocks), patterns, issues), patterns, b, issues
+                _after_heading(
+                    blocks,
+                    i,
+                    len(blocks),
+                    patterns,
+                    issues,
+                    allow_numbered=False,
+                    headings=headings,
+                ),
+                patterns,
+                b,
+                issues,
             )
             return _until_explicit_heading(span, explicit_nodes, patterns, anchor_kind)
     return []

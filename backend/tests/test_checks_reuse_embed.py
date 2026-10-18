@@ -4,6 +4,7 @@ DB — this module never touches the database (pure function over
 `ExtractionResult`), same convention as `test_checks_agreement_extract.py`."""
 
 from app.checks.reuse.embed import (
+    UNSTRUCTURED_BODY_SCOPE,
     _add_context,
     _average_normalize,
     _chunk_words,
@@ -239,13 +240,17 @@ def test_compute_passage_embeddings_short_chapter_is_one_passage():
     assert "entirely manual" in passages[0].text
 
 
-def test_compute_passage_embeddings_no_chapter_structure_is_empty():
-    """Honest, named scope limit (module docstring): F7.4 needs chapter
-    structure. A flat/unparseable document still gets F7.1's whole-document
-    fallback (unaffected by this ticket) but no passage-level coverage."""
+def test_compute_passage_embeddings_unstructured_scope_has_source_offsets():
+    """V-081 adds explicit body passages; it must not invent a chapter."""
     blocks = [_block("Some flat, unstructured content with no headings at all.", page=1)]
     passages = compute_passage_embeddings(_extraction(blocks, nodes=[]), settings=SETTINGS)
-    assert passages == []
+    assert len(passages) == 1
+    passage = passages[0]
+    assert passage.chapter_index == UNSTRUCTURED_BODY_SCOPE
+    assert passage.page == 1
+    assert blocks[0].text[passage.char_start : passage.char_end] == passage.text
+    assert passage.text in passage.context_text
+    assert not passage.is_reference_list
 
 
 def test_heading_only_references_chapter_is_still_tagged_reference_list():
