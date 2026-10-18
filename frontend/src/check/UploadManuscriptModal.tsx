@@ -263,7 +263,14 @@ export function UploadManuscriptModal({ onClose, onUploadSuccess }: UploadManusc
               </section>
             )}
             <p className="signal-upload-summary__counts">
-              {summary.page_count} pages parsed. {summary.citations} reference records extracted.
+              {summary.anchor_kind === "paragraph"
+                ? "Word document processed using paragraph locations. Page count is not available."
+                : summary.anchor_kind === "page"
+                  ? summary.page_count > 0
+                    ? `${summary.page_count} ${summary.page_count === 1 ? "page" : "pages"} parsed.`
+                    : "The parser reported 0 pages for this PDF. Check the file before starting a check."
+                  : "Page count is not available for this upload."}
+              {" "}{summary.citations} reference {summary.citations === 1 ? "record" : "records"} extracted.
             </p>
             {(extractionNotes.length > 0 || showsVisionUnavailable) && (
               <section className="signal-upload-summary__notes" aria-label="Extraction notes">

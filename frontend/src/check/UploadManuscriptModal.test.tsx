@@ -102,6 +102,31 @@ describe("UploadManuscriptModal", () => {
     expect(await screen.findByText("12 pages parsed. 0 reference records extracted.")).toBeInTheDocument();
   });
 
+  it.each([
+    ["paragraph", 0, 0, "Word document processed using paragraph locations. Page count is not available. 0 reference records extracted."],
+    ["paragraph", 7, 1, "Word document processed using paragraph locations. Page count is not available. 1 reference record extracted."],
+    ["page", 0, 0, "The parser reported 0 pages for this PDF. Check the file before starting a check. 0 reference records extracted."],
+    ["page", 1, 1, "1 page parsed. 1 reference record extracted."],
+    [undefined, 0, 2, "Page count is not available for this upload. 2 reference records extracted."],
+  ])("uses returned location kind %s, not filename or zero-page inference", async (anchorKind, pages, citations, expected) => {
+    const note = "Some content needs a source-reading check.";
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({
+      ...SUMMARY, anchor_kind: anchorKind, page_count: pages, citations, notes: [note],
+    }), { status: 200 })));
+    const onUploadSuccess = vi.fn();
+    renderWithProviders(<UploadManuscriptModal onClose={() => {}} onUploadSuccess={onUploadSuccess} />);
+    chooseFile(); // The returned location contract wins even for a .pdf filename.
+    fireEvent.click(screen.getByRole("button", { name: "Upload manuscript" }));
+    expect(await screen.findByText(expected)).toBeInTheDocument();
+    expect(screen.queryByText(/0 pages parsed/)).not.toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "Extraction notes" })).toHaveTextContent(note);
+    if (anchorKind !== "paragraph") expect(screen.queryByText(/Word document processed/)).not.toBeInTheDocument();
+    const heading = screen.getByRole("heading", { name: "Upload complete" });
+    await waitFor(() => expect(document.activeElement).toBe(heading));
+    fireEvent.click(screen.getByRole("button", { name: "Start a check with this manuscript" }));
+    expect(onUploadSuccess).toHaveBeenCalledWith(42);
+  });
+
   it("displays source-reading limitations for an ordinary text PDF", async () => {
     const note = "References were not extracted because some pages cannot be read reliably.";
     vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({
