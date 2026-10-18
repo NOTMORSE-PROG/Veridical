@@ -276,6 +276,35 @@ async def test_pagination_is_stable_when_every_row_shares_one_created_at(session
         assert len(set(seen_ids)) == 5  # no id repeated across a page boundary
 
 
+async def test_record_sequence_keeps_legacy_timestamps_unchanged(session_factory):
+    """Mixed historical clocks must not reverse entry order or be rewritten."""
+    async with session_factory() as session:
+        instructor = Instructor(email="clock@test.local", display_name="Clock")
+        session.add(instructor)
+        await session.commit()
+        run = await _make_run(session, instructor)
+        newer_time = datetime(2026, 10, 18, 1, 17, tzinfo=UTC)
+        older_time = newer_time - timedelta(minutes=5)
+        first = AuditLog(
+            event_type="report_decided", check_run_id=run.id, payload={}, created_at=newer_time
+        )
+        session.add(first)
+        await session.commit()
+        second = AuditLog(
+            event_type="report_reopened", check_run_id=run.id, payload={}, created_at=older_time
+        )
+        session.add(second)
+        await session.commit()
+        page = await list_audit_log(session, instructor.id)
+        assert [row.id for row in page.items] == [second.id, first.id]
+        assert [row.created_at for row in page.items] == [older_time, newer_time]
+        filtered = await list_audit_log(session, instructor.id, date_from=newer_time)
+        assert [row.id for row in filtered.items] == [first.id]
+        assert (
+            await get_audit_log_detail(session, instructor.id, second.id)
+        ).created_at == older_time
+
+
 async def test_detail_returns_full_payload_and_input_hash(session_factory):
     async with session_factory() as session:
         instructor = Instructor(email="det@test.local", display_name="Det")

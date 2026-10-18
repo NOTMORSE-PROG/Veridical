@@ -399,7 +399,7 @@ function AuditDetailModal({ id, onClose }: { id: number; onClose: () => void }) 
                 </span>
               )}
               <span>
-                <b className="text-ink">When:</b>{" "}
+                <b className="text-ink">Stored time:</b>{" "}
                 {new Date(data.created_at).toLocaleString(undefined, {
                   dateStyle: "medium",
                   timeStyle: "medium",
@@ -429,6 +429,11 @@ function AuditDetailModal({ id, onClose }: { id: number; onClose: () => void }) 
                 unchanged so a technical reviewer can inspect the record or use it in a
                 reproduction workflow.
               </p>
+              <p>
+                Entry numbers identify records, not verified event times or transaction completion
+                order. Older records may use different system clocks.
+              </p>
+              <p>Stored timestamp: <code>{data.created_at}</code></p>
               {data.agreement_score !== null && (
                 <div className="rounded-md bg-page px-2.5 py-1.5 font-mono text-xs break-all text-ink-tertiary">
                   agreement_score: {data.agreement_score}
@@ -606,6 +611,9 @@ export function AuditLogPage() {
       </div>
 
       <div className="signal-group-flow signal-audit-records">
+      <p className="signal-filter-help">
+        Order: Highest entry number first. Stored times are shown unchanged and may not follow this order.
+      </p>
       {isLoading && (
         <div
           role="status"
@@ -641,7 +649,7 @@ export function AuditLogPage() {
                   return (
                     <li key={row.id} className="rounded-lg border border-border bg-panel p-3">
                       <div className="flex items-start justify-between gap-2">
-                        <span className="text-xs text-ink-tertiary">{formatEventTime(row.created_at)}</span>
+                        <span className="text-xs text-ink-tertiary">Entry #{row.id}<br />{formatEventTime(row.created_at)}</span>
                         <button
                           type="button"
                           onClick={() => setParam("detail", String(row.id))}
@@ -667,9 +675,7 @@ export function AuditLogPage() {
                       className="flex min-h-11 w-full items-center justify-between gap-2 text-left text-sm text-ink"
                     >
                       <span>
-                        <b>{entry.rows.length}</b> x {entry.label} events between{" "}
-                        {formatEventTime(entry.rows[entry.rows.length - 1].created_at)} and{" "}
-                        {formatEventTime(entry.rows[0].created_at)}
+                        <b>{entry.rows.length}</b> x {entry.label} events
                         {entry.groupLabel && <span className="text-ink-tertiary"> · {entry.groupLabel}</span>}
                         <ExecutionModeTag mode={entry.executionMode} />
                       </span>
@@ -681,7 +687,7 @@ export function AuditLogPage() {
                       <ul className="mt-2 flex flex-col gap-2 border-t border-border pt-2">
                         {entry.rows.map((row) => (
                           <li key={row.id} className="flex items-start justify-between gap-2">
-                            <span className="text-xs text-ink-tertiary">{formatEventTime(row.created_at)}</span>
+                            <span className="text-xs text-ink-tertiary">Entry #{row.id}<br />{formatEventTime(row.created_at)}</span>
                             <button
                               type="button"
                               onClick={() => setParam("detail", String(row.id))}
@@ -713,7 +719,7 @@ export function AuditLogPage() {
               role="row"
               className="grid grid-cols-[152px_minmax(0,1fr)_84px] gap-3 border-b border-border bg-status-neutral-bg px-4 py-2.5 text-xs font-semibold tracking-header text-ink-tertiary uppercase"
             >
-              <span role="columnheader">Time</span>
+              <span role="columnheader">Entry / stored time</span>
               <span role="columnheader">Event</span>
               <span role="columnheader">
                 <span className="sr-only">Actions</span>
@@ -730,6 +736,7 @@ export function AuditLogPage() {
                       className="grid grid-cols-[152px_minmax(0,1fr)_84px] items-start gap-3 border-t border-border px-4 py-3 text-sm"
                     >
                       <span role="cell" className="pt-0.5 text-xs text-ink-tertiary">
+                        Entry #{row.id}<br />
                         {formatEventTime(row.created_at)}
                       </span>
                       <span role="cell" className="min-w-0 text-ink">
@@ -756,8 +763,7 @@ export function AuditLogPage() {
                       className="grid grid-cols-[152px_minmax(0,1fr)_84px] items-start gap-3 border-t border-border bg-page px-4 py-2 text-sm"
                     >
                       <span role="cell" className="pt-0.5 text-xs text-ink-tertiary">
-                        {formatEventTime(entry.rows[entry.rows.length - 1].created_at)} to{" "}
-                        {formatEventTime(entry.rows[0].created_at)}
+                        Grouped entries
                       </span>
                       <span role="cell" className="min-w-0 text-ink">
                         <b>{entry.rows.length}</b> x {entry.label} events
@@ -783,6 +789,7 @@ export function AuditLogPage() {
                           className="grid grid-cols-[152px_minmax(0,1fr)_84px] items-start gap-3 border-t border-border py-2 pr-4 pl-8 text-sm"
                         >
                           <span role="cell" className="pt-0.5 text-xs text-ink-tertiary">
+                            Entry #{row.id}<br />
                             {formatEventTime(row.created_at)}
                           </span>
                           <span role="cell" className="min-w-0 text-ink">

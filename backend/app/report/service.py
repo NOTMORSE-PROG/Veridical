@@ -7,7 +7,6 @@ an instructor resolves an escalation).
 
 import asyncio
 import dataclasses
-from datetime import UTC, datetime
 from decimal import Decimal
 from pathlib import Path
 from typing import Any, Literal
@@ -1462,7 +1461,6 @@ async def decide_report(
     # already uses for the completion/cancel race: a request that loses
     # gets 0 rows back and 409s honestly instead of 200-ing into an audit
     # trail that records a decision which never took effect.
-    decided_at = datetime.now(UTC)
     won = (
         await session.execute(
             update(ReadinessReport)
@@ -1473,11 +1471,11 @@ async def decide_report(
                 if current_score is not None
                 else None,
                 decision=decision_enum,
-                decided_at=decided_at,
+                decided_at=func.clock_timestamp(),
                 decided_by_instructor_id=instructor_id,
                 decision_note=stripped_note,
             )
-            .returning(ReadinessReport.id)
+            .returning(ReadinessReport.id, ReadinessReport.decided_at)
         )
     ).first()
     if won is None:
@@ -1488,6 +1486,7 @@ async def decide_report(
         session,
         event_type="verdict_computed",
         check_run_id=check_run_id,
+        created_at=won.decided_at,
         payload={
             key: current_scoring[key]
             for key in (
@@ -1514,6 +1513,7 @@ async def decide_report(
         session,
         event_type="report_decided",
         check_run_id=check_run_id,
+        created_at=won.decided_at,
         payload={
             "instructor_id": instructor_id,
             "decision": decision,
@@ -1554,14 +1554,36 @@ async def reopen_report(
 
     prior_decision = report.decision.value
     prior_note = report.decision_note
-    report.decision = None
-    report.decided_at = None
-    report.decided_by_instructor_id = None
-    report.decision_note = None
+    # A delayed reopen must not clear a newer decision, even if that newer
+    # decision repeats the same outcome and note. Match the original stored
+    # snapshot at the write boundary; legacy nullable fields compare safely.
+    won = (
+        await session.execute(
+            update(ReadinessReport)
+            .where(
+                ReadinessReport.id == report.id,
+                ReadinessReport.decision == report.decision,
+                ReadinessReport.decided_at.is_not_distinct_from(report.decided_at),
+                ReadinessReport.decided_by_instructor_id.is_not_distinct_from(
+                    report.decided_by_instructor_id
+                ),
+                ReadinessReport.decision_note.is_not_distinct_from(prior_note),
+            )
+            .values(
+                decision=None, decided_at=None, decided_by_instructor_id=None, decision_note=None
+            )
+            .returning(ReadinessReport.id, func.clock_timestamp().label("reopened_at"))
+        )
+    ).first()
+    if won is None:
+        raise ConflictError(
+            "This decision changed while you were reopening it. Refresh and review it again."
+        )
     await write_audit_event(
         session,
         event_type="report_reopened",
         check_run_id=check_run_id,
+        created_at=won.reopened_at,
         payload={
             "instructor_id": instructor_id,
             "reason": reason.strip(),

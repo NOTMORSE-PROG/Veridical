@@ -106,18 +106,10 @@ async def list_audit_log(
     total = await session.scalar(select(func.count()).select_from(query.subquery()))
     rows = (
         await session.execute(
-            # Tie-break on id: found live while testing BUG-219 (multiple
-            # rows written in one transaction share the exact same
-            # `created_at`, Postgres's own `server_default=func.now()`
-            # being transaction-start time, not per-statement) -- without
-            # it, OFFSET/LIMIT across ties is undefined, so a row can
-            # repeat on the next page or never appear on any. Same defect
-            # class BUG-207 already named for archive/service.py's sibling
-            # query; that ticket is updated with the other sites this same
-            # pass found.
-            query.order_by(AuditLog.created_at.desc(), AuditLog.id.desc())
-            .offset((page - 1) * page_size)
-            .limit(page_size)
+            # V-081: historical rows use different clocks and transaction-
+            # start times. Present immutable entry-number order, not a
+            # claimed event/commit chronology; retain stored date filters.
+            query.order_by(AuditLog.id.desc()).offset((page - 1) * page_size).limit(page_size)
         )
     ).all()
     items = [_summary(row, group_label) for row, group_label, _original_filename in rows]
@@ -156,6 +148,7 @@ async def write_audit_event(
     prompt_version: str | None = None,
     input_hash: str | None = None,
     agreement_score: float | None = None,
+    created_at: datetime | None = None,
 ) -> AuditLog:
     """Shared write helper for the non-LLM audit events this ticket adds
     on top of V-009's queue-level writes (escalation resolutions, flag
@@ -169,5 +162,9 @@ async def write_audit_event(
         agreement_score=_decimal_or_none(agreement_score),
         payload=payload,
     )
+    if created_at is not None:
+        # An action can reuse the exact database time of its winning write.
+        # Ordinary callers retain the existing database default.
+        entry.created_at = created_at
     session.add(entry)
     return entry

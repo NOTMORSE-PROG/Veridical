@@ -1,4 +1,4 @@
-import { fireEvent, screen } from "@testing-library/react";
+import { fireEvent, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { renderWithProviders, stubFetchByPath } from "../test/renderWithProviders";
 import { AuditLogPage } from "./AuditLog";
@@ -50,6 +50,45 @@ describe("AuditLogPage", () => {
     renderWithProviders(<AuditLogPage />, { route: "/audit", path: "/audit" });
     expect((await screen.findAllByText("AI call")).length).toBe(2);
     expect(screen.getAllByText("Escalation resolved").length).toBe(2);
+  });
+
+  it("V-081: explains record order without rewriting contrary historical times", async () => {
+    vi.stubGlobal("fetch", stubFetchByPath({ "/audit": PAGE, "/audit/42": DETAIL }));
+    renderWithProviders(<AuditLogPage />, { route: "/audit" });
+    expect(await screen.findByText(/Order: Highest entry number first/)).toHaveTextContent(
+      "Stored times are shown unchanged and may not follow this order.",
+    );
+    const table = await screen.findByRole("table");
+    const rows = await within(table).findAllByRole("row");
+    expect(rows[1]).toHaveTextContent("Entry #42");
+    expect(rows[2]).toHaveTextContent("Entry #41");
+    fireEvent.click(within(rows[1]).getByRole("button", { name: "Detail" }));
+    expect(await screen.findByText(DETAIL.created_at)).toBeInTheDocument();
+    expect(screen.getByText("Stored time:")).toBeInTheDocument();
+    expect(screen.getByText(/Entry numbers identify records, not verified event times/)).toBeInTheDocument();
+  });
+
+  it.each([
+    ["2026-07-25T14:05:00Z", "2026-07-25T14:18:00Z"],
+    ["2026-07-25T14:18:00Z", "2026-07-25T14:05:00Z"],
+    ["2026-07-25T14:05:00Z", "2026-07-25T14:05:00Z"],
+  ])("V-081: grouped records retain API order without inferring a duration (%s, %s)", async (firstTime, secondTime) => {
+    vi.stubGlobal("fetch", stubFetchByPath({ "/audit": {
+      ...PAGE, items: [
+        { ...PAGE.items[0], id: 42, created_at: firstTime },
+        { ...PAGE.items[0], id: 38, created_at: secondTime },
+      ],
+    } }));
+    renderWithProviders(<AuditLogPage />, { route: "/audit" });
+    expect(await screen.findByText("Grouped entries")).toBeInTheDocument();
+    expect(screen.queryByText(/events between/)).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Show all" }));
+    const table = screen.getByRole("table");
+    const rows = within(table).getAllByRole("row");
+    expect(rows[2]).toHaveTextContent("Entry #42");
+    expect(rows[3]).toHaveTextContent("Entry #38");
+    expect(within(table).getAllByRole("button", { name: "Detail" })).toHaveLength(2);
+    expect(within(table).getByRole("button", { name: "Hide" })).toHaveAttribute("aria-expanded", "true");
   });
 
   it("BUG (found live): the event-type key for an overridden flag never matched the real backend value, so it always showed a raw string instead of a label", async () => {
