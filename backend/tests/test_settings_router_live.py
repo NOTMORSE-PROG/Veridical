@@ -77,22 +77,27 @@ def seeded(client, api_scratch_url):
     from app.db import sqlalchemy_url
     from app.models.audit import AuditLog
     from app.models.instructor import Instructor
+    from app.models.manuscript import Manuscript
 
     async def seed():
         engine = create_async_engine(sqlalchemy_url(api_scratch_url))
         try:
-            factory = async_sessionmaker(engine)
+            factory = async_sessionmaker(engine, expire_on_commit=False)
             async with factory() as session:
                 await session.execute(
                     text("TRUNCATE audit_log, session, instructor RESTART IDENTITY CASCADE")
                 )
-                session.add(
-                    Instructor(
-                        email="prof@tip.edu.ph",
-                        display_name="Prof",
-                        password_hash=hash_password("s3cret!"),
-                    )
+                instructor = Instructor(
+                    email="prof@tip.edu.ph",
+                    display_name="Prof",
+                    password_hash=hash_password("s3cret!"),
                 )
+                session.add(instructor)
+                await session.flush()
+                manuscript = Manuscript(
+                    instructor_id=instructor.id, group_label="Settings", file_ref="settings.pdf"
+                )
+                session.add(manuscript)
                 await session.commit()
 
                 # An OLDER call for "semantic_grading" at v1, then a NEWER
@@ -103,6 +108,7 @@ def seeded(client, api_scratch_url):
                     AuditLog(
                         event_type="llm_call",
                         check_run_id=None,
+                        manuscript_id=manuscript.id,
                         prompt_version="v1",
                         payload={"prompt_type": "semantic_grading", "model": "gemini-old"},
                     )
@@ -112,6 +118,7 @@ def seeded(client, api_scratch_url):
                     AuditLog(
                         event_type="llm_cache_hit",
                         check_run_id=None,
+                        manuscript_id=manuscript.id,
                         prompt_version="v2",
                         payload={"prompt_type": "semantic_grading", "model": "gemini-new"},
                     )
@@ -120,6 +127,7 @@ def seeded(client, api_scratch_url):
                     AuditLog(
                         event_type="llm_call",
                         check_run_id=None,
+                        manuscript_id=manuscript.id,
                         prompt_version="v1",
                         payload={"prompt_type": "rubric_decomposition", "model": "gemini-new"},
                     )
@@ -187,22 +195,27 @@ def test_a_low_frequency_prompt_type_survives_a_high_volume_burst_of_another(
     from app.db import sqlalchemy_url
     from app.models.audit import AuditLog
     from app.models.instructor import Instructor
+    from app.models.manuscript import Manuscript
 
     async def seed():
         engine = create_async_engine(sqlalchemy_url(api_scratch_url))
         try:
-            factory = async_sessionmaker(engine)
+            factory = async_sessionmaker(engine, expire_on_commit=False)
             async with factory() as session:
                 await session.execute(
                     text("TRUNCATE audit_log, session, instructor RESTART IDENTITY CASCADE")
                 )
-                session.add(
-                    Instructor(
-                        email="burst@tip.edu.ph",
-                        display_name="Burst Test",
-                        password_hash=hash_password("s3cret!"),
-                    )
+                instructor = Instructor(
+                    email="burst@tip.edu.ph",
+                    display_name="Burst Test",
+                    password_hash=hash_password("s3cret!"),
                 )
+                session.add(instructor)
+                await session.flush()
+                manuscript = Manuscript(
+                    instructor_id=instructor.id, group_label="Burst", file_ref="burst.pdf"
+                )
+                session.add(manuscript)
                 await session.commit()
 
                 # One old, low-frequency row.
@@ -210,6 +223,7 @@ def test_a_low_frequency_prompt_type_survives_a_high_volume_burst_of_another(
                     AuditLog(
                         event_type="llm_call",
                         check_run_id=None,
+                        manuscript_id=manuscript.id,
                         prompt_version="v1",
                         payload={"prompt_type": "rubric_decomposition", "model": "gemini-old"},
                     )
@@ -222,6 +236,7 @@ def test_a_low_frequency_prompt_type_survives_a_high_volume_burst_of_another(
                         AuditLog(
                             event_type="llm_call",
                             check_run_id=None,
+                            manuscript_id=manuscript.id,
                             prompt_version="v9",
                             payload={"prompt_type": "semantic_grading", "model": "gemini-new"},
                         )

@@ -1,8 +1,8 @@
 """Settings screen data (F8.9 display slice, V-042, screen 4u; BYOK V-052)."""
 
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.audit.service import instructor_audit_query
 from app.config import Settings
 from app.errors import ConflictError
 from app.llm import evict_instructor_client
@@ -10,20 +10,6 @@ from app.llm.keystore import encrypt_api_key, validate_gemini_api_key
 from app.models.audit import AuditLog
 from app.models.instructor import Instructor
 from app.settings.schemas import ApiKeyStatusOut, PromptVersionOut, SettingsOut, ThresholdsOut
-
-# TODO(V-052 follow-up): the prompt/model-version query below is STILL
-# unscoped by instructor -- now genuinely incomplete rather than merely
-# forward-looking, since an instructor using their own BYOK key spends a
-# DIFFERENT key/model than the shared pool, and `audit_log` has no
-# instructor_id column to scope by (it only carries `check_run_id`, and
-# rubric-decomposition calls have none at all -- see the prior version of
-# this comment, V-042). Left as a known, disclosed gap: this screen can
-# show a BYOK instructor prompt/model versions that were actually served
-# by someone else's shared-pool call, or vice versa. Not fixed in V-052
-# (BYOK's own ACs don't require it, and fixing it means either adding
-# `instructor_id` to `audit_log` or a second, differently-scoped query --
-# a real design decision, not a one-line fix) -- revisit if this becomes
-# actually misleading in practice, not just theoretically imprecise.
 
 
 async def get_settings_view(
@@ -47,12 +33,15 @@ async def get_settings_view(
     prompt_type_col = AuditLog.payload["prompt_type"].astext
     rows = (
         await session.scalars(
-            select(AuditLog)
+            # Shared quota does not imply shared activity history. Legacy
+            # rubric/vision rows with no owned manuscript remain unattributed.
+            instructor_audit_query(instructor.id)
+            .with_only_columns(AuditLog)
             .where(AuditLog.event_type.in_(("llm_call", "llm_cache_hit")))
             .where(prompt_type_col.isnot(None))
             .where(AuditLog.prompt_version.isnot(None))
             .distinct(prompt_type_col)
-            .order_by(prompt_type_col, AuditLog.created_at.desc())
+            .order_by(prompt_type_col, AuditLog.created_at.desc(), AuditLog.id.desc())
         )
     ).all()
 

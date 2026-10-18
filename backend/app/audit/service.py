@@ -15,7 +15,7 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Any
 
-from sqlalchemy import func, select
+from sqlalchemy import Select, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.audit.schemas import AuditLogDetail, AuditLogSummary, LLMExecutionMode, PaginatedAuditLog
@@ -26,7 +26,8 @@ from app.models.manuscript import Manuscript
 from app.models.run import CheckRun
 
 
-def _scoped_query(instructor_id: int):
+def instructor_audit_query(instructor_id: int) -> Select[tuple[AuditLog, str, str | None]]:
+    """Use stored manuscript ownership, never untrusted payload attribution."""
     return (
         select(AuditLog, Manuscript.group_label, Manuscript.original_filename)
         .outerjoin(CheckRun, CheckRun.id == AuditLog.check_run_id)
@@ -90,7 +91,7 @@ async def list_audit_log(
     page: int = 1,
     page_size: int = 50,
 ) -> PaginatedAuditLog:
-    query = _scoped_query(instructor_id)
+    query = instructor_audit_query(instructor_id)
     if check_run_id is not None:
         query = query.where(AuditLog.check_run_id == check_run_id)
     if event_type is not None:
@@ -127,7 +128,7 @@ async def get_audit_log_detail(
     session: AsyncSession, instructor_id: int, audit_id: int
 ) -> AuditLogDetail:
     row = (
-        await session.execute(_scoped_query(instructor_id).where(AuditLog.id == audit_id))
+        await session.execute(instructor_audit_query(instructor_id).where(AuditLog.id == audit_id))
     ).first()
     if row is None:
         raise NotFoundError(f"No audit log entry {audit_id}.")
