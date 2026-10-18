@@ -135,6 +135,116 @@ async def _make_run(
     return check_run
 
 
+@pytest.mark.parametrize("ungraded", ["quota_exhausted", "api_down"])
+async def test_ungraded_criteria_are_pending_work_not_ready_to_decide(session_factory, ungraded):
+    async with session_factory() as session:
+        owner = Instructor(email="ungraded-owner@demo.local", display_name="Owner")
+        other = Instructor(email="ungraded-other@demo.local", display_name="Other")
+        session.add_all([owner, other])
+        await session.commit()
+        await _make_run(
+            session,
+            owner,
+            run_status=CheckRunStatus.done,
+            report_status="needs_review",
+            results=[ungraded, ungraded],
+        )
+        clean = await _make_run(
+            session,
+            owner,
+            run_status=CheckRunStatus.done,
+            report_status="ready",
+            results=["passed"],
+        )
+        await _make_run(
+            session,
+            other,
+            run_status=CheckRunStatus.done,
+            report_status="needs_review",
+            results=[ungraded],
+        )
+        session.add(
+            CheckResult(
+                check_run_id=clean.id,
+                criterion_id=None,
+                kind=CheckKind.internal_agreement,
+                outcome=ResultOutcome(ungraded),
+                detail={"reason": "Unavailable integrity check"},
+            )
+        )
+        await session.commit()
+
+        stats = await get_dashboard_stats(session, owner.id)
+        assert stats.ready_to_decide_count == 1
+        assert stats.needs_attention_count == 1
+        assert stats.escalations_awaiting_review == 2
+        # A provider failure is pending work, not a low-confidence model vote.
+        assert stats.escalation_rate == 0
+
+
+@pytest.mark.parametrize("ungraded", ["quota_exhausted", "api_down"])
+async def test_ungraded_queue_filters_counts_and_latest_resolution_agree(session_factory, ungraded):
+    from app.ingest.schemas import ManuscriptQueueStatus
+    from app.ingest.service import list_manuscripts
+
+    async with session_factory() as session:
+        owner = Instructor(email="ungraded-queue@demo.local", display_name="Owner")
+        session.add(owner)
+        await session.commit()
+        pending = await _make_run(
+            session,
+            owner,
+            run_status=CheckRunStatus.done,
+            report_status="needs_review",
+            results=[ungraded, ungraded],
+        )
+        clean = await _make_run(
+            session,
+            owner,
+            run_status=CheckRunStatus.done,
+            report_status="ready",
+            results=["passed"],
+        )
+        attention = await list_manuscripts(
+            session,
+            owner.id,
+            status=ManuscriptQueueStatus.needs_attention,
+        )
+        assert attention.total == 1
+        assert attention.items[0].id == pending.manuscript_id
+        assert attention.items[0].escalations_awaiting_review == 2
+        review = await list_manuscripts(session, owner.id, needs_review=True)
+        assert [row.id for row in review.items] == [pending.manuscript_id]
+        ready = await list_manuscripts(
+            session,
+            owner.id,
+            status=ManuscriptQueueStatus.checked,
+            needs_review=False,
+        )
+        assert [row.id for row in ready.items] == [clean.manuscript_id]
+
+        # The old ungraded run must not keep a successfully rechecked manuscript
+        # in the pending queue; historical results remain unchanged and readable.
+        await _make_run(
+            session,
+            owner,
+            manuscript_id=pending.manuscript_id,
+            run_status=CheckRunStatus.done,
+            report_status="ready",
+            results=["passed"],
+        )
+        attention = await list_manuscripts(
+            session,
+            owner.id,
+            status=ManuscriptQueueStatus.needs_attention,
+        )
+        assert attention.total == 0
+        stats = await get_dashboard_stats(session, owner.id)
+        assert stats.ready_to_decide_count == 2
+        assert stats.needs_attention_count == 0
+        assert stats.escalations_awaiting_review == 0
+
+
 async def test_kpis_match_db_truth_across_all_four_statuses(session_factory):
     async with session_factory() as session:
         instructor = Instructor(email="dash@demo.local", display_name="Dash Test")

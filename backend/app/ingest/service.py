@@ -18,6 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app import messages
 from app.audit.service import write_audit_event
+from app.checks.escalation import NEEDS_REVIEW_OUTCOMES
 from app.config import Settings, get_settings
 from app.errors import (
     ApiDownError,
@@ -50,7 +51,6 @@ from app.models.enums import (
     IngestFailureReason,
     IngestStatus,
     ManuscriptOrigin,
-    ResultOutcome,
 )
 from app.models.group import Group, GroupMember, Program
 from app.models.manuscript import Manuscript
@@ -445,7 +445,7 @@ async def list_manuscripts(
         .where(
             CheckResult.check_run_id == latest_done_run_id,
             CheckResult.criterion_id.is_not(None),
-            CheckResult.outcome == ResultOutcome.escalated,
+            CheckResult.outcome.in_(NEEDS_REVIEW_OUTCOMES),
         )
         .correlate(Manuscript)
         .scalar_subquery()
@@ -691,7 +691,7 @@ async def list_manuscripts(
                 .where(
                     CheckResult.check_run_id.in_(done_run_ids),
                     CheckResult.criterion_id.is_not(None),
-                    CheckResult.outcome == ResultOutcome.escalated,
+                    CheckResult.outcome.in_(NEEDS_REVIEW_OUTCOMES),
                 )
                 .group_by(CheckResult.check_run_id)
             )

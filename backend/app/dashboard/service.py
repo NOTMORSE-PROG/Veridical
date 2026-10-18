@@ -5,6 +5,7 @@ queries over what V-018/V-019 already persist — no new state.
 from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.checks.escalation import NEEDS_REVIEW_OUTCOMES
 from app.config import Settings, get_settings
 from app.dashboard.schemas import DashboardStats
 from app.models.enums import (
@@ -83,6 +84,7 @@ async def get_dashboard_stats(
     ).all()
     outcome_counts = {outcome: count for outcome, count in criterion_result_rows}
     escalated = outcome_counts.get(ResultOutcome.escalated, 0)
+    pending_review = sum(outcome_counts.get(outcome, 0) for outcome in NEEDS_REVIEW_OUTCOMES)
     total_criterion_results = sum(outcome_counts.values())
     escalation_rate = escalated / total_criterion_results if total_criterion_results > 0 else None
 
@@ -105,7 +107,7 @@ async def get_dashboard_stats(
                 .where(
                     CheckResult.check_run_id == latest_done_run_ids.c.run_id,
                     CheckResult.criterion_id.is_not(None),
-                    CheckResult.outcome == ResultOutcome.escalated,
+                    CheckResult.outcome.in_(NEEDS_REVIEW_OUTCOMES),
                 )
                 .exists(),
             )
@@ -141,7 +143,7 @@ async def get_dashboard_stats(
         .where(
             CheckResult.check_run_id == latest_done_run_id,
             CheckResult.criterion_id.is_not(None),
-            CheckResult.outcome == ResultOutcome.escalated,
+            CheckResult.outcome.in_(NEEDS_REVIEW_OUTCOMES),
         )
         .correlate(Manuscript)
         .scalar_subquery()
@@ -212,7 +214,7 @@ async def get_dashboard_stats(
         conditionally_ready_count=status_counts.get(ReadinessStatus.conditionally_ready, 0),
         not_ready_count=status_counts.get(ReadinessStatus.not_ready, 0),
         needs_review_count=status_counts.get(ReadinessStatus.needs_review, 0),
-        escalations_awaiting_review=escalated,
+        escalations_awaiting_review=pending_review,
         escalation_rate=escalation_rate,
         escalation_budget=settings.escalation_budget,
         system_underperforming=(
