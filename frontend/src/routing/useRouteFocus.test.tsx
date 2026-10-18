@@ -129,8 +129,30 @@ function AsyncReportPageNeverReady() {
   return <main><h1 ref={headingRef} tabIndex={-1}>Readiness report</h1></main>;
 }
 
+function NestedCriterionPage() {
+  const headingRef = useRef<HTMLHeadingElement>(null);
+  useRouteFocus("Criterion review", headingRef);
+  return <main><h1 ref={headingRef} tabIndex={-1}>Criterion review</h1><details data-testid="outer-record"><summary>Criterion record</summary><details><summary id="nested-criterion-summary">Criterion evidence</summary><Link to="/document" onClick={() => rememberRouteReturnFocus("/criteria", "/document", "nested-criterion-summary")}>Open criterion source</Link></details></details></main>;
+}
+
 describe("route focus and announcement", () => {
   afterEach(() => vi.restoreAllMocks());
+
+  it("reveals enclosing disclosures before restoring an embedded criterion summary", async () => {
+    const router = createMemoryRouter([
+      { path: "/criteria", element: <NestedCriterionPage /> },
+      { path: "/document", element: <DocumentPage /> },
+    ], { initialEntries: ["/criteria"] });
+    render(<RouterProvider router={router} />);
+    fireEvent.click(screen.getByText("Criterion record"));
+    fireEvent.click(screen.getByText("Criterion evidence"));
+    fireEvent.click(screen.getByRole("link", { name: "Open criterion source" }));
+    await screen.findByRole("heading", { name: "Source manuscript" });
+    await act(async () => { await router.navigate(-1); });
+    await waitFor(() => expect(screen.getByText("Criterion evidence")).toHaveFocus());
+    expect(screen.getByTestId("outer-record")).toHaveAttribute("open");
+    expect(screen.getByRole("link", { name: "Open criterion source" })).toBeVisible();
+  });
 
   it("announces POP navigation and restores focus to the source trigger", async () => {
     const router = createMemoryRouter([

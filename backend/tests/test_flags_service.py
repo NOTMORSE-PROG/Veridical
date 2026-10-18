@@ -3,7 +3,40 @@ live DB needed -- same convention as `test_checks_reuse_service.py`'s
 pure-function tests for the wording-template drafts this detail dict
 comes from."""
 
-from app.flags.service import _passage_pair_from_detail
+import pytest
+
+from app.flags.service import _p_value_comparison, _passage_pair_from_detail
+
+
+def test_p_value_comparison_is_exact_whitelisted_saved_display():
+    detail = {
+        "kind": "p_value_decision_error",
+        "reported_p_display": "= 0.900",
+        "computed_p_display": "0.021",
+        "private": "not public",
+    }
+    comparison = _p_value_comparison("statistical_forensics", detail)
+    assert comparison.model_dump() == {"reported": "= 0.900", "recalculated": "0.021"}
+    assert _p_value_comparison("citation_integrity", detail) is None
+    assert (
+        _p_value_comparison("statistical_forensics", {**detail, "kind": "grim_inconsistent"})
+        is None
+    )
+
+
+@pytest.mark.parametrize("missing", [None, "", "   ", 0.021, {"value": "0.021"}])
+def test_p_value_comparison_does_not_invent_missing_display(missing):
+    assert (
+        _p_value_comparison(
+            "statistical_forensics",
+            {
+                "kind": "p_value_mismatch",
+                "reported_p_display": "= 0.900",
+                "computed_p_display": missing,
+            },
+        )
+        is None
+    )
 
 
 def test_passage_kind_flag_builds_pair_from_evidence_excerpt_as_before():

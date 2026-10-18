@@ -4,7 +4,7 @@ import { ApiError } from "../api/client";
 import type { FlagOut } from "../api/types";
 import { useMe } from "../auth/useAuth";
 import { PassagePairPanel } from "../document/PassagePairPanel";
-import { checkKindMeta, humanize } from "../domain/checkKind";
+import { checkKindMeta, findingVerificationPrompt, humanize, isPValueFinding } from "../domain/checkKind";
 import { evidenceDisplayState } from "../domain/evidenceDisplay";
 import { markFlagViewed } from "../domain/flagViewed";
 import { problemLabel } from "../domain/problemLabel";
@@ -15,6 +15,7 @@ import { Alert } from "../ui/Alert";
 import { Button } from "../ui/Button";
 import { Dialog } from "../ui/Dialog";
 import { ConfirmCitationSourceModal } from "./ConfirmCitationSourceModal";
+import { PValueComparison } from "./PValueComparison";
 import { useAnnotateFlag, useFlag, useOverrideFlag } from "./useFlag";
 
 const SEVERITY_LABEL: Record<FlagOut["severity"], string> = {
@@ -67,7 +68,9 @@ function EvidenceSection({
       {showsManuscriptQuote && (
         <blockquote className="signal-evidence-quote"><span>“{systemFindingCopy(flag.evidence_excerpt, flag.ai_verdict_summary, "evidence")}”</span><cite>{flag.page_anchor}</cite></blockquote>
       )}
-      {reasoningText && <div className="signal-reasoning"><h3>Recorded reasoning</h3><p>{systemFindingCopy(reasoningText, flag.ai_verdict_summary, "reasoning")}</p></div>}
+      <PValueComparison flag={flag} />
+      {reasoningText && (!isPValueFinding(flag.ai_verdict_summary) || flag.p_value_comparison) && <div className="signal-reasoning"><h3>Recorded reasoning</h3><p>{systemFindingCopy(reasoningText, flag.ai_verdict_summary, "reasoning")}</p></div>}
+      <div className="signal-reasoning"><h3>What the instructor should verify</h3><p>{findingVerificationPrompt(flag.check_kind, flag.ai_verdict_summary, !!flag.passage_pair)}</p></div>
       {/* BUG-154: the API has always returned a complete
           passage_pair for a matched flag (own/matched excerpt +
           context both sides, similarity, level) -- this page fetched

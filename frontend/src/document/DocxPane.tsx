@@ -35,6 +35,7 @@ export function DocxPane({
   onSelectFlag,
   isVisible,
   findingNumbers = EMPTY_FINDING_NUMBERS,
+  requestedParagraph = null,
 }: {
   paragraphs: DocumentParagraphOut[] | undefined;
   paragraphsPending: boolean;
@@ -55,9 +56,16 @@ export function DocxPane({
   // visible, not just once per selection.
   isVisible: boolean;
   findingNumbers?: ReadonlyMap<number, number>;
+  requestedParagraph?: number | null;
 }) {
   const [hoveredFlagId, setHoveredFlagId] = useState<number | null>(null);
   const highlightRefs = useRef<Map<number, HTMLButtonElement>>(new Map());
+  const paperRef = useRef<HTMLElement>(null);
+
+  useEffect(() => {
+    if (requestedParagraph === null || !Number.isSafeInteger(requestedParagraph) || !isVisible) return;
+    paperRef.current?.querySelector<HTMLElement>(`[data-source-paragraph="${requestedParagraph}"]`)?.focus();
+  }, [requestedParagraph, paragraphs, isVisible]);
 
   const flagsById = new Map(flags.map((f) => [f.id, f]));
 
@@ -144,7 +152,7 @@ export function DocxPane({
         </div>
       )}
       <div role="region" tabIndex={0} aria-label="Full manuscript, scrollable" className="signal-document-scroll signal-document-scroll--docx">
-        <article className="signal-document-docx-paper" aria-label="Reconstructed manuscript text">
+        <article ref={paperRef} className="signal-document-docx-paper" aria-label="Reconstructed manuscript text">
           <header className="signal-document-docx-paper__header">
             <span>Reconstructed manuscript</span>
             <span>{paragraphs ? `${paragraphs.length} extracted ${paragraphs.length === 1 ? "paragraph" : "paragraphs"}` : "Extracting text"}</span>
@@ -198,11 +206,11 @@ export function DocxPane({
 
             if (!primaryFlag) {
               return HeadingTag ? (
-                <HeadingTag key={p.paragraph} className="mt-3 mb-1.5 text-md font-semibold text-ink">
+                <HeadingTag key={p.paragraph} data-source-paragraph={p.paragraph} tabIndex={-1} className="mt-3 mb-1.5 text-md font-semibold text-ink">
                   {p.text}
                 </HeadingTag>
               ) : (
-                <p key={p.paragraph} className="mb-2 text-sm text-ink">
+                <p key={p.paragraph} data-source-paragraph={p.paragraph} tabIndex={-1} className="mb-2 text-sm text-ink">
                   {p.text}
                 </p>
               );
@@ -244,11 +252,11 @@ export function DocxPane({
                 </button>
               );
               return HeadingTag ? (
-                <HeadingTag key={p.paragraph} className="mt-3 mb-1.5">
+                <HeadingTag key={p.paragraph} data-source-paragraph={p.paragraph} tabIndex={-1} className="mt-3 mb-1.5">
                   {highlightButton}
                 </HeadingTag>
               ) : (
-                <div key={p.paragraph} className="mb-2">
+                <div key={p.paragraph} data-source-paragraph={p.paragraph} tabIndex={-1} className="mb-2">
                   {highlightButton}
                 </div>
               );
@@ -288,11 +296,11 @@ export function DocxPane({
             );
 
             return HeadingTag ? (
-              <HeadingTag key={p.paragraph} className="mt-3 mb-1.5">
+              <HeadingTag key={p.paragraph} data-source-paragraph={p.paragraph} tabIndex={-1} className="mt-3 mb-1.5">
                 {multiFlagBlock}
               </HeadingTag>
             ) : (
-              <div key={p.paragraph} className="mb-2">
+              <div key={p.paragraph} data-source-paragraph={p.paragraph} tabIndex={-1} className="mb-2">
                 {multiFlagBlock}
               </div>
             );

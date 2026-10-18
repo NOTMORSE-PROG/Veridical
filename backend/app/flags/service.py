@@ -21,7 +21,7 @@ from app.config import get_settings
 from app.errors import ConflictError, NotFoundError
 from app.external import cache
 from app.findings.policy import exclusion_reason, reuse_excerpt, reuse_reasoning
-from app.flags.schemas import CitationSourceKeyOut, FlagOut, PassagePairOut
+from app.flags.schemas import CitationSourceKeyOut, FlagOut, PassagePairOut, PValueComparisonOut
 from app.models.audit import AuditLog
 from app.models.manuscript import Manuscript
 from app.models.rubric import Criterion
@@ -124,6 +124,18 @@ def _distinct_reasoning(detail: dict, evidence_excerpt: str) -> str | None:
     return reasoning
 
 
+def _p_value_comparison(check_kind: str, detail: dict) -> PValueComparisonOut | None:
+    if check_kind != "statistical_forensics" or detail.get("kind") not in {
+        "p_value_mismatch",
+        "p_value_decision_error",
+    }:
+        return None
+    reported, computed = detail.get("reported_p_display"), detail.get("computed_p_display")
+    if not all(isinstance(value, str) and value.strip() for value in (reported, computed)):
+        return None
+    return PValueComparisonOut(reported=reported, recalculated=computed)
+
+
 async def _to_flag_out(
     session: AsyncSession,
     flag: Flag,
@@ -178,6 +190,7 @@ async def _to_flag_out(
             if result.kind.value == "originality_reuse"
             else _distinct_reasoning(detail, flag.evidence_excerpt)
         ),
+        p_value_comparison=_p_value_comparison(result.kind.value, detail),
         llm_mode=check_run.llm_mode.value,
         # BUG-170: same expression as `report/service.py`'s `FlagSummaryOut`
         # field of the same name -- `flag.detail` directly (not the

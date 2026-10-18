@@ -17,6 +17,7 @@ import { isManuscriptQuote } from "../domain/evidenceDisplay";
 import { useViewedFlagIds } from "../domain/flagViewed";
 import { problemLabel } from "../domain/problemLabel";
 import { systemFindingCopy } from "../domain/systemFindingCopy";
+import { rememberRouteReturnFocus } from "../routing/useRouteFocus";
 import { ActionLink } from "../ui/ActionLink";
 import { OriginalityScope } from "./OriginalityScope";
 import { originalityUnassessed } from "./originalityScopeState";
@@ -24,6 +25,7 @@ import { Alert } from "../ui/Alert";
 import { Button } from "../ui/Button";
 import { clusterFlagFindings, type FlagFindingCluster } from "./flagClusters";
 import { useEscalatedItems, useFlags, useResolveEscalation } from "./useReport";
+import { resultDisplay } from "./ResultsTable";
 
 const OUTCOME_COPY: Record<ResultRowCommon["outcome"], { label: string; tone: string }> = {
   passed: { label: "Meets criterion", tone: "meets" },
@@ -755,17 +757,47 @@ export function SignalCriteriaResults({ results, checkRunId, publicView = false 
   checkRunId: number;
   publicView?: boolean;
 }) {
+  const location = useLocation();
   return (
     <section className="signal-review-section" aria-labelledby="criteria-results-heading">
       <div className="signal-review-section__heading"><div><p className="signal-section-kicker">Criterion record</p><h2 id="criteria-results-heading" tabIndex={-1}>All assessed criteria</h2></div><span>{results.length} total</span></div>
       <p className="signal-review-section__intro">Each row shows the recorded outcome and the evidence available for checking it. Importance is shown as a band, never as a judgment percentage.</p>
       {results.length ? <ol className="signal-result-list">{results.map((row, index) => {
-        const outcome = OUTCOME_COPY[row.outcome];
-        return <li key={row.criterion_id} className="signal-result-card"><div className="signal-result-card__top"><span className="signal-result-card__number">{index + 1}</span><span className={`signal-outcome signal-outcome--${outcome.tone}`}>{outcome.label}</span><span className={`signal-importance signal-importance--${row.weight_importance === "med" ? "medium" : row.weight_importance}`}>{row.weight_importance === "med" ? "Medium" : `${row.weight_importance.slice(0, 1).toUpperCase()}${row.weight_importance.slice(1)}`} importance</span></div><h3>{row.text}</h3>{row.level && <p className="signal-level-result"><strong>Recorded level:</strong> {row.level.name}</p>}{row.resolution && <p className="signal-resolution-note"><strong>Instructor resolution:</strong> {row.resolution.reason}</p>}{/* BUG-065: this summary repeats verbatim once per row -- a screen-reader
+        const display = resultDisplay(row);
+        const outcome = row.level ? { label: `Level: ${display.label}`, tone: "neutral" }
+          : display.tone === "caution" ? { label: "Partly meets criterion", tone: "warning" }
+          : OUTCOME_COPY[row.outcome];
+        const evidenceSummaryId = `signal-criterion-evidence-${checkRunId}-${row.criterion_id}`;
+        const excerptAnchors = new Set(row.evidence.map((item) => item.anchor).filter((anchor) => anchor?.trim()));
+        const seenAnchors = new Set<string>();
+        const sourceAction = (anchor: string) => {
+          const destination = `/report/${checkRunId}/document?anchor=${encodeURIComponent(anchor)}`;
+          return <ActionLink
+            to={destination}
+            variant="quiet"
+            aria-label={`Open in manuscript: ${anchor}. Criterion ${index + 1}: ${row.text}`}
+            onClick={() => rememberRouteReturnFocus(location.pathname + location.search, destination, evidenceSummaryId)}
+          >Open in manuscript: {anchor}</ActionLink>;
+        };
+        return <li key={row.criterion_id} className="signal-result-card"><div className="signal-result-card__top"><span className="signal-result-card__number">{index + 1}</span><span className={`signal-outcome signal-outcome--${outcome.tone}`}>{outcome.label}</span><span className={`signal-importance signal-importance--${row.weight_importance === "med" ? "medium" : row.weight_importance}`}>{row.weight_importance === "med" ? "Medium" : `${row.weight_importance.slice(0, 1).toUpperCase()}${row.weight_importance.slice(1)}`} importance</span></div><h3>{row.text}</h3>{row.resolution && <p className="signal-resolution-note"><strong>Instructor resolution:</strong> {row.resolution.reason}</p>}{/* BUG-065: this summary repeats verbatim once per row -- a screen-reader
                 links/buttons list can't tell them apart without a per-criterion
                 accessible name, same fix already applied to the flag "Review
                 evidence" links and the escalation resolve-button groups. */}
-              <details><summary aria-label={`Review evidence and reasoning: ${row.text}`}>Review evidence and reasoning</summary><div className="signal-result-card__evidence">{row.evidence.length ? row.evidence.map((item) => <blockquote key={`${item.anchor}-${item.quote}`}><span>“{item.quote}”</span><cite>{item.anchor}</cite></blockquote>) : <p>No verified excerpt was recorded for this criterion.</p>}{row.reasoning && <p><strong>Recorded reasoning:</strong> {row.reasoning}</p>}{row.reason && <p><strong>System note:</strong> {row.reason}</p>}{!publicView && row.anchor && <ActionLink to={`/report/${checkRunId}/document?anchor=${encodeURIComponent(row.anchor)}`} variant="quiet">Open manuscript anchor</ActionLink>}</div></details></li>;
+              <details><summary id={evidenceSummaryId} aria-label={`Review evidence and reasoning: ${row.text}`}>Review evidence and reasoning</summary><div className="signal-result-card__evidence">
+                {row.evidence.length ? row.evidence.map((item, evidenceIndex) => {
+                  const hasAnchor = Boolean(item.anchor?.trim());
+                  const showAction = hasAnchor && !seenAnchors.has(item.anchor);
+                  if (hasAnchor) seenAnchors.add(item.anchor);
+                  return <div className="signal-attached-flow" key={`${item.anchor}-${item.quote}-${evidenceIndex}`}>
+                    <blockquote><span>“{item.quote}”</span><cite>{item.anchor}</cite></blockquote>
+                    {!hasAnchor && <p>No manuscript location was recorded for this excerpt.</p>}
+                    {!publicView && showAction && sourceAction(item.anchor)}
+                  </div>;
+                }) : <p>No verified excerpt was recorded for this criterion.</p>}
+                {!publicView && row.anchor?.trim() && !excerptAnchors.has(row.anchor) && <div className="signal-attached-flow"><p>Recorded criterion location: {row.anchor}</p>{sourceAction(row.anchor)}</div>}
+                {row.reasoning && <p><strong>Recorded reasoning:</strong> {row.reasoning}</p>}
+                {row.reason && <p><strong>System note:</strong> {row.reason}</p>}
+              </div></details></li>;
       })}</ol> : <div className="signal-desk-empty"><h3>No criterion results yet</h3><p>This report has no assessed criterion rows.</p></div>}
     </section>
   );

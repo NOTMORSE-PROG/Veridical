@@ -38,7 +38,7 @@ export function renderWithProviders(
 
 /** Routes a stubbed `fetch` by pathname → JSON body (or a Response). */
 export function stubFetchByPath(handlers: Record<string, unknown>) {
-  return vi.fn(async (input: RequestInfo | URL) => {
+  return vi.fn(async (input: RequestInfo | URL, _init?: RequestInit) => {
     const url = typeof input === "string" ? input : input.toString();
     const path = new URL(url, "http://localhost").pathname;
     // Auth screen fixtures written before BUG-186 use `/auth/me`. The live

@@ -39,7 +39,15 @@ function restoreRegisteredFocus(elementId: string): boolean {
   const target = document.getElementById(elementId);
   if (!target) return false;
 
+  // The source control can live inside nested native disclosures which
+  // remount closed after navigation. Reveal it before restoring focus.
+  let disclosure = target.parentElement?.closest("details");
+  while (disclosure) {
+    disclosure.open = true;
+    disclosure = disclosure.parentElement?.closest("details");
+  }
   target.focus({ preventScroll: true });
+  if (document.activeElement !== target) return false;
   requestAnimationFrame(() => {
     const bounds = target.getBoundingClientRect();
     if (bounds.top < 0 || bounds.bottom > window.innerHeight) {

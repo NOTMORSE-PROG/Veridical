@@ -403,6 +403,7 @@ export function PdfPane({
 
   useEffect(() => {
     if (requestedPage === null || metrics.length === 0) return;
+    if (!Number.isSafeInteger(requestedPage) || requestedPage < 1 || requestedPage > metrics.length) return;
     requestAnimationFrame(() => scrollToPage(requestedPage, "auto"));
   }, [metrics.length, requestedPage, scrollToPage]);
 
@@ -447,6 +448,7 @@ export function PdfPane({
           <output aria-live="polite">Page {currentPage} of {pdf?.numPages ?? "…"}</output>
         </div>
       </div>
+      {pdf && requestedPage !== null && (!Number.isSafeInteger(requestedPage) || requestedPage < 1 || requestedPage > pdf.numPages) && <p role="alert" className="signal-document-reconstruction-note">The recorded page is not available in this PDF. Inspect the manuscript manually; no replacement page was selected.</p>}
       {scopeRegions.length > 0 && (
         <div className="signal-document-scope-markers" role="group" aria-label="Findings without an exact passage location">
           {scopeRegions.map((region) => {

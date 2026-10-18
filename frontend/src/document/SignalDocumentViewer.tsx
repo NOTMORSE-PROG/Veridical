@@ -3,7 +3,7 @@ import { Link, useParams, useSearchParams } from "react-router";
 import { ApiError, BASE_URL } from "../api/client";
 import type { FlagRegionOut, ReportOut } from "../api/types";
 import { CRITERION_ANCHOR_REGION_ID } from "../config/ui";
-import { checkKindMeta } from "../domain/checkKind";
+import { checkKindMeta, findingVerificationPrompt, isPValueFinding } from "../domain/checkKind";
 import { DECISION_LABEL } from "../domain/decisionTone";
 import { evidenceDisplayState } from "../domain/evidenceDisplay";
 import { manuscriptIdentity } from "../domain/manuscriptLabel";
@@ -11,6 +11,7 @@ import { problemLabel } from "../domain/problemLabel";
 import { severityLabel } from "../domain/severity";
 import { systemFindingCopy } from "../domain/systemFindingCopy";
 import { useFlag } from "../flags/useFlag";
+import { PValueComparison } from "../flags/PValueComparison";
 import { SignalDecisionPanel } from "../report/SignalDecisionPanel";
 import { SignalCriteriaResults, SignalEscalatedPanel } from "../report/SignalReviewSections";
 import { coverageItems } from "../report/reportCoverage";
@@ -44,8 +45,8 @@ type ReviewFilter = "open" | "resolved" | "all";
 
 function criterionAnchorRegion(anchor: string | null): FlagRegionOut | null {
   if (!anchor) return null;
-  const page = anchor.match(/\b(?:page|p\.)\s*(\d+)\b/i);
-  if (page) {
+  const page = anchor.trim().match(/^(?:page|p\.)\s*(\d+)$/i);
+  if (page && Number.isSafeInteger(Number(page[1])) && Number(page[1]) > 0) {
     return {
       flag_id: CRITERION_ANCHOR_REGION_ID,
       kind: "page_only",
@@ -57,8 +58,8 @@ function criterionAnchorRegion(anchor: string | null): FlagRegionOut | null {
       index: null,
     };
   }
-  const paragraph = anchor.match(/(?:¶|paragraph\s+)(\d+)/i);
-  if (paragraph) {
+  const paragraph = anchor.trim().match(/^(?:¶|\u00c2¶|paragraph\s+)(\d+)$/i);
+  if (paragraph && Number.isSafeInteger(Number(paragraph[1]))) {
     return {
       flag_id: CRITERION_ANCHOR_REGION_ID,
       kind: "paragraph_only",
@@ -197,9 +198,8 @@ function SelectedFinding({ finding, total, locationFlagId, region, previous, nex
   const precision = regionPrecision(region);
   const comparative = flag.check_kind === "originality_reuse";
   const kindMeta = checkKindMeta(flag.check_kind);
-  const verificationPrompt = flag.passage_pair
-    ? kindMeta.verificationPrompt
-    : kindMeta.verificationPromptWithoutComparison ?? kindMeta.verificationPrompt;
+  const verificationPrompt = findingVerificationPrompt(flag.check_kind, flag.ai_verdict_summary, !!flag.passage_pair);
+  const pValueFinding = flag.check_kind === "statistical_forensics" && isPValueFinding(flag.ai_verdict_summary);
   const title = findingTitle(finding);
   const locationIndex = finding.flags.findIndex((member) => member.id === locationFlagId);
 
@@ -236,7 +236,8 @@ function SelectedFinding({ finding, total, locationFlagId, region, previous, nex
         {flag.passage_pair && <p className="signal-field-hint"><strong>Highlight key:</strong> Yellow marks the selected manuscript location. Shaded wording below appears in both stored passages.</p>}
         {flag.passage_pair && <PassagePairPanel pair={flag.passage_pair} ownAnchor={instructorAnchor(flag.page_anchor)} variant="flag" />}
         {!flag.passage_pair && showsManuscriptQuote && <blockquote><span>“{systemFindingCopy(flag.evidence_excerpt, flag.ai_verdict_summary, "evidence")}”</span><cite>{instructorAnchor(flag.page_anchor)}</cite></blockquote>}
-        {!comparative && <p className="signal-field-hint">This check evaluates one manuscript location. A second passage does not apply.</p>}
+        <PValueComparison flag={flag} />
+        {flag.ai_verdict_summary === "orphan_in_text_citation" ? <p className="signal-field-hint">The saved check did not link this citation to a reference-list entry. A matching entry is not available for side-by-side comparison.</p> : !comparative && !pValueFinding && <p className="signal-field-hint">This check evaluates one manuscript location. A second passage does not apply.</p>}
       </section>
       {flag.passage_pair && <Button variant="quiet" onClick={onExplore}>See other passage matches</Button>}
       {!showsManuscriptEvidence && (
@@ -249,7 +250,7 @@ function SelectedFinding({ finding, total, locationFlagId, region, previous, nex
         </Alert>
       )}
       <section aria-labelledby="verify-heading" className="signal-document-detail-section signal-document-detail-section--verify"><h3 id="verify-heading">What the instructor should verify</h3><p>{verificationPrompt}</p></section>
-      <details className="signal-document-recorded-reasoning"><summary>Recorded reasoning and technical details</summary><p>This is the system's full recorded explanation. It is supporting information, not an instructor decision.</p>{reasoningText ? <p>{systemFindingCopy(reasoningText, flag.ai_verdict_summary, "reasoning")}</p> : <p>No additional recorded reasoning is available.</p>}</details>
+      {(!pValueFinding || flag.p_value_comparison) && <details className="signal-document-recorded-reasoning"><summary>Recorded reasoning and technical details</summary><p>This is the system's full recorded explanation. It is supporting information, not an instructor decision.</p>{reasoningText ? <p>{systemFindingCopy(reasoningText, flag.ai_verdict_summary, "reasoning")}</p> : <p>No additional recorded reasoning is available.</p>}</details>}
       <ActionLink to={`/flags/${flag.id}`} variant="secondary">Review instructor actions for this location</ActionLink>
     </article>
   );
@@ -321,7 +322,7 @@ export function SignalDocumentViewerPage() {
   const parsedSelection = rawSelection ? Number(rawSelection) : null;
   const requestedFlagId = parsedSelection && Number.isInteger(parsedSelection) && parsedSelection > 0 ? parsedSelection : null;
   const recordedAnchor = searchParams.get("anchor");
-  const anchorRegion = criterionAnchorRegion(recordedAnchor);
+  const parsedAnchorRegion = criterionAnchorRegion(recordedAnchor);
   const view = searchParams.get("view");
   const isExploring = view === "matches" || searchParams.get("panel") === "explore";
   const isDecision = view === "decision";
@@ -346,6 +347,12 @@ export function SignalDocumentViewerPage() {
   const viewer = viewerQuery.data;
   const isDocx = viewer?.available === true && viewer.source_format === "docx";
   const paragraphsQuery = useManuscriptParagraphs(id, isDocx);
+  const anchorRegion = parsedAnchorRegion && viewer?.available && (
+    parsedAnchorRegion.page !== null
+      ? viewer.source_format === "pdf" && (viewer.page_count === null || parsedAnchorRegion.page <= viewer.page_count)
+      : viewer.source_format === "docx" && paragraphsQuery.data?.paragraphs.some((paragraph) => paragraph.paragraph === parsedAnchorRegion.paragraph)
+  ) ? parsedAnchorRegion : null;
+  const anchorSourceLoaded = !viewerQuery.isPending && (!isDocx || !paragraphsQuery.isPending);
   const findings = useMemo(() => buildReviewFindings(flagsQuery.data ?? []), [flagsQuery.data]);
   const numbersByFlagId = useMemo(() => findingNumberByFlagId(findings), [findings]);
   const selectedFinding = findingForFlag(findings, requestedFlagId);
@@ -474,21 +481,21 @@ export function SignalDocumentViewerPage() {
   }
 
   const expandedMatch = excludedMatchesQuery.data?.matches.find((match) => match.id === expandedMatchId) ?? null;
-  const selectedRegion = isExploring
+  const selectedRegion = recordedAnchor ? anchorRegion : isExploring
     ? expandedMatch?.own_region ?? null
     : selectedLocationId
       ? viewer?.regions.find((region) => region.flag_id === selectedLocationId) ?? null
       : anchorRegion;
   const requestedPage = selectedRegion?.page ?? null;
   const browseRegions = representativeRegions(findings, viewer?.regions ?? []);
-  const visibleRegions = selectedRegion?.flag_id === CRITERION_ANCHOR_REGION_ID
-    ? [...browseRegions, selectedRegion]
+  const visibleRegions = recordedAnchor
+    ? []
     : isExploring && expandedMatch
       ? [...browseRegions, expandedMatch.own_region]
       : selectedFinding && selectedRegion
         ? [selectedRegion]
         : browseRegions;
-  const selectedRegionId = selectedRegion?.flag_id ?? null;
+  const selectedRegionId = recordedAnchor ? null : selectedRegion?.flag_id ?? null;
   const selectedSummary = selectedFinding?.flags.find((flag) => flag.id === selectedLocationId) ?? selectedFinding?.representative ?? null;
   const selectedPrecision = selectedFinding ? regionPrecision(selectedRegion) : null;
   const reviewCount = findings.filter((finding) => !finding.isResolved).length + (reportQuery.data?.pending_review_count ?? 0);
@@ -510,15 +517,16 @@ export function SignalDocumentViewerPage() {
             <div className="signal-document-grid">
               <div id="manuscript-panel" role="tabpanel" aria-labelledby="manuscript-tab" data-active={activeTab === "manuscript"} className="signal-document-pane">
                 {selectedFinding && selectedSummary && selectedPrecision && (
-                  <div className="signal-document-selection-strip" role="status"><div><strong>Finding {selectedFinding.number} selected</strong><span>{instructorAnchor(selectedSummary.page_anchor)} · {selectedPrecision.label}</span></div><div><Button variant="secondary" onClick={showSelectedReview}>View review</Button><Button variant="quiet" onClick={showQueue}>Clear selection</Button></div></div>
+                  <div className="signal-document-selection-strip" role="status"><div><strong>Finding {selectedFinding.number} selected</strong><span>{instructorAnchor(recordedAnchor ?? selectedSummary.page_anchor)} · {selectedPrecision.label}</span></div><div><Button variant="secondary" onClick={showSelectedReview}>View review</Button><Button variant="quiet" onClick={showQueue}>Clear selection</Button></div></div>
                 )}
-                {recordedAnchor && !anchorRegion && <Alert title="The recorded criterion anchor could not be placed" tone="warning">Review the recorded excerpt in Review and inspect the manuscript manually.</Alert>}
+                {recordedAnchor && anchorRegion && <div className="signal-document-reconstruction-note" role="status"><strong>Source location: {recordedAnchor}</strong><p>This opens the recorded page or paragraph, not an exact passage highlight.</p></div>}
+                {recordedAnchor && anchorSourceLoaded && !anchorRegion && <Alert title="The recorded criterion anchor could not be placed" tone="warning">Review the recorded excerpt in Review and inspect the manuscript manually.</Alert>}
                 {rawSelection && requestedFlagId === null && <Alert title="The selected finding address is invalid" tone="warning">Showing the review queue instead.</Alert>}
                 {viewerQuery.isPending ? <div className="signal-document-source"><div className="signal-document-toolbar"><div className="signal-document-toolbar__identity"><strong>Full manuscript</strong><span>Loading stored source</span></div></div><div className="signal-document-scroll"><section role="status" aria-live="polite" aria-busy="true" className="signal-document-pdf-skeleton"><span>Loading full manuscript.</span><i /><i /><i /></section></div></div>
                   : viewerQuery.isError || !viewer ? <div className="signal-document-source"><div className="signal-document-toolbar"><div className="signal-document-toolbar__identity"><strong>Full manuscript</strong><span>Stored source</span></div></div><div className="signal-document-scroll"><section className="signal-document-paper-state"><Alert title="The manuscript could not be loaded" tone="error" role="alert"><p>VERIDICAL could not load the stored source view. The Review pane loads separately and may also need to be retried.</p><Button variant="secondary" onClick={() => viewerQuery.refetch()}>Try source again</Button><ActionLink to="/dashboard?queue=needs_review" variant="quiet">Return to Review Desk</ActionLink></Alert></section></div></div>
                     : !viewer.available ? <div className="signal-document-source"><div className="signal-document-toolbar"><div className="signal-document-toolbar__identity"><strong>Full manuscript</strong><span>{viewer.original_filename ?? "Stored source"}</span></div></div><div className="signal-document-scroll"><section className="signal-document-unavailable"><p className="signal-section-kicker">Stored source unavailable</p><h2>Source manuscript unavailable</h2><p>{viewer.unavailable_reason}</p><p>You can still review the recorded evidence and readiness details, but VERIDICAL cannot show the full manuscript.</p><ActionLink to={`/report/${id}`} variant="brand">Open full readiness report</ActionLink></section></div></div>
                       : viewer.source_format === "pdf" ? <PdfPane fileUrl={`${BASE_URL}/check-runs/${id}/document/file`} regions={visibleRegions} flags={flagsQuery.data ?? []} selectedFlagId={selectedRegionId} onSelectFlag={selectFinding} requestedPage={requestedPage} findingNumbers={numbersByFlagId} />
-                        : viewer.source_format === "docx" ? <DocxPane paragraphs={paragraphsQuery.data?.paragraphs} paragraphsPending={paragraphsQuery.isPending} paragraphsError={paragraphsQuery.isError} onRetry={() => paragraphsQuery.refetch()} regions={visibleRegions} flags={flagsQuery.data ?? []} selectedFlagId={selectedRegionId} onSelectFlag={selectFinding} isVisible={activeTab === "manuscript"} findingNumbers={numbersByFlagId} />
+                        : viewer.source_format === "docx" ? <DocxPane paragraphs={paragraphsQuery.data?.paragraphs} paragraphsPending={paragraphsQuery.isPending} paragraphsError={paragraphsQuery.isError} onRetry={() => paragraphsQuery.refetch()} regions={visibleRegions} flags={flagsQuery.data ?? []} selectedFlagId={selectedRegionId} onSelectFlag={selectFinding} isVisible={activeTab === "manuscript"} findingNumbers={numbersByFlagId} requestedParagraph={anchorRegion?.paragraph ?? null} />
                           : <div className="signal-document-source"><div className="signal-document-toolbar"><div className="signal-document-toolbar__identity"><strong>Full manuscript</strong><span>{viewer.original_filename ?? "Unsupported source"}</span></div></div><div className="signal-document-scroll"><section className="signal-document-paper-state"><Alert title="This manuscript format cannot be displayed here" tone="warning"><p>Use the recorded excerpts and anchors in Review, or open the full readiness report.</p><ActionLink to={`/report/${id}`} variant="secondary">Open full readiness report</ActionLink></Alert></section></div></div>}
               </div>
               <aside ref={inspectorRef} id="review-panel" role="tabpanel" aria-labelledby="review-tab" data-active={activeTab === "review"} className="signal-document-inspector">

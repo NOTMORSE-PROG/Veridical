@@ -49,6 +49,12 @@ describe("PdfPane page visibility", () => {
   });
   afterEach(() => vi.unstubAllGlobals());
 
+  it("does not clamp an unavailable recorded source page to the last page", async () => {
+    render(<PdfPane {...props} fileUrl="short.pdf" requestedPage={999} />);
+    expect(await screen.findByRole("alert")).toHaveTextContent("The recorded page is not available in this PDF");
+    expect(screen.getByRole("spinbutton", { name: "Go to page" })).toHaveValue(1);
+  });
+
   it("does not discard a queued exit or let the old page overwrite the visible page", async () => {
     render(<PdfPane {...props} fileUrl="long.pdf" />);
     await screen.findByLabelText("Page 29 of 29");

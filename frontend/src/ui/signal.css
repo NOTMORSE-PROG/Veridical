@@ -296,6 +296,11 @@
     text-wrap: balance;
   }
 
+  .signal-route-header .signal-eyebrow,
+  .signal-auth-card > .signal-eyebrow {
+    color: var(--color-signal-ink-secondary);
+  }
+
   .signal-hero__body {
     max-width: var(--signal-hero-body-measure);
     margin: var(--signal-space-6) 0 0;

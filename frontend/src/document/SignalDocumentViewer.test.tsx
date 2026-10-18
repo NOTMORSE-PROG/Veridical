@@ -5,8 +5,8 @@ import { renderWithProviders, stubFetchByPath } from "../test/renderWithProvider
 import { SignalDocumentViewerPage } from "./SignalDocumentViewer";
 
 vi.mock("./PdfPane", () => ({
-  PdfPane: ({ requestedPage, selectedFlagId, fileUrl }: { requestedPage: number | null; selectedFlagId: number | null; fileUrl: string }) => (
-    <div data-testid="pdf-pane" data-page={requestedPage ?? ""} data-selection={selectedFlagId ?? ""} data-file={fileUrl}>PDF source</div>
+  PdfPane: ({ requestedPage, selectedFlagId, fileUrl, regions }: { requestedPage: number | null; selectedFlagId: number | null; fileUrl: string; regions: unknown[] }) => (
+    <div data-testid="pdf-pane" data-page={requestedPage ?? ""} data-selection={selectedFlagId ?? ""} data-file={fileUrl} data-regions={regions.length}>PDF source</div>
   ),
 }));
 vi.mock("./DocxPane", () => ({ DocxPane: () => <div>DOCX source</div> }));
@@ -102,6 +102,38 @@ function stubViewer(viewer: ManuscriptViewerOut = VIEWER) {
 describe("SignalDocumentViewerPage", () => {
   afterEach(() => vi.unstubAllGlobals());
 
+  it.each([true, false])("shows saved p-value comparison or recorded fallback without disclosure (fields=%s)", async (hasFields) => {
+    const reasoning = "The reported .900 differs from the recalculated .021.";
+    vi.stubGlobal("fetch", stubFetchByPath({
+      "/check-runs/5/document": VIEWER, "/check-runs/5/report": REPORT,
+      "/check-runs/5/escalated": [], "/check-runs/5/flags": [{ ...SUMMARY, check_kind: "statistical_forensics", problem_kind: "p_value_decision_error" }],
+      "/flags/7": { ...FLAG, check_kind: "statistical_forensics", ai_verdict_summary: "p_value_decision_error", ai_reasoning: reasoning,
+        p_value_comparison: hasFields ? { reported: "= 0.900", recalculated: "0.021" } : null },
+    }));
+    renderWithProviders(<SignalDocumentViewerPage />, { route: "/report/5/document?flag=7", path: "/report/:checkRunId/document" });
+    expect(await screen.findByRole("heading", { name: "Recorded p-value comparison" })).toBeVisible();
+    if (hasFields) {
+      expect(screen.getByText("= 0.900")).toBeVisible();
+      expect(screen.getByText("0.021")).toBeVisible();
+    } else {
+      expect(screen.getByText(reasoning)).toBeVisible();
+      expect(screen.queryByText("Recorded reasoning and technical details")).not.toBeInTheDocument();
+    }
+    expect(screen.getByText(/original analysis output for the test value, degrees of freedom/)).toBeVisible();
+    expect(screen.queryByText(/shown sample size and summary statistics/)).not.toBeInTheDocument();
+  });
+
+  it("gives missing-reference guidance without inventing a source to open", async () => {
+    vi.stubGlobal("fetch", stubFetchByPath({
+      "/check-runs/5/document": VIEWER, "/check-runs/5/report": REPORT,
+      "/check-runs/5/escalated": [], "/check-runs/5/flags": [SUMMARY],
+      "/flags/7": { ...FLAG, check_kind: "citation_integrity", ai_verdict_summary: "orphan_in_text_citation" },
+    }));
+    renderWithProviders(<SignalDocumentViewerPage />, { route: "/report/5/document?flag=7", path: "/report/:checkRunId/document" });
+    expect(await screen.findByText(/Check the manuscript's reference list for this author and year/)).toBeVisible();
+    expect(screen.queryByText(/Open the cited source and confirm/)).not.toBeInTheDocument();
+  });
+
   it("rejects an invalid route id without issuing a malformed request", async () => {
     const fetch = vi.fn();
     vi.stubGlobal("fetch", fetch);
@@ -116,6 +148,34 @@ describe("SignalDocumentViewerPage", () => {
     const pane = await screen.findByTestId("pdf-pane");
     expect(pane).toHaveAttribute("data-page", "9");
     expect(pane).toHaveAttribute("data-file", expect.stringContaining("/check-runs/5/document/file"));
+    expect(pane).toHaveAttribute("data-selection", "");
+    expect(pane).toHaveAttribute("data-regions", "0");
+    expect(screen.getByText(/not an exact passage highlight/)).toBeInTheDocument();
+  });
+
+  it.each(["page 999", "page 0", "page 9 and page 12", "appendix page 9", "page 9007199254740992"])("does not pretend to place unsupported source anchor %s", async (anchor) => {
+    stubViewer();
+    renderWithProviders(<SignalDocumentViewerPage />, { route: `/report/5/document?anchor=${encodeURIComponent(anchor)}`, path: "/report/:checkRunId/document" });
+    expect(await screen.findByText("The recorded criterion anchor could not be placed")).toBeInTheDocument();
+    expect(await screen.findByTestId("pdf-pane")).toHaveAttribute("data-page", "");
+    expect(screen.getByTestId("pdf-pane")).toHaveAttribute("data-regions", "0");
+  });
+
+  it("keeps a finding selected while opening a different recorded statement page without its original highlight", async () => {
+    stubViewer();
+    renderWithProviders(<SignalDocumentViewerPage />, { route: "/report/5/document?finding=7&anchor=page%209", path: "/report/:checkRunId/document" });
+    expect(await screen.findByTestId("pdf-pane")).toHaveAttribute("data-page", "9");
+    expect(screen.getByTestId("pdf-pane")).toHaveAttribute("data-selection", "");
+    expect(screen.getByTestId("pdf-pane")).toHaveAttribute("data-regions", "0");
+    expect(await screen.findByText("Finding 1 selected")).toBeInTheDocument();
+  });
+
+  it("keeps unsupported recorded anchor recovery visible without inventing a page", async () => {
+    stubViewer();
+    renderWithProviders(<SignalDocumentViewerPage />, { route: "/report/5/document?anchor=appendix%20%26%20%3Cfigure%3E", path: "/report/:checkRunId/document" });
+    expect(await screen.findByText("The recorded criterion anchor could not be placed")).toBeInTheDocument();
+    expect(screen.getByText(/inspect the manuscript manually/i)).toBeInTheDocument();
+    expect(await screen.findByTestId("pdf-pane")).toHaveAttribute("data-page", "");
   });
 
   it("shows selected bounded evidence, places its page, and links to the full instructor action record", async () => {

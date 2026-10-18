@@ -660,6 +660,7 @@ export interface FlagOut {
   override_reason: string | null;
   ai_verdict_summary: string | null;
   ai_reasoning: string | null;
+  p_value_comparison?: { reported: string; recalculated: string } | null;
   // BUG-049: the flag evidence page is exactly where the audit found a
   // fabricated statistical-forensics finding rendered with no disclosure.
   llm_mode: LLMMode;

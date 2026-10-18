@@ -24,7 +24,7 @@ export const CHECK_KIND_META: Record<string, CheckKindMeta> = {
   statistical_forensics: {
     eyebrow: "Statistical forensics check",
     title: "Possible statistical inconsistency",
-    verificationPrompt: "Recalculate the reported values from the shown sample size and summary statistics, then check for a rounding or transcription issue.",
+    verificationPrompt: "Check the recorded numbers and calculation against the original analysis output. This check does not verify the raw data.",
   },
   originality_reuse: {
     eyebrow: "Originality and reuse check",
@@ -67,4 +67,19 @@ export function checkKindMeta(kind: string): CheckKindMeta {
     title: "Possible inconsistency",
     verificationPrompt: "Check the recorded evidence against the manuscript before deciding whether this finding needs action.",
   };
+}
+
+export function isPValueFinding(kind: string | null | undefined): boolean {
+  return kind === "p_value_mismatch" || kind === "p_value_decision_error";
+}
+
+export function findingVerificationPrompt(checkKind: string, problemKind: string | null, hasPair: boolean): string {
+  if (problemKind === "orphan_in_text_citation") {
+    return "Check the manuscript's reference list for this author and year. Confirm whether the entry is missing or uses different spelling or a different year.";
+  }
+  if (isPValueFinding(problemKind)) {
+    return "Compare the reported p-value with the saved recalculation. Check the original analysis output for the test value, degrees of freedom, and whether the test was one-sided or two-sided. This check does not verify the raw data.";
+  }
+  const meta = checkKindMeta(checkKind);
+  return hasPair ? meta.verificationPrompt : meta.verificationPromptWithoutComparison ?? meta.verificationPrompt;
 }
