@@ -112,6 +112,7 @@ function AccountDisclosure() {
         type="button"
         aria-expanded={open}
         aria-controls="signal-account-panel"
+        data-tour="replay-tour-account"
         className="signal-account__trigger"
         onClick={() => setOpen((value) => !value)}
       >
@@ -172,6 +173,7 @@ function MobileWorkspaceMenu() {
         className="signal-mobile-menu__trigger"
         aria-expanded={open}
         aria-controls="signal-mobile-menu-panel"
+        data-tour="replay-tour-menu"
         onClick={() => setOpen((value) => !value)}
       >
         <span aria-hidden="true" className="signal-mobile-menu__icon"><i /><i /><i /></span>

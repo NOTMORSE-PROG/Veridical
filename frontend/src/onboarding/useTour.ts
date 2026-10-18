@@ -30,10 +30,22 @@ export function useTour() {
   // change of its own, e.g. data finishing a fetch).
   const [pollTick, setPollTick] = useState(0);
   const pollCountRef = useRef(0);
+  const pendingEntry = useRef<HTMLElement | null>(null);
 
   const active = Boolean(me) && !me?.onboarding_dismissed_at && !dismissedLocally;
 
   const resolved = active ? resolveTourStep(stepIndex, location.pathname) : null;
+
+  useEffect(() => {
+    if (active || !pendingEntry.current) return;
+    const target = pendingEntry.current;
+    pendingEntry.current = null;
+    // The tour's unmount cleanup releases inertness before the next dialog
+    // opens. Focus the ordinary trigger so Cancel returns to a real control.
+    if (!target.isConnected || target.closest("[inert]") || target.matches(":disabled")) return;
+    target.focus();
+    target.click();
+  }, [active]);
 
   // Poll a bounded number of times when the tour is active but nothing
   // resolves yet on this page -- catches an anchor that mounts after an
@@ -41,7 +53,7 @@ export function useTour() {
   // document.
   useEffect(() => {
     pollCountRef.current = 0;
-  }, [stepIndex, location.pathname]);
+  }, [stepIndex, location.pathname, active]);
 
   useEffect(() => {
     if (!active || resolved) return;
@@ -51,12 +63,9 @@ export function useTour() {
       setPollTick((t) => t + 1);
     }, POLL_MS);
     return () => clearTimeout(timer);
-    // BUG-086: `[active, resolved, pollTick]` is already the complete
-    // array -- every value the body reads (`active`, `resolved`) is
-    // listed; `pollCountRef` is a ref, exempt by React's own rule. The
-    // `eslint-disable` this line used to carry suppressed nothing: eslint
-    // isn't installed (oxlint is); verified manually, not assumed.
-  }, [active, resolved, pollTick]);
+    // A route change restarts discovery even if the previous page had
+    // exhausted its polls and the new page's anchor is still loading.
+  }, [active, resolved, pollTick, location.pathname]);
 
   function next() {
     if (!resolved) return;
@@ -80,6 +89,12 @@ export function useTour() {
     replay.mutate();
   }
 
+  function enterTask() {
+    if (!resolved?.step.entryActionLabel) return;
+    pendingEntry.current = resolved.el;
+    dismissTour();
+  }
+
   return {
     resolved,
     stepNumber: resolved ? resolved.index + 1 : 0,
@@ -90,5 +105,6 @@ export function useTour() {
     back,
     dismiss: dismissTour,
     replay: replayTour,
+    enterTask,
   };
 }

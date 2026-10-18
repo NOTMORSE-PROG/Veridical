@@ -194,6 +194,18 @@ async def get_dashboard_stats(
         )
     ) or 0
 
+    not_checked_count = (
+        await session.scalar(
+            select(func.count())
+            .select_from(Manuscript)
+            .where(
+                *manuscript_scope,
+                Manuscript.ingest_status == IngestStatus.done,
+                latest_run_status.is_(None),
+            )
+        )
+    ) or 0
+
     return DashboardStats(
         manuscripts_checked=manuscripts_checked or 0,
         ready_count=status_counts.get(ReadinessStatus.ready, 0),
@@ -210,4 +222,5 @@ async def get_dashboard_stats(
         ready_to_decide_count=ready_to_decide_count,
         needs_attention_count=needs_attention_count,
         checking_count=checking_count,
+        not_checked_count=not_checked_count,
     )

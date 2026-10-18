@@ -51,7 +51,7 @@ function formatUploadDate(value: string): string {
 }
 
 interface UploadManuscriptModalProps {
-  onClose: () => void;
+  onClose: (createdManuscriptId?: number) => void;
   /** Fired once a real upload succeeds, with the new manuscript's id --
    * lets the caller hand off straight into "New check" with this
    * manuscript preselected (Flow B, FEATURES.md), without forcing a
@@ -109,6 +109,7 @@ export function UploadManuscriptModal({ onClose, onUploadSuccess }: UploadManusc
   const fileInputId = useId();
   const hintId = useId();
   const errorId = useId();
+  const lastCreatedManuscriptId = useRef<number | undefined>(undefined);
 
   // Same BUG-028 rationale as UploadRubricModal: a focused element that
   // becomes `disabled` mid-pending drops focus to <body>. Moving focus to
@@ -124,8 +125,17 @@ export function UploadManuscriptModal({ onClose, onUploadSuccess }: UploadManusc
   // result heading gives keyboard and screen-reader users the same immediate
   // feedback sighted pointer users receive.
   useEffect(() => {
-    if (ingest.data) resultHeadingRef.current?.focus();
+    if (ingest.data) {
+      resultHeadingRef.current?.focus();
+      // Duplicate notices describe an earlier copy; ingestion still creates
+      // a new unchecked manuscript that must remain discoverable on close.
+      lastCreatedManuscriptId.current = ingest.data.manuscript_id;
+    }
   }, [ingest.data]);
+
+  function handleClose() {
+    onClose(lastCreatedManuscriptId.current);
+  }
 
   function handleUpload() {
     setFieldError(null);
@@ -185,7 +195,7 @@ export function UploadManuscriptModal({ onClose, onUploadSuccess }: UploadManusc
         title="Upload manuscript"
         size="lg"
         className="signal-upload-sheet"
-        onClose={ingest.isPending ? undefined : onClose}
+        onClose={ingest.isPending ? undefined : handleClose}
         footer={
           summary ? (
             showGroupProposal ? <div ref={setActionsTarget} /> : (
@@ -212,7 +222,7 @@ export function UploadManuscriptModal({ onClose, onUploadSuccess }: UploadManusc
             <>
               <button
                 type="button"
-                onClick={onClose}
+                onClick={handleClose}
                 disabled={ingest.isPending}
                 className="flex h-11 items-center justify-center rounded-md border border-border-input bg-panel px-4 text-sm font-bold text-ink hover:bg-status-neutral-bg disabled:opacity-45"
               >

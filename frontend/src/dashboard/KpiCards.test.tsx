@@ -17,6 +17,7 @@ const BASE: DashboardStats = {
   ready_to_decide_count: 2,
   needs_attention_count: 1,
   checking_count: 0,
+  not_checked_count: 0,
 };
 
 describe("KpiCards", () => {

@@ -91,6 +91,48 @@ describe("UploadManuscriptModal", () => {
     expect(onUploadSuccess).toHaveBeenCalledWith(42);
   });
 
+  it.each([null, {
+    manuscript_id: 17,
+    created_at: "2026-09-20T04:30:00Z",
+    original_filename: "thesis.pdf",
+    purged_at: null,
+  }])("V-081: closing a completed upload returns its new record, including a duplicate notice", async (existingUpload) => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ ...SUMMARY, existing_upload: existingUpload }), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+    const onClose = vi.fn();
+    const onUploadSuccess = vi.fn();
+    renderWithProviders(<UploadManuscriptModal onClose={onClose} onUploadSuccess={onUploadSuccess} />);
+    chooseFile();
+    fireEvent.click(screen.getByRole("button", { name: "Upload manuscript" }));
+    await screen.findByRole("heading", { name: existingUpload ? "You uploaded this file before" : "Upload complete" });
+    fireEvent.click(screen.getByRole("button", { name: "Close" }));
+    expect(onClose).toHaveBeenCalledExactlyOnceWith(42);
+    expect(onUploadSuccess).not.toHaveBeenCalled();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("V-081: cancelling before upload has no manuscript to reveal and sends no request", () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    const onClose = vi.fn();
+    renderWithProviders(<UploadManuscriptModal onClose={onClose} onUploadSuccess={() => {}} />);
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(onClose).toHaveBeenCalledExactlyOnceWith(undefined);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("V-081: cancelling Upload another still reveals the manuscript already saved", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify(SUMMARY), { status: 200 })));
+    const onClose = vi.fn();
+    renderWithProviders(<UploadManuscriptModal onClose={onClose} onUploadSuccess={() => {}} />);
+    chooseFile();
+    fireEvent.click(screen.getByRole("button", { name: "Upload manuscript" }));
+    await screen.findByRole("heading", { name: "Upload complete" });
+    fireEvent.click(screen.getByRole("button", { name: "Upload another" }));
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(onClose).toHaveBeenCalledExactlyOnceWith(42);
+  });
+
   it("states zero extracted reference records without claiming the manuscript has none", async () => {
     vi.stubGlobal(
       "fetch",

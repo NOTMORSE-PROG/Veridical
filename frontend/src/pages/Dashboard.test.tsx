@@ -37,6 +37,7 @@ const STATS = {
   // selected -- the "In progress" assertion below reads this directly.
   needs_attention_count: 5,
   checking_count: 3,
+  not_checked_count: 4,
 };
 
 const MANUSCRIPTS_PAGE = {
@@ -293,6 +294,43 @@ describe("DashboardPage", () => {
     // BUG-212: "In progress" isn't the active tab here, and used to show
     // no count at all -- now reads STATS.checking_count directly.
     expect(screen.getByRole("button", { name: /In progress3 manuscripts/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Not checked4 manuscripts/ })).toBeInTheDocument();
+  });
+
+  it("V-081: exposes the unchecked queue with an account-wide count and explicitly scoped search", async () => {
+    const fetchMock = stubFetchByPath({
+      "/auth/me": { id: 1, email: "a@b.com", display_name: "Demo Instructor" },
+      "/rubric-families": ACTIVE_FAMILY,
+      "/stats": STATS,
+      "/manuscripts": { items: [], total: 0, page: 1, page_size: 20 },
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    renderWithProviders(<DashboardPage />, { route: "/dashboard?q=missing" });
+
+    fireEvent.click(await screen.findByRole("button", { name: /Not checked4 manuscripts/ }));
+    expect(await screen.findByRole("heading", { name: "No matches in Not checked" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Not checked4 manuscripts/ })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByLabelText("Search group or file in this queue")).toHaveValue("missing");
+    expect(screen.getByText("Only manuscripts in Not checked are searched. Change queues to find other uploads.")).toBeInTheDocument();
+    await waitFor(() => expect(fetchMock.mock.calls.some(([input]) => {
+      const url = new URL(input.toString(), "http://localhost");
+      return url.pathname === "/manuscripts" && url.searchParams.get("status") === "not_checked"
+        && url.searchParams.get("q") === "missing";
+    })).toBe(true));
+    expect(fetchMock.mock.calls.some(([, init]) => init?.method === "POST")).toBe(false);
+  });
+
+  it("V-081: distinguishes an empty unchecked queue from a completed evaluation", async () => {
+    vi.stubGlobal("fetch", stubFetchByPath({
+      "/auth/me": { id: 1, email: "a@b.com", display_name: "Demo Instructor" },
+      "/rubric-families": ACTIVE_FAMILY,
+      "/stats": { ...STATS, not_checked_count: 0 },
+      "/manuscripts": { items: [], total: 0, page: 1, page_size: 20 },
+    }));
+    renderWithProviders(<DashboardPage />, { route: "/dashboard?queue=not_checked" });
+    expect(await screen.findByRole("heading", { name: "No unchecked manuscripts" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Not checked0 manuscripts/ })).toBeInTheDocument();
+    expect(screen.queryByText("Check complete")).not.toBeInTheDocument();
   });
 
   it("BUG-190: completed check evidence wins over a stale pending ingest state", async () => {
@@ -446,7 +484,7 @@ describe("DashboardPage", () => {
     expect(await within(dialog).findByText("G-11")).toBeInTheDocument();
   });
 
-  it("V-059: end-to-end handoff — upload a manuscript, then it's preselected in New check", async () => {
+  it.each(["start", "close"])("V-059/V-081: uploaded manuscript handoff via %s", async (nextAction) => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const path = new URL(typeof input === "string" ? input : input.toString(), "http://localhost").pathname;
       if (path === "/auth/me") {
@@ -513,7 +551,7 @@ describe("DashboardPage", () => {
       return new Response("not found", { status: 404 });
     });
     vi.stubGlobal("fetch", fetchMock);
-    renderWithProviders(<DashboardPage />);
+    renderWithProviders(<DashboardPage />, { route: "/dashboard?q=previous-search" });
 
     fireEvent.click(await screen.findByRole("button", { name: "Add manuscript" }));
     const dialog = await screen.findByRole("dialog");
@@ -526,6 +564,20 @@ describe("DashboardPage", () => {
     fireEvent.click(within(dialog).getByRole("button", { name: "Upload manuscript" }));
 
     await screen.findByText("8 pages parsed. 3 reference records extracted.");
+    if (nextAction === "close") {
+      fireEvent.click(within(dialog).getByRole("button", { name: "Close" }));
+      await waitFor(() => expect(screen.getByRole("button", { name: /Not checked4 manuscripts/ })).toHaveAttribute("aria-pressed", "true"));
+      expect(screen.getByLabelText("Search group or file in this queue")).toHaveValue("");
+      await waitFor(() => expect(fetchMock.mock.calls.some(([input]) => {
+        const url = new URL(input.toString(), "http://localhost");
+        return url.pathname === "/manuscripts" && url.searchParams.get("status") === "not_checked"
+          && !url.searchParams.has("q");
+      })).toBe(true));
+      expect(fetchMock.mock.calls.filter(([, init]) => init?.method === "POST").map(([input]) =>
+        new URL(input.toString(), "http://localhost").pathname)).toEqual(["/manuscripts/ingest"]);
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+      return;
+    }
     fireEvent.click(screen.getByRole("button", { name: "Start a check with this manuscript" }));
 
     // Lands in New Check with the just-uploaded manuscript preselected,

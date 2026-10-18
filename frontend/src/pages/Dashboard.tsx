@@ -34,6 +34,7 @@ const QUEUES: ReadonlyArray<{
   description: string;
 }> = [
   { id: "needs_review", label: "Needs you", description: "Unresolved or recovery work" },
+  { id: "not_checked", label: "Not checked", description: "Uploaded manuscripts awaiting a check" },
   { id: "checking", label: "In progress", description: "Checks currently running" },
   {
     id: "ready_to_decide",
@@ -103,6 +104,10 @@ function QueueCount({
   activeQueue: ReviewDeskQueue;
   activeTotal?: number;
 }) {
+  if (queue === "not_checked") {
+    const count = stats?.not_checked_count;
+    return count === undefined ? null : <span>{count} manuscript{count === 1 ? "" : "s"}</span>;
+  }
   if (queue === activeQueue && activeTotal !== undefined) {
     return <span>{activeTotal} manuscript{activeTotal === 1 ? "" : "s"}</span>;
   }
@@ -324,6 +329,7 @@ function ReviewDesk({
   const q = params.get("q")?.trim() || undefined;
   const program = params.get("program") || undefined;
   const [searchDraft, setSearchDraft] = useState(q ?? "");
+  useEffect(() => setSearchDraft(q ?? ""), [q]);
   const query: ReviewDeskQuery = { queue, q, program, sort, page, pageSize: REVIEW_DESK_PAGE_SIZE };
   const { data, isPending, isError, refetch } = useReviewDeskPage(query);
   const { data: stats } = useDashboardStats();
@@ -359,9 +365,7 @@ function ReviewDesk({
   }
 
   const totalPages = data ? Math.max(1, Math.ceil(data.total / data.page_size)) : 1;
-  const queueTitle = queue === "not_checked"
-    ? "Ready to check"
-    : QUEUES.find((item) => item.id === queue)?.label ?? "Needs you";
+  const queueTitle = QUEUES.find((item) => item.id === queue)?.label ?? "Needs you";
 
   return (
     <>
@@ -406,16 +410,20 @@ function ReviewDesk({
 
         <div className="signal-filters">
           <form role="search" onSubmit={submitSearch}>
-            <label htmlFor="review-desk-search">Search group or file</label>
+            <label htmlFor="review-desk-search">Search group or file in this queue</label>
             <div>
               <input
                 id="review-desk-search"
                 type="search"
+                aria-describedby="review-desk-search-help"
                 value={searchDraft}
                 onChange={(event) => setSearchDraft(event.target.value)}
               />
               <Button type="submit" variant="secondary">Search</Button>
             </div>
+            <p id="review-desk-search-help" className="signal-filter-help">
+              Only manuscripts in {queueTitle} are searched. Change queues to find other uploads.
+            </p>
           </form>
           <div className="signal-filter-field">
             <label htmlFor="review-desk-program">Program</label>
@@ -472,11 +480,13 @@ function ReviewDesk({
         {data && data.items.length === 0 && (
           <div className="signal-desk-empty">
             <div className="signal-desk-empty__mark" aria-hidden="true" />
-            <h3>{q || program ? "No manuscripts match these filters" : "This queue is clear"}</h3>
+            <h3>{q || program ? `No matches in ${queueTitle}` : queue === "not_checked" ? "No unchecked manuscripts" : "This queue is clear"}</h3>
             <p>
               {q || program
-                ? "Clear or change a filter to widen the view."
-                : "There is no manuscript work in this state right now."}
+                ? "Clear the filters or choose another queue."
+                : queue === "not_checked"
+                  ? "New uploads appear here after preparation. Previously checked manuscripts stay in their other queues."
+                  : "There is no manuscript work in this state right now."}
             </p>
             {q || program ? (
               <Button
@@ -633,7 +643,12 @@ export function DashboardPage() {
       {uploadFormatOpen && <UploadRubricModal onClose={() => setUploadFormatOpen(false)} />}
       {uploadManuscriptOpen && (
         <UploadManuscriptModal
-          onClose={() => setUploadManuscriptOpen(false)}
+          onClose={(createdManuscriptId) => {
+            setUploadManuscriptOpen(false);
+            if (createdManuscriptId !== undefined) {
+              setRerunParams({ queue: "not_checked", status: "not_checked", sort: "newest" });
+            }
+          }}
           onUploadSuccess={(id) => {
             setUploadManuscriptOpen(false);
             openCheck(id);

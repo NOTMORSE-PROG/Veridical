@@ -27,6 +27,7 @@ export interface DashboardStats {
   // whenever that tab wasn't the currently selected one.
   needs_attention_count: number;
   checking_count: number;
+  not_checked_count: number;
 }
 
 export function useDashboardStats() {

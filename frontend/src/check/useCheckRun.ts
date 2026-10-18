@@ -46,6 +46,7 @@ export function useIngestManuscript() {
       // Query matches by key prefix, so one call covers both without
       // either query needing to know about the other.
       queryClient.invalidateQueries({ queryKey: ["manuscripts"] });
+      queryClient.invalidateQueries({ queryKey: ["stats"] });
     },
   });
 }

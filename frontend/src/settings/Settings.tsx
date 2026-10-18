@@ -11,6 +11,7 @@ import {
   type MouseEvent as ReactMouseEvent,
   type ReactNode,
   useEffect,
+  useId,
   useRef,
   useState,
 } from "react";
@@ -485,31 +486,60 @@ function ApiKeySection() {
   );
 }
 
-const quotaGridCols = "grid-cols-[minmax(0,1fr)_110px_110px_110px_80px_120px]";
-
 function ModelRow({ model }: { model: ModelQuotaStatus }) {
-  // BUG-084: `role="cell"` on every child -- the ARIA 1.2 spec that
-  // `role="row"` (this row's own container, set by the caller) requires
-  // also requires each child to carry a cell role, invalid otherwise.
-  // The Status cell is ALWAYS rendered, empty when not exhausted, rather
-  // than conditionally omitted -- a `role="row"` with a variable number
-  // of cells (5 here, 6 for an exhausted model) leaves a screen reader
-  // unable to align this row against the 6 `columnheader`s above it,
-  // the same "cell count vs header count" class BUG-055 already named
-  // for this ticket's own sibling file.
   return (
-    <>
-      <span role="cell" className="truncate text-ink" title={model.model}>
-        {model.model}
-      </span>
-      <span role="cell" className="text-ink-tertiary">
-        {model.calls_used} / {model.daily_limit}
-      </span>
-      <span role="cell" className="text-ink-tertiary">{model.calls_remaining}</span>
-      <span role="cell" className="text-ink-tertiary">{model.cache_hits_today}</span>
-      <span role="cell" className="text-ink-tertiary">{model.vision ? "Yes" : "No"}</span>
-      <span role="cell">{model.exhausted && <StatusPill tone="attention">Exhausted</StatusPill>}</span>
-    </>
+    <tr>
+      <th scope="row">{model.model}</th>
+      <td>{model.calls_used} / {model.daily_limit}</td>
+      <td>{model.calls_remaining}</td>
+      <td>{model.cache_hits_today}</td>
+      <td>{model.vision ? "Yes" : "No"}</td>
+      <td>{model.exhausted && <StatusPill tone="attention">Exhausted</StatusPill>}</td>
+    </tr>
+  );
+}
+
+function ModelCapacityTable({ models }: { models: ModelQuotaStatus[] }) {
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const [overflows, setOverflows] = useState(false);
+  const helpId = useId();
+
+  useEffect(() => {
+    const container = scrollRef.current;
+    if (!container) return;
+    const measure = () => setOverflows(container.scrollWidth > container.clientWidth);
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(container);
+    if (container.firstElementChild) observer.observe(container.firstElementChild);
+    return () => observer.disconnect();
+  }, [models]);
+
+  return (
+    <div className="hidden lg:block">
+      <div
+        ref={scrollRef}
+        role="region"
+        aria-label="Daily AI capacity by model"
+        aria-describedby={overflows ? helpId : undefined}
+        tabIndex={overflows ? 0 : undefined}
+        className="signal-model-capacity-scroll"
+      >
+        <table className="signal-model-capacity-table">
+          <caption>Daily AI capacity by model</caption>
+          <thead><tr>
+            <th scope="col">Model</th>
+            <th scope="col">Used / Limit</th>
+            <th scope="col">Remaining</th>
+            <th scope="col">Cache hits</th>
+            <th scope="col">Images</th>
+            <th scope="col">Status</th>
+          </tr></thead>
+          <tbody>{models.map((model) => <ModelRow key={model.model} model={model} />)}</tbody>
+        </table>
+      </div>
+      {overflows && <p id={helpId} className="mt-2 text-xs text-ink-secondary">Scroll across to see all model details.</p>}
+    </div>
   );
 }
 
@@ -585,7 +615,7 @@ function QuotaSection() {
             {quota.models.map((model) => (
               <li key={model.model} className="rounded-lg border border-border p-3 text-sm">
                 <div className="flex items-center justify-between gap-2">
-                  <span className="min-w-0 truncate font-medium text-ink" title={model.model}>
+                  <span className="min-w-0 wrap-anywhere font-medium text-ink">
                     {model.model}
                   </span>
                   {model.exhausted && <StatusPill tone="attention">Exhausted</StatusPill>}
@@ -597,34 +627,7 @@ function QuotaSection() {
               </li>
             ))}
           </ul>
-          {/* BUG-084: `role="row"`/`role="columnheader"` below require a
-              `table`/`grid`/`treegrid` ancestor per ARIA 1.2, or they're
-              orphaned -- unannounced as a table, inert to a screen reader.
-              This wrapper had none; the three other grids in this codebase
-              that get this right (AuditLog.tsx, ResultsTable.tsx) all use
-              exactly this flat `table > row > columnheader/cell` shape. */}
-          <div role="table" className="hidden overflow-hidden rounded-lg border border-border lg:block">
-            <div
-              role="row"
-              className={`grid ${quotaGridCols} gap-3 border-b border-border bg-status-neutral-bg px-3 py-2 text-xs font-semibold tracking-header text-ink-tertiary uppercase`}
-            >
-              <span role="columnheader">Model</span>
-              <span role="columnheader">Used / Limit</span>
-              <span role="columnheader">Remaining</span>
-              <span role="columnheader">Cache hits</span>
-              <span role="columnheader">Vision</span>
-              <span role="columnheader">Status</span>
-            </div>
-            {quota.models.map((model) => (
-              <div
-                key={model.model}
-                role="row"
-                className={`grid ${quotaGridCols} items-center gap-3 border-t border-border px-3 py-2.5 text-sm`}
-              >
-                <ModelRow model={model} />
-              </div>
-            ))}
-          </div>
+          <ModelCapacityTable models={quota.models} />
         </div>
       )}
     </SectionCard>
@@ -701,15 +704,15 @@ function TransparencySection() {
         </details>
 
         <div>
-          <h3 className="font-semibold text-ink">AI models and prompts in use</h3>
+          <h3 className="font-semibold text-ink">Models and prompts recorded for your manuscripts</h3>
           <p className="mt-1 text-xs text-ink-tertiary">
-            Read from your account's most recent AI calls, not a fixed list. If a model or prompt
-            changes, this updates automatically.
+            Latest recorded use for each check type, from manuscripts owned by your account.
+            Activity without a manuscript ownership link, including format-upload calls, is not included.
           </p>
           {prompt_versions.length === 0 ? (
             <p className="mt-2 text-ink-secondary">
-              No AI grading calls have been recorded yet. This fills in automatically once
-              VERIDICAL grades a manuscript.
+              No attributable model activity is available for your manuscripts yet.
+              This does not mean no AI calls have occurred.
             </p>
           ) : (
             <ul className="mt-2 flex flex-col gap-2">
@@ -718,7 +721,7 @@ function TransparencySection() {
                   <span className="font-medium text-ink">{p.prompt_type}</span>
                   <span className="text-ink-tertiary">
                     {" "}
-                    · {p.model} · prompt v{p.prompt_version.replace(/^v/, "")} · last used{" "}
+                    · {p.model} · prompt v{p.prompt_version.replace(/^v/, "")} · Last recorded{" "}
                     {new Date(p.observed_at).toLocaleString()}
                   </span>
                 </li>

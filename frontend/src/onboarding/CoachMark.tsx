@@ -7,6 +7,7 @@
 import { useEffect, useId, useRef } from "react";
 import { createPortal } from "react-dom";
 import { useInertBackground } from "../components/useInertBackground";
+import { Button } from "../ui/Button";
 import { useCoachMarkPosition } from "./useCoachMarkPosition";
 import { useTour } from "./TourContext";
 
@@ -69,6 +70,8 @@ function CoachMarkCard({
   onBack,
   onNext,
   onDismiss,
+  entryActionLabel,
+  onEnterTask,
 }: {
   anchorEl: HTMLElement;
   title: string;
@@ -80,6 +83,8 @@ function CoachMarkCard({
   onBack: () => void;
   onNext: () => void;
   onDismiss: () => void;
+  entryActionLabel?: string;
+  onEnterTask: () => void;
 }) {
   useInertBackground();
   const position = useCoachMarkPosition(anchorEl);
@@ -185,7 +190,7 @@ function CoachMarkCard({
         aria-describedby={bodyId}
         tabIndex={-1}
         className="motion-safe:animate-coachmark-in flex flex-col gap-3 rounded-lg border border-border bg-panel p-4 shadow-(--elevation-overlay)"
-        style={{ position: "fixed", top: cardTop, left: cardLeft, width: "320px", maxWidth: "calc(100vw - 32px)", zIndex: "var(--z-tour-card)" }}
+        style={{ position: "fixed", top: cardTop, left: cardLeft, width: "320px", maxWidth: "calc(100vw - 32px)", maxHeight: `calc(100dvh - ${cardTop}px - var(--signal-space-4))`, overflowY: "auto", zIndex: "var(--z-tour-card)" }}
       >
         <div className="flex items-start gap-2">
           <h2 id={titleId} className="flex-1 text-sm font-bold text-ink">
@@ -193,7 +198,7 @@ function CoachMarkCard({
           </h2>
           <button
             type="button"
-            aria-label="Close tour"
+            aria-label="Close introduction"
             onClick={onDismiss}
             className="flex h-11 w-11 flex-none items-center justify-center rounded-md text-ink-tertiary hover:bg-status-neutral-bg hover:text-ink"
           >
@@ -203,6 +208,11 @@ function CoachMarkCard({
         <p id={bodyId} className="text-sm text-ink-secondary">
           {body}
         </p>
+        {entryActionLabel && (
+          <Button variant="brand" onClick={onEnterTask} disabled={anchorEl.matches(":disabled")}>
+            {entryActionLabel}
+          </Button>
+        )}
         <div className="flex items-center justify-between gap-2">
           <StepDots current={stepNumber} total={totalSteps} />
           <div className="flex gap-2">
@@ -218,7 +228,7 @@ function CoachMarkCard({
             <button
               type="button"
               onClick={onNext}
-              className="flex h-11 items-center justify-center rounded-md bg-action px-3.5 text-sm font-bold text-on-action hover:bg-action-hover"
+              className="flex h-11 items-center justify-center rounded-md border border-border-input bg-panel px-3.5 text-sm font-bold text-ink hover:bg-status-neutral-bg"
             >
               {isLast ? "Done" : "Next"}
             </button>
@@ -259,6 +269,8 @@ export function CoachMark() {
         onBack={tour.back}
         onNext={tour.isLast ? tour.dismiss : tour.next}
         onDismiss={tour.dismiss}
+        entryActionLabel={tour.resolved.step.entryActionLabel}
+        onEnterTask={tour.enterTask}
       />
     </>,
     document.body,

@@ -24,6 +24,27 @@ function renderShell(route = "/library") {
 describe("SignalShell destination navigation", () => {
   afterEach(() => vi.unstubAllGlobals());
 
+  it.each(["Account", "Menu"])("V-081: replay from Settings survives closing its %s menu", async (triggerName) => {
+    const me = { id: 1, email: "instructor@demo.local", display_name: "Instructor", onboarding_dismissed_at: "2026-01-01T00:00:00Z" };
+    const fetchMock = stubFetchByPath({
+      "/auth/session": { instructor: me },
+      "/auth/onboarding/replay": { ...me, onboarding_dismissed_at: null },
+      "/quota": { calls_used: 3, calls_remaining: 17, daily_limit: 20 },
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    renderWithProviders(<SignalShell><p>Route content</p></SignalShell>, { route: "/settings" });
+    const trigger = await screen.findByRole("button", { name: triggerName });
+    trigger.getBoundingClientRect = () => ({ top: 100, left: 100, width: 120, height: 44, bottom: 144, right: 220 }) as DOMRect;
+    fireEvent.click(trigger);
+    const replay = screen.getByRole("button", { name: "Replay introduction" });
+    replay.getBoundingClientRect = trigger.getBoundingClientRect;
+    fireEvent.click(replay);
+    expect(await screen.findByRole("dialog", { name: "Come back anytime" })).toBeInTheDocument();
+    expect(trigger).toHaveAttribute("aria-expanded", "false");
+    expect(fetchMock.mock.calls.filter(([, init]) => init?.method === "POST").map(([input]) =>
+      new URL(input.toString(), "http://localhost").pathname)).toEqual(["/auth/onboarding/replay"]);
+  });
+
   it("exposes every stable destination in the primary navigation", async () => {
     renderShell();
     const navigation = await screen.findByRole("navigation", { name: "Primary navigation" });

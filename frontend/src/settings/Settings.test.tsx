@@ -246,25 +246,27 @@ describe("SettingsPage", () => {
     await screen.findByText("Prof Cruz");
     await screen.findAllByText("gemini-3.5-pro");
 
-    const table = container.querySelector('[role="table"]');
+    const table = container.querySelector("table");
     expect(table).toBeInTheDocument();
+    expect(table!.querySelector("caption")).toHaveTextContent("Daily AI capacity by model");
 
-    const columnHeaderCount = table!.querySelectorAll('[role="columnheader"]').length;
-    expect(columnHeaderCount).toBeGreaterThan(0);
+    const columnHeaderCount = table!.querySelectorAll('th[scope="col"]').length;
+    expect(columnHeaderCount).toBe(6);
 
-    const rows = table!.querySelectorAll('[role="row"]');
+    const rows = table!.querySelectorAll("tr");
     expect(rows.length).toBeGreaterThan(0);
     for (const row of Array.from(rows)) {
       // Every role="row" resolves to the SAME table via .closest -- none
       // orphaned outside it.
-      expect(row.closest('[role="table"]')).toBe(table);
+      expect(row.closest("table")).toBe(table);
     }
     // The header row's own cells are columnheaders, not plain cells; every
     // DATA row (the rest) carries exactly one role="cell" per column.
     const dataRows = Array.from(rows).slice(1);
     expect(dataRows.length).toBe(2); // one per model
     for (const row of dataRows) {
-      expect(row.querySelectorAll('[role="cell"]').length).toBe(columnHeaderCount);
+      expect(row.querySelectorAll('td, th[scope="row"]').length).toBe(columnHeaderCount);
+      expect(row.querySelector('th[scope="row"]')).toBeInTheDocument();
     }
   });
 
@@ -280,9 +282,11 @@ describe("SettingsPage", () => {
     expect(screen.getByText("Not Ready composite cutoff").closest("div")).toHaveTextContent("60");
     expect(screen.getByText("Escalation agreement cutoff").closest("div")).toHaveTextContent("1.00");
     expect(screen.getByText(/semantic_grading/)).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Models and prompts recorded for your manuscripts" })).toBeInTheDocument();
+    expect(screen.getByText(/Activity without a manuscript ownership link/)).toBeInTheDocument();
   });
 
-  it("discloses an honest empty state when no AI calls have been recorded yet", async () => {
+  it("discloses missing attributable activity without claiming no calls occurred", async () => {
     vi.stubGlobal(
       "fetch",
       stubFetchByPath(baseHandlers({ "/settings": { ...SETTINGS, prompt_versions: [] } })),
@@ -291,7 +295,7 @@ describe("SettingsPage", () => {
     await screen.findByText("Prof Cruz");
 
     expect(
-      await screen.findByText("No AI grading calls have been recorded yet. This fills in automatically once VERIDICAL grades a manuscript."),
+      await screen.findByText("No attributable model activity is available for your manuscripts yet. This does not mean no AI calls have occurred."),
     ).toBeInTheDocument();
   });
 

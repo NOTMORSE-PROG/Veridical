@@ -23,6 +23,8 @@ export interface TourStep {
   anchorSelectors: string[];
   title: string;
   body: string;
+  /** Only safe dialog-entry steps opt in; never confirmation or evaluation. */
+  entryActionLabel?: string;
 }
 
 export const TOUR_STEPS: readonly TourStep[] = [
@@ -31,7 +33,8 @@ export const TOUR_STEPS: readonly TourStep[] = [
     routeMatch: (pathname) => pathname === "/dashboard",
     anchorSelectors: ['[data-tour="upload-format-cta"]'],
     title: "Format comes first",
-    body: "Upload your rubric or format document here first, before any manuscript can be checked against it.",
+    body: "Add your program's rubric or format document. You can review the prepared criteria before using it.",
+    entryActionLabel: "Open format upload",
   },
   {
     id: "confirm-rubric",
@@ -45,7 +48,8 @@ export const TOUR_STEPS: readonly TourStep[] = [
     routeMatch: (pathname) => pathname === "/dashboard",
     anchorSelectors: ['[data-tour="new-check-cta"]'],
     title: "Run a check when you're ready",
-    body: "Pick a manuscript and your active format here to start a check.",
+    body: "Choose an uploaded manuscript and the active format. Review the setup before starting the check.",
+    entryActionLabel: "Choose manuscript",
   },
   {
     id: "escalation",
@@ -65,9 +69,11 @@ export const TOUR_STEPS: readonly TourStep[] = [
   {
     id: "replay",
     routeMatch: () => true,
-    anchorSelectors: ['[data-tour="replay-tour-desktop"]', '[data-tour="replay-tour-mobile"]'],
+    // Menu items disappear after replay. Persistent menu triggers provide
+    // a visible fallback on routes without a format/check anchor.
+    anchorSelectors: ['[data-tour="replay-tour-desktop"]', '[data-tour="replay-tour-mobile"]', '[data-tour="replay-tour-account"]', '[data-tour="replay-tour-menu"]'],
     title: "Come back anytime",
-    body: "Replay this tour anytime from this button.",
+    body: "Use Replay introduction in your account controls whenever you need a reminder.",
   },
 ] as const;
 

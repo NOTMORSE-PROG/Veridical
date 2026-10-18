@@ -1,6 +1,8 @@
 import { fireEvent, screen, waitFor } from "@testing-library/react";
+import { useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { renderWithProviders, stubFetchByPath } from "../test/renderWithProviders";
+import { Modal, ModalBackdrop } from "../components/Modal";
 import { CoachMark } from "./CoachMark";
 import { TourProvider, useTour } from "./TourContext";
 
@@ -29,6 +31,20 @@ function DashboardFixture() {
       <button data-tour="new-check-cta">New check</button>
       <button data-tour="replay-tour-desktop">Replay</button>
     </div>
+  );
+}
+
+function EntryDialogFixture({ onEntry }: { onEntry: () => void }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <>
+      <button data-tour="upload-format-cta" onClick={() => { onEntry(); setOpen(true); }}>
+        Upload required format
+      </button>
+      {open && <ModalBackdrop><Modal title="Upload required format" onClose={() => setOpen(false)}>
+        <button onClick={() => setOpen(false)}>Cancel</button>
+      </Modal></ModalBackdrop>}
+    </>
   );
 }
 
@@ -82,6 +98,64 @@ describe("CoachMark", () => {
     const dialog = await screen.findByRole("dialog");
     expect(dialog).toHaveTextContent("Format comes first");
     await waitFor(() => expect(dialog.contains(document.activeElement)).toBe(true));
+  });
+
+  it("V-081: safe entry releases the introduction before opening the ordinary dialog and restores focus on Cancel", async () => {
+    const fetchMock = stubFetchByPath({
+      "/auth/me": ME_NOT_DISMISSED,
+      "/auth/onboarding/dismiss": ME_DISMISSED,
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const onEntry = vi.fn(() => expect(document.getElementById("root")).not.toHaveAttribute("inert"));
+    renderWithProviders(<div id="root"><TourProvider>
+      <EntryDialogFixture onEntry={onEntry} />
+      <CoachMark />
+    </TourProvider></div>, { route: "/dashboard" });
+    mountFixtureRects();
+    const entry = await screen.findByRole("button", { name: "Open format upload" });
+    expect(document.getElementById("root")).toHaveAttribute("inert");
+    fireEvent.click(entry);
+
+    const dialog = await screen.findByRole("dialog", { name: "Upload required format" });
+    expect(onEntry).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole("dialog", { name: "Format comes first" })).not.toBeInTheDocument();
+    expect(dialog.contains(document.activeElement)).toBe(true);
+    expect(document.getElementById("root")).toHaveAttribute("inert");
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(document.getElementById("root")).not.toHaveAttribute("inert");
+    expect(screen.getByRole("button", { name: "Upload required format" })).toHaveFocus();
+    expect(fetchMock.mock.calls.filter(([, init]) => init?.method === "POST").map(([input]) =>
+      new URL(input.toString(), "http://localhost").pathname)).toEqual(["/auth/onboarding/dismiss"]);
+  });
+
+  it("V-081: confirmation steps never offer automatic entry or activate the highlighted action", async () => {
+    vi.stubGlobal("fetch", stubFetchByPath({ "/auth/me": ME_NOT_DISMISSED }));
+    const confirm = vi.fn();
+    renderWithProviders(<TourProvider>
+      <button data-tour="confirm-rubric-cta" onClick={confirm}>Confirm rubric</button>
+      <CoachMark />
+    </TourProvider>, { route: "/rubric/1/review" });
+    mountFixtureRects();
+    await screen.findByRole("dialog", { name: "Review before you confirm" });
+    expect(screen.queryByRole("button", { name: "Open format upload" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Choose manuscript" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Next" }));
+    expect(confirm).not.toHaveBeenCalled();
+  });
+
+  it("V-081: a disabled upload control cannot be invoked through the introduction", async () => {
+    vi.stubGlobal("fetch", stubFetchByPath({ "/auth/me": ME_NOT_DISMISSED }));
+    const open = vi.fn();
+    renderWithProviders(<TourProvider>
+      <button disabled data-tour="upload-format-cta" onClick={open}>Upload required format</button>
+      <CoachMark />
+    </TourProvider>, { route: "/dashboard" });
+    mountFixtureRects();
+    const entry = await screen.findByRole("button", { name: "Open format upload" });
+    expect(entry).toBeDisabled();
+    fireEvent.click(entry);
+    expect(open).not.toHaveBeenCalled();
   });
 
   it("Next advances to the next resolvable step", async () => {
@@ -158,7 +232,7 @@ describe("CoachMark", () => {
     mountFixtureRects();
     await screen.findByText("Format comes first");
 
-    fireEvent.click(screen.getByRole("button", { name: "Close tour" }));
+    fireEvent.click(screen.getByRole("button", { name: "Close introduction" }));
 
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     await waitFor(() =>
@@ -239,7 +313,7 @@ describe("CoachMark", () => {
     mountFixtureRects();
     await screen.findByText("Format comes first");
 
-    fireEvent.click(screen.getByRole("button", { name: "Close tour" }));
+    fireEvent.click(screen.getByRole("button", { name: "Close introduction" }));
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Replay" }));

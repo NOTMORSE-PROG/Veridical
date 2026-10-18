@@ -37,3 +37,4 @@ class DashboardStats(BaseModel):
     # no real count to fall back on whenever that tab wasn't selected.
     needs_attention_count: int
     checking_count: int
+    not_checked_count: int

@@ -5,6 +5,7 @@ counts, and the escalation-rate self-reporting (D-012) must be honest
 """
 
 import os
+from datetime import UTC, datetime
 from decimal import Decimal
 
 import pytest
@@ -12,7 +13,14 @@ from sqlalchemy import text
 
 from app.config import get_settings
 from app.dashboard.service import get_dashboard_stats
-from app.models.enums import CheckKind, CheckRunStatus, ReadinessStatus, ResultOutcome
+from app.models.enums import (
+    CheckKind,
+    CheckRunStatus,
+    IngestStatus,
+    ManuscriptOrigin,
+    ReadinessStatus,
+    ResultOutcome,
+)
 from app.models.instructor import Instructor
 from app.models.manuscript import Manuscript
 from app.models.rubric import Criterion, Rubric
@@ -486,3 +494,49 @@ async def test_a_superseded_runs_decision_does_not_linger_in_decided_count(sessi
         stats = await get_dashboard_stats(session, instructor.id)
         assert stats.manuscripts_checked == 1
         assert stats.decided_count == 0
+
+
+async def test_not_checked_count_matches_owned_visible_check_inputs(session_factory):
+    """V-081: count uploaded check inputs, not Library, failed or foreign rows."""
+    from app.ingest.service import list_manuscripts
+
+    async with session_factory() as session:
+        owner = Instructor(email="desk-owner@demo.local", display_name="Owner")
+        other = Instructor(email="desk-other@demo.local", display_name="Other")
+        session.add_all([owner, other])
+        await session.commit()
+        eligible = []
+        for label, attributes in [
+            ("unchecked A", {}),
+            ("unchecked B", {}),
+            ("foreign", {"instructor_id": other.id}),
+            ("library", {"origin": ManuscriptOrigin.library_submission}),
+            ("dismissed", {"dismissed_at": datetime.now(UTC)}),
+            ("failed", {"ingest_status": IngestStatus.failed}),
+            ("pending", {"ingest_status": IngestStatus.pending}),
+            ("processing", {"ingest_status": IngestStatus.processing}),
+        ]:
+            values = dict(instructor_id=owner.id, ingest_status=IngestStatus.done)
+            values.update(attributes)
+            manuscript = Manuscript(group_label=label, file_ref="fixture.pdf", **values)
+            session.add(manuscript)
+            if label.startswith("unchecked"):
+                eligible.append(manuscript)
+        await session.commit()
+        for status in (CheckRunStatus.queued, CheckRunStatus.failed, CheckRunStatus.done):
+            manuscript = Manuscript(
+                instructor_id=owner.id,
+                group_label=status.value,
+                file_ref="has-run.pdf",
+                ingest_status=IngestStatus.done,
+            )
+            session.add(manuscript)
+            await session.commit()
+            await _make_run(session, owner, manuscript_id=manuscript.id, run_status=status)
+
+        stats = await get_dashboard_stats(session, owner.id)
+        page = await list_manuscripts(session, owner.id, status="not_checked")
+        assert stats.not_checked_count == 2
+        assert page.total == stats.not_checked_count
+        assert {row.id for row in page.items} == {row.id for row in eligible}
+        assert (await get_dashboard_stats(session, other.id)).not_checked_count == 1
