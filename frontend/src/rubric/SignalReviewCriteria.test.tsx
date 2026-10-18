@@ -1,4 +1,4 @@
-import { fireEvent, screen, waitFor } from "@testing-library/react";
+import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { useNavigate } from "react-router";
 import type { Rubric } from "../api/types";
@@ -138,6 +138,88 @@ describe("SignalReviewCriteriaPage", () => {
     expect(summary).toHaveFocus();
     expect(screen.getByRole("button", { name: "Criterion 1 has no text." })).toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(["Save draft", "Confirm and activate format"])("%s rejects incomplete added criteria before sending a request", async (action) => {
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => new Response(JSON.stringify(RUBRIC), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+    renderPage();
+    await screen.findByLabelText("Criterion 1 text");
+    fireEvent.click(screen.getByRole("button", { name: "Add criterion" }));
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Criterion 3 text"), { target: { value: "   " } });
+    fireEvent.click(screen.getByRole("button", { name: action }));
+    const summary = await screen.findByRole("alert");
+    await waitFor(() => expect(summary).toHaveFocus());
+    expect(screen.getByLabelText("Criterion 3 text")).toHaveAttribute("aria-invalid", "true");
+    expect(screen.getByLabelText("Criterion 3 weight")).toHaveAttribute("aria-invalid", "true");
+    expect(fetchMock.mock.calls.filter(([, init]) => init?.method === "PUT")).toHaveLength(0);
+    fireEvent.click(within(summary).getByRole("button", { name: "Criterion 3's weight must be greater than zero." }));
+    expect(screen.getByLabelText("Criterion 3 weight")).toHaveFocus();
+    fireEvent.change(screen.getByLabelText("Criterion 3 text"), { target: { value: "New supported requirement" } });
+    fireEvent.click(screen.getByRole("button", { name: action }));
+    expect(fetchMock.mock.calls.filter(([, init]) => init?.method === "PUT")).toHaveLength(0);
+    fireEvent.change(screen.getByLabelText("Criterion 3 weight"), { target: { value: "10" } });
+    fireEvent.click(screen.getByRole("button", { name: action }));
+    await waitFor(() => expect(fetchMock.mock.calls.filter(([, init]) => init?.method === "PUT")).toHaveLength(1));
+    const body = JSON.parse(fetchMock.mock.calls.find(([, init]) => init?.method === "PUT")![1]!.body as string);
+    expect(body.confirm).toBe(action !== "Save draft");
+    expect(body.criteria[2]).toMatchObject({ text: "New supported requirement", weight: 10, evidence: null });
+    expect(body.criteria[1].levels).toEqual(LEVELS);
+  });
+
+  it.each(["Save draft", "Confirm and activate format"])("%s rejects an empty criterion set", async (action) => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify(RUBRIC), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+    renderPage();
+    await screen.findByLabelText("Criterion 1 text");
+    fireEvent.click(screen.getByRole("button", { name: "Remove criterion 2" }));
+    fireEvent.click(screen.getByRole("button", { name: "Remove criterion 1" }));
+    fireEvent.click(screen.getByRole("button", { name: action }));
+    const summary = await screen.findByRole("alert");
+    await waitFor(() => expect(summary).toHaveFocus());
+    expect(within(summary).getByRole("button", { name: "Add at least one criterion." })).toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("invalid save-and-leave closes the dialog, focuses errors, and keeps dirty edits", async () => {
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => new Response(JSON.stringify(RUBRIC), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+    renderWithProviders(<><SignalReviewCriteriaPage /><VersionNavigationControl /></>, { route: "/rubric/5/review", path: "/rubric/:rubricId/review" });
+    fireEvent.change(await screen.findByLabelText("Criterion 1 text"), { target: { value: "" } });
+    fireEvent.click(screen.getByRole("button", { name: "Open next version" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Save draft and leave" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    await waitFor(() => expect(screen.getByRole("alert")).toHaveFocus());
+    expect(screen.getByLabelText("Criterion 1 text")).toHaveValue("");
+    expect(fetchMock.mock.calls.filter(([, init]) => init?.method === "PUT")).toHaveLength(0);
+    fireEvent.click(screen.getByRole("button", { name: "Open next version" }));
+    expect(await screen.findByRole("dialog")).toBeInTheDocument();
+  });
+
+  it.each([200, 503, 422])("valid save-and-leave handles HTTP %s without losing edits", async (status) => {
+    const next = { ...RUBRIC, id: 6, criteria: [{ ...RUBRIC.criteria[0], text: "New version criterion" }] };
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (init?.method === "PUT") return new Response(JSON.stringify(status === 200 ? RUBRIC : {}), { status });
+      return new Response(JSON.stringify(String(input).endsWith("/6") ? next : RUBRIC), { status: 200 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    renderWithProviders(<><SignalReviewCriteriaPage /><VersionNavigationControl /></>, { route: "/rubric/5/review", path: "/rubric/:rubricId/review" });
+    fireEvent.change(await screen.findByLabelText("Criterion 1 text"), { target: { value: "Retain this corrected criterion" } });
+    fireEvent.click(screen.getByRole("button", { name: "Open next version" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Save draft and leave" }));
+    await waitFor(() => expect(fetchMock.mock.calls.filter(([, init]) => init?.method === "PUT")).toHaveLength(1));
+    const body = JSON.parse(fetchMock.mock.calls.find(([, init]) => init?.method === "PUT")![1]!.body as string);
+    expect(body.confirm).toBe(false);
+    if (status === 200) {
+      await waitFor(() => expect(screen.getByLabelText("Criterion 1 text")).toHaveValue("New version criterion"));
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    } else {
+      const dialog = await screen.findByRole("dialog");
+      const expected = status === 422 ? /One or more criterion values were rejected/ : /Request failed \(503\)/;
+      expect(await within(dialog).findByText(expected)).toBeInTheDocument();
+      expect(screen.getByLabelText("Criterion 1 text")).toHaveValue("Retain this corrected criterion");
+    }
   });
 
   it("renders a history version read-only and explains traceability", async () => {

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Link, useBlocker, useParams } from "react-router";
+import { ApiError } from "../api/client";
 import type { CriterionType, RubricLevel } from "../api/types";
 import { WEIGHT_IMPORTANCE_PREVIEW } from "../config/ui";
 import { useRouteFocus } from "../routing/useRouteFocus";
@@ -26,6 +27,14 @@ const TYPE_LABELS: Record<CriterionType, string> = {
 };
 
 let localCriterionId = 0;
+
+function invalidWeight(weight: number): boolean {
+  return !Number.isFinite(weight) || weight <= 0;
+}
+
+function invalidCriteria(rows: CriterionRow[]): boolean {
+  return rows.length === 0 || rows.some((row) => !row.text.trim() || invalidWeight(row.weight));
+}
 
 function importance(weight: number, average: number): "Low" | "Medium" | "High" {
   if (average <= 0) return "Medium";
@@ -82,7 +91,7 @@ function CriterionCard({
   onRemove: () => void;
 }) {
   const textError = showErrors && row.text.trim() === "";
-  const weightError = showErrors && row.weight <= 0;
+  const weightError = showErrors && invalidWeight(row.weight);
   if (readOnly) return (
     <li className="signal-criterion-card">
       <div className="signal-criterion-card__number" aria-hidden="true">{index + 1}</div>
@@ -193,6 +202,7 @@ function CriteriaEditor({ id }: { id: number }) {
   const summaryRef = useRef<HTMLDivElement>(null);
   const addRef = useRef<HTMLButtonElement>(null);
   const resolvingBlocker = useRef(false);
+  const focusErrorsAfterDialog = useRef(false);
   useRouteFocus("Review prepared criteria - VERIDICAL", headingRef);
 
   useEffect(() => {
@@ -229,6 +239,10 @@ function CriteriaEditor({ id }: { id: number }) {
 
   useEffect(() => {
     if (blocker.state === "blocked") resolvingBlocker.current = false;
+    else if (focusErrorsAfterDialog.current) {
+      focusErrorsAfterDialog.current = false;
+      queueMicrotask(() => summaryRef.current?.focus());
+    }
   }, [blocker.state]);
 
   if (isPending || (!isError && rubric && !rows)) {
@@ -245,10 +259,10 @@ function CriteriaEditor({ id }: { id: number }) {
   const problems = attempted
     ? [
       ...(currentRows.length === 0 ? [{ key: "empty", message: "Add at least one criterion.", target: addRef }] : []),
-      ...(attempted === "confirm" ? currentRows.flatMap((row, index) => [
+      ...currentRows.flatMap((row, index) => [
         ...(row.text.trim() === "" ? [{ key: `text-${row.key}`, message: `Criterion ${index + 1} has no text.`, selector: `[aria-label="Criterion ${index + 1} text"]` }] : []),
-        ...(row.weight <= 0 ? [{ key: `weight-${row.key}`, message: `Criterion ${index + 1}'s weight must be greater than zero.`, selector: `[aria-label="Criterion ${index + 1} weight"]` }] : []),
-      ]) : []),
+        ...(invalidWeight(row.weight) ? [{ key: `weight-${row.key}`, message: `Criterion ${index + 1}'s weight must be greater than zero.`, selector: `[aria-label="Criterion ${index + 1} weight"]` }] : []),
+      ]),
     ]
     : [];
 
@@ -276,9 +290,7 @@ function CriteriaEditor({ id }: { id: number }) {
 
   function attemptSave(confirm: boolean) {
     setAttempted(confirm ? "confirm" : "save");
-    const hasProblems = currentRows.length === 0
-      || (confirm && currentRows.some((row) => !row.text.trim() || row.weight <= 0));
-    if (hasProblems) {
+    if (invalidCriteria(currentRows)) {
       queueMicrotask(() => summaryRef.current?.focus());
       return;
     }
@@ -298,6 +310,12 @@ function CriteriaEditor({ id }: { id: number }) {
 
   function saveAndLeave() {
     if (resolvingBlocker.current || blocker.state !== "blocked") return;
+    setAttempted("save");
+    if (invalidCriteria(currentRows)) {
+      focusErrorsAfterDialog.current = true;
+      resolveBlocker("keep");
+      return;
+    }
     resolvingBlocker.current = true;
     const submitted = currentRows;
     save.mutate(
@@ -309,7 +327,9 @@ function CriteriaEditor({ id }: { id: number }) {
     );
   }
 
-  const saveError = save.error instanceof Error ? save.error.message : save.error ? "Save failed. Try again." : undefined;
+  const saveError = save.error instanceof ApiError && save.error.status === 422
+    ? "One or more criterion values were rejected. Your edits are still on this page. Review the criteria and try again."
+    : save.error instanceof Error ? save.error.message : save.error ? "Save failed. Try again." : undefined;
 
   return (
     <div className="signal-route signal-page-flow signal-criteria-review">
@@ -348,7 +368,7 @@ function CriteriaEditor({ id }: { id: number }) {
               index={index}
               average={average}
               readOnly={readOnly}
-              showErrors={attempted === "confirm"}
+              showErrors={attempted !== undefined}
               onChange={(patch) => updateRow(row.key, patch)}
               onRemove={() => removeCriterion(row.key)}
             />
@@ -365,6 +385,7 @@ function CriteriaEditor({ id }: { id: number }) {
               <Button ref={addRef} variant="quiet" onClick={addCriterion}>Add criterion</Button>
               <Button variant="secondary" onClick={distributeWeights}>Set equal relative weights</Button>
               <p>Weights are relative. VERIDICAL shows importance as Low, Medium, or High.</p>
+              <p>Saving or confirming requires text and a relative weight greater than zero for every criterion. Evidence expected is optional.</p>
             </div>
             <div>
               <Button variant="secondary" busy={save.isPending} onClick={() => attemptSave(false)}>Save draft</Button>
