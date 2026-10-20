@@ -147,6 +147,16 @@ def test_docx_source_gets_no_image_for_any_flag_and_says_so(doc_and_tree):
     for flag_id in (7, 8):
         assert result[flag_id].image_png is None
         assert "submitted as a DOCX" in result[flag_id].reason
+        assert result[flag_id].reason_code == "docx_layout"
+
+
+def test_purged_docx_retains_missing_source_reason_not_just_layout_note(doc_and_tree):
+    _, tree = doc_and_tree
+    reason = "This manuscript's source file was purged and can no longer be viewed."
+    result = _build(None, tree, [_flag(1, "¶1")], source_format="docx", unavailable_reason=reason)
+    assert result[1].image_png is None
+    assert result[1].reason == reason
+    assert result[1].reason_code is None
 
 
 def test_purged_manuscript_states_the_purge_reason_verbatim(doc_and_tree):

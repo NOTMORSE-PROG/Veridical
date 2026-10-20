@@ -612,6 +612,38 @@ class PageEvidenceImageOut(BaseModel):
     image_png: bytes | None
     page: int | None
     reason: str | None
+    reason_code: Literal["docx_layout"] | None = None
+
+
+class ExportComparisonOut(BaseModel):
+    """Only stored, already-public evidence; never a new comparison or calculation."""
+
+    label: str
+    text: str
+    anchor: str | None = None
+
+
+class FlagExportDetailOut(BaseModel):
+    """Print allowlist. Deliberately has no annotation or arbitrary detail payload."""
+
+    issue: str | None = None
+    reasoning: str | None = None
+    source_identifier: str | None = None
+    comparisons: list[ExportComparisonOut] = Field(default_factory=list)
+    override_reason: str | None = None
+    evidence_unavailable: bool = False
+    evidence_is_summary: bool = False
+    current_guidance: str | None = None
+    recorded_explanation_withheld: bool = False
+
+
+class UnassessedReferenceOut(BaseModel):
+    """Index into the saved reference list, not a new current-parser interpretation."""
+
+    reference_order_index: int = Field(ge=0)
+    status: str
+    reason: str | None = None
+    lookup_attempted: bool
 
 
 class ReportExportData(BaseModel):
@@ -631,3 +663,6 @@ class ReportExportData(BaseModel):
     flags: list[FlagSummaryOut]
     archive_size_n: int | None
     page_images: dict[int, PageEvidenceImageOut] = {}
+    flag_details: dict[int, FlagExportDetailOut] = Field(default_factory=dict)
+    unassessed_references: list[UnassessedReferenceOut] = Field(default_factory=list)
+    source_format: Literal["pdf", "docx", "unknown"] = "unknown"

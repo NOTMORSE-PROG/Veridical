@@ -1014,3 +1014,141 @@ def test_export_rejects_a_strangers_check_run(logged_in_with_a_done_run, api_scr
     client.post("/auth/login", json={"email": "stranger@tip.edu.ph", "password": "other!"})
     resp = client.get(f"/check-runs/{check_run_id}/report/export.pdf")
     assert resp.status_code == 404
+
+
+def test_export_keeps_each_persisted_finding_without_private_annotation(
+    logged_in_with_a_done_run, api_scratch_url
+):
+    """Real DB/HTTP/export assembly, with no model or external-provider calls."""
+    import asyncio
+
+    import fitz
+    from sqlalchemy import select
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
+    from app.db import sqlalchemy_url
+    from app.models.enums import CheckKind, FlagSeverity, ResultOutcome
+    from app.models.run import CheckResult, Flag
+
+    client, check_run_id = logged_in_with_a_done_run
+    details = [
+        (
+            CheckKind.citation_integrity,
+            {
+                "kind": "unverifiable_not_found",
+                "reason": "The recorded source was not found in the checked databases.",
+                "key_kind": "doi",
+                "key_value": "10.1234/saved-source",
+                "private": "PRIVATE_CITATION_DETAIL",
+            },
+        ),
+        (
+            CheckKind.internal_agreement,
+            {
+                "kind": "agreement_partial",
+                "reason": "The candidate result does not establish the stated time outcome.",
+                "intent_text": "Measure the processing time.",
+                "intent_anchor": "p. 2",
+                "outcome_text": "Respondents rated the interface.",
+                "outcome_anchor": "p. 8",
+            },
+        ),
+        (
+            CheckKind.statistical_forensics,
+            {
+                "kind": "p_value_decision_error",
+                "reason": "The saved recalculation differs from the reported value.",
+                "reported_p_display": "= .01",
+                "computed_p_display": "= .24",
+            },
+        ),
+        (
+            CheckKind.originality_reuse,
+            {
+                "kind": "reuse_high_similarity_passage",
+                "reason": "Recorded comparison lead.",
+                "matched_manuscript_id": 917,
+                "matched_text": "SAVED_MATCHED_PASSAGE",
+                "own_context_text": "SAVED_OWN_PASSAGE",
+                "matched_context_text": "SAVED_MATCHED_PASSAGE",
+                "similarity": 0.95,
+                "matched_group_label": "FOREIGN_PRIVATE_NAME",
+            },
+        ),
+    ]
+
+    async def seed_findings():
+        engine = create_async_engine(sqlalchemy_url(api_scratch_url))
+        try:
+            factory = async_sessionmaker(engine, expire_on_commit=False)
+            async with factory() as session:
+                for kind, detail in details:
+                    result = await session.scalar(
+                        select(CheckResult).where(
+                            CheckResult.check_run_id == check_run_id, CheckResult.kind == kind
+                        )
+                    )
+                    if result is None:
+                        result = CheckResult(
+                            check_run_id=check_run_id,
+                            kind=kind,
+                            outcome=ResultOutcome.passed,
+                        )
+                        session.add(result)
+                        await session.flush()
+                    if kind == CheckKind.citation_integrity:
+                        result.detail = {
+                            "reference_metadata_coverage": [
+                                {
+                                    "reference_order_index": 3,
+                                    "status": "unassessed",
+                                    "reason": "ambiguous_identifier_wrap",
+                                    "lookup_attempted": False,
+                                }
+                            ]
+                        }
+                    session.add(
+                        Flag(
+                            check_result_id=result.id,
+                            severity=FlagSeverity.low,
+                            evidence_excerpt=(
+                                "SAVED_OWN_PASSAGE"
+                                if kind == CheckKind.originality_reuse
+                                else f"Saved source excerpt for {kind.value}."
+                            ),
+                            page_anchor="p. 4",
+                            detail=detail,
+                            annotation="PRIVATE_INSTRUCTOR_ANNOTATION",
+                        )
+                    )
+                await session.commit()
+        finally:
+            await engine.dispose()
+
+    asyncio.run(seed_findings())
+    resp = client.get(f"/check-runs/{check_run_id}/report/export.pdf")
+    assert resp.status_code == 200
+    with fitz.open(stream=resp.content, filetype="pdf") as doc:
+        content = " ".join(" ".join(page.get_text().split()) for page in doc)
+    for expected in (
+        "The recorded source was not found in the checked databases.",
+        "doi: 10.1234/saved-source",
+        "Measure the processing time.",
+        "Respondents rated the interface.",
+        "The saved recalculation differs from the reported value.",
+        "Reported p-value: = .01",
+        "Recalculated p-value: = .24",
+        "SAVED_OWN_PASSAGE",
+        "SAVED_MATCHED_PASSAGE",
+        "Library match 917",
+        "Reference entry 4",
+        "No lookup was attempted.",
+        "Comparison lead: not scored",
+    ):
+        assert expected in content
+    for private in (
+        "PRIVATE_CITATION_DETAIL",
+        "FOREIGN_PRIVATE_NAME",
+        "PRIVATE_INSTRUCTOR_ANNOTATION",
+    ):
+        assert private not in content

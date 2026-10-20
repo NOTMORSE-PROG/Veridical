@@ -27,7 +27,9 @@ a bug -- check the actual rendered page before treating one as real.
 """
 
 import contextlib
+import json
 from datetime import UTC, datetime
+from functools import lru_cache
 from io import BytesIO
 from pathlib import Path
 from xml.sax.saxutils import escape
@@ -40,10 +42,12 @@ from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.pdfgen.canvas import Canvas
 from reportlab.platypus import (
+    CondPageBreak,
     HRFlowable,
     Image,
     KeepTogether,
     Paragraph,
+    PTOContainer,
     SimpleDocTemplate,
     Spacer,
     Table,
@@ -54,6 +58,7 @@ from app.checks.escalation import NEEDS_REVIEW_OUTCOMES as _NEEDS_REVIEW_OUTCOME
 from app.config import get_settings
 from app.report.schemas import (
     CriterionResultOut,
+    FlagExportDetailOut,
     FlagSummaryOut,
     PageEvidenceImageOut,
     ReportExportData,
@@ -105,6 +110,51 @@ _INK_TERTIARY = colors.HexColor("#5b6272")
 _RULE = colors.HexColor("#dbdee5")
 _ZEBRA = colors.HexColor("#f7f8fa")
 _DRAFT_GRAY = colors.HexColor("#8992a6")
+
+# Central print-layout values for 4k. Footer height is also measured below;
+# wrapped disclosures increase the body reservation instead of overlapping it.
+_PRINT_LAYOUT = {
+    "side_margin": 54,
+    "bottom_margin": 84,
+    "footer_bottom": 16,
+    "footer_row_gap": 1,
+    "footer_body_gap": 16,
+    "header_identity_gap": 20,
+    "minimum_evidence_lines": 2,
+}
+
+
+@lru_cache(maxsize=1)
+def _problem_labels() -> dict[str, str]:
+    # Paired contract test against the screen's domain labels prevents copy drift.
+    return json.loads((Path(__file__).parent / "data" / "problem_labels.json").read_text("utf-8"))
+
+
+@lru_cache
+def _coverage_labels() -> dict[str, str]:
+    return json.loads((Path(__file__).parent / "data" / "coverage_labels.json").read_text("utf-8"))
+
+
+def _issue_title(issue: str | None) -> str:
+    if not issue:
+        return "Recorded finding"
+    return _problem_labels().get(issue, f"Recorded issue: {issue}")
+
+
+def _fit_running_identity(text: str, font: str, size: float, width: float) -> str:
+    """Measured elision is only for repeated running identity, never source evidence."""
+    if pdfmetrics.stringWidth(text, font, size) <= width:
+        return text
+    suffix = "..."
+    low, high = 0, len(text)
+    while low < high:
+        middle = (low + high + 1) // 2
+        if pdfmetrics.stringWidth(text[:middle] + suffix, font, size) <= width:
+            low = middle
+        else:
+            high = middle - 1
+    return text[:low] + suffix
+
 
 _TONE_COLORS = {
     "success": (colors.HexColor("#e3f6f4"), colors.HexColor("#0d6e64")),
@@ -205,6 +255,7 @@ def _styles(font: str) -> dict[str, ParagraphStyle]:
             textColor=_INK,
             spaceBefore=14,
             spaceAfter=6,
+            keepWithNext=True,
         ),
         "h3": ParagraphStyle(
             "h3",
@@ -214,6 +265,7 @@ def _styles(font: str) -> dict[str, ParagraphStyle]:
             textColor=_INK_TERTIARY,
             spaceBefore=8,
             spaceAfter=3,
+            keepWithNext=True,
         ),
         "body": ParagraphStyle("body", fontName=font, fontSize=10, leading=14, textColor=_INK),
         "body_bold": ParagraphStyle(
@@ -558,15 +610,55 @@ def build_report_pdf(data: ReportExportData) -> bytes:
     report = data.report
     is_draft = report.decision is None
     export_dpi = get_settings().export_page_image_dpi
+    generated_at = _format_date(datetime.now(UTC), with_time=True)
+    footer_llm_disclosure = _LLM_MODE_DISCLOSURE.get(report.llm_mode)
+    side_margin = _PRINT_LAYOUT["side_margin"]
+    content_width = A4[0] - 2 * side_margin
+    footer_style = ParagraphStyle("footer", parent=styles["caption"], alignment=1)
+    footer_mode_style = ParagraphStyle(
+        "footer_mode",
+        parent=footer_style,
+        fontName=f"{font}-Bold",
+        textColor=(
+            _TONE_COLORS[footer_llm_disclosure[1]][1] if footer_llm_disclosure else _INK_TERTIARY
+        ),
+    )
+    footer_rows = [
+        Paragraph(
+            escape(footer_llm_disclosure[0]) if footer_llm_disclosure else "",
+            footer_mode_style,
+        ),
+        Paragraph(
+            "This report reflects the instructor's own review and decisions. "
+            "It is not an automated grade.",
+            footer_style,
+        ),
+        Paragraph(
+            "DRAFT - NO DECISION RECORDED" if is_draft else "",
+            ParagraphStyle("footer_draft", parent=footer_mode_style, textColor=_DRAFT_GRAY),
+        ),
+    ]
+    footer_height = sum(
+        max(row.wrap(content_width, A4[1])[1], footer_style.leading)
+        + _PRINT_LAYOUT["footer_row_gap"]
+        for row in footer_rows
+    )
+    footer_timestamp = Paragraph(f"Generated {generated_at}", styles["caption"])
+    timestamp_height = footer_timestamp.wrap(content_width / 2, A4[1])[1]
+    timestamp_y = _PRINT_LAYOUT["footer_bottom"] + footer_height
+    bottom_margin = max(
+        _PRINT_LAYOUT["bottom_margin"],
+        timestamp_y + timestamp_height + _PRINT_LAYOUT["footer_body_gap"],
+    )
 
     buf = BytesIO()
     doc = SimpleDocTemplate(
         buf,
         pagesize=A4,
         topMargin=98,
-        bottomMargin=56,
-        leftMargin=54,
-        rightMargin=54,
+        bottomMargin=bottom_margin,
+        leftMargin=side_margin,
+        rightMargin=side_margin,
         title=f"VERIDICAL Readiness Report - {report.manuscript_group_label}",
         author="VERIDICAL",
         subject="Capstone manuscript readiness report",
@@ -582,7 +674,6 @@ def build_report_pdf(data: ReportExportData) -> bytes:
         identity = f"{identity} · {report.manuscript_original_filename}"
     flow.append(Paragraph(escape(identity), styles["meta"]))
     flow.append(Paragraph(escape(report.rubric_title), styles["meta"]))
-    generated_at = _format_date(datetime.now(UTC), with_time=True)
     flow.append(
         Paragraph(
             f"Generated {generated_at} · Reference: check run #{report.check_run_id}",
@@ -760,7 +851,10 @@ def build_report_pdf(data: ReportExportData) -> bytes:
         flow.append(Paragraph("Assessment limits", styles["h2"]))
         for coverage in report.integrity_check_status:
             label = _CHECK_KIND_LABEL.get(coverage.check_kind, coverage.check_kind)
-            reason = (coverage.coverage_reason or coverage.outcome).replace("_", " ")
+            reason = _coverage_labels().get(
+                coverage.coverage_reason,
+                (coverage.coverage_reason or coverage.outcome).replace("_", " "),
+            )
             if coverage.assessment_scope == "reference_metadata_only":
                 reason = (
                     "Partially assessed. Reference details were checked where possible. "
@@ -782,7 +876,8 @@ def build_report_pdf(data: ReportExportData) -> bytes:
                 )
             if coverage.n_metadata_api_down:
                 counts.append(
-                    f"{coverage.n_metadata_api_down} source checks could not reach an external service"
+                    f"{coverage.n_metadata_api_down} source checks could not reach "
+                    "an external service"
                 )
             if coverage.n_source_pages_unassessed:
                 counts.append(f"{coverage.n_source_pages_unassessed} source pages unassessed")
@@ -792,6 +887,21 @@ def build_report_pdf(data: ReportExportData) -> bytes:
                 counts.append(
                     f"{coverage.n_claim_support_unassessed} sources with unassessed claim support"
                 )
+            if coverage.n_skipped_quota:
+                counts.append(
+                    f"{coverage.n_skipped_quota} items skipped because AI capacity was unavailable"
+                )
+            if coverage.n_skipped_api_down:
+                counts.append(
+                    f"{coverage.n_skipped_api_down} items skipped because a service was unavailable"
+                )
+            if coverage.n_skipped_parse_failure:
+                counts.append(
+                    f"{coverage.n_skipped_parse_failure} items skipped because the model "
+                    "response could not be validated"
+                )
+            if coverage.n_linkage_unassessed:
+                counts.append(f"{coverage.n_linkage_unassessed} reference links remain unassessed")
             text = f"{label}: {reason}. " + "; ".join(counts)
             flow.append(Paragraph(escape(text), styles["body"]))
         flow.append(
@@ -801,16 +911,60 @@ def build_report_pdf(data: ReportExportData) -> bytes:
                 styles["body"],
             )
         )
-    flow.append(Paragraph(f"Flags ({len(data.flags)})", styles["h2"]))
-    flow.append(
+    if data.unassessed_references:
+        flow.append(Paragraph("Reference entries with assessment limits", styles["h3"]))
+        flow.append(
+            Paragraph(
+                "Entry numbers below are positions in this run's saved reference list. "
+                "These are coverage notices, not findings against the manuscript.",
+                styles["caption"],
+            )
+        )
+        for entry in data.unassessed_references:
+            if entry.status == "api_down":
+                reason = "The external service was unavailable; verification did not complete."
+            elif entry.reason == "ambiguous_identifier_wrap":
+                reason = "A split source identifier could not be reconstructed reliably."
+            elif entry.reason == "unsupported_reference_structure":
+                reason = "The reference could not be parsed reliably enough for verification."
+            else:
+                reason = (
+                    "Some reference fields were not reliably parsed. "
+                    f"Recorded lookup status: {entry.status.replace('_', ' ')}."
+                )
+            attempted = (
+                "A lookup was attempted." if entry.lookup_attempted else "No lookup was attempted."
+            )
+            flow.append(
+                Paragraph(
+                    escape(
+                        f"Reference entry {entry.reference_order_index + 1}: {reason} {attempted}"
+                    ),
+                    styles["body"],
+                )
+            )
+    flag_intro = [Paragraph(f"Flags ({len(data.flags)})", styles["h2"])]
+    docx_source = data.source_format == "docx" or any(
+        image.reason_code == "docx_layout" for image in data.page_images.values()
+    )
+    if docx_source:
+        flag_intro.append(
+            Paragraph(
+                "This manuscript was submitted as a DOCX. Evidence below uses saved text "
+                "and source locations; original Word pages are not reproduced.",
+                styles["caption"],
+            )
+        )
+    flag_intro.append(
         Paragraph(
             "Possible inconsistencies found by VERIDICAL's integrity checks (F4 to F7), not "
             "accusations.",
             styles["caption_italic"],
         )
     )
-    flow.append(Spacer(1, 6))
+    flag_intro.append(Spacer(1, 6))
     if not data.flags:
+        flow.extend(flag_intro)
         flow.append(
             Paragraph(
                 "No integrity flags were recorded. Read the check coverage and originality "
@@ -819,17 +973,19 @@ def build_report_pdf(data: ReportExportData) -> bytes:
             )
         )
     else:
+        finding_numbers = {flag.id: index for index, flag in enumerate(data.flags, start=1)}
         by_kind: dict[str, list[FlagSummaryOut]] = {}
         for f in data.flags:
             by_kind.setdefault(f.check_kind, []).append(f)
         for kind in sorted(by_kind, key=lambda k: _CHECK_KIND_ORDER.get(k, len(_CHECK_KIND_ORDER))):
             group = by_kind[kind]
-            flow.append(
-                Paragraph(
-                    f"{_CHECK_KIND_LABEL.get(kind, kind).upper()} ({len(group)})", styles["h3"]
-                )
+            category_heading = Paragraph(
+                f"{_CHECK_KIND_LABEL.get(kind, kind).upper()} ({len(group)})", styles["h3"]
             )
-            for f in group:
+            for group_index, f in enumerate(group):
+                detail = data.flag_details.get(f.id, FlagExportDetailOut())
+                finding_number = finding_numbers[f.id]
+                issue = _issue_title(detail.issue or f.problem_kind)
                 severity_label = {
                     "high": "High severity",
                     "med": "Medium severity",
@@ -863,22 +1019,110 @@ def build_report_pdf(data: ReportExportData) -> bytes:
                 divider = HRFlowable(
                     width=content_width, thickness=0.5, color=_RULE, spaceBefore=6, spaceAfter=6
                 )
-                # Only the short header needs to stay glued to the excerpt
-                # that follows it; the excerpt itself paginates normally if
-                # genuinely long (never truncated -- this IS the evidence
-                # an instructor/adviser verifies independently).
-                flow.append(KeepTogether([divider, header, Spacer(1, 2), excerpt]))
-                # V-070: the actual submitted page, not glued into the
-                # KeepTogether above -- a real rendered page can be taller
-                # than the excerpt text, and forcing it to share one
-                # unbreakable block with an already-long excerpt is exactly
-                # how a reportlab flowable ends up too tall to place on any
-                # page. Letting it flow independently means only the image
-                # itself (capped by `export_page_image_max_height`) has to
-                # fit, not the whole group.
-                flow.extend(
-                    _page_evidence_flowables(
-                        data.page_images.get(f.id), content_width, styles, export_dpi
+                heading = Paragraph(
+                    escape(f"Finding {finding_number}: {issue}"), styles["body_bold"]
+                )
+                evidence_label = Paragraph(
+                    "System comparison summary"
+                    if detail.evidence_is_summary
+                    else "Manuscript evidence",
+                    styles["caption_bold"],
+                )
+                prefix = list(flag_intro) + [category_heading] if group_index == 0 else []
+                flag_intro = []
+                start_items = [*prefix, divider, heading, header, evidence_label]
+                for item in start_items:
+                    item.keepWithNext = True
+                start_height = 0
+                previous_space = 0
+                for item in start_items:
+                    start_height += max(previous_space, item.getSpaceBefore())
+                    start_height += item.wrap(content_width, A4[1])[1]
+                    previous_space = item.getSpaceAfter()
+                start_height += previous_space + min(
+                    excerpt.wrap(content_width, A4[1])[1],
+                    styles["body"].leading * _PRINT_LAYOUT["minimum_evidence_lines"],
+                )
+                flow.append(CondPageBreak(start_height))
+                finding = [*start_items, excerpt]
+                if detail.source_identifier:
+                    finding.append(
+                        Paragraph(
+                            f"<b>Source identifier:</b> {escape(detail.source_identifier)}",
+                            styles["body"],
+                        )
+                    )
+                for comparison in detail.comparisons:
+                    finding.append(
+                        Paragraph(
+                            f"<b>{escape(comparison.label)}:</b> {escape(comparison.text)}",
+                            styles["body"],
+                        )
+                    )
+                    if comparison.anchor:
+                        finding.append(
+                            Paragraph(
+                                f"Source location: {escape(comparison.anchor)}", styles["caption"]
+                            )
+                        )
+                finding.append(
+                    Paragraph(
+                        "<b>Recorded reason:</b> "
+                        + escape(
+                            detail.reasoning
+                            or (
+                                "The legacy explanation is not reproduced because current "
+                                "comparison policy removes outdated or identifying wording."
+                                if detail.recorded_explanation_withheld
+                                else None
+                            )
+                            or "No separate explanation was saved for this finding."
+                        ),
+                        styles["body"],
+                    )
+                )
+                if detail.current_guidance:
+                    finding.append(
+                        Paragraph(
+                            "<b>Current comparison guidance:</b> "
+                            + escape(detail.current_guidance),
+                            styles["body"],
+                        )
+                    )
+                if detail.evidence_unavailable:
+                    finding.append(
+                        Paragraph(
+                            "Supporting comparison evidence was not available for this finding.",
+                            styles["body"],
+                        )
+                    )
+                if f.overridden and detail.override_reason:
+                    finding.append(
+                        Paragraph(
+                            "<b>Recorded instructor resolution:</b> "
+                            + escape(detail.override_reason),
+                            styles["body"],
+                        )
+                    )
+                page_image = data.page_images.get(f.id)
+                if page_image is None or page_image.reason_code != "docx_layout":
+                    finding.extend(
+                        _page_evidence_flowables(page_image, content_width, styles, export_dpi)
+                    )
+                # Split long evidence/reasoning instead of hiding or truncating
+                # it; every continuation retains the finding and source identity.
+                flow.append(
+                    PTOContainer(
+                        finding,
+                        header=[
+                            Paragraph(
+                                escape(
+                                    f"Finding {finding_number} (continued) - "
+                                    f"Source location: {f.page_anchor}"
+                                ),
+                                styles["caption_bold"],
+                            )
+                        ],
                     )
                 )
                 flow.append(Spacer(1, 8))
@@ -997,9 +1241,7 @@ def build_report_pdf(data: ReportExportData) -> bytes:
                 )
             )
     else:
-        flow.append(
-            Paragraph("No decision has been recorded for this manuscript yet.", styles["body"])
-        )
+        flow.append(Paragraph("This manuscript has no final decision yet.", styles["body"]))
         if pending:
             flow.append(
                 Paragraph(
@@ -1009,8 +1251,6 @@ def build_report_pdf(data: ReportExportData) -> bytes:
                 )
             )
 
-    footer_llm_disclosure = _LLM_MODE_DISCLOSURE.get(report.llm_mode)
-
     def _on_page(canvas: Canvas, doc_: SimpleDocTemplate) -> None:
         canvas.saveState()
         page_num = canvas.getPageNumber()
@@ -1018,39 +1258,33 @@ def build_report_pdf(data: ReportExportData) -> bytes:
         if page_num > 1:
             canvas.setFont(font, 8)
             canvas.setFillColor(_INK_TERTIARY)
-            canvas.drawString(54, A4[1] - 40, "VERIDICAL - Readiness Report")
-            group = report.manuscript_group_label
-            truncated = group if len(group) <= 45 else group[:44] + "…"
-            canvas.drawRightString(A4[0] - 54, A4[1] - 40, truncated)
+            running_title = "VERIDICAL - Readiness Report"
+            canvas.drawString(side_margin, A4[1] - 40, running_title)
+            identity_width = (
+                content_width
+                - pdfmetrics.stringWidth(running_title, font, 8)
+                - _PRINT_LAYOUT["header_identity_gap"]
+            )
+            truncated = _fit_running_identity(
+                report.manuscript_group_label, font, 8, identity_width
+            )
+            canvas.drawRightString(A4[0] - side_margin, A4[1] - 40, truncated)
             canvas.setStrokeColor(_RULE)
             canvas.setLineWidth(0.5)
             canvas.line(54, A4[1] - 48, A4[0] - 54, A4[1] - 48)
 
-        canvas.setFont(font, 8)
-        canvas.setFillColor(_INK_TERTIARY)
-        canvas.drawString(54, 40, f"Generated {generated_at}")
-        canvas.drawCentredString(A4[0] / 2, 40, f"Page {page_num}")
-        if is_draft:
-            canvas.setFont(f"{font}-Bold", 8)
-            canvas.setFillColor(_DRAFT_GRAY)
-            canvas.drawRightString(
-                A4[0] - 54,
-                40,
-                f"DRAFT - {report.manuscript_group_label} has no final decision yet",
-            )
-        canvas.setFont(font, 8)
-        canvas.setFillColor(_INK_TERTIARY)
-        canvas.drawCentredString(
-            A4[0] / 2,
-            28,
-            "This report reflects the instructor's own review and decisions. It is not an "
-            "automated grade.",
+        footer_y = _PRINT_LAYOUT["footer_bottom"]
+        for row in footer_rows:
+            _, height = row.wrap(content_width, A4[1])
+            row.drawOn(canvas, side_margin, footer_y)
+            footer_y += max(height, footer_style.leading) + _PRINT_LAYOUT["footer_row_gap"]
+        footer_timestamp.drawOn(canvas, side_margin, timestamp_y)
+        page_counter = Paragraph(
+            f"Page {page_num}",
+            ParagraphStyle("footer_page", parent=styles["caption"], alignment=2),
         )
-        if footer_llm_disclosure is not None:
-            footer_text, footer_tone = footer_llm_disclosure
-            canvas.setFont(f"{font}-Bold", 8)
-            canvas.setFillColor(_TONE_COLORS[footer_tone][1])
-            canvas.drawCentredString(A4[0] / 2, 16, footer_text)
+        page_counter.wrap(content_width / 2, A4[1])
+        page_counter.drawOn(canvas, side_margin + content_width / 2, timestamp_y)
 
         if is_draft:
             canvas.saveState()

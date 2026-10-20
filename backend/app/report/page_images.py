@@ -290,12 +290,17 @@ def build_page_evidence_images(
     An empty box set participates in this comparison, so page-only or whole-
     document findings never inherit another finding's precise rectangles.
     """
-    if source_format == "docx":
+    if source_format == "docx" and unavailable_reason is None:
         reason = (
             "Page images are available for PDF submissions only; this manuscript "
             "was submitted as a DOCX."
         )
-        return {f.id: PageEvidenceImageOut(image_png=None, page=None, reason=reason) for f in flags}
+        return {
+            f.id: PageEvidenceImageOut(
+                image_png=None, page=None, reason=reason, reason_code="docx_layout"
+            )
+            for f in flags
+        }
     if doc is None:
         reason = unavailable_reason or _UNAVAILABLE_REASON
         return {f.id: PageEvidenceImageOut(image_png=None, page=None, reason=reason) for f in flags}

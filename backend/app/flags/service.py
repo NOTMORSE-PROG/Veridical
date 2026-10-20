@@ -13,6 +13,7 @@ already excludes from the severity deduction once set (V-019, unchanged
 by this ticket).
 """
 
+from pydantic import ValidationError
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -38,21 +39,15 @@ from app.report.service import aggregate_and_score, raise_if_decided
 
 def _passage_pair_from_detail(evidence_excerpt: str, detail: dict) -> PassagePairOut | None:
     kind = detail.get("kind") or ""
+    if not isinstance(kind, str):
+        return None
     if kind.endswith("_passage"):
-        own_before, own_after = split_context(detail.get("own_context_text", ""), evidence_excerpt)
-        matched_excerpt = detail.get("matched_text", "")
-        matched_before, matched_after = split_context(
-            detail.get("matched_context_text", ""), matched_excerpt
-        )
-        return PassagePairOut(
+        return _stored_passage_pair(
             own_excerpt=evidence_excerpt,
-            own_context_before=own_before,
-            own_context_after=own_after,
-            matched_ref=detail["matched_manuscript_id"],
-            matched_excerpt=matched_excerpt,
-            matched_context_before=matched_before,
-            matched_context_after=matched_after,
-            context_words_each_side=get_settings().reuse_passage_context_words,
+            own_context=detail.get("own_context_text", ""),
+            matched_excerpt=detail.get("matched_text", ""),
+            matched_context=detail.get("matched_context_text", ""),
+            matched_ref=detail.get("matched_manuscript_id"),
             similarity=detail.get("similarity", 0.0),
             level="exact_duplicate" if "exact_duplicate" in kind else "high_similarity",
         )
@@ -64,26 +59,50 @@ def _passage_pair_from_detail(evidence_excerpt: str, detail: dict) -> PassagePai
     # manuscript text, so it can't double as `own_excerpt` the way it does
     # for a genuine passage-level flag above.
     supporting = detail.get("supporting_passage")
-    if supporting is None:
+    if not isinstance(supporting, dict):
         return None
-    own_excerpt = supporting.get("own_text", "")
-    own_before, own_after = split_context(supporting.get("own_context_text", ""), own_excerpt)
-    matched_excerpt = supporting.get("matched_text", "")
-    matched_before, matched_after = split_context(
-        supporting.get("matched_context_text", ""), matched_excerpt
-    )
-    return PassagePairOut(
-        own_excerpt=own_excerpt,
-        own_context_before=own_before,
-        own_context_after=own_after,
-        matched_ref=supporting["matched_manuscript_id"],
-        matched_excerpt=matched_excerpt,
-        matched_context_before=matched_before,
-        matched_context_after=matched_after,
-        context_words_each_side=get_settings().reuse_passage_context_words,
+    return _stored_passage_pair(
+        own_excerpt=supporting.get("own_text", ""),
+        own_context=supporting.get("own_context_text", ""),
+        matched_excerpt=supporting.get("matched_text", ""),
+        matched_context=supporting.get("matched_context_text", ""),
+        matched_ref=supporting.get("matched_manuscript_id"),
         similarity=supporting.get("similarity", 0.0),
         level=supporting.get("level", "high_similarity"),
     )
+
+
+def _stored_passage_pair(
+    *, own_excerpt, own_context, matched_excerpt, matched_context, matched_ref, similarity, level
+) -> PassagePairOut | None:
+    """A malformed historical pair is unavailable, never an export-wide failure."""
+    if type(matched_ref) is not int or matched_ref <= 0:
+        return None
+    if not all(
+        isinstance(value, str) and value.strip() for value in (own_excerpt, matched_excerpt)
+    ):
+        return None
+    own_before, own_after = split_context(
+        own_context if isinstance(own_context, str) else "", own_excerpt
+    )
+    matched_before, matched_after = split_context(
+        matched_context if isinstance(matched_context, str) else "", matched_excerpt
+    )
+    try:
+        return PassagePairOut(
+            own_excerpt=own_excerpt,
+            own_context_before=own_before,
+            own_context_after=own_after,
+            matched_ref=matched_ref,
+            matched_excerpt=matched_excerpt,
+            matched_context_before=matched_before,
+            matched_context_after=matched_after,
+            context_words_each_side=get_settings().reuse_passage_context_words,
+            similarity=similarity,
+            level=level,
+        )
+    except ValidationError:
+        return None
 
 
 async def _scoped_flag(
@@ -181,6 +200,11 @@ async def _to_flag_out(
     # check_result.detail for the older one-flag-per-check_result shape
     # (semantic grading, V-020) where the reason still lives there.
     detail = flag.detail or result.detail or {}
+    passage_pair = _passage_pair_from_detail(flag.evidence_excerpt, detail)
+    kind = detail.get("kind")
+    has_stored_pair = (
+        isinstance(kind, str) and kind.endswith("_passage")
+    ) or "supporting_passage" in detail
     return FlagOut(
         id=flag.id,
         check_result_id=result.id,
@@ -227,10 +251,11 @@ async def _to_flag_out(
         # `detail` merge above), since F7 reuse checks always populate
         # `flag.detail["kind"]` themselves (V-033 per-flag detail).
         is_passage_level=bool((flag.detail or {}).get("kind", "").endswith("_passage")),
-        passage_pair=_passage_pair_from_detail(flag.evidence_excerpt, detail),
+        passage_pair=passage_pair,
         matched_ref=detail.get("matched_manuscript_id"),
         first_upload_context=bool(detail.get("first_upload_context")),
-        evidence_unavailable=bool(detail.get("evidence_unavailable")),
+        evidence_unavailable=bool(detail.get("evidence_unavailable"))
+        or (result.kind.value == "originality_reuse" and has_stored_pair and passage_pair is None),
         citation_source_key=_citation_source_key(detail),
         confirmed_citation_source=flag.confirmed_citation_source,
     )

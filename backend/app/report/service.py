@@ -1283,13 +1283,55 @@ async def get_report_export_data(
     # duration of one export (CODING.md's PyMuPDF/embeddings rule).
     check_run = await _owned_check_run(session, check_run_id, instructor_id)
     manuscript = await session.get(Manuscript, check_run.manuscript_id)
+    # Local imports avoid the flags -> report service dependency cycle. Project
+    # the SAME persisted flag detail as the evidence screen, then an export-only
+    # allowlist. In particular private annotations never reach ReportExportData.
+    from app.flags.service import _to_flag_out
+    from app.report.export_data import flag_export_detail, unassessed_references
+
+    detail_rows = (
+        await session.execute(
+            select(Flag, CheckResult)
+            .join(CheckResult, CheckResult.id == Flag.check_result_id)
+            .where(CheckResult.check_run_id == check_run_id)
+        )
+    ).all()
+    flag_details = {
+        flag.id: flag_export_detail(
+            await _to_flag_out(session, flag, result, manuscript, check_run),
+            recorded_detail=flag.detail or result.detail or {},
+            recorded_excerpt=flag.evidence_excerpt,
+        )
+        for flag, result in detail_rows
+    }
+    citation_check = await session.scalar(
+        select(CheckResult).where(
+            CheckResult.check_run_id == check_run_id,
+            CheckResult.kind == CheckKind.citation_integrity,
+        )
+    )
+    reference_limits = unassessed_references(
+        citation_check.detail or {} if citation_check is not None else {}
+    )
     loop = asyncio.get_running_loop()
     page_images = await loop.run_in_executor(
         None, render_flag_page_images_for, manuscript, flags, report.llm_mode, settings
     )
 
     return ReportExportData(
-        report=report, flags=flags, archive_size_n=archive_size_n, page_images=page_images
+        report=report,
+        flags=flags,
+        archive_size_n=archive_size_n,
+        page_images=page_images,
+        flag_details=flag_details,
+        unassessed_references=reference_limits,
+        source_format=(
+            "docx"
+            if Path(manuscript.file_ref).suffix.lower() == ".docx"
+            else "pdf"
+            if Path(manuscript.file_ref).suffix.lower() == ".pdf"
+            else "unknown"
+        ),
     )
 
 
