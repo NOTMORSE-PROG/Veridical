@@ -188,3 +188,75 @@ async def test_wrong_p_value_and_grim_impossible_mean_both_flagged_together(sess
         rows = (await session.execute(kind_query, {"id": result.id})).scalars().all()
     assert any("2.45" in r for r in rows)  # the p-recalc flag
     assert any("3.33" in r for r in rows)  # the GRIM flag
+
+
+async def test_unread_image_keeps_supported_flag_and_persists_neutral_coverage(session_factory):
+    from app.ingest.schemas import ImageBlock
+    from app.models.run import CheckResult
+
+    check_run_id = await _seed_check_run(session_factory)
+    extraction = _extraction(blocks=[_block("t(28) = 2.45, p = .900.")])
+    extraction.images = [ImageBlock(page=1, bbox=(0, 0, 100, 100))]
+    async with session_factory() as session:
+        result = await run_statistical_forensics_check(session, check_run_id, extraction)
+        assert result.outcome == ResultOutcome.escalated
+        assert result.detail["n_flags"] == 1
+        saved_id = result.id
+    async with session_factory() as session:
+        saved = await session.get(CheckResult, saved_id)
+        assert saved.detail["analysis_coverage"] == "partial"
+        assert saved.detail["n_images_unassessed"] == 1
+        assert saved.detail["image_coverage_items"] == [
+            {
+                "image_index": 0,
+                "page": 1,
+                "paragraph": None,
+                "reason": "reading_not_recorded",
+            }
+        ]
+        payload = (
+            await session.execute(
+                text(
+                    "SELECT payload FROM audit_log WHERE check_run_id=:id "
+                    "AND event_type='statistical_forensics_check_computed'"
+                ),
+                {"id": check_run_id},
+            )
+        ).scalar_one()
+        assert payload["outcome"] == "escalated"
+        assert payload["n_flags"] == 1
+        assert payload["image_coverage_items"] == saved.detail["image_coverage_items"]
+
+
+async def test_source_order_stop_keeps_image_snapshot_and_audit(session_factory):
+    from app.ingest.schemas import ImageBlock
+    from app.models.run import CheckResult
+
+    check_run_id = await _seed_check_run(session_factory)
+    extraction = _extraction(blocks=[_block("t(28) = 2.45, p = .900.")])
+    extraction.reading_order = []  # Missing PDF page inventory remains a source gate.
+    extraction.images = [ImageBlock(page=1, bbox=(0, 0, 100, 100))]
+    async with session_factory() as session:
+        result = await run_statistical_forensics_check(session, check_run_id, extraction)
+        saved_id = result.id
+    async with session_factory() as session:
+        saved = await session.get(CheckResult, saved_id)
+        assert saved.outcome == ResultOutcome.escalated
+        assert saved.detail["coverage_reason"] == "source_reading_order_unresolved"
+        assert saved.detail["analysis_coverage"] == "unsupported"
+        assert "assessment_scope" not in saved.detail
+        assert saved.detail["n_flags"] == 0
+        assert saved.detail["image_coverage_version"] == "v1"
+        assert saved.detail["n_images_unassessed"] == 1
+        assert saved.detail["image_coverage_items"][0]["reason"] == "reading_not_recorded"
+        payload = (
+            await session.execute(
+                text(
+                    "SELECT payload FROM audit_log WHERE check_run_id=:id "
+                    "AND event_type='statistical_forensics_check_computed'"
+                ),
+                {"id": check_run_id},
+            )
+        ).scalar_one()
+        assert payload["image_coverage_items"] == saved.detail["image_coverage_items"]
+        assert payload["coverage_reason"] == saved.detail["coverage_reason"]

@@ -326,11 +326,12 @@ def _integrity_skip_count(kind: CheckKind, detail: dict[str, Any] | None, cause:
     a future check kind whose `detail` used neither naming convention,
     instead of surfacing the gap."""
     detail = detail or {}
-    key = (
-        f"n_skipped_{cause}"
-        if kind == CheckKind.internal_agreement
-        else f"n_claim_support_skipped_{cause}"
-    )
+    if kind in {CheckKind.internal_agreement, CheckKind.statistical_forensics}:
+        key = f"n_skipped_{cause}"
+    elif kind == CheckKind.citation_integrity:
+        key = f"n_claim_support_skipped_{cause}"
+    else:
+        return 0
     return detail.get(key, 0)
 
 
@@ -556,13 +557,28 @@ async def report_out_for_check_run(
             analysis_coverage=(row.detail or {}).get("analysis_coverage")
             if (row.detail or {}).get("analysis_coverage") in {"complete", "partial", "unsupported"}
             else None,
-            assessment_scope="reference_metadata_only"
-            if (row.detail or {}).get("assessment_scope") == "reference_metadata_only"
+            assessment_scope=(row.detail or {}).get("assessment_scope")
+            if (row.detail or {}).get("assessment_scope")
+            in {
+                "reference_metadata_only",
+                "available_text_and_tables",
+            }
             else None,
             n_reference_metadata_attempted=(row.detail or {}).get(
                 "n_reference_metadata_attempted", 0
             ),
             n_metadata_api_down=(row.detail or {}).get("n_metadata_api_down", 0),
+            n_images_unassessed=(row.detail or {}).get("n_images_unassessed", 0),
+            n_image_occurrences_omitted=(row.detail or {}).get("n_image_occurrences_omitted", 0),
+            n_equations_unassessed=(row.detail or {}).get("n_equations_unassessed", 0),
+            n_recovery_figures_unassessed=(row.detail or {}).get(
+                "n_recovery_figures_unassessed", 0
+            ),
+            n_recovery_tables_unassessed=(row.detail or {}).get("n_recovery_tables_unassessed", 0),
+            image_coverage_items=[
+                {key: item.get(key) for key in ("image_index", "page", "paragraph", "reason")}
+                for item in (row.detail or {}).get("image_coverage_items", [])
+            ],
         )
         for row in integrity_rows
     ]

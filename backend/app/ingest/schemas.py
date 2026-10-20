@@ -148,6 +148,35 @@ class ImageBlock(BaseModel):
     ) = None
 
 
+class ImageReading(BaseModel):
+    """Saved reading attempt, not proof that an image's meaning was verified."""
+
+    image_index: int = Field(ge=0)
+    status: Literal["not_selected", "failed", "invalid_response", "classified_only", "transcribed"]
+    reason: (
+        Literal[
+            "not_attempted",
+            "unsupported_source",
+            "size_filter",
+            "selection_limit",
+            "vision_disabled",
+            "client_unavailable",
+            "api_down",
+            "quota_exhausted",
+            "crop_unavailable",
+            "invalid_response",
+            "content_not_transcribed",
+            "low_confidence",
+        ]
+        | None
+    ) = None
+    attempted: bool = False
+    kind: Literal["table", "equation", "chart", "other"] | None = None
+    confidence: Literal["high", "low"] | None = None
+    prompt_type: str | None = None
+    prompt_version: str | None = None
+
+
 class TableBlock(BaseModel):
     """A table with rows/cells intact. `native` = read directly from the
     file (DOCX, F1.2); `vision` = recovered from an embedded image by the
@@ -162,16 +191,18 @@ class TableBlock(BaseModel):
     source: Literal["native", "vision"] = "native"
     low_confidence: bool = False
     caption: str | None = None
+    source_image_index: int | None = Field(default=None, ge=0)
 
 
 class EquationBlock(BaseModel):
     """An equation/statistical expression recovered from an embedded image
-    (F1.3) — input for the F6 statistics extraction."""
+    (F1.3). Retained transcription; F6 does not yet evaluate this representation."""
 
     page: int | None = None
     paragraph: int | None = None
     latex: str
     low_confidence: bool = False
+    source_image_index: int | None = Field(default=None, ge=0)
 
 
 class PageGeometry(BaseModel):
@@ -407,6 +438,8 @@ class ExtractionResult(BaseModel):
     section_tree: SectionTree
     blocks: list[TextBlock]
     images: list[ImageBlock]
+    image_reading_version: Literal["v1"] | None = None
+    image_readings: list[ImageReading] | None = None
     docx_source_sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
     docx_omitted_image_occurrences: int = Field(default=0, ge=0)
     tables: list[TableBlock] = Field(default_factory=list)

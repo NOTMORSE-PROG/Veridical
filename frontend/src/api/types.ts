@@ -437,9 +437,15 @@ export interface IntegrityCheckStatusOut {
   n_claim_support_unassessed?: number;
   reference_list_page?: number | null;
   analysis_coverage?: "complete" | "partial" | "unsupported" | null;
-  assessment_scope?: "reference_metadata_only" | null;
+  assessment_scope?: "reference_metadata_only" | "available_text_and_tables" | null;
   n_reference_metadata_attempted?: number;
   n_metadata_api_down?: number;
+  n_images_unassessed?: number;
+  n_image_occurrences_omitted?: number;
+  n_equations_unassessed?: number;
+  n_recovery_figures_unassessed?: number;
+  n_recovery_tables_unassessed?: number;
+  image_coverage_items?: { image_index: number; page: number | null; paragraph: number | null; reason: string }[];
 }
 
 /** V-077 (D-028): a count, not a judgment. "library" for checks since the

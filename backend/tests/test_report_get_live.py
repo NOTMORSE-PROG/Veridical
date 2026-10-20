@@ -134,6 +134,59 @@ async def test_get_report_returns_the_full_shape_for_a_done_run(session_factory)
         assert row.evidence == []
 
 
+async def test_image_coverage_prevents_ready_and_uses_only_saved_safe_snapshot(session_factory):
+    from app.checks.forensics.service import run_statistical_forensics_check
+    from app.ingest.schemas import (
+        ExtractionResult,
+        ImageBlock,
+        ImageReading,
+        SectionTree,
+        TextBlock,
+    )
+    from app.share.service import _to_public_report
+
+    instructor_id, run_id, _ = await _seed_done_run(session_factory)
+    extraction = ExtractionResult(
+        page_count=1,
+        anchor_kind="page",
+        image_only=False,
+        text_chars=50,
+        section_tree=SectionTree(source="none"),
+        blocks=[TextBlock(page=1, text="t(28) = 2.45, p = .021.", max_font_size=11, bold_ratio=0)],
+        images=[ImageBlock(page=1, bbox=(0, 0, 100, 100))],
+        image_reading_version="v1",
+        image_readings=[
+            ImageReading(image_index=0, status="failed", reason="api_down", attempted=True)
+        ],
+    )
+    async with session_factory() as session:
+        assert (await get_report(session, run_id, instructor_id)).status == "ready"
+        result = await run_statistical_forensics_check(session, run_id, extraction)
+        await aggregate_and_score(session, run_id)
+        report = await get_report(session, run_id, instructor_id)
+        assert report.status == "needs_review"
+        assert report.flag_deduction == 0
+        [coverage] = report.integrity_check_status
+        assert coverage.n_skipped_api_down == 1
+        assert coverage.n_images_unassessed == 1
+        assert coverage.assessment_scope == "available_text_and_tables"
+        assert coverage.image_coverage_items[0].page == 1
+        assert _to_public_report(report).assessment_incomplete is True
+        # A stored private field cannot pass through the explicit public projection.
+        detail = {
+            **result.detail,
+            "image_coverage_items": [
+                {**result.detail["image_coverage_items"][0], "private_path": "DO-NOT-EXPOSE"},
+            ],
+        }
+        result.detail = detail
+        await session.commit()
+        extraction.images.clear()
+        reopened = await get_report(session, run_id, instructor_id)
+        assert reopened.integrity_check_status == report.integrity_check_status
+        assert "DO-NOT-EXPOSE" not in reopened.model_dump_json()
+
+
 async def test_get_report_rejects_a_run_that_has_not_finished(session_factory):
     async with session_factory() as session:
         instructor = Instructor(email="unfinished@demo.local", display_name="Test")

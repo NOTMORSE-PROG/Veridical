@@ -111,8 +111,16 @@ COVERAGE_REASONS = frozenset(
         "reference_list_unavailable",
         "claim_support_unavailable",
         "statement_roles_unverified",
+        "image_content_unassessed",
     }
 )
+
+
+class ImageAssessmentLocationOut(BaseModel):
+    image_index: int = Field(ge=0)
+    page: int | None = Field(default=None, gt=0)
+    paragraph: int | None = Field(default=None, ge=0)
+    reason: str
 
 
 class IntegrityCheckStatusOut(BaseModel):
@@ -139,9 +147,15 @@ class IntegrityCheckStatusOut(BaseModel):
     n_claim_support_unassessed: int = 0
     reference_list_page: int | None = None
     analysis_coverage: Literal["complete", "partial", "unsupported"] | None = None
-    assessment_scope: Literal["reference_metadata_only"] | None = None
+    assessment_scope: Literal["reference_metadata_only", "available_text_and_tables"] | None = None
     n_reference_metadata_attempted: int = 0
     n_metadata_api_down: int = 0
+    n_images_unassessed: int = 0
+    n_image_occurrences_omitted: int = 0
+    n_equations_unassessed: int = 0
+    n_recovery_figures_unassessed: int = 0
+    n_recovery_tables_unassessed: int = 0
+    image_coverage_items: list[ImageAssessmentLocationOut] = Field(default_factory=list)
 
 
 class OriginalityScopeOut(BaseModel):

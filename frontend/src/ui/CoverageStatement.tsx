@@ -1,6 +1,7 @@
-import type { ReactNode } from "react";
+import { useId, useState, type ReactNode } from "react";
 import { ActionLink } from "./ActionLink";
 import { WarningTriangleIcon } from "./Alert";
+import { Button } from "./Button";
 
 export interface CoverageStatementItem {
   key: string;
@@ -8,6 +9,30 @@ export interface CoverageStatementItem {
   detail: ReactNode;
   subIssues?: string[];
   action?: { to: string; label: string; ariaLabel?: string };
+  detailsLabel?: string;
+  sources?: { label: string; to: string | null }[];
+}
+
+function CoverageDetails({ item }: { item: CoverageStatementItem }) {
+  const [expanded, setExpanded] = useState(false);
+  const id = useId();
+  const content = <>
+    {item.subIssues && item.subIssues.length > 0 &&
+      <ul>{item.subIssues.map((issue) => <li key={issue}>{issue}</li>)}</ul>}
+    {item.sources && item.sources.length > 0 && <ul>
+      {item.sources.map((source) => <li key={source.label}>
+        {source.to ? <ActionLink to={source.to} variant="quiet">{source.label}</ActionLink> : source.label}
+      </li>)}
+    </ul>}
+  </>;
+  if (!item.detailsLabel) return content;
+  return <>
+    <Button variant="quiet" aria-expanded={expanded} aria-controls={id}
+      onClick={() => setExpanded((value) => !value)}>
+      {expanded ? "Hide" : "Show"} {item.detailsLabel}
+    </Button>
+    <div id={id} hidden={!expanded}>{content}</div>
+  </>;
 }
 
 interface CoverageStatementProps {
@@ -53,9 +78,7 @@ export function CoverageStatement({ headingId, kicker = "Assessment coverage", h
             <div className="signal-coverage-list__body">
               <p className="signal-coverage-list__label">{item.label}</p>
               <p>{item.detail}</p>
-              {item.subIssues && item.subIssues.length > 0 && (
-                <ul>{item.subIssues.map((issue) => <li key={issue}>{issue}</li>)}</ul>
-              )}
+              <CoverageDetails item={item} />
             </div>
             {item.action && (
               <ActionLink to={item.action.to} variant="secondary" aria-label={item.action.ariaLabel ?? item.action.label}>

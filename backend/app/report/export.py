@@ -135,6 +135,13 @@ def _coverage_labels() -> dict[str, str]:
     return json.loads((Path(__file__).parent / "data" / "coverage_labels.json").read_text("utf-8"))
 
 
+@lru_cache
+def _image_coverage_labels() -> dict[str, str]:
+    return json.loads(
+        (Path(__file__).parent / "data" / "image_coverage_labels.json").read_text("utf-8")
+    )
+
+
 def _issue_title(issue: str | None) -> str:
     if not issue:
         return "Recorded finding"
@@ -864,6 +871,16 @@ def build_report_pdf(data: ReportExportData) -> bytes:
                     "could not be checked. Citation matching and claim support across the "
                     "manuscript were not assessed"
                 )
+            elif coverage.assessment_scope == "available_text_and_tables":
+                reason = (
+                    "Partially assessed. Statistical statements were extracted from readable "
+                    "text or tables. Some image content remains unassessed. "
+                    "This limit is not a statistical error"
+                    if coverage.analysis_coverage == "partial"
+                    else "Not assessed. No supported statistical statements were found in "
+                    "readable text and tables. Unassessed images may contain information "
+                    "this check missed"
+                )
             elif coverage.analysis_coverage == "unsupported":
                 reason = (
                     "Not assessed. VERIDICAL could not establish a reliable source for this check. "
@@ -902,8 +919,46 @@ def build_report_pdf(data: ReportExportData) -> bytes:
                 )
             if coverage.n_linkage_unassessed:
                 counts.append(f"{coverage.n_linkage_unassessed} reference links remain unassessed")
+            if coverage.n_images_unassessed:
+                noun = "occurrence" if coverage.n_images_unassessed == 1 else "occurrences"
+                counts.append(f"{coverage.n_images_unassessed} image {noun} unassessed")
+            if coverage.n_image_occurrences_omitted:
+                counts.append(
+                    f"{coverage.n_image_occurrences_omitted} additional drawing occurrences "
+                    "exceeded the inventory limit"
+                )
+            if coverage.n_equations_unassessed:
+                noun = "equation" if coverage.n_equations_unassessed == 1 else "equations"
+                counts.append(
+                    f"{coverage.n_equations_unassessed} {noun} transcribed but not evaluated"
+                )
+            if coverage.n_recovery_figures_unassessed or coverage.n_recovery_tables_unassessed:
+                counts.append(
+                    f"{coverage.n_recovery_figures_unassessed} figure and "
+                    f"{coverage.n_recovery_tables_unassessed} table recovery proposals unassessed"
+                )
             text = f"{label}: {reason}. " + "; ".join(counts)
             flow.append(Paragraph(escape(text), styles["body"]))
+            image_locations = {}
+            for item in coverage.image_coverage_items:
+                anchor = (
+                    f"Page {item.page}"
+                    if item.page is not None
+                    else f"Source position {item.paragraph + 1}"
+                    if item.paragraph is not None
+                    else "Source location unavailable"
+                )
+                key = anchor, item.reason
+                image_locations[key] = image_locations.get(key, 0) + 1
+            for (anchor, image_reason), count in image_locations.items():
+                label = _image_coverage_labels().get(image_reason, "Image content unassessed")
+                occurrences = "image occurrence" if count == 1 else "image occurrences"
+                flow.append(
+                    Paragraph(
+                        escape(f"{anchor}: {label} ({count} {occurrences})."),
+                        styles["caption"],
+                    )
+                )
         flow.append(
             Paragraph(
                 "These are coverage limitations, not findings against the manuscript. "

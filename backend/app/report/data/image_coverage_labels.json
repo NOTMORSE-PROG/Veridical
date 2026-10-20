@@ -1,0 +1,18 @@
+{
+  "reading_not_recorded": "Image reading was not recorded",
+  "unsupported_source": "Image assessment is not supported for this source",
+  "vision_disabled": "Image reading was not requested",
+  "not_attempted": "Image reading was not attempted",
+  "size_filter": "Outside image-reading size limits",
+  "selection_limit": "Image-reading limit reached",
+  "client_unavailable": "Image-reading service was not configured",
+  "api_down": "Image-reading service was unavailable",
+  "quota_exhausted": "AI capacity was unavailable",
+  "crop_unavailable": "The image region could not be read",
+  "invalid_response": "Image reading could not be validated",
+  "content_not_transcribed": "Identified by type only; content not assessed",
+  "low_confidence": "Image reading was too uncertain for statistical checks",
+  "equation_not_checked": "Equation transcribed but not evaluated",
+  "table_not_checked": "No supported statistics extracted from the image table",
+  "table_partly_parsed": "Some statistical cells in the image table could not be assessed"
+}

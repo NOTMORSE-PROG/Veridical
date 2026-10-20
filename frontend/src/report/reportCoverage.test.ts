@@ -45,4 +45,18 @@ describe("partial source coverage", () => {
       coverage_reason: "source_reading_order_unresolved" });
     expect(row.detail).toContain("This check was not assessed");
   });
+
+  it("retains source-stop precedence and secondary image locations together", () => {
+    const row = item({
+      check_kind: "statistical_forensics",
+      assessment_scope: null, analysis_coverage: "unsupported",
+      coverage_reason: "source_reading_order_unresolved", n_images_unassessed: 1,
+      image_coverage_items: [{ image_index: 0, page: 2, paragraph: null, reason: "invalid_response" }],
+    });
+    expect(row.detail).toContain("This check was not assessed");
+    expect(row.detail).not.toContain("Statistical statements were extracted");
+    expect(row.subIssues?.join(" ")).toContain("1 image occurrence remains unassessed");
+    expect(row.detailsLabel).toBe("source and image assessment details");
+    expect(row.sources?.[0].to).toBe("/report/3/document?anchor=page%202&coverage=images");
+  });
 });

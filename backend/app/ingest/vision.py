@@ -34,14 +34,17 @@ import pymupdf
 from pydantic import BaseModel, ValidationError
 
 from app.config import Settings
+from app.errors import ApiDownError, QuotaExhaustedError
 from app.ingest.patterns import HeadingPatterns
 from app.ingest.schemas import (
     EquationBlock,
     ExtractionResult,
     ImageBlock,
+    ImageReading,
     SectionNode,
     TableBlock,
 )
+from app.llm import LLMNotConfiguredError
 from app.llm.base import LLMClient
 
 PROMPT_TYPE = "image_table_extraction"
@@ -69,7 +72,7 @@ async def read_images(
 ) -> int:
     """Run the vision pass, merging tables/equations into `result` in
     place. Returns the number of LLM calls made (quota accounting)."""
-    selected = select_images(result, patterns, settings)
+    selected = prepare_image_readings(result, patterns, settings)
     if not selected:
         result.vision_status = "none"
         return 0
@@ -77,17 +80,38 @@ async def read_images(
     prompt = _PROMPT_FILE.read_text(encoding="utf-8")
     loop = asyncio.get_running_loop()
     calls = 0
-    for image in selected:
+    for index in selected:
+        image = result.images[index]
+        reading = result.image_readings[index]
         # Rendering is CPU-bound — off the event loop (CODING.md §2).
-        png = await loop.run_in_executor(None, _crop, file_path, image, settings)
-        response = await llm.complete(
-            PROMPT_TYPE,
-            prompt,
-            prompt_version=PROMPT_VERSION,
-            images=[png],
-        )
+        try:
+            png = await loop.run_in_executor(None, _crop, file_path, image, settings)
+        except (ValueError, RuntimeError, IndexError):
+            reading.status, reading.reason = "failed", "crop_unavailable"
+            continue
+        reading.attempted = True
+        reading.prompt_type, reading.prompt_version = PROMPT_TYPE, PROMPT_VERSION
         calls += 1
-        _merge(result, image, response)
+        try:
+            response = await llm.complete(
+                PROMPT_TYPE,
+                prompt,
+                prompt_version=PROMPT_VERSION,
+                images=[png],
+            )
+        except (ApiDownError, QuotaExhaustedError, LLMNotConfiguredError) as exc:
+            reason = (
+                "client_unavailable"
+                if isinstance(exc, LLMNotConfiguredError)
+                else "quota_exhausted"
+                if isinstance(exc, QuotaExhaustedError)
+                else "api_down"
+            )
+            reading.status, reading.reason = "failed", reason
+            mark_pending_unavailable(result, reason)
+            result.vision_status = "unavailable"
+            raise
+        _merge(result, image, response, reading)
     result.vision_status = "done"
     return calls
 
@@ -97,21 +121,59 @@ def select_images(
 ) -> list[ImageBlock]:
     """Bounded, prioritized selection — the quota governor for F1.3.
 
-    PDF-only for now: DOCX image blocks carry no croppable region or bytes
-    yet (recorded V-007 gap; needs image-part extraction from the package),
-    so an LLM call for them would spend quota on nothing."""
+    PDF-only: native DOCX display does not opt its images into this crop path."""
+    return [result.images[index] for index in _selected_indices(result, patterns, settings)]
+
+
+def _selected_indices(
+    result: ExtractionResult, patterns: HeadingPatterns, settings: Settings
+) -> list[int]:
     sized = [
-        img
-        for img in result.images
-        if img.bbox is not None and _area(img.bbox) >= settings.ingest_vision_min_area_pts
+        index
+        for index, img in enumerate(result.images)
+        if result.anchor_kind == "page"
+        and img.page is not None
+        and img.bbox is not None
+        and _area(img.bbox) >= settings.ingest_vision_min_area_pts
     ]
     priority_pages = _priority_page_ranges(result.section_tree.nodes, patterns)
 
     def is_priority(img: ImageBlock) -> bool:
         return img.page is not None and any(a <= img.page <= b for a, b in priority_pages)
 
-    ordered = sorted(sized, key=lambda img: not is_priority(img))
+    ordered = sorted(sized, key=lambda index: not is_priority(result.images[index]))
     return ordered[: settings.ingest_vision_max_images]
+
+
+def prepare_image_readings(
+    result: ExtractionResult,
+    patterns: HeadingPatterns,
+    settings: Settings,
+    *,
+    enabled: bool = True,
+) -> list[int]:
+    selected = _selected_indices(result, patterns, settings) if enabled else []
+    result.image_reading_version = "v1"
+    result.image_readings = []
+    for index, image in enumerate(result.images):
+        if not enabled:
+            reason = "vision_disabled"
+        elif result.anchor_kind != "page" or image.page is None or image.bbox is None:
+            reason = "unsupported_source"
+        elif _area(image.bbox) < settings.ingest_vision_min_area_pts:
+            reason = "size_filter"
+        else:
+            reason = "not_attempted" if index in selected else "selection_limit"
+        result.image_readings.append(
+            ImageReading(image_index=index, status="not_selected", reason=reason)
+        )
+    return selected
+
+
+def mark_pending_unavailable(result: ExtractionResult, reason: str) -> None:
+    for reading in result.image_readings or []:
+        if reading.status == "not_selected" and reading.reason == "not_attempted":
+            reading.reason = reason
 
 
 def _area(bbox: tuple[float, float, float, float]) -> float:
@@ -141,12 +203,29 @@ def _crop(file_path: Path, image: ImageBlock, settings: Settings) -> bytes:
         return pix.tobytes("png")
 
 
-def _merge(result: ExtractionResult, image: ImageBlock, response: dict[str, Any]) -> None:
+def _merge(
+    result: ExtractionResult,
+    image: ImageBlock,
+    response: dict[str, Any],
+    entry: ImageReading,
+) -> None:
     try:
         reading = VisionReading.model_validate(response)
-    except ValidationError:
+        if reading.kind == "table" and (
+            not reading.rows
+            or not any(cell.strip() for row in reading.rows for cell in row)
+            or reading.latex
+        ):
+            raise ValueError("Missing or incompatible table content")
+        if reading.kind == "equation" and (not (reading.latex or "").strip() or reading.rows):
+            raise ValueError("Missing or incompatible equation content")
+        if reading.kind in {"chart", "other"} and (reading.rows or reading.latex):
+            raise ValueError("Classification carries incompatible content")
+    except (ValidationError, ValueError):
         # A malformed model answer is an unreadable image, nothing more.
+        entry.status, entry.reason = "invalid_response", "invalid_response"
         return
+    entry.kind, entry.confidence = reading.kind, reading.confidence
     low = reading.confidence == "low"
     if reading.kind == "table" and reading.rows:
         result.tables.append(
@@ -157,6 +236,7 @@ def _merge(result: ExtractionResult, image: ImageBlock, response: dict[str, Any]
                 source="vision",
                 low_confidence=low,
                 caption=reading.caption,
+                source_image_index=entry.image_index,
             )
         )
     elif reading.kind == "equation" and reading.latex:
@@ -166,6 +246,12 @@ def _merge(result: ExtractionResult, image: ImageBlock, response: dict[str, Any]
                 paragraph=image.paragraph,
                 latex=reading.latex,
                 low_confidence=low,
+                source_image_index=entry.image_index,
             )
         )
-    # charts/other: classified and left alone — no invented data.
+    if reading.kind in {"table", "equation"}:
+        entry.status = "transcribed"
+        entry.reason = "low_confidence" if low else None
+    else:
+        entry.status, entry.reason = "classified_only", "content_not_transcribed"
+    # Charts/other remain unassessed: the label alone cannot establish relevance.

@@ -1,5 +1,6 @@
 import type { IntegrityCheckStatusOut, ReportOut } from "../api/types";
 import type { CoverageStatementItem } from "../ui/CoverageStatement";
+import { imageCoverageItem } from "./imageCoverage";
 
 const INTEGRITY_LABEL: Record<IntegrityCheckStatusOut["check_kind"], string> = {
   internal_agreement: "Internal agreement",
@@ -15,6 +16,9 @@ const INTEGRITY_LABEL: Record<IntegrityCheckStatusOut["check_kind"], string> = {
 function integrityCoverageItem(status: IntegrityCheckStatusOut, manuscriptId: number, checkRunId: number): CoverageStatementItem {
   const label = INTEGRITY_LABEL[status.check_kind];
   const reason = status.coverage_reason;
+  if (reason === "image_content_unassessed" && status.assessment_scope === "available_text_and_tables") {
+    return imageCoverageItem(status, checkRunId);
+  }
   if (status.assessment_scope === "reference_metadata_only") {
     const partial = status.analysis_coverage === "partial";
     return {
@@ -43,6 +47,10 @@ function integrityCoverageItem(status: IntegrityCheckStatusOut, manuscriptId: nu
     statement_roles_unverified: "The check found possible objectives and results, but could not reliably establish that they describe this study. Comparison leads do not change readiness.",
   };
   if (reason && coverageCopy[reason]) {
+    const imageDetails = status.check_kind === "statistical_forensics" &&
+      (status.n_images_unassessed || status.n_image_occurrences_omitted || status.n_equations_unassessed ||
+        status.n_recovery_figures_unassessed || status.n_recovery_tables_unassessed)
+      ? imageCoverageItem(status, checkRunId) : null;
     const subIssues: string[] = [];
     if (status.n_skipped_api_down) subIssues.push(`${status.n_skipped_api_down} items skipped because a service was unavailable.`);
     if (status.n_skipped_quota) subIssues.push(`${status.n_skipped_quota} items skipped because AI capacity was unavailable.`);
@@ -52,7 +60,10 @@ function integrityCoverageItem(status: IntegrityCheckStatusOut, manuscriptId: nu
     if (status.n_linkage_unassessed) subIssues.push(`${status.n_linkage_unassessed} reference links remain unassessed.`);
     if (status.n_claim_support_unassessed) subIssues.push(`${status.n_claim_support_unassessed} cited sources have unassessed claim support.`);
     return {
-      key: status.check_kind, label, detail: coverageCopy[reason], subIssues,
+      key: status.check_kind, label, detail: coverageCopy[reason],
+      subIssues: [...subIssues, ...(imageDetails?.subIssues ?? [])],
+      sources: imageDetails?.sources,
+      detailsLabel: imageDetails ? "source and image assessment details" : undefined,
       action: { to: `/report/${checkRunId}/document?view=decision`, label: "Open the paper" },
     };
   }

@@ -84,3 +84,37 @@ def test_export_retains_metadata_provider_outage_count():
     with pymupdf.open(stream=build_report_pdf(data), filetype="pdf") as document:
         text = " ".join(page.get_text().replace("\n", " ") for page in document)
     assert "1 source checks could not reach an external service" in text
+
+
+@pytest.mark.parametrize("state", ["partial", "unsupported"])
+def test_saved_image_coverage_survives_export_and_public_incomplete_notice(state):
+    coverage = IntegrityCheckStatusOut(
+        check_kind="statistical_forensics",
+        outcome="escalated",
+        n_skipped_quota=0,
+        n_skipped_api_down=0,
+        n_skipped_parse_failure=0,
+        coverage_reason="image_content_unassessed",
+        assessment_scope="available_text_and_tables",
+        analysis_coverage=state,
+        n_images_unassessed=2,
+        n_equations_unassessed=1,
+        image_coverage_items=[
+            {"image_index": 0, "paragraph": 4, "reason": "unsupported_source"},
+            {"image_index": 1, "paragraph": 4, "reason": "unsupported_source"},
+        ],
+    )
+    saved_report = report(coverage)
+    assert _to_public_report(saved_report).assessment_incomplete is True
+    data = ReportExportData(report=saved_report, flags=[], archive_size_n=None)
+    with pymupdf.open(stream=build_report_pdf(data), filetype="pdf") as document:
+        text = " ".join(page.get_text().replace("\n", " ") for page in document)
+    assert "2 image occurrences unassessed" in text
+    assert "1 equation transcribed but not evaluated" in text
+    assert text.count("Source position 5: Image assessment is not supported for this source") == 1
+    assert "(2 image occurrences)" in text
+    assert "These are coverage limitations, not findings against the manuscript" in text
+    if state == "partial":
+        assert "Statistical statements were extracted from readable text or tables" in text
+    else:
+        assert "Unassessed images may contain information this check missed" in text

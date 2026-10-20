@@ -210,13 +210,16 @@ async def ingest_manuscript(
         )
         patterns = load_patterns(settings.ingest_patterns_file)
         drafts = await loop.run_in_executor(None, references.extract_references, result, patterns)
+        selected_images = vision.prepare_image_readings(
+            result, patterns, settings, enabled=read_images
+        )
         try:
             # Vision pass (F1.3) merges image tables/equations into result
             # BEFORE the raw store is written, so the store is complete.
-            if read_images:
+            if selected_images:
                 llm = await get_llm_client_for(session, settings, manuscript.instructor_id)
                 await vision.read_images(result, file_path, llm, patterns, settings)
-        except (LLMNotConfiguredError, ApiDownError, QuotaExhaustedError):
+        except (LLMNotConfiguredError, ApiDownError, QuotaExhaustedError) as exc:
             # No client (real mode before V-009), or the queue's own
             # retries were exhausted, or the daily quota ran out: image
             # content stays unread — an honest state (F1.7), never an
@@ -228,6 +231,14 @@ async def ingest_manuscript(
             # must not be thrown away over an unrelated image-reading
             # problem.
             result.vision_status = "unavailable"
+            vision.mark_pending_unavailable(
+                result,
+                "client_unavailable"
+                if isinstance(exc, LLMNotConfiguredError)
+                else "quota_exhausted"
+                if isinstance(exc, QuotaExhaustedError)
+                else "api_down",
+            )
         raw_path = raw_store_path(settings, manuscript.id)
         await loop.run_in_executor(None, _write_raw_store, result, raw_path)
         # BUG-138: same durability as the upload itself -- without this, the

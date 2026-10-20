@@ -24,6 +24,7 @@ narrow enough to never touch the ordinary APA comma between clauses
 
 import contextlib
 import io
+import math
 import re
 import warnings
 from dataclasses import dataclass
@@ -193,9 +194,37 @@ def _parse_number(text: str) -> float | None:
     if not cleaned:
         return None
     try:
-        return float(cleaned)
+        value = float(cleaned)
+        return value if math.isfinite(value) else None
     except ValueError:
         return None
+
+
+def table_statistical_cells_complete(
+    table: TableBlock, keywords: ForensicsKeywords | None = None
+) -> bool:
+    """Whether every declared supported statistical cell can be consumed.
+
+    This is parser coverage, not independent verification of a transcription.
+    Blank/ragged rows and repeated statistical headers remain incomplete:
+    the extractor skips those cells or keeps only the first matching column.
+    """
+    if table.low_confidence or len(table.rows) < 2:
+        return False
+    keywords = keywords or load_keywords()
+    header = table.rows[0]
+    columns = _match_columns(header, keywords)
+    declared = sum(bool(_match_columns([cell], keywords)) for cell in header)
+    if not columns or declared != len(columns):
+        return False
+    for row in table.rows[1:]:
+        if len(row) != len(header):
+            return False
+        for column in columns.values():
+            value = _parse_number(row[column])
+            if value is None or not math.isfinite(value):
+                return False
+    return True
 
 
 def extract_descriptive_stats(

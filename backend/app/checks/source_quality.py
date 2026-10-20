@@ -28,11 +28,18 @@ def source_limitation_detail(extraction: ExtractionResult) -> dict | None:
 
 
 async def persist_source_limitation(
-    session: AsyncSession, check_run_id: int, kind: CheckKind, extraction: ExtractionResult
+    session: AsyncSession,
+    check_run_id: int,
+    kind: CheckKind,
+    extraction: ExtractionResult,
+    *,
+    supplemental_detail: dict | None = None,
 ) -> CheckResult | None:
     detail = source_limitation_detail(extraction)
     if detail is None:
         return None
+    # The source gate stays authoritative over any supplemental inventory.
+    detail = {**(supplemental_detail or {}), **detail}
     if kind == CheckKind.originality_reuse:
         detail.update(corpus="library", comparison_ran=False)
     result = CheckResult(

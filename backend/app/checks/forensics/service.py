@@ -4,14 +4,15 @@ GRIMMER + V-033's p-recalculation and sanity checks, into one
 `app.checks.citations.verify.run_citation_integrity_check` (F5's
 assembly), applied to F6.
 
-**Applicability gate (F6.5)**: a manuscript with no statistics at all
-(purely qualitative — the ticket's own example) gets
+**Applicability gate (F6.5)**: readable content with no supported statistics
+and no recorded image/equation coverage gap gets
 `outcome=not_applicable` — N/A is not "passed" (charter rule 9), never a
 silently-clean check_run when there was nothing to check. Any manuscript
 with EITHER inferential or descriptive stats gets `outcome=passed`
 (whether or not it also carries flags — matches F5's own convention:
 `outcome` answers "did the check run meaningfully", `Flag` rows are the
-actual findings).
+actual findings). Unassessed image/equation content instead records neutral
+incompleteness while preserving independently supported findings.
 """
 
 import asyncio
@@ -22,6 +23,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.audit.service import write_audit_event
 from app.checks.forensics.checks import ForensicsFlagDraft, evaluate_grim_grimmer
+from app.checks.forensics.coverage import image_coverage
 from app.checks.forensics.extract import extract_all_stats
 from app.checks.forensics.pcheck import evaluate_p_recalc
 from app.checks.forensics.sanity import evaluate_group_counts, evaluate_percentage_sums
@@ -38,6 +40,7 @@ class _ForensicsComputation:
     outcome: ResultOutcome
     flag_drafts: list[ForensicsFlagDraft]
     skipped_composite_rows: int
+    image_coverage: dict
 
 
 def _compute_forensics_findings(extraction: ExtractionResult) -> _ForensicsComputation:
@@ -55,6 +58,9 @@ def _compute_forensics_findings(extraction: ExtractionResult) -> _ForensicsCompu
     descriptive = [s for s in stats if s.kind == "descriptive"]
 
     outcome = ResultOutcome.passed if (inferential or descriptive) else ResultOutcome.not_applicable
+    coverage = image_coverage(extraction, stats)
+    if coverage.get("coverage_reason"):
+        outcome = ResultOutcome.escalated
 
     full_text = "\n".join(b.text for b in extraction.blocks if not b.is_furniture)
 
@@ -71,14 +77,22 @@ def _compute_forensics_findings(extraction: ExtractionResult) -> _ForensicsCompu
         outcome=outcome,
         flag_drafts=flag_drafts,
         skipped_composite_rows=grim_grimmer.skipped_composite_rows,
+        image_coverage=coverage,
     )
 
 
 async def run_statistical_forensics_check(
     session: AsyncSession, check_run_id: int, extraction: ExtractionResult
 ) -> CheckResult:
+    inventory = image_coverage(extraction, [])
+    for field in ("coverage_reason", "assessment_scope", "analysis_coverage"):
+        inventory.pop(field, None)
     source_stop = await persist_source_limitation(
-        session, check_run_id, CheckKind.statistical_forensics, extraction
+        session,
+        check_run_id,
+        CheckKind.statistical_forensics,
+        extraction,
+        supplemental_detail=inventory,
     )
     if source_stop is not None:
         return source_stop
@@ -94,6 +108,7 @@ async def run_statistical_forensics_check(
         kind=CheckKind.statistical_forensics,
         outcome=outcome,
         detail={
+            **computation.image_coverage,
             "n_inferential_stats": computation.n_inferential,
             "n_descriptive_stats": computation.n_descriptive,
             "n_flags": len(flag_drafts),
