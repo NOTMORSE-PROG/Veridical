@@ -48,6 +48,7 @@ from app.external import s2 as s2_client
 from app.external.schemas import VerificationResult
 from app.ingest.patterns import HeadingPatterns
 from app.ingest.references import (
+    ReferenceEntryLocation,
     extract_references,
     non_reference_blocks,
     reference_entry_locations,
@@ -313,6 +314,27 @@ def _verdict_flag_draft(citation: Citation, verdict: CitationVerdict) -> Citatio
     )
 
 
+def _with_reference_anchor(
+    draft: CitationFlagDraft,
+    order_index: int | None,
+    locations: dict[tuple[int, str], ReferenceEntryLocation],
+) -> CitationFlagDraft:
+    """Navigate to a source entry only when both its order and exact excerpt agree."""
+    if type(order_index) is not int or order_index < 0:
+        return draft
+    location = locations.get((order_index + 1, draft.evidence_excerpt))
+    if location is None:
+        return draft
+    anchor = (
+        f"p. {location.page}"
+        if location.page is not None
+        else f"\u00b6{location.paragraph}"
+        if location.paragraph is not None
+        else draft.page_anchor
+    )
+    return replace(draft, page_anchor=anchor)
+
+
 async def run_citation_integrity_check(
     session: AsyncSession,
     client: httpx.AsyncClient,
@@ -424,6 +446,12 @@ async def run_citation_integrity_check(
         (location.index, location.raw_text): location
         for location in reference_entry_locations(extraction, patterns)
     }
+    flag_drafts = [
+        _with_reference_anchor(draft, draft.detail.get("order_index"), locations)
+        if draft.detail.get("kind") == "uncited_reference"
+        else draft
+        for draft in flag_drafts
+    ]
     for citation in citations:
         parsed = citation.parse_status == CitationParseStatus.parsed
         metadata_complete = bool(
@@ -457,17 +485,7 @@ async def run_citation_integrity_check(
         )
         draft = _verdict_flag_draft(citation, verdict)
         if draft is not None:
-            location = locations.get((citation.order_index + 1, citation.raw_text))
-            if location is not None:
-                anchor = (
-                    f"p. {location.page}"
-                    if location.page is not None
-                    else f"\u00b6{location.paragraph}"
-                    if location.paragraph is not None
-                    else draft.page_anchor
-                )
-                draft = replace(draft, page_anchor=anchor)
-            flag_drafts.append(draft)
+            flag_drafts.append(_with_reference_anchor(draft, citation.order_index, locations))
         claim_sentence = claim_by_order_index.get(citation.order_index)
         if claim_sentence and (
             not metadata_complete or verdict.result is None or not verdict.result.abstract
