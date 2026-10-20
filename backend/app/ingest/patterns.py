@@ -48,6 +48,9 @@ class HeadingPatterns:
     toc_style_prefixes: tuple[str, ...]
     # Section titles that hold the reference list (F1.5).
     reference_titles: frozenset[str]
+    # These headings alone do not establish substantive chapter spans (F7).
+    # Exact normalized titles only; never substring-based exclusions.
+    reuse_ancillary_titles: frozenset[str]
     # Numbering preceding a reference title, if this document uses it.
     reference_heading_prefix: re.Pattern[str]
     # Later headings that end a bare reference list when no section tree
@@ -118,6 +121,14 @@ def load_patterns(path: Path | None = None) -> HeadingPatterns:
         label_pattern = json.loads(_DEFAULT_FILE.read_text(encoding="utf-8"))[
             "standalone_heading_label"
         ]
+    ancillary_titles = raw.get(
+        "reuse_ancillary_titles",
+        json.loads(_DEFAULT_FILE.read_text(encoding="utf-8"))["reuse_ancillary_titles"],
+    )
+    if not isinstance(ancillary_titles, list) or any(
+        not isinstance(title, str) or not normalize(title) for title in ancillary_titles
+    ):
+        raise ValueError("Reuse ancillary titles must be a list of nonempty strings")
     return HeadingPatterns(
         chapter=re.compile(raw["chapter"], ci),
         numbered=re.compile(raw["numbered"]),
@@ -129,6 +140,7 @@ def load_patterns(path: Path | None = None) -> HeadingPatterns:
         toc_titles=frozenset(s.casefold() for s in raw["toc_titles"]),
         toc_style_prefixes=tuple(s.casefold() for s in raw["toc_style_prefixes"]),
         reference_titles=frozenset(s.casefold() for s in raw["reference_titles"]),
+        reuse_ancillary_titles=frozenset(normalize(s).casefold() for s in ancillary_titles),
         reference_heading_prefix=reference_heading_prefix,
         reference_end_headings=tuple(re.compile(pattern, ci) for pattern in reference_end_headings),
         reference_history_lines=tuple(

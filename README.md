@@ -121,6 +121,21 @@ source-mapped table is not a statistical or semantic validation. Identical
 source/model/recipe results can be reused on re-ingestion, but their source
 mappings are checked again; reopening a saved report does not run the worker.
 
+### Reuse selection and existing Library indexes
+
+For documents without substantive detected chapter headings, reuse comparison
+uses exact non-reference body fragments. Ancillary titles such as acknowledgements
+do not, by themselves, define chapters; the configurable list is
+`reuse_ancillary_titles` in the heading-pattern JSON. A document with a substantive
+chapter retains the chapter-based front-matter policy.
+
+This selection applies when embeddings are computed. Existing Library passage
+rows and historical reports are not automatically rebuilt or rewritten by an
+upgrade. Old indexes may therefore retain earlier coverage or reference-tagging
+limitations; use newly indexed entries when verifying the corrected selection.
+Embedding-model identity alone does not version the source-selection recipe.
+Similarity results remain non-scoring comparison leads, not originality clearance.
+
 ### Recover legacy exact-file identities
 
 Manuscripts uploaded before the content-identity field was introduced may

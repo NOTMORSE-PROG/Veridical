@@ -1,9 +1,13 @@
 """F7 source-consumer regression controls, not labelled accuracy evaluation."""
 
+import json
+from pathlib import Path
+
 import pytest
 
 from app.checks.reuse import embed
 from app.config import get_settings
+from app.ingest import patterns as patterns_module
 from app.ingest.normalize import normalize
 from app.ingest.patterns import load_patterns
 from app.ingest.references import select_references
@@ -216,3 +220,171 @@ def test_damaged_line_provenance_does_not_produce_body_embeddings(encoded):
     assert embed.compute_document_embeddings(extraction).whole_document is None
     assert embed.compute_passage_embeddings(extraction) == []
     assert encoded == []
+
+
+def ancillary_source(*, title="Acknowledgements", mixed=False):
+    """A short paper with no detected substantive headings, not a synthetic chapter."""
+    lines = [
+        "Closing discussion belongs to the manuscript body.",
+        title,
+        "The authors thank the maintainers for their feedback.",
+        "References",
+        "Reyes, J. (2024). A separate source. Journal of Examples.",
+    ]
+    tail = (
+        [native_block(lines).model_copy(update={"page": 3})]
+        if mixed
+        else [block(text, 3) for text in lines]
+    )
+    return source(
+        [
+            block("The study implemented a document classification service."),
+            block("Its evaluation used a separately collected sample.", 2),
+            *tail,
+        ],
+        [
+            SectionNode(title=title, level=1, page=3),
+            SectionNode(title="References", level=1, page=3),
+        ],
+    )
+
+
+@pytest.mark.parametrize("mixed", [False, True])
+def test_ancillary_only_tree_restores_exact_body_without_duplicate_reference_scope(encoded, mixed):
+    extraction = ancillary_source(mixed=mixed)
+    before = extraction.model_dump()
+    document = embed.compute_document_embeddings(extraction)
+    assert document.whole_document is not None
+    assert document.chapters == []
+    assert len(encoded) == 1
+    assert "classification service" in encoded[0]
+    assert "maintainers" in encoded[0]
+    assert "Reyes" not in encoded[0]
+    assert "References" not in encoded[0]
+
+    passages = embed.compute_passage_embeddings(extraction)
+    body = [p for p in passages if not p.is_reference_list]
+    references = [p for p in passages if p.is_reference_list]
+    assert body and references
+    assert all(p.chapter_index == embed.UNSTRUCTURED_BODY_SCOPE for p in body)
+    assert all(p.chapter_index == 1 for p in references)
+    body_text = "\n".join(p.text for p in body)
+    assert body_text.count("The authors thank the maintainers") == 1
+    assert "Closing discussion" in body_text
+    assert "Reyes" not in body_text and "References" not in body_text
+    assert "Reyes" in "\n".join(p.text for p in references)
+    assert all(
+        "maintainers" not in p.context_text and "Closing discussion" not in p.context_text
+        for p in references
+    )
+    assert extraction.model_dump() == before
+
+
+def test_ancillary_and_substantive_headings_preserve_structured_scope(encoded):
+    extraction = ancillary_source()
+    extraction.blocks.insert(0, block("Approval text outside the real chapter."))
+    extraction.section_tree.nodes.insert(0, SectionNode(title="Evaluation", level=1, page=2))
+    document = embed.compute_document_embeddings(extraction)
+    assert [chapter.chapter_index for chapter in document.chapters] == [0]
+    assert all("Approval text" not in text for text in encoded)
+    passages = embed.compute_passage_embeddings(extraction)
+    assert all(p.chapter_index != embed.UNSTRUCTURED_BODY_SCOPE for p in passages)
+    assert all("Approval text" not in p.context_text for p in passages)
+
+
+def configured_settings(tmp_path, ancillary_titles):
+    original = Path(patterns_module.__file__).parent / "data" / "heading_patterns.json"
+    raw = json.loads(original.read_text(encoding="utf-8"))
+    if ancillary_titles is None:
+        raw.pop("reuse_ancillary_titles", None)
+    else:
+        raw["reuse_ancillary_titles"] = ancillary_titles
+    target = tmp_path / "custom-heading-patterns.json"
+    target.write_text(json.dumps(raw), encoding="utf-8")
+    return get_settings().model_copy(update={"ingest_patterns_file": target})
+
+
+def test_older_custom_patterns_inherit_ancillary_default(encoded, tmp_path):
+    settings = configured_settings(tmp_path, None)
+    result = embed.compute_document_embeddings(ancillary_source(), settings)
+    assert result.whole_document is not None and result.chapters == []
+
+
+def test_explicit_custom_ancillary_titles_are_exact_normalized_matches(encoded, tmp_path):
+    settings = configured_settings(tmp_path, ["  Contributor   notes  "])
+    result = embed.compute_document_embeddings(
+        ancillary_source(title="CONTRIBUTOR NOTES"), settings
+    )
+    assert result.whole_document is not None and result.chapters == []
+    encoded.clear()
+    different = ancillary_source(title="Contributor notes analysis")
+    assert embed.compute_document_embeddings(different, settings).whole_document is None
+    assert encoded == []
+
+
+def test_explicit_empty_ancillary_config_preserves_original_chapter_selection(encoded, tmp_path):
+    settings = configured_settings(tmp_path, [])
+    assert embed.compute_document_embeddings(ancillary_source(), settings).whole_document is None
+    assert encoded == []
+
+
+@pytest.mark.parametrize("invalid", ["acknowledgements", [None], ["  "]])
+def test_invalid_ancillary_configuration_is_not_silently_coerced(tmp_path, invalid):
+    settings = configured_settings(tmp_path, invalid)
+    with pytest.raises(ValueError, match="ancillary"):
+        load_patterns(settings.ingest_patterns_file)
+
+
+@pytest.mark.parametrize("damaged", [False, True])
+def test_ancillary_fallback_does_not_bypass_ambiguous_or_invalid_source(encoded, damaged):
+    extraction = ancillary_source()
+    if damaged:
+        extraction.blocks[0] = extraction.blocks[0].model_copy(update={"source_lines": []})
+    else:
+        extraction.blocks[-1:] = [
+            block("[1] Reyes, J. (2024). One work.", 3),
+            block("[1] Santos, A. (2023). A different work.", 3),
+        ]
+    assert select_references(extraction, load_patterns()).issues
+    assert embed.compute_document_embeddings(extraction).whole_document is None
+    assert embed.compute_passage_embeddings(extraction) == []
+    assert encoded == []
+
+
+@pytest.mark.parametrize("printed_title", ["7. References", "II. References"])
+def test_numbered_selected_heading_retains_reference_passages(encoded, printed_title):
+    extraction = ancillary_source()
+    extraction.blocks[-2] = block(printed_title, 3)
+    selection = select_references(extraction, load_patterns())
+    assert not selection.issues and len(selection.span) == 1
+    passages = embed.compute_passage_embeddings(extraction)
+    references = [p for p in passages if p.is_reference_list]
+    assert references and all(p.chapter_index == 1 for p in references)
+    assert "Reyes" in "\n".join(p.text for p in references)
+    assert all("maintainers" not in p.context_text for p in references)
+    assert all(
+        "Reyes" not in p.context_text and printed_title not in p.context_text
+        for p in passages
+        if not p.is_reference_list
+    )
+
+
+def test_ancillary_fallback_preserves_docx_paragraph_anchors(encoded):
+    extraction = ancillary_source()
+    extraction.anchor_kind = "paragraph"
+    for index, source_block in enumerate(extraction.blocks):
+        source_block.page = None
+        source_block.paragraph = index
+    extraction.section_tree.nodes = [
+        SectionNode(title="Acknowledgements", level=1, paragraph=3),
+        SectionNode(title="References", level=1, paragraph=5),
+    ]
+    before = extraction.model_dump()
+    document = embed.compute_document_embeddings(extraction)
+    passages = embed.compute_passage_embeddings(extraction)
+    assert document.whole_document is not None and document.chapters == []
+    assert all(p.page is None and p.paragraph is not None for p in passages)
+    assert all(p.anchor_kind == "paragraph" for p in passages)
+    assert all(p.paragraph == 5 for p in passages if p.is_reference_list)
+    assert all("maintainers" not in p.context_text for p in passages if p.is_reference_list)
+    assert extraction.model_dump() == before

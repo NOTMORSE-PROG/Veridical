@@ -41,7 +41,7 @@ from app.config import Settings, get_settings
 from app.ingest.blockquotes import block_quote_block_ids, block_quote_ids_in_scope
 from app.ingest.normalize import normalize
 from app.ingest.patterns import HeadingPatterns, load_patterns
-from app.ingest.references import non_reference_blocks
+from app.ingest.references import ReferenceSelection, non_reference_blocks, select_references
 from app.ingest.schemas import ExtractionResult, SectionNode, TextBlock
 from app.ml.embeddings import embed_texts
 
@@ -55,6 +55,35 @@ def _unstructured_body_blocks(
 ) -> list[TextBlock]:
     """Exclude only the selected bibliography and its exact source heading."""
     return non_reference_blocks(extraction, patterns, exclude_heading=True)
+
+
+def _uses_unstructured_body(chapters: list[SectionNode], patterns: HeadingPatterns) -> bool:
+    """Ancillary headings alone do not locate the paper's substantive content."""
+    excluded_titles = patterns.reference_titles | patterns.reuse_ancillary_titles
+    return not any(normalize(node.title).casefold() not in excluded_titles for node in chapters)
+
+
+def _selected_reference_chapter(
+    chapters: list[SectionNode],
+    selection: ReferenceSelection,
+    anchor_kind: str,
+    patterns: HeadingPatterns,
+) -> int | None:
+    """Attach exact reference fragments to one evidenced existing node, never a page span."""
+    heading = selection.heading
+    if heading is None:
+        return None
+    source_anchor = heading.page if anchor_kind == "page" else heading.paragraph
+    if source_anchor is None:
+        return None
+    matches = [
+        index
+        for index, node in enumerate(chapters)
+        if patterns.is_reference_heading(node.title)
+        and patterns.is_reference_heading(heading.text)
+        and (node.page if anchor_kind == "page" else node.paragraph) == source_anchor
+    ]
+    return matches[0] if len(matches) == 1 else None
 
 
 @dataclass(frozen=True)
@@ -145,9 +174,20 @@ def compute_document_embeddings(
 ) -> DocumentEmbeddings:
     settings = settings or get_settings()
     patterns = load_patterns(settings.ingest_patterns_file)
-    content_blocks = non_reference_blocks(extraction, patterns)
-
     chapters = [n for n in extraction.section_tree.nodes if n.level == 1]
+    if _uses_unstructured_body(chapters, patterns):
+        # Short papers can have body text but only acknowledgements/references
+        # in the detected tree. Use exact body fragments, without inventing a
+        # chapter or embedding the same ancillary content twice.
+        text = "\n".join(b.text for b in _unstructured_body_blocks(extraction, patterns))
+        return DocumentEmbeddings(
+            model_id=settings.embedding_model_id,
+            whole_document=embed_long_text(
+                text, chunk_words=settings.reuse_embedding_chunk_words, settings=settings
+            ),
+            chapters=[],
+        )
+    content_blocks = non_reference_blocks(extraction, patterns)
     chapter_embeddings: list[ChapterEmbedding] = []
     chapter_texts: list[str] = []
 
@@ -196,16 +236,6 @@ def compute_document_embeddings(
             chunk_words=settings.reuse_embedding_chunk_words,
             settings=settings,
         )
-    elif not any(normalize(n.title).casefold() not in patterns.reference_titles for n in chapters):
-        # No chapter structure detected at all (e.g. `section_tree.source
-        # == "none"`, a scan or a document heuristics couldn't parse) —
-        # fall back to every non-furniture, non-reference block so a
-        # manuscript with a genuinely flat structure still gets SOME
-        # archive coverage rather than silently opting out of F7 entirely.
-        text = "\n".join(b.text for b in _unstructured_body_blocks(extraction, patterns))
-        whole_document = embed_long_text(
-            text, chunk_words=settings.reuse_embedding_chunk_words, settings=settings
-        )
 
     return DocumentEmbeddings(
         model_id=settings.embedding_model_id,
@@ -227,7 +257,7 @@ def compute_document_embeddings(
 # `compute_document_embeddings` to serve both would risk the F7.1-3 tests
 # this module already carries.
 #
-# When no non-reference chapter exists, V-081 adds an explicit unstructured
+# When no substantive chapter exists, V-081 adds an explicit unstructured
 # body scope. It uses exact non-reference source fragments and the same chunker;
 # it never fabricates section nodes or changes structured front-matter policy.
 
@@ -413,6 +443,15 @@ def compute_passage_embeddings(
     quote_ids = block_quote_block_ids(extraction, settings)
 
     chapters = [n for n in extraction.section_tree.nodes if n.level == 1]
+    unstructured = _uses_unstructured_body(chapters, patterns)
+    reference_selection = select_references(extraction, patterns) if unstructured else None
+    if reference_selection is not None and reference_selection.issues:
+        return []
+    reference_chapter = (
+        _selected_reference_chapter(chapters, reference_selection, extraction.anchor_kind, patterns)
+        if reference_selection is not None
+        else None
+    )
     drafts: list[dict] = []
     texts: list[str] = []
 
@@ -436,14 +475,26 @@ def compute_passage_embeddings(
         # `is_reference_list=True`, whether or not its particular blocks
         # individually fell inside `_reference_span`'s narrower window.
         chapter_is_reference_list = normalize(node.title).casefold() in patterns.reference_titles
-        next_chapter = chapters[chapter_idx + 1] if chapter_idx + 1 < len(chapters) else None
-        span_blocks = [
-            b
-            for b in _chapter_span_blocks(
-                node, next_chapter, content_blocks, extraction.anchor_kind
-            )
-            if b.text.strip()
-        ]
+        if unstructured:
+            # Ancillary text already belongs to the flat body scope. Only the
+            # selected bibliography gets a separate scope, using its exact
+            # fragments so same-page body/acknowledgements cannot leak into it.
+            if chapter_idx != reference_chapter or reference_selection is None:
+                continue
+            span_blocks = [
+                block
+                for block in [reference_selection.heading, *reference_selection.span]
+                if block is not None and block.text.strip()
+            ]
+        else:
+            next_chapter = chapters[chapter_idx + 1] if chapter_idx + 1 < len(chapters) else None
+            span_blocks = [
+                b
+                for b in _chapter_span_blocks(
+                    node, next_chapter, content_blocks, extraction.anchor_kind
+                )
+                if b.text.strip()
+            ]
         if not span_blocks:
             continue
         full_chapter_text = "\n".join(b.text for b in span_blocks)
@@ -465,7 +516,7 @@ def compute_passage_embeddings(
             drafts.append(draft)
             texts.append(draft["text"])
 
-    if not any(normalize(n.title).casefold() not in patterns.reference_titles for n in chapters):
+    if unstructured:
         body_blocks = _unstructured_body_blocks(extraction, patterns)
         full_body_text = "\n".join(b.text for b in body_blocks)
         body_quote_ids = (

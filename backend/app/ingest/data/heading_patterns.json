@@ -50,6 +50,19 @@
     "works cited",
     "literature cited"
   ],
+  "reuse_ancillary_titles": [
+    "acknowledgment",
+    "acknowledgments",
+    "acknowledgement",
+    "acknowledgements",
+    "dedication",
+    "approval sheet",
+    "table of contents",
+    "contents",
+    "list of figures",
+    "list of tables",
+    "list of abbreviations"
+  ],
   "reference_heading_prefix": "^(?:[IVXLCDM]+\\.|[1-9]\\d*(?:\\.\\d+)*[.)])\\s+",
   "reference_end_headings": [
     "^(?:appendix(?:es)?|appendices)(?:\\s+[A-Z0-9IVXLCDM]+)?(?:\\s*[:.\\-]\\s*.+)?$",
