@@ -9,10 +9,12 @@ import asyncio
 import hashlib
 import zipfile
 from collections.abc import AsyncIterator, Callable
+from contextlib import suppress
 from dataclasses import asdict
 from datetime import UTC, datetime
 from pathlib import Path
 
+from botocore.exceptions import BotoCoreError, ClientError
 from sqlalchemy import and_, delete, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -36,6 +38,7 @@ from app.groups.service import (
 )
 from app.ingest import docx, pdf, references, vision
 from app.ingest.patterns import load_patterns
+from app.ingest.recovery import recover_layout, selected_pages
 from app.ingest.schemas import (
     ExtractionResult,
     ManuscriptListItem,
@@ -151,6 +154,19 @@ def clean_original_filename(filename: str) -> str | None:
     return Path(clean_name).name[:255] or None
 
 
+def _recover_with_cache(
+    result: ExtractionResult, file_path: Path, settings: Settings, manuscript_id: int
+) -> ExtractionResult:
+    previous = None
+    if settings.ingest_recovery_python is not None and selected_pages(result):
+        # Optional reuse only. A missing, unreadable or unavailable cache
+        # never discards fresh native work. The later durable write must
+        # still succeed; storage failures are not suppressed there.
+        with suppress(OSError, ValueError, BotoCoreError, ClientError):
+            previous = load_raw_store(settings, manuscript_id).recovery
+    return recover_layout(result, file_path, settings, previous)
+
+
 async def ingest_manuscript(
     session: AsyncSession,
     manuscript: Manuscript,
@@ -187,6 +203,11 @@ async def ingest_manuscript(
             )
         except TimeoutError as exc:
             raise FileTooLargeError(messages.EXTRACTION_TIMED_OUT) from exc
+        # Separate optional CPU process, with its own bounds and native-source
+        # mappings. It cannot erase an unresolved reading-order record.
+        result = await loop.run_in_executor(
+            None, _recover_with_cache, result, file_path, settings, manuscript.id
+        )
         patterns = load_patterns(settings.ingest_patterns_file)
         drafts = await loop.run_in_executor(None, references.extract_references, result, patterns)
         try:

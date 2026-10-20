@@ -90,6 +90,22 @@ class Settings(BaseSettings):
     # Font boxes overlap during ordinary leading. Reject coincident flows
     # closer than this many smaller-font ems, not every box intersection.
     ingest_reading_order_min_baseline_separation_em: float = Field(default=1.0, gt=0)
+    # Optional CPU-only PDF table/figure worker, installed separately. Disabled
+    # on small hosted APIs; no model download or provider request on ingestion.
+    ingest_recovery_python: Path | None = None
+    ingest_recovery_models_dir: Path | None = None
+    ingest_recovery_manifest_file: Path | None = None
+    ingest_recovery_max_pages: int = Field(default=8, gt=0)
+    ingest_recovery_timeout_seconds: float = Field(default=120.0, gt=0)
+    ingest_recovery_cleanup_timeout_seconds: float = Field(default=5.0, gt=0)
+    ingest_recovery_memory_mb: int = Field(default=2048, gt=0)
+    ingest_recovery_poll_seconds: float = Field(default=0.1, gt=0)
+    ingest_recovery_threads: int = Field(default=2, gt=0)
+    ingest_recovery_max_output_mb: int = Field(default=16, gt=0)
+    ingest_recovery_max_regions_per_page: int = Field(default=64, gt=0)
+    ingest_recovery_max_cells_per_table: int = Field(default=2000, gt=0)
+    ingest_recovery_max_fragments_per_cell: int = Field(default=12, gt=0)
+    ingest_recovery_max_mapping_comparisons: int = Field(default=100000, gt=0)
     # Share of a line's characters that must be bold for the line to count
     # as bold (styled runs inside prose stay below it).
     ingest_bold_ratio_min: float = 0.8
@@ -813,6 +829,9 @@ class Settings(BaseSettings):
 
     @field_validator(
         "ingest_patterns_file",
+        "ingest_recovery_python",
+        "ingest_recovery_models_dir",
+        "ingest_recovery_manifest_file",
         "structural_keywords_file",
         "structural_bound_patterns_file",
         "llm_model_pool_file",

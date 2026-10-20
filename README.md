@@ -86,6 +86,41 @@ complete suite:
 DATABASE_URL=postgresql://veridical:veridical@localhost:5433/veridical uv run pytest
 ```
 
+### Optional local PDF region recovery
+
+The default ingestion path remains PyMuPDF and python-docx. An opt-in, separate
+Docling environment can propose tables and figures on PDF pages whose native
+table regions remain unresolved. It enriches the saved extraction; it does not
+replace original text, clear unresolved reading-order records, assess figure
+content, or declare a manuscript ready.
+
+Install the worker separately from the API, using
+`tools/extraction-worker-requirements.txt`. The pinned package/model identity
+manifest is `backend/app/ingest/data/recovery_models.json`.
+`tools/prepare_extraction_models.py --help` describes copying and verifying
+those exact artifacts from an existing local Hugging Face cache. It does not
+download models. Preserve the included model cards and license notices.
+Set `INGEST_RECOVERY_PYTHON` and `INGEST_RECOVERY_MODELS_DIR` to absolute,
+operator-owned paths; empty values leave recovery disabled.
+
+The current adapter launches a same-host subprocess, not a remote-worker
+service. A separate environment does not add RAM. Run it on a machine with
+enough memory for both the API and worker, not in the small hosted API
+container. Page count, threads, wall time, sampled process-tree
+memory, output size and mapping work are bounded by the `INGEST_RECOVERY_*`
+settings. A shared data-directory lock admits one worker at a time. Windows
+Job Objects and POSIX process groups manage child-process lifetime; these are
+not a sandbox for an untrusted interpreter or protection against arbitrary
+filesystem/network access. Model processing uses local artifacts and is
+configured offline.
+
+Proposed cells receive original-source coordinates only after exact text and
+geometry checks. Ambiguous cells, omitted content, mixed alignment that cannot
+be established, and unavailable pages remain explicitly unresolved. A
+source-mapped table is not a statistical or semantic validation. Identical
+source/model/recipe results can be reused on re-ingestion, but their source
+mappings are checked again; reopening a saved report does not run the worker.
+
 ### Recover legacy exact-file identities
 
 Manuscripts uploaded before the content-identity field was introduced may

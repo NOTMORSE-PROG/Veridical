@@ -1,0 +1,6 @@
+# Separate optional CPU worker; do not install into the hosted API container.
+docling==2.140.0
+docling-core==2.101.1
+docling-ibm-models==4.0.3
+torch==2.14.1
+torchvision==0.29.1

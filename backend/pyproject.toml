@@ -45,6 +45,10 @@ dependencies = [
     # BUG-138: R2 is S3-compatible -- boto3's S3 client works against it
     # unmodified with just a custom endpoint_url (app/storage/__init__.py).
     "boto3>=1.35",
+    # Monitor and reap the optional extraction subprocess tree. Heavy model
+    # dependencies remain exclusively in that worker's separate environment.
+    "psutil>=7.2.2",
+    "filelock>=3.32.2",
 ]
 
 [dependency-groups]

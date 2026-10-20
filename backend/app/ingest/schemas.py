@@ -20,6 +20,8 @@ from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator
 
+from app.ingest.recovery_models import RecoveryEnvelope
+
 Bbox = tuple[float, float, float, float]
 
 
@@ -381,6 +383,9 @@ class ExtractionResult(BaseModel):
     uri_links: list[UriLink] | None = None
     uri_links_complete: bool = False
     reading_order: list[PageReadingOrder] | None = None
+    # Optional local layout recovery. Native text/order/coordinates above remain
+    # canonical; a mapped table does not settle document-wide coverage.
+    recovery: RecoveryEnvelope | None = None
     # F1.3 vision pass over embedded images: "none" = no images selected,
     # "done" = ran, "unavailable" = no LLM client configured (honest state
     # — ingestion continues, image content simply stays unread).
