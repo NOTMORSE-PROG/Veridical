@@ -13,6 +13,9 @@ dependencies = [
     "pgvector>=0.3",
     "pymupdf>=1.28.0",
     "python-docx>=1.2.0",
+    # Native DOCX package parsing uses python-docx's entity-disabled XML parser;
+    # its syntax-error type is handled directly for honest unavailable sources.
+    "lxml>=6.0",
     "python-multipart>=0.0.32",
     "google-genai>=1.0",
     # OWASP's first-choice password hashing algorithm (2026-07-25,

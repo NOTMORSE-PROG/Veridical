@@ -554,8 +554,26 @@ class DocumentParagraphOut(BaseModel):
     heading_level: int | None
 
 
+class DocumentTableOut(BaseModel):
+    paragraph: int
+    rows: list[list[str]]
+
+
+class DocumentImageOut(BaseModel):
+    image_index: int
+    paragraph: int
+    available: bool
+    source_alt_text: str | None = None
+    width_px: int | None = None
+    height_px: int | None = None
+    unavailable_reason: str | None = None
+
+
 class DocumentParagraphsOut(BaseModel):
     paragraphs: list[DocumentParagraphOut]
+    tables: list[DocumentTableOut] = Field(default_factory=list)
+    images: list[DocumentImageOut] = Field(default_factory=list)
+    omitted_image_occurrences: int = 0
 
 
 class ExcludedReuseMatchOut(BaseModel):

@@ -110,12 +110,42 @@ class UriLink(BaseModel):
         return value
 
 
+class DocxImageSource(BaseModel):
+    """Private original-package identity; never a client-supplied filesystem path."""
+
+    relationship_id: str
+    part_name: str
+    sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    content_type: Literal["image/png", "image/jpeg"]
+    byte_length: int = Field(gt=0)
+    width_px: int = Field(gt=0)
+    height_px: int = Field(gt=0)
+
+    @field_validator("part_name")
+    @classmethod
+    def unambiguous_member_name(cls, value: str) -> str:
+        if (
+            not value
+            or value.startswith("/")
+            or "\\" in value
+            or "\x00" in value
+            or any(part in {"", ".", ".."} for part in value.split("/"))
+        ):
+            raise ValueError("Image part must name one normal package member")
+        return value
+
+
 class ImageBlock(BaseModel):
     """Inventory entry for an embedded image — V-007's work queue."""
 
     page: int | None = None
     paragraph: int | None = None
     bbox: Bbox | None = None
+    docx_source: DocxImageSource | None = None
+    source_alt_text: str | None = None
+    display_unavailable_reason: (
+        Literal["unsupported_drawing", "external_image", "invalid_image", "image_limit"] | None
+    ) = None
 
 
 class TableBlock(BaseModel):
@@ -377,6 +407,8 @@ class ExtractionResult(BaseModel):
     section_tree: SectionTree
     blocks: list[TextBlock]
     images: list[ImageBlock]
+    docx_source_sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+    docx_omitted_image_occurrences: int = Field(default=0, ge=0)
     tables: list[TableBlock] = Field(default_factory=list)
     equations: list[EquationBlock] = Field(default_factory=list)
     geometry: list[PageGeometry] = Field(default_factory=list)

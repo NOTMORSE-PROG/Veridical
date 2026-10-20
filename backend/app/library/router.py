@@ -7,7 +7,7 @@ same "#<id>" reference F7 findings already use for a matched source.
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Form, Query, UploadFile
+from fastapi import APIRouter, Depends, Form, Path, Query, Response, UploadFile
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse
 from pydantic import ValidationError
@@ -30,6 +30,7 @@ from app.library.service import (
     LibraryListScope,
     decide_library_entry,
     get_library_document,
+    get_library_docx_image,
     get_library_excerpt,
     get_library_file_path,
     get_library_item,
@@ -201,6 +202,25 @@ async def get_library_paragraphs_route(
     instructor: Annotated[Instructor, Depends(get_current_instructor)],
 ) -> DocumentParagraphsOut:
     return await get_library_paragraphs(session, instructor.id, manuscript_id, get_settings())
+
+
+@router.get("/library/{manuscript_id}/document/images/{image_index}")
+async def get_library_docx_image_route(
+    manuscript_id: int,
+    image_index: Annotated[int, Path(ge=0)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+    instructor: Annotated[Instructor, Depends(get_current_instructor)],
+) -> Response:
+    settings = get_settings()
+    enforce_action_rate_limit(settings, "docx_source_image", instructor.id)
+    content, content_type = await get_library_docx_image(
+        session, instructor.id, manuscript_id, image_index, settings
+    )
+    return Response(
+        content,
+        media_type=content_type,
+        headers={"Cache-Control": "private, no-store", "X-Content-Type-Options": "nosniff"},
+    )
 
 
 @router.get("/library/{manuscript_id}/document/original")

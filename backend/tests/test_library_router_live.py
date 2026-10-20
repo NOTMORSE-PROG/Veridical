@@ -489,6 +489,75 @@ def test_other_instructors_can_read_full_docx_text_and_lose_access_after_removal
         assert response.headers["Cache-Control"] == "private, no-store"
 
 
+def test_original_docx_images_follow_each_read_surfaces_own_access_policy(
+    client, api_scratch_url, tmp_path
+):
+    from tests.test_docx_source_media import _source
+    from tests.test_ingest_docx import _png_bytes
+
+    source = tmp_path / "native-media.docx"
+    document = _source(source)
+    document.add_paragraph(
+        "This source contains a complete synthetic body for testing document reading. "
+        "It does not represent an analytical result or a real manuscript evaluation."
+    )
+    document.save(source)
+    _login(client, OWNER)
+    item = _submit(client, source.read_bytes(), source.name)["item"]
+    mid = item["manuscript_id"]
+    body = client.get(f"/library/{mid}/document/paragraphs").json()
+    assert body["tables"][0]["rows"][0][0] == "Original table text"
+    assert [(row["paragraph"], row["available"]) for row in body["images"]] == [
+        (1, True),
+        (3, True),
+    ]
+    owner_id = _fetchval(api_scratch_url, "SELECT id FROM instructor WHERE email=$1", OWNER[0])
+    rubric_id = _fetchval(
+        api_scratch_url,
+        "INSERT INTO rubric(instructor_id,title,source_file) "
+        "VALUES($1,'Format','r.pdf') RETURNING id",
+        owner_id,
+    )
+    run_id = _fetchval(
+        api_scratch_url,
+        "INSERT INTO check_run(manuscript_id,rubric_id,status) VALUES($1,$2,'done') RETURNING id",
+        mid,
+        rubric_id,
+    )
+    report_path = f"/check-runs/{run_id}/document/images/0"
+    library_path = f"/library/{mid}/document/images/0"
+    for path in (report_path, library_path):
+        response = client.get(path)
+        assert response.status_code == 200, response.text
+        assert response.content == _png_bytes()
+        assert response.headers["content-type"] == "image/png"
+        assert response.headers["cache-control"] == "private, no-store"
+        assert response.headers["x-content-type-options"] == "nosniff"
+    assert client.get(f"/library/{mid}/document/images/-1").status_code == 422
+    assert client.get(f"/library/{mid}/document/images/999999").status_code == 404
+    _login(client, STRANGER)
+    assert client.get(report_path).status_code == 404
+    assert client.get(library_path).content == _png_bytes()
+    _fetchval(
+        api_scratch_url,
+        "UPDATE library_entry SET status='needs_decision' WHERE manuscript_id=$1",
+        mid,
+    )
+    assert client.get(library_path).status_code == 404
+    _login(client, OWNER)
+    assert client.get(library_path).content == _png_bytes()
+    _fetchval(
+        api_scratch_url, "UPDATE library_entry SET status='active' WHERE manuscript_id=$1", mid
+    )
+    _fetchval(api_scratch_url, "UPDATE manuscript SET purged_at=now() WHERE id=$1", mid)
+    for path in (report_path, library_path):
+        assert client.get(path).status_code == 410
+    assert client.post("/auth/logout").status_code in (200, 204)
+    for path in (report_path, library_path):
+        assert client.get(path).status_code == 401
+    assert VISION_CALLS == []
+
+
 def test_shared_reading_never_exposes_non_library_uploads_or_anonymous_files(client):
     _login(client, OWNER)
     checked = client.post(

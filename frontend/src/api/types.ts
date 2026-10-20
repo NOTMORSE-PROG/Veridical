@@ -788,6 +788,24 @@ export interface DocumentParagraphOut {
 
 export interface DocumentParagraphsOut {
   paragraphs: DocumentParagraphOut[];
+  tables?: DocumentTableOut[];
+  images?: DocumentImageOut[];
+  omitted_image_occurrences?: number;
+}
+
+export interface DocumentTableOut {
+  paragraph: number;
+  rows: string[][];
+}
+
+export interface DocumentImageOut {
+  image_index: number;
+  paragraph: number;
+  available: boolean;
+  source_alt_text: string | null;
+  width_px: number | null;
+  height_px: number | null;
+  unavailable_reason: string | null;
 }
 
 // V-072 (F7.4), design review spec §4.2/§4.3: a passage match the DEFAULT

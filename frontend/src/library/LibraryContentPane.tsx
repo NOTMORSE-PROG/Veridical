@@ -83,7 +83,12 @@ function FullDocumentPane({
   if (viewer.source_format === "docx") {
     return (
       <DocxPane
+        key={manuscriptId}
         paragraphs={paragraphsData?.paragraphs}
+        tables={paragraphsData?.tables}
+        images={paragraphsData?.images}
+        omittedImageOccurrences={paragraphsData?.omitted_image_occurrences}
+        imageBasePath={`/library/${manuscriptId}/document/images`}
         paragraphsPending={paragraphsPending}
         paragraphsError={paragraphsError}
         onRetry={() => refetchParagraphs()}

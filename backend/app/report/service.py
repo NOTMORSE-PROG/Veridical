@@ -49,14 +49,17 @@ from app.models.enums import (
 from app.models.manuscript import Manuscript, ManuscriptPassageArchive
 from app.models.rubric import Criterion, Rubric
 from app.models.run import CheckResult, CheckRun, Flag, ReadinessReport
+from app.report.docx_images import manuscript_docx_image_for
 from app.report.page_images import build_page_evidence_images
 from app.report.rating import compute_levelled_rating
 from app.report.schemas import (
     COVERAGE_REASONS,
     CriterionLevelOut,
     CriterionResultOut,
+    DocumentImageOut,
     DocumentParagraphOut,
     DocumentParagraphsOut,
+    DocumentTableOut,
     EscalatedItemOut,
     EvidenceItem,
     ExcludedReuseMatchOut,
@@ -1240,7 +1243,53 @@ def manuscript_paragraphs_for(manuscript: Manuscript, settings: Settings) -> Doc
         for block in extraction.blocks
         if block.paragraph is not None
     ]
-    return DocumentParagraphsOut(paragraphs=paragraphs)
+    image_items = []
+    source_bound = (
+        extraction.docx_source_sha256 is not None
+        and extraction.docx_source_sha256 == manuscript.content_hash
+    )
+    for index, image in enumerate(extraction.images[: settings.docx_image_max_count]):
+        if image.paragraph is None:
+            continue
+        source = image.docx_source if source_bound else None
+        image_items.append(
+            DocumentImageOut(
+                image_index=index,
+                paragraph=image.paragraph,
+                available=source is not None,
+                source_alt_text=image.source_alt_text,
+                width_px=source.width_px if source else None,
+                height_px=source.height_px if source else None,
+                unavailable_reason=None
+                if source
+                else (image.display_unavailable_reason or "source_not_recorded"),
+            )
+        )
+    return DocumentParagraphsOut(
+        paragraphs=paragraphs,
+        tables=[
+            DocumentTableOut(paragraph=table.paragraph, rows=table.rows)
+            for table in extraction.tables
+            if table.paragraph is not None and table.source == "native"
+        ],
+        images=image_items,
+        omitted_image_occurrences=extraction.docx_omitted_image_occurrences
+        + max(0, len(extraction.images) - settings.docx_image_max_count),
+    )
+
+
+async def get_manuscript_docx_image(
+    session: AsyncSession,
+    check_run_id: int,
+    instructor_id: int,
+    image_index: int,
+    settings: Settings,
+) -> tuple[bytes, str]:
+    check_run = await _owned_check_run(session, check_run_id, instructor_id)
+    manuscript = await session.get(Manuscript, check_run.manuscript_id)
+    return await asyncio.get_running_loop().run_in_executor(
+        None, manuscript_docx_image_for, manuscript, image_index, settings
+    )
 
 
 async def get_report_export_data(

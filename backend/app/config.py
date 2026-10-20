@@ -180,6 +180,18 @@ class Settings(BaseSettings):
     # ceiling -- `info.file_size` is attacker-controlled central-directory
     # metadata a crafted archive can understate.
     max_docx_uncompressed_mb: int = 150
+    # Native DOCX raster display only, never an opt-in to model assessment.
+    # Per-source bounds complement the archive's actual-decompression guard.
+    docx_image_max_bytes: int = Field(default=16_777_216, ge=1)
+    docx_image_max_pixels: int = Field(default=25_000_000, ge=1)
+    docx_image_max_count: int = Field(default=200, ge=1)
+    docx_image_max_metadata_segments: int = Field(default=2048, ge=1)
+    docx_image_total_max_bytes: int = Field(default=67_108_864, ge=1)
+    # Image source navigation stops at the requested drawing. Bound both the
+    # decompressed XML prefix and element count independently of upload limits.
+    docx_image_source_xml_max_bytes: int = Field(default=16_777_216, ge=1)
+    docx_image_source_xml_max_nodes: int = Field(default=200_000, ge=1)
+    docx_source_image_rate_limit_max_attempts: int = Field(default=400, ge=1)
     # BUG-180: `max_upload_mb` bounds the wrong dimension for a PDF -- a
     # 50,000-page, 15.9MB file (well inside the 40MB cap) took 6.1s to
     # parse and produced 1.29M chars; measured linear scaling projects

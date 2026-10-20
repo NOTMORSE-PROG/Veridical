@@ -97,6 +97,7 @@ from app.models.manuscript import (
     ManuscriptChapterArchive,
     ManuscriptPassageArchive,
 )
+from app.report.docx_images import manuscript_docx_image_for
 from app.report.schemas import DocumentParagraphsOut, ManuscriptViewerOut
 from app.report.service import (
     manuscript_file_path_for,
@@ -1038,6 +1039,19 @@ async def get_library_original_file_path(
         return await asyncio.get_running_loop().run_in_executor(None, resolve_original)
     except FileNotFoundError:
         raise GoneError(messages.MANUSCRIPT_SOURCE_MISSING) from None
+
+
+async def get_library_docx_image(
+    session: AsyncSession,
+    instructor_id: int,
+    manuscript_id: int,
+    image_index: int,
+    settings: Settings,
+) -> tuple[bytes, str]:
+    manuscript = await _resolve_readable_library_manuscript(session, instructor_id, manuscript_id)
+    return await asyncio.get_running_loop().run_in_executor(
+        None, manuscript_docx_image_for, manuscript, image_index, settings
+    )
 
 
 async def get_library_excerpt(

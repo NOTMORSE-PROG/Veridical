@@ -14,6 +14,7 @@ CPU-bound and synchronous on purpose — callers run it in a threadpool.
 """
 
 import copy
+import hashlib
 import re
 import zipfile
 from zipfile import BadZipFile
@@ -26,6 +27,7 @@ from docx.text.paragraph import Paragraph
 from app.config import Settings
 from app.errors import FileMalformedError, FileTooLargeError
 from app.ingest import sections
+from app.ingest.docx_media import DocxMediaInventory
 from app.ingest.normalize import normalize
 from app.ingest.patterns import HeadingPatterns, load_patterns
 from app.ingest.schemas import (
@@ -82,7 +84,11 @@ def _check_uncompressed_size(path: str, settings: Settings) -> None:
     limit = settings.max_docx_uncompressed_mb * 1024 * 1024
     with zipfile.ZipFile(path) as zf:
         declared_total = 0
+        member_names = set()
         for info in zf.infolist():
+            if info.filename in member_names:
+                raise FileMalformedError(FILE_UNREADABLE)
+            member_names.add(info.filename)
             declared_total += info.file_size
             if declared_total > limit:
                 raise FileTooLargeError(DOCX_EXPANDS_TOO_LARGE)
@@ -102,7 +108,10 @@ def extract_document(path: str, settings: Settings) -> ExtractionResult:
     patterns = load_patterns(settings.ingest_patterns_file)
     try:
         _check_uncompressed_size(path, settings)
-        document = docx.Document(path)
+        with open(path, "rb") as source_file:
+            source_sha256 = hashlib.file_digest(source_file, "sha256").hexdigest()
+            source_file.seek(0)
+            document = docx.Document(source_file)
     except (PackageNotFoundError, BadZipFile, KeyError, ValueError) as exc:
         raise FileMalformedError(FILE_UNREADABLE) from exc
 
@@ -111,8 +120,17 @@ def extract_document(path: str, settings: Settings) -> ExtractionResult:
     images: list[ImageBlock] = []
     candidates: list[sections.Candidate] = []
     used_styles = False
+    media = DocxMediaInventory(settings)
+    omitted_image_occurrences = 0
 
     for index, item in enumerate(document.iter_inner_content()):
+        # Preserve table-cell drawings and empty image-only paragraphs, anchored
+        # to their original body container. This is not a Word page/cell box.
+        for drawing in item._element.xpath(".//w:drawing | .//w:pict"):
+            if len(images) >= settings.docx_image_max_count:
+                omitted_image_occurrences += 1
+            else:
+                images.append(media.describe(drawing, document.part, index))
         if isinstance(item, Table):
             tables.append(
                 TableBlock(
@@ -123,10 +141,6 @@ def extract_document(path: str, settings: Settings) -> ExtractionResult:
             continue
         if not isinstance(item, Paragraph):
             continue
-
-        # Images are anchored to the body item that carries their drawing.
-        for _ in item._p.xpath(".//w:drawing | .//w:pict"):
-            images.append(ImageBlock(paragraph=index))
 
         text = normalize(item.text)
         if not text:
@@ -169,6 +183,8 @@ def extract_document(path: str, settings: Settings) -> ExtractionResult:
         section_tree=tree,
         blocks=blocks,
         images=images,
+        docx_source_sha256=source_sha256,
+        docx_omitted_image_occurrences=omitted_image_occurrences,
         tables=tables,
         geometry=_section_geometry(document),
     )

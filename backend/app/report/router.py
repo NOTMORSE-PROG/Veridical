@@ -3,7 +3,7 @@
 import asyncio
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Response
+from fastapi import APIRouter, Depends, Path, Response
 from fastapi.responses import FileResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -27,6 +27,7 @@ from app.report.schemas import (
 )
 from app.report.service import (
     decide_report,
+    get_manuscript_docx_image,
     get_manuscript_file_path,
     get_manuscript_paragraphs,
     get_manuscript_viewer,
@@ -136,6 +137,25 @@ async def get_manuscript_paragraphs_route(
     same way the PDF file bytes are (`.../document/file` below) -- DOCX
     sources only, never a purged manuscript."""
     return await get_manuscript_paragraphs(session, check_run_id, instructor.id)
+
+
+@router.get("/check-runs/{check_run_id}/document/images/{image_index}")
+async def get_manuscript_docx_image_route(
+    check_run_id: int,
+    image_index: Annotated[int, Path(ge=0)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+    instructor: Annotated[Instructor, Depends(get_current_instructor)],
+) -> Response:
+    settings = get_settings()
+    enforce_action_rate_limit(settings, "docx_source_image", instructor.id)
+    content, content_type = await get_manuscript_docx_image(
+        session, check_run_id, instructor.id, image_index, settings
+    )
+    return Response(
+        content,
+        media_type=content_type,
+        headers={"Cache-Control": "private, no-store", "X-Content-Type-Options": "nosniff"},
+    )
 
 
 @router.get("/check-runs/{check_run_id}/document/file")

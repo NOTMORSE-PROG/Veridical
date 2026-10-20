@@ -6,12 +6,13 @@
 // concept, so "jump to the right page" collapses to "scroll to the right
 // paragraph," which needs no render race to guard against at all.
 import { useEffect, useRef, useState } from "react";
-import type { DocumentParagraphOut, FlagRegionOut, FlagSummaryOut } from "../api/types";
+import type { DocumentImageOut, DocumentParagraphOut, DocumentTableOut, FlagRegionOut, FlagSummaryOut } from "../api/types";
 import { SeverityTag, type Severity } from "../components/SeverityTag";
 import { CHECK_KIND_SHORT_LABEL } from "../domain/checkKind";
 import { severityLabel } from "../domain/severity";
 import { truncateAtWord } from "../format/text";
 import { regionPrecision } from "./regionCopy";
+import { DocxSourceMedia } from "./DocxSourceMedia";
 
 function SpinnerIcon() {
   return (
@@ -23,6 +24,8 @@ function SpinnerIcon() {
 }
 
 const EMPTY_FINDING_NUMBERS: ReadonlyMap<number, number> = new Map();
+const EMPTY_TABLES: DocumentTableOut[] = [];
+const EMPTY_IMAGES: DocumentImageOut[] = [];
 
 export function DocxPane({
   paragraphs,
@@ -36,6 +39,10 @@ export function DocxPane({
   isVisible,
   findingNumbers = EMPTY_FINDING_NUMBERS,
   requestedParagraph = null,
+  tables = EMPTY_TABLES,
+  images = EMPTY_IMAGES,
+  omittedImageOccurrences = 0,
+  imageBasePath,
 }: {
   paragraphs: DocumentParagraphOut[] | undefined;
   paragraphsPending: boolean;
@@ -57,6 +64,10 @@ export function DocxPane({
   isVisible: boolean;
   findingNumbers?: ReadonlyMap<number, number>;
   requestedParagraph?: number | null;
+  tables?: DocumentTableOut[];
+  images?: DocumentImageOut[];
+  omittedImageOccurrences?: number;
+  imageBasePath?: string;
 }) {
   const [hoveredFlagId, setHoveredFlagId] = useState<number | null>(null);
   const highlightRefs = useRef<Map<number, HTMLButtonElement>>(new Map());
@@ -65,7 +76,7 @@ export function DocxPane({
   useEffect(() => {
     if (requestedParagraph === null || !Number.isSafeInteger(requestedParagraph) || !isVisible) return;
     paperRef.current?.querySelector<HTMLElement>(`[data-source-paragraph="${requestedParagraph}"]`)?.focus();
-  }, [requestedParagraph, paragraphs, isVisible]);
+  }, [requestedParagraph, paragraphs, tables, images, isVisible]);
 
   const flagsById = new Map(flags.map((f) => [f.id, f]));
 
@@ -96,7 +107,7 @@ export function DocxPane({
     if (selectedFlagId === null || !isVisible) return;
     const el = highlightRefs.current.get(selectedFlagId);
     el?.focus({ preventScroll: false });
-  }, [selectedFlagId, paragraphs, isVisible]);
+  }, [selectedFlagId, paragraphs, tables, images, isVisible]);
 
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {
@@ -120,20 +131,28 @@ export function DocxPane({
     selectedRegion?.kind === "paragraph_only" &&
     selectedRegion.paragraph !== null &&
     paragraphs !== undefined &&
-    !paragraphs.some((p) => p.paragraph === selectedRegion.paragraph);
+    !paragraphs.some((p) => p.paragraph === selectedRegion.paragraph) &&
+    !tables.some((t) => t.paragraph === selectedRegion.paragraph) &&
+    !images.some((image) => image.paragraph === selectedRegion.paragraph);
+  const bodyPositions = [...new Set([
+    ...(paragraphs ?? []).map((p) => p.paragraph),
+    ...tables.map((table) => table.paragraph),
+    ...images.map((image) => image.paragraph),
+  ])].sort((a, b) => a - b);
 
   return (
     <div className="signal-document-source">
       <div className="signal-document-toolbar">
         <div className="signal-document-toolbar__identity">
           <strong>Full manuscript</strong>
-          <span>DOCX · Reconstructed text</span>
+          <span>DOCX · Reconstructed document</span>
         </div>
       </div>
       <div className="signal-document-reconstruction-note">
         <p>
-          This view preserves extracted text order and headings. Page layout, tables, and images
-          may differ from the uploaded file.
+          Extracted text, native tables and available embedded images appear in source order.
+          This is not Word page layout. Merged-cell layout, drawing placement, image cropping and
+          rotation may differ. Displaying an image does not assess its contents.
         </p>
       </div>
       {scopeRegions.length > 0 && (
@@ -152,10 +171,10 @@ export function DocxPane({
         </div>
       )}
       <div role="region" tabIndex={0} aria-label="Full manuscript, scrollable" className="signal-document-scroll signal-document-scroll--docx">
-        <article ref={paperRef} className="signal-document-docx-paper" aria-label="Reconstructed manuscript text">
+        <article ref={paperRef} className="signal-document-docx-paper" aria-label="Reconstructed manuscript document">
           <header className="signal-document-docx-paper__header">
             <span>Reconstructed manuscript</span>
-            <span>{paragraphs ? `${paragraphs.length} extracted ${paragraphs.length === 1 ? "paragraph" : "paragraphs"}` : "Extracting text"}</span>
+            <span>{paragraphs ? `${paragraphs.length} paragraphs · ${tables.length} tables · ${images.length} drawing occurrences` : "Extracting text"}</span>
           </header>
           <div className="signal-document-docx-paper__body">
         {paragraphsError && (
@@ -172,11 +191,14 @@ export function DocxPane({
             <SpinnerIcon /> Loading manuscript text.
           </p>
         )}
-        {!paragraphsPending && !paragraphsError && paragraphs && paragraphs.length === 0 && (
+        {!paragraphsPending && !paragraphsError && paragraphs && bodyPositions.length === 0 && (
           <p className="p-4 text-sm text-ink-secondary">
             VERIDICAL could not extract any readable text from this file.
           </p>
         )}
+        {omittedImageOccurrences > 0 && <p role="status" className="signal-document-reconstruction-note">
+          {omittedImageOccurrences} additional drawing occurrences exceed the source-view limit and are not displayed or assessed here.
+        </p>}
         {selectedParagraphMissing && (
           <p className="mb-3 rounded-lg bg-status-neutral-bg px-4 py-2.5 text-xs text-status-neutral-text">
             VERIDICAL could not locate the recorded paragraph in the reconstructed
@@ -187,8 +209,12 @@ export function DocxPane({
         {!paragraphsPending &&
           !paragraphsError &&
           paragraphs &&
-          paragraphs.length > 0 &&
-          paragraphs.map((p) => {
+          bodyPositions.map((position) => {
+            const p = paragraphs.find((paragraph) => paragraph.paragraph === position);
+            const sourceTables = tables.filter((table) => table.paragraph === position);
+            const sourceImages = images.filter((image) => image.paragraph === position);
+            const renderText = () => {
+              if (!p) return null;
             // Found live (report/44, real data): F7 reuse flags can anchor
             // to a CHAPTER-HEADING paragraph's own index, not just a body
             // paragraph -- the chunker embeds a passage starting at the
@@ -304,9 +330,24 @@ export function DocxPane({
                 {multiFlagBlock}
               </div>
             );
+            };
+            const mediaFlags = !p ? visibleFlagIdsFor(flagIdsByParagraph.get(position) ?? []) : [];
+            return <section key={position} className="signal-docx-source-item"
+              data-source-paragraph={!p ? position : undefined} tabIndex={!p ? -1 : undefined}>
+              {renderText()}
+              {mediaFlags.length > 0 && <div className="signal-docx-source-findings" role="group" aria-label="Findings at this source location">
+                {mediaFlags.map((flagId) => <button key={flagId} type="button"
+                  ref={(el) => { if (el) highlightRefs.current.set(flagId, el); else highlightRefs.current.delete(flagId); }}
+                  className={`signal-document-co-located-marker${flagId === selectedFlagId ? " is-selected" : ""}`}
+                  aria-pressed={flagId === selectedFlagId} onClick={() => onSelectFlag(flagId)}>
+                  Finding {findingNumbers.get(flagId) ?? 1} · source location only
+                </button>)}
+              </div>}
+              <DocxSourceMedia tables={sourceTables} images={sourceImages} imageBasePath={imageBasePath} isVisible={isVisible} />
+            </section>;
           })}
           </div>
-          {!paragraphsPending && !paragraphsError && paragraphs && paragraphs.length > 0 && (
+          {!paragraphsPending && !paragraphsError && paragraphs && bodyPositions.length > 0 && (
             <footer className="signal-document-docx-paper__footer">End of reconstructed manuscript</footer>
           )}
         </article>
