@@ -30,6 +30,7 @@ from statistics import median
 from app.config import get_settings
 from app.ingest.normalize import match_key, normalize
 from app.ingest.patterns import HeadingPatterns
+from app.ingest.reference_dois import recover_reference_dois
 from app.ingest.reference_metadata_patterns import load_reference_metadata_patterns
 from app.ingest.reference_urls import reference_urls, text_url
 from app.ingest.schemas import ExtractionResult, SectionNode, TextBlock
@@ -86,12 +87,18 @@ def possible_split_doi(raw_text: str, extracted_doi: str) -> bool:
     This deliberately trades coverage for precision and never reconstructs an
     identifier. A terminal DOI remains eligible for normal verification.
     """
-    return bool(
-        re.search(
-            rf"(?<!\w){re.escape(extracted_doi)}[.,;:]?\s+(?=(?:[./:_-]\s*)?\w)",
-            raw_text,
-        )
+    match = re.search(
+        rf"(?<!\w){re.escape(extracted_doi)}[.,;:)]*\s+(?=\S)",
+        raw_text,
     )
+    if match is None:
+        return False
+    # An explicitly separate locator is not a continuation of the prior DOI.
+    following = raw_text[match.end() :]
+    patterns = load_reference_metadata_patterns(get_settings().reference_metadata_patterns_file)
+    if patterns.locator_label is not None and patterns.locator_label.match(following):
+        return False
+    return not re.match(r"https?://|(?:doi:?\s*)?10\.\d{4,9}/", following, re.I)
 
 
 @dataclass
@@ -215,10 +222,32 @@ def extract_references(result: ExtractionResult, patterns: HeadingPatterns) -> l
         complete=result.uri_links_complete,
         tolerance=patterns.reference_url_geometry_tolerance_pts,
     )
-    drafts = [
-        parse_reference(_merge([block.text for block in group]), i)
-        for i, group in enumerate(groups)
-    ]
+    settings = get_settings()
+    recoveries = recover_reference_dois(
+        result,
+        groups,
+        resolver_hosts=load_reference_metadata_patterns(
+            settings.reference_metadata_patterns_file
+        ).doi_resolver_hosts,
+        tolerance=patterns.reference_url_geometry_tolerance_pts,
+        max_chars=settings.reference_metadata_max_chars,
+        max_comparisons=settings.reference_doi_max_geometry_comparisons,
+    )
+    drafts = []
+    for index, (group, recovery) in enumerate(zip(groups, recoveries, strict=True)):
+        raw = "\n".join(block.text for block in group)
+        parser_view = (
+            raw[: recovery.start] + recovery.doi + raw[recovery.end :]
+            if recovery is not None
+            else raw
+        )
+        draft = parse_reference(_join_lines(parser_view), index)
+        if recovery is not None:
+            # The source/link contract establishes the complete identifier.
+            # Generic reference punctuation stripping must not shorten it.
+            draft.doi = recovery.doi
+        draft.raw_text = _join_lines(raw)
+        drafts.append(draft)
     for draft, url in zip(drafts, urls, strict=True):
         draft.url = url
     return drafts
@@ -397,6 +426,11 @@ def parse_reference(raw: str, order_index: int) -> CitationDraft:
     try:
         _parse_into(draft, raw)
     except Exception:  # noqa: BLE001 — the QA property "never throws" outranks
+        draft.parse_status = CitationParseStatus.parse_failed
+    if draft.doi and possible_split_doi(raw, draft.doi):
+        # A successful lookup of this prefix would be as misleading as a
+        # negative one. Raw source remains available; no guessed suffix.
+        draft.doi = None
         draft.parse_status = CitationParseStatus.parse_failed
     return draft
 

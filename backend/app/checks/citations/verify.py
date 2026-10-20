@@ -51,6 +51,7 @@ from app.ingest.references import (
     ReferenceEntryLocation,
     extract_references,
     non_reference_blocks,
+    possible_split_doi,
     reference_entry_locations,
     reference_reading_order_issues,
     reference_section_page,
@@ -64,6 +65,7 @@ from app.models.run import CheckResult, Flag
 
 
 class VerdictKind(StrEnum):
+    unassessed = "unassessed"
     existence_confirmed = "existence_confirmed"
     retracted = "retracted"
     corrected = "corrected"
@@ -147,6 +149,10 @@ async def verify_citation(
     fabricated/mismatched citation to an unrelated real paper by title
     alone, which would be a false reassurance (worse than a false flag,
     charter judgment #1)."""
+    if citation.doi and possible_split_doi(citation.raw_text, citation.doi):
+        # Also protects old stored prefixes and direct callers: no existence,
+        # retraction or supplementary-abstract request can verify a partial key.
+        return CitationVerdict(VerdictKind.unassessed)
     if citation.doi:
         verdict = await _verify_keyed(
             session,
@@ -265,8 +271,14 @@ def _verdict_from_result(
 
 
 def _verdict_flag_draft(citation: Citation, verdict: CitationVerdict) -> CitationFlagDraft | None:
-    if verdict.kind in (VerdictKind.existence_confirmed, VerdictKind.instructor_confirmed):
-        return None  # a confirmed, clean source is not a finding — no noise
+    if verdict.kind in (
+        VerdictKind.existence_confirmed,
+        VerdictKind.instructor_confirmed,
+        VerdictKind.unassessed,
+    ):
+        # Unassessed identifiers are disclosed through coverage, never as
+        # "not found"; confirmed sources do not need an issue flag.
+        return None
     anchor = f"reference #{citation.order_index + 1}"
     if verdict.kind == VerdictKind.retracted:
         detail = (verdict.result and verdict.result.retraction_detail) or "retracted"
@@ -454,10 +466,21 @@ async def run_citation_integrity_check(
     ]
     for citation in citations:
         parsed = citation.parse_status == CitationParseStatus.parsed
-        metadata_complete = bool(
-            parsed and citation.title and citation.authors and citation.year is not None
+        identifier_unassessed = bool(
+            citation.doi and possible_split_doi(citation.raw_text, citation.doi)
         )
-        lookup_eligible = parsed and (bool(citation.doi or citation.isbn) or metadata_complete)
+        metadata_complete = bool(
+            parsed
+            and citation.title
+            and citation.authors
+            and citation.year is not None
+            and not identifier_unassessed
+        )
+        lookup_eligible = (
+            parsed
+            and not identifier_unassessed
+            and (bool(citation.doi or citation.isbn) or metadata_complete)
+        )
         if not metadata_complete:
             metadata_unassessed.append(citation.order_index)
         if not lookup_eligible:
@@ -465,7 +488,11 @@ async def run_citation_integrity_check(
                 {
                     "reference_order_index": citation.order_index,
                     "status": "unassessed",
-                    "reason": "unsupported_reference_structure",
+                    "reason": (
+                        "ambiguous_identifier_wrap"
+                        if identifier_unassessed
+                        else "unsupported_reference_structure"
+                    ),
                     "lookup_attempted": False,
                     "metadata_complete": False,
                 }

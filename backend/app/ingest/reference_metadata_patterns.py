@@ -14,6 +14,7 @@ class ReferenceMetadataPatterns:
     name_particles: frozenset[str]
     corporate_author_words: frozenset[str]
     locator_label: re.Pattern[str] | None
+    doi_resolver_hosts: frozenset[str]
 
 
 @lru_cache
@@ -44,6 +45,18 @@ def load_reference_metadata_patterns(path: Path | None = None) -> ReferenceMetad
     ):
         raise ValueError("Reference metadata locator_labels must be a list of words")
     labels = "|".join(re.escape(value) for value in locator_labels)
+    hosts = raw.get(
+        "doi_resolver_hosts",
+        json.loads(
+            (Path(__file__).parent / "data" / "reference_metadata_patterns.json").read_text(
+                encoding="utf-8"
+            )
+        )["doi_resolver_hosts"],
+    )
+    if not isinstance(hosts, list) or not all(
+        isinstance(host, str) and re.fullmatch(r"[a-zA-Z0-9.-]+", host) for host in hosts
+    ):
+        raise ValueError("DOI resolver hosts must be a list of plain host names")
     return ReferenceMetadataPatterns(
         access_note=re.compile(
             rf"\b(?:{access})\s*(?::|on\b|from\b|(?=(?:{months})\.?\s+\d|\d))",
@@ -59,4 +72,5 @@ def load_reference_metadata_patterns(path: Path | None = None) -> ReferenceMetad
         locator_label=(
             re.compile(rf"\b(?:{labels})\s*:?\s*(?=https?://)", re.IGNORECASE) if labels else None
         ),
+        doi_resolver_hosts=frozenset(host.lower() for host in hosts),
     )

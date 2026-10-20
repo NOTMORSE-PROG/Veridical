@@ -534,6 +534,7 @@ class Settings(BaseSettings):
     numeric_citation_context_file: Path | None = None
     numeric_citation_max_range_span: int = Field(default=20, gt=0)
     reference_metadata_max_chars: int = Field(default=8192, ge=256, le=32768)
+    reference_doi_max_geometry_comparisons: int = Field(default=100000, gt=0)
     reference_metadata_patterns_file: Path | None = None
     # Longer unseparated natural names may contain merged authors. Retain raw
     # display text but do not assert an author count or complete metadata.
