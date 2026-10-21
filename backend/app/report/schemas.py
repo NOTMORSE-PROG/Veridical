@@ -185,6 +185,7 @@ class ReportOut(BaseModel):
     check_run_id: int
     figure_readings: list[FigureReading] | None = None
     historical_semantic_support_unverified: bool = False
+    historical_citation_title_unverified: bool = False
     # BUG-128: instructor-only (never added to `PublicReportOut` below,
     # which has no instructor actions by design) -- lets the frontend
     # deep-link an integrity-check remedy straight into the existing
@@ -340,6 +341,7 @@ class PublicReportOut(BaseModel):
     originality_scope: OriginalityScopeOut | None = None
     # Coverage fact only: no private rationale, raw detail, or source identity.
     assessment_incomplete: bool = False
+    historical_citation_title_unverified: bool = False
 
 
 class DecisionIn(BaseModel):
@@ -509,6 +511,7 @@ class FlagSummaryOut(BaseModel):
     # a short, honest problem label; an unmapped or absent kind renders no
     # label rather than a guessed one (`frontend/src/domain/problemLabel.ts`).
     problem_kind: str | None = None
+    citation_metadata_review_warning: Literal["quoted_title_projection_unverified"] | None = None
     # BUG-141: an opaque archive identifier used only to establish finding
     # identity across whole-document/chapter/passage locations. This is the
     # same non-identifying reference already disclosed by F7 evidence; never
@@ -678,6 +681,7 @@ class FlagExportDetailOut(BaseModel):
     evidence_is_summary: bool = False
     current_guidance: str | None = None
     recorded_explanation_withheld: bool = False
+    citation_metadata_review_warning: Literal["quoted_title_projection_unverified"] | None = None
 
 
 class UnassessedReferenceOut(BaseModel):

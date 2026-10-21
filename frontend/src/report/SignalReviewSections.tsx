@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useLocation, useSearchParams } from "react-router";
+import { CITATION_HISTORY_TITLE } from "../domain/citationHistory";
 import type {
   EscalatedItemOut,
   EscalationResolution,
@@ -205,6 +206,7 @@ function SignalFindingCard({
           {first.confirmed_citation_source && <span className="signal-resolution-state">Source confirmed</span>}
         </div>
         <h3 id={headingId} tabIndex={-1}>{problemLabel(first.problem_kind) ?? first.criterion_text ?? "Possible inconsistency"}</h3>
+      {flags.some((flag) => flag.citation_metadata_review_warning) && <p className="signal-field-hint"><strong>{CITATION_HISTORY_TITLE}</strong></p>}
         {/* BUG-170: a whole-document/chapter/resubmission reuse flag's
             evidence_excerpt is a system-authored template sentence, never
             manuscript text -- <blockquote> claims a quotation that isn't
@@ -246,6 +248,7 @@ function SignalFindingCard({
         {confirmedCount > 0 && <span className="signal-resolution-state">{confirmedCount} source-confirmed location{confirmedCount === 1 ? "" : "s"}</span>}
       </div>
       <h3 id={headingId} tabIndex={-1}>{problemLabel(first.problem_kind) ?? first.criterion_text ?? "Possible inconsistency"}</h3>
+      {flags.some((flag) => flag.citation_metadata_review_warning) && <p className="signal-field-hint"><strong>{CITATION_HISTORY_TITLE}</strong></p>}
       {first.check_kind === "originality_reuse" && first.matched_ref != null && (
         <p className="signal-flag-finding-context">Possible match with archived manuscript #{first.matched_ref}</p>
       )}

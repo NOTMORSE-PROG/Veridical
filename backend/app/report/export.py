@@ -872,8 +872,15 @@ def build_report_pdf(data: ReportExportData) -> bytes:
         flow.append(Spacer(1, 6))
 
     # 4. Flags.
-    if report.integrity_check_status:
+    if report.integrity_check_status or report.historical_citation_title_unverified:
         flow.append(Paragraph("Assessment limits", styles["h2"]))
+        if report.historical_citation_title_unverified:
+            flow.append(
+                Paragraph(
+                    escape(_coverage_labels()["historical_citation_title_unverified"]),
+                    styles["body"],
+                )
+            )
         for coverage in report.integrity_check_status:
             label = _CHECK_KIND_LABEL.get(coverage.check_kind, coverage.check_kind)
             reason = _coverage_labels().get(
@@ -1183,6 +1190,21 @@ def build_report_pdf(data: ReportExportData) -> bytes:
                 )
                 flow.append(CondPageBreak(start_height))
                 finding = [*start_items, excerpt]
+                if detail.citation_metadata_review_warning:
+                    finding.extend(
+                        [
+                            Paragraph(
+                                escape(
+                                    _coverage_labels()["historical_citation_title_warning_title"]
+                                ),
+                                styles["body_bold"],
+                            ),
+                            Paragraph(
+                                escape(_coverage_labels()[detail.citation_metadata_review_warning]),
+                                styles["body"],
+                            ),
+                        ]
+                    )
                 if detail.source_identifier:
                     finding.append(
                         Paragraph(
@@ -1206,7 +1228,11 @@ def build_report_pdf(data: ReportExportData) -> bytes:
                         )
                 finding.append(
                     Paragraph(
-                        "<b>Recorded reason:</b> "
+                        (
+                            "<b>Original recorded explanation:</b> "
+                            if detail.citation_metadata_review_warning
+                            else "<b>Recorded reason:</b> "
+                        )
                         + escape(
                             detail.reasoning
                             or (

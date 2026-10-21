@@ -706,6 +706,31 @@ def _ieee_author(name: str) -> str | None:
     return f"{surname}, {' '.join(initials)}" if initials else surname
 
 
+def _ieee_author_names(authors_part: str) -> list[str]:
+    return [
+        name.strip()
+        for name in re.split(
+            r",\s*(?:and\s+)?|\s+and\s+", re.sub(r"\bet\s+al\.?", "", authors_part)
+        )
+        if name.strip()
+    ]
+
+
+def ieee_quoted_author_prefix_supported(prefix: str) -> bool:
+    """Linear token scan for the same explicit author shape used at ingestion."""
+    body = _LEADING_LABEL.sub("", prefix.strip(), count=1)
+    if not body.endswith(",") or any(char in body for char in "()"):
+        return False
+    # Bound the splitter to single separators without changing saved text or
+    # source offsets. Adjacent whitespace must not create repeated searches.
+    names = _ieee_author_names(" ".join(body[:-1].split()))
+    for name in names:
+        words = name.split()
+        if len(words) < 2 or not _INITIALS.fullmatch(words[0]):
+            return False
+    return bool(names)
+
+
 def _parse_ieee_into(draft: CitationDraft, raw: str, *, legacy_quoted_titles: bool = False) -> None:
     body = _LEADING_LABEL.sub("", raw, count=1)
     if legacy_quoted_titles:
@@ -738,11 +763,7 @@ def _parse_ieee_into(draft: CitationDraft, raw: str, *, legacy_quoted_titles: bo
             return
     if not authors_part or not years:
         return
-    names = [
-        n.strip()
-        for n in re.split(r",\s*(?:and\s+)?|\s+and\s+", re.sub(r"\bet\s+al\.?", "", authors_part))
-        if n.strip()
-    ]
+    names = _ieee_author_names(authors_part)
     authors = [a for a in (_ieee_author(n) for n in names) if a]
     if not legacy_quoted_titles and any(
         not name.split() or not _INITIALS.fullmatch(name.split()[0]) or len(name.split()) < 2

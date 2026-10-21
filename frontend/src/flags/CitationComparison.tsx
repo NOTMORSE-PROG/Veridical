@@ -30,11 +30,11 @@ export function CitationComparison({ flag }: { flag: FlagOut }) {
   return <section className="signal-reasoning signal-copy-flow signal-citation-comparison" aria-labelledby={headingId}>
     <h3 id={headingId}>Recorded citation metadata comparison</h3>
     <p>The check recorded differences between this reference and metadata returned for its DOI. Compare both records before deciding what needs correction. Source existence does not establish support for a manuscript claim.</p>
-    <p>Fields marked different: {marked.join(", ") || "Not recorded"}.</p>
+    <p>{flag.citation_metadata_review_warning ? "Fields marked different by the saved check" : "Fields marked different"}: {marked.join(", ") || "Not recorded"}.</p>
     <table aria-labelledby={headingId}>
       <thead><tr><th scope="col">Field</th><th scope="col">In manuscript reference</th><th scope="col">Returned by {provider}</th></tr></thead>
       <tbody>{FIELDS.map(([key, label, difference]) => <tr key={key}>
-        <th scope="row">{label}{evidence.differing_fields.includes(difference) && <span>: Marked different</span>}</th>
+        <th scope="row">{label}{evidence.differing_fields.includes(difference) && <span>{flag.citation_metadata_review_warning ? ": Marked different by the saved check" : ": Marked different"}</span>}</th>
         <td>{evidence.cited[key] ?? "Not recorded"}</td><td>{evidence.registered[key] ?? "Not recorded"}</td>
       </tr>)}</tbody>
     </table>

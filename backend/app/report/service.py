@@ -18,6 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app import messages
 from app.audit.service import write_audit_event
+from app.checks.citations.history_review import citation_metadata_review_warning
 from app.checks.escalation import (
     NEEDS_REVIEW_OUTCOMES,
     EscalatedItem,
@@ -641,7 +642,23 @@ async def report_out_for_check_run(
         )
     except (FileNotFoundError, ValidationError, OSError, GoneError):
         visual_readings = None
+    citation_flag_rows = (
+        await session.execute(
+            select(Flag, CheckResult)
+            .join(CheckResult, Flag.check_result_id == CheckResult.id)
+            .where(
+                CheckResult.check_run_id == check_run_id,
+                CheckResult.kind == CheckKind.citation_integrity,
+            )
+        )
+    ).all()
     return ReportOut(
+        historical_citation_title_unverified=any(
+            citation_metadata_review_warning(
+                "citation_integrity", flag.evidence_excerpt, flag.detail or result.detail or {}
+            )
+            for flag, result in citation_flag_rows
+        ),
         figure_readings=visual_readings,
         historical_semantic_support_unverified=any(
             result.kind == CheckKind.semantic
@@ -760,6 +777,9 @@ async def flags_for_check_run(session: AsyncSession, check_run_id: int) -> list[
 
     summaries = [
         FlagSummaryOut(
+            citation_metadata_review_warning=citation_metadata_review_warning(
+                result.kind.value, flag.evidence_excerpt, flag.detail or result.detail or {}
+            ),
             id=flag.id,
             check_kind=result.kind.value,
             severity=flag.severity.value,

@@ -4,6 +4,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, HttpUrl, field_validator
 
+from app.checks.citations.history_review import CitationMetadataReviewWarning
 from app.report.schemas import ReportOut
 
 
@@ -115,6 +116,7 @@ class FlagOut(BaseModel):
     p_value_comparison: PValueComparisonOut | None = None
     agreement_pair: AgreementPairOut | None = None
     citation_metadata_comparison: CitationMetadataComparisonOut | None = None
+    citation_metadata_review_warning: CitationMetadataReviewWarning | None = None
     # BUG-049: "fake" (fixture data — e.g. a vision-pass table that was
     # never in the manuscript), "real", or "unknown" (predates migration
     # 0024). The flag evidence page is exactly where the audit found a

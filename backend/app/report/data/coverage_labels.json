@@ -1,4 +1,7 @@
 {
+  "historical_citation_title_warning_title": "Historical title comparison needs review",
+  "quoted_title_projection_unverified": "This quoted reference has no saved record confirming that the comparison used only the quoted title. The saved title comparison may include publication details outside the title. Verify the quoted title against the cited source, or run a new check before relying on this title difference. The original evidence and explanation below are preserved.",
+  "historical_citation_title_unverified": "Some citation findings contain a historical title comparison that needs verification. Their original findings and readiness record are preserved; this report has not been recomputed. Review the warning on each affected finding before relying on those title differences.",
   "source_reading_order_unresolved": "Some pages could not be read reliably. This check was not assessed; this is not a finding against the paper",
   "source_reading_order_partial": "Only independently readable source content was assessed. Unread content remains unassessed",
   "reference_metadata_insufficient": "Some references are visible in the paper, but their author, title, or date could not be read reliably. They have not been verified",

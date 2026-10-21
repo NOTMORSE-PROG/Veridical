@@ -43,7 +43,9 @@ def flag_export_detail(
             )
             comparisons.append(
                 ExportComparisonOut(
-                    label="Fields marked different",
+                    label="Fields marked different by the saved check"
+                    if flag.citation_metadata_review_warning
+                    else "Fields marked different",
                     text=", ".join(metadata.differing_fields) or "Not recorded",
                 )
             )
@@ -155,6 +157,7 @@ def flag_export_detail(
                 )
     source = flag.citation_source_key
     return FlagExportDetailOut(
+        citation_metadata_review_warning=flag.citation_metadata_review_warning,
         issue=flag.ai_verdict_summary,
         reasoning=reasoning,
         source_identifier=f"{source.kind}: {source.value}" if source else None,

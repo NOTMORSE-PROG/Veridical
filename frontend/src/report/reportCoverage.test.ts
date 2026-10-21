@@ -17,6 +17,14 @@ function item(patch: Partial<IntegrityCheckStatusOut> = {}) {
 }
 
 describe("partial source coverage", () => {
+  it("adds a current limitation without changing a historical report record", () => {
+    const report = { manuscript_id: 2, check_run_id: 3, integrity_check_status: [], historical_citation_title_unverified: true } as unknown as ReportOut;
+    const before = JSON.stringify(report);
+    const notices = coverageItems(report);
+    expect(notices[0].label).toBe("Historical title comparison needs review");
+    expect(notices[0].detail).toContain("this report has not been recomputed");
+    expect(JSON.stringify(report)).toBe(before);
+  });
   it("does not confuse metadata checks with full citation or claim assessment", () => {
     const row = item();
     expect(row.label).toContain("Partially assessed");

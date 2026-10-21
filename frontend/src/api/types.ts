@@ -462,6 +462,7 @@ export interface ReportOut extends ReportCommon {
   check_run_id: number;
   figure_readings?: FigureReadingOut[] | null;
   historical_semantic_support_unverified?: boolean;
+  historical_citation_title_unverified?: boolean;
   // BUG-128: instructor-only -- lets the report deep-link an integrity-
   // check remedy straight into the Dashboard's existing "Run again"
   // (RerunModal) mechanism, which already keys off this id.
@@ -491,6 +492,7 @@ export interface ReportOut extends ReportCommon {
  * `ReportCommon`'s own comment for which fields were cut and why. */
 export interface PublicReportOut extends ReportCommon {
   assessment_incomplete?: boolean;
+  historical_citation_title_unverified?: boolean;
   check_run_id: number;
   manuscript_group_label: string;
   manuscript_original_filename: string | null;
@@ -654,6 +656,7 @@ export interface CitationSourceKeyOut {
 }
 
 export interface FlagOut {
+  citation_metadata_review_warning?: "quoted_title_projection_unverified" | null;
   citation_metadata_comparison?: {
     schema_version: string;
     provider: string;
@@ -735,6 +738,7 @@ export interface ConfirmCitationSourceOut extends FlagOut {
  * for why: a summary row's job is "enough to decide whether to click,"
  * not "enough to skip clicking"). */
 export interface FlagSummaryOut {
+  citation_metadata_review_warning?: "quoted_title_projection_unverified" | null;
   affects_readiness?: boolean;
   readiness_exclusion_reason?: string | null;
   id: number;

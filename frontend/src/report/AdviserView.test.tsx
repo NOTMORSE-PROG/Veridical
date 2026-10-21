@@ -94,6 +94,15 @@ describe("AdviserViewPage", () => {
     return renderWithProviders(<AdviserViewPage />, { route: "/shared/tok123", path: "/shared/:token" });
   }
 
+  it("discloses the historical title limitation in both the shared report and its finding", async () => {
+    vi.stubGlobal("fetch", stubFetchByPath({ "/shared/tok123/report": shared({ report: { ...BASE_REPORT, historical_citation_title_unverified: true }, flags: [{ ...SAMPLE_FLAG, check_kind: "citation_integrity", problem_kind: "possible_metadata_mismatch", citation_metadata_review_warning: "quoted_title_projection_unverified" }] }) }));
+    render();
+    expect((await screen.findAllByText("Historical title comparison needs review")).length).toBeGreaterThan(1);
+    expect(screen.getByText(/this report has not been recomputed/)).toBeInTheDocument();
+    expect(screen.getByText(/may include publication details/)).toHaveTextContent("ask the instructor to run a new check");
+    expect(screen.queryByText(/Review the warning on each affected finding/)).not.toBeInTheDocument();
+  });
+
   it("shows a loading state, then the report", async () => {
     vi.stubGlobal("fetch", stubFetchByPath({ "/shared/tok123/report": shared() }));
     render();

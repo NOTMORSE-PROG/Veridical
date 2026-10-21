@@ -34,6 +34,16 @@ const FLAG = {
 describe("FlagDetailPage", () => {
   afterEach(() => vi.unstubAllGlobals());
 
+  it.each([true, false])("qualifies saved title findings only when the API reports missing parsing proof (%s)", async (warning) => {
+    vi.stubGlobal("fetch", stubFetchByPath({ "/flags/5": { ...FLAG, ai_verdict_summary: "possible_metadata_mismatch", citation_metadata_comparison: CITATION_COMPARISON, citation_metadata_review_warning: warning ? "quoted_title_projection_unverified" : null } }));
+    renderWithProviders(<FlagDetailPage />, { route: "/flags/5", path: "/flags/:flagId" });
+    await screen.findByText("Registry check result");
+    expect(!!screen.queryByText("Historical title comparison needs review")).toBe(warning);
+    expect(screen.getByText(warning ? "Fields marked different by the saved check: Title, Year, First author." : "Fields marked different: Title, Year, First author.")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: warning ? "Original recorded explanation" : "Recorded reasoning" })).toBeInTheDocument();
+    expect(screen.getByText(FLAG.ai_reasoning)).toBeInTheDocument();
+  });
+
   it.each(["complete", "partial", "legacy"])("V-081: exposes saved registry evidence or its absence (%s)", async (state) => {
     const comparison = state === "legacy" ? null : state === "partial"
       ? { ...CITATION_COMPARISON, registered: { ...CITATION_COMPARISON.registered, year: null, first_author: null } }

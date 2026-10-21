@@ -102,6 +102,17 @@ function stubViewer(viewer: ManuscriptViewerOut = VIEWER) {
 }
 
 describe("SignalDocumentViewerPage", () => {
+  it("shows current historical title guidance before preserved comparison evidence", async () => {
+    vi.stubGlobal("fetch", stubFetchByPath({
+      "/check-runs/5/document": VIEWER, "/check-runs/5/report": { ...REPORT, historical_citation_title_unverified: true },
+      "/check-runs/5/escalated": [], "/check-runs/5/flags": [{ ...SUMMARY, check_kind: "citation_integrity", problem_kind: "possible_metadata_mismatch", citation_metadata_review_warning: "quoted_title_projection_unverified" }],
+      "/flags/7": { ...FLAG, check_kind: "citation_integrity", ai_verdict_summary: "possible_metadata_mismatch", citation_metadata_comparison: CITATION_COMPARISON, citation_metadata_review_warning: "quoted_title_projection_unverified" },
+    }));
+    renderWithProviders(<SignalDocumentViewerPage />, { route: "/report/5/document?flag=7", path: "/report/:checkRunId/document" });
+    expect(await screen.findByText("Historical title comparison needs review")).toBeInTheDocument();
+    expect(screen.getByText(/original evidence and explanation below are preserved/)).toBeInTheDocument();
+    expect(screen.getByRole("table", { name: "Recorded citation metadata comparison" })).toBeInTheDocument();
+  });
   afterEach(() => vi.unstubAllGlobals());
 
   it("V-081: the decision pane counts unassessed criterion records without calling them assessed", async () => {

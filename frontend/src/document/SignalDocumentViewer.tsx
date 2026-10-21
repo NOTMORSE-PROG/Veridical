@@ -17,6 +17,7 @@ import { useFlag } from "../flags/useFlag";
 import { PValueComparison } from "../flags/PValueComparison";
 import { AgreementComparison } from "../flags/AgreementComparison";
 import { CitationComparison } from "../flags/CitationComparison";
+import { CitationHistoryWarning } from "../flags/CitationHistoryWarning";
 import { findingMethodLabel, isCitationMetadataFinding } from "../domain/findingMethod";
 import { SignalDecisionPanel } from "../report/SignalDecisionPanel";
 import { SignalCriteriaResults, SignalEscalatedPanel } from "../report/SignalReviewSections";
@@ -236,6 +237,7 @@ function SelectedFinding({ finding, total, locationFlagId, region, sourceAvailab
         <p>{title}. This is a possible issue for instructor review, not a final determination.</p>
         {!showsManuscriptQuote && <p><strong>Recorded check summary:</strong> {systemFindingCopy(flag.evidence_excerpt, flag.ai_verdict_summary, "evidence")}</p>}
       </section>
+      <CitationHistoryWarning flag={flag} />
       <section aria-labelledby="evidence-heading" className="signal-document-detail-section">
         <h3 id="evidence-heading">Evidence to compare or check</h3>
         {flag.passage_pair && <p className="signal-field-hint"><strong>Highlight key:</strong> Yellow marks the selected manuscript location. Shaded wording below appears in both stored passages.</p>}
@@ -257,7 +259,7 @@ function SelectedFinding({ finding, total, locationFlagId, region, sourceAvailab
         </Alert>
       )}
       <section aria-labelledby="verify-heading" className="signal-document-detail-section signal-document-detail-section--verify"><h3 id="verify-heading">What the instructor should verify</h3><p>{verificationPrompt}</p></section>
-      {(!pValueFinding || flag.p_value_comparison) && <details className="signal-document-recorded-reasoning"><summary>Recorded reasoning and technical details</summary><p>This is the system's full recorded explanation. It is supporting information, not an instructor decision.</p>{reasoningText ? <p>{systemFindingCopy(reasoningText, flag.ai_verdict_summary, "reasoning")}</p> : <p>No additional recorded reasoning is available.</p>}</details>}
+      {(!pValueFinding || flag.p_value_comparison) && <details className="signal-document-recorded-reasoning"><summary>{flag.citation_metadata_review_warning ? "Original recorded explanation and technical details" : "Recorded reasoning and technical details"}</summary><p>This is the system's full recorded explanation. It is supporting information, not an instructor decision.</p>{reasoningText ? <p>{systemFindingCopy(reasoningText, flag.ai_verdict_summary, "reasoning")}</p> : <p>No additional recorded reasoning is available.</p>}</details>}
       <ActionLink to={`/flags/${flag.id}`} variant="secondary">Review instructor actions for this location</ActionLink>
     </article>
   );

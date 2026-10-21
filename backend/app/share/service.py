@@ -194,6 +194,7 @@ def _to_public_report(report: ReportOut) -> PublicReportOut:
         levelled_rating=report.levelled_rating,
         originality_scope=report.originality_scope,
         assessment_incomplete=bool(report.integrity_check_status),
+        historical_citation_title_unverified=report.historical_citation_title_unverified,
     )
 
 

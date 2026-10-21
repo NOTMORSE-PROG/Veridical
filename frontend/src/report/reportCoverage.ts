@@ -1,6 +1,7 @@
 import type { IntegrityCheckStatusOut, ReportOut } from "../api/types";
 import type { CoverageStatementItem } from "../ui/CoverageStatement";
 import { imageCoverageItem } from "./imageCoverage";
+import { CITATION_HISTORY_REPORT_LIMIT, CITATION_HISTORY_TITLE } from "../domain/citationHistory";
 
 const INTEGRITY_LABEL: Record<IntegrityCheckStatusOut["check_kind"], string> = {
   internal_agreement: "Internal agreement",
@@ -99,6 +100,9 @@ function integrityCoverageItem(status: IntegrityCheckStatusOut, manuscriptId: nu
 
 export function coverageItems(report: ReportOut): CoverageStatementItem[] {
   const items: CoverageStatementItem[] = [];
+  if (report.historical_citation_title_unverified) {
+    items.push({ key: "historical_citation_title_unverified", label: CITATION_HISTORY_TITLE, detail: CITATION_HISTORY_REPORT_LIMIT });
+  }
   if (report.rubric_needs_review) {
     items.push({
       key: "rubric_needs_review",

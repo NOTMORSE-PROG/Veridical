@@ -20,6 +20,7 @@ import { ConfirmCitationSourceModal } from "./ConfirmCitationSourceModal";
 import { PValueComparison } from "./PValueComparison";
 import { AgreementComparison } from "./AgreementComparison";
 import { CitationComparison } from "./CitationComparison";
+import { CitationHistoryWarning } from "./CitationHistoryWarning";
 import { useAnnotateFlag, useFlag, useOverrideFlag } from "./useFlag";
 
 const SEVERITY_LABEL: Record<FlagOut["severity"], string> = {
@@ -75,7 +76,7 @@ function EvidenceSection({
       <PValueComparison flag={flag} />
       <AgreementComparison flag={flag} />
       <CitationComparison flag={flag} />
-      {reasoningText && (!isPValueFinding(flag.ai_verdict_summary) || flag.p_value_comparison) && <div className="signal-reasoning"><h3>Recorded reasoning</h3><p>{systemFindingCopy(reasoningText, flag.ai_verdict_summary, "reasoning")}</p></div>}
+      {reasoningText && (!isPValueFinding(flag.ai_verdict_summary) || flag.p_value_comparison) && <div className="signal-reasoning"><h3>{flag.citation_metadata_review_warning ? "Original recorded explanation" : "Recorded reasoning"}</h3><p>{systemFindingCopy(reasoningText, flag.ai_verdict_summary, "reasoning")}</p></div>}
       <div className="signal-reasoning"><h3>What the instructor should verify</h3><p>{findingVerificationPrompt(flag.check_kind, flag.ai_verdict_summary, !!flag.passage_pair, !!flag.citation_metadata_comparison)}</p></div>
       {/* BUG-154: the API has always returned a complete
           passage_pair for a matched flag (own/matched excerpt +
@@ -365,6 +366,7 @@ export function FlagDetailPage() {
                 : "Review the recorded evidence and source before recording an instructor action."}</p>
           </section>
 
+          <CitationHistoryWarning flag={flag} />
           <EvidenceSection flag={flag} sourcePath={sourcePath} sourceLinkId={sourceLinkId} />
 
           <div ref={resolutionRef} tabIndex={-1}><ResolutionControl flag={flag} /></div>
