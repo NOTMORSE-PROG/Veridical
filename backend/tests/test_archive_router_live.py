@@ -471,6 +471,123 @@ def test_stored_files_list_says_what_is_kept_and_links_the_latest_check(seeded, 
     assert item["latest_check_run_id"] == run_id  # history is kept
 
 
+def test_source_availability_observes_local_copy_then_absence(seeded):
+    from pathlib import Path
+
+    client, ids = seeded
+    url = f"/archive/{ids['mine']}/availability"
+    response = client.get(url)
+    assert response.status_code == 200
+    assert response.headers["cache-control"] == "no-store"
+    assert response.json()["state"] == "found"
+    assert response.json()["basis"] == "local_metadata"
+    assert response.json()["checked_at"]
+    assert set(response.json()) == {"manuscript_id", "state", "basis", "checked_at", "purged_at"}
+    Path(ids["upload_path"]).unlink()
+    response = client.get(url)
+    assert response.json()["state"] == "missing"
+    assert response.json()["basis"] is None
+    assert not Path(ids["upload_path"]).exists()
+
+
+def test_source_availability_never_probes_foreign_or_unrecorded_sources(
+    seeded, api_scratch_url, monkeypatch
+):
+    from unittest.mock import Mock
+
+    from sqlalchemy import update
+
+    from app.models.enums import ManuscriptOrigin
+    from app.models.manuscript import Manuscript
+
+    client, ids = seeded
+    probe = Mock(side_effect=AssertionError("unauthorized I/O"))
+    monkeypatch.setattr("app.archive.service.probe_source", probe)
+    assert client.get(f"/archive/{ids['theirs']}/availability").status_code == 404
+    assert client.get("/archive/999999/availability").status_code == 404
+
+    async def blank_source(session):
+        await session.execute(
+            update(Manuscript).where(Manuscript.id == ids["mine"]).values(file_ref="")
+        )
+
+    _seed_with(api_scratch_url, blank_source)
+    assert client.get(f"/archive/{ids['mine']}/availability").json()["state"] == "not_recorded"
+
+    async def library_source(session):
+        await session.execute(
+            update(Manuscript)
+            .where(Manuscript.id == ids["mine"])
+            .values(origin=ManuscriptOrigin.library_submission)
+        )
+
+    _seed_with(api_scratch_url, library_source)
+    assert client.get(f"/archive/{ids['mine']}/availability").status_code == 404
+    probe.assert_not_called()
+
+
+def test_purged_source_never_probes_residual_cache(seeded, monkeypatch):
+    from pathlib import Path
+    from unittest.mock import Mock
+
+    client, ids = seeded
+    assert client.delete(f"/archive/{ids['mine']}").status_code == 200
+    Path(ids["upload_path"]).write_bytes(b"stray old cache")
+    probe = Mock(side_effect=AssertionError("purged source must not probe"))
+    monkeypatch.setattr("app.archive.service.probe_source", probe)
+    response = client.get(f"/archive/{ids['mine']}/availability")
+    assert response.json()["state"] == "deleted"
+    assert response.json()["purged_at"]
+    probe.assert_not_called()
+
+
+def test_source_availability_does_not_lock_out_purge_and_refreshes_deleted_state(
+    seeded, monkeypatch
+):
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Event
+
+    from app.storage.availability import SourceObservation
+
+    client, ids = seeded
+    entered, release = Event(), Event()
+
+    def slow_probe(*_args):
+        entered.set()
+        assert release.wait(5)
+        return SourceObservation("found", "object_metadata")
+
+    monkeypatch.setattr("app.archive.service.probe_source", slow_probe)
+    with ThreadPoolExecutor() as executor:
+        pending = executor.submit(client.get, f"/archive/{ids['mine']}/availability")
+        try:
+            assert entered.wait(5)
+            # A second DB request can complete while the probe is offloaded.
+            assert client.get("/archive").status_code == 200
+            assert client.delete(f"/archive/{ids['mine']}").status_code == 200
+        finally:
+            release.set()
+        response = pending.result(timeout=5)
+    assert response.status_code == 200
+    assert response.json()["state"] == "deleted"
+    assert response.json()["basis"] is None
+
+
+def test_source_availability_has_an_independent_rate_limit(seeded, monkeypatch):
+    import app.ratelimit as limits
+
+    client, ids = seeded
+    monkeypatch.setattr(limits, "_limiters", {})
+    monkeypatch.setenv("STORAGE_PROBE_RATE_LIMIT_MAX_ATTEMPTS", "1")
+    get_settings.cache_clear()
+    url = f"/archive/{ids['mine']}/availability"
+    assert client.get(url).status_code == 200
+    assert client.get(url).status_code == 429
+    # The independent scope does not disable list navigation or history.
+    assert client.get("/archive").status_code == 200
+    get_settings.cache_clear()
+
+
 def test_purge_refuses_while_a_check_is_running(seeded, api_scratch_url):
     """V-078 edge case: deleting the files a running check reads would fail
     it for a reason the instructor never sees. Refuse, keep everything."""

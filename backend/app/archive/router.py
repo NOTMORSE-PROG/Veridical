@@ -2,17 +2,28 @@
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.archive.schemas import PaginatedArchive, PurgeOut
-from app.archive.service import list_archive, purge_manuscript
+from app.archive.schemas import PaginatedArchive, PurgeOut, SourceAvailabilityOut
+from app.archive.service import list_archive, purge_manuscript, source_availability
 from app.auth.dependencies import get_current_instructor
 from app.config import get_settings
 from app.db import get_session
 from app.models.instructor import Instructor
 
 router = APIRouter(tags=["archive"])
+
+
+@router.get("/archive/{manuscript_id}/availability", response_model=SourceAvailabilityOut)
+async def source_availability_route(
+    manuscript_id: int,
+    response: Response,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    instructor: Annotated[Instructor, Depends(get_current_instructor)],
+) -> SourceAvailabilityOut:
+    response.headers["Cache-Control"] = "no-store"
+    return await source_availability(session, instructor.id, manuscript_id, get_settings())
 
 
 @router.get("/archive", response_model=PaginatedArchive)

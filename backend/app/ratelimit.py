@@ -18,6 +18,8 @@ def _max_attempts_for(settings: Settings, scope: str) -> int:
         return settings.library_submission_rate_limit_max_attempts
     if scope == "docx_source_image":
         return settings.docx_source_image_rate_limit_max_attempts
+    if scope == "storage_probe":
+        return settings.storage_probe_rate_limit_max_attempts
     return settings.action_rate_limit_max_attempts
 
 

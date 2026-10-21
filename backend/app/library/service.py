@@ -672,7 +672,7 @@ async def submit_library_entry(
     program_id = await _program_id(session, metadata.program)
     loop = asyncio.get_running_loop()
     suffix = Path(filename).suffix.lower()[:8]
-    uploads = settings.data_dir / "uploads"
+    uploads = settings.data_dir / settings.manuscript_upload_subdir
     # Server-owned names only: the original filename never touches the
     # filesystem.
     pending = uploads / f"library-pending-{uuid.uuid4().hex}{suffix}"

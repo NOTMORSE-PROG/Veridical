@@ -827,10 +827,26 @@ class Settings(BaseSettings):
     # archive's embeddings) and Render's paid persistent disk (ground rule 2).
     # `data_dir` stays the local CACHE in both modes -- see `app/storage/`.
     storage_backend: str = "local"
+    manuscript_upload_subdir: str = "uploads"
+
+    @field_validator("manuscript_upload_subdir")
+    @classmethod
+    def validate_manuscript_upload_subdir(cls, value: str) -> str:
+        if not value or value in (".", "..") or any(c in value for c in "/\\:\x00"):
+            raise ValueError("MANUSCRIPT_UPLOAD_SUBDIR must be one directory name")
+        return value
+
     r2_bucket: str | None = None
     r2_endpoint_url: str | None = None
     r2_access_key_id: str | None = None
     r2_secret_access_key: str | None = None
+    # V-078: explicit metadata-only availability probes. Keep these separate
+    # from upload/download timeouts; a list must never download an object.
+    storage_probe_connect_timeout_seconds: float = Field(default=2.0, gt=0)
+    storage_probe_read_timeout_seconds: float = Field(default=2.0, gt=0)
+    storage_probe_total_attempts: int = Field(default=1, ge=1)
+    # Separate per-instructor scope, using action_rate_limit_window_seconds.
+    storage_probe_rate_limit_max_attempts: int = Field(default=60, ge=1)
 
     # --- CORS (V-048) --------------------------------------------------------
     # Comma-separated origins allowed to call the API from a browser. Empty

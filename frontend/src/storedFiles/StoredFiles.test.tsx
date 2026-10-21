@@ -105,7 +105,8 @@ describe("Stored files (V-078)", () => {
     expect(screen.getByText("4 uploads")).toBeInTheDocument();
 
     const kept = rowFor("portal.pdf");
-    expect(within(kept).getByText("File recorded")).toBeInTheDocument();
+    expect(within(kept).getByText("Not checked")).toBeInTheDocument();
+    expect(within(kept).getByRole("button", { name: "Check file availability: portal.pdf" })).toBeInTheDocument();
     expect(within(kept).getByRole("link", { name: "Open manuscript review" })).toHaveAttribute("href", "/report/41/document");
     expect(within(kept).getByRole("button", { name: "Delete stored file" })).toBeInTheDocument();
     expect(within(kept).queryByText(/Ready|Not Ready|%/)).not.toBeInTheDocument();
@@ -199,7 +200,7 @@ describe("Stored files (V-078)", () => {
     renderWithProviders(<StoredFilesPage />);
     const row = await screen.findByRole("listitem", { name: "portal.pdf" });
     expect(within(row).getByText("No stored file recorded")).toBeInTheDocument();
-    expect(screen.getByText(/File availability is checked when you open its source/)).toBeInTheDocument();
+    expect(screen.getByText(/This checks storage, not whether the/)).toBeInTheDocument();
     expect(screen.queryByText("No file was kept")).not.toBeInTheDocument();
   });
 
@@ -215,5 +216,98 @@ describe("Stored files (V-078)", () => {
     expect(within(dialog).getByRole("button", { name: "Delete stored file" })).toBeDisabled();
     fireEvent.click(within(alert).getByRole("button", { name: "Refresh file status" }));
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+  });
+
+  it("probes only the clicked row and keeps the observation time and scope explicit", async () => {
+    const list = archiveFetch([KEPT, DELETED]);
+    const checkedAt = "2026-10-22T02:04:10Z";
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) =>
+      String(input).endsWith("/availability")
+        ? json({ manuscript_id: 11, state: "found", basis: "local_metadata", checked_at: checkedAt, purged_at: null })
+        : list(input, init));
+    vi.stubGlobal("fetch", fetchMock);
+    renderWithProviders(<StoredFilesPage />);
+    const row = await screen.findByRole("listitem", { name: "portal.pdf" });
+    expect(fetchMock.mock.calls.filter(([input]) => String(input).endsWith("/availability"))).toHaveLength(0);
+    const button = within(row).getByRole("button", { name: "Check file availability: portal.pdf" });
+    button.focus();
+    fireEvent.click(button);
+    expect(await within(row).findByText("Stored copy found")).toBeInTheDocument();
+    expect(within(row).getByText(/A local copy was found. Its contents were not opened/)).toBeInTheDocument();
+    expect(within(row).getByText(`Checked ${new Date(checkedAt).toLocaleString()}`)).toBeInTheDocument();
+    expect(within(row).getByRole("status")).toHaveTextContent("portal.pdf: Stored copy found.");
+    expect(button).toHaveFocus();
+    fireEvent.focus(window);
+    expect(fetchMock.mock.calls.filter(([input]) => String(input).endsWith("/availability"))).toHaveLength(1);
+    expect(within(rowFor("old.pdf")).queryByRole("button", { name: /availability/ })).not.toBeInTheDocument();
+  });
+
+  it.each([
+    ["found", "object_metadata", "Stored copy found", "Storage confirmed a saved object. Its contents were not opened."],
+    ["missing", null, "Stored copy not found", "No copy was found in the storage locations checked."],
+    ["unverified", null, "Could not check availability", "The check could not confirm whether a stored copy exists. Try again later."],
+  ] as const)("shows %s independently of the saved report", async (state, basis, label, detail) => {
+    const list = archiveFetch([KEPT]);
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) =>
+      String(input).endsWith("/availability")
+        ? json({ manuscript_id: 11, state, basis, checked_at: "2026-10-22T02:04:10Z", purged_at: null })
+        : list(input, init)));
+    renderWithProviders(<StoredFilesPage />);
+    fireEvent.click(await screen.findByRole("button", { name: "Check file availability: portal.pdf" }));
+    const row = rowFor("portal.pdf");
+    expect(await within(row).findByText(label)).toBeInTheDocument();
+    expect(within(row).getByText(detail)).toBeInTheDocument();
+    expect(within(row).getByRole("link", { name: "Open manuscript review" })).toHaveAttribute("href", "/report/41/document");
+    expect(within(row).getByRole("button", { name: "Delete stored file" })).toBeEnabled();
+    expect(within(row).getByRole("button", { name: "Check again: file availability for portal.pdf" })).toBeEnabled();
+    expect(within(row).getByText(state === "unverified" ? /^Attempted / : /^Checked /)).toBeInTheDocument();
+  });
+
+  it("does not retry a failed probe or keep an earlier found result as confirmed", async () => {
+    const list = archiveFetch([KEPT]);
+    let requests = 0;
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (!String(input).endsWith("/availability")) return list(input, init);
+      requests += 1;
+      return requests === 1
+        ? json({ manuscript_id: 11, state: "found", basis: "local_metadata", checked_at: "2026-10-22T02:04:10Z", purged_at: null })
+        : json({ error: { code: "rate_limited", message: "private provider path" } }, 429);
+    }));
+    renderWithProviders(<StoredFilesPage />);
+    fireEvent.click(await screen.findByRole("button", { name: "Check file availability: portal.pdf" }));
+    await screen.findByText("Stored copy found");
+    fireEvent.click(screen.getByRole("button", { name: "Check again: file availability for portal.pdf" }));
+    await screen.findByText("Could not check availability");
+    expect(screen.queryByText("Stored copy found")).not.toBeInTheDocument();
+    expect(screen.queryByText(/^Checked /)).not.toBeInTheDocument();
+    expect(screen.queryByText(/private provider path/)).not.toBeInTheDocument();
+    expect(requests).toBe(2);
+  });
+
+  it("blocks local deletion while checking and lets a committed purge replace the pending result", async () => {
+    const list = archiveFetch([KEPT]);
+    let finish!: (response: Response) => void;
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) =>
+      String(input).endsWith("/availability")
+        ? new Promise<Response>((resolve) => { finish = resolve; })
+        : list(input, init)));
+    renderWithProviders(<StoredFilesPage />);
+    const check = await screen.findByRole("button", { name: "Check file availability: portal.pdf" });
+    check.focus();
+    fireEvent.click(check);
+    await screen.findByText("Checking storage");
+    expect(check).toHaveFocus();
+    expect(check).toHaveAttribute("aria-disabled", "true");
+    expect(check).toHaveAttribute("aria-busy", "true");
+    fireEvent.click(check);
+    fireEvent.click(check);
+    expect(vi.mocked(fetch).mock.calls.filter(([input]) => String(input).endsWith("/availability"))).toHaveLength(1);
+    expect(screen.getByRole("button", { name: "Delete stored file" })).toBeDisabled();
+    expect(within(rowFor("portal.pdf")).getByRole("status")).toHaveAttribute("aria-busy", "true");
+    finish(json({ manuscript_id: 11, state: "deleted", basis: null, checked_at: "2026-10-22T02:04:10Z", purged_at: "2026-10-22T02:00:00Z" }));
+    await screen.findByText(/^Deleted /);
+    expect(screen.queryByRole("button", { name: /availability/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Delete stored file" })).not.toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Open manuscript review" })).toBeInTheDocument();
   });
 });

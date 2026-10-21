@@ -4,7 +4,7 @@
 // decisions and audit history).
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api/client";
-import type { PaginatedStoredFiles, PurgeOut } from "../api/types";
+import type { PaginatedStoredFiles, PurgeOut, SourceAvailabilityOut } from "../api/types";
 import { STORED_FILES_PAGE_SIZE } from "../config/ui";
 
 export function useStoredFiles(page: number) {
@@ -12,6 +12,26 @@ export function useStoredFiles(page: number) {
   return useQuery({
     queryKey: ["stored-files", page],
     queryFn: () => api.get<PaginatedStoredFiles>(`/archive?${params.toString()}`),
+  });
+}
+
+export function useCheckStoredFile(manuscriptId: number) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: () => api.get<SourceAvailabilityOut>(`/archive/${manuscriptId}/availability`),
+    retry: false,
+    onSuccess: (result) => {
+      if (result.state === "deleted" && result.purged_at) {
+        queryClient.setQueriesData<PaginatedStoredFiles>({ queryKey: ["stored-files"] }, (current) =>
+          current && {
+            ...current,
+            items: current.items.map((item) => item.manuscript_id === result.manuscript_id
+              ? { ...item, purged_at: result.purged_at, has_stored_file: false, has_archive: false, in_library: false }
+              : item),
+          },
+        );
+      }
+    },
   });
 }
 

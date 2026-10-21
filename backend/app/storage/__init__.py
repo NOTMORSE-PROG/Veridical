@@ -48,6 +48,12 @@ class Storage(Protocol):
         existence first)."""
         ...
 
+    def exists(self, key: str) -> bool:
+        """Metadata-only existence check; errors remain errors, not absence."""
+        ...
+
+    def close(self) -> None: ...
+
 
 class LocalDiskStorage:
     """Dev/CI default: `data_dir` itself is the object store. No network
@@ -67,6 +73,17 @@ class LocalDiskStorage:
     def delete(self, key: str) -> None:
         (self._root / key).unlink(missing_ok=True)
 
+    def exists(self, key: str) -> bool:
+        import stat
+
+        try:
+            return stat.S_ISREG((self._root / key).stat().st_mode)
+        except FileNotFoundError:
+            return False
+
+    def close(self) -> None:
+        pass
+
 
 class R2Storage:
     """Cloudflare R2, via boto3's S3-compatible client. Credentials come
@@ -74,7 +91,13 @@ class R2Storage:
     below refuses to construct this without all four."""
 
     def __init__(
-        self, *, bucket: str, endpoint_url: str, access_key_id: str, secret_access_key: str
+        self,
+        *,
+        bucket: str,
+        endpoint_url: str,
+        access_key_id: str,
+        secret_access_key: str,
+        client_config=None,
     ) -> None:
         import boto3
 
@@ -85,6 +108,7 @@ class R2Storage:
             aws_access_key_id=access_key_id,
             aws_secret_access_key=secret_access_key,
             region_name="auto",
+            config=client_config,
         )
 
     def put_file(self, local_path: Path, key: str) -> None:
@@ -105,8 +129,30 @@ class R2Storage:
     def delete(self, key: str) -> None:
         self._client.delete_object(Bucket=self._bucket, Key=key)
 
+    def exists(self, key: str) -> bool:
+        from botocore.exceptions import ClientError
 
-def get_storage(settings: Settings) -> Storage:
+        try:
+            metadata = self._client.head_object(Bucket=self._bucket, Key=key)
+        except ClientError as exc:
+            code = exc.response.get("Error", {}).get("Code")
+            status = exc.response.get("ResponseMetadata", {}).get("HTTPStatusCode")
+            if status == 404 and code in ("404", "NoSuchKey", "NotFound"):
+                return False
+            # In particular,403 can mean missing OR denied. A missing bucket
+            # is also configuration failure, not proof about this file.
+            raise
+        length = metadata.get("ContentLength")
+        status = metadata.get("ResponseMetadata", {}).get("HTTPStatusCode")
+        if status != 200 or type(length) is not int or length <= 0:
+            raise ValueError("Storage metadata did not confirm a nonempty source object.")
+        return True
+
+    def close(self) -> None:
+        self._client.close()
+
+
+def get_storage(settings: Settings, *, metadata_probe: bool = False) -> Storage:
     if settings.storage_backend == "r2":
         if not (
             settings.r2_bucket
@@ -119,11 +165,21 @@ def get_storage(settings: Settings) -> Storage:
                 "R2_BUCKET, R2_ENDPOINT_URL, R2_ACCESS_KEY_ID and "
                 "R2_SECRET_ACCESS_KEY."
             )
+        client_config = None
+        if metadata_probe:
+            from botocore.config import Config
+
+            client_config = Config(
+                connect_timeout=settings.storage_probe_connect_timeout_seconds,
+                read_timeout=settings.storage_probe_read_timeout_seconds,
+                retries={"total_max_attempts": settings.storage_probe_total_attempts},
+            )
         return R2Storage(
             bucket=settings.r2_bucket,
             endpoint_url=settings.r2_endpoint_url,
             access_key_id=settings.r2_access_key_id,
             secret_access_key=settings.r2_secret_access_key,
+            client_config=client_config,
         )
     if settings.storage_backend != "local":
         # backend review finding (BUG-138 review): this used to fall

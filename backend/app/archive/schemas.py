@@ -2,6 +2,8 @@ from datetime import datetime
 
 from pydantic import BaseModel
 
+from app.storage.availability import AvailabilityBasis, AvailabilityState
+
 
 class ArchiveItemOut(BaseModel):
     manuscript_id: int
@@ -43,3 +45,11 @@ class PaginatedArchive(BaseModel):
 class PurgeOut(BaseModel):
     manuscript_id: int
     purged_at: datetime
+
+
+class SourceAvailabilityOut(BaseModel):
+    manuscript_id: int
+    state: AvailabilityState
+    basis: AvailabilityBasis | None = None
+    checked_at: datetime
+    purged_at: datetime | None = None

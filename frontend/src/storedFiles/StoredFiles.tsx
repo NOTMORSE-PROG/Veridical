@@ -14,7 +14,7 @@ import { ActionLink } from "../ui/ActionLink";
 import { Alert } from "../ui/Alert";
 import { Button } from "../ui/Button";
 import { Dialog } from "../ui/Dialog";
-import { useDeleteStoredFile, useStoredFiles } from "./useStoredFiles";
+import { useCheckStoredFile, useDeleteStoredFile, useStoredFiles } from "./useStoredFiles";
 
 function fileName(item: StoredFileOut): string {
   return item.original_filename ?? `Upload for ${item.group_label}`;
@@ -38,14 +38,46 @@ function processStatus(item: StoredFileOut) {
   return manuscriptStatus(item);
 }
 
-function storedFileState(item: StoredFileOut): string {
-  if (item.purged_at) return `Deleted ${formatDate(item.purged_at)}`;
-  return item.has_stored_file ? "File recorded" : "No stored file recorded";
-}
-
 function StoredFileRow({ item, onDelete }: { item: StoredFileOut; onDelete: () => void }) {
   const status = processStatus(item);
   const running = checkIsRunning(item);
+  const availability = useCheckStoredFile(item.manuscript_id);
+  const checkingRef = useRef(false);
+  function checkAvailability() {
+    // Synchronous guard covers repeat clicks before the pending render, too.
+    if (checkingRef.current) return;
+    checkingRef.current = true;
+    availability.mutate(undefined, { onSettled: () => { checkingRef.current = false; } });
+  }
+  const probe = availability.data;
+  const recorded = item.has_stored_file && !item.purged_at;
+  const initial = !probe && !availability.isError;
+  let fileState = "Not checked";
+  let fileDetail = "Check whether a stored copy can be found.";
+  if (item.purged_at) {
+    fileState = `Deleted ${formatDate(item.purged_at)}`;
+    fileDetail = "";
+  } else if (!item.has_stored_file || probe?.state === "not_recorded") {
+    fileState = "No stored file recorded";
+    fileDetail = "";
+  } else if (availability.isPending) {
+    fileState = "Checking storage";
+    fileDetail = "Checking this file.";
+  } else if (availability.isError || probe?.state === "unverified") {
+    fileState = "Could not check availability";
+    fileDetail = "The check could not confirm whether a stored copy exists. Try again later.";
+  } else if (probe?.state === "found") {
+    fileState = "Stored copy found";
+    fileDetail = probe.basis === "local_metadata"
+      ? "A local copy was found. Its contents were not opened."
+      : "Storage confirmed a saved object. Its contents were not opened.";
+  } else if (probe?.state === "missing") {
+    fileState = "Stored copy not found";
+    fileDetail = "No copy was found in the storage locations checked.";
+  }
+  const inconclusive = availability.isError || probe?.state === "unverified";
+  const showTime = recorded && probe && !availability.isError && !availability.isPending;
+  const checkLabel = availability.isPending ? "Checking" : initial ? "Check file availability" : "Check again";
   return (
     <li className="signal-stored-file" aria-labelledby={headingId(item)}>
       <div className="signal-stored-file__identity">
@@ -63,9 +95,20 @@ function StoredFileRow({ item, onDelete }: { item: StoredFileOut; onDelete: () =
         </div>
         <div>
           <dt>Stored file</dt>
-          <dd>{storedFileState(item)}</dd>
+          <dd>
+            <StatusPill tone={recorded && (inconclusive || probe?.state === "missing") ? "attention" : "neutral"}>
+              {fileState}
+            </StatusPill>
+            {fileDetail && <p>{fileDetail}</p>}
+            {showTime && (
+              <p>{inconclusive ? "Attempted" : "Checked"} {new Date(probe.checked_at).toLocaleString()}</p>
+            )}
+          </dd>
         </div>
       </dl>
+      <div role="status" aria-live="polite" aria-busy={availability.isPending}>
+        {recorded && !availability.isIdle && `${fileName(item)}: ${fileState}.`}
+      </div>
       {item.dismissed_at && (
         <p className="signal-stored-file__note">
           Removed from the Review Desk on {formatDate(item.dismissed_at)}. VERIDICAL kept the record.
@@ -79,7 +122,10 @@ function StoredFileRow({ item, onDelete }: { item: StoredFileOut; onDelete: () =
       {item.has_stored_file && running && (
         <p className="signal-stored-file__note">A preparation or check is running. You can delete the stored file when it stops.</p>
       )}
-      {(item.latest_check_run_id !== null || item.latest_done_check_run_id !== null || (item.has_stored_file && !running)) && (
+      {recorded && (item.ingest_status === "pending" || item.ingest_status === "processing") && (
+        <p className="signal-stored-file__note">Preparation is in progress. File status may change.</p>
+      )}
+      {(item.latest_check_run_id !== null || item.latest_done_check_run_id !== null || recorded) && (
         <div className="signal-stored-file__actions">
           {item.latest_done_check_run_id !== null && (
             <ActionLink to={`/report/${item.latest_done_check_run_id}/document`} variant="secondary">Open manuscript review</ActionLink>
@@ -87,8 +133,15 @@ function StoredFileRow({ item, onDelete }: { item: StoredFileOut; onDelete: () =
           {item.latest_check_run_id !== null && item.latest_check_run_status !== null && RUNNING_STATUSES.has(item.latest_check_run_status) && (
             <ActionLink to={`/checks/${item.latest_check_run_id}`} variant="secondary">Open check progress</ActionLink>
           )}
+          {recorded && (
+            <Button type="button" variant="secondary"
+              aria-busy={availability.isPending || undefined}
+              aria-disabled={availability.isPending || undefined}
+              aria-label={availability.isPending ? `Checking file availability: ${fileName(item)}` : initial ? `Check file availability: ${fileName(item)}` : `Check again: file availability for ${fileName(item)}`}
+              onClick={checkAvailability}>{checkLabel}</Button>
+          )}
           {item.has_stored_file && !running && (
-            <Button type="button" variant="danger" onClick={onDelete}>Delete stored file</Button>
+            <Button type="button" variant="danger" disabled={availability.isPending} onClick={onDelete}>Delete stored file</Button>
           )}
         </div>
       )}
@@ -187,7 +240,8 @@ export function StoredFilesPage() {
             Review the manuscript files uploaded through the Review Desk, including failed uploads removed from its queues.
             Deleting a stored file removes the upload and its extracted text; reports, decisions and the audit
             history stay. Manuscripts in the <Link to="/library">Library</Link> are managed there.
-            {" "}File availability is checked when you open its source.
+            {" "}Use Check file availability to look for a stored copy. This checks storage, not whether the
+            document opens correctly or contains the expected content.
           </p>
         </div>
       </header>
@@ -224,7 +278,7 @@ export function StoredFilesPage() {
             </p>
             <ul className="signal-stored-files__list">
               {data.items.map((item) => (
-                <StoredFileRow key={item.manuscript_id} item={item} onDelete={() => setDeleting(item)} />
+                <StoredFileRow key={`${page}-${item.manuscript_id}-${item.purged_at ?? "recorded"}`} item={item} onDelete={() => setDeleting(item)} />
               ))}
             </ul>
           </>

@@ -10,13 +10,14 @@ proposed anywhere in this module: FEATURES.md §10 Q4 (retention policy) is
 still an open adviser question, so purge is instructor-triggered only.
 """
 
+import asyncio
 from datetime import UTC, datetime
 from pathlib import Path
 
 from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.archive.schemas import ArchiveItemOut, PaginatedArchive, PurgeOut
+from app.archive.schemas import ArchiveItemOut, PaginatedArchive, PurgeOut, SourceAvailabilityOut
 from app.audit.service import write_audit_event
 from app.config import Settings
 from app.db import advisory_lock
@@ -38,13 +39,50 @@ from app.models.manuscript import (
     ManuscriptPassageArchive,
 )
 from app.models.run import CheckRun
+from app.ratelimit import enforce_action_rate_limit
 from app.storage import get_storage, storage_key_for
+from app.storage.availability import SourceObservation, probe_source
 
 _TERMINAL_RUN_STATUSES = (
     CheckRunStatus.done,
     CheckRunStatus.failed,
     CheckRunStatus.cancelled,
 )
+
+
+async def source_availability(
+    session: AsyncSession, instructor_id: int, manuscript_id: int, settings: Settings
+) -> SourceAvailabilityOut:
+    manuscript = await session.scalar(
+        select(Manuscript).where(
+            Manuscript.id == manuscript_id,
+            Manuscript.instructor_id == instructor_id,
+            Manuscript.origin == ManuscriptOrigin.check_upload,
+        )
+    )
+    if manuscript is None:
+        raise NotFoundError("Manuscript not found.")
+    if manuscript.purged_at is not None:
+        observation = SourceObservation("deleted")
+    elif not manuscript.file_ref.strip():
+        observation = SourceObservation("not_recorded")
+    else:
+        enforce_action_rate_limit(settings, "storage_probe", instructor_id)
+        observation = await asyncio.to_thread(
+            probe_source, settings, manuscript.id, manuscript.file_ref
+        )
+        # No cache writes, so no SHARE lock/network-held purge delay needed.
+        # Observe a purge that committed while metadata I/O was in flight.
+        await session.refresh(manuscript)
+        if manuscript.purged_at is not None:
+            observation = SourceObservation("deleted")
+    return SourceAvailabilityOut(
+        manuscript_id=manuscript.id,
+        state=observation.state,
+        basis=observation.basis,
+        checked_at=datetime.now(UTC),
+        purged_at=manuscript.purged_at,
+    )
 
 
 async def list_archive(

@@ -363,7 +363,7 @@ async def ingest_upload(
     # original filename never touches the filesystem (it's persisted for
     # display only, above).
     suffix = Path(filename).suffix.lower()[:8]
-    dest = settings.data_dir / "uploads" / f"{manuscript.id}{suffix}"
+    dest = settings.data_dir / settings.manuscript_upload_subdir / f"{manuscript.id}{suffix}"
     try:
         await save_upload(chunks, dest, settings)
     except FileTooLargeError as exc:

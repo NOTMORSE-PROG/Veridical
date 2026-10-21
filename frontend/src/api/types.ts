@@ -938,6 +938,14 @@ export interface PaginatedStoredFiles {
   page_size: number;
 }
 
+export interface SourceAvailabilityOut {
+  manuscript_id: number;
+  state: "found" | "missing" | "unverified" | "deleted" | "not_recorded";
+  basis: "local_metadata" | "object_metadata" | null;
+  checked_at: string;
+  purged_at: string | null;
+}
+
 // V-042: deletes one manuscript's stored file and extracted text
 // (`DELETE /archive/{id}`); V-078's stored files page is its only caller.
 export interface PurgeOut {
