@@ -19,6 +19,7 @@ from sqlalchemy import select, text
 
 import app.pipeline.machine as pipeline_machine
 from app.config import get_settings
+from app.llm.fake import FakeLLMClient
 from app.models.enums import CheckRunStatus
 from app.models.instructor import Instructor
 from app.models.manuscript import Manuscript
@@ -641,7 +642,9 @@ async def test_run_check_run_stops_cleanly_when_heartbeat_reports_claim_lost(
         check_run = await session.get(CheckRun, check_run_id)
         # Must not raise -- ClaimLost is internal control flow, not a real
         # failure, and `run_check_run` owns catching it.
-        await run_check_run(session, check_run, get_settings(), heartbeat=lost_heartbeat)
+        await run_check_run(
+            session, check_run, get_settings(), llm=FakeLLMClient(), heartbeat=lost_heartbeat
+        )
 
     async with session_factory() as session:
         row = await session.scalar(select(CheckRun).where(CheckRun.id == check_run_id))
