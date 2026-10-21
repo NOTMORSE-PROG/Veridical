@@ -13,7 +13,7 @@ from app.models.enums import ResultOutcome
 
 PROMPT_TYPE = "semantic_support"
 PROMPT_VERSION = "v1"
-SOURCE_SCOPE_POLICY_VERSION = "explicit_in_text_v1"
+SOURCE_SCOPE_POLICY_VERSION = "source_obligations_v2"
 _PROMPT = Path(__file__).parent / "prompts" / f"{PROMPT_TYPE}_{PROMPT_VERSION}.txt"
 SupportStatus = Literal["supported", "unsupported", "uncertain"]
 
@@ -54,21 +54,38 @@ def _incomplete(reason: str) -> dict[str, Any]:
 
 @lru_cache
 def _scope_patterns(path):
-    data = json.loads(Path(path).read_text(encoding="utf-8"))
-    return [re.compile(pattern, re.I) for pattern in data["body_required"]]
+    defaults = Path(__file__).parent / "data" / "semantic_evidence_scopes.json"
+    data = {
+        **json.loads(defaults.read_text(encoding="utf-8")),
+        **json.loads(Path(path).read_text(encoding="utf-8")),
+    }
+    return {
+        key: [re.compile(pattern, re.I) for pattern in patterns] for key, patterns in data.items()
+    }
 
 
 def _scope_failure(batch, criterion, detail):
     path = getattr(batch, "scope_patterns_file", None)
     if path is None:
         return None
+    patterns = _scope_patterns(path)
+    quotes = [" ".join(item["quote"].split()).casefold() for item in detail.get("evidence", [])]
+    if quotes and all(
+        any(pattern.fullmatch(quote) for pattern in patterns["non_substantive_quotes"])
+        for quote in quotes
+    ):
+        return (
+            "The submitted evidence consists only of a source identifier. An identifier can "
+            "locate a source, but does not demonstrate this semantic criterion or performance "
+            "level. Review substantive manuscript evidence before assigning a level."
+        )
     requirements = criterion.text + "\n" + (getattr(criterion, "evidence", None) or "")
     level = match_level(criterion, detail["verdict"])
     if level is not None:
         requirements += "\n" + next(
             item["descriptor"] for item in criterion.levels if int(item["level"]) == level.ordinal
         )
-    if not any(pattern.search(requirements) for pattern in _scope_patterns(path)):
+    if not any(pattern.search(requirements) for pattern in patterns["body_required"]):
         return None
     body, references = (
         getattr(batch, "body_context", None),
@@ -81,7 +98,6 @@ def _scope_failure(batch, criterion, detail):
         return " ".join(value.split()).casefold()
 
     body, references = normalize(body), normalize(references)
-    quotes = [normalize(item["quote"]) for item in detail.get("evidence", [])]
     # A necessary provenance condition, not a relevance or similarity score:
     # explicit in-text obligations require a submitted body passage. Ambiguous
     # passages appearing in both scopes cannot establish that distinction.

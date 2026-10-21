@@ -196,6 +196,45 @@ async def test_supported_named_level_retains_its_scale_and_basis(runner):
     assert [call[0] for call in client.calls].count("semantic_support") == 1
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("runner", [run_semantic_checks, run_semantic_checks_with_consistency])
+async def test_source_identifier_alone_cannot_establish_scholarly_contribution(runner):
+    doi = "DOI: 10.21105/joss.01943"
+    source, item = extraction(), criterion()
+    source.blocks[0].text = doi
+    item.text, item.evidence = "Contribution to the body of knowledge", "Research findings"
+
+    class IdentifierClient(Client):
+        async def complete(self, kind, prompt, **context):
+            answer = await super().complete(kind, prompt, **context)
+            if kind == "semantic_grading":
+                answer["verdicts"][0]["evidence_quotes"] = [doi]
+            else:
+                for requirement in answer["items"][0]["requirements"]:
+                    requirement["evidence_quotes"] = [doi]
+            return answer
+
+    result = (
+        await runner(Session(), 1, [item], source, IdentifierClient("supported"), Settings())
+    )[0]
+    assert result.outcome == ResultOutcome.escalated and result.score is None
+    assert "source identifier" in result.detail["reason"]
+    assert "verdict" not in result.detail
+
+
+def test_older_scope_configuration_inherits_new_packaged_provenance_guard(tmp_path):
+    from app.checks.support import _scope_patterns
+
+    path = tmp_path / "old-scopes.json"
+    path.write_text(json.dumps({"body_required": [r"\bin-text\b"]}), encoding="utf-8")
+    configured = _scope_patterns(path)
+    assert configured["body_required"][0].pattern == r"\bin-text\b"
+    assert any(
+        pattern.fullmatch("doi: 10.21105/joss.01943")
+        for pattern in configured["non_substantive_quotes"]
+    )
+
+
 def test_mentioning_references_does_not_discard_body_context():
     batches, missing = build_semantic_batches([criterion()], extraction())
     assert not missing
