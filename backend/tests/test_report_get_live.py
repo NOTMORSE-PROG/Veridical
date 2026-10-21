@@ -147,6 +147,19 @@ async def test_old_semantic_suggestions_are_disclosed_without_rewriting_history(
         assert result.outcome == ResultOutcome.passed
         result.detail = {**result.detail, "support_check": {"status": "supported"}}
         await session.commit()
+        assert (
+            await get_report(session, run_id, instructor_id)
+        ).historical_semantic_support_unverified
+        from app.checks.support import SOURCE_SCOPE_POLICY_VERSION
+
+        result.detail = {
+            **result.detail,
+            "support_check": {
+                "status": "supported",
+                "source_scope_policy": SOURCE_SCOPE_POLICY_VERSION,
+            },
+        }
+        await session.commit()
         assert not (
             await get_report(session, run_id, instructor_id)
         ).historical_semantic_support_unverified

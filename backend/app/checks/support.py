@@ -1,6 +1,8 @@
 """F3 evidence-support veto. A second review can withhold, never invent, a grade."""
 
 import json
+import re
+from functools import lru_cache
 from pathlib import Path
 from typing import Any, Literal
 
@@ -11,6 +13,7 @@ from app.models.enums import ResultOutcome
 
 PROMPT_TYPE = "semantic_support"
 PROMPT_VERSION = "v1"
+SOURCE_SCOPE_POLICY_VERSION = "explicit_in_text_v1"
 _PROMPT = Path(__file__).parent / "prompts" / f"{PROMPT_TYPE}_{PROMPT_VERSION}.txt"
 SupportStatus = Literal["supported", "unsupported", "uncertain"]
 
@@ -47,6 +50,48 @@ def context_limitation(batch: Any, settings: Any) -> dict[str, Any] | None:
 
 def _incomplete(reason: str) -> dict[str, Any]:
     return {"status": "incomplete", "reason": reason, "prompt_version": PROMPT_VERSION}
+
+
+@lru_cache
+def _scope_patterns(path):
+    data = json.loads(Path(path).read_text(encoding="utf-8"))
+    return [re.compile(pattern, re.I) for pattern in data["body_required"]]
+
+
+def _scope_failure(batch, criterion, detail):
+    path = getattr(batch, "scope_patterns_file", None)
+    if path is None:
+        return None
+    requirements = criterion.text + "\n" + (getattr(criterion, "evidence", None) or "")
+    level = match_level(criterion, detail["verdict"])
+    if level is not None:
+        requirements += "\n" + next(
+            item["descriptor"] for item in criterion.levels if int(item["level"]) == level.ordinal
+        )
+    if not any(pattern.search(requirements) for pattern in _scope_patterns(path)):
+        return None
+    body, references = (
+        getattr(batch, "body_context", None),
+        getattr(batch, "reference_context", None),
+    )
+    if body is None or references is None:
+        return "Source boundaries do not establish the body evidence required by this criterion."
+
+    def normalize(value):
+        return " ".join(value.split()).casefold()
+
+    body, references = normalize(body), normalize(references)
+    quotes = [normalize(item["quote"]) for item in detail.get("evidence", [])]
+    # A necessary provenance condition, not a relevance or similarity score:
+    # explicit in-text obligations require a submitted body passage. Ambiguous
+    # passages appearing in both scopes cannot establish that distinction.
+    if not any(quote and quote in body and quote not in references for quote in quotes):
+        return (
+            "The criterion mentions in-text documentation, but its submitted quotes do not "
+            "establish distinct manuscript-body evidence. Review the criterion's intended "
+            "scope and manuscript body before assigning a level."
+        )
+    return None
 
 
 async def check_support(
@@ -152,7 +197,18 @@ async def check_support(
             ],
             "prompt_version": PROMPT_VERSION,
             "source_scope": batch.label,
+            "source_scope_policy": SOURCE_SCOPE_POLICY_VERSION,
         }
+        scope_failure = _scope_failure(batch, criterion, detail)
+        if item.status == "supported" and scope_failure:
+            results[criterion.id] = {
+                "status": "unsupported",
+                "reason": scope_failure,
+                "prompt_version": PROMPT_VERSION,
+                "source_scope": batch.label,
+                "scope_guard": "required_body_evidence_unconfirmed",
+                "source_scope_policy": SOURCE_SCOPE_POLICY_VERSION,
+            }
     return results
 
 

@@ -94,6 +94,7 @@ def extraction():
         text_chars=len(BODY + QUOTE),
         blocks=[
             TextBlock(page=1, text=BODY, max_font_size=11, bold_ratio=0),
+            TextBlock(page=2, text="References", max_font_size=14, bold_ratio=1),
             TextBlock(page=2, text=QUOTE, max_font_size=11, bold_ratio=0),
         ],
         section_tree=SectionTree(
@@ -117,6 +118,66 @@ async def test_locatable_bibliography_cannot_establish_complete_documentation(ru
     assert result.detail["support_check"]["status"] == "unsupported"
     assert "bibliography" in result.detail["reason"]
     assert result.detail["evidence"][0]["quote"] == QUOTE
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("runner", [run_semantic_checks, run_semantic_checks_with_consistency])
+async def test_agreeing_support_model_cannot_override_explicit_body_evidence_obligation(runner):
+    client = Client("supported")
+    result = (await runner(Session(), 1, [criterion()], extraction(), client, Settings()))[0]
+    assert result.outcome == ResultOutcome.escalated and result.score is None
+    assert result.detail["support_check"]["scope_guard"] == "required_body_evidence_unconfirmed"
+    assert "in-text documentation" in result.detail["reason"]
+    assert "verdict" not in result.detail and "level" not in result.detail
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("runner", [run_semantic_checks, run_semantic_checks_with_consistency])
+@pytest.mark.parametrize(
+    "variant", ["unknown_boundary", "descriptor_only", "unicode_hyphen", "unicode_dash"]
+)
+async def test_body_scope_guard_handles_uncertain_boundaries_and_requirement_forms(runner, variant):
+    item, source = criterion(), extraction()
+    if variant == "unknown_boundary":
+        source.blocks.pop(1)
+    elif variant == "descriptor_only":
+        item.evidence = "Inspect documentation"
+        item.levels[-1]["descriptor"] = "Complete in-text documentation"
+    else:
+        item.evidence = (
+            "Reference list and in"
+            + ("\u2011" if variant == "unicode_hyphen" else "\u2013")
+            + "text documentation"
+        )
+    result = (await runner(Session(), 1, [item], source, Client("supported"), Settings()))[0]
+    assert result.outcome == ResultOutcome.escalated and result.score is None
+    assert result.detail["support_check"]["scope_guard"] == "required_body_evidence_unconfirmed"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("runner", [run_semantic_checks, run_semantic_checks_with_consistency])
+async def test_distinct_body_passage_can_satisfy_necessary_source_scope(runner):
+    body = "Smith (2020) explains the reference format used for our results."
+    source = extraction()
+    source.blocks[0].text = body
+
+    class BodyClient(Client):
+        async def complete(self, kind, prompt, **context):
+            answer = await super().complete(kind, prompt, **context)
+            if kind == "semantic_grading":
+                answer["verdicts"][0]["evidence_quotes"] = [body]
+            if kind == "semantic_support":
+                for item in answer["items"]:
+                    for requirement in item["requirements"]:
+                        requirement["evidence_quotes"] = [body]
+            return answer
+
+    result = (
+        await runner(Session(), 1, [criterion()], source, BodyClient("supported"), Settings())
+    )[0]
+    assert result.outcome == ResultOutcome.passed
+    assert result.detail["support_check"]["status"] == "supported"
+    assert result.detail["evidence"][0]["quote"] == body
 
 
 @pytest.mark.asyncio

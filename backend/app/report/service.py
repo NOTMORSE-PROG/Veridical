@@ -30,6 +30,7 @@ from app.checks.reuse.query import (
     comparison_exclusions,
     query_similar_passages,
 )
+from app.checks.support import SOURCE_SCOPE_POLICY_VERSION
 from app.config import Settings, get_settings
 from app.errors import ConflictError, GoneError, NotFoundError
 from app.findings.policy import exclusion_reason, reuse_excerpt
@@ -641,7 +642,8 @@ async def report_out_for_check_run(
         historical_semantic_support_unverified=any(
             result.kind == CheckKind.semantic
             and (result.detail or {}).get("basis") == "llm"
-            and "support_check" not in (result.detail or {})
+            and (result.detail or {}).get("support_check", {}).get("source_scope_policy")
+            != SOURCE_SCOPE_POLICY_VERSION
             for result, _criterion in rows
         ),
         check_run_id=check_run_id,

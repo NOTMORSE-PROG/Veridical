@@ -24,6 +24,8 @@ from app.checks.source_quality import source_limitation_detail
 from app.checks.support import apply_support, check_support, context_limitation
 from app.config import Settings, get_settings
 from app.errors import VeridicalError
+from app.ingest.patterns import load_patterns
+from app.ingest.references import non_reference_blocks, select_references
 from app.ingest.schemas import ExtractionResult, SectionNode, TextBlock
 from app.llm.base import LLMClient
 from app.models.enums import CheckKind, ResultOutcome
@@ -53,6 +55,9 @@ def _normalize(text: str) -> str:
 class SemanticBatch:
     label: str
     blocks: list[TextBlock]
+    body_context: str | None = None
+    reference_context: str | None = None
+    scope_patterns_file: Path | None = None
 
     @property
     def context_text(self) -> str:
@@ -102,8 +107,18 @@ def build_semantic_batches(
     # rather than charging the full text repeatedly for keyword-derived hints.
     if not eligible:
         return [], missing
-    size = (settings or get_settings()).semantic_batch_max_criteria
-    batch = SemanticBatch("whole document", [b for b in extraction.blocks if not b.is_furniture])
+    settings = settings or get_settings()
+    size = settings.semantic_batch_max_criteria
+    patterns = load_patterns(settings.ingest_patterns_file)
+    selected = select_references(extraction, patterns)
+    body = non_reference_blocks(extraction, patterns, selection=selected, exclude_heading=True)
+    batch = SemanticBatch(
+        "whole document",
+        [b for b in extraction.blocks if not b.is_furniture],
+        "\n".join(block.text for block in body) if not selected.issues and selected.span else None,
+        "\n".join(block.text for block in selected.span) if not selected.issues else None,
+        settings.semantic_evidence_scope_patterns_file,
+    )
     return [
         (batch, eligible[start : start + size]) for start in range(0, len(eligible), size)
     ], missing
