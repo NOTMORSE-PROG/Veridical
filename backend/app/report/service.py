@@ -856,8 +856,7 @@ def _open_manuscript_source(
         return (
             None,
             source_format,
-            f"This manuscript's source file was purged on "
-            f"{manuscript.purged_at.date().isoformat()} and can no longer be viewed.",
+            "This manuscript's source file was deleted and can no longer be viewed.",
         )
     if source_format == "unknown":
         return (

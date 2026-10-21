@@ -12,7 +12,18 @@ export interface RegionPrecision {
   isExact: boolean;
 }
 
-export function regionPrecision(region: FlagRegionOut | null): RegionPrecision {
+export type SourceAvailability = "deleted" | "unavailable" | undefined;
+
+export function regionPrecision(region: FlagRegionOut | null, source?: SourceAvailability): RegionPrecision {
+  if (source) {
+    return {
+      label: source === "deleted" ? "Original source deleted" : "Original source unavailable",
+      helper: source === "deleted"
+        ? "The original source file was deleted, so VERIDICAL cannot display or highlight this location. Review the saved evidence and any recorded location below."
+        : "VERIDICAL cannot open the original source, so it cannot display or highlight this location. Review the saved evidence and any recorded location below.",
+      isExact: false,
+    };
+  }
   if (!region) {
     return {
       label: "Location unavailable",

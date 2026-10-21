@@ -62,7 +62,8 @@ describe("AuditLogPage", () => {
     expect((await screen.findAllByText("Stored file deleted")).length).toBe(2);
     fireEvent.click(screen.getAllByRole("button", { name: "Detail" })[0]);
     expect(await screen.findByText(/You deleted the uploaded file and its extracted text/))
-      .toHaveTextContent("Reports, decisions and audit history are kept.");
+      .toHaveTextContent("Saved reports, decisions, comparison evidence and audit history are kept.");
+    expect(screen.getByText(/cannot be used as a source in future originality checks/)).toBeInTheDocument();
     expect(screen.getByText("manuscript_purged", { selector: "code" })).toBeInTheDocument();
     expect(screen.getByText(/"manuscript_id": 9/)).toBeInTheDocument();
   });

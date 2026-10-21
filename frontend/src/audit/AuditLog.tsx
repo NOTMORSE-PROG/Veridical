@@ -77,7 +77,7 @@ const EVENT_EXPLANATIONS: Record<string, string> = {
   llm_model_exhausted: "The configured AI service choices were unavailable, so the affected work was not treated as assessed.",
   report_decided: "You recorded the final instructor outcome for this readiness review.",
   report_reopened: "You reopened a previously recorded instructor outcome for further review.",
-  manuscript_purged: "You deleted the uploaded file and its extracted text, along with any comparison data stored for this manuscript. Reports, decisions and audit history are kept.",
+  manuscript_purged: "You deleted the uploaded file and its extracted text. The manuscript cannot be used as a source in future originality checks. Saved reports, decisions, comparison evidence and audit history are kept.",
   check_run_cancel_requested: "You requested that an active manuscript check stop at its next safe boundary.",
   check_run_cancelled: "VERIDICAL stopped the manuscript check and preserved its completed work and history.",
   citation_source_confirmed: "You confirmed the source associated with a citation-integrity finding.",

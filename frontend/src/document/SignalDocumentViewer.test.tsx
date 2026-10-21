@@ -4,6 +4,7 @@ import type { CriterionResultOut, FlagOut, FlagSummaryOut, ManuscriptViewerOut, 
 import { renderWithProviders, stubFetchByPath } from "../test/renderWithProviders";
 import { SignalDocumentViewerPage } from "./SignalDocumentViewer";
 import { CITATION_COMPARISON } from "../test/citationComparisonFixture";
+import { localDate } from "../domain/localDate";
 
 vi.mock("./PdfPane", () => ({
   PdfPane: ({ requestedPage, selectedFlagId, fileUrl, regions }: { requestedPage: number | null; selectedFlagId: number | null; fileUrl: string; regions: unknown[] }) => (
@@ -361,12 +362,32 @@ describe("SignalDocumentViewerPage", () => {
   });
 
   it("keeps unavailable source content honest while preserving a return to the report", async () => {
-    stubViewer({ ...VIEWER, available: false, unavailable_reason: "Stored content was removed by the instructor.", purged_at: "2026-08-20T00:00:00Z" });
+    stubViewer({ ...VIEWER, available: false, unavailable_reason: "Stored content was removed by the instructor.", purged_at: null });
     renderWithProviders(<SignalDocumentViewerPage />, { route: "/report/5/document", path: "/report/:checkRunId/document" });
     expect(await screen.findByRole("heading", { name: "Source manuscript unavailable" })).toBeInTheDocument();
     expect(screen.getByText("Stored content was removed by the instructor.")).toBeInTheDocument();
     expect(screen.getByText(/VERIDICAL cannot show the full manuscript/)).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Review queue" })).toBeInTheDocument();
+  });
+
+  it("retains the recorded location and citation comparison after source deletion", async () => {
+    const deletedAt = "2026-10-21T17:00:00Z";
+    vi.stubGlobal("fetch", stubFetchByPath({
+      "/check-runs/5/document": { ...VIEWER, available: false, regions: [], purged_at: deletedAt, unavailable_reason: "Old UTC-date server wording must not be displayed." },
+      "/check-runs/5/report": REPORT,
+      "/check-runs/5/escalated": [],
+      "/check-runs/5/flags": [{ ...SUMMARY, page_anchor: "paragraph 5", check_kind: "citation_integrity", problem_kind: "possible_metadata_mismatch" }],
+      "/check-runs/5/document/reuse-matches": { passage_archive_size_n: 0, matches: [] },
+      "/flags/7": { ...FLAG, page_anchor: "paragraph 5", check_kind: "citation_integrity", ai_verdict_summary: "possible_metadata_mismatch", citation_metadata_comparison: CITATION_COMPARISON },
+    }));
+    renderWithProviders(<SignalDocumentViewerPage />, { route: "/report/5/document?view=finding&finding=7&location=7", path: "/report/:checkRunId/document" });
+    expect(await screen.findByText(`The stored source file was deleted on ${localDate(deletedAt)} and can no longer be opened.`)).toBeInTheDocument();
+    expect((await screen.findAllByText("Original source deleted")).length).toBeGreaterThan(0);
+    expect(screen.getByText(/cannot display or highlight this location/)).toBeInTheDocument();
+    expect(screen.getAllByText("Extracted paragraph 6").length).toBeGreaterThan(0);
+    expect(screen.getByRole("heading", { name: "Recorded citation metadata comparison" })).toBeInTheDocument();
+    expect(screen.queryByText(/could not place it on a page or paragraph/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Old UTC-date server wording/)).not.toBeInTheDocument();
   });
 
   it("does not claim the other pane is available when both source and review requests fail", async () => {

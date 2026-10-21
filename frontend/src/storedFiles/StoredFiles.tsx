@@ -8,16 +8,13 @@ import { ApiError } from "../api/client";
 import type { StoredFileOut } from "../api/types";
 import { StatusPill } from "../components/StatusPill";
 import { manuscriptStatus, RUNNING_STATUSES } from "../domain/manuscriptStatus";
+import { localDate as formatDate } from "../domain/localDate";
 import { useRouteFocus } from "../routing/useRouteFocus";
 import { ActionLink } from "../ui/ActionLink";
 import { Alert } from "../ui/Alert";
 import { Button } from "../ui/Button";
 import { Dialog } from "../ui/Dialog";
 import { useDeleteStoredFile, useStoredFiles } from "./useStoredFiles";
-
-function formatDate(value: string): string {
-  return new Date(value).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
-}
 
 function fileName(item: StoredFileOut): string {
   return item.original_filename ?? `Upload for ${item.group_label}`;

@@ -1113,8 +1113,7 @@ async def get_library_excerpt(
             chapters=[],
             total_chapters=0,
             limitations=(
-                f"This manuscript's stored content was removed on "
-                f"{manuscript.purged_at.date().isoformat()} and can no longer be previewed."
+                "This manuscript's stored content was deleted and can no longer be previewed."
             ),
             purged_at=manuscript.purged_at,
         )

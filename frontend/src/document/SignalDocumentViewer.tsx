@@ -11,6 +11,7 @@ import { problemLabel } from "../domain/problemLabel";
 import { severityLabel } from "../domain/severity";
 import { systemFindingCopy } from "../domain/systemFindingCopy";
 import { instructorAnchor } from "../domain/sourceAnchor";
+import { localDate } from "../domain/localDate";
 import { FigureReadingsSummary } from "../report/FigureReadings";
 import { useFlag } from "../flags/useFlag";
 import { PValueComparison } from "../flags/PValueComparison";
@@ -36,7 +37,7 @@ import { ReadinessBand } from "../ui/ReadinessBand";
 import { DocxPane } from "./DocxPane";
 import { PassagePairPanel } from "./PassagePairPanel";
 import { PdfPane } from "./PdfPane";
-import { regionPrecision } from "./regionCopy";
+import { regionPrecision, type SourceAvailability } from "./regionCopy";
 import {
   buildReviewFindings,
   findingForFlag,
@@ -94,9 +95,10 @@ function regionForFinding(finding: ReviewFinding, regions: FlagRegionOut[]): Fla
     ?? null;
 }
 
-function ReviewQueue({ findings, regions, report, pending, error, filter, invalidSelection, onFilter, onSelect, onExplore, onDecision }: {
+function ReviewQueue({ findings, regions, sourceAvailability, report, pending, error, filter, invalidSelection, onFilter, onSelect, onExplore, onDecision }: {
   findings: ReviewFinding[];
   regions: FlagRegionOut[];
+  sourceAvailability?: SourceAvailability;
   report: ReportOut;
   pending: boolean;
   error: boolean;
@@ -138,7 +140,7 @@ function ReviewQueue({ findings, regions, report, pending, error, filter, invali
       ) : (
         <ol className="signal-document-review-list">
           {visible.map((finding) => {
-            const precision = regionPrecision(regionForFinding(finding, regions));
+            const precision = regionPrecision(regionForFinding(finding, regions), sourceAvailability);
             const state = finding.isSourceConfirmed ? "Source confirmed" : finding.isResolved ? "Resolved" : "Open";
             return (
               <li key={finding.key}>
@@ -176,11 +178,12 @@ function ReviewQueue({ findings, regions, report, pending, error, filter, invali
   );
 }
 
-function SelectedFinding({ finding, total, locationFlagId, region, sourceAnchor, previous, next, onBack, onPrevious, onNext, onLocation, onExplore }: {
+function SelectedFinding({ finding, total, locationFlagId, region, sourceAvailability, sourceAnchor, previous, next, onBack, onPrevious, onNext, onLocation, onExplore }: {
   finding: ReviewFinding;
   total: number;
   locationFlagId: number;
   region: FlagRegionOut | null;
+  sourceAvailability?: SourceAvailability;
   sourceAnchor: string | null;
   previous: ReviewFinding | null;
   next: ReviewFinding | null;
@@ -195,7 +198,7 @@ function SelectedFinding({ finding, total, locationFlagId, region, sourceAnchor,
   if (isError || !flag) return <Alert title="Finding details could not be loaded" tone="error" role="alert"><p>The manuscript and review queue are still available. Try loading this finding again.</p><Button variant="secondary" onClick={() => refetch()}>Try again</Button><Button variant="quiet" onClick={onBack}>Back to review queue</Button></Alert>;
 
   const { showsManuscriptQuote, reasoningText, showsManuscriptEvidence, isResubmission } = evidenceDisplayState(flag);
-  const precision = regionPrecision(region);
+  const precision = regionPrecision(region, sourceAvailability);
   const comparative = flag.check_kind === "originality_reuse";
   const kindMeta = checkKindMeta(flag.check_kind);
   const verificationPrompt = findingVerificationPrompt(flag.check_kind, flag.ai_verdict_summary, !!flag.passage_pair, !!flag.citation_metadata_comparison);
@@ -216,7 +219,7 @@ function SelectedFinding({ finding, total, locationFlagId, region, sourceAnchor,
       <dl className="signal-document-finding-facts">
         <div><dt>Check</dt><dd>{kindMeta.eyebrow}</dd></div>
         <div><dt>How exact is this location?</dt><dd>{precision.label}</dd></div>
-        <div><dt>Recorded location</dt><dd>{instructorAnchor(sourceAnchor ?? flag.page_anchor)}</dd></div>
+        <div><dt>Recorded location</dt><dd>{(sourceAnchor ?? flag.page_anchor).trim() ? instructorAnchor(sourceAnchor ?? flag.page_anchor) : "No location was recorded."}</dd></div>
         <div><dt>Check method</dt><dd>{findingMethodLabel(flag)}</dd></div>
         <div><dt>Evidence type</dt><dd>{citationMetadata ? flag.citation_metadata_comparison ? "Recorded registry metadata comparison" : "Registry comparison without saved provider metadata" : flag.check_kind === "internal_agreement" ? agreementEvidenceType(flag) : comparative ? flag.passage_pair ? "Recorded passage comparison" : "Comparison without a stored pair" : "Single-location check"}</dd></div>
       </dl>
@@ -297,7 +300,7 @@ function ReadinessDecision({ checkRunId, report, pending, error, onRetry, onBack
   );
 }
 
-function ReviewHome({ checkRunId, report, reportPending, reportError, onReportRetry, findings, regions, flagsPending, flagsError, filter, invalidSelection, onFilter, onSelect, onExplore, onDecision }: {
+function ReviewHome({ checkRunId, report, reportPending, reportError, onReportRetry, findings, regions, sourceAvailability, flagsPending, flagsError, filter, invalidSelection, onFilter, onSelect, onExplore, onDecision }: {
   checkRunId: number;
   report: ReportOut | undefined;
   reportPending: boolean;
@@ -305,6 +308,7 @@ function ReviewHome({ checkRunId, report, reportPending, reportError, onReportRe
   onReportRetry: () => void;
   findings: ReviewFinding[];
   regions: FlagRegionOut[];
+  sourceAvailability?: SourceAvailability;
   flagsPending: boolean;
   flagsError: boolean;
   filter: ReviewFilter;
@@ -316,7 +320,7 @@ function ReviewHome({ checkRunId, report, reportPending, reportError, onReportRe
 }) {
   if (reportPending) return <div role="status" aria-live="polite" aria-busy="true" className="signal-desk-loading"><span>Loading review queue.</span><i /><i /></div>;
   if (!report) return <ReportUnavailable checkRunId={checkRunId} error={reportError} onRetry={onReportRetry} />;
-  return <ReviewQueue findings={findings} regions={regions} report={report} pending={flagsPending} error={flagsError} filter={filter} invalidSelection={invalidSelection} onFilter={onFilter} onSelect={onSelect} onExplore={onExplore} onDecision={onDecision} />;
+  return <ReviewQueue findings={findings} regions={regions} sourceAvailability={sourceAvailability} report={report} pending={flagsPending} error={flagsError} filter={filter} invalidSelection={invalidSelection} onFilter={onFilter} onSelect={onSelect} onExplore={onExplore} onDecision={onDecision} />;
 }
 
 export function SignalDocumentViewerPage() {
@@ -351,6 +355,8 @@ export function SignalDocumentViewerPage() {
   const flagsQuery = useFlags(id);
   const excludedMatchesQuery = useExcludedReuseMatches(id, { includeReferenceList, includeBlockQuote });
   const viewer = viewerQuery.data;
+  const sourceAvailability: SourceAvailability = viewer?.available === false
+    ? viewer.purged_at ? "deleted" : "unavailable" : undefined;
   const isDocx = viewer?.available === true && viewer.source_format === "docx";
   const paragraphsQuery = useManuscriptParagraphs(id, isDocx);
   const anchorRegion = parsedAnchorRegion && viewer?.available && (
@@ -507,7 +513,7 @@ export function SignalDocumentViewerPage() {
         : browseRegions;
   const selectedRegionId = recordedAnchor ? null : selectedRegion?.flag_id ?? null;
   const selectedSummary = selectedFinding?.flags.find((flag) => flag.id === selectedLocationId) ?? selectedFinding?.representative ?? null;
-  const selectedPrecision = selectedFinding ? regionPrecision(selectedRegion) : null;
+  const selectedPrecision = selectedFinding ? regionPrecision(selectedRegion, sourceAvailability) : null;
   const reviewCount = findings.filter((finding) => !finding.isResolved).length + (reportQuery.data?.pending_review_count ?? 0);
 
   return (
@@ -534,7 +540,7 @@ export function SignalDocumentViewerPage() {
                 {rawSelection && requestedFlagId === null && <Alert title="The selected finding address is invalid" tone="warning">Showing the review queue instead.</Alert>}
                 {viewerQuery.isPending ? <div className="signal-document-source"><div className="signal-document-toolbar"><div className="signal-document-toolbar__identity"><strong>Full manuscript</strong><span>Loading stored source</span></div></div><div className="signal-document-scroll"><section role="status" aria-live="polite" aria-busy="true" className="signal-document-pdf-skeleton"><span>Loading full manuscript.</span><i /><i /><i /></section></div></div>
                   : viewerQuery.isError || !viewer ? <div className="signal-document-source"><div className="signal-document-toolbar"><div className="signal-document-toolbar__identity"><strong>Full manuscript</strong><span>Stored source</span></div></div><div className="signal-document-scroll"><section className="signal-document-paper-state"><Alert title="The manuscript could not be loaded" tone="error" role="alert"><p>VERIDICAL could not load the stored source view. The Review pane loads separately and may also need to be retried.</p><Button variant="secondary" onClick={() => viewerQuery.refetch()}>Try source again</Button><ActionLink to="/dashboard?queue=needs_review" variant="quiet">Return to Review Desk</ActionLink></Alert></section></div></div>
-                    : !viewer.available ? <div className="signal-document-source"><div className="signal-document-toolbar"><div className="signal-document-toolbar__identity"><strong>Full manuscript</strong><span>{viewer.original_filename ?? "Stored source"}</span></div></div><div className="signal-document-scroll"><section className="signal-document-unavailable"><p className="signal-section-kicker">Stored source unavailable</p><h2>Source manuscript unavailable</h2><p>{viewer.unavailable_reason}</p><p>You can still review the recorded evidence and readiness details, but VERIDICAL cannot show the full manuscript.</p><ActionLink to={`/report/${id}`} variant="brand">Open full readiness report</ActionLink></section></div></div>
+                    : !viewer.available ? <div className="signal-document-source"><div className="signal-document-toolbar"><div className="signal-document-toolbar__identity"><strong>Full manuscript</strong><span>{viewer.original_filename ?? "Stored source"}</span></div></div><div className="signal-document-scroll"><section className="signal-document-unavailable"><p className="signal-section-kicker">Stored source unavailable</p><h2>Source manuscript unavailable</h2><p>{viewer.purged_at ? `The stored source file was deleted on ${localDate(viewer.purged_at)} and can no longer be opened.` : viewer.unavailable_reason}</p><p>You can still review the recorded evidence and readiness details, but VERIDICAL cannot show the full manuscript.</p><ActionLink to={`/report/${id}`} variant="brand">Open full readiness report</ActionLink></section></div></div>
                       : viewer.source_format === "pdf" ? <PdfPane fileUrl={`${BASE_URL}/check-runs/${id}/document/file`} regions={visibleRegions} flags={flagsQuery.data ?? []} selectedFlagId={selectedRegionId} onSelectFlag={selectFinding} requestedPage={requestedPage} findingNumbers={numbersByFlagId} />
                         : viewer.source_format === "docx" ? <DocxPane key={id} paragraphs={paragraphsQuery.data?.paragraphs} tables={paragraphsQuery.data?.tables} images={paragraphsQuery.data?.images} omittedImageOccurrences={paragraphsQuery.data?.omitted_image_occurrences} imageBasePath={`/check-runs/${id}/document/images`} paragraphsPending={paragraphsQuery.isPending} paragraphsError={paragraphsQuery.isError} onRetry={() => paragraphsQuery.refetch()} regions={visibleRegions} flags={flagsQuery.data ?? []} selectedFlagId={selectedRegionId} onSelectFlag={selectFinding} isVisible={activeTab === "manuscript"} findingNumbers={numbersByFlagId} requestedParagraph={anchorRegion?.paragraph ?? null} />
                           : <div className="signal-document-source"><div className="signal-document-toolbar"><div className="signal-document-toolbar__identity"><strong>Full manuscript</strong><span>{viewer.original_filename ?? "Unsupported source"}</span></div></div><div className="signal-document-scroll"><section className="signal-document-paper-state"><Alert title="This manuscript format cannot be displayed here" tone="warning"><p>Use the recorded excerpts and anchors in Review, or open the full readiness report.</p><ActionLink to={`/report/${id}`} variant="secondary">Open full readiness report</ActionLink></Alert></section></div></div>}
@@ -542,8 +548,8 @@ export function SignalDocumentViewerPage() {
               <aside ref={inspectorRef} id="review-panel" role="tabpanel" aria-labelledby="review-tab" data-active={activeTab === "review"} className="signal-document-inspector">
                 {isExploring ? <ReuseExplorePanel flags={flagsQuery.data} onSelectFlag={selectFinding} onBack={showQueue} includeReferenceList={includeReferenceList} includeBlockQuote={includeBlockQuote} onToggleReferenceList={(value) => setToggle("ref", value)} onToggleBlockQuote={(value) => setToggle("quote", value)} excludedMatchesQuery={excludedMatchesQuery} expandedMatchId={expandedMatchId} onExpandMatch={setMatch} />
                   : isDecision ? <ReadinessDecision checkRunId={id} report={reportQuery.data} pending={reportQuery.isPending} error={reportQuery.error} onRetry={() => reportQuery.refetch()} onBack={showQueue} />
-                    : selectedFinding && selectedLocationId ? <SelectedFinding finding={selectedFinding} total={findings.length} locationFlagId={selectedLocationId} region={selectedRegion} sourceAnchor={recordedAnchor} previous={previousFinding} next={nextFinding} onBack={showQueue} onPrevious={() => previousFinding && selectFinding(previousFinding.representative.id, true)} onNext={() => nextFinding && selectFinding(nextFinding.representative.id, true)} onLocation={selectFinding} onExplore={openExplore} />
-                      : <ReviewHome checkRunId={id} report={reportQuery.data} reportPending={reportQuery.isPending} reportError={reportQuery.error} onReportRetry={() => reportQuery.refetch()} findings={findings} regions={viewer?.regions ?? []} flagsPending={flagsQuery.isPending} flagsError={flagsQuery.isError} filter={filter} invalidSelection={invalidSelection} onFilter={setFilter} onSelect={selectFinding} onExplore={openExplore} onDecision={openDecision} />}
+                    : selectedFinding && selectedLocationId ? <SelectedFinding finding={selectedFinding} total={findings.length} locationFlagId={selectedLocationId} region={selectedRegion} sourceAvailability={sourceAvailability} sourceAnchor={recordedAnchor} previous={previousFinding} next={nextFinding} onBack={showQueue} onPrevious={() => previousFinding && selectFinding(previousFinding.representative.id, true)} onNext={() => nextFinding && selectFinding(nextFinding.representative.id, true)} onLocation={selectFinding} onExplore={openExplore} />
+                      : <ReviewHome checkRunId={id} report={reportQuery.data} reportPending={reportQuery.isPending} reportError={reportQuery.error} onReportRetry={() => reportQuery.refetch()} findings={findings} regions={viewer?.regions ?? []} sourceAvailability={sourceAvailability} flagsPending={flagsQuery.isPending} flagsError={flagsQuery.isError} filter={filter} invalidSelection={invalidSelection} onFilter={setFilter} onSelect={selectFinding} onExplore={openExplore} onDecision={openDecision} />}
               </aside>
             </div>
           </section>
