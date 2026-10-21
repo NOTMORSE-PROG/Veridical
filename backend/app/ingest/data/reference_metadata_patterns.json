@@ -1,5 +1,9 @@
 {
-  "_comment": "Conservative unquoted numbered-reference grammar. These conventions may be overridden; ambiguous names/dates remain unassessed.",
+  "_comment": "Conservative reference metadata grammar. These conventions may be overridden; ambiguous names, dates and quoted boundaries remain unassessed.",
+  "version": "reference-metadata-v2",
+  "quoted_title_pairs": [["\"", "\""], ["“", "”"]],
+  "quoted_title_separators": ".,",
+  "quoted_title_terminal_delimiters": ",",
   "access_note_prefixes": ["accessed", "retrieved", "last accessed", "visited"],
   "locator_labels": ["URL"],
   "doi_resolver_hosts": ["doi.org", "dx.doi.org"],

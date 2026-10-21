@@ -39,6 +39,7 @@ from app.checks.citations.numbered import (
     analyze_numbered_citations,
     explicit_reference_label,
 )
+from app.checks.citations.projection import SOURCE_FIELDS, project_quoted_metadata
 from app.checks.citations.support import (
     ClaimSupportInput,
     ClaimSupportResult,
@@ -487,31 +488,70 @@ async def run_citation_integrity_check(
 ) -> CheckResult:
     source_limit = source_limitation_detail(extraction)
     selection = select_references(extraction, patterns)
+    citations, source_projections = project_quoted_metadata(
+        citations, extraction, patterns, settings=settings
+    )
+    projection_reason = next(
+        (row["reason"] for row in source_projections.values() if row.get("reason")), None
+    )
+    if projection_reason:
+        detail = {
+            "analysis_coverage": "unsupported",
+            "coverage_reason": projection_reason,
+            "n_references": len(citations),
+            "n_metadata_skipped_insufficient": len(citations),
+            "n_linkage_unassessed": len(citations),
+            "n_claim_support_checked": 0,
+            "n_flags": 0,
+            "reference_metadata_coverage": [
+                {
+                    "reference_order_index": c.order_index,
+                    "status": "unassessed",
+                    "reason": projection_reason,
+                    "lookup_attempted": False,
+                    "metadata_complete": False,
+                    "source_projection": source_projections.get(c.order_index),
+                }
+                for c in citations
+            ],
+        }
+        if source_limit is not None:
+            return await persist_source_limitation(
+                session,
+                check_run_id,
+                CheckKind.citation_integrity,
+                extraction,
+                supplemental_detail=detail,
+            )
+        result = CheckResult(
+            check_run_id=check_run_id,
+            criterion_id=None,
+            kind=CheckKind.citation_integrity,
+            outcome=ResultOutcome.escalated,
+            detail=detail,
+        )
+        session.add(result)
+        await write_audit_event(
+            session,
+            event_type="citation_integrity_check_computed",
+            check_run_id=check_run_id,
+            payload={**detail, "outcome": result.outcome.value},
+        )
+        await session.commit()
+        return result
     metadata_only = False
     if source_limit is not None:
         # Metadata verification has a bounded source: the complete bibliography.
         # Admit it only when both source boundaries/provenance and the persisted
         # entries agree. No body fragments are joined across unsupported pages.
         drafts = extract_references(extraction, patterns)
-        source_fields = (
-            "order_index",
-            "raw_text",
-            "authors",
-            "title",
-            "year",
-            "doi",
-            "isbn",
-            "venue",
-            "url",
-            "parse_status",
-        )
         metadata_only = bool(
             drafts
             and len(drafts) == len(citations)
             and not selection.issues
             and not reference_reading_order_issues(extraction, selection)
             and all(
-                all(getattr(draft, field) == getattr(citation, field) for field in source_fields)
+                all(getattr(draft, field) == getattr(citation, field) for field in SOURCE_FIELDS)
                 for draft, citation in zip(drafts, citations, strict=True)
             )
         )
@@ -519,7 +559,9 @@ async def run_citation_integrity_check(
             return await persist_source_limitation(
                 session, check_run_id, CheckKind.citation_integrity, extraction
             )
-    body_blocks = [] if metadata_only else non_reference_blocks(extraction, patterns)
+    body_blocks = (
+        [] if metadata_only or projection_reason else non_reference_blocks(extraction, patterns)
+    )
     gaps: set[str] = set()
     in_text = extract_in_text_citations(body_blocks, settings=settings, coverage_gaps=gaps)
     cross = cross_match(in_text, citations)
@@ -538,7 +580,13 @@ async def run_citation_integrity_check(
             absence_candidates, citations, body_blocks, settings
         )
     # No supported body style or a partial scan cannot prove a reference unused.
-    if metadata_only or gaps or selection.issues or (not numbered and not cross.linked):
+    if (
+        metadata_only
+        or projection_reason
+        or gaps
+        or selection.issues
+        or (not numbered and not cross.linked)
+    ):
         absence_candidates = []
     linkage_unassessed = (
         len(numeric.absence_unassessed_references)
@@ -550,7 +598,7 @@ async def run_citation_integrity_check(
             }
         )
     )
-    if metadata_only or gaps or selection.issues:
+    if metadata_only or projection_reason or gaps or selection.issues:
         linkage_unassessed = max(linkage_unassessed, len(citations))
     if not numbered:
         linkage_unassessed = (
@@ -561,7 +609,7 @@ async def run_citation_integrity_check(
                     for ref in (cross.possibly_cited + (cross.uncited if not cross.linked else []))
                 }
             )
-            if not (metadata_only or gaps or selection.issues)
+            if not (metadata_only or projection_reason or gaps or selection.issues)
             else len(citations)
         )
     metadata_unassessed = set()
@@ -597,7 +645,7 @@ async def run_citation_integrity_check(
             *uncited_flags(absence_candidates),
         ]
     )
-    if metadata_only or selection.issues or not citations:
+    if metadata_only or projection_reason or selection.issues or not citations:
         flag_drafts = []
     claim_support_pairs: list[ClaimSupportInput] = []
     locations = {
@@ -646,12 +694,20 @@ async def run_citation_integrity_check(
                     "reference_order_index": citation.order_index,
                     "status": "unassessed",
                     "reason": (
-                        "ambiguous_identifier_wrap"
+                        source_projections[citation.order_index]["reason"]
+                        if citation.order_index in source_projections
+                        and source_projections[citation.order_index].get("reason")
+                        else "ambiguous_identifier_wrap"
                         if identifier_unassessed
                         else "unsupported_reference_structure"
                     ),
                     "lookup_attempted": False,
                     "metadata_complete": False,
+                    **(
+                        {"source_projection": source_projections[citation.order_index]}
+                        if citation.order_index in source_projections
+                        else {}
+                    ),
                 }
             )
             continue
@@ -688,6 +744,11 @@ async def run_citation_integrity_check(
                 else None,
                 "lookup_kind": "doi" if citation.doi else "isbn" if citation.isbn else "title",
                 "metadata_complete": metadata_complete,
+                **(
+                    {"source_projection": source_projections[citation.order_index]}
+                    if citation.order_index in source_projections
+                    else {}
+                ),
                 "provider": verdict.result.provider if verdict.result else None,
                 "providers_attempted": verdict.result.attempted_providers if verdict.result else [],
                 "retraction_status": "checked"
@@ -697,6 +758,14 @@ async def run_citation_integrity_check(
         )
         draft = _verdict_flag_draft(citation, verdict)
         if draft is not None:
+            if citation.order_index in source_projections:
+                draft = replace(
+                    draft,
+                    detail={
+                        **draft.detail,
+                        "source_projection": source_projections[citation.order_index],
+                    },
+                )
             flag_drafts.append(_with_reference_anchor(draft, citation.order_index, locations))
         claim_sentence = claim_by_order_index.get(citation.order_index)
         if claim_sentence and (
@@ -742,7 +811,9 @@ async def run_citation_integrity_check(
     # existing, most self-resolving state) last. The real per-cause counts
     # are always in `detail` regardless of which one outcome wins.
     coverage_reason = (
-        "source_reading_order_partial"
+        projection_reason
+        if projection_reason
+        else "source_reading_order_partial"
         if metadata_only
         else "reference_list_unavailable"
         if selection.issues or not citations

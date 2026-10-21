@@ -212,7 +212,9 @@ def select_references(result: ExtractionResult, patterns: HeadingPatterns) -> Re
     )
 
 
-def extract_references(result: ExtractionResult, patterns: HeadingPatterns) -> list[CitationDraft]:
+def extract_references(
+    result: ExtractionResult, patterns: HeadingPatterns, *, _legacy_quoted_titles: bool = False
+) -> list[CitationDraft]:
     selection = select_references(result, patterns)
     if selection.issues or reference_reading_order_issues(result, selection):
         return []
@@ -242,7 +244,9 @@ def extract_references(result: ExtractionResult, patterns: HeadingPatterns) -> l
             if recovery is not None
             else raw
         )
-        draft = parse_reference(_join_lines(parser_view), index)
+        draft = parse_reference(
+            _join_lines(parser_view), index, _legacy_quoted_titles=_legacy_quoted_titles
+        )
         if recovery is not None:
             # The source/link contract establishes the complete identifier.
             # Generic reference punctuation stripping must not shorten it.
@@ -416,7 +420,9 @@ def reference_section_page(result: ExtractionResult, patterns: HeadingPatterns) 
     return next((block.page for block in selection.span if block.page is not None), None)
 
 
-def parse_reference(raw: str, order_index: int) -> CitationDraft:
+def parse_reference(
+    raw: str, order_index: int, *, _legacy_quoted_titles: bool = False
+) -> CitationDraft:
     """Best-effort APA parse. Never raises: any surprise leaves the entry
     as parse_failed with its raw text intact."""
     draft = CitationDraft(order_index=order_index, raw_text=raw)
@@ -425,18 +431,84 @@ def parse_reference(raw: str, order_index: int) -> CitationDraft:
     if len(raw) > get_settings().reference_metadata_max_chars:
         return draft
     try:
-        _parse_into(draft, raw)
+        _parse_into(draft, raw, legacy_quoted_titles=_legacy_quoted_titles)
+        if draft.doi and possible_split_doi(raw, draft.doi):
+            # Raw source survives, but an identifier prefix cannot establish
+            # either a successful or a negative registry lookup.
+            draft.doi = None
+            draft.parse_status = CitationParseStatus.parse_failed
     except Exception:  # noqa: BLE001 — the QA property "never throws" outranks
-        draft.parse_status = CitationParseStatus.parse_failed
-    if draft.doi and possible_split_doi(raw, draft.doi):
-        # A successful lookup of this prefix would be as misleading as a
-        # negative one. Raw source remains available; no guessed suffix.
-        draft.doi = None
         draft.parse_status = CitationParseStatus.parse_failed
     return draft
 
 
-def _parse_into(draft: CitationDraft, raw: str) -> None:
+@dataclass(frozen=True)
+class QuotedTitleSpan:
+    start: int
+    end: int
+    after: int
+
+
+def quoted_title_span(raw: str, start: int) -> QuotedTitleSpan | None:
+    """An exact title span only at an independently established title start.
+
+    Leading quotation punctuation is a commitment to this grammar. A broken
+    pair cannot fall through to an unquoted whole-remainder title.
+    """
+    patterns = load_reference_metadata_patterns(get_settings().reference_metadata_patterns_file)
+    while start < len(raw) and (
+        raw[start].isspace() or raw[start] in patterns.quoted_title_separators
+    ):
+        start += 1
+    pairs = dict(patterns.quoted_title_pairs)
+    delimiters = {char for pair in patterns.quoted_title_pairs for char in pair}
+    if start == len(raw) or raw[start] not in delimiters:
+        return None
+    if raw[start] not in pairs:
+        raise ValueError("unmatched_quoted_title_opener")
+    close = next((i for i in range(start + 1, len(raw)) if raw[i] in delimiters), None)
+    if close is None or raw[close] != pairs[raw[start]]:
+        raise ValueError("unmatched_quoted_title_pair")
+    after = close + 1
+    if any(char in delimiters for char in raw[after:]):
+        raise ValueError("ambiguous_extra_quoted_fields")
+    if after < len(raw) and not (
+        raw[after].isspace() or raw[after] in patterns.quoted_title_separators
+    ):
+        raise ValueError("ambiguous_quoted_title_boundary")
+    # A second leading quote would turn the apparent tail into another title.
+    tail_start = after
+    while tail_start < len(raw) and (
+        raw[tail_start].isspace() or raw[tail_start] in patterns.quoted_title_separators
+    ):
+        tail_start += 1
+    if tail_start < len(raw) and raw[tail_start] in delimiters:
+        raise ValueError("ambiguous_nested_quoted_title")
+    title_start, title_end = start + 1, close
+    while title_start < title_end and raw[title_start].isspace():
+        title_start += 1
+    while title_end > title_start and (
+        raw[title_end - 1].isspace()
+        or raw[title_end - 1] in patterns.quoted_title_terminal_delimiters
+    ):
+        title_end -= 1
+    if not any(char.isalnum() for char in raw[title_start:title_end]):
+        raise ValueError("empty_quoted_title")
+    return QuotedTitleSpan(title_start, title_end, after)
+
+
+def apa_quoted_title_span(raw: str) -> QuotedTitleSpan | None:
+    """The APA date/title boundary used by the versioned run-local repair."""
+    issue_spans = {match.span("issue") for match in _VOLUME_ISSUE_PAGES.finditer(raw)}
+    date = next(
+        (m for m in date_patterns()["reference"].finditer(raw) if m.span(1) not in issue_spans),
+        None,
+    )
+    return quoted_title_span(raw, date.end()) if date else None
+
+
+def _parse_locators(draft: CitationDraft, raw: str) -> None:
+    draft.doi, draft.isbn = None, None
     doi = _DOI.search(raw)
     if doi:
         draft.doi = doi.group(0).rstrip(_TRAILING_PUNCT)
@@ -445,6 +517,9 @@ def _parse_into(draft: CitationDraft, raw: str) -> None:
         draft.isbn = re.sub(r"[- ]", "", isbn.group(1)).upper()
     draft.url = text_url(raw)
 
+
+def _parse_into(draft: CitationDraft, raw: str, *, legacy_quoted_titles: bool = False) -> None:
+    _parse_locators(draft, raw)
     issue_spans = {match.span("issue") for match in _VOLUME_ISSUE_PAGES.finditer(raw)}
     year_m = next(
         (
@@ -454,11 +529,18 @@ def _parse_into(draft: CitationDraft, raw: str) -> None:
         ),
         None,
     )
-    if not year_m:
+    metadata_patterns = load_reference_metadata_patterns(
+        get_settings().reference_metadata_patterns_file
+    )
+    quote_chars = {char for pair in metadata_patterns.quoted_title_pairs for char in pair}
+    first_quote = next((i for i, char in enumerate(raw) if char in quote_chars), None)
+    if not year_m or (
+        not legacy_quoted_titles and first_quote is not None and first_quote < year_m.start()
+    ):
         # IEEE-style numbered entries print the year at the end, not in
         # parentheses; their title is the quoted span.
-        _parse_ieee_into(draft, raw)
-        if draft.parse_status != CitationParseStatus.parsed:
+        _parse_ieee_into(draft, raw, legacy_quoted_titles=legacy_quoted_titles)
+        if draft.parse_status != CitationParseStatus.parsed and first_quote is None:
             _parse_unquoted_numbered_into(draft, raw)
         return  # otherwise no year backbone -> parse_failed, raw preserved
     draft.year = int(year_m.group(1)[:4]) if year_m.group(1)[:4].isdigit() else None
@@ -473,6 +555,15 @@ def _parse_into(draft: CitationDraft, raw: str) -> None:
         authors_raw = authors_raw.rstrip(".")
     if authors_raw:
         draft.authors = split_apa_authors(authors_raw)
+
+    if not legacy_quoted_titles and (span := quoted_title_span(raw, year_m.end())):
+        _parse_locators(draft, raw[: year_m.end()] + raw[span.after :])
+        draft.title = raw[span.start : span.end]
+        tail = raw[span.after :]
+        draft.venue = _RETRIEVED.sub("", _DOI_TAIL.sub("", _URL.sub("", tail))).strip(" ,.") or None
+        if draft.authors:
+            draft.parse_status = CitationParseStatus.parsed
+        return
 
     rest = raw[year_m.end() :].lstrip(". ").strip()
     # The URL/DOI tail is locator, not venue text: "https://doi.org/10...",
@@ -615,14 +706,36 @@ def _ieee_author(name: str) -> str | None:
     return f"{surname}, {' '.join(initials)}" if initials else surname
 
 
-def _parse_ieee_into(draft: CitationDraft, raw: str) -> None:
+def _parse_ieee_into(draft: CitationDraft, raw: str, *, legacy_quoted_titles: bool = False) -> None:
     body = _LEADING_LABEL.sub("", raw, count=1)
-    match = _IEEE_QUOTED_TITLE.search(body)
-    if match is None:
-        return
-    authors_part = body[: match.start()].strip().rstrip(",").strip()
-    after = _DOI_TAIL.sub("", _URL.sub("", body[match.end() :]))
-    years = _IEEE_YEAR.findall(after)
+    if legacy_quoted_titles:
+        match = _IEEE_QUOTED_TITLE.search(body)
+        if match is None:
+            return
+        authors_part = body[: match.start()].strip().rstrip(",").strip()
+        after = _DOI_TAIL.sub("", _URL.sub("", body[match.end() :]))
+        title = match.group("title").strip().rstrip(",.")
+        years = _IEEE_YEAR.findall(after)
+    else:
+        patterns = load_reference_metadata_patterns(get_settings().reference_metadata_patterns_file)
+        quote_chars = {char for pair in patterns.quoted_title_pairs for char in pair}
+        start = next((i for i, char in enumerate(body) if char in quote_chars), None)
+        if start is None or not body[:start].rstrip().endswith(","):
+            return
+        authors_part = body[:start].strip().rstrip(",").strip()
+        span = quoted_title_span(body, start)
+        if span is None:
+            return
+        title = body[span.start : span.end]
+        _parse_locators(draft, body[:start] + body[span.after :])
+        after = body[span.after :]
+        access = patterns.access_note.search(after)
+        if access:
+            after = after[: access.start()]
+        after = _DOI_TAIL.sub("", _URL.sub("", after))
+        years = list({m.group("year") for m in patterns.publication_year.finditer(after)})
+        if len(years) != 1:
+            return
     if not authors_part or not years:
         return
     names = [
@@ -631,10 +744,15 @@ def _parse_ieee_into(draft: CitationDraft, raw: str) -> None:
         if n.strip()
     ]
     authors = [a for a in (_ieee_author(n) for n in names) if a]
+    if not legacy_quoted_titles and any(
+        not name.split() or not _INITIALS.fullmatch(name.split()[0]) or len(name.split()) < 2
+        for name in names
+    ):
+        return  # no independent initials/surname boundary before the title
     if not authors:
         return
     draft.authors = authors
-    draft.title = match.group("title").strip().rstrip(",.")
+    draft.title = title
     draft.year = int(years[-1])
     draft.venue = after.strip(" ,.") or None
     draft.parse_status = CitationParseStatus.parsed

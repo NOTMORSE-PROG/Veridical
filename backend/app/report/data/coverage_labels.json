@@ -10,6 +10,8 @@
   "statement_roles_unverified": "The check found possible objectives and results, but could not reliably establish that they describe this study. Comparison leads do not change readiness",
   "image_content_unassessed": "Some image content remains unassessed. This limit is not a statistical error",
   "metadata_comparison_policy_unavailable": "Reference metadata comparison could not run because its comparison policy was unavailable. No lookup or claim-support assessment was made for those DOI references",
+  "reference_metadata_policy_unavailable": "Reference metadata could not be parsed because its parsing policy was unavailable. Reference lookups and claim support remain unassessed",
+  "reference_source_projection_unbound": "The saved reference entries could not be matched to the current source inventory. Reference lookups and claim support remain unassessed",
   "citation_metadata_comparison_unassessed": "Some reference titles could not be compared reliably because of ambiguous formatting, case or missing metadata. Those comparisons and their claim support remain unassessed",
   "title_hyphenation_unassessed": "Hyphenation differs between the reference title and registry title. The title comparison remains unassessed.",
   "title_case_unassessed": "Title capitalization may change scientific meaning. The title comparison remains unassessed.",

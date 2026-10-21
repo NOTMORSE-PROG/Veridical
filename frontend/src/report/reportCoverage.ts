@@ -38,6 +38,8 @@ function integrityCoverageItem(status: IntegrityCheckStatusOut, manuscriptId: nu
   }
   const coverageCopy: Record<string, string> = {
     metadata_comparison_policy_unavailable: "Reference metadata comparison could not run because its comparison policy was unavailable. No lookup or claim-support assessment was made for those DOI references.",
+    reference_metadata_policy_unavailable: "Reference metadata could not be parsed because its parsing policy was unavailable. Reference lookups and claim support remain unassessed.",
+    reference_source_projection_unbound: "The saved reference entries could not be matched to the current source inventory. Reference lookups and claim support remain unassessed.",
     citation_metadata_comparison_unassessed: "Some reference titles could not be compared reliably because of ambiguous formatting, case or missing metadata. Those comparisons and their claim support remain unassessed.",
     source_reading_order_unresolved: "Some pages could not be read reliably. This check was not assessed; this is not a finding against the paper.",
     reference_metadata_insufficient: "Some references are visible in the paper, but their author, title, or date could not be read reliably. They have not been verified.",

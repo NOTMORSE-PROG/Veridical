@@ -1,7 +1,9 @@
 """Data-backed conventions for a bounded numbered-reference fallback (F1/F5)."""
 
+import hashlib
 import json
 import re
+import unicodedata
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
@@ -17,6 +19,11 @@ class ReferenceMetadataPatterns:
     doi_resolver_hosts: frozenset[str]
     date_source: str
     standard_identifier: re.Pattern[str]
+    quoted_title_pairs: tuple[tuple[str, str], ...]
+    quoted_title_separators: str
+    quoted_title_terminal_delimiters: str
+    version: str
+    sha256: str
 
 
 @lru_cache
@@ -28,6 +35,45 @@ def load_reference_metadata_patterns(path: Path | None = None) -> ReferenceMetad
             encoding="utf-8"
         )
     )
+    if not isinstance(raw, dict):
+        raise ValueError("Reference metadata configuration must be an object")
+    effective = defaults | raw
+    raw = effective
+    pairs = effective["quoted_title_pairs"]
+    if (
+        not isinstance(pairs, list)
+        or not pairs
+        or any(
+            not isinstance(pair, list)
+            or len(pair) != 2
+            or any(not isinstance(char, str) or len(char) != 1 for char in pair)
+            for pair in pairs
+        )
+        or len({pair[0] for pair in pairs}) != len(pairs)
+    ):
+        raise ValueError("Quoted title pairs must have unique single-character openers")
+    for opening, closing in pairs:
+        if (
+            any("QUOTATION MARK" not in unicodedata.name(char, "") for char in (opening, closing))
+            or unicodedata.category(opening) not in {"Pi", "Po"}
+            or unicodedata.category(closing) not in {"Pf", "Po"}
+            or (unicodedata.category(opening) == "Po" and opening != closing)
+        ):
+            raise ValueError("Quoted title pairs must contain correctly oriented quotation marks")
+    for name in ("quoted_title_separators", "quoted_title_terminal_delimiters", "version"):
+        if not isinstance(effective[name], str) or not effective[name]:
+            raise ValueError(f"Reference metadata {name} must be nonempty text")
+    quote_chars = {char for pair in pairs for char in pair}
+    for name in ("quoted_title_separators", "quoted_title_terminal_delimiters"):
+        if any(
+            not unicodedata.category(char).startswith("P") or char in quote_chars
+            for char in effective[name]
+        ):
+            raise ValueError(f"Reference metadata {name} must contain non-quote punctuation")
+    if not set(effective["quoted_title_terminal_delimiters"]) <= set(
+        effective["quoted_title_separators"]
+    ):
+        raise ValueError("Quoted terminal delimiters must also be title separators")
     no_dates = raw.get("no_date_tokens", defaults["no_date_tokens"])
     if not isinstance(no_dates, list) or not all(
         isinstance(token, str) and token.strip() for token in no_dates
@@ -72,11 +118,11 @@ def load_reference_metadata_patterns(path: Path | None = None) -> ReferenceMetad
     ):
         raise ValueError("DOI resolver hosts must be a list of plain host names")
     return ReferenceMetadataPatterns(
-        access_note=re.compile(
+        access_note=_compile(
             rf"\b(?:{access})\s*(?::|on\b|from\b|(?=(?:{months})\.?\s+\d|\d))",
             re.IGNORECASE,
         ),
-        publication_year=re.compile(
+        publication_year=_compile(
             rf"(?:,\s*|\b(?:{months})\.?\s+(?:\d{{1,2}},?\s+)?)"
             r"(?P<year>1[89]\d{2}|20\d{2})(?=[.,;\s]|$)",
             re.IGNORECASE,
@@ -84,11 +130,25 @@ def load_reference_metadata_patterns(path: Path | None = None) -> ReferenceMetad
         name_particles=frozenset(word.casefold() for word in raw["name_particles"]),
         corporate_author_words=frozenset(word.casefold() for word in raw["corporate_author_words"]),
         locator_label=(
-            re.compile(rf"\b(?:{labels})\s*:?\s*(?=https?://)", re.IGNORECASE) if labels else None
+            _compile(rf"\b(?:{labels})\s*:?\s*(?=https?://)", re.IGNORECASE) if labels else None
         ),
         doi_resolver_hosts=frozenset(host.lower() for host in hosts),
         date_source=f"(?:{date_source})",
-        standard_identifier=re.compile(
+        standard_identifier=_compile(
             raw.get("standard_identifier_pattern", defaults["standard_identifier_pattern"])
         ),
+        quoted_title_pairs=tuple(tuple(pair) for pair in pairs),
+        quoted_title_separators=effective["quoted_title_separators"],
+        quoted_title_terminal_delimiters=effective["quoted_title_terminal_delimiters"],
+        version=effective["version"],
+        sha256=hashlib.sha256(
+            json.dumps(effective, sort_keys=True, ensure_ascii=False).encode("utf-8")
+        ).hexdigest(),
     )
+
+
+def _compile(pattern, flags=0):
+    try:
+        return re.compile(pattern, flags)
+    except (re.error, TypeError) as exc:
+        raise ValueError("Reference metadata pattern is invalid") from exc
