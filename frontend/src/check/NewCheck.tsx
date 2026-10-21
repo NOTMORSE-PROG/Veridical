@@ -2,7 +2,8 @@
 // uploaded/ingested separately (V-008); this modal only picks WHICH
 // already-ingested manuscript to run against WHICH active rubric.
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useNavigate } from "react-router";
+import { useLocation, useNavigate } from "react-router";
+import { reviewDeskDestination } from "../routing/reviewDeskReturn";
 import { ApiError } from "../api/client";
 import { Modal, ModalBackdrop } from "../components/Modal";
 import { formatManuscriptOption, manuscriptIdentity } from "../domain/manuscriptLabel";
@@ -62,6 +63,7 @@ export function NewCheckModal({
   } = useRubricFamilies();
   const create = useCreateCheckRun();
   const navigate = useNavigate();
+  const location = useLocation();
 
   const readyManuscripts = useMemo(
     () => (manuscripts ?? []).filter((m) => m.ingest_status === "done"),
@@ -219,7 +221,7 @@ export function NewCheckModal({
     }
     create.mutate(
       { manuscript_id: manuscriptId as number, rubric_id: rubricId as number },
-      { onSuccess: (run) => navigate(`/checks/${run.id}`) },
+      { onSuccess: (run) => navigate(reviewDeskDestination(`/checks/${run.id}`, location)) },
     );
   }
 

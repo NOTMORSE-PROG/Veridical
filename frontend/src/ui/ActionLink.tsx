@@ -1,5 +1,5 @@
 import type { LinkProps } from "react-router";
-import { Link } from "react-router";
+import { WorkflowLink } from "../routing/WorkflowLink";
 import { cx } from "../components/cx";
 
 interface ActionLinkProps extends Omit<LinkProps, "className"> {
@@ -44,12 +44,12 @@ export function ActionLink({
   ...props
 }: ActionLinkProps) {
   return (
-    <Link
+    <WorkflowLink
       className={cx("signal-button", `signal-button--${variant}`, className)}
       {...props}
     >
       {children}
       <TrailingChevronIcon />
-    </Link>
+    </WorkflowLink>
   );
 }

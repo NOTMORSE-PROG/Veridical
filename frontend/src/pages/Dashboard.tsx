@@ -19,6 +19,7 @@ import { useDashboardStats, usePrograms } from "../dashboard/useDashboard";
 import { DECISION_LABEL } from "../domain/decisionTone";
 import { manuscriptIdentity } from "../domain/manuscriptLabel";
 import { useRouteFocus } from "../routing/useRouteFocus";
+import { WorkflowLink } from "../routing/WorkflowLink";
 import { RerunModal } from "../rubric/RerunModal";
 import { UploadRubricModal } from "../rubric/UploadRubricModal";
 import { useRubricFamilies } from "../rubric/useRubric";
@@ -173,14 +174,14 @@ function RecordPrimaryAction({
     const description = row.latest_decision
       ? `${label}. Opens the manuscript and recorded analysis.`
       : `${label}. Opens the manuscript and analysis.`;
-    return <ActionLink to={`/report/${row.latest_check_run_id}/document`} aria-label={description}>{label}</ActionLink>;
+    return <ActionLink id={`review-desk-primary-${row.id}`} to={`/report/${row.latest_check_run_id}/document`} aria-label={description}>{label}</ActionLink>;
   }
   if (row.latest_check_run_status && row.latest_check_run_id) {
     if (row.latest_check_run_status === "cancelled") {
       return <Button onClick={() => onStartCheck(row.id)}>Start a fresh check</Button>;
     }
     return (
-      <ActionLink to={`/checks/${row.latest_check_run_id}`}>
+      <ActionLink id={`review-desk-primary-${row.id}`} to={`/checks/${row.latest_check_run_id}`}>
         {row.latest_check_run_status === "failed" ? "Review check failure" : "View current check"}
       </ActionLink>
     );
@@ -264,10 +265,10 @@ function WorkQueueRecord({
               // in-place actions (the plain <button>s around it), sharing
               // one CSS rule with nothing to tell them apart before a
               // click -- same trailing-chevron marker ActionLink carries.
-              <Link to={`/report/${row.latest_done_check_run_id}`}>
+              <WorkflowLink id={`review-desk-prior-${row.id}`} to={`/report/${row.latest_done_check_run_id}`}>
                 Open prior report
                 <TrailingChevronIcon />
-              </Link>
+              </WorkflowLink>
             )}
             {row.latest_done_check_run_id ? (
               <button type="button" onClick={() => onRerun(row.id)}>Run again</button>

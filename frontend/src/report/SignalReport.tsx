@@ -1,5 +1,7 @@
+import { WorkflowLink as Link } from "../routing/WorkflowLink";
+import { ReviewDeskReturnLink } from "../routing/ReviewDeskReturnLink";
 import { type MouseEvent, useEffect, useRef, useState } from "react";
-import { Link, useParams } from "react-router";
+import { useParams } from "react-router";
 import { ApiError } from "../api/client";
 import { manuscriptIdentity } from "../domain/manuscriptLabel";
 import { useRouteFocus } from "../routing/useRouteFocus";
@@ -75,7 +77,7 @@ export function SignalReportPage() {
     <div className="signal-route signal-page-flow signal-report">
       <header className="signal-route-header signal-report-header">
         <div>
-          <nav aria-label="Breadcrumb"><Link to="/dashboard?queue=needs_review">Review Desk</Link><span aria-hidden="true">/</span><span>Readiness report</span></nav>
+          <nav aria-label="Breadcrumb"><ReviewDeskReturnLink>Review Desk</ReviewDeskReturnLink><span aria-hidden="true">/</span><span>Readiness report</span></nav>
           <p className="signal-eyebrow">Review · Evidence before decision</p>
           <h1 ref={headingRef} tabIndex={-1}>Readiness report</h1>
           {report && <p className="signal-route-header__intro">{identity?.primary} · checked against {report.rubric_title}</p>}

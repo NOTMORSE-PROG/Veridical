@@ -1,5 +1,8 @@
+import { reviewDeskDestination } from "../routing/reviewDeskReturn";
+import { WorkflowLink as Link } from "../routing/WorkflowLink";
+import { ReviewDeskReturnLink } from "../routing/ReviewDeskReturnLink";
 import { useEffect, useId, useRef, useState } from "react";
-import { Link, useLocation, useParams } from "react-router";
+import { useLocation, useParams } from "react-router";
 import { ApiError } from "../api/client";
 import type { FlagOut } from "../api/types";
 import { useMe } from "../auth/useAuth";
@@ -59,6 +62,7 @@ function EvidenceSection({
   sourcePath: string;
   sourceLinkId: string;
 }) {
+  const sourceLocation = useLocation();
   const { showsManuscriptQuote, reasoningText, showsManuscriptEvidence, isResubmission } = evidenceDisplayState(flag);
   const headingId = showsManuscriptEvidence ? "evidence-heading" : "system-record-heading";
 
@@ -116,7 +120,7 @@ function EvidenceSection({
         id={sourceLinkId}
         to={sourcePath}
         variant="brand"
-        onClick={() => rememberRouteReturnFocus(`/flags/${flag.id}`, sourcePath.split("?")[0], sourceLinkId)}
+        onClick={() => rememberRouteReturnFocus(sourceLocation.pathname + sourceLocation.search, sourcePath, sourceLinkId)}
       >
         View this location in the manuscript
       </ActionLink>
@@ -328,14 +332,14 @@ export function FlagDetailPage() {
   }, [flag]);
 
   const meta = flag ? checkKindMeta(flag.check_kind) : null;
-  const sourcePath = flag ? `/report/${flag.check_run_id}/document?flag=${flag.id}` : "";
+  const sourcePath = flag ? reviewDeskDestination(`/report/${flag.check_run_id}/document?flag=${flag.id}`, routeLocation) : "";
   const sourceLinkId = flag ? `flag-source-link-${flag.id}` : "";
 
   return (
     <div className="signal-route signal-page-flow signal-flag-detail">
       <header className="signal-route-header signal-flag-header">
         <div>
-          <nav aria-label="Breadcrumb"><Link to="/dashboard?queue=needs_review">Review Desk</Link><span aria-hidden="true">/</span>{flag && <><Link to={returnFocus?.returnPath ?? `/report/${flag.check_run_id}`}>{flag.manuscript_group_label}</Link><span aria-hidden="true">/</span></>}<span>Evidence</span></nav>
+          <nav aria-label="Breadcrumb"><ReviewDeskReturnLink>Review Desk</ReviewDeskReturnLink><span aria-hidden="true">/</span>{flag && <><Link to={returnFocus?.returnPath ?? `/report/${flag.check_run_id}`}>{flag.manuscript_group_label}</Link><span aria-hidden="true">/</span></>}<span>Evidence</span></nav>
           <p className="signal-eyebrow">Review · Possible inconsistency</p>
           <h1 ref={headingRef} tabIndex={-1}>{meta?.title ?? "Evidence detail"}</h1>
           {flag?.criterion_text && <p className="signal-route-header__intro">Related criterion: {flag.criterion_text}</p>}
@@ -344,7 +348,7 @@ export function FlagDetailPage() {
       </header>
 
       {!validId ? (
-        <Alert title="This evidence address is invalid" tone="error" role="alert"><ActionLink to="/dashboard?queue=needs_review" variant="secondary">Return to Review Desk</ActionLink></Alert>
+        <Alert title="This evidence address is invalid" tone="error" role="alert"><ReviewDeskReturnLink variant="secondary">Return to Review Desk</ReviewDeskReturnLink></Alert>
       ) : isPending ? (
         <div role="status" aria-live="polite" aria-busy="true" className="signal-desk-loading"><span>Loading evidence…</span><i /><i /></div>
       ) : isError || !flag ? (

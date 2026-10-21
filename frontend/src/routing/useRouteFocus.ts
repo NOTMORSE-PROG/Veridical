@@ -31,8 +31,9 @@ export function rememberRouteReturnFocus(
   returnPath: string,
   destinationPath: string,
   elementId: string,
+  options: { armed?: boolean } = {},
 ) {
-  pendingReturnFocus = { returnPath, destinationPath, elementId, armed: false };
+  pendingReturnFocus = { returnPath, destinationPath, elementId, armed: options.armed ?? false };
 }
 
 function restoreRegisteredFocus(elementId: string): boolean {

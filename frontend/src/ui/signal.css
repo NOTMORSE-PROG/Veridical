@@ -5732,24 +5732,25 @@
     }
 
     .signal-route-header.signal-document-header {
-      align-items: center;
-      flex-direction: row;
+      align-items: stretch;
+      flex-direction: column;
       gap: var(--signal-space-3);
       margin-block-end: 0;
       padding-inline: var(--signal-space-4);
     }
 
-    .signal-document-header nav[aria-label="Breadcrumb"] {
-      display: none;
+    .signal-document-header > div:first-child {
+      min-width: 0;
     }
 
-    .signal-document-header h1 {
-      margin-block-start: 0;
-      font-size: var(--signal-type-subhead);
+    .signal-document-header h1,
+    .signal-document-header .signal-route-header__intro {
+      overflow-wrap: anywhere;
     }
 
     .signal-document-header > .signal-button {
-      display: none;
+      max-inline-size: 100%;
+      white-space: normal;
     }
 
     .signal-document-workbench {

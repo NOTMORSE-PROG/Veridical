@@ -5,6 +5,17 @@ export interface SignalNavigationRoute {
   matches: (pathname: string) => boolean;
 }
 
+// F8 review navigation protocol, shared by queue links and return controls.
+export const REVIEW_DESK_RETURN = {
+  pathname: "/dashboard",
+  fallback: "/dashboard?queue=needs_review",
+  pathParam: "desk_return",
+  focusParam: "desk_focus",
+  maxPathLength: 4096,
+  actionPattern: /^review-desk-(?:primary|prior)-([1-9]\d*)$/,
+  workflowPattern: /^\/(?:report\/[1-9]\d*(?:\/document)?|flags\/[1-9]\d*|checks\/[1-9]\d*)$/,
+} as const;
+
 /**
  * Stable workspace destinations. Workflow stages belong inside active tasks;
  * global navigation names places an instructor can predictably return to.

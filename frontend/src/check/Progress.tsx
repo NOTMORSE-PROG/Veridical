@@ -1,6 +1,7 @@
+import { ReviewDeskReturnLink } from "../routing/ReviewDeskReturnLink";
 // Screen 4g — transparent, cancellable check progress (F3.1–F3.6/F8.1).
 import { useEffect, useRef, useState } from "react";
-import { Link, useParams } from "react-router";
+import { useParams } from "react-router";
 import type { CheckRun, CheckRunStatus } from "../api/types";
 import { formatManuscriptOption, manuscriptIdentity } from "../domain/manuscriptLabel";
 import { useRouteFocus } from "../routing/useRouteFocus";
@@ -132,7 +133,7 @@ export function CheckProgressPage() {
     <div className="signal-route signal-page-flow signal-check-progress">
       <header className="signal-route-header signal-check-progress__header">
         <div>
-          <nav aria-label="Breadcrumb"><Link to="/dashboard?queue=checking">Review Desk</Link><span aria-hidden="true">/</span><span>Check progress</span></nav>
+          <nav aria-label="Breadcrumb"><ReviewDeskReturnLink fallback="/dashboard?queue=checking">Review Desk</ReviewDeskReturnLink><span aria-hidden="true">/</span><span>Check progress</span></nav>
           <p className="signal-eyebrow">Check · Live pipeline</p>
           <h1 ref={headingRef} tabIndex={-1}>Check progress</h1>
           <p className="signal-route-header__intro">Follow each stage. You can leave this page while the check continues.</p>
@@ -179,7 +180,7 @@ export function CheckProgressPage() {
           {run.status === "done" && <section className="signal-check-complete" aria-labelledby="check-complete-heading"><div><p className="signal-section-kicker">Next: Review</p><h2 id="check-complete-heading">Your manuscript review is ready</h2><p>Read the manuscript beside VERIDICAL's recorded criteria and integrity signals before you make a final decision.</p></div><ActionLink to={`/report/${run.id}/document`} variant="brand">Open manuscript review</ActionLink></section>}
 
           <div className="signal-check-actions">
-            <ActionLink to="/dashboard?queue=checking" variant="quiet">Back to Review Desk</ActionLink>
+            <ReviewDeskReturnLink fallback="/dashboard?queue=checking" variant="quiet">Back to Review Desk</ReviewDeskReturnLink>
             {ACTIVE_STATUSES.has(run.status) && <Button variant="danger" disabled={Boolean(run.cancel_requested_at)} onClick={() => setShowCancel(true)}>{run.cancel_requested_at ? "Cancellation requested" : "Cancel check"}</Button>}
           </div>
 

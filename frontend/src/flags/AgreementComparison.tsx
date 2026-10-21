@@ -3,6 +3,7 @@ import type { FlagOut } from "../api/types";
 import { instructorAnchor } from "../domain/sourceAnchor";
 import { agreementEvidenceType } from "../domain/evidenceDisplay";
 import { rememberRouteReturnFocus } from "../routing/useRouteFocus";
+import { reviewDeskDestination } from "../routing/reviewDeskReturn";
 import { ActionLink } from "../ui/ActionLink";
 
 /** Candidate roles are unverified; lexical overlap is not agreement evidence. */
@@ -22,7 +23,7 @@ export function AgreementComparison({ flag, findingNumber }: { flag: FlagOut; fi
       : <p>{unmatched ? "The check did not record a paired result for this statement. This does not establish that the manuscript contains no result." : "This saved finding does not include both statements needed for comparison. Inspect the manuscript manually."}</p>}
     {flag.affects_readiness === false && <p>This review lead does not change readiness.</p>}
     {statements.map((statement) => {
-      const sourcePath = `/report/${flag.check_run_id}/document?finding=${flag.id}&anchor=${encodeURIComponent(statement.anchor ?? "")}`;
+      const sourcePath = reviewDeskDestination(`/report/${flag.check_run_id}/document?finding=${flag.id}&anchor=${encodeURIComponent(statement.anchor ?? "")}`, location);
       const controlId = `agreement-${flag.id}-${statement.role}-source`;
       const label = `Open ${statement.role} location: ${instructorAnchor(statement.anchor ?? "")}`;
       return <div key={statement.role} className="signal-attached-flow">

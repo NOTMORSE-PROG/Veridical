@@ -1,3 +1,4 @@
+import { reviewDeskDestination } from "../routing/reviewDeskReturn";
 import { useEffect, useRef, useState } from "react";
 import { useLocation, useSearchParams } from "react-router";
 import { CITATION_HISTORY_TITLE } from "../domain/citationHistory";
@@ -782,7 +783,7 @@ export function SignalCriteriaResults({ results, checkRunId, publicView = false 
         const excerptAnchors = new Set(row.evidence.map((item) => item.anchor).filter((anchor) => anchor?.trim()));
         const seenAnchors = new Set<string>();
         const sourceAction = (anchor: string) => {
-          const destination = `/report/${checkRunId}/document?anchor=${encodeURIComponent(anchor)}`;
+          const destination = reviewDeskDestination(`/report/${checkRunId}/document?anchor=${encodeURIComponent(anchor)}`, location);
           return <ActionLink
             to={destination}
             variant="quiet"
