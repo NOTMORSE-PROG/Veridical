@@ -526,6 +526,11 @@ class Settings(BaseSettings):
     # metadata search.
     crossref_single_rps: float = 10.0
     crossref_list_rps: float = 3.0
+    citation_doi_providers: list[Literal["crossref", "datacite"]] = Field(
+        default=["crossref", "datacite"], min_length=1
+    )
+    datacite_base_url: str = "https://api.datacite.org"
+    datacite_rpm: int = Field(default=60, ge=1)
     # Semantic Scholar (RESEARCH.md §2): the unauthenticated shared pool is
     # generously documented (5,000 req/5min) but genuinely shared/unreliable
     # in practice, so the no-key path self-throttles to 1 rps regardless —

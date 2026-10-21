@@ -131,6 +131,11 @@ class MemorySession:
     def add(self, row):
         self.rows.append(row)
 
+    async def scalar(self, statement):
+        # These isolated module controls have no owned manuscript/account.
+        # Confirmation lookup must fail closed; live DB tests cover ownership.
+        return None
+
     async def flush(self):
         for row in self.rows:
             if getattr(row, "id", None) is None:

@@ -28,6 +28,7 @@ from dataclasses import dataclass, field
 from statistics import median
 
 from app.config import get_settings
+from app.ingest.citation_dates import date_patterns
 from app.ingest.normalize import match_key, normalize
 from app.ingest.patterns import HeadingPatterns
 from app.ingest.reference_dois import recover_reference_dois
@@ -446,7 +447,12 @@ def _parse_into(draft: CitationDraft, raw: str) -> None:
 
     issue_spans = {match.span("issue") for match in _VOLUME_ISSUE_PAGES.finditer(raw)}
     year_m = next(
-        (match for match in _YEAR.finditer(raw) if match.span(1) not in issue_spans), None
+        (
+            match
+            for match in date_patterns()["reference"].finditer(raw)
+            if match.span(1) not in issue_spans
+        ),
+        None,
     )
     if not year_m:
         # IEEE-style numbered entries print the year at the end, not in
@@ -455,7 +461,7 @@ def _parse_into(draft: CitationDraft, raw: str) -> None:
         if draft.parse_status != CitationParseStatus.parsed:
             _parse_unquoted_numbered_into(draft, raw)
         return  # otherwise no year backbone -> parse_failed, raw preserved
-    draft.year = int(year_m.group(1))
+    draft.year = int(year_m.group(1)[:4]) if year_m.group(1)[:4].isdigit() else None
 
     # A numbered APA list ("12. Cruz, M. A. (2023)") keeps its label in the
     # raw text; it is not part of the first author's name.
@@ -1050,7 +1056,7 @@ def _bibliography_continues(span: list[TextBlock]) -> bool:
     return any(
         _NUMBERED_ENTRY.match(block.text) is not None
         or _STANDALONE_REFERENCE_LABEL.fullmatch(block.text) is not None
-        or _AUTHOR_YEAR_ENTRY_START.match(block.text) is not None
+        or date_patterns()["entry"].match(block.text) is not None
         for block in _split_numbered_block_lines(span)
     )
 

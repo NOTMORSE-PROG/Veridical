@@ -27,6 +27,8 @@ from app.checks.citations.extract import (
     orphan_flags,
     uncited_flags,
 )
+from app.checks.citations.linkage_guard import guarded_absence_candidates
+from app.checks.citations.metadata import metadata_mismatches, returned_doi, same_doi
 from app.checks.citations.numbered import (
     NumberedCitationAssessment,
     analyze_numbered_citations,
@@ -42,6 +44,7 @@ from app.config import Settings
 from app.errors import ApiDownError
 from app.external import cache
 from app.external import crossref as crossref_client
+from app.external import datacite as datacite_client
 from app.external import gbooks as gbooks_client
 from app.external import openlibrary as openlibrary_client
 from app.external import s2 as s2_client
@@ -61,7 +64,8 @@ from app.ingest.schemas import ExtractionResult
 from app.llm.base import LLMClient
 from app.models.citation import Citation
 from app.models.enums import CheckKind, CitationParseStatus, FlagSeverity, ResultOutcome
-from app.models.run import CheckResult, Flag
+from app.models.manuscript import Manuscript
+from app.models.run import CheckResult, CheckRun, Flag
 
 
 class VerdictKind(StrEnum):
@@ -76,6 +80,7 @@ class VerdictKind(StrEnum):
     # local/Philippine source these providers don't index) -- silence, same
     # as `existence_confirmed`, never re-flagged.
     instructor_confirmed = "instructor_confirmed"
+    metadata_mismatch = "metadata_mismatch"
 
 
 @dataclass(frozen=True)
@@ -100,8 +105,8 @@ CORRECTED_WORDING = (
     "Not a retraction, for your awareness."
 )
 UNVERIFIABLE_NOT_FOUND_WORDING = (
-    "Could not find this source in CrossRef, Semantic Scholar, Open "
-    "Library, or Google Books. Possible local/unindexed source, a typo in "
+    "The attempted registry or catalogue lookup did not return this source. "
+    "Possible local/unindexed source, a typo in "
     "the citation, or a source these providers don't cover, please check "
     "manually. Unverifiable, not necessarily incorrect."
 )
@@ -140,7 +145,12 @@ def _numeric_link_evidence(assessment: NumberedCitationAssessment) -> list[dict[
 
 
 async def verify_citation(
-    session: AsyncSession, client: httpx.AsyncClient, citation: Citation, *, settings: Settings
+    session: AsyncSession,
+    client: httpx.AsyncClient,
+    citation: Citation,
+    *,
+    settings: Settings,
+    instructor_id: int | None = None,
 ) -> CitationVerdict:
     """Existence: DOI → CrossRef; books (ISBN) → Open Library→Google Books;
     else (no DOI/ISBN) → metadata search CrossRef→Semantic Scholar (ticket
@@ -159,8 +169,18 @@ async def verify_citation(
             "doi",
             citation.doi,
             settings=settings,
-            fetch=lambda: crossref_client.lookup_doi(client, citation.doi, settings=settings),
+            fetch=lambda: _lookup_doi_chain(client, citation.doi, settings),
+            required_providers=settings.citation_doi_providers,
+            instructor_id=instructor_id,
+            reference_text=citation.raw_text,
         )
+        if verdict.result and verdict.result.found:
+            if not same_doi(returned_doi(verdict.result), citation.doi):
+                return CitationVerdict(VerdictKind.unassessed, verdict.result)
+            if verdict.kind in (VerdictKind.retracted, VerdictKind.corrected):
+                return verdict
+            if metadata_mismatches(citation, verdict.result):
+                return CitationVerdict(VerdictKind.metadata_mismatch, verdict.result)
         # CrossRef often has no abstract (many publishers don't submit one) —
         # most real DOI-backed citations would never reach V-030's
         # claim-support check without this. S2 is the more reliable
@@ -170,6 +190,7 @@ async def verify_citation(
         if (
             verdict.kind == VerdictKind.existence_confirmed
             and verdict.result is not None
+            and verdict.result.content_checkable
             and not verdict.result.abstract
         ):
             abstract = await _fetch_supplementary_abstract(
@@ -188,7 +209,13 @@ async def verify_citation(
             return result
 
         return await _verify_keyed(
-            session, "isbn", citation.isbn, settings=settings, fetch=_book_lookup
+            session,
+            "isbn",
+            citation.isbn,
+            settings=settings,
+            fetch=_book_lookup,
+            instructor_id=instructor_id,
+            reference_text=citation.raw_text,
         )
 
     if citation.title:
@@ -202,12 +229,41 @@ async def verify_citation(
             return result
 
         return await _verify_keyed(
-            session, "title", citation.title.casefold(), settings=settings, fetch=_title_search
+            session,
+            "title",
+            citation.title.casefold(),
+            settings=settings,
+            fetch=_title_search,
+            instructor_id=instructor_id,
+            reference_text=citation.raw_text,
         )
 
     # No DOI/ISBN/title to key a lookup on (e.g. a parse_failed entry) —
     # genuinely unverifiable, no network call made.
     return CitationVerdict(VerdictKind.not_found)
+
+
+async def _lookup_doi_chain(client, doi, settings):
+    attempted, unavailable = [], False
+    lookups = {"crossref": crossref_client.lookup_doi, "datacite": datacite_client.lookup_doi}
+    for provider in settings.citation_doi_providers:
+        if provider not in lookups:
+            raise ApiDownError("The configured DOI provider is unsupported.")
+        attempted.append(provider)
+        try:
+            result = await lookups[provider](client, doi, settings=settings)
+        except (ApiDownError, httpx.HTTPError, ValueError, KeyError, TypeError, AttributeError):
+            unavailable = True
+            continue
+        if result.found:
+            return replace(result, attempted_providers=attempted)
+    if unavailable:
+        raise ApiDownError("At least one DOI registry could not be checked.")
+    return VerificationResult(
+        found=False,
+        provider=attempted[-1] if attempted else "unassessed",
+        attempted_providers=attempted,
+    )
 
 
 async def _fetch_supplementary_abstract(
@@ -219,25 +275,41 @@ async def _fetch_supplementary_abstract(
         key_value=doi,
         stale_days=settings.citation_cache_stale_days,
     )
-    if cached is not None:
+    if cached is not None and (not cached.found or same_doi(returned_doi(cached), doi)):
         return cached.abstract
     try:
         result = await s2_client.lookup_doi(client, doi, settings=settings)
-    except ApiDownError:
+    except (ApiDownError, httpx.HTTPError, ValueError, KeyError, TypeError, AttributeError):
         return None
     await cache.store_result(
         session, key_kind="doi_abstract", key_value=doi, provider="s2", result=result
     )
-    return result.abstract
+    return result.abstract if same_doi(returned_doi(result), doi) else None
 
 
-async def _verify_keyed(session, key_kind, key_value, *, settings, fetch) -> CitationVerdict:
+async def _verify_keyed(
+    session,
+    key_kind,
+    key_value,
+    *,
+    settings,
+    fetch,
+    required_providers=(),
+    instructor_id=None,
+    reference_text=None,
+) -> CitationVerdict:
     cached = await cache.get_cached(
         session,
         key_kind=key_kind,
         key_value=key_value,
         stale_days=settings.citation_cache_stale_days,
     )
+    if (
+        cached is not None
+        and not cached.found
+        and not set(required_providers).issubset(cached.attempted_providers)
+    ):
+        cached = None
     if cached is not None:
         verdict = _verdict_from_result(cached, key_kind=key_kind, key_value=key_value)
     else:
@@ -250,7 +322,11 @@ async def _verify_keyed(session, key_kind, key_value, *, settings, fetch) -> Cit
         )
         verdict = _verdict_from_result(result, key_kind=key_kind, key_value=key_value)
     if verdict.kind == VerdictKind.not_found and await cache.is_instructor_confirmed(
-        session, key_kind=key_kind, key_value=key_value
+        session,
+        key_kind=key_kind,
+        key_value=key_value,
+        instructor_id=instructor_id,
+        reference_text=reference_text,
     ):
         return CitationVerdict(
             VerdictKind.instructor_confirmed, verdict.result, key_kind, key_value
@@ -280,6 +356,22 @@ def _verdict_flag_draft(citation: Citation, verdict: CitationVerdict) -> Citatio
         # "not found"; confirmed sources do not need an issue flag.
         return None
     anchor = f"reference #{citation.order_index + 1}"
+    if verdict.kind == VerdictKind.metadata_mismatch:
+        return CitationFlagDraft(
+            severity=FlagSeverity.low,
+            evidence_excerpt=citation.raw_text,
+            page_anchor=anchor,
+            detail={
+                "kind": "possible_metadata_mismatch",
+                "reason": (
+                    "The DOI identifies a registered source, but its published metadata differs "
+                    "from this reference. Compare the author, title and year before relying on it. "
+                    "Source existence does not establish claim support."
+                ),
+                "provider": verdict.result.provider,
+                "differing_fields": metadata_mismatches(citation, verdict.result),
+            },
+        )
     if verdict.kind == VerdictKind.retracted:
         detail = (verdict.result and verdict.result.retraction_detail) or "retracted"
         return CitationFlagDraft(
@@ -310,7 +402,11 @@ def _verdict_flag_draft(citation: Citation, verdict: CitationVerdict) -> Citatio
             page_anchor=anchor,
             detail={"kind": "unverifiable_api_down", "reason": UNVERIFIABLE_API_DOWN_WORDING},
         )
-    detail = {"kind": "unverifiable_not_found", "reason": UNVERIFIABLE_NOT_FOUND_WORDING}
+    detail = {
+        "kind": "unverifiable_not_found",
+        "reason": UNVERIFIABLE_NOT_FOUND_WORDING,
+        "providers_attempted": verdict.result.attempted_providers if verdict.result else [],
+    }
     if verdict.key_kind is not None:
         # BUG-078: only present when there's a real DOI/ISBN/title to key a
         # confirmation on -- absent for the "no identifier at all" case, so
@@ -404,6 +500,11 @@ async def run_citation_integrity_check(
     )
     numbered = numeric.n_numbered_reference_entries > 0
     absence_candidates = numeric.confidently_uncited if numbered else cross.confidently_uncited
+    identity_unassessed, identifier_leads = set(), []
+    if not numbered:
+        absence_candidates, identity_unassessed, identifier_leads = guarded_absence_candidates(
+            absence_candidates, citations, body_blocks, settings
+        )
     # No supported body style or a partial scan cannot prove a reference unused.
     if metadata_only or gaps or selection.issues or (not numbered and not cross.linked):
         absence_candidates = []
@@ -419,6 +520,18 @@ async def run_citation_integrity_check(
     )
     if metadata_only or gaps or selection.issues:
         linkage_unassessed = max(linkage_unassessed, len(citations))
+    if not numbered:
+        linkage_unassessed = (
+            len(
+                identity_unassessed
+                | {
+                    ref.order_index
+                    for ref in (cross.possibly_cited + (cross.uncited if not cross.linked else []))
+                }
+            )
+            if not (metadata_only or gaps or selection.issues)
+            else len(citations)
+        )
     metadata_unassessed = []
     metadata_api_down = 0
     metadata_not_found = 0
@@ -464,6 +577,11 @@ async def run_citation_integrity_check(
         else draft
         for draft in flag_drafts
     ]
+    instructor_id = await session.scalar(
+        select(Manuscript.instructor_id)
+        .join(CheckRun, CheckRun.manuscript_id == Manuscript.id)
+        .where(CheckRun.id == check_run_id)
+    )
     for citation in citations:
         parsed = citation.parse_status == CitationParseStatus.parsed
         identifier_unassessed = bool(
@@ -498,7 +616,11 @@ async def run_citation_integrity_check(
                 }
             )
             continue
-        verdict = await verify_citation(session, client, citation, settings=settings)
+        verdict = await verify_citation(
+            session, client, citation, settings=settings, instructor_id=instructor_id
+        )
+        if verdict.kind == VerdictKind.unassessed:
+            metadata_unassessed.append(citation.order_index)
         metadata_api_down += verdict.kind == VerdictKind.api_down
         metadata_not_found += verdict.kind == VerdictKind.not_found
         verification_records.append(
@@ -508,6 +630,11 @@ async def run_citation_integrity_check(
                 "lookup_attempted": True,
                 "lookup_kind": "doi" if citation.doi else "isbn" if citation.isbn else "title",
                 "metadata_complete": metadata_complete,
+                "provider": verdict.result.provider if verdict.result else None,
+                "providers_attempted": verdict.result.attempted_providers if verdict.result else [],
+                "retraction_status": "checked"
+                if verdict.result and verdict.result.provider == "crossref"
+                else "unassessed",
             }
         )
         draft = _verdict_flag_draft(citation, verdict)
@@ -515,7 +642,10 @@ async def run_citation_integrity_check(
             flag_drafts.append(_with_reference_anchor(draft, citation.order_index, locations))
         claim_sentence = claim_by_order_index.get(citation.order_index)
         if claim_sentence and (
-            not metadata_complete or verdict.result is None or not verdict.result.abstract
+            not metadata_complete
+            or verdict.kind != VerdictKind.existence_confirmed
+            or verdict.result is None
+            or not verdict.result.abstract
         ):
             content_unassessed.add(citation.order_index)
         if (
@@ -618,6 +748,7 @@ async def run_citation_integrity_check(
             "n_numeric_candidate_links": len(numeric.linked),
             "n_numeric_assessed_links": sum(m.strong_citation_context for m, _ in numeric.linked),
             "numeric_link_evidence": _numeric_link_evidence(numeric),
+            "identifier_linkage_leads": identifier_leads,
             "reference_metadata_coverage": verification_records,
             "reference_list_page": reference_section_page(extraction, patterns),
             "reference_selection_issues": list(selection.issues),

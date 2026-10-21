@@ -15,12 +15,26 @@ class ReferenceMetadataPatterns:
     corporate_author_words: frozenset[str]
     locator_label: re.Pattern[str] | None
     doi_resolver_hosts: frozenset[str]
+    date_source: str
+    standard_identifier: re.Pattern[str]
 
 
 @lru_cache
 def load_reference_metadata_patterns(path: Path | None = None) -> ReferenceMetadataPatterns:
     source = path or Path(__file__).parent / "data" / "reference_metadata_patterns.json"
     raw = json.loads(source.read_text(encoding="utf-8"))
+    defaults = json.loads(
+        (Path(__file__).parent / "data" / "reference_metadata_patterns.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    no_dates = raw.get("no_date_tokens", defaults["no_date_tokens"])
+    if not isinstance(no_dates, list) or not all(
+        isinstance(token, str) and token.strip() for token in no_dates
+    ):
+        raise ValueError("No-date tokens must be a list of nonempty strings")
+    alternatives = "|".join(re.escape(token) for token in no_dates)
+    date_source = r"\d{4}[a-z]?" + (rf"|(?i:{alternatives})" if alternatives else "")
     for name in (
         "access_note_prefixes",
         "months",
@@ -73,4 +87,8 @@ def load_reference_metadata_patterns(path: Path | None = None) -> ReferenceMetad
             re.compile(rf"\b(?:{labels})\s*:?\s*(?=https?://)", re.IGNORECASE) if labels else None
         ),
         doi_resolver_hosts=frozenset(host.lower() for host in hosts),
+        date_source=f"(?:{date_source})",
+        standard_identifier=re.compile(
+            raw.get("standard_identifier_pattern", defaults["standard_identifier_pattern"])
+        ),
     )

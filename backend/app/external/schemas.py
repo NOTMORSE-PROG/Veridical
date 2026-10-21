@@ -28,3 +28,4 @@ class VerificationResult:
     # claim-support check) — None elsewhere, never fabricated from `raw`.
     abstract: str | None = None
     raw: dict[str, Any] = field(default_factory=dict)
+    attempted_providers: list[str] = field(default_factory=list)

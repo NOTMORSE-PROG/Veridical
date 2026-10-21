@@ -265,7 +265,9 @@ async def _seed_confirmable_citation_flag(session):
     return instructor, check_run, flag
 
 
-async def test_confirm_citation_source_overrides_the_flag_and_marks_the_cache_row(session_factory):
+async def test_confirm_citation_source_overrides_owned_flag_without_global_confirmation(
+    session_factory,
+):
     async with session_factory() as session:
         instructor, check_run, flag = await _seed_confirmable_citation_flag(session)
 
@@ -290,8 +292,72 @@ async def test_confirm_citation_source_overrides_the_flag_and_marks_the_cache_ro
                 CitationCache.key_kind == "doi", CitationCache.key_value == "10.9999/local-source"
             )
         )
-        assert row.instructor_confirmed is True
-        assert row.instructor_confirmed_at is not None
+        assert row.instructor_confirmed is False
+        assert row.instructor_confirmed_at is None
+
+
+async def test_confirmation_reuse_is_owner_scoped_and_never_hides_retraction(session_factory):
+    import httpx
+
+    from app.checks.citations.verify import VerdictKind, verify_citation
+    from app.config import Settings
+    from app.external.cache import is_instructor_confirmed, store_result
+    from app.external.schemas import VerificationResult
+    from app.models.citation import Citation
+
+    async with session_factory() as session:
+        instructor, _, flag = await _seed_confirmable_citation_flag(session)
+        other = Instructor(email="other-source-check@test.local", display_name="Other instructor")
+        session.add(other)
+        await session.commit()
+        await confirm_citation_source(
+            session, flag.id, instructor.id, "Checked in the publisher catalogue."
+        )
+        key = {"key_kind": "doi", "key_value": "10.9999/local-source"}
+        assert await is_instructor_confirmed(
+            session, **key, instructor_id=instructor.id, reference_text=flag.evidence_excerpt
+        )
+        assert not await is_instructor_confirmed(
+            session, **key, instructor_id=other.id, reference_text=flag.evidence_excerpt
+        )
+        assert not await is_instructor_confirmed(
+            session,
+            **key,
+            instructor_id=instructor.id,
+            reference_text="A different reference sharing the DOI",
+        )
+        assert not await is_instructor_confirmed(session, **key, instructor_id=instructor.id)
+        assert not await is_instructor_confirmed(session, **key)
+        source = Citation(order_index=0, raw_text=flag.evidence_excerpt, doi=key["key_value"])
+        settings = Settings(citation_doi_providers=["crossref"])
+        async with httpx.AsyncClient(
+            transport=httpx.MockTransport(lambda request: httpx.Response(404))
+        ) as client:
+            own = await verify_citation(
+                session, client, source, settings=settings, instructor_id=instructor.id
+            )
+            foreign = await verify_citation(
+                session, client, source, settings=settings, instructor_id=other.id
+            )
+        assert own.kind == VerdictKind.instructor_confirmed
+        assert foreign.kind == VerdictKind.not_found
+        await store_result(
+            session,
+            **key,
+            provider="crossref",
+            result=VerificationResult(
+                found=True, provider="crossref", retracted=True, raw={"DOI": key["key_value"]}
+            ),
+        )
+        async with httpx.AsyncClient(
+            transport=httpx.MockTransport(
+                lambda request: pytest.fail("must use saved provider record")
+            )
+        ) as client:
+            retracted = await verify_citation(
+                session, client, source, settings=settings, instructor_id=instructor.id
+            )
+        assert retracted.kind == VerdictKind.retracted
 
 
 async def test_confirm_citation_source_rejects_a_flag_with_nothing_to_confirm(session_factory):

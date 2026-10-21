@@ -25,6 +25,7 @@ from typing import Any, Protocol
 from app.checks.citations.numbered import reference_anchor
 from app.config import Settings, get_settings
 from app.findings.identity import FINDING_GROUP_FIELD, finding_group_fingerprint
+from app.ingest.citation_dates import citation_date_key, date_patterns, reference_date_key
 from app.ingest.schemas import TextBlock
 from app.models.enums import FlagSeverity
 
@@ -296,7 +297,7 @@ def extract_in_text_citations(
             if len(out) >= settings.citation_in_text_max_matches:
                 gaps.add("citation_count_limit")
                 return out
-            if not _YEAR_IN_GROUP.search(group_m.group(1)):
+            if not date_patterns(settings)["group"].search(group_m.group(1)):
                 continue
             if len(group_m.group(1)) > settings.citation_parenthetical_group_max_chars:
                 gaps.add("parenthetical_group_limit")
@@ -344,7 +345,7 @@ def extract_in_text_citations(
                         )
                     )
 
-        for m in _NARRATIVE_YEAR.finditer(text):
+        for m in date_patterns(settings)["narrative"].finditer(text):
             if len(out) >= settings.citation_in_text_max_matches:
                 gaps.add("citation_count_limit")
                 return out
@@ -435,7 +436,7 @@ def _parenthetical_entry(
     if len(entry) > settings.citation_parenthetical_entry_max_chars:
         gaps.add("parenthetical_entry_limit")
         return None
-    for year_match in _PAREN_YEAR.finditer(entry):
+    for year_match in date_patterns(settings)["parenthetical"].finditer(entry):
         author = entry[: year_match.start()].strip()
         if not _author_tokens_valid(
             author,
@@ -869,8 +870,8 @@ def cross_match(in_text: list[InTextCitation], references: list[ReferenceLike]) 
                     surnames = [suffix]
                     candidates = list(index[suffix])
                     break
-        year_digits = cite.year[:4]
-        matches = [c for c in candidates if str(c.year) == year_digits]
+        year_digits = citation_date_key(cite.year)
+        matches = [c for c in candidates if reference_date_key(c) == year_digits]
         matched_ids = {ref.order_index for ref in matches}
         # A narrative prefix can also precede a natural-order name. Recover
         # only possible suffix matches; never turn an inferred family-name
@@ -885,7 +886,7 @@ def cross_match(in_text: list[InTextCitation], references: list[ReferenceLike]) 
             ref.order_index: ref
             for key in possible_keys
             for ref in possible_names.get(key, [])
-            if str(ref.year) == year_digits and ref.order_index not in matched_ids
+            if reference_date_key(ref) == year_digits and ref.order_index not in matched_ids
         }
         if uncertain_names:
             ambiguous.append(cite)

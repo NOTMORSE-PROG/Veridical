@@ -8,12 +8,15 @@ whole cache (a fresh DOI lookup for a different citation is unaffected).
 
 from datetime import UTC, datetime, timedelta
 
+from sqlalchemy import and_, or_
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 
 from app.external.schemas import VerificationResult
 from app.models.citation_cache import CitationCache
+from app.models.manuscript import Manuscript
+from app.models.run import CheckResult, CheckRun, Flag
 
 
 def _to_result(row: CitationCache) -> VerificationResult:
@@ -36,18 +39,44 @@ async def get_cached(
     return _to_result(row)
 
 
-async def is_instructor_confirmed(session: AsyncSession, *, key_kind: str, key_value: str) -> bool:
+async def is_instructor_confirmed(
+    session: AsyncSession,
+    *,
+    key_kind: str,
+    key_value: str,
+    instructor_id: int | None = None,
+    reference_text: str | None = None,
+) -> bool:
     """BUG-078/FEATURES.md §9: has a human already confirmed this specific
     source is legitimate? Kept separate from `get_cached` (rather than
     folding into its return shape) so the common existence-confirmed/
     retracted/corrected paths pay no extra query -- only a `not_found`
     verdict needs to ask this."""
-    row = await session.scalar(
-        select(CitationCache.instructor_confirmed).where(
-            CitationCache.key_kind == key_kind, CitationCache.key_value == key_value
-        )
+    if instructor_id is None or not reference_text:
+        return False
+    same_key = and_(
+        Flag.detail["key_kind"].astext == key_kind, Flag.detail["key_value"].astext == key_value
     )
-    return bool(row)
+    legacy_detail = and_(
+        or_(Flag.detail == {}, Flag.detail.is_(None)),
+        CheckResult.detail["key_kind"].astext == key_kind,
+        CheckResult.detail["key_value"].astext == key_value,
+    )
+    row = await session.scalar(
+        select(Flag.id)
+        .join(CheckResult, Flag.check_result_id == CheckResult.id)
+        .join(CheckRun, CheckResult.check_run_id == CheckRun.id)
+        .join(Manuscript, CheckRun.manuscript_id == Manuscript.id)
+        .where(
+            Manuscript.instructor_id == instructor_id,
+            Flag.evidence_excerpt == reference_text,
+            Flag.confirmed_citation_source.is_(True),
+            Flag.overridden.is_(True),
+            or_(same_key, legacy_detail),
+        )
+        .limit(1)
+    )
+    return row is not None
 
 
 async def citation_source_cached(session: AsyncSession, *, key_kind: str, key_value: str) -> bool:
@@ -118,6 +147,8 @@ async def store_result(
         "content_checkable": result.content_checkable,
         "url": result.url,
         "raw": result.raw,
+        "abstract": result.abstract,
+        "attempted_providers": result.attempted_providers,
     }
     stmt = (
         pg_insert(CitationCache)

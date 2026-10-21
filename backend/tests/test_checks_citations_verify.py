@@ -148,7 +148,7 @@ async def test_typo_doi_is_unverifiable_not_retried_via_title(session_factory):
     async with session_factory() as session, _client(handler) as client:
         verdict = await verify_citation(session, client, citation, settings=get_settings())
     assert verdict.kind == VerdictKind.not_found
-    assert len(calls) == 1  # only the DOI lookup — no title-search fallback
+    assert len(calls) == 2  # exact DOI in both registries; no title-search fallback
     draft = _verdict_flag_draft(citation, verdict)
     assert draft.severity == FlagSeverity.low
     assert draft.detail["reason"] == UNVERIFIABLE_NOT_FOUND_WORDING
@@ -172,14 +172,12 @@ async def test_not_found_with_no_identifier_has_nothing_confirmable(session_fact
     assert "key_value" not in draft.detail
 
 
-async def test_instructor_confirmed_source_produces_no_flag(session_factory):
-    """BUG-078/FEATURES.md §9: once a source's citation_cache row is
-    marked instructor_confirmed (by `confirm_citation_source`, exercised
-    directly here rather than through the flags service to keep this test
-    scoped to `verify.py`'s own read side), a LATER verification of the
-    identical key (this manuscript's re-run, or a different manuscript
-    citing the same DOI) must resolve to `instructor_confirmed` and
-    produce no flag -- the whole point of the feature."""
+async def test_legacy_global_confirmation_does_not_suppress_a_finding(session_factory):
+    """Historical global cache bits cannot suppress any instructor's finding.
+
+    The legacy writer seeds an old record; current confirmations are resolved
+    from an owned flag with exact reference identity, never this shared bit.
+    """
     from app.external.cache import confirm_citation_source
 
     citation = _citation(doi="10.9999/confirmed-doi")
@@ -203,9 +201,9 @@ async def test_instructor_confirmed_source_produces_no_flag(session_factory):
     # must now resolve to instructor_confirmed, not not_found again.
     async with session_factory() as session, _client(handler) as client:
         second = await verify_citation(session, client, citation, settings=get_settings())
-    assert second.kind == VerdictKind.instructor_confirmed
-    assert _verdict_flag_draft(citation, second) is None
-    assert len(calls) == 1  # only the first lookup hit the network; the second was a cache hit
+    assert second.kind == VerdictKind.not_found
+    assert _verdict_flag_draft(citation, second) is not None
+    assert len(calls) == 2  # both registry misses cached; no new calls on replay
 
 
 async def test_known_retracted_doi_is_high_severity(session_factory):
@@ -315,7 +313,14 @@ async def test_crossref_missing_abstract_supplemented_from_s2(session_factory):
         if "crossref.org" in str(request.url):
             return httpx.Response(200, json={"message": {"DOI": "10.1/y", "title": ["A Paper"]}})
         assert "semanticscholar.org" in str(request.url)
-        return httpx.Response(200, json={"title": "A Paper", "abstract": "We report a finding."})
+        return httpx.Response(
+            200,
+            json={
+                "title": "A Paper",
+                "abstract": "We report a finding.",
+                "externalIds": {"DOI": "10.1/y"},
+            },
+        )
 
     citation = _citation(doi="10.1/y")
     async with session_factory() as session, _client(handler) as client:
@@ -358,7 +363,12 @@ async def test_claim_support_flag_created_end_to_end(session_factory):
             )
         assert "semanticscholar.org" in str(request.url)
         return httpx.Response(
-            200, json={"title": "A Study", "abstract": "We found a significant positive effect."}
+            200,
+            json={
+                "title": "A Study",
+                "abstract": "We found a significant positive effect.",
+                "externalIds": {"DOI": "10.1/reyes"},
+            },
         )
 
     class ScriptedLLM:
@@ -434,7 +444,12 @@ async def test_a_run_with_skipped_claim_support_pairs_does_not_report_passed(ses
             )
         assert "semanticscholar.org" in str(request.url)
         return httpx.Response(
-            200, json={"title": "A Study", "abstract": "We found a significant positive effect."}
+            200,
+            json={
+                "title": "A Study",
+                "abstract": "We found a significant positive effect.",
+                "externalIds": {"DOI": "10.1/reyes"},
+            },
         )
 
     class QuotaExhaustedLLM:

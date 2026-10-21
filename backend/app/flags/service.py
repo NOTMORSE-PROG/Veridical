@@ -337,33 +337,23 @@ async def confirm_citation_source(
     destroyed) -- `flag.confirmed_citation_source` additionally records
     that this path (not an ordinary override) is what resolved it, so the
     terminal banner can say something true instead of "you overrode this
-    finding" (design review spec, 2026-08-24); (2) the underlying
-    `citation_cache` row is marked `instructor_confirmed` -- a DURABLE,
-    CROSS-MANUSCRIPT mark (`citation_cache` is keyed by source identity —
-    DOI/ISBN/title — not by instructor or manuscript), so any future check
-    run, including another instructor's manuscript citing the identical
-    source, is never re-flagged either (FEATURES.md §9's own wording:
-    "cache instructor's manual confirmations so the same source isn't
-    re-flagged").
+    finding" (design review spec, 2026-08-24); (2) later checks may reuse this
+    account's confirmation only for the identical reference text and lookup
+    key. Provider metadata remains shared, but this judgment is not shared
+    with another instructor or another reference using the same key.
 
     `reason` is instructor-authored ("Where you verified this") -- required,
     same discipline as `override_flag`'s reason, and if anything a HIGHER
-    bar is warranted here (durable, cross-account), never a lower one.
+    bar is warranted here (durable, account-specific), never a lower one.
 
     Only reachable for a flag whose detail carries `key_kind`/`key_value`
     (set by `verify.py` only when a real DOI/ISBN/title existed to key the
     lookup on) — anything else is a `ConflictError`, never a silent no-op.
 
-    Commit ORDER matters (backend review, BUG-078 review, live-
-    reproduced): the flag/audit-log write commits FIRST, and only then is
-    `citation_cache` marked confirmed (its own separate commit) -- the
-    reverse order left a window where a crash between the two commits
-    would durably silence this source everywhere, forever, with no
-    `Flag.overridden` and no audit trail at all. This order's own worst
-    case (a crash after the first commit) is strictly safer: the flag is
-    honestly resolved with a real audit trail, and the source just isn't
-    globally suppressed yet -- recoverable by confirming again, which is
-    idempotent."""
+    The owned flag and its audit trail commit together. The historical global
+    citation-cache confirmation bit is not written or used for suppression.
+    Existence confirmation never establishes claim support or hides retraction.
+    """
     flag, result, manuscript, check_run = await _scoped_flag(session, flag_id, instructor_id)
     await raise_if_decided(session, result.check_run_id)
     detail = flag.detail or result.detail or {}
@@ -392,7 +382,6 @@ async def confirm_citation_source(
         )
     )
     await session.commit()
-    await cache.confirm_citation_source(session, key_kind=key_kind, key_value=key_value)
     await aggregate_and_score(session, result.check_run_id)
     await session.refresh(flag)
     return await _to_flag_out(session, flag, result, manuscript, check_run), result.check_run_id

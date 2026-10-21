@@ -239,7 +239,7 @@ function ResolutionControl({ flag }: { flag: FlagOut }) {
       <section className="signal-resolution-record" aria-labelledby="resolution-heading">
         <div><p className="signal-section-kicker">Instructor resolution</p><h2 id="resolution-heading">{flag.confirmed_citation_source ? "Source confirmed" : "Finding overridden"}</h2></div>
         <p>{flag.confirmed_citation_source ? `You confirmed the source after checking it: ${flag.override_reason}.` : `You overrode this possible inconsistency: ${flag.override_reason}.`}</p>
-        {flag.confirmed_citation_source && <p>The verified-source record also applies when the same DOI, ISBN, or title appears in another manuscript. This action currently has no in-product undo.</p>}
+        {flag.confirmed_citation_source && <p>Your confirmation applies only to this exact reference in your account, not to another reference or instructor. It does not establish support for a manuscript claim.</p>}
         <p>The original finding remains above, and the readiness band has been recalculated.</p>
         <ActionLink to={`/report/${flag.check_run_id}`} variant="secondary">View updated report</ActionLink>
       </section>

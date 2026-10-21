@@ -605,7 +605,7 @@ describe("FlagDetail — BUG-078 confirm-source", () => {
     ).toBeInTheDocument();
     expect(screen.getByText(/Verified on the publisher's own website\./)).toBeInTheDocument();
     expect(
-      screen.getByText(/verified-source record also applies/),
+      screen.getByText(/only to this exact reference in your account, not to another reference or instructor/),
     ).toBeInTheDocument();
     // The ordinary-override sentence must never appear on this path.
     expect(screen.queryByText(/You overrode this possible inconsistency/)).not.toBeInTheDocument();
