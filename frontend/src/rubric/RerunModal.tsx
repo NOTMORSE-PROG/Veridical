@@ -2,8 +2,9 @@
 // activated rubric version. Bulk multi-select + sequential submission
 // with real per-item status (never a fake aggregate percentage, charter
 // rule 3) -- design review spec, 2026-08-14.
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import { ApiError } from "../api/client";
+import type { ManuscriptListItem, RubricListItem } from "../api/types";
 import { useCreateCheckRun, useManuscripts, useRerunEstimate } from "../check/useCheckRun";
 import { Modal, ModalBackdrop } from "../components/Modal";
 import { manuscriptIdentity } from "../domain/manuscriptLabel";
@@ -23,7 +24,7 @@ function SpinnerIcon() {
 type RowState =
   | { status: "waiting" }
   | { status: "submitting" }
-  | { status: "submitted"; queuePosition: number | null; runId: number }
+  | { status: "submitted"; runId: number }
   | { status: "failed"; message: string };
 
 interface RerunModalProps {
@@ -80,11 +81,27 @@ export function RerunModal({ onClose, initialManuscriptIds }: RerunModalProps) {
   // silently showing an empty or unrelated selection.
   const [excludedInitialCount, setExcludedInitialCount] = useState(0);
   const [rowState, setRowState] = useState<Record<number, RowState>>({});
+  const [submittedManuscripts, setSubmittedManuscripts] = useState<ManuscriptListItem[]>([]);
+  const [submittedFormat, setSubmittedFormat] = useState<RubricListItem>();
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [hasSubmitted, setHasSubmitted] = useState(false);
   const [announcement, setAnnouncement] = useState("");
+  const [submissionAttempt, setSubmissionAttempt] = useState(0);
+  const outcomesHeadingRef = useRef<HTMLHeadingElement>(null);
   const createCheckRun = useCreateCheckRun();
   const dataReady = !manuscriptsPending && !manuscriptsError && !familiesPending && activeFamily !== undefined;
+
+  useEffect(() => {
+    if (submissionAttempt > 0) outcomesHeadingRef.current?.focus();
+  }, [submissionAttempt]);
+
+  function navigateFromOutcomesHeading(event: KeyboardEvent<HTMLHeadingElement>) {
+    if (event.key !== "Tab") return;
+    const dialog = event.currentTarget.closest('[role="dialog"]');
+    const controls = dialog?.querySelectorAll<HTMLElement>('a[href], button:not([disabled])');
+    event.preventDefault();
+    if (controls?.length) controls[event.shiftKey ? controls.length - 1 : 0].focus();
+  }
 
   // Default: everything eligible is selected, since a version this
   // manuscript was graded against can never be the one just activated
@@ -160,29 +177,37 @@ export function RerunModal({ onClose, initialManuscriptIds }: RerunModalProps) {
   }
 
   async function submit(ids: number[]) {
-    if (!activeFamily) return;
+    const targetFormat = submittedFormat ?? activeFamily;
+    if (!targetFormat) return;
+    if (!hasSubmitted) {
+      setSubmittedManuscripts(eligible.filter((m) => selected.has(m.id)));
+      setSubmittedFormat(targetFormat);
+    }
     setIsSubmitting(true);
     setHasSubmitted(true);
+    setSubmissionAttempt((attempt) => attempt + 1);
+    setAnnouncement("");
     try {
-      let succeeded = 0;
-      let failed = 0;
+      const outcomes = { ...rowState };
       for (const id of ids) {
         setRowState((prev) => ({ ...prev, [id]: { status: "submitting" } }));
         try {
-          const run = await createCheckRun.mutateAsync({ manuscript_id: id, rubric_id: activeFamily.id });
+          const run = await createCheckRun.mutateAsync({ manuscript_id: id, rubric_id: targetFormat.id });
+          outcomes[id] = { status: "submitted", runId: run.id };
           setRowState((prev) => ({
             ...prev,
-            [id]: { status: "submitted", queuePosition: run.queue_position, runId: run.id },
+            [id]: outcomes[id],
           }));
-          succeeded++;
         } catch (err) {
-          const message = err instanceof ApiError ? err.message : "Could not start this check. Try again.";
+          const message = err instanceof ApiError ? err.message : "Could not confirm this request. Check manuscript progress before retrying.";
+          outcomes[id] = { status: "failed", message };
           setRowState((prev) => ({ ...prev, [id]: { status: "failed", message } }));
-          failed++;
         }
       }
+      const accepted = Object.values(outcomes).filter((state) => state.status === "submitted").length;
+      const unconfirmed = Object.values(outcomes).filter((state) => state.status === "failed").length;
       setAnnouncement(
-        `Re-run submissions complete. ${succeeded} started successfully${failed > 0 ? `, ${failed} failed` : ""}.`,
+        `Request submission finished. ${accepted} check ${accepted === 1 ? "request" : "requests"} accepted.${unconfirmed > 0 ? ` ${unconfirmed} ${unconfirmed === 1 ? "request" : "requests"} could not be confirmed.` : ""}`,
       );
     } finally {
       setIsSubmitting(false);
@@ -197,8 +222,9 @@ export function RerunModal({ onClose, initialManuscriptIds }: RerunModalProps) {
   const allFailed = allDone && failedIds.length === selectedList.length && selectedList.length > 0;
 
   const submittedRows = hasSubmitted
-    ? eligible.filter((m) => selectedList.includes(m.id))
+    ? submittedManuscripts
     : eligible;
+  const displayFormat = submittedFormat ?? activeFamily;
 
   let footer: React.ReactNode;
   if (!hasSubmitted) {
@@ -239,7 +265,7 @@ export function RerunModal({ onClose, initialManuscriptIds }: RerunModalProps) {
           Close
         </button>
         <button type="button" onClick={() => submit(selectedList)} className="flex h-11 items-center justify-center rounded-md bg-action px-4 text-sm font-bold text-on-action hover:bg-action-hover">
-          Try again
+          Retry {failedIds.length} unconfirmed {failedIds.length === 1 ? "request" : "requests"}
         </button>
       </>
     );
@@ -250,7 +276,7 @@ export function RerunModal({ onClose, initialManuscriptIds }: RerunModalProps) {
           Close
         </button>
         <button type="button" onClick={() => submit(failedIds)} className="flex h-11 items-center justify-center rounded-md bg-action px-4 text-sm font-bold text-on-action hover:bg-action-hover">
-          Retry failed ({failedIds.length})
+          Retry {failedIds.length} unconfirmed {failedIds.length === 1 ? "request" : "requests"}
         </button>
       </>
     );
@@ -265,17 +291,19 @@ export function RerunModal({ onClose, initialManuscriptIds }: RerunModalProps) {
   return (
     <ModalBackdrop>
       <Modal title="Re-run manuscripts" onClose={isSubmitting ? undefined : onClose} size="lg" footer={footer}>
-        <div className="signal-group-flow" aria-busy={isSubmitting}>
-          <p aria-live="polite" className="sr-only">
+        <div className="signal-group-flow">
+          <p role="status" aria-atomic="true" className="sr-only">
             {announcement}
           </p>
+          {hasSubmitted && <h3 ref={outcomesHeadingRef} tabIndex={-1} onKeyDown={navigateFromOutcomesHeading} className="text-sm font-bold text-ink">Check request outcomes</h3>}
 
-          {manuscriptsPending || familiesPending ? (
+          <div className="signal-group-flow" aria-busy={isSubmitting}>
+          {!hasSubmitted && (manuscriptsPending || familiesPending) ? (
             <div role="status" aria-live="polite" aria-busy="true" className="flex items-center gap-2 text-sm text-ink-secondary">
               <SpinnerIcon />
               Loading manuscripts.
             </div>
-          ) : manuscriptsError ? (
+          ) : !hasSubmitted && manuscriptsError ? (
             <div role="alert" className="rounded-md border border-status-attention-text/25 bg-status-attention-bg p-3 text-sm text-status-attention-text">
               Could not load your manuscripts.{" "}
               <button type="button" onClick={() => refetch()} className="font-medium underline">
@@ -283,23 +311,25 @@ export function RerunModal({ onClose, initialManuscriptIds }: RerunModalProps) {
               </button>
               .
             </div>
-          ) : !activeFamily ? (
+          ) : !displayFormat ? (
             <p className="rounded-md border border-border bg-page px-3 py-2.5 text-sm text-ink-secondary">
               No active rubric is available right now. Activate a format version before re-running
               manuscripts.
             </p>
-          ) : eligible.length === 0 ? (
+          ) : !hasSubmitted && eligible.length === 0 ? (
             <p className="rounded-md border border-border bg-page px-3 py-2.5 text-sm text-ink-secondary">
               {(manuscripts ?? []).some((m) => m.latest_done_check_run_id !== null)
-                ? `No manuscripts have been checked against ${activeFamily.title} yet, so there's nothing to re-run.`
+                ? `No manuscripts have been checked against ${displayFormat.title} yet, so there's nothing to re-run.`
                 : "No manuscripts have been checked yet, so there's nothing to re-run."}
             </p>
           ) : (
             <>
               <p className="rounded-md bg-status-info-bg px-3 py-2 text-sm text-status-info-text">
-                Runs against <b>{activeFamily.title}</b> v{activeFamily.version}, {activeFamily.criteria_count}{" "}
+                Runs against <b>{displayFormat.title}</b> v{displayFormat.version}, {displayFormat.criteria_count}{" "}
                 criteria.
               </p>
+
+              {hasSubmitted && failedIds.length > 0 && <p className="text-sm text-ink-secondary">Check manuscript progress before retrying an unconfirmed request. The earlier request may already have been accepted.</p>}
 
               {/* V-071 (first-time-user review finding, live-reproduced): this paragraph
                   used to unconditionally claim "all manuscripts... selected
@@ -328,7 +358,7 @@ export function RerunModal({ onClose, initialManuscriptIds }: RerunModalProps) {
                   )
                 ) : (
                   <p className="text-sm text-ink-secondary">
-                    All manuscripts previously checked against {activeFamily.title} are selected by
+                    All manuscripts previously checked against {displayFormat.title} are selected by
                     default. Deselect any you don't want to re-run.
                   </p>
                 ))}
@@ -338,7 +368,7 @@ export function RerunModal({ onClose, initialManuscriptIds }: RerunModalProps) {
                   The manuscript{excludedInitialCount === 1 ? "" : "s"} you selected{" "}
                   {excludedInitialCount === 1 ? "isn't" : "aren't"} included below: either{" "}
                   {excludedInitialCount === 1 ? "it wasn't" : "they weren't"} checked against{" "}
-                  {activeFamily.title}, or {excludedInitialCount === 1 ? "its" : "their"} program no
+                  {displayFormat.title}, or {excludedInitialCount === 1 ? "its" : "their"} program no
                   longer matches this rubric's.
                 </p>
               )}
@@ -382,9 +412,7 @@ export function RerunModal({ onClose, initialManuscriptIds }: RerunModalProps) {
                         {hasSubmitted && state?.status === "submitted" && (
                           <>
                             <span>
-                              {state.queuePosition && state.queuePosition > 0
-                                ? `Queue position ${state.queuePosition}.`
-                                : "Starting now."}
+                              Check request accepted.
                             </span>
                             <a href={`/checks/${state.runId}`} className="font-medium text-link underline">
                               View progress
@@ -405,7 +433,7 @@ export function RerunModal({ onClose, initialManuscriptIds }: RerunModalProps) {
                       <div key={m.id} className="flex min-h-11 items-start gap-3 border-b border-border px-3 py-2.5 text-sm last:border-0">
                         <span className="mt-0.5 flex-none">
                           {!state || state.status === "waiting" ? (
-                            <span className="text-xs text-ink-tertiary">Waiting</span>
+                            <span className="text-xs text-ink-tertiary">Waiting to submit.</span>
                           ) : state.status === "submitting" ? (
                             <span className="inline-flex items-center gap-1 text-xs text-status-info-text">
                               <SpinnerIcon /> Submitting.
@@ -413,7 +441,7 @@ export function RerunModal({ onClose, initialManuscriptIds }: RerunModalProps) {
                           ) : state.status === "submitted" ? (
                             <span className="text-xs font-medium text-status-success-text">Submitted</span>
                           ) : (
-                            <span className="text-xs font-medium text-status-danger-text">Failed</span>
+                            <span className="text-xs font-medium text-status-danger-text">Not confirmed</span>
                           )}
                         </span>
                         {identityBlock}
@@ -505,6 +533,7 @@ export function RerunModal({ onClose, initialManuscriptIds }: RerunModalProps) {
               )}
             </>
           )}
+          </div>
         </div>
       </Modal>
     </ModalBackdrop>

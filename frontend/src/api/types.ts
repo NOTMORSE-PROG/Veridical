@@ -270,6 +270,7 @@ export interface CheckRun {
   status: CheckRunStatus;
   stage_status: StageStatus | null;
   cancel_requested_at: string | null;
+  /** Deprecated: always null on current APIs; older numbers do not predict execution order. */
   queue_position: number | null;
   started_at: string | null;
   finished_at: string | null;

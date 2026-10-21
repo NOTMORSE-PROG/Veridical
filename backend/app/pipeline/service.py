@@ -293,20 +293,13 @@ async def list_check_runs(session: AsyncSession, instructor_id: int) -> list[Che
 
 
 async def queue_position(session: AsyncSession, check_run: CheckRun) -> int | None:
-    """1-based position among runs still waiting/running, oldest first —
-    `None` once a run is terminal (done/failed): "queue position" stops
-    being a meaningful concept (ticket AC: position shown while queued)."""
-    if check_run.status not in _ACTIVE_STATUSES:
-        return None
-    count = await session.scalar(
-        select(func.count())
-        .select_from(CheckRun)
-        .where(
-            CheckRun.status.in_(_ACTIVE_STATUSES),
-            CheckRun.created_at < check_run.created_at,
-        )
-    )
-    return (count or 0) + 1
+    """Deprecated response field, retained as null for API compatibility.
+
+    Creation order does not predict execution order: instructor rotation,
+    claims and retry eligibility affect selection (BUG-352). No ordinal is
+    available from this contract, including while a run is queued.
+    """
+    return None
 
 
 async def estimate_rerun_calls(

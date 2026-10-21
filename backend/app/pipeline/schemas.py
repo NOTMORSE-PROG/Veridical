@@ -3,7 +3,7 @@
 from datetime import datetime
 from typing import Any
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class CreateCheckRunRequest(BaseModel):
@@ -18,7 +18,10 @@ class CheckRunOut(BaseModel):
     status: str
     stage_status: dict[str, Any] | None
     cancel_requested_at: datetime | None
-    queue_position: int | None
+    queue_position: int | None = Field(
+        deprecated=True,
+        description="Always null; creation order does not represent execution order.",
+    )
     started_at: datetime | None
     finished_at: datetime | None
     created_at: datetime

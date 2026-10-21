@@ -26,8 +26,8 @@ const STAGE_LABEL: Record<string, string> = Object.fromEntries(
 
 const FAILURE_MESSAGES: Record<string, string> = {
   file_malformed: "This manuscript could not be checked because it failed ingestion.",
-  api_down: "An external service is unavailable. This will resume automatically.",
-  quota_exhausted: "Daily AI quota reached. This will resume automatically after reset.",
+  api_down: "An external service is unavailable.",
+  quota_exhausted: "AI capacity was reached.",
   unexpected_error: "Something went wrong while running this check. Try running it again.",
 };
 
@@ -49,9 +49,32 @@ function formatDateTime(iso: string): string {
 }
 
 function blockedDetail(blocked: { code: string; message: string; resume_at: string | null }): string {
-  const base = FAILURE_MESSAGES[blocked.code] ?? blocked.message;
-  if (!blocked.resume_at) return `${base} This will resume automatically.`;
-  return `${base} Resumes at ${formatDateTime(blocked.resume_at)}.`;
+  const base = `${FAILURE_MESSAGES[blocked.code] ?? blocked.message} This check is paused.`;
+  if (!blocked.resume_at) return `${base} No retry time is available. You can leave this page or cancel the check.`;
+  return `${base} Eligible to retry after ${formatDateTime(blocked.resume_at)}. Processing may start later.`;
+}
+
+type ProgressSummary = {
+  kind: "done" | "failed" | "cancelled" | "cancelling" | "blocked" | "queued" | "current";
+  title: string;
+  announcement: string;
+  detail?: string;
+};
+
+function progressSummary(run: CheckRun): ProgressSummary {
+  if (run.status === "done") return { kind: "done", title: "Check finished", announcement: "Check finished. Open manuscript review to check the results and assessment limits." };
+  if (run.status === "failed") return { kind: "failed", title: "Check needs attention", announcement: "This check stopped. Review the error message." };
+  if (run.status === "cancelled") return { kind: "cancelled", title: "Check cancelled", announcement: "Check cancelled. No new readiness report was produced." };
+  if (run.cancel_requested_at) return { kind: "cancelling", title: "Cancellation requested", announcement: "Cancellation requested. Waiting for the check to stop." };
+  const blocked = run.stage_status?.blocked;
+  if (blocked) {
+    const capacity = blocked.code === "quota_exhausted";
+    const detail = blockedDetail(blocked);
+    return { kind: "blocked", title: capacity ? "Paused: capacity reached" : "Paused: service unavailable", detail, announcement: `${capacity ? "Check paused because AI capacity was reached." : "Check paused because a service is unavailable."} ${detail}` };
+  }
+  if (run.status === "queued") return { kind: "queued", title: "Waiting to start", announcement: "Waiting to start. Start order can change across instructors." };
+  const title = `Current stage: ${STAGE_LABEL[run.status] ?? run.status}`;
+  return { kind: "current", title, announcement: `${title}.` };
 }
 
 function degradedDetail(entry: { n_criteria?: number; degraded_count?: number; degraded_code?: string }): string {
@@ -72,11 +95,11 @@ interface SignalStage {
   detail?: string;
 }
 
-function toStage(run: CheckRun, key: string, label: string): SignalStage {
+function toStage(run: CheckRun, key: string, label: string, summary: ProgressSummary): SignalStage {
   const entry = run.stage_status?.stages?.[key];
-  const blocked = run.stage_status?.blocked;
-  if (run.status === key && blocked) return { id: key, label, state: "blocked", tagText: "Paused", detail: blockedDetail(blocked) };
-  if (run.status === key) return { id: key, label, state: "running", tagText: "In progress" };
+  if (run.status === key && summary.kind === "cancelling") return { id: key, label, state: "blocked", tagText: "Cancellation requested" };
+  if (run.status === key && summary.kind === "blocked") return { id: key, label, state: "blocked", tagText: "Paused", detail: summary.detail };
+  if (run.status === key) return { id: key, label, state: "running", tagText: "Current stage" };
   if (entry?.status === "skipped") return { id: key, label, state: "skipped", tagText: "Skipped", detail: typeof entry.note === "string" ? entry.note : undefined };
   if (entry?.status === "done" && (entry.degraded_count ?? 0) > 0) return { id: key, label, state: "attention", tagText: "Needs review", detail: degradedDetail(entry) };
   if (entry?.status === "done") return { id: key, label, state: "done", tagText: "Done" };
@@ -109,25 +132,12 @@ export function CheckProgressPage() {
   const headingRef = useRef<HTMLHeadingElement>(null);
   useRouteFocus("Check progress - VERIDICAL", headingRef);
 
-  const prevStatusRef = useRef<CheckRunStatus | undefined>(undefined);
+  const summary = run ? progressSummary(run) : undefined;
+  const nextAnnouncement = run && summary && !isPending && !isError ? `Check #${run.id}. ${summary.announcement}` : "";
   const [announcement, setAnnouncement] = useState("");
   useEffect(() => {
-    if (!run || run.status === prevStatusRef.current) return;
-    prevStatusRef.current = run.status;
-    if (run.status === "done") setAnnouncement("Check complete. Your manuscript review is ready.");
-    else if (run.status === "failed") setAnnouncement("This check has failed. See the message below.");
-    else if (run.status === "cancelled") setAnnouncement("This check was cancelled.");
-    else setAnnouncement(`Now running: ${STAGE_LABEL[run.status] ?? run.status}.`);
-    // BUG-086: deliberately narrowed to the one primitive field this
-    // effect actually needs to react to -- `run.status` (read again above
-    // for the label) is the same value, listing the whole `run` object
-    // would re-fire on every poll even when status hasn't changed. The
-    // OLD `eslint-disable` comment here suppressed nothing (eslint isn't
-    // installed; oxlint is, and DOES enforce this rule as a real, live
-    // warning -- confirmed by running `npx oxlint` directly). This is
-    // oxlint's own real directive syntax, verified to actually suppress it.
-    // oxlint-disable-next-line react-hooks/exhaustive-deps
-  }, [run?.status]);
+    setAnnouncement(nextAnnouncement);
+  }, [nextAnnouncement]);
 
   return (
     <div className="signal-route signal-page-flow signal-check-progress">
@@ -136,12 +146,14 @@ export function CheckProgressPage() {
           <nav aria-label="Breadcrumb"><ReviewDeskReturnLink fallback="/dashboard?queue=checking">Review Desk</ReviewDeskReturnLink><span aria-hidden="true">/</span><span>Check progress</span></nav>
           <p className="signal-eyebrow">Check · Live pipeline</p>
           <h1 ref={headingRef} tabIndex={-1}>Check progress</h1>
-          <p className="signal-route-header__intro">Follow each stage. You can leave this page while the check continues.</p>
+          <p className="signal-route-header__intro">Follow the recorded stages. Leaving this page does not cancel the check.</p>
         </div>
-        {run && <ProcessStatus status={run.status} />}
+        {run && summary && (summary.kind === "current" || summary.kind === "blocked" || summary.kind === "cancelling"
+          ? <span className={`signal-process-status signal-process-status--${summary.kind === "current" ? "running" : "attention"}`}>{summary.title}</span>
+          : <ProcessStatus status={run.status} />)}
       </header>
 
-      <p aria-live="polite" className="signal-live-region">{announcement}</p>
+      <p role="status" aria-atomic="true" className="signal-live-region">{announcement}</p>
 
       {isPending ? (
         <div role="status" aria-live="polite" aria-busy="true" className="signal-desk-loading"><span>Loading check progress…</span><i /><i /></div>
@@ -154,14 +166,16 @@ export function CheckProgressPage() {
             <dl><div><dt>Required format</dt><dd>{run.rubric_title ?? "Active format"}</dd></div><div><dt>Run</dt><dd>#{run.id}</dd></div></dl>
           </section>
 
-          {run.status === "queued" && <Alert title="Waiting to start" tone="info" role="status">Queue position {run.queue_position}. VERIDICAL will start this check when an execution slot is available.</Alert>}
+          {summary?.kind === "queued" && <Alert title="Waiting to start" tone="info">Your check is saved and waiting to start. Checks share capacity across instructors, so start order can change. A start time is not available. You can leave this page and return later.</Alert>}
 
-          {run.cancel_requested_at && run.status !== "cancelled" && <Alert title="Stopping after the current safe step" tone="warning" role="status">Your cancellation request is recorded. Intermediate work and the audit trail will be kept.</Alert>}
+          {summary?.kind === "cancelling" && <Alert title="Cancellation requested" tone="warning">Your cancellation request is recorded. Waiting for the check to stop. Intermediate work and the audit trail will be kept.</Alert>}
+
+          {summary?.kind === "blocked" && run.status === "queued" && <Alert title={summary.title} tone="warning">{summary.detail}</Alert>}
 
           <section className="signal-check-pipeline" aria-labelledby="pipeline-heading">
             <div className="signal-section-heading"><div><p className="signal-section-kicker">Pipeline</p><h2 id="pipeline-heading">What VERIDICAL is doing</h2></div><p>Completed work remains traceable even if this run stops.</p></div>
             <ol className="signal-check-track">
-              {STAGE_ORDER.map(({ key, label }) => toStage(run, key, label)).map((stage) => (
+              {STAGE_ORDER.map(({ key, label }) => toStage(run, key, label, summary!)).map((stage) => (
                 <li key={stage.id} className={`signal-check-stage signal-check-stage--${stage.state}`} aria-current={stage.state === "running" || stage.state === "blocked" ? "step" : undefined}>
                   <span className="signal-check-stage__mark" aria-hidden="true">{STAGE_MARKS[stage.state]}</span>
                   <div><h3>{stage.label}</h3>{stage.detail && <p>{stage.detail}</p>}</div>
@@ -171,9 +185,9 @@ export function CheckProgressPage() {
             </ol>
           </section>
 
-          {run.status === "failed" && run.stage_status?.failed && <Alert title="This check stopped" tone="error" role="alert">{FAILURE_MESSAGES[run.stage_status.failed.code] ?? run.stage_status.failed.message}</Alert>}
+          {run.status === "failed" && run.stage_status?.failed && <Alert title="This check stopped" tone="error">{FAILURE_MESSAGES[run.stage_status.failed.code] ?? run.stage_status.failed.message}</Alert>}
 
-          {run.status === "cancelled" && <Alert title="Check cancelled" tone="info" role="status">No readiness report was produced. The partial run remains in Audit for traceability.</Alert>}
+          {run.status === "cancelled" && <Alert title="Check cancelled" tone="info">No new readiness report was produced. The partial run remains in Audit for traceability.</Alert>}
 
           {cancel.error && <Alert title="Could not cancel this check" tone="error" role="alert">{cancel.error instanceof Error ? cancel.error.message : "Try again."}</Alert>}
 

@@ -1,4 +1,4 @@
-import { fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { renderWithProviders, stubFetchByPath } from "../test/renderWithProviders";
 import { CheckProgressPage } from "./Progress";
@@ -95,7 +95,7 @@ const FAILED_UNEXPECTED = {
 };
 
 describe("CheckProgressPage", () => {
-  afterEach(() => vi.unstubAllGlobals());
+  afterEach(() => { vi.unstubAllGlobals(); vi.useRealTimers(); });
 
   it("renders the 5 V2 stages with the currently-running one highlighted", async () => {
     vi.stubGlobal("fetch", stubFetchByPath({ "/check-runs/5": RUNNING }));
@@ -127,16 +127,20 @@ describe("CheckProgressPage", () => {
     expect(screen.queryByText(/^Ungrouped,/)).not.toBeInTheDocument();
   });
 
-  it("shows the queue position pill only while genuinely queued, not once running (locked-in bug fix)", async () => {
+  it("explains waiting without presenting a legacy numeric position as execution order", async () => {
     vi.stubGlobal("fetch", stubFetchByPath({ "/check-runs/5": QUEUED }));
     renderWithProviders(<CheckProgressPage />, {
       route: "/checks/5",
       path: "/checks/:checkRunId",
     });
-    const queued = (await screen.findByText("Waiting to start")).closest("[role='status']");
+    const queued = (await screen.findByText("Waiting to start")).closest(".signal-alert");
     expect(queued).not.toBeNull();
     expect(queued).toHaveTextContent("Waiting to start");
-    expect(queued).toHaveTextContent("Queue position 3");
+    expect(queued).toHaveTextContent("start order can change");
+    expect(queued).toHaveTextContent("A start time is not available");
+    expect(screen.queryByText(/Queue position/)).not.toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveTextContent("Check #5. Waiting to start. Start order can change across instructors.");
+    expect(screen.getByRole("status")).toHaveAttribute("aria-atomic", "true");
   });
 
   it("hides the queue position pill once a run is actively running, even if queue_position is still non-null", async () => {
@@ -158,8 +162,8 @@ describe("CheckProgressPage", () => {
       route: "/checks/5",
       path: "/checks/:checkRunId",
     });
-    expect(await screen.findByText(/Daily AI quota reached/)).toBeInTheDocument();
-    expect(screen.getByText(/Resumes at/)).toBeInTheDocument();
+    expect(await screen.findByText(/AI capacity was reached\. This check is paused\. Eligible to retry after/)).toBeInTheDocument();
+    expect(screen.queryByText(/Resumes at|resume automatically/)).not.toBeInTheDocument();
     expect(screen.getByText("Paused")).toBeInTheDocument();
   });
 
@@ -169,7 +173,7 @@ describe("CheckProgressPage", () => {
       route: "/checks/5",
       path: "/checks/:checkRunId",
     });
-    const banner = await screen.findByRole("alert");
+    const banner = (await screen.findByText("This check stopped")).closest(".signal-alert");
     expect(banner).toHaveTextContent("failed ingestion");
     expect(banner).not.toHaveTextContent("quota");
     expect(banner).not.toHaveTextContent("unavailable");
@@ -181,7 +185,7 @@ describe("CheckProgressPage", () => {
       route: "/checks/5",
       path: "/checks/:checkRunId",
     });
-    const banner = await screen.findByRole("alert");
+    const banner = (await screen.findByText("This check stopped")).closest(".signal-alert");
     expect(banner).toHaveTextContent("Something went wrong while running this check");
     expect(banner).not.toHaveTextContent("Errno");
     expect(banner).not.toHaveTextContent("extraction.json");
@@ -195,7 +199,7 @@ describe("CheckProgressPage", () => {
     });
     const link = await screen.findByRole("link", { name: "Open manuscript review" });
     expect(link).toHaveAttribute("href", "/report/5/document");
-    expect(screen.getByText("Check complete. Your manuscript review is ready.")).toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveTextContent("Check finished. Open manuscript review to check the results and assessment limits.");
   });
 
   it("does not show the report link for a still-running check", async () => {
@@ -230,7 +234,7 @@ describe("CheckProgressPage", () => {
       expect.stringContaining("/check-runs/5/cancel"),
       expect.objectContaining({ method: "POST" }),
     ));
-    expect(await screen.findByText("Cancellation requested")).toBeDisabled();
+    expect(await screen.findByRole("button", { name: "Cancellation requested" })).toBeDisabled();
   });
 
   it("renders a done-but-skipped stage as visually and textually distinct from a done stage (never conflated as passed)", async () => {
@@ -277,6 +281,78 @@ describe("CheckProgressPage", () => {
     expect(alert).toHaveTextContent("Could not load this check's progress");
     fireEvent.click(screen.getByRole("button", { name: "Try again" }));
     await waitFor(() => expect(screen.getByText("AI grading")).toBeInTheDocument());
+  });
+
+  it.each([null, "2020-01-01T00:00:00Z"])("does not promise resumption for retry eligibility %s", async (resumeAt) => {
+    vi.stubGlobal("fetch", stubFetchByPath({ "/check-runs/5": {
+      ...RUNNING,
+      stage_status: { blocked: { code: "api_down", message: "offline", resume_at: resumeAt } },
+    } }));
+    renderWithProviders(<CheckProgressPage />, { route: "/checks/5", path: "/checks/:checkRunId" });
+    await screen.findByText("Paused: service unavailable");
+    expect(screen.getByRole("status")).toHaveTextContent(resumeAt ? "Eligible to retry after" : "No retry time is available");
+    expect(screen.queryByText(/will resume|Resumes at|Starting now/)).not.toBeInTheDocument();
+    expect(screen.queryByText("Current stage")).not.toBeInTheDocument();
+  });
+
+  it("announces same-stage blocks and cancellation, while identical polls leave the status node unchanged", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    let response: unknown = RUNNING;
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json(response)));
+    renderWithProviders(<CheckProgressPage />, { route: "/checks/5", path: "/checks/:checkRunId" });
+    const region = await screen.findByRole("status");
+    await waitFor(() => expect(region).toHaveTextContent("Current stage: AI grading"));
+    const updates: MutationRecord[] = [];
+    const observer = new MutationObserver((records) => updates.push(...records));
+    observer.observe(region, { subtree: true, childList: true, characterData: true });
+    const poll = async () => { await act(async () => { await vi.advanceTimersByTimeAsync(2_000); }); };
+    try {
+      await poll();
+      expect(updates).toHaveLength(0);
+      response = BLOCKED_ON_QUOTA;
+      await poll();
+      expect(region).toHaveTextContent("Check paused because AI capacity was reached");
+      expect(updates.length).toBeGreaterThan(0);
+      updates.length = 0;
+      await poll();
+      expect(updates).toHaveLength(0);
+      response = { ...BLOCKED_ON_QUOTA, stage_status: { blocked: { ...BLOCKED_ON_QUOTA.stage_status.blocked, resume_at: null } } };
+      await poll();
+      expect(region).toHaveTextContent("No retry time is available");
+      response = { ...BLOCKED_ON_QUOTA, cancel_requested_at: "2026-01-01T00:05:00Z" };
+      await poll();
+      expect(region).toHaveTextContent("Cancellation requested. Waiting for the check to stop");
+      expect(region).not.toHaveTextContent("Check paused");
+      expect(screen.queryByText("Paused")).not.toBeInTheDocument();
+      expect(screen.queryByText("Waiting to start")).not.toBeInTheDocument();
+    } finally { observer.disconnect(); }
+  });
+
+  it("keeps terminal degraded results distinct even with stale block and cancellation metadata", async () => {
+    vi.stubGlobal("fetch", stubFetchByPath({ "/check-runs/5": {
+      ...DEGRADED,
+      cancel_requested_at: "2026-01-01T00:05:00Z",
+      stage_status: { ...DEGRADED.stage_status, blocked: BLOCKED_ON_QUOTA.stage_status.blocked },
+    } }));
+    renderWithProviders(<CheckProgressPage />, { route: "/checks/5", path: "/checks/:checkRunId" });
+    await screen.findByRole("link", { name: "Open manuscript review" });
+    expect(screen.getByText("Needs review")).toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveTextContent("Check finished");
+    expect(screen.queryByText("Cancellation requested")).not.toBeInTheDocument();
+    expect(screen.queryByText("Paused")).not.toBeInTheDocument();
+  });
+
+  it("clears the prior stage announcement when a subsequent progress fetch fails", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    let fail = false;
+    vi.stubGlobal("fetch", vi.fn(async () => fail ? new Response("offline", { status: 500 }) : Response.json(RUNNING)));
+    renderWithProviders(<CheckProgressPage />, { route: "/checks/5", path: "/checks/:checkRunId" });
+    const region = await screen.findByRole("status");
+    await waitFor(() => expect(region).toHaveTextContent("Current stage"));
+    fail = true;
+    await act(async () => { await vi.advanceTimersByTimeAsync(2_000); });
+    expect(screen.getByRole("alert")).toHaveTextContent("Could not load this check's progress");
+    expect(region).toBeEmptyDOMElement();
   });
 
   it("stops auto-polling once a fetch settles into a persisting error, instead of retrying forever (regression: previously stuck on 'Loading' indefinitely, hammering the backend)", async () => {

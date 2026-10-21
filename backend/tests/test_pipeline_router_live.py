@@ -143,7 +143,7 @@ def test_create_get_and_list_check_run(logged_in):
     assert created.status_code == 201
     body = created.json()
     assert body["status"] == "queued"
-    assert body["queue_position"] == 1
+    assert body["queue_position"] is None  # BUG-352: creation order is not execution order.
 
     # Display-only fields for screen 4g — so an instructor never has to
     # hold a manuscript/rubric ID number in their head to tell two check

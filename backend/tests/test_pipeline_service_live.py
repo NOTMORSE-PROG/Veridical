@@ -1,12 +1,11 @@
 """V-018 live-DB tests: `create_check_run`'s validations (ownership,
-ingestion/activation preconditions) and `queue_position`'s FIFO ordering
-(ticket AC: "second upload while running -> queued, position shown").
+ingestion/activation preconditions) and the deprecated queue-position contract.
 """
 
 import asyncio
 import os
 import time
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 import pytest
@@ -15,7 +14,7 @@ from sqlalchemy import func, select, text
 from app.config import get_settings
 from app.errors import ConflictError, NotFoundError
 from app.models.audit import AuditLog
-from app.models.enums import CheckRunStatus, IngestStatus, ReadinessStatus
+from app.models.enums import CheckRunStatus, IngestStatus, LLMMode, ReadinessStatus
 from app.models.group import Group, Program
 from app.models.instructor import Instructor
 from app.models.manuscript import Manuscript
@@ -247,7 +246,7 @@ async def test_create_check_run_allows_an_unset_manuscript_program_against_any_r
         assert check_run.id is not None
 
 
-async def test_queue_position_is_fifo_among_active_runs(session_factory):
+async def test_queue_position_is_unavailable_even_for_creation_ordered_runs(session_factory):
     instructor_id, manuscript_id, rubric_id = await _seed_instructor_manuscript_rubric(
         session_factory
     )
@@ -269,9 +268,55 @@ async def test_queue_position_is_fifo_among_active_runs(session_factory):
         second = await create_check_run(session, instructor_id, copies[0].id, rubric_id)
         third = await create_check_run(session, instructor_id, copies[1].id, rubric_id)
 
-        assert await queue_position(session, first) == 1
-        assert await queue_position(session, second) == 2
-        assert await queue_position(session, third) == 3
+        assert await queue_position(session, first) is None
+        assert await queue_position(session, second) is None
+        assert await queue_position(session, third) is None
+
+
+async def test_bug352_two_instructor_waiting_contract_after_a1_is_claimed(session_factory):
+    """Live selector/claim exercise; no pipeline or provider execution."""
+    from app.pipeline.worker import pick_next_runnable
+
+    owner_a, manuscript_a, rubric_a = await _seed_instructor_manuscript_rubric(session_factory)
+    _, manuscript_b, rubric_b = await _seed_instructor_manuscript_rubric(session_factory)
+    base = datetime.now(UTC) - timedelta(minutes=1)
+    async with session_factory() as session:
+        copies = [
+            Manuscript(instructor_id=owner_a, group_label="A", file_ref=f"a-{i}.pdf")
+            for i in range(2)
+        ]
+        session.add_all(copies)
+        await session.flush()
+        runs = [
+            CheckRun(
+                manuscript_id=manuscript_id,
+                rubric_id=rubric_id,
+                created_at=base + timedelta(seconds=index),
+                llm_mode=LLMMode.fake,
+            )
+            for index, (manuscript_id, rubric_id) in enumerate(
+                [
+                    (manuscript_a, rubric_a),
+                    *[(copy.id, rubric_a) for copy in copies],
+                    (manuscript_b, rubric_b),
+                ]
+            )
+        ]
+        session.add_all(runs)
+        await session.commit()
+        assert [await queue_position(session, run) for run in runs] == [None] * 4
+
+        picked = await pick_next_runnable(session, get_settings())
+        assert picked is not None and picked[0].id == runs[0].id
+        assert picked[0].claimed_at is not None
+        # Represent A1's recorded turn without executing a fixture pipeline.
+        picked[0].started_at = datetime.now(UTC)
+        picked[0].status = CheckRunStatus.semantic
+        await session.commit()
+        assert [await queue_position(session, run) for run in runs] == [None] * 4
+        second = await pick_next_runnable(session, get_settings())
+        assert second is not None and second[0].id == runs[3].id
+        assert second[0].llm_mode == LLMMode.fake
 
 
 async def test_concurrent_identical_creation_reuses_one_active_run(session_factory):

@@ -1,4 +1,4 @@
-import { fireEvent, screen, waitFor } from "@testing-library/react";
+import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ManuscriptListItem, RubricListItem } from "../api/types";
 import { renderWithProviders, stubFetchByPath } from "../test/renderWithProviders";
@@ -324,12 +324,98 @@ describe("RerunModal", () => {
     fireEvent.click(confirmButton);
 
     expect(await screen.findByText("Submitted")).toBeInTheDocument();
-    expect(screen.getByText("Queue position 2.")).toBeInTheDocument();
+    expect(screen.getByText("Check request accepted.")).toBeInTheDocument();
+    expect(screen.queryByText(/Queue position|Starting now|started successfully/)).not.toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveTextContent("Request submission finished. 1 check request accepted.");
     expect(postedRubricIds).toEqual([9]); // the active family's rubric id
     expect(screen.getByRole("button", { name: "Done" })).toBeInTheDocument();
   });
 
-  it("a single failure never aborts the rest of the batch, and Retry failed only resubmits the failed ones", async () => {
+  it("keeps keyboard focus inside the dialog while the submitting footer replaces its trigger", async () => {
+    let release: (value: Response) => void = () => {};
+    const accepted = new Promise<Response>((resolve) => { release = resolve; });
+    const base = stubBase();
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const path = new URL(typeof input === "string" ? input : input.toString(), "http://localhost").pathname;
+      return path === "/check-runs" && init?.method === "POST" ? accepted : base(input, init);
+    }));
+    renderWithProviders(<RerunModal onClose={() => {}} />);
+    const trigger = await screen.findByRole("button", { name: "Re-run 1 manuscript" });
+    trigger.focus();
+    fireEvent.click(trigger);
+    const dialog = screen.getByRole("dialog", { name: "Re-run manuscripts" });
+    try {
+      await screen.findByRole("button", { name: "Submitting." });
+      expect(dialog).toContainElement(document.activeElement as HTMLElement);
+      const heading = screen.getByRole("heading", { name: "Check request outcomes" });
+      expect(heading).toHaveFocus();
+      fireEvent.keyDown(heading, { key: "Tab" });
+      expect(heading).toHaveFocus();
+      fireEvent.keyDown(heading, { key: "Tab", shiftKey: true });
+      expect(heading).toHaveFocus();
+    } finally {
+      release(Response.json({ id: 99, queue_position: null, status: "queued" }, { status: 201 }));
+    }
+    await screen.findByRole("button", { name: "Done" });
+    expect(dialog).toContainElement(document.activeElement as HTMLElement);
+    const heading = screen.getByRole("heading", { name: "Check request outcomes" });
+    fireEvent.keyDown(heading, { key: "Tab" });
+    expect(within(dialog).getByRole("button", { name: "Close" })).toHaveFocus();
+    heading.focus();
+    fireEvent.keyDown(heading, { key: "Tab", shiftKey: true });
+    expect(within(dialog).getByRole("button", { name: "Done" })).toHaveFocus();
+  });
+
+  it("leaves focus on an accepted progress link when the rest of the batch settles", async () => {
+    let release: (value: Response) => void = () => {};
+    const second = new Promise<Response>((resolve) => { release = resolve; });
+    const base = stubBase({ "/manuscripts": { items: [manuscript(), manuscript({ id: 2, group_label: "G-12" })], total: 2, page: 1, page_size: 200 } });
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const path = new URL(typeof input === "string" ? input : input.toString(), "http://localhost").pathname;
+      if (path === "/check-runs" && init?.method === "POST") {
+        return JSON.parse(init.body as string).manuscript_id === 1
+          ? Promise.resolve(Response.json({ id: 99, status: "queued" }, { status: 201 })) : second;
+      }
+      return base(input, init);
+    }));
+    renderWithProviders(<RerunModal onClose={() => {}} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Re-run 2 manuscripts" }));
+    const progress = await screen.findByRole("link", { name: "View progress" });
+    progress.focus();
+    release(Response.json({ id: 100, status: "queued" }, { status: 201 }));
+    await screen.findByRole("button", { name: "Done" });
+    expect(progress).toHaveFocus();
+  });
+
+  it.each(["queued", "error"])("keeps the accepted progress receipt when the live manuscript list refetches as %s", async (outcome) => {
+    let accepted = false;
+    let manuscriptReads = 0;
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = new URL(typeof input === "string" ? input : input.toString(), "http://localhost").pathname;
+      if (path === "/manuscripts") {
+        manuscriptReads++;
+        if (accepted && outcome === "error") return new Response("unavailable", { status: 500 });
+        const item = manuscript(accepted ? { latest_check_run_status: "queued", latest_check_run_id: 99 } : {});
+        return Response.json({ items: [item], total: 1, page: 1, page_size: 200 });
+      }
+      if (path === "/rubric-families") return Response.json(ACTIVE_FAMILY);
+      if (path === "/check-runs/rerun-estimate") {
+        return Response.json({ items: [], total_estimated_calls: 0, manuscripts_with_no_estimate: 0 });
+      }
+      if (path === "/check-runs" && init?.method === "POST") {
+        accepted = true;
+        return Response.json({ id: 99, queue_position: null, status: "queued" }, { status: 201 });
+      }
+      return new Response("not found", { status: 404 });
+    }));
+    renderWithProviders(<RerunModal onClose={() => {}} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Re-run 1 manuscript" }));
+    await waitFor(() => expect(manuscriptReads).toBeGreaterThan(1));
+    expect(await screen.findByRole("link", { name: "View progress" })).toHaveAttribute("href", "/checks/99");
+    expect(screen.queryByText(/nothing to re-run/)).not.toBeInTheDocument();
+  });
+
+  it("a single unconfirmed request never aborts the batch, and retry resubmits only unconfirmed requests", async () => {
     let manuscript2Attempts = 0;
     vi.stubGlobal(
       "fetch",
@@ -384,11 +470,17 @@ describe("RerunModal", () => {
 
     await screen.findByText("This manuscript hasn't finished ingestion yet.");
     expect(await screen.findByText("Submitted")).toBeInTheDocument(); // manuscript 1 still succeeded
-    const retryButton = screen.getByRole("button", { name: "Retry failed (1)" });
+    const retryButton = screen.getByRole("button", { name: "Retry 1 unconfirmed request" });
+    expect(screen.getByRole("status")).toHaveTextContent("1 check request accepted. 1 request could not be confirmed.");
+    retryButton.focus();
     fireEvent.click(retryButton);
 
-    await waitFor(() => expect(screen.queryByRole("button", { name: /Retry failed/ })).not.toBeInTheDocument());
+    await waitFor(() => expect(screen.queryByRole("button", { name: /Retry.*unconfirmed/ })).not.toBeInTheDocument());
     expect(screen.getByRole("button", { name: "Done" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Check request outcomes" })).toHaveFocus();
+    expect(screen.getByRole("status")).toHaveTextContent("Request submission finished. 2 check requests accepted.");
+    expect(screen.getAllByText("Check request accepted.")).toHaveLength(2);
+    expect(screen.queryByText("Starting now.")).not.toBeInTheDocument();
     expect(manuscript2Attempts).toBe(2);
   });
 
