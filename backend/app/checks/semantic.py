@@ -253,6 +253,7 @@ async def _call_grade(
     expected_count: int,
     consistency_pass: str = "single",
     prompt_version: str = PROMPT_VERSION,
+    validation_attempt: int = 0,
 ) -> GradeBatchResponse:
     # `consistency_pass` rides in **context: it differentiates the response-
     # cache key (D-011) so two independent voting passes over the SAME
@@ -266,6 +267,7 @@ async def _call_grade(
         prompt_version=prompt_version,
         check_run_id=check_run_id,
         consistency_pass=consistency_pass,
+        validation_attempt=validation_attempt,
     )
     try:
         parsed = GradeBatchResponse.model_validate(_unwrap_verdicts(response))
@@ -448,6 +450,7 @@ async def grade_batch_verdicts(
                 expected_count=len(batch_criteria),
                 consistency_pass=consistency_pass,
                 prompt_version=prompt_version,
+                validation_attempt=_attempt,
             )
             break
         except SemanticGradeError:

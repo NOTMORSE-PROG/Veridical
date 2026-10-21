@@ -88,6 +88,7 @@ def _build_real_client(
         reset_timezone=settings.llm_quota_reset_timezone,
         instructor_id=instructor_id,
         cache_bypass=settings.llm_cache_bypass,
+        cache_contract_version=settings.llm_cache_contract_version,
     )
     return GeminiLLMClient(queue)
 

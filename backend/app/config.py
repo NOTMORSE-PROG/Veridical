@@ -282,6 +282,7 @@ class Settings(BaseSettings):
     # Timezone Gemini resets against — NOT local time (ticket V-009 edge case).
     llm_quota_reset_timezone: str = "America/Los_Angeles"
     llm_max_retries: int = 3
+    llm_cache_contract_version: str = "evidence-v2"
     llm_retry_base_seconds: float = 1.0
     # BUG-162: the response cache (D-011) is keyed on prompt content, not
     # check_run_id, by design -- so a normal re-run of the same manuscript

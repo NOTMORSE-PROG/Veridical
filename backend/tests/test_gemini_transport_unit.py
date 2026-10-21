@@ -5,6 +5,7 @@ replaced with a stub so malformed-response paths are reproducible
 from dataclasses import dataclass
 from typing import Any
 
+import httpx
 import pytest
 
 from app.llm.queue import TransportServerError
@@ -59,3 +60,15 @@ async def test_valid_json_response_parses_normally():
     transport = _transport_with_response('{"pong": true}')
     result = await transport.generate(model="m", prompt="p", temperature=0.0)
     assert result == {"pong": True}
+
+
+async def test_timeout_maps_to_recoverable_transport_failure_and_sdk_cannot_retry():
+    transport = _transport_with_response(None)
+
+    async def timed_out(**kwargs):
+        assert kwargs["config"].http_options.retry_options.attempts == 1
+        raise httpx.ReadTimeout("controlled")
+
+    transport._client.aio.models.generate_content = timed_out
+    with pytest.raises(TransportServerError, match="timed out"):
+        await transport.generate(model="m", prompt="p", temperature=0)

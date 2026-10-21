@@ -253,12 +253,42 @@ async def test_queue_position_is_fifo_among_active_runs(session_factory):
     )
     async with session_factory() as session:
         first = await create_check_run(session, instructor_id, manuscript_id, rubric_id)
-        second = await create_check_run(session, instructor_id, manuscript_id, rubric_id)
-        third = await create_check_run(session, instructor_id, manuscript_id, rubric_id)
+        # Distinct uploads queue independently; duplicate clicks now reuse the
+        # active run for an identical manuscript/rubric/mode.
+        copies = [
+            Manuscript(
+                instructor_id=instructor_id,
+                group_label="G",
+                file_ref=f"copy-{i}.pdf",
+                ingest_status=IngestStatus.done,
+            )
+            for i in range(2)
+        ]
+        session.add_all(copies)
+        await session.commit()
+        second = await create_check_run(session, instructor_id, copies[0].id, rubric_id)
+        third = await create_check_run(session, instructor_id, copies[1].id, rubric_id)
 
         assert await queue_position(session, first) == 1
         assert await queue_position(session, second) == 2
         assert await queue_position(session, third) == 3
+
+
+async def test_concurrent_identical_creation_reuses_one_active_run(session_factory):
+    args = await _seed_instructor_manuscript_rubric(session_factory)
+
+    async def create():
+        async with session_factory() as session:
+            return (await create_check_run(session, *args)).id
+
+    ids = await asyncio.gather(create(), create())
+    assert ids[0] == ids[1]
+    async with session_factory() as session:
+        assert await session.scalar(select(func.count(CheckRun.id))) == 1
+        run = await session.get(CheckRun, ids[0])
+        run.status = CheckRunStatus.done
+        await session.commit()
+        assert (await create_check_run(session, *args)).id != ids[0]
 
 
 async def test_queue_position_is_none_once_terminal(session_factory):

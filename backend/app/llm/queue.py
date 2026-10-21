@@ -7,6 +7,7 @@ DB-persisted daily quota, checks the response cache before spending quota
 Nothing outside `app/llm/` may call a transport directly (CODING.md §2).
 """
 
+import asyncio
 import hashlib
 import json
 from datetime import datetime, timedelta
@@ -17,6 +18,7 @@ from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from app.config import get_settings
 from app.errors import ApiDownError, InvalidApiKeyError, QuotaExhaustedError
 from app.llm.pool import ModelSpec, pool_daily_capacity
 from app.models.audit import AuditLog
@@ -119,6 +121,7 @@ class LLMQueue:
         sleep: SleepFn | None = None,
         instructor_id: int | None = None,
         cache_bypass: bool = False,
+        cache_contract_version: str | None = None,
     ) -> None:
         if pool is None:
             # Single-model form: still supported so a caller (or a test) can
@@ -143,6 +146,10 @@ class LLMQueue:
         # `backend/scripts/stability_probe.py` run (`Settings.llm_cache_bypass`,
         # config.py's own docstring for why this exists).
         self._cache_bypass = cache_bypass
+        self._cache_contract_version = (
+            cache_contract_version or get_settings().llm_cache_contract_version
+        )
+        self._inflight: dict[str, tuple[asyncio.Lock, int]] = {}
         self._temperature = temperature
         self._max_retries = max_retries
         self._retry_base_seconds = retry_base_seconds
@@ -193,13 +200,32 @@ class LLMQueue:
         return value
 
     @staticmethod
-    def _input_hash(prompt_version: str, model: str, prompt: str, context: dict[str, Any]) -> str:
+    def _input_hash(
+        prompt_version: str,
+        model: str,
+        prompt: str,
+        context: dict[str, Any],
+        *,
+        prompt_type=None,
+        temperature=None,
+        cache_contract_version=None,
+    ) -> str:
+        contract = (
+            {}
+            if cache_contract_version is None
+            else {
+                "prompt_type": prompt_type,
+                "temperature": temperature,
+                "cache_contract_version": cache_contract_version,
+            }
+        )
         payload = json.dumps(
             {
                 "prompt_version": prompt_version,
                 "model": model,
                 "prompt": prompt,
-                "context": context,
+                "context": LLMQueue._json_safe(context) if contract else context,
+                **contract,
             },
             sort_keys=True,
             default=str,
@@ -207,6 +233,44 @@ class LLMQueue:
         return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
     async def submit(
+        self,
+        *,
+        prompt_type: str,
+        prompt: str,
+        prompt_version: str,
+        check_run_id: int | None = None,
+        **context: Any,
+    ) -> dict[str, Any]:
+        # Bound memory to currently waiting requests. The shared runtime queue
+        # coalesces identical misses; separate processes still require DB locking.
+        key = self._input_hash(
+            prompt_version,
+            self._model,
+            prompt,
+            context,
+            prompt_type=prompt_type,
+            temperature=self._temperature,
+            cache_contract_version=self._cache_contract_version,
+        )
+        lock, users = self._inflight.get(key, (asyncio.Lock(), 0))
+        self._inflight[key] = (lock, users + 1)
+        try:
+            async with lock:
+                return await self._submit(
+                    prompt_type=prompt_type,
+                    prompt=prompt,
+                    prompt_version=prompt_version,
+                    check_run_id=check_run_id,
+                    **context,
+                )
+        finally:
+            _, users = self._inflight[key]
+            if users == 1:
+                del self._inflight[key]
+            else:
+                self._inflight[key] = (lock, users - 1)
+
+    async def _submit(
         self,
         *,
         prompt_type: str,
@@ -224,7 +288,15 @@ class LLMQueue:
         # D-011). A hit on ANY candidate is a real answer already paid for,
         # so all of them are checked before spending a call.
         hashes = {
-            spec.model: self._input_hash(prompt_version, spec.model, prompt, context)
+            spec.model: self._input_hash(
+                prompt_version,
+                spec.model,
+                prompt,
+                context,
+                prompt_type=prompt_type,
+                temperature=self._temperature,
+                cache_contract_version=self._cache_contract_version,
+            )
             for spec in candidates
         }
 
@@ -259,19 +331,17 @@ class LLMQueue:
 
         exhausted: list[str] = []
         for spec in candidates:
-            async with self._session_factory() as session:
-                reserved = await self._try_reserve_quota(session, spec)
-                await session.commit()
-            if not reserved:
-                exhausted.append(spec.model)
-                continue
-
-            await self._governors[spec.model].acquire()
             input_hash = hashes[spec.model]
 
             try:
                 response = await self._call_with_retry(
-                    model=spec.model, prompt=prompt, context=context
+                    spec=spec,
+                    prompt=prompt,
+                    context=context,
+                    prompt_type=prompt_type,
+                    prompt_version=prompt_version,
+                    input_hash=input_hash,
+                    check_run_id=check_run_id,
                 )
             except TransportDailyQuotaExhausted as exc:
                 # Reality disagreed with our counter (the real cap moved, or
@@ -613,6 +683,7 @@ class LLMQueue:
                     # either state by guessing.
                     "fake_llm": False,
                     "temperature": self._temperature,
+                    "cache_contract_version": self._cache_contract_version,
                     "context": self._json_safe(context or {}),
                     "prompt": prompt,
                     "response": response,
@@ -621,13 +692,43 @@ class LLMQueue:
         )
 
     async def _call_with_retry(
-        self, *, model: str, prompt: str, context: dict[str, Any]
+        self,
+        *,
+        spec: ModelSpec,
+        prompt: str,
+        context: dict[str, Any],
+        prompt_type: str,
+        prompt_version: str,
+        input_hash: str,
+        check_run_id: int | None,
     ) -> dict[str, Any]:
         last_exc: Exception | None = None
         for attempt in range(self._max_retries):
+            await self._governors[spec.model].acquire()
+            async with self._session_factory() as session:
+                reserved = await self._try_reserve_quota(session, spec)
+                await session.commit()
+            if not reserved:
+                raise TransportDailyQuotaExhausted("Local provider-attempt allowance exhausted.")
+            # Each SDK invocation has its own reservation, RPM acquisition and
+            # durable attempt record, including attempts returning no response.
+            async with self._session_factory() as session:
+                await self._write_audit(
+                    session,
+                    event_type="llm_transport_attempt",
+                    prompt_type=prompt_type,
+                    prompt_version=prompt_version,
+                    input_hash=input_hash,
+                    check_run_id=check_run_id,
+                    response={"attempt": attempt + 1},
+                    context=context,
+                    prompt=prompt,
+                    model=spec.model,
+                )
+                await session.commit()
             try:
                 return await self._transport.generate(
-                    model=model, prompt=prompt, temperature=self._temperature, **context
+                    model=spec.model, prompt=prompt, temperature=self._temperature, **context
                 )
             except TransportDailyQuotaExhausted:
                 # Never retried: the window is a DAY, not seconds. Propagate

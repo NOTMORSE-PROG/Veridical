@@ -41,12 +41,36 @@ from app.llm.fake import FakeLLMClient
 from app.models.audit import AuditLog
 
 
-def _input_hash(prompt_version: str, model: str, prompt: str, context: dict) -> str:
+def _input_hash(
+    prompt_version: str,
+    model: str,
+    prompt: str,
+    context: dict,
+    *,
+    prompt_type=None,
+    temperature=None,
+    cache_contract_version=None,
+) -> str:
     # Mirrors `LLMQueue._input_hash` exactly (app/llm/queue.py) — kept as
     # a literal copy rather than an import so this debug tool never
     # accidentally shares mutable state with the live queue.
+    contract = (
+        {}
+        if cache_contract_version is None
+        else {
+            "prompt_type": prompt_type,
+            "temperature": temperature,
+            "cache_contract_version": cache_contract_version,
+        }
+    )
     payload = json.dumps(
-        {"prompt_version": prompt_version, "model": model, "prompt": prompt, "context": context},
+        {
+            "prompt_version": prompt_version,
+            "model": model,
+            "prompt": prompt,
+            "context": context,
+            **contract,
+        },
         sort_keys=True,
         default=str,
     )
@@ -90,7 +114,15 @@ async def run(audit_id: int, *, fake: bool, live: bool) -> None:
         # applied to this tool's own output).
         print("(fake-LLM mode, no cached input_hash to replay against, not a mismatch)")
     else:
-        recomputed = _input_hash(prompt_version, model, prompt, context)
+        recomputed = _input_hash(
+            prompt_version,
+            model,
+            prompt,
+            context,
+            prompt_type=prompt_type,
+            temperature=temperature,
+            cache_contract_version=payload.get("cache_contract_version"),
+        )
         match = "MATCH" if recomputed == row.input_hash else "MISMATCH"
         print(f"recomputed input_hash={recomputed}  ({match})")
     print(f"\n--- prompt ---\n{prompt}")

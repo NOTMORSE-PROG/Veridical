@@ -3,6 +3,7 @@
 import json
 from typing import Any
 
+import httpx
 from google import genai
 from google.genai import errors as genai_errors
 from google.genai import types as genai_types
@@ -57,9 +58,14 @@ class GeminiTransport:
                 config=genai_types.GenerateContentConfig(
                     temperature=temperature,
                     response_mime_type="application/json",
-                    http_options=genai_types.HttpOptions(timeout=self._timeout_ms),
+                    http_options=genai_types.HttpOptions(
+                        timeout=self._timeout_ms,
+                        retry_options=genai_types.HttpRetryOptions(attempts=1),
+                    ),
                 ),
             )
+        except httpx.TransportError as exc:
+            raise TransportServerError("The model service connection failed or timed out.") from exc
         except genai_errors.APIError as exc:
             if exc.code == 429:
                 if _is_daily_quota_error(exc):

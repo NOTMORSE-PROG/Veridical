@@ -42,7 +42,15 @@ async def create_check_run(
     rubric_id: int,
     settings: Settings | None = None,
 ) -> CheckRun:
-    manuscript = await session.get(Manuscript, manuscript_id)
+    manuscript = await session.scalar(
+        select(Manuscript)
+        .where(
+            Manuscript.id == manuscript_id,
+            Manuscript.instructor_id == instructor_id,
+            Manuscript.origin == ManuscriptOrigin.check_upload,
+        )
+        .with_for_update()
+    )
     # V-077 (D-028): a Library submission is stored for comparison only and
     # can never be checked; it is indistinguishable here from "not found".
     if (
@@ -110,6 +118,20 @@ async def create_check_run(
     # a fake-LLM-mode run's report/PDF/public link could never be told
     # apart from a real one after the fact.
     llm_mode = LLMMode.fake if settings.veridical_fake_llm else LLMMode.real
+    existing = await session.scalar(
+        select(CheckRun)
+        .where(
+            CheckRun.manuscript_id == manuscript_id,
+            CheckRun.rubric_id == rubric_id,
+            CheckRun.llm_mode == llm_mode,
+            CheckRun.status.in_(_ACTIVE_STATUSES),
+        )
+        .order_by(CheckRun.id)
+        .limit(1)
+    )
+    if existing is not None:
+        await session.commit()
+        return existing
     check_run = CheckRun(manuscript_id=manuscript_id, rubric_id=rubric_id, llm_mode=llm_mode)
     session.add(check_run)
     await session.commit()

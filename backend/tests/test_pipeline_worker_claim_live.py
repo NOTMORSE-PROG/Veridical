@@ -92,6 +92,31 @@ async def _seed_check_run(session_factory) -> int:
         return check_run.id
 
 
+async def test_duplicate_start_does_not_advance_blocked_run_before_resume(
+    session_factory, monkeypatch
+):
+    run_id = await _seed_check_run(session_factory)
+    async with session_factory() as session:
+        run = await session.get(CheckRun, run_id)
+        run.stage_status = {
+            "blocked": {
+                "reason": "api_down",
+                "resume_at": (datetime.now(UTC) + timedelta(hours=1)).isoformat(),
+            }
+        }
+        await session.commit()
+
+    async def forbidden(*args, **kwargs):
+        pytest.fail("a repeated Start cannot bypass the recorded resume time")
+
+    monkeypatch.setattr(worker, "run_check_run", forbidden)
+    await worker.advance_once(run_id, session_factory, get_settings())
+    async with session_factory() as session:
+        run = await session.get(CheckRun, run_id)
+        assert run.claimed_at is None
+        assert run.stage_status["blocked"]["reason"] == "api_down"
+
+
 @pytest.mark.parametrize("route_first", [True, False])
 async def test_advance_once_and_worker_tick_never_both_enter_the_same_run(
     session_factory, monkeypatch, route_first

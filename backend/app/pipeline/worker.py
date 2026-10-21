@@ -236,13 +236,16 @@ async def advance_once(
     session_factory = session_factory or db.get_session_factory()
     async with session_factory() as session:
         check_run = await session.get(CheckRun, check_run_id)
-        if check_run is None:
+        if check_run is None or is_blocked(check_run):
             return
         token = await _try_claim(session, check_run_id, settings)
         if token is None:
             return
         heartbeat, current_token = _make_heartbeat(session, check_run_id, token)
         try:
+            await session.refresh(check_run)
+            if is_blocked(check_run):
+                return
             # llm=None -- V-052 (BYOK): run_check_run resolves the caller's real
             # client itself, after it loads the manuscript, so it can select the
             # owning instructor's own key (falling back to the shared pool).

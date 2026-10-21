@@ -256,6 +256,74 @@ async def test_rate_limited_response_is_retried_like_a_server_error(session_fact
     response = await queue.submit(prompt_type="t", prompt="flaky", prompt_version="v1")
     assert response == {"ok": True}
     assert len(transport.calls) == 3
+    assert (await queue.get_quota_status())["calls_used"] == 3
+
+
+async def test_retries_cannot_exceed_actual_attempt_allowance(session_factory):
+    transport = ScriptedTransport(fail_times=3)
+    queue = _make_queue(session_factory, transport, daily_quota=2, max_retries=3)
+    with pytest.raises(QuotaExhaustedError):
+        await queue.submit(prompt_type="t", prompt="flaky", prompt_version="v1")
+    assert len(transport.calls) == 2
+    assert (await queue.get_quota_status())["calls_used"] == 2
+    async with session_factory() as session:
+        attempts = (
+            await session.scalars(
+                select(AuditLog).where(AuditLog.event_type == "llm_transport_attempt")
+            )
+        ).all()
+        assert len(attempts) == 2
+
+
+async def test_identical_concurrent_misses_coalesce_and_release_lock(session_factory):
+    import asyncio
+
+    transport = ScriptedTransport()
+    queue = _make_queue(session_factory, transport)
+    results = await asyncio.gather(
+        *[queue.submit(prompt_type="t", prompt="same", prompt_version="v1") for _ in range(3)]
+    )
+    assert results == [{"ok": True}] * 3
+    assert len(transport.calls) == 1
+    assert not queue._inflight
+    status = await queue.get_quota_status()
+    assert status["calls_used"] == 1 and status["cache_hits_today"] == 2
+
+
+async def test_cancellation_while_waiting_for_rpm_does_not_reserve_daily_capacity(session_factory):
+    import asyncio
+
+    entered = asyncio.Event()
+
+    class WaitingGovernor:
+        async def acquire(self):
+            entered.set()
+            await asyncio.Event().wait()
+
+    transport = ScriptedTransport()
+    queue = _make_queue(session_factory, transport, governor=WaitingGovernor())
+    task = asyncio.create_task(queue.submit(prompt_type="t", prompt="wait", prompt_version="v1"))
+    await entered.wait()
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert not transport.calls and not queue._inflight
+    assert (await queue.get_quota_status())["calls_used"] == 0
+
+
+async def test_cache_identity_includes_temperature_type_and_contract(session_factory):
+    transport = ScriptedTransport()
+    for temperature, prompt_type, contract in [
+        (0, "a", "v2"),
+        (0.7, "a", "v2"),
+        (0, "b", "v2"),
+        (0, "a", "v3"),
+    ]:
+        queue = _make_queue(
+            session_factory, transport, temperature=temperature, cache_contract_version=contract
+        )
+        await queue.submit(prompt_type=prompt_type, prompt="same", prompt_version="v1")
+    assert len(transport.calls) == 4
 
 
 async def test_cache_hit_skips_transport_and_quota_but_is_still_audited(session_factory):
