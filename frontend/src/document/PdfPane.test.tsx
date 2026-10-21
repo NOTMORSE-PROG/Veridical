@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { PdfPane } from "./PdfPane";
 
@@ -47,7 +47,10 @@ describe("PdfPane page visibility", () => {
       destroy: vi.fn(),
     }));
   });
-  afterEach(() => vi.unstubAllGlobals());
+  afterEach(() => {
+    cleanup();
+    vi.unstubAllGlobals();
+  });
 
   it("does not clamp an unavailable recorded source page to the last page", async () => {
     render(<PdfPane {...props} fileUrl="short.pdf" requestedPage={999} />);
@@ -58,6 +61,7 @@ describe("PdfPane page visibility", () => {
   it("does not discard a queued exit or let the old page overwrite the visible page", async () => {
     render(<PdfPane {...props} fileUrl="long.pdf" />);
     await screen.findByLabelText("Page 29 of 29");
+    await waitFor(() => observer(29));
     act(() => observer(10).emit([0.75]));
     act(() => observer(29).emit([0.5]));
     act(() => observer(10).emit([0.76, 0]));
@@ -68,6 +72,7 @@ describe("PdfPane page visibility", () => {
   it("uses the latest near-render entry rather than the first entry", async () => {
     render(<PdfPane {...props} fileUrl="long.pdf" />);
     const page = await screen.findByLabelText("Page 29 of 29");
+    await waitFor(() => observer(29, true));
     act(() => observer(29, true).emit([1, 0]));
     expect(within(page).queryByRole("img")).not.toBeInTheDocument();
     act(() => observer(29, true).emit([0, 1]));
@@ -77,9 +82,12 @@ describe("PdfPane page visibility", () => {
   it("clears old visibility when a different document replaces the manuscript", async () => {
     const { rerender } = render(<PdfPane {...props} fileUrl="long.pdf" />);
     await screen.findByLabelText("Page 29 of 29");
+    // DOM insertion can precede the passive effect registering visibility.
+    await waitFor(() => observer(29));
     act(() => observer(29).emit([1]));
     rerender(<PdfPane {...props} fileUrl="short.pdf" />);
     await screen.findByLabelText("Page 2 of 2");
+    await waitFor(() => observer(1));
     act(() => observer(1).emit([0.5]));
     await waitFor(() => expect(screen.getByRole("spinbutton")).toHaveValue(1));
     expect(screen.getByText("Page 1 of 2", { selector: "output" })).toBeInTheDocument();
@@ -88,6 +96,7 @@ describe("PdfPane page visibility", () => {
   it("scrolls the registered source page within the pane", async () => {
     render(<PdfPane {...props} fileUrl="long.pdf" />);
     const page = await screen.findByLabelText("Page 29 of 29");
+    await waitFor(() => observer(29));
     const root = screen.getByRole("region", { name: "Full manuscript, scrollable" });
     root.scrollTo = vi.fn();
     vi.spyOn(root, "getBoundingClientRect").mockReturnValue({ top: 100 } as DOMRect);
