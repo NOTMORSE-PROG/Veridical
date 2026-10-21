@@ -8,5 +8,10 @@
   "numeric_citation_scan_limit": "The numbered-citation scan reached its safety limit. Unread citations have not been assessed",
   "claim_support_unavailable": "Source details were checked where possible, but some cited claims could not be checked against source content",
   "statement_roles_unverified": "The check found possible objectives and results, but could not reliably establish that they describe this study. Comparison leads do not change readiness",
-  "image_content_unassessed": "Some image content remains unassessed. This limit is not a statistical error"
+  "image_content_unassessed": "Some image content remains unassessed. This limit is not a statistical error",
+  "metadata_comparison_policy_unavailable": "Reference metadata comparison could not run because its comparison policy was unavailable. No lookup or claim-support assessment was made for those DOI references",
+  "citation_metadata_comparison_unassessed": "Some reference titles could not be compared reliably because of ambiguous formatting, case or missing metadata. Those comparisons and their claim support remain unassessed",
+  "title_hyphenation_unassessed": "Hyphenation differs between the reference title and registry title. The title comparison remains unassessed.",
+  "title_case_unassessed": "Title capitalization may change scientific meaning. The title comparison remains unassessed.",
+  "title_metadata_unavailable": "A complete title was not recorded for both sides. The title comparison remains unassessed."
 }

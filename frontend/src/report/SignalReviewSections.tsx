@@ -768,8 +768,8 @@ export function SignalCriteriaResults({ results, checkRunId, publicView = false 
   const location = useLocation();
   return (
     <section className="signal-review-section" aria-labelledby="criteria-results-heading">
-      <div className="signal-review-section__heading"><div><p className="signal-section-kicker">Criterion record</p><h2 id="criteria-results-heading" tabIndex={-1}>All assessed criteria</h2></div><span>{results.length} total</span></div>
-      <p className="signal-review-section__intro">Each row shows the recorded outcome and the evidence available for checking it. Importance is shown as a band, never as a judgment percentage.</p>
+      <div className="signal-review-section__heading"><div><p className="signal-section-kicker">Criterion record</p><h2 id="criteria-results-heading" tabIndex={-1}>Criterion records</h2></div><span>{results.length} {results.length === 1 ? "record" : "records"}</span></div>
+      <p className="signal-review-section__intro">Each row shows the recorded status and any available evidence. A criterion marked Not assessed has no assessment result. Importance is shown as Low, Medium or High.</p>
       {results.length ? <ol className="signal-result-list">{results.map((row, index) => {
         const display = resultDisplay(row);
         const outcome = row.level ? { label: `Level: ${display.label}`, tone: "neutral" }
@@ -806,7 +806,7 @@ export function SignalCriteriaResults({ results, checkRunId, publicView = false 
                 {row.reasoning && <p><strong>Recorded reasoning:</strong> {row.reasoning}</p>}
                 {row.reason && <p><strong>System note:</strong> {row.reason}</p>}
               </div></details></li>;
-      })}</ol> : <div className="signal-desk-empty"><h3>No criterion results yet</h3><p>This report has no assessed criterion rows.</p></div>}
+      })}</ol> : <div className="signal-desk-empty"><h3>No criterion records in this section</h3><p>No criterion records are shown here. Review the other report sections for unresolved criteria and assessment limits.</p></div>}
     </section>
   );
 }

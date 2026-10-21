@@ -73,7 +73,12 @@ export function isPValueFinding(kind: string | null | undefined): boolean {
   return kind === "p_value_mismatch" || kind === "p_value_decision_error";
 }
 
-export function findingVerificationPrompt(checkKind: string, problemKind: string | null, hasPair: boolean): string {
+export function findingVerificationPrompt(checkKind: string, problemKind: string | null, hasPair: boolean, hasCitationComparison = false): string {
+  if (checkKind === "citation_integrity" && problemKind === "possible_metadata_mismatch") {
+    return hasCitationComparison
+      ? "Compare the reference with the saved provider metadata. Open the DOI source to check which work the identifier names, then decide whether the reference needs correction. This comparison does not verify support for a manuscript claim."
+      : "This historical finding has no saved provider comparison. Check the original reference and DOI independently, or run a new check to create a new evidence record. Source existence does not establish support for a manuscript claim.";
+  }
   if (checkKind === "internal_agreement") {
     return problemKind === "agreement_unmatched_intent"
       ? "Check whether this statement is this study's objective. Read the results and surrounding text to see whether it was addressed; no paired result was recorded by the check."

@@ -25,5 +25,6 @@
   "p_value_mismatch": "Reported and recalculated p-values may differ",
   "percentage_sum_off": "Table percentages may not sum to 100%",
   "group_count_exceeds_total": "Group sample sizes may not match the stated total",
-  "reuse_same_instructor_resubmission": "Possible resubmission of your own Library record"
+  "reuse_same_instructor_resubmission": "Possible resubmission of your own Library record",
+  "possible_metadata_mismatch": "Possible metadata mismatch"
 }

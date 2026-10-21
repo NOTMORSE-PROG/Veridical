@@ -6859,3 +6859,27 @@
 
 
 }
+
+@layer components {
+  /* V-081 F5, 4i/4w: wrap saved registry inputs inside the review pane. */
+  .signal-citation-comparison table {
+    width: 100%;
+    table-layout: fixed;
+    border-collapse: collapse;
+  }
+  .signal-citation-comparison th,
+  .signal-citation-comparison td {
+    padding: var(--signal-space-2);
+    border-block-end: var(--signal-border-hairline) solid var(--color-signal-border);
+    text-align: start;
+    vertical-align: top;
+    overflow-wrap: anywhere;
+  }
+  .signal-citation-comparison a {
+    color: var(--color-signal-link);
+    text-decoration: underline;
+  }
+  .signal-citation-comparison dd {
+    overflow-wrap: anywhere;
+  }
+}

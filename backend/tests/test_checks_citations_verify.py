@@ -128,11 +128,117 @@ async def test_real_doi_confirmed_produces_no_flag(session_factory):
         assert "semanticscholar.org" in str(request.url)
         return httpx.Response(404)  # no S2 record either — abstract stays None, still fine
 
-    citation = _citation(doi="10.1/x")
+    citation = _citation(doi="10.1/x", title="Real Paper")
     async with session_factory() as session, _client(handler) as client:
         verdict = await verify_citation(session, client, citation, settings=get_settings())
     assert verdict.kind == VerdictKind.existence_confirmed
     assert _verdict_flag_draft(citation, verdict) is None
+
+
+@pytest.mark.parametrize("mode", ["mismatch", "ambiguous", "invalid_policy"])
+async def test_metadata_snapshot_or_unassessed_reason_survives_full_assembly(
+    session_factory, tmp_path, mode
+):
+    from sqlalchemy import select
+
+    from app.flags.service import get_flag
+    from app.ingest.patterns import load_patterns
+    from app.models.run import Flag
+
+    c = _citation(
+        doi="10.1234/control", title="Nanometer scale thermometry", authors=["Smith, J."], year=2018
+    )
+    extraction = ExtractionResult(
+        page_count=1,
+        anchor_kind="page",
+        image_only=False,
+        text_chars=100,
+        section_tree=SectionTree(source="none", nodes=[]),
+        images=[],
+        blocks=[
+            TextBlock(
+                page=1,
+                text="Prior work (Smith, 2018) measured heat.",
+                max_font_size=11,
+                bold_ratio=0,
+            ),
+            TextBlock(page=1, text="REFERENCES", max_font_size=12, bold_ratio=1),
+            TextBlock(page=1, text=c.raw_text, max_font_size=11, bold_ratio=0),
+        ],
+    )
+    settings = get_settings().model_copy()
+    if mode == "invalid_policy":
+        path = tmp_path / "policy.json"
+        path.write_text("{}", encoding="utf-8")
+        settings.citation_metadata_title_policy_file = path
+    calls = []
+
+    def handler(request):
+        calls.append(request)
+        assert mode != "invalid_policy", "Policy must fail before a provider request"
+        return httpx.Response(
+            200,
+            json={
+                "message": {
+                    "DOI": c.doi,
+                    "title": [
+                        "Another registered title"
+                        if mode == "mismatch"
+                        else "Nanometre-scale thermometry"
+                    ],
+                    "author": [{"family": "Smith"}],
+                    "published": {"date-parts": [[2018]]},
+                }
+            },
+        )
+
+    class NoClaimCalls:
+        async def complete(self, *args, **kwargs):
+            pytest.fail("Unassessed or mismatched metadata cannot enable claim support")
+
+    run_id = await _seed_check_run(session_factory)
+    async with session_factory() as session, _client(handler) as client:
+        result = await run_citation_integrity_check(
+            session, client, run_id, [c], extraction, load_patterns(), settings, NoClaimCalls()
+        )
+        ledger = result.detail["reference_metadata_coverage"][0]
+        if mode == "mismatch":
+            flag = await session.scalar(select(Flag).where(Flag.check_result_id == result.id))
+            assert flag.detail["metadata_comparison"] == ledger["metadata_comparison"]
+            owner = await session.scalar(
+                select(Manuscript.instructor_id)
+                .join(CheckRun, CheckRun.manuscript_id == Manuscript.id)
+                .where(CheckRun.id == run_id)
+            )
+            api = await get_flag(session, flag.id, owner)
+            assert api.citation_metadata_comparison.registered.title == "Another registered title"
+            assert api.citation_metadata_comparison.cited.title == c.title
+            assert api.citation_metadata_comparison.differing_fields == ["title"]
+            assert (
+                api.citation_metadata_comparison.policy_sha256
+                == ledger["metadata_comparison"]["policy_sha256"]
+            )
+            from app.errors import NotFoundError
+
+            with pytest.raises(NotFoundError):
+                await get_flag(session, flag.id, owner + 1)
+        else:
+            assert result.outcome == ResultOutcome.escalated
+            assert ledger["status"] == "unassessed"
+            assert ledger["reason"] == (
+                "metadata_comparison_policy_unavailable"
+                if mode == "invalid_policy"
+                else "title_hyphenation_unassessed"
+            )
+            assert result.detail["coverage_reason"] == (
+                "metadata_comparison_policy_unavailable"
+                if mode == "invalid_policy"
+                else "citation_metadata_comparison_unassessed"
+            )
+            assert result.detail["n_metadata_skipped_insufficient"] == 1
+            assert ledger["lookup_attempted"] == (mode != "invalid_policy")
+            assert result.detail["n_flags"] == 0
+            assert len(calls) == (0 if mode == "invalid_policy" else 1)
 
 
 async def test_typo_doi_is_unverifiable_not_retried_via_title(session_factory):
@@ -322,7 +428,7 @@ async def test_crossref_missing_abstract_supplemented_from_s2(session_factory):
             },
         )
 
-    citation = _citation(doi="10.1/y")
+    citation = _citation(doi="10.1/y", title="A Paper")
     async with session_factory() as session, _client(handler) as client:
         verdict = await verify_citation(session, client, citation, settings=get_settings())
     assert verdict.kind == VerdictKind.existence_confirmed

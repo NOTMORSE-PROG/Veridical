@@ -29,7 +29,7 @@ function integrityCoverageItem(status: IntegrityCheckStatusOut, manuscriptId: nu
         : "Reference entries were retained, but their details could not be checked. Citation matching across the manuscript was not assessed.",
       subIssues: [
         `${status.n_reference_metadata_attempted ?? 0} reference checks attempted. This does not mean every source was verified.`,
-        ...(status.n_metadata_skipped_insufficient ? [`${status.n_metadata_skipped_insufficient} references could not be checked because their details were incomplete.`] : []),
+        ...(status.n_metadata_skipped_insufficient ? [`${status.n_metadata_skipped_insufficient} references could not be verified reliably.`] : []),
         ...(status.n_metadata_api_down ? [`${status.n_metadata_api_down} source checks could not reach an external service.`] : []),
         "Claim support across the manuscript was not assessed. Unchecked content is not treated as passed.",
       ],
@@ -37,6 +37,8 @@ function integrityCoverageItem(status: IntegrityCheckStatusOut, manuscriptId: nu
     };
   }
   const coverageCopy: Record<string, string> = {
+    metadata_comparison_policy_unavailable: "Reference metadata comparison could not run because its comparison policy was unavailable. No lookup or claim-support assessment was made for those DOI references.",
+    citation_metadata_comparison_unassessed: "Some reference titles could not be compared reliably because of ambiguous formatting, case or missing metadata. Those comparisons and their claim support remain unassessed.",
     source_reading_order_unresolved: "Some pages could not be read reliably. This check was not assessed; this is not a finding against the paper.",
     reference_metadata_insufficient: "Some references are visible in the paper, but their author, title, or date could not be read reliably. They have not been verified.",
     reference_list_unavailable: "The reference list could not be separated reliably. This does not mean references are missing from the paper.",

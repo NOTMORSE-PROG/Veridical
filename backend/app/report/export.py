@@ -1000,9 +1000,11 @@ def build_report_pdf(data: ReportExportData) -> bytes:
                 reason = "A split source identifier could not be reconstructed reliably."
             elif entry.reason == "unsupported_reference_structure":
                 reason = "The reference could not be parsed reliably enough for verification."
+            elif entry.reason in _coverage_labels():
+                reason = _coverage_labels()[entry.reason]
             else:
                 reason = (
-                    "Some reference fields were not reliably parsed. "
+                    "This reference was not fully assessed. "
                     f"Recorded lookup status: {entry.status.replace('_', ' ')}."
                 )
             attempted = (

@@ -24,6 +24,7 @@ from app.external import cache
 from app.findings.policy import exclusion_reason, reuse_excerpt, reuse_reasoning
 from app.flags.schemas import (
     AgreementPairOut,
+    CitationMetadataComparisonOut,
     CitationSourceKeyOut,
     FlagOut,
     PassagePairOut,
@@ -184,6 +185,17 @@ def _agreement_pair(check_kind: str, detail: dict) -> AgreementPairOut | None:
     )
 
 
+def _citation_metadata_comparison(
+    check_kind: str, detail: dict
+) -> CitationMetadataComparisonOut | None:
+    if check_kind != "citation_integrity" or detail.get("kind") != "possible_metadata_mismatch":
+        return None
+    try:
+        return CitationMetadataComparisonOut.model_validate(detail.get("metadata_comparison"))
+    except ValidationError:
+        return None
+
+
 async def _to_flag_out(
     session: AsyncSession,
     flag: Flag,
@@ -245,6 +257,7 @@ async def _to_flag_out(
         ),
         p_value_comparison=_p_value_comparison(result.kind.value, detail),
         agreement_pair=_agreement_pair(result.kind.value, detail),
+        citation_metadata_comparison=_citation_metadata_comparison(result.kind.value, detail),
         llm_mode=check_run.llm_mode.value,
         # BUG-170: same expression as `report/service.py`'s `FlagSummaryOut`
         # field of the same name -- `flag.detail` directly (not the

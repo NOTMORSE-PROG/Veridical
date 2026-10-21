@@ -654,6 +654,19 @@ export interface CitationSourceKeyOut {
 }
 
 export interface FlagOut {
+  citation_metadata_comparison?: {
+    schema_version: string;
+    provider: string;
+    cited: { doi: string | null; title: string | null; year: number | null; first_author: string | null };
+    registered: { doi: string | null; title: string | null; year: number | null; first_author: string | null };
+    differing_fields: string[];
+    title_status: string;
+    unassessed_reason: string | null;
+    policy_version: string | null;
+    policy_sha256: string | null;
+    doi_source_url: string | null;
+    provider_record_url: string | null;
+  } | null;
   affects_readiness?: boolean;
   readiness_exclusion_reason?: string | null;
   id: number;

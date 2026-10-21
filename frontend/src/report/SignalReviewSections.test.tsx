@@ -11,9 +11,24 @@
 // when the last escalated item resolves.
 import { fireEvent, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { EscalatedItemOut } from "../api/types";
+import type { EscalatedItemOut, ResultRowCommon } from "../api/types";
 import { renderWithProviders, stubFetchByPath } from "../test/renderWithProviders";
-import { SignalEscalatedPanel } from "./SignalReviewSections";
+import { SignalCriteriaResults, SignalEscalatedPanel } from "./SignalReviewSections";
+
+describe("criterion record count", () => {
+  it.each([false, true])("V-081: five unassessed rows are records in private/shared view (%s)", (publicView) => {
+    const results: ResultRowCommon[] = Array.from({ length: 5 }, (_, index) => ({
+      criterion_id: index + 1, text: `Criterion ${index + 1}`, type: "semantic", kind: "semantic",
+      weight: 1, weight_importance: "med", outcome: "quota_exhausted", score: null,
+      basis: null, anchor: null, reasoning: null, reason: "Capacity reached", evidence: [],
+    }));
+    renderWithProviders(<SignalCriteriaResults results={results} checkRunId={18} publicView={publicView} />);
+    expect(screen.getByRole("heading", { name: "Criterion records" })).toBeInTheDocument();
+    expect(screen.getByText("5 records")).toBeInTheDocument();
+    expect(screen.getAllByText("Not assessed: capacity reached")).toHaveLength(5);
+    expect(screen.queryByText("All assessed criteria")).not.toBeInTheDocument();
+  });
+});
 
 const REAL_MAJORITY: EscalatedItemOut = {
   check_result_id: 4,

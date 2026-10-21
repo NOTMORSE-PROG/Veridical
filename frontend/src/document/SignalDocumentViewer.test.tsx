@@ -1,8 +1,9 @@
 import { fireEvent, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { FlagOut, FlagSummaryOut, ManuscriptViewerOut, ReportOut } from "../api/types";
+import type { CriterionResultOut, FlagOut, FlagSummaryOut, ManuscriptViewerOut, ReportOut } from "../api/types";
 import { renderWithProviders, stubFetchByPath } from "../test/renderWithProviders";
 import { SignalDocumentViewerPage } from "./SignalDocumentViewer";
+import { CITATION_COMPARISON } from "../test/citationComparisonFixture";
 
 vi.mock("./PdfPane", () => ({
   PdfPane: ({ requestedPage, selectedFlagId, fileUrl, regions }: { requestedPage: number | null; selectedFlagId: number | null; fileUrl: string; regions: unknown[] }) => (
@@ -101,6 +102,41 @@ function stubViewer(viewer: ManuscriptViewerOut = VIEWER) {
 
 describe("SignalDocumentViewerPage", () => {
   afterEach(() => vi.unstubAllGlobals());
+
+  it("V-081: the decision pane counts unassessed criterion records without calling them assessed", async () => {
+    const results: CriterionResultOut[] = Array.from({ length: 5 }, (_, index) => ({
+      criterion_id: index + 1, text: `Unassessed criterion ${index + 1}`, type: "semantic", kind: "semantic",
+      weight: 1, weight_importance: "med", outcome: "quota_exhausted", score: null,
+      basis: null, anchor: null, reasoning: null, reason: "Capacity reached", evidence: [], resolution: null,
+    }));
+    vi.stubGlobal("fetch", stubFetchByPath({
+      "/check-runs/5/document": VIEWER, "/check-runs/5/report": { ...REPORT, results },
+      "/check-runs/5/escalated": [], "/check-runs/5/flags": [],
+    }));
+    renderWithProviders(<SignalDocumentViewerPage />, { route: "/report/5/document?view=decision&pane=review", path: "/report/:checkRunId/document" });
+    const summary = await screen.findByText("Criterion record, 5 entries");
+    fireEvent.click(summary);
+    expect(screen.getByRole("heading", { name: "Criterion records" })).toBeVisible();
+    expect(screen.getAllByText("Not assessed: capacity reached")).toHaveLength(5);
+    expect(screen.queryByText("All assessed criteria")).not.toBeInTheDocument();
+  });
+
+  it.each([true, false])("V-081: registry evidence is shared with flag detail; missing history is explicit (%s)", async (saved) => {
+    vi.stubGlobal("fetch", stubFetchByPath({
+      "/check-runs/5/document": VIEWER, "/check-runs/5/report": REPORT,
+      "/check-runs/5/escalated": [], "/check-runs/5/flags": [{ ...SUMMARY, check_kind: "citation_integrity", problem_kind: "possible_metadata_mismatch" }],
+      "/flags/7": { ...FLAG, check_kind: "citation_integrity", ai_verdict_summary: "possible_metadata_mismatch", citation_metadata_comparison: saved ? CITATION_COMPARISON : null },
+    }));
+    renderWithProviders(<SignalDocumentViewerPage />, { route: "/report/5/document?flag=7", path: "/report/:checkRunId/document" });
+    expect(await screen.findByText("Registry check result")).toBeInTheDocument();
+    expect(screen.getByText(saved ? "Recorded registry metadata comparison" : "Registry comparison without saved provider metadata")).toBeInTheDocument();
+    expect(screen.queryByText(/A second passage does not apply/)).not.toBeInTheDocument();
+    if (saved) {
+      expect(screen.getByText("Cited study title")).toBeInTheDocument();
+      expect(screen.getByText("Registered study title")).toBeInTheDocument();
+      expect(screen.getByText("abc-saved-policy-hash")).toBeInTheDocument();
+    } else expect(screen.getByText("Provider comparison was not saved")).toBeInTheDocument();
+  });
 
   it.each([true, false])("shows saved p-value comparison or recorded fallback without disclosure (fields=%s)", async (hasFields) => {
     const reasoning = "The reported .900 differs from the recalculated .021.";

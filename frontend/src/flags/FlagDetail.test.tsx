@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ConfirmCitationSourceOut, FlagOut, ReportOut } from "../api/types";
 import { renderWithProviders, stubFetchByPath } from "../test/renderWithProviders";
 import { FlagDetailPage } from "./FlagDetail";
+import { CITATION_COMPARISON } from "../test/citationComparisonFixture";
 
 const FLAG = {
   id: 5,
@@ -33,6 +34,38 @@ const FLAG = {
 describe("FlagDetailPage", () => {
   afterEach(() => vi.unstubAllGlobals());
 
+  it.each(["complete", "partial", "legacy"])("V-081: exposes saved registry evidence or its absence (%s)", async (state) => {
+    const comparison = state === "legacy" ? null : state === "partial"
+      ? { ...CITATION_COMPARISON, registered: { ...CITATION_COMPARISON.registered, year: null, first_author: null } }
+      : CITATION_COMPARISON;
+    vi.stubGlobal("fetch", stubFetchByPath({ "/flags/5": { ...FLAG, llm_mode: "unknown", ai_verdict_summary: "possible_metadata_mismatch", citation_metadata_comparison: comparison } }));
+    renderWithProviders(<FlagDetailPage />, { route: "/flags/5", path: "/flags/:flagId" });
+    expect(await screen.findByText("Registry check result")).toBeInTheDocument();
+    expect(screen.queryByText("AI suggestion")).not.toBeInTheDocument();
+    expect(screen.queryByText("AI mode could not be verified")).not.toBeInTheDocument();
+    if (comparison) {
+      const table = screen.getByRole("table", { name: "Recorded citation metadata comparison" });
+      expect(within(table).getByText("Cited study title")).toBeInTheDocument();
+      expect(within(table).getByText("Registered study title")).toBeInTheDocument();
+      expect(within(table).getByRole("columnheader", { name: "Returned by Crossref" })).toBeInTheDocument();
+      expect(screen.getByText("abc-saved-policy-hash")).toBeInTheDocument();
+      expect(screen.getByRole("link", { name: "Open DOI source (opens in a new tab)" })).toHaveAttribute("href", CITATION_COMPARISON.doi_source_url);
+      if (state === "partial") expect(within(table).getAllByText("Not recorded")).toHaveLength(2);
+    } else {
+      expect(screen.getByText("Provider comparison was not saved")).toBeInTheDocument();
+      expect(screen.getByText(/This historical finding has no saved provider comparison/)).toBeInTheDocument();
+      expect(screen.queryByRole("table")).not.toBeInTheDocument();
+      expect(screen.queryByText("Registered study title")).not.toBeInTheDocument();
+    }
+  });
+
+  it("keeps the AI label and mode disclosure for an actual semantic finding", async () => {
+    vi.stubGlobal("fetch", stubFetchByPath({ "/flags/5": { ...FLAG, check_kind: "semantic", llm_mode: "unknown" } }));
+    renderWithProviders(<FlagDetailPage />, { route: "/flags/5", path: "/flags/:flagId" });
+    expect(await screen.findByText("AI suggestion")).toBeInTheDocument();
+    expect(screen.getByText("AI mode could not be verified")).toBeInTheDocument();
+  });
+
   it("renders the same stored agreement pair as the manuscript viewer", async () => {
     vi.stubGlobal("fetch", stubFetchByPath({ "/flags/5": { ...FLAG, check_kind: "internal_agreement", agreement_pair: { intent_text: "To build a login module.", intent_anchor: "page 1", outcome_text: "The login module was not implemented.", outcome_anchor: "page 2" }, affects_readiness: false } }));
     renderWithProviders(<FlagDetailPage />, { route: "/flags/5", path: "/flags/:flagId" });
@@ -41,16 +74,16 @@ describe("FlagDetailPage", () => {
     expect(screen.getByRole("link", { name: "Open result location: page 2" })).toHaveAttribute("href", "/report/20/document?finding=5&anchor=page%202");
   });
 
-  it("shows the evidence excerpt, anchor, humanized AI verdict, and severity", async () => {
+  it("shows evidence and a neutral method when the stored method is unknown", async () => {
     vi.stubGlobal("fetch", stubFetchByPath({ "/flags/5": FLAG }));
     renderWithProviders(<FlagDetailPage />, { route: "/flags/5", path: "/flags/:flagId" });
     expect(await screen.findByText(/Wang, S\. \(2019\)/)).toBeInTheDocument();
     expect(screen.getByText("page 34")).toBeInTheDocument();
-    expect(screen.getByText("AI suggestion")).toBeInTheDocument();
+    expect(screen.getByText("Recorded check result")).toBeInTheDocument();
     expect(screen.getByText("Not supported")).toBeInTheDocument();
     expect(screen.getByText("High severity")).toBeInTheDocument();
     expect(screen.queryByText("Agreement 100%")).not.toBeInTheDocument();
-    expect(screen.getByText(/not shown as a percentage/)).toBeInTheDocument();
+    expect(screen.getByText(/Review the recorded evidence and source/)).toBeInTheDocument();
   });
 
   it("maps an internal agreement kind to instructor-facing problem copy", async () => {

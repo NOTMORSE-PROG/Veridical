@@ -33,6 +33,77 @@ def flag_export_detail(
                 and recorded_reason != recorded_excerpt
             )
     comparisons = []
+    if (
+        flag.check_kind == "citation_integrity"
+        and flag.ai_verdict_summary == "possible_metadata_mismatch"
+    ):
+        if metadata := flag.citation_metadata_comparison:
+            comparisons.append(
+                ExportComparisonOut(label="Recorded registry comparison", text=metadata.provider)
+            )
+            comparisons.append(
+                ExportComparisonOut(
+                    label="Fields marked different",
+                    text=", ".join(metadata.differing_fields) or "Not recorded",
+                )
+            )
+            for key, label in (
+                ("doi", "DOI"),
+                ("title", "Title"),
+                ("year", "Year"),
+                ("first_author", "First author"),
+            ):
+                for values, origin in (
+                    (metadata.cited, "In manuscript reference"),
+                    (metadata.registered, "Returned by provider"),
+                ):
+                    value = getattr(values, key)
+                    comparisons.append(
+                        ExportComparisonOut(
+                            label=f"{origin} - {label}",
+                            text=str(value) if value is not None else "Not recorded",
+                        )
+                    )
+            for label, value in (
+                ("DOI source", metadata.doi_source_url),
+                ("Provider record", metadata.provider_record_url),
+                ("Comparison policy", metadata.policy_version),
+                ("Policy SHA256", metadata.policy_sha256),
+                ("Snapshot schema", metadata.schema_version),
+            ):
+                comparisons.append(
+                    ExportComparisonOut(label=label, text=str(value) if value else "Not recorded")
+                )
+            comparisons.append(
+                ExportComparisonOut(
+                    label="Comparison limit",
+                    text=(
+                        "Source existence does not establish support for a manuscript claim. "
+                        "Links open current external records; "
+                        "the comparison above is saved evidence."
+                    ),
+                )
+            )
+            comparisons.append(
+                ExportComparisonOut(label="Title comparison", text=metadata.title_status)
+            )
+            if metadata.unassessed_reason:
+                comparisons.append(
+                    ExportComparisonOut(
+                        label="Unassessed comparison reason", text=metadata.unassessed_reason
+                    )
+                )
+        else:
+            comparisons.append(
+                ExportComparisonOut(
+                    label="Provider comparison was not saved",
+                    text=(
+                        "This historical finding does not include the provider metadata used "
+                        "for comparison. Run a new check to create a new evidence record, "
+                        "or verify the source independently."
+                    ),
+                )
+            )
     if pair := flag.agreement_pair:
         comparisons.extend(
             [
@@ -110,11 +181,21 @@ def unassessed_references(detail: dict) -> list[UnassessedReferenceOut]:
         if type(index) is not int or index < 0:
             continue
         status = row.get("status")
-        if status not in ("unassessed", "api_down") and row.get("metadata_complete") is not False:
+        comparison = row.get("metadata_comparison")
+        title_unassessed = (
+            isinstance(comparison, dict) and comparison.get("title_status") == "unassessed"
+        )
+        if (
+            status not in ("unassessed", "api_down")
+            and row.get("metadata_complete") is not False
+            and not title_unassessed
+        ):
             continue
         if not isinstance(status, str) or type(row.get("lookup_attempted")) is not bool:
             continue
-        reason = row.get("reason")
+        reason = row.get("reason") or (
+            comparison.get("unassessed_reason") if title_unassessed else None
+        )
         records.append(
             UnassessedReferenceOut(
                 reference_order_index=index,

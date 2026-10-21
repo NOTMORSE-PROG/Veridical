@@ -20,6 +20,7 @@ const EXPECTED_REACHABLE_KINDS = [
   "agreement_cannot_determine",
   "agreement_injection_suspected",
   // F5 citation integrity (checks/citations/verify.py, extract.py, support.py)
+  "possible_metadata_mismatch",
   "retracted_source",
   "corrected_source",
   "unverifiable_api_down",

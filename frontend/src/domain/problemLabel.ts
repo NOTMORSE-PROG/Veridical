@@ -7,6 +7,7 @@
 // kind renders no label rather than a guessed one -- extend this table
 // from the checks' own `*_WORDING` constants, never invent new copy.
 export const PROBLEM_LABEL: Partial<Record<string, string>> = {
+  possible_metadata_mismatch: "Possible metadata mismatch",
   agreement_unmatched_intent: "Possible objective-to-outcome gap",
   retracted_source: "Possibly retracted source",
   corrected_source: "Correction on record for this source",

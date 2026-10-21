@@ -1,6 +1,15 @@
 """F5 separates exact registry identity from cited metadata agreement."""
 
 import re
+from collections.abc import Mapping
+from dataclasses import dataclass
+from types import MappingProxyType
+from urllib.parse import quote
+
+from pydantic import HttpUrl, TypeAdapter, ValidationError
+
+from app.checks.citations.title_policy import TitlePolicy, compare_titles, load_title_policy
+from app.config import Settings
 
 _ASCII_FOLD = str.maketrans("ABCDEFGHIJKLMNOPQRSTUVWXYZ", "abcdefghijklmnopqrstuvwxyz")
 
@@ -36,9 +45,51 @@ def _words(value):
     return re.findall(r"\w+", value.casefold()) if isinstance(value, str) else []
 
 
-def metadata_mismatches(citation, result):
+@dataclass(frozen=True)
+class MetadataComparison:
+    differing_fields: tuple[str, ...]
+    title_status: str
+    unassessed_reason: str | None
+    cited: Mapping
+    registered: Mapping
+    policy_version: str
+    policy_sha256: str
+    provider: str
+    doi_source_url: str | None = None
+    provider_record_url: str | None = None
+
+    def evidence(self):
+        return {
+            "schema_version": "doi-metadata-v1",
+            "differing_fields": list(self.differing_fields),
+            "title_status": self.title_status,
+            "unassessed_reason": self.unassessed_reason,
+            "cited": dict(self.cited),
+            "registered": dict(self.registered),
+            "policy_version": self.policy_version,
+            "policy_sha256": self.policy_sha256,
+            "provider": self.provider,
+            "doi_source_url": self.doi_source_url,
+            "provider_record_url": self.provider_record_url,
+        }
+
+
+def _record_url(template, doi):
+    if not template or not isinstance(doi, str) or not re.fullmatch(r"10\.\d{4,9}/\S+", doi):
+        return None
+    try:
+        return str(TypeAdapter(HttpUrl).validate_python(template.format(doi=quote(doi, safe=""))))
+    except (ValueError, KeyError, IndexError, AttributeError, ValidationError):
+        return None
+
+
+def compare_metadata(
+    citation, result, *, policy: TitlePolicy | None = None, settings: Settings | None = None
+):
+    policy = policy or load_title_policy()
     differences = []
-    if citation.title and result.title and _words(citation.title) != _words(result.title):
+    title_status, title_reason = compare_titles(citation.title, result.title, policy)
+    if title_status == "differs":
         differences.append("title")
     year, authors = None, []
     raw = _obj(result.raw)
@@ -59,4 +110,38 @@ def metadata_mismatches(citation, result):
         cited = citation.authors[0].split(",", 1)[0]
         if _words(cited) != _words(authors[0]):
             differences.append("first author")
-    return differences
+    return MetadataComparison(
+        tuple(differences),
+        title_status,
+        title_reason,
+        MappingProxyType(
+            {
+                "doi": citation.doi,
+                "title": citation.title,
+                "year": citation.year,
+                "first_author": citation.authors[0] if citation.authors else None,
+            }
+        ),
+        MappingProxyType(
+            {
+                "doi": returned_doi(result) if isinstance(returned_doi(result), str) else None,
+                "title": result.title if isinstance(result.title, str) else None,
+                "year": year if type(year) is int else None,
+                "first_author": authors[0] if authors and isinstance(authors[0], str) else None,
+            }
+        ),
+        policy.version,
+        policy.sha256,
+        result.provider,
+        _record_url(settings.citation_doi_source_url_template, citation.doi) if settings else None,
+        _record_url(
+            settings.citation_registry_record_url_templates.get(result.provider),
+            returned_doi(result),
+        )
+        if settings
+        else None,
+    )
+
+
+def metadata_mismatches(citation, result):
+    return list(compare_metadata(citation, result).differing_fields)

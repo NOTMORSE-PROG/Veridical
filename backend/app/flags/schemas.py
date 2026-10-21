@@ -1,6 +1,8 @@
 """Flag evidence/annotation/override HTTP contract (F8.2/F8.4, screen 4i)."""
 
-from pydantic import BaseModel, Field, field_validator
+from typing import Literal
+
+from pydantic import BaseModel, ConfigDict, Field, HttpUrl, field_validator
 
 from app.report.schemas import ReportOut
 
@@ -59,6 +61,30 @@ class AgreementPairOut(BaseModel):
     outcome_anchor: str | None
 
 
+class CitationMetadataValuesOut(BaseModel):
+    model_config = ConfigDict(strict=True)
+    doi: str | None = None
+    title: str | None = None
+    year: int | None = None
+    first_author: str | None = None
+
+
+class CitationMetadataComparisonOut(BaseModel):
+    """Only saved inputs/provenance; never a live cache or registry reconstruction."""
+
+    schema_version: Literal["doi-metadata-v1"]
+    provider: str
+    cited: CitationMetadataValuesOut
+    registered: CitationMetadataValuesOut
+    differing_fields: list[str]
+    title_status: str
+    unassessed_reason: str | None = None
+    policy_version: str | None = None
+    policy_sha256: str | None = None
+    doi_source_url: HttpUrl | None = None
+    provider_record_url: HttpUrl | None = None
+
+
 class FlagOut(BaseModel):
     id: int
     check_result_id: int
@@ -88,6 +114,7 @@ class FlagOut(BaseModel):
     ai_reasoning: str | None
     p_value_comparison: PValueComparisonOut | None = None
     agreement_pair: AgreementPairOut | None = None
+    citation_metadata_comparison: CitationMetadataComparisonOut | None = None
     # BUG-049: "fake" (fixture data — e.g. a vision-pass table that was
     # never in the manuscript), "real", or "unknown" (predates migration
     # 0024). The flag evidence page is exactly where the audit found a

@@ -28,7 +28,12 @@ from app.checks.citations.extract import (
     uncited_flags,
 )
 from app.checks.citations.linkage_guard import guarded_absence_candidates
-from app.checks.citations.metadata import metadata_mismatches, returned_doi, same_doi
+from app.checks.citations.metadata import (
+    MetadataComparison,
+    compare_metadata,
+    returned_doi,
+    same_doi,
+)
 from app.checks.citations.numbered import (
     NumberedCitationAssessment,
     analyze_numbered_citations,
@@ -39,6 +44,7 @@ from app.checks.citations.support import (
     ClaimSupportResult,
     run_claim_support_check,
 )
+from app.checks.citations.title_policy import TitlePolicy, load_title_policy
 from app.checks.source_quality import persist_source_limitation, source_limitation_detail
 from app.config import Settings
 from app.errors import ApiDownError
@@ -93,6 +99,8 @@ class CitationVerdict:
     # resulting flag is confirmable (BUG-078).
     key_kind: str | None = None
     key_value: str | None = None
+    metadata_comparison: MetadataComparison | None = None
+    unassessed_reason: str | None = None
 
 
 RETRACTED_WORDING = (
@@ -151,6 +159,7 @@ async def verify_citation(
     *,
     settings: Settings,
     instructor_id: int | None = None,
+    title_policy: TitlePolicy | None = None,
 ) -> CitationVerdict:
     """Existence: DOI → CrossRef; books (ISBN) → Open Library→Google Books;
     else (no DOI/ISBN) → metadata search CrossRef→Semantic Scholar (ticket
@@ -164,6 +173,14 @@ async def verify_citation(
         # retraction or supplementary-abstract request can verify a partial key.
         return CitationVerdict(VerdictKind.unassessed)
     if citation.doi:
+        try:
+            title_policy = title_policy or load_title_policy(
+                settings.citation_metadata_title_policy_file
+            )
+        except (OSError, ValueError, UnicodeError):
+            return CitationVerdict(
+                VerdictKind.unassessed, unassessed_reason="metadata_comparison_policy_unavailable"
+            )
         verdict = await _verify_keyed(
             session,
             "doi",
@@ -179,8 +196,18 @@ async def verify_citation(
                 return CitationVerdict(VerdictKind.unassessed, verdict.result)
             if verdict.kind in (VerdictKind.retracted, VerdictKind.corrected):
                 return verdict
-            if metadata_mismatches(citation, verdict.result):
-                return CitationVerdict(VerdictKind.metadata_mismatch, verdict.result)
+            comparison = compare_metadata(
+                citation, verdict.result, policy=title_policy, settings=settings
+            )
+            verdict = replace(verdict, metadata_comparison=comparison)
+            if comparison.differing_fields:
+                return replace(verdict, kind=VerdictKind.metadata_mismatch)
+            if comparison.title_status == "unassessed":
+                return replace(
+                    verdict,
+                    kind=VerdictKind.unassessed,
+                    unassessed_reason=comparison.unassessed_reason,
+                )
         # CrossRef often has no abstract (many publishers don't submit one) —
         # most real DOI-backed citations would never reach V-030's
         # claim-support check without this. S2 is the more reliable
@@ -197,7 +224,7 @@ async def verify_citation(
                 session, client, citation.doi, settings=settings
             )
             if abstract:
-                verdict = CitationVerdict(verdict.kind, replace(verdict.result, abstract=abstract))
+                verdict = replace(verdict, result=replace(verdict.result, abstract=abstract))
         return verdict
 
     if citation.isbn:
@@ -369,7 +396,12 @@ def _verdict_flag_draft(citation: Citation, verdict: CitationVerdict) -> Citatio
                     "Source existence does not establish claim support."
                 ),
                 "provider": verdict.result.provider,
-                "differing_fields": metadata_mismatches(citation, verdict.result),
+                "differing_fields": list(verdict.metadata_comparison.differing_fields)
+                if verdict.metadata_comparison
+                else [],
+                "metadata_comparison": verdict.metadata_comparison.evidence()
+                if verdict.metadata_comparison
+                else None,
             },
         )
     if verdict.kind == VerdictKind.retracted:
@@ -532,7 +564,8 @@ async def run_citation_integrity_check(
             if not (metadata_only or gaps or selection.issues)
             else len(citations)
         )
-    metadata_unassessed = []
+    metadata_unassessed = set()
+    comparison_unassessed = False
     metadata_api_down = 0
     metadata_not_found = 0
     verification_records = []
@@ -582,6 +615,12 @@ async def run_citation_integrity_check(
         .join(CheckRun, CheckRun.manuscript_id == Manuscript.id)
         .where(CheckRun.id == check_run_id)
     )
+    title_policy, policy_unavailable = None, False
+    if any(c.doi for c in citations):
+        try:
+            title_policy = load_title_policy(settings.citation_metadata_title_policy_file)
+        except (OSError, ValueError, UnicodeError):
+            policy_unavailable = True
     for citation in citations:
         parsed = citation.parse_status == CitationParseStatus.parsed
         identifier_unassessed = bool(
@@ -600,7 +639,7 @@ async def run_citation_integrity_check(
             and (bool(citation.doi or citation.isbn) or metadata_complete)
         )
         if not metadata_complete:
-            metadata_unassessed.append(citation.order_index)
+            metadata_unassessed.add(citation.order_index)
         if not lookup_eligible:
             verification_records.append(
                 {
@@ -616,18 +655,37 @@ async def run_citation_integrity_check(
                 }
             )
             continue
-        verdict = await verify_citation(
-            session, client, citation, settings=settings, instructor_id=instructor_id
+        verdict = (
+            CitationVerdict(
+                VerdictKind.unassessed, unassessed_reason="metadata_comparison_policy_unavailable"
+            )
+            if citation.doi and policy_unavailable
+            else await verify_citation(
+                session,
+                client,
+                citation,
+                settings=settings,
+                instructor_id=instructor_id,
+                title_policy=title_policy,
+            )
         )
         if verdict.kind == VerdictKind.unassessed:
-            metadata_unassessed.append(citation.order_index)
+            metadata_unassessed.add(citation.order_index)
+        if verdict.metadata_comparison and verdict.metadata_comparison.title_status == "unassessed":
+            comparison_unassessed = True
+            metadata_unassessed.add(citation.order_index)
         metadata_api_down += verdict.kind == VerdictKind.api_down
         metadata_not_found += verdict.kind == VerdictKind.not_found
         verification_records.append(
             {
                 "reference_order_index": citation.order_index,
                 "status": verdict.kind.value,
-                "lookup_attempted": True,
+                "lookup_attempted": verdict.unassessed_reason
+                != "metadata_comparison_policy_unavailable",
+                "reason": verdict.unassessed_reason,
+                "metadata_comparison": verdict.metadata_comparison.evidence()
+                if verdict.metadata_comparison
+                else None,
                 "lookup_kind": "doi" if citation.doi else "isbn" if citation.isbn else "title",
                 "metadata_complete": metadata_complete,
                 "provider": verdict.result.provider if verdict.result else None,
@@ -688,6 +746,10 @@ async def run_citation_integrity_check(
         if metadata_only
         else "reference_list_unavailable"
         if selection.issues or not citations
+        else "metadata_comparison_policy_unavailable"
+        if policy_unavailable
+        else "citation_metadata_comparison_unassessed"
+        if comparison_unassessed
         else "reference_metadata_insufficient"
         if metadata_unassessed
         else "author_year_citation_parse_unassessed"

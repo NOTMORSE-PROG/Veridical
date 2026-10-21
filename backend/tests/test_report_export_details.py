@@ -92,6 +92,23 @@ def test_export_discloses_missing_historical_reason_instead_of_inventing_one():
     assert "No separate explanation was saved for this finding." in text
 
 
+def test_export_names_title_comparison_uncertainty_without_claiming_a_parse_failure():
+    data = _data(
+        unassessed_references=[
+            {
+                "reference_order_index": 1,
+                "status": "unassessed",
+                "reason": "title_hyphenation_unassessed",
+                "lookup_attempted": True,
+            }
+        ]
+    )
+    text = _text(build_report_pdf(data))
+    assert "Hyphenation differs between the reference title and registry title" in text
+    assert "The title comparison remains unassessed" in text
+    assert "Some reference fields were not reliably parsed" not in text
+
+
 def test_docx_layout_note_is_once_but_missing_source_is_not_suppressed():
     data = _data(
         source_format="docx",

@@ -576,6 +576,14 @@ class Settings(BaseSettings):
     citation_in_text_max_matches: int = Field(default=2000, ge=1, le=10000)
     citation_wrap_font_size_tolerance_pt: float = Field(default=0.5, ge=0.0, le=4.0)
 
+    # Exact-DOI metadata title policy. Packaged default if unset; changing a
+    # custom policy requires a process restart. Each comparison saves its hash.
+    citation_metadata_title_policy_file: Path | None = None
+    citation_doi_source_url_template: str = "https://doi.org/{doi}"
+    citation_registry_record_url_templates: dict[str, str] = {
+        "crossref": "https://api.crossref.org/works/{doi}",
+        "datacite": "https://api.datacite.org/dois/{doi}",
+    }
     citation_cache_stale_days: int = 30
     # Claim-support check (V-030, F5.4): batched into as few Gemini calls
     # as possible per manuscript (D-001/D-011). Local NLI was measured and

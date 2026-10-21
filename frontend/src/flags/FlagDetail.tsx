@@ -6,6 +6,7 @@ import { useMe } from "../auth/useAuth";
 import { PassagePairPanel } from "../document/PassagePairPanel";
 import { checkKindMeta, findingVerificationPrompt, humanize, isPValueFinding } from "../domain/checkKind";
 import { evidenceDisplayState } from "../domain/evidenceDisplay";
+import { findingMethodLabel, isCitationMetadataFinding } from "../domain/findingMethod";
 import { markFlagViewed } from "../domain/flagViewed";
 import { problemLabel } from "../domain/problemLabel";
 import { instructorAnchor } from "../domain/sourceAnchor";
@@ -18,6 +19,7 @@ import { Dialog } from "../ui/Dialog";
 import { ConfirmCitationSourceModal } from "./ConfirmCitationSourceModal";
 import { PValueComparison } from "./PValueComparison";
 import { AgreementComparison } from "./AgreementComparison";
+import { CitationComparison } from "./CitationComparison";
 import { useAnnotateFlag, useFlag, useOverrideFlag } from "./useFlag";
 
 const SEVERITY_LABEL: Record<FlagOut["severity"], string> = {
@@ -72,8 +74,9 @@ function EvidenceSection({
       )}
       <PValueComparison flag={flag} />
       <AgreementComparison flag={flag} />
+      <CitationComparison flag={flag} />
       {reasoningText && (!isPValueFinding(flag.ai_verdict_summary) || flag.p_value_comparison) && <div className="signal-reasoning"><h3>Recorded reasoning</h3><p>{systemFindingCopy(reasoningText, flag.ai_verdict_summary, "reasoning")}</p></div>}
-      <div className="signal-reasoning"><h3>What the instructor should verify</h3><p>{findingVerificationPrompt(flag.check_kind, flag.ai_verdict_summary, !!flag.passage_pair)}</p></div>
+      <div className="signal-reasoning"><h3>What the instructor should verify</h3><p>{findingVerificationPrompt(flag.check_kind, flag.ai_verdict_summary, !!flag.passage_pair, !!flag.citation_metadata_comparison)}</p></div>
       {/* BUG-154: the API has always returned a complete
           passage_pair for a matched flag (own/matched excerpt +
           context both sides, similarity, level) -- this page fetched
@@ -120,8 +123,9 @@ function EvidenceSection({
   );
 }
 
-function ModeDisclosure({ mode }: { mode: FlagOut["llm_mode"] }) {
+function ModeDisclosure({ mode, registry = false }: { mode: FlagOut["llm_mode"]; registry?: boolean }) {
   if (mode === "real") return null;
+  if (registry && mode === "fake") return <Alert title="Check recorded in a test-mode run" tone="warning">This record belongs to a test-mode run. Do not treat its saved provider values as evidence of a fresh external lookup.</Alert>;
   return mode === "fake" ? (
     <Alert title="Test-mode AI result" tone="warning">
       This finding came from fixture responses, not real AI grading. Do not treat it as a finding about the manuscript.
@@ -347,14 +351,18 @@ export function FlagDetailPage() {
       ) : (
         <>
           <p aria-live="polite" className="signal-live-region">{announcement}</p>
-          <ModeDisclosure mode={flag.llm_mode} />
+          {(!isCitationMetadataFinding(flag) || flag.llm_mode === "fake") && <ModeDisclosure mode={flag.llm_mode} registry={isCitationMetadataFinding(flag)} />}
           {flag.first_upload_context && <Alert title="Limited first-upload comparison context" tone="info">This signal was created while there were few manuscripts to compare against. The severity was not changed by that limitation.</Alert>}
 
           <section className="signal-evidence-hero" aria-labelledby="finding-heading">
             <div className="signal-evidence-hero__meta"><span>{meta?.eyebrow ?? humanize(flag.check_kind)}</span><span>Signal #{flag.id}</span></div>
             <h2 id="finding-heading">Recorded system finding</h2>
-            <p className="signal-ai-suggestion"><strong>AI suggestion</strong><span>{humanizedVerdict(flag)}</span></p>
-            <p>Repeated AI consistency is intentionally not shown as a percentage. The excerpt and source location below are the evidence to check.</p>
+            <p className="signal-ai-suggestion"><strong>{findingMethodLabel(flag)}</strong><span>{humanizedVerdict(flag)}</span></p>
+            <p>{findingMethodLabel(flag) === "AI suggestion"
+              ? "Repeated AI consistency is intentionally not shown as a percentage. The excerpt and source location below are the evidence to check."
+              : isCitationMetadataFinding(flag) && !flag.citation_metadata_comparison
+                ? "Review the original reference and recorded explanation. Verify the source independently or run a new check before recording an instructor action."
+                : "Review the recorded evidence and source before recording an instructor action."}</p>
           </section>
 
           <EvidenceSection flag={flag} sourcePath={sourcePath} sourceLinkId={sourceLinkId} />

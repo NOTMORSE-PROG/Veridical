@@ -15,6 +15,8 @@ import { FigureReadingsSummary } from "../report/FigureReadings";
 import { useFlag } from "../flags/useFlag";
 import { PValueComparison } from "../flags/PValueComparison";
 import { AgreementComparison } from "../flags/AgreementComparison";
+import { CitationComparison } from "../flags/CitationComparison";
+import { findingMethodLabel, isCitationMetadataFinding } from "../domain/findingMethod";
 import { SignalDecisionPanel } from "../report/SignalDecisionPanel";
 import { SignalCriteriaResults, SignalEscalatedPanel } from "../report/SignalReviewSections";
 import { coverageItems } from "../report/reportCoverage";
@@ -196,8 +198,9 @@ function SelectedFinding({ finding, total, locationFlagId, region, sourceAnchor,
   const precision = regionPrecision(region);
   const comparative = flag.check_kind === "originality_reuse";
   const kindMeta = checkKindMeta(flag.check_kind);
-  const verificationPrompt = findingVerificationPrompt(flag.check_kind, flag.ai_verdict_summary, !!flag.passage_pair);
+  const verificationPrompt = findingVerificationPrompt(flag.check_kind, flag.ai_verdict_summary, !!flag.passage_pair, !!flag.citation_metadata_comparison);
   const pValueFinding = flag.check_kind === "statistical_forensics" && isPValueFinding(flag.ai_verdict_summary);
+  const citationMetadata = isCitationMetadataFinding(flag);
   const title = findingTitle(finding);
   const locationIndex = finding.flags.findIndex((member) => member.id === locationFlagId);
 
@@ -214,7 +217,8 @@ function SelectedFinding({ finding, total, locationFlagId, region, sourceAnchor,
         <div><dt>Check</dt><dd>{kindMeta.eyebrow}</dd></div>
         <div><dt>How exact is this location?</dt><dd>{precision.label}</dd></div>
         <div><dt>Recorded location</dt><dd>{instructorAnchor(sourceAnchor ?? flag.page_anchor)}</dd></div>
-        <div><dt>Evidence type</dt><dd>{flag.check_kind === "internal_agreement" ? agreementEvidenceType(flag) : comparative ? flag.passage_pair ? "Recorded passage comparison" : "Comparison without a stored pair" : "Single-location check"}</dd></div>
+        <div><dt>Check method</dt><dd>{findingMethodLabel(flag)}</dd></div>
+        <div><dt>Evidence type</dt><dd>{citationMetadata ? flag.citation_metadata_comparison ? "Recorded registry metadata comparison" : "Registry comparison without saved provider metadata" : flag.check_kind === "internal_agreement" ? agreementEvidenceType(flag) : comparative ? flag.passage_pair ? "Recorded passage comparison" : "Comparison without a stored pair" : "Single-location check"}</dd></div>
       </dl>
       <p className="signal-document-precision-note"><strong>{precision.label}.</strong> {precision.helper}</p>
       {finding.flags.length > 1 && (
@@ -236,7 +240,8 @@ function SelectedFinding({ finding, total, locationFlagId, region, sourceAnchor,
         {!flag.passage_pair && showsManuscriptQuote && flag.check_kind !== "internal_agreement" && <blockquote><span>“{systemFindingCopy(flag.evidence_excerpt, flag.ai_verdict_summary, "evidence")}”</span><cite>{instructorAnchor(flag.page_anchor)}</cite></blockquote>}
         <PValueComparison flag={flag} />
         <AgreementComparison flag={flag} findingNumber={finding.number} />
-        {flag.ai_verdict_summary === "orphan_in_text_citation" ? <p className="signal-field-hint">The saved check did not link this citation to a reference-list entry. A matching entry is not available for side-by-side comparison.</p> : !comparative && !pValueFinding && flag.check_kind !== "internal_agreement" && <p className="signal-field-hint">This check evaluates one manuscript location. A second passage does not apply.</p>}
+        <CitationComparison flag={flag} />
+        {flag.ai_verdict_summary === "orphan_in_text_citation" ? <p className="signal-field-hint">The saved check did not link this citation to a reference-list entry. A matching entry is not available for side-by-side comparison.</p> : !citationMetadata && !comparative && !pValueFinding && flag.check_kind !== "internal_agreement" && <p className="signal-field-hint">This check evaluates one manuscript location. A second passage does not apply.</p>}
       </section>
       {flag.passage_pair && <Button variant="quiet" onClick={onExplore}>See other passage matches</Button>}
       {!showsManuscriptEvidence && (
@@ -266,7 +271,7 @@ function ReadinessDecision({ checkRunId, report, pending, error, onRetry, onBack
 
   const identity = manuscriptIdentity(report.manuscript_group_label, report.manuscript_original_filename);
   const coverage = coverageItems(report);
-  const assessed = report.results.filter((row) => row.outcome !== "escalated");
+  const criterionRecords = report.results.filter((row) => row.outcome !== "escalated");
   return (
     <div className="signal-document-analysis">
       <Button variant="quiet" onClick={onBack}>Back to review queue</Button>
@@ -285,7 +290,7 @@ function ReadinessDecision({ checkRunId, report, pending, error, onRetry, onBack
       {coverage.length > 0 && <CoverageStatement state="partial" headingId="workspace-coverage-heading" heading="Assessment limits" intro="Results below cover only the checks that ran. Unchecked content is not treated as passed." items={coverage} />}
       {report.historical_semantic_support_unverified && <Alert title="Historical AI grades need fresh evidence review" tone="warning">Some recorded AI suggestions predate criterion-support validation. They are not validated by the current safeguards. Run a new check or assess the manuscript independently. Reopening preserves the original record.</Alert>}
       <FigureReadingsSummary readings={report.figure_readings} checkRunId={checkRunId} />
-      <details className="signal-document-analysis__criteria"><summary>Criterion record, {assessed.length} assessed</summary><SignalCriteriaResults results={assessed} checkRunId={report.check_run_id} /></details>
+      <details className="signal-document-analysis__criteria"><summary>Criterion record, {criterionRecords.length} {criterionRecords.length === 1 ? "entry" : "entries"}</summary><SignalCriteriaResults results={criterionRecords} checkRunId={report.check_run_id} /></details>
       <SignalDecisionPanel report={report} manuscriptLabel={identity.primary} />
       <div className="signal-document-analysis__footer"><ActionLink to={`/report/${report.check_run_id}`} variant="secondary">Open full readiness report</ActionLink></div>
     </div>

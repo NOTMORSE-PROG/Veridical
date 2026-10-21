@@ -106,6 +106,8 @@ COVERAGE_REASONS = frozenset(
         "source_reading_order_unresolved",
         "source_reading_order_partial",
         "reference_metadata_insufficient",
+        "metadata_comparison_policy_unavailable",
+        "citation_metadata_comparison_unassessed",
         "author_year_citation_parse_unassessed",
         "numeric_citation_style_unassessed",
         "numeric_citation_scan_limit",
