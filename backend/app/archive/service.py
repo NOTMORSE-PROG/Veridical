@@ -129,7 +129,7 @@ async def list_archive(
             await session.scalars(
                 select(CheckRun)
                 .where(CheckRun.manuscript_id.in_(manuscript_ids))
-                .order_by(CheckRun.manuscript_id, CheckRun.created_at.desc(), CheckRun.id.desc())
+                .order_by(CheckRun.manuscript_id, CheckRun.id.desc())
             )
         ).all()
         for run in runs:

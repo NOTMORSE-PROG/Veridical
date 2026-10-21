@@ -5,12 +5,14 @@ the latest-check-run join used by the dashboard table's row actions.
 
 import asyncio
 import os
+from datetime import UTC, datetime
 from decimal import Decimal
 
 import pytest
 from sqlalchemy import func, select, text
 
 from app.archive.service import list_archive
+from app.dashboard.service import get_dashboard_stats
 from app.errors import ConflictError, NotFoundError
 from app.groups.service import UNSET_PROGRAM_FILTER
 from app.ingest.schemas import ManuscriptQueueStatus, ManuscriptSort
@@ -21,6 +23,7 @@ from app.models.enums import (
     CheckRunStatus,
     CriterionType,
     IngestStatus,
+    LLMMode,
     ReadinessStatus,
     ReportDecision,
     ResultOutcome,
@@ -30,6 +33,7 @@ from app.models.instructor import Instructor
 from app.models.manuscript import Manuscript
 from app.models.rubric import Criterion, Rubric
 from app.models.run import CheckResult, CheckRun, ReadinessReport
+from app.report.service import get_report
 
 live = pytest.mark.skipif(
     "DATABASE_URL" not in os.environ,
@@ -133,6 +137,109 @@ async def test_latest_check_run_is_surfaced_per_manuscript(session_factory):
         # (still running) must not hide the older DONE run's valid
         # report -- the two are tracked separately.
         assert page.items[0].latest_done_check_run_id == older.id
+
+
+@pytest.mark.parametrize(
+    "current_status",
+    [CheckRunStatus.done, CheckRunStatus.semantic, CheckRunStatus.failed, CheckRunStatus.cancelled],
+)
+async def test_bug349_inverted_timestamps_keep_current_and_historical_links_coherent(
+    session_factory, current_status
+):
+    async with session_factory() as session:
+        owner = Instructor(email="run-order-owner@demo.local", display_name="Owner")
+        other = Instructor(email="run-order-other@demo.local", display_name="Other")
+        session.add_all([owner, other])
+        await session.flush()
+        manuscript = Manuscript(
+            instructor_id=owner.id, group_label="Run order", file_ref="order.pdf"
+        )
+        rubric = Rubric(instructor_id=owner.id, title="Format", source_file="format.pdf")
+        session.add_all([manuscript, rubric])
+        await session.flush()
+        criterion = Criterion(
+            rubric_id=rubric.id,
+            type=CriterionType.structural,
+            text="Criterion",
+            weight=1,
+            position=0,
+        )
+        session.add(criterion)
+        await session.flush()
+        runs = []
+        for index, status in enumerate((CheckRunStatus.done, CheckRunStatus.done, current_status)):
+            run = CheckRun(
+                manuscript_id=manuscript.id,
+                rubric_id=rubric.id,
+                status=status,
+                llm_mode=LLMMode.fake,
+                created_at=datetime(2030 - index, 1, 1, tzinfo=UTC),
+            )
+            session.add(run)
+            await session.flush()
+            runs.append(run)
+            if status == CheckRunStatus.done:
+                session.add_all(
+                    [
+                        ReadinessReport(
+                            check_run_id=run.id,
+                            status=ReadinessStatus.needs_review
+                            if index == 0
+                            else ReadinessStatus.ready,
+                        ),
+                        CheckResult(
+                            check_run_id=run.id,
+                            criterion_id=criterion.id,
+                            kind=CheckKind.structural,
+                            outcome=ResultOutcome.escalated if index == 0 else ResultOutcome.passed,
+                            score=None if index == 0 else 100,
+                        ),
+                    ]
+                )
+        await session.commit()
+        oldest, completed, current = runs
+        assert oldest.id < completed.id < current.id
+        assert oldest.created_at > completed.created_at > current.created_at
+        expected_done = current if current_status == CheckRunStatus.done else completed
+
+        page = await list_manuscripts(session, owner.id)
+        row = page.items[0]
+        assert row.latest_check_run_id == current.id
+        assert row.latest_check_run_status == current_status.value
+        assert row.latest_done_check_run_id == expected_done.id
+        assert row.latest_readiness == "ready"
+        assert row.escalations_awaiting_review == 0
+        archive = await list_archive(session, owner.id)
+        assert archive.items[0].latest_check_run_id == current.id
+        assert archive.items[0].latest_check_run_status == current_status.value
+        assert archive.items[0].latest_done_check_run_id == expected_done.id
+
+        ready = await list_manuscripts(
+            session, owner.id, status=ManuscriptQueueStatus.checked, needs_review=False
+        )
+        checking = await list_manuscripts(session, owner.id, status=ManuscriptQueueStatus.checking)
+        attention = await list_manuscripts(
+            session, owner.id, status=ManuscriptQueueStatus.needs_attention
+        )
+        assert ready.total == int(current_status == CheckRunStatus.done)
+        assert checking.total == int(current_status == CheckRunStatus.semantic)
+        assert attention.total == int(
+            current_status in (CheckRunStatus.failed, CheckRunStatus.cancelled)
+        )
+        assert (await list_manuscripts(session, owner.id, needs_review=True)).total == 0
+        stats = await get_dashboard_stats(session, owner.id)
+        assert stats.ready_count == 1  # Historical completed band remains readable.
+        assert stats.ready_to_decide_count == ready.total
+        assert stats.checking_count == checking.total
+        assert stats.needs_attention_count == attention.total
+        assert stats.escalations_awaiting_review == 0
+
+        assert (await get_report(session, oldest.id, owner.id)).pending_review_count == 1
+        assert (await list_manuscripts(session, other.id)).total == 0
+        assert (await list_archive(session, other.id)).total == 0
+        assert (await get_dashboard_stats(session, other.id)).manuscripts_checked == 0
+        with pytest.raises(NotFoundError):
+            await get_report(session, current.id, other.id)
 
 
 @pytest.mark.parametrize(

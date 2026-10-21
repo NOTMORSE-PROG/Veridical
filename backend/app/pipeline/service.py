@@ -351,7 +351,7 @@ async def estimate_rerun_calls(
                     CheckRun.status == CheckRunStatus.done,
                     CheckRun.rubric_id.in_(family_rubric_ids),
                 )
-                .order_by(CheckRun.manuscript_id, CheckRun.created_at.desc())
+                .order_by(CheckRun.manuscript_id, CheckRun.id.desc())
             )
         ).all()
         for run in runs:

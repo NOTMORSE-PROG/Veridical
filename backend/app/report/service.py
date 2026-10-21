@@ -479,12 +479,11 @@ async def report_out_for_check_run(
             .join(Rubric, Rubric.id == CheckRun.rubric_id)
             .where(
                 CheckRun.manuscript_id == check_run.manuscript_id,
-                CheckRun.id != check_run_id,
+                CheckRun.id < check_run_id,
                 CheckRun.status == CheckRunStatus.done,
-                CheckRun.created_at < check_run.created_at,
                 Rubric.rubric_family_id == rubric.rubric_family_id,
             )
-            .order_by(CheckRun.created_at.desc())
+            .order_by(CheckRun.id.desc())
             .limit(1)
         )
     ).first()

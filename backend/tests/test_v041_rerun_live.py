@@ -6,6 +6,7 @@ immutability (AC3), the version-comparison line, and the quota estimate
 """
 
 import os
+from datetime import UTC, datetime
 from decimal import Decimal
 
 import httpx
@@ -287,6 +288,53 @@ async def test_version_comparison_line_points_at_the_immediately_prior_run(sessi
         new_report = await get_report(session, new_run.id, instructor.id)
         assert new_report.previous_status == "conditionally_ready"
         assert new_report.previous_composite_score == 70.0
+
+
+@pytest.mark.parametrize("surface", ["comparison", "estimate"])
+async def test_bug349_rerun_history_uses_insertion_order_with_inverted_dates(
+    session_factory, surface
+):
+    async with session_factory() as session:
+        instructor = Instructor(email="inverted-history@demo.local", display_name="Owner")
+        session.add(instructor)
+        await session.flush()
+        manuscript = Manuscript(instructor_id=instructor.id, group_label="Order", file_ref="x.pdf")
+        rubric = Rubric(instructor_id=instructor.id, title="Format", source_file="format.pdf")
+        session.add_all([manuscript, rubric])
+        await session.commit()
+        runs = []
+        for index, (band, score) in enumerate(
+            [("conditionally_ready", "70"), ("ready", "95"), ("not_ready", "40")]
+        ):
+            run = await _seed_done_run(
+                session, manuscript.id, rubric.id, status_label=band, score=Decimal(score)
+            )
+            run.created_at = datetime(2030 - index, 1, 1, tzinfo=UTC)
+            session.add_all(
+                [
+                    AuditLog(event_type="llm_call", check_run_id=run.id, payload={"fake_llm": True})
+                    for _ in range(index + 1)
+                ]
+            )
+            await session.commit()
+            runs.append(run)
+        assert runs[0].id < runs[1].id < runs[2].id
+        assert runs[0].created_at > runs[1].created_at > runs[2].created_at
+        if surface == "comparison":
+            # Opening a historical report must not compare it to a later run.
+            first = await get_report(session, runs[0].id, instructor.id)
+            second = await get_report(session, runs[1].id, instructor.id)
+            third = await get_report(session, runs[2].id, instructor.id)
+            assert first.previous_status is None
+            assert second.previous_status == "conditionally_ready"
+            assert second.previous_composite_score == 70
+            assert third.previous_status == "ready"
+            assert third.previous_composite_score == 95
+        else:
+            estimate = await estimate_rerun_calls(
+                session, instructor.id, [manuscript.id], rubric.id
+            )
+            assert estimate.items[0].estimated_calls == estimate.total_estimated_calls == 3
 
 
 async def test_comparison_never_crosses_an_unrelated_rubric_family(session_factory):

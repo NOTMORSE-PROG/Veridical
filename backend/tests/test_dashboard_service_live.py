@@ -9,7 +9,7 @@ from datetime import UTC, datetime
 from decimal import Decimal
 
 import pytest
-from sqlalchemy import text
+from sqlalchemy import select, text
 
 from app.config import get_settings
 from app.dashboard.service import get_dashboard_stats
@@ -17,6 +17,7 @@ from app.models.enums import (
     CheckKind,
     CheckRunStatus,
     IngestStatus,
+    LLMMode,
     ManuscriptOrigin,
     ReadinessStatus,
     ResultOutcome,
@@ -243,6 +244,68 @@ async def test_ungraded_queue_filters_counts_and_latest_resolution_agree(session
         assert stats.ready_to_decide_count == 2
         assert stats.needs_attention_count == 0
         assert stats.escalations_awaiting_review == 0
+
+
+async def test_bug349_transaction_start_time_cannot_resurrect_pending_work(session_factory):
+    """Use real transaction defaults, without rewriting any created_at value."""
+    from app.ingest.schemas import ManuscriptQueueStatus
+    from app.ingest.service import list_manuscripts
+
+    async with session_factory() as setup:
+        owner = Instructor(email="transaction-order@demo.local", display_name="Owner")
+        setup.add(owner)
+        await setup.flush()
+        manuscript = Manuscript(instructor_id=owner.id, group_label="Order", file_ref="order.pdf")
+        setup.add(manuscript)
+        await setup.commit()
+
+    async with session_factory() as early, session_factory() as later:
+        early_time = await early.scalar(text("SELECT transaction_timestamp()"))
+        older = await _make_run(
+            later,
+            owner,
+            manuscript_id=manuscript.id,
+            run_status=CheckRunStatus.done,
+            report_status="needs_review",
+            results=["quota_exhausted", "quota_exhausted"],
+        )
+        newer = CheckRun(
+            manuscript_id=manuscript.id,
+            rubric_id=older.rubric_id,
+            status=CheckRunStatus.done,
+            llm_mode=LLMMode.fake,
+        )
+        early.add(newer)
+        await early.flush()
+        criteria = (
+            await early.scalars(select(Criterion.id).where(Criterion.rubric_id == older.rubric_id))
+        ).all()
+        early.add(ReadinessReport(check_run_id=newer.id, status=ReadinessStatus.ready))
+        early.add_all(
+            [
+                CheckResult(
+                    check_run_id=newer.id,
+                    criterion_id=criterion_id,
+                    kind=CheckKind.structural,
+                    outcome=ResultOutcome.passed,
+                    score=100,
+                )
+                for criterion_id in criteria
+            ]
+        )
+        await early.commit()
+        assert newer.id > older.id
+        assert newer.created_at == early_time < older.created_at
+        page = await list_manuscripts(early, owner.id)
+        assert page.items[0].latest_check_run_id == newer.id
+        assert page.items[0].latest_done_check_run_id == newer.id
+        assert page.items[0].escalations_awaiting_review == 0
+        assert (
+            await list_manuscripts(early, owner.id, status=ManuscriptQueueStatus.needs_attention)
+        ).total == 0
+        stats = await get_dashboard_stats(early, owner.id)
+        assert stats.ready_count == stats.ready_to_decide_count == 1
+        assert stats.needs_attention_count == stats.escalations_awaiting_review == 0
 
 
 async def test_kpis_match_db_truth_across_all_four_statuses(session_factory):

@@ -477,10 +477,11 @@ async def list_manuscripts(
     those excluded rows instead -- a real, selectable filter state, not an
     edge case to hide (design review finding while speccing the dashboard
     control this powers)."""
+    # Run identity defines insertion order; created_at records transaction start.
     latest_run_status = (
         select(CheckRun.status)
         .where(CheckRun.manuscript_id == Manuscript.id)
-        .order_by(CheckRun.created_at.desc(), CheckRun.id.desc())
+        .order_by(CheckRun.id.desc())
         .limit(1)
         .correlate(Manuscript)
         .scalar_subquery()
@@ -491,7 +492,7 @@ async def list_manuscripts(
             CheckRun.manuscript_id == Manuscript.id,
             CheckRun.status == CheckRunStatus.done,
         )
-        .order_by(CheckRun.created_at.desc(), CheckRun.id.desc())
+        .order_by(CheckRun.id.desc())
         .limit(1)
         .correlate(Manuscript)
         .scalar_subquery()
@@ -653,7 +654,6 @@ async def list_manuscripts(
                 .where(CheckRun.manuscript_id.in_(manuscript_ids))
                 .order_by(
                     CheckRun.manuscript_id,
-                    CheckRun.created_at.desc(),
                     CheckRun.id.desc(),
                 )
             )

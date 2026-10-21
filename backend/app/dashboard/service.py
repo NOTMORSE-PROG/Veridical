@@ -30,7 +30,8 @@ async def get_dashboard_stats(
     # superseded re-run's stale escalations don't keep counting once a
     # newer run exists for the same manuscript. A manuscript can have
     # multiple CheckRuns (re-runs); only the newest done one represents
-    # its current, actionable state.
+    # its latest completed assessment. Actionable queues below additionally
+    # require the absolute latest run to be done.
     latest_done_run_ids_select = (
         select(func.max(CheckRun.id).label("run_id"))
         .select_from(CheckRun)
@@ -88,32 +89,6 @@ async def get_dashboard_stats(
     total_criterion_results = sum(outcome_counts.values())
     escalation_rate = escalated / total_criterion_results if total_criterion_results > 0 else None
 
-    # BUG-211: mirrors `list_manuscripts(status=checked, needs_review=False)`
-    # exactly (latest run done, no decision, zero unresolved escalations on
-    # THAT manuscript's own latest run) -- not derivable from the band
-    # counts above, which is what the frontend used to do and got wrong.
-    ready_to_decide_count = (
-        await session.scalar(
-            select(func.count())
-            .select_from(latest_done_run_ids)
-            .where(
-                ~select(ReadinessReport.id)
-                .where(
-                    ReadinessReport.check_run_id == latest_done_run_ids.c.run_id,
-                    ReadinessReport.decision.is_not(None),
-                )
-                .exists(),
-                ~select(CheckResult.id)
-                .where(
-                    CheckResult.check_run_id == latest_done_run_ids.c.run_id,
-                    CheckResult.criterion_id.is_not(None),
-                    CheckResult.outcome.in_(NEEDS_REVIEW_OUTCOMES),
-                )
-                .exists(),
-            )
-        )
-    ) or 0
-
     # BUG-212: "Needs you" and "In progress" tab badges need real counts
     # too, mirroring `list_manuscripts`'s own `needs_attention`/`checking`
     # predicates exactly (`ingest/service.py`) -- scoped to ALL of the
@@ -125,7 +100,7 @@ async def get_dashboard_stats(
     latest_run_status = (
         select(CheckRun.status)
         .where(CheckRun.manuscript_id == Manuscript.id)
-        .order_by(CheckRun.created_at.desc(), CheckRun.id.desc())
+        .order_by(CheckRun.id.desc())
         .limit(1)
         .correlate(Manuscript)
         .scalar_subquery()
@@ -133,7 +108,7 @@ async def get_dashboard_stats(
     latest_done_run_id = (
         select(CheckRun.id)
         .where(CheckRun.manuscript_id == Manuscript.id, CheckRun.status == CheckRunStatus.done)
-        .order_by(CheckRun.created_at.desc(), CheckRun.id.desc())
+        .order_by(CheckRun.id.desc())
         .limit(1)
         .correlate(Manuscript)
         .scalar_subquery()
@@ -154,6 +129,30 @@ async def get_dashboard_stats(
         # V-077 (D-028): Library submissions are not check inputs.
         Manuscript.origin == ManuscriptOrigin.check_upload,
     )
+
+    # BUG-211/349: the same current-run predicate as the Review Desk. An older
+    # completed report remains readable during a rerun but is not current work.
+    has_decision = (
+        select(ReadinessReport.id)
+        .where(
+            ReadinessReport.check_run_id == latest_done_run_id,
+            ReadinessReport.decision.is_not(None),
+        )
+        .correlate(Manuscript)
+        .exists()
+    )
+    ready_to_decide_count = (
+        await session.scalar(
+            select(func.count())
+            .select_from(Manuscript)
+            .where(
+                *manuscript_scope,
+                latest_run_status == CheckRunStatus.done,
+                ~has_decision,
+                per_manuscript_escalation_count == 0,
+            )
+        )
+    ) or 0
 
     needs_attention_count = (
         await session.scalar(
