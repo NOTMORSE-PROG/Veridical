@@ -11,6 +11,7 @@ from typing import Any
 from app.checks.semantic import build_semantic_batches, run_semantic_checks
 from app.ingest.schemas import ExtractionResult, SectionNode, SectionTree, TextBlock
 from app.models.enums import ResultOutcome
+from tests.semantic_support_fixture import supported_response
 
 
 @dataclass
@@ -44,8 +45,12 @@ class ScriptedLLM:
     def __init__(self, responses: list[dict[str, Any]]):
         self._responses = list(responses)
         self.calls: list[str] = []
+        self.support_calls: list[str] = []
 
     async def complete(self, prompt_type, prompt, *, prompt_version="unversioned", **context):
+        if prompt_type == "semantic_support":
+            self.support_calls.append(prompt)
+            return supported_response(prompt)
         self.calls.append(prompt)
         return self._responses.pop(0)
 
@@ -67,7 +72,7 @@ def _extraction(
 # --- build_semantic_batches ------------------------------------------------------
 
 
-def test_batches_group_by_named_section():
+def test_section_hints_share_full_source_without_duplicating_model_calls():
     tree = SectionTree(
         source="heuristics",
         nodes=[
@@ -87,9 +92,11 @@ def test_batches_group_by_named_section():
     batches, missing = build_semantic_batches(criteria, extraction)
     assert missing == []
     labels = {b.label for b, _ in batches}
-    assert labels == {"ABSTRACT", "CHAPTER 1 INTRODUCTION"}
+    assert labels == {"whole document"}
     for _batch, batch_criteria in batches:
-        assert len(batch_criteria) == 1
+        assert len(batch_criteria) == 2
+        assert "Abstract text here." in _batch.context_text
+        assert "Chapter one prose." in _batch.context_text
 
 
 def test_batches_fall_back_to_whole_document_when_no_section_named():
@@ -240,7 +247,8 @@ async def test_hallucinated_quote_triggers_single_criterion_retry_then_succeeds(
     session = FakeSession()
     results = await run_semantic_checks(session, 1, criteria, extraction, llm)
     assert results[0].outcome == ResultOutcome.passed
-    assert results[0].detail["reasoning"] == "Confirmed on retry."
+    assert results[0].detail["grading_reasoning"] == "Confirmed on retry."
+    assert results[0].detail["reasoning"] == "Scripted support control."
     assert len(llm.calls) == 2
 
 

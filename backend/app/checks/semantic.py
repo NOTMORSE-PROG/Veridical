@@ -1,10 +1,6 @@
-"""Semantic grading pipeline (F3.3): batches semantic criteria by the
-manuscript section they actually reference (never the whole manuscript
-per criterion — D-001 quota discipline), calls Gemini once per batch
-through the queue (V-009), and REJECTS any verdict whose quoted evidence
-doesn't actually appear in the source text — retrying once at the
-single-criterion level before escalating to the instructor rather than
-ever showing unverifiable evidence (charter rule 1).
+"""Semantic grading pipeline (F3.3): bounded criterion batches share the
+full available source, with no silent truncation. Quote containment and a
+separate evidence-support review precede any accepted rubric judgment.
 
 Single-pass in V2 by design (self-consistency arrives V-022): the call
 interface here (`run_semantic_checks`) takes a plain `LLMClient` and
@@ -21,10 +17,11 @@ from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.checks.levels import level_scale_prompt_fragment, outcome_and_score
-from app.checks.rules.sections import find_section_node, identify_target_section, walk_sections
+from app.checks.rules.sections import find_section_node, identify_target_section
 from app.checks.schemas import GradeBatchResponse, GradeVerdict
 from app.checks.signals import compute_shadow_signals, shadow_signals_as_detail
 from app.checks.source_quality import source_limitation_detail
+from app.checks.support import apply_support, check_support, context_limitation
 from app.config import Settings, get_settings
 from app.errors import VeridicalError
 from app.ingest.schemas import ExtractionResult, SectionNode, TextBlock
@@ -33,26 +30,9 @@ from app.models.enums import CheckKind, ResultOutcome
 from app.models.run import CheckResult
 
 PROMPT_TYPE = "semantic_grading"
-# V-069: v3 is v1 (still the module default before this ticket — see the
-# discrepancy note below) plus ONE addition: a per-criterion levelled-scale
-# exception, so a levelled criterion's own level names validate as a
-# "verdict" too. Deliberately NOT built on v2's fuller STEP-1/2/3 rewrite
-# (that file already exists but was never made the module default) — this
-# ticket's blast radius is "levels support," not "also switch every
-# criterion's grading prompt wording," and widening it would make the
-# AC3 pass/fail regression check less honest about what it's actually
-# proving unchanged.
-#
-# Adjacent discrepancy found, NOT fixed here (out of scope): v1 has been
-# the module default this whole time, including in production
-# (`consistency.vote_batch`'s own `prompt_version: str = PROMPT_VERSION`
-# default, never overridden at the pipeline call site) — but V-054/D-017's
-# own docstrings describe per-pass annotator stance as already shipped and
-# live. `_stance()` returns "" for exactly "v1", so stance text has
-# actually been discarded on every real grading call since V-054, despite
-# the golden-set/audit-log evidence implying otherwise. Logged to
-# STATE.md; not this ticket's to fix.
-PROMPT_VERSION = "v3"
+# v4 consumes reviewer stances and represents missing evidence as uncertainty.
+# Its new cache identity cannot reuse the earlier v3 judgment contract.
+PROMPT_VERSION = "v4"
 _PROMPT_FILE = Path(__file__).parent / "prompts" / f"{PROMPT_TYPE}_{PROMPT_VERSION}.txt"
 _WHOLE_DOCUMENT_KEY = "__whole_document__"
 
@@ -99,11 +79,10 @@ def _section_span_blocks(
 
 
 def build_semantic_batches(
-    criteria: list[Any], extraction: ExtractionResult
+    criteria: list[Any], extraction: ExtractionResult, *, settings: Settings | None = None
 ) -> tuple[list[tuple[SemanticBatch, list[Any]]], list[tuple[Any, str]]]:
-    """Groups semantic criteria by the section they name (or "whole
-    document" when none is identifiable) so one Gemini call can grade
-    every criterion that shares the same context. Returns
+    """Share full source across bounded batches instead of inferring an
+    evidence boundary from one incidental heading word. Returns
     `(batches, missing)`: `missing` is (criterion, target) pairs whose
     named section could not be located by title match -- BUG-221: a lookup
     miss is not proof of genuine absence (see `_title_candidates`'s own
@@ -111,47 +90,23 @@ def build_semantic_batches(
     caller, without spending a call, never auto-failed. Same treatment as
     `required_section_present`'s identical situation.
     """
-    flat_nodes = list(walk_sections(extraction.section_tree))
-    groups: dict[str, list[Any]] = {}
-    group_nodes: dict[str, SectionNode] = {}
     missing: list[tuple[Any, str]] = []
-
+    eligible = []
     for criterion in criteria:
         target = identify_target_section(criterion)
-        if target is None:
-            key = _WHOLE_DOCUMENT_KEY
-        else:
-            node = find_section_node(target, extraction.section_tree)
-            if node is None:
-                missing.append((criterion, target))
-                continue
-            key = node.title
-            group_nodes[key] = node
-        groups.setdefault(key, []).append(criterion)
-
-    batches: list[tuple[SemanticBatch, list[Any]]] = []
-    for key, batch_criteria in groups.items():
-        if key == _WHOLE_DOCUMENT_KEY:
-            batch_blocks = [b for b in extraction.blocks if not b.is_furniture]
-            label = "whole document"
-        else:
-            node = group_nodes[key]
-            idx = next(i for i, n in enumerate(flat_nodes) if n is node)
-            # The span must run to the next SIBLING-OR-HIGHER heading, not
-            # simply the next node in depth-first order — `walk_sections`
-            # yields a node's own children immediately after it, so
-            # `flat_nodes[idx + 1]` for a chapter is its own first
-            # subsection (same page), which zeroed the span entirely (real
-            # bug, found live grading the owner's real proposal PDF: a
-            # chapter's whole context came back empty). A chapter's
-            # context must include everything under it.
-            next_node = next((n for n in flat_nodes[idx + 1 :] if n.level <= node.level), None)
-            batch_blocks = _section_span_blocks(
-                node, next_node, extraction.blocks, extraction.anchor_kind
-            )
-            label = node.title
-        batches.append((SemanticBatch(label=label, blocks=batch_blocks), batch_criteria))
-    return batches, missing
+        if target is not None and find_section_node(target, extraction.section_tree) is None:
+            missing.append((criterion, target))
+            continue
+        eligible.append(criterion)
+    # All eligible criteria now see the same source. Coalesce their cohorts
+    # rather than charging the full text repeatedly for keyword-derived hints.
+    if not eligible:
+        return [], missing
+    size = (settings or get_settings()).semantic_batch_max_criteria
+    batch = SemanticBatch("whole document", [b for b in extraction.blocks if not b.is_furniture])
+    return [
+        (batch, eligible[start : start + size]) for start in range(0, len(eligible), size)
+    ], missing
 
 
 def _criteria_listing(criteria: list[Any]) -> str:
@@ -510,6 +465,16 @@ async def grade_batch_verdicts(
     claimed_quotes: set[str] = set()
     for i, criterion in enumerate(batch_criteria):
         verdict = by_index.get(i)
+        if verdict is not None and verdict.verdict == "uncertain":
+            out[criterion.id] = GradedVerdict(
+                criterion.id,
+                None,
+                verdict.reasoning,
+                verdict.evidence_quotes,
+                None,
+                verdict.reasoning,
+            )
+            continue
         quotes = verdict.evidence_quotes if verdict else None
         anchors = _verify_quotes(quotes, batch.blocks, anchor_kind) if quotes else None
         if anchors is not None:
@@ -648,6 +613,26 @@ async def _grade_batch(
         batch, batch_criteria, llm, check_run_id, anchor_kind, consistency_pass="single"
     )
     shadow_detail = shadow_signals_as_detail(compute_shadow_signals(batch.context_text, settings))
+    candidates = []
+    for criterion in batch_criteria:
+        g = graded[criterion.id]
+        if (
+            g.verdict is not None
+            and outcome_and_score(criterion, g.verdict)[0] != ResultOutcome.escalated
+        ):
+            candidates.append(
+                (
+                    criterion,
+                    {
+                        "verdict": g.verdict,
+                        "evidence": [
+                            {"quote": q, "anchor": a}
+                            for q, a in zip(g.quotes or [], g.anchors or [], strict=True)
+                        ],
+                    },
+                )
+            )
+    support = await check_support(batch, candidates, llm, check_run_id=check_run_id)
     results: list[CheckResult] = []
     for criterion in batch_criteria:
         g = graded[criterion.id]
@@ -703,6 +688,7 @@ async def _grade_batch(
         }
         if level is not None:
             detail["level"] = level.as_detail()
+        outcome, detail = apply_support(outcome, detail, support[criterion.id])
         results.append(await _persist(session, check_run_id, criterion, outcome, detail))
     return results
 
@@ -733,7 +719,7 @@ async def run_semantic_checks(
             )
             for criterion in criteria
         ]
-    batches, missing = build_semantic_batches(criteria, extraction)
+    batches, missing = build_semantic_batches(criteria, extraction, settings=settings)
     # BUG-221 (charter rule 1): this used to grade `failed` immediately --
     # a title-match miss is not proof the section is genuinely absent, only
     # that the lookup couldn't find it (the same false-negative class
@@ -762,6 +748,15 @@ async def run_semantic_checks(
         for criterion, target in missing
     ]
     for batch, batch_criteria in batches:
+        limitation = context_limitation(batch, settings)
+        if limitation is not None:
+            results.extend(
+                [
+                    await _persist(session, check_run_id, c, ResultOutcome.escalated, limitation)
+                    for c in batch_criteria
+                ]
+            )
+            continue
         results.extend(
             await _grade_batch(
                 session, check_run_id, batch, batch_criteria, llm, settings, extraction.anchor_kind

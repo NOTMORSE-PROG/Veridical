@@ -71,6 +71,12 @@ REVIEW_REASON_INJECTION_SUSPECTED = "injection_suspected"
 
 
 def review_reason_for(outcome: ResultOutcome, detail: dict[str, Any] | None = None) -> str:
+    if detail and detail.get("support_withheld"):
+        return (
+            "support_incomplete"
+            if detail.get("support_check", {}).get("status") == "incomplete"
+            else "support_unconfirmed"
+        )
     if detail and detail.get("injection_suspected"):
         return REVIEW_REASON_INJECTION_SUSPECTED
     if outcome == ResultOutcome.escalated:
@@ -272,6 +278,11 @@ async def resolve_escalation(
         raise ConflictError("This criterion doesn't have named performance levels.")
 
     if resolution == RESOLUTION_ACCEPT_MAJORITY:
+        if detail.get("support_withheld"):
+            raise ConflictError(
+                "The evidence review did not establish this suggested grade. "
+                "Record your own criterion judgment and reason instead."
+            )
         if majority_verdict is None:
             # Covers both "the vote genuinely tied" and "the AI never ran at
             # all" (V-050). Either way there is no AI opinion to accept, and

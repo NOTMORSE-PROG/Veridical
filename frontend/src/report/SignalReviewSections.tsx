@@ -492,6 +492,11 @@ function SignalFlagList({
 }
 
 function voteSummary(item: EscalatedItemOut): string {
+  if (item.support_withheld) {
+    if (item.support_status === "incomplete") return "The separate evidence review did not finish. No grade was accepted.";
+    if (item.support_status === "unsupported") return "The separate evidence review did not support the suggested grade.";
+    return "The separate evidence review could not confirm that the evidence supports the suggested grade.";
+  }
   if (item.review_reason === "not_graded") return "The AI did not grade this criterion.";
   if (item.review_reason === "injection_suspected") return "AI passes agreed, but that agreement cannot be trusted here.";
   if (item.votes.length === 0) return "No AI assessment was recorded.";
@@ -595,6 +600,7 @@ function SignalResolutionCard({ item, checkRunId, sharedReasonId, onResolved }: 
       <div className="signal-resolution-card__context">
         <div><p className="signal-section-kicker">Criterion requiring judgment</p><h3 ref={criterionHeadingRef} tabIndex={-1}>{item.criterion_text}</h3></div>
         <p id={voteId} className="signal-resolution-card__vote">{voteSummary(item)}</p>
+        {item.support_withheld && <div className="signal-copy-flow"><strong>No grade accepted</strong><p>Review the criterion and manuscript evidence, then record your own judgment.</p></div>}
         {sharedReasonId
           ? <p>Unresolved. The shared review reason above applies to this criterion.</p>
           : item.reason && <p id={reasonId}>{item.reason}</p>}
@@ -604,6 +610,7 @@ function SignalResolutionCard({ item, checkRunId, sharedReasonId, onResolved }: 
         {item.unverified_evidence && item.unverified_evidence.length > 0 && (
           <div id={unverifiedId} className="signal-unverified-evidence"><strong>Could not verify against the source</strong>{item.unverified_evidence.map((quote) => <blockquote key={quote}>“{quote}”</blockquote>)}</div>
         )}
+        {item.support_withheld && item.evidence?.map((entry, index) => <div className="signal-attached-flow" key={`${entry.anchor}-${index}`}><blockquote>“{entry.quote}”</blockquote><p>Located manuscript passage. Support for the suggested grade has not been established.</p><ActionLink variant="quiet" to={`/report/${checkRunId}/document?anchor=${encodeURIComponent(entry.anchor)}`}>Open in manuscript: {entry.anchor}</ActionLink></div>)}
       </div>
 
       {/* BUG-145 (UX review review, round 2): this region must be mounted
@@ -643,7 +650,7 @@ function SignalResolutionCard({ item, checkRunId, sharedReasonId, onResolved }: 
               recognise" incoherence this ticket named. `item.reason`
               already explains why, so removing the button loses no
               information. */}
-          {item.ai_majority_verdict !== null && !item.verdict_unrecognized && <Button variant={item.review_reason === "injection_suspected" ? "quiet" : "secondary"} aria-describedby={describedBy} onClick={() => choose("accept_majority")}>Accept AI suggestion: {item.ai_majority_verdict}</Button>}
+          {item.ai_majority_verdict !== null && !item.verdict_unrecognized && !item.support_withheld && <Button variant={item.review_reason === "injection_suspected" ? "quiet" : "secondary"} aria-describedby={describedBy} onClick={() => choose("accept_majority")}>Accept AI suggestion: {item.ai_majority_verdict}</Button>}
         </div>
       ) : (
         <div className="signal-resolution-form">

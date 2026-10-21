@@ -570,6 +570,9 @@ export interface EscalatedItemOut {
    * predate BUG-170 don't need every one of them updated just to keep
    * compiling -- same convention as `injection_suspected` below. */
   verdict_unrecognized?: boolean;
+  support_withheld?: boolean;
+  support_status?: "supported" | "unsupported" | "uncertain" | "incomplete" | null;
+  evidence?: { quote: string; anchor: string }[];
   reason: string | null;
   /** "low_confidence" = AI graded it and hesitated; "not_graded" = the AI
    * never ran (daily capacity spent or API down); "injection_suspected"
@@ -577,7 +580,7 @@ export interface EscalatedItemOut {
    * produced by both passes reading the same manuscript text containing
    * language addressed at a grader, so it cannot be trusted here -- a
    * fourth, distinct case (V-050's original two, plus this one). */
-  review_reason: "low_confidence" | "not_graded" | "injection_suspected";
+  review_reason: "low_confidence" | "not_graded" | "injection_suspected" | "support_unconfirmed" | "support_incomplete";
   /** V-068: quotes the model actually returned but that failed containment
    * verification. Never a verified anchor -- rendered under its own
    * "could not verify" label, never inside a verified evidence block. */

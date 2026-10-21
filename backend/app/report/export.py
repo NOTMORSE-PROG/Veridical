@@ -540,6 +540,8 @@ def _criterion_flowable(row: CriterionResultOut, styles: dict[str, ParagraphStyl
     elif row.evidence:
         parts.append(Paragraph(escape(row.evidence[0].quote), styles["cell"]))
         parts.append(Paragraph(f"Anchor: {escape(row.evidence[0].anchor)}", styles["cell_caption"]))
+        if row.reasoning or row.reason:
+            parts.append(Paragraph(escape(row.reasoning or row.reason or ""), styles["cell"]))
     elif row.reasoning or row.reason:
         parts.append(Paragraph(escape(row.reasoning or row.reason or ""), styles["cell"]))
     parts.append(Paragraph(" · ".join(escape(c) for c in caption_bits), styles["cell_caption"]))
@@ -841,7 +843,10 @@ def build_report_pdf(data: ReportExportData) -> bytes:
                     f"<i>({_format_weight_importance(row.weight_importance, long=True)})</i>",
                     styles["body_bold"],
                 ),
-                Paragraph(_pending_review_reason(row.outcome), styles["body"]),
+                Paragraph(
+                    escape(row.reason) if row.reason else _pending_review_reason(row.outcome),
+                    styles["body"],
+                ),
                 Paragraph(
                     "Not yet resolved. This is why this export is marked DRAFT."
                     if is_draft

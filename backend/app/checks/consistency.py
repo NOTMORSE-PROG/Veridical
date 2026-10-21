@@ -41,6 +41,7 @@ from app.checks.semantic import (
 )
 from app.checks.signals import compute_shadow_signals, shadow_signals_as_detail
 from app.checks.source_quality import source_limitation_detail
+from app.checks.support import apply_support, check_support, context_limitation
 from app.config import Settings, get_settings
 from app.ingest.schemas import ExtractionResult
 from app.llm.base import LLMClient
@@ -322,6 +323,17 @@ async def vote_batch(
     # prompt, at temperature 0 — a repeated near-deterministic sample, so
     # their agreement carried almost no information even though that
     # agreement IS the confidence signal (D-006).
+    limitation = context_limitation(batch, settings)
+    if limitation is not None:
+        return [
+            VotedCriterion(
+                c,
+                VoteResult(None, 0, [], None, limitation["reason"]),
+                ResultOutcome.escalated,
+                limitation,
+            )
+            for c in batch_criteria
+        ]
     pass_1 = await grade_batch_verdicts(
         batch,
         batch_criteria,
@@ -435,7 +447,22 @@ async def vote_batch(
         if score is not None:
             detail["score"] = score
         voted.append(VotedCriterion(criterion, vote, outcome, detail))
-    return voted
+    candidates = [
+        (v.criterion, v.detail)
+        for v in voted
+        if v.outcome in (ResultOutcome.passed, ResultOutcome.failed)
+        and v.detail.get("verdict")
+        and not v.detail.get("injection_suspected")
+    ]
+    support = await check_support(batch, candidates, llm, check_run_id=check_run_id)
+    return [
+        VotedCriterion(
+            v.criterion, v.vote, *apply_support(v.outcome, v.detail, support[v.criterion.id])
+        )
+        if v.criterion.id in support
+        else v
+        for v in voted
+    ]
 
 
 async def _vote_batch(
@@ -482,7 +509,7 @@ async def run_semantic_checks_with_consistency(
             )
             for criterion in criteria
         ]
-    batches, missing = build_semantic_batches(criteria, extraction)
+    batches, missing = build_semantic_batches(criteria, extraction, settings=settings)
     results: list[CheckResult] = []
     for criterion, target in missing:
         # BUG-221: a title-match miss is not proof the section is genuinely
@@ -514,6 +541,17 @@ async def run_semantic_checks_with_consistency(
         if cancellation_boundary is not None:
             await cancellation_boundary()
     for batch, batch_criteria in batches:
+        limitation = context_limitation(batch, settings)
+        if limitation is not None:
+            results.extend(
+                [
+                    await _persist(session, check_run_id, c, ResultOutcome.escalated, limitation)
+                    for c in batch_criteria
+                ]
+            )
+            if cancellation_boundary is not None:
+                await cancellation_boundary()
+            continue
         results.extend(
             await _vote_batch(
                 session, check_run_id, batch, batch_criteria, llm, settings, extraction.anchor_kind

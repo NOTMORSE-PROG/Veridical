@@ -2,7 +2,7 @@
 for one batched grading call.
 """
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, ValidationInfo, field_validator
 
 
 class GradeVerdict(BaseModel):
@@ -24,13 +24,13 @@ class GradeVerdict(BaseModel):
     index: int
     verdict: str = Field(min_length=1)
     reasoning: str = Field(min_length=1)
-    evidence_quotes: list[str] = Field(min_length=1)
+    evidence_quotes: list[str]
 
     @field_validator("evidence_quotes")
     @classmethod
-    def _no_blank_quotes(cls, value: list[str]) -> list[str]:
+    def _no_blank_quotes(cls, value: list[str], info: ValidationInfo) -> list[str]:
         cleaned = [q.strip() for q in value if q.strip()]
-        if not cleaned:
+        if not cleaned and info.data.get("verdict") != "uncertain":
             raise ValueError("evidence_quotes must contain at least one non-blank quote")
         return cleaned
 

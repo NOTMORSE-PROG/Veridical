@@ -134,6 +134,26 @@ class FakeLLMClient(LLMClient):
         response = json.loads(fixture.read_text(encoding="utf-8"))
         if prompt_type == _SEMANTIC_GRADING_PROMPT_TYPE:
             response = _with_real_quotes(response, prompt)
+        if prompt_type == "semantic_support":
+            task = json.loads(prompt.split("--- TASK JSON ---\n", 1)[1])
+            response = {
+                "items": [
+                    {
+                        "index": item["index"],
+                        "status": response["status"],
+                        "reason": response["reason"],
+                        "requirements": [
+                            {
+                                "key": obligation["key"],
+                                "status": response["status"],
+                                "evidence_quotes": item["candidate_quotes"],
+                            }
+                            for obligation in item["required_obligations"]
+                        ],
+                    }
+                    for item in task["items"]
+                ]
+            }
         if self._session_factory is not None:
             await self._write_audit(prompt_type, prompt, prompt_version, response, context)
         return response

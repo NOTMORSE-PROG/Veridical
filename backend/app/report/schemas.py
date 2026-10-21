@@ -379,6 +379,9 @@ class EscalatedItemOut(BaseModel):
     # honestly reporting that the passes agreed (`reason` already explains
     # why the agreed verdict doesn't count).
     verdict_unrecognized: bool = False
+    support_withheld: bool = False
+    support_status: str | None = None
+    evidence: list[EvidenceItem] = Field(default_factory=list)
     reason: str | None
     # "low_confidence" = the AI graded it and hesitated; "not_graded" = the
     # AI never ran (quota spent / API down). The instructor must be able to

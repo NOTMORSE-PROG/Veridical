@@ -96,6 +96,23 @@ function reportWith(overrides: Record<string, unknown>) {
 }
 
 describe("SignalEscalatedPanel / SignalResolutionCard", () => {
+  it.each(["unsupported", "uncertain", "incomplete"] as const)("withholds %s support without a false split vote or accept shortcut", async (status) => {
+    const item: EscalatedItemOut = {
+      ...LEVELLED_ITEM, agreement: 1, votes: ["Exemplary", "Exemplary"],
+      ai_majority_verdict: null, support_withheld: true, support_status: status,
+      review_reason: status === "incomplete" ? "support_incomplete" : "support_unconfirmed",
+      reason: "The bibliography does not establish in-text documentation.",
+      evidence: [{ quote: "A located reference entry.", anchor: "page 3" }],
+    };
+    vi.stubGlobal("fetch", stubFetchByPath({ "/check-runs/5/escalated": [item] }));
+    renderWithProviders(<SignalEscalatedPanel checkRunId={5} />);
+    expect(await screen.findByText("No grade accepted")).toBeInTheDocument();
+    expect(screen.queryByText(/Split vote:/)).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Accept AI suggestion/ })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Exemplary" })).toBeEnabled();
+    expect(screen.getByRole("link", { name: "Open in manuscript: page 3" })).toHaveAttribute("href", "/report/5/document?anchor=page%203");
+    if (status === "incomplete") expect(screen.getByText(/separate evidence review did not finish/)).toBeInTheDocument();
+  });
   afterEach(() => vi.unstubAllGlobals());
 
   it("shows an identical shared reason once and associates every choice with it", async () => {

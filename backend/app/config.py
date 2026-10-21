@@ -295,6 +295,10 @@ class Settings(BaseSettings):
     # `llm_response_cache` as normal, so a probe run leaves the cache in a
     # normal, usable state afterward rather than disturbing it.
     llm_cache_bypass: bool = False
+    # Full-source semantic review is never silently truncated. Larger inputs
+    # remain explicitly unassessed until a source-bound retrieval path exists.
+    semantic_context_max_chars: int = Field(default=200_000, ge=1)
+    semantic_batch_max_criteria: int = Field(default=20, ge=1)
 
     # --- Structural check engine (V-016, F3.2) -------------------------------
     # Override the packaged criterion-matching keyword lists / bound-phrase

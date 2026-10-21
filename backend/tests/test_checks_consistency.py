@@ -13,6 +13,7 @@ from app.checks.escalation import gate_vote
 from app.config import get_settings
 from app.ingest.schemas import ExtractionResult, SectionTree, TextBlock
 from app.models.enums import ResultOutcome
+from tests.semantic_support_fixture import supported_response
 
 
 @dataclass
@@ -44,8 +45,12 @@ class ScriptedLLM:
     def __init__(self, responses: list[dict[str, Any]]):
         self._responses = list(responses)
         self.passes: list[str | None] = []
+        self.support_calls: list[str] = []
 
     async def complete(self, prompt_type, prompt, *, prompt_version="unversioned", **context):
+        if prompt_type == "semantic_support":
+            self.support_calls.append(prompt)
+            return supported_response(prompt)
         self.passes.append(context.get("consistency_pass"))
         return self._responses.pop(0)
 

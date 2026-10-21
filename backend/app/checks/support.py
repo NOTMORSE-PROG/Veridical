@@ -1,0 +1,178 @@
+"""F3 evidence-support veto. A second review can withhold, never invent, a grade."""
+
+import json
+from pathlib import Path
+from typing import Any, Literal
+
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
+
+from app.checks.levels import match_level
+from app.models.enums import ResultOutcome
+
+PROMPT_TYPE = "semantic_support"
+PROMPT_VERSION = "v1"
+_PROMPT = Path(__file__).parent / "prompts" / f"{PROMPT_TYPE}_{PROMPT_VERSION}.txt"
+SupportStatus = Literal["supported", "unsupported", "uncertain"]
+
+
+class RequirementSupport(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    key: str = Field(min_length=1)
+    status: SupportStatus
+    evidence_quotes: list[str]
+
+
+class SupportItem(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    index: int = Field(ge=0)
+    status: SupportStatus
+    reason: str = Field(min_length=1)
+    requirements: list[RequirementSupport] = Field(min_length=1)
+
+
+def context_limitation(batch: Any, settings: Any) -> dict[str, Any] | None:
+    if len(batch.context_text) <= settings.semantic_context_max_chars:
+        return None
+    return {
+        "basis": "source-coverage",
+        "reason": (
+            "The available manuscript text exceeds the supported semantic-review context. "
+            "No text was silently omitted and no rubric rating was assigned. "
+            "Review the criterion directly in the full manuscript."
+        ),
+        "context_chars": len(batch.context_text),
+        "context_limit_chars": settings.semantic_context_max_chars,
+    }
+
+
+def _incomplete(reason: str) -> dict[str, Any]:
+    return {"status": "incomplete", "reason": reason, "prompt_version": PROMPT_VERSION}
+
+
+async def check_support(
+    batch: Any,
+    candidates: list[tuple[Any, dict[str, Any]]],
+    llm: Any,
+    *,
+    check_run_id: int | None,
+) -> dict[int, dict[str, Any]]:
+    """One bounded call per batch; missing/ambiguous items fail closed individually.
+
+    Provider/quota exceptions propagate unchanged so the pipeline retains its
+    availability/recovery policy. The grader's explanation is deliberately absent.
+    Context and task data enter the response-cache key through the full prompt.
+    """
+    if not candidates:
+        return {}
+    items = []
+    obligations = []
+    for index, (criterion, detail) in enumerate(candidates):
+        required = {"criterion": criterion.text}
+        if getattr(criterion, "evidence", None):
+            required["evidence_request"] = criterion.evidence
+        matched = match_level(criterion, detail["verdict"])
+        if matched is not None:
+            required["level_descriptor"] = next(
+                level["descriptor"]
+                for level in criterion.levels
+                if int(level["level"]) == matched.ordinal
+            )
+        obligations.append(required)
+        items.append(
+            {
+                "index": index,
+                "criterion": criterion.text,
+                "evidence_needed": getattr(criterion, "evidence", None),
+                "performance_levels": getattr(criterion, "levels", None),
+                "proposed_verdict": detail["verdict"],
+                "candidate_quotes": [item["quote"] for item in detail.get("evidence", [])],
+                "required_obligations": [
+                    {"key": key, "text": text} for key, text in required.items()
+                ],
+            }
+        )
+    task = {"items": items, "source_scope": batch.label, "source_text": batch.context_text}
+    # One replacement prevents source strings resembling template slots from
+    # being interpolated. JSON escaping keeps supplied data structurally separate.
+    prompt = _PROMPT.read_text(encoding="utf-8").replace(
+        "{task_json}", json.dumps(task, ensure_ascii=False)
+    )
+    response = await llm.complete(
+        PROMPT_TYPE, prompt, prompt_version=PROMPT_VERSION, check_run_id=check_run_id
+    )
+    raw_items = response.get("items") if isinstance(response, dict) else None
+    if not isinstance(raw_items, list) or any(
+        not isinstance(raw, dict)
+        or type(raw.get("index")) is not int
+        or not 0 <= raw["index"] < len(candidates)
+        for raw in raw_items
+    ):
+        return {
+            c.id: _incomplete("The evidence-support response could not be read.")
+            for c, _ in candidates
+        }
+    by_index: dict[int, list[dict]] = {}
+    for raw in raw_items:
+        if isinstance(raw, dict) and type(raw.get("index")) is int:
+            by_index.setdefault(raw["index"], []).append(raw)
+    results = {}
+    for index, (criterion, detail) in enumerate(candidates):
+        matches = by_index.get(index, [])
+        failure = "The evidence-support response was missing, ambiguous or incomplete."
+        if len(matches) != 1:
+            results[criterion.id] = _incomplete(failure)
+            continue
+        try:
+            item = SupportItem.model_validate(matches[0])
+            if not item.reason.strip():
+                raise ValueError("Blank support explanation")
+            keys = [part.key for part in item.requirements]
+            if len(keys) != len(set(keys)) or set(keys) != set(obligations[index]):
+                raise ValueError("Every supplied obligation must be reviewed exactly once")
+            proposed = {e["quote"] for e in detail.get("evidence", [])}
+            for part in item.requirements:
+                if part.status == "supported" and not part.evidence_quotes:
+                    raise ValueError("Support requires candidate evidence")
+                if any(
+                    not quote.strip() or quote not in proposed for quote in part.evidence_quotes
+                ):
+                    raise ValueError("Reviewer substituted unsubmitted evidence")
+            if item.status == "supported" and any(
+                part.status != "supported" for part in item.requirements
+            ):
+                raise ValueError("Not every requirement supports the proposed rating")
+        except (ValidationError, ValueError):
+            results[criterion.id] = _incomplete(failure)
+            continue
+        results[criterion.id] = {
+            **item.model_dump(exclude={"index"}),
+            "requirements": [
+                {**part.model_dump(), "requirement": obligations[index][part.key]}
+                for part in item.requirements
+            ],
+            "prompt_version": PROMPT_VERSION,
+            "source_scope": batch.label,
+        }
+    return results
+
+
+def apply_support(
+    outcome: ResultOutcome, detail: dict[str, Any], support: dict[str, Any]
+) -> tuple[ResultOutcome, dict[str, Any]]:
+    """Keep location-verified passages, but remove any withheld accepted rating."""
+    updated = {**detail, "support_check": support}
+    if support["status"] == "supported":
+        updated["support_basis"] = support["reason"]
+        updated["grading_reasoning"] = updated.get("reasoning")
+        updated["reasoning"] = support["reason"]
+        return outcome, updated
+    if "verdict" in updated:
+        updated["proposed_verdict"] = updated.pop("verdict")
+    if "level" in updated:
+        updated["proposed_level"] = updated.pop("level")
+    if "reasoning" in updated:
+        updated["proposed_reasoning"] = updated.pop("reasoning")
+    updated.pop("score", None)
+    updated["reason"] = support["reason"]
+    updated["support_withheld"] = True
+    return ResultOutcome.escalated, updated

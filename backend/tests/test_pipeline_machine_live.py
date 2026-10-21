@@ -97,7 +97,9 @@ def _two_section_pdf(tmp_path):
     b.new_page().line("ABSTRACT", bold=True)
     b.line("This is a test sentence used as evidence.")
     b.new_page().line("CHAPTER 1 INTRODUCTION", bold=True)
-    b.line("This is a test sentence used as evidence.")
+    # Distinct body text is essential: repeated text is classified as page
+    # furniture and cannot be evidence in the full-source semantic context.
+    b.line("A different test sentence describes the research problem.")
     return b.save(tmp_path / "two.pdf")
 
 
@@ -865,13 +867,17 @@ class _FlakyThenFineLLM:
         self.calls += 1
         if self.calls > self.fail_after:
             raise QuotaExhaustedError("simulated: daily Gemini quota exhausted")
+        if args[0] == "semantic_support":
+            from tests.semantic_support_fixture import supported_response
+
+            return supported_response(args[1])
         return {
             "verdicts": [
                 {
                     "index": 0,
                     "verdict": "pass",
                     "reasoning": "The document clearly and directly satisfies this criterion.",
-                    "evidence_quotes": ["This is a test sentence used as evidence."],
+                    "evidence_quotes": ["ABSTRACT This is a test sentence used as evidence."],
                 }
             ]
         }
@@ -886,11 +892,15 @@ async def test_quota_exhausted_parks_the_run_then_resumes_without_duplicate_call
     availability-floor tests below) — parking is opt-in because waiting for
     midnight Pacific can mean waiting past the defense."""
     check_run_id, criterion_ids, settings = await _seed(session_factory, tmp_path, monkeypatch)
-    settings = settings.model_copy(update={"pipeline_degrade_on_quota": False})
+    settings = settings.model_copy(
+        update={"pipeline_degrade_on_quota": False, "semantic_batch_max_criteria": 1}
+    )
 
-    # 2 calls (pass_1 + pass_2) complete the FIRST criterion's vote; the
-    # 3rd call (second criterion's pass_1) is where "quota" runs out.
-    flaky = _FlakyThenFineLLM(fail_after=2)
+    # Explicit one-criterion batches exercise recovery across a completed
+    # boundary: two grading calls plus support finish the first batch;
+    # the next call exhausts quota. The heading disambiguates the repeated
+    # sentence in this fixture's full-source context without changing it.
+    flaky = _FlakyThenFineLLM(fail_after=3)
     async with session_factory() as session:
         check_run = await session.get(CheckRun, check_run_id)
         await run_check_run(session, check_run, settings, flaky)
