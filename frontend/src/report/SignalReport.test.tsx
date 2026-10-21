@@ -84,6 +84,12 @@ function stubReport(report: ReportOut = BASE_REPORT, escalated: EscalatedItemOut
 }
 
 describe("SignalReportPage", () => {
+  it("discloses legacy suggestions without treating reopen as new validation", async () => {
+    stubReport({ ...BASE_REPORT, historical_semantic_support_unverified: true });
+    renderWithProviders(<SignalReportPage />, { route: "/report/5", path: "/report/:checkRunId" });
+    expect(await screen.findByText(/Some recorded AI suggestions predate criterion-support validation/))
+      .toBeInTheDocument();
+  });
   afterEach(() => vi.unstubAllGlobals());
 
   it("leads with a readiness band and identity without presenting the composite as a judgment percentage", async () => {

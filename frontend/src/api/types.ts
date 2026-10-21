@@ -460,6 +460,8 @@ export interface OriginalityScope {
 
 export interface ReportOut extends ReportCommon {
   check_run_id: number;
+  figure_readings?: FigureReadingOut[] | null;
+  historical_semantic_support_unverified?: boolean;
   // BUG-128: instructor-only -- lets the report deep-link an integrity-
   // check remedy straight into the Dashboard's existing "Run again"
   // (RerunModal) mechanism, which already keys off this id.
@@ -815,6 +817,23 @@ export interface DocumentImageOut {
   width_px: number | null;
   height_px: number | null;
   unavailable_reason: string | null;
+  figure_reading?: FigureReadingOut | null;
+}
+
+export interface FigureReadingOut {
+  image_index: number;
+  status: "not_selected" | "unavailable" | "needs_review" | "available";
+  reason: string;
+  source_anchor: string | null;
+  source_caption: string | null;
+  caption_anchor: string | null;
+  source_binding: Record<string, unknown>;
+  kind: string | null;
+  visible_content: string | null;
+  visible_labels: string[];
+  limitations: string[];
+  support_reason: string | null;
+  schema_version: string;
 }
 
 // V-072 (F7.4), design review spec §4.2/§4.3: a passage match the DEFAULT

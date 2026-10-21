@@ -428,6 +428,24 @@ class PageReadingOrder(BaseModel):
     ordered_source_line_ids: list[str]
 
 
+class FigureReading(BaseModel):
+    """Non-scoring visual observations; never numeric or criterion assessment."""
+
+    image_index: int = Field(ge=0)
+    status: Literal["not_selected", "unavailable", "needs_review", "available"]
+    reason: str
+    source_anchor: str | None = None
+    source_binding: dict = Field(default_factory=dict)
+    source_caption: str | None = None
+    caption_anchor: str | None = None
+    kind: str | None = None
+    visible_content: str | None = None
+    visible_labels: list[str] = Field(default_factory=list)
+    limitations: list[str] = Field(default_factory=list)
+    support_reason: str | None = None
+    schema_version: Literal["v1"] = "v1"
+
+
 class ExtractionResult(BaseModel):
     page_count: int  # DOCX: 0 — pages don't exist before rendering
     anchor_kind: Literal["page", "paragraph"]
@@ -440,6 +458,7 @@ class ExtractionResult(BaseModel):
     images: list[ImageBlock]
     image_reading_version: Literal["v1"] | None = None
     image_readings: list[ImageReading] | None = None
+    figure_readings: list[FigureReading] | None = None
     docx_source_sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
     docx_omitted_image_occurrences: int = Field(default=0, ge=0)
     tables: list[TableBlock] = Field(default_factory=list)

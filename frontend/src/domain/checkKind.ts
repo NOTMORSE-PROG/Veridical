@@ -82,6 +82,9 @@ export function findingVerificationPrompt(checkKind: string, problemKind: string
   if (problemKind === "orphan_in_text_citation") {
     return "Check the manuscript's reference list for this author and year. Confirm whether the entry is missing or uses different spelling or a different year.";
   }
+  if (problemKind === "uncited_reference") {
+    return "Check whether this reference is cited in the manuscript text, tables, or captions. Citation spelling and style may differ. If you cannot find a matching citation, decide whether the reference should be cited or removed.";
+  }
   if (isPValueFinding(problemKind)) {
     return "Compare the reported p-value with the saved recalculation. Check the original analysis output for the test value, degrees of freedom, and whether the test was one-sided or two-sided. This check does not verify the raw data.";
   }

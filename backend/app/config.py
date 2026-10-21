@@ -132,6 +132,9 @@ class Settings(BaseSettings):
     # Hard cap on Gemini vision calls per manuscript (quota is the currency,
     # D-001: cap × ~20 groups/day must stay well inside the free-tier RPD).
     ingest_vision_max_images: int = 12
+    ingest_figure_reading_enabled: bool = True
+    ingest_figure_max_images: int = Field(default=2, ge=0)
+    ingest_figure_caption_lookahead: int = Field(default=4, ge=0)
     # Embedded images smaller than this (PDF bbox area, square points) are
     # decorative — icons, bullets, logos — and never worth a call.
     # 5000 pt² ≈ a 1in × 1in figure.

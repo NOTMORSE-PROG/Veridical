@@ -8,6 +8,7 @@ import { checkKindMeta, findingVerificationPrompt, humanize, isPValueFinding } f
 import { evidenceDisplayState } from "../domain/evidenceDisplay";
 import { markFlagViewed } from "../domain/flagViewed";
 import { problemLabel } from "../domain/problemLabel";
+import { instructorAnchor } from "../domain/sourceAnchor";
 import { systemFindingCopy } from "../domain/systemFindingCopy";
 import { rememberRouteReturnFocus, useRouteFocus } from "../routing/useRouteFocus";
 import { ActionLink } from "../ui/ActionLink";
@@ -67,7 +68,7 @@ function EvidenceSection({
         </div>
       </div>
       {showsManuscriptQuote && flag.check_kind !== "internal_agreement" && (
-        <blockquote className="signal-evidence-quote"><span>“{systemFindingCopy(flag.evidence_excerpt, flag.ai_verdict_summary, "evidence")}”</span><cite>{flag.page_anchor}</cite></blockquote>
+        <blockquote className="signal-evidence-quote"><span>“{systemFindingCopy(flag.evidence_excerpt, flag.ai_verdict_summary, "evidence")}”</span><cite>{instructorAnchor(flag.page_anchor)}</cite></blockquote>
       )}
       <PValueComparison flag={flag} />
       <AgreementComparison flag={flag} />
@@ -82,7 +83,7 @@ function EvidenceSection({
           Same component, same props, same "flag" variant already
           shipped on SignalDocumentViewer.tsx -- no new design here. */}
       {flag.passage_pair && (
-        <PassagePairPanel pair={flag.passage_pair} ownAnchor={flag.page_anchor} variant="flag" />
+        <PassagePairPanel pair={flag.passage_pair} ownAnchor={instructorAnchor(flag.page_anchor)} variant="flag" />
       )}
       {/* BUG-170: a reuse flag with no manuscript-sourced content at
           all (no quote, no passage panel) still needs an honest reason

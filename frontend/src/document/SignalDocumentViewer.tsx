@@ -11,6 +11,7 @@ import { problemLabel } from "../domain/problemLabel";
 import { severityLabel } from "../domain/severity";
 import { systemFindingCopy } from "../domain/systemFindingCopy";
 import { instructorAnchor } from "../domain/sourceAnchor";
+import { FigureReadingsSummary } from "../report/FigureReadings";
 import { useFlag } from "../flags/useFlag";
 import { PValueComparison } from "../flags/PValueComparison";
 import { AgreementComparison } from "../flags/AgreementComparison";
@@ -282,6 +283,8 @@ function ReadinessDecision({ checkRunId, report, pending, error, onRetry, onBack
       </section>
       {report.llm_mode !== "real" && <Alert title={report.llm_mode === "fake" ? "Test-mode AI results" : "AI mode could not be verified"} tone="warning">{report.llm_mode === "fake" ? "This review was produced with fixture responses, not real AI grading. Do not treat it as a finding about the manuscript." : "This run predates reliable AI-mode tracking. Treat AI-derived outcomes cautiously."}</Alert>}
       {coverage.length > 0 && <CoverageStatement state="partial" headingId="workspace-coverage-heading" heading="Assessment limits" intro="Results below cover only the checks that ran. Unchecked content is not treated as passed." items={coverage} />}
+      {report.historical_semantic_support_unverified && <Alert title="Historical AI grades need fresh evidence review" tone="warning">Some recorded AI suggestions predate criterion-support validation. They are not validated by the current safeguards. Run a new check or assess the manuscript independently. Reopening preserves the original record.</Alert>}
+      <FigureReadingsSummary readings={report.figure_readings} checkRunId={checkRunId} />
       <details className="signal-document-analysis__criteria"><summary>Criterion record, {assessed.length} assessed</summary><SignalCriteriaResults results={assessed} checkRunId={report.check_run_id} /></details>
       <SignalDecisionPanel report={report} manuscriptLabel={identity.primary} />
       <div className="signal-document-analysis__footer"><ActionLink to={`/report/${report.check_run_id}`} variant="secondary">Open full readiness report</ActionLink></div>
@@ -521,7 +524,7 @@ export function SignalDocumentViewerPage() {
                 {selectedFinding && selectedSummary && selectedPrecision && (
                   <div className="signal-document-selection-strip" role="status"><div><strong>Finding {selectedFinding.number} selected</strong><span>{instructorAnchor(recordedAnchor ?? selectedSummary.page_anchor)} · {selectedPrecision.label}</span></div><div><Button variant="secondary" onClick={showSelectedReview}>View review</Button><Button variant="quiet" onClick={showQueue}>Clear selection</Button></div></div>
                 )}
-                {recordedAnchor && anchorRegion && <div className="signal-document-reconstruction-note" role="status"><strong>Source location: {recordedAnchor}</strong><p>This opens the recorded page or paragraph, not an exact passage highlight.</p></div>}
+                {recordedAnchor && anchorRegion && <div className="signal-document-reconstruction-note" role="status"><strong>Source location: {instructorAnchor(recordedAnchor)}</strong><p>This opens the recorded page or extracted paragraph, not an exact passage highlight. Extracted paragraphs are source positions, not printed Word page numbers.</p></div>}
                 {recordedAnchor && anchorSourceLoaded && !anchorRegion && <Alert title="The recorded criterion anchor could not be placed" tone="warning">Review the recorded excerpt in Review and inspect the manuscript manually.</Alert>}
                 {rawSelection && requestedFlagId === null && <Alert title="The selected finding address is invalid" tone="warning">Showing the review queue instead.</Alert>}
                 {viewerQuery.isPending ? <div className="signal-document-source"><div className="signal-document-toolbar"><div className="signal-document-toolbar__identity"><strong>Full manuscript</strong><span>Loading stored source</span></div></div><div className="signal-document-scroll"><section role="status" aria-live="polite" aria-busy="true" className="signal-document-pdf-skeleton"><span>Loading full manuscript.</span><i /><i /><i /></section></div></div>

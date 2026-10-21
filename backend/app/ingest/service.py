@@ -27,6 +27,7 @@ from app.errors import (
     ConflictError,
     FileMalformedError,
     FileTooLargeError,
+    InvalidApiKeyError,
     NotFoundError,
     QuotaExhaustedError,
 )
@@ -36,7 +37,7 @@ from app.groups.service import (
     program_name_for,
     resolve_or_create_group,
 )
-from app.ingest import docx, pdf, references, vision
+from app.ingest import docx, figures, pdf, references, vision
 from app.ingest.patterns import load_patterns
 from app.ingest.recovery import recover_layout, selected_pages
 from app.ingest.schemas import (
@@ -239,6 +240,19 @@ async def ingest_manuscript(
                 if isinstance(exc, QuotaExhaustedError)
                 else "api_down",
             )
+        # Visual observations remain separate from numeric image transcriptions
+        # and never enter semantic grading or integrity scoring.
+        selected_figures = figures.prepare_figures(result, patterns, settings, enabled=read_images)
+        if selected_figures:
+            try:
+                llm = await get_llm_client_for(session, settings, manuscript.instructor_id)
+                await figures.read_figures(
+                    result, file_path, llm, patterns, settings, source_hash=manuscript.content_hash
+                )
+            except (LLMNotConfiguredError, ApiDownError, QuotaExhaustedError, InvalidApiKeyError):
+                for entry in result.figure_readings or []:
+                    if entry.reason == "not_attempted":
+                        entry.status, entry.reason = "unavailable", "service_unavailable"
         raw_path = raw_store_path(settings, manuscript.id)
         await loop.run_in_executor(None, _write_raw_store, result, raw_path)
         # BUG-138: same durability as the upload itself -- without this, the

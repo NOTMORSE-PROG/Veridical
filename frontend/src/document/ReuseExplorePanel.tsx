@@ -229,7 +229,7 @@ export function ReuseExplorePanel({
                           match.own_region.page !== null
                             ? `p. ${match.own_region.page}`
                             : match.own_region.paragraph !== null
-                              ? `¶${match.own_region.paragraph}`
+                              ? `Extracted paragraph ${match.own_region.paragraph + 1}`
                               : null
                         }
                         variant="excluded"

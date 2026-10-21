@@ -6,6 +6,7 @@ from typing import Literal
 from pydantic import BaseModel, Field, field_validator
 
 from app.config import get_settings
+from app.ingest.schemas import FigureReading
 
 
 class EvidenceItem(BaseModel):
@@ -178,6 +179,8 @@ class OriginalityScopeOut(BaseModel):
 
 class ReportOut(BaseModel):
     check_run_id: int
+    figure_readings: list[FigureReading] | None = None
+    historical_semantic_support_unverified: bool = False
     # BUG-128: instructor-only (never added to `PublicReportOut` below,
     # which has no instructor actions by design) -- lets the frontend
     # deep-link an integrity-check remedy straight into the existing
@@ -584,6 +587,7 @@ class DocumentImageOut(BaseModel):
     width_px: int | None = None
     height_px: int | None = None
     unavailable_reason: str | None = None
+    figure_reading: FigureReading | None = None
 
 
 class DocumentParagraphsOut(BaseModel):

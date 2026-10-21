@@ -376,7 +376,7 @@ describe("SignalDocumentViewerPage", () => {
     expect(screen.queryByRole("button", { name: "Previous finding" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Next finding" })).not.toBeInTheDocument();
     expect(screen.queryByText("\u00b60")).not.toBeInTheDocument();
-    expect(screen.getAllByText("Reconstructed text").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Extracted paragraph 1").length).toBeGreaterThan(0);
   });
 
   it("keeps readiness, criteria, signals, and decision work beside the manuscript", async () => {

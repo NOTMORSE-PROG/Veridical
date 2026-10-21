@@ -28,6 +28,7 @@ a bug -- check the actual rendered page before treating one as real.
 
 import contextlib
 import json
+import re
 from datetime import UTC, datetime
 from functools import lru_cache
 from io import BytesIO
@@ -478,6 +479,11 @@ def _result_display(row: CriterionResultOut) -> tuple[str, str]:
     }.get(row.outcome, (row.outcome, "neutral"))
 
 
+def _display_anchor(anchor: str) -> str:
+    match = re.fullmatch(r"(?:¶|Â¶|paragraph\s+)(\d+)", anchor.strip(), flags=re.I)
+    return f"Extracted paragraph {int(match[1]) + 1}" if match else anchor
+
+
 def _source_caption(row: CriterionResultOut) -> str:
     """BUG-082: this used to read `row.type` (what the rubric DECLARES the
     criterion to be), while the frontend's identical caption
@@ -539,7 +545,11 @@ def _criterion_flowable(row: CriterionResultOut, styles: dict[str, ParagraphStyl
             )
     elif row.evidence:
         parts.append(Paragraph(escape(row.evidence[0].quote), styles["cell"]))
-        parts.append(Paragraph(f"Anchor: {escape(row.evidence[0].anchor)}", styles["cell_caption"]))
+        parts.append(
+            Paragraph(
+                f"Anchor: {escape(_display_anchor(row.evidence[0].anchor))}", styles["cell_caption"]
+            )
+        )
         if row.reasoning or row.reason:
             parts.append(Paragraph(escape(row.reasoning or row.reason or ""), styles["cell"]))
     elif row.reasoning or row.reason:
@@ -844,7 +854,10 @@ def build_report_pdf(data: ReportExportData) -> bytes:
                     styles["body_bold"],
                 ),
                 Paragraph(
-                    escape(row.reason) if row.reason else _pending_review_reason(row.outcome),
+                    escape(
+                        _pending_review_reason(row.outcome)
+                        + (" " + row.reason if row.reason else "")
+                    ),
                     styles["body"],
                 ),
                 Paragraph(
@@ -949,7 +962,7 @@ def build_report_pdf(data: ReportExportData) -> bytes:
                 anchor = (
                     f"Page {item.page}"
                     if item.page is not None
-                    else f"Source position {item.paragraph + 1}"
+                    else f"Extracted paragraph {item.paragraph + 1}"
                     if item.paragraph is not None
                     else "Source location unavailable"
                 )
@@ -1003,6 +1016,67 @@ def build_report_pdf(data: ReportExportData) -> bytes:
                     styles["body"],
                 )
             )
+    if data.report.figure_readings is not None:
+        readings = data.report.figure_readings
+        available = [item for item in readings if item.status == "available"]
+        flow.append(Paragraph("Saved visual readings", styles["h2"]))
+        flow.append(
+            Paragraph(
+                escape(
+                    f"Visual readings are available for {len(available)} of {len(readings)} "
+                    f"image occurrences. {len(readings) - len(available)} remain unassessed. "
+                    "Visual readings do not establish that statistical values in images "
+                    "were checked or that rubric criteria were met."
+                ),
+                styles["body"],
+            )
+        )
+        for item in readings:
+            location = item.source_binding.get("locator", {})
+            if not isinstance(location, dict):
+                location = {}
+            anchor = (
+                f"Extracted paragraph {location['paragraph'] + 1}"
+                if type(location.get("paragraph")) is int
+                else f"Page {location['page']}"
+                if type(location.get("page")) is int
+                else "Source location unavailable"
+            )
+            flow.append(
+                Paragraph(
+                    escape(
+                        f"Source image {item.image_index + 1} - {anchor}: "
+                        f"{item.status}. {item.reason}"
+                    ),
+                    styles["body"],
+                )
+            )
+            if item.status == "available":
+                for text in [
+                    item.visible_content,
+                    "Visible labels: " + "; ".join(item.visible_labels),
+                    "Limits: " + "; ".join(item.limitations),
+                    item.support_reason,
+                ]:
+                    if text:
+                        flow.append(Paragraph(escape(text), styles["body"]))
+                if item.source_caption:
+                    flow.append(
+                        Paragraph(
+                            escape("Nearby source caption: " + item.source_caption),
+                            styles["caption"],
+                        )
+                    )
+    if data.report.historical_semantic_support_unverified:
+        flow.append(Paragraph("Historical AI grades need fresh evidence review", styles["h2"]))
+        flow.append(
+            Paragraph(
+                "Some recorded AI suggestions predate criterion-support validation. They are not "
+                "validated by the current safeguards. Run a new check or assess the manuscript "
+                "independently. Reopening preserves the original record.",
+                styles["body"],
+            )
+        )
     flag_intro = [Paragraph(f"Flags ({len(data.flags)})", styles["h2"])]
     docx_source = data.source_format == "docx" or any(
         image.reason_code == "docx_layout" for image in data.page_images.values()
@@ -1058,7 +1132,9 @@ def build_report_pdf(data: ReportExportData) -> bytes:
                 caption_style = (
                     styles["caption_bold"] if f.severity == "high" else styles["caption"]
                 )
-                caption_text = f"Anchor: {escape(f.page_anchor)} · {escape(severity_label)}"
+                caption_text = (
+                    f"Anchor: {escape(_display_anchor(f.page_anchor))} · {escape(severity_label)}"
+                )
                 if f.overridden:
                     caption_text += " · Overridden"
                 if not f.affects_readiness:
@@ -1122,7 +1198,8 @@ def build_report_pdf(data: ReportExportData) -> bytes:
                     if comparison.anchor:
                         finding.append(
                             Paragraph(
-                                f"Source location: {escape(comparison.anchor)}", styles["caption"]
+                                f"Source location: {escape(_display_anchor(comparison.anchor))}",
+                                styles["caption"],
                             )
                         )
                 finding.append(
@@ -1178,7 +1255,7 @@ def build_report_pdf(data: ReportExportData) -> bytes:
                             Paragraph(
                                 escape(
                                     f"Finding {finding_number} (continued) - "
-                                    f"Source location: {f.page_anchor}"
+                                    f"Source location: {_display_anchor(f.page_anchor)}"
                                 ),
                                 styles["caption_bold"],
                             )

@@ -246,7 +246,8 @@ async def test_missing_isbn_title_never_searches_the_raw_reference_as_a_title(mo
     monkeypatch.setattr(verify.openlibrary_client, "lookup_isbn", isbn_lookup)
     monkeypatch.setattr(verify.gbooks_client, "search_title", title_lookup)
 
-    async def keyed(session, kind, value, *, settings, fetch):
+    async def keyed(session, kind, value, *, settings, fetch, instructor_id, reference_text):
+        assert instructor_id is None and reference_text == ref.raw_text
         return await fetch()
 
     monkeypatch.setattr(verify, "_verify_keyed", keyed)

@@ -39,7 +39,7 @@ const QUEUES: ReadonlyArray<{
   {
     id: "ready_to_decide",
     label: "Ready to decide",
-    description: "Assessed manuscripts awaiting your outcome",
+    description: "Checks finished. Review assessment limits before recording your decision.",
   },
   { id: "complete", label: "Complete", description: "Instructor decisions already recorded" },
 ] as const;

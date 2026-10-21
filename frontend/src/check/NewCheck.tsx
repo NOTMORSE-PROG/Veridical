@@ -356,7 +356,7 @@ export function NewCheckModal({
                       {formatManuscriptOption(
                         manuscriptIdentity(m.group_label, m.original_filename),
                         dateFormatter.format(new Date(m.created_at)),
-                      )}
+                      )} · Upload {m.id}
                     </option>
                   ))}
                 </select>
@@ -375,7 +375,7 @@ export function NewCheckModal({
                       <p className="text-sm text-ink-secondary break-words">
                         Selected: <b className="font-medium text-ink">{identity.primary}</b>
                         {identity.secondary && <> ({identity.secondary})</>}, uploaded{" "}
-                        {dateFormatter.format(new Date(selectedManuscript.created_at))}.
+                        {dateFormatter.format(new Date(selectedManuscript.created_at))}. Upload {selectedManuscript.id}.
                       </p>
                     );
                   })()}
@@ -425,7 +425,7 @@ export function NewCheckModal({
                     <option value="">Select an active rubric.</option>
                     {familiesForPicker.map((f) => (
                       <option key={f.id} value={f.id}>
-                        {f.title} (v{f.version})
+                        {f.title} (v{f.version}) · Family {f.rubric_family_id}
                       </option>
                     ))}
                   </select>
@@ -447,7 +447,7 @@ export function NewCheckModal({
             // the first place (UX review finding, V-055 4f review).
             <div className="rounded-md bg-status-info-bg px-3 py-2 text-sm break-words text-status-info-text">
               Runs against <b>{selectedRubric.title}</b> v{selectedRubric.version},{" "}
-              {selectedRubric.criteria_count} criteria.
+              {selectedRubric.criteria_count} criteria. Family {selectedRubric.rubric_family_id}.
             </div>
           )}
 

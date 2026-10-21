@@ -27,7 +27,7 @@ export function imageCoverageItem(status: IntegrityCheckStatusOut, checkRunId: n
     const page = Number.isSafeInteger(item.page) && item.page! > 0 ? item.page : null;
     const paragraph = Number.isSafeInteger(item.paragraph) && item.paragraph! >= 0 ? item.paragraph : null;
     const anchor = page !== null ? `page ${page}` : paragraph !== null ? `paragraph ${paragraph}` : null;
-    const location = page !== null ? `Page ${page}` : paragraph !== null ? `Source position ${paragraph + 1}` : "Source location unavailable";
+    const location = page !== null ? `Page ${page}` : paragraph !== null ? `Extracted paragraph ${paragraph + 1}` : "Source location unavailable";
     const label = `${location}: ${IMAGE_COVERAGE_LABELS[item.reason] ?? "Image content unassessed"}`;
     const previous = locations.get(label);
     locations.set(label, { label, anchor, count: (previous?.count ?? 0) + 1 });

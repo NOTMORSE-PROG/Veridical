@@ -33,6 +33,7 @@ from app.checks.reuse.query import (
 from app.config import Settings, get_settings
 from app.errors import ConflictError, GoneError, NotFoundError
 from app.findings.policy import exclusion_reason, reuse_excerpt
+from app.ingest.figures import saved_figure_readings
 from app.ingest.regions import _flatten, recover_region
 from app.ingest.schemas import SectionTree
 from app.ingest.service import load_raw_store, load_raw_store_async
@@ -629,7 +630,20 @@ async def report_out_for_check_run(
         else None
     )
 
+    try:
+        visual_readings = saved_figure_readings(
+            await load_raw_store_async(settings, manuscript.id), manuscript.content_hash
+        )
+    except (FileNotFoundError, ValidationError, OSError):
+        visual_readings = None
     return ReportOut(
+        figure_readings=visual_readings,
+        historical_semantic_support_unverified=any(
+            result.kind == CheckKind.semantic
+            and (result.detail or {}).get("basis") == "llm"
+            and "support_check" not in (result.detail or {})
+            for result, _criterion in rows
+        ),
         check_run_id=check_run_id,
         manuscript_id=check_run.manuscript_id,
         manuscript_group_label=manuscript.group_label,
@@ -1267,10 +1281,15 @@ def manuscript_paragraphs_for(manuscript: Manuscript, settings: Settings) -> Doc
         extraction.docx_source_sha256 is not None
         and extraction.docx_source_sha256 == manuscript.content_hash
     )
+    visual_by_index = {
+        entry.image_index: entry
+        for entry in saved_figure_readings(extraction, manuscript.content_hash) or []
+    }
     for index, image in enumerate(extraction.images[: settings.docx_image_max_count]):
         if image.paragraph is None:
             continue
         source = image.docx_source if source_bound else None
+        visual_payload = visual_by_index.get(index)
         image_items.append(
             DocumentImageOut(
                 image_index=index,
@@ -1282,6 +1301,7 @@ def manuscript_paragraphs_for(manuscript: Manuscript, settings: Settings) -> Doc
                 unavailable_reason=None
                 if source
                 else (image.display_unavailable_reason or "source_not_recorded"),
+                figure_reading=visual_payload,
             )
         )
     return DocumentParagraphsOut(

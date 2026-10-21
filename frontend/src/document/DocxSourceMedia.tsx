@@ -4,6 +4,7 @@ import { api } from "../api/client";
 import type { DocumentImageOut, DocumentTableOut } from "../api/types";
 import { Button } from "../ui/Button";
 import { Modal, ModalBackdrop } from "../components/Modal";
+import { FigureReadingDetails } from "../report/FigureReadings";
 
 const UNAVAILABLE: Record<string, string> = {
   unsupported_drawing: "This drawing cannot be displayed in the reconstructed view.",
@@ -84,9 +85,10 @@ function SourceImage({ image, basePath, isVisible }: {
               onError={() => setFailed(true)} />
             <Button variant="secondary" onClick={() => { setActualSize(false); setExpanded(true); }}>Expand image {number}</Button>
           </> : <p role="status">{inView ? "Loading source image." : "Image will load when visible."}</p>}
+      {url && !failed && <FigureReadingDetails reading={image.figure_reading} />}
       {expanded && url && !failed && <ModalBackdrop>
         <Modal title={`Source image ${number}`} size="lg" onClose={() => setExpanded(false)}>
-          <p>Original embedded image at source position {image.paragraph + 1}. Word cropping and rotation are not reproduced. Display does not verify the contents.</p>
+          <p>Original embedded image at extracted paragraph {image.paragraph + 1}. Word cropping and rotation are not reproduced. Display does not verify the contents.</p>
           <div className="signal-docx-image-controls" role="group" aria-label="Image size">
             <Button variant="secondary" aria-pressed={!actualSize} onClick={() => setActualSize(false)}>Fit width</Button>
             <Button variant="secondary" aria-pressed={actualSize} onClick={() => setActualSize(true)}>Actual size</Button>
@@ -95,6 +97,7 @@ function SourceImage({ image, basePath, isVisible }: {
             <img src={url} alt={alt} width={image.width_px ?? undefined} height={image.height_px ?? undefined}
               className={actualSize ? "is-actual-size" : ""} />
           </div>
+          <FigureReadingDetails reading={image.figure_reading} />
         </Modal>
       </ModalBackdrop>}
     </figure>
@@ -110,9 +113,9 @@ export function DocxSourceMedia({ tables, images, imageBasePath, isVisible }: {
   return <>
     {tables.map((table, index) => (
       <div key={index} className="signal-docx-source-table" role="region" tabIndex={0}
-        aria-label={`Table at source position ${table.paragraph + 1}, scrollable`}>
+        aria-label={`Table at extracted paragraph ${table.paragraph + 1}, scrollable`}>
         <table>
-          <caption>Source table · ¶{table.paragraph + 1}</caption>
+          <caption>Source table · Extracted paragraph {table.paragraph + 1}</caption>
           <tbody>{table.rows.map((row, rowIndex) => <tr key={rowIndex}>
             {row.map((cell, cellIndex) => <td key={cellIndex}>{cell}</td>)}
           </tr>)}</tbody>

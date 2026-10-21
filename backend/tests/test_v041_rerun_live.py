@@ -102,7 +102,7 @@ async def test_ac1_a_reruns_citation_check_hits_the_cache_not_the_network(sessio
     def real_network_handler(request):
         if "crossref.org" in str(request.url):
             return httpx.Response(
-                200, json={"message": {"DOI": "10.1/rerun-x", "title": ["Real Paper"]}}
+                200, json={"message": {"DOI": "10.1/rerun-x", "title": [citation.title]}}
             )
         return httpx.Response(404)
 

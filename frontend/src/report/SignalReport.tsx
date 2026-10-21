@@ -14,6 +14,7 @@ import { SignalShareDialog } from "./SignalShareDialog";
 import { coverageItems } from "./reportCoverage";
 import { useExportReportPdf, useReport } from "./useReport";
 import { useShareLink } from "./useShare";
+import { FigureReadingsSummary } from "./FigureReadings";
 
 // `scrollIntoView` defaults to false: the existing plain `<a href="#...">`
 // jump-nav links below are same-page hash anchors the BROWSER's own
@@ -146,7 +147,9 @@ export function SignalReportPage() {
             </div>
           )}
 
+          {report.historical_semantic_support_unverified && <Alert title="Historical AI grades need fresh evidence review" tone="warning">Some recorded AI suggestions predate criterion-support validation. They are not validated by the current safeguards. Run a new check or assess the manuscript independently. Reopening preserves the original record.</Alert>}
           <SignalEscalatedPanel checkRunId={report.check_run_id} />
+          <FigureReadingsSummary readings={report.figure_readings} checkRunId={report.check_run_id} />
           <SignalFlagsPanel checkRunId={report.check_run_id} unresolvedHighFlagCount={report.unresolved_high_flag_count} originalityScope={report.originality_scope} />
           <SignalCriteriaResults results={report.results.filter((row) => row.outcome !== "escalated")} checkRunId={report.check_run_id} />
           <SignalDecisionPanel report={report} manuscriptLabel={identity?.primary ?? report.manuscript_group_label} />

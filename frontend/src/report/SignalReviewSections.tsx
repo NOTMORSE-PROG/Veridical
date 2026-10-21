@@ -16,6 +16,7 @@ import {
 import { isManuscriptQuote } from "../domain/evidenceDisplay";
 import { useViewedFlagIds } from "../domain/flagViewed";
 import { problemLabel } from "../domain/problemLabel";
+import { instructorAnchor } from "../domain/sourceAnchor";
 import { systemFindingCopy } from "../domain/systemFindingCopy";
 import { rememberRouteReturnFocus } from "../routing/useRouteFocus";
 import { ActionLink } from "../ui/ActionLink";
@@ -212,7 +213,7 @@ function SignalFindingCard({
         {isManuscriptQuote(first)
           ? <blockquote>“{systemFindingCopy(first.evidence_excerpt, first.problem_kind, "evidence")}”</blockquote>
           : <p className="signal-flag-finding-context">{systemFindingCopy(first.evidence_excerpt, first.problem_kind, "evidence")}</p>}
-        <p>{first.page_anchor}</p>
+        <p>{instructorAnchor(first.page_anchor)}</p>
         {first.first_upload_context && <p className="signal-field-hint">First-upload context: the comparison archive was limited when this signal was created.</p>}
         {showActions && (
           <ActionLink
@@ -281,7 +282,7 @@ function SignalFindingCard({
             // gets exactly that string, and two links pointing at the
             // same flag with the IDENTICAL accessible name is real,
             // avoidable ambiguity for anyone navigating by link name.
-            aria-label={`Review evidence at ${first.page_anchor} (one of ${flags.length} locations)`}
+            aria-label={`Review evidence at ${instructorAnchor(first.page_anchor)} (one of ${flags.length} locations)`}
             state={{
               routeReturnFocus: {
                 returnPath: location.pathname + location.search,
@@ -309,7 +310,7 @@ function SignalFindingCard({
                 ? <blockquote>“{systemFindingCopy(flag.evidence_excerpt, flag.problem_kind, "evidence")}”</blockquote>
                 : <p className="signal-flag-finding-context">{systemFindingCopy(flag.evidence_excerpt, flag.problem_kind, "evidence")}</p>}
               <div className="signal-flag-location__meta">
-                <strong>{flag.page_anchor}</strong>
+                <strong>{instructorAnchor(flag.page_anchor)}</strong>
                 {mixedSeverity && <span className={`signal-severity signal-severity--${flag.severity}`}>{SEVERITY_LABEL[flag.severity]}</span>}
                 {!flag.overridden && viewedIds.has(flag.id) && (
                   <span className="signal-viewed-state"><ViewedIcon />Viewed</span>
@@ -322,7 +323,7 @@ function SignalFindingCard({
                   id={`signal-flag-review-${flag.id}`}
                   to={`/flags/${flag.id}`}
                   variant="secondary"
-                  aria-label={`Review evidence at ${flag.page_anchor}, location ${locationIndex + 1} of ${flags.length}`}
+                  aria-label={`Review evidence at ${instructorAnchor(flag.page_anchor)}, location ${locationIndex + 1} of ${flags.length}`}
                   state={{ routeReturnFocus: { returnPath: location.pathname + location.search, elementId: `signal-flag-review-${flag.id}` } }}
                 >
                   Review evidence

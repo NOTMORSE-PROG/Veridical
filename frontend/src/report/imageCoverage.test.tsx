@@ -28,7 +28,7 @@ describe("saved image assessment coverage", () => {
     expect(item.detail).toContain("Statistical statements were extracted");
     expect(item.detail).not.toContain("statistics checked");
     expect(item.sources).toHaveLength(1);
-    expect(item.sources![0].label).toContain("Source position 5");
+    expect(item.sources![0].label).toContain("Extracted paragraph 5");
     expect(item.sources![0].label).toContain("2 image occurrences");
     expect(item.sources![0].to).toBe("/report/12/document?anchor=paragraph%204&coverage=images");
     expect(item.action?.label).toBe("Open the paper");
@@ -56,11 +56,11 @@ describe("saved image assessment coverage", () => {
     expect(screen.getByText(/Some image content remains unassessed/)).toBeVisible();
     const toggle = screen.getByRole("button", { name: "Show image assessment details" });
     expect(toggle).toHaveAttribute("aria-expanded", "false");
-    expect(screen.queryByRole("link", { name: /Source position 5/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: /Extracted paragraph 5/ })).not.toBeInTheDocument();
     fireEvent.click(toggle);
     expect(toggle).toHaveAttribute("aria-expanded", "true");
     expect(document.getElementById(toggle.getAttribute("aria-controls")!)).toBeVisible();
-    expect(screen.getByRole("link", { name: /Source position 5/ })).toBeVisible();
+    expect(screen.getByRole("link", { name: /Extracted paragraph 5/ })).toBeVisible();
     fireEvent.click(toggle);
     expect(toggle).toHaveAttribute("aria-expanded", "false");
     expect(screen.queryByRole("textbox")).not.toBeInTheDocument();

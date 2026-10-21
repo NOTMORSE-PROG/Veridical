@@ -8,7 +8,7 @@ import os
 from decimal import Decimal
 
 import pytest
-from sqlalchemy import text
+from sqlalchemy import select, text
 
 from app.errors import ConflictError, NotFoundError
 from app.models.enums import CheckKind, CheckRunStatus, ResultOutcome
@@ -132,6 +132,24 @@ async def test_get_report_returns_the_full_shape_for_a_done_run(session_factory)
         assert row.outcome == "passed"
         assert row.anchor == "page 2"
         assert row.evidence == []
+
+
+async def test_old_semantic_suggestions_are_disclosed_without_rewriting_history(session_factory):
+    instructor_id, run_id, _ = await _seed_done_run(session_factory)
+    async with session_factory() as session:
+        result = await session.scalar(select(CheckResult).where(CheckResult.check_run_id == run_id))
+        result.kind = CheckKind.semantic
+        result.detail = {**result.detail, "basis": "llm", "prompt_version": "v3"}
+        await session.commit()
+        assert (
+            await get_report(session, run_id, instructor_id)
+        ).historical_semantic_support_unverified
+        assert result.outcome == ResultOutcome.passed
+        result.detail = {**result.detail, "support_check": {"status": "supported"}}
+        await session.commit()
+        assert not (
+            await get_report(session, run_id, instructor_id)
+        ).historical_semantic_support_unverified
 
 
 async def test_image_coverage_prevents_ready_and_uses_only_saved_safe_snapshot(session_factory):

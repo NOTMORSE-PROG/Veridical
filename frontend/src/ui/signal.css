@@ -6772,3 +6772,10 @@
     translate: 0;
   }
 }
+/* Saved source identities wrap inside the existing evidence panel at desktop zoom. */
+.signal-figure-reading-record {
+  min-inline-size: 0;
+  max-inline-size: 100%;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
