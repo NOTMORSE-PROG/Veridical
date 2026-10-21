@@ -123,6 +123,17 @@ LIBRARY_SOURCE_MISSING = (
 
 LIBRARY_UNKNOWN_PROGRAM = "No program named {program}."
 
+# V-078: a stored file is read by a check while it runs, so it is never
+# deleted underneath one. Recoverable: wait, or stop the check.
+STORED_FILE_CHECK_RUNNING = (
+    "A check is still running on this manuscript. Wait for it to finish, "
+    "or stop it from its progress page, then delete the stored file."
+)
+STORED_FILE_PREPARATION_RUNNING = (
+    "This upload's preparation is still running. Wait for it to finish "
+    "before deleting the stored file."
+)
+
 # --- criterion routing (F3.1, V-015) ----------------------------------------
 
 STRUCTURAL_RULE_UNIMPLEMENTED = (

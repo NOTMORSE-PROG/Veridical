@@ -61,6 +61,7 @@ from app.models.manuscript import Manuscript
 from app.models.rubric import Rubric
 from app.models.run import CheckResult, CheckRun, ReadinessReport
 from app.storage import ensure_local_file, get_storage, storage_key_for
+from app.storage.access import read_source
 
 # One extractor per supported suffix. Each is a sync callable executed off
 # the event loop. Legacy .doc is deliberately absent: rejected with a clear
@@ -926,7 +927,9 @@ async def get_group_proposal(
                 extraction_failed=False,
             )
 
-    result = await load_raw_store_async(settings, manuscript_id)
+    result = await read_source(
+        session, manuscript, lambda: load_raw_store_async(settings, manuscript_id)
+    )
     patterns = load_patterns(settings.ingest_patterns_file)
     return extract_title_page(result, patterns)
 

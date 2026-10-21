@@ -6401,7 +6401,7 @@
     display: flex;
     align-items: center;
     border-block-end: var(--signal-border-emphasis) solid transparent;
-    padding-inline: var(--signal-space-3);
+    padding-inline: var(--signal-nav-link-padding-inline);
     color: var(--color-signal-surface-muted);
     font-size: var(--signal-type-label);
     font-weight: var(--signal-weight-medium);
@@ -6778,4 +6778,80 @@
   max-inline-size: 100%;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
+}
+
+@layer components {
+  /* V-078 (BUG-410): stored files page. Rows reuse the Library's metadata
+     grid and state panels; the danger button carries the only destructive
+     action. */
+  /* Links inside running text must read as links; the reset strips the
+     underline. */
+  .signal-stored-files .signal-route-header__intro a,
+  .signal-record__retention a {
+    color: inherit;
+    text-decoration: underline;
+  }
+
+  .signal-stored-files__count {
+    margin: 0;
+    color: var(--color-signal-ink-secondary);
+    font-size: var(--signal-type-meta);
+  }
+
+  .signal-stored-files__list {
+    display: grid;
+    gap: var(--signal-space-4);
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  .signal-stored-file {
+    display: grid;
+    gap: var(--signal-space-4);
+    border: var(--signal-border-hairline) solid var(--color-signal-border);
+    border-inline-start: var(--signal-border-brand) solid var(--color-signal-brand);
+    border-radius: var(--signal-radius-panel);
+    padding: var(--signal-space-5);
+    background: var(--color-signal-surface);
+    box-shadow: var(--signal-shadow-raised);
+  }
+
+  .signal-stored-file__identity h2 {
+    margin: 0;
+    font-family: var(--font-signal-display);
+    font-size: var(--signal-type-section);
+    line-height: var(--signal-line-section);
+    overflow-wrap: anywhere;
+  }
+
+  .signal-stored-file__identity h2:focus-visible {
+    outline: var(--signal-border-emphasis) solid var(--color-signal-focus);
+    outline-offset: var(--signal-border-emphasis);
+  }
+
+  .signal-stored-file__identity p,
+  .signal-stored-file__note {
+    margin: 0;
+    color: var(--color-signal-ink-secondary);
+  }
+
+  .signal-stored-file__identity p {
+    margin-block-start: var(--signal-space-1);
+  }
+
+  .signal-stored-file__note {
+    font-size: var(--signal-type-meta);
+    line-height: var(--signal-line-meta);
+  }
+
+  .signal-stored-file__actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--signal-space-2);
+    border-block-start: var(--signal-border-hairline) solid var(--color-signal-border);
+    padding-block-start: var(--signal-space-4);
+  }
+
+
 }

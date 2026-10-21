@@ -43,7 +43,7 @@ const EVENT_LABELS: Record<string, string> = {
   llm_model_exhausted: "AI model exhausted, failed over",
   report_decided: "Decision recorded",
   report_reopened: "Decision reopened",
-  manuscript_purged: "Archive purged",
+  manuscript_purged: "Stored file deleted",
   check_run_cancel_requested: "Check cancellation requested",
   check_run_cancelled: "Check cancelled",
   citation_source_confirmed: "Citation source confirmed",
@@ -77,7 +77,7 @@ const EVENT_EXPLANATIONS: Record<string, string> = {
   llm_model_exhausted: "The configured AI service choices were unavailable, so the affected work was not treated as assessed.",
   report_decided: "You recorded the final instructor outcome for this readiness review.",
   report_reopened: "You reopened a previously recorded instructor outcome for further review.",
-  manuscript_purged: "You permanently removed archived manuscript content while retaining the minimum audit history.",
+  manuscript_purged: "You deleted the uploaded file and its extracted text, along with any comparison data stored for this manuscript. Reports, decisions and audit history are kept.",
   check_run_cancel_requested: "You requested that an active manuscript check stop at its next safe boundary.",
   check_run_cancelled: "VERIDICAL stopped the manuscript check and preserved its completed work and history.",
   citation_source_confirmed: "You confirmed the source associated with a citation-integrity finding.",
@@ -434,6 +434,7 @@ function AuditDetailModal({ id, onClose }: { id: number; onClose: () => void }) 
                 order. Older records may use different system clocks.
               </p>
               <p>Stored timestamp: <code>{data.created_at}</code></p>
+              <p>Event type: <code>{data.event_type}</code></p>
               {data.agreement_score !== null && (
                 <div className="rounded-md bg-page px-2.5 py-1.5 font-mono text-xs break-all text-ink-tertiary">
                   agreement_score: {data.agreement_score}

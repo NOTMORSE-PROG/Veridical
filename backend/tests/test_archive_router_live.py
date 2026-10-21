@@ -420,3 +420,469 @@ def test_out_of_range_pagination_is_a_clean_422_not_a_bare_500(seeded):
 def test_archive_route_requires_auth(client):
     assert client.get("/archive").status_code == 401
     assert client.delete("/archive/1").status_code == 401
+
+
+def _seed_with(api_scratch_url, fn):
+    """Runs `fn(session)` against the scratch DB on its own engine (same
+    loop-binding reason as `seeded`)."""
+    import asyncio
+
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
+    from tests.test_schema import sqlalchemy_url
+
+    async def run():
+        engine = create_async_engine(sqlalchemy_url(api_scratch_url))
+        try:
+            factory = async_sessionmaker(engine, expire_on_commit=False)
+            async with factory() as session:
+                result = await fn(session)
+                await session.commit()
+                return result
+        finally:
+            await engine.dispose()
+
+    return asyncio.run(run())
+
+
+def test_stored_files_list_says_what_is_kept_and_links_the_latest_check(seeded, api_scratch_url):
+    """V-078: the stored files page needs whether the file is still kept,
+    whether it is a legacy Library record, and the newest check's id."""
+    from sqlalchemy import select
+
+    from app.models.run import CheckRun
+
+    client, ids = seeded
+
+    async def latest_run(session):
+        return await session.scalar(
+            select(CheckRun.id).where(CheckRun.manuscript_id == ids["mine"])
+        )
+
+    run_id = _seed_with(api_scratch_url, latest_run)
+    item = client.get("/archive").json()["items"][0]
+    assert item["has_stored_file"] is True
+    assert item["in_library"] is False
+    assert item["latest_check_run_id"] == run_id
+
+    assert client.delete(f"/archive/{ids['mine']}").status_code == 200
+    item = client.get("/archive").json()["items"][0]
+    assert item["has_stored_file"] is False
+    assert item["latest_check_run_id"] == run_id  # history is kept
+
+
+def test_purge_refuses_while_a_check_is_running(seeded, api_scratch_url):
+    """V-078 edge case: deleting the files a running check reads would fail
+    it for a reason the instructor never sees. Refuse, keep everything."""
+    from pathlib import Path
+
+    from sqlalchemy import update
+
+    from app.models.enums import CheckRunStatus
+    from app.models.run import CheckRun
+
+    client, ids = seeded
+
+    async def mark_running(session):
+        await session.execute(
+            update(CheckRun)
+            .where(CheckRun.manuscript_id == ids["mine"])
+            .values(status=CheckRunStatus.semantic)
+        )
+
+    _seed_with(api_scratch_url, mark_running)
+    resp = client.delete(f"/archive/{ids['mine']}")
+    assert resp.status_code == 409
+    assert "still running" in resp.json()["error"]["message"]
+    assert Path(ids["upload_path"]).exists()
+    assert client.get("/archive").json()["items"][0]["purged_at"] is None
+
+
+def test_purging_a_legacy_library_record_takes_it_out_of_the_library(seeded, api_scratch_url):
+    """V-078 AC5: a check upload carried into the Library before V-077 leaves
+    the Library when its stored file is deleted."""
+    from sqlalchemy import select
+
+    from app.models.enums import LibraryEntrySource, LibraryEntryStatus, LibraryRemovalReason
+    from app.models.library import LibraryEntry
+
+    client, ids = seeded
+
+    async def add_entry(session):
+        session.add(
+            LibraryEntry(
+                manuscript_id=ids["mine"],
+                source=LibraryEntrySource.legacy_check_upload,
+                status=LibraryEntryStatus.active,
+            )
+        )
+
+    _seed_with(api_scratch_url, add_entry)
+    assert client.get("/archive").json()["items"][0]["in_library"] is True
+    assert client.delete(f"/archive/{ids['mine']}").status_code == 200
+
+    async def read_entry(session):
+        return await session.scalar(
+            select(LibraryEntry).where(LibraryEntry.manuscript_id == ids["mine"])
+        )
+
+    entry = _seed_with(api_scratch_url, read_entry)
+    assert entry.status == LibraryEntryStatus.removed
+    assert entry.removal_reason == LibraryRemovalReason.purged
+    assert client.get("/archive").json()["items"][0]["in_library"] is False
+    assert client.get(f"/library/{ids['mine']}").status_code == 404
+
+
+@pytest.mark.parametrize("status", ["pending", "processing"])
+def test_purge_refuses_while_source_preparation_is_running(seeded, api_scratch_url, status):
+    from pathlib import Path
+
+    from app.models.enums import IngestStatus
+    from app.models.manuscript import Manuscript
+
+    client, ids = seeded
+
+    async def mark_preparing(session):
+        manuscript = await session.get(Manuscript, ids["mine"])
+        manuscript.ingest_status = IngestStatus(status)
+
+    _seed_with(api_scratch_url, mark_preparing)
+    response = client.delete(f"/archive/{ids['mine']}")
+    assert response.status_code == 409
+    assert "preparation" in response.json()["error"]["message"].lower()
+    assert Path(ids["upload_path"]).is_file()
+    assert Path(ids["raw_path"]).is_file()
+    assert client.get("/archive").json()["items"][0]["purged_at"] is None
+
+
+def test_stored_files_preserves_prior_report_after_new_cancelled_attempt(seeded, api_scratch_url):
+    from sqlalchemy import select
+
+    from app.models.enums import CheckRunStatus
+    from app.models.run import CheckRun
+
+    client, ids = seeded
+
+    async def add_cancelled_attempt(session):
+        previous = await session.scalar(
+            select(CheckRun).where(CheckRun.manuscript_id == ids["mine"])
+        )
+        cancelled = CheckRun(
+            manuscript_id=previous.manuscript_id,
+            rubric_id=previous.rubric_id,
+            status=CheckRunStatus.cancelled,
+            created_at=previous.created_at,
+        )
+        session.add(cancelled)
+        await session.flush()
+        return previous.id, cancelled.id
+
+    previous_id, cancelled_id = _seed_with(api_scratch_url, add_cancelled_attempt)
+    item = client.get("/archive").json()["items"][0]
+    assert item["latest_check_run_id"] == cancelled_id
+    assert item["latest_check_run_status"] == "cancelled"
+    assert item["latest_done_check_run_id"] == previous_id
+
+
+def test_purge_and_new_check_creation_cannot_delete_an_active_source(
+    seeded, api_scratch_url, monkeypatch
+):
+    import asyncio
+
+    from sqlalchemy import select
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
+    from app.archive import service as archive
+    from app.db import sqlalchemy_url
+    from app.errors import ConflictError
+    from app.models.rubric import Rubric
+    from app.models.run import CheckRun
+    from app.pipeline.service import create_check_run
+
+    _, ids = seeded
+    settings = get_settings()
+
+    async def exercise_race():
+        engine = create_async_engine(sqlalchemy_url(api_scratch_url))
+        sessions = async_sessionmaker(engine, expire_on_commit=False)
+        reached_deletion = asyncio.Event()
+        release_deletion = asyncio.Event()
+        original_delete = archive.delete_archive_rows
+
+        async def pause_before_deletion(session, manuscript_id):
+            reached_deletion.set()
+            await release_deletion.wait()
+            return await original_delete(session, manuscript_id)
+
+        monkeypatch.setattr(archive, "delete_archive_rows", pause_before_deletion)
+        try:
+            async with sessions() as session:
+                previous = await session.scalar(
+                    select(CheckRun).where(CheckRun.manuscript_id == ids["mine"])
+                )
+                rubric = await session.get(Rubric, previous.rubric_id)
+                rubric.is_active = True
+                rubric_id = rubric.id
+                await session.commit()
+
+            async def purge():
+                async with sessions() as session:
+                    return await archive.purge_manuscript(
+                        session, ids["owner_id"], ids["mine"], settings
+                    )
+
+            async def start():
+                async with sessions() as session:
+                    return await create_check_run(
+                        session, ids["owner_id"], ids["mine"], rubric_id, settings
+                    )
+
+            purge_task = asyncio.create_task(purge())
+            await asyncio.wait_for(reached_deletion.wait(), timeout=5)
+            start_task = asyncio.create_task(start())
+            # A broken implementation completes creation during this pause;
+            # correct row-locking waits, then sees the committed purge.
+            await asyncio.wait({start_task}, timeout=0.2)
+            release_deletion.set()
+            purged, started = await asyncio.wait_for(
+                asyncio.gather(purge_task, start_task, return_exceptions=True), timeout=5
+            )
+            assert not isinstance(purged, BaseException)
+            assert isinstance(started, ConflictError), started
+            assert "purged" in str(started).lower()
+        finally:
+            release_deletion.set()
+            await engine.dispose()
+
+    asyncio.run(exercise_race())
+
+
+def test_waiting_shared_library_reader_rechecks_membership_after_removal(
+    seeded, api_scratch_url, monkeypatch
+):
+    import asyncio
+    from pathlib import Path
+
+    from sqlalchemy import select
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
+    from app.db import sqlalchemy_url
+    from app.errors import NotFoundError
+    from app.library import service as library
+    from app.models.enums import LibraryEntrySource, LibraryEntryStatus
+    from app.models.instructor import Instructor
+    from app.models.library import LibraryEntry
+
+    _, ids = seeded
+    settings = get_settings()
+
+    async def add_legacy_entry(session):
+        session.add(
+            LibraryEntry(
+                manuscript_id=ids["mine"],
+                source=LibraryEntrySource.legacy_check_upload,
+                status=LibraryEntryStatus.active,
+            )
+        )
+        return await session.scalar(select(Instructor.id).where(Instructor.id != ids["owner_id"]))
+
+    foreign_id = _seed_with(api_scratch_url, add_legacy_entry)
+
+    async def exercise_race():
+        engine = create_async_engine(sqlalchemy_url(api_scratch_url))
+        sessions = async_sessionmaker(engine, expire_on_commit=False)
+        removal_has_lock = asyncio.Event()
+        release_removal = asyncio.Event()
+        original_delete = library.delete_archive_rows
+
+        async def pause_removal(session, manuscript_id):
+            removal_has_lock.set()
+            await release_removal.wait()
+            return await original_delete(session, manuscript_id)
+
+        monkeypatch.setattr(library, "delete_archive_rows", pause_removal)
+
+        async def remove():
+            async with sessions() as session:
+                return await library.remove_library_entry(
+                    session, ids["owner_id"], ids["mine"], settings
+                )
+
+        async def read():
+            async with sessions() as session:
+                return await library.get_library_file_path(
+                    session, foreign_id, ids["mine"], settings
+                )
+
+        tasks = []
+        try:
+            remover = asyncio.create_task(remove())
+            tasks.append(remover)
+            await asyncio.wait_for(removal_has_lock.wait(), timeout=5)
+            reader = asyncio.create_task(read())
+            tasks.append(reader)
+            await asyncio.wait({reader}, timeout=0.2)
+            release_removal.set()
+            removed, result = await asyncio.wait_for(
+                asyncio.gather(remover, reader, return_exceptions=True), timeout=5
+            )
+            assert not isinstance(removed, BaseException), removed
+            assert isinstance(result, NotFoundError), result
+            assert Path(ids["upload_path"]).is_file(), "legacy removal keeps the owner's source"
+        finally:
+            release_removal.set()
+            if tasks:
+                await asyncio.gather(*tasks, return_exceptions=True)
+            await engine.dispose()
+
+    asyncio.run(exercise_race())
+
+
+def test_purge_is_visible_in_owner_audit_without_exposing_it_to_another_instructor(seeded):
+    client, ids = seeded
+    before_ids = {
+        row["id"]
+        for row in client.get("/audit", params={"event_type": "manuscript_purged"}).json()["items"]
+    }
+    assert client.delete(f"/archive/{ids['mine']}").status_code == 200
+    rows = [
+        row
+        for row in client.get("/audit", params={"event_type": "manuscript_purged"}).json()["items"]
+        if row["id"] not in before_ids
+    ]
+    assert len(rows) == 1
+    assert rows[0]["manuscript_id"] == ids["mine"]
+    assert client.get(f"/audit/{rows[0]['id']}").status_code == 200
+    client.post("/auth/logout")
+    login = client.post("/auth/login", json={"email": "stranger@tip.edu.ph", "password": "other!"})
+    assert login.status_code == 200
+    assert client.get("/audit", params={"event_type": "manuscript_purged"}).json()["items"] == []
+    assert client.get(f"/audit/{rows[0]['id']}").status_code == 404
+
+
+@pytest.mark.parametrize("cancel_count", [0, 1, 2])
+@pytest.mark.parametrize("source_kind", ["pdf", "extraction"])
+def test_inflight_source_hydration_cannot_restore_bytes_after_purge(
+    seeded, api_scratch_url, monkeypatch, cancel_count, source_kind
+):
+    import asyncio
+    import threading
+    from pathlib import Path
+
+    from sqlalchemy import select
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
+    from app.archive import service as archive
+    from app.db import sqlalchemy_url
+    from app.ingest import service as ingestion
+    from app.ingest.schemas import ExtractionResult, SectionTree, TextBlock
+    from app.models.run import CheckRun
+    from app.report import service as report
+    from app.storage import storage_key_for
+
+    _, ids = seeded
+    settings = get_settings()
+    source_module = report if source_kind == "pdf" else ingestion
+    local_source = Path(ids["upload_path"] if source_kind == "pdf" else ids["raw_path"])
+    if source_kind == "extraction":
+        extraction = ExtractionResult(
+            page_count=1,
+            anchor_kind="page",
+            image_only=False,
+            text_chars=15,
+            section_tree=SectionTree(source="none", nodes=[]),
+            blocks=[TextBlock(text="Disposable body", page=1, max_font_size=11, bold_ratio=0)],
+            images=[],
+        )
+        local_source.write_text(extraction.model_dump_json(), encoding="utf-8")
+    original_bytes = local_source.read_bytes()
+    source_key = storage_key_for(settings, str(local_source))
+    local_source.unlink()
+    fetched = threading.Event()
+    release_fetch = threading.Event()
+    refill_finished = threading.Event()
+    original_ensure = source_module.ensure_local_file
+
+    def observed_refill(*args):
+        try:
+            return original_ensure(*args)
+        finally:
+            refill_finished.set()
+
+    class DelayedStorage:
+        def __init__(self):
+            self.objects = {source_key: original_bytes}
+
+        def get_bytes(self, key):
+            if key not in self.objects:
+                raise FileNotFoundError(key)
+            payload = self.objects[key]
+            fetched.set()
+            if not release_fetch.wait(timeout=5):
+                raise TimeoutError("test did not release the controlled source read")
+            return payload
+
+        def delete(self, key):
+            self.objects.pop(key, None)
+
+    storage = DelayedStorage()
+    monkeypatch.setattr(source_module, "get_storage", lambda _: storage)
+    monkeypatch.setattr(source_module, "ensure_local_file", observed_refill)
+    monkeypatch.setattr(archive, "get_storage", lambda _: storage)
+
+    async def exercise_race():
+        engine = create_async_engine(sqlalchemy_url(api_scratch_url))
+        sessions = async_sessionmaker(engine, expire_on_commit=False)
+
+        async def read_source():
+            async with sessions() as session:
+                if source_kind == "extraction":
+                    return await ingestion.get_group_proposal(
+                        session, settings, ids["mine"], ids["owner_id"]
+                    )
+                run_id = await session.scalar(
+                    select(CheckRun.id).where(CheckRun.manuscript_id == ids["mine"])
+                )
+                return await report.get_manuscript_file_path(
+                    session, run_id, ids["owner_id"], settings
+                )
+
+        async def purge():
+            async with sessions() as session:
+                return await archive.purge_manuscript(
+                    session, ids["owner_id"], ids["mine"], settings
+                )
+
+        tasks = []
+        try:
+            reader = asyncio.create_task(read_source())
+            tasks.append(reader)
+            assert await asyncio.to_thread(fetched.wait, 5)
+            if cancel_count:
+                reader.cancel()
+            purger = asyncio.create_task(purge())
+            tasks.append(purger)
+            await asyncio.wait({purger}, timeout=0.2)
+            if cancel_count > 1:
+                reader.cancel()
+            release_fetch.set()
+            read_result, purge_result = await asyncio.wait_for(
+                asyncio.gather(reader, purger, return_exceptions=True), timeout=5
+            )
+            assert await asyncio.to_thread(refill_finished.wait, 5)
+            assert not isinstance(purge_result, BaseException), purge_result
+            if cancel_count:
+                assert isinstance(read_result, asyncio.CancelledError)
+            elif source_kind == "pdf":
+                assert read_result == local_source
+            else:
+                assert not isinstance(read_result, BaseException), read_result
+            assert not local_source.exists(), "source bytes were restored after successful purge"
+            assert storage.objects == {}
+        finally:
+            release_fetch.set()
+            if tasks:
+                await asyncio.gather(*tasks, return_exceptions=True)
+            await engine.dispose()
+
+    asyncio.run(exercise_race())

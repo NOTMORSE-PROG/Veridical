@@ -21,6 +21,16 @@ class ArchiveItemOut(BaseModel):
     # both for "never checked" and "purged"; `purged_at` distinguishes them.
     has_archive: bool
     purged_at: datetime | None
+    # Retention metadata only; a recorded path does not prove physical
+    # availability. Source retrieval checks local/durable storage on demand.
+    has_stored_file: bool
+    # V-078: a legacy Library record built from this upload before V-077
+    # (D-028); deleting the stored file also takes it out of the Library.
+    in_library: bool
+    # V-078: the newest check's id, so the page can link to its report
+    # without repeating any of the report's content.
+    latest_check_run_id: int | None
+    latest_done_check_run_id: int | None
 
 
 class PaginatedArchive(BaseModel):

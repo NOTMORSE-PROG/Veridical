@@ -52,6 +52,21 @@ describe("AuditLogPage", () => {
     expect(screen.getAllByText("Escalation resolved").length).toBe(2);
   });
 
+  it("V-078: names stored-file deletion consistently and explains retained history", async () => {
+    const row = { ...PAGE.items[0], event_type: "manuscript_purged", prompt_type: null };
+    vi.stubGlobal("fetch", stubFetchByPath({
+      "/audit": { ...PAGE, items: [row], total: 1 },
+      "/audit/42": { ...row, input_hash: null, payload: { manuscript_id: 9 } },
+    }));
+    renderWithProviders(<AuditLogPage />, { route: "/audit", path: "/audit" });
+    expect((await screen.findAllByText("Stored file deleted")).length).toBe(2);
+    fireEvent.click(screen.getAllByRole("button", { name: "Detail" })[0]);
+    expect(await screen.findByText(/You deleted the uploaded file and its extracted text/))
+      .toHaveTextContent("Reports, decisions and audit history are kept.");
+    expect(screen.getByText("manuscript_purged", { selector: "code" })).toBeInTheDocument();
+    expect(screen.getByText(/"manuscript_id": 9/)).toBeInTheDocument();
+  });
+
   it("V-081: explains record order without rewriting contrary historical times", async () => {
     vi.stubGlobal("fetch", stubFetchByPath({ "/audit": PAGE, "/audit/42": DETAIL }));
     renderWithProviders(<AuditLogPage />, { route: "/audit" });

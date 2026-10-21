@@ -477,6 +477,17 @@ async def test_real_purge_holds_shared_lock_through_delete_and_commit(
     path.parent.mkdir(parents=True)
     path.write_bytes(b"local copy purge must remove")
     ids = await _seed_manuscripts(session_factory, [{"file_ref": path}])
+    from app.models.enums import IngestStatus
+
+    # A stored legacy source ready for purge, rather than an upload whose
+    # preparation is still pending (now explicitly protected from deletion).
+    async with session_factory() as prepared:
+        await prepared.execute(
+            update(Manuscript)
+            .where(Manuscript.id == ids[0])
+            .values(ingest_status=IngestStatus.done)
+        )
+        await prepared.commit()
     settings = Settings(_env_file=None, data_dir=data_dir)
     storage = FakeStorage({"uploads/purge-race.pdf": b"durable copy purge must remove"})
     purge_before_commit = asyncio.Event()

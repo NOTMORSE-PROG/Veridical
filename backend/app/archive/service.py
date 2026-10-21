@@ -22,7 +22,14 @@ from app.config import Settings
 from app.db import advisory_lock
 from app.errors import ConflictError, NotFoundError
 from app.ingest.service import raw_store_path
-from app.models.enums import LibraryEntryStatus, LibraryRemovalReason, ManuscriptOrigin
+from app.messages import STORED_FILE_CHECK_RUNNING, STORED_FILE_PREPARATION_RUNNING
+from app.models.enums import (
+    CheckRunStatus,
+    IngestStatus,
+    LibraryEntryStatus,
+    LibraryRemovalReason,
+    ManuscriptOrigin,
+)
 from app.models.library import LibraryEntry
 from app.models.manuscript import (
     Manuscript,
@@ -32,6 +39,12 @@ from app.models.manuscript import (
 )
 from app.models.run import CheckRun
 from app.storage import get_storage, storage_key_for
+
+_TERMINAL_RUN_STATUSES = (
+    CheckRunStatus.done,
+    CheckRunStatus.failed,
+    CheckRunStatus.cancelled,
+)
 
 
 async def list_archive(
@@ -52,7 +65,7 @@ async def list_archive(
                 Manuscript.instructor_id == instructor_id,
                 Manuscript.origin == ManuscriptOrigin.check_upload,
             )
-            .order_by(Manuscript.created_at.desc())
+            .order_by(Manuscript.created_at.desc(), Manuscript.id.desc())
             .offset((page - 1) * page_size)
             .limit(page_size)
         )
@@ -60,7 +73,10 @@ async def list_archive(
 
     manuscript_ids = [m.id for m in manuscripts]
     archived_ids: set[int] = set()
+    library_ids: set[int] = set()
     latest_status_by_manuscript: dict[int, str] = {}
+    latest_run_by_manuscript: dict[int, int] = {}
+    latest_done_run_by_manuscript: dict[int, int] = {}
     if manuscript_ids:
         archived_ids = set(
             (
@@ -75,11 +91,24 @@ async def list_archive(
             await session.scalars(
                 select(CheckRun)
                 .where(CheckRun.manuscript_id.in_(manuscript_ids))
-                .order_by(CheckRun.manuscript_id, CheckRun.created_at.desc())
+                .order_by(CheckRun.manuscript_id, CheckRun.created_at.desc(), CheckRun.id.desc())
             )
         ).all()
         for run in runs:
             latest_status_by_manuscript.setdefault(run.manuscript_id, run.status.value)
+            latest_run_by_manuscript.setdefault(run.manuscript_id, run.id)
+            if run.status == CheckRunStatus.done:
+                latest_done_run_by_manuscript.setdefault(run.manuscript_id, run.id)
+        library_ids = set(
+            (
+                await session.scalars(
+                    select(LibraryEntry.manuscript_id).where(
+                        LibraryEntry.manuscript_id.in_(manuscript_ids),
+                        LibraryEntry.status != LibraryEntryStatus.removed,
+                    )
+                )
+            ).all()
+        )
 
     return PaginatedArchive(
         items=[
@@ -93,6 +122,10 @@ async def list_archive(
                 latest_check_run_status=latest_status_by_manuscript.get(m.id),
                 has_archive=m.id in archived_ids,
                 purged_at=m.purged_at,
+                has_stored_file=m.purged_at is None and bool(m.file_ref.strip()),
+                in_library=m.id in library_ids,
+                latest_check_run_id=latest_run_by_manuscript.get(m.id),
+                latest_done_check_run_id=latest_done_run_by_manuscript.get(m.id),
             )
             for m in manuscripts
         ],
@@ -268,9 +301,28 @@ async def purge_manuscript(
     # reads/hashes/updates, so neither side can recreate bytes or persist an
     # identity inside purge's former delete-before-commit race window.
     async with advisory_lock(session, manuscript_id):
-        await session.refresh(manuscript)
+        # Check creation holds this same row lock. Either it commits an
+        # active run first (purge refuses), or it sees our committed purge
+        # and refuses to start; the advisory lock alone cannot ensure that.
+        await session.refresh(manuscript, with_for_update=True)
         if manuscript.purged_at is not None:
             raise ConflictError("This manuscript's archive has already been purged.")
+        if manuscript.ingest_status in (IngestStatus.pending, IngestStatus.processing):
+            raise ConflictError(STORED_FILE_PREPARATION_RUNNING)
+        # V-078: a running check reads these files; deleting them mid-run
+        # would fail it for a reason the instructor never sees. A crashed
+        # run is re-claimed by the worker (BUG-144), and any run can be
+        # stopped (V-071), so this refusal is never permanent.
+        running = await session.scalar(
+            select(CheckRun.id)
+            .where(
+                CheckRun.manuscript_id == manuscript_id,
+                CheckRun.status.not_in(_TERMINAL_RUN_STATUSES),
+            )
+            .limit(1)
+        )
+        if running is not None:
+            raise ConflictError(STORED_FILE_CHECK_RUNNING)
         await delete_archive_rows(session, manuscript_id)
 
         # `file_ref` is already an absolute path (ingest/service.py writes it as
@@ -300,6 +352,7 @@ async def purge_manuscript(
             session,
             event_type="manuscript_purged",
             check_run_id=None,
+            manuscript_id=manuscript_id,
             payload={"manuscript_id": manuscript_id, "group_label": manuscript.group_label},
         )
         await session.commit()

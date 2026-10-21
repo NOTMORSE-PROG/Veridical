@@ -26,6 +26,8 @@ export const LIBRARY_STATUS_POLL_MS = 3000;
 export const LIBRARY_PENDING_PAGE_SIZE = 100;
 // V-077: Library page size; the backend caps it at 200.
 export const LIBRARY_PAGE_SIZE = 50;
+// V-078: the stored-files list uses the archive endpoint paging contract.
+export const STORED_FILES_PAGE_SIZE = 50;
 export const REVIEW_DESK_PAGE_SIZE = 20;
 export const FLAG_LIST_INITIAL_COUNT = 8;
 export const FLAG_LIST_BATCH_COUNT = 8;

@@ -88,6 +88,7 @@ from app.report.scoring import (
 )
 from app.report.weight_importance import WeightImportance, weight_importance
 from app.storage import ensure_local_file, get_storage
+from app.storage.access import read_source
 
 
 async def _load_scorable_results(session: AsyncSession, check_run_id: int) -> list[ScorableResult]:
@@ -633,9 +634,12 @@ async def report_out_for_check_run(
 
     try:
         visual_readings = saved_figure_readings(
-            await load_raw_store_async(settings, manuscript.id), manuscript.content_hash
+            await read_source(
+                session, manuscript, lambda: load_raw_store_async(settings, manuscript.id)
+            ),
+            manuscript.content_hash,
         )
-    except (FileNotFoundError, ValidationError, OSError):
+    except (FileNotFoundError, ValidationError, OSError, GoneError):
         visual_readings = None
     return ReportOut(
         figure_readings=visual_readings,
@@ -819,7 +823,12 @@ async def get_manuscript_viewer(
         .scalars()
         .all()
     )
-    return await manuscript_viewer_for(manuscript, flags, settings)
+    return await read_source(
+        session,
+        manuscript,
+        lambda: manuscript_viewer_for(manuscript, flags, settings),
+        allow_purged=True,
+    )
 
 
 def _open_manuscript_source(
@@ -885,6 +894,8 @@ def _open_manuscript_pdf_or_none(
     fallback as `_open_manuscript_source`, but excluded-match rendering is a
     nice-to-have (the caller falls back to unavailable regions), so a
     failure here is silent rather than reasoned like the viewer's."""
+    if manuscript.purged_at is not None:
+        return None
     try:
         local_path = ensure_local_file(settings, get_storage(settings), manuscript.file_ref)
         return pymupdf.open(local_path)
@@ -1073,8 +1084,10 @@ async def list_reuse_passage_matches(
         # A genuinely gone extraction (purged manuscript, pre-BUG-138 row)
         # leaves nothing to explore, the same empty state as before.
         try:
-            extraction = await load_raw_store_async(settings, manuscript.id)
-        except FileNotFoundError:
+            extraction = await read_source(
+                session, manuscript, lambda: load_raw_store_async(settings, manuscript.id)
+            )
+        except (FileNotFoundError, GoneError):
             extraction = None
         if extraction is not None:
             passages = await asyncio.get_running_loop().run_in_executor(
@@ -1122,8 +1135,12 @@ async def list_reuse_passage_matches(
     if Path(manuscript.file_ref).suffix.lower() == ".pdf" and manuscript.purged_at is None:
         # BUG-138 (backend review finding): off the event loop, same reason
         # as `_open_manuscript_source` above.
-        doc = await asyncio.get_running_loop().run_in_executor(
-            None, _open_manuscript_pdf_or_none, manuscript, settings
+        doc = await read_source(
+            session,
+            manuscript,
+            lambda: asyncio.to_thread(_open_manuscript_pdf_or_none, manuscript, settings),
+            allow_purged=True,
+            on_cancel=lambda opened: opened.close() if opened is not None else None,
         )
 
     try:
@@ -1195,8 +1212,10 @@ async def get_manuscript_file_path(
     manuscript = await session.get(Manuscript, check_run.manuscript_id)
     # BUG-138 (backend review finding): off the event loop -- a cache miss
     # now means a real durable-storage network fetch, not just a local read.
-    return await asyncio.get_running_loop().run_in_executor(
-        None, manuscript_file_path_for, manuscript, settings
+    return await read_source(
+        session,
+        manuscript,
+        lambda: asyncio.to_thread(manuscript_file_path_for, manuscript, settings),
     )
 
 
@@ -1234,8 +1253,10 @@ async def get_manuscript_paragraphs(
     # BUG-138 (backend review finding): off the event loop, same reason as
     # `get_manuscript_file_path` above (`load_raw_store` inside this can now
     # hit durable storage over the network on a cache miss).
-    return await asyncio.get_running_loop().run_in_executor(
-        None, manuscript_paragraphs_for, manuscript, settings
+    return await read_source(
+        session,
+        manuscript,
+        lambda: asyncio.to_thread(manuscript_paragraphs_for, manuscript, settings),
     )
 
 
@@ -1328,8 +1349,10 @@ async def get_manuscript_docx_image(
 ) -> tuple[bytes, str]:
     check_run = await _owned_check_run(session, check_run_id, instructor_id)
     manuscript = await session.get(Manuscript, check_run.manuscript_id)
-    return await asyncio.get_running_loop().run_in_executor(
-        None, manuscript_docx_image_for, manuscript, image_index, settings
+    return await read_source(
+        session,
+        manuscript,
+        lambda: asyncio.to_thread(manuscript_docx_image_for, manuscript, image_index, settings),
     )
 
 
@@ -1403,9 +1426,13 @@ async def get_report_export_data(
     reference_limits = unassessed_references(
         citation_check.detail or {} if citation_check is not None else {}
     )
-    loop = asyncio.get_running_loop()
-    page_images = await loop.run_in_executor(
-        None, render_flag_page_images_for, manuscript, flags, report.llm_mode, settings
+    page_images = await read_source(
+        session,
+        manuscript,
+        lambda: asyncio.to_thread(
+            render_flag_page_images_for, manuscript, flags, report.llm_mode, settings
+        ),
+        allow_purged=True,
     )
 
     return ReportExportData(

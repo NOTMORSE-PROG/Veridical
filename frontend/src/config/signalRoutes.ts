@@ -33,6 +33,12 @@ export const SIGNAL_NAVIGATION: readonly SignalNavigationRoute[] = [
     matches: (path) => path.startsWith("/library"),
   },
   {
+    label: "Stored files",
+    description: "Uploaded manuscript files, and deleting one",
+    to: "/stored-files",
+    matches: (path) => path === "/stored-files",
+  },
+  {
     label: "Audit",
     description: "Trace system and instructor actions",
     to: "/audit",

@@ -895,8 +895,34 @@ export interface QuotaStatus {
   models?: ModelQuotaStatus[];
 }
 
-// V-042: per-item purge of the F7 embedding archive. The `/archive` route
-// still exists server-side; the V-077 Library no longer calls it.
+// V-078: the stored files page reads `GET /archive` -- the requester's own
+// Review Desk uploads, including failed ones removed from the desk. No
+// verdict, score or report content; only a link to the newest check.
+export interface StoredFileOut {
+  manuscript_id: number;
+  group_label: string;
+  original_filename: string | null;
+  created_at: string;
+  ingest_status: string;
+  dismissed_at: string | null;
+  latest_check_run_status: CheckRunStatus | null;
+  latest_check_run_id: number | null;
+  latest_done_check_run_id: number | null;
+  has_archive: boolean;
+  has_stored_file: boolean;
+  in_library: boolean;
+  purged_at: string | null;
+}
+
+export interface PaginatedStoredFiles {
+  items: StoredFileOut[];
+  total: number;
+  page: number;
+  page_size: number;
+}
+
+// V-042: deletes one manuscript's stored file and extracted text
+// (`DELETE /archive/{id}`); V-078's stored files page is its only caller.
 export interface PurgeOut {
   manuscript_id: number;
   purged_at: string;

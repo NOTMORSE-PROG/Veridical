@@ -32,6 +32,7 @@ import { RouteFrame } from "./routing/RouteFrame";
 import { ManageRubricPage } from "./rubric/Manage";
 import { SignalReviewCriteriaPage } from "./rubric/SignalReviewCriteria";
 import { SettingsPage } from "./settings/Settings";
+import { StoredFilesPage } from "./storedFiles/StoredFiles";
 import { SignalShell } from "./shell/SignalShell";
 
 const queryClient = new QueryClient();
@@ -62,6 +63,7 @@ const router = createBrowserRouter(
           <Route path="/library/add" element={<SignalLibraryAddPage />} />
           <Route path="/library/:manuscriptId" element={<SignalLibraryDetailPage />} />
           <Route path="/settings" element={<SettingsPage />} />
+          <Route path="/stored-files" element={<StoredFilesPage />} />
           <Route path="/rubric/:rubricId/review" element={<SignalReviewCriteriaPage />} />
           <Route path="/checks/:checkRunId" element={<CheckProgressPage />} />
           <Route path="/report/:checkRunId" element={<SignalReportPage />} />

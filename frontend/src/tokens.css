@@ -392,6 +392,7 @@
      single-row summary+records+actions panel is far shorter than the
      stacked mobile layout the reserve above sizes for. */
   --signal-library-selection-desktop-reserve: 10rem;
+  --signal-nav-link-padding-inline: clamp(var(--signal-space-2), 0.75vw, var(--signal-space-3));
   --signal-spine-stage-number-size: 2rem;
   --signal-account-panel-width: 17rem;
   --signal-account-initials-size: 2rem;

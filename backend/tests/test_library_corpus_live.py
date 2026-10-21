@@ -273,6 +273,13 @@ async def test_purge_takes_the_manuscript_out_of_the_library(
     await _library_entry(session_factory, manuscript_id)
 
     async with session_factory() as session:
+        from app.models.enums import IngestStatus
+
+        # This control represents an already prepared active source. Pending
+        # uploads are now explicitly protected against deletion while reading.
+        manuscript = await session.get(Manuscript, manuscript_id)
+        manuscript.ingest_status = IngestStatus.done
+        await session.commit()
         await purge_manuscript(session, owner, manuscript_id, get_settings())
         row = (
             await session.execute(

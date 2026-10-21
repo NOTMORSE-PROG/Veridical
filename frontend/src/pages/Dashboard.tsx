@@ -296,7 +296,10 @@ function WorkQueueRecord({
           </div>
         </details>
         {row.ingest_status === "failed" && (
-          <p className="signal-record__retention">VERIDICAL keeps the failed record in the audit history.</p>
+          <p className="signal-record__retention">
+            VERIDICAL keeps the failed record. Review its retention status in{" "}
+            <Link to="/stored-files">Stored files</Link>.
+          </p>
         )}
         {dismiss.isError && (
           <Alert tone="error" role="alert" title="Could not move this record">

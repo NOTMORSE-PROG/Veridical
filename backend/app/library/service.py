@@ -105,6 +105,7 @@ from app.report.service import (
     manuscript_viewer_for,
 )
 from app.storage import ensure_local_file, get_storage, storage_key_for
+from app.storage.access import lock_source, read_source
 
 # Lengths come from the columns themselves, so a schema change cannot leave
 # a silent truncation mismatch behind.
@@ -539,10 +540,16 @@ async def _discard_late_work(
     session: AsyncSession, entry: LibraryEntry, manuscript: Manuscript, settings: Settings
 ) -> None:
     """The entry left the Library (removed, skipped, purged) while this
-    request was still reading or embedding it. Write nothing, and delete
-    whatever the late work re-created: ingestion may have rewritten the
+    request was still reading or embedding it. Delete only after a real
+    removal: a competing activation can legitimately change the expected
+    state, and its source and comparison data belong to the winning action.
+    Ingestion may have rewritten the
     extraction (locally and durably) after the removal deleted it. Caller
     holds the manuscript's advisory lock."""
+    await session.refresh(entry)
+    await session.refresh(manuscript, with_for_update=True)
+    if entry.status != LibraryEntryStatus.removed:
+        return
     await delete_archive_rows(session, manuscript.id)
     if entry.source == LibraryEntrySource.library_submission:
         await asyncio.get_running_loop().run_in_executor(
@@ -843,7 +850,7 @@ async def _remove(
     only the comparison data leaves."""
     async with advisory_lock(session, manuscript.id):
         await session.refresh(entry)
-        await session.refresh(manuscript)
+        await session.refresh(manuscript, with_for_update=True)
         if entry.status == LibraryEntryStatus.removed:
             raise NotFoundError(f"No Library record with id {manuscript.id}.")
         # A live upload is still being read on another request; removing it
@@ -914,9 +921,14 @@ async def decide_library_entry(
             session, entry, manuscript, settings, reason=LibraryRemovalReason.duplicate_skipped
         )
     try:
-        result = await load_raw_store_async(settings, manuscript.id)
+        result = await read_source(
+            session, manuscript, lambda: load_raw_store_async(settings, manuscript.id)
+        )
     except FileNotFoundError as exc:
         raise ConflictError(messages.LIBRARY_SOURCE_MISSING) from exc
+    # Activation acquires advisory before UPDATE and revalidates expected state.
+    # Release this read-only SHARE transaction before that mutation boundary.
+    await session.commit()
     document, passages = await _embed(result, settings)
     if document.whole_document is None:
         raise ConflictError(messages.LIBRARY_SOURCE_MISSING)
@@ -986,6 +998,16 @@ async def _resolve_readable_library_manuscript(
     )
     if manuscript is None:
         raise NotFoundError(f"No Library record with id {manuscript_id}.")
+    await lock_source(session, manuscript)
+    # A removal can finish while the SHARE lock waits. Recheck current
+    # membership in a fresh statement, including legacy entries whose bytes stay.
+    visible = await session.scalar(
+        select(LibraryEntry.id)
+        .join(Manuscript, Manuscript.id == LibraryEntry.manuscript_id)
+        .where(LibraryEntry.manuscript_id == manuscript_id, _visible_to(instructor_id))
+    )
+    if visible is None:
+        raise NotFoundError(f"No Library record with id {manuscript_id}.")
     return manuscript
 
 
@@ -993,7 +1015,12 @@ async def get_library_document(
     session: AsyncSession, instructor_id: int, manuscript_id: int, settings: Settings
 ) -> ManuscriptViewerOut:
     manuscript = await _resolve_readable_library_manuscript(session, instructor_id, manuscript_id)
-    viewer = await manuscript_viewer_for(manuscript, [], settings)
+    viewer = await read_source(
+        session,
+        manuscript,
+        lambda: manuscript_viewer_for(manuscript, [], settings),
+        allow_purged=True,
+    )
     # Shared document prose may identify its authors; structured filenames stay
     # redacted just like the collection's metadata (V-079 sharing boundary).
     if manuscript.instructor_id != instructor_id:
@@ -1005,8 +1032,10 @@ async def get_library_file_path(
     session: AsyncSession, instructor_id: int, manuscript_id: int, settings: Settings
 ) -> Path:
     manuscript = await _resolve_readable_library_manuscript(session, instructor_id, manuscript_id)
-    return await asyncio.get_running_loop().run_in_executor(
-        None, manuscript_file_path_for, manuscript, settings
+    return await read_source(
+        session,
+        manuscript,
+        lambda: asyncio.to_thread(manuscript_file_path_for, manuscript, settings),
     )
 
 
@@ -1014,8 +1043,10 @@ async def get_library_paragraphs(
     session: AsyncSession, instructor_id: int, manuscript_id: int, settings: Settings
 ) -> DocumentParagraphsOut:
     manuscript = await _resolve_readable_library_manuscript(session, instructor_id, manuscript_id)
-    return await asyncio.get_running_loop().run_in_executor(
-        None, manuscript_paragraphs_for, manuscript, settings
+    return await read_source(
+        session,
+        manuscript,
+        lambda: asyncio.to_thread(manuscript_paragraphs_for, manuscript, settings),
     )
 
 
@@ -1036,7 +1067,7 @@ async def get_library_original_file_path(
         return ensure_local_file(settings, get_storage(settings), manuscript.file_ref)
 
     try:
-        return await asyncio.get_running_loop().run_in_executor(None, resolve_original)
+        return await read_source(session, manuscript, lambda: asyncio.to_thread(resolve_original))
     except FileNotFoundError:
         raise GoneError(messages.MANUSCRIPT_SOURCE_MISSING) from None
 
@@ -1049,8 +1080,10 @@ async def get_library_docx_image(
     settings: Settings,
 ) -> tuple[bytes, str]:
     manuscript = await _resolve_readable_library_manuscript(session, instructor_id, manuscript_id)
-    return await asyncio.get_running_loop().run_in_executor(
-        None, manuscript_docx_image_for, manuscript, image_index, settings
+    return await read_source(
+        session,
+        manuscript,
+        lambda: asyncio.to_thread(manuscript_docx_image_for, manuscript, image_index, settings),
     )
 
 
