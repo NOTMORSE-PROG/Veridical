@@ -51,6 +51,9 @@ class Manuscript(Base, PkCreatedMixin):
     group_id: Mapped[int | None] = mapped_column(
         BigInteger, ForeignKey("manuscript_group.id"), index=True
     )
+    # V-081: explicit confirmation provenance and replay identity. NULL is
+    # unknown historical provenance, never inferred from members or labels.
+    group_confirmation: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
     ingest_status: Mapped[IngestStatus] = mapped_column(
         Enum(IngestStatus, native_enum=False), server_default=IngestStatus.pending
     )

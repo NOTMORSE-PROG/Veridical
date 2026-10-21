@@ -41,6 +41,9 @@ class Group(Base, PkCreatedMixin):
     instructor_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("instructor.id"), index=True)
     name: Mapped[str] = mapped_column(String(200))
     name_normalized: Mapped[str] = mapped_column(String(200))
+    # V-081: original proposed identity survives a generated display suffix.
+    # Legacy NULL values are deliberately not guessed from the saved name.
+    proposal_name_normalized: Mapped[str | None] = mapped_column(String(200), index=True)
     # NULL = "not set", never guessed (same convention as
     # `ingest_failure_reason`) — the backfill (migration 0025) always
     # leaves this NULL; V-063's title-page inference is the only path

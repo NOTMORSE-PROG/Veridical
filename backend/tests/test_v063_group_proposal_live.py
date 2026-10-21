@@ -164,18 +164,17 @@ def test_reopening_set_group_after_confirming_shows_the_current_group_not_the_st
         },
     )
 
-    reopened = client.get(f"/manuscripts/{manuscript_id}/group-proposal")
+    reopened = client.get(f"/manuscripts/{manuscript_id}/group")
     assert reopened.status_code == 200, reopened.text
-    proposal = reopened.json()
-
-    assert proposal["short_name"]["value"] == "VERIDICAL CORRECTED"
-    assert proposal["short_name"]["anchor"] == "current group"
-    member_values = {m["value"] for m in proposal["members"]}
-    assert member_values == {"Condino, Mark Andrei A", "A Member The Extraction Missed"}
-    assert all(m["anchor"] == "current group" for m in proposal["members"])
-    # The corrected state is shown -- the ORIGINAL extraction's own
-    # (uncorrected) second member must NOT reappear.
-    assert "Concepcion, Marc Laurence M." not in member_values
+    saved = reopened.json()
+    assert saved["confirmation"] == "recorded"
+    assert saved["group"]["name"] == "VERIDICAL CORRECTED"
+    assert set(saved["group"]["member_names"]) == {
+        "Condino, Mark Andrei A",
+        "A Member The Extraction Missed",
+    }
+    source = client.get(f"/manuscripts/{manuscript_id}/group-proposal")
+    assert source.json() == upload.json()["group_proposal"]
 
 
 @live
@@ -468,3 +467,139 @@ def test_image_only_first_page_returns_the_honest_extraction_failed_state(client
     proposal = r.json()["group_proposal"]
     assert proposal["extraction_failed"] is True
     assert proposal["short_name"] is None
+
+
+@live
+def test_memberless_confirmation_replay_effective_noop_and_stale_conflict(client, tmp_path):
+    path = _title_page_pdf(tmp_path, title="Replay Control")
+
+    def upload():
+        response = client.post(
+            "/manuscripts/ingest",
+            files={"file": ("replay.pdf", path.read_bytes(), "application/pdf")},
+        )
+        assert response.status_code == 200, response.text
+        return response.json()["manuscript_id"]
+
+    manuscript_id = upload()
+    current = client.get(f"/manuscripts/{manuscript_id}/group").json()
+    assert current["confirmation"] == "not_recorded"
+    initial_id = current["group"]["id"]
+    body = {
+        "group_name": "Memberless replay",
+        "member_names": [],
+        "program_id": None,
+        "title": "Original subtitle",
+        "expected_group_id": initial_id,
+    }
+    first = client.patch(f"/manuscripts/{manuscript_id}/group", json=body)
+    assert first.status_code == 200, first.text
+    assert first.json()["outcome"] == "created"
+    group_id = first.json()["group_id"]
+    count = len(client.get("/groups").json())
+    for _ in range(3):
+        replay = client.patch(f"/manuscripts/{manuscript_id}/group", json=body)
+        assert replay.status_code == 200, replay.text
+        assert replay.json()["group_id"] == group_id
+        assert replay.json()["outcome"] == "unchanged"
+    saved = client.get(f"/manuscripts/{manuscript_id}/group").json()
+    assert saved["group"]["member_names"] == []
+    assert saved["group"]["title"] == "Original subtitle"
+    assert saved["confirmation"] == "recorded"
+    effective = {**body, "expected_group_id": group_id}
+    assert (
+        client.patch(f"/manuscripts/{manuscript_id}/group", json=effective).json()["outcome"]
+        == "unchanged"
+    )
+    stale = client.patch(
+        f"/manuscripts/{manuscript_id}/group", json={**body, "group_name": "Different"}
+    )
+    assert stale.status_code == 409
+    assert len(client.get("/groups").json()) == count
+    # Another manuscript with no members is not evidence of the same team.
+    other_id = upload()
+    distinct = client.patch(
+        f"/manuscripts/{other_id}/group",
+        json={k: v for k, v in body.items() if k != "expected_group_id"},
+    )
+    assert distinct.status_code == 200, distinct.text
+    assert distinct.json()["group_id"] != group_id
+    assert distinct.json()["group_label"] == "Memberless replay (2)"
+    suffix_id = distinct.json()["group_id"]
+    suffix_body = {
+        **body,
+        "group_name": distinct.json()["group_label"],
+        "expected_group_id": suffix_id,
+    }
+    unchanged = client.patch(f"/manuscripts/{other_id}/group", json=suffix_body)
+    assert unchanged.json()["outcome"] == "unchanged"
+    assert unchanged.json()["group_id"] == suffix_id
+    original_again = client.patch(
+        f"/manuscripts/{other_id}/group", json={**body, "expected_group_id": suffix_id}
+    )
+    assert original_again.json()["outcome"] == "unchanged"
+    assert original_again.json()["group_id"] == suffix_id
+
+
+@live
+def test_distinct_teams_and_later_suffixed_team_upload_preserve_identity(client, tmp_path):
+    path = _title_page_pdf(tmp_path, title="Suffix identity control")
+
+    def assign(members):
+        upload = client.post(
+            "/manuscripts/ingest",
+            files={"file": ("suffix.pdf", path.read_bytes(), "application/pdf")},
+        )
+        assert upload.status_code == 200
+        return client.patch(
+            f"/manuscripts/{upload.json()['manuscript_id']}/group",
+            json={"group_name": "Suffix identity", "member_names": members},
+        )
+
+    alice, bob, charlie = assign(["Alice"]), assign(["Bob"]), assign(["Charlie"])
+    assert all(r.status_code == 200 for r in (alice, bob, charlie))
+    assert [r.json()["group_label"] for r in (alice, bob, charlie)] == [
+        "Suffix identity",
+        "Suffix identity (2)",
+        "Suffix identity (3)",
+    ]
+    again = assign(["Bob", "Bob colleague"])
+    assert again.status_code == 200, again.text
+    assert again.json()["outcome"] == "matched"
+    assert again.json()["group_id"] == bob.json()["group_id"]
+    collision = client.get(
+        "/groups/collision-check", params={"short_name": "Suffix identity", "member_names": "Bob"}
+    )
+    assert collision.json()["collision"] is False
+
+
+@live
+def test_current_group_survives_source_purge_and_invalid_fields_are_rejected(client, tmp_path):
+    path = _title_page_pdf(tmp_path, title="Retained assignment")
+    upload = client.post(
+        "/manuscripts/ingest",
+        files={"file": ("retained.pdf", path.read_bytes(), "application/pdf")},
+    )
+    manuscript_id = upload.json()["manuscript_id"]
+    body = {"group_name": "Retained assignment", "member_names": []}
+    assert client.patch(f"/manuscripts/{manuscript_id}/group", json=body).status_code == 200
+    for bad in (
+        {"group_name": " "},
+        {"group_name": "x" * 201},
+        {"member_names": ["x" * 201]},
+        {"title": "x" * 501},
+        {"program_id": 0},
+        {"program_id": -1},
+        {"program_id": True},
+        {"program_id": "1"},
+        {"expected_group_id": 0},
+        {"expected_group_id": True},
+    ):
+        rejected = client.patch(f"/manuscripts/{manuscript_id}/group", json={**body, **bad})
+        assert rejected.status_code == 422, rejected.text
+    assert client.delete(f"/archive/{manuscript_id}").status_code == 200
+    assert (
+        client.get(f"/manuscripts/{manuscript_id}/group").json()["group"]["name"]
+        == "Retained assignment"
+    )
+    assert client.get(f"/manuscripts/{manuscript_id}/group-proposal").status_code == 410

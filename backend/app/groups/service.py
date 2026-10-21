@@ -6,23 +6,14 @@ Business logic only (CODING.md §2) — HTTP shaping lives in `router.py`.
 
 import re
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from app.config import get_settings
 from app.db import sqlalchemy_url
+from app.errors import ConflictError, FileMalformedError
 from app.models.group import Group, GroupMember, Program
-
-# Same retry-on-IntegrityError pattern already established in
-# `app/share/service.py::create_share_link` for the identical class of
-# race (a select-then-insert against a unique constraint, two concurrent
-# requests both seeing "not found"). backend review (V-062 review)
-# reproduced this live against the real DB: two concurrent calls for a
-# brand-new group name, one committed, the other raised `IntegrityError`
-# unguarded -- realistic at defense-season upload volume (D-014), not a
-# hypothetical.
-_MAX_CREATE_ATTEMPTS = 3
 
 # The one literal every `group_label`-default reader compares against
 # (frontend's `UNGROUPED_LABEL`, `manuscriptIdentity()`) — centralized here
@@ -129,23 +120,27 @@ async def list_groups(session: AsyncSession, instructor_id: int) -> list[tuple[G
     return list(rows)
 
 
+def validate_group_fields(name: str, members: list[str], title: str | None = None) -> None:
+    """Reject values that cannot fit the schema, including normalized Unicode."""
+    if (
+        len(name) > Group.name.type.length
+        or len(normalize_group_name(name)) > Group.name_normalized.type.length
+    ):
+        raise FileMalformedError("The group name is too long. Enter a shorter name.")
+    if any(len(n) > GroupMember.name.type.length for n in members):
+        raise FileMalformedError("A member name is too long. Enter a shorter name.")
+    if title is not None and len(title) > Group.title.type.length:
+        raise FileMalformedError("The group title is too long. Enter a shorter title.")
+
+
 async def resolve_or_create_group(
     session: AsyncSession, instructor_id: int, raw_name: str
 ) -> Group:
-    """Find-or-create, scoped to the instructor (two instructors can both
-    have a "Group 4" without colliding). The FIRST spelling submitted for
-    a given normalized name wins as the group's display `name` -- later
-    submissions using a different casing still resolve to the same row,
-    they just don't rename it.
-
-    Retries on `IntegrityError` (see `_MAX_CREATE_ATTEMPTS`'s comment):
-    two concurrent uploads for the same brand-new group name can both see
-    "not found" before either commits; the loser re-queries and finds the
-    winner's row instead of surfacing an unhandled 500."""
+    """Resolve a free-text upload label without rolling back the caller."""
     display_name = raw_name.strip() or DEFAULT_GROUP_LABEL
+    validate_group_fields(display_name, [])
     normalized = normalize_group_name(display_name)
-
-    for attempt in range(_MAX_CREATE_ATTEMPTS):
+    for _ in range(get_settings().group_create_max_attempts):
         existing = await session.scalar(
             select(Group).where(
                 Group.instructor_id == instructor_id, Group.name_normalized == normalized
@@ -153,22 +148,51 @@ async def resolve_or_create_group(
         )
         if existing is not None:
             return existing
-
-        group = Group(instructor_id=instructor_id, name=display_name, name_normalized=normalized)
-        session.add(group)
         try:
-            await session.flush()  # need group.id before the manuscript row can point at it
+            async with session.begin_nested():
+                group = Group(
+                    instructor_id=instructor_id, name=display_name, name_normalized=normalized
+                )
+                session.add(group)
+                await session.flush()
+            return group
         except IntegrityError:
-            await session.rollback()
-            if attempt == _MAX_CREATE_ATTEMPTS - 1:
-                raise
             continue
-        return group
-    raise AssertionError("unreachable")  # loop always returns or raises
+    raise ConflictError("The group changed while saving. Try again.")
+
+
+async def _proposal_candidates(
+    session: AsyncSession, instructor_id: int, normalized: str, *, lock: bool = False
+) -> list[Group]:
+    query = (
+        select(Group)
+        .where(
+            Group.instructor_id == instructor_id,
+            or_(Group.name_normalized == normalized, Group.proposal_name_normalized == normalized),
+        )
+        .order_by(Group.id)
+        .execution_options(populate_existing=True)
+    )
+    if lock:
+        query = query.with_for_update()
+    return list((await session.scalars(query)).all())
+
+
+async def _member_names(session: AsyncSession, group_id: int) -> set[str]:
+    return {
+        normalize_group_name(n)
+        for n in (
+            await session.scalars(select(GroupMember.name).where(GroupMember.group_id == group_id))
+        ).all()
+    }
 
 
 async def find_rule3_collision(
-    session: AsyncSession, instructor_id: int, short_name: str, member_names: list[str]
+    session: AsyncSession,
+    instructor_id: int,
+    short_name: str,
+    member_names: list[str],
+    exclude_group_id: int | None = None,
 ) -> Group | None:
     """V-063 (owner's call, 2026-08-19): a READ-ONLY pre-check for the
     confirm form, run BEFORE the instructor clicks Confirm -- rule 3 of
@@ -192,23 +216,15 @@ async def find_rule3_collision(
     if not normalized_incoming:
         return None
 
-    candidates = (
-        await session.scalars(
-            select(Group).where(
-                Group.instructor_id == instructor_id, Group.name_normalized == base_normalized
-            )
-        )
-    ).all()
+    candidates = [
+        g
+        for g in await _proposal_candidates(session, instructor_id, base_normalized)
+        if g.id != exclude_group_id
+    ]
     for candidate in candidates:
-        existing_names = (
-            await session.scalars(
-                select(GroupMember.name).where(GroupMember.group_id == candidate.id)
-            )
-        ).all()
-        existing_normalized = {normalize_group_name(n) for n in existing_names}
-        if not (normalized_incoming & existing_normalized):
-            return candidate
-    return None
+        if normalized_incoming & await _member_names(session, candidate.id):
+            return None
+    return candidates[0] if candidates else None
 
 
 async def match_or_create_group_from_proposal(
@@ -245,45 +261,64 @@ async def match_or_create_group_from_proposal(
     base_normalized = normalize_group_name(display_name)
     normalized_incoming = {normalize_group_name(m) for m in member_names if m.strip()}
 
-    for attempt in range(_MAX_CREATE_ATTEMPTS):
-        candidates = (
-            await session.scalars(
-                select(Group).where(
-                    Group.instructor_id == instructor_id, Group.name_normalized == base_normalized
-                )
-            )
-        ).all()
+    validate_group_fields(display_name, member_names)
+    for _ in range(get_settings().group_create_max_attempts):
+        candidates = await _proposal_candidates(session, instructor_id, base_normalized, lock=True)
+        matches = []
         for candidate in candidates:
-            existing_names = (
+            if normalized_incoming & await _member_names(session, candidate.id):
+                matches.append(candidate)
+        if len(matches) > 1:
+            raise ConflictError(
+                "More than one saved group matches these names. "
+                "Use the exact saved group name to distinguish the assignment."
+            )
+        if matches:
+            group = matches[0]
+            existing = await _member_names(session, group.id)
+            for member in member_names:
+                stripped = member.strip()
+                normalized = normalize_group_name(stripped)
+                if stripped and normalized not in existing:
+                    session.add(GroupMember(group_id=group.id, name=stripped))
+                    existing.add(normalized)
+            await session.flush()
+            return group, True
+
+        used = set(
+            (
                 await session.scalars(
-                    select(GroupMember.name).where(GroupMember.group_id == candidate.id)
+                    select(Group.name_normalized).where(Group.instructor_id == instructor_id)
                 )
             ).all()
-            existing_normalized = {normalize_group_name(n) for n in existing_names}
-            if normalized_incoming & existing_normalized:
-                for member_name in member_names:
-                    stripped = member_name.strip()
-                    if stripped and normalize_group_name(stripped) not in existing_normalized:
-                        session.add(GroupMember(group_id=candidate.id, name=stripped))
-                await session.flush()
-                return candidate, True
-
-        suffix = len(candidates) + 1
-        name = display_name if suffix == 1 else f"{display_name} ({suffix})"
-        normalized = base_normalized if suffix == 1 else f"{base_normalized} ({suffix})"
-        group = Group(instructor_id=instructor_id, name=name, name_normalized=normalized)
-        session.add(group)
+        )
+        # Among N occupied names, at least one of N+1 candidates is free.
+        for suffix in range(1, len(used) + 2):
+            name = display_name if suffix == 1 else f"{display_name} ({suffix})"
+            normalized = normalize_group_name(name)
+            if normalized not in used:
+                break
+        validate_group_fields(name, member_names)
         try:
-            await session.flush()
+            # All potentially conflicting writes belong inside the SAVEPOINT.
+            async with session.begin_nested():
+                group = Group(
+                    instructor_id=instructor_id,
+                    name=name,
+                    name_normalized=normalized,
+                    proposal_name_normalized=base_normalized,
+                )
+                session.add(group)
+                await session.flush()
+                seen = set()
+                for member in member_names:
+                    stripped = member.strip()
+                    normalized_member = normalize_group_name(stripped)
+                    if stripped and normalized_member not in seen:
+                        session.add(GroupMember(group_id=group.id, name=stripped))
+                        seen.add(normalized_member)
+                await session.flush()
+            return group, False
         except IntegrityError:
-            await session.rollback()
-            if attempt == _MAX_CREATE_ATTEMPTS - 1:
-                raise
             continue
-        for member_name in member_names:
-            stripped = member_name.strip()
-            if stripped:
-                session.add(GroupMember(group_id=group.id, name=stripped))
-        await session.flush()
-        return group, False
-    raise AssertionError("unreachable")
+    raise ConflictError("The group changed while saving. Try again.")

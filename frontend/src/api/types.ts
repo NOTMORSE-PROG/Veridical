@@ -173,6 +173,22 @@ export interface ConfirmGroupResponse {
   // true = an existing group was matched (a real resubmission); false =
   // a brand-new group was created.
   matched: boolean;
+  outcome: "created" | "matched" | "unchanged";
+}
+
+export interface CurrentGroup {
+  id: number;
+  name: string;
+  member_names: string[];
+  program_id: number | null;
+  program: string | null;
+  title: string | null;
+}
+
+export interface ManuscriptGroup {
+  manuscript_id: number;
+  group: CurrentGroup | null;
+  confirmation: "recorded" | "not_recorded";
 }
 
 // V-063 (owner's call, 2026-08-19): rule 3 of the matching rule (ticket's

@@ -875,6 +875,7 @@ class Settings(BaseSettings):
     # to lock in, or a stray env var makes different environments diverge
     # silently) -- this setting is for ongoing, post-migration additions.
     default_programs: str = "CS,IT"
+    group_create_max_attempts: int = Field(default=3, ge=1)
 
     @property
     def default_programs_list(self) -> list[str]:

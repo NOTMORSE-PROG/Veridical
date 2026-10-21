@@ -65,14 +65,15 @@ export function usePrograms() {
 // expected to debounce `shortName`/`memberNames` itself (same manual
 // setTimeout pattern `RerunModal.tsx` already uses) -- this hook just
 // gates on there being something real to check.
-export function useGroupCollisionCheck(shortName: string, memberNames: string[]) {
+export function useGroupCollisionCheck(shortName: string, memberNames: string[], excludeGroupId?: number) {
   const trimmed = shortName.trim();
   const realMembers = memberNames.map((m) => m.trim()).filter((m) => m.length > 0);
   return useQuery({
-    queryKey: ["group-collision", trimmed, [...realMembers].sort()],
+    queryKey: ["group-collision", trimmed, [...realMembers].sort(), excludeGroupId],
     queryFn: () => {
       const params = new URLSearchParams({ short_name: trimmed });
       for (const name of realMembers) params.append("member_names", name);
+      if (excludeGroupId !== undefined) params.set("exclude_group_id", String(excludeGroupId));
       return api.get<GroupCollisionOut>(`/groups/collision-check?${params.toString()}`);
     },
     enabled: trimmed.length > 0 && realMembers.length > 0,

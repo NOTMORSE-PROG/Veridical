@@ -50,8 +50,11 @@ async def check_group_collision_route(
     instructor: Annotated[Instructor, Depends(get_current_instructor)],
     short_name: Annotated[str, Query()],
     member_names: Annotated[list[str] | None, Query()] = None,
+    exclude_group_id: Annotated[int | None, Query(gt=0)] = None,
 ) -> GroupCollisionOut:
-    collision = await find_rule3_collision(session, instructor.id, short_name, member_names or [])
+    collision = await find_rule3_collision(
+        session, instructor.id, short_name, member_names or [], exclude_group_id
+    )
     if collision is None:
         return GroupCollisionOut(collision=False)
     return GroupCollisionOut(collision=True, existing_group_name=collision.name)

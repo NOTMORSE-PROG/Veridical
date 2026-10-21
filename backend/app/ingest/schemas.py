@@ -313,13 +313,30 @@ class ConfirmGroupRequest(BaseModel):
 
     group_name: str = Field(min_length=1)
     member_names: list[str] = Field(default_factory=list)
-    program_id: int | None = None
+    program_id: int | None = Field(default=None, gt=0, strict=True)
     # V-066: the full capstone title shown (read-only, not editable) in the
     # confirm dialog alongside group_name/members -- carried through here
     # exactly like program_id so it can be persisted, same "only set on a
     # NEWLY created group" rule as program_id (see
     # `app.ingest.service.confirm_manuscript_group`).
     title: str | None = None
+    # Omission supports older clients; explicit NULL expects no current FK.
+    expected_group_id: int | None = Field(default=None, gt=0, strict=True)
+
+
+class CurrentGroupOut(BaseModel):
+    id: int
+    name: str
+    member_names: list[str]
+    program_id: int | None
+    program: str | None
+    title: str | None
+
+
+class ManuscriptGroupOut(BaseModel):
+    manuscript_id: int
+    group: CurrentGroupOut | None
+    confirmation: Literal["recorded", "not_recorded"]
 
 
 class ConfirmGroupResponse(BaseModel):
@@ -330,6 +347,7 @@ class ConfirmGroupResponse(BaseModel):
     # True = an existing group was matched (AC4); False = a new one was
     # created — lets the confirm dialog say which happened, honestly.
     matched: bool
+    outcome: Literal["created", "matched", "unchanged"]
 
 
 class ManuscriptListItem(BaseModel):

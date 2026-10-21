@@ -371,8 +371,8 @@ describe("UploadManuscriptModal", () => {
     expect(screen.getByDisplayValue("Juan Dela Cruz")).toBeInTheDocument();
     const footer = document.querySelector(".signal-task-sheet__footer") as HTMLElement;
     const body = document.querySelector(".signal-task-sheet__body") as HTMLElement;
-    expect(within(footer).getByRole("button", { name: "Confirm group" })).toBeInTheDocument();
-    expect(within(body).queryByRole("button", { name: "Confirm group" })).not.toBeInTheDocument();
+    expect(within(footer).getByRole("button", { name: "Confirm assignment" })).toBeInTheDocument();
+    expect(within(body).queryByRole("button", { name: "Confirm assignment" })).not.toBeInTheDocument();
     expect(
       screen.queryByRole("button", { name: "Start a check with this manuscript" }),
     ).not.toBeInTheDocument();
@@ -413,7 +413,7 @@ describe("UploadManuscriptModal", () => {
     expect(screen.getByLabelText("Group name")).toHaveValue("");
   });
 
-  it("V-063: 'Confirm group' PATCHes the proposal and shows a resolved banner naming the created group", async () => {
+  it("V-063: 'Confirm assignment' PATCHes the proposal and shows a resolved banner naming the created group", async () => {
     const proposalSummary = {
       ...SUMMARY,
       group_proposal: {
@@ -442,7 +442,7 @@ describe("UploadManuscriptModal", () => {
     fireEvent.click(screen.getByRole("button", { name: "Upload manuscript" }));
 
     await screen.findByRole("heading", { name: "Upload complete" });
-    fireEvent.click(screen.getByRole("button", { name: "Confirm group" }));
+    fireEvent.click(screen.getByRole("button", { name: "Confirm assignment" }));
 
     expect(await screen.findByText(/Created a new group/)).toBeInTheDocument();
     expect(within(document.querySelector(".signal-task-sheet__footer") as HTMLElement)

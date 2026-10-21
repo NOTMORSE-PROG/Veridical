@@ -6,6 +6,7 @@ import { api } from "../api/client";
 import type {
   CheckRun,
   ConfirmGroupResponse,
+  ManuscriptGroup,
   IngestSummary,
   PaginatedManuscripts,
   RerunEstimateOut,
@@ -54,11 +55,18 @@ export function useIngestManuscript() {
 // V-063 (AC6): re-derives the SAME proposal shown right after upload --
 // lets the "Set group" entry point (dashboard) reopen it any time later,
 // so dismissing the confirm dialog is never a dead end.
-export function useGroupProposal(manuscriptId: number | undefined) {
+export function useGroupProposal(manuscriptId: number | undefined, enabled = true) {
   return useQuery({
     queryKey: ["group-proposal", manuscriptId],
     queryFn: () => api.get<TitlePageProposal>(`/manuscripts/${manuscriptId}/group-proposal`),
-    enabled: manuscriptId !== undefined,
+    enabled: enabled && manuscriptId !== undefined,
+  });
+}
+
+export function useManuscriptGroup(manuscriptId: number) {
+  return useQuery({
+    queryKey: ["manuscript-group", manuscriptId],
+    queryFn: () => api.get<ManuscriptGroup>(`/manuscripts/${manuscriptId}/group`),
   });
 }
 
@@ -73,10 +81,14 @@ export function useConfirmGroup(manuscriptId: number | undefined) {
       member_names: string[];
       program_id: number | null;
       title: string | null;
+      expected_group_id?: number | null;
     }) => api.patch<ConfirmGroupResponse>(`/manuscripts/${manuscriptId}/group`, body),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["manuscripts"] });
       queryClient.invalidateQueries({ queryKey: ["groups"] });
+      queryClient.invalidateQueries({ queryKey: ["manuscript-group"] });
+      queryClient.invalidateQueries({ queryKey: ["group-proposal"] });
+      queryClient.invalidateQueries({ queryKey: ["group-collision"] });
     },
   });
 }

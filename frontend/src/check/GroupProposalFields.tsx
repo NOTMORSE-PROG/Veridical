@@ -9,7 +9,7 @@ import { createPortal } from "react-dom";
 import { ApiError } from "../api/client";
 import { AnchorPill } from "../components/AnchorPill";
 import { useGroupCollisionCheck, usePrograms } from "../dashboard/useDashboard";
-import type { ConfirmGroupResponse, TitlePageProposal } from "../api/types";
+import type { ConfirmGroupResponse, CurrentGroup, TitlePageProposal } from "../api/types";
 import { useConfirmGroup } from "./useCheckRun";
 
 function RemoveIcon() {
@@ -39,6 +39,14 @@ function PlusCircleIcon() {
   );
 }
 
+function normalizeName(value: string) {
+  return value.replace(/[ \t\n\r\f\v]+/g, " ").replace(/^ +| +$/g, "").toLowerCase();
+}
+
+function memberIdentity(names: string[]) {
+  return [...new Set(names.filter((name) => name.trim()).map(normalizeName))].sort();
+}
+
 interface MemberField {
   id: number;
   value: string;
@@ -64,23 +72,28 @@ export function GroupProposalFields({
   proposal,
   onDone,
   actionsTarget,
+  currentGroup,
+  expectedGroupId,
 }: {
   manuscriptId: number;
   proposal: TitlePageProposal;
   /** `null` = the instructor skipped without confirming anything. */
   onDone: (result: ConfirmGroupResponse | null) => void;
   actionsTarget?: HTMLElement | null;
+  currentGroup?: CurrentGroup;
+  expectedGroupId?: number | null;
 }) {
   const confirm = useConfirmGroup(manuscriptId);
   const { data: programs } = usePrograms();
   const programFieldId = useId();
 
-  const [groupName, setGroupName] = useState(proposal.short_name?.value ?? "");
-  const [groupNameEdited, setGroupNameEdited] = useState(proposal.short_name === null);
+  const [groupName, setGroupName] = useState(currentGroup?.name ?? proposal.short_name?.value ?? "");
+  const [groupNameEdited, setGroupNameEdited] = useState(currentGroup !== undefined || proposal.short_name === null);
   const [members, setMembers] = useState<MemberField[]>(() =>
-    proposal.members.map((m) => newMemberField(m.value, m.anchor)),
+    currentGroup ? currentGroup.member_names.map((name) => newMemberField(name, null))
+      : proposal.members.map((m) => newMemberField(m.value, m.anchor)),
   );
-  const [programId, setProgramId] = useState<number | null>(null);
+  const [programId, setProgramId] = useState<number | null>(currentGroup?.program_id ?? null);
   const [programEdited, setProgramEdited] = useState(false);
   const [attempted, setAttempted] = useState(false);
 
@@ -96,7 +109,7 @@ export function GroupProposalFields({
   // has loaded -- the proposal only ever carries a name (what the degree
   // line said), never an id.
   useEffect(() => {
-    if (!programs || proposal.program === null || programEdited) return;
+    if (currentGroup || !programs || proposal.program === null || programEdited) return;
     const match = programs.find((p) => p.name === proposal.program!.value);
     if (match) setProgramId(match.id);
     // BUG-086: deliberately fires only when the program LIST changes --
@@ -136,8 +149,13 @@ export function GroupProposalFields({
   const collisionCheck = useGroupCollisionCheck(
     debouncedCollisionCheck.name,
     debouncedCollisionCheck.members,
+    currentGroup?.id,
   );
   const showCollisionWarning = collisionCheck.data?.collision === true && !confirm.isSuccess;
+  const unchanged = currentGroup !== undefined
+    && normalizeName(groupName) === normalizeName(currentGroup.name)
+    && JSON.stringify(memberIdentity(members.map((m) => m.value))) === JSON.stringify(memberIdentity(currentGroup.member_names))
+    && programId === currentGroup.program_id;
 
   // UX review (V-063 review): removing a member row used to strand focus
   // at <body> -- BUG-054's same "a control that unmounts mid-interaction
@@ -190,6 +208,7 @@ export function GroupProposalFields({
 
   function handleConfirm() {
     setAttempted(true);
+    if (confirm.isPending || unchanged) return;
     const trimmedName = groupName.trim();
     if (trimmedName === "") {
       groupNameRef.current?.focus();
@@ -207,7 +226,8 @@ export function GroupProposalFields({
       // V-066: read-only in this form (not an editable field here), so
       // whatever VERIDICAL extracted is exactly what's sent -- null when
       // nothing was found, same as every other unfound proposal field.
-      title: proposal.title?.value ?? null,
+      title: currentGroup ? currentGroup.title : proposal.title?.value ?? null,
+      ...(expectedGroupId !== undefined ? { expected_group_id: expectedGroupId } : {}),
     });
   }
 
@@ -233,11 +253,13 @@ export function GroupProposalFields({
           }
         >
           {result.matched ? <MergeIcon /> : <PlusCircleIcon />}
-          {result.matched ? (
+          {result.outcome === "unchanged" ? (
+            <>Assignment unchanged: <b>{result.group_label}</b>.</>
+          ) : result.matched ? (
             <>
-              Matched to an existing group: <b>{result.group_label}</b>. VERIDICAL found a group
-              with the same name and at least one shared member, so this manuscript joined that
-              group's history.
+              Assigned to an existing group: <b>{result.group_label}</b>. The submitted name
+              matches a name recorded for this group, and at least one submitted member name
+              matches its records.
             </>
           ) : (
             <>
@@ -245,6 +267,11 @@ export function GroupProposalFields({
             </>
           )}
         </div>
+        <dl className="flex flex-col gap-2 text-sm text-ink">
+          <div><dt className="font-bold">Assigned group</dt><dd className="break-words">{result.group_label}</dd></div>
+          <div><dt className="font-bold">Saved program</dt><dd>{result.program ?? "Not set"}</dd></div>
+          <div><dt className="font-bold">Saved title</dt><dd className="break-words">{result.title ?? "Not recorded"}</dd></div>
+        </dl>
         <ProposalActions target={actionsTarget}>
           <button
             type="button"
@@ -260,22 +287,32 @@ export function GroupProposalFields({
 
   return (
     <div className="signal-group-proposal">
-      {proposal.extraction_failed ? (
+      {currentGroup ? (
+        <p className="text-sm text-ink-secondary">
+          These fields start from the current group record. Changing them can assign this manuscript
+          to another group or create a separate group. Other manuscripts are not edited here.
+        </p>
+      ) : proposal.extraction_failed ? (
         <p role="status" className="rounded-md bg-status-caution-bg px-3 py-2 text-sm text-status-caution-text">
           Couldn't read the title page. This can happen with a scanned image with no extractable
           text. Enter the group details yourself.
         </p>
       ) : (
         <p className="text-sm text-ink-secondary">
-          VERIDICAL read this from the manuscript's title page. Check it before it becomes the
-          group record.
+          These details were read from the manuscript's title page. Check them before assigning
+          this manuscript to a group.
         </p>
       )}
 
-      {proposal.title && (
+      <p className="text-sm text-ink-secondary">
+        The program and title shown here are saved only when a new group is created.
+        Matching an existing group keeps its saved program and title unchanged.
+      </p>
+
+      {(currentGroup?.title || (!currentGroup && proposal.title)) && (
         <p className="text-sm text-ink-tertiary break-words">
-          Extracted title: <span className="text-ink">{proposal.title.value}</span>{" "}
-          <AnchorPill anchor={proposal.title.anchor} />
+          {currentGroup ? "Saved title" : "Extracted title"}: <span className="text-ink">{currentGroup ? currentGroup.title : proposal.title?.value}</span>{" "}
+          {!currentGroup && proposal.title && <AnchorPill anchor={proposal.title.anchor} />}
         </p>
       )}
 
@@ -300,7 +337,7 @@ export function GroupProposalFields({
             }}
             className={`min-h-11 w-full rounded-md border bg-panel px-3 text-base text-ink ${invalid ? "border-2 border-status-attention-text" : "border-border-input"}`}
           />
-          {!groupNameEdited && proposal.short_name ? (
+          {currentGroup ? null : !groupNameEdited && proposal.short_name ? (
             <AnchorPill anchor={proposal.short_name.anchor} />
           ) : groupNameEdited && proposal.short_name ? (
             <span className="text-xs text-ink-tertiary italic">Edited.</span>
@@ -334,7 +371,7 @@ export function GroupProposalFields({
                 </option>
               ))}
             </select>
-            {programEdited ? (
+            {currentGroup ? null : programEdited ? (
               <span className="text-xs text-ink-tertiary italic">Entered manually.</span>
             ) : proposal.program === null ? (
               <span className="text-xs text-ink-tertiary">Not found on the title page.</span>
@@ -353,7 +390,7 @@ export function GroupProposalFields({
       <div className="signal-group-proposal__field">
         <span className="text-sm font-medium text-ink">Group members</span>
         {members.length === 0 && (
-          <p className="text-xs text-ink-tertiary">No members found on the title page.</p>
+          <p className="text-xs text-ink-tertiary">{currentGroup ? "No members recorded." : "No members found on the title page."}</p>
         )}
         {members.map((m, i) => (
           <div key={m.id} className="signal-group-proposal__member">
@@ -401,7 +438,7 @@ export function GroupProposalFields({
         </button>
       </div>
 
-      {proposal.adviser && (
+      {!currentGroup && proposal.adviser && (
         <p className="text-xs text-ink-tertiary">
           Adviser: {proposal.adviser.value} <AnchorPill anchor={proposal.adviser.anchor} />
         </p>
@@ -416,7 +453,7 @@ export function GroupProposalFields({
         </p>
       )}
 
-      {!proposal.extraction_failed && (groupName || members.length > 0 || programId !== null) && (
+      {!currentGroup && !proposal.extraction_failed && (groupName || members.length > 0 || programId !== null) && (
         <button
           type="button"
           disabled={confirm.isPending}
@@ -441,16 +478,16 @@ export function GroupProposalFields({
           onClick={() => onDone(null)}
           className="flex h-11 items-center justify-center rounded-md border border-border-input bg-panel px-4 text-sm font-bold text-ink hover:bg-status-neutral-bg disabled:opacity-45"
         >
-          Skip for now
+          {currentGroup ? "Cancel" : "Skip for now"}
         </button>
         <button
           type="button"
-          disabled={confirm.isPending}
+          disabled={confirm.isPending || unchanged}
           aria-busy={confirm.isPending ? "true" : undefined}
           onClick={handleConfirm}
           className="flex h-11 items-center justify-center rounded-md bg-action px-4 text-sm font-bold text-on-action hover:bg-action-hover disabled:opacity-60"
         >
-          {confirm.isPending ? "Confirming." : "Confirm group"}
+          {confirm.isPending ? "Confirming." : "Confirm assignment"}
         </button>
       </ProposalActions>
     </div>

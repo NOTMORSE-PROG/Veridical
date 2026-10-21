@@ -96,7 +96,7 @@ describe("GroupProposalFields", () => {
     renderWithProviders(
       <GroupProposalFields manuscriptId={1} proposal={EMPTY_PROPOSAL} onDone={() => {}} />,
     );
-    fireEvent.click(screen.getByRole("button", { name: "Confirm group" }));
+    fireEvent.click(screen.getByRole("button", { name: "Confirm assignment" }));
     const input = screen.getByLabelText("Group name");
     expect(input).toHaveAttribute("aria-invalid", "true");
     const errorId = input.getAttribute("aria-describedby");
@@ -132,6 +132,7 @@ describe("GroupProposalFields", () => {
               program: null,
               title: "AI-Powered Capstone Advisor",
               matched: true,
+              outcome: "matched",
             }),
             { status: 200 },
           );
@@ -143,9 +144,9 @@ describe("GroupProposalFields", () => {
     renderWithProviders(
       <GroupProposalFields manuscriptId={1} proposal={FULL_PROPOSAL} onDone={onDone} />,
     );
-    fireEvent.click(screen.getByRole("button", { name: "Confirm group" }));
+    fireEvent.click(screen.getByRole("button", { name: "Confirm assignment" }));
 
-    expect(await screen.findByText(/Matched to an existing group/)).toBeInTheDocument();
+    expect(await screen.findByText(/Assigned to an existing group/)).toBeInTheDocument();
     expect(patchBody[0]).toEqual({
       group_name: "VERIDICAL",
       member_names: ["Juan Dela Cruz", "Maria Santos"],
@@ -174,8 +175,8 @@ describe("GroupProposalFields", () => {
     expect(
       await screen.findByText(/A group named "VERIDICAL" already exists/),
     ).toBeInTheDocument();
-    // Proposes, never blocks -- Confirm group stays available.
-    expect(screen.getByRole("button", { name: "Confirm group" })).not.toBeDisabled();
+    // Proposes, never blocks -- Confirm assignment stays available.
+    expect(screen.getByRole("button", { name: "Confirm assignment" })).not.toBeDisabled();
   });
 
   it("shows no collision warning when there's no collision", async () => {
@@ -213,7 +214,7 @@ describe("GroupProposalFields", () => {
       <GroupProposalFields manuscriptId={1} proposal={FULL_PROPOSAL} onDone={() => {}} />,
     );
     fireEvent.change(screen.getByLabelText("Group name"), { target: { value: "VERIDICAL Team" } });
-    fireEvent.click(screen.getByRole("button", { name: "Confirm group" }));
+    fireEvent.click(screen.getByRole("button", { name: "Confirm assignment" }));
 
     expect(await screen.findByRole("alert")).toHaveTextContent("Could not save this group.");
     await waitFor(() => expect(screen.getByLabelText("Group name")).toHaveValue("VERIDICAL Team"));

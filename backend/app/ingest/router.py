@@ -22,6 +22,7 @@ from app.ingest.schemas import (
     DismissedManuscriptOut,
     ExistingUploadOut,
     IngestSummary,
+    ManuscriptGroupOut,
     ManuscriptQueueStatus,
     ManuscriptSort,
     PaginatedManuscripts,
@@ -31,6 +32,7 @@ from app.ingest.service import (
     confirm_manuscript_group,
     dismiss_failed_manuscript,
     get_group_proposal,
+    get_manuscript_group,
     ingest_upload,
     list_manuscripts,
 )
@@ -139,6 +141,15 @@ async def get_group_proposal_route(
     return TitlePageProposalOut.model_validate(proposal, from_attributes=True)
 
 
+@router.get("/manuscripts/{manuscript_id}/group", response_model=ManuscriptGroupOut)
+async def get_manuscript_group_route(
+    manuscript_id: int,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    instructor: Annotated[Instructor, Depends(get_current_instructor)],
+) -> ManuscriptGroupOut:
+    return await get_manuscript_group(session, manuscript_id, instructor.id)
+
+
 @router.patch("/manuscripts/{manuscript_id}/group", response_model=ConfirmGroupResponse)
 async def confirm_manuscript_group_route(
     manuscript_id: int,
@@ -149,7 +160,7 @@ async def confirm_manuscript_group_route(
     """V-063 (AC2/AC4): applies a confirmed (or instructor-edited, or
     fully instructor-typed) group proposal -- the ONLY place a proposal
     ever changes a manuscript's group."""
-    group, matched = await confirm_manuscript_group(
+    group, outcome = await confirm_manuscript_group(
         session,
         manuscript_id,
         instructor.id,
@@ -157,6 +168,8 @@ async def confirm_manuscript_group_route(
         body.member_names,
         body.program_id,
         body.title,
+        expected_group_id=body.expected_group_id,
+        expected_provided="expected_group_id" in body.model_fields_set,
     )
     program_name = await program_name_for(session, group.program_id)
     return ConfirmGroupResponse(
@@ -164,7 +177,8 @@ async def confirm_manuscript_group_route(
         group_label=group.name,
         program=program_name,
         title=group.title,
-        matched=matched,
+        matched=outcome == "matched",
+        outcome=outcome,
     )
 
 

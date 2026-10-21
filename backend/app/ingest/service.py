@@ -31,23 +31,32 @@ from app.errors import (
     NotFoundError,
     QuotaExhaustedError,
 )
+from app.groups.assignment import (
+    AssignmentReceipt,
+    AssignmentRequest,
+    assignment_values,
+    current_receipt,
+)
 from app.groups.service import (
     UNSET_PROGRAM_FILTER,
     match_or_create_group_from_proposal,
     program_name_for,
     resolve_or_create_group,
+    validate_group_fields,
 )
 from app.ingest import docx, figures, pdf, references, vision
 from app.ingest.patterns import load_patterns
 from app.ingest.recovery import recover_layout, selected_pages
 from app.ingest.schemas import (
+    CurrentGroupOut,
     ExtractionResult,
+    ManuscriptGroupOut,
     ManuscriptListItem,
     ManuscriptQueueStatus,
     ManuscriptSort,
     PaginatedManuscripts,
 )
-from app.ingest.titlepage import AnchoredValue, TitlePageProposal, extract_title_page
+from app.ingest.titlepage import TitlePageProposal, extract_title_page
 from app.llm import LLMNotConfiguredError, get_llm_client_for
 from app.models.citation import Citation
 from app.models.enums import (
@@ -880,27 +889,7 @@ async def load_raw_store_async(settings: Settings, manuscript_id: int) -> Extrac
 async def get_group_proposal(
     session: AsyncSession, settings: Settings, manuscript_id: int, instructor_id: int
 ) -> TitlePageProposal:
-    """V-063 (AC6): re-derives the SAME proposal `ingest_upload` computed
-    at upload time, from the persisted raw store -- nothing about the
-    proposal itself is stored, it's recomputed on demand. This is what
-    makes "dismiss now, decide later" a real, no-dead-end path (AC6)
-    rather than a one-shot dialog: the dashboard's own "Set group" action
-    calls this exact function whenever the instructor comes back to it.
-
-    UX review (V-063 review), reproduced live: reopening on a manuscript
-    that was ALREADY confirmed into a real group used to blindly re-derive
-    the ORIGINAL title-page extraction every time -- an instructor who'd
-    already fixed a garbled proposal would see their fix appear to have
-    vanished, and risked silently reverting a good group record back to
-    the bad one by re-confirming without noticing. A group only ever gets
-    `GroupMember` rows through a real V-063 confirm (the older, plain
-    pre-upload free-text path never creates them) -- so "this manuscript's
-    current group has recorded members" is a reliable, DERIVED signal
-    (no new column) that there's a confirmed state to show instead of the
-    stale extraction. The anchor "current group" (never "p. N"/"paragraph
-    N") tells the frontend this came from the group record, not the
-    document -- the same evidence-honesty rule as an instructor's own
-    edit, just sourced differently."""
+    """F1: source title-page proposal, distinct from the saved assignment."""
     manuscript = await session.get(Manuscript, manuscript_id)
     if (
         manuscript is None
@@ -909,29 +898,67 @@ async def get_group_proposal(
     ):
         raise NotFoundError(f"No manuscript with id {manuscript_id}.")
 
-    current_group = await session.get(Group, manuscript.group_id)
-    if current_group is not None:
-        member_names = (
-            await session.scalars(
-                select(GroupMember.name).where(GroupMember.group_id == current_group.id)
-            )
-        ).all()
-        if member_names:
-            program_name = await program_name_for(session, current_group.program_id)
-            return TitlePageProposal(
-                title=None,
-                short_name=AnchoredValue(current_group.name, "current group"),
-                members=[AnchoredValue(name, "current group") for name in member_names],
-                program=AnchoredValue(program_name, "current group") if program_name else None,
-                adviser=None,
-                extraction_failed=False,
-            )
-
     result = await read_source(
         session, manuscript, lambda: load_raw_store_async(settings, manuscript_id)
     )
     patterns = load_patterns(settings.ingest_patterns_file)
     return extract_title_page(result, patterns)
+
+
+async def _owned_current_group(session: AsyncSession, manuscript: Manuscript) -> Group | None:
+    if manuscript.group_id is None:
+        return None
+    group = await session.scalar(
+        select(Group)
+        .where(Group.id == manuscript.group_id, Group.instructor_id == manuscript.instructor_id)
+        .execution_options(populate_existing=True)
+    )
+    if group is None:
+        raise NotFoundError("This manuscript's group is unavailable.")
+    return group
+
+
+async def _current_group_members(session: AsyncSession, group: Group) -> list[str]:
+    return list(
+        (
+            await session.scalars(
+                select(GroupMember.name)
+                .where(GroupMember.group_id == group.id)
+                .order_by(GroupMember.id)
+            )
+        ).all()
+    )
+
+
+async def get_manuscript_group(
+    session: AsyncSession, manuscript_id: int, instructor_id: int
+) -> ManuscriptGroupOut:
+    manuscript = await session.scalar(
+        select(Manuscript).where(
+            Manuscript.id == manuscript_id,
+            Manuscript.instructor_id == instructor_id,
+            Manuscript.origin == ManuscriptOrigin.check_upload,
+        )
+    )
+    if manuscript is None:
+        raise NotFoundError(f"No manuscript with id {manuscript_id}.")
+    group = await _owned_current_group(session, manuscript)
+    return ManuscriptGroupOut(
+        manuscript_id=manuscript.id,
+        confirmation="recorded"
+        if current_receipt(manuscript.group_confirmation, manuscript.group_id)
+        else "not_recorded",
+        group=CurrentGroupOut(
+            id=group.id,
+            name=group.name,
+            member_names=await _current_group_members(session, group),
+            program_id=group.program_id,
+            program=await program_name_for(session, group.program_id),
+            title=group.title,
+        )
+        if group
+        else None,
+    )
 
 
 async def confirm_manuscript_group(
@@ -942,45 +969,94 @@ async def confirm_manuscript_group(
     member_names: list[str],
     program_id: int | None,
     title: str | None = None,
-) -> tuple[Group, bool]:
-    """V-063 (AC2): applies a CONFIRMED (possibly instructor-edited)
-    proposal -- this is the only place a title-page proposal ever
-    actually changes a manuscript's group; `extract_title_page` itself
-    has no DB access and no side effects. `program_id` is only ever set
-    on a NEWLY created group, never an existing one that already had a
-    chance to be corrected some other way -- a later upload's own
-    proposal must not silently overwrite a fact about a group that
-    already exists. `title` (V-066) follows the identical rule: a second
-    manuscript matched into an existing group carries its OWN title page,
-    which is not necessarily the group's -- only the group's first confirm
-    ever sets it."""
-    manuscript = await session.get(Manuscript, manuscript_id)
-    if (
-        manuscript is None
-        or manuscript.instructor_id != instructor_id
-        or manuscript.origin != ManuscriptOrigin.check_upload
-    ):
+    *,
+    expected_group_id: int | None = None,
+    expected_provided: bool = False,
+) -> tuple[Group, str]:
+    """F1: serialize assignment, validate replay, and commit one atomic change.
+
+    Existing group facts are retained. The receipt records submitted and
+    effective identities separately because matching may union members or
+    creation may disambiguate the display name.
+    """
+    manuscript = await session.scalar(
+        select(Manuscript)
+        .where(
+            Manuscript.id == manuscript_id,
+            Manuscript.instructor_id == instructor_id,
+            Manuscript.origin == ManuscriptOrigin.check_upload,
+        )
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
+    if manuscript is None:
         raise NotFoundError(f"No manuscript with id {manuscript_id}.")
-    # backend review (V-063 review): reproduced live -- an unvalidated
-    # program_id reached the FK and surfaced as a bare, unhandled 500
-    # (asyncpg's ForeignKeyViolationError) instead of this codebase's own
-    # established pattern for the same instructor-supplied FK
-    # (`rubric/service.py::set_rubric_family_program`).
+    if not group_name.strip():
+        raise FileMalformedError("Enter a group name before confirming.")
+    validate_group_fields(group_name, member_names, title)
+    if program_id is not None and (type(program_id) is not int or program_id <= 0):
+        raise FileMalformedError("Choose a valid program, or leave it as Not set.")
+    if (
+        expected_provided
+        and expected_group_id is not None
+        and (type(expected_group_id) is not int or expected_group_id <= 0)
+    ):
+        raise FileMalformedError("The expected group assignment is invalid. Reopen Group details.")
+    values = assignment_values(group_name, member_names, program_id, title)
+    request = AssignmentRequest(
+        **values.model_dump(),
+        expected_group_id=expected_group_id,
+        expected_provided=expected_provided,
+    )
+    current = await _owned_current_group(session, manuscript)
+    receipt = current_receipt(manuscript.group_confirmation, manuscript.group_id)
+    # A response can be lost after commit: the original expected ID may now
+    # be stale, but an exact validated request replay must remain a no-op.
+    if receipt is not None and receipt.request == request and current is not None:
+        await session.commit()
+        return current, "unchanged"
+    if expected_provided and manuscript.group_id != expected_group_id:
+        raise ConflictError(
+            "This manuscript's group assignment changed. "
+            "Close and reopen Group details before trying again."
+        )
+    if (
+        receipt is not None
+        and current is not None
+        and expected_provided
+        and values.model_dump()
+        == receipt.request.model_dump(exclude={"expected_group_id", "expected_provided"})
+    ):
+        await session.commit()
+        return current, "unchanged"
+    if (
+        current is not None
+        and expected_provided
+        and values
+        == assignment_values(
+            current.name,
+            await _current_group_members(session, current),
+            current.program_id,
+            current.title,
+        )
+    ):
+        await session.commit()
+        return current, "unchanged"
     if program_id is not None and await session.get(Program, program_id) is None:
         raise NotFoundError(f"No program with id {program_id}.")
-
     group, matched = await match_or_create_group_from_proposal(
         session, instructor_id, group_name, member_names
     )
     if not matched:
-        if program_id is not None:
-            group.program_id = program_id
-        stripped_title = title.strip() if title else None
-        if stripped_title:
-            group.title = stripped_title
-
+        group.program_id = program_id
+        group.title = values.title
     manuscript.group_id = group.id
     manuscript.group_label = group.name
+    effective = assignment_values(
+        group.name, await _current_group_members(session, group), group.program_id, group.title
+    )
+    manuscript.group_confirmation = AssignmentReceipt(
+        version=1, assigned_group_id=group.id, request=request, effective=effective
+    ).model_dump(mode="json")
     await session.commit()
-    await session.refresh(group)
-    return group, matched
+    return group, "matched" if matched else "created"
