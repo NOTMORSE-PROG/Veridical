@@ -1834,6 +1834,10 @@
     margin-block-end: var(--signal-space-5);
   }
 
+  .signal-family-switcher__identity {
+    overflow-wrap: anywhere;
+  }
+
   .signal-family-switcher label,
   .signal-studio-field label {
     color: var(--color-signal-ink-secondary);

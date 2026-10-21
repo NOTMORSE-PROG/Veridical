@@ -1,7 +1,7 @@
 // V-073 screen 4m — Rubric Studio. The active format is the workspace;
 // versions form an explicit timeline and never look like interchangeable rows.
 import { useEffect, useId, useRef, useState } from "react";
-import { Link } from "react-router";
+import { Link, useSearchParams } from "react-router";
 import { ApiError } from "../api/client";
 import type { RubricListItem } from "../api/types";
 import { usePrograms } from "../dashboard/useDashboard";
@@ -79,7 +79,8 @@ export function ManageRubricPage() {
 
   const { data: families, isPending, isError, refetch } = useRubricFamilies();
   const defaultFamily = (families ?? []).find((item) => item.is_active) ?? families?.[0];
-  const [selectedFamilyId, setSelectedFamilyId] = useState<string>();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const selectedFamilyId = searchParams.get("family");
   const family = (families ?? []).find((item) => item.rubric_family_id === selectedFamilyId)
     ?? defaultFamily;
   const { data: versions } = useRubricVersions(family?.rubric_family_id);
@@ -93,10 +94,15 @@ export function ManageRubricPage() {
   const [liveMessage, setLiveMessage] = useState("");
   const [recentActivation, setRecentActivation] = useState<number>();
 
+  const familyId = family?.rubric_family_id;
   useEffect(() => {
-    if (selectedFamilyId || !defaultFamily) return;
-    setSelectedFamilyId(defaultFamily.rubric_family_id);
-  }, [defaultFamily, selectedFamilyId]);
+    if (!familyId || selectedFamilyId === familyId) return;
+    setSearchParams((previous) => {
+      const next = new URLSearchParams(previous);
+      next.set("family", familyId);
+      return next;
+    }, { replace: true });
+  }, [familyId, selectedFamilyId, setSearchParams]);
 
   async function activateVersion(version: RubricListItem) {
     setActionError(undefined);
@@ -184,10 +190,16 @@ export function ManageRubricPage() {
           <select
             id="required-format-family"
             value={family.rubric_family_id}
-            onChange={(event) => setSelectedFamilyId(event.target.value)}
+            aria-describedby="selected-format-identity"
+            onChange={(event) => {
+              const next = new URLSearchParams(searchParams);
+              next.set("family", event.target.value);
+              setSearchParams(next);
+            }}
           >
-            {families?.map((item) => <option key={item.rubric_family_id} value={item.rubric_family_id}>{item.title}</option>)}
+            {families?.map((item) => <option key={item.rubric_family_id} value={item.rubric_family_id}>{item.title} (v{item.version}) · Family {item.rubric_family_id}</option>)}
           </select>
+          <p id="selected-format-identity" className="signal-family-switcher__identity">Selected format: {family.title}. Version {family.version}. Family {family.rubric_family_id}.</p>
           <p>{families?.length} format families are available. Reports remain pinned to the version that produced them.</p>
         </div>
       )}

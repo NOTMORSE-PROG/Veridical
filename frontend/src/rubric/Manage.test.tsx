@@ -1,5 +1,6 @@
 import { fireEvent, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { useLocation } from "react-router";
 import type { RubricListItem } from "../api/types";
 import { renderWithProviders, stubFetchByPath } from "../test/renderWithProviders";
 import { ManageRubricPage } from "./Manage";
@@ -32,6 +33,11 @@ const V1: RubricListItem = {
   report_count: 3,
   program: null,
 };
+
+function CurrentLocation() {
+  const location = useLocation();
+  return <output aria-label="Current location">{location.pathname}{location.search}</output>;
+}
 
 describe("ManageRubricPage", () => {
   afterEach(() => vi.unstubAllGlobals());
@@ -100,6 +106,25 @@ describe("ManageRubricPage", () => {
       await screen.findByText(/2 format families are available/),
     ).toBeInTheDocument();
     expect(screen.getByLabelText("Required format")).toBeInTheDocument();
+  });
+
+  it("keeps duplicate-title formats distinguishable and selects the URL's family", async () => {
+    const second: RubricListItem = { ...V1, id: 99, rubric_family_id: "33333333-3333-3333-3333-333333333333" };
+    vi.stubGlobal("fetch", stubFetchByPath({
+      "/rubric-families": [V1, second],
+      [`/rubric-families/${FAMILY_ID}/versions`]: [V1],
+      [`/rubric-families/${second.rubric_family_id}/versions`]: [second],
+    }));
+    renderWithProviders(<><ManageRubricPage /><CurrentLocation /></>, { route: `/rubric?family=${second.rubric_family_id}` });
+    const select = await screen.findByLabelText("Required format");
+    expect(select).toHaveValue(second.rubric_family_id);
+    expect(screen.getByRole("option", { name: `${V1.title} (v1) · Family ${FAMILY_ID}` })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: `${second.title} (v1) · Family ${second.rubric_family_id}` })).toBeInTheDocument();
+    expect(select).toHaveAccessibleDescription(`Selected format: ${second.title}. Version 1. Family ${second.rubric_family_id}.`);
+    expect(screen.getByRole("link", { name: "View criteria" })).toHaveAttribute("href", "/rubric/99/review");
+    fireEvent.change(select, { target: { value: FAMILY_ID } });
+    await waitFor(() => expect(screen.getByLabelText("Current location")).toHaveTextContent(`/rubric?family=${FAMILY_ID}`));
+    expect(screen.getByRole("link", { name: "View criteria" })).toHaveAttribute("href", "/rubric/10/review");
   });
 
   it("Activate calls the activate endpoint for that version", async () => {

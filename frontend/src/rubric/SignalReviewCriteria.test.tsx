@@ -66,6 +66,8 @@ describe("SignalReviewCriteriaPage", () => {
     expect(screen.getByLabelText("Criterion 2 evidence")).toHaveValue("Results and discussion");
     expect(screen.getByText("Levelled criterion · 2 levels")).toBeInTheDocument();
     expect(screen.getAllByText(/importance$/)).toHaveLength(2);
+    expect(screen.getByRole("link", { name: "Rubric Studio" })).toHaveAttribute("href", `/rubric?family=${RUBRIC.rubric_family_id}`);
+    expect(screen.getByLabelText("Criterion 2 type")).toHaveAccessibleDescription(/Semantic for checks that require interpreting the content/);
   });
 
   it("saves the complete edited set as a draft and preserves level data", async () => {

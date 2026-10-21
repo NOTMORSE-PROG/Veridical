@@ -224,7 +224,7 @@ function WorkQueueRecord({
         {identity.secondary && <p title={identity.secondary}>{identity.secondary}</p>}
         <dl>
           <div><dt>Program</dt><dd>{row.program ?? "Not set"}</dd></div>
-          <div><dt>Last activity</dt><dd>{formatActivity(row.created_at)}</dd></div>
+          <div><dt>Uploaded</dt><dd>{formatActivity(row.created_at)}</dd></div>
         </dl>
       </div>
       <div className="signal-record__state">

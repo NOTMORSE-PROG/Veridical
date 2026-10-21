@@ -55,16 +55,17 @@ function toEdits(rows: CriterionRow[]): CriterionEdit[] {
   }));
 }
 
-function CriteriaHeader({ headingRef, title, count, readOnly = false }: {
+function CriteriaHeader({ headingRef, title, count, readOnly = false, familyId }: {
   headingRef: React.RefObject<HTMLHeadingElement | null>;
   title?: string;
   count?: number;
   readOnly?: boolean;
+  familyId?: string;
 }) {
   return (
     <header className="signal-route-header signal-criteria-header">
       <div>
-        <nav aria-label="Breadcrumb"><Link to="/rubric">Rubric Studio</Link><span aria-hidden="true">/</span><span>Criteria review</span></nav>
+        <nav aria-label="Breadcrumb"><Link to={familyId ? `/rubric?family=${encodeURIComponent(familyId)}` : "/rubric"}>Rubric Studio</Link><span aria-hidden="true">/</span><span>Criteria review</span></nav>
         <p className="signal-eyebrow">Prepare · Human review gate</p>
         <h1 ref={headingRef} tabIndex={-1}>{readOnly ? "View criteria" : "Review prepared criteria"}</h1>
         {title && <p className="signal-route-header__intro">{title}{count !== undefined ? ` · ${count} ${count === 1 ? "criterion" : "criteria"}` : ""}</p>}
@@ -138,6 +139,7 @@ function CriterionCard({
               value={row.type}
               disabled={readOnly}
               aria-label={`Criterion ${index + 1} type`}
+              aria-describedby="criterion-type-guidance"
               onChange={(event) => onChange({ type: event.target.value as CriterionType })}
             >
               {Object.entries(TYPE_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
@@ -333,7 +335,7 @@ function CriteriaEditor({ id }: { id: number }) {
 
   return (
     <div className="signal-route signal-page-flow signal-criteria-review">
-      <CriteriaHeader headingRef={headingRef} title={rubric.title} count={currentRows.length} readOnly={readOnly} />
+      <CriteriaHeader headingRef={headingRef} title={rubric.title} count={currentRows.length} readOnly={readOnly} familyId={rubric.rubric_family_id} />
       <div className="signal-section-flow signal-criteria-guidance">
         {readOnly
           ? <Alert title="Read-only version" tone="info">
@@ -344,6 +346,10 @@ function CriteriaEditor({ id }: { id: number }) {
               <Button variant="secondary" onClick={() => setUploadOpen(true)}>Upload new version</Button>
             </Alert>
           : <Alert title="Review before anything runs" tone="info">Correct the prepared criteria, evidence, type, and relative importance. Nothing checks a manuscript until you confirm.</Alert>}
+        <section className="signal-copy-flow" aria-labelledby="criterion-type-heading">
+          <h2 id="criterion-type-heading">How criterion types work</h2>
+          <p id="criterion-type-guidance">Choose Structural for checks based on document structure or presence, Semantic for checks that require interpreting the content, and Not from the document for requirements that need other evidence, such as a presentation or printed copy.</p>
+        </section>
         {rubric.parse_status === "needs_review" && (
           <Alert title="Needs manual completion" tone="warning" role="status">
             <p>{readOnly
