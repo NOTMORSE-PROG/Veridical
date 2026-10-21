@@ -1,0 +1,229 @@
+{
+  "schema_version": "v4-source-control-provenance-v2",
+  "label_draft_sha256": "9c6db2dd8ef7aa8edc8139d49a2c208bced7931fd27bd3e94cf29ffda3a3280b",
+  "original_frozen_test_sha256": "d7b9ad98d68a43d95ca3bb3778070aa6da83af561865b3812cfb037a860177c1",
+  "original_test_selection_and_assertions_preserved": true,
+  "source_records": [
+    {
+      "doi": "10.1038/nature12373",
+      "retrieved_at": "2026-10-21T20:33:00.491234+00:00",
+      "url": "https://api.crossref.org/works/10.1038/nature12373",
+      "raw_sha256": "e3ea5782d255baa3159b07d218475f2e7c6d1033c48e2fc056264bce16f25687",
+      "title": "Nanometre-scale thermometry in a living cell",
+      "authors": [
+        {
+          "given": "G.",
+          "family": "Kucsko"
+        },
+        {
+          "given": "P. C.",
+          "family": "Maurer"
+        },
+        {
+          "given": "N. Y.",
+          "family": "Yao"
+        },
+        {
+          "given": "M.",
+          "family": "Kubo"
+        },
+        {
+          "given": "H. J.",
+          "family": "Noh"
+        },
+        {
+          "given": "P. K.",
+          "family": "Lo"
+        },
+        {
+          "given": "H.",
+          "family": "Park"
+        },
+        {
+          "given": "M. D.",
+          "family": "Lukin"
+        }
+      ],
+      "issued": {
+        "date-parts": [
+          [
+            2013,
+            7,
+            31
+          ]
+        ]
+      },
+      "published_online": {
+        "date-parts": [
+          [
+            2013,
+            7,
+            31
+          ]
+        ]
+      },
+      "published_print": {
+        "date-parts": [
+          [
+            2013,
+            8
+          ]
+        ]
+      },
+      "journal": [
+        "Nature"
+      ],
+      "volume": "500",
+      "issue": "7460",
+      "page": "54-58",
+      "article_number": null,
+      "updates": []
+    },
+    {
+      "doi": "10.3402/nano.v3i0.11586",
+      "retrieved_at": "2026-10-21T20:33:00.860045+00:00",
+      "url": "https://api.crossref.org/works/10.3402/nano.v3i0.11586",
+      "raw_sha256": "895110f0617c29dc6bbc86ef068a7722b288252e5e316c7a8470488cafb3750b",
+      "title": "Nanoscale thermal probing",
+      "authors": [
+        {
+          "given": "Yanan",
+          "family": "Yue"
+        },
+        {
+          "given": "Xinwei",
+          "family": "Wang"
+        }
+      ],
+      "issued": {
+        "date-parts": [
+          [
+            2012,
+            1
+          ]
+        ]
+      },
+      "published_online": {
+        "date-parts": [
+          [
+            2012,
+            3,
+            12
+          ]
+        ]
+      },
+      "published_print": {
+        "date-parts": [
+          [
+            2012,
+            1
+          ]
+        ]
+      },
+      "journal": [
+        "Nano Reviews"
+      ],
+      "volume": "3",
+      "issue": "1",
+      "page": "11586",
+      "article_number": null,
+      "updates": []
+    }
+  ],
+  "additional_source_checks": [
+    {
+      "url": "https://lukin.physics.harvard.edu/sites/g/files/omnuum6416/files/lukin/files/nanometre-scale_thermometry_in_a_living_cell.pdf",
+      "checked_on": "2026-10-22",
+      "fields": [
+        "DOI",
+        "title",
+        "eight authors",
+        "2013",
+        "Nature 500",
+        "pages 54-58"
+      ]
+    },
+    {
+      "url": "https://sites.miamioh.edu/thermal-energy-and-raman-sensing-lab/nanoscale-thermal-probing-hotspot/",
+      "checked_on": "2026-10-22",
+      "fields": [
+        "Yanan Yue",
+        "Xinwei Wang",
+        "2012",
+        "title"
+      ]
+    },
+    {
+      "url": "https://www.researchgate.net/publication/221704065_Nanoscale_thermal_probing",
+      "checked_on": "2026-10-22",
+      "fields": [
+        "author-uploaded full text",
+        "2012",
+        "review subject"
+      ]
+    }
+  ],
+  "numerical_oracles": {
+    "student_t_two_sided": {
+      "t": 2.45,
+      "df": 28,
+      "scipy_survival_twice": 0.020796517179338406,
+      "independent_density_quadrature": 0.020796517179338534,
+      "reported_p": ".021"
+    },
+    "single_integer_item": {
+      "responses": [
+        3,
+        3,
+        3,
+        3,
+        3,
+        3,
+        3,
+        4,
+        4,
+        4
+      ],
+      "n": 10,
+      "total": 33,
+      "mean": "3.30"
+    }
+  },
+  "retraction_scope": "No retraction or correction notice was reported in the saved Crossref snapshots. Future live changes must fail for investigation; this is not a permanent unretracted-status claim.",
+  "scope": "Require actual reference metadata agreement and applicable numerical computation. Claim-support uncertainty is recorded separately. No whole-F5, semantic, F4/F7, whole-UAT or representative accuracy claim.",
+  "pipeline_mode": "FakeLLM for orchestration only, persisted as fake and audited; real ingestion, metadata transport and deterministic forensics. Empty test rubric is not a parsed instructor format.",
+  "frozen_before_first_pipeline_output_at": "2026-10-21T21:48:41.685415+00:00",
+  "recipe_sha256": "b68531ffbdf86b70cf501894a2f826400fb7a092a5f50e293975ed95867c2cd3",
+  "docx_sha256": "0357cbfd0be8d2e1ffa7d611b355e0fedd48f9cb3a936c889c291d01d63d7db1",
+  "document_xml_sha256": "8441288eb3e24dcbfda121238a4f9fc7bba461c0bc89d2e80bc835d42766444a",
+  "canonical_inventory": {
+    "paragraphs": [
+      "Source validated citation and numerical controls",
+      "This document exercises software checks using two source-correct references and separate synthetic numerical examples. It is not a research manuscript or a representative accuracy sample.",
+      "Literature context",
+      "Kucsko et al. (2013) describe nanoscale thermometry in living cells. Yue and Wang (2012) review nanoscale thermal probing techniques.",
+      "Synthetic numerical examples",
+      "The numerical examples are synthetic software controls and do not describe either cited publication. The descriptive table and t-test are separate independent examples.",
+      "For the first independent synthetic example, a two-sided t-test gives t(28) = 2.45, p = .021.",
+      "The separate second synthetic example measures one integer-valued item in ten independent responses. Each respondent contributes exactly one integer response. Seven responses are 3 and three responses are 4, giving an integer total of 33.",
+      "Table 1 Single item integer responses",
+      "REFERENCES",
+      "Kucsko, G., Maurer, P. C., Yao, N. Y., Kubo, M., Noh, H. J., Lo, P. K., Park, H., & Lukin, M. D. (2013). Nanometre-scale thermometry in a living cell. Nature, 500(7460), 54-58. https://doi.org/10.1038/nature12373",
+      "Yue, Y., & Wang, X. (2012). Nanoscale thermal probing. Nano Reviews, 3(1), 11586. https://doi.org/10.3402/nano.v3i0.11586"
+    ],
+    "tables": [
+      [
+        [
+          "Group",
+          "n",
+          "M"
+        ],
+        [
+          "Single integer item",
+          "10",
+          "3.30"
+        ]
+      ]
+    ]
+  }
+}

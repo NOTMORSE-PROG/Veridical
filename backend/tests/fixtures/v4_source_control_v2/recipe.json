@@ -1,0 +1,86 @@
+{
+  "version": "v4-source-validated-control-v2",
+  "title": "Source validated citation and numerical controls",
+  "purpose": "This document exercises software checks using two source-correct references and separate synthetic numerical examples. It is not a research manuscript or a representative accuracy sample.",
+  "literature_heading": "Literature context",
+  "literature_text": "Kucsko et al. (2013) describe nanoscale thermometry in living cells. Yue and Wang (2012) review nanoscale thermal probing techniques.",
+  "statistics_heading": "Synthetic numerical examples",
+  "statistics_scope": "The numerical examples are synthetic software controls and do not describe either cited publication. The descriptive table and t-test are separate independent examples.",
+  "inferential_text": "For the first independent synthetic example, a two-sided t-test gives t(28) = 2.45, p = .021.",
+  "descriptive_text": "The separate second synthetic example measures one integer-valued item in ten independent responses. Each respondent contributes exactly one integer response. Seven responses are 3 and three responses are 4, giving an integer total of 33.",
+  "table_caption": "Table 1 Single item integer responses",
+  "table_rows": [
+    [
+      "Group",
+      "n",
+      "M"
+    ],
+    [
+      "Single integer item",
+      "10",
+      "3.30"
+    ]
+  ],
+  "references_heading": "REFERENCES",
+  "references": [
+    "Kucsko, G., Maurer, P. C., Yao, N. Y., Kubo, M., Noh, H. J., Lo, P. K., Park, H., & Lukin, M. D. (2013). Nanometre-scale thermometry in a living cell. Nature, 500(7460), 54-58. https://doi.org/10.1038/nature12373",
+    "Yue, Y., & Wang, X. (2012). Nanoscale thermal probing. Nano Reviews, 3(1), 11586. https://doi.org/10.3402/nano.v3i0.11586"
+  ],
+  "expected": {
+    "references": [
+      {
+        "doi": "10.1038/nature12373",
+        "title": "Nanometre-scale thermometry in a living cell",
+        "year": 2013,
+        "first_author": "Kucsko"
+      },
+      {
+        "doi": "10.3402/nano.v3i0.11586",
+        "title": "Nanoscale thermal probing",
+        "year": 2012,
+        "first_author": "Yue"
+      }
+    ],
+    "reference_count": 2,
+    "inferential": {
+      "test_type": "t",
+      "test_value": 2.45,
+      "test_value_precision": 2,
+      "p_value": 0.021,
+      "p_value_precision": 3,
+      "computed_p": 0.020796517179338406,
+      "two_tailed": true,
+      "df1": 28,
+      "df2": null,
+      "computed_p_abs_tolerance": 1e-12
+    },
+    "descriptive": {
+      "n": 10,
+      "mean": 3.3,
+      "mean_text": "3.30",
+      "mean_precision": 2,
+      "integer_total": 33,
+      "item_count": 1
+    },
+    "forensics_counts": {
+      "n_inferential_stats": 1,
+      "n_descriptive_stats": 2,
+      "n_grim_skipped_likely_composite": 0
+    },
+    "metadata_counters": {
+      "n_metadata_skipped_insufficient": 0,
+      "n_metadata_api_down": 0,
+      "n_metadata_not_found": 0
+    },
+    "scope": "Require actual reference metadata agreement and applicable numerical computation. Claim-support uncertainty is recorded separately. No whole-F5, semantic, F4/F7, whole-UAT or representative accuracy claim."
+  },
+  "package_created_at": "2000-01-01T00:00:00+00:00",
+  "package_zip_time": [
+    2000,
+    1,
+    1,
+    0,
+    0,
+    0
+  ]
+}
