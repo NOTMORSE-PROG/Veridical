@@ -1,5 +1,6 @@
-import { fireEvent, screen, waitFor, within } from "@testing-library/react";
-import { useQueryClient } from "@tanstack/react-query";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { onlineManager, QueryClient, QueryClientProvider, useQueryClient } from "@tanstack/react-query";
+import { createMemoryRouter, RouterProvider } from "react-router";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { reviewDeskPath } from "../dashboard/useReviewDesk";
 import { renderWithProviders, stubFetchByPath } from "../test/renderWithProviders";
@@ -80,7 +81,233 @@ function stubCompleteDesk(stats: unknown = { ...STATS, complete_queue_count: 27 
 }
 
 describe("DashboardPage", () => {
-  afterEach(() => vi.unstubAllGlobals());
+  afterEach(() => { onlineManager.setOnline(true); vi.unstubAllGlobals(); vi.restoreAllMocks(); });
+
+  it.each([
+    { start: 1, target: 2, button: "Next", disabled: "Next" },
+    { start: 2, target: 1, button: "Previous", disabled: "Previous" },
+  ])("BUG-436: $button hands focus over before a deferred page request and boundary change", async ({ start, target, button, disabled }) => {
+    vi.spyOn(document, "hasFocus").mockReturnValue(true);
+    let finish!: (response: Response) => void;
+    let requestFocus: Element | null = null;
+    const fallback = stubCompleteDesk(undefined, () => ({ ...MANUSCRIPTS_PAGE, total: 21, page: start }));
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = new URL(input.toString(), "http://localhost");
+      if (url.pathname === "/manuscripts" && Number(url.searchParams.get("page")) === target) {
+        requestFocus = document.activeElement;
+        return new Promise<Response>((resolve) => { finish = resolve; });
+      }
+      return fallback(input, init);
+    }));
+    renderWithProviders(<DashboardPage />, { route: `/dashboard?queue=complete&page=${start}&program=BSIT&sort=oldest&q=applied` });
+    const trigger = await screen.findByRole("button", { name: button });
+    trigger.focus(); fireEvent.click(trigger);
+    const heading = screen.getByRole("heading", { name: "Complete", level: 2 });
+    expect(heading).toHaveFocus();
+    await waitFor(() => expect(requestFocus).toBe(heading));
+    const status = screen.getByRole("status");
+    expect(status).toHaveTextContent(`Loading page ${target} in Complete.`);
+    expect(status).toHaveAttribute("aria-busy", "true");
+    expect(status).not.toHaveTextContent("21 matching manuscripts");
+    const search = screen.getByRole("searchbox");
+    search.focus();
+    await act(async () => finish(new Response(JSON.stringify({ ...MANUSCRIPTS_PAGE, total: 21, page: target }), { status: 200 })));
+    await waitFor(() => expect(status).toHaveTextContent(`Complete: Page ${target} of 2. 21 matching manuscripts.`));
+    expect(status).toHaveAttribute("aria-busy", "false");
+    expect(screen.getByRole("button", { name: disabled })).toBeDisabled();
+    expect(search).toHaveFocus();
+    expect(fallback.mock.calls.some(([input]) => {
+      const url = new URL(input.toString(), "http://localhost");
+      return url.pathname === "/manuscripts" && url.searchParams.get("program") === "BSIT" && url.searchParams.get("sort") === "oldest" && url.searchParams.get("q") === "applied";
+    })).toBe(true);
+  });
+
+  it.each(["outside", "inactive window"])("BUG-436: paging preserves %s focus intent", async (intent) => {
+    vi.spyOn(document, "hasFocus").mockReturnValue(intent !== "inactive window");
+    stubCompleteDesk(undefined, (url) => ({ ...MANUSCRIPTS_PAGE, total: 21, page: Number(url.searchParams.get("page")) }));
+    renderWithProviders(<DashboardPage />, { route: "/dashboard?queue=complete" });
+    const next = await screen.findByRole("button", { name: "Next" });
+    const search = screen.getByRole("searchbox");
+    (intent === "outside" ? search : next).focus();
+    const focus = vi.spyOn(screen.getByRole("heading", { name: "Complete", level: 2 }), "focus");
+    fireEvent.click(next);
+    await screen.findByText("Page 2 of 2");
+    expect(focus).not.toHaveBeenCalled();
+    if (intent === "outside") expect(search).toHaveFocus();
+  });
+
+  it.each([true, false])("BUG-436: cached error retry (empty=%s) is loading then only error, preserving nonempty cards", async (empty) => {
+    vi.spyOn(document, "hasFocus").mockReturnValue(true);
+    let finish!: (response: Response) => void;
+    let hold = false;
+    const fallback = stubCompleteDesk(undefined, () => empty ? { ...MANUSCRIPTS_PAGE, total: 0, items: [] } : MANUSCRIPTS_PAGE);
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      if (hold && new URL(input.toString(), "http://localhost").pathname === "/manuscripts") return new Promise<Response>((resolve) => { finish = resolve; });
+      return fallback(input, init);
+    }));
+    function Refresh() {
+      const client = useQueryClient();
+      return <button onClick={() => { hold = true; void client.invalidateQueries({ queryKey: ["manuscripts"] }); }}>Refresh test queue</button>;
+    }
+    renderWithProviders(<><Refresh /><DashboardPage /></>, { route: "/dashboard?queue=complete" });
+    if (empty) await screen.findByRole("heading", { name: "This queue is clear" });
+    else await screen.findByText("G-11");
+    const fail = () => new Response(JSON.stringify({ error: { code: "api_down", message: "Controlled queue failure" } }), { status: 503 });
+    fireEvent.click(screen.getByRole("button", { name: "Refresh test queue" }));
+    await waitFor(() => expect(finish).toBeTypeOf("function"));
+    await act(async () => finish(fail()));
+    await screen.findByRole("alert");
+    expect(screen.queryByRole("heading", { name: "This queue is clear" })).not.toBeInTheDocument();
+    if (!empty) expect(screen.getByText("G-11")).toBeVisible();
+    const retry = screen.getByRole("button", { name: "Try again" });
+    retry.focus(); fireEvent.click(retry);
+    expect(screen.getByRole("heading", { name: "Complete", level: 2 })).toHaveFocus();
+    const status = screen.getByRole("status");
+    await waitFor(() => expect(status).toHaveTextContent("Loading page 1 in Complete."));
+    expect(status).toHaveAttribute("aria-busy", "true");
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "This queue is clear" })).not.toBeInTheDocument();
+    if (!empty) expect(screen.getByText("G-11")).toBeVisible();
+    await act(async () => finish(fail()));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Could not load page 1 in Complete");
+    expect(status).toBeEmptyDOMElement();
+    expect(status).toHaveAttribute("aria-busy", "false");
+    expect(screen.queryByRole("heading", { name: "This queue is clear" })).not.toBeInTheDocument();
+  });
+
+  it("BUG-436: a delayed router transition retains the target loading marker through the origin render", async () => {
+    vi.spyOn(document, "hasFocus").mockReturnValue(true);
+    let commitNavigation!: (value: null) => void;
+    let finish!: (response: Response) => void;
+    const fallback = stubCompleteDesk(undefined, () => ({ ...MANUSCRIPTS_PAGE, total: 21 }));
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = new URL(input.toString(), "http://localhost");
+      if (url.pathname === "/manuscripts" && url.searchParams.get("page") === "2") return new Promise<Response>((resolve) => { finish = resolve; });
+      return fallback(input, init);
+    }));
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const router = createMemoryRouter([{
+      path: "/dashboard", element: <DashboardPage />,
+      loader: ({ request }) => new URL(request.url).searchParams.get("page") === "2"
+        ? new Promise<null>((resolve) => { commitNavigation = resolve; }) : null,
+    }], { initialEntries: ["/dashboard?queue=complete"] });
+    render(<QueryClientProvider client={client}><RouterProvider router={router} /></QueryClientProvider>);
+    const next = await screen.findByRole("button", { name: "Next" });
+    next.focus(); fireEvent.click(next);
+    await waitFor(() => expect(commitNavigation).toBeTypeOf("function"));
+    expect(router.state.location.search).not.toContain("page=2");
+    expect(screen.getByRole("heading", { name: "Complete", level: 2 })).toHaveFocus();
+    await act(async () => commitNavigation(null));
+    await waitFor(() => expect(finish).toBeTypeOf("function"));
+    expect(screen.getByRole("status")).toHaveTextContent("Loading page 2 in Complete.");
+    await act(async () => finish(new Response(JSON.stringify({ ...MANUSCRIPTS_PAGE, total: 21, page: 2 }), { status: 200 })));
+    await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Complete: Page 2 of 2. 21 manuscripts."));
+  });
+
+  it("BUG-436: paused cached retry stays busy until connectivity and request settlement", async () => {
+    vi.spyOn(document, "hasFocus").mockReturnValue(true);
+    let finish!: (response: Response) => void;
+    let hold = false;
+    const fallback = stubCompleteDesk(undefined, () => new Response(JSON.stringify({ error: { code: "api_down", message: "Controlled failure" } }), { status: 503 }));
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      if (hold && new URL(input.toString(), "http://localhost").pathname === "/manuscripts") return new Promise<Response>((resolve) => { finish = resolve; });
+      return fallback(input, init);
+    }));
+    renderWithProviders(<DashboardPage />, { route: "/dashboard?queue=complete" });
+    const retry = await screen.findByRole("button", { name: "Try again" });
+    onlineManager.setOnline(false); hold = true;
+    retry.focus(); fireEvent.click(retry);
+    const status = screen.getByRole("status");
+    await waitFor(() => expect(status).toHaveTextContent("Loading page 1 in Complete."));
+    expect(status).toHaveAttribute("aria-busy", "true");
+    expect(finish).toBeUndefined();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    await act(async () => onlineManager.setOnline(true));
+    await waitFor(() => expect(finish).toBeTypeOf("function"));
+    expect(status).toHaveTextContent("Loading page 1 in Complete.");
+    await act(async () => finish(new Response(JSON.stringify(MANUSCRIPTS_PAGE), { status: 200 })));
+    await waitFor(() => expect(status).toHaveTextContent("Complete: Page 1 of 1. 1 manuscript."));
+    expect(status).toHaveAttribute("aria-busy", "false");
+  });
+
+  it("BUG-436: Back after adopting a pending cached page abandons ownership before Forward", async () => {
+    let finish!: (response: Response) => void;
+    const fallback = stubCompleteDesk(undefined, () => ({ ...MANUSCRIPTS_PAGE, total: 21 }));
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = new URL(input.toString(), "http://localhost");
+      if (url.pathname === "/manuscripts" && url.searchParams.get("page") === "2") return new Promise<Response>((resolve) => { finish = resolve; });
+      return fallback(input, init);
+    }));
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const cachedPage = { ...MANUSCRIPTS_PAGE, total: 21, page: 2 };
+    client.setQueryData(["manuscripts", "review-desk", { queue: "complete", sort: "newest", page: 2, pageSize: 20 }], cachedPage);
+    const router = createMemoryRouter([{ path: "/dashboard", element: <DashboardPage /> }], { initialEntries: ["/dashboard?queue=complete"] });
+    render(<QueryClientProvider client={client}><RouterProvider router={router} /></QueryClientProvider>);
+    fireEvent.click(await screen.findByRole("button", { name: "Next" }));
+    await waitFor(() => expect(screen.getByRole("status")).toHaveAttribute("aria-busy", "true"));
+    expect(screen.getByRole("status")).toHaveTextContent("Loading page 2 in Complete.");
+    await act(async () => { await router.navigate(-1); });
+    await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Complete: Page 1 of 2. 21 manuscripts."));
+    await act(async () => { await router.navigate(1); });
+    expect(screen.getByRole("status")).toHaveTextContent("Complete: Page 2 of 2. 21 manuscripts.");
+    expect(screen.getByRole("status")).toHaveAttribute("aria-busy", "false");
+    await act(async () => finish(new Response(JSON.stringify(cachedPage), { status: 200 })));
+  });
+
+  it("BUG-436: an old retry completion cannot clear a newer full-query action", async () => {
+    const requests: Array<{ url: URL; finish: (response: Response) => void }> = [];
+    let hold = false;
+    const fail = () => new Response(JSON.stringify({ error: { code: "api_down", message: "Controlled failure" } }), { status: 503 });
+    const fallback = stubCompleteDesk(undefined, fail);
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = new URL(input.toString(), "http://localhost");
+      if (hold && url.pathname === "/manuscripts") return new Promise<Response>((finish) => { requests.push({ url, finish }); });
+      return fallback(input, init);
+    }));
+    renderWithProviders(<DashboardPage />, { route: "/dashboard?queue=complete&q=old&program=BSIT&sort=oldest" });
+    const retry = await screen.findByRole("button", { name: "Try again" });
+    hold = true; fireEvent.click(retry);
+    await waitFor(() => expect(requests).toHaveLength(1));
+    fireEvent.click(screen.getByRole("button", { name: "Clear filters" }));
+    await waitFor(() => expect(requests).toHaveLength(2));
+    expect(requests[0].url.searchParams.get("q")).toBe("old");
+    expect(requests[1].url.searchParams.has("q")).toBe(false);
+    expect(requests[1].url.searchParams.has("program")).toBe(false);
+    expect(requests[1].url.searchParams.get("sort")).toBe("oldest");
+    await act(async () => requests[1].finish(fail()));
+    fireEvent.click(await screen.findByRole("button", { name: "Try again" }));
+    await waitFor(() => expect(requests).toHaveLength(3));
+    await act(async () => requests[0].finish(new Response(JSON.stringify({ ...MANUSCRIPTS_PAGE, total: 9 }), { status: 200 })));
+    expect(screen.getByRole("status")).toHaveTextContent("Loading page 1 in Complete.");
+    expect(screen.getByRole("status")).toHaveAttribute("aria-busy", "true");
+    await act(async () => requests[2].finish(new Response(JSON.stringify(MANUSCRIPTS_PAGE), { status: 200 })));
+    await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Complete: Page 1 of 1. 1 manuscript."));
+  });
+
+  it("BUG-436: an unmarked cached refresh keeps cards, count and external focus without a page-loading announcement", async () => {
+    let finish!: (response: Response) => void;
+    let hold = false;
+    const fallback = stubCompleteDesk();
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      if (hold && new URL(input.toString(), "http://localhost").pathname === "/manuscripts") return new Promise<Response>((resolve) => { finish = resolve; });
+      return fallback(input, init);
+    }));
+    function Refresh() {
+      const client = useQueryClient();
+      return <button onClick={() => { hold = true; void client.invalidateQueries({ queryKey: ["manuscripts"] }); }}>Refresh test queue</button>;
+    }
+    renderWithProviders(<><Refresh /><DashboardPage /></>, { route: "/dashboard?queue=complete" });
+    await screen.findByText("G-11");
+    const refresh = screen.getByRole("button", { name: "Refresh test queue" });
+    refresh.focus(); fireEvent.click(refresh);
+    await waitFor(() => expect(finish).toBeTypeOf("function"));
+    expect(screen.getByRole("status")).toHaveTextContent("Complete: Page 1 of 1. 1 manuscript.");
+    expect(screen.getByRole("status")).toHaveAttribute("aria-busy", "false");
+    expect(screen.getByText("G-11")).toBeVisible();
+    expect(refresh).toHaveFocus();
+    await act(async () => finish(new Response(JSON.stringify(MANUSCRIPTS_PAGE), { status: 200 })));
+    expect(refresh).toHaveFocus();
+  });
 
   it("BUG-430: Complete uses the current queue count, list total across pages, then its inactive count again", async () => {
     stubCompleteDesk(undefined, (url) => url.searchParams.get("status") === "decided"
@@ -91,7 +318,7 @@ describe("DashboardPage", () => {
     expect(complete).toHaveTextContent("Latest check finished. Instructor decision recorded.");
     fireEvent.click(complete);
     expect(await screen.findByText("Page 1 of 2")).toBeVisible();
-    expect(document.querySelector(".signal-desk__heading p[aria-live]")).toHaveTextContent("Complete: 27 manuscripts.");
+    expect(document.querySelector(".signal-desk__heading p[aria-live]")).toHaveTextContent("Complete: Page 1 of 2. 27 manuscripts.");
     fireEvent.click(screen.getByRole("button", { name: "Next" }));
     expect(await screen.findByText("Page 2 of 2")).toBeVisible();
     expect(screen.getByRole("button", { name: /Complete27 manuscripts/ })).toHaveAttribute("aria-pressed", "true");
@@ -105,7 +332,7 @@ describe("DashboardPage", () => {
     const expected = `${count} matching manuscript${count === 1 ? "" : "s"}`;
     expect(await screen.findByRole("button", { name: new RegExp(`Complete${expected}`) })).toHaveAttribute("aria-pressed", "true");
     const notice = document.querySelector(".signal-desk__heading p[aria-live]");
-    expect(notice).toHaveTextContent(`Complete: ${expected}.`);
+    expect(notice).toHaveTextContent(`Complete: Page 1 of 1. ${expected}.`);
     expect(notice).toHaveAttribute("aria-atomic", "true");
   });
 
@@ -117,17 +344,17 @@ describe("DashboardPage", () => {
     await screen.findByRole("button", { name: /Complete1 manuscript/ });
     fireEvent.change(screen.getByRole("searchbox"), { target: { value: "unsubmitted draft" } });
     expect(screen.getByRole("button", { name: /Complete1 manuscript/ })).toBeInTheDocument();
-    expect(document.querySelector(".signal-desk__heading p[aria-live]")).toHaveTextContent("Complete: 1 manuscript.");
+    expect(document.querySelector(".signal-desk__heading p[aria-live]")).toHaveTextContent("Complete: Page 1 of 1. 1 manuscript.");
   });
 
   it("BUG-430: changing queue with an equal count changes the announcement context without moving focus", async () => {
     stubCompleteDesk({ ...STATS, complete_queue_count: 1 });
     renderWithProviders(<DashboardPage />);
     await screen.findByRole("button", { name: /Complete1 manuscript/ });
-    expect(document.querySelector(".signal-desk__heading p[aria-live]")).toHaveTextContent("Needs you: 1 manuscript.");
+    expect(document.querySelector(".signal-desk__heading p[aria-live]")).toHaveTextContent("Needs you: Page 1 of 1. 1 manuscript.");
     const complete = screen.getByRole("button", { name: /Complete1 manuscript/ });
     complete.focus(); fireEvent.click(complete);
-    await waitFor(() => expect(document.querySelector(".signal-desk__heading p[aria-live]")).toHaveTextContent("Complete: 1 manuscript."));
+    await waitFor(() => expect(document.querySelector(".signal-desk__heading p[aria-live]")).toHaveTextContent("Complete: Page 1 of 1. 1 manuscript."));
     expect(complete).toHaveFocus();
   });
 

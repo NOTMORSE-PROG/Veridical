@@ -1,8 +1,8 @@
 // V-073 screen 4b/4e — Signal Review Desk. The page is a prioritized work
 // queue, not an analytics dashboard: each record names what happened, what
 // still needs the instructor, and one honest next action.
-import { type FormEvent, useEffect, useMemo, useRef, useState } from "react";
-import { Link, useSearchParams } from "react-router";
+import { type FormEvent, type MouseEvent, useEffect, useMemo, useRef, useState } from "react";
+import { Link, useLocation, useSearchParams } from "react-router";
 import type { ManuscriptListItem } from "../api/types";
 import { GroupProposalDialog } from "../check/GroupProposalDialog";
 import { NewCheckModal } from "../check/NewCheck";
@@ -12,6 +12,7 @@ import {
   type ReviewDeskQuery,
   type ReviewDeskQueue,
   type ReviewDeskSort,
+  reviewDeskPath,
   useDismissFailedManuscript,
   useReviewDeskPage,
 } from "../dashboard/useReviewDesk";
@@ -333,6 +334,7 @@ function ReviewDesk({
   onRerun: (id: number) => void;
   onSetGroup: (id: number) => void;
 }) {
+  const location = useLocation();
   const [params, setParams] = useSearchParams();
   const queue = queueFromParams(params);
   const requestedSort = params.get("sort");
@@ -345,17 +347,66 @@ function ReviewDesk({
   const [searchDraft, setSearchDraft] = useState(q ?? "");
   useEffect(() => setSearchDraft(q ?? ""), [q]);
   const query: ReviewDeskQuery = { queue, q, program, sort, page, pageSize: REVIEW_DESK_PAGE_SIZE };
-  const { data, isPending, isError, refetch } = useReviewDeskPage(query);
+  const { data, isPending, isError, fetchStatus, refetch } = useReviewDeskPage(query);
+  const queueHeading = useRef<HTMLHeadingElement>(null);
+  const [queueAction, setQueueAction] = useState<{
+    path: string;
+    originLocationKey: string;
+    adoptedLocationKey?: string;
+    kind: "page" | "retry";
+  }>();
+  const currentPath = reviewDeskPath(query);
+  useEffect(() => {
+    if (!queueAction) return;
+    // A local update can render before the router commits its transition.
+    // Keep the target marker through that origin render and offline pauses.
+    const abandoned = queueAction.adoptedLocationKey !== undefined
+      ? location.key !== queueAction.adoptedLocationKey
+      : location.key !== queueAction.originLocationKey
+        && (queueAction.kind === "retry" || queueAction.path !== currentPath);
+    const settledPage = queueAction.kind === "page"
+      && queueAction.path === currentPath && fetchStatus === "idle";
+    if (abandoned || settledPage) {
+      setQueueAction((current) => current === queueAction ? undefined : current);
+    } else if (queueAction.kind === "page" && queueAction.path === currentPath
+      && queueAction.adoptedLocationKey === undefined) {
+      setQueueAction((current) => current === queueAction
+        ? { ...current, adoptedLocationKey: location.key } : current);
+    }
+  }, [queueAction, currentPath, location.key, fetchStatus]);
   const { data: stats, isError: statsError } = useDashboardStats();
   const { data: programs } = usePrograms();
 
-  function update(next: Record<string, string | undefined>, replace = false) {
+  function update(next: Record<string, string | undefined>, replace = false, paging = false) {
+    if (!paging) setQueueAction(undefined);
     const updated = new URLSearchParams(params);
     for (const [key, value] of Object.entries(next)) {
       if (value) updated.set(key, value);
       else updated.delete(key);
     }
     setParams(updated, { replace });
+  }
+
+  function beginQueueAction(event: MouseEvent<HTMLButtonElement>, next: ReviewDeskQuery, kind: "page" | "retry") {
+    const control = event.currentTarget;
+    if (control.isConnected && !control.disabled && document.activeElement === control && document.hasFocus()) {
+      queueHeading.current?.focus();
+    }
+    const action = { path: reviewDeskPath(next), originLocationKey: location.key, kind };
+    setQueueAction(action);
+    return action;
+  }
+
+  function changePage(event: MouseEvent<HTMLButtonElement>, nextPage: number) {
+    beginQueueAction(event, { ...query, page: nextPage }, "page");
+    update({ page: String(nextPage) }, false, true);
+  }
+
+  function retryQueue(event: MouseEvent<HTMLButtonElement>) {
+    const action = beginQueueAction(event, query, "retry");
+    void refetch().finally(() => {
+      setQueueAction((current) => current === action ? undefined : current);
+    });
   }
 
   function selectQueue(next: ReviewDeskQueue) {
@@ -381,7 +432,12 @@ function ReviewDesk({
   const totalPages = data ? Math.max(1, Math.ceil(data.total / data.page_size)) : 1;
   const queueTitle = QUEUES.find((item) => item.id === queue)?.label ?? "Needs you";
   const matching = Boolean(q?.trim() || program?.trim());
-  const usableList = data !== undefined && !isPending && !isError;
+  const ownedRequest = queueAction?.path === currentPath
+    && (queueAction.adoptedLocationKey === undefined || queueAction.adoptedLocationKey === location.key)
+    && (queueAction.kind === "page" || queueAction.originLocationKey === location.key);
+  const loading = isPending || (ownedRequest && fetchStatus !== "idle");
+  const usableList = data !== undefined && !loading && !isError;
+  const loadingMessage = `Loading page ${page} in ${queueTitle}.`;
 
   return (
     <>
@@ -417,13 +473,13 @@ function ReviewDesk({
         <div className="signal-desk__heading">
           <div>
             <p className="signal-eyebrow">Current queue</p>
-            <h2 id="desk-heading">{queueTitle}</h2>
+            <h2 id="desk-heading" ref={queueHeading} tabIndex={-1}>{queueTitle}</h2>
           </div>
-          {usableList && (
-            <p aria-live="polite" aria-atomic="true">
-              <span className="sr-only">{queueTitle}: </span><strong>{data.total}</strong>{matching ? " matching" : ""} manuscript{data.total === 1 ? "" : "s"}.
-            </p>
-          )}
+          <p role="status" aria-live="polite" aria-atomic="true" aria-busy={loading}>
+            {loading ? <span className="sr-only">{loadingMessage}</span> : usableList ? <>
+              <span className="sr-only">{queueTitle}: Page {data.page} of {totalPages}. </span><strong>{data.total}</strong>{matching ? " matching" : ""} manuscript{data.total === 1 ? "" : "s"}.
+            </> : null}
+          </p>
         </div>
 
         <div className="signal-filters">
@@ -483,19 +539,19 @@ function ReviewDesk({
           )}
         </div>
 
-        {isPending && (
-          <div className="signal-desk-loading" role="status" aria-busy="true">
-            <span>Loading {queueTitle.toLowerCase()} manuscripts…</span>
+        {loading && (
+          <div className="signal-desk-loading" aria-hidden="true">
+            <span>{loadingMessage}</span>
             <i /><i /><i />
           </div>
         )}
-        {isError && (
-          <Alert title="Could not load this queue" tone="error" role="alert">
+        {isError && !loading && (
+          <Alert title={`Could not load page ${page} in ${queueTitle}`} tone="error" role="alert">
             <p>Your records have not changed.</p>
-            <Button variant="secondary" onClick={() => refetch()}>Try again</Button>
+            <Button variant="secondary" onClick={retryQueue}>Try again</Button>
           </Alert>
         )}
-        {data && data.items.length === 0 && (
+        {usableList && data.items.length === 0 && (
           <div className="signal-desk-empty">
             <div className="signal-desk-empty__mark" aria-hidden="true" />
             <h3>{q || program ? `No matches in ${queueTitle}` : queue === "not_checked" ? "No unchecked manuscripts" : "This queue is clear"}</h3>
@@ -541,7 +597,7 @@ function ReviewDesk({
             <Button
               variant="secondary"
               disabled={page <= 1}
-              onClick={() => update({ page: String(page - 1) })}
+              onClick={(event) => changePage(event, page - 1)}
             >
               Previous
             </Button>
@@ -549,7 +605,7 @@ function ReviewDesk({
             <Button
               variant="secondary"
               disabled={page >= totalPages}
-              onClick={() => update({ page: String(page + 1) })}
+              onClick={(event) => changePage(event, page + 1)}
             >
               Next
             </Button>
