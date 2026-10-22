@@ -16,6 +16,7 @@ import { AnchorPill } from "../components/AnchorPill";
 import { StatusPill, type StatusPillTone } from "../components/StatusPill";
 import { WeightImportanceTag } from "../components/WeightImportanceTag";
 import { truncateAtWord } from "../format/text";
+import { RECORDED_GRADE_BASIS } from "../domain/semanticSupport";
 
 // escalated/quota_exhausted/api_down all belong to the escalation panel
 // only (backend/app/checks/escalation.py's own NEEDS_REVIEW_OUTCOMES
@@ -287,8 +288,7 @@ function ResolutionBlock({ resolution, level }: { resolution: ResolutionOut; lev
       </p>
       {resolution.ai_majority_verdict && (
         <p className="text-xs text-ink-tertiary">
-          The AI's own vote leaned {resolution.ai_majority_verdict}, but did not reach the agreement
-          threshold needed to auto-decide.
+          {RECORDED_GRADE_BASIS.recordedSuggestion} {resolution.ai_majority_verdict}.
         </p>
       )}
     </div>

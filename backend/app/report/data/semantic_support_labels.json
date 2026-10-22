@@ -6,5 +6,6 @@
   "missing_explanation": "No AI explanation is available for this review item.",
   "missing_excerpt": "No located excerpt is available for this review item.",
   "missing_location": "No manuscript location is available for this excerpt.",
-  "pending": "No grade has been accepted for this criterion."
+  "pending": "No grade has been accepted for this criterion.",
+  "recorded_suggestion": "Recorded AI suggestion:"
 }

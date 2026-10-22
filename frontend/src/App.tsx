@@ -28,6 +28,7 @@ import { NotFoundPage } from "./pages/NotFound";
 import { SignInPage } from "./pages/SignIn";
 import { AdviserViewPage } from "./report/AdviserView";
 import { SignalReportPage } from "./report/SignalReport";
+import { CriterionReviewLayout } from "./report/CriterionReviewScope";
 import { RouteFrame } from "./routing/RouteFrame";
 import { ManageRubricPage } from "./rubric/Manage";
 import { SignalReviewCriteriaPage } from "./rubric/SignalReviewCriteria";
@@ -66,8 +67,10 @@ const router = createBrowserRouter(
           <Route path="/stored-files" element={<StoredFilesPage />} />
           <Route path="/rubric/:rubricId/review" element={<SignalReviewCriteriaPage />} />
           <Route path="/checks/:checkRunId" element={<CheckProgressPage />} />
-          <Route path="/report/:checkRunId" element={<SignalReportPage />} />
-          <Route path="/report/:checkRunId/document" element={<SignalDocumentViewerPage />} />
+          <Route path="/report/:checkRunId" element={<CriterionReviewLayout />}>
+            <Route index element={<SignalReportPage />} />
+            <Route path="document" element={<SignalDocumentViewerPage />} />
+          </Route>
           <Route path="/flags/:flagId" element={<FlagDetailPage />} />
           <Route path="/audit" element={<AuditLogPage />} />
         </Route>

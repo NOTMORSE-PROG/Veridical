@@ -1,7 +1,7 @@
 import { fireEvent, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { CriterionResultOut, FlagOut, FlagSummaryOut, ManuscriptViewerOut, ReportOut } from "../api/types";
-import { renderWithProviders, stubFetchByPath } from "../test/renderWithProviders";
+import { renderWithReviewProviders as renderWithProviders, stubFetchByPath } from "../test/renderWithProviders";
 import { SignalDocumentViewerPage } from "./SignalDocumentViewer";
 import { CITATION_COMPARISON } from "../test/citationComparisonFixture";
 import { localDate } from "../domain/localDate";

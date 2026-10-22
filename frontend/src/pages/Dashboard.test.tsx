@@ -608,7 +608,7 @@ describe("DashboardPage", () => {
     expect(screen.getByText("Conditionally Ready")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Review 2 unresolved criteria. Opens the manuscript and analysis." })).toHaveAttribute(
       "href",
-      "/report/7/document",
+      "/report/7/document?view=decision&pane=review",
     );
     expect(screen.getByRole("button", { name: /Needs you1 manuscript/ })).toBeInTheDocument();
     expect(screen.getByText("2").closest(".signal-record__assessment")).toHaveTextContent(

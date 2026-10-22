@@ -4,6 +4,8 @@ import { createMemoryRouter, RouterProvider } from "react-router";
 import { afterEach, expect, it, vi } from "vitest";
 import { SignalDocumentViewerPage } from "./SignalDocumentViewer";
 import { stubFetchByPath } from "../test/renderWithProviders";
+import { ME_QUERY_KEY } from "../auth/useAuth";
+import { CriterionReviewLayout } from "../report/CriterionReviewScope";
 
 vi.mock("./PdfPane", () => ({ PdfPane: () => <div>PDF source</div> }));
 vi.mock("./ReuseExplorePanel", () => ({ ReuseExplorePanel: () => null }));
@@ -42,7 +44,8 @@ async function setup({ origin = ORIGIN, open = true, drafts: makeDrafts = true }
   });
   vi.stubGlobal("fetch", fetch);
   const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
-  const router = createMemoryRouter([{ path: "/report/:checkRunId/document", element: <SignalDocumentViewerPage /> }], { initialEntries: [{ pathname: "/report/5/document", search: origin.slice(origin.indexOf("?")), state: { notice: "retained" } }] });
+  client.setQueryData(ME_QUERY_KEY, { id: 1 });
+  const router = createMemoryRouter([{ path: "/report/:checkRunId", element: <CriterionReviewLayout />, children: [{ path: "document", element: <SignalDocumentViewerPage /> }] }], { initialEntries: [{ pathname: "/report/5/document", search: origin.slice(origin.indexOf("?")), state: { notice: "retained" } }] });
   render(<QueryClientProvider client={client}><RouterProvider router={router} /></QueryClientProvider>);
   const choices = await screen.findAllByRole("button", { name: "Meets criterion" });
   if (makeDrafts) {

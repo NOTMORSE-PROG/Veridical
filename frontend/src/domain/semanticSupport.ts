@@ -10,4 +10,5 @@ export const RECORDED_GRADE_BASIS = {
   missingExplanation: "No AI explanation is available for this review item.",
   missingExcerpt: "No located excerpt is available for this review item.",
   missingLocation: "No manuscript location is available for this excerpt.",
+  recordedSuggestion: "Recorded AI suggestion:",
 } as const;

@@ -99,10 +99,26 @@ export function useExcludedReuseMatches(
   });
 }
 
-export function useResolveEscalation(checkRunId: number) {
+const RESOLUTION_OUTCOMES = new Set(["passed", "failed", "not_applicable"]);
+
+function resolutionResponseMatches(out: ResolveEscalationOut, checkRunId: number, checkResultId: number) {
+  return out !== null && typeof out === "object" && out.check_result_id === checkResultId
+    && RESOLUTION_OUTCOMES.has(out.outcome) && out.report !== null && typeof out.report === "object"
+    && out.report.check_run_id === checkRunId && Array.isArray(out.report.results)
+    && out.report.results.every((row) => row !== null && typeof row === "object" && typeof row.criterion_id === "number"
+      && (row.level == null || (typeof row.level === "object" && typeof row.level.name === "string")));
+}
+
+export function useResolveEscalation(checkRunId: number, isCurrent: () => boolean) {
   const queryClient = useQueryClient();
+  function refreshResolutionRecords() {
+    if (!isCurrent()) return;
+    void queryClient.invalidateQueries({ queryKey: ["report", checkRunId], exact: true });
+    void queryClient.invalidateQueries({ queryKey: ["report", checkRunId, "escalated"] });
+    void queryClient.invalidateQueries({ queryKey: ["stats"] });
+  }
   return useMutation({
-    mutationFn: ({
+    mutationFn: async ({
       checkResultId,
       resolution,
       reason,
@@ -114,17 +130,21 @@ export function useResolveEscalation(checkRunId: number) {
       // V-069 AC4: required (and only meaningful) when resolution is
       // "mark_level" -- the level's own ordinal.
       level?: number;
-    }) =>
-      api.post<ResolveEscalationOut>(
+    }) => {
+      const out = await api.post<ResolveEscalationOut>(
         `/check-runs/${checkRunId}/escalated/${checkResultId}/resolve`,
         { resolution, reason, level },
-      ),
-    onSuccess: (out) => {
-      // The response already carries the fresh report (ticket AC: "live");
-      // seed both caches directly instead of an extra round-trip.
-      queryClient.setQueryData(["report", checkRunId], out.report);
-      queryClient.invalidateQueries({ queryKey: ["report", checkRunId, "escalated"] });
-      queryClient.invalidateQueries({ queryKey: ["stats"] }); // dashboard badge
+      );
+      if (!resolutionResponseMatches(out, checkRunId, checkResultId)) {
+        throw new ApiError(502, "invalid_response", "The server response did not confirm this resolution. Refresh the review before confirming again.");
+      }
+      return out;
+    },
+    // Concurrent sibling replies can contain older report snapshots. Refetch
+    // the authoritative report rather than installing the last-arriving reply.
+    onSuccess: refreshResolutionRecords,
+    onError: (error) => {
+      if (error instanceof ApiError && error.code === "invalid_response") refreshResolutionRecords();
     },
   });
 }

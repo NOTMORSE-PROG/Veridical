@@ -12,10 +12,20 @@
 import { fireEvent, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { EscalatedItemOut, ResultRowCommon } from "../api/types";
-import { renderWithProviders, stubFetchByPath } from "../test/renderWithProviders";
+import { renderWithReviewProviders as renderWithProviders, stubFetchByPath } from "../test/renderWithProviders";
 import { SignalCriteriaResults, SignalEscalatedPanel } from "./SignalReviewSections";
 
 describe("criterion record count", () => {
+  it.each([false, true])("keeps system notes distinct from absent academic basis in criterion records (shared=%s)", (publicView) => {
+    const row: ResultRowCommon = { criterion_id: 1, text: "Custom criterion", type: "semantic", kind: "semantic", weight: 1,
+      weight_importance: "med", outcome: "escalated", score: null, basis: "llm", anchor: null,
+      reasoning: " \n\t ", reason: "No winning grade", evidence: [], resolved: false };
+    renderWithProviders(<SignalCriteriaResults results={[row]} checkRunId={5} publicView={publicView} />);
+    fireEvent.click(screen.getByText("Review evidence and reasoning"));
+    expect(screen.getByText("No AI explanation is available for this review item.")).toBeVisible();
+    expect(screen.getByText("No located excerpt is available for this review item.")).toBeVisible();
+    expect(screen.getByText("No winning grade")).toBeVisible();
+  });
   it.each([false, true])("V-081: five unassessed rows are records in private/shared view (%s)", (publicView) => {
     const results: ResultRowCommon[] = Array.from({ length: 5 }, (_, index) => ({
       criterion_id: index + 1, text: `Criterion ${index + 1}`, type: "semantic", kind: "semantic",
@@ -180,8 +190,8 @@ describe("SignalEscalatedPanel / SignalResolutionCard", () => {
     vi.stubGlobal("fetch", stubFetchByPath({ "/check-runs/5/escalated": items }));
     renderWithProviders(<SignalEscalatedPanel checkRunId={5} />);
     expect(await screen.findAllByText(reason)).toHaveLength(1);
-    expect(screen.getAllByText("No AI assessment was recorded.")).toHaveLength(2);
-    for (const button of screen.getAllByRole("button")) {
+    expect(screen.queryByText("No AI assessment was recorded.")).not.toBeInTheDocument();
+    for (const button of screen.getAllByRole("button").filter((button) => !button.hasAttribute("aria-expanded"))) {
       expect(button.getAttribute("aria-describedby")?.split(" "))
         .toContain("signal-shared-review-reason-5");
     }
@@ -198,7 +208,7 @@ describe("SignalEscalatedPanel / SignalResolutionCard", () => {
     expect(screen.queryByText("Shared review reason")).not.toBeInTheDocument();
   });
 
-  it("BUG-045/BUG-131: an injection-suspected item's vote summary never shows a bare agreement fraction, and renders the matched evidence", async () => {
+  it("BUG-045/BUG-131: an instruction warning never implies agreement and retains the matched evidence", async () => {
     vi.stubGlobal("fetch", stubFetchByPath({ "/check-runs/5/escalated": [INJECTION_SUSPECTED] }));
     renderWithProviders(<SignalEscalatedPanel checkRunId={5} />);
 
@@ -208,7 +218,7 @@ describe("SignalEscalatedPanel / SignalResolutionCard", () => {
     // it. Assert it is nowhere in the document, not just that the
     // replacement text is present.
     expect(
-      await screen.findByText("AI passes agreed, but that agreement cannot be trusted here."),
+      await screen.findByText("Text that may be directed at automated grading needs review."),
     ).toBeInTheDocument();
     expect(screen.queryByText(/^\d of \d AI passes/)).not.toBeInTheDocument();
     expect(screen.getByText("Text addressed at an automated grader")).toBeInTheDocument();

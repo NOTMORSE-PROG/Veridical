@@ -1,0 +1,55 @@
+import type { EscalatedItemOut } from "../api/types";
+
+export const REVIEW_DRAFT_COPY = {
+  retention: "Your choice and reason stay available while you move between this report and its manuscript. Confirm resolution saves them.",
+  saving: "Saving this resolution. You can inspect the manuscript while it finishes.",
+} as const;
+
+export const CRITERION_REVIEW_COPY = {
+  supportIncomplete: "The separate evidence review did not finish.",
+  supportUnsupported: "The separate evidence review did not support the suggested grade.",
+  supportUnconfirmed: "The separate evidence review could not confirm that the evidence supports the suggested grade.",
+  sourceInstructions: "Text that may be directed at automated grading needs review.",
+  unrecognizedGrade: "The recorded suggestion is not a recognized grade for this criterion.",
+  notGraded: "A completed grade is not available in this review record.",
+  tentativeSuggestion: "A tentative AI suggestion is recorded. Review it against the criterion and manuscript.",
+  details: "technical assessment details",
+  detailsTitle: "Recorded assessment details",
+  detailsQualification: "These entries describe stored grading results. They do not count provider requests or independent reviewers.",
+  entriesLabel: "Recorded result entries",
+  missingEntry: "No grade label recorded.",
+  noEntries: "No comparison entries are present in this record.",
+} as const;
+
+export interface CriterionReviewNotice {
+  kind: "support" | "source_instructions" | "unrecognized_grade" | "not_graded" | "tentative_suggestion";
+  text: string;
+}
+
+/** Recorded limitations can coexist; result slots do not establish their cause. */
+export function criterionReviewNotices(item: EscalatedItemOut): CriterionReviewNotice[] {
+  const notices: CriterionReviewNotice[] = [];
+  if (item.support_withheld || item.review_reason === "support_incomplete" || item.review_reason === "support_unconfirmed") {
+    notices.push({
+      kind: "support",
+      text: item.support_status === "incomplete" || item.review_reason === "support_incomplete"
+        ? CRITERION_REVIEW_COPY.supportIncomplete
+        : item.support_status === "unsupported"
+          ? CRITERION_REVIEW_COPY.supportUnsupported
+          : CRITERION_REVIEW_COPY.supportUnconfirmed,
+    });
+  }
+  if (item.injection_suspected || item.review_reason === "injection_suspected") {
+    notices.push({ kind: "source_instructions", text: CRITERION_REVIEW_COPY.sourceInstructions });
+  }
+  if (item.verdict_unrecognized) {
+    notices.push({ kind: "unrecognized_grade", text: CRITERION_REVIEW_COPY.unrecognizedGrade });
+  }
+  if (item.review_reason === "not_graded") {
+    notices.push({ kind: "not_graded", text: CRITERION_REVIEW_COPY.notGraded });
+  }
+  if (notices.length === 0 && item.ai_majority_verdict?.trim()) {
+    notices.push({ kind: "tentative_suggestion", text: CRITERION_REVIEW_COPY.tentativeSuggestion });
+  }
+  return notices;
+}

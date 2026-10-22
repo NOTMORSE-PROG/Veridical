@@ -527,6 +527,36 @@ def _pending_review_reason(outcome: str) -> str:
     )
 
 
+def _pending_semantic_basis_flowables(
+    row: CriterionResultOut, styles: dict[str, ParagraphStyle]
+) -> list:
+    if row.kind != "semantic" or row.basis != "llm" or row.outcome != "escalated":
+        return []
+    labels = _semantic_support_labels()
+    parts = [
+        Paragraph(escape(labels["review"]), styles["body"]),
+        Paragraph(escape(labels["qualification"]), styles["body"]),
+    ]
+    if row.reasoning and row.reasoning.strip():
+        parts.append(Paragraph("Recorded AI explanation", styles["body_bold"]))
+        parts.append(Paragraph(escape(row.reasoning), styles["body"]))
+    else:
+        parts.append(Paragraph(escape(labels["missing_explanation"]), styles["body"]))
+    if row.evidence:
+        parts.append(Paragraph("Recorded passages and locations", styles["body_bold"]))
+        for entry in row.evidence:
+            parts.append(Paragraph(escape(entry.quote), styles["body"]))
+            location = (
+                _display_anchor(entry.anchor)
+                if entry.anchor.strip()
+                else labels["missing_location"]
+            )
+            parts.append(Paragraph(escape(location), styles["caption"]))
+    else:
+        parts.append(Paragraph(escape(labels["missing_excerpt"]), styles["body"]))
+    return parts
+
+
 def _criterion_flowable(row: CriterionResultOut, styles: dict[str, ParagraphStyle]) -> list:
     parts = [Paragraph(escape(row.text), styles["cell_bold"])]
     caption_bits = [_source_caption(row)]
@@ -547,9 +577,8 @@ def _criterion_flowable(row: CriterionResultOut, styles: dict[str, ParagraphStyl
         if row.resolution.ai_majority_verdict:
             parts.append(
                 Paragraph(
-                    "The AI's own vote leaned "
-                    f"{escape(row.resolution.ai_majority_verdict)}, but did not reach the "
-                    "agreement threshold needed to auto-decide.",
+                    f"{escape(_semantic_support_labels()['recorded_suggestion'])} "
+                    f"{escape(row.resolution.ai_majority_verdict)}.",
                     styles["cell_caption"],
                 )
             )
@@ -878,27 +907,7 @@ def build_report_pdf(data: ReportExportData) -> bytes:
                 ),
             ]
             flow.append(KeepTogether(block))
-            if row.kind == "semantic" and row.basis == "llm" and row.outcome == "escalated":
-                labels = _semantic_support_labels()
-                flow.append(Paragraph(escape(labels["review"]), styles["body"]))
-                flow.append(Paragraph(escape(labels["qualification"]), styles["body"]))
-                if row.reasoning and row.reasoning.strip():
-                    flow.append(Paragraph("Recorded AI explanation", styles["body_bold"]))
-                    flow.append(Paragraph(escape(row.reasoning), styles["body"]))
-                elif not (row.reason and row.reason.strip()):
-                    flow.append(Paragraph(escape(labels["missing_explanation"]), styles["body"]))
-                if row.evidence:
-                    flow.append(Paragraph("Recorded passages and locations", styles["body_bold"]))
-                    for entry in row.evidence:
-                        flow.append(Paragraph(escape(entry.quote), styles["body"]))
-                        location = (
-                            _display_anchor(entry.anchor)
-                            if entry.anchor.strip()
-                            else labels["missing_location"]
-                        )
-                        flow.append(Paragraph(escape(location), styles["caption"]))
-                elif not (row.reason and row.reason.strip()):
-                    flow.append(Paragraph(escape(labels["missing_excerpt"]), styles["body"]))
+            flow.extend(_pending_semantic_basis_flowables(row, styles))
             flow.append(Spacer(1, 6))
         flow.append(Spacer(1, 6))
 

@@ -5,6 +5,10 @@ import { render } from "@testing-library/react";
 import type { ReactElement } from "react";
 import { createMemoryRouter, RouterProvider } from "react-router";
 import { vi } from "vitest";
+import { CriterionReviewProvider } from "../report/CriterionReviewScope";
+import { ME_QUERY_KEY } from "../auth/useAuth";
+
+type RenderOptions = { route?: string; path?: string; state?: Record<string, unknown>; reviewRunId?: number; reviewInstructorId?: number };
 
 export function renderWithProviders(
   ui: ReactElement,
@@ -12,11 +16,14 @@ export function renderWithProviders(
     route = "/",
     path,
     state,
-  }: { route?: string; path?: string; state?: Record<string, unknown> } = {},
+    reviewRunId,
+    reviewInstructorId = 1,
+  }: RenderOptions = {},
 ) {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   });
+  if (reviewRunId !== undefined) queryClient.setQueryData(ME_QUERY_KEY, { id: reviewInstructorId });
   // A data router (createMemoryRouter), not plain MemoryRouter/Routes:
   // react-router's navigation-blocking hook (useBlocker, BUG-037) only
   // works inside a data router, and every screen under test must render
@@ -26,7 +33,8 @@ export function renderWithProviders(
   // "*" (no `path` given) matches unconditionally, same as the old
   // bare-`ui`-with-no-Route-boundary fallback did.
   const entry = state ? { pathname: route, state } : route;
-  const router = createMemoryRouter([{ path: path ?? "*", element: ui }], {
+  const element = reviewRunId === undefined ? ui : <CriterionReviewProvider checkRunId={reviewRunId} instructorId={reviewInstructorId}>{ui}</CriterionReviewProvider>;
+  const router = createMemoryRouter([{ path: path ?? "*", element }], {
     initialEntries: [entry],
   });
   return render(
@@ -34,6 +42,12 @@ export function renderWithProviders(
       <RouterProvider router={router} />
     </QueryClientProvider>,
   );
+}
+
+/** Explicit private report owner for isolated report/card component controls. */
+export function renderWithReviewProviders(ui: ReactElement<{ checkRunId?: number }>, options: RenderOptions = {}) {
+  const routeRunId = options.route?.match(/^\/report\/(\d+)/)?.[1];
+  return renderWithProviders(ui, { ...options, reviewRunId: routeRunId ? Number(routeRunId) : ui.props.checkRunId ?? 5 });
 }
 
 /** Routes a stubbed `fetch` by pathname → JSON body (or a Response). */

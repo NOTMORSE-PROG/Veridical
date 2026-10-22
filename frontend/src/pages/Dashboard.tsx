@@ -185,7 +185,8 @@ function RecordPrimaryAction({
     const description = row.latest_decision
       ? `${label}. Opens the manuscript and recorded analysis.`
       : `${label}. Opens the manuscript and analysis.`;
-    return <ActionLink id={`review-desk-primary-${row.id}`} to={`/report/${row.latest_check_run_id}/document`} aria-label={description}>{label}</ActionLink>;
+    const destination = `/report/${row.latest_check_run_id}/document${row.escalations_awaiting_review > 0 ? "?view=decision&pane=review" : ""}`;
+    return <ActionLink id={`review-desk-primary-${row.id}`} to={destination} aria-label={description}>{label}</ActionLink>;
   }
   if (row.latest_check_run_status && row.latest_check_run_id) {
     if (row.latest_check_run_status === "cancelled") {

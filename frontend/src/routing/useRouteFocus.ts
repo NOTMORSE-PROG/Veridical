@@ -2,7 +2,7 @@
 // main heading here; browser Back/Forward receives the same focus treatment
 // as an in-app link. A focused return control can also be registered for a
 // source-detail round trip, preserving the instructor's review position.
-import { type RefObject, useEffect, useRef } from "react";
+import { type RefObject, useLayoutEffect, useRef } from "react";
 import { useLocation, useNavigationType } from "react-router";
 
 interface PendingReturnFocus {
@@ -144,7 +144,9 @@ export function useRouteFocus(
   const registeredReturnRef = useRef(false);
   const restoredRef = useRef<RestoredFocus | null>(null);
 
-  useEffect(() => {
+  // Establish route/return focus before source panes place their requested
+  // target in a passive effect, including when that source is already cached.
+  useLayoutEffect(() => {
     document.title = title;
     // BUG-167: compared with the FULL path, including search, everywhere in
     // this hook -- a return control's own list-view/filter/pagination state

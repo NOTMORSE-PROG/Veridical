@@ -1,7 +1,7 @@
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { EscalatedItemOut, FlagSummaryOut, ReportOut } from "../api/types";
-import { renderWithProviders, stubFetchByPath } from "../test/renderWithProviders";
+import { renderWithReviewProviders as renderWithProviders, stubFetchByPath } from "../test/renderWithProviders";
 import { SignalReportPage } from "./SignalReport";
 
 const BASE_REPORT: ReportOut = {
@@ -203,12 +203,11 @@ describe("SignalReportPage", () => {
     expect(screen.getByRole("button", { name: "Meets criterion" })).toBeInTheDocument();
   });
 
-  it("BUG-132: every resolution button is programmatically described by the vote summary and reason above it", async () => {
+  it("BUG-132: every resolution button is described by the unresolved state and essential reason", async () => {
     // A screen-reader user can tab directly to a button (not just read
     // top-to-bottom); before this fix they heard only "Meets criterion,
     // button" -- none of the context explaining WHY this criterion needs
-    // review. `ESCALATED` has both a vote summary (always present) and a
-    // `reason` (conditional) -- asserts BOTH are in the described-by set,
+    // review. The unresolved state and recorded reason are in the described-by set,
     // resolving to real elements containing the real context text.
     stubReport(BASE_REPORT, [ESCALATED]);
     renderWithProviders(<SignalReportPage />, { route: "/report/5", path: "/report/:checkRunId" });
@@ -219,7 +218,9 @@ describe("SignalReportPage", () => {
     const describedText = describedByIds
       .map((id) => document.getElementById(id)?.textContent ?? "")
       .join(" ");
-    expect(describedText).toContain("Split vote: pass, fail.");
+    expect(describedByIds.every((id) => document.getElementById(id))).toBe(true);
+    expect(describedText).toContain("No grade accepted");
+    expect(describedText).not.toContain("Split vote:");
     expect(describedText).toContain(ESCALATED.reason);
 
     // Every other visible button in the row shares the identical
@@ -647,7 +648,7 @@ describe("SignalReportPage", () => {
       "/check-runs/5/share": null,
       "/auth/me": ME_INSTRUCTOR,
     }));
-    renderWithProviders(<SignalReportPage />, { route: "/report/5", path: "/report/:checkRunId" });
+    renderWithProviders(<SignalReportPage />, { route: "/report/5", path: "/report/:checkRunId", reviewInstructorId: ME_INSTRUCTOR.id });
 
     const viewedBadges = await screen.findAllByText("Viewed");
     expect(viewedBadges).toHaveLength(1);
@@ -667,7 +668,7 @@ describe("SignalReportPage", () => {
       "/check-runs/5/share": null,
       "/auth/me": ME_INSTRUCTOR,
     }));
-    renderWithProviders(<SignalReportPage />, { route: "/report/5", path: "/report/:checkRunId" });
+    renderWithProviders(<SignalReportPage />, { route: "/report/5", path: "/report/:checkRunId", reviewInstructorId: ME_INSTRUCTOR.id });
 
     await screen.findByText("Showing 1 of 1 open finding across 1 location.");
     expect(screen.queryByText("Viewed")).not.toBeInTheDocument();
