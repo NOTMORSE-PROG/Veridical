@@ -36,9 +36,9 @@ export function rememberRouteReturnFocus(
   pendingReturnFocus = { returnPath, destinationPath, elementId, armed: options.armed ?? false };
 }
 
-function restoreRegisteredFocus(elementId: string): boolean {
+function restoreRegisteredFocus(elementId: string): HTMLElement | null {
   const target = document.getElementById(elementId);
-  if (!target) return false;
+  if (!target) return null;
 
   // The source control can live inside nested native disclosures which
   // remount closed after navigation. Reveal it before restoring focus.
@@ -48,14 +48,84 @@ function restoreRegisteredFocus(elementId: string): boolean {
     disclosure = disclosure.parentElement?.closest("details");
   }
   target.focus({ preventScroll: true });
-  if (document.activeElement !== target) return false;
+  if (document.activeElement !== target) return null;
   requestAnimationFrame(() => {
+    if (!target.isConnected || document.activeElement !== target) return;
     const bounds = target.getBoundingClientRect();
     if (bounds.top < 0 || bounds.bottom > window.innerHeight) {
       target.scrollIntoView({ block: "nearest" });
     }
   });
-  return true;
+  return target;
+}
+
+function observeUserIntent(
+  target: HTMLElement | null,
+  retire: () => void,
+  restoring: () => boolean = () => false,
+): () => void {
+  const onFocus = (event: FocusEvent) => {
+    if (!restoring() && event.target !== target) retire();
+  };
+  // React can blur a still-connected node just before removing it. Neutral
+  // focusout alone does not establish that the instructor moved focus.
+  const onKey = (event: KeyboardEvent) => {
+    if (event.key === "Tab") retire();
+  };
+  const onPointer = (event: PointerEvent) => {
+    if (!target || !target.contains(event.target as Node)) retire();
+  };
+  document.addEventListener("focusin", onFocus, true);
+  document.addEventListener("keydown", onKey, true);
+  document.addEventListener("pointerdown", onPointer, true);
+  window.addEventListener("blur", retire);
+  return () => {
+    document.removeEventListener("focusin", onFocus, true);
+    document.removeEventListener("keydown", onKey, true);
+    document.removeEventListener("pointerdown", onPointer, true);
+    window.removeEventListener("blur", retire);
+  };
+}
+
+interface RestoredFocus {
+  path: string;
+  target: HTMLElement;
+}
+
+function observeRestoredFocus(
+  target: HTMLElement,
+  headingRef: RefObject<HTMLElement | null>,
+  retire: () => void,
+): () => void {
+  const scope = headingRef.current?.closest("main") ?? target.closest("main") ?? document.body;
+  let disposed = false;
+  let removeIntent = () => {};
+  const observer = new MutationObserver(() => {
+    if (disposed || target.isConnected) return;
+    const active = document.activeElement;
+    const heading = headingRef.current;
+    const recover = scope.isConnected && heading?.isConnected
+      && (active === document.body || active === null || active === target);
+    stop();
+    if (!recover) return;
+    const replacement = document.getElementById(target.id);
+    if (replacement && scope.contains(replacement) && restoreRegisteredFocus(target.id)) return;
+    heading.focus();
+  });
+  const dispose = () => {
+    disposed = true;
+    observer.disconnect();
+    removeIntent();
+  };
+  const stop = () => {
+    dispose();
+    retire();
+  };
+  removeIntent = observeUserIntent(target, stop);
+  observer.observe(scope, { childList: true, subtree: true });
+  // Effect cleanup leaves the record available for StrictMode's replay.
+  // User intent or reconciliation retires it permanently instead.
+  return dispose;
 }
 
 export function useRouteFocus(
@@ -67,6 +137,7 @@ export function useRouteFocus(
   const navigationType = useNavigationType();
   const ranRef = useRef(false);
   const registeredReturnRef = useRef(false);
+  const restoredRef = useRef<RestoredFocus | null>(null);
 
   useEffect(() => {
     document.title = title;
@@ -79,6 +150,19 @@ export function useRouteFocus(
     // return path." Harmless for a destination page with no meaningful
     // search (`location.search` is just "").
     const fullPath = location.pathname + location.search;
+    const watchRestoration = (target: HTMLElement) => {
+      const ownership = { path: fullPath, target };
+      restoredRef.current = ownership;
+      return observeRestoredFocus(target, headingRef, () => {
+        if (restoredRef.current === ownership) restoredRef.current = null;
+      });
+    };
+    const restored = restoredRef.current;
+    if (restored?.path === fullPath && restored.target.isConnected
+      && document.activeElement === restored.target) {
+      return watchRestoration(restored.target);
+    }
+    restoredRef.current = null;
 
     // A Link can carry its origin control in route state. Registering at the
     // destination is resilient to async source rendering and avoids relying
@@ -103,44 +187,55 @@ export function useRouteFocus(
       // as the browser's own Back button, and an instructor has no way to
       // know the internal navigation-type distinction produces two
       // different experiences for what looks like the same action.
-      if (restoreRegisteredFocus(pending.elementId)) {
+      const target = restoreRegisteredFocus(pending.elementId);
+      if (target) {
         // React StrictMode immediately replays a newly mounted effect in
         // development. Mark this route pass as handled before clearing the
         // shared registration, or the replay will treat it as an ordinary
         // route change and move focus from the restored control to the H1.
         ranRef.current = true;
         pendingReturnFocus = null;
-        return;
+        return watchRestoration(target);
       }
 
-      // Detail content can arrive after the route itself. Observe only until
-      // the registered return control exists, then disconnect immediately.
-      // BUG-167: a control that never appears at all (its own list view
-      // reset to a state that no longer renders it) used to leave this
-      // observer running forever with focus abandoned on <body> -- worse
-      // than the plain "move focus to the heading" fallback every OTHER
-      // route change gets. Bounded: whichever of "found it" / "timed out"
-      // happens first wins, and the timeout path falls back to the same
-      // heading-focus behavior an ordinary route change already uses.
+      // Async content may arrive after the route. Search is time-bounded;
+      // successful restoration then owns focus only until user intent,
+      // removal reconciliation or route cleanup (including cache refresh).
       let settled = false;
-      const observer = new MutationObserver(() => {
-        if (settled || !restoreRegisteredFocus(pending.elementId)) return;
-        settled = true;
-        pendingReturnFocus = null;
+      let restoring = false;
+      let disposeOwnership: (() => void) | undefined;
+      const releaseSearch = () => {
         observer.disconnect();
         window.clearTimeout(timeoutId);
-      });
-      observer.observe(document.body, { childList: true, subtree: true });
-      const timeoutId = window.setTimeout(() => {
+        removeIntent();
+      };
+      const finishSearch = () => {
         if (settled) return;
         settled = true;
-        observer.disconnect();
-        pendingReturnFocus = null;
+        ranRef.current = true;
+        if (pendingReturnFocus === pending) pendingReturnFocus = null;
+        releaseSearch();
+      };
+      const observer = new MutationObserver(() => {
+        if (settled) return;
+        restoring = true;
+        const appeared = restoreRegisteredFocus(pending.elementId);
+        restoring = false;
+        if (!appeared) return;
+        finishSearch();
+        disposeOwnership = watchRestoration(appeared);
+      });
+      const scope = headingRef.current?.closest("main") ?? document.body;
+      observer.observe(scope, { childList: true, subtree: true });
+      const timeoutId = window.setTimeout(() => {
+        if (settled) return;
+        finishSearch();
         headingRef.current?.focus();
       }, RETURN_FOCUS_OBSERVER_TIMEOUT_MS);
+      const removeIntent = observeUserIntent(null, finishSearch, () => restoring);
       return () => {
-        observer.disconnect();
-        window.clearTimeout(timeoutId);
+        releaseSearch();
+        disposeOwnership?.();
       };
     } else if (
       pending
