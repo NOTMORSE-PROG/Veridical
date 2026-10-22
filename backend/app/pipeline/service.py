@@ -77,7 +77,14 @@ async def create_check_run(
             "Upload it again to check it."
         )
 
-    rubric = await session.get(Rubric, rubric_id)
+    # Hold compatible reader locks until creation commits; criterion writers
+    # acquire the family's rows before checking whether any run pins this version.
+    rubric = await session.scalar(
+        select(Rubric)
+        .where(Rubric.id == rubric_id, Rubric.instructor_id == instructor_id)
+        .with_for_update(read=True)
+        .execution_options(populate_existing=True)
+    )
     if rubric is None or rubric.instructor_id != instructor_id:
         raise NotFoundError(f"No rubric with id {rubric_id}.")
     if not rubric.is_active:
