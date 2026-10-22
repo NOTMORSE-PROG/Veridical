@@ -188,6 +188,49 @@ def test_put_criteria_edit_and_confirm_round_trips_through_http(client, tmp_path
     assert all(c["weight"] == 60.0 for c in reloaded["criteria"])
 
 
+@pytest.mark.parametrize("confirm", [False, True])
+def test_put_replaced_criteria_returns_persisted_membership_and_reusable_ids(
+    client, tmp_path, confirm
+):
+    """F2.3: the successful response must describe the rows just saved."""
+    uploaded = _upload(client, tmp_path)
+    old_ids = {row["id"] for row in uploaded["criteria"]}
+    survivor = uploaded["criteria"][-1]
+    levels = [
+        {"level": 1, "name": "Limited", "descriptor": "Limited comparison", "points": 1},
+        {"level": 2, "name": "Developed", "descriptor": "Developed comparison", "points": 3},
+    ]
+    replacement = [
+        {
+            "type": "semantic",
+            "text": "Findings explain their relationship to earlier work",
+            "evidence": "Discussion comparison",
+            "weight": 7,
+            "levels": levels,
+        },
+        {**survivor, "text": "Retained requirement after edit", "weight": 2},
+    ]
+    route = f"/rubrics/{uploaded['id']}/criteria"
+    saved = client.put(route, json={"criteria": replacement, "confirm": confirm})
+    assert saved.status_code == 200, saved.text
+    body = saved.json()
+    assert body["is_active"] is confirm
+    assert len(body["criteria"]) == len(replacement)
+    assert [row["text"] for row in body["criteria"]] == [row["text"] for row in replacement]
+    assert body["criteria"][0]["id"] not in old_ids
+    assert body["criteria"][1]["id"] == survivor["id"]
+    assert [row["position"] for row in body["criteria"]] == [0, 1]
+    assert body["criteria"][0]["evidence"] == replacement[0]["evidence"]
+    assert body["criteria"][0]["weight"] == 7
+    assert body["criteria"][0]["levels"] == levels
+    fresh = client.get(f"/rubrics/{uploaded['id']}")
+    assert fresh.status_code == 200
+    assert body == fresh.json()
+    again = client.put(route, json={"criteria": body["criteria"], "confirm": confirm})
+    assert again.status_code == 200, again.text
+    assert again.json() == body
+
+
 def test_put_criteria_rejects_an_empty_list(client, tmp_path):
     """Server-side backstop for 'deleting all criteria -> confirm disabled'
     (the frontend disables the button; the API also refuses to persist
