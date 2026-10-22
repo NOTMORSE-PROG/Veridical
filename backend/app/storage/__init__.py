@@ -233,11 +233,14 @@ def ensure_local_file(settings: Settings, storage: Storage, file_ref: str) -> Pa
         staged.write(data)
         staged.close()
         try:
-            os.replace(staged.name, local_path)
-        except PermissionError as publication_error:
-            # Windows denies replacement while another source reader is open.
-            # Accept a competing fill only after verifying all downloaded bytes;
-            # absence, a different object or a failed comparison keeps the error.
+            # Both operations refuse an existing destination. Never replace the
+            # winner while another consumer may be opening its complete bytes.
+            if os.name == "nt":
+                os.rename(staged.name, local_path)
+            else:
+                os.link(staged.name, local_path)
+        except FileExistsError as publication_error:
+            # Accept a competing fill only after verifying all downloaded bytes.
             try:
                 already_complete = local_path.read_bytes() == data
             except OSError:
