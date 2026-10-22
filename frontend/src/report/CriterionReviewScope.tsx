@@ -87,7 +87,7 @@ export function CriterionReviewProvider({ checkRunId, instructorId, children }: 
       const focusFrom = document.activeElement;
       // The route owner, not an unmounted card's mutate callback, consumes
       // completion. No private draft is copied into report query records.
-      void resolve.mutateAsync({ checkResultId: id, resolution: draft.resolution, level: draft.level, reason: draft.reason.trim() }).then((out) => {
+      void resolve.mutateAsync({ checkResultId: id, criterionId: draft.criterionId, resolution: draft.resolution, level: draft.level, reason: draft.reason.trim() }).then((out) => {
         if (!isCurrent() || records.current.get(id) !== submitted) return;
         const completionMessage = message(out);
         const next = new Map(records.current); next.delete(id); publish(next);

@@ -223,6 +223,7 @@ RESOLUTION_VERB = {
     "accept_majority": "Accepted the AI's verdict",
     "mark_pass": "Marked Pass",
     "mark_fail": "Marked Fail",
+    "needs_document": "Excluded from readiness calculation: needs another document",
     # V-069: fallback only — `_criterion_flowable` prefers "Marked
     # {level name}" whenever `row.level` is present, which it always is
     # for a real `mark_level` resolution.
@@ -599,6 +600,8 @@ def _criterion_flowable(row: CriterionResultOut, styles: dict[str, ParagraphStyl
         parts.append(
             Paragraph(f"<b>{escape(verb)}.</b> {escape(row.resolution.reason)}", styles["cell"])
         )
+        if row.resolution.type == "needs_document":
+            parts.append(Paragraph("No grade recorded.", styles["cell_caption"]))
         if row.resolution.ai_majority_verdict:
             parts.append(
                 Paragraph(

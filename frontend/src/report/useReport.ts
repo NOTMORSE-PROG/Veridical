@@ -129,11 +129,13 @@ export function useResolveEscalation(checkRunId: number, isCurrent: () => boolea
   return useMutation({
     mutationFn: async ({
       checkResultId,
+      criterionId,
       resolution,
       reason,
       level,
     }: {
       checkResultId: number;
+      criterionId: number;
       resolution: EscalationResolution;
       reason: string;
       // V-069 AC4: required (and only meaningful) when resolution is
@@ -146,6 +148,15 @@ export function useResolveEscalation(checkRunId: number, isCurrent: () => boolea
       );
       if (!resolutionResponseMatches(out, checkRunId, checkResultId)) {
         throw new ApiError(502, "invalid_response", "The server response did not confirm this resolution. Refresh the review before confirming again.");
+      }
+      if (resolution === "needs_document") {
+        const rows = out.report.results.filter((row) => row.criterion_id === criterionId);
+        const row = rows.length === 1 ? rows[0] : undefined;
+        if (out.outcome !== "not_applicable" || out.score !== null || !row
+          || row.outcome !== "not_applicable" || row.score !== null || row.level != null
+          || row.resolution?.type !== "needs_document") {
+          throw new ApiError(502, "invalid_response", "The server response did not confirm this resolution. Refresh the review before confirming again.");
+        }
       }
       return out;
     },

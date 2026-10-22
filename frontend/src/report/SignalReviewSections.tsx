@@ -16,7 +16,7 @@ import {
   RESOLUTION_REASON_MIN_LENGTH,
 } from "../config/ui";
 import { isManuscriptQuote } from "../domain/evidenceDisplay";
-import { CRITERION_REVIEW_COPY, REVIEW_DRAFT_COPY, criterionReviewNotices } from "../domain/criterionReview";
+import { CRITERION_EXCLUSION_COPY, CRITERION_REVIEW_COPY, REVIEW_DRAFT_COPY, criterionReviewNotices } from "../domain/criterionReview";
 import { isOptionalComparisonLead } from "../domain/comparisonLeadIdentity";
 import { useViewedFlagIds } from "../domain/flagViewed";
 import { problemLabel } from "../domain/problemLabel";
@@ -506,7 +506,7 @@ function resolutionLabel(item: EscalatedItemOut, resolution: EscalationResolutio
   if (resolution === "accept_majority") return `Accept AI suggestion: ${item.ai_majority_verdict}`;
   if (resolution === "mark_pass") return "Mark as meets criterion";
   if (resolution === "mark_fail") return "Mark as does not meet";
-  if (resolution === "needs_document") return "Exclude: needs another document";
+  if (resolution === "needs_document") return CRITERION_EXCLUSION_COPY.action;
   return item.levels?.find((entry) => entry.level === level)?.name ?? "Selected rubric level";
 }
 
@@ -553,10 +553,12 @@ function SignalResolutionCard({ item, checkRunId, sharedReasonId, sourceTarget, 
   }
 
   function confirm() {
+    const submittedResolution = pending?.resolution;
     review.confirm(item.check_result_id, (out) => {
+      if (submittedResolution === "needs_document") return CRITERION_EXCLUSION_COPY.success;
       const result = out.report.results.find((row) => row.criterion_id === item.criterion_id);
       const resultLabel = result?.level?.name
-        ?? (out.outcome === "not_applicable" ? "excluded because another document is needed" : OUTCOME_COPY[out.outcome as ResultRowCommon["outcome"]]?.label ?? out.outcome);
+        ?? OUTCOME_COPY[out.outcome as ResultRowCommon["outcome"]]?.label ?? out.outcome;
       return `Criterion resolved as ${resultLabel}. The readiness band has been recalculated.`;
     });
   }
@@ -569,6 +571,9 @@ function SignalResolutionCard({ item, checkRunId, sharedReasonId, sourceTarget, 
   const injectionId = `signal-resolution-injection-${item.check_result_id}`;
   const unverifiedId = `signal-resolution-unverified-${item.check_result_id}`;
   const qualificationId = `signal-resolution-basis-${item.check_result_id}`;
+  const exclusionHintId = `signal-exclusion-hint-${item.check_result_id}`;
+  const exclusionConsequenceId = `signal-exclusion-consequence-${item.check_result_id}`;
+  const excluding = pending?.resolution === "needs_document";
   const reviewNotices = criterionReviewNotices(item);
   const noticeId = (kind: string) => `signal-resolution-notice-${item.check_result_id}-${kind}`;
   const showInjectionSnippet = Boolean(
@@ -653,7 +658,7 @@ function SignalResolutionCard({ item, checkRunId, sharedReasonId, sourceTarget, 
           {item.levels && item.levels.length > 0
             ? item.levels.map((level) => <Button key={level.level} variant="secondary" aria-describedby={`${describedBy} ${levelDescriptionId(level.level)}`} onClick={() => choose("mark_level", level.level)}>{level.name}</Button>)
             : <><Button variant="secondary" aria-describedby={describedBy} onClick={() => choose("mark_pass")}>Meets criterion</Button><Button variant="secondary" aria-describedby={describedBy} onClick={() => choose("mark_fail")}>Does not meet</Button></>}
-          <Button variant="quiet" aria-describedby={describedBy} onClick={() => choose("needs_document")}>Needs another document</Button>
+          <div className="signal-copy-flow"><Button variant="quiet" aria-describedby={`${describedBy} ${exclusionHintId}`} onClick={() => choose("needs_document")}>{CRITERION_EXCLUSION_COPY.action}</Button><p id={exclusionHintId} className="signal-field-hint">{CRITERION_EXCLUSION_COPY.hint}</p></div>
           {/* BUG-170: `verdict_unrecognized` means accepting this verdict
               is guaranteed to 409 server-side (the passes agreed on a
               string that still doesn't name any of this criterion's own
@@ -666,13 +671,14 @@ function SignalResolutionCard({ item, checkRunId, sharedReasonId, sourceTarget, 
         </div>
       ) : (
         <div className="signal-resolution-form">
+          {excluding && <div className="signal-copy-flow"><p id={exclusionConsequenceId}>{CRITERION_EXCLUSION_COPY.consequence}</p><p>{CRITERION_EXCLUSION_COPY.cancel}</p></div>}
           {selectedLevel && <div className="signal-copy-flow"><p><strong>Selected level: {selectedLevel.name}</strong></p><p>{selectedLevel.descriptor || "Description not recorded for this level."}</p></div>}
-          <label><span>Reason (required)</span><textarea ref={reasonRef} disabled={saving} rows={3} value={reason} aria-invalid={reasonInvalid || undefined} aria-describedby={reasonInvalid ? reasonErrorId : undefined} onChange={(event) => review.changeReason(item.check_result_id, event.target.value)} /></label>
+          <label><span>{excluding ? CRITERION_EXCLUSION_COPY.reason : "Reason (required)"}</span><textarea ref={reasonRef} disabled={saving} rows={3} value={reason} aria-invalid={reasonInvalid || undefined} aria-describedby={[excluding ? exclusionConsequenceId : null, reasonInvalid ? reasonErrorId : null].filter(Boolean).join(" ") || undefined} onChange={(event) => review.changeReason(item.check_result_id, event.target.value)} /></label>
           <p className="signal-field-hint">This reason appears in the instructor report and export.</p>
           {reasonInvalid && <p id={reasonErrorId} role="alert" className="signal-field-error">{reason.trim() ? `Enter at least ${RESOLUTION_REASON_MIN_LENGTH} characters.` : "Enter a reason before confirming."}</p>}
           {saving && <p role="status">{REVIEW_DRAFT_COPY.saving}</p>}
           {Boolean(pending.error) && <Alert title="Could not save this resolution" tone="error" role="alert">{pending.error instanceof Error ? pending.error.message : "Try again."}</Alert>}
-          <div><Button variant="secondary" disabled={saving} onClick={cancel}>Cancel</Button><Button variant="brand" disabled={saving} aria-describedby={describedBy} busy={saving} onClick={confirm}>Confirm resolution</Button></div>
+          <div><Button variant="secondary" disabled={saving} onClick={cancel}>Cancel</Button><Button variant="brand" disabled={saving} aria-describedby={`${describedBy}${excluding ? ` ${exclusionConsequenceId}` : ""}`} busy={saving} onClick={confirm}>{excluding ? CRITERION_EXCLUSION_COPY.confirm : "Confirm resolution"}</Button></div>
         </div>
       )}
     </article>
@@ -716,6 +722,7 @@ export function SignalEscalatedPanel({ checkRunId, sourceTarget, onOpenSource }:
       <div className="signal-review-section__heading"><div><p className="signal-section-kicker">First review task</p><h2 id="escalated-heading" ref={headingRef} tabIndex={-1}>Criteria needing your judgment</h2></div><span>{items?.length ?? 0} unresolved</span></div>
       <p className="signal-review-section__intro">VERIDICAL did not settle these items. Review the evidence and record your own reasoned resolution; the final decision remains unavailable until they are resolved.</p>
       <p className="signal-field-hint">{REVIEW_DRAFT_COPY.retention}</p>
+      <p className="signal-field-hint">{CRITERION_EXCLUSION_COPY.wait}</p>
       <p ref={announcementRef} tabIndex={-1} aria-live="polite" className="signal-live-region">{announcement}</p>
       {sharedReason && <Alert title="Shared review reason" tone="warning"><p id={sharedReasonId}>{sharedReason}</p></Alert>}
       {hasItems
@@ -825,7 +832,7 @@ export function SignalCriteriaResults({ results, checkRunId, publicView = false 
             onClick={() => rememberRouteReturnFocus(location.pathname + location.search, destination, evidenceSummaryId)}
           >Open in manuscript: {instructorAnchor(anchor)}</ActionLink>;
         };
-        return <li key={row.criterion_id} className="signal-result-card"><div className="signal-result-card__top"><span className="signal-result-card__number">{index + 1}</span><span className={`signal-outcome signal-outcome--${outcome.tone}`}>{outcome.label}</span><span className={`signal-importance signal-importance--${row.weight_importance === "med" ? "medium" : row.weight_importance}`}>{row.weight_importance === "med" ? "Medium" : `${row.weight_importance.slice(0, 1).toUpperCase()}${row.weight_importance.slice(1)}`} importance</span></div><h3>{row.text}</h3>{row.resolution && <p className="signal-resolution-note"><strong>Instructor resolution:</strong> {row.resolution.reason}</p>}{/* BUG-065: this summary repeats verbatim once per row -- a screen-reader
+        return <li key={row.criterion_id} className="signal-result-card"><div className="signal-result-card__top"><span className="signal-result-card__number">{index + 1}</span><span className={`signal-outcome signal-outcome--${outcome.tone}`}>{outcome.label}</span><span className={`signal-importance signal-importance--${row.weight_importance === "med" ? "medium" : row.weight_importance}`}>{row.weight_importance === "med" ? "Medium" : `${row.weight_importance.slice(0, 1).toUpperCase()}${row.weight_importance.slice(1)}`} importance</span></div><h3>{row.text}</h3>{row.resolution?.type === "needs_document" && <p className="signal-resolution-note">{CRITERION_EXCLUSION_COPY.recorded}. {CRITERION_EXCLUSION_COPY.noGrade}</p>}{row.resolution && <p className="signal-resolution-note"><strong>Instructor resolution:</strong> {row.resolution.reason}</p>}{/* BUG-065: this summary repeats verbatim once per row -- a screen-reader
                 links/buttons list can't tell them apart without a per-criterion
                 accessible name, same fix already applied to the flag "Review
                 evidence" links and the escalation resolve-button groups. */}

@@ -9,13 +9,25 @@
 // full submission flows (including the actual mutation payload), the
 // mark_level path, the injection_suspected path, and focus survival
 // when the last escalated item resolves.
-import { fireEvent, screen, waitFor } from "@testing-library/react";
+import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { EscalatedItemOut, ResultRowCommon } from "../api/types";
 import { renderWithReviewProviders as renderWithProviders, stubFetchByPath } from "../test/renderWithProviders";
 import { SignalCriteriaResults, SignalEscalatedPanel } from "./SignalReviewSections";
 
 describe("criterion record count", () => {
+  it.each([false, true])("names only an actual document exclusion, not generic N/A (excluded=%s)", (excluded) => {
+    const row: ResultRowCommon = { criterion_id: 1, text: "Custom criterion", type: "semantic", kind: "semantic", weight: 1,
+      weight_importance: "med", outcome: "not_applicable", score: null, basis: "llm", anchor: null,
+      reasoning: null, reason: null, evidence: [], resolution: excluded ? {
+        type: "needs_document", reason: "A separate demonstration is required.", ai_majority_verdict: null,
+      } : null };
+    renderWithProviders(<SignalCriteriaResults results={[row]} checkRunId={5} />);
+    if (excluded) {
+      expect(screen.getByText("Excluded from readiness calculation: needs another document. No grade recorded.")).toBeVisible();
+      expect(screen.getByText("A separate demonstration is required.")).toBeVisible();
+    } else expect(screen.queryByText(/Excluded from readiness calculation: needs another document/)).not.toBeInTheDocument();
+  });
   it.each([false, true])("keeps system notes distinct from absent academic basis in criterion records (shared=%s)", (publicView) => {
     const row: ResultRowCommon = { criterion_id: 1, text: "Custom criterion", type: "semantic", kind: "semantic", weight: 1,
       weight_importance: "med", outcome: "escalated", score: null, basis: "llm", anchor: null,
@@ -295,7 +307,12 @@ describe("SignalEscalatedPanel / SignalResolutionCard", () => {
             check_result_id: 4,
             outcome: "not_applicable",
             score: null,
-            report: reportWith({ status: "needs_review", composite_score: null, results: [] }),
+            report: reportWith({ status: "needs_review", composite_score: null, results: [{
+              criterion_id: 13, text: REAL_MAJORITY.criterion_text, type: "semantic", kind: "semantic", weight: 20,
+              weight_importance: "med", outcome: "not_applicable", score: null, basis: "instructor", anchor: null,
+              reasoning: null, reason: null, evidence: [], level: null,
+              resolution: { type: "needs_document", reason: "Cannot judge this without opening the manuscript myself.", ai_majority_verdict: "pass" },
+            }] }),
           }),
           { status: 200 },
         );
@@ -306,11 +323,13 @@ describe("SignalEscalatedPanel / SignalResolutionCard", () => {
     vi.stubGlobal("fetch", fetchMock);
     renderWithProviders(<SignalEscalatedPanel checkRunId={5} />);
 
-    fireEvent.click(await screen.findByRole("button", { name: "Needs another document" }));
-    fireEvent.change(screen.getByRole("textbox", { name: "Reason (required)" }), {
+    const exclusion = await screen.findByRole("button", { name: "Exclude: needs another document" });
+    expect(exclusion).toHaveAccessibleDescription(/stays ungraded.*Saving resolves this review item/);
+    fireEvent.click(exclusion);
+    fireEvent.change(screen.getByRole("textbox", { name: "Reason for exclusion (required)" }), {
       target: { value: "Cannot judge this without opening the manuscript myself." },
     });
-    fireEvent.click(screen.getByRole("button", { name: "Confirm resolution" }));
+    fireEvent.click(screen.getByRole("button", { name: "Confirm exclusion" }));
 
     await waitFor(() =>
       expect(fetchMock).toHaveBeenCalledWith(
@@ -323,9 +342,84 @@ describe("SignalEscalatedPanel / SignalResolutionCard", () => {
     expect(body.resolution).toBe("needs_document");
     expect(
       await screen.findByText(
-        "Criterion resolved as excluded because another document is needed. The readiness band has been recalculated.",
+        "Exclusion recorded without a grade. The readiness report has been updated.",
       ),
     ).toBeInTheDocument();
+  });
+
+  it("explains exclusion on the focused field and keeps the item unresolved when canceled", async () => {
+    const fetch = stubFetchByPath({ "/check-runs/5/escalated": [REAL_MAJORITY] });
+    vi.stubGlobal("fetch", fetch);
+    renderWithProviders(<SignalEscalatedPanel checkRunId={5} />);
+    const exclude = await screen.findByRole("button", { name: "Exclude: needs another document" });
+    expect(screen.getByText("To wait for more evidence, leave the criterion unresolved.")).toBeVisible();
+    expect(exclude).toHaveAccessibleDescription(/stays ungraded.*Saving resolves this review item/);
+    expect(screen.getByRole("button", { name: "Meets criterion" })).not.toHaveAccessibleDescription(/Saving resolves this review item/);
+    fireEvent.click(exclude);
+    const reason = screen.getByRole("textbox", { name: "Reason for exclusion (required)" });
+    expect(reason).toHaveFocus();
+    expect(reason).toHaveAccessibleDescription(/stays ungraded.*Other review requirements still apply/);
+    fireEvent.click(screen.getByRole("button", { name: "Confirm exclusion" }));
+    expect(reason).toHaveAttribute("aria-invalid", "true");
+    expect(reason).toHaveAccessibleDescription(/Other review requirements still apply.*Enter a reason before confirming/);
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(screen.getByRole("heading", { name: REAL_MAJORITY.criterion_text })).toHaveFocus();
+    expect(screen.getByText("1 unresolved")).toBeVisible();
+    expect(fetch.mock.calls.some(([, init]) => init?.method === "POST")).toBe(false);
+    expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
+  });
+
+  it.each(["graded reply", "missing criterion", "generic N/A", "graded criterion", "retained level", "duplicate criterion"])(
+    "keeps the exclusion unfinished when the saved response has %s", async (variant) => {
+      const row: ResultRowCommon = {
+        criterion_id: 13, text: REAL_MAJORITY.criterion_text, type: "semantic", kind: "semantic", weight: 20,
+        weight_importance: "med", outcome: "not_applicable", score: null, basis: "llm", anchor: null,
+        reasoning: null, reason: null, evidence: [], level: null,
+        resolution: { type: "needs_document", reason: "A separate demonstration is required.", ai_majority_verdict: "pass" },
+      };
+      if (variant === "generic N/A") row.resolution = null;
+      if (variant === "graded criterion") { row.outcome = "passed"; row.score = 100; }
+      if (variant === "retained level") row.level = { name: "Proficient", ordinal: 2, points: 3, max_points: 4 };
+      const results = variant === "missing criterion" ? [] : variant === "duplicate criterion" ? [row, { ...row }] : [row];
+      const response = { check_result_id: 4, outcome: variant === "graded reply" ? "passed" : "not_applicable",
+        score: variant === "graded reply" ? 100 : null, report: reportWith({ results }) };
+      const fallback = stubFetchByPath({ "/check-runs/5/escalated": [REAL_MAJORITY] });
+      const fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => init?.method === "POST"
+        ? new Response(JSON.stringify(response), { status: 200 }) : fallback(input, init));
+      vi.stubGlobal("fetch", fetch);
+      renderWithProviders(<SignalEscalatedPanel checkRunId={5} />);
+      fireEvent.click(await screen.findByRole("button", { name: "Exclude: needs another document" }));
+      const reason = screen.getByRole("textbox", { name: "Reason for exclusion (required)" });
+      const exact = "  A separate demonstration is required.  ";
+      fireEvent.change(reason, { target: { value: exact } });
+      fireEvent.click(screen.getByRole("button", { name: "Confirm exclusion" }));
+      await screen.findByText("The server response did not confirm this resolution. Refresh the review before confirming again.");
+      expect(reason).toHaveValue(exact);
+      expect(screen.getByRole("button", { name: "Confirm exclusion" })).toBeEnabled();
+      expect(screen.queryByText("Exclusion recorded without a grade. The readiness report has been updated.")).not.toBeInTheDocument();
+      const call = fetch.mock.calls.find(([, init]) => init?.method === "POST");
+      expect(JSON.parse(call![1]!.body as string)).toEqual({ resolution: "needs_document", reason: exact.trim() });
+    },
+  );
+
+  it("retains an unfinished exclusion and its exact reason after a save failure", async () => {
+    const fallback = stubFetchByPath({ "/check-runs/5/escalated": [REAL_MAJORITY] });
+    const fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => init?.method === "POST"
+      ? new Response(JSON.stringify({ error: { code: "unavailable", message: "Temporary local failure" } }), { status: 503 })
+      : fallback(input, init));
+    vi.stubGlobal("fetch", fetch);
+    renderWithProviders(<SignalEscalatedPanel checkRunId={5} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Exclude: needs another document" }));
+    const reason = screen.getByRole("textbox", { name: "Reason for exclusion (required)" });
+    const exact = "  A separate demonstration is required.\nKeep this reason intact.  ";
+    fireEvent.change(reason, { target: { value: exact } });
+    fireEvent.click(screen.getByRole("button", { name: "Confirm exclusion" }));
+    await screen.findByText("Could not save this resolution");
+    expect(reason).toHaveValue(exact);
+    expect(screen.getByRole("button", { name: "Confirm exclusion" })).toBeEnabled();
+    expect(screen.queryByText("Exclusion recorded without a grade. The readiness report has been updated.")).not.toBeInTheDocument();
+    const card = reason.closest("article")!;
+    expect(within(card).getByRole("heading", { name: "Exclude: needs another document" })).toBeVisible();
   });
 
   it("requires a reason before confirming, announced without moving focus away from the field (WCAG 4.1.3)", async () => {

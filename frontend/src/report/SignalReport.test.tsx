@@ -223,12 +223,12 @@ describe("SignalReportPage", () => {
     expect(describedText).not.toContain("Split vote:");
     expect(describedText).toContain(ESCALATED.reason);
 
-    // Every other visible button in the row shares the identical
-    // described-by set -- the fix isn't scoped to just one button.
-    for (const name of ["Does not meet", "Needs another document"]) {
-      expect(screen.getByRole("button", { name }).getAttribute("aria-describedby")).toBe(
-        button.getAttribute("aria-describedby"),
-      );
+    // Every action retains the essential review descriptions. Exclusion
+    // also describes its own consequence before the instructor selects it.
+    for (const name of ["Does not meet", "Exclude: needs another document"]) {
+      const ids = screen.getByRole("button", { name }).getAttribute("aria-describedby")!.split(/\s+/);
+      expect(ids).toEqual(expect.arrayContaining(describedByIds));
+      expect(ids.every((id) => document.getElementById(id))).toBe(true);
     }
   });
 
@@ -260,7 +260,7 @@ describe("SignalReportPage", () => {
     // removes only the one guaranteed-to-fail button.
     expect(screen.getByRole("button", { name: "Meets criterion" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Does not meet" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Needs another document" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Exclude: needs another document" })).toBeInTheDocument();
   });
 
   it("still offers to accept a real, matchable majority verdict (BUG-170 guard is scoped to verdict_unrecognized, not every majority)", async () => {

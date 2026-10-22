@@ -16,6 +16,30 @@ from app.share.service import _to_public_report
 from tests.test_report_export_perf import _sixty_criterion_report
 
 
+@pytest.mark.parametrize("excluded", [False, True])
+def test_document_exclusion_is_named_only_from_its_recorded_resolution(excluded):
+    row = _sixty_criterion_report().report.results[0]
+    row.outcome = "not_applicable"
+    row.score = None
+    row.resolution = (
+        ResolutionOut(
+            type="needs_document",
+            reason="Separate <demonstration> & supporting material required.",
+            ai_majority_verdict=None,
+        )
+        if excluded
+        else None
+    )
+    text = " ".join(part.getPlainText() for part in _criterion_flowable(row, _styles("Helvetica")))
+    if excluded:
+        assert "Excluded from readiness calculation: needs another document." in text
+        assert "No grade recorded." in text
+        assert "Separate <demonstration> & supporting material required." in text
+    else:
+        assert "Excluded from readiness calculation: needs another document" not in text
+        assert "No grade recorded." not in text
+
+
 @pytest.mark.parametrize("recorded", [None, "The saved representative explanation."])
 def test_escalated_projection_uses_only_actual_reasoning(recorded):
     detail = {
@@ -70,7 +94,8 @@ def test_pending_copy_does_not_erase_tentative_votes_or_rename_not_graded():
 def test_resolved_export_does_not_invent_a_threshold_failure():
     row = _sixty_criterion_report().report.results[0]
     row.resolution = ResolutionOut(
-        type="mark_fail", reason="The instructor checked the actual requirement.",
+        type="mark_fail",
+        reason="The instructor checked the actual requirement.",
         ai_majority_verdict="pass",
     )
     # Flowable text inspection exercises export composition without authoring a PDF.

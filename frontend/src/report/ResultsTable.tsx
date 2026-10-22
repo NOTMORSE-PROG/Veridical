@@ -17,6 +17,7 @@ import { StatusPill, type StatusPillTone } from "../components/StatusPill";
 import { WeightImportanceTag } from "../components/WeightImportanceTag";
 import { truncateAtWord } from "../format/text";
 import { RECORDED_GRADE_BASIS } from "../domain/semanticSupport";
+import { CRITERION_EXCLUSION_COPY } from "../domain/criterionReview";
 
 // escalated/quota_exhausted/api_down all belong to the escalation panel
 // only (backend/app/checks/escalation.py's own NEEDS_REVIEW_OUTCOMES
@@ -260,7 +261,7 @@ const RESOLUTION_VERB: Record<string, string> = {
   // V-068 AC2: excluded from the score, not decided either way -- the
   // verb has to say that plainly, not borrow "Marked" language that
   // would imply a Pass/Fail judgment was made.
-  needs_document: "Marked as needing the document",
+  needs_document: CRITERION_EXCLUSION_COPY.recorded,
   // V-069: fallback only -- `ResolutionBlock` prefers "Marked {level
   // name}" whenever `level` is present, which it always is for a real
   // mark_level resolution.
@@ -286,6 +287,7 @@ function ResolutionBlock({ resolution, level }: { resolution: ResolutionOut; lev
       <p className="text-ink">
         <span className="font-semibold">{verb}.</span> {resolution.reason}
       </p>
+      {resolution.type === "needs_document" && <p className="text-xs text-ink-tertiary">{CRITERION_EXCLUSION_COPY.noGrade}</p>}
       {resolution.ai_majority_verdict && (
         <p className="text-xs text-ink-tertiary">
           {RECORDED_GRADE_BASIS.recordedSuggestion} {resolution.ai_majority_verdict}.

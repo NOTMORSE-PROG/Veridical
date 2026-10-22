@@ -1,8 +1,21 @@
 import type { EscalatedItemOut } from "../api/types";
 
 export const REVIEW_DRAFT_COPY = {
-  retention: "Your choice and reason stay available while you move between this report and its manuscript. Confirm resolution saves them.",
+  retention: "Your choice and reason stay available while you move between this report and its manuscript. Confirming saves them.",
   saving: "Saving this resolution. You can inspect the manuscript while it finishes.",
+} as const;
+
+export const CRITERION_EXCLUSION_COPY = {
+  action: "Exclude: needs another document",
+  hint: "This criterion stays ungraded and does not count toward the readiness calculation. Saving resolves this review item.",
+  wait: "To wait for more evidence, leave the criterion unresolved.",
+  consequence: "When saved, this criterion stays ungraded and outside the readiness calculation, and this review item is resolved. It is not marked as met. Other review requirements still apply.",
+  cancel: "Cancel to keep this criterion unresolved while you gather evidence.",
+  reason: "Reason for exclusion (required)",
+  confirm: "Confirm exclusion",
+  success: "Exclusion recorded without a grade. The readiness report has been updated.",
+  recorded: "Excluded from readiness calculation: needs another document",
+  noGrade: "No grade recorded.",
 } as const;
 
 export const CRITERION_REVIEW_COPY = {
