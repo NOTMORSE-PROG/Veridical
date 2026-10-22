@@ -7,6 +7,7 @@ transitions on the manuscript row and the raw-store write.
 
 import asyncio
 import hashlib
+import logging
 import zipfile
 from collections.abc import AsyncIterator, Callable
 from contextlib import suppress
@@ -79,6 +80,8 @@ EXTRACTORS: dict[str, Callable[[str, Settings], ExtractionResult]] = {
     ".pdf": pdf.extract_document,
     ".docx": docx.extract_document,
 }
+
+logger = logging.getLogger(__name__)
 
 
 def raw_store_path(settings: Settings, manuscript_id: int) -> Path:
@@ -191,9 +194,11 @@ async def ingest_manuscript(
     for text comparison only, so it costs zero quota. `vision_status` then
     stays "none", an honest "not read", never "done"."""
     settings = settings or get_settings()
+    manuscript_id, instructor_id = manuscript.id, manuscript.instructor_id
     manuscript.ingest_status = IngestStatus.processing
     await session.commit()
     loop = asyncio.get_running_loop()
+    finalizing = False
     try:
         # Dispatch by sniffed content (extensions lie) — inside the stage
         # boundary so an unreadable file leaves the row `failed`, not stuck.
@@ -274,6 +279,13 @@ async def ingest_manuscript(
         await loop.run_in_executor(
             None, storage.put_file, raw_path, storage_key_for(settings, str(raw_path))
         )
+        # Citation replacement and the terminal state are one transaction.
+        finalizing = True
+        await session.execute(delete(Citation).where(Citation.manuscript_id == manuscript_id))
+        session.add_all(Citation(manuscript_id=manuscript_id, **asdict(draft)) for draft in drafts)
+        manuscript.section_tree = result.section_tree.model_dump()
+        manuscript.ingest_status = IngestStatus.done
+        await session.commit()
     except FileMalformedError as exc:
         # Stage boundary (CODING.md §2): the failure is recorded on the row,
         # then propagates — run-level stage bookkeeping arrives with V-018.
@@ -281,10 +293,9 @@ async def ingest_manuscript(
         # BUG-066: `str(exc)` is safe to persist here ONLY because every
         # `FileMalformedError` raise site passes a vetted `messages.py`
         # template (FILE_UNREADABLE/FILE_ENCRYPTED), never raw file content.
-        manuscript.ingest_status = IngestStatus.failed
-        manuscript.ingest_failure_reason = IngestFailureReason.unreadable_format
-        manuscript.ingest_failure_detail = str(exc)
-        await session.commit()
+        await _record_ingest_failure(
+            session, manuscript_id, instructor_id, IngestFailureReason.unreadable_format, str(exc)
+        )
         raise
     except FileTooLargeError as exc:
         # BUG-180 (found while adding this ticket's own page-count/timeout
@@ -303,24 +314,62 @@ async def ingest_manuscript(
         # "over the MB limit" sentence would be flatly wrong for two of the
         # three. Never a raw caught exception's `str()` -- only ever this
         # library's own vetted `VeridicalError` message.
-        manuscript.ingest_status = IngestStatus.failed
-        manuscript.ingest_failure_reason = IngestFailureReason.file_too_large
-        manuscript.ingest_failure_detail = str(exc)
-        await session.commit()
+        await _record_ingest_failure(
+            session, manuscript_id, instructor_id, IngestFailureReason.file_too_large, str(exc)
+        )
         raise
     except Exception:
-        manuscript.ingest_status = IngestStatus.failed
-        manuscript.ingest_failure_reason = IngestFailureReason.extraction_failed
-        await session.commit()
+        await _record_ingest_failure(
+            session,
+            manuscript_id,
+            instructor_id,
+            IngestFailureReason.extraction_failed,
+            messages.MANUSCRIPT_PREPARATION_FAILED if finalizing else None,
+        )
         raise
-
-    # Re-ingest replaces the previous citation set (idempotent).
-    await session.execute(delete(Citation).where(Citation.manuscript_id == manuscript.id))
-    session.add_all(Citation(manuscript_id=manuscript.id, **asdict(draft)) for draft in drafts)
-    manuscript.section_tree = result.section_tree.model_dump()
-    manuscript.ingest_status = IngestStatus.done
-    await session.commit()
     return result
+
+
+async def _record_ingest_failure(
+    session: AsyncSession,
+    manuscript_id: int,
+    instructor_id: int,
+    reason: IngestFailureReason,
+    detail: str | None,
+) -> None:
+    """Best effort after a failed stage; the caller re-raises its original error."""
+    try:
+        # Rollback expires ORM attributes, so use only captured identity here.
+        await session.rollback()
+        changed = await session.execute(
+            update(Manuscript)
+            .where(
+                Manuscript.id == manuscript_id,
+                Manuscript.instructor_id == instructor_id,
+                Manuscript.purged_at.is_(None),
+            )
+            .values(
+                ingest_status=IngestStatus.failed,
+                ingest_failure_reason=reason,
+                ingest_failure_detail=detail,
+            )
+            .returning(Manuscript.id)
+            .execution_options(synchronize_session=False)
+        )
+        updated_id = changed.scalar_one_or_none()
+        await session.commit()
+        if updated_id is not None:
+            # Rollback can be a no-op before a transaction starts. Reload even
+            # then so callers cannot retain the cached processing state.
+            await session.get(Manuscript, manuscript_id, populate_existing=True)
+    except Exception as recovery_error:
+        # A persistent outage can prevent recording failure. Never mask the
+        # original error or copy database/document exception text into logs.
+        logger.warning(
+            "Could not record manuscript preparation failure (%s)", type(recovery_error).__name__
+        )
+        with suppress(Exception):
+            await session.rollback()
 
 
 async def ingest_upload(

@@ -30,6 +30,10 @@ MANUSCRIPT_SOURCE_MISSING = (
     "again to create a new reviewable copy."
 )
 
+MANUSCRIPT_PREPARATION_FAILED = (
+    "VERIDICAL could not finish preparing this manuscript. Try uploading it again."
+)
+
 FILE_ENCRYPTED = (
     "The file is password-protected, so its text cannot be read. Please upload an unlocked copy."
 )
