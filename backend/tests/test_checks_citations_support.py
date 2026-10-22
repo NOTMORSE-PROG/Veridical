@@ -214,20 +214,19 @@ async def test_malformed_llm_output_counts_as_parse_failure_not_quota():
     assert result.n_skipped_api_down == 0
 
 
-async def test_a_verdict_missing_from_an_otherwise_valid_batch_is_also_parse_failure():
-    """The per-index `verdicts.get(i) is None` path (batch validated, but
-    the model silently omitted one pair's verdict) is the SAME D-017
-    defect class as a batch-level ClaimSupportError, not a different
-    cause -- must count identically."""
+async def test_a_missing_verdict_withholds_the_entire_non_bijective_batch():
+    """BUG-329: a missing response row invalidates the whole batch mapping."""
     llm = ScriptedLLM(
         [{"verdicts": [{"index": 1, "verdict": "supported", "reasoning": "ok"}]}]  # omits index 0
     )
     result = await run_claim_support_check(
         llm, [_pair(0), _pair(1)], check_run_id=1, settings=get_settings()
     )
-    assert result.n_skipped_parse_failure == 1
+    assert result.n_skipped_parse_failure == 2
     assert result.n_skipped_quota == 0
     assert result.n_skipped_api_down == 0
+    assert result.flags == []
+    assert all(item.status == "unassessed" for item in result.pair_results)
 
 
 async def test_batching_respects_max_pairs_per_call():
