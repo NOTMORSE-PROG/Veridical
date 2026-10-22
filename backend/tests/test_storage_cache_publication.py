@@ -147,6 +147,28 @@ def test_warm_cache_does_not_download_or_rewrite(tmp_path):
     assert durable.reads == 0
 
 
+def test_late_cold_fill_preserves_already_published_file_identity(tmp_path, monkeypatch):
+    """A delayed filler must not rename over a file another consumer is opening."""
+    settings = Settings(_env_file=None, data_dir=tmp_path)
+    final_path = tmp_path / "source.pdf"
+    payload = b"complete private source"
+    written, release = threading.Event(), threading.Event()
+    pause_first_writer(monkeypatch, written, release)
+    with ThreadPoolExecutor(max_workers=1, thread_name_prefix="cold-fill") as pool:
+        late = pool.submit(ensure_local_file, settings, DurableBytes(payload), str(final_path))
+        try:
+            assert written.wait(timeout=5)
+            assert ensure_local_file(settings, DurableBytes(payload), str(final_path)) == final_path
+            published = final_path.stat()
+            release.set()
+            assert late.result(timeout=5) == final_path
+            assert final_path.stat().st_ino == published.st_ino
+            assert final_path.read_bytes() == payload
+        finally:
+            release.set()
+    assert [path for path in tmp_path.iterdir() if path.is_file()] == [final_path]
+
+
 @pytest.mark.parametrize("failure", [FileNotFoundError, TimeoutError, PermissionError])
 def test_durable_failure_retains_exception_and_creates_no_cache(tmp_path, failure):
     settings = Settings(_env_file=None, data_dir=tmp_path)
@@ -161,7 +183,7 @@ def test_durable_failure_retains_exception_and_creates_no_cache(tmp_path, failur
     assert not [path for path in tmp_path.rglob("*") if path.is_file()]
 
 
-@pytest.mark.parametrize("phase", ["write", "close", "replace"])
+@pytest.mark.parametrize("phase", ["write", "close", "publish"])
 def test_failed_publication_cleans_private_file_without_publishing_partial_source(
     tmp_path, monkeypatch, phase
 ):
@@ -200,13 +222,15 @@ def test_failed_publication_cleans_private_file_without_publishing_partial_sourc
         created.append(Path(temporary.name))
         return temporary
 
-    def fail_replace(*_args):
-        raise OSError("Controlled replace failure")
+    def fail_publish(*_args):
+        raise OSError("Controlled publish failure")
 
     monkeypatch.setattr(io, "open", controlled_open)
     monkeypatch.setattr(storage_module, "NamedTemporaryFile", record_temporary)
-    if phase == "replace":
-        monkeypatch.setattr(storage_module.os, "replace", fail_replace)
+    if phase == "publish":
+        monkeypatch.setattr(
+            storage_module.os, "rename" if os.name == "nt" else "link", fail_publish
+        )
     with pytest.raises(OSError, match=f"Controlled {phase} failure"):
         ensure_local_file(settings, DurableBytes(b"complete private source"), str(final_path))
     assert len(created) == 1
@@ -222,7 +246,8 @@ def test_source_is_closed_and_complete_before_publication(tmp_path, monkeypatch)
     final_path = tmp_path / "source.pdf"
     payload = b"complete private source"
     original_temporary = storage_module.NamedTemporaryFile
-    original_replace = os.replace
+    publication_name = "rename" if os.name == "nt" else "link"
+    original_publish = getattr(os, publication_name)
     created = []
 
     def record_temporary(*args, **kwargs):
@@ -230,15 +255,15 @@ def test_source_is_closed_and_complete_before_publication(tmp_path, monkeypatch)
         created.append(temporary)
         return temporary
 
-    def observe_replace(source, destination):
+    def observe_publish(source, destination):
         assert created[0].closed
         assert Path(source).parent == final_path.parent
         assert Path(source).read_bytes() == payload
         assert not final_path.exists()
-        return original_replace(source, destination)
+        return original_publish(source, destination)
 
     monkeypatch.setattr(storage_module, "NamedTemporaryFile", record_temporary)
-    monkeypatch.setattr(storage_module.os, "replace", observe_replace)
+    monkeypatch.setattr(storage_module.os, publication_name, observe_publish)
     assert ensure_local_file(settings, DurableBytes(payload), str(final_path)) == final_path
     assert final_path.read_bytes() == payload
     assert not Path(created[0].name).exists()
@@ -337,16 +362,16 @@ def test_competing_complete_fill_remains_usable_while_source_reader_is_open(
 
 
 @pytest.mark.parametrize("competing_state", ["same", "different", "missing", "unreadable"])
-def test_permission_error_requires_exact_complete_competing_bytes(
+def test_existing_destination_requires_exact_complete_competing_bytes(
     tmp_path, monkeypatch, competing_state
 ):
     settings = Settings(_env_file=None, data_dir=tmp_path)
     final_path = tmp_path / "source.pdf"
     payload = b"complete private source"
-    denied = PermissionError("Controlled publication denied")
+    denied = FileExistsError("Controlled existing destination")
     original_read = Path.read_bytes
 
-    def denied_replace(*_args):
+    def existing_destination(*_args):
         if competing_state != "missing":
             final_path.write_bytes(payload if competing_state == "same" else b"different source")
         raise denied
@@ -356,15 +381,91 @@ def test_permission_error_requires_exact_complete_competing_bytes(
             raise OSError("Controlled verification failure")
         return original_read(path)
 
-    monkeypatch.setattr(storage_module.os, "replace", denied_replace)
+    monkeypatch.setattr(
+        storage_module.os, "rename" if os.name == "nt" else "link", existing_destination
+    )
     monkeypatch.setattr(Path, "read_bytes", controlled_read)
     if competing_state == "same":
         assert ensure_local_file(settings, DurableBytes(payload), str(final_path)) == final_path
         assert original_read(final_path) == payload
     else:
-        with pytest.raises(PermissionError) as error:
+        with pytest.raises(FileExistsError) as error:
             ensure_local_file(settings, DurableBytes(payload), str(final_path))
         assert error.value is denied
     assert sorted(path for path in tmp_path.iterdir() if path.is_file()) == (
         [] if competing_state == "missing" else [final_path]
     )
+
+
+def test_permission_failure_is_not_masked_by_matching_destination(tmp_path, monkeypatch):
+    settings = Settings(_env_file=None, data_dir=tmp_path)
+    final_path = tmp_path / "source.pdf"
+    payload = b"complete private source"
+    denied = PermissionError("Controlled permission failure")
+
+    def denied_publish(*_args):
+        final_path.write_bytes(payload)
+        raise denied
+
+    monkeypatch.setattr(storage_module.os, "rename" if os.name == "nt" else "link", denied_publish)
+    with pytest.raises(PermissionError) as error:
+        ensure_local_file(settings, DurableBytes(payload), str(final_path))
+    assert error.value is denied
+    assert list(tmp_path.iterdir()) == [final_path]
+
+
+@pytest.mark.parametrize("source_kind", ["pdf", "extraction"])
+def test_simultaneous_cold_source_consumers_keep_published_winner_readable(
+    tmp_path, monkeypatch, source_kind
+):
+    settings = Settings(_env_file=None, data_dir=tmp_path)
+    manuscript = Manuscript(
+        id=1,
+        file_ref=str(tmp_path / "uploads" / ("1.pdf" if source_kind == "pdf" else "1.docx")),
+        purged_at=None,
+        section_tree={"source": "none", "nodes": []},
+    )
+    barrier = threading.Barrier(6)
+    if source_kind == "pdf":
+        payload = (FIXTURE_DIR / "native.pdf").read_bytes()
+        final_path = Path(manuscript.file_ref)
+
+        def consume():
+            path = report.manuscript_file_path_for(manuscript, settings)
+            with pymupdf.open(path) as document:
+                assert document.page_count > 0
+            assert path.read_bytes() == payload
+
+    else:
+        extraction = ExtractionResult(
+            page_count=0,
+            anchor_kind="paragraph",
+            image_only=False,
+            text_chars=22,
+            section_tree=SectionTree(source="none", nodes=[]),
+            blocks=[
+                TextBlock(text="Complete source text.", paragraph=0, max_font_size=11, bold_ratio=0)
+            ],
+            images=[],
+        )
+        payload = extraction.model_dump_json().encode("utf-8")
+        final_path = ingestion.raw_store_path(settings, manuscript.id)
+
+        def consume():
+            result = report.manuscript_paragraphs_for(manuscript, settings)
+            assert result.paragraphs[0].text == "Complete source text."
+
+    class SimultaneousStorage:
+        def get_bytes(self, _key):
+            barrier.wait(timeout=5)
+            return payload
+
+    durable = SimultaneousStorage()
+    monkeypatch.setattr(report, "get_storage", lambda _settings: durable)
+    monkeypatch.setattr(ingestion, "get_storage", lambda _settings: durable)
+    with ThreadPoolExecutor(max_workers=6) as pool:
+        readers = [pool.submit(consume) for _ in range(6)]
+        for reader in readers:
+            reader.result(timeout=10)
+    assert final_path.read_bytes() == payload
+    assert [path for path in tmp_path.rglob("*") if path.is_file()] == [final_path]
