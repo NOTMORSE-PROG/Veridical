@@ -177,13 +177,13 @@ def test_cancel_queued_run_is_terminal_idempotent_and_audited(
     from app.db import sqlalchemy_url
     from app.models.audit import AuditLog
 
-    async def do_not_advance(*_args, **_kwargs):
+    def do_not_advance(*_args, **_kwargs):
         return None
 
     # Hold the newly-created run in the queued state so this test exercises
     # the immediate-cancel branch deterministically instead of racing the
     # background worker.
-    monkeypatch.setattr(pipeline_router, "advance_once", do_not_advance)
+    monkeypatch.setattr(pipeline_router, "wake_pipeline", do_not_advance)
 
     client, manuscript_id, rubric_id = logged_in
     created = client.post(

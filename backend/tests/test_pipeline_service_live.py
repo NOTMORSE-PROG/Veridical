@@ -275,7 +275,7 @@ async def test_queue_position_is_unavailable_even_for_creation_ordered_runs(sess
 
 async def test_bug352_two_instructor_waiting_contract_after_a1_is_claimed(session_factory):
     """Live selector/claim exercise; no pipeline or provider execution."""
-    from app.pipeline.worker import pick_next_runnable
+    from app.pipeline.worker import _release_claim, pick_next_runnable
 
     owner_a, manuscript_a, rubric_a = await _seed_instructor_manuscript_rubric(session_factory)
     _, manuscript_b, rubric_b = await _seed_instructor_manuscript_rubric(session_factory)
@@ -304,18 +304,23 @@ async def test_bug352_two_instructor_waiting_contract_after_a1_is_claimed(sessio
         ]
         session.add_all(runs)
         await session.commit()
+        run_ids = [run.id for run in runs]
         assert [await queue_position(session, run) for run in runs] == [None] * 4
 
         picked = await pick_next_runnable(session, get_settings())
-        assert picked is not None and picked[0].id == runs[0].id
+        assert picked is not None and picked[0].id == run_ids[0]
         assert picked[0].claimed_at is not None
         # Represent A1's recorded turn without executing a fixture pipeline.
         picked[0].started_at = datetime.now(UTC)
         picked[0].status = CheckRunStatus.semantic
         await session.commit()
         assert [await queue_position(session, run) for run in runs] == [None] * 4
+        # A fresh holder reserves the common slot. After its turn yields,
+        # B's never-served head wins before another run belonging to A.
+        assert await pick_next_runnable(session, get_settings()) is None
+        await _release_claim(session, run_ids[0], picked[1])
         second = await pick_next_runnable(session, get_settings())
-        assert second is not None and second[0].id == runs[3].id
+        assert second is not None and second[0].id == run_ids[3]
         assert second[0].llm_mode == LLMMode.fake
 
 

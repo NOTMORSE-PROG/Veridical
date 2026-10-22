@@ -101,7 +101,7 @@ def test_prod_env_autostarts_the_pipeline_worker_loop_even_with_the_flag_unset(m
     get_settings.cache_clear()
 
 
-def test_dev_env_does_not_autostart_the_worker_loop_unless_explicitly_opted_in(monkeypatch):
+def test_dev_env_starts_waiting_scheduler_without_periodic_polling(monkeypatch):
     monkeypatch.setenv("VERIDICAL_ENV", "dev")
     monkeypatch.delenv("PIPELINE_WORKER_AUTOSTART", raising=False)
     get_settings.cache_clear()
@@ -110,7 +110,8 @@ def test_dev_env_does_not_autostart_the_worker_loop_unless_explicitly_opted_in(m
     with patch("app.main.worker_loop") as mock_worker_loop:
         with TestClient(app):
             pass
-        mock_worker_loop.assert_not_called()
+        mock_worker_loop.assert_called_once()
+        assert mock_worker_loop.call_args.kwargs["periodic"] is False
     get_settings.cache_clear()
 
 

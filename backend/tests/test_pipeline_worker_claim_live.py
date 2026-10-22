@@ -15,7 +15,7 @@ import time
 from datetime import UTC, datetime, timedelta
 
 import pytest
-from sqlalchemy import select, text
+from sqlalchemy import func, select, text
 
 import app.pipeline.machine as pipeline_machine
 from app.config import get_settings
@@ -134,7 +134,7 @@ async def test_advance_once_and_worker_tick_never_both_enter_the_same_run(
     entered = asyncio.Event()
     release = asyncio.Event()
 
-    async def slow_run_check_run(session, check_run, settings, heartbeat=None):
+    async def slow_run_check_run(session, check_run, settings, heartbeat=None, **_kwargs):
         entries.append(check_run.id)
         entered.set()
         await release.wait()
@@ -176,7 +176,7 @@ async def test_claim_is_released_so_a_later_stage_can_still_be_picked_up(
     settings = get_settings()
     entries: list[int] = []
 
-    async def fast_run_check_run(session, check_run, settings, heartbeat=None):
+    async def fast_run_check_run(session, check_run, settings, heartbeat=None, **_kwargs):
         entries.append(check_run.id)
 
     monkeypatch.setattr(worker, "run_check_run", fast_run_check_run)
@@ -194,15 +194,18 @@ async def test_stale_claim_is_reclaimable_after_a_simulated_crash(session_factor
     check_run_id = await _seed_check_run(session_factory)
     settings = get_settings()
 
-    stale_moment = datetime.now(UTC) - timedelta(seconds=settings.pipeline_claim_stale_seconds + 60)
     async with session_factory() as session:
+        # Claim expiry uses the database clock, independent of client clock skew.
+        stale_moment = await session.scalar(select(func.clock_timestamp())) - timedelta(
+            seconds=settings.pipeline_claim_stale_seconds + 60
+        )
         check_run = await session.get(CheckRun, check_run_id)
         check_run.claimed_at = stale_moment
         await session.commit()
 
     entries: list[int] = []
 
-    async def fast_run_check_run(session, check_run, settings, heartbeat=None):
+    async def fast_run_check_run(session, check_run, settings, heartbeat=None, **_kwargs):
         entries.append(check_run.id)
 
     monkeypatch.setattr(worker, "run_check_run", fast_run_check_run)
@@ -226,7 +229,7 @@ async def test_a_fresh_claim_is_not_reclaimable(session_factory, monkeypatch):
 
     entries: list[int] = []
 
-    async def fast_run_check_run(session, check_run, settings, heartbeat=None):
+    async def fast_run_check_run(session, check_run, settings, heartbeat=None, **_kwargs):
         entries.append(check_run.id)
 
     monkeypatch.setattr(worker, "run_check_run", fast_run_check_run)
@@ -250,15 +253,20 @@ async def test_heartbeat_keeps_a_slow_but_alive_run_from_going_stale(session_fac
     settings = get_settings()
 
     # Claim set well in the past -- would be stale on its own.
-    stale_moment = datetime.now(UTC) - timedelta(seconds=settings.pipeline_claim_stale_seconds + 60)
     async with session_factory() as session:
+        # Claim expiry uses the database clock, independent of client clock skew.
+        stale_moment = await session.scalar(select(func.clock_timestamp())) - timedelta(
+            seconds=settings.pipeline_claim_stale_seconds + 60
+        )
         check_run = await session.get(CheckRun, check_run_id)
         check_run.claimed_at = stale_moment
         await session.commit()
 
     heartbeats_fired = 0
 
-    async def long_running_but_heartbeating(session, check_run, settings, heartbeat=None):
+    async def long_running_but_heartbeating(
+        session, check_run, settings, heartbeat=None, **_kwargs
+    ):
         nonlocal heartbeats_fired
         # Simulates a real stage calling `cancellation_boundary()` (and
         # therefore `heartbeat()`) after each of several batches -- the
@@ -294,8 +302,11 @@ async def test_a_stolen_claims_original_holder_cannot_release_the_new_holders_cl
     settings = get_settings()
 
     # Holder A's claim, already stale.
-    stale_moment = datetime.now(UTC) - timedelta(seconds=settings.pipeline_claim_stale_seconds + 60)
     async with session_factory() as session:
+        # Claim expiry uses the database clock, independent of client clock skew.
+        stale_moment = await session.scalar(select(func.clock_timestamp())) - timedelta(
+            seconds=settings.pipeline_claim_stale_seconds + 60
+        )
         check_run = await session.get(CheckRun, check_run_id)
         check_run.claimed_at = stale_moment
         old_token = stale_moment
@@ -304,7 +315,9 @@ async def test_a_stolen_claims_original_holder_cannot_release_the_new_holders_cl
     # Holder B legitimately re-claims (simulating a second driver arriving
     # after A's process crashed).
     async with session_factory() as session:
-        new_token = await worker._try_claim(session, check_run_id, settings)
+        claimed = await worker.pick_next_runnable(session, settings)
+        assert claimed is not None and claimed[0].id == check_run_id
+        new_token = claimed[1]
     assert new_token is not None
     assert new_token != old_token
 
@@ -389,6 +402,7 @@ async def test_bug181_fair_queuing_interleaves_a_late_second_instructor(session_
             run.started_at = datetime.now(UTC)
             run.status = CheckRunStatus.done  # simulates completion, leaves the pool
             await session.commit()
+            await worker._release_claim(session, run.id, _token)
 
     # Plain FIFO would have produced [a1, a2, a3, b1] -- B dead last behind
     # A's entire backlog. Fair queuing gives B a turn right after A's
@@ -459,6 +473,7 @@ async def test_bug181_three_instructors_rotate_instead_of_draining_one_at_a_time
             run.started_at = datetime.now(UTC)
             run.status = CheckRunStatus.done
             await session.commit()
+            await worker._release_claim(session, run.id, _token)
 
     expected = ["A1", "B1", "C1", "A2", "B2", "C2", "A3", "B3", "C3", "A4", "B4", "C4"]
     assert picked == expected
@@ -516,11 +531,14 @@ async def test_bug181_in_progress_run_counts_as_this_instructors_last_turn(sessi
 
     settings = get_settings()
     async with session_factory() as session:
+        assert await worker.pick_next_runnable(session, settings) is None
+        await worker._release_claim(session, a_in_progress.id, a_in_progress.claimed_at)
         result = await worker.pick_next_runnable(session, settings)
 
     assert result is not None
     run, _token = result
-    # B has never had a turn at all; A's in-progress run means A HAS,
+    # The fresh global holder first reserved capacity. After release, B has
+    # never had a turn at all; A's in-progress run means A HAS,
     # even though nothing of A's has finished yet -- B goes first.
     assert run.id == b_queued_id
 

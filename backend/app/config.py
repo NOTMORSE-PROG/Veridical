@@ -400,7 +400,7 @@ class Settings(BaseSettings):
     # How often the background worker polls for the next runnable
     # check_run when it isn't actively advancing one (simplest job runner
     # per the ticket's own research note — no paid queue infrastructure).
-    pipeline_worker_poll_seconds: float = 5.0
+    pipeline_worker_poll_seconds: float = Field(default=5.0, gt=0, allow_inf_nan=False)
     # An api_down stage doesn't have a precise reset time the way quota
     # does (D-001) — retry after a fixed backoff instead.
     pipeline_api_down_retry_seconds: float = 300.0
@@ -408,10 +408,14 @@ class Settings(BaseSettings):
     # abandoned (the process holding it crashed mid-run) and can be
     # re-claimed by either driver -- without this, one crash mid-run would
     # strand that check_run claimed forever, unpickable by anything.
-    # Generous relative to `pipeline_worker_poll_seconds` and every stage's
-    # own per-attempt timeouts (`gemini_request_timeout_seconds` etc.) so a
-    # genuinely slow-but-alive run is never mistaken for an abandoned one.
-    pipeline_claim_stale_seconds: float = 600.0
+    # A separate short-session renewal task retains ownership during long
+    # modules; stage boundaries additionally check the current fencing token.
+    pipeline_claim_stale_seconds: float = Field(default=600.0, gt=0, allow_inf_nan=False)
+    pipeline_claim_renew_seconds: float = Field(default=30.0, gt=0, allow_inf_nan=False)
+    pipeline_coordination_timeout_seconds: float = Field(default=5.0, gt=0, allow_inf_nan=False)
+    # Two-int32 transaction advisory key space, separate from manuscript locks.
+    pipeline_admission_lock_namespace: int = Field(default=427, ge=-(2**31), lt=2**31)
+    pipeline_admission_lock_key: int = Field(default=1, ge=-(2**31), lt=2**31)
     # BUG-181: per-CALL bounds exist (`gemini_request_timeout_seconds`,
     # `external_http_timeout_seconds`, `ingest_extraction_timeout_seconds`)
     # but nothing bounded the WHOLE run -- a run makes many calls across
@@ -430,7 +434,7 @@ class Settings(BaseSettings):
     # existing `TerminalFailure` machinery, the same path every other
     # genuine failure already uses, rather than hanging with no deadline
     # to break the queue.
-    pipeline_run_deadline_seconds: float = 2700.0
+    pipeline_run_deadline_seconds: float = Field(default=2700.0, ge=0, allow_inf_nan=False)
     # AVAILABILITY FLOOR (V-050, D-015). When the day's AI budget is spent,
     # FINISH the run — deterministic checks stand, and the criteria the AI
     # never reached go to the instructor as an honest `quota_exhausted`
@@ -444,14 +448,9 @@ class Settings(BaseSettings):
         "Not graded by AI. Today's free AI capacity was reached. "
         "Needs your review, or re-run this check after the daily reset."
     )
-    # Off by default so importing the FastAPI app (every TestClient-based
-    # test) never starts a real polling loop against whatever DATABASE_URL
-    # happens to be configured. BUG-136: production does NOT need this set
-    # -- `main.py`'s lifespan autostarts the loop whenever
-    # `veridical_env == "prod"` regardless of this flag, so a real deploy
-    # can never silently ship with the loop off the way it did before this
-    # fix. This flag is now only an explicit opt-in for running the loop
-    # outside prod (e.g. local manual testing).
+    # The scheduler always waits for accepted-request wakeups. Production
+    # independently polls durable queued work (BUG-136); this flag enables
+    # that periodic recovery outside production as an explicit local opt-in.
     pipeline_worker_autostart: bool = False
 
     # --- Dashboard accuracy self-reporting (V-021, D-012) --------------------
@@ -901,6 +900,11 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def _weight_importance_ratios_are_ordered(self) -> "Settings":
+        if (
+            2 * (self.pipeline_claim_renew_seconds + self.pipeline_coordination_timeout_seconds)
+            >= self.pipeline_claim_stale_seconds
+        ):
+            raise ValueError("pipeline claim lifetime must allow two bounded renewal attempts")
         # backend review finding (BUG-052 review): `weight_importance.py`
         # checks `low_max_ratio` first, then `high_min_ratio`, else `med`
         # -- an operator swapping these in `.env` (or setting them equal)

@@ -8,6 +8,41 @@ def _bare_settings(**env: str) -> Settings:
     return Settings(_env_file=None, **env)
 
 
+@pytest.mark.parametrize(
+    "field",
+    [
+        "pipeline_claim_stale_seconds",
+        "pipeline_claim_renew_seconds",
+        "pipeline_coordination_timeout_seconds",
+        "pipeline_worker_poll_seconds",
+    ],
+)
+@pytest.mark.parametrize("value", [0, float("inf"), float("nan")])
+def test_pipeline_coordination_requires_finite_positive_timings(field, value):
+    with pytest.raises(ValueError):
+        _bare_settings(**{field: value})
+
+
+@pytest.mark.parametrize("value", [float("inf"), float("nan")])
+def test_run_deadline_must_be_finite(value):
+    with pytest.raises(ValueError):
+        _bare_settings(pipeline_run_deadline_seconds=value)
+
+
+def test_claim_lifetime_requires_two_bounded_renewal_opportunities():
+    with pytest.raises(ValueError, match="two bounded renewal attempts"):
+        _bare_settings(pipeline_claim_stale_seconds=70)
+
+
+@pytest.mark.parametrize(
+    "field", ["pipeline_admission_lock_namespace", "pipeline_admission_lock_key"]
+)
+@pytest.mark.parametrize("value", [-(2**31) - 1, 2**31])
+def test_admission_lock_keys_fit_postgres_signed_int32(field, value):
+    with pytest.raises(ValueError):
+        _bare_settings(**{field: value})
+
+
 def test_defaults_require_no_env(monkeypatch):
     for var in ("VERIDICAL_ENV", "VERIDICAL_FAKE_LLM", "DATABASE_URL", "GEMINI_API_KEY"):
         monkeypatch.delenv(var, raising=False)

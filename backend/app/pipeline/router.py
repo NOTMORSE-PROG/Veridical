@@ -2,7 +2,7 @@
 
 from typing import Annotated
 
-from fastapi import APIRouter, BackgroundTasks, Depends, Query
+from fastapi import APIRouter, Depends, Query, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.dependencies import get_current_instructor
@@ -20,10 +20,13 @@ from app.pipeline.service import (
     list_check_runs,
     queue_position,
 )
-from app.pipeline.worker import advance_once
 from app.ratelimit import enforce_action_rate_limit
 
 router = APIRouter(tags=["check-runs"])
+
+
+def wake_pipeline(request: Request) -> None:
+    request.app.state.pipeline_wake_event.set()
 
 
 async def _to_out(session: AsyncSession, check_run) -> CheckRunOut:
@@ -54,17 +57,17 @@ async def _to_out(session: AsyncSession, check_run) -> CheckRunOut:
 @router.post("/check-runs", response_model=CheckRunOut, status_code=201)
 async def create_check_run_route(
     body: CreateCheckRunRequest,
-    background_tasks: BackgroundTasks,
+    request: Request,
     session: Annotated[AsyncSession, Depends(get_session)],
     instructor: Annotated[Instructor, Depends(get_current_instructor)],
 ) -> CheckRunOut:
     enforce_action_rate_limit(get_settings(), "check_run", instructor.id)
     check_run = await create_check_run(session, instructor.id, body.manuscript_id, body.rubric_id)
-    # Kick it now rather than waiting for the poll loop's next tick — the
-    # background worker still owns steady-state progress and any queueing
-    # behind an already-running check (ticket AC: second upload queues).
-    background_tasks.add_task(advance_once, check_run.id)
-    return await _to_out(session, check_run)
+    receipt = await _to_out(session, check_run)
+    # The committed request wakes the common fair scheduler; its ID cannot
+    # bypass another instructor's turn or a fresh global execution lease.
+    wake_pipeline(request)
+    return receipt
 
 
 @router.get("/check-runs/rerun-estimate", response_model=RerunEstimateOut)

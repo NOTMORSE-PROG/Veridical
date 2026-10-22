@@ -3,7 +3,7 @@
 import asyncio
 import logging
 from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from pathlib import Path
 
 from alembic.config import Config
@@ -123,31 +123,22 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
         # must never make a real HuggingFace fetch by surprise.
         await _prewarm_embedding_model_on_boot()
 
-    # BUG-136: this used to be gated ONLY on `pipeline_worker_autostart`
-    # (default False), with a comment claiming "production (Render) turns
-    # this on" -- but nothing in the deploy actually set that env var, so
-    # production silently ran with the loop OFF since the day this
-    # shipped. A `quota_exhausted`/`api_down` block's "resumes
-    # automatically at <time>" promise (D-001's resumability requirement)
-    # was never true in prod: every check_run only ever advanced via the
-    # one-time `advance_once` kick at creation, and a run that blocked
-    # anywhere in its own single-request walk stayed parked forever,
-    # invisible until an instructor happened to notice. Same class of bug
-    # D-021 already fixed for migrations, and the same fix: gate on
-    # `veridical_env == "prod"` directly (matching the migration/seed
-    # gates just above), same reasoning as those -- every TestClient-based
-    # test imports this module and must never start a real polling loop
-    # against a test's DATABASE_URL by surprise, and a non-prod env can
-    # never satisfy this condition. `pipeline_worker_autostart` still
-    # exists as an explicit opt-in for exercising the loop outside prod
-    # (e.g. local manual testing) without faking `veridical_env`.
-    task = None
     settings = get_settings()
-    if settings.veridical_env == "prod" or settings.pipeline_worker_autostart:
-        task = asyncio.create_task(worker_loop())
-    yield
-    if task is not None:
+    wake_event = asyncio.Event()
+    app.state.pipeline_wake_event = wake_event
+    task = asyncio.create_task(
+        worker_loop(
+            wake_event=wake_event,
+            periodic=settings.veridical_env == "prod" or settings.pipeline_worker_autostart,
+        ),
+        name="pipeline-scheduler",
+    )
+    try:
+        yield
+    finally:
         task.cancel()
+        with suppress(asyncio.CancelledError):
+            await task
 
 
 app = FastAPI(

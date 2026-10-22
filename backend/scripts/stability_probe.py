@@ -46,8 +46,10 @@ from app.db import sqlalchemy_url
 from app.models.enums import CheckRunStatus
 from app.models.rubric import Criterion
 from app.models.run import CheckResult, CheckRun
+from app.pipeline.coordination import AdmissionState
+from app.pipeline.machine import is_blocked
 from app.pipeline.service import create_check_run
-from app.pipeline.worker import advance_once
+from app.pipeline.worker import worker_step
 
 
 async def _run_one(
@@ -59,22 +61,26 @@ async def _run_one(
         )
         check_run_id = check_run.id
 
-    # backend review finding (BUG-162 review, P1): calling `run_check_run`
-    # directly (no claim, no heartbeat) raced `worker_loop` in exactly the
-    # shape BUG-144 exists to prevent -- `worker_loop` starts unconditionally
-    # in production (`app/main.py`) and is a normal, documented local-dev
-    # opt-in too (`PIPELINE_WORKER_AUTOSTART`). `advance_once` is the SAME
-    # claim+heartbeat+release path `worker_loop`/the create-route's "kick it
-    # now" call already use -- if a live worker gets there first, this
-    # becomes a silent, correct no-op instead of a second execution that
-    # would duplicate real, quota-spending work and corrupt this exact
-    # measurement (BUG-144's own production incident: every finding
-    # appeared exactly twice).
-    await advance_once(check_run_id, session_factory, settings)
-
-    async with session_factory() as session:
-        check_run = await session.get(CheckRun, check_run_id)
-        status = check_run.status
+    # The requested-ID check happens inside common guarded fair admission. If
+    # another run should go first, wait for its normal worker; never execute it
+    # with this sample's cache-bypass settings or skip its fair turn. Use an
+    # isolated/quiescent queue when no other worker is serving earlier work.
+    async with asyncio.timeout(settings.pipeline_run_deadline_seconds):
+        while True:
+            async with session_factory() as session:
+                check_run = await session.get(CheckRun, check_run_id)
+                status = check_run.status
+                if status in (
+                    CheckRunStatus.done,
+                    CheckRunStatus.failed,
+                    CheckRunStatus.cancelled,
+                ) or is_blocked(check_run):
+                    break
+            if (
+                await worker_step(session_factory, settings, requested_run_id=check_run_id)
+                != AdmissionState.admitted
+            ):
+                await asyncio.sleep(settings.pipeline_worker_poll_seconds)
 
     async with session_factory() as session:
         rows = (

@@ -12,6 +12,7 @@ where it left off — no duplicate LLM calls for completed work (ticket
 AC).
 """
 
+import asyncio
 import copy
 import logging
 from collections.abc import Awaitable, Callable
@@ -20,6 +21,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from sqlalchemy import delete, func, select, update
+from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -61,6 +63,7 @@ from app.models.enums import CheckKind, CheckRunStatus, IngestStatus, ResultOutc
 from app.models.manuscript import Manuscript
 from app.models.rubric import Rubric
 from app.models.run import CheckResult, CheckRun, ReadinessReport
+from app.pipeline.guards import try_guard
 from app.report.service import aggregate_and_score
 
 _logger = logging.getLogger(__name__)
@@ -81,13 +84,68 @@ _INTEGRITY_STAGE_NOTE = (
 )
 
 
-async def _finish_cancel_if_requested(session: AsyncSession, check_run: CheckRun) -> bool:
+ClaimToken = Callable[[], Awaitable[datetime]]
+
+
+async def _assert_claim_owner(
+    session: AsyncSession, run_id: int, settings: Settings, claim_token: ClaimToken | None
+) -> None:
+    if claim_token is None:
+        return
+    # Scalar columns retain dirty stage metadata until ownership is established.
+    try:
+        with session.no_autoflush:
+            row = (
+                await session.execute(
+                    select(CheckRun.claimed_at, func.clock_timestamp())
+                    .where(CheckRun.id == run_id)
+                    .with_for_update(nowait=True, key_share=True)
+                )
+            ).one_or_none()
+            token = await claim_token()
+            if (
+                row is None
+                or row.claimed_at != token
+                or token < row[1] - timedelta(seconds=settings.pipeline_claim_stale_seconds)
+            ):
+                raise ClaimLost
+    except DBAPIError as exc:
+        raise ClaimYield from exc
+
+
+async def _commit_owned(
+    session: AsyncSession, run_id: int, settings: Settings, claim_token: ClaimToken | None
+) -> None:
+    if claim_token is None:
+        await session.commit()
+        return
+    try:
+        async with asyncio.timeout(settings.pipeline_coordination_timeout_seconds):
+            with session.no_autoflush:
+                if not await try_guard(session, settings):
+                    raise ClaimYield
+                await _assert_claim_owner(session, run_id, settings, claim_token)
+            # No module, corpus lock or external work after this final check.
+            await session.commit()
+    except (DBAPIError, TimeoutError) as exc:
+        raise ClaimYield from exc
+
+
+async def _finish_cancel_if_requested(
+    session: AsyncSession,
+    check_run: CheckRun,
+    *,
+    settings: Settings | None = None,
+    claim_token: ClaimToken | None = None,
+) -> bool:
     """Stop at a persistence boundary without presenting partial work as done.
 
     The cancellation API writes only `cancel_requested_at` for an active run.
     Refreshing that separate column prevents a concurrent request from being
     lost when this worker commits its own stage transition.
     """
+    settings = settings or get_settings()
+    await _assert_claim_owner(session, check_run.id, settings, claim_token)
     locked = await session.scalar(
         select(CheckRun)
         .where(CheckRun.id == check_run.id)
@@ -100,7 +158,7 @@ async def _finish_cancel_if_requested(session: AsyncSession, check_run: CheckRun
     if check_run.status == CheckRunStatus.cancelled:
         return True
     if check_run.cancel_requested_at is None:
-        await session.commit()
+        await _commit_owned(session, check_run.id, settings, claim_token)
         return False
 
     current_stage = check_run.status
@@ -178,7 +236,7 @@ async def _finish_cancel_if_requested(session: AsyncSession, check_run: CheckRun
             manuscript_id=check_run.manuscript_id,
             payload={"reason": "cancelled_after_reuse_write_back"},
         )
-    await session.commit()
+    await _commit_owned(session, check_run.id, settings, claim_token)
     return True
 
 
@@ -200,6 +258,10 @@ class ClaimLost(Exception):
     colliding work it does in between."""
 
 
+class ClaimYield(ClaimLost):
+    """Coordination contention: roll back and yield without claiming theft."""
+
+
 CancellationBoundary = Callable[[], Awaitable[None]]
 # BUG-144: same shape as `CancellationBoundary`, distinct name -- a
 # zero-arg async callback, but for claim-refresh rather than cancellation.
@@ -212,6 +274,8 @@ async def _transition_after_boundary(
     check_run: CheckRun,
     completed_stage: CheckRunStatus,
     settings: Settings,
+    *,
+    claim_token: ClaimToken | None = None,
 ) -> bool:
     """Persist one safe unit, then atomically advance only if not cancelled.
 
@@ -221,8 +285,11 @@ async def _transition_after_boundary(
     makes the cancellation endpoint return Conflict without persisting a
     misleading request.
     """
-    await session.commit()
-    if await _finish_cancel_if_requested(session, check_run):
+    await _assert_claim_owner(session, check_run.id, settings, claim_token)
+    await _commit_owned(session, check_run.id, settings, claim_token)
+    if await _finish_cancel_if_requested(
+        session, check_run, settings=settings, claim_token=claim_token
+    ):
         return False
     # BUG-181: checked at the SAME stage-boundary checkpoint cancellation
     # already uses, so no new call site is needed anywhere else. Cancellation
@@ -250,6 +317,7 @@ async def _transition_after_boundary(
     if next_stage == CheckRunStatus.done:
         values["finished_at"] = now
 
+    await _assert_claim_owner(session, check_run.id, settings, claim_token)
     advanced = (
         await session.execute(
             update(CheckRun)
@@ -265,16 +333,22 @@ async def _transition_after_boundary(
     if advanced is None:
         await session.refresh(check_run)
         if check_run.cancel_requested_at is not None:
-            await _finish_cancel_if_requested(session, check_run)
+            await _finish_cancel_if_requested(
+                session, check_run, settings=settings, claim_token=claim_token
+            )
         return False
 
-    await session.commit()
+    await _commit_owned(session, check_run.id, settings, claim_token)
     await session.refresh(check_run)
     return True
 
 
 async def _exception_target_if_not_cancelled(
-    session: AsyncSession, check_run: CheckRun
+    session: AsyncSession,
+    check_run: CheckRun,
+    *,
+    settings: Settings | None = None,
+    claim_token: ClaimToken | None = None,
 ) -> CheckRun | None:
     """Lock the run after an exception and honor the terminal-state winner.
 
@@ -285,6 +359,8 @@ async def _exception_target_if_not_cancelled(
     """
     check_run_id = check_run.id
     await session.rollback()
+    settings = settings or get_settings()
+    await _assert_claim_owner(session, check_run_id, settings, claim_token)
     locked = await session.scalar(
         select(CheckRun)
         .where(CheckRun.id == check_run_id)
@@ -294,13 +370,15 @@ async def _exception_target_if_not_cancelled(
     if locked is None:
         return None
     if locked.status == CheckRunStatus.cancelled:
-        await session.commit()
+        await session.rollback()
         return None
     if locked.cancel_requested_at is not None:
-        await _finish_cancel_if_requested(session, locked)
+        await _finish_cancel_if_requested(
+            session, locked, settings=settings, claim_token=claim_token
+        )
         return None
     if locked.status not in _STAGE_AFTER:
-        await session.commit()
+        await session.rollback()
         return None
     return locked
 
@@ -668,18 +746,41 @@ async def run_check_run(
     settings: Settings | None = None,
     llm: LLMClient | None = None,
     heartbeat: Heartbeat | None = None,
+    *,
+    claim_token: ClaimToken | None = None,
+) -> bool | None:
+    """Walk stages with independent ownership checks and fenced lifecycle commits.
+
+    No-claim direct calls retain their existing behavior. Worker callers provide
+    the renewable lease's synchronized token getter. A lost or contended claim
+    rolls back unsafe lifecycle work and yields for a later fair scheduling turn.
+    Already-committed analytical work and in-flight external calls remain outside
+    this cooperative lifecycle fence.
+    """
+    try:
+        return await _run_check_run(
+            session, check_run, settings, llm, heartbeat, claim_token=claim_token
+        )
+    except ClaimLost:
+        await session.rollback()
+        return False
+
+
+async def _run_check_run(
+    session: AsyncSession,
+    check_run: CheckRun,
+    settings: Settings | None = None,
+    llm: LLMClient | None = None,
+    heartbeat: Heartbeat | None = None,
+    *,
+    claim_token: ClaimToken | None = None,
 ) -> None:
-    """`heartbeat` (BUG-144, backend review finding): an optional
-    zero-arg callback `worker.py` wires up to refresh `check_run.claimed_at`
-    -- called from the SAME per-batch checkpoints `cancellation_boundary`
-    already uses below, so a genuinely-alive-but-slow run (many criteria,
-    LLM retries) keeps its claim fresh as it makes progress, and only a
-    run that's made NO progress at all for `pipeline_claim_stale_seconds`
-    is ever treated as abandoned. `None` (every caller except `worker.py`,
-    including every test) means no claim exists to refresh -- a no-op."""
+    """Internal stage walk; the outer entry handles every ownership-loss exit."""
     settings = settings or get_settings()
 
-    if await _finish_cancel_if_requested(session, check_run):
+    if await _finish_cancel_if_requested(
+        session, check_run, settings=settings, claim_token=claim_token
+    ):
         return
 
     manuscript = await session.get(Manuscript, check_run.manuscript_id)
@@ -700,19 +801,21 @@ async def run_check_run(
     async def cancellation_boundary() -> None:
         if heartbeat is not None:
             await heartbeat()
-        if await _finish_cancel_if_requested(session, check_run):
+        if await _finish_cancel_if_requested(
+            session, check_run, settings=settings, claim_token=claim_token
+        ):
             raise CancellationAccepted
 
     try:
         if check_run.status == CheckRunStatus.queued and not await _transition_after_boundary(
-            session, check_run, CheckRunStatus.queued, settings
+            session, check_run, CheckRunStatus.queued, settings, claim_token=claim_token
         ):
             return
 
         if check_run.status == CheckRunStatus.ingesting:
             await _run_ingesting_stage(check_run, manuscript)
             if not await _transition_after_boundary(
-                session, check_run, CheckRunStatus.ingesting, settings
+                session, check_run, CheckRunStatus.ingesting, settings, claim_token=claim_token
             ):
                 return
 
@@ -724,7 +827,7 @@ async def run_check_run(
                 session, check_run, criteria_by_id, decisions, settings, manuscript
             )
             if not await _transition_after_boundary(
-                session, check_run, CheckRunStatus.structural, settings
+                session, check_run, CheckRunStatus.structural, settings, claim_token=claim_token
             ):
                 return
 
@@ -740,7 +843,7 @@ async def run_check_run(
                 cancellation_boundary,
             )
             if not await _transition_after_boundary(
-                session, check_run, CheckRunStatus.semantic, settings
+                session, check_run, CheckRunStatus.semantic, settings, claim_token=claim_token
             ):
                 return
 
@@ -754,7 +857,7 @@ async def run_check_run(
                 cancellation_boundary,
             )
             if not await _transition_after_boundary(
-                session, check_run, CheckRunStatus.integrity, settings
+                session, check_run, CheckRunStatus.integrity, settings, claim_token=claim_token
             ):
                 return
 
@@ -762,18 +865,13 @@ async def run_check_run(
             await aggregate_and_score(session, check_run.id, settings)
             _record_stage(check_run, CheckRunStatus.aggregating, status="done")
             await _transition_after_boundary(
-                session, check_run, CheckRunStatus.aggregating, settings
+                session, check_run, CheckRunStatus.aggregating, settings, claim_token=claim_token
             )
 
     except CancellationAccepted:
         return
     except ClaimLost:
-        # BUG-144: another driver now legitimately owns this run (see
-        # `ClaimLost`'s own docstring) -- back off silently, the same as
-        # an accepted cancellation. Whatever that driver has or hasn't
-        # persisted yet is its own concern; this call must not touch
-        # `check_run`'s status at all.
-        return
+        raise
     except PipelineBlockedError as exc:
         # BUG-032 finding: if the exception that landed us here came from a
         # DB-level failure mid-flush (an IntegrityError, a race with the
@@ -784,27 +882,33 @@ async def run_check_run(
         # lazy-load them on a plain sync attribute read afterward (raises
         # MissingGreenlet), so an explicit refresh is required before
         # `_record_blocked` touches `check_run.stage_status`.
-        target = await _exception_target_if_not_cancelled(session, check_run)
+        target = await _exception_target_if_not_cancelled(
+            session, check_run, settings=settings, claim_token=claim_token
+        )
         if target is None:
             return
         _record_blocked(target, exc.block)
-        await session.commit()
+        await _commit_owned(session, check_run.id, settings, claim_token)
     except TerminalFailure as exc:
-        target = await _exception_target_if_not_cancelled(session, check_run)
+        target = await _exception_target_if_not_cancelled(
+            session, check_run, settings=settings, claim_token=claim_token
+        )
         if target is None:
             return
         target.status = CheckRunStatus.failed
         target.finished_at = datetime.now(UTC)
         _record_failed(target, exc.code, exc.message)
-        await session.commit()
+        await _commit_owned(session, check_run.id, settings, claim_token)
     except FileMalformedError as exc:
-        target = await _exception_target_if_not_cancelled(session, check_run)
+        target = await _exception_target_if_not_cancelled(
+            session, check_run, settings=settings, claim_token=claim_token
+        )
         if target is None:
             return
         target.status = CheckRunStatus.failed
         target.finished_at = datetime.now(UTC)
         _record_failed(target, "file_malformed", str(exc))
-        await session.commit()
+        await _commit_owned(session, check_run.id, settings, claim_token)
     except Exception:
         # BUG-032: this runs inside a Starlette BackgroundTask (worker.py),
         # which does not propagate exceptions anywhere — no client-visible
@@ -817,10 +921,12 @@ async def run_check_run(
         # IngestFailureReason (models/enums.py) — one bucket, not one per
         # exception type.
         _logger.exception("Unexpected pipeline failure for check run %s.", check_run.id)
-        target = await _exception_target_if_not_cancelled(session, check_run)
+        target = await _exception_target_if_not_cancelled(
+            session, check_run, settings=settings, claim_token=claim_token
+        )
         if target is None:
             return
         target.status = CheckRunStatus.failed
         target.finished_at = datetime.now(UTC)
         _record_failed(target, "unexpected_error", messages.UNEXPECTED_PIPELINE_ERROR)
-        await session.commit()
+        await _commit_owned(session, check_run.id, settings, claim_token)
