@@ -90,10 +90,10 @@ const REPORT: ReportOut = {
   results: [],
 };
 
-function stubViewer(viewer: ManuscriptViewerOut = VIEWER) {
+function stubViewer(viewer: ManuscriptViewerOut = VIEWER, report: ReportOut = REPORT) {
   vi.stubGlobal("fetch", stubFetchByPath({
     "/check-runs/5/document": viewer,
-    "/check-runs/5/report": REPORT,
+    "/check-runs/5/report": report,
     "/check-runs/5/escalated": [],
     "/check-runs/5/flags": [SUMMARY],
     "/check-runs/5/document/reuse-matches": { passage_archive_size_n: 8, matches: [] },
@@ -102,6 +102,14 @@ function stubViewer(viewer: ManuscriptViewerOut = VIEWER) {
 }
 
 describe("SignalDocumentViewerPage", () => {
+  it.each([undefined, false, true])("shows one record-based support notice and no age/rerun warning when flagged=%s", async (flag) => {
+    stubViewer(VIEWER, { ...REPORT, historical_semantic_support_unverified: flag });
+    renderWithProviders(<SignalDocumentViewerPage />, { route: "/report/5/document?view=decision&pane=review", path: "/report/:checkRunId/document" });
+    await screen.findByRole("heading", { name: "Readiness and decision" });
+    expect(screen.queryAllByText("AI evidence support needs review")).toHaveLength(flag ? 1 : 0);
+    expect(screen.queryByText("Historical AI grades need fresh evidence review")).not.toBeInTheDocument();
+    expect(screen.queryByText(/suggestions predate criterion-support validation/)).not.toBeInTheDocument();
+  });
   it.each(["fake", "real", "unknown"] as const)("BUG-435: decision AI disclosure is scoped to responses for mode %s", async (mode) => {
     vi.stubGlobal("fetch", stubFetchByPath({
       "/check-runs/5/document": VIEWER, "/check-runs/5/report": { ...REPORT, llm_mode: mode },

@@ -8,7 +8,7 @@ from app.flags.service import _to_flag_out
 from app.models.enums import CheckKind
 from app.report.export import _problem_labels, build_report_pdf
 from app.report.export_data import flag_export_detail, unassessed_references
-from app.report.schemas import ReportExportData
+from app.report.schemas import EvidenceItem, ReportExportData
 from tests.test_report_export_perf import _sixty_criterion_report
 
 
@@ -139,6 +139,37 @@ def test_long_evidence_and_reason_can_span_pages_without_loss():
     for marker in ("REASON_START", "REASON_END", "SOURCE_START", "SOURCE_END"):
         assert marker in text
     assert "Finding 1 (continued)" in text
+
+
+def test_pending_ai_basis_is_retained_escaped_and_splittable_without_claiming_a_verdict():
+    data = _data()
+    data.report.decision = None
+    row = data.report.results[0]
+    row.kind = "semantic"
+    row.basis = "llm"
+    row.outcome = "escalated"
+    row.resolution = None
+    row.reasoning = (
+        "BASIS_START <source> & analysis " + "Saved explanatory context. " * 500 + " BASIS_END"
+    )
+    row.evidence = [
+        EvidenceItem(
+            quote="SOURCE_START <exact> & literal " + "Recorded text. " * 500 + " SOURCE_END",
+            anchor="paragraph 57",
+        )
+    ]
+    text = _text(build_report_pdf(data))
+    for marker in (
+        "BASIS_START <source> & analysis",
+        "BASIS_END",
+        "SOURCE_START <exact> & literal",
+        "SOURCE_END",
+        "Extracted paragraph 58",
+    ):
+        assert marker in text
+    assert "A recorded location does not establish support for a grade." in text
+    assert "No grade has been accepted for this criterion." in text
+    assert "AI reached no verdict for this criterion." not in text
 
 
 @pytest.mark.parametrize("preface_length", [20, 30, 40, 50, 60])

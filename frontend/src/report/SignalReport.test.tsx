@@ -98,11 +98,13 @@ describe("SignalReportPage", () => {
       else expect(screen.queryByText("AI mode could not be verified")).not.toBeInTheDocument();
     }
   });
-  it("discloses legacy suggestions without treating reopen as new validation", async () => {
+  it("discloses missing support records without inferring their age", async () => {
     stubReport({ ...BASE_REPORT, historical_semantic_support_unverified: true });
     renderWithProviders(<SignalReportPage />, { route: "/report/5", path: "/report/:checkRunId" });
-    expect(await screen.findByText(/Some recorded AI suggestions predate criterion-support validation/))
+    expect(await screen.findByText("AI evidence support needs review"))
       .toBeInTheDocument();
+    expect(screen.getByText(/The saved record does not confirm/)).toBeVisible();
+    expect(screen.queryByText(/suggestions predate criterion-support validation/)).not.toBeInTheDocument();
   });
   afterEach(() => vi.unstubAllGlobals());
 

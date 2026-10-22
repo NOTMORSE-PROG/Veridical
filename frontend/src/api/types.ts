@@ -508,6 +508,7 @@ export interface ReportOut extends ReportCommon {
  * payload. Deliberately does NOT extend `ReportOut` -- see
  * `ReportCommon`'s own comment for which fields were cut and why. */
 export interface PublicReportOut extends ReportCommon {
+  semantic_support_unverified?: boolean;
   assessment_incomplete?: boolean;
   historical_citation_title_unverified?: boolean;
   check_run_id: number;
@@ -593,6 +594,7 @@ export interface EscalatedItemOut {
   verdict_unrecognized?: boolean;
   support_withheld?: boolean;
   support_status?: "supported" | "unsupported" | "uncertain" | "incomplete" | null;
+  reasoning?: string | null;
   evidence?: { quote: string; anchor: string }[];
   reason: string | null;
   /** "low_confidence" = AI graded it and hesitated; "not_graded" = the AI

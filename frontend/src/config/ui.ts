@@ -18,6 +18,8 @@ export const INSTRUCTOR_NOTE_MAX_LENGTH = 1000;
  * anchor through the existing document-pane focus engine. Real Flag ids
  * are positive; this value can therefore never be mistaken for one. */
 export const CRITERION_ANCHOR_REGION_ID = -2147483647;
+// Matches the existing single-pane document layout in signal.css.
+export const DOCUMENT_SINGLE_PANE_MEDIA_QUERY = "(max-width: 767px)";
 export const PASSWORD_MIN_LENGTH = 8;
 export const LIBRARY_SEARCH_DEBOUNCE_MS = 400;
 // V-077: how often an own Library record that is still being read refreshes

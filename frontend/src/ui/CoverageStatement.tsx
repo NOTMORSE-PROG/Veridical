@@ -75,13 +75,13 @@ export function CoverageStatement({ headingId, kicker = "Assessment coverage", h
         {items.map((item) => (
           <li className="signal-coverage-list__item" key={item.key}>
             <WarningTriangleIcon />
+            <p className="signal-coverage-list__label">{item.label}</p>
             <div className="signal-coverage-list__body">
-              <p className="signal-coverage-list__label">{item.label}</p>
               <p>{item.detail}</p>
               <CoverageDetails item={item} />
             </div>
             {item.action && (
-              <ActionLink to={item.action.to} variant="secondary" aria-label={item.action.ariaLabel ?? item.action.label}>
+              <ActionLink className="signal-coverage-list__action" to={item.action.to} variant="secondary" aria-label={item.action.ariaLabel ?? item.action.label}>
                 {item.action.label}
               </ActionLink>
             )}

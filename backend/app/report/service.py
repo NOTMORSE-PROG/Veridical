@@ -712,6 +712,7 @@ def _to_escalated_out(item: EscalatedItem) -> EscalatedItemOut:
         support_withheld=bool(item.detail.get("support_withheld")),
         support_status=item.detail.get("support_check", {}).get("status"),
         evidence=[EvidenceItem(**entry) for entry in item.detail.get("evidence", [])],
+        reasoning=item.detail.get("reasoning"),
         reason=item.reason,
         review_reason=item.review_reason,
         unverified_evidence=item.unverified_evidence,

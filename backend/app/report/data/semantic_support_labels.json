@@ -1,0 +1,10 @@
+{
+  "title": "AI evidence support needs review",
+  "body": "The saved record does not confirm that every AI criterion result completed the current evidence-support checks. Review each result's status, any available explanation and the manuscript before relying on AI content. Recorded outcomes and instructor decisions are preserved.",
+  "qualification": "A recorded location does not establish support for a grade.",
+  "review": "Review the criterion, any recorded explanation and the manuscript before choosing a grade.",
+  "missing_explanation": "No AI explanation is available for this review item.",
+  "missing_excerpt": "No located excerpt is available for this review item.",
+  "missing_location": "No manuscript location is available for this excerpt.",
+  "pending": "No grade has been accepted for this criterion."
+}

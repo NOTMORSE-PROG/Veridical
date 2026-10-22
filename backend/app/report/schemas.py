@@ -184,6 +184,7 @@ class OriginalityScopeOut(BaseModel):
 class ReportOut(BaseModel):
     check_run_id: int
     figure_readings: list[FigureReading] | None = None
+    # Compatibility name: missing current support-policy metadata, not an age test.
     historical_semantic_support_unverified: bool = False
     historical_citation_title_unverified: bool = False
     # BUG-128: instructor-only (never added to `PublicReportOut` below,
@@ -342,6 +343,7 @@ class PublicReportOut(BaseModel):
     # Coverage fact only: no private rationale, raw detail, or source identity.
     assessment_incomplete: bool = False
     historical_citation_title_unverified: bool = False
+    semantic_support_unverified: bool = False
 
 
 class DecisionIn(BaseModel):
@@ -391,6 +393,7 @@ class EscalatedItemOut(BaseModel):
     support_withheld: bool = False
     support_status: str | None = None
     evidence: list[EvidenceItem] = Field(default_factory=list)
+    reasoning: str | None = None
     reason: str | None
     # "low_confidence" = the AI graded it and hesitated; "not_graded" = the
     # AI never ran (quota spent / API down). The instructor must be able to

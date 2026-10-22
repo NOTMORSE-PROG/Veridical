@@ -1,14 +1,15 @@
 import { ReviewDeskReturnLink } from "../routing/ReviewDeskReturnLink";
-import { type KeyboardEvent, useEffect, useMemo, useRef } from "react";
-import { useParams, useSearchParams } from "react-router";
+import { type KeyboardEvent, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useLocation, useParams, useSearchParams } from "react-router";
 import { ApiError, BASE_URL } from "../api/client";
 import type { FlagRegionOut, ReportOut } from "../api/types";
-import { CRITERION_ANCHOR_REGION_ID } from "../config/ui";
+import { CRITERION_ANCHOR_REGION_ID, DOCUMENT_SINGLE_PANE_MEDIA_QUERY } from "../config/ui";
 import { checkKindMeta, findingVerificationPrompt, isPValueFinding } from "../domain/checkKind";
 import { DECISION_LABEL } from "../domain/decisionTone";
 import { agreementEvidenceType, evidenceDisplayState } from "../domain/evidenceDisplay";
 import { manuscriptIdentity } from "../domain/manuscriptLabel";
 import { TEST_AI_DISCLOSURE } from "../domain/aiModeDisclosure";
+import { SEMANTIC_SUPPORT_REVIEW } from "../domain/semanticSupport";
 import { problemLabel } from "../domain/problemLabel";
 import { severityLabel } from "../domain/severity";
 import { systemFindingCopy } from "../domain/systemFindingCopy";
@@ -22,7 +23,7 @@ import { CitationComparison } from "../flags/CitationComparison";
 import { CitationHistoryWarning } from "../flags/CitationHistoryWarning";
 import { findingMethodLabel, isCitationMetadataFinding } from "../domain/findingMethod";
 import { SignalDecisionPanel } from "../report/SignalDecisionPanel";
-import { SignalCriteriaResults, SignalEscalatedPanel } from "../report/SignalReviewSections";
+import { SignalCriteriaResults, SignalEscalatedPanel, type CriterionSourceOpen, type CriterionSourceTarget } from "../report/SignalReviewSections";
 import { coverageItems } from "../report/reportCoverage";
 import {
   useExcludedReuseMatches,
@@ -36,6 +37,7 @@ import { ActionLink } from "../ui/ActionLink";
 import { Alert } from "../ui/Alert";
 import { Button } from "../ui/Button";
 import { CoverageStatement } from "../ui/CoverageStatement";
+import { useMediaQuery } from "../ui/useMediaQuery";
 import { ReadinessBand } from "../ui/ReadinessBand";
 import { DocxPane } from "./DocxPane";
 import { PassagePairPanel } from "./PassagePairPanel";
@@ -272,7 +274,7 @@ function ReportUnavailable({ checkRunId, error, onRetry }: { checkRunId: number;
   return <Alert title="Could not load review details" tone="error" role="alert"><p>VERIDICAL could not load the recorded review. The source pane loads separately and may also need to be retried.</p><Button variant="secondary" onClick={onRetry}>Try review again</Button><ReviewDeskReturnLink variant="quiet">Return to Review Desk</ReviewDeskReturnLink></Alert>;
 }
 
-function ReadinessDecision({ checkRunId, report, pending, error, onRetry, onBack }: { checkRunId: number; report: ReportOut | undefined; pending: boolean; error: unknown; onRetry: () => void; onBack: () => void }) {
+function ReadinessDecision({ checkRunId, report, pending, error, onRetry, onBack, sourceTarget, onOpenSource }: { checkRunId: number; report: ReportOut | undefined; pending: boolean; error: unknown; onRetry: () => void; onBack: () => void; sourceTarget: CriterionSourceTarget; onOpenSource: CriterionSourceOpen }) {
   if (pending) return <div role="status" aria-live="polite" aria-busy="true" className="signal-desk-loading"><span>Loading readiness and decision.</span><i /><i /></div>;
   if (!report) return <ReportUnavailable checkRunId={checkRunId} error={error} onRetry={onRetry} />;
 
@@ -282,7 +284,8 @@ function ReadinessDecision({ checkRunId, report, pending, error, onRetry, onBack
   return (
     <div className="signal-document-analysis">
       <Button variant="quiet" onClick={onBack}>Back to review queue</Button>
-      <SignalEscalatedPanel checkRunId={report.check_run_id} />
+      {report.historical_semantic_support_unverified && <Alert title={SEMANTIC_SUPPORT_REVIEW.title} tone="warning">{SEMANTIC_SUPPORT_REVIEW.body}</Alert>}
+      <SignalEscalatedPanel checkRunId={report.check_run_id} sourceTarget={sourceTarget} onOpenSource={onOpenSource} />
       <section className="signal-document-analysis__summary" aria-labelledby="analysis-heading">
         <div className="signal-document-inspector__heading"><p className="signal-section-kicker">After the evidence</p><h2 id="analysis-heading">Readiness and decision</h2><p>Use this summary after reviewing the evidence. The instructor records the final decision.</p></div>
         <div className="signal-document-analysis__readiness">
@@ -295,7 +298,6 @@ function ReadinessDecision({ checkRunId, report, pending, error, onRetry, onBack
       </section>
       {report.llm_mode !== "real" && <Alert title={report.llm_mode === "fake" ? TEST_AI_DISCLOSURE.title : "AI mode could not be verified"} tone="warning">{report.llm_mode === "fake" ? TEST_AI_DISCLOSURE.body : "This run predates reliable AI-mode tracking. Treat AI-derived outcomes cautiously."}</Alert>}
       {coverage.length > 0 && <CoverageStatement state="partial" headingId="workspace-coverage-heading" heading="Assessment limits" intro="Results below cover only the checks that ran. Unchecked content is not treated as passed." items={coverage} />}
-      {report.historical_semantic_support_unverified && <Alert title="Historical AI grades need fresh evidence review" tone="warning">Some recorded AI suggestions predate criterion-support validation. They are not validated by the current safeguards. Run a new check or assess the manuscript independently. Reopening preserves the original record.</Alert>}
       <FigureReadingsSummary readings={report.figure_readings} checkRunId={checkRunId} />
       <details className="signal-document-analysis__criteria"><summary>Criterion record, {criterionRecords.length} {criterionRecords.length === 1 ? "entry" : "entries"}</summary><SignalCriteriaResults results={criterionRecords} checkRunId={report.check_run_id} /></details>
       <SignalDecisionPanel report={report} manuscriptLabel={identity.primary} />
@@ -328,6 +330,7 @@ function ReviewHome({ checkRunId, report, reportPending, reportError, onReportRe
 }
 
 export function SignalDocumentViewerPage() {
+  const location = useLocation();
   const { checkRunId } = useParams<{ checkRunId: string }>();
   const id = Number(checkRunId);
   const validId = Number.isInteger(id) && id > 0;
@@ -347,11 +350,19 @@ export function SignalDocumentViewerPage() {
   const filter = parseFilter(searchParams.get("filter"));
   const headingRef = useRef<HTMLHeadingElement>(null);
   const manuscriptTabRef = useRef<HTMLButtonElement>(null);
+  const sourcePanelRef = useRef<HTMLDivElement>(null);
+  const sourceFocusOwner = useRef<HTMLElement | null>(null);
   const reviewTabRef = useRef<HTMLButtonElement>(null);
   const inspectorRef = useRef<HTMLElement>(null);
   const queueScrollRef = useRef(0);
   const queueFocusRef = useRef<number | null>(null);
   const restoreQueueRef = useRef(false);
+  const sourceAttemptSequence = useRef(0);
+  const criterionInspectionRun = useRef<number | null>(null);
+  const [criterionSource, setCriterionSource] = useState<{ attempt: number; run: number; anchor: string; origin: string; from: string; destination: string; actionId: string }>();
+  const sourcePlacement = useRef<{ run: number; origin: string; destination: string; adopted: boolean; allowed: boolean } | undefined>(undefined);
+  const liveSourceScope = useRef({ run: id, query: searchParams.toString() });
+  const returnSourceFocus = useRef<{ from: string; search: string; actionId: string; owner: Element | null } | undefined>(undefined);
   useRouteFocus("Manuscript review - VERIDICAL", headingRef);
 
   const viewerQuery = useManuscriptViewer(id);
@@ -362,6 +373,8 @@ export function SignalDocumentViewerPage() {
   const sourceAvailability: SourceAvailability = viewer?.available === false
     ? viewer.purged_at ? "deleted" : "unavailable" : undefined;
   const isDocx = viewer?.available === true && viewer.source_format === "docx";
+  const singlePaneLayout = useMediaQuery(DOCUMENT_SINGLE_PANE_MEDIA_QUERY, false);
+  const docxScrollInPane = isDocx && singlePaneLayout;
   const paragraphsQuery = useManuscriptParagraphs(id, isDocx);
   const anchorRegion = parsedAnchorRegion && viewer?.available && (
     parsedAnchorRegion.page !== null
@@ -397,6 +410,108 @@ export function SignalDocumentViewerPage() {
     change(next);
     setSearchParams(next, { replace });
   }
+
+  function criterionSourceTarget(anchor: string) {
+    const next = new URLSearchParams(searchParams);
+    next.set("anchor", anchor);
+    next.set("pane", "manuscript");
+    return `/report/${id}/document?${next}`;
+  }
+
+  function openCriterionSource(anchor: string, actionId: string) {
+    const action = document.getElementById(actionId);
+    const owned = action?.isConnected === true && document.activeElement === action && document.hasFocus();
+    const target = new URL(criterionSourceTarget(anchor), window.location.origin);
+    const destination = target.search.slice(1);
+    const originSearch = criterionSource?.run === id && criterionSource.destination === searchParams.toString()
+      ? criterionSource.origin : searchParams.toString();
+    const originParams = new URLSearchParams(originSearch);
+    originParams.set("pane", "review");
+    const origin = originParams.toString();
+    criterionInspectionRun.current = id;
+    setCriterionSource({ attempt: ++sourceAttemptSequence.current, run: id, anchor, origin, from: searchParams.toString(), destination, actionId });
+    if (owned) {
+      sourcePanelRef.current?.focus();
+      if (document.activeElement !== sourcePanelRef.current) manuscriptTabRef.current?.focus();
+    }
+    sourceFocusOwner.current = owned && (document.activeElement === sourcePanelRef.current || document.activeElement === manuscriptTabRef.current)
+      ? document.activeElement as HTMLElement : null;
+    sourcePlacement.current = { run: id, origin: searchParams.toString(), destination, adopted: false, allowed: sourceFocusOwner.current !== null };
+    setSearchParams(new URLSearchParams(destination), { state: location.state });
+  }
+
+  const sourceQuery = searchParams.toString();
+  liveSourceScope.current = { run: id, query: sourceQuery };
+  useEffect(() => {
+    criterionInspectionRun.current = null;
+    if (sourcePlacement.current) sourcePlacement.current.allowed = false;
+    returnSourceFocus.current = undefined;
+    sourceFocusOwner.current = null;
+  }, [id]);
+  useEffect(() => {
+    const ownTransition = criterionSource && sourceQuery === criterionSource.from && !sourcePlacement.current?.adopted;
+    if (criterionSource && (criterionSource.run !== id || (!ownTransition && sourceQuery !== criterionSource.destination && sourceQuery !== criterionSource.origin))) setCriterionSource(undefined);
+  }, [id, sourceQuery, criterionSource]);
+  useEffect(() => {
+    const attempt = sourcePlacement.current;
+    if (!attempt || !attempt.allowed) return;
+    if (attempt.run !== id || (attempt.destination !== sourceQuery && (attempt.adopted || attempt.origin !== sourceQuery))) {
+      attempt.allowed = false;
+      return;
+    }
+    if (attempt.destination === sourceQuery) attempt.adopted = true;
+    const retire = () => { attempt.allowed = false; returnSourceFocus.current = undefined; };
+    const focus = (event: FocusEvent) => { if (event.target !== sourceFocusOwner.current) retire(); };
+    window.addEventListener("blur", retire);
+    window.addEventListener("keydown", retire);
+    window.addEventListener("pointerdown", retire);
+    window.addEventListener("wheel", retire, { passive: true });
+    document.addEventListener("focusin", focus);
+    return () => {
+      window.removeEventListener("blur", retire);
+      window.removeEventListener("keydown", retire);
+      window.removeEventListener("pointerdown", retire);
+      window.removeEventListener("wheel", retire);
+      document.removeEventListener("focusin", focus);
+    };
+  }, [id, sourceQuery, criterionSource?.attempt]);
+
+  useEffect(() => () => { if (sourcePlacement.current) sourcePlacement.current.allowed = false; }, []);
+
+  const placeCriterionSource = useCallback((element: HTMLElement) => {
+    const attempt = sourcePlacement.current;
+    if (!attempt?.allowed || attempt.run !== liveSourceScope.current.run || attempt.destination !== liveSourceScope.current.query || !document.hasFocus() || document.activeElement !== sourceFocusOwner.current) return;
+    attempt.adopted = true;
+    attempt.allowed = false;
+    element.scrollIntoView({ block: "nearest" });
+  }, []);
+
+  function returnToCriterion(event: React.MouseEvent<HTMLButtonElement>) {
+    if (!criterionSource || criterionSource.run !== id) return;
+    const owned = event.currentTarget.isConnected && document.activeElement === event.currentTarget && document.hasFocus();
+    if (sourcePlacement.current) sourcePlacement.current.allowed = false;
+    if (owned) {
+      inspectorRef.current?.focus();
+      if (document.activeElement !== inspectorRef.current) reviewTabRef.current?.focus();
+      returnSourceFocus.current = { from: sourceQuery, search: criterionSource.origin, actionId: criterionSource.actionId, owner: document.activeElement };
+    }
+    setSearchParams(new URLSearchParams(criterionSource.origin), { state: location.state });
+    setCriterionSource(undefined);
+  }
+
+  useLayoutEffect(() => {
+    const requested = returnSourceFocus.current;
+    if (!requested) return;
+    if (requested.search !== sourceQuery) {
+      if (requested.from !== sourceQuery) returnSourceFocus.current = undefined;
+      return;
+    }
+    returnSourceFocus.current = undefined;
+    if (!document.hasFocus() || document.activeElement !== requested.owner) return;
+    const action = document.getElementById(requested.actionId);
+    const resultId = requested.actionId.split("-").at(-2);
+    (action ?? document.getElementById(`signal-resolution-heading-${resultId}`) ?? document.getElementById("escalated-heading"))?.focus();
+  });
 
   function selectFinding(flagId: number, replace = false) {
     const finding = findingForFlag(findings, flagId);
@@ -535,7 +650,8 @@ export function SignalDocumentViewerPage() {
               <button ref={reviewTabRef} id="review-tab" type="button" role="tab" aria-controls="review-panel" aria-label={reviewCount > 0 ? `Review, ${reviewCount} ${reviewCount === 1 ? "task" : "tasks"}` : "Review"} aria-selected={activeTab === "review"} tabIndex={activeTab === "review" ? 0 : -1} onKeyDown={tabKey} onClick={() => selectPane("review")}>Review{reviewCount > 0 ? ` (${reviewCount})` : ""}</button>
             </div>
             <div className="signal-document-grid">
-              <div id="manuscript-panel" role="tabpanel" aria-labelledby="manuscript-tab" data-active={activeTab === "manuscript"} className="signal-document-pane">
+              <div ref={sourcePanelRef} tabIndex={docxScrollInPane ? 0 : -1} id="manuscript-panel" role="tabpanel" aria-labelledby="manuscript-tab" data-active={activeTab === "manuscript"} data-source-format={viewer?.source_format} className="signal-document-pane">
+                {criterionSource?.run === id && isDecision && sourceQuery === criterionSource.destination && <Button variant="secondary" onClick={returnToCriterion}>Return to criterion review</Button>}
                 {selectedFinding && selectedSummary && selectedPrecision && (
                   <div className="signal-document-selection-strip" role="status"><div><strong>Finding {selectedFinding.number} selected</strong><span>{instructorAnchor(recordedAnchor ?? selectedSummary.page_anchor)} · {selectedPrecision.label}</span></div><div><Button variant="secondary" onClick={showSelectedReview}>View review</Button><Button variant="quiet" onClick={showQueue}>Clear selection</Button></div></div>
                 )}
@@ -546,12 +662,12 @@ export function SignalDocumentViewerPage() {
                   : viewerQuery.isError || !viewer ? <div className="signal-document-source"><div className="signal-document-toolbar"><div className="signal-document-toolbar__identity"><strong>Full manuscript</strong><span>Stored source</span></div></div><div className="signal-document-scroll"><section className="signal-document-paper-state"><Alert title="The manuscript could not be loaded" tone="error" role="alert"><p>VERIDICAL could not load the stored source view. The Review pane loads separately and may also need to be retried.</p><Button variant="secondary" onClick={() => viewerQuery.refetch()}>Try source again</Button><ReviewDeskReturnLink variant="quiet">Return to Review Desk</ReviewDeskReturnLink></Alert></section></div></div>
                     : !viewer.available ? <div className="signal-document-source"><div className="signal-document-toolbar"><div className="signal-document-toolbar__identity"><strong>Full manuscript</strong><span>{viewer.original_filename ?? "Stored source"}</span></div></div><div className="signal-document-scroll"><section className="signal-document-unavailable"><p className="signal-section-kicker">Stored source unavailable</p><h2>Source manuscript unavailable</h2><p>{viewer.purged_at ? `The stored source file was deleted on ${localDate(viewer.purged_at)} and can no longer be opened.` : viewer.unavailable_reason}</p><p>You can still review the recorded evidence and readiness details, but VERIDICAL cannot show the full manuscript.</p><ActionLink to={`/report/${id}`} variant="brand">Open full readiness report</ActionLink></section></div></div>
                       : viewer.source_format === "pdf" ? <PdfPane fileUrl={`${BASE_URL}/check-runs/${id}/document/file`} regions={visibleRegions} flags={flagsQuery.data ?? []} selectedFlagId={selectedRegionId} onSelectFlag={selectFinding} requestedPage={requestedPage} findingNumbers={numbersByFlagId} />
-                        : viewer.source_format === "docx" ? <DocxPane key={id} paragraphs={paragraphsQuery.data?.paragraphs} tables={paragraphsQuery.data?.tables} images={paragraphsQuery.data?.images} omittedImageOccurrences={paragraphsQuery.data?.omitted_image_occurrences} imageBasePath={`/check-runs/${id}/document/images`} paragraphsPending={paragraphsQuery.isPending} paragraphsError={paragraphsQuery.isError} onRetry={() => paragraphsQuery.refetch()} regions={visibleRegions} flags={flagsQuery.data ?? []} selectedFlagId={selectedRegionId} onSelectFlag={selectFinding} isVisible={activeTab === "manuscript"} findingNumbers={numbersByFlagId} requestedParagraph={anchorRegion?.paragraph ?? null} />
+                        : viewer.source_format === "docx" ? <DocxPane key={id} paragraphs={paragraphsQuery.data?.paragraphs} tables={paragraphsQuery.data?.tables} images={paragraphsQuery.data?.images} omittedImageOccurrences={paragraphsQuery.data?.omitted_image_occurrences} imageBasePath={`/check-runs/${id}/document/images`} paragraphsPending={paragraphsQuery.isPending} paragraphsError={paragraphsQuery.isError} onRetry={() => paragraphsQuery.refetch()} regions={visibleRegions} flags={flagsQuery.data ?? []} selectedFlagId={selectedRegionId} onSelectFlag={selectFinding} isVisible={activeTab === "manuscript"} findingNumbers={numbersByFlagId} requestedParagraph={anchorRegion?.paragraph ?? null} onPlaceRequestedParagraph={criterionInspectionRun.current === id && isDecision ? placeCriterionSource : undefined} requestedParagraphAttempt={criterionSource?.attempt} scrollInParent={docxScrollInPane} />
                           : <div className="signal-document-source"><div className="signal-document-toolbar"><div className="signal-document-toolbar__identity"><strong>Full manuscript</strong><span>{viewer.original_filename ?? "Unsupported source"}</span></div></div><div className="signal-document-scroll"><section className="signal-document-paper-state"><Alert title="This manuscript format cannot be displayed here" tone="warning"><p>Use the recorded excerpts and anchors in Review, or open the full readiness report.</p><ActionLink to={`/report/${id}`} variant="secondary">Open full readiness report</ActionLink></Alert></section></div></div>}
               </div>
-              <aside ref={inspectorRef} id="review-panel" role="tabpanel" aria-labelledby="review-tab" data-active={activeTab === "review"} className="signal-document-inspector">
+              <aside ref={inspectorRef} tabIndex={-1} id="review-panel" role="tabpanel" aria-labelledby="review-tab" data-active={activeTab === "review"} className="signal-document-inspector">
                 {isExploring ? <ReuseExplorePanel flags={flagsQuery.data} flagsFetching={flagsQuery.isFetching} flagsError={flagsQuery.isError} flagsSucceeded={flagsQuery.isSuccess} onRetryFlags={() => flagsQuery.refetch()} onSelectFlag={selectFinding} onBack={showQueue} includeReferenceList={includeReferenceList} includeBlockQuote={includeBlockQuote} onToggleReferenceList={(value) => setToggle("ref", value)} onToggleBlockQuote={(value) => setToggle("quote", value)} excludedMatchesQuery={excludedMatchesQuery} expandedMatchId={expandedMatchId} onExpandMatch={setMatch} />
-                  : isDecision ? <ReadinessDecision checkRunId={id} report={reportQuery.data} pending={reportQuery.isPending} error={reportQuery.error} onRetry={() => reportQuery.refetch()} onBack={showQueue} />
+                  : isDecision ? <ReadinessDecision checkRunId={id} report={reportQuery.data} pending={reportQuery.isPending} error={reportQuery.error} onRetry={() => reportQuery.refetch()} onBack={showQueue} sourceTarget={criterionSourceTarget} onOpenSource={openCriterionSource} />
                     : selectedFinding && selectedLocationId ? <SelectedFinding finding={selectedFinding} total={findings.length} locationFlagId={selectedLocationId} region={selectedRegion} sourceAvailability={sourceAvailability} sourceAnchor={recordedAnchor} previous={previousFinding} next={nextFinding} onBack={showQueue} onPrevious={() => previousFinding && selectFinding(previousFinding.representative.id, true)} onNext={() => nextFinding && selectFinding(nextFinding.representative.id, true)} onLocation={selectFinding} onExplore={openExplore} />
                       : <ReviewHome checkRunId={id} report={reportQuery.data} reportPending={reportQuery.isPending} reportError={reportQuery.error} onReportRetry={() => reportQuery.refetch()} findings={findings} regions={viewer?.regions ?? []} sourceAvailability={sourceAvailability} flagsPending={flagsQuery.isPending} flagsError={flagsQuery.isError} filter={filter} invalidSelection={invalidSelection} onFilter={setFilter} onSelect={selectFinding} onExplore={openExplore} onDecision={openDecision} />}
               </aside>

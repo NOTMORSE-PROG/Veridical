@@ -2535,7 +2535,7 @@
 
   .signal-coverage-list__item {
     display: grid;
-    grid-template-columns: auto minmax(0, 1fr) auto;
+    grid-template-columns: auto minmax(0, 1fr);
     gap: var(--signal-space-3);
     align-items: start;
     border: var(--signal-border-hairline) solid var(--color-signal-border);
@@ -2544,7 +2544,7 @@
     background: var(--color-signal-surface);
   }
 
-  .signal-coverage-list__item svg {
+  .signal-coverage-list__item > svg {
     flex: none;
     color: var(--color-signal-warning-text);
     margin-block-start: var(--signal-space-1);
@@ -2559,6 +2559,26 @@
   .signal-coverage-list__body p + p,
   .signal-coverage-list__body ul {
     margin-block-start: var(--signal-space-2);
+  }
+
+  .signal-coverage-list__body {
+    min-width: 0;
+    grid-column: 1 / -1;
+  }
+
+  .signal-coverage-list__body ul {
+    display: grid;
+    gap: var(--signal-space-1);
+    padding-inline-start: var(--signal-space-4);
+    list-style: disc;
+  }
+
+  .signal-coverage-list__action {
+    min-width: 0;
+    max-inline-size: 100%;
+    grid-column: 1 / -1;
+    justify-self: start;
+    white-space: normal;
   }
 
   .signal-resolution-list,
@@ -5786,6 +5806,26 @@
       display: block;
     }
 
+    .signal-document-pane[data-source-format="docx"] {
+      overflow: auto;
+      scroll-padding-block: var(--signal-space-5);
+    }
+
+    .signal-document-pane[data-source-format="docx"] > *,
+    .signal-document-pane[data-source-format="docx"] .signal-document-source > * {
+      flex-shrink: 0;
+    }
+
+    .signal-document-pane[data-source-format="docx"] .signal-document-source {
+      height: auto;
+      flex: none;
+    }
+
+    .signal-document-pane[data-source-format="docx"] .signal-document-scroll--docx {
+      flex: none;
+      overflow: visible;
+    }
+
     .signal-document-toolbar {
       align-items: flex-start;
       padding-inline: var(--signal-paper-gutter-phone);
@@ -6252,14 +6292,6 @@
     .signal-coverage-list {
       padding: var(--signal-space-4);
       padding-block-start: 0;
-    }
-
-    .signal-coverage-list__item {
-      grid-template-columns: auto minmax(0, 1fr);
-    }
-
-    .signal-coverage-list__item .signal-button {
-      grid-column: 1 / -1;
     }
 
     .signal-resolution-options,

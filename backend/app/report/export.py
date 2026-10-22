@@ -137,6 +137,13 @@ def _coverage_labels() -> dict[str, str]:
 
 
 @lru_cache
+def _semantic_support_labels() -> dict[str, str]:
+    return json.loads(
+        (Path(__file__).parent / "data" / "semantic_support_labels.json").read_text("utf-8")
+    )
+
+
+@lru_cache
 def _image_coverage_labels() -> dict[str, str]:
     return json.loads(
         (Path(__file__).parent / "data" / "image_coverage_labels.json").read_text("utf-8")
@@ -513,7 +520,7 @@ def _source_caption(row: CriterionResultOut) -> str:
 
 def _pending_review_reason(outcome: str) -> str:
     if outcome == "escalated":
-        return "AI reached no verdict for this criterion."
+        return _semantic_support_labels()["pending"]
     return (
         "This criterion was not graded by AI (capacity spent or the grading service was "
         "unavailable)."
@@ -871,6 +878,27 @@ def build_report_pdf(data: ReportExportData) -> bytes:
                 ),
             ]
             flow.append(KeepTogether(block))
+            if row.kind == "semantic" and row.basis == "llm" and row.outcome == "escalated":
+                labels = _semantic_support_labels()
+                flow.append(Paragraph(escape(labels["review"]), styles["body"]))
+                flow.append(Paragraph(escape(labels["qualification"]), styles["body"]))
+                if row.reasoning and row.reasoning.strip():
+                    flow.append(Paragraph("Recorded AI explanation", styles["body_bold"]))
+                    flow.append(Paragraph(escape(row.reasoning), styles["body"]))
+                elif not (row.reason and row.reason.strip()):
+                    flow.append(Paragraph(escape(labels["missing_explanation"]), styles["body"]))
+                if row.evidence:
+                    flow.append(Paragraph("Recorded passages and locations", styles["body_bold"]))
+                    for entry in row.evidence:
+                        flow.append(Paragraph(escape(entry.quote), styles["body"]))
+                        location = (
+                            _display_anchor(entry.anchor)
+                            if entry.anchor.strip()
+                            else labels["missing_location"]
+                        )
+                        flow.append(Paragraph(escape(location), styles["caption"]))
+                elif not (row.reason and row.reason.strip()):
+                    flow.append(Paragraph(escape(labels["missing_excerpt"]), styles["body"]))
             flow.append(Spacer(1, 6))
         flow.append(Spacer(1, 6))
 
@@ -1080,15 +1108,9 @@ def build_report_pdf(data: ReportExportData) -> bytes:
                         )
                     )
     if data.report.historical_semantic_support_unverified:
-        flow.append(Paragraph("Historical AI grades need fresh evidence review", styles["h2"]))
-        flow.append(
-            Paragraph(
-                "Some recorded AI suggestions predate criterion-support validation. They are not "
-                "validated by the current safeguards. Run a new check or assess the manuscript "
-                "independently. Reopening preserves the original record.",
-                styles["body"],
-            )
-        )
+        labels = _semantic_support_labels()
+        flow.append(Paragraph(escape(labels["title"]), styles["h2"]))
+        flow.append(Paragraph(escape(labels["body"]), styles["body"]))
     flag_intro = [Paragraph(f"Flags ({len(data.flags)})", styles["h2"])]
     docx_source = data.source_format == "docx" or any(
         image.reason_code == "docx_layout" for image in data.page_images.values()

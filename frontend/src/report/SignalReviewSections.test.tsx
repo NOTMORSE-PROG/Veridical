@@ -111,6 +111,48 @@ function reportWith(overrides: Record<string, unknown>) {
 }
 
 describe("SignalEscalatedPanel / SignalResolutionCard", () => {
+  it("shows the actual explanation and all located basis before choices and describes confirmation", async () => {
+    const item = { ...REAL_MAJORITY, reasoning: "Saved representative explanation", evidence: [
+      { quote: "Located source excerpt", anchor: "paragraph 57" },
+      { quote: "Unplaced source excerpt", anchor: "" },
+    ] };
+    vi.stubGlobal("fetch", stubFetchByPath({ "/check-runs/5/escalated": [item] }));
+    renderWithProviders(<SignalEscalatedPanel checkRunId={5} />);
+    const explanation = await screen.findByText("Saved representative explanation");
+    const choice = screen.getByRole("button", { name: "Accept AI suggestion: pass" });
+    expect(explanation.compareDocumentPosition(choice) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(screen.getByRole("link", { name: /Open in manuscript: Extracted paragraph 58/ })).toBeVisible();
+    expect(screen.getByText("No manuscript location is available for this excerpt.")).toBeVisible();
+    expect(screen.getAllByRole("link")).toHaveLength(1);
+    fireEvent.click(choice);
+    expect(screen.getByRole("button", { name: "Confirm resolution" })).toHaveAccessibleDescription(/A recorded location does not establish support for a grade/);
+    expect(screen.getByText("This reason appears in the instructor report and export.")).toBeVisible();
+    expect(screen.queryByText(/any active share link/)).not.toBeInTheDocument();
+  });
+
+  it.each([null, " \n\t "])("states when a tentative suggestion has no usable explanation (%s) or located excerpt", async (reasoning) => {
+    vi.stubGlobal("fetch", stubFetchByPath({ "/check-runs/5/escalated": [{ ...REAL_MAJORITY, reasoning }] }));
+    renderWithProviders(<SignalEscalatedPanel checkRunId={5} />);
+    expect(await screen.findByText("No AI explanation is available for this review item.")).toBeVisible();
+    expect(screen.getByText("No located excerpt is available for this review item.")).toBeVisible();
+  });
+
+  it.each([false, true])("qualifies unresolved public AI basis while excluding resolved=%s", (resolved) => {
+    const row: ResultRowCommon = { criterion_id: 1, text: "Custom criterion", type: "semantic", kind: "semantic", weight: 1, weight_importance: "med", outcome: "escalated", score: null, basis: "llm", anchor: null, reasoning: "Saved basis", reason: null, evidence: [{ quote: "Saved quotation", anchor: "paragraph 57" }], resolved };
+    renderWithProviders(<SignalCriteriaResults results={[row]} checkRunId={5} publicView />);
+    fireEvent.click(screen.getByText("Review evidence and reasoning"));
+    expect(screen.queryByText("A recorded location does not establish support for a grade.") !== null).toBe(!resolved);
+    expect(screen.queryByRole("link", { name: /Open in manuscript/ })).not.toBeInTheDocument();
+    expect(screen.getByText("Extracted paragraph 58")).toBeVisible();
+  });
+
+  it.each([null, "rule", "local"])("does not give basis=%s an AI support qualification", (basis) => {
+    const row = { criterion_id: 1, text: "Criterion", type: "semantic", kind: "semantic", weight: 1, weight_importance: "med", outcome: "escalated", score: null, basis, anchor: null, reasoning: null, reason: null, evidence: [] } as ResultRowCommon;
+    renderWithProviders(<SignalCriteriaResults results={[row]} checkRunId={5} publicView />);
+    fireEvent.click(screen.getByText("Review evidence and reasoning"));
+    expect(screen.queryByText("A recorded location does not establish support for a grade.")).not.toBeInTheDocument();
+  });
+
   it.each(["unsupported", "uncertain", "incomplete"] as const)("withholds %s support without a false split vote or accept shortcut", async (status) => {
     const item: EscalatedItemOut = {
       ...LEVELLED_ITEM, agreement: 1, votes: ["Exemplary", "Exemplary"],
@@ -125,7 +167,7 @@ describe("SignalEscalatedPanel / SignalResolutionCard", () => {
     expect(screen.queryByText(/Split vote:/)).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /Accept AI suggestion/ })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Exemplary" })).toBeEnabled();
-    expect(screen.getByRole("link", { name: "Open in manuscript: page 3" })).toHaveAttribute("href", "/report/5/document?anchor=page%203");
+    expect(screen.getByRole("link", { name: /Open in manuscript: page 3\./ })).toHaveAttribute("href", "/report/5/document?anchor=page%203");
     if (status === "incomplete") expect(screen.getByText(/separate evidence review did not finish/)).toBeInTheDocument();
   });
   afterEach(() => vi.unstubAllGlobals());

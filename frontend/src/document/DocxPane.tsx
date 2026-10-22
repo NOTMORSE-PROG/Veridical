@@ -43,6 +43,9 @@ export function DocxPane({
   images = EMPTY_IMAGES,
   omittedImageOccurrences = 0,
   imageBasePath,
+  onPlaceRequestedParagraph,
+  requestedParagraphAttempt,
+  scrollInParent = false,
 }: {
   paragraphs: DocumentParagraphOut[] | undefined;
   paragraphsPending: boolean;
@@ -68,6 +71,9 @@ export function DocxPane({
   images?: DocumentImageOut[];
   omittedImageOccurrences?: number;
   imageBasePath?: string;
+  onPlaceRequestedParagraph?: (element: HTMLElement) => void;
+  requestedParagraphAttempt?: number;
+  scrollInParent?: boolean;
 }) {
   const [hoveredFlagId, setHoveredFlagId] = useState<number | null>(null);
   const highlightRefs = useRef<Map<number, HTMLButtonElement>>(new Map());
@@ -75,8 +81,11 @@ export function DocxPane({
 
   useEffect(() => {
     if (requestedParagraph === null || !Number.isSafeInteger(requestedParagraph) || !isVisible) return;
-    paperRef.current?.querySelector<HTMLElement>(`[data-source-paragraph="${requestedParagraph}"]`)?.focus();
-  }, [requestedParagraph, paragraphs, tables, images, isVisible]);
+    const target = paperRef.current?.querySelector<HTMLElement>(`[data-source-paragraph="${requestedParagraph}"]`);
+    if (!target) return;
+    if (onPlaceRequestedParagraph) onPlaceRequestedParagraph(target);
+    else target.focus();
+  }, [requestedParagraph, paragraphs, tables, images, isVisible, onPlaceRequestedParagraph, requestedParagraphAttempt]);
 
   const flagsById = new Map(flags.map((f) => [f.id, f]));
 
@@ -170,7 +179,7 @@ export function DocxPane({
           })}
         </div>
       )}
-      <div role="region" tabIndex={0} aria-label="Full manuscript, scrollable" className="signal-document-scroll signal-document-scroll--docx">
+      <div role={scrollInParent ? undefined : "region"} tabIndex={scrollInParent ? undefined : 0} aria-label={scrollInParent ? undefined : "Full manuscript, scrollable"} className="signal-document-scroll signal-document-scroll--docx">
         <article ref={paperRef} className="signal-document-docx-paper" aria-label="Reconstructed manuscript document">
           <header className="signal-document-docx-paper__header">
             <span>Reconstructed manuscript</span>

@@ -1,0 +1,175 @@
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { createMemoryRouter, RouterProvider } from "react-router";
+import { afterEach, expect, it, vi } from "vitest";
+import { SignalDocumentViewerPage } from "./SignalDocumentViewer";
+import { stubFetchByPath } from "../test/renderWithProviders";
+
+vi.mock("./PdfPane", () => ({ PdfPane: () => <div>PDF source</div> }));
+vi.mock("./ReuseExplorePanel", () => ({ ReuseExplorePanel: () => null }));
+
+const ORIGIN = "/report/5/document?view=decision&pane=review&filter=all&sentinel=kept";
+const ITEMS = [1, 2].map((id) => ({
+  check_result_id: id, criterion_id: id, criterion_text: `Criterion ${id}`, weight: 1,
+  votes: ["pass", "fail", "pass"], agreement: 0.667, ai_majority_verdict: "pass",
+  reasoning: `Saved explanation ${id}`, reason: null, review_reason: "low_confidence",
+  evidence: [{ quote: `Recorded quote ${id}`, anchor: `paragraph ${id + 1}` }],
+}));
+const REPORT = {
+  check_run_id: 5, manuscript_id: 10, manuscript_group_label: "Local navigation control",
+  manuscript_original_filename: "source.docx", rubric_title: "Custom format", status: "needs_review",
+  composite_score: null, thresholds: {}, reason: null, flag_deduction: 0,
+  unresolved_high_flag_count: 0, decision: null, decided_at: null, decision_note: null,
+  pending_review_count: 2, rubric_is_current: true, llm_mode: "real", rubric_needs_review: false,
+  rubric_parse_issues: null, previous_status: null, previous_composite_score: null,
+  integrity_check_status: [], results: [],
+};
+const PARAGRAPHS = { paragraphs: [{ paragraph: 2, text: "The requested source paragraph", heading_level: null }, { paragraph: 3, text: "A second source paragraph", heading_level: null }], tables: [], images: [] };
+
+async function setup({ origin = ORIGIN, open = true, drafts: makeDrafts = true } = {}) {
+  vi.spyOn(document, "hasFocus").mockReturnValue(true);
+  const scroll = vi.spyOn(Element.prototype, "scrollIntoView").mockImplementation(() => {});
+  let release!: (body: typeof PARAGRAPHS) => void;
+  const held = new Promise<typeof PARAGRAPHS>((resolve) => { release = resolve; });
+  const normal = stubFetchByPath({
+    "/check-runs/5/document": { manuscript_id: 10, source_format: "docx", available: true, original_filename: "source.docx", page_count: null, regions: [] },
+    "/check-runs/5/report": REPORT, "/check-runs/5/flags": [], "/check-runs/5/escalated": ITEMS,
+    "/check-runs/5/document/reuse-matches": { matches: [], passage_archive_size_n: 0 },
+  });
+  const fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    if (String(input).includes("/document/paragraphs")) return new Response(JSON.stringify(await held), { status: 200 });
+    return normal(input, init);
+  });
+  vi.stubGlobal("fetch", fetch);
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
+  const router = createMemoryRouter([{ path: "/report/:checkRunId/document", element: <SignalDocumentViewerPage /> }], { initialEntries: [{ pathname: "/report/5/document", search: origin.slice(origin.indexOf("?")), state: { notice: "retained" } }] });
+  render(<QueryClientProvider client={client}><RouterProvider router={router} /></QueryClientProvider>);
+  const choices = await screen.findAllByRole("button", { name: "Meets criterion" });
+  if (makeDrafts) {
+    fireEvent.click(choices[0]);
+    fireEvent.click(choices[1]);
+  }
+  const drafts = screen.queryAllByRole("textbox");
+  if (makeDrafts) {
+    fireEvent.change(drafts[0], { target: { value: "First private draft" } });
+    fireEvent.change(drafts[1], { target: { value: "Second private draft" } });
+  }
+  const action = screen.getByRole("link", { name: /Open in manuscript: Extracted paragraph 3\. Criterion 1/ });
+  if (open) {
+    action.focus();
+    fireEvent.click(action);
+    await waitFor(() => expect(router.state.location.search).toContain("anchor=paragraph+2"));
+  }
+  return { client, router, scroll, release, drafts, action, fetch };
+}
+
+afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
+
+it("keeps two private drafts and the full decision context through delayed source, return and history", async () => {
+  const { router, scroll, release, drafts, action, fetch, client } = await setup();
+  expect(router.state.location.search).toContain("view=decision");
+  expect(router.state.location.search).toContain("sentinel=kept");
+  expect(router.state.location.state).toEqual({ notice: "retained" });
+  expect(document.getElementById("manuscript-panel")).toHaveFocus();
+  scroll.mockClear();
+  await act(async () => { release(PARAGRAPHS); });
+  await screen.findByText("The requested source paragraph");
+  expect(scroll).toHaveBeenCalledTimes(1);
+  expect(document.getElementById("manuscript-panel")).toHaveFocus();
+  await act(async () => { client.setQueryData(["unrelated"], "no focus"); });
+  expect(scroll).toHaveBeenCalledTimes(1);
+  const back = screen.getByRole("button", { name: "Return to criterion review" });
+  back.focus(); fireEvent.click(back);
+  await waitFor(() => expect(router.state.location.search).toBe(ORIGIN.slice(ORIGIN.indexOf("?"))));
+  expect(action).toHaveFocus();
+  expect(screen.getAllByRole("textbox")[0]).toBe(drafts[0]);
+  expect(screen.getAllByRole("textbox")[1]).toBe(drafts[1]);
+  expect(drafts[0]).toHaveValue("First private draft");
+  expect(drafts[1]).toHaveValue("Second private draft");
+  await act(async () => { await router.navigate(-1); await router.navigate(1); });
+  expect(screen.getAllByRole("textbox")[0]).toBe(drafts[0]);
+  expect(router.state.location.search).not.toContain("private");
+  expect(JSON.stringify(router.state.location.state)).not.toContain("draft");
+  expect(fetch.mock.calls.some(([, init]) => init?.method === "POST")).toBe(false);
+});
+
+it.each(["focus", "blur", "Tab", "PageDown", "wheel", "pointer", "query"])("does not reclaim source focus or scroll after %s intent", async (intent) => {
+  const { router, scroll, release, drafts } = await setup();
+  scroll.mockClear();
+  if (intent === "focus") drafts[1].focus();
+  if (intent === "blur") window.dispatchEvent(new Event("blur"));
+  if (intent === "Tab" || intent === "PageDown") fireEvent.keyDown(window, { key: intent });
+  if (intent === "wheel") fireEvent.wheel(window);
+  if (intent === "pointer") fireEvent.pointerDown(document.body);
+  if (intent === "query") await act(async () => { await router.navigate(router.state.location.pathname + router.state.location.search + "&changed=1"); });
+  const focus = document.activeElement;
+  await act(async () => { release(PARAGRAPHS); });
+  await screen.findByText("The requested source paragraph");
+  expect(document.activeElement).toBe(focus);
+  expect(scroll).not.toHaveBeenCalled();
+  expect(drafts[0]).toHaveValue("First private draft");
+});
+
+it("keeps the draft and an explicit return when the recorded source position is absent", async () => {
+  const { release, drafts } = await setup();
+  await act(async () => { release({ paragraphs: [], tables: [], images: [] }); });
+  await screen.findByText("The recorded criterion anchor could not be placed");
+  expect(screen.getByRole("button", { name: "Return to criterion review" })).toBeEnabled();
+  expect(drafts[0]).toHaveValue("First private draft");
+});
+
+it("gives a repeated same-address action a fresh one-scroll attempt and retires it on new wheel intent", async () => {
+  const { release, action, scroll, client, drafts } = await setup();
+  await act(async () => { release(PARAGRAPHS); });
+  await screen.findByText("The requested source paragraph");
+  scroll.mockClear();
+  action.focus(); fireEvent.click(action);
+  await waitFor(() => expect(scroll).toHaveBeenCalledTimes(1));
+  expect(document.getElementById("manuscript-panel")).toHaveFocus();
+  scroll.mockClear();
+  action.focus(); fireEvent.click(action);
+  fireEvent.wheel(window);
+  await act(async () => { client.setQueryData(["report", 5, "document", "paragraphs"], { ...PARAGRAPHS, paragraphs: [...PARAGRAPHS.paragraphs] }); });
+  // The explicit cached activation may place immediately; the later arrival cannot place again.
+  expect(scroll.mock.calls.length).toBeLessThanOrEqual(1);
+  expect(drafts[0]).toHaveValue("First private draft");
+});
+
+it("retires a repeated same-address attempt while its source is still delayed", async () => {
+  const { release, action, scroll } = await setup();
+  action.focus(); fireEvent.click(action);
+  fireEvent.wheel(window);
+  scroll.mockClear();
+  await act(async () => { release(PARAGRAPHS); });
+  await screen.findByText("The requested source paragraph");
+  expect(scroll).not.toHaveBeenCalled();
+});
+
+it("places a new criterion target rather than consuming permission on the previously cached paragraph", async () => {
+  const { release, scroll, drafts } = await setup();
+  await act(async () => { release(PARAGRAPHS); });
+  await screen.findByText("A second source paragraph");
+  scroll.mockClear();
+  const action = screen.getByRole("link", { name: /Open in manuscript: Extracted paragraph 4\. Criterion 2/ });
+  action.focus(); fireEvent.click(action);
+  await waitFor(() => expect(scroll).toHaveBeenCalledTimes(1));
+  expect((scroll.mock.instances[0] as unknown as HTMLElement).dataset.sourceParagraph).toBe("3");
+  expect(drafts[0]).toHaveValue("First private draft");
+  expect(drafts[1]).toHaveValue("Second private draft");
+});
+
+it("preserves ordinary direct decision-anchor placement without a local inspection attempt", async () => {
+  const { release } = await setup({ origin: ORIGIN.replace("pane=review", "pane=manuscript") + "&anchor=paragraph+2", open: false, drafts: false });
+  await act(async () => { release(PARAGRAPHS); });
+  await waitFor(() => expect(screen.getByText("The requested source paragraph")).toHaveFocus());
+});
+
+it("retires inspection mode across a different run before returning to an ordinary direct anchor", async () => {
+  const { release, router } = await setup();
+  await act(async () => { release(PARAGRAPHS); });
+  await screen.findByText("The requested source paragraph");
+  await act(async () => { await router.navigate("/report/6/document?view=decision&pane=manuscript"); });
+  await waitFor(() => expect(router.state.location.pathname).toBe("/report/6/document"));
+  await act(async () => { await router.navigate("/report/5/document?view=decision&pane=manuscript&anchor=paragraph+2"); });
+  await waitFor(() => expect(screen.getByText("The requested source paragraph")).toHaveFocus());
+});

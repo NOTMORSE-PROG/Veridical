@@ -577,6 +577,7 @@ def test_shared_report_public_schema_is_an_exact_allow_list(
         # V-081: public coverage fact only, not private source details.
         "assessment_incomplete",
         "historical_citation_title_unverified",
+        "semantic_support_unverified",
     }
     assert type(shared["report"]["assessment_incomplete"]) is bool
     assert set(shared["report"]["results"][0].keys()) == {

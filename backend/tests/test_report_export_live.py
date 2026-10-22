@@ -430,7 +430,7 @@ def test_export_never_drops_a_pending_criterion_from_a_decided_report(client, ap
     # A decided report is not a draft -- must not claim to be one.
     assert "Needs Your Review" not in full_text
     assert "Unresolved At Time Of Decision" in full_text
-    assert "AI reached no verdict for this criterion." in full_text
+    assert "No grade has been accepted for this criterion." in full_text
 
 
 def test_export_captions_a_criterion_by_kind_not_by_declared_type(client, api_scratch_url):

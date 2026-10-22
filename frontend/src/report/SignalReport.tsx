@@ -1,4 +1,5 @@
 import { WorkflowLink as Link } from "../routing/WorkflowLink";
+import { SEMANTIC_SUPPORT_REVIEW } from "../domain/semanticSupport";
 import { ReviewDeskReturnLink } from "../routing/ReviewDeskReturnLink";
 import { type MouseEvent, useEffect, useRef, useState } from "react";
 import { useParams } from "react-router";
@@ -150,7 +151,7 @@ export function SignalReportPage() {
             </div>
           )}
 
-          {report.historical_semantic_support_unverified && <Alert title="Historical AI grades need fresh evidence review" tone="warning">Some recorded AI suggestions predate criterion-support validation. They are not validated by the current safeguards. Run a new check or assess the manuscript independently. Reopening preserves the original record.</Alert>}
+          {report.historical_semantic_support_unverified && <Alert title={SEMANTIC_SUPPORT_REVIEW.title} tone="warning">{SEMANTIC_SUPPORT_REVIEW.body}</Alert>}
           <SignalEscalatedPanel checkRunId={report.check_run_id} />
           <FigureReadingsSummary readings={report.figure_readings} checkRunId={report.check_run_id} />
           <SignalFlagsPanel checkRunId={report.check_run_id} unresolvedHighFlagCount={report.unresolved_high_flag_count} originalityScope={report.originality_scope} />

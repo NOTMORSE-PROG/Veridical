@@ -61,9 +61,9 @@ function integrityCoverageItem(status: IntegrityCheckStatusOut, manuscriptId: nu
     if (status.n_skipped_quota) subIssues.push(`${status.n_skipped_quota} items skipped because AI capacity was unavailable.`);
     if (status.n_skipped_parse_failure) subIssues.push(`${status.n_skipped_parse_failure} items skipped because the model response could not be validated.`);
     if (status.n_source_pages_unassessed) subIssues.push(`${status.n_source_pages_unassessed} pages need a source-reading check.`);
-    if (status.n_metadata_skipped_insufficient) subIssues.push(`${status.n_metadata_skipped_insufficient} references remain unverified.`);
-    if (status.n_linkage_unassessed) subIssues.push(`${status.n_linkage_unassessed} reference links remain unassessed.`);
-    if (status.n_claim_support_unassessed) subIssues.push(`${status.n_claim_support_unassessed} cited sources have unassessed claim support.`);
+    if (status.n_metadata_skipped_insufficient) subIssues.push(`${status.n_metadata_skipped_insufficient} ${status.n_metadata_skipped_insufficient === 1 ? "reference" : "references"} unverified`);
+    if (status.n_linkage_unassessed) subIssues.push(`${status.n_linkage_unassessed} reference ${status.n_linkage_unassessed === 1 ? "link" : "links"} unassessed`);
+    if (status.n_claim_support_unassessed) subIssues.push(`${status.n_claim_support_unassessed} cited ${status.n_claim_support_unassessed === 1 ? "source" : "sources"} with unassessed claim support`);
     return {
       key: status.check_kind, label, detail: coverageCopy[reason],
       subIssues: [...subIssues, ...(imageDetails?.subIssues ?? [])],

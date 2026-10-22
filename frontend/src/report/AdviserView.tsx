@@ -5,6 +5,7 @@ import { Link, useParams } from "react-router";
 import { ApiError } from "../api/client";
 import { DECISION_LABEL } from "../domain/decisionTone";
 import { TEST_AI_DISCLOSURE } from "../domain/aiModeDisclosure";
+import { SEMANTIC_SUPPORT_REVIEW } from "../domain/semanticSupport";
 import { manuscriptIdentity } from "../domain/manuscriptLabel";
 import { Alert } from "../ui/Alert";
 import { CITATION_HISTORY_SHARED_LIMIT, CITATION_HISTORY_TITLE } from "../domain/citationHistory";
@@ -76,6 +77,7 @@ export function AdviserViewPage() {
         {report.llm_mode !== "real" && <Alert title={report.llm_mode === "fake" ? TEST_AI_DISCLOSURE.title : "AI mode could not be verified"} tone="warning">{report.llm_mode === "fake" ? TEST_AI_DISCLOSURE.body : "This run predates reliable AI-mode tracking. Treat AI-derived outcomes cautiously."}</Alert>}
         {report.rubric_needs_review && <Alert title="The required format had parser uncertainty" tone="warning"><p>The instructor activated it despite the warning.</p>{report.rubric_parse_issues?.length ? <ul>{report.rubric_parse_issues.map((issue) => <li key={issue}>{issue}</li>)}</ul> : null}</Alert>}
         {report.assessment_incomplete && <Alert title="Assessment limits" tone="warning">Some integrity checks were not fully assessed. Unchecked content is not treated as passed. The instructor decision remains separate from these limitations.</Alert>}
+        {report.semantic_support_unverified && <Alert title={SEMANTIC_SUPPORT_REVIEW.title} tone="warning"><p>{SEMANTIC_SUPPORT_REVIEW.body}</p><p>{SEMANTIC_SUPPORT_REVIEW.shared}</p></Alert>}
 
         {report.historical_citation_title_unverified && <Alert title={CITATION_HISTORY_TITLE} tone="warning">{CITATION_HISTORY_SHARED_LIMIT}</Alert>}
         <SignalPublicFlags flags={flags} originalityScope={report.originality_scope} />

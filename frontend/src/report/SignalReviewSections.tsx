@@ -19,6 +19,7 @@ import { isManuscriptQuote } from "../domain/evidenceDisplay";
 import { useViewedFlagIds } from "../domain/flagViewed";
 import { problemLabel } from "../domain/problemLabel";
 import { instructorAnchor } from "../domain/sourceAnchor";
+import { RECORDED_GRADE_BASIS } from "../domain/semanticSupport";
 import { systemFindingCopy } from "../domain/systemFindingCopy";
 import { rememberRouteReturnFocus } from "../routing/useRouteFocus";
 import { ActionLink } from "../ui/ActionLink";
@@ -520,12 +521,18 @@ function resolutionLabel(item: EscalatedItemOut, resolution: EscalationResolutio
   return item.levels?.find((entry) => entry.level === level)?.name ?? "Selected rubric level";
 }
 
-function SignalResolutionCard({ item, checkRunId, sharedReasonId, onResolved }: {
+export type CriterionSourceTarget = (anchor: string, actionId: string) => string;
+export type CriterionSourceOpen = (anchor: string, actionId: string) => void;
+
+function SignalResolutionCard({ item, checkRunId, sharedReasonId, onResolved, sourceTarget, onOpenSource }: {
   item: EscalatedItemOut;
   checkRunId: number;
   sharedReasonId?: string;
   onResolved: (message: string) => void;
+  sourceTarget?: CriterionSourceTarget;
+  onOpenSource?: CriterionSourceOpen;
 }) {
+  const location = useLocation();
   const [pending, setPending] = useState<{ resolution: EscalationResolution; level?: number }>();
   const [reason, setReason] = useState("");
   const [attempted, setAttempted] = useState(false);
@@ -588,11 +595,14 @@ function SignalResolutionCard({ item, checkRunId, sharedReasonId, onResolved }: 
   const reasonId = `signal-resolution-context-reason-${item.check_result_id}`;
   const injectionId = `signal-resolution-injection-${item.check_result_id}`;
   const unverifiedId = `signal-resolution-unverified-${item.check_result_id}`;
+  const qualificationId = `signal-resolution-basis-${item.check_result_id}`;
+  const hasTentativeSuggestion = item.ai_majority_verdict !== null && !item.support_withheld;
   const levelDescriptionId = (level: number) => `signal-resolution-level-${item.check_result_id}-${level}`;
   const selectedLevel = pending?.resolution === "mark_level"
     ? item.levels?.find((level) => level.level === pending.level) : undefined;
   const describedBy = [
     voteId,
+    qualificationId,
     sharedReasonId || (item.reason && reasonId),
     item.injection_suspected && item.injection_matched_snippet && injectionId,
     item.unverified_evidence && item.unverified_evidence.length > 0 && unverifiedId,
@@ -603,9 +613,9 @@ function SignalResolutionCard({ item, checkRunId, sharedReasonId, onResolved }: 
   return (
     <article className="signal-resolution-card">
       <div className="signal-resolution-card__context">
-        <div><p className="signal-section-kicker">Criterion requiring judgment</p><h3 ref={criterionHeadingRef} tabIndex={-1}>{item.criterion_text}</h3></div>
+        <div><p className="signal-section-kicker">Criterion requiring judgment</p><h3 id={`signal-resolution-heading-${item.check_result_id}`} ref={criterionHeadingRef} tabIndex={-1}>{item.criterion_text}</h3></div>
         <p id={voteId} className="signal-resolution-card__vote">{voteSummary(item)}</p>
-        {item.support_withheld && <div className="signal-copy-flow"><strong>No grade accepted</strong><p>Review the criterion and manuscript evidence, then record your own judgment.</p></div>}
+        <div className="signal-copy-flow"><strong>No grade accepted</strong><p>{RECORDED_GRADE_BASIS.review}</p><p id={qualificationId}>{RECORDED_GRADE_BASIS.qualification}</p></div>
         {sharedReasonId
           ? <p>Unresolved. The shared review reason above applies to this criterion.</p>
           : item.reason && <p id={reasonId}>{item.reason}</p>}
@@ -615,7 +625,19 @@ function SignalResolutionCard({ item, checkRunId, sharedReasonId, onResolved }: 
         {item.unverified_evidence && item.unverified_evidence.length > 0 && (
           <div id={unverifiedId} className="signal-unverified-evidence"><strong>Could not verify against the source</strong>{item.unverified_evidence.map((quote) => <blockquote key={quote}>“{quote}”</blockquote>)}</div>
         )}
-        {item.support_withheld && item.evidence?.map((entry, index) => <div className="signal-attached-flow" key={`${entry.anchor}-${index}`}><blockquote>“{entry.quote}”</blockquote><p>Located manuscript passage. Support for the suggested grade has not been established.</p><ActionLink variant="quiet" to={`/report/${checkRunId}/document?anchor=${encodeURIComponent(entry.anchor)}`}>Open in manuscript: {entry.anchor}</ActionLink></div>)}
+        {item.reasoning?.trim() ? <div className="signal-copy-flow"><strong>Recorded AI explanation</strong><p>{item.reasoning}</p></div> : hasTentativeSuggestion && <p>{RECORDED_GRADE_BASIS.missingExplanation}</p>}
+        {Boolean(item.evidence?.length) && <strong>Recorded passages and locations</strong>}
+        {item.evidence?.map((entry, index) => {
+          const actionId = `signal-resolution-source-${checkRunId}-${item.check_result_id}-${index}`;
+          const target = sourceTarget?.(entry.anchor, actionId) ?? reviewDeskDestination(`/report/${checkRunId}/document?anchor=${encodeURIComponent(entry.anchor)}`, location);
+          return <div className="signal-attached-flow" key={`${entry.anchor}-${index}`}><blockquote>“{entry.quote}”</blockquote>{entry.anchor.trim() ? <><p>{instructorAnchor(entry.anchor)}</p><ActionLink id={actionId} variant="quiet" to={target} aria-label={`Open in manuscript: ${instructorAnchor(entry.anchor)}. ${item.criterion_text}`} onClick={(event) => {
+            if (onOpenSource && event.button === 0 && !event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey) {
+              event.preventDefault();
+              onOpenSource(entry.anchor, actionId);
+            } else if (!onOpenSource) rememberRouteReturnFocus(location.pathname + location.search, target, actionId);
+          }}>Open in manuscript: {instructorAnchor(entry.anchor)}</ActionLink></> : <p>{RECORDED_GRADE_BASIS.missingLocation}</p>}</div>;
+        })}
+        {!item.evidence?.length && hasTentativeSuggestion && <p>{RECORDED_GRADE_BASIS.missingExcerpt}</p>}
       </div>
 
       {/* BUG-145 (UX review review, round 2): this region must be mounted
@@ -661,17 +683,17 @@ function SignalResolutionCard({ item, checkRunId, sharedReasonId, onResolved }: 
         <div className="signal-resolution-form">
           {selectedLevel && <div className="signal-copy-flow"><p><strong>Selected level: {selectedLevel.name}</strong></p><p>{selectedLevel.descriptor || "Description not recorded for this level."}</p></div>}
           <label><span>Reason (required)</span><textarea autoFocus rows={3} value={reason} aria-invalid={reasonInvalid || undefined} aria-describedby={reasonInvalid ? reasonErrorId : undefined} onChange={(event) => { setReason(event.target.value); if (attempted) setAttempted(false); }} /></label>
-          <p className="signal-field-hint">This reason appears in the report, export, and any active share link.</p>
+          <p className="signal-field-hint">This reason appears in the instructor report and export.</p>
           {reasonInvalid && <p id={reasonErrorId} role="alert" className="signal-field-error">{reason.trim() ? `Enter at least ${RESOLUTION_REASON_MIN_LENGTH} characters.` : "Enter a reason before confirming."}</p>}
           {resolve.error && <Alert title="Could not save this resolution" tone="error" role="alert">{resolve.error instanceof Error ? resolve.error.message : "Try again."}</Alert>}
-          <div><Button variant="secondary" disabled={resolve.isPending} onClick={cancel}>Cancel</Button><Button variant="brand" busy={resolve.isPending} onClick={confirm}>Confirm resolution</Button></div>
+          <div><Button variant="secondary" disabled={resolve.isPending} onClick={cancel}>Cancel</Button><Button variant="brand" aria-describedby={describedBy} busy={resolve.isPending} onClick={confirm}>Confirm resolution</Button></div>
         </div>
       )}
     </article>
   );
 }
 
-export function SignalEscalatedPanel({ checkRunId }: { checkRunId: number }) {
+export function SignalEscalatedPanel({ checkRunId, sourceTarget, onOpenSource }: { checkRunId: number; sourceTarget?: CriterionSourceTarget; onOpenSource?: CriterionSourceOpen }) {
   const { data: items, isPending, isError, refetch } = useEscalatedItems(checkRunId);
   const [announcement, setAnnouncement] = useState("");
   const headingRef = useRef<HTMLHeadingElement>(null);
@@ -698,7 +720,7 @@ export function SignalEscalatedPanel({ checkRunId }: { checkRunId: number }) {
       <p ref={announcementRef} tabIndex={-1} aria-live="polite" className="signal-live-region">{announcement}</p>
       {sharedReason && <Alert title="Shared review reason" tone="warning"><p id={sharedReasonId}>{sharedReason}</p></Alert>}
       {hasItems
-        ? <div className="signal-resolution-list">{items?.map((item) => <SignalResolutionCard key={item.check_result_id} item={item} checkRunId={checkRunId} sharedReasonId={sharedReason ? sharedReasonId : undefined} onResolved={(message) => { setAnnouncement(message); headingRef.current?.focus(); }} />)}</div>
+        ? <div className="signal-resolution-list">{items?.map((item) => <SignalResolutionCard key={`${checkRunId}-${item.check_result_id}`} item={item} checkRunId={checkRunId} sourceTarget={sourceTarget} onOpenSource={onOpenSource} sharedReasonId={sharedReason ? sharedReasonId : undefined} onResolved={(message) => { setAnnouncement(message); headingRef.current?.focus(); }} />)}</div>
         : <Alert title="No unresolved criteria" tone="success">Every criterion has a recorded outcome. Continue to the integrity signals.</Alert>}
     </section>
   );
@@ -780,6 +802,7 @@ export function SignalCriteriaResults({ results, checkRunId, publicView = false 
           : display.tone === "caution" ? { label: "Partly meets criterion", tone: "warning" }
           : OUTCOME_COPY[row.outcome];
         const evidenceSummaryId = `signal-criterion-evidence-${checkRunId}-${row.criterion_id}`;
+        const unresolvedAi = row.kind === "semantic" && row.basis === "llm" && !row.resolution && row.resolved !== true && row.outcome === "escalated";
         const excerptAnchors = new Set(row.evidence.map((item) => item.anchor).filter((anchor) => anchor?.trim()));
         const seenAnchors = new Set<string>();
         const sourceAction = (anchor: string) => {
@@ -787,27 +810,28 @@ export function SignalCriteriaResults({ results, checkRunId, publicView = false 
           return <ActionLink
             to={destination}
             variant="quiet"
-            aria-label={`Open in manuscript: ${anchor}. Criterion ${index + 1}: ${row.text}`}
+            aria-label={`Open in manuscript: ${instructorAnchor(anchor)}. Criterion ${index + 1}: ${row.text}`}
             onClick={() => rememberRouteReturnFocus(location.pathname + location.search, destination, evidenceSummaryId)}
-          >Open in manuscript: {anchor}</ActionLink>;
+          >Open in manuscript: {instructorAnchor(anchor)}</ActionLink>;
         };
         return <li key={row.criterion_id} className="signal-result-card"><div className="signal-result-card__top"><span className="signal-result-card__number">{index + 1}</span><span className={`signal-outcome signal-outcome--${outcome.tone}`}>{outcome.label}</span><span className={`signal-importance signal-importance--${row.weight_importance === "med" ? "medium" : row.weight_importance}`}>{row.weight_importance === "med" ? "Medium" : `${row.weight_importance.slice(0, 1).toUpperCase()}${row.weight_importance.slice(1)}`} importance</span></div><h3>{row.text}</h3>{row.resolution && <p className="signal-resolution-note"><strong>Instructor resolution:</strong> {row.resolution.reason}</p>}{/* BUG-065: this summary repeats verbatim once per row -- a screen-reader
                 links/buttons list can't tell them apart without a per-criterion
                 accessible name, same fix already applied to the flag "Review
                 evidence" links and the escalation resolve-button groups. */}
               <details><summary id={evidenceSummaryId} aria-label={`Review evidence and reasoning: ${row.text}`}>Review evidence and reasoning</summary><div className="signal-result-card__evidence">
+                {unresolvedAi && <><p><strong>No grade accepted</strong></p><p>{RECORDED_GRADE_BASIS.review}</p><p>{RECORDED_GRADE_BASIS.qualification}</p></>}
                 {row.evidence.length ? row.evidence.map((item, evidenceIndex) => {
                   const hasAnchor = Boolean(item.anchor?.trim());
                   const showAction = hasAnchor && !seenAnchors.has(item.anchor);
                   if (hasAnchor) seenAnchors.add(item.anchor);
                   return <div className="signal-attached-flow" key={`${item.anchor}-${item.quote}-${evidenceIndex}`}>
-                    <blockquote><span>“{item.quote}”</span><cite>{item.anchor}</cite></blockquote>
+                  <blockquote><span>“{item.quote}”</span><cite>{instructorAnchor(item.anchor)}</cite></blockquote>
                     {!hasAnchor && <p>No manuscript location was recorded for this excerpt.</p>}
                     {!publicView && showAction && sourceAction(item.anchor)}
                   </div>;
                 }) : <p>No verified excerpt was recorded for this criterion.</p>}
                 {!publicView && row.anchor?.trim() && !excerptAnchors.has(row.anchor) && <div className="signal-attached-flow"><p>Recorded criterion location: {row.anchor}</p>{sourceAction(row.anchor)}</div>}
-                {row.reasoning && <p><strong>Recorded reasoning:</strong> {row.reasoning}</p>}
+                {row.reasoning?.trim() && <p><strong>{unresolvedAi ? "Recorded AI explanation:" : "Recorded reasoning:"}</strong> {row.reasoning}</p>}
                 {row.reason && <p><strong>System note:</strong> {row.reason}</p>}
               </div></details></li>;
       })}</ol> : <div className="signal-desk-empty"><h3>No criterion records in this section</h3><p>No criterion records are shown here. Review the other report sections for unresolved criteria and assessment limits.</p></div>}
