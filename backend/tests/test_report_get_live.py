@@ -134,6 +134,112 @@ async def test_get_report_returns_the_full_shape_for_a_done_run(session_factory)
         assert row.evidence == []
 
 
+@pytest.mark.parametrize("limit", [1, 2])
+async def test_claim_occurrence_ledger_survives_persistence_and_reports_honest_coverage(
+    session_factory, monkeypatch, limit
+):
+    """F5.4: persisted occurrences remain private; omitted work stays visible."""
+    from unittest.mock import AsyncMock
+
+    from app.checks.citations import verify
+    from app.config import Settings
+    from app.external.schemas import VerificationResult
+    from app.ingest.patterns import load_patterns
+    from app.models.audit import AuditLog
+    from app.models.citation import Citation
+    from app.models.enums import CitationParseStatus
+    from app.models.run import Flag
+    from app.share.service import _to_public_report
+    from tests.test_citation_claim_occurrences import (
+        ABSTRACT,
+        FIRST,
+        RAW,
+        SECOND,
+        ScriptedClaims,
+        source,
+    )
+
+    owner, run_id, _ = await _seed_done_run(session_factory)
+    provider = AsyncMock(
+        return_value=verify.CitationVerdict(
+            verify.VerdictKind.existence_confirmed,
+            VerificationResult(found=True, provider="crossref", title="A Study", abstract=ABSTRACT),
+        )
+    )
+    monkeypatch.setattr(verify, "verify_citation", provider)
+    settings = Settings(_env_file=None, claim_support_max_pairs_per_run=limit)
+    async with session_factory() as session:
+        run = await session.get(CheckRun, run_id)
+        reference = Citation(
+            manuscript_id=run.manuscript_id,
+            order_index=0,
+            raw_text=RAW,
+            authors=["Reyes, J."],
+            year=2023,
+            title="A Study",
+            parse_status=CitationParseStatus.parsed,
+        )
+        session.add(reference)
+        await session.commit()
+        result = await verify.run_citation_integrity_check(
+            session,
+            None,
+            run_id,
+            [reference],
+            source([FIRST, SECOND]),
+            load_patterns(),
+            settings,
+            ScriptedClaims(),
+        )
+        saved_detail = result.detail
+        result_id = result.id
+        await aggregate_and_score(session, run_id)
+
+    provider.assert_awaited_once()
+    async with session_factory() as session:
+        persisted = await session.get(CheckResult, result_id)
+        assert persisted.detail == saved_detail
+        assert len(persisted.detail["claim_support_occurrences"]) == 2
+        assert persisted.detail["n_claim_support_checked"] == limit
+        assert persisted.detail["n_claim_support_pairs_unassessed"] == 2 - limit
+        flags = list(await session.scalars(select(Flag).where(Flag.check_result_id == result_id)))
+        if limit == 1:
+            assert flags == [] and persisted.outcome == ResultOutcome.escalated
+        else:
+            assert len(flags) == 1 and flags[0].page_anchor == "p. 2"
+            assert flags[0].evidence_excerpt == SECOND
+            assert flags[0].detail["claim_support_pair_index"] == 1
+        report = await get_report(session, run_id, owner)
+        assert "claim_support_occurrences" not in report.model_dump_json()
+        status = [
+            item
+            for item in report.integrity_check_status
+            if item.check_kind == "citation_integrity"
+        ]
+        if limit == 1:
+            assert len(status) == 1 and status[0].coverage_reason == "claim_support_unavailable"
+            assert status[0].n_claim_support_unassessed == 1
+            assert report.status == "needs_review"
+        else:
+            assert status == []
+        public = _to_public_report(report)
+        assert public.assessment_incomplete is (limit == 1)
+        assert "claim_support_occurrences" not in public.model_dump_json()
+        audit = await session.scalar(
+            select(AuditLog)
+            .where(
+                AuditLog.check_run_id == run_id,
+                AuditLog.event_type == "citation_integrity_check_computed",
+            )
+            .order_by(AuditLog.id.desc())
+            .limit(1)
+        )
+        assert (
+            audit.payload["claim_support_occurrences"] == saved_detail["claim_support_occurrences"]
+        )
+        assert audit.payload["thresholds"]["claim_support_max_pairs_per_run"] == limit
+
+
 async def test_old_semantic_suggestions_are_disclosed_without_rewriting_history(session_factory):
     instructor_id, run_id, _ = await _seed_done_run(session_factory)
     async with session_factory() as session:

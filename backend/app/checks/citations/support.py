@@ -16,12 +16,12 @@ candidate set to prefilter).
 Batched into as few Gemini calls as possible per manuscript (D-001/D-011
 quota discipline) — same pattern as `app.checks.semantic`'s grading
 batches, generalized: one call for every claim/abstract pair this
-check_run has, chunked only if the pair count exceeds
-`claim_support_max_pairs_per_call`.
+check_run admits, bounded by `claim_support_max_pairs_per_run` and chunked by
+`claim_support_max_pairs_per_call`. Every input pair retains a terminal record.
 """
 
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Literal
 
@@ -91,7 +91,7 @@ class ClaimSupportError(VeridicalError):
 
 
 class ClaimSupportVerdict(BaseModel):
-    index: int
+    index: int = Field(strict=True, ge=0)
     verdict: Literal["supported", "possibly_unsupported", "cannot_determine"]
     reasoning: str = Field(min_length=1)
     abstract_excerpt: str | None = None
@@ -111,6 +111,7 @@ class ClaimSupportInput:
     citation: Citation
     claim_sentence: str
     abstract: str
+    claim_anchor: str | None = None
 
 
 def _normalize(text: str) -> str:
@@ -145,7 +146,13 @@ async def _judge_batch(
         parsed = ClaimSupportBatchResponse.model_validate(response)
     except Exception as exc:  # noqa: BLE001 — any bad shape degrades honestly, never crashes the run
         raise ClaimSupportError(f"claim_support response failed validation: {exc}") from exc
-    return {v.index: v for v in parsed.verdicts}
+    verdicts = {}
+    for verdict in parsed.verdicts:
+        if verdict.index >= len(pairs) or verdict.index in verdicts:
+            # A conflicting or extraneous mapping cannot identify trusted work.
+            raise ClaimSupportError("claim_support response has duplicate or out-of-range indexes")
+        verdicts[verdict.index] = verdict
+    return verdicts
 
 
 def _verdict_to_flag(
@@ -154,7 +161,7 @@ def _verdict_to_flag(
     claim_injection: InjectionSignal,
     abstract_injection: InjectionSignal,
 ) -> CitationFlagDraft | None:
-    anchor = f"reference #{pair.citation.order_index + 1}"
+    anchor = pair.claim_anchor or f"reference #{pair.citation.order_index + 1}"
     injection_detail: dict = {}
     if claim_injection.suspected or abstract_injection.suspected:
         # Traceable regardless of verdict (ground rule 4); which side
@@ -228,6 +235,20 @@ def _verdict_to_flag(
 
 
 @dataclass(frozen=True)
+class ClaimSupportPairResult:
+    pair_index: int
+    status: Literal["assessed", "unassessed"]
+    unassessed_reason: str | None = None
+    batch_index: int | None = None
+    batch_local_index: int | None = None
+    model_verdict: str | None = None
+    model_reasoning: str | None = None
+    abstract_excerpt: str | None = None
+    effective_verdict: str | None = None
+    flag_kind: str | None = None
+
+
+@dataclass(frozen=True)
 class ClaimSupportResult:
     flags: list[CitationFlagDraft]
     # BUG-072: three distinct causes, three distinct counters -- collapsing
@@ -239,10 +260,17 @@ class ClaimSupportResult:
     n_skipped_quota: int
     n_skipped_api_down: int
     n_skipped_parse_failure: int
+    n_skipped_limit: int = 0
+    pair_results: list[ClaimSupportPairResult] = field(default_factory=list)
 
     @property
     def n_skipped_total(self) -> int:
-        return self.n_skipped_quota + self.n_skipped_api_down + self.n_skipped_parse_failure
+        return (
+            self.n_skipped_quota
+            + self.n_skipped_api_down
+            + self.n_skipped_parse_failure
+            + self.n_skipped_limit
+        )
 
 
 async def run_claim_support_check(
@@ -257,22 +285,50 @@ async def run_claim_support_check(
 
     flags: list[CitationFlagDraft] = []
     n_quota = n_api_down = n_parse_failure = 0
+    admitted_count = min(len(pairs), settings.claim_support_max_pairs_per_run)
+    n_limit = len(pairs) - admitted_count
+    pair_results = [
+        ClaimSupportPairResult(index, "unassessed", "limit")
+        for index in range(admitted_count, len(pairs))
+    ]
     chunk_size = max(1, settings.claim_support_max_pairs_per_call)
-    for start in range(0, len(pairs), chunk_size):
-        chunk = pairs[start : start + chunk_size]
+    for start in range(0, admitted_count, chunk_size):
+        chunk = pairs[start : min(start + chunk_size, admitted_count)]
+        batch_index = start // chunk_size
+
+        def skipped(
+            index: int,
+            reason: str,
+            *,
+            batch_start: int = start,
+            batch_size: int = len(chunk),
+            attempted_batch: int = batch_index,
+        ) -> ClaimSupportPairResult:
+            attempted = index < batch_start + batch_size
+            return ClaimSupportPairResult(
+                index,
+                "unassessed",
+                reason,
+                batch_index=attempted_batch if attempted else None,
+                batch_local_index=index - batch_start if attempted else None,
+            )
+
         try:
             verdicts = await _judge_batch(llm, chunk, check_run_id=check_run_id)
         except QuotaExhaustedError:
             # BUG-080: quota exhaustion is terminal for the whole run, not
             # just this chunk -- every remaining pair would fail identically,
             # so count them all as skipped and stop instead of retrying.
-            n_quota += len(pairs) - start
+            n_quota += admitted_count - start
+            pair_results.extend(skipped(index, "quota") for index in range(start, admitted_count))
             break
         except ApiDownError:
             n_api_down += len(chunk)
+            pair_results.extend(skipped(start + i, "api_down") for i in range(len(chunk)))
             continue
         except ClaimSupportError:
             n_parse_failure += len(chunk)
+            pair_results.extend(skipped(start + i, "parse_failure") for i in range(len(chunk)))
             continue
         for i, pair in enumerate(chunk):
             verdict = verdicts.get(i)
@@ -283,6 +339,7 @@ async def run_claim_support_check(
                 # defect class as the batch-level ClaimSupportError above,
                 # not a quota or availability issue.
                 n_parse_failure += 1
+                pair_results.append(skipped(start + i, "parse_failure"))
                 continue
             # Cheap regex, no LLM call — checked separately so the flag can
             # name which side matched (the student's claim sentence, or the
@@ -294,5 +351,39 @@ async def run_claim_support_check(
                 detect_injection_signal(pair.abstract),
             )
             if draft is not None:
+                draft = replace(
+                    draft,
+                    detail={
+                        **draft.detail,
+                        "reference_order_index": pair.citation.order_index,
+                        "claim_support_pair_index": start + i,
+                    },
+                )
                 flags.append(draft)
-    return ClaimSupportResult(flags, n_quota, n_api_down, n_parse_failure)
+            kind = draft.detail.get("kind") if draft else None
+            pair_results.append(
+                ClaimSupportPairResult(
+                    pair_index=start + i,
+                    status="assessed",
+                    batch_index=batch_index,
+                    batch_local_index=i,
+                    model_verdict=verdict.verdict,
+                    model_reasoning=verdict.reasoning,
+                    abstract_excerpt=verdict.abstract_excerpt
+                    if verdict.abstract_excerpt
+                    and _excerpt_in_abstract(verdict.abstract_excerpt, pair.abstract)
+                    else None,
+                    effective_verdict="cannot_determine"
+                    if kind == "claim_support_cannot_determine"
+                    else verdict.verdict,
+                    flag_kind=kind,
+                )
+            )
+    return ClaimSupportResult(
+        flags,
+        n_quota,
+        n_api_down,
+        n_parse_failure,
+        n_limit,
+        sorted(pair_results, key=lambda result: result.pair_index),
+    )

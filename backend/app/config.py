@@ -589,6 +589,9 @@ class Settings(BaseSettings):
     # ruled out (DECISIONS.md D-011 follow-up: 487MB peak RSS, doesn't fit
     # Render's 512MB) — this is the Tier-2 fallback D-011 itself named.
     claim_support_max_pairs_per_call: int = 20
+    # Total eligible occurrence/reference pairs admitted before batching. Overflow
+    # remains explicitly unassessed; this is not a representative sample.
+    claim_support_max_pairs_per_run: int = Field(default=20, ge=1)
 
     # --- Statistical forensics: extraction (V-031, F6.1) ----------------------
     # Override the packaged table-column-header synonym list without a code

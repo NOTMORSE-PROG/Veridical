@@ -11,7 +11,7 @@ ONLY high-severity outcome this check ever produces — everything else
 those are, by themselves, evidence of anything wrong with the manuscript.
 """
 
-from dataclasses import dataclass, replace
+from dataclasses import asdict, dataclass, replace
 from enum import StrEnum
 
 import httpx
@@ -622,20 +622,53 @@ async def run_citation_integrity_check(
         for c in citations
     )
 
-    # First linked claim sentence per reference, for V-030's claim-support
-    # pairing — a citation mentioned in-text more than once keeps whichever
-    # mention was linked first; picking one is enough to check the source
-    # actually says what THIS manuscript uses it for.
-    claim_by_order_index: dict[int, str] = {}
-    for in_text_cite, matched_refs in cross.linked:
-        for ref in matched_refs:
-            claim_by_order_index.setdefault(ref.order_index, in_text_cite.claim_sentence)
+    # Metadata belongs to the reference; support belongs to each captured use.
+    # Occurrence indexes are local inventory positions, not canonical source IDs.
+    claim_occurrences: list[dict] = []
+    occurrences_by_reference: dict[int, list[int]] = {}
     content_unassessed: set[int] = set()
+
+    def capture_occurrences(mark, matched_refs, *, numeric_mark: bool) -> None:
+        cropped = mark.excerpt_cropped if numeric_mark else mark.claim_excerpt_cropped
+        reason = (
+            "ambiguous_linkage"
+            if len(matched_refs) != 1
+            else "cropped_claim"
+            if cropped
+            else "weak_numeric_context"
+            if numeric_mark and not mark.strong_citation_context
+            else "claim_unavailable"
+            if not mark.claim_sentence
+            else None
+        )
+        for ref in matched_refs:
+            index = len(claim_occurrences)
+            claim_occurrences.append(
+                {
+                    "occurrence_index": index,
+                    "reference_order_index": ref.order_index,
+                    "source_anchor": mark.anchor,
+                    "page": mark.page,
+                    "paragraph": mark.paragraph,
+                    "raw_mark": mark.raw_text,
+                    "claim_sentence": mark.claim_sentence,
+                    "source_block_index": mark.block_index if numeric_mark else None,
+                    "source_offset": mark.start if numeric_mark else None,
+                    "eligible": False,
+                    "eligibility_reason": reason,
+                    "eligible_pair_index": None,
+                    "status": "unassessed",
+                    "unassessed_reason": reason or "metadata_unavailable",
+                }
+            )
+            occurrences_by_reference.setdefault(ref.order_index, []).append(index)
+            if reason:
+                content_unassessed.add(ref.order_index)
+
+    for mark, matched_refs in cross.linked:
+        capture_occurrences(mark, matched_refs, numeric_mark=False)
     for mark, matched_refs in numeric.linked:
-        if mark.strong_citation_context and not mark.excerpt_cropped and len(matched_refs) == 1:
-            claim_by_order_index.setdefault(matched_refs[0].order_index, mark.claim_sentence)
-        else:
-            content_unassessed.update(ref.order_index for ref in matched_refs)
+        capture_occurrences(mark, matched_refs, numeric_mark=True)
 
     flag_drafts: list[CitationFlagDraft] = (
         numeric_linkage_flags(numeric.orphan_marks, absence_candidates, len(citations))
@@ -648,6 +681,7 @@ async def run_citation_integrity_check(
     if metadata_only or projection_reason or selection.issues or not citations:
         flag_drafts = []
     claim_support_pairs: list[ClaimSupportInput] = []
+    candidate_by_pair_index: list[int] = []
     locations = {
         (location.index, location.raw_text): location
         for location in reference_entry_locations(extraction, patterns)
@@ -689,6 +723,12 @@ async def run_citation_integrity_check(
         if not metadata_complete:
             metadata_unassessed.add(citation.order_index)
         if not lookup_eligible:
+            for index in occurrences_by_reference.get(citation.order_index, []):
+                occurrence = claim_occurrences[index]
+                if occurrence["eligibility_reason"] is None:
+                    occurrence["eligibility_reason"] = "metadata_incomplete"
+                    occurrence["unassessed_reason"] = "metadata_incomplete"
+                    content_unassessed.add(citation.order_index)
             verification_records.append(
                 {
                     "reference_order_index": citation.order_index,
@@ -767,39 +807,74 @@ async def run_citation_integrity_check(
                     },
                 )
             flag_drafts.append(_with_reference_anchor(draft, citation.order_index, locations))
-        claim_sentence = claim_by_order_index.get(citation.order_index)
-        if claim_sentence and (
-            not metadata_complete
-            or verdict.kind != VerdictKind.existence_confirmed
-            or verdict.result is None
-            or not verdict.result.abstract
-        ):
-            content_unassessed.add(citation.order_index)
-        if (
-            metadata_complete
-            and verdict.kind == VerdictKind.existence_confirmed
-            and verdict.result is not None
-            and verdict.result.abstract
-            and claim_sentence
-        ):
+        for index in occurrences_by_reference.get(citation.order_index, []):
+            occurrence = claim_occurrences[index]
+            if occurrence["eligibility_reason"] is not None:
+                continue
+            reason = (
+                "metadata_incomplete"
+                if not metadata_complete
+                else "metadata_unavailable"
+                if verdict.kind != VerdictKind.existence_confirmed or verdict.result is None
+                else "abstract_unavailable"
+                if not verdict.result.abstract
+                else None
+            )
+            if reason:
+                occurrence["eligibility_reason"] = reason
+                occurrence["unassessed_reason"] = reason
+                content_unassessed.add(citation.order_index)
+                continue
+            occurrence["eligible"] = True
+            occurrence["eligible_pair_index"] = len(claim_support_pairs)
+            occurrence["unassessed_reason"] = "no_llm"
+            candidate_by_pair_index.append(index)
             claim_support_pairs.append(
                 ClaimSupportInput(
                     citation=citation,
-                    claim_sentence=claim_sentence,
+                    claim_sentence=occurrence["claim_sentence"],
                     abstract=verdict.result.abstract,
+                    claim_anchor=occurrence["source_anchor"],
                 )
             )
 
     claim_support_result = ClaimSupportResult([], 0, 0, 0)
-    claim_support_checked = 0
     if llm is not None and claim_support_pairs:
         claim_support_result = await run_claim_support_check(
             llm, claim_support_pairs, check_run_id=check_run_id, settings=settings
         )
         flag_drafts.extend(claim_support_result.flags)
-        claim_support_checked = len(claim_support_pairs) - claim_support_result.n_skipped_total
+        records, duplicate_indexes = {}, set()
+        for record in claim_support_result.pair_results:
+            if type(record.pair_index) is not int or not 0 <= record.pair_index < len(
+                candidate_by_pair_index
+            ):
+                continue
+            if record.pair_index in records:
+                duplicate_indexes.add(record.pair_index)
+            records[record.pair_index] = record
+        for pair_index, candidate_index in enumerate(candidate_by_pair_index):
+            occurrence = claim_occurrences[candidate_index]
+            record = records.get(pair_index)
+            if record is None or pair_index in duplicate_indexes:
+                # Internal result mappings must not invent successful coverage.
+                occurrence["unassessed_reason"] = "parse_failure"
+                continue
+            occurrence.update(
+                {key: value for key, value in asdict(record).items() if key != "pair_index"}
+            )
+            if record.unassessed_reason == "limit":
+                content_unassessed.add(occurrence["reference_order_index"])
     elif claim_support_pairs:
         content_unassessed.update(pair.citation.order_index for pair in claim_support_pairs)
+
+    claim_support_checked = sum(item["status"] == "assessed" for item in claim_occurrences)
+    skipped_support = {
+        reason: sum(
+            item["eligible"] and item["unassessed_reason"] == reason for item in claim_occurrences
+        )
+        for reason in ("limit", "quota", "api_down", "parse_failure")
+    }
 
     # BUG-073: a check that skipped even one pair did NOT fully execute --
     # `passed` is reserved for a run that judged everything it set out to
@@ -837,11 +912,11 @@ async def run_citation_integrity_check(
     )
     if coverage_reason:
         outcome = ResultOutcome.escalated
-    elif metadata_not_found or claim_support_result.n_skipped_parse_failure > 0:
+    elif metadata_not_found or skipped_support["parse_failure"] > 0:
         outcome = ResultOutcome.unverifiable
-    elif metadata_api_down or claim_support_result.n_skipped_api_down > 0:
+    elif metadata_api_down or skipped_support["api_down"] > 0:
         outcome = ResultOutcome.api_down
-    elif claim_support_result.n_skipped_quota > 0:
+    elif skipped_support["quota"] > 0:
         outcome = ResultOutcome.quota_exhausted
     else:
         outcome = ResultOutcome.passed
@@ -888,9 +963,13 @@ async def run_citation_integrity_check(
             "citation_parse_issues": sorted(gaps),
             "n_claim_support_checked": claim_support_checked,
             "n_claim_support_pairs_total": len(claim_support_pairs),
-            "n_claim_support_skipped_quota": claim_support_result.n_skipped_quota,
-            "n_claim_support_skipped_api_down": claim_support_result.n_skipped_api_down,
-            "n_claim_support_skipped_parse_failure": claim_support_result.n_skipped_parse_failure,
+            "n_claim_support_candidate_pairs_total": len(claim_occurrences),
+            "n_claim_support_pairs_unassessed": len(claim_occurrences) - claim_support_checked,
+            "claim_support_occurrences": claim_occurrences,
+            "n_claim_support_skipped_limit": skipped_support["limit"],
+            "n_claim_support_skipped_quota": skipped_support["quota"],
+            "n_claim_support_skipped_api_down": skipped_support["api_down"],
+            "n_claim_support_skipped_parse_failure": skipped_support["parse_failure"],
             "n_flags": len(flag_drafts),
         },
     )
@@ -921,7 +1000,11 @@ async def run_citation_integrity_check(
         payload={
             **result.detail,
             "outcome": result.outcome.value,
-            "thresholds": {"cache_stale_days": settings.citation_cache_stale_days},
+            "thresholds": {
+                "cache_stale_days": settings.citation_cache_stale_days,
+                "claim_support_max_pairs_per_call": settings.claim_support_max_pairs_per_call,
+                "claim_support_max_pairs_per_run": settings.claim_support_max_pairs_per_run,
+            },
         },
     )
     await session.commit()

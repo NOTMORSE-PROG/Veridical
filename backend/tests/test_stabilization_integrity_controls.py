@@ -8,7 +8,7 @@ import pytest
 from app.checks.agreement.extract import Statement
 from app.checks.agreement.pair import Candidate, PairingError, _judge_batch
 from app.checks.citations import verify
-from app.checks.citations.support import ClaimSupportResult
+from app.checks.citations.support import ClaimSupportPairResult, ClaimSupportResult
 from app.checks.forensics.extract import ReportedStat
 from app.checks.forensics.grim import grim_check
 from app.checks.forensics.pcheck import recompute_p
@@ -187,7 +187,20 @@ async def check(monkeypatch, body, refs, *, llm=None, abstract="A source abstrac
             ),
         )
     )
-    support = AsyncMock(return_value=ClaimSupportResult([], 0, 0, 0))
+
+    async def assessed(_llm, pairs, **_kwargs):
+        return ClaimSupportResult(
+            [],
+            0,
+            0,
+            0,
+            pair_results=[
+                ClaimSupportPairResult(index, "assessed", model_verdict="supported")
+                for index in range(len(pairs))
+            ],
+        )
+
+    support = AsyncMock(side_effect=assessed)
     monkeypatch.setattr(verify, "verify_citation", provider)
     monkeypatch.setattr(verify, "run_claim_support_check", support)
     monkeypatch.setattr(verify, "write_audit_event", AsyncMock())
