@@ -152,6 +152,8 @@ async def _judge_batch(
             # A conflicting or extraneous mapping cannot identify trusted work.
             raise ClaimSupportError("claim_support response has duplicate or out-of-range indexes")
         verdicts[verdict.index] = verdict
+    if len(verdicts) != len(pairs):
+        raise ClaimSupportError("claim_support response omits an input index")
     return verdicts
 
 

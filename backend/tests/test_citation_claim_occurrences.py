@@ -297,8 +297,8 @@ class Batches:
         (
             {"verdicts": [{"index": 0, "verdict": "supported", "reasoning": "Scripted."}]},
             "parse_failure",
-            4,
-            1,
+            3,
+            2,
             3,
         ),
     ],
@@ -354,6 +354,7 @@ async def test_missing_or_duplicate_runner_record_cannot_claim_complete_coverage
     result, flags, _ = await run(monkeypatch, [FIRST, FIRST])
     assert result.detail["n_claim_support_checked"] == 0
     assert result.detail["n_claim_support_skipped_parse_failure"] == 2
+    assert result.outcome == ResultOutcome.unverifiable and flags == []
 
 
 @pytest.mark.parametrize(
@@ -386,4 +387,42 @@ async def test_invalid_model_indexes_cannot_overwrite_or_claim_complete_coverage
         item["status"] == "unassessed" and item["unassessed_reason"] == "parse_failure"
         for item in result.detail["claim_support_occurrences"]
     )
+
+
+@pytest.mark.parametrize("returned_index", [0, 1])
+async def test_missing_model_index_withholds_the_entire_batch(monkeypatch, returned_index):
+    async def missing_response(self, prompt_type, prompt, **_context):
+        self.prompts.append(prompt)
+        return {
+            "verdicts": [
+                {"index": returned_index, "verdict": "supported", "reasoning": "Scripted."}
+            ]
+        }
+
+    monkeypatch.setattr(ScriptedClaims, "complete", missing_response)
+    result, flags, model = await run(monkeypatch, [FIRST, SECOND])
     assert result.outcome == ResultOutcome.unverifiable and flags == []
+    assert len(model.prompts) == 1
+    assert result.detail["n_claim_support_checked"] == 0
+    assert result.detail["n_claim_support_skipped_parse_failure"] == 2
+    assert all(
+        item["model_verdict"] is None and item["unassessed_reason"] == "parse_failure"
+        for item in result.detail["claim_support_occurrences"]
+    )
+
+
+async def test_permuted_complete_model_indexes_retain_the_correct_claim(monkeypatch):
+    original_complete = ScriptedClaims.complete
+
+    async def permuted_response(self, prompt_type, prompt, **context):
+        response = await original_complete(self, prompt_type, prompt, **context)
+        response["verdicts"].reverse()
+        return response
+
+    monkeypatch.setattr(ScriptedClaims, "complete", permuted_response)
+    result, flags, _model = await run(monkeypatch, [FIRST, SECOND])
+    assert result.detail["n_claim_support_checked"] == 2
+    assert result.detail["n_claim_support_skipped_parse_failure"] == 0
+    assert len(flags) == 1 and flags[0].evidence_excerpt == SECOND
+    assert flags[0].page_anchor == "p. 2"
+    assert flags[0].detail["claim_support_pair_index"] == 1
