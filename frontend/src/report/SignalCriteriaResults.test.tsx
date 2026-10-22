@@ -12,6 +12,15 @@ function row(overrides: Partial<ResultRowCommon> = {}): ResultRowCommon {
 }
 
 describe("Signal criterion judgment presentation", () => {
+  it("does not substitute a binary or AI grade for a missing recorded instructor level", () => {
+    renderWithProviders(<SignalCriteriaResults checkRunId={3} results={[row({
+      level: null, resolution: { type: "mark_level", reason: "", ai_majority_verdict: "Exemplary" },
+    })]} />);
+    expect(screen.getAllByText("Recorded grade unavailable")).toHaveLength(2);
+    expect(screen.getByText("No instructor reason is available in this record.")).toBeVisible();
+    expect(screen.queryByText("Meets criterion")).not.toBeInTheDocument();
+    expect(screen.queryByText("Exemplary")).not.toBeInTheDocument();
+  });
   it.each([false, true])("uses each rubric's exact level rather than pass/fail (public=%s)", (publicView) => {
     renderWithProviders(<SignalCriteriaResults checkRunId={3} publicView={publicView} results={[
       row({ score: 25, level: { name: "Limited", ordinal: 1, points: 1, max_points: 4 } }),

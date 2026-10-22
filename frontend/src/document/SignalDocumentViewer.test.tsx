@@ -1,4 +1,5 @@
-import { fireEvent, screen, waitFor } from "@testing-library/react";
+import { useQueryClient, type QueryClient } from "@tanstack/react-query";
+import { act, fireEvent, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { CriterionResultOut, FlagOut, FlagSummaryOut, ManuscriptViewerOut, ReportOut } from "../api/types";
 import { renderWithReviewProviders as renderWithProviders, stubFetchByPath } from "../test/renderWithProviders";
@@ -117,7 +118,7 @@ describe("SignalDocumentViewerPage", () => {
       "/check-runs/5/document/reuse-matches": { passage_archive_size_n: 4, matches: [] },
     }));
     renderWithProviders(<SignalDocumentViewerPage />, { route: "/report/5/document?view=decision&pane=review", path: "/report/:checkRunId/document" });
-    await screen.findByText("Criterion record, 0 entries");
+    await screen.findByText("Recorded criterion results, 0 entries");
     if (mode === "fake") {
       expect(screen.getByText("Test-mode AI responses")).toBeVisible();
       expect(screen.getByText("This run is recorded in test AI mode. AI responses use fixtures instead of real AI grading. Do not treat AI-derived judgments as a real assessment of the manuscript. Check the recorded evidence directly.")).toBeVisible();
@@ -152,7 +153,7 @@ describe("SignalDocumentViewerPage", () => {
       "/check-runs/5/escalated": [], "/check-runs/5/flags": [],
     }));
     renderWithProviders(<SignalDocumentViewerPage />, { route: "/report/5/document?view=decision&pane=review", path: "/report/:checkRunId/document" });
-    const summary = await screen.findByText("Criterion record, 5 entries");
+    const summary = await screen.findByText("Recorded criterion results, 5 entries");
     fireEvent.click(summary);
     expect(screen.getByRole("heading", { name: "Criterion records" })).toBeVisible();
     expect(screen.getAllByText("Not assessed: capacity reached")).toHaveLength(5);
@@ -574,4 +575,30 @@ describe("SignalDocumentViewerPage", () => {
     expect(await screen.findByRole("heading", { name: "Review queue" })).toBeInTheDocument();
     await waitFor(() => expect(screen.getByRole("button", { name: /Finding 1.*High passage similarity/s })).toHaveFocus());
   });
+});
+
+it("retains the workspace record and focus with qualified readiness across a transient report read failure", async () => {
+  let client: QueryClient; let failed = false;
+  function QueryAccess() { client = useQueryClient(); return null; }
+  const base = stubFetchByPath({ "/check-runs/5/document": VIEWER, "/check-runs/5/report": REPORT,
+    "/check-runs/5/escalated": [], "/check-runs/5/flags": [],
+    "/check-runs/5/document/reuse-matches": { passage_archive_size_n: 0, matches: [] } });
+  const fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    if (failed && String(input).endsWith("/report")) return new Response(JSON.stringify({ error: { code: "unavailable", message: "Controlled workspace read failure" } }), { status: 503 });
+    return base(input, init);
+  });
+  vi.stubGlobal("fetch", fetch);
+  renderWithProviders(<><QueryAccess /><SignalDocumentViewerPage /></>, { route: "/report/5/document?view=decision&pane=review", path: "/report/:checkRunId/document" });
+  const disclosure = (await screen.findByText("Recorded criterion results, 0 entries")).closest("details")!;
+  disclosure.open = true; const heading = screen.getByRole("heading", { name: "Criterion records" }); heading.focus();
+  failed = true; await act(async () => { await client.invalidateQueries({ queryKey: ["report", 5], exact: true }); });
+  await screen.findByText("Could not update this report");
+  expect(heading.isConnected).toBe(true); expect(heading).toHaveFocus(); expect(disclosure.open).toBe(true);
+  expect(screen.getByText("Last loaded system readiness")).toBeVisible();
+  fireEvent.click(screen.getByRole("button", { name: "Return for revision" }));
+  expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  failed = false; fireEvent.click(screen.getAllByRole("button", { name: "Retry report" })[0]);
+  await waitFor(() => expect(screen.queryByText("Could not update this report")).not.toBeInTheDocument());
+  expect(heading).toHaveFocus(); expect(disclosure.open).toBe(true);
+  vi.unstubAllGlobals();
 });

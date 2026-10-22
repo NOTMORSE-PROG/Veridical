@@ -1,11 +1,14 @@
 // F3/F8, screens 4h/4w: private drafts live only in this report route family.
 import { useQueryClient } from "@tanstack/react-query";
 import { useLayoutEffect, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
-import { Outlet, useParams } from "react-router";
+import { Outlet, useLocation, useNavigate, useParams } from "react-router";
+import type { ResultRowCommon } from "../api/types";
 import { ME_QUERY_KEY, useMe } from "../auth/useAuth";
 import { RESOLUTION_REASON_MIN_LENGTH } from "../config/ui";
 import { useResolveEscalation } from "./useReport";
 import { ReviewContext, type ReviewCompletion, type ReviewDraft, type ReviewScope } from "./criterionReviewContext";
+import { claimFocusContinuation, type FocusContinuation } from "../routing/focusContinuation";
+import { confirmedJudgment, criterionRecordId, revealCriterionRecord, SAVED_CRITERION_PARAM } from "./savedJudgment";
 
 // Query identity changes on cache clear, including logout/login to the same
 // instructor. Data identity alone does not distinguish those auth lifetimes.
@@ -38,15 +41,24 @@ export function CriterionReviewProvider({ checkRunId, instructorId, children }: 
   checkRunId: number; instructorId: number; children: ReactNode;
 }) {
   const client = useQueryClient();
+  const location = useLocation();
+  const navigate = useNavigate();
   const [authQuery] = useState(() => client.getQueryCache().find({ queryKey: ME_QUERY_KEY, exact: true }));
   const alive = useRef(false);
   const records = useRef(new Map<number, ReviewDraft>());
   const [drafts, setDrafts] = useState(records.current);
   const [completion, setCompletion] = useState<ReviewCompletion>();
+  const confirmedRecords = useRef(new Map<number, ResultRowCommon>());
+  const [confirmed, setConfirmed] = useState<ReadonlyMap<number, ResultRowCommon>>(confirmedRecords.current);
+  const [savedNavigation, setSavedNavigation] = useState<ReviewScope["savedNavigation"]>();
+  const continuations = useRef(new Set<FocusContinuation>());
   useLayoutEffect(() => {
     alive.current = true;
-    return () => { alive.current = false; records.current.clear(); };
+    const confirmedForLifetime = confirmedRecords.current;
+    const continuationsForLifetime = continuations.current;
+    return () => { alive.current = false; records.current.clear(); confirmedForLifetime.clear(); continuationsForLifetime.forEach((claim) => claim.dispose()); };
   }, []);
+  useLayoutEffect(() => { continuations.current.forEach((claim) => claim.dispose()); continuations.current.clear(); }, [location.key]);
   function isCurrent() {
     return alive.current && authQuery !== undefined
       && client.getQueryCache().find({ queryKey: ME_QUERY_KEY, exact: true }) === authQuery
@@ -63,9 +75,22 @@ export function CriterionReviewProvider({ checkRunId, instructorId, children }: 
     publish(new Map(records.current).set(id, change(draft)));
   }
   const scope: ReviewScope = {
-    checkRunId, drafts, completion,
+    checkRunId, drafts, completion, confirmed, savedNavigation,
+    viewSaved(criterionId, trigger) {
+      if (!isCurrent()) return;
+      const target = document.getElementById("criteria-results-heading");
+      const owned = document.hasFocus() && document.activeElement === trigger;
+      if (target && owned) { revealCriterionRecord(target); target.focus(); }
+      setSavedNavigation((previous) => ({ version: (previous?.version ?? 0) + 1, criterionId,
+        owner: target && owned && document.activeElement === target ? target : null }));
+      const next = new URLSearchParams(location.search);
+      next.set(SAVED_CRITERION_PARAM, criterionId === undefined ? "all" : String(criterionId));
+      if (location.pathname.endsWith("/document")) { next.set("view", "decision"); next.set("pane", "review"); }
+      void navigate({ pathname: location.pathname, search: next.toString(),
+        hash: criterionId === undefined ? "criteria-results-heading" : criterionRecordId(checkRunId, criterionId) }, { state: location.state });
+    },
     choose(item, resolution, level) {
-      if (!isCurrent() || records.current.get(item.check_result_id)?.saving) return;
+      if (!isCurrent() || confirmedRecords.current.has(item.criterion_id) || records.current.get(item.check_result_id)?.saving) return;
       publish(new Map(records.current).set(item.check_result_id, {
         criterionId: item.criterion_id, resolution, level, reason: "", attempted: false, saving: false,
       }));
@@ -83,17 +108,34 @@ export function CriterionReviewProvider({ checkRunId, instructorId, children }: 
         return;
       }
       const submitted = { ...draft, attempted: true, saving: true, error: undefined };
-      publish(new Map(records.current).set(id, submitted));
       const focusFrom = document.activeElement;
+      let focus: FocusContinuation | undefined;
+      if (document.hasFocus() && focusFrom?.matches("[data-criterion-confirm]")) {
+        const continuation = document.getElementById("escalated-heading");
+        continuation?.focus();
+        if (continuation && document.activeElement === continuation) {
+          focus = claimFocusContinuation(continuation);
+          continuations.current.add(focus);
+        }
+      }
+      publish(new Map(records.current).set(id, submitted));
       // The route owner, not an unmounted card's mutate callback, consumes
       // completion. No private draft is copied into report query records.
       void resolve.mutateAsync({ checkResultId: id, criterionId: draft.criterionId, resolution: draft.resolution, level: draft.level, reason: draft.reason.trim() }).then((out) => {
         if (!isCurrent() || records.current.get(id) !== submitted) return;
+        const result = confirmedJudgment(out, draft.criterionId, { resolution: draft.resolution, reason: draft.reason.trim(), level: draft.level });
+        if (!result) return;
         const completionMessage = message(out);
+        confirmedRecords.current = new Map(confirmedRecords.current).set(result.criterion_id, result);
+        setConfirmed(confirmedRecords.current);
         const next = new Map(records.current); next.delete(id); publish(next);
-        setCompletion((previous) => ({ version: (previous?.version ?? 0) + 1, message: completionMessage,
-          focusFrom: focusFrom?.isConnected && document.activeElement === focusFrom ? focusFrom : null }));
+        setCompletion((previous) => {
+          previous?.focus?.dispose();
+          return { version: (previous?.version ?? 0) + 1, message: completionMessage, result, focus,
+            focusFrom: focusFrom?.isConnected && document.activeElement === focusFrom ? focusFrom : null };
+        });
       }).catch((error: unknown) => {
+        focus?.dispose();
         if (!isCurrent() || records.current.get(id) !== submitted) return;
         publish(new Map(records.current).set(id, { ...submitted, saving: false, error }));
       });

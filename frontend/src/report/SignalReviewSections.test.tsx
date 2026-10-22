@@ -11,7 +11,7 @@
 // when the last escalated item resolves.
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { EscalatedItemOut, ResultRowCommon } from "../api/types";
+import type { EscalatedItemOut, EscalationResolution, ResultRowCommon } from "../api/types";
 import { renderWithReviewProviders as renderWithProviders, stubFetchByPath } from "../test/renderWithProviders";
 import { SignalCriteriaResults, SignalEscalatedPanel } from "./SignalReviewSections";
 
@@ -101,6 +101,12 @@ const LEVELLED_ITEM: EscalatedItemOut = {
     { level: 4, name: "Exemplary", descriptor: "engaging and complete", points: 4 },
   ],
 };
+
+function savedRow(item: EscalatedItemOut, reason: string, resolution: EscalationResolution = "accept_majority", extra: Partial<ResultRowCommon> = {}): ResultRowCommon {
+  return { criterion_id: item.criterion_id, text: item.criterion_text, type: "semantic", kind: "semantic", weight: item.weight,
+    weight_importance: "med", outcome: "passed", score: 100, basis: "llm", anchor: null, evidence: [],
+    reasoning: null, reason: null, resolution: { type: resolution, reason, ai_majority_verdict: item.ai_majority_verdict }, ...extra };
+}
 
 function reportWith(overrides: Record<string, unknown>) {
   return {
@@ -203,7 +209,7 @@ describe("SignalEscalatedPanel / SignalResolutionCard", () => {
     renderWithProviders(<SignalEscalatedPanel checkRunId={5} />);
     expect(await screen.findAllByText(reason)).toHaveLength(1);
     expect(screen.queryByText("No AI assessment was recorded.")).not.toBeInTheDocument();
-    for (const button of screen.getAllByRole("button").filter((button) => !button.hasAttribute("aria-expanded"))) {
+    for (const button of screen.getAllByRole("article").flatMap((card) => within(card).getAllByRole("button")).filter((button) => !button.hasAttribute("aria-expanded"))) {
       expect(button.getAttribute("aria-describedby")?.split(" "))
         .toContain("signal-shared-review-reason-5");
     }
@@ -266,7 +272,7 @@ describe("SignalEscalatedPanel / SignalResolutionCard", () => {
             check_result_id: 4,
             outcome: "passed",
             score: 100,
-            report: reportWith({ results: [] }),
+            report: reportWith({ results: [savedRow(REAL_MAJORITY, "AI's grading looks correct on review.")] }),
           }),
           { status: 200 },
         );
@@ -498,10 +504,10 @@ describe("SignalEscalatedPanel / SignalResolutionCard", () => {
               // announcement must be built from this, not from
               // client-side selection state (UX review finding, V-069).
               results: [
-                {
-                  criterion_id: LEVELLED_ITEM.criterion_id,
+                savedRow(LEVELLED_ITEM, "Read it myself: previews structure but isn't engaging.", "mark_level", {
+                  score: 75,
                   level: { name: "Proficient", ordinal: 3, points: 3, max_points: 4 },
-                },
+                }),
               ],
             }),
           }),
@@ -546,14 +552,14 @@ describe("SignalEscalatedPanel / SignalResolutionCard", () => {
     ).toBeInTheDocument();
   });
 
-  it("moves focus to the panel heading after a resolution when other items remain", async () => {
+  it("moves an owned confirmation to its visible saved receipt when other items remain", async () => {
     let resolved = false;
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = typeof input === "string" ? input : input.toString();
       if (url.includes("/resolve") && init?.method === "POST") {
         resolved = true;
         return new Response(
-          JSON.stringify({ check_result_id: 4, outcome: "passed", score: 100, report: reportWith({ results: [] }) }),
+          JSON.stringify({ check_result_id: 4, outcome: "passed", score: 100, report: reportWith({ results: [savedRow(REAL_MAJORITY, "AI's grading looks correct on review.")] }) }),
           { status: 200 },
         );
       }
@@ -576,21 +582,22 @@ describe("SignalEscalatedPanel / SignalResolutionCard", () => {
     fireEvent.change(screen.getByRole("textbox", { name: "Reason (required)" }), {
       target: { value: "AI's grading looks correct on review." },
     });
-    fireEvent.click(screen.getByRole("button", { name: "Confirm resolution" }));
+    const confirm = screen.getByRole("button", { name: "Confirm resolution" });
+    confirm.focus(); fireEvent.click(confirm);
 
     await waitFor(() =>
-      expect(document.activeElement).toBe(screen.getByRole("heading", { name: "Criteria needing your judgment" })),
+      expect(document.activeElement).toBe(screen.getByRole("heading", { name: "Judgment saved" })),
     );
   });
 
-  it("resolving the LAST escalated item moves focus to the announcement itself, not the still-mounted (but now stale-looking) section heading", async () => {
+  it("resolving the last item keeps meaningful focus on its visible saved receipt", async () => {
     let resolved = false;
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = typeof input === "string" ? input : input.toString();
       if (url.includes("/resolve") && init?.method === "POST") {
         resolved = true;
         return new Response(
-          JSON.stringify({ check_result_id: 4, outcome: "passed", score: 100, report: reportWith({ results: [] }) }),
+          JSON.stringify({ check_result_id: 4, outcome: "passed", score: 100, report: reportWith({ results: [savedRow(REAL_MAJORITY, "AI's grading looks correct on review.")] }) }),
           { status: 200 },
         );
       }
@@ -603,7 +610,7 @@ describe("SignalEscalatedPanel / SignalResolutionCard", () => {
         // text never changes, so parking focus there again would leave a
         // screen-reader user re-hearing "Criteria needing your judgment"
         // with no indication anything just happened. Focus should move
-        // to the announcement, which DID just change.
+        // to the visible receipt for the criterion that was saved.
         return new Response(JSON.stringify(resolved ? [] : [REAL_MAJORITY]), { status: 200 });
       }
       return new Response("{}", { status: 200 });
@@ -615,12 +622,14 @@ describe("SignalEscalatedPanel / SignalResolutionCard", () => {
     fireEvent.change(screen.getByRole("textbox", { name: "Reason (required)" }), {
       target: { value: "AI's grading looks correct on review." },
     });
-    fireEvent.click(screen.getByRole("button", { name: "Confirm resolution" }));
+    const confirm = screen.getByRole("button", { name: "Confirm resolution" });
+    confirm.focus(); fireEvent.click(confirm);
 
     const announcement = await screen.findByText(
       "Criterion resolved as Meets criterion. The readiness band has been recalculated.",
     );
-    await waitFor(() => expect(announcement).toHaveFocus());
+    expect(announcement).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByRole("heading", { name: "Judgment saved" })).toHaveFocus());
     // The section's own heading is still there (it's not the thing that
     // unmounts), but the empty-state success message has replaced the
     // resolution list below it.

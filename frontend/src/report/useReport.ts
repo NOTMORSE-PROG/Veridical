@@ -3,6 +3,8 @@
 // (V-038, F8.5).
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ApiError, api } from "../api/client";
+import { confirmedJudgment } from "./savedJudgment";
+import { ME_QUERY_KEY } from "../auth/useAuth";
 import type {
   Decision,
   DocumentParagraphsOut,
@@ -146,17 +148,9 @@ export function useResolveEscalation(checkRunId: number, isCurrent: () => boolea
         `/check-runs/${checkRunId}/escalated/${checkResultId}/resolve`,
         { resolution, reason, level },
       );
-      if (!resolutionResponseMatches(out, checkRunId, checkResultId)) {
+      if (!resolutionResponseMatches(out, checkRunId, checkResultId)
+        || !confirmedJudgment(out, criterionId, { resolution, reason, level })) {
         throw new ApiError(502, "invalid_response", "The server response did not confirm this resolution. Refresh the review before confirming again.");
-      }
-      if (resolution === "needs_document") {
-        const rows = out.report.results.filter((row) => row.criterion_id === criterionId);
-        const row = rows.length === 1 ? rows[0] : undefined;
-        if (out.outcome !== "not_applicable" || out.score !== null || !row
-          || row.outcome !== "not_applicable" || row.score !== null || row.level != null
-          || row.resolution?.type !== "needs_document") {
-          throw new ApiError(502, "invalid_response", "The server response did not confirm this resolution. Refresh the review before confirming again.");
-        }
       }
       return out;
     },
@@ -184,28 +178,42 @@ function refetchReportOnConflict(queryClient: ReturnType<typeof useQueryClient>,
   };
 }
 
+// A response belongs to the authentication query that submitted it, including
+// logout/login to the same instructor. An old callback cannot refill a new cache.
+function reportMutationOwner(queryClient: ReturnType<typeof useQueryClient>) {
+  const authQuery = queryClient.getQueryCache().find({ queryKey: ME_QUERY_KEY, exact: true });
+  const instructorId = queryClient.getQueryData<{ id: number } | null>(ME_QUERY_KEY)?.id;
+  return { isCurrent: () => authQuery !== undefined && instructorId !== undefined
+    && queryClient.getQueryCache().find({ queryKey: ME_QUERY_KEY, exact: true }) === authQuery
+    && queryClient.getQueryData<{ id: number } | null>(ME_QUERY_KEY)?.id === instructorId };
+}
+
 export function useDecideReport(checkRunId: number) {
   const queryClient = useQueryClient();
   return useMutation({
+    onMutate: () => reportMutationOwner(queryClient),
     mutationFn: (body: { decision: Decision; note: string | null }) =>
       api.post<ReportOut>(`/check-runs/${checkRunId}/decision`, body),
-    onSuccess: (report) => {
+    onSuccess: (report, _body, owner) => {
+      if (!owner?.isCurrent() || report.check_run_id !== checkRunId) return;
       queryClient.setQueryData(["report", checkRunId], report);
       queryClient.invalidateQueries({ queryKey: ["stats"] });
     },
-    onError: refetchReportOnConflict(queryClient, checkRunId),
+    onError: (error, _input, owner) => { if (owner?.isCurrent()) refetchReportOnConflict(queryClient, checkRunId)(error); },
   });
 }
 
 export function useReopenReport(checkRunId: number) {
   const queryClient = useQueryClient();
   return useMutation({
+    onMutate: () => reportMutationOwner(queryClient),
     mutationFn: (reason: string) => api.post<ReportOut>(`/check-runs/${checkRunId}/reopen`, { reason }),
-    onSuccess: (report) => {
+    onSuccess: (report, _reason, owner) => {
+      if (!owner?.isCurrent() || report.check_run_id !== checkRunId) return;
       queryClient.setQueryData(["report", checkRunId], report);
       queryClient.invalidateQueries({ queryKey: ["stats"] });
     },
-    onError: refetchReportOnConflict(queryClient, checkRunId),
+    onError: (error, _input, owner) => { if (owner?.isCurrent()) refetchReportOnConflict(queryClient, checkRunId)(error); },
   });
 }
 

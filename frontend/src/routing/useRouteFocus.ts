@@ -43,6 +43,11 @@ export function clearRouteReturnFocus(actionPrefix: string) {
   if (pendingReturnFocus?.elementId.startsWith(actionPrefix)) pendingReturnFocus = null;
 }
 
+/** Let a pending source return own asynchronous restoration before URL entry focus. */
+export function hasPendingRouteReturnFocus(path: string) {
+  return pendingReturnFocus?.armed === true && pendingReturnFocus.returnPath === path;
+}
+
 function restoreRegisteredFocus(elementId: string): HTMLElement | null {
   const target = document.getElementById(elementId);
   if (!target) return null;

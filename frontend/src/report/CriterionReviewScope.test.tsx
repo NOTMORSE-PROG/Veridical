@@ -7,6 +7,7 @@ import { RequireAuth } from "../auth/RequireAuth";
 import { CriterionReviewLayout } from "./CriterionReviewScope";
 import { SignalEscalatedPanel } from "./SignalReviewSections";
 import { useReport } from "./useReport";
+import type { ResultRowCommon } from "../api/types";
 
 const ITEMS = [1, 2, 3].map((id) => ({
   check_result_id: id, criterion_id: id, criterion_text: `Requirement ${id}`, weight: 1,
@@ -14,6 +15,12 @@ const ITEMS = [1, 2, 3].map((id) => ({
   reason: null, review_reason: "low_confidence", evidence: [{ quote: `Excerpt ${id}`, anchor: `paragraph ${id}` }],
   levels: [{ level: 1, name: "First level", descriptor: "First descriptor", points: 1 }, { level: 2, name: "Second level", descriptor: "Second descriptor", points: 2 }],
 }));
+function savedRow(id: number, reason: string, level = 1): ResultRowCommon {
+  return { criterion_id: id, text: `Requirement ${id}`, type: "semantic", kind: "semantic", weight: 1,
+    weight_importance: "med", outcome: "passed", score: level * 50, basis: "llm", anchor: null, evidence: [], reasoning: null, reason: null,
+    level: { name: level === 1 ? "First level" : "Second level", ordinal: level, points: level, max_points: 2 },
+    resolution: { type: "mark_level", reason, ai_majority_verdict: null } };
+}
 function ReportObserver() { const { data } = useReport(Number(useParams().checkRunId)); return <p data-testid="recorded-pending">{data?.pending_review_count}</p>; }
 function Panel() { return <><ReportObserver /><SignalEscalatedPanel checkRunId={Number(useParams().checkRunId)} /></>; }
 function Source() { return <><ReportObserver /><h1 tabIndex={-1}>Source reading</h1><Link to="..">Return to report</Link></>; }
@@ -22,6 +29,7 @@ function setup() {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
   client.setQueryData(ME_QUERY_KEY, { id: 1 });
   let unresolved = [...ITEMS];
+  let saved: ResultRowCommon[] = [];
   let failList = false;
   const held: Array<{ id: number; finish: (success?: boolean, response?: unknown, apply?: boolean) => void }> = [];
   const fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -29,15 +37,17 @@ function setup() {
     const resolution = path.match(/\/escalated\/(\d+)\/resolve$/);
     if (resolution && init?.method === "POST") return await new Promise<Response>((resolve) => {
       const id = Number(resolution[1]);
+      const body = JSON.parse(init.body as string) as { reason: string; level: number };
+      const row = savedRow(id, body.reason, body.level);
       held.push({ id, finish(success = true, response?: unknown, apply = true) {
-        if (success && apply) unresolved = unresolved.filter((item) => item.check_result_id !== id);
+        if (success && apply) { unresolved = unresolved.filter((item) => item.check_result_id !== id); saved = [...saved.filter((item) => item.criterion_id !== id), row]; }
         resolve(new Response(JSON.stringify(response ?? (success
-          ? { check_result_id: id, outcome: "passed", score: 100, report: { check_run_id: 5, results: [], pending_review_count: unresolved.length } }
+          ? { check_result_id: id, outcome: "passed", score: row.score, report: { check_run_id: 5, results: saved, pending_review_count: unresolved.length } }
           : { error: { code: "internal", message: "Controlled save failure" } })), { status: success ? 200 : 503 }));
       } });
     });
     if (path.endsWith("/escalated")) return new Response(JSON.stringify(failList ? { error: { code: "internal", message: "Controlled list failure" } } : unresolved), { status: failList ? 503 : 200 });
-    if (path.endsWith("/report")) return new Response(JSON.stringify({ check_run_id: Number(path.split("/")[2]), results: [], pending_review_count: unresolved.length }));
+    if (path.endsWith("/report")) return new Response(JSON.stringify({ check_run_id: Number(path.split("/")[2]), results: saved, pending_review_count: unresolved.length }));
     return new Response(JSON.stringify({ instructor: { id: 1 } }));
   });
   vi.stubGlobal("fetch", fetch);
@@ -92,9 +102,9 @@ describe("report-family private review ownership", () => {
     const { held, client } = setup();
     await draft(1, "First level", "First independent confirmation"); await confirm(1);
     await draft(2, "Second level", "Second independent confirmation"); await confirm(2);
-    const newer = { check_result_id: 2, outcome: "passed", report: { check_run_id: 5, results: [], pending_review_count: 1 } };
+    const newer = { check_result_id: 2, outcome: "passed", score: 100, report: { check_run_id: 5, results: [savedRow(2, "Second independent confirmation", 2)], pending_review_count: 1 } };
     await act(async () => { held[1].finish(true, newer); });
-    const older = { check_result_id: 1, outcome: "passed", report: { check_run_id: 5, results: [], pending_review_count: 2 } };
+    const older = { check_result_id: 1, outcome: "passed", score: 50, report: { check_run_id: 5, results: [savedRow(1, "First independent confirmation")], pending_review_count: 2 } };
     await act(async () => { held[0].finish(true, older); });
     await waitFor(() => expect(screen.getByTestId("recorded-pending")).toHaveTextContent("1"));
     expect(client.getQueryData(["report", 5])).toMatchObject({ pending_review_count: 1 });
@@ -133,7 +143,7 @@ describe("report-family private review ownership", () => {
     expect(within(await card(2)).getByRole("textbox")).toHaveValue("Second exact reason");
     if (success) {
       await waitFor(() => expect(screen.queryByRole("heading", { name: "Requirement 1" })).not.toBeInTheDocument());
-      expect(await screen.findByText(/Criterion resolved as Meets criterion/)).toBeInTheDocument();
+      expect(await screen.findByText(/Criterion resolved as First level/)).toBeInTheDocument();
     } else {
       expect(within(await card(1)).getByRole("textbox")).toHaveValue("First exact reason");
       expect(await screen.findByText("Controlled save failure")).toBeVisible();
@@ -160,8 +170,8 @@ describe("report-family private review ownership", () => {
     const state = setup(); await draft(1, "First level", "Retain through failed list request");
     state.failList();
     await act(async () => { await state.client.refetchQueries({ queryKey: ["report", 5, "escalated"] }); });
-    expect(await screen.findByText("Could not load criteria needing review")).toBeVisible();
-    state.restoreList(); fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+    expect(await screen.findByText("Could not update criteria needing review")).toBeVisible();
+    state.restoreList(); fireEvent.click(screen.getByRole("button", { name: "Retry review items" }));
     expect(within(await card(1)).getByRole("textbox")).toHaveValue("Retain through failed list request");
   });
 

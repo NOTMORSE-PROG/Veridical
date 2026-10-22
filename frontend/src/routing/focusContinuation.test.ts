@@ -13,9 +13,9 @@ it("moves explicit continuation after the final trigger is removed", () => {
   const { owner, target, claim } = setup(); owner.remove();
   expect(claim.focus(target)).toBe(true); expect(document.activeElement).toBe(target);
 });
-it.each(["Tab", "PageDown", "PageUp", "ArrowDown", "ArrowUp", "Home", "End", "pointer", "wheel", "blur", "focus"])("retires focus permission on later %s intent", (intent) => {
+it.each(["Tab", "PageDown", "PageUp", "ArrowDown", "ArrowUp", "Home", "End", " ", "pointer", "wheel", "blur", "focus"])("retires focus permission on later %s intent", (intent) => {
   const { owner, target, claim } = setup();
-  if (["Tab", "PageDown", "PageUp", "ArrowDown", "ArrowUp", "Home", "End"].includes(intent)) document.dispatchEvent(new KeyboardEvent("keydown", { key: intent }));
+  if (["Tab", "PageDown", "PageUp", "ArrowDown", "ArrowUp", "Home", "End", " "].includes(intent)) document.dispatchEvent(new KeyboardEvent("keydown", { key: intent }));
   if (intent === "pointer") document.dispatchEvent(new Event("pointerdown"));
   if (intent === "wheel") window.dispatchEvent(new Event("wheel"));
   if (intent === "blur") window.dispatchEvent(new Event("blur"));

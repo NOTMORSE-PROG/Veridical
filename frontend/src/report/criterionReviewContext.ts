@@ -1,5 +1,6 @@
 import { createContext, useContext } from "react";
-import type { EscalatedItemOut, EscalationResolution, ResolveEscalationOut } from "../api/types";
+import type { EscalatedItemOut, EscalationResolution, ResolveEscalationOut, ResultRowCommon } from "../api/types";
+import type { FocusContinuation } from "../routing/focusContinuation";
 
 export interface ReviewDraft {
   criterionId: number;
@@ -10,11 +11,20 @@ export interface ReviewDraft {
   saving: boolean;
   error?: unknown;
 }
-export interface ReviewCompletion { version: number; message: string; focusFrom: Element | null }
+export interface ReviewCompletion {
+  version: number;
+  message: string;
+  focusFrom: Element | null;
+  result: ResultRowCommon;
+  focus?: FocusContinuation;
+}
 export interface ReviewScope {
   checkRunId: number;
   drafts: ReadonlyMap<number, ReviewDraft>;
   completion?: ReviewCompletion;
+  confirmed: ReadonlyMap<number, ResultRowCommon>;
+  savedNavigation?: { version: number; criterionId?: number; owner: Element | null };
+  viewSaved: (criterionId: number | undefined, trigger: HTMLElement) => void;
   choose: (item: EscalatedItemOut, resolution: EscalationResolution, level?: number) => void;
   changeReason: (id: number, reason: string) => void;
   cancel: (id: number) => void;

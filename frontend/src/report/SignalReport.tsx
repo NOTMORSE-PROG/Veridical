@@ -19,6 +19,8 @@ import { coverageItems } from "./reportCoverage";
 import { useExportReportPdf, useReport } from "./useReport";
 import { useShareLink } from "./useShare";
 import { FigureReadingsSummary } from "./FigureReadings";
+import { ReportReadNotice } from "./ReportReadNotice";
+import { usableReport } from "./reportReadState";
 
 // `scrollIntoView` defaults to false: the existing plain `<a href="#...">`
 // jump-nav links below are same-page hash anchors the BROWSER's own
@@ -48,7 +50,9 @@ function focusReportJumpTarget(
 export function SignalReportPage() {
   const { checkRunId } = useParams<{ checkRunId: string }>();
   const id = Number(checkRunId);
-  const { data: report, isPending, isError, error, refetch } = useReport(id);
+  const { data, isPending, error, refetch, fetchStatus } = useReport(id);
+  const report = usableReport(data, id, error);
+  const readFailed = Boolean(report && error);
   const exportPdf = useExportReportPdf(id);
   const { data: shareLink } = useShareLink(id);
   const [shareOpen, setShareOpen] = useState(false);
@@ -84,20 +88,21 @@ export function SignalReportPage() {
           <h1 ref={headingRef} tabIndex={-1}>Readiness report</h1>
           {report && <p className="signal-route-header__intro">{identity?.primary} · checked against {report.rubric_title}</p>}
         </div>
-        {report && <ReadinessBand status={report.status} />}
+        {report && <div>{readFailed && <span>Last loaded </span>}<ReadinessBand status={report.status} /></div>}
       </header>
 
-      {isPending ? (
+      {isPending && !report ? (
         <div role="status" aria-live="polite" aria-busy="true" className="signal-desk-loading"><span>Loading the readiness report…</span><i /><i /></div>
-      ) : isError || !report ? (
+      ) : !report ? (
         error instanceof ApiError && error.code === "conflict"
           ? <Alert title="This report is not ready yet" tone="info" role="alert"><ActionLink to={`/checks/${id}`} variant="secondary">View check progress</ActionLink></Alert>
           : <Alert title="Could not load this report" tone="error" role="alert"><p>{error instanceof ApiError ? error.message : "Try again."}</p><Button variant="secondary" onClick={() => refetch()}>Try again</Button></Alert>
       ) : (
         <>
-          <section className="signal-report-hero" aria-labelledby="readiness-band-heading">
+          {readFailed && <ReportReadNotice retrying={fetchStatus === "fetching"} onRetry={() => { void refetch(); }} />}
+          <section className="signal-report-hero" aria-labelledby="readiness-band-heading" aria-describedby={readFailed ? "report-read-failure" : undefined}>
             <div className="signal-report-hero__branch" aria-hidden="true"><i /><i /><i /></div>
-            <div><p className="signal-section-kicker">VERIDICAL readiness band</p><h2 id="readiness-band-heading">{report.status === "ready" ? "Ready" : report.status === "conditionally_ready" ? "Conditionally Ready" : report.status === "not_ready" ? "Not Ready" : "Needs Review"}</h2><p>{report.reason ?? "This band is derived from the recorded criterion outcomes and integrity signals. Review the evidence below before deciding."}</p></div>
+            <div><p className="signal-section-kicker">{readFailed ? "Last loaded readiness band" : "VERIDICAL readiness band"}</p><h2 id="readiness-band-heading">{report.status === "ready" ? "Ready" : report.status === "conditionally_ready" ? "Conditionally Ready" : report.status === "not_ready" ? "Not Ready" : "Needs Review"}</h2><p>{report.reason ?? "This band is derived from the recorded criterion outcomes and integrity signals. Review the evidence below before deciding."}</p></div>
             <dl>
               <div><dt>Unresolved criteria</dt><dd>{report.pending_review_count}</dd></div>
               <div>
@@ -156,7 +161,7 @@ export function SignalReportPage() {
           <FigureReadingsSummary readings={report.figure_readings} checkRunId={report.check_run_id} />
           <SignalFlagsPanel checkRunId={report.check_run_id} unresolvedHighFlagCount={report.unresolved_high_flag_count} originalityScope={report.originality_scope} />
           <SignalCriteriaResults results={report.results.filter((row) => row.outcome !== "escalated")} checkRunId={report.check_run_id} />
-          <SignalDecisionPanel report={report} manuscriptLabel={identity?.primary ?? report.manuscript_group_label} />
+          <SignalDecisionPanel report={report} manuscriptLabel={identity?.primary ?? report.manuscript_group_label} readFailed={readFailed} retrying={fetchStatus === "fetching"} onRetry={() => { void refetch(); }} />
         </>
       )}
 

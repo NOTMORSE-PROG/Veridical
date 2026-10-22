@@ -13,6 +13,8 @@ export const WEIGHT_IMPORTANCE_PREVIEW = {
 // every reasoned instructor action uses one disclosed validation rule.
 export const RESOLUTION_REASON_MIN_LENGTH = 10;
 export const INSTRUCTOR_NOTE_MAX_LENGTH = 1000;
+// API encoding units for criterion results, independent of readiness thresholds.
+export const CRITERION_SCORE_UNITS = { none: 0, full: 100 } as const;
 
 /** Synthetic region id used only to route a criterion's recorded text
  * anchor through the existing document-pane focus engine. Real Flag ids

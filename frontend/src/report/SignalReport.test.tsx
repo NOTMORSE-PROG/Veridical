@@ -1,4 +1,5 @@
-import { fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { useQueryClient, type QueryClient } from "@tanstack/react-query";
+import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { EscalatedItemOut, FlagSummaryOut, ReportOut } from "../api/types";
 import { renderWithReviewProviders as renderWithProviders, stubFetchByPath } from "../test/renderWithProviders";
@@ -876,4 +877,125 @@ describe("SignalReportPage", () => {
 
     expect(await screen.findByRole("heading", { name: "Final defense-readiness decision" })).toBeInTheDocument();
   });
+});
+
+// Exercise the real route, including its report-read gate and mounted dialogs.
+function readFailurePage(initial: ReportOut = BASE_REPORT, escalated: EscalatedItemOut[] = []) {
+  let current = initial;
+  let failure = 0;
+  let hold = false;
+  let release: (() => void) | undefined;
+  let client: QueryClient;
+  let postCount = 0;
+  function QueryAccess() { client = useQueryClient(); return null; }
+  const fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const path = new URL(String(input), "http://localhost").pathname;
+    if (init?.method === "POST") {
+      postCount++;
+      if (path.endsWith("/resolve")) {
+        const body = JSON.parse(String(init.body));
+        const row = { ...BASE_REPORT.results[0], criterion_id: ESCALATED.criterion_id, text: ESCALATED.criterion_text,
+          resolution: { type: body.resolution, reason: body.reason, ai_majority_verdict: null } };
+        current = { ...current, pending_review_count: 0, results: [...BASE_REPORT.results, row] };
+        return new Response(JSON.stringify({ check_result_id: ESCALATED.check_result_id, outcome: "passed", score: 100, report: current }));
+      }
+    }
+    if (path.endsWith("/report")) {
+      if (hold) await new Promise<void>((resolve) => { release = resolve; });
+      return new Response(JSON.stringify(failure ? { error: { code: "unavailable", message: "Controlled read failure" } } : current), { status: failure || 200 });
+    }
+    return stubFetchByPath({ "/check-runs/5/escalated": current.pending_review_count ? escalated : [],
+      "/check-runs/5/share": null, "/check-runs/5/flags": [] })(input, init);
+  });
+  vi.stubGlobal("fetch", fetch);
+  renderWithProviders(<><QueryAccess /><SignalReportPage /></>, { route: "/report/5", path: "/report/:checkRunId" });
+  return { fail(status = 503) { failure = status; }, fresh(report = current) { failure = 0; current = report; },
+    hold() { hold = true; }, release() { hold = false; release?.(); }, posts: () => postCount,
+    refresh: () => client.invalidateQueries({ queryKey: ["report", 5], exact: true }) };
+}
+
+describe("full report background-read continuity", () => {
+  afterEach(() => vi.unstubAllGlobals());
+  it("keeps a validated save receipt and exact retrieval available after its report GET fails", async () => {
+    vi.spyOn(document, "hasFocus").mockReturnValue(true);
+    const pending = { ...BASE_REPORT, pending_review_count: 1, results: [...BASE_REPORT.results,
+      { ...BASE_REPORT.results[0], criterion_id: 2, text: ESCALATED.criterion_text, outcome: "escalated" as const, score: null }] };
+    const c = readFailurePage(pending, [ESCALATED]);
+    const card = (await screen.findByRole("heading", { name: ESCALATED.criterion_text })).closest("article")!;
+    fireEvent.click(within(card).getByRole("button", { name: "Meets criterion" }));
+    fireEvent.change(within(card).getByRole("textbox"), { target: { value: "A checkable instructor reason for this criterion." } });
+    c.fail(); fireEvent.click(within(card).getByRole("button", { name: "Confirm resolution" }));
+    expect(await screen.findByRole("heading", { name: "Judgment saved" })).toBeVisible();
+    await screen.findByText("Could not update this report");
+    expect(screen.getByText("Last loaded readiness band")).toBeVisible();
+    const view = screen.getByRole("button", { name: `View saved judgment: ${ESCALATED.criterion_text}` });
+    view.focus(); fireEvent.click(view);
+    expect(await screen.findByText("Your judgment was saved, but the recorded result could not be loaded.")).toBeVisible();
+    expect(document.getElementById("criterion-record-5-2")).toBeNull();
+    const other = screen.getByRole("link", { name: "Open manuscript" }); other.focus();
+    c.fresh(); fireEvent.click(screen.getByRole("button", { name: "Retry recorded result" }));
+    await waitFor(() => expect(document.getElementById("criterion-record-5-2")).not.toBeNull());
+    expect(other).toHaveFocus(); expect(view.isConnected).toBe(true); expect(c.posts()).toBe(1);
+    expect(screen.queryByText("Could not update this report")).not.toBeInTheDocument();
+    vi.restoreAllMocks();
+  });
+
+  it.each([false, true])("keeps the open dialog, note and focus while read failure blocks confirmation (reopen=%s)", async (reopen) => {
+    const initial = reopen ? { ...BASE_REPORT, decision: "approved" as const, decided_at: "2026-10-22T12:00:00Z" } : BASE_REPORT;
+    const c = readFailurePage(initial);
+    fireEvent.click(await screen.findByRole("button", { name: reopen ? "Reopen this decision" : "Approve for defense" }));
+    const dialog = await screen.findByRole("dialog");
+    const note = within(dialog).getByRole("textbox");
+    fireEvent.change(note, { target: { value: "Preserve this instructor note through the refresh." } }); note.focus();
+    c.fail(); await act(async () => { await c.refresh(); });
+    await within(dialog).findByText("Reload the report before making or reopening a final decision.");
+    expect(note).toHaveFocus(); expect(note).toHaveValue("Preserve this instructor note through the refresh.");
+    const confirm = within(dialog).getByRole("button", { name: reopen ? "Reopen decision" : "Approve for defense" });
+    expect(confirm).toHaveAttribute("aria-disabled", "true"); fireEvent.click(confirm); expect(c.posts()).toBe(0);
+    c.hold(); c.fresh(); fireEvent.click(within(dialog).getByRole("button", { name: "Retry report" }));
+    expect(confirm).toHaveAttribute("aria-disabled", "true"); fireEvent.click(confirm); expect(c.posts()).toBe(0);
+    await act(async () => { c.release(); });
+    await waitFor(() => expect(confirm).not.toHaveAttribute("aria-disabled"));
+    expect(note).toHaveValue("Preserve this instructor note through the refresh.");
+    fireEvent.click(within(dialog).getByRole("button", { name: reopen ? "Keep decision" : "Cancel" }));
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument(); expect(c.posts()).toBe(0);
+  });
+
+  it("preserves an open note but refuses an obsolete choice after retry reveals another decision", async () => {
+    const c = readFailurePage();
+    fireEvent.click(await screen.findByRole("button", { name: "Approve for defense" }));
+    const dialog = await screen.findByRole("dialog"); const note = within(dialog).getByRole("textbox");
+    fireEvent.change(note, { target: { value: "Original note stays available." } }); note.focus();
+    c.fail(); await act(async () => { await c.refresh(); });
+    await within(dialog).findByText("Reload the report before making or reopening a final decision.");
+    c.fresh({ ...BASE_REPORT, decision: "returned", decided_at: "2026-10-23T00:00:00Z" });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Retry report" }));
+    await within(dialog).findByText("The report changed. Close this dialog and review its current criteria and decision before deciding.");
+    expect(note).toHaveFocus(); expect(note).toHaveValue("Original note stays available.");
+    fireEvent.click(within(dialog).getByRole("button", { name: "Approve for defense" })); expect(c.posts()).toBe(0);
+  });
+
+  it.each([401, 403, 404])("does not retain private report content after access failure %s", async (status) => {
+    const c = readFailurePage(); await screen.findByRole("link", { name: "Open manuscript" });
+    c.fail(status); await act(async () => { await c.refresh(); });
+    expect(await screen.findByText("Could not load this report")).toBeVisible();
+    expect(screen.queryByRole("link", { name: "Open manuscript" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Criterion records" })).not.toBeInTheDocument();
+    expect(screen.queryByText("Could not update this report")).not.toBeInTheDocument();
+  });
+});
+
+it("keeps an open reopen reason but refuses a decision that changed during report retry", async () => {
+  const c = readFailurePage({ ...BASE_REPORT, decision: "approved", decided_at: "2026-10-22T12:00:00Z" });
+  fireEvent.click(await screen.findByRole("button", { name: "Reopen this decision" }));
+  const dialog = await screen.findByRole("dialog"); const note = within(dialog).getByRole("textbox");
+  fireEvent.change(note, { target: { value: "Reopen reason survives a changed record." } }); note.focus();
+  c.fail(); await act(async () => { await c.refresh(); });
+  await within(dialog).findByText("Reload the report before making or reopening a final decision.");
+  c.fresh({ ...BASE_REPORT, decision: "returned", decided_at: "2026-10-23T00:00:00Z" });
+  fireEvent.click(within(dialog).getByRole("button", { name: "Retry report" }));
+  await within(dialog).findByText("The decision changed. Close this dialog and review its current record before reopening.");
+  expect(note).toHaveFocus(); expect(note).toHaveValue("Reopen reason survives a changed record.");
+  fireEvent.click(within(dialog).getByRole("button", { name: "Reopen decision" })); expect(c.posts()).toBe(0);
+  vi.unstubAllGlobals();
 });
