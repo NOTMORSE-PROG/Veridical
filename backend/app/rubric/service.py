@@ -322,6 +322,7 @@ async def update_criteria(
         await _activate_only(session, rubric)
 
     await session.commit()
+    await session.refresh(rubric, attribute_names=["criteria"])
     return await get_rubric(session, rubric_id, instructor_id)
 
 
