@@ -233,7 +233,10 @@ NEEDS_REVIEW_OUTCOMES = tuple(_NEEDS_REVIEW_OUTCOMES_ENUM)
 # against report/29 -- the ticket's own reproduction case).
 _LLM_MODE_DISCLOSURE = {
     "fake": (
-        "Test-mode run: AI results are simulated and do not describe this document.",
+        "Test-mode AI responses. This run is recorded in test AI mode. "
+        "AI responses use fixtures instead of real AI grading. "
+        "Do not treat AI-derived judgments as a real assessment of the manuscript. "
+        "Check the recorded evidence directly.",
         "danger",
     ),
     "unknown": (

@@ -764,8 +764,12 @@ def test_export_discloses_test_mode_run(client, api_scratch_url):
 
     doc = fitz.open(stream=resp.content, filetype="pdf")
     full_text = "\n".join(page.get_text() for page in doc)
-    assert "Test-mode run" in full_text
-    assert "AI results are simulated" in full_text
+    normalized = " ".join(full_text.split())
+    assert "Test-mode AI responses." in normalized
+    assert "AI responses use fixtures instead of real AI grading." in normalized
+    assert "Do not treat AI-derived judgments as a real assessment of the manuscript." in normalized
+    assert "Check the recorded evidence directly." in normalized
+    assert "AI results are simulated" not in normalized
 
 
 def _real_quote_pdf(tmp_path):

@@ -4,6 +4,7 @@ import { ReviewDeskReturnLink } from "../routing/ReviewDeskReturnLink";
 import { useEffect, useId, useRef, useState } from "react";
 import { useLocation, useParams } from "react-router";
 import { ApiError } from "../api/client";
+import { TEST_AI_DISCLOSURE } from "../domain/aiModeDisclosure";
 import type { FlagOut } from "../api/types";
 import { useMe } from "../auth/useAuth";
 import { PassagePairPanel } from "../document/PassagePairPanel";
@@ -132,8 +133,8 @@ function ModeDisclosure({ mode, registry = false }: { mode: FlagOut["llm_mode"];
   if (mode === "real") return null;
   if (registry && mode === "fake") return <Alert title="Check recorded in a test-mode run" tone="warning">This record belongs to a test-mode run. Do not treat its saved provider values as evidence of a fresh external lookup.</Alert>;
   return mode === "fake" ? (
-    <Alert title="Test-mode AI result" tone="warning">
-      This finding came from fixture responses, not real AI grading. Do not treat it as a finding about the manuscript.
+    <Alert title={TEST_AI_DISCLOSURE.title} tone="warning">
+      {TEST_AI_DISCLOSURE.body}
     </Alert>
   ) : (
     <Alert title="AI mode could not be verified" tone="warning">

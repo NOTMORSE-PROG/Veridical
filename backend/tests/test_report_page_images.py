@@ -427,3 +427,30 @@ def test_failed_page_is_explicit_and_reused_within_the_distinct_page_budget(
     assert result[1].reason == result[2].reason
     assert "configured" in result[1].reason
     assert "rendered-page limit" in result[3].reason
+
+
+@pytest.mark.parametrize("mode", ["real", "fake", "unknown"])
+def test_image_notice_uses_a_scoped_summary_and_retains_full_unknown_caution(
+    doc_and_tree, monkeypatch, mode
+):
+    from app.report.export import _LLM_MODE_DISCLOSURE
+
+    doc, tree = doc_and_tree
+    observed = []
+    render = pymupdf.Page.get_pixmap
+
+    def inspect_band(page, *args, **kwargs):
+        if "matrix" in kwargs:
+            observed.append(" ".join(page.get_text().split()))
+        return render(page, *args, **kwargs)
+
+    monkeypatch.setattr(pymupdf.Page, "get_pixmap", inspect_band)
+    image = _build(doc, tree, [_flag(1, "p. 1")], llm_mode=mode)[1]
+    assert image.image_png is not None
+    if mode == "fake":
+        assert observed == ["Test-mode AI responses. Not real AI grading."]
+        assert "Check the recorded evidence directly." in _LLM_MODE_DISCLOSURE["fake"][0]
+    elif mode == "unknown":
+        assert observed == [_LLM_MODE_DISCLOSURE["unknown"][0]]
+    else:
+        assert observed == []

@@ -34,6 +34,30 @@ const FLAG = {
 describe("FlagDetailPage", () => {
   afterEach(() => vi.unstubAllGlobals());
 
+  it("BUG-435: warns about test AI responses without attributing a local F7 comparison to fixtures", async () => {
+    renderFlag(makeFlag({ check_kind: "originality_reuse", llm_mode: "fake", is_passage_level: true,
+      affects_readiness: false, citation_source_key: null, ai_verdict_summary: "possible_reuse",
+      ai_reasoning: "Recorded local comparison evidence.", passage_pair: {
+        matched_ref: 2, own_excerpt: "Stored local passage alpha.", matched_excerpt: "Stored comparison passage beta.",
+        own_context_before: null, own_context_after: null, matched_context_before: null, matched_context_after: null,
+        similarity: 0.9, level: "high_similarity", context_words_each_side: 10,
+      } }));
+    expect(await screen.findByText("Test-mode AI responses")).toBeVisible();
+    expect(screen.getByText("This run is recorded in test AI mode. AI responses use fixtures instead of real AI grading. Do not treat AI-derived judgments as a real assessment of the manuscript. Check the recorded evidence directly.")).toBeVisible();
+    expect(screen.queryByText(/This finding came from fixture responses/)).not.toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Review lead: not scored" })).toBeVisible();
+    expect(screen.getByText("Stored local passage alpha.")).toBeInTheDocument();
+    expect(screen.getByText("Stored comparison passage beta.")).toBeInTheDocument();
+  });
+
+  it("BUG-435: retains the distinct saved-registry test-mode caution", async () => {
+    renderFlag(makeFlag({ llm_mode: "fake", ai_verdict_summary: "possible_metadata_mismatch", citation_metadata_comparison: CITATION_COMPARISON }));
+    expect(await screen.findByText("Check recorded in a test-mode run")).toBeVisible();
+    expect(screen.getByText(/Do not treat its saved provider values as evidence of a fresh external lookup/)).toBeVisible();
+    expect(screen.queryByText("Test-mode AI responses")).not.toBeInTheDocument();
+    expect(screen.getByRole("table", { name: "Recorded citation metadata comparison" })).toBeInTheDocument();
+  });
+
   it.each([true, false])("qualifies saved title findings only when the API reports missing parsing proof (%s)", async (warning) => {
     vi.stubGlobal("fetch", stubFetchByPath({ "/flags/5": { ...FLAG, ai_verdict_summary: "possible_metadata_mismatch", citation_metadata_comparison: CITATION_COMPARISON, citation_metadata_review_warning: warning ? "quoted_title_projection_unverified" : null } }));
     renderWithProviders(<FlagDetailPage />, { route: "/flags/5", path: "/flags/:flagId" });
@@ -278,21 +302,21 @@ describe("FlagDetailPage", () => {
   it("BUG-049: discloses a test-mode (fake-LLM) run so its finding is never mistaken for real", async () => {
     vi.stubGlobal("fetch", stubFetchByPath({ "/flags/5": { ...FLAG, llm_mode: "fake" } }));
     renderWithProviders(<FlagDetailPage />, { route: "/flags/5", path: "/flags/:flagId" });
-    expect(await screen.findByText("Test-mode AI result")).toBeInTheDocument();
+    expect(await screen.findByText("Test-mode AI responses")).toBeInTheDocument();
   });
 
   it("BUG-049: shows no test-mode disclosure for a real run", async () => {
     vi.stubGlobal("fetch", stubFetchByPath({ "/flags/5": FLAG }));
     renderWithProviders(<FlagDetailPage />, { route: "/flags/5", path: "/flags/:flagId" });
     await screen.findByText(/Wang, S\. \(2019\)/);
-    expect(screen.queryByText("Test-mode AI result")).not.toBeInTheDocument();
+    expect(screen.queryByText("Test-mode AI responses")).not.toBeInTheDocument();
   });
 
   it("BUG-049 (backend review finding): discloses an unknown-mode flag distinctly from real", async () => {
     vi.stubGlobal("fetch", stubFetchByPath({ "/flags/5": { ...FLAG, llm_mode: "unknown" } }));
     renderWithProviders(<FlagDetailPage />, { route: "/flags/5", path: "/flags/:flagId" });
     expect(await screen.findByText("AI mode could not be verified")).toBeInTheDocument();
-    expect(screen.queryByText("Test-mode AI result")).not.toBeInTheDocument();
+    expect(screen.queryByText("Test-mode AI responses")).not.toBeInTheDocument();
   });
 
   it("BUG-097: discloses a first-upload-context flag distinctly from an ordinary one", async () => {

@@ -117,14 +117,16 @@ describe("AdviserViewPage", () => {
       stubFetchByPath({ "/shared/tok123/report": shared({ report: { ...BASE_REPORT, llm_mode: "fake" } }) }),
     );
     render();
-    expect(await screen.findByText("Test-mode AI results")).toBeInTheDocument();
+    expect(await screen.findByText("Test-mode AI responses")).toBeInTheDocument();
+    expect(screen.getByText("This run is recorded in test AI mode. AI responses use fixtures instead of real AI grading. Do not treat AI-derived judgments as a real assessment of the manuscript. Check the recorded evidence directly.")).toBeVisible();
+    expect(screen.queryByText(/Fixture responses produced this report/)).not.toBeInTheDocument();
   });
 
   it("shows no test-mode disclosure for a real run", async () => {
     vi.stubGlobal("fetch", stubFetchByPath({ "/shared/tok123/report": shared() }));
     render();
     await screen.findAllByText("Conditionally Ready");
-    expect(screen.queryByText("Test-mode AI results")).not.toBeInTheDocument();
+    expect(screen.queryByText("Test-mode AI responses")).not.toBeInTheDocument();
   });
 
   it("discloses incomplete coverage without publishing private check details", async () => {
@@ -145,7 +147,7 @@ describe("AdviserViewPage", () => {
     );
     render();
     expect(await screen.findByText("AI mode could not be verified")).toBeInTheDocument();
-    expect(screen.queryByText("Test-mode AI results")).not.toBeInTheDocument();
+    expect(screen.queryByText("Test-mode AI responses")).not.toBeInTheDocument();
   });
 
   it("BUG-052: discloses a rubric activated with a coverage warning to the adviser too", async () => {

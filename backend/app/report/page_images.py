@@ -247,7 +247,14 @@ def build_page_evidence_images(
         return {f.id: PageEvidenceImageOut(image_png=None, page=None, reason=reason) for f in flags}
 
     llm_disclosure = _LLM_MODE_DISCLOSURE.get(llm_mode)
-    disclosure = (llm_disclosure[0], llm_disclosure[1]) if llm_disclosure is not None else None
+    # A detached test-mode image gets the approved compact AI-response notice;
+    # the report header/footer retain the full warning. Unknown stays distinct
+    # and uses its full cautious wording, with tone from the same mode mapping.
+    disclosure = (
+        (disclosure_layout()["summaries"].get(llm_mode, llm_disclosure[0]), llm_disclosure[1])
+        if llm_disclosure is not None
+        else None
+    )
 
     # Pass 1: classify every flag's region once.
     renders: dict[int, _RegionRender | None] = {}

@@ -8,6 +8,7 @@ import { checkKindMeta, findingVerificationPrompt, isPValueFinding } from "../do
 import { DECISION_LABEL } from "../domain/decisionTone";
 import { agreementEvidenceType, evidenceDisplayState } from "../domain/evidenceDisplay";
 import { manuscriptIdentity } from "../domain/manuscriptLabel";
+import { TEST_AI_DISCLOSURE } from "../domain/aiModeDisclosure";
 import { problemLabel } from "../domain/problemLabel";
 import { severityLabel } from "../domain/severity";
 import { systemFindingCopy } from "../domain/systemFindingCopy";
@@ -292,7 +293,7 @@ function ReadinessDecision({ checkRunId, report, pending, error, onRetry, onBack
           <ActionLink to={`/report/${report.check_run_id}`} variant="secondary">Open full readiness report</ActionLink>
         </div>
       </section>
-      {report.llm_mode !== "real" && <Alert title={report.llm_mode === "fake" ? "Test-mode AI results" : "AI mode could not be verified"} tone="warning">{report.llm_mode === "fake" ? "This review was produced with fixture responses, not real AI grading. Do not treat it as a finding about the manuscript." : "This run predates reliable AI-mode tracking. Treat AI-derived outcomes cautiously."}</Alert>}
+      {report.llm_mode !== "real" && <Alert title={report.llm_mode === "fake" ? TEST_AI_DISCLOSURE.title : "AI mode could not be verified"} tone="warning">{report.llm_mode === "fake" ? TEST_AI_DISCLOSURE.body : "This run predates reliable AI-mode tracking. Treat AI-derived outcomes cautiously."}</Alert>}
       {coverage.length > 0 && <CoverageStatement state="partial" headingId="workspace-coverage-heading" heading="Assessment limits" intro="Results below cover only the checks that ran. Unchecked content is not treated as passed." items={coverage} />}
       {report.historical_semantic_support_unverified && <Alert title="Historical AI grades need fresh evidence review" tone="warning">Some recorded AI suggestions predate criterion-support validation. They are not validated by the current safeguards. Run a new check or assess the manuscript independently. Reopening preserves the original record.</Alert>}
       <FigureReadingsSummary readings={report.figure_readings} checkRunId={checkRunId} />

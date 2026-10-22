@@ -102,6 +102,24 @@ function stubViewer(viewer: ManuscriptViewerOut = VIEWER) {
 }
 
 describe("SignalDocumentViewerPage", () => {
+  it.each(["fake", "real", "unknown"] as const)("BUG-435: decision AI disclosure is scoped to responses for mode %s", async (mode) => {
+    vi.stubGlobal("fetch", stubFetchByPath({
+      "/check-runs/5/document": VIEWER, "/check-runs/5/report": { ...REPORT, llm_mode: mode },
+      "/check-runs/5/escalated": [], "/check-runs/5/flags": [],
+      "/check-runs/5/document/reuse-matches": { passage_archive_size_n: 4, matches: [] },
+    }));
+    renderWithProviders(<SignalDocumentViewerPage />, { route: "/report/5/document?view=decision&pane=review", path: "/report/:checkRunId/document" });
+    await screen.findByText("Criterion record, 0 entries");
+    if (mode === "fake") {
+      expect(screen.getByText("Test-mode AI responses")).toBeVisible();
+      expect(screen.getByText("This run is recorded in test AI mode. AI responses use fixtures instead of real AI grading. Do not treat AI-derived judgments as a real assessment of the manuscript. Check the recorded evidence directly.")).toBeVisible();
+      expect(screen.queryByText(/This review was produced with fixture responses/)).not.toBeInTheDocument();
+    } else {
+      expect(screen.queryByText("Test-mode AI responses")).not.toBeInTheDocument();
+      if (mode === "unknown") expect(screen.getByText("This run predates reliable AI-mode tracking. Treat AI-derived outcomes cautiously.")).toBeVisible();
+      else expect(screen.queryByText("AI mode could not be verified")).not.toBeInTheDocument();
+    }
+  });
   it("shows current historical title guidance before preserved comparison evidence", async () => {
     vi.stubGlobal("fetch", stubFetchByPath({
       "/check-runs/5/document": VIEWER, "/check-runs/5/report": { ...REPORT, historical_citation_title_unverified: true },

@@ -465,5 +465,5 @@ def test_footer_variants_are_within_page_and_do_not_intersect(llm_mode, decision
                     assert not rect.intersects(fitz.Rect(second["bbox"]))
             texts = " ".join(s["text"] for s in spans)
             assert ("DRAFT - NO DECISION RECORDED" in texts) == (decision is None)
-            assert ("Test-mode run:" in texts) == (llm_mode == "fake")
+            assert ("Test-mode AI responses." in texts) == (llm_mode == "fake")
             assert ("AI mode unknown" in texts) == (llm_mode == "unknown")

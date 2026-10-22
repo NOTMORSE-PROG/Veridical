@@ -84,6 +84,20 @@ function stubReport(report: ReportOut = BASE_REPORT, escalated: EscalatedItemOut
 }
 
 describe("SignalReportPage", () => {
+  it.each(["fake", "real", "unknown"] as const)("BUG-435: report AI disclosure is scoped to responses for mode %s", async (mode) => {
+    stubReport({ ...BASE_REPORT, llm_mode: mode });
+    renderWithProviders(<SignalReportPage />, { route: "/report/5", path: "/report/:checkRunId" });
+    await screen.findByRole("link", { name: "Open manuscript" });
+    if (mode === "fake") {
+      expect(screen.getByText("Test-mode AI responses")).toBeVisible();
+      expect(screen.getByText("This run is recorded in test AI mode. AI responses use fixtures instead of real AI grading. Do not treat AI-derived judgments as a real assessment of the manuscript. Check the recorded evidence directly.")).toBeVisible();
+      expect(screen.queryByText(/This report was produced with fixture responses/)).not.toBeInTheDocument();
+    } else {
+      expect(screen.queryByText("Test-mode AI responses")).not.toBeInTheDocument();
+      if (mode === "unknown") expect(screen.getByText("This run predates reliable AI-mode tracking. Treat AI-derived outcomes cautiously.")).toBeVisible();
+      else expect(screen.queryByText("AI mode could not be verified")).not.toBeInTheDocument();
+    }
+  });
   it("discloses legacy suggestions without treating reopen as new validation", async () => {
     stubReport({ ...BASE_REPORT, historical_semantic_support_unverified: true });
     renderWithProviders(<SignalReportPage />, { route: "/report/5", path: "/report/:checkRunId" });
@@ -325,7 +339,7 @@ describe("SignalReportPage", () => {
     stubReport(report, [], [FLAG]);
     renderWithProviders(<SignalReportPage />, { route: "/report/5", path: "/report/:checkRunId" });
 
-    expect(await screen.findByText("Test-mode AI results")).toBeInTheDocument();
+    expect(await screen.findByText("Test-mode AI responses")).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Assessment limits" })).toBeInTheDocument();
     expect(screen.getByText("Required format review")).toBeInTheDocument();
     expect(screen.getByText("Citation integrity")).toBeInTheDocument();

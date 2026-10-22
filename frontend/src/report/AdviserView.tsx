@@ -4,6 +4,7 @@ import { type ReactNode, useEffect, useRef } from "react";
 import { Link, useParams } from "react-router";
 import { ApiError } from "../api/client";
 import { DECISION_LABEL } from "../domain/decisionTone";
+import { TEST_AI_DISCLOSURE } from "../domain/aiModeDisclosure";
 import { manuscriptIdentity } from "../domain/manuscriptLabel";
 import { Alert } from "../ui/Alert";
 import { CITATION_HISTORY_SHARED_LIMIT, CITATION_HISTORY_TITLE } from "../domain/citationHistory";
@@ -72,7 +73,7 @@ export function AdviserViewPage() {
 
         <section className="signal-shared-verdict" aria-labelledby="shared-band-heading"><div><p className="signal-section-kicker">VERIDICAL readiness band</p><h2 id="shared-band-heading">{report.status === "ready" ? "Ready" : report.status === "conditionally_ready" ? "Conditionally Ready" : report.status === "not_ready" ? "Not Ready" : "Needs Review"}</h2><p>{report.reason ?? "This band comes from the recorded criterion outcomes and integrity signals. It does not approve or block a defense."}</p></div><dl><div><dt>Items still awaiting instructor review</dt><dd>{pendingCount}</dd></div><div><dt>Instructor decision</dt><dd>{report.decision ? DECISION_LABEL[report.decision] : "Not recorded"}</dd></div></dl></section>
 
-        {report.llm_mode !== "real" && <Alert title={report.llm_mode === "fake" ? "Test-mode AI results" : "AI mode could not be verified"} tone="warning">{report.llm_mode === "fake" ? "Fixture responses produced this report. Do not treat AI-derived content as findings about the manuscript." : "This run predates reliable AI-mode tracking. Treat AI-derived outcomes cautiously."}</Alert>}
+        {report.llm_mode !== "real" && <Alert title={report.llm_mode === "fake" ? TEST_AI_DISCLOSURE.title : "AI mode could not be verified"} tone="warning">{report.llm_mode === "fake" ? TEST_AI_DISCLOSURE.body : "This run predates reliable AI-mode tracking. Treat AI-derived outcomes cautiously."}</Alert>}
         {report.rubric_needs_review && <Alert title="The required format had parser uncertainty" tone="warning"><p>The instructor activated it despite the warning.</p>{report.rubric_parse_issues?.length ? <ul>{report.rubric_parse_issues.map((issue) => <li key={issue}>{issue}</li>)}</ul> : null}</Alert>}
         {report.assessment_incomplete && <Alert title="Assessment limits" tone="warning">Some integrity checks were not fully assessed. Unchecked content is not treated as passed. The instructor decision remains separate from these limitations.</Alert>}
 
