@@ -1,13 +1,14 @@
 // V-077 (D-028), screen 4z: the Library as a plain collection of
 // manuscripts and the only originality corpus. No readiness band, score,
 // flag, report link, or similarity judgment appears anywhere here.
-import { useEffect, useId, useRef, useState } from "react";
-import { useLocation, useNavigate, useSearchParams } from "react-router";
+import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useLocation, useNavigate, useNavigationType, useSearchParams } from "react-router";
 import { ApiError } from "../api/client";
 import type { LibraryItemOut } from "../api/types";
 import { LIBRARY_SEARCH_DEBOUNCE_MS, UNSET_PROGRAM_FILTER } from "../config/ui";
 import { usePrograms } from "../dashboard/useDashboard";
 import { useLibraryRouteFocus } from "./useLibraryRouteFocus";
+import { libraryCardActionId, librarySourceDestination, libraryStateRecord, readLibraryComparisonState, validLibraryRecordId, type LibraryComparisonState } from "../routing/libraryReturn";
 import { ActionLink } from "../ui/ActionLink";
 import { Alert } from "../ui/Alert";
 import { Button } from "../ui/Button";
@@ -218,6 +219,7 @@ function LibraryCard({
   selectionFull,
   accessibleSelectionName,
   onToggle,
+  sourceDestination,
 }: {
   item: LibraryItemOut;
   compareMode: boolean;
@@ -225,6 +227,7 @@ function LibraryCard({
   selectionFull: boolean;
   accessibleSelectionName: string;
   onToggle: () => void;
+  sourceDestination: string;
 }) {
   const disabled = !selected && selectionFull;
   const name = libraryRecordName(item);
@@ -277,7 +280,8 @@ function LibraryCard({
           </dl>
           <footer className="signal-library-card__footer">
             <ActionLink
-              to={'/library/' + item.manuscript_id}
+              id={libraryCardActionId(item.manuscript_id)}
+              to={sourceDestination}
               variant="secondary"
               aria-label={'View manuscript: ' + name}
             >
@@ -295,6 +299,7 @@ interface LibraryLocationState {
   skippedTitle?: string;
   deletedTitle?: string;
   comparisonSelection?: number[];
+  comparisonMode?: boolean;
 }
 
 export function SignalLibraryPage() {
@@ -302,6 +307,7 @@ export function SignalLibraryPage() {
   useLibraryRouteFocus("Manuscript Library - VERIDICAL", headingRef);
   const navigate = useNavigate();
   const location = useLocation();
+  const navigationType = useNavigationType();
   // Captured once on arrival: later URL updates (search, page) replace the
   // history entry and would otherwise drop the notice (UX review P2-4).
   const [arrivalNotice] = useState(() => location.state as LibraryLocationState | null);
@@ -314,13 +320,31 @@ export function SignalLibraryPage() {
   const program = searchParams.get("program") ?? undefined;
   const urlSearch = searchParams.get("q") ?? "";
   const [searchInput, setSearchInput] = useState(urlSearch);
-  const compareFrom = Number(searchParams.get("compareFrom"));
-  const initialSelection = [...new Set(
-    arrivalNotice?.comparisonSelection
-      ?? (Number.isInteger(compareFrom) && compareFrom > 0 ? [compareFrom] : []),
-  )].filter((id) => Number.isInteger(id) && id > 0).slice(0, 2);
-  const [compareMode, setCompareMode] = useState(initialSelection.length > 0);
-  const [selected, setSelected] = useState<number[]>(initialSelection);
+  const compareFrom = searchParams.getAll("compareFrom").length === 1
+    ? Number(searchParams.get("compareFrom")) : undefined;
+  const comparison = useMemo(() => validLibraryRecordId(compareFrom)
+    ? { comparisonMode: true, comparisonSelection: [compareFrom] }
+    : readLibraryComparisonState(location.state) ?? { comparisonMode: false, comparisonSelection: [] },
+  [compareFrom, location.state]);
+  const compareMode = comparison.comparisonMode;
+  const selected = comparison.comparisonSelection;
+  const lastSearchArrival = useRef({ key: location.key, query: urlSearch });
+
+  useLayoutEffect(() => {
+    const prior = lastSearchArrival.current;
+    lastSearchArrival.current = { key: location.key, query: urlSearch };
+    // A POP owns its committed query even if the previous entry still had a
+    // draft debounce pending. Ordinary filter changes can retain that draft.
+    if (prior.query !== urlSearch || (prior.key !== location.key && navigationType === "POP")) {
+      setSearchInput(urlSearch);
+    }
+  }, [location.key, navigationType, urlSearch]);
+
+  function setComparison(next: LibraryComparisonState) {
+    navigate(location.pathname + location.search, {
+      replace: true, state: { ...libraryStateRecord(location.state), ...next },
+    });
+  }
 
   useEffect(() => {
     if (!searchParams.has("compareFrom")) return;
@@ -328,8 +352,8 @@ export function SignalLibraryPage() {
       const next = new URLSearchParams(current);
       next.delete("compareFrom");
       return next;
-    }, { replace: true });
-  }, [searchParams, setSearchParams]);
+    }, { replace: true, state: { ...libraryStateRecord(location.state), ...comparison } });
+  }, [searchParams, setSearchParams, location.state, comparison]);
 
   useEffect(() => {
     const handle = window.setTimeout(() => {
@@ -341,10 +365,10 @@ export function SignalLibraryPage() {
         else next.delete("q");
         next.set("page", "1");
         return next;
-      }, { replace: true });
+      }, { replace: true, state: location.state });
     }, LIBRARY_SEARCH_DEBOUNCE_MS);
     return () => window.clearTimeout(handle);
-  }, [searchInput, urlSearch, setSearchParams]);
+  }, [location.key, location.state, searchInput, urlSearch, setSearchParams]);
 
   const { data, isLoading, isError, refetch } = useLibrary(page, program, urlSearch);
   // The result count belongs to this filter; comparison availability belongs
@@ -383,7 +407,7 @@ export function SignalLibraryPage() {
       else next.delete("program");
       next.set("page", "1");
       return next;
-    });
+    }, { state: location.state });
   }
 
   function changePage(nextPage: number) {
@@ -391,25 +415,24 @@ export function SignalLibraryPage() {
       const next = new URLSearchParams(current);
       next.set("page", String(nextPage));
       return next;
-    });
+    }, { state: location.state });
   }
 
   function toggleSelection(id: number) {
-    setSelected((current) => {
-      if (current.includes(id)) return current.filter((value) => value !== id);
-      if (current.length === 2) return current;
-      return [...current, id];
-    });
+    if (selected.includes(id)) {
+      setComparison({ comparisonMode: true, comparisonSelection: selected.filter((value) => value !== id) });
+    } else if (selected.length < 2) {
+      setComparison({ comparisonMode: true, comparisonSelection: [...selected, id] });
+    }
   }
 
   function closeCompareMode() {
-    setCompareMode(false);
-    setSelected([]);
+    setComparison({ comparisonMode: false, comparisonSelection: [] });
   }
 
   function clearFilters() {
     setSearchInput("");
-    setSearchParams({});
+    setSearchParams({}, { state: location.state });
   }
 
   let emptyHeading = "No records match your search";
@@ -486,7 +509,7 @@ export function SignalLibraryPage() {
             <Button
               type="button"
               variant={compareMode ? "quiet" : "secondary"}
-              onClick={() => compareMode ? closeCompareMode() : setCompareMode(true)}
+              onClick={() => compareMode ? closeCompareMode() : setComparison({ comparisonMode: true, comparisonSelection: [] })}
             >
               {compareMode ? "Exit comparison" : "Compare two records"}
             </Button>
@@ -544,7 +567,7 @@ export function SignalLibraryPage() {
             </ul>
           )}
           <div className="signal-library-selection__actions">
-            <Button type="button" variant="quiet" disabled={!selected.length} onClick={() => setSelected([])}>
+            <Button type="button" variant="quiet" disabled={!selected.length} onClick={() => setComparison({ comparisonMode: true, comparisonSelection: [] })}>
               Clear
             </Button>
             <Button
@@ -626,6 +649,7 @@ export function SignalLibraryPage() {
                     selected.includes(item.manuscript_id),
                   )}
                   onToggle={() => toggleSelection(item.manuscript_id)}
+                  sourceDestination={librarySourceDestination(item.manuscript_id, location, comparison)}
                 />
               ))}
             </ul>

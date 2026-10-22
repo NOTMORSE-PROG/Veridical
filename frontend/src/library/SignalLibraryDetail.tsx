@@ -3,11 +3,14 @@
 // or score. The owner can edit details, resolve a possible duplicate, and
 // remove the record from the Library.
 import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
-import { Link, useBlocker, useNavigate, useParams } from "react-router";
+import { useBlocker, useLocation, useNavigate, useParams } from "react-router";
 import { ApiError, BASE_URL } from "../api/client";
 import type { LibraryItemOut } from "../api/types";
 import { usePrograms } from "../dashboard/useDashboard";
 import { useLibraryRouteFocus } from "./useLibraryRouteFocus";
+import { LibraryReturnLink } from "../routing/LibraryReturnLink";
+import { readLibraryReturn } from "../routing/libraryReturn";
+import { rememberRouteReturnFocus } from "../routing/useRouteFocus";
 import { ActionLink } from "../ui/ActionLink";
 import { Alert } from "../ui/Alert";
 import { Button } from "../ui/Button";
@@ -317,6 +320,8 @@ export function SignalLibraryDetailPage() {
   const headingRef = useRef<HTMLHeadingElement>(null);
   const removeButtonRef = useRef<HTMLButtonElement>(null);
   const navigate = useNavigate();
+  const location = useLocation();
+  const returnContext = readLibraryReturn(location);
   const [confirmingRemove, setConfirmingRemove] = useState(false);
   const [removeError, setRemoveError] = useState<string | null>(null);
   const [deciding, setDeciding] = useState<"add" | "skip" | null>(null);
@@ -339,18 +344,27 @@ export function SignalLibraryDetailPage() {
   const name = item ? libraryRecordName(item) : null;
   const notFound = isError && error instanceof ApiError && error.status === 404;
 
-  useLibraryRouteFocus(name ? `${name} - Manuscript Library - VERIDICAL` : "Manuscript Library - VERIDICAL", headingRef);
+  useLibraryRouteFocus(name ? `${name} - Manuscript Library - VERIDICAL` : "Manuscript Library - VERIDICAL", headingRef, returnContext ?? null);
+
+  function returnToLibrary(notice: Record<string, string>) {
+    if (returnContext) {
+      rememberRouteReturnFocus(returnContext.returnPath, location.pathname + location.search, returnContext.elementId, { armed: true });
+    }
+    navigate(returnContext?.returnPath ?? "/library", { state: {
+      ...(returnContext ? { comparisonMode: returnContext.comparisonMode, comparisonSelection: returnContext.comparisonSelection } : {}),
+      ...notice,
+    } });
+  }
 
   async function confirmRemove() {
     if (!manuscriptId || !name) return;
     setRemoveError(null);
     try {
       await remove.mutateAsync(manuscriptId);
-      navigate(
-        "/library",
+      returnToLibrary(
         item?.status === "active"
-          ? { state: { removedTitle: name } }
-          : { state: { deletedTitle: item?.original_filename ?? name } },
+          ? { removedTitle: name }
+          : { deletedTitle: item?.original_filename ?? name },
       );
     } catch (removeFailure) {
       setRemoveError(
@@ -365,7 +379,7 @@ export function SignalLibraryDetailPage() {
     setDecideError(null);
     try {
       await decide.mutateAsync({ manuscriptId, action });
-      if (action === "skip") navigate("/library", { state: { skippedTitle: item?.original_filename ?? name } });
+      if (action === "skip") returnToLibrary({ skippedTitle: item?.original_filename ?? name });
       else await refetch();
     } catch (decisionFailure) {
       setDecideError(
@@ -391,7 +405,7 @@ export function SignalLibraryDetailPage() {
       <header className="signal-route-header signal-library-detail__header">
         <div>
           <nav className="signal-breadcrumb" aria-label="Breadcrumb">
-            <Link to="/library">Manuscript Library</Link>
+            <LibraryReturnLink>Manuscript Library</LibraryReturnLink>
             <span aria-hidden="true">/</span>
             <span>Record</span>
           </nav>
@@ -427,7 +441,7 @@ export function SignalLibraryDetailPage() {
         <section className="signal-library-state" role="alert">
           <h2>This record address is not valid</h2>
           <p>Return to the Library and open a listed record.</p>
-          <ActionLink to="/library" variant="brand">Return to Library</ActionLink>
+          <LibraryReturnLink variant="brand">Return to Library</LibraryReturnLink>
         </section>
       )}
       {manuscriptId && isPending && (
@@ -437,7 +451,7 @@ export function SignalLibraryDetailPage() {
         <section className="signal-library-state" role="alert">
           <h2>This Library record is not available</h2>
           <p>It may have been removed from the Library.</p>
-          <ActionLink to="/library" variant="secondary">Return to Library</ActionLink>
+          <LibraryReturnLink variant="secondary">Return to Library</LibraryReturnLink>
         </section>
       )}
       {manuscriptId && isError && !notFound && (

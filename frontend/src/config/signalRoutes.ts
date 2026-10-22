@@ -16,6 +16,24 @@ export const REVIEW_DESK_RETURN = {
   workflowPattern: /^\/(?:report\/[1-9]\d*(?:\/document)?|flags\/[1-9]\d*|checks\/[1-9]\d*)$/,
 } as const;
 
+/** Library source-reader context, independent of manuscript review routes. */
+export const LIBRARY_RETURN = {
+  pathname: "/library",
+  pathParam: "library_return",
+  originParam: "library_origin",
+  modeParam: "library_compare",
+  selectionParam: "library_selected",
+  openMode: "open",
+  closedMode: "closed",
+  actionPrefix: "library-view-",
+  sourcePattern: /^\/library\/([1-9]\d*)$/,
+  maxPathLength: 4096,
+  maxContextLength: 16384,
+  maxProgramLength: 50,
+  selectionLimit: 2,
+  queryKeys: ["q", "program", "page"],
+} as const;
+
 /**
  * Stable workspace destinations. Workflow stages belong inside active tasks;
  * global navigation names places an instructor can predictably return to.

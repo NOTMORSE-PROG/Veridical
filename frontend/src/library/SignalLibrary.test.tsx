@@ -15,6 +15,7 @@ import { SignalLibraryPage } from "./SignalLibrary";
 import { SignalLibraryAddPage } from "./SignalLibraryAdd";
 import { SignalLibraryComparePage } from "./SignalLibraryCompare";
 import { SignalLibraryDetailPage } from "./SignalLibraryDetail";
+import { readLibraryReturn } from "../routing/libraryReturn";
 
 vi.mock("./LibraryContentPane", () => ({
   LibraryContentPane: () => <div>Full manuscript source</div>,
@@ -147,12 +148,20 @@ describe("Library collection (4z)", () => {
     expect(screen.getByText(/Checking a manuscript does not add it here/)).toBeInTheDocument();
 
     const own = await screen.findByRole("link", { name: "View manuscript: Barangay Service Portal" });
-    expect(own).toHaveAttribute("href", "/library/1");
+    const ownDestination = new URL(own.getAttribute("href")!, "http://localhost");
+    expect(ownDestination.pathname).toBe("/library/1");
+    expect(readLibraryReturn(ownDestination)).toEqual({
+      returnPath: "/library", elementId: "library-view-1", comparisonMode: false, comparisonSelection: [],
+    });
     expect(screen.getByText("Ana Cruz, Ben Reyes")).toBeInTheDocument();
     // Own records show their number, so "Library record #N" in a finding is findable.
     expect(screen.getByText("#1")).toBeInTheDocument();
     const foreign = screen.getByRole("link", { name: "View manuscript: Library record #2" });
-    expect(foreign).toHaveAttribute("href", "/library/2");
+    const sharedDestination = new URL(foreign.getAttribute("href")!, "http://localhost");
+    expect(sharedDestination.pathname).toBe("/library/2");
+    expect(readLibraryReturn(sharedDestination)).toEqual({
+      returnPath: "/library", elementId: "library-view-2", comparisonMode: false, comparisonSelection: [],
+    });
     expect(screen.getByText(/Identifying fields on shared records stay hidden/)).toBeInTheDocument();
 
     expect(screen.queryByText(/report/i)).not.toBeInTheDocument();

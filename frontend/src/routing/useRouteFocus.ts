@@ -36,6 +36,11 @@ export function rememberRouteReturnFocus(
   pendingReturnFocus = { returnPath, destinationPath, elementId, armed: options.armed ?? false };
 }
 
+/** Retire only registrations owned by the named workflow's action prefix. */
+export function clearRouteReturnFocus(actionPrefix: string) {
+  if (pendingReturnFocus?.elementId.startsWith(actionPrefix)) pendingReturnFocus = null;
+}
+
 function restoreRegisteredFocus(elementId: string): HTMLElement | null {
   const target = document.getElementById(elementId);
   if (!target) return null;
