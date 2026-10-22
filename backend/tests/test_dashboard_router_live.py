@@ -100,6 +100,7 @@ def test_stats_returns_honest_zeros_for_a_fresh_instructor(logged_in):
     assert body["escalation_rate"] is None
     assert body["system_underperforming"] is False
     assert body["not_checked_count"] == 0
+    assert body["complete_queue_count"] == 0
 
 
 def test_manuscripts_list_is_paginated(logged_in):

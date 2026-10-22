@@ -1,4 +1,5 @@
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { useQueryClient } from "@tanstack/react-query";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { reviewDeskPath } from "../dashboard/useReviewDesk";
 import { renderWithProviders, stubFetchByPath } from "../test/renderWithProviders";
@@ -63,8 +64,109 @@ const MANUSCRIPTS_PAGE = {
   page_size: 20,
 };
 
+function stubCompleteDesk(stats: unknown = { ...STATS, complete_queue_count: 27 }, list?: (url: URL) => unknown) {
+  const fallback = stubFetchByPath({
+    "/auth/me": { id: 1, email: "a@b.com", display_name: "Instructor" },
+    "/rubric-families": ACTIVE_FAMILY, "/stats": stats, "/programs": [],
+  });
+  const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+    const url = new URL(input.toString(), "http://localhost");
+    if (url.pathname !== "/manuscripts") return fallback(input, init);
+    const body = list ? list(url) : MANUSCRIPTS_PAGE;
+    return Promise.resolve(body instanceof Response ? body : new Response(JSON.stringify(body), { status: 200 }));
+  });
+  vi.stubGlobal("fetch", fetchMock);
+  return fetchMock;
+}
+
 describe("DashboardPage", () => {
   afterEach(() => vi.unstubAllGlobals());
+
+  it("BUG-430: Complete uses the current queue count, list total across pages, then its inactive count again", async () => {
+    stubCompleteDesk(undefined, (url) => url.searchParams.get("status") === "decided"
+      ? { ...MANUSCRIPTS_PAGE, page: Number(url.searchParams.get("page")), total: 27, items: [{ ...MANUSCRIPTS_PAGE.items[0], latest_decision: "approved" }] }
+      : MANUSCRIPTS_PAGE);
+    renderWithProviders(<DashboardPage />, { route: "/dashboard?queue=checking" });
+    const complete = await screen.findByRole("button", { name: /Complete27 manuscripts/ });
+    expect(complete).toHaveTextContent("Latest check finished. Instructor decision recorded.");
+    fireEvent.click(complete);
+    expect(await screen.findByText("Page 1 of 2")).toBeVisible();
+    expect(document.querySelector(".signal-desk__heading p[aria-live]")).toHaveTextContent("Complete: 27 manuscripts.");
+    fireEvent.click(screen.getByRole("button", { name: "Next" }));
+    expect(await screen.findByText("Page 2 of 2")).toBeVisible();
+    expect(screen.getByRole("button", { name: /Complete27 manuscripts/ })).toHaveAttribute("aria-pressed", "true");
+    fireEvent.click(screen.getByRole("button", { name: /In progress/ }));
+    await waitFor(() => expect(screen.getByRole("button", { name: /Complete27 manuscripts/ })).toHaveAttribute("aria-pressed", "false"));
+  });
+
+  it.each([0, 1])("BUG-430: selected Complete reports filtered total %s with atomic queue context", async (count) => {
+    stubCompleteDesk(undefined, () => ({ ...MANUSCRIPTS_PAGE, total: count, items: count ? MANUSCRIPTS_PAGE.items : [] }));
+    renderWithProviders(<DashboardPage />, { route: "/dashboard?queue=complete&q=applied" });
+    const expected = `${count} matching manuscript${count === 1 ? "" : "s"}`;
+    expect(await screen.findByRole("button", { name: new RegExp(`Complete${expected}`) })).toHaveAttribute("aria-pressed", "true");
+    const notice = document.querySelector(".signal-desk__heading p[aria-live]");
+    expect(notice).toHaveTextContent(`Complete: ${expected}.`);
+    expect(notice).toHaveAttribute("aria-atomic", "true");
+  });
+
+  it("BUG-430: program Not set is applied filtering; an unsubmitted draft is not", async () => {
+    stubCompleteDesk(undefined, () => ({ ...MANUSCRIPTS_PAGE, total: 1 }));
+    renderWithProviders(<DashboardPage />, { route: "/dashboard?queue=complete&program=__unset__" });
+    await screen.findByRole("button", { name: /Complete1 matching manuscript/ });
+    fireEvent.click(screen.getByRole("button", { name: "Clear filters" }));
+    await screen.findByRole("button", { name: /Complete1 manuscript/ });
+    fireEvent.change(screen.getByRole("searchbox"), { target: { value: "unsubmitted draft" } });
+    expect(screen.getByRole("button", { name: /Complete1 manuscript/ })).toBeInTheDocument();
+    expect(document.querySelector(".signal-desk__heading p[aria-live]")).toHaveTextContent("Complete: 1 manuscript.");
+  });
+
+  it("BUG-430: changing queue with an equal count changes the announcement context without moving focus", async () => {
+    stubCompleteDesk({ ...STATS, complete_queue_count: 1 });
+    renderWithProviders(<DashboardPage />);
+    await screen.findByRole("button", { name: /Complete1 manuscript/ });
+    expect(document.querySelector(".signal-desk__heading p[aria-live]")).toHaveTextContent("Needs you: 1 manuscript.");
+    const complete = screen.getByRole("button", { name: /Complete1 manuscript/ });
+    complete.focus(); fireEvent.click(complete);
+    await waitFor(() => expect(document.querySelector(".signal-desk__heading p[aria-live]")).toHaveTextContent("Complete: 1 manuscript."));
+    expect(complete).toHaveFocus();
+  });
+
+  it.each(["missing", "failed"])("BUG-430: omits an inactive Complete number when stats are %s", async (state) => {
+    stubCompleteDesk(state === "missing" ? STATS : new Response(JSON.stringify({ error: { code: "api_down", message: "Controlled stats failure" } }), { status: 503 }));
+    renderWithProviders(<DashboardPage />);
+    const complete = await screen.findByRole("button", { name: /Complete/ });
+    await screen.findByRole("heading", { name: "Needs you" });
+    expect(complete).not.toHaveTextContent(/\d|manuscripts/);
+  });
+
+  it.each(["pending", "error"])("BUG-430: selected Complete never falls back to global stats during list %s", async (state) => {
+    const fetchMock = stubCompleteDesk(undefined, () => new Response(JSON.stringify({ error: { code: "api_down", message: "Controlled list failure" } }), { status: 503 }));
+    if (state === "pending") {
+      const fetchOriginal = fetchMock.getMockImplementation()!;
+      fetchMock.mockImplementation((input, init) => new URL(input.toString(), "http://localhost").pathname === "/manuscripts" ? new Promise<Response>(() => {}) : fetchOriginal(input, init));
+    }
+    renderWithProviders(<DashboardPage />, { route: "/dashboard?queue=complete" });
+    const complete = await screen.findByRole("button", { name: /Complete/ });
+    await waitFor(() => expect(fetchMock.mock.calls.some(([input]) => new URL(input.toString(), "http://localhost").pathname === "/stats")).toBe(true));
+    expect(complete).not.toHaveTextContent(/\d|manuscripts/);
+  });
+
+  it("BUG-430: a cached stats failure suppresses the inactive number", async () => {
+    let failing = false;
+    const fallback = stubCompleteDesk();
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      if (failing && new URL(input.toString(), "http://localhost").pathname === "/stats") return Promise.resolve(new Response(JSON.stringify({ error: { code: "api_down", message: "Controlled cached stats failure" } }), { status: 503 }));
+      return fallback(input, init);
+    }));
+    function Refresh() {
+      const client = useQueryClient();
+      return <button onClick={() => { failing = true; void client.invalidateQueries({ queryKey: ["stats"] }); }}>Refresh test stats</button>;
+    }
+    renderWithProviders(<><Refresh /><DashboardPage /></>);
+    await screen.findByRole("button", { name: /Complete27 manuscripts/ });
+    fireEvent.click(screen.getByRole("button", { name: "Refresh test stats" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: /Complete/ })).not.toHaveTextContent(/\d|manuscripts/));
+  });
 
   it("BUG-194: routes Needs you through the server's complete attention queue", () => {
     const path = reviewDeskPath({

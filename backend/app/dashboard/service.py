@@ -154,6 +154,18 @@ async def get_dashboard_stats(
         )
     ) or 0
 
+    complete_queue_count = (
+        await session.scalar(
+            select(func.count())
+            .select_from(Manuscript)
+            .where(
+                *manuscript_scope,
+                latest_run_status == CheckRunStatus.done,
+                has_decision,
+            )
+        )
+    ) or 0
+
     needs_attention_count = (
         await session.scalar(
             select(func.count())
@@ -220,6 +232,7 @@ async def get_dashboard_stats(
             escalation_rate is not None and escalation_rate > settings.escalation_budget
         ),
         decided_count=decided_count,
+        complete_queue_count=complete_queue_count,
         ready_to_decide_count=ready_to_decide_count,
         needs_attention_count=needs_attention_count,
         checking_count=checking_count,

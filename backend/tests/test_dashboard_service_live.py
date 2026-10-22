@@ -713,3 +713,157 @@ async def test_not_checked_count_matches_owned_visible_check_inputs(session_fact
         assert page.total == stats.not_checked_count
         assert {row.id for row in page.items} == {row.id for row in eligible}
         assert (await get_dashboard_stats(session, other.id)).not_checked_count == 1
+
+
+@pytest.mark.parametrize("new_status", [s for s in CheckRunStatus if s != CheckRunStatus.done])
+async def test_bug430_complete_queue_excludes_newer_unfinished_or_unsuccessful_runs(
+    session_factory, new_status
+):
+    from app.ingest.service import list_manuscripts
+
+    async with session_factory() as session:
+        owner = Instructor(email="complete-rerun@demo.local", display_name="Owner")
+        session.add(owner)
+        await session.commit()
+        older = await _make_run(
+            session,
+            owner,
+            run_status=CheckRunStatus.done,
+            report_status="ready",
+            decision="approved",
+        )
+        await _make_run(
+            session,
+            owner,
+            manuscript_id=older.manuscript_id,
+            run_status=new_status,
+        )
+        stats = await get_dashboard_stats(session, owner.id)
+        page = await list_manuscripts(session, owner.id, status="decided")
+        assert stats.decided_count == 1
+        assert page.total == 0
+        assert stats.complete_queue_count == page.total
+
+
+async def test_bug430_complete_count_matches_all_unfiltered_pages_and_visible_scope(
+    session_factory,
+):
+    from app.ingest.service import list_manuscripts
+
+    async with session_factory() as session:
+        owner = Instructor(email="complete-scope@demo.local", display_name="Owner")
+        other = Instructor(email="complete-foreign@demo.local", display_name="Other")
+        session.add_all([owner, other])
+        await session.commit()
+        expected = set()
+        for decision in ("approved", "returned", "rejected"):
+            run = await _make_run(
+                session,
+                owner,
+                run_status=CheckRunStatus.done,
+                report_status="ready",
+                decision=decision,
+            )
+            expected.add(run.manuscript_id)
+            await _make_run(
+                session,
+                owner,
+                manuscript_id=run.manuscript_id,
+                run_status=CheckRunStatus.done,
+                report_status="ready",
+                decision=decision,
+            )
+        for label, attributes, instructor in [
+            ("dismissed", {"dismissed_at": datetime.now(UTC)}, owner),
+            ("library", {"origin": ManuscriptOrigin.library_submission}, owner),
+            ("foreign", {}, other),
+        ]:
+            manuscript = Manuscript(
+                instructor_id=instructor.id,
+                group_label=label,
+                file_ref="fixture.pdf",
+                **attributes,
+            )
+            session.add(manuscript)
+            await session.commit()
+            await _make_run(
+                session,
+                instructor,
+                manuscript_id=manuscript.id,
+                run_status=CheckRunStatus.done,
+                report_status="ready",
+                decision="approved",
+            )
+        undecided = await _make_run(
+            session,
+            owner,
+            run_status=CheckRunStatus.done,
+            report_status="ready",
+            decision="approved",
+        )
+        await _make_run(
+            session,
+            owner,
+            manuscript_id=undecided.manuscript_id,
+            run_status=CheckRunStatus.done,
+            report_status="ready",
+        )
+        await _make_run(session, owner, run_status=CheckRunStatus.done)
+        session.add(Manuscript(instructor_id=owner.id, group_label="No run", file_ref="none.pdf"))
+        await session.commit()
+        stats = await get_dashboard_stats(session, owner.id)
+        assert stats.decided_count == 5  # Historical KPI retains dismissed/Library decisions.
+        assert stats.complete_queue_count == len(expected) == 3
+        pages = [
+            await list_manuscripts(session, owner.id, status="decided", page=page, page_size=2)
+            for page in (1, 2, 3)
+        ]
+        assert [len(page.items) for page in pages] == [2, 1, 0]
+        assert all(page.total == stats.complete_queue_count for page in pages)
+        assert {row.id for page in pages for row in page.items} == expected
+        assert (await get_dashboard_stats(session, other.id)).complete_queue_count == 1
+
+
+@pytest.mark.parametrize("new_decision", [None, "returned"])
+async def test_bug430_complete_count_uses_run_id_despite_transaction_time_inversion(
+    session_factory, new_decision
+):
+    from app.ingest.service import list_manuscripts
+
+    async with session_factory() as setup:
+        owner = Instructor(email="complete-order@demo.local", display_name="Owner")
+        setup.add(owner)
+        await setup.commit()
+    async with session_factory() as early, session_factory() as later:
+        early_time = await early.scalar(text("SELECT transaction_timestamp()"))
+        older = await _make_run(
+            later,
+            owner,
+            run_status=CheckRunStatus.done,
+            report_status="ready",
+            decision="approved",
+        )
+        newer = CheckRun(
+            manuscript_id=older.manuscript_id,
+            rubric_id=older.rubric_id,
+            status=CheckRunStatus.done,
+            llm_mode=LLMMode.fake,
+        )
+        early.add(newer)
+        await early.flush()
+        early.add(
+            ReadinessReport(
+                check_run_id=newer.id,
+                status=ReadinessStatus.ready,
+                decision=new_decision,
+            )
+        )
+        await early.commit()
+        assert newer.id > older.id
+        assert newer.created_at == early_time < older.created_at
+        stats = await get_dashboard_stats(early, owner.id)
+        page = await list_manuscripts(early, owner.id, status="decided")
+        assert stats.complete_queue_count == page.total == int(new_decision is not None)
+        assert stats.decided_count == int(new_decision is not None)
+        if page.items:
+            assert page.items[0].latest_check_run_id == newer.id

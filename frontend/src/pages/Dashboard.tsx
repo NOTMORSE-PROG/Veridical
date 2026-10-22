@@ -42,7 +42,7 @@ const QUEUES: ReadonlyArray<{
     label: "Ready to decide",
     description: "Checks finished. Review assessment limits before recording your decision.",
   },
-  { id: "complete", label: "Complete", description: "Instructor decisions already recorded" },
+  { id: "complete", label: "Complete", description: "Latest check finished. Instructor decision recorded." },
 ] as const;
 
 const FAILURE_COPY = {
@@ -99,12 +99,23 @@ function QueueCount({
   stats,
   activeQueue,
   activeTotal,
+  statsError,
+  matching,
 }: {
   queue: ReviewDeskQueue;
   stats?: ReturnType<typeof useDashboardStats>["data"];
   activeQueue: ReviewDeskQueue;
   activeTotal?: number;
+  statsError: boolean;
+  matching: boolean;
 }) {
+  if (queue === "complete") {
+    const selected = queue === activeQueue;
+    const count = selected ? activeTotal : statsError ? undefined : stats?.complete_queue_count;
+    return typeof count === "number"
+      ? <span>{count}{selected && matching ? " matching" : ""} manuscript{count === 1 ? "" : "s"}</span>
+      : null;
+  }
   if (queue === "not_checked") {
     const count = stats?.not_checked_count;
     return count === undefined ? null : <span>{count} manuscript{count === 1 ? "" : "s"}</span>;
@@ -121,7 +132,6 @@ function QueueCount({
   // a manuscript's readiness BAND (needs_review_count) and whether it
   // currently has unresolved escalations are different facts.
   if (queue === "ready_to_decide") count = stats.ready_to_decide_count;
-  if (queue === "complete") count = stats.decided_count;
   // BUG-212: `needs_review`/`checking` used to fall through to `null`
   // here whenever they weren't the active tab -- no equivalent stat
   // field existed for either predicate at all.
@@ -336,7 +346,7 @@ function ReviewDesk({
   useEffect(() => setSearchDraft(q ?? ""), [q]);
   const query: ReviewDeskQuery = { queue, q, program, sort, page, pageSize: REVIEW_DESK_PAGE_SIZE };
   const { data, isPending, isError, refetch } = useReviewDeskPage(query);
-  const { data: stats } = useDashboardStats();
+  const { data: stats, isError: statsError } = useDashboardStats();
   const { data: programs } = usePrograms();
 
   function update(next: Record<string, string | undefined>, replace = false) {
@@ -370,6 +380,8 @@ function ReviewDesk({
 
   const totalPages = data ? Math.max(1, Math.ceil(data.total / data.page_size)) : 1;
   const queueTitle = QUEUES.find((item) => item.id === queue)?.label ?? "Needs you";
+  const matching = Boolean(q?.trim() || program?.trim());
+  const usableList = data !== undefined && !isPending && !isError;
 
   return (
     <>
@@ -386,7 +398,9 @@ function ReviewDesk({
               queue={item.id}
               stats={stats}
               activeQueue={queue}
-              activeTotal={data?.total}
+              activeTotal={usableList ? data.total : undefined}
+              statsError={statsError}
+              matching={matching}
             />
             <small>{item.description}</small>
           </button>
@@ -405,9 +419,9 @@ function ReviewDesk({
             <p className="signal-eyebrow">Current queue</p>
             <h2 id="desk-heading">{queueTitle}</h2>
           </div>
-          {data && (
-            <p aria-live="polite">
-              <strong>{data.total}</strong> manuscript{data.total === 1 ? "" : "s"}
+          {usableList && (
+            <p aria-live="polite" aria-atomic="true">
+              <span className="sr-only">{queueTitle}: </span><strong>{data.total}</strong>{matching ? " matching" : ""} manuscript{data.total === 1 ? "" : "s"}.
             </p>
           )}
         </div>

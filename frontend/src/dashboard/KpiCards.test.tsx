@@ -14,6 +14,7 @@ const BASE: DashboardStats = {
   escalation_budget: 0.2,
   system_underperforming: false,
   decided_count: 2,
+  complete_queue_count: 0,
   ready_to_decide_count: 2,
   needs_attention_count: 1,
   checking_count: 0,

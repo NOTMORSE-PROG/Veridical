@@ -21,6 +21,8 @@ class DashboardStats(BaseModel):
     # (F8.5) had ever been used. Scoped to the exact same latest-done-run
     # set as every other count on this screen (BUG-012's own rule).
     decided_count: int
+    # Current visible Complete queue; historical decided_count stays independent.
+    complete_queue_count: int
     # BUG-211: the exact same predicate `list_manuscripts(status=checked,
     # needs_review=False)` uses (latest run done, zero unresolved
     # escalations, no decision yet) -- NOT derivable from the band counts
