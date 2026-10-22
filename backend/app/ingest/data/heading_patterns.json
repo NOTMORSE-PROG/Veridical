@@ -92,7 +92,7 @@
     "^\\d{1,4}$",
     "^page\\s+\\d+(\\s+of\\s+\\d+)?$"
   ],
-  "toc_line_suffix": "[.\\u2026\\s]*\\d{1,4}\\s*$",
+  "toc_line_suffix": "\\d{1,4}\\s*$",
   "title_page": {
     "_comment": [
       "V-063: deterministic title-page extraction (group name, members,",

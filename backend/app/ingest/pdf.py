@@ -5,6 +5,9 @@ CPU-bound and synchronous on purpose — callers run it in a threadpool
 (CODING.md §2 async discipline); nothing here touches the DB or the network.
 """
 
+import math
+from itertools import pairwise
+
 import pymupdf
 from pydantic import ValidationError
 
@@ -308,6 +311,7 @@ def _mark_furniture(
         and len(pages) / page_count >= settings.ingest_furniture_page_ratio
     }
 
+    repeated_top: dict[int, list[Line]] = {}
     for lines in lines_by_page.values():
         for ln in lines:
             b = band(ln)
@@ -321,6 +325,69 @@ def _mark_furniture(
                 if unique and sections.heading_shaped(ln.text, patterns):
                     continue
                 ln.is_furniture = True
+                if b == "top":
+                    repeated_top.setdefault(ln.page, []).append(ln)
+
+    # Repetition in a wide margin band can also describe the first body line.
+    # Restore only the immediate continuation of an already-retained unique
+    # heading, supported by one disjoint source column continuing below the
+    # band. The downstream order/overlap/table guards remain authoritative.
+    eligible_top: dict[int, list[Line]] = {}
+    for page, candidates in repeated_top.items():
+        lines = lines_by_page[page]
+        height = page_heights[page]
+        if len(lines) > settings.ingest_reading_order_max_lines_per_page:
+            continue
+        if (
+            not math.isfinite(height)
+            or height <= 0
+            or any(
+                not all(math.isfinite(value) for value in line.bbox)
+                or line.bbox[0] >= line.bbox[2]
+                or line.bbox[1] >= line.bbox[3]
+                for line in lines
+            )
+        ):
+            continue
+        eligible_top[page] = candidates
+    if not eligible_top:
+        return
+
+    listing_pages = sections.toc_page_numbers(lines_by_page, patterns, settings)
+    for page, candidates in eligible_top.items():
+        if page in listing_pages:
+            continue
+        lines = lines_by_page[page]
+        height = page_heights[page]
+        ordered = sorted(lines, key=lambda line: (line.bbox[1], line.bbox[0]))
+        candidate_ids = {id(line) for line in candidates}
+        body_candidates = [
+            line
+            for previous, line in pairwise(ordered)
+            if id(line) in candidate_ids
+            and not previous.is_furniture
+            and band(previous) == "top"
+            and len(exact_pages[("top", match_key(previous.text))]) == 1
+            and sections.heading_shaped(previous.text, patterns)
+            and previous.bbox[3] < line.bbox[1]
+        ]
+        if not body_candidates:
+            continue
+        restore_ids = {id(line) for line in body_candidates}
+        body = [line for line in ordered if not line.is_furniture or id(line) in restore_ids]
+        if max(line.bbox[0] for line in body) >= min(line.bbox[2] for line in body):
+            continue
+        if any(left.bbox[3] >= right.bbox[1] for left, right in pairwise(body)):
+            continue
+        if not any(
+            not line.is_furniture
+            and line.bbox[1] >= height * settings.ingest_furniture_band_ratio
+            and not sections.heading_shaped(line.text, patterns)
+            for line in body
+        ):
+            continue
+        for line in body_candidates:
+            line.is_furniture = False
 
 
 def _assemble_blocks(

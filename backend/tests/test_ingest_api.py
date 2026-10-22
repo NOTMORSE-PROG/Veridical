@@ -103,6 +103,8 @@ def _upload(client, fixture_name: str, as_name: str | None = None, data: bytes |
 
 @live
 def test_upload_pdf_returns_summary(client):
+    from app.ingest.service import load_raw_store
+
     r = _upload(client, "native.pdf")
     assert r.status_code == 200, r.text
     body = r.json()
@@ -110,10 +112,19 @@ def test_upload_pdf_returns_summary(client):
     assert body["page_count"] == 6 and body["anchor_kind"] == "page"
     assert body["citations"] == 2
     assert body["section_tree"]["source"] == "heuristics"
-    assert body["notes"] == [
-        "Some pages could not be read in a reliable order. Reference entries were retained "
-        "from a readable section. Extraction does not verify their sources."
-    ]
+    # The native fixture's repeated first body lines are substantive. Their
+    # retention now makes all six pages ordered; check the durable extraction
+    # as well as the absence of the former ambiguity warning.
+    assert body["notes"] == []
+    saved = load_raw_store(get_settings(), body["manuscript_id"])
+    assert body["text_chars"] == saved.text_chars == 1973
+    assert saved.reading_order is not None and len(saved.reading_order) == 6
+    assert all(page.status == "ordered" for page in saved.reading_order)
+    for source_id in ("3:1:0", "4:1:0", "5:1:0"):
+        matches = [block for block in saved.blocks if source_id in (block.source_line_ids or [])]
+        assert len(matches) == 1
+        assert not matches[0].is_furniture
+        assert "Body prose sentence 0" in matches[0].text
 
 
 @live
