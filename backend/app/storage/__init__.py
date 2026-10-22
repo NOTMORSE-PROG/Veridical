@@ -24,7 +24,9 @@ object-store handle.
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
+from tempfile import NamedTemporaryFile
 from typing import Protocol
 
 from app.config import Settings
@@ -224,5 +226,22 @@ def ensure_local_file(settings: Settings, storage: Storage, file_ref: str) -> Pa
     key = storage_key_for(settings, file_ref)
     data = storage.get_bytes(key)
     local_path.parent.mkdir(parents=True, exist_ok=True)
-    local_path.write_bytes(data)
+    # Source readers may run concurrently even while retention is row-locked.
+    # Publish only a closed, complete file on the same filesystem; the caller's
+    # source transaction still owns serialization against manuscript deletion.
+    with NamedTemporaryFile(mode="wb", dir=local_path.parent, delete_on_close=False) as staged:
+        staged.write(data)
+        staged.close()
+        try:
+            os.replace(staged.name, local_path)
+        except PermissionError as publication_error:
+            # Windows denies replacement while another source reader is open.
+            # Accept a competing fill only after verifying all downloaded bytes;
+            # absence, a different object or a failed comparison keeps the error.
+            try:
+                already_complete = local_path.read_bytes() == data
+            except OSError:
+                raise publication_error from None
+            if not already_complete:
+                raise
     return local_path
