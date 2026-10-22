@@ -1,7 +1,7 @@
 // V-077 (D-028), screen 4z: the Library as a plain collection of
 // manuscripts and the only originality corpus. No readiness band, score,
 // flag, report link, or similarity judgment appears anywhere here.
-import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type MouseEvent } from "react";
 import { useLocation, useNavigate, useNavigationType, useSearchParams } from "react-router";
 import { ApiError } from "../api/client";
 import type { LibraryItemOut } from "../api/types";
@@ -13,6 +13,7 @@ import { ActionLink } from "../ui/ActionLink";
 import { Alert } from "../ui/Alert";
 import { Button } from "../ui/Button";
 import { LibraryEntryStatus } from "./LibraryEntryStatus";
+import { LibraryRecoveryActions } from "./LibraryRecoveryActions";
 import { formatLibraryDate, libraryRecordName } from "./libraryFormat";
 import {
   useLibrary,
@@ -303,6 +304,7 @@ interface LibraryLocationState {
 }
 
 export function SignalLibraryPage() {
+  const routeRef = useRef<HTMLDivElement>(null);
   const headingRef = useRef<HTMLHeadingElement>(null);
   useLibraryRouteFocus("Manuscript Library - VERIDICAL", headingRef);
   const navigate = useNavigate();
@@ -370,7 +372,7 @@ export function SignalLibraryPage() {
     return () => window.clearTimeout(handle);
   }, [location.key, location.state, searchInput, urlSearch, setSearchParams]);
 
-  const { data, isLoading, isError, refetch } = useLibrary(page, program, urlSearch);
+  const { data, isSuccess, isError, fetchStatus, refetch } = useLibrary(page, program, urlSearch);
   // The result count belongs to this filter; comparison availability belongs
   // to the whole Library. The common unfiltered query shares the same cache.
   const collection = useLibrary(1, undefined, "");
@@ -398,7 +400,38 @@ export function SignalLibraryPage() {
   const hasFilters = Boolean(program || hasSearch);
   const total = data?.total ?? 0;
   const corpusTotal = collection.data?.total ?? (!hasFilters ? data?.total : undefined);
-  const libraryIsEmpty = Boolean(data && !hasFilters && total === 0);
+  const settled = fetchStatus === "idle" && isSuccess && Boolean(data);
+  const loadError = fetchStatus === "idle" && isError;
+  const unavailable = fetchStatus === "idle" && !isError && !settled;
+  const outOfRange = Boolean(data && total > 0 && data.items.length === 0 && page > totalPages);
+  const emptyInRange = Boolean(settled && data && total > 0 && data.items.length === 0 && !outOfRange);
+  const libraryIsEmpty = Boolean(settled && !hasFilters && total === 0);
+  const loadMessage = fetchStatus === "fetching"
+    ? data ? "Updating Library records." : "Loading library records."
+    : fetchStatus === "paused"
+      ? data ? "Waiting to update Library records." : "Waiting to load Library records."
+      : unavailable ? "Library records are unavailable." : undefined;
+
+  function handOffRecoveryFocus(event: MouseEvent<HTMLButtonElement>) {
+    const control = event.currentTarget;
+    if (control.isConnected && !control.disabled && document.activeElement === control && document.hasFocus()) {
+      headingRef.current?.focus();
+    }
+  }
+
+  function recoverPage(event: MouseEvent<HTMLButtonElement>, nextPage: number) {
+    handOffRecoveryFocus(event);
+    setSearchParams((current) => {
+      const next = new URLSearchParams(current);
+      next.set("page", String(nextPage));
+      return next;
+    }, { replace: true, state: location.state });
+  }
+
+  function retryLibrary(event: MouseEvent<HTMLButtonElement>) {
+    handOffRecoveryFocus(event);
+    void refetch();
+  }
 
   function changeProgram(nextProgram: string | undefined) {
     setSearchParams((current) => {
@@ -440,7 +473,7 @@ export function SignalLibraryPage() {
   else if (program) emptyHeading = "No records match this program";
 
   return (
-    <div className="signal-route signal-page-flow signal-library" data-compare={compareMode || undefined}>
+    <div ref={routeRef} className="signal-route signal-page-flow signal-library" data-compare={compareMode || undefined}>
       <header className="signal-route-header signal-library-header">
         <div>
           <p className="signal-eyebrow">Originality comparison source</p>
@@ -492,7 +525,9 @@ export function SignalLibraryPage() {
                 />
               </label>
               <p id="signal-library-search-hint" className="signal-field-hint">
-                Search your titles, teams, authors and file names. Use a record number such as #20 to find any Library record.
+                Search titles, teams, authors, school years and file names in your own Library records.
+                To find your own or shared records, search by record number, such as #20.
+                The program filter applies to both.
               </p>
               <ProgramFilter value={program} onChange={changeProgram} />
             </div>
@@ -501,9 +536,15 @@ export function SignalLibraryPage() {
 
         <div className="signal-library-results-header">
           <h2 aria-live="polite" aria-atomic="true">
+            {loadMessage && <><span>{loadMessage}</span>{" "}</>}
             {data ? (
-              <><strong>{total}</strong> {hasFilters ? "matching" : "Library"} {total === 1 ? "manuscript" : "manuscripts"}</>
-            ) : "Library manuscripts"}
+              <>{!settled && "Last loaded: "}<strong>{total}</strong> {hasFilters ? "matching" : "Library"} {total === 1 ? "manuscript" : "manuscripts"}</>
+            ) : !loadMessage ? "Library manuscripts" : null}
+            {outOfRange && (
+              <span className="sr-only">
+                {" "}{settled ? "The current results end" : "The last loaded results ended"} on page {totalPages}.
+              </span>
+            )}
           </h2>
           {compareMode || (corpusTotal !== undefined && corpusTotal >= 2) ? (
             <Button
@@ -590,19 +631,7 @@ export function SignalLibraryPage() {
           </p>
         )}
 
-        <div className="signal-group-flow signal-library-results">
-          {isLoading && (
-            <div className="signal-library-state" role="status" aria-live="polite" aria-busy="true">
-              Loading library records.
-            </div>
-          )}
-          {isError && (
-            <div className="signal-library-state" role="alert">
-              <strong>The library could not be loaded.</strong>
-              <Button type="button" variant="secondary" onClick={() => refetch()}>Try again</Button>
-            </div>
-          )}
-
+        <div className="signal-group-flow signal-library-results" aria-busy={fetchStatus === "fetching"}>
           {libraryIsEmpty && (
             <section className="signal-library-state">
               {pendingItems.length > 0 ? (
@@ -624,16 +653,45 @@ export function SignalLibraryPage() {
             </section>
           )}
 
-          {data && hasFilters && data.items.length === 0 && (
+          {settled && hasFilters && total === 0 && (
             <section className="signal-library-state">
               <h2>{emptyHeading}</h2>
-              {hasSearch && <p>Search covers your own records only.</p>}
+              <p>Try another search or clear the search and program filter.</p>
               <Button type="button" variant="secondary" onClick={clearFilters}>
                 Clear search and filter
               </Button>
             </section>
           )}
 
+          {outOfRange && (
+            <section className="signal-library-state">
+              {settled && <h2>Page {page} is outside the current results</h2>}
+              <p>
+                {settled ? "The current results end" : "The last loaded results ended"} on page {totalPages}.
+              </p>
+            </section>
+          )}
+          {emptyInRange && (
+            <div className="signal-library-state">
+              <strong>Library records could not be shown on this page.</strong>
+            </div>
+          )}
+          <LibraryRecoveryActions
+            focusScope={routeRef}
+            scope={location.pathname + location.search}
+            goPage={outOfRange ? totalPages : undefined}
+            retryAvailable={loadError || emptyInRange || unavailable}
+            onGo={recoverPage}
+            onRetry={retryLibrary}
+          />
+
+          {loadError && (
+            <div className="signal-library-state" role="alert">
+              <strong>The library could not be loaded.</strong>
+            </div>
+          )}
+
+          {!settled && data && data.items.length > 0 && <p>Showing the last loaded records.</p>}
           {data && data.items.length > 0 && (
             <ul className="signal-library-grid">
               {data.items.map((item) => (
@@ -655,7 +713,7 @@ export function SignalLibraryPage() {
             </ul>
           )}
 
-          {totalPages > 1 && (
+          {data && data.items.length > 0 && page <= totalPages && totalPages > 1 && (
             <nav className="signal-library-pagination" aria-label="Library pages">
               <Button type="button" variant="secondary" disabled={page === 1} onClick={() => changePage(page - 1)}>
                 Previous

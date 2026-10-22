@@ -219,12 +219,17 @@ describe("Library collection (4z)", () => {
     expect(screen.getByText("Comparison is a reading aid and does not assign a new similarity score.")).toBeInTheDocument();
   });
 
-  it("says a search covers own records only when nothing matches", async () => {
+  it("explains own identity and shared record-number search consistently when nothing matches", async () => {
     vi.stubGlobal("fetch", libraryFetch({ "/library": page([]), "/programs": [] }));
     renderWithProviders(<SignalLibraryPage />, { route: "/library?q=Maria", path: "/library" });
 
     expect(await screen.findByRole("heading", { name: "No records match your search" })).toBeInTheDocument();
-    expect(screen.getAllByText("Search covers your own records only.").length).toBeGreaterThan(0);
+    const hint = document.getElementById("signal-library-search-hint")!;
+    expect(hint).toHaveTextContent("school years");
+    expect(hint).toHaveTextContent("your own or shared records");
+    expect(screen.getByRole("searchbox")).toHaveAttribute("aria-describedby", hint.id);
+    expect(screen.queryByText("Search covers your own records only.")).not.toBeInTheDocument();
+    expect(screen.getByText("Try another search or clear the search and program filter.")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Clear search and filter" })).toBeInTheDocument();
   });
 
