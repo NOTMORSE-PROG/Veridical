@@ -1,16 +1,12 @@
-// V-072 (F7.4), design review spec (2026-08-20) §4.2/§4.3: the passage-
-// level exploration panel — every SCORED F7.4 match (real flags, reached
-// exactly like any other flag) plus, on request, the matches the DEFAULT
-// policy excludes from scoring (a reference-list or block-quote passage
-// on either side). Excluded matches are never scored and never a real
-// Flag — shown here for the instructor's own verification only.
-import { useEffect, useRef } from "react";
+// V-081 (F7.4), screen 4w: recorded passage findings and optional comparisons.
+import { type MouseEvent, useEffect, useRef } from "react";
 import { AnchorPill } from "../components/AnchorPill";
 import { SeverityTag, type Severity } from "../components/SeverityTag";
 import { StatusPill } from "../components/StatusPill";
 import type { useExcludedReuseMatches } from "../report/useReport";
 import { truncateAtWord } from "../format/text";
 import type { FlagSummaryOut } from "../api/types";
+import { instructorAnchor } from "../domain/sourceAnchor";
 import { PassagePairPanel } from "./PassagePairPanel";
 
 function SpinnerIcon() {
@@ -52,6 +48,10 @@ function ToggleRow({
 
 export function ReuseExplorePanel({
   flags,
+  flagsFetching,
+  flagsError,
+  flagsSucceeded,
+  onRetryFlags,
   onSelectFlag,
   onBack,
   includeReferenceList,
@@ -63,6 +63,10 @@ export function ReuseExplorePanel({
   onExpandMatch,
 }: {
   flags: FlagSummaryOut[] | undefined;
+  flagsFetching: boolean;
+  flagsError: boolean;
+  flagsSucceeded: boolean;
+  onRetryFlags: () => void;
   onSelectFlag: (flagId: number) => void;
   onBack: () => void;
   includeReferenceList: boolean;
@@ -74,12 +78,30 @@ export function ReuseExplorePanel({
   onExpandMatch: (id: string | null) => void;
 }) {
   const headingRef = useRef<HTMLHeadingElement>(null);
-  const { data, isPending, isError, refetch } = excludedMatchesQuery;
-  const scoredPassageFlags = (flags ?? []).filter(
+  const { data, isFetching, isError, isSuccess, refetch } = excludedMatchesQuery;
+  const passageFlags = (flags ?? []).filter(
     (f) => f.check_kind === "originality_reuse" && f.is_passage_level,
   );
   const anyToggleOn = includeReferenceList || includeBlockQuote;
   const excludedMatches = data?.matches ?? [];
+  const comparisonLoaded = !isFetching && !isError && isSuccess && data !== undefined;
+  const coverage = isFetching
+    ? anyToggleOn ? "Loading comparison coverage and additional matches." : "Loading comparison coverage."
+    : isError
+      ? anyToggleOn ? "Comparison coverage and additional matches could not be loaded." : "Comparison coverage could not be loaded."
+      : comparisonLoaded
+        ? `Comparison coverage: ${data.passage_archive_size_n} stored comparison passage${data.passage_archive_size_n === 1 ? "" : "s"}. This counts passages, not Library manuscripts.`
+        : "Comparison coverage is unavailable.";
+  const recordedLoaded = !flagsFetching && !flagsError && flagsSucceeded && flags !== undefined;
+  const recordedNotice = flagsFetching
+    ? passageFlags.length > 0 ? "Updating recorded passage matches." : "Loading recorded passage matches."
+    : flagsError ? "Recorded passage matches could not be loaded."
+      : recordedLoaded ? "" : "Recorded passage matches are unavailable.";
+
+  function retry(event: MouseEvent<HTMLButtonElement>, request: () => unknown) {
+    if (document.hasFocus() && document.activeElement === event.currentTarget) headingRef.current?.focus();
+    void request();
+  }
 
   // UX review finding (2026-08-20): entering this panel (via "Explore
   // passage matches" or "See other passage matches") left focus on
@@ -106,11 +128,13 @@ export function ReuseExplorePanel({
         </h2>
       </div>
 
-      <p className="border-b border-border bg-status-neutral-bg px-3.5 py-2 text-xs text-status-neutral-text">
-        {data
-          ? `The Library currently holds ${data.passage_archive_size_n} record${data.passage_archive_size_n === 1 ? "" : "s"}. Passage matches are found only against Library records, so an empty result here is not evidence of originality. Coverage grows as instructors add manuscripts to the Library.`
-          : "Counting Library records."}
-      </p>
+      <div className="border-b border-border bg-status-neutral-bg px-3.5 py-2 text-xs text-status-neutral-text">
+        <p role="status" aria-live="polite" aria-busy={isFetching}>
+          {isFetching && <SpinnerIcon />} {coverage}
+          {!isFetching && isError && <> <button type="button" onClick={(event) => retry(event, refetch)} className="font-medium underline">Try again</button></>}
+        </p>
+        <p>An empty result is not evidence of originality.</p>
+      </div>
 
       <fieldset className="border-b border-border py-1.5">
         <legend className="px-3.5 text-xs font-semibold tracking-header text-ink-tertiary uppercase">
@@ -130,26 +154,21 @@ export function ReuseExplorePanel({
         />
       </fieldset>
 
-      <p role="status" aria-live="polite" aria-busy={anyToggleOn && isPending} className="sr-only">
-        {!anyToggleOn
-          ? ""
-          : isPending
-            ? "Loading additional matches."
-            : isError
-              ? "These additional matches couldn't be loaded."
-              : `${excludedMatches.length} additional match${excludedMatches.length === 1 ? "" : "es"} found.`}
-      </p>
-
       <div>
         <p className="border-b border-border px-3.5 py-2 text-xs font-semibold tracking-header text-ink-tertiary uppercase">
-          Included in readiness review
+          Recorded passage matches
         </p>
-        {scoredPassageFlags.length === 0 ? (
+        <p role="status" aria-live="polite" aria-busy={flagsFetching} className={recordedNotice ? "px-3.5 py-3 text-sm text-ink-secondary" : "sr-only"}>
+          {recordedNotice}
+          {!flagsFetching && flagsError && <> <button type="button" onClick={(event) => retry(event, onRetryFlags)} className="font-medium underline">Retry loading recorded matches</button></>}
+        </p>
+        {(flagsFetching || flagsError) && passageFlags.length > 0 && <p className="px-3.5 py-2 text-xs text-ink-tertiary">Showing the last loaded recorded matches.</p>}
+        {recordedLoaded && passageFlags.length === 0 && (
           <p className="border-b border-border px-3.5 py-3 text-sm text-ink-secondary">
-            No passage-level match was included in this manuscript's readiness review.
+            No passage-level match was recorded for this check.
           </p>
-        ) : (
-          scoredPassageFlags.map((flag) => (
+        )}
+        {passageFlags.map((flag) => (
             <button
               key={flag.id}
               type="button"
@@ -160,13 +179,13 @@ export function ReuseExplorePanel({
                 {truncateAtWord(flag.evidence_excerpt, 140)}
               </p>
               <div className="flex flex-wrap items-center gap-1.5">
-                <AnchorPill anchor={flag.page_anchor} />
+                <AnchorPill anchor={instructorAnchor(flag.page_anchor)} />
                 <SeverityTag severity={flag.severity as Severity} />
+                {flag.affects_readiness === false && <StatusPill tone="neutral">Review lead: not scored</StatusPill>}
                 {flag.overridden && <StatusPill tone="neutral">Overridden</StatusPill>}
               </div>
             </button>
-          ))
-        )}
+          ))}
       </div>
 
       {anyToggleOn && (
@@ -174,28 +193,14 @@ export function ReuseExplorePanel({
           <p className="border-b border-border px-3.5 py-2 text-xs font-semibold tracking-header text-ink-tertiary uppercase">
             Not included in readiness, for verification only
           </p>
-          {isPending && (
-            <p className="flex items-center gap-1.5 px-3.5 py-3 text-sm text-ink-secondary">
-              <SpinnerIcon /> Loading additional matches.
-            </p>
-          )}
-          {isError && (
-            <p role="alert" className="px-3.5 py-3 text-sm text-status-attention-text">
-              These additional matches couldn't be loaded.{" "}
-              <button type="button" onClick={() => refetch()} className="font-medium underline">
-                Try again
-              </button>
-              .
-            </p>
-          )}
-          {!isPending && !isError && excludedMatches.length === 0 && (
+          {(isFetching || isError) && excludedMatches.length > 0 && <p className="px-3.5 py-2 text-xs text-ink-tertiary">Showing the last loaded additional matches.</p>}
+          {!isFetching && !isError && !comparisonLoaded && <p className="px-3.5 py-3 text-sm text-ink-secondary">Additional matches are unavailable.</p>}
+          {comparisonLoaded && excludedMatches.length === 0 && (
             <p className="px-3.5 py-3 text-sm text-ink-secondary">
               No additional matches found with the current toggles on.
             </p>
           )}
-          {!isPending &&
-            !isError &&
-            excludedMatches.map((match) => {
+          {excludedMatches.map((match) => {
               const isExpanded = expandedMatchId === match.id;
               return (
                 <div key={match.id} className="border-b border-border">
