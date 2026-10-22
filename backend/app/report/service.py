@@ -29,6 +29,7 @@ from app.checks.reuse.embed import PassageEmbedding, compute_passage_embeddings,
 from app.checks.reuse.query import (
     canonical_library_copies,
     comparison_exclusions,
+    passage_archive_size,
     query_similar_passages,
 )
 from app.checks.support import SOURCE_SCOPE_POLICY_VERSION
@@ -1064,6 +1065,16 @@ async def list_reuse_passage_matches(
     settings = settings or get_settings()
     check_run = await _owned_check_run(session, check_run_id, instructor_id)
     manuscript = await session.get(Manuscript, check_run.manuscript_id)
+
+    # F7.4 exploration only returns policy-excluded passages. With neither
+    # exclusion category requested, or no eligible comparison source, no
+    # match can be returned; coverage must not depend on source/model access.
+    exclude = await comparison_exclusions(session, manuscript.id)
+    archive_size_n = await passage_archive_size(
+        session, exclude_manuscript_ids=exclude, settings=settings
+    )
+    if not (include_reference_list or include_block_quote) or archive_size_n == 0:
+        return ReuseMatchesOut(passage_archive_size_n=archive_size_n, matches=[])
 
     archive_rows = (
         (

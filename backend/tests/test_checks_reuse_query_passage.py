@@ -368,3 +368,72 @@ async def test_exploration_toggle_recomputes_passages_for_a_manuscript_outside_t
     assert revealed.matches, "the recomputed passages should reveal the reference overlap"
     assert all(m.matched_ref == manuscript_a for m in revealed.matches)
     get_settings.cache_clear()
+
+
+async def test_default_coverage_counts_foreign_passages_without_loading_source_or_model(
+    session_factory, monkeypatch
+):
+    """V-081: the default read cannot reveal excluded matches, even with a corpus."""
+    import app.report.service as report_service
+
+    settings = get_settings()
+    source_id, _ = await _seed_manuscript_and_run(session_factory, group_label="Source")
+    await _add_to_library(
+        session_factory, source_id, _extraction_with_references(BODY_TEXT, REFERENCE_ENTRY)
+    )
+    manuscript_id, run_id = await _seed_manuscript_and_run(session_factory, group_label="Check")
+
+    def forbidden(*args, **kwargs):
+        raise AssertionError("Coverage-only reads must not load extraction, encode or compare")
+
+    monkeypatch.setattr(report_service, "load_raw_store_async", forbidden)
+    monkeypatch.setattr(report_service, "compute_passage_embeddings", forbidden)
+    monkeypatch.setattr(report_service, "query_similar_passages", forbidden)
+    async with session_factory() as session:
+        owner = (await session.get(Manuscript, manuscript_id)).instructor_id
+        result = await report_service.list_reuse_passage_matches(
+            session,
+            run_id,
+            owner,
+            include_reference_list=False,
+            include_block_quote=False,
+            settings=settings,
+        )
+    assert result.passage_archive_size_n == 2
+    assert result.matches == []
+
+
+@pytest.mark.parametrize(
+    "include_reference_list,include_block_quote",
+    [
+        (False, False),
+        (True, False),
+        (False, True),
+        (True, True),
+    ],
+)
+async def test_empty_coverage_does_not_load_source_model_or_compare(
+    session_factory, monkeypatch, include_reference_list, include_block_quote
+):
+    """No eligible source means every exploration choice has an honest empty result."""
+    import app.report.service as report_service
+
+    manuscript_id, run_id = await _seed_manuscript_and_run(session_factory, group_label="Check")
+
+    def forbidden(*args, **kwargs):
+        raise AssertionError("An empty eligible corpus must not load extraction, encode or compare")
+
+    monkeypatch.setattr(report_service, "load_raw_store_async", forbidden)
+    monkeypatch.setattr(report_service, "compute_passage_embeddings", forbidden)
+    monkeypatch.setattr(report_service, "query_similar_passages", forbidden)
+    async with session_factory() as session:
+        owner = (await session.get(Manuscript, manuscript_id)).instructor_id
+        result = await report_service.list_reuse_passage_matches(
+            session,
+            run_id,
+            owner,
+            include_reference_list=include_reference_list,
+            include_block_quote=include_block_quote,
+        )
+    assert result.passage_archive_size_n == 0
+    assert result.matches == []
