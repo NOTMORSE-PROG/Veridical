@@ -4,10 +4,12 @@ APA-ish citation-style sniff. Both are pure functions over `ctx.citations`
 """
 
 import re
+from dataclasses import asdict
 
 from app.checks.rules import RuleContext, RuleOutcome, RuleSpec, register_rule
 from app.checks.rules.bounds import Bound, extract_bound
 from app.checks.rules.keywords import contains_any, full_text, load_keywords
+from app.messages import REFERENCE_LIST_UNASSESSABLE
 from app.models.enums import ResultOutcome
 
 _KEYWORDS = load_keywords()
@@ -93,7 +95,10 @@ def _run_reference_count(criterion, ctx: RuleContext) -> RuleOutcome:
                 "found_unit": bound.unit,
             },
         )
-    count = len(ctx.citations)
+    limited = _inventory_limit_outcome(ctx)
+    if limited is not None:
+        return limited
+    count = ctx.reference_inventory.count
     ok = _within(bound.kind, bound.low, bound.high, count)
     return RuleOutcome(
         outcome=ResultOutcome.passed if ok else ResultOutcome.failed,
@@ -102,6 +107,33 @@ def _run_reference_count(criterion, ctx: RuleContext) -> RuleOutcome:
             "expected": {"kind": bound.kind, "low": bound.low, "high": bound.high},
             "actual_count": count,
         },
+    )
+
+
+def _inventory_limit_outcome(ctx: RuleContext) -> RuleOutcome | None:
+    inventory = ctx.reference_inventory
+    if (
+        inventory is not None
+        and inventory.status == "complete"
+        and type(inventory.count) is int
+        and inventory.count == len(ctx.citations)
+        and not inventory.reasons
+    ):
+        return None
+    detail = (
+        asdict(inventory)
+        if inventory is not None
+        else {
+            "status": "unknown",
+            "count": None,
+            "reasons": ("reference_inventory_unavailable",),
+            "retained_row_count": len(ctx.citations),
+        }
+    )
+    return RuleOutcome(
+        outcome=ResultOutcome.unverifiable,
+        anchor=inventory.anchor if inventory is not None else "reference list",
+        detail={"reason": REFERENCE_LIST_UNASSESSABLE, "reference_inventory": detail},
     )
 
 
@@ -140,7 +172,10 @@ def _run_citation_style(criterion, ctx: RuleContext) -> RuleOutcome:
                 )
             },
         )
-    if not ctx.citations:
+    limited = _inventory_limit_outcome(ctx)
+    if limited is not None:
+        return limited
+    if ctx.reference_inventory.count == 0:
         return RuleOutcome(
             outcome=ResultOutcome.not_applicable,
             anchor="reference list",

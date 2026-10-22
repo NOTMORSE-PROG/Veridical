@@ -159,3 +159,8 @@ CRITERION_NOT_ASSESSABLE_FROM_DOCUMENT = (
     "you observe directly, such as a defense-day behavior or a physical "
     "requirement, not a property of the manuscript itself."
 )
+
+REFERENCE_LIST_UNASSESSABLE = (
+    "VERIDICAL could not reliably assess the reference count or citation style from "
+    "the available reference-list entries. Review the reference list manually."
+)

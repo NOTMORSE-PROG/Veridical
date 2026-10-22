@@ -7,7 +7,9 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.checks.rules import RuleContext
+from app.checks.rules.reference_inventory import measure_reference_inventory
 from app.config import Settings, get_settings
+from app.ingest.patterns import load_patterns
 from app.ingest.service import load_raw_store_async
 from app.models.citation import Citation
 from app.models.manuscript import Manuscript
@@ -42,4 +44,7 @@ async def build_rule_context(
         margin_tolerance_pts=settings.structural_margin_tolerance_pts,
         citation_style_min_ratio=settings.structural_citation_style_min_ratio,
         table_caption_min_ratio=settings.structural_table_caption_min_ratio,
+        reference_inventory=measure_reference_inventory(
+            extraction, list(citations), load_patterns(settings.ingest_patterns_file)
+        ),
     )

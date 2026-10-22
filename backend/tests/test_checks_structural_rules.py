@@ -3,12 +3,12 @@ the Tier-0 shadow signal layer (app/checks/signals.py). Pure functions,
 no DB, no LLM, no network — matches every rule's own contract.
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 import pytest
 
-from app.checks.rules import RuleContext, get_rule, registered_rules
+from app.checks.rules import ReferenceInventory, RuleContext, get_rule, registered_rules
 from app.checks.rules.bounds import extract_bound, to_points
 from app.checks.rules.geometry import RULE_ID as MARGINS_RULE_ID
 from app.checks.rules.pages import RULE_ID as PAGE_LIMIT_RULE_ID
@@ -61,6 +61,8 @@ def _ctx(
         margin_tolerance_pts=settings.structural_margin_tolerance_pts,
         citation_style_min_ratio=settings.structural_citation_style_min_ratio,
         table_caption_min_ratio=settings.structural_table_caption_min_ratio,
+        # These arithmetic fixtures explicitly declare a complete synthetic list.
+        reference_inventory=ReferenceInventory("complete", len(citations or [])),
     )
 
 
@@ -650,6 +652,11 @@ def test_bug_048_all_eleven_real_tip_criteria_route_and_execute_with_no_false_st
         page_count=result.page_count,
         section_tree=result.section_tree,
         citations=citations,
+    )
+    from app.checks.rules.reference_inventory import measure_reference_inventory
+
+    ctx = replace(
+        ctx, reference_inventory=measure_reference_inventory(result, citations, load_patterns())
     )
 
     decisions = [
