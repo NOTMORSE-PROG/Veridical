@@ -1,0 +1,11 @@
+{
+  "font": "hebo",
+  "inset_em": 0.6,
+  "line_height_em": 1.3,
+  "background_opacity": 0.92,
+  "highlight_stroke_pt": 1.4,
+  "unavailable": {
+    "pixel_limit": "Page image unavailable: rendering this source with its disclosure would exceed the configured image size limit.",
+    "disclosure_fit": "Page image unavailable: its AI-mode disclosure could not fit at the configured readable size without covering source evidence."
+  }
+}

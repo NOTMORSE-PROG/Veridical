@@ -18,6 +18,8 @@ import time
 import tracemalloc
 from pathlib import Path
 
+import pytest
+
 from app.report.export import build_report_pdf
 from app.report.schemas import (
     CriterionResultOut,
@@ -187,7 +189,8 @@ def _n_page_pdf(tmp_path: Path, n_pages: int) -> Path:
     return b.save(tmp_path / "page_image_perf.pdf")
 
 
-def test_page_image_rendering_stays_within_a_measured_native_memory_bound(tmp_path):
+@pytest.mark.parametrize("llm_mode", ["real", "fake", "unknown"])
+def test_page_image_rendering_stays_within_a_measured_native_memory_bound(tmp_path, llm_mode):
     """The ticket's own Q1 ("measure first: peak RSS and output size for
     34 flags on a 47-page manuscript, at several DPIs. Then set the cap in
     config") -- exercised here as an automated, re-runnable bound rather
@@ -235,7 +238,7 @@ def test_page_image_rendering_stays_within_a_measured_native_memory_bound(tmp_pa
             flags,
             source_format="pdf",
             unavailable_reason=None,
-            llm_mode="real",
+            llm_mode=llm_mode,
             settings=get_settings(),
         )
     finally:

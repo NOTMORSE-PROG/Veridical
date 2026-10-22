@@ -697,7 +697,11 @@ class Settings(BaseSettings):
     # rather than trusting this comment's numbers as they age.
     # 150dpi is legible print quality without spending that headroom faster
     # than needed.
-    export_page_image_dpi: int = 150
+    export_page_image_dpi: int = Field(default=150, gt=0)
+    # Bound each complete source-plus-disclosure RGB raster before allocation.
+    # Independent of the distinct-page cap: a single unusually large PDF page
+    # must not allocate an unbounded canvas. Unavailable images retain a reason.
+    export_page_image_max_pixels: int = Field(default=25_000_000, ge=1)
     # Safety valve, not expected to bind on a real manuscript: caps the
     # number of DISTINCT PAGES one export will rasterize -- every flag
     # anchored to an already-rendered page is free, REGARDLESS of whether
@@ -731,7 +735,7 @@ class Settings(BaseSettings):
     # left for the flag's own header/excerpt above the image on the same
     # page, never a reportlab layout error from a single flowable too tall
     # to place.
-    export_page_image_max_height: float = 420.0
+    export_page_image_max_height: float = Field(default=420.0, gt=0, allow_inf_nan=False)
     # Desired EFFECTIVE (embedded/on-page) size of the fake/unknown-`llm_mode`
     # disclosure band's text, in points -- `app/report/page_images.py`
     # derives the RASTER's own native fontsize from this and the page's
@@ -742,7 +746,7 @@ class Settings(BaseSettings):
     # on a real Letter-height source page scaled to fit
     # `export_page_image_max_height`). 8pt matches this document's own
     # smallest normal caption size (`export.py`'s `caption` style).
-    export_page_disclosure_font_pt: float = 8.0
+    export_page_disclosure_font_pt: float = Field(default=8.0, gt=0, allow_inf_nan=False)
 
     # --- Originality/reuse: passage-level similarity (V-072, F7.4) ------------
     # Passage size for the F7.4 chunker -- deliberately smaller than

@@ -13,7 +13,6 @@ import pytest
 from app.config import get_settings
 from app.ingest.pdf import extract_document
 from app.report.page_images import (
-    _draw_disclosure_band,
     _merge_line_boxes,
     build_page_evidence_images,
 )
@@ -381,41 +380,6 @@ def test_reuse_flag_discloses_the_matched_manuscript_is_not_shown(doc_and_tree):
     assert "other manuscript in this comparison is not included" not in result[31].reason
 
 
-def test_draw_disclosure_band_grows_and_retries_when_the_initial_estimate_undershoots(
-    monkeypatch,
-):
-    """panel review finding, 2026-08-25: `page.insert_textbox` silently
-    draws NOTHING and returns a negative number when the text overflows
-    its box -- reproduced live for the real 'unknown' disclosure string
-    on a real A4 page (measured: -2.57 at the ORIGINAL fixed-multiplier
-    height). `_draw_disclosure_band`'s fix is a measure-then-VERIFY loop;
-    this test proves the retry/grow path itself works by forcing the
-    initial estimate to undershoot on purpose (monkeypatching
-    `_wrapped_line_count` to always return 1, regardless of the real
-    string), rather than depending on any one string/page-width
-    combination happening to sit on the exact overflow boundary."""
-    import app.report.page_images as page_images_module
-
-    monkeypatch.setattr(page_images_module, "_wrapped_line_count", lambda *a, **k: 1)
-
-    doc = pymupdf.open()
-    page = doc.new_page()
-    long_text = (
-        "AI mode unknown: this run predates AI-mode tracking, so whether it used real "
-        "or simulated AI results can't be confirmed, and this sentence is deliberately "
-        "extended further to guarantee it cannot possibly fit inside a single-line-sized "
-        "band no matter how the real wrapping estimate would have sized it."
-    )
-    _draw_disclosure_band(page, long_text, 16.0, (0.48, 0.21, 0.4), (0.96, 0.91, 0.95))
-    pix = doc[0].get_pixmap(dpi=150)
-    doc.close()
-
-    assert _band_has_visible_text(pix.tobytes("png"), (122, 53, 102)), (
-        "the retry/grow loop did not recover from a deliberately undersized initial "
-        "estimate -- text should still be visible after growing the band"
-    )
-
-
 def test_merge_line_boxes_unions_same_line_word_runs():
     """`page.search_for()` returns one rect per word-run on a matched
     line, not one rect for the whole phrase (measured live against a real
@@ -426,3 +390,40 @@ def test_merge_line_boxes_unions_same_line_word_runs():
     assert len(merged) == 2
     line_box = next(b for b in merged if b[1] == 100.0)
     assert line_box == (10.0, 100.0, 60.0, 112.0)
+
+
+@pytest.mark.parametrize("failure", ["composite_cap", "font_fit"])
+def test_failed_page_is_explicit_and_reused_within_the_distinct_page_budget(
+    doc_and_tree, monkeypatch, failure
+):
+    import app.report.page_images as page_images
+
+    doc, tree = doc_and_tree
+    settings = get_settings()
+    native = doc[0].get_pixmap(dpi=settings.export_page_image_dpi)
+    updates = {"export_max_page_images": 1}
+    if failure == "composite_cap":
+        updates["export_page_image_max_pixels"] = native.width * native.height
+    else:
+        updates["export_page_image_max_height"] = 1
+    settings = settings.model_copy(update=updates)
+    render = page_images._render_page_png
+    calls = []
+
+    def observed(page, *args, **kwargs):
+        calls.append(page.number)
+        return render(page, *args, **kwargs)
+
+    monkeypatch.setattr(page_images, "_render_page_png", observed)
+    result = _build(
+        doc,
+        tree,
+        [_flag(1, "p. 1"), _flag(2, "p. 1"), _flag(3, "p. 2")],
+        llm_mode="fake",
+        settings=settings,
+    )
+    assert calls == [0]
+    assert result[1].image_png is None
+    assert result[1].reason == result[2].reason
+    assert "configured" in result[1].reason
+    assert "rendered-page limit" in result[3].reason

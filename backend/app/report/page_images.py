@@ -20,14 +20,22 @@ convention instead -- the same one `search_for()` returns before
 """
 
 from dataclasses import dataclass
+from math import ceil
 from typing import Literal
 
 import pymupdf
+from reportlab.lib.pagesizes import A4
 
 from app.config import Settings
 from app.ingest.regions import AnchorRegion, recover_region
 from app.ingest.schemas import SectionTree
-from app.report.export import _LLM_MODE_DISCLOSURE, _TONE_COLORS
+from app.report.export import _LLM_MODE_DISCLOSURE, _PRINT_LAYOUT, _TONE_COLORS
+from app.report.page_image_disclosure import (
+    PageImageUnavailable,
+    append_disclosure,
+    check_pixel_budget,
+    disclosure_layout,
+)
 from app.report.schemas import FlagSummaryOut, PageEvidenceImageOut
 
 Bbox = tuple[float, float, float, float]
@@ -130,66 +138,6 @@ def _region_render(region: AnchorRegion) -> _RegionRender | None:
     return None
 
 
-_DISCLOSURE_FONT = "hebo"
-
-
-def _wrapped_line_count(text: str, fontname: str, fontsize: float, max_width: float) -> int:
-    """Greedy word-wrap simulation to ESTIMATE how many lines `text` needs
-    at `fontsize` within `max_width` -- `pymupdf.insert_textbox` does the
-    real wrapping itself and is the actual authority (`_draw_disclosure_band`
-    verifies against its real return value), this is only a starting guess
-    so the common case fits on the first attempt instead of the retry loop."""
-    words = text.split()
-    if not words:
-        return 1
-    space_width = pymupdf.get_text_length(" ", fontname=fontname, fontsize=fontsize)
-    lines = 1
-    current_width = 0.0
-    for word in words:
-        word_width = pymupdf.get_text_length(word, fontname=fontname, fontsize=fontsize)
-        if current_width and current_width + space_width + word_width > max_width:
-            lines += 1
-            current_width = word_width
-        else:
-            current_width += (space_width if current_width else 0.0) + word_width
-    return lines
-
-
-def _draw_disclosure_band(
-    page: pymupdf.Page,
-    text: str,
-    fontsize: float,
-    fg_rgb: tuple[float, float, float],
-    bg_rgb: tuple[float, float, float],
-) -> None:
-    """Draws the fake/unknown-`llm_mode` disclosure directly onto the page
-    before rasterizing (AC5). `insert_textbox` does NOT raise or clip when
-    the text overflows its box -- it silently draws NOTHING and returns a
-    NEGATIVE number (the overflow amount) instead (panel review finding,
-    2026-08-25, reproduced live: the disclosure string for `llm_mode=
-    'unknown'` silently failed to render at all against a real A4 page,
-    while the band's background alone still painted -- a visually "fine"
-    but textless banner, the exact failure this AC exists to prevent).
-    Estimates a starting band height from real font-metric wrapping, then
-    VERIFIES against `insert_textbox`'s own return value and grows the
-    band if the estimate undershot, rather than trusting the estimate."""
-    page_width = page.rect.width
-    page_height = page.rect.height
-    inset = fontsize * 0.6
-    n_lines = _wrapped_line_count(text, _DISCLOSURE_FONT, fontsize, page_width - 2 * inset)
-    height = n_lines * fontsize * 1.3 + inset * 2
-
-    for _ in range(6):  # bounded safety net; the estimate above should land on attempt 1
-        band = pymupdf.Rect(0, page_height - height, page_width, page_height)
-        page.draw_rect(band, color=None, fill=bg_rgb, fill_opacity=0.92, overlay=True)
-        fit = page.insert_textbox(
-            band, text, fontsize=fontsize, fontname=_DISCLOSURE_FONT, color=fg_rgb, align=1
-        )
-        if fit >= 0:
-            return
-        height *= 1.4
-
-
 def _render_page_png(
     page: pymupdf.Page,
     boxes: tuple[Bbox, ...],
@@ -197,59 +145,52 @@ def _render_page_png(
     llm_disclosure: tuple[str, str] | None,
     settings: Settings,
 ) -> bytes:
-    """Render one source page with only the boxes shared by every consumer.
+    """Render the visible source unchanged, with an optional external notice.
 
-    The caller supplies an empty tuple when findings on the page require
-    different marks. This preserves the distinct-page rendering budget
-    without attributing one finding's rectangles to another finding.
+    Only finding marks shared by all consumers are added. The original page
+    is rasterized with its own layer/annotation state, then marks are drawn
+    directly on those pixels. No page copy can lose document-level visibility.
     """
-    page_height = page.rect.height
-    annots = []
-    merged = _merge_line_boxes(boxes, settings.export_box_line_merge_tolerance) if boxes else []
-    box_color = _TONE_COLORS["danger"][1]
-    box_rgb = (box_color.red, box_color.green, box_color.blue)
-    for bbox in merged:
-        rect = _to_mupdf_rect(bbox, page_height)
-        annot = page.add_rect_annot(rect)
-        annot.set_colors(stroke=box_rgb)
-        annot.set_border(width=1.4)
-        annot.update()
-        annots.append(annot)
-
-    # AC5: a fake/unknown-mode run's page images must carry the SAME
-    # disclosure the header/footer already state (BUG-049/BUG-113) --
-    # baked into the raster itself (not just an adjacent caption) so it
-    # can't be separated from the image across a page break. Reuses
-    # export.py's own single-sourced wording/tone, never a re-derived copy
-    # -- including the BACKGROUND fill, not only the text color
-    # (UX review-class finding, 2026-08-25: the fill used to be a
-    # hand-typed constant that ignored `tone`, so 'unknown' (caution) read
-    # visually as 'fake' (danger) on the page itself).
-    if llm_disclosure is not None:
-        text, tone = llm_disclosure
-        fg = _TONE_COLORS[tone][1]
-        bg = _TONE_COLORS[tone][0]
-        fg_rgb = (fg.red, fg.green, fg.blue)
-        bg_rgb = (bg.red, bg.green, bg.blue)
-        # `page_images.py` embeds this raster at up to `export_page_image_max_height`
-        # points tall regardless of the source page's own (often much
-        # taller) native height -- a fixed native fontsize would shrink
-        # proportionally on a tall page and become illegible at the
-        # embedded size (design review finding, 2026-08-25: measured ~4.8pt
-        # effective on a real Letter-height page). Scaling the native
-        # fontsize by how much this page will later be shrunk keeps the
-        # EMBEDDED size at roughly `export_page_disclosure_font_pt`
-        # regardless of source page height.
-        shrink = min(1.0, settings.export_page_image_max_height / page_height)
-        native_fontsize = settings.export_page_disclosure_font_pt / shrink
-        _draw_disclosure_band(page, text, native_fontsize, fg_rgb, bg_rgb)
-
-    try:
-        pix = page.get_pixmap(dpi=settings.export_page_image_dpi, annots=True)
-        return pix.tobytes("png")
-    finally:
-        for annot in annots:
-            page.delete_annot(annot)
+    raster_rect = (
+        page.rect
+        * pymupdf.Matrix(settings.export_page_image_dpi / 72, settings.export_page_image_dpi / 72)
+    ).irect
+    check_pixel_budget(raster_rect.width, raster_rect.height, settings)
+    source = page.get_pixmap(
+        dpi=settings.export_page_image_dpi, colorspace=pymupdf.csRGB, alpha=False, annots=True
+    )
+    check_pixel_budget(source.width, source.height, settings)
+    if boxes:
+        merged = _merge_line_boxes(boxes, settings.export_box_line_merge_tolerance)
+        box_color = _TONE_COLORS["danger"][1]
+        color = tuple(round(c * 255) for c in (box_color.red, box_color.green, box_color.blue))
+        dpi_scale = settings.export_page_image_dpi / 72
+        stroke = ceil(disclosure_layout()["highlight_stroke_pt"] * dpi_scale)
+        transform = page.rotation_matrix * pymupdf.Matrix(dpi_scale, dpi_scale)
+        for bbox in merged:
+            # Recovered coordinates are unrotated. Map into the same visible
+            # viewport as get_pixmap, then clip each border through set_rect.
+            rect = _to_mupdf_rect(bbox, page.rect.height) * transform
+            border = (rect + (-stroke / 2, -stroke / 2, stroke / 2, stroke / 2)).irect
+            for edge in (
+                (border.x0, border.y0, border.x1, border.y0 + stroke),
+                (border.x0, border.y1 - stroke, border.x1, border.y1),
+                (border.x0, border.y0, border.x0 + stroke, border.y1),
+                (border.x1 - stroke, border.y0, border.x1, border.y1),
+            ):
+                source.set_rect(edge, color)
+    if llm_disclosure is None:
+        return source.tobytes("png")
+    text, tone = llm_disclosure
+    fg, bg = _TONE_COLORS[tone][1], _TONE_COLORS[tone][0]
+    return append_disclosure(
+        source,
+        text,
+        (fg.red, fg.green, fg.blue),
+        (bg.red, bg.green, bg.blue),
+        content_width=A4[0] - 2 * _PRINT_LAYOUT["side_margin"],
+        settings=settings,
+    )
 
 
 _REUSE_OTHER_SIDE_NOTE = (
@@ -331,16 +272,23 @@ def build_page_evidence_images(
             differing_locations.add(rendered.page)
 
     # Pass 3: render each distinct page once, capped by real page count.
-    page_cache: dict[int, bytes] = {}
+    page_cache: dict[int, bytes | None] = {}
+    unavailable_pages: dict[int, str] = {}
     for page_no, boxes in boxes_by_page.items():
         if len(page_cache) >= settings.export_max_page_images:
             continue
-        page_cache[page_no] = _render_page_png(
-            doc[page_no - 1],
-            () if page_no in differing_locations else boxes,
-            llm_disclosure=disclosure,
-            settings=settings,
-        )
+        # An attempted distinct page consumes its budget even if no safe image
+        # can be produced. Later findings reuse that same explicit reason.
+        page_cache[page_no] = None
+        try:
+            page_cache[page_no] = _render_page_png(
+                doc[page_no - 1],
+                () if page_no in differing_locations else boxes,
+                llm_disclosure=disclosure,
+                settings=settings,
+            )
+        except PageImageUnavailable as exc:
+            unavailable_pages[page_no] = str(exc)
 
     # Pass 4: assemble each flag's own result from the shared page cache.
     results: dict[int, PageEvidenceImageOut] = {}
@@ -357,7 +305,8 @@ def build_page_evidence_images(
             results[flag.id] = PageEvidenceImageOut(
                 image_png=None,
                 page=rendered.page,
-                reason=(
+                reason=unavailable_pages.get(rendered.page)
+                or (
                     "Page image skipped: this export's rendered-page limit "
                     f"({settings.export_max_page_images}) was reached."
                 ),
