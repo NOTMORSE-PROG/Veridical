@@ -355,6 +355,119 @@ describe("CheckProgressPage", () => {
     expect(region).toBeEmptyDOMElement();
   });
 
+  it.each(["semantic", "cancelled"])("continues at the persistent heading after cancellation acknowledges %s", async (status) => {
+    vi.stubGlobal("fetch", vi.fn(async (_input, init) => Response.json(init?.method === "POST"
+      ? { ...RUNNING, status, cancel_requested_at: "2026-01-01T00:05:00Z" }
+      : RUNNING)));
+    renderWithProviders(<CheckProgressPage />, { route: "/checks/5", path: "/checks/:checkRunId" });
+    const trigger = await screen.findByRole("button", { name: "Cancel check" });
+    trigger.focus(); fireEvent.click(trigger);
+    const confirm = within(screen.getByRole("dialog")).getByRole("button", { name: "Cancel check" });
+    confirm.focus(); fireEvent.click(confirm);
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    expect(screen.getByRole("heading", { name: "Check progress", level: 1 })).toHaveFocus();
+    if (status === "semantic") expect(trigger).toBeDisabled();
+    else expect(trigger).not.toBeInTheDocument();
+  });
+
+  it.each(["Escape", "Close"])("pending %s dismissal has one continuation and respects focus after late acknowledgment", async (dismiss) => {
+    let finish!: (response: Response) => void;
+    const pending = new Promise<Response>((resolve) => { finish = resolve; });
+    vi.stubGlobal("fetch", vi.fn(async (_input, init) => init?.method === "POST" ? pending : Response.json(RUNNING)));
+    renderWithProviders(<CheckProgressPage />, { route: "/checks/5", path: "/checks/:checkRunId" });
+    const trigger = await screen.findByRole("button", { name: "Cancel check" });
+    trigger.focus(); fireEvent.click(trigger);
+    const dialog = screen.getByRole("dialog");
+    const confirm = within(dialog).getByRole("button", { name: "Cancel check" });
+    confirm.focus(); fireEvent.click(confirm);
+    await waitFor(() => expect(within(dialog).getByRole("button", { name: "Keep checking" })).toBeDisabled());
+    if (dismiss === "Escape") fireEvent.keyDown(document, { key: "Escape" });
+    else fireEvent.click(within(dialog).getByRole("button", { name: "Close" }));
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Check progress", level: 1 })).toHaveFocus();
+    const back = screen.getByRole("link", { name: "Back to Review Desk" });
+    back.focus();
+    await act(async () => finish(Response.json({ ...RUNNING, status: "cancelled", cancel_requested_at: "2026-01-01T00:05:00Z" })));
+    await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Check cancelled"));
+    expect(back).toHaveFocus();
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+
+  it.each(["Keep checking", "Close", "Escape"])("restores the enabled trigger for pre-submit %s", async (dismiss) => {
+    vi.stubGlobal("fetch", stubFetchByPath({ "/check-runs/5": RUNNING }));
+    renderWithProviders(<CheckProgressPage />, { route: "/checks/5", path: "/checks/:checkRunId" });
+    const trigger = await screen.findByRole("button", { name: "Cancel check" });
+    trigger.focus(); fireEvent.click(trigger);
+    if (dismiss === "Escape") fireEvent.keyDown(document, { key: "Escape" });
+    else fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: dismiss }));
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(trigger).toHaveFocus();
+  });
+
+  it("hands focus to the enabled Close button before submitting and keeps it through failure", async () => {
+    let finish!: (response: Response) => void;
+    const pending = new Promise<Response>((resolve) => { finish = resolve; });
+    let focusAtPost: Element | null = null;
+    vi.stubGlobal("fetch", vi.fn(async (_input, init) => {
+      if (init?.method === "POST") { focusAtPost = document.activeElement; return pending; }
+      return Response.json(RUNNING);
+    }));
+    renderWithProviders(<CheckProgressPage />, { route: "/checks/5", path: "/checks/:checkRunId" });
+    const trigger = await screen.findByRole("button", { name: "Cancel check" });
+    trigger.focus(); fireEvent.click(trigger);
+    const dialog = screen.getByRole("dialog");
+    const close = within(dialog).getByRole("button", { name: "Close" });
+    const confirm = within(dialog).getByRole("button", { name: "Cancel check" });
+    confirm.focus(); fireEvent.click(confirm);
+    await waitFor(() => expect(confirm).toBeDisabled());
+    expect(focusAtPost).toBe(close);
+    expect(close).toHaveFocus();
+    await act(async () => finish(Response.json({ error: { code: "api_down", message: "Control service unavailable" } }, { status: 503 })));
+    await within(dialog).findByRole("alert");
+    expect(close).toHaveFocus();
+    expect(confirm).toBeEnabled();
+  });
+
+  it("does not take an existing outside focus destination when a stale confirmation submits", async () => {
+    let finish!: (response: Response) => void;
+    const pending = new Promise<Response>((resolve) => { finish = resolve; });
+    vi.stubGlobal("fetch", vi.fn(async (_input, init) => init?.method === "POST" ? pending : Response.json(RUNNING)));
+    renderWithProviders(<CheckProgressPage />, { route: "/checks/5", path: "/checks/:checkRunId" });
+    const trigger = await screen.findByRole("button", { name: "Cancel check" });
+    trigger.focus(); fireEvent.click(trigger);
+    const dialog = screen.getByRole("dialog");
+    const confirm = within(dialog).getByRole("button", { name: "Cancel check" });
+    const outside = document.createElement("button");
+    document.body.append(outside);
+    try {
+      outside.focus(); fireEvent.click(confirm);
+      await waitFor(() => expect(confirm).toBeDisabled());
+      expect(outside).toHaveFocus();
+      await act(async () => finish(Response.json({ error: { code: "api_down", message: "Control service unavailable" } }, { status: 503 })));
+      await within(dialog).findByRole("alert");
+      expect(outside).toHaveFocus();
+    } finally { outside.remove(); }
+  });
+
+  it("keeps a failed cancellation open and restores its enabled trigger after dismissal", async () => {
+    vi.stubGlobal("fetch", vi.fn(async (_input, init) => init?.method === "POST"
+      ? Response.json({ error: { code: "api_down", message: "Control service unavailable" } }, { status: 503 })
+      : Response.json(RUNNING)));
+    renderWithProviders(<CheckProgressPage />, { route: "/checks/5", path: "/checks/:checkRunId" });
+    const trigger = await screen.findByRole("button", { name: "Cancel check" });
+    trigger.focus(); fireEvent.click(trigger);
+    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Cancel check" }));
+    await within(screen.getByRole("dialog")).findByRole("alert");
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+    expect(screen.getAllByRole("alert")).toHaveLength(1);
+    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Keep checking" }));
+    expect(trigger).toHaveFocus();
+    expect(screen.getAllByRole("alert")).toHaveLength(1);
+    fireEvent.click(trigger);
+    expect(within(screen.getByRole("dialog")).getByRole("alert")).toHaveTextContent("Could not cancel this check");
+    expect(screen.getAllByRole("alert")).toHaveLength(1);
+  });
+
   it("stops auto-polling once a fetch settles into a persisting error, instead of retrying forever (regression: previously stuck on 'Loading' indefinitely, hammering the backend)", async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     const fetchMock = vi.fn(async () => new Response("Not Found", { status: 404 }));

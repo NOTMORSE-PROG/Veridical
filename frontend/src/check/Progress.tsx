@@ -130,11 +130,16 @@ export function CheckProgressPage() {
   const cancel = useCancelCheckRun(id);
   const [showCancel, setShowCancel] = useState(false);
   const headingRef = useRef<HTMLHeadingElement>(null);
+  const cancelCloseRef = useRef<HTMLButtonElement>(null);
+  const cancellationReturnRun = useRef<number | null>(null);
   useRouteFocus("Check progress - VERIDICAL", headingRef);
 
   const summary = run ? progressSummary(run) : undefined;
   const nextAnnouncement = run && summary && !isPending && !isError ? `Check #${run.id}. ${summary.announcement}` : "";
   const [announcement, setAnnouncement] = useState("");
+  const cancellationError = cancel.error
+    ? <Alert title="Could not cancel this check" tone="error" role="alert">{cancel.error instanceof Error ? cancel.error.message : "Try again."}</Alert>
+    : null;
   useEffect(() => {
     setAnnouncement(nextAnnouncement);
   }, [nextAnnouncement]);
@@ -189,22 +194,41 @@ export function CheckProgressPage() {
 
           {run.status === "cancelled" && <Alert title="Check cancelled" tone="info">No new readiness report was produced. The partial run remains in Audit for traceability.</Alert>}
 
-          {cancel.error && <Alert title="Could not cancel this check" tone="error" role="alert">{cancel.error instanceof Error ? cancel.error.message : "Try again."}</Alert>}
+          {!showCancel && cancellationError}
 
           {run.status === "done" && <section className="signal-check-complete" aria-labelledby="check-complete-heading"><div><p className="signal-section-kicker">Next: Review</p><h2 id="check-complete-heading">Your manuscript review is ready</h2><p>Read the manuscript beside VERIDICAL's recorded criteria and integrity signals before you make a final decision.</p></div><ActionLink to={`/report/${run.id}/document`} variant="brand">Open manuscript review</ActionLink></section>}
 
           <div className="signal-check-actions">
             <ReviewDeskReturnLink fallback="/dashboard?queue=checking" variant="quiet">Back to Review Desk</ReviewDeskReturnLink>
-            {ACTIVE_STATUSES.has(run.status) && <Button variant="danger" disabled={Boolean(run.cancel_requested_at)} onClick={() => setShowCancel(true)}>{run.cancel_requested_at ? "Cancellation requested" : "Cancel check"}</Button>}
+            {ACTIVE_STATUSES.has(run.status) && <Button variant="danger" disabled={Boolean(run.cancel_requested_at)} onClick={() => {
+              if (!cancel.isPending || cancellationReturnRun.current !== id) cancellationReturnRun.current = null;
+              setShowCancel(true);
+            }}>{run.cancel_requested_at ? "Cancellation requested" : "Cancel check"}</Button>}
           </div>
 
           {showCancel && (
             <Dialog
               title="Cancel this check?"
               onClose={() => setShowCancel(false)}
-              actions={<><Button variant="secondary" disabled={cancel.isPending} onClick={() => setShowCancel(false)}>Keep checking</Button><Button variant="danger" busy={cancel.isPending} onClick={() => cancel.mutate(undefined, { onSuccess: () => setShowCancel(false) })}>Cancel check</Button></>}
+              returnFocusTarget={() => cancellationReturnRun.current === id ? headingRef.current : null}
+              fallbackFocusRef={headingRef}
+              closeButtonRef={cancelCloseRef}
+              actions={<><Button variant="secondary" disabled={cancel.isPending} onClick={() => setShowCancel(false)}>Keep checking</Button><Button variant="danger" busy={cancel.isPending} onClick={(event) => {
+                cancellationReturnRun.current = id;
+                // The submitting action becomes natively disabled while busy.
+                // Hand focus to a persistent dialog control before that commit.
+                const dialog = event.currentTarget.closest("[role='dialog']");
+                const close = cancelCloseRef.current;
+                if (document.hasFocus() && dialog?.contains(document.activeElement)
+                  && close?.isConnected && !close.disabled) close.focus();
+                cancel.mutate(undefined, {
+                  onSuccess: () => { if (cancellationReturnRun.current === id) setShowCancel(false); },
+                  onError: () => { if (cancellationReturnRun.current === id) cancellationReturnRun.current = null; },
+                });
+              }}>Cancel check</Button></>}
             >
               <div className="signal-dialog-copy"><p>VERIDICAL will stop after the current safe step. It will not create a readiness report.</p><p>Intermediate results and the audit trail are kept; no manuscript file is deleted.</p></div>
+              {cancellationError}
             </Dialog>
           )}
         </>
