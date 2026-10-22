@@ -33,7 +33,7 @@ describe("criterion record count", () => {
       weight_importance: "med", outcome: "escalated", score: null, basis: "llm", anchor: null,
       reasoning: " \n\t ", reason: "No winning grade", evidence: [], resolved: false };
     renderWithProviders(<SignalCriteriaResults results={[row]} checkRunId={5} publicView={publicView} />);
-    fireEvent.click(screen.getByText("Review evidence and reasoning"));
+    fireEvent.click(document.getElementById("signal-criterion-evidence-5-1")!);
     expect(screen.getByText("No AI explanation is available for this review item.")).toBeVisible();
     expect(screen.getByText("No located excerpt is available for this review item.")).toBeVisible();
     expect(screen.getByText("No winning grade")).toBeVisible();
@@ -168,8 +168,9 @@ describe("SignalEscalatedPanel / SignalResolutionCard", () => {
   it.each([false, true])("qualifies unresolved public AI basis while excluding resolved=%s", (resolved) => {
     const row: ResultRowCommon = { criterion_id: 1, text: "Custom criterion", type: "semantic", kind: "semantic", weight: 1, weight_importance: "med", outcome: "escalated", score: null, basis: "llm", anchor: null, reasoning: "Saved basis", reason: null, evidence: [{ quote: "Saved quotation", anchor: "paragraph 57" }], resolved };
     renderWithProviders(<SignalCriteriaResults results={[row]} checkRunId={5} publicView />);
-    fireEvent.click(screen.getByText("Review evidence and reasoning"));
-    expect(screen.queryByText("A recorded location does not establish support for a grade.") !== null).toBe(!resolved);
+    fireEvent.click(document.getElementById("signal-criterion-evidence-5-1")!);
+    expect(screen.getByText("A recorded location does not establish support for a grade.")).toBeVisible();
+    expect(screen.queryByText("No grade accepted") !== null).toBe(!resolved);
     expect(screen.queryByRole("link", { name: /Open in manuscript/ })).not.toBeInTheDocument();
     expect(screen.getByText("Extracted paragraph 58")).toBeVisible();
   });
@@ -177,7 +178,7 @@ describe("SignalEscalatedPanel / SignalResolutionCard", () => {
   it.each([null, "rule", "local"])("does not give basis=%s an AI support qualification", (basis) => {
     const row = { criterion_id: 1, text: "Criterion", type: "semantic", kind: "semantic", weight: 1, weight_importance: "med", outcome: "escalated", score: null, basis, anchor: null, reasoning: null, reason: null, evidence: [] } as ResultRowCommon;
     renderWithProviders(<SignalCriteriaResults results={[row]} checkRunId={5} publicView />);
-    fireEvent.click(screen.getByText("Review evidence and reasoning"));
+    fireEvent.click(document.getElementById("signal-criterion-evidence-5-1")!);
     expect(screen.queryByText("A recorded location does not establish support for a grade.")).not.toBeInTheDocument();
   });
 

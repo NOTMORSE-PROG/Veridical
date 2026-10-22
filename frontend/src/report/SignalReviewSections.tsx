@@ -1,3 +1,4 @@
+import { criterionAssessmentDetails } from "../domain/criterionAssessment";
 import { recoverableReadError } from "./reportReadState";
 import { reviewDeskDestination } from "../routing/reviewDeskReturn";
 import { useContext, useEffect, useMemo, useRef, useState } from "react";
@@ -841,7 +842,8 @@ export function SignalCriteriaResults({ results, checkRunId, publicView = false,
           : display.tone === "caution" ? { label: "Partly meets criterion", tone: "warning" }
           : OUTCOME_COPY[row.outcome];
         const evidenceSummaryId = `signal-criterion-evidence-${checkRunId}-${row.criterion_id}`;
-        const unresolvedAi = row.kind === "semantic" && row.basis === "llm" && !row.resolution && row.resolved !== true && row.outcome === "escalated";
+        const assessment = criterionAssessmentDetails(row, publicView);
+        const unresolvedAi = assessment.source === "ai" && !assessment.instructorRecorded && row.outcome === "escalated";
         const excerptAnchors = new Set(row.evidence.map((item) => item.anchor).filter((anchor) => anchor?.trim()));
         const seenAnchors = new Set<string>();
         const sourceAction = (anchor: string) => {
@@ -880,8 +882,12 @@ export function SignalCriteriaResults({ results, checkRunId, publicView = false,
                 links/buttons list can't tell them apart without a per-criterion
                 accessible name, same fix already applied to the flag "Review
                 evidence" links and the escalation resolve-button groups. */}
-              <details><summary id={evidenceSummaryId} aria-label={`Review evidence and reasoning: ${row.text}`}>Review evidence and reasoning</summary><div className="signal-result-card__evidence">
+              <details><summary id={evidenceSummaryId} aria-label={`${assessment.summary}: ${row.text}`}>{assessment.summary}</summary><div className="signal-result-card__evidence">
+                {assessment.relationship && <p>{assessment.relationship}</p>}
                 {unresolvedAi && <><p><strong>No grade accepted</strong></p><p>{RECORDED_GRADE_BASIS.review}</p><p>{RECORDED_GRADE_BASIS.qualification}</p></>}
+                {!assessment.hasDetails ? <p>No assessment details are available in this record.</p> : <>
+                {row.evidence.length > 0 && <h4>Recorded manuscript excerpts</h4>}
+                {!unresolvedAi && assessment.hasLocations && <p>{RECORDED_GRADE_BASIS.qualification}</p>}
                 {row.evidence.length ? row.evidence.map((item, evidenceIndex) => {
                   const hasAnchor = Boolean(item.anchor?.trim());
                   const showAction = hasAnchor && !seenAnchors.has(item.anchor);
@@ -891,10 +897,11 @@ export function SignalCriteriaResults({ results, checkRunId, publicView = false,
                     {!hasAnchor && <p>No manuscript location was recorded for this excerpt.</p>}
                     {!publicView && showAction && sourceAction(item.anchor)}
                   </div>;
-                }) : <p>{unresolvedAi ? RECORDED_GRADE_BASIS.missingExcerpt : "No verified excerpt was recorded for this criterion."}</p>}
+                }) : <p>{unresolvedAi ? RECORDED_GRADE_BASIS.missingExcerpt : "No excerpt is available in this assessment record."}</p>}
                 {!publicView && row.anchor?.trim() && !excerptAnchors.has(row.anchor) && <div className="signal-attached-flow"><p>Recorded criterion location: {row.anchor}</p>{sourceAction(row.anchor)}</div>}
-                {row.reasoning?.trim() ? <p><strong>{unresolvedAi ? "Recorded AI explanation:" : "Recorded reasoning:"}</strong> {row.reasoning}</p> : unresolvedAi && <p>{RECORDED_GRADE_BASIS.missingExplanation}</p>}
-                {row.reason && <p><strong>System note:</strong> {row.reason}</p>}
+                {row.reasoning?.trim() ? <p><strong>{assessment.explanationLabel}</strong> {row.reasoning}</p> : <p>{unresolvedAi ? RECORDED_GRADE_BASIS.missingExplanation : assessment.missingExplanation}</p>}
+                {row.reason?.trim() && <p><strong>Recorded system note:</strong> {row.reason}</p>}
+                </>}
               </div></details></li>;
       })}</ol> : updating ? <p>Recorded results are updating.</p> : <div className="signal-desk-empty"><h3>No criterion records in this section</h3><p>No criterion records are shown here. Review the other report sections for unresolved criteria and assessment limits.</p></div>}
     </section>
