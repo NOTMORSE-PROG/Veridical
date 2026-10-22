@@ -1,0 +1,96 @@
+import { act, fireEvent, screen, waitFor } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import type { FlagOut, FlagSummaryOut } from "../api/types";
+import { renderWithReviewProviders, stubFetchByPath } from "../test/renderWithProviders";
+import { SignalDocumentViewerPage } from "./SignalDocumentViewer";
+
+vi.mock("./PdfPane", () => ({ PdfPane: () => <div>PDF source</div> }));
+vi.mock("./ReuseExplorePanel", () => ({ ReuseExplorePanel: () => null }));
+const RECORDS: FlagSummaryOut[] = Array.from({ length: 31 }, (_, i) => ({ id: i + 39,
+  check_kind: "originality_reuse", affects_readiness: false, severity: "high", criterion_text: null,
+  evidence_excerpt: "Same saved excerpt", page_anchor: "page 2", overridden: i === 2,
+  is_passage_level: true, first_upload_context: false, confirmed_citation_source: false,
+  problem_kind: "reuse_high_similarity_passage", matched_ref: 13,
+}));
+const REPORT = { check_run_id: 5, manuscript_id: 10, manuscript_group_label: "Local comparison control",
+  manuscript_original_filename: "source.pdf", rubric_title: "Custom format", status: "needs_review",
+  composite_score: null, thresholds: {}, reason: null, flag_deduction: 0, unresolved_high_flag_count: 0,
+  decision: null, decided_at: null, decision_note: null, pending_review_count: 5, rubric_is_current: true,
+  llm_mode: "real", rubric_needs_review: false, rubric_parse_issues: null, previous_status: null,
+  previous_composite_score: null, integrity_check_status: [], results: [] };
+function setup(query = "", delay = false) {
+  vi.spyOn(document, "hasFocus").mockReturnValue(true);
+  let release!: (response: Response) => void;
+  const held = new Promise<Response>((resolve) => { release = resolve; });
+  const fallback = stubFetchByPath({
+    "/check-runs/5/document": { manuscript_id: 10, source_format: "pdf", available: true, original_filename: "source.pdf", page_count: 4, regions: [] },
+    "/check-runs/5/report": REPORT, "/check-runs/5/flags": [...RECORDS].reverse(), "/check-runs/5/escalated": [],
+    "/check-runs/5/document/reuse-matches": { matches: [], passage_archive_size_n: 0 },
+  });
+  const fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const path = new URL(String(input), "http://localhost").pathname;
+    const match = path.match(/^\/flags\/(\d+)$/);
+    if (match) {
+      if (delay) return await held;
+      return response(Number(match[1]));
+    }
+    return fallback(input, init);
+  });
+  vi.stubGlobal("fetch", fetch);
+  renderWithReviewProviders(<><button>Outside control</button><SignalDocumentViewerPage /></>, { route: `/report/5/document?pane=review${query}`, path: "/report/:checkRunId/document" });
+  return { fetch, release };
+}
+function response(id: number) {
+  const flag = { ...RECORDS.find((record) => record.id === id), id, check_result_id: 9, check_run_id: 5,
+    manuscript_group_label: "Local comparison control", confidence: null, annotation: id === 41 ? "Retained annotation" : null,
+    override_reason: null, ai_verdict_summary: "reuse_high_similarity_passage", ai_reasoning: "Actual stored reasoning",
+    llm_mode: "real", passage_pair: null, evidence_unavailable: false } as FlagOut;
+  return new Response(JSON.stringify(flag), { status: 200 });
+}
+afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
+describe("optional comparison workspace navigation", () => {
+  it("keeps five required judgments before 31 optional records without a combined task count", async () => {
+    setup();
+    const criteria = await screen.findByRole("heading", { name: "5 criteria need your judgment" });
+    const leads = screen.getByRole("heading", { name: "Optional comparison leads" });
+    expect(criteria.compareDocumentPosition(leads) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(screen.getByText("31 recorded comparison leads")).toBeVisible();
+    const tab = screen.getByRole("tab", { name: /Review\. 5 criteria awaiting judgment\. 31 optional comparison leads/ });
+    expect(tab).toHaveTextContent(/^Review$/); expect(tab).not.toHaveAccessibleName(/36|tasks/);
+    fireEvent.click(screen.getByRole("button", { name: "Review evidence for Comparison lead 3 of 31. Record #41." }));
+    await screen.findByText("Actual stored reasoning");
+    fireEvent.click(screen.getByText("Recorded reasoning and technical details"));
+    expect(await screen.findByText("Actual stored reasoning")).toBeVisible();
+    expect(screen.getByRole("link", { name: "Review instructor actions for this location" })).toHaveAttribute("href", "/flags/41");
+    expect(screen.queryByText("Finding 1 of 31")).not.toBeInTheDocument();
+  });
+  it("retains an exact selected record outside its filter rather than selecting an arbitrary neighbor", async () => {
+    setup("&view=finding&finding=41&lead_view=open");
+    expect(await screen.findByText("This comparison lead is outside the current filter.")).toBeVisible();
+    expect(screen.getByText("Comparison lead 3 of 31. Record #41.")).toBeVisible();
+    for (const name of ["Previous comparison lead", "Next comparison lead"]) expect(screen.getByRole("button", { name })).toHaveAttribute("aria-disabled", "true");
+    expect(screen.queryByText(/Item 0/)).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Show all comparison leads" }));
+    const next = screen.getByRole("button", { name: "Next comparison lead" }); next.focus(); fireEvent.click(next);
+    await waitFor(() => expect(screen.getByText("Comparison lead 4 of 31. Record #42.")).toBeVisible());
+    expect(screen.getByRole("heading", { name: "High passage similarity" })).toHaveFocus();
+  });
+  it("returns a record beyond the first batch to its exact row with stable ordinal", async () => {
+    setup("&view=finding&finding=69");
+    await screen.findByText("Actual stored reasoning");
+    const back = screen.getByRole("button", { name: "Back to review queue" }); back.focus(); fireEvent.click(back);
+    const row = await screen.findByRole("button", { name: "Review evidence for Comparison lead 31 of 31. Record #69." });
+    expect(row).toHaveFocus();
+    expect(screen.getAllByRole("button", { name: /Review evidence for Comparison lead/ })).toHaveLength(31);
+  });
+  it("keeps the detail heading connected through delay/failure without stealing later focus", async () => {
+    const { release } = setup("&view=finding&finding=41", true);
+    const heading = await screen.findByRole("heading", { name: "High passage similarity" });
+    expect(await screen.findByText("Loading comparison lead record.")).toBeVisible();
+    const outside = screen.getByRole("button", { name: "Outside control" }); outside.focus();
+    await act(async () => { release(new Response(JSON.stringify({ error: { code: "internal", message: "Controlled failure" } }), { status: 503 })); });
+    expect(await screen.findByRole("alert")).toHaveTextContent("Comparison lead details could not be loaded");
+    expect(screen.getByRole("heading", { name: "High passage similarity" })).toBe(heading);
+    expect(outside).toHaveFocus();
+  });
+});

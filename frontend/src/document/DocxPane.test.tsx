@@ -1,7 +1,9 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { api } from "../api/client";
 import { DocxPane } from "./DocxPane";
+import type { FlagSummaryOut } from "../api/types";
+import { comparisonLeadSnapshot } from "../domain/comparisonLeadIdentity";
 
 const props = {
   paragraphs: [{ paragraph: 0, text: "Source heading", heading_level: 1 }, { paragraph: 2, text: "Source paragraph", heading_level: null }],
@@ -10,6 +12,70 @@ const props = {
 };
 
 describe("recorded DOCX source navigation", () => {
+  afterEach(() => vi.restoreAllMocks());
+  const leads: FlagSummaryOut[] = Array.from({ length: 31 }, (_, index) => ({
+    id: index + 39, check_kind: "originality_reuse", affects_readiness: false,
+    severity: "high", criterion_text: null, evidence_excerpt: "Saved passage",
+    page_anchor: "paragraph 3", overridden: false, is_passage_level: true,
+    first_upload_context: false, confirmed_citation_source: false, problem_kind: "reuse_high_similarity",
+  }));
+  const region = (id: number) => ({ flag_id: id, kind: "paragraph_only" as const, paragraph: 2,
+    page: null, end_page: null, bbox: null, all_bboxes: [], index: null });
+
+  it("keeps complete-collection identities on co-located source controls and selects the actual record", () => {
+    const onSelectFlag = vi.fn();
+    render(<DocxPane {...props} flags={[leads[30], leads[2]]} regions={[region(69), region(41)]}
+      comparisonLeads={comparisonLeadSnapshot(21, leads)} onSelectFlag={onSelectFlag} />);
+    const control = screen.getByRole("button", { name: /Comparison lead 3 of 31\. Record #41:.*Comparison lead: not scored/ });
+    expect(control).toHaveTextContent("L3");
+    expect(screen.getByRole("button", { name: /Comparison lead 31 of 31\. Record #69:/ })).toHaveTextContent("L31");
+    expect(control).not.toHaveAccessibleName(/High severity/);
+    fireEvent.click(control);
+    expect(onSelectFlag).toHaveBeenCalledWith(41);
+  });
+
+  it("uses the exact record ID without inventing an ordinal when collection context is absent", () => {
+    render(<DocxPane {...props} flags={[leads[2]]} regions={[region(41)]} />);
+    const control = screen.getByRole("button", { name: /Record #41:.*Comparison lead: not scored/ });
+    expect(control).toHaveTextContent("Record #41");
+    expect(control.querySelector(".signal-document-marker--comparison")).toBeInTheDocument();
+    expect(screen.queryByText("L1")).not.toBeInTheDocument();
+  });
+
+  it("highlights a review selection without moving focus into the source", () => {
+    vi.spyOn(document, "hasFocus").mockReturnValue(true);
+    const { rerender } = render(<><button>Review action</button><DocxPane {...props}
+      flags={[leads[2]]} regions={[region(41)]} isVisible={false} /></>);
+    screen.getByRole("button", { name: "Review action" }).focus();
+    rerender(<><button>Review action</button><DocxPane {...props}
+      flags={[leads[2]]} regions={[region(41)]} selectedFlagId={41} isVisible={false} /></>);
+    expect(screen.getByRole("button", { name: "Review action" })).toHaveFocus();
+  });
+
+  it.each(["focus", "wheel"])("does not place a delayed selected source after newer %s intent", (intent) => {
+    vi.spyOn(document, "hasFocus").mockReturnValue(true);
+    const content = (loaded: boolean) => <><button>Source action</button><button>Later action</button>
+      <DocxPane {...props} paragraphs={loaded ? props.paragraphs : undefined} paragraphsPending={!loaded}
+        flags={[leads[2]]} regions={[region(41)]} selectedFlagId={41} /></>;
+    const { rerender } = render(content(false));
+    if (intent === "focus") screen.getByRole("button", { name: "Later action" }).focus();
+    else window.dispatchEvent(new Event("wheel"));
+    rerender(content(true));
+    expect(screen.getByRole("button", { name: /Record #41:/ })).not.toHaveFocus();
+    if (intent === "focus") expect(screen.getByRole("button", { name: "Later action" })).toHaveFocus();
+  });
+
+  it("places an explicit source selection once and does not repeat it on source data refresh", () => {
+    vi.spyOn(document, "hasFocus").mockReturnValue(true);
+    const content = (paragraphs: typeof props.paragraphs) => <><button>Later action</button><DocxPane {...props}
+      paragraphs={paragraphs} flags={[leads[2]]} regions={[region(41)]} selectedFlagId={41} /></>;
+    const { rerender } = render(content(props.paragraphs));
+    expect(screen.getByRole("button", { name: /Record #41:/ })).toHaveFocus();
+    screen.getByRole("button", { name: "Later action" }).focus();
+    rerender(content([...props.paragraphs]));
+    expect(screen.getByRole("button", { name: "Later action" })).toHaveFocus();
+  });
+
   it.each([[0, "Source heading"], [2, "Source paragraph"]] as const)("focuses paragraph %s without inventing a finding", async (paragraph, text) => {
     render(<DocxPane {...props} requestedParagraph={paragraph} />);
     await waitFor(() => expect(screen.getByText(text)).toHaveFocus());

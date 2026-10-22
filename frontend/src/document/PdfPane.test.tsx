@@ -1,6 +1,8 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { PdfPane } from "./PdfPane";
+import type { FlagSummaryOut } from "../api/types";
+import { comparisonLeadSnapshot } from "../domain/comparisonLeadIdentity";
 
 const mocks = vi.hoisted(() => ({ getDocument: vi.fn() }));
 vi.mock("pdfjs-dist", () => ({ GlobalWorkerOptions: {}, getDocument: mocks.getDocument }));
@@ -50,6 +52,25 @@ describe("PdfPane page visibility", () => {
   afterEach(() => {
     cleanup();
     vi.unstubAllGlobals();
+  });
+
+  it("keeps optional page-scope controls tied to complete-collection identities", async () => {
+    const leads: FlagSummaryOut[] = Array.from({ length: 31 }, (_, index) => ({
+      id: index + 39, check_kind: "originality_reuse", affects_readiness: false,
+      severity: "high", criterion_text: null, evidence_excerpt: "Saved passage",
+      page_anchor: "page 1", overridden: false, is_passage_level: false,
+      first_upload_context: false, confirmed_citation_source: false, problem_kind: "reuse_high_similarity",
+    }));
+    const onSelectFlag = vi.fn();
+    render(<PdfPane {...props} fileUrl="short.pdf" flags={[leads[2]]}
+      comparisonLeads={comparisonLeadSnapshot(21, leads)} onSelectFlag={onSelectFlag}
+      regions={[{ flag_id: 41, kind: "page_only", page: 1, end_page: null, bbox: null,
+        all_bboxes: [], paragraph: null, index: null }]} />);
+    const control = await screen.findByRole("button", { name: /Comparison lead 3 of 31\. Record #41/ });
+    expect(control).toHaveTextContent("L3");
+    expect(control).not.toHaveAccessibleName(/High severity|Finding 1/);
+    fireEvent.click(control);
+    expect(onSelectFlag).toHaveBeenCalledWith(41);
   });
 
   it("does not clamp an unavailable recorded source page to the last page", async () => {

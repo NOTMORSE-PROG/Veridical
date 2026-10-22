@@ -10,11 +10,13 @@ interface PendingReturnFocus {
   destinationPath: string;
   elementId: string;
   armed: boolean;
+  fallbackElementId?: string;
 }
 
 export interface RouteReturnFocusRegistration {
   returnPath: string;
   elementId: string;
+  fallbackElementId?: string;
 }
 
 let hasNavigatedOnce = false;
@@ -31,9 +33,9 @@ export function rememberRouteReturnFocus(
   returnPath: string,
   destinationPath: string,
   elementId: string,
-  options: { armed?: boolean } = {},
+  options: { armed?: boolean; fallbackElementId?: string } = {},
 ) {
-  pendingReturnFocus = { returnPath, destinationPath, elementId, armed: options.armed ?? false };
+  pendingReturnFocus = { returnPath, destinationPath, elementId, armed: options.armed ?? false, fallbackElementId: options.fallbackElementId };
 }
 
 /** Retire only registrations owned by the named workflow's action prefix. */
@@ -95,12 +97,14 @@ function observeUserIntent(
 interface RestoredFocus {
   path: string;
   target: HTMLElement;
+  fallbackElementId?: string;
 }
 
 function observeRestoredFocus(
   target: HTMLElement,
   headingRef: RefObject<HTMLElement | null>,
   retire: () => void,
+  fallbackElementId?: string,
 ): () => void {
   const scope = headingRef.current?.closest("main") ?? target.closest("main") ?? document.body;
   let disposed = false;
@@ -108,7 +112,7 @@ function observeRestoredFocus(
   const observer = new MutationObserver(() => {
     if (disposed || target.isConnected) return;
     const active = document.activeElement;
-    const heading = headingRef.current;
+    const heading = (fallbackElementId && document.getElementById(fallbackElementId)) || headingRef.current;
     const recover = scope.isConnected && heading?.isConnected
       && (active === document.body || active === null || active === target);
     stop();
@@ -157,17 +161,17 @@ export function useRouteFocus(
     // return path." Harmless for a destination page with no meaningful
     // search (`location.search` is just "").
     const fullPath = location.pathname + location.search;
-    const watchRestoration = (target: HTMLElement) => {
-      const ownership = { path: fullPath, target };
+    const watchRestoration = (target: HTMLElement, fallbackElementId?: string) => {
+      const ownership = { path: fullPath, target, fallbackElementId };
       restoredRef.current = ownership;
       return observeRestoredFocus(target, headingRef, () => {
         if (restoredRef.current === ownership) restoredRef.current = null;
-      });
+      }, fallbackElementId);
     };
     const restored = restoredRef.current;
     if (restored?.path === fullPath && restored.target.isConnected
       && document.activeElement === restored.target) {
-      return watchRestoration(restored.target);
+      return watchRestoration(restored.target, restored.fallbackElementId);
     }
     restoredRef.current = null;
 
@@ -180,6 +184,7 @@ export function useRouteFocus(
         destinationPath: fullPath,
         elementId: returnFocus.elementId,
         armed: true,
+        fallbackElementId: returnFocus.fallbackElementId,
       };
       registeredReturnRef.current = true;
     }
@@ -202,7 +207,7 @@ export function useRouteFocus(
         // route change and move focus from the restored control to the H1.
         ranRef.current = true;
         pendingReturnFocus = null;
-        return watchRestoration(target);
+        return watchRestoration(target, pending.fallbackElementId);
       }
 
       // Async content may arrive after the route. Search is time-bounded;
@@ -230,14 +235,14 @@ export function useRouteFocus(
         restoring = false;
         if (!appeared) return;
         finishSearch();
-        disposeOwnership = watchRestoration(appeared);
+        disposeOwnership = watchRestoration(appeared, pending.fallbackElementId);
       });
       const scope = headingRef.current?.closest("main") ?? document.body;
       observer.observe(scope, { childList: true, subtree: true });
       const timeoutId = window.setTimeout(() => {
         if (settled) return;
         finishSearch();
-        headingRef.current?.focus();
+        ((pending.fallbackElementId && document.getElementById(pending.fallbackElementId)) || headingRef.current)?.focus();
       }, RETURN_FOCUS_OBSERVER_TIMEOUT_MS);
       const removeIntent = observeUserIntent(null, finishSearch, () => restoring);
       return () => {

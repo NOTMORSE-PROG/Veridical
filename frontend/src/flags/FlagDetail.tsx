@@ -15,6 +15,9 @@ import { markFlagViewed } from "../domain/flagViewed";
 import { problemLabel } from "../domain/problemLabel";
 import { instructorAnchor } from "../domain/sourceAnchor";
 import { systemFindingCopy } from "../domain/systemFindingCopy";
+import { COMPARISON_LEAD_COPY, comparisonLeadIdentity, isOptionalComparisonLead } from "../domain/comparisonLeadIdentity";
+import { comparisonLeadCollection } from "../report/comparisonLeadCollection";
+import { useCachedReportFlags } from "../report/useReport";
 import { rememberRouteReturnFocus, useRouteFocus } from "../routing/useRouteFocus";
 import { ActionLink } from "../ui/ActionLink";
 import { Alert } from "../ui/Alert";
@@ -251,7 +254,7 @@ function ResolutionControl({ flag }: { flag: FlagOut }) {
         <div><p className="signal-section-kicker">Instructor resolution</p><h2 id="resolution-heading">{flag.confirmed_citation_source ? "Source confirmed" : "Finding overridden"}</h2></div>
         <p>{flag.confirmed_citation_source ? `You confirmed the source after checking it: ${flag.override_reason}.` : `You overrode this possible inconsistency: ${flag.override_reason}.`}</p>
         {flag.confirmed_citation_source && <p>Your confirmation applies only to this exact reference in your account, not to another reference or instructor. It does not establish support for a manuscript claim.</p>}
-        <p>The original finding remains above, and the readiness band has been recalculated.</p>
+        <p>{isOptionalComparisonLead(flag) ? "The original comparison record remains above. This lead does not affect readiness." : "The original finding remains above, and the readiness band has been recalculated."}</p>
         <ActionLink to={`/report/${flag.check_run_id}`} variant="secondary">View updated report</ActionLink>
       </section>
     );
@@ -293,6 +296,10 @@ export function FlagDetailPage() {
   const id = Number(flagId);
   const validId = Number.isInteger(id) && id > 0;
   const { data: flag, isPending, isError, error, refetch } = useFlag(id);
+  const cachedFlags = useCachedReportFlags(flag?.check_run_id);
+  const leadContext = flag ? comparisonLeadCollection(flag.check_run_id, cachedFlags) : undefined;
+  const optionalComparison = Boolean(flag && isOptionalComparisonLead(flag));
+  const leadIdentity = flag && optionalComparison ? comparisonLeadIdentity(flag, leadContext?.snapshot) : undefined;
   const headingRef = useRef<HTMLHeadingElement>(null);
   const resolutionRef = useRef<HTMLDivElement>(null);
   const previousResolved = useRef<boolean | null>(null);
@@ -326,7 +333,7 @@ export function FlagDetailPage() {
       return;
     }
     if (flag.overridden && previousResolved.current === false) {
-      setAnnouncement(flag.confirmed_citation_source ? "Source confirmed. The readiness band was recalculated." : "Finding overridden. The readiness band was recalculated.");
+      setAnnouncement(isOptionalComparisonLead(flag) ? "Comparison lead resolved. This does not affect readiness." : flag.confirmed_citation_source ? "Source confirmed. The readiness band was recalculated." : "Finding overridden. The readiness band was recalculated.");
       resolutionRef.current?.focus();
     }
     previousResolved.current = flag.overridden;
@@ -341,11 +348,11 @@ export function FlagDetailPage() {
       <header className="signal-route-header signal-flag-header">
         <div>
           <nav aria-label="Breadcrumb"><ReviewDeskReturnLink>Review Desk</ReviewDeskReturnLink><span aria-hidden="true">/</span>{flag && <><Link to={returnFocus?.returnPath ?? `/report/${flag.check_run_id}`}>{flag.manuscript_group_label}</Link><span aria-hidden="true">/</span></>}<span>Evidence</span></nav>
-          <p className="signal-eyebrow">Review · Possible inconsistency</p>
+          <p className="signal-eyebrow">{optionalComparison ? "Review · Optional comparison lead" : "Review · Possible inconsistency"}</p>
           <h1 ref={headingRef} tabIndex={-1}>{meta?.title ?? "Evidence detail"}</h1>
           {flag?.criterion_text && <p className="signal-route-header__intro">Related criterion: {flag.criterion_text}</p>}
         </div>
-        {flag && <div className="signal-flag-status"><span className={`signal-severity signal-severity--${flag.severity}`}>{SEVERITY_LABEL[flag.severity]}</span>{flag.overridden && <span className="signal-resolution-state">{flag.confirmed_citation_source ? "Source confirmed" : "Overridden"}</span>}</div>}
+        {flag && <div className="signal-flag-status"><span className={`signal-severity signal-severity--${optionalComparison ? "low" : flag.severity}`}>{optionalComparison ? COMPARISON_LEAD_COPY.badge : SEVERITY_LABEL[flag.severity]}</span>{flag.overridden && <span className="signal-resolution-state">{flag.confirmed_citation_source ? "Source confirmed" : "Overridden"}</span>}</div>}
       </header>
 
       {!validId ? (
@@ -361,8 +368,9 @@ export function FlagDetailPage() {
           {flag.first_upload_context && <Alert title="Limited first-upload comparison context" tone="info">This signal was created while there were few manuscripts to compare against. The severity was not changed by that limitation.</Alert>}
 
           <section className="signal-evidence-hero" aria-labelledby="finding-heading">
-            <div className="signal-evidence-hero__meta"><span>{meta?.eyebrow ?? humanize(flag.check_kind)}</span><span>Signal #{flag.id}</span></div>
-            <h2 id="finding-heading">Recorded system finding</h2>
+            <div className="signal-evidence-hero__meta"><span>{meta?.eyebrow ?? humanize(flag.check_kind)}</span><span>{leadIdentity ? `${leadContext?.lastLoaded ? "Last loaded: " : ""}${leadIdentity.label}` : `Signal #${flag.id}`}</span></div>
+            <h2 id="finding-heading">{optionalComparison ? "Recorded comparison lead" : "Recorded system finding"}</h2>
+            {optionalComparison && <p>{COMPARISON_LEAD_COPY.intro}</p>}
             <p className="signal-ai-suggestion"><strong>{findingMethodLabel(flag)}</strong><span>{humanizedVerdict(flag)}</span></p>
             <p>{findingMethodLabel(flag) === "AI suggestion"
               ? "Repeated AI consistency is intentionally not shown as a percentage. The excerpt and source location below are the evidence to check."

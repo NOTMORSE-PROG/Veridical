@@ -9,10 +9,11 @@ import { useEffect, useRef, useState } from "react";
 import type { DocumentImageOut, DocumentParagraphOut, DocumentTableOut, FlagRegionOut, FlagSummaryOut } from "../api/types";
 import { SeverityTag, type Severity } from "../components/SeverityTag";
 import { CHECK_KIND_SHORT_LABEL } from "../domain/checkKind";
-import { severityLabel } from "../domain/severity";
 import { truncateAtWord } from "../format/text";
 import { regionPrecision } from "./regionCopy";
 import { DocxSourceMedia } from "./DocxSourceMedia";
+import { COMPARISON_LEAD_COPY, comparisonLeadIdentity, isOptionalComparisonLead, sourceRecordPresentation, type ComparisonLeadSnapshot } from "../domain/comparisonLeadIdentity";
+import { claimFocusContinuation, type FocusContinuation } from "../routing/focusContinuation";
 
 function SpinnerIcon() {
   return (
@@ -38,6 +39,7 @@ export function DocxPane({
   onSelectFlag,
   isVisible,
   findingNumbers = EMPTY_FINDING_NUMBERS,
+  comparisonLeads,
   requestedParagraph = null,
   tables = EMPTY_TABLES,
   images = EMPTY_IMAGES,
@@ -66,6 +68,7 @@ export function DocxPane({
   // visible, not just once per selection.
   isVisible: boolean;
   findingNumbers?: ReadonlyMap<number, number>;
+  comparisonLeads?: ComparisonLeadSnapshot;
   requestedParagraph?: number | null;
   tables?: DocumentTableOut[];
   images?: DocumentImageOut[];
@@ -77,6 +80,7 @@ export function DocxPane({
 }) {
   const [hoveredFlagId, setHoveredFlagId] = useState<number | null>(null);
   const highlightRefs = useRef<Map<number, HTMLButtonElement>>(new Map());
+  const pendingSelectionFocus = useRef<FocusContinuation | null>(null);
   const paperRef = useRef<HTMLElement>(null);
 
   useEffect(() => {
@@ -113,9 +117,17 @@ export function DocxPane({
   }
 
   useEffect(() => {
+    pendingSelectionFocus.current?.dispose();
+    pendingSelectionFocus.current = selectedFlagId !== null && isVisible ? claimFocusContinuation() : null;
+    return () => { pendingSelectionFocus.current?.dispose(); pendingSelectionFocus.current = null; };
+  }, [selectedFlagId, isVisible]);
+
+  useEffect(() => {
     if (selectedFlagId === null || !isVisible) return;
     const el = highlightRefs.current.get(selectedFlagId);
-    el?.focus({ preventScroll: false });
+    if (!el) return;
+    pendingSelectionFocus.current?.focus(el);
+    pendingSelectionFocus.current = null;
   }, [selectedFlagId, paragraphs, tables, images, isVisible]);
 
   useEffect(() => {
@@ -157,6 +169,7 @@ export function DocxPane({
           <span>DOCX · Reconstructed document</span>
         </div>
       </div>
+      {flags.some(isOptionalComparisonLead) && <p className="signal-field-hint">{COMPARISON_LEAD_COPY.markerLegend}</p>}
       <div className="signal-document-reconstruction-note">
         <p>
           Extracted text, native tables and available embedded images appear in source order.
@@ -169,11 +182,12 @@ export function DocxPane({
           {scopeRegions.map((region) => {
             const flag = flagsById.get(region.flag_id);
             const number = findingNumbers.get(region.flag_id) ?? 1;
+            const identity = flag ? sourceRecordPresentation(flag, number, comparisonLeads) : { label: `Finding ${number}`, marker: String(number) };
             const precision = regionPrecision(region);
             return (
               <button key={region.flag_id} type="button" aria-pressed={region.flag_id === selectedFlagId} onClick={() => onSelectFlag(region.flag_id)}>
-                <span aria-hidden="true">{number}</span>
-                <span>Finding {number} · {precision.label}{flag ? ` · ${CHECK_KIND_SHORT_LABEL[flag.check_kind] ?? flag.check_kind}` : ""}</span>
+                <span aria-hidden="true">{identity.marker}</span>
+                <span>{identity.label} · {precision.label}{flag ? ` · ${CHECK_KIND_SHORT_LABEL[flag.check_kind] ?? flag.check_kind}` : ""}</span>
               </button>
             );
           })}
@@ -254,6 +268,7 @@ export function DocxPane({
             const textClassName = HeadingTag
               ? "text-left text-md font-semibold text-ink"
               : "text-left text-sm text-ink";
+            const primaryIdentity = sourceRecordPresentation(primaryFlag, findingNumbers.get(primaryFlagId) ?? 1, comparisonLeads);
 
             // UX review finding (2026-08-22): a single button whose
             // aria-label claimed "2 findings" but whose onClick always
@@ -272,7 +287,7 @@ export function DocxPane({
                     if (el) highlightRefs.current.set(primaryFlagId, el);
                     else highlightRefs.current.delete(primaryFlagId);
                   }}
-                  aria-label={`Finding ${findingNumbers.get(primaryFlagId) ?? 1}: ${CHECK_KIND_SHORT_LABEL[primaryFlag.check_kind] ?? primaryFlag.check_kind}. ${severityLabel(primaryFlag.severity)}. Extracted paragraph ${p.paragraph + 1}. Paragraph location.${primaryFlagId === selectedFlagId ? " Selected." : ""}`}
+                  aria-label={`${primaryIdentity.label}: ${CHECK_KIND_SHORT_LABEL[primaryFlag.check_kind] ?? primaryFlag.check_kind}. ${primaryIdentity.qualification}. Extracted paragraph ${p.paragraph + 1}. Paragraph location.${primaryFlagId === selectedFlagId ? " Selected." : ""}`}
                   aria-pressed={primaryFlagId === selectedFlagId}
                   aria-describedby={popoverFlag?.id === primaryFlagId ? `docx-region-popover-${primaryFlagId}` : undefined}
                   onMouseEnter={() => setHoveredFlagId(primaryFlagId)}
@@ -282,7 +297,7 @@ export function DocxPane({
                   onClick={() => onSelectFlag(primaryFlagId)}
                   className={`signal-document-docx-location${primaryFlagId === selectedFlagId ? " is-selected" : ""} ${textClassName}`}
                 >
-                  <span className="signal-document-marker signal-document-marker--inline" aria-hidden="true">{findingNumbers.get(primaryFlagId) ?? 1}</span>
+                  <span className={`signal-document-marker signal-document-marker--inline${isOptionalComparisonLead(primaryFlag) ? " signal-document-marker--comparison" : ""}`} aria-hidden="true">{primaryIdentity.marker}</span>
                   <span>{p.text}</span>
                 </button>
               );
@@ -300,10 +315,11 @@ export function DocxPane({
             const multiFlagBlock = (
               <div className="signal-document-docx-location signal-document-docx-location--multiple">
                 <p className={textClassName}>{p.text}</p>
-                <div className="mt-1.5 flex flex-wrap gap-1" role="group" aria-label={`${paragraphFlagIds.length} findings in this paragraph`}>
+                <div className="mt-1.5 flex flex-wrap gap-1" role="group" aria-label={`${paragraphFlagIds.length} ${paragraphFlagIds.some((flagId) => { const flag = flagsById.get(flagId); return flag && isOptionalComparisonLead(flag); }) ? "recorded locations" : "findings"} in this paragraph`}>
                   {paragraphFlagIds.map((flagId, i) => {
                     const flag = flagsById.get(flagId);
                     if (!flag) return null;
+                    const identity = sourceRecordPresentation(flag, findingNumbers.get(flagId) ?? i + 1, comparisonLeads);
                     return (
                       <button
                         key={flagId}
@@ -312,7 +328,7 @@ export function DocxPane({
                           if (el) highlightRefs.current.set(flagId, el);
                           else highlightRefs.current.delete(flagId);
                         }}
-                        aria-label={`Finding ${findingNumbers.get(flagId) ?? i + 1}: ${CHECK_KIND_SHORT_LABEL[flag.check_kind] ?? flag.check_kind}. ${severityLabel(flag.severity)}. Extracted paragraph ${p.paragraph + 1}. Paragraph location.${flagId === selectedFlagId ? " Selected." : ""}`}
+                        aria-label={`${identity.label}: ${CHECK_KIND_SHORT_LABEL[flag.check_kind] ?? flag.check_kind}. ${identity.qualification}. Extracted paragraph ${p.paragraph + 1}. Paragraph location.${flagId === selectedFlagId ? " Selected." : ""}`}
                         aria-pressed={flagId === selectedFlagId}
                         aria-describedby={popoverFlag?.id === flagId ? `docx-region-popover-${flagId}` : undefined}
                         onMouseEnter={() => setHoveredFlagId(flagId)}
@@ -322,7 +338,7 @@ export function DocxPane({
                         onClick={() => onSelectFlag(flagId)}
                         className={`signal-document-co-located-marker${flagId === selectedFlagId ? " is-selected" : ""}`}
                       >
-                        {findingNumbers.get(flagId) ?? i + 1}
+                        {identity.marker}
                       </button>
                     );
                   })}
@@ -349,7 +365,7 @@ export function DocxPane({
                   ref={(el) => { if (el) highlightRefs.current.set(flagId, el); else highlightRefs.current.delete(flagId); }}
                   className={`signal-document-co-located-marker${flagId === selectedFlagId ? " is-selected" : ""}`}
                   aria-pressed={flagId === selectedFlagId} onClick={() => onSelectFlag(flagId)}>
-                  Finding {findingNumbers.get(flagId) ?? 1} · source location only
+                  {flagsById.has(flagId) ? sourceRecordPresentation(flagsById.get(flagId)!, findingNumbers.get(flagId) ?? 1, comparisonLeads).label : `Finding ${findingNumbers.get(flagId) ?? 1}`} · source location only
                 </button>)}
               </div>}
               <DocxSourceMedia tables={sourceTables} images={sourceImages} imageBasePath={imageBasePath} isVisible={isVisible} />
@@ -387,8 +403,9 @@ export function DocxPane({
                 {CHECK_KIND_SHORT_LABEL[popoverFlag.check_kind] ?? popoverFlag.check_kind}
               </p>
               <p className="mt-1 text-ink">{truncateAtWord(popoverFlag.evidence_excerpt, 140)}</p>
+              {isOptionalComparisonLead(popoverFlag) && <p>{comparisonLeadIdentity(popoverFlag, comparisonLeads).label}</p>}
               <div className="mt-1.5">
-                <SeverityTag severity={popoverFlag.severity as Severity} />
+                {isOptionalComparisonLead(popoverFlag) ? <span>{COMPARISON_LEAD_COPY.badge}</span> : <SeverityTag severity={popoverFlag.severity as Severity} />}
               </div>
             </div>
           );

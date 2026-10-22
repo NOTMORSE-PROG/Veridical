@@ -80,7 +80,7 @@ export function AdviserViewPage() {
         {report.semantic_support_unverified && <Alert title={SEMANTIC_SUPPORT_REVIEW.title} tone="warning"><p>{SEMANTIC_SUPPORT_REVIEW.body}</p><p>{SEMANTIC_SUPPORT_REVIEW.shared}</p></Alert>}
 
         {report.historical_citation_title_unverified && <Alert title={CITATION_HISTORY_TITLE} tone="warning">{CITATION_HISTORY_SHARED_LIMIT}</Alert>}
-        <SignalPublicFlags flags={flags} originalityScope={report.originality_scope} />
+        <SignalPublicFlags flags={flags} originalityScope={report.originality_scope} checkRunId={report.check_run_id} />
         <SignalCriteriaResults results={report.results} checkRunId={report.check_run_id} publicView />
 
         <section className="signal-shared-decision" aria-labelledby="shared-decision-heading"><div><p className="signal-section-kicker">Instructor authority</p><h2 id="shared-decision-heading">Final decision</h2></div>{report.decision ? <><span className={`signal-decision signal-decision--${report.decision}`}>{DECISION_LABEL[report.decision]}</span><p>Recorded by the instructor. VERIDICAL did not make this decision.</p>{report.decision_note && <blockquote><strong>Decision note</strong><span>{report.decision_note}</span></blockquote>}</> : <Alert title="No final instructor decision has been recorded" tone="info">The readiness band above is an aid for review, not an approval or block.</Alert>}</section>

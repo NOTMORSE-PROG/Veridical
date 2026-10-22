@@ -1,4 +1,5 @@
 import type { FlagSummaryOut } from "../api/types";
+import { isOptionalComparisonLead } from "../domain/comparisonLeadIdentity";
 
 export interface FlagFindingCluster {
   key: string;
@@ -6,6 +7,7 @@ export interface FlagFindingCluster {
 }
 
 function findingIdentity(flag: FlagSummaryOut): string {
+  if (isOptionalComparisonLead(flag)) return `comparison-record:${flag.id}`;
   if (!flag.problem_kind) return `flag:${flag.id}`;
 
   if (flag.check_kind === "originality_reuse") {

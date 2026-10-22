@@ -138,6 +138,25 @@ function NestedCriterionPage() {
 describe("route focus and announcement", () => {
   afterEach(() => vi.restoreAllMocks());
 
+  it("returns to a persistent collection heading when its exact record control disappeared", async () => {
+    function Collection() {
+      const headingRef = useRef<HTMLHeadingElement>(null);
+      useRouteFocus("Report", headingRef);
+      return <main><h1 ref={headingRef} tabIndex={-1}>Report</h1><h2 id="lead-list" tabIndex={-1}>Optional comparison leads</h2></main>;
+    }
+    const router = createMemoryRouter([
+      { path: "/report/21", element: <Collection /> },
+      { path: "/flags/41", element: <FlagFromRouteState /> },
+    ], { initialEntries: ["/report/21"] });
+    render(<RouterProvider router={router} />);
+    await act(async () => { await router.navigate("/flags/41", { state: {
+      routeReturnFocus: { returnPath: "/report/21", elementId: "missing-record", fallbackElementId: "lead-list" },
+    } }); });
+    await screen.findByRole("heading", { name: "Evidence detail" });
+    await act(async () => { await router.navigate(-1); });
+    await waitFor(() => expect(screen.getByRole("heading", { name: "Optional comparison leads" })).toHaveFocus());
+  });
+
   it("reveals enclosing disclosures before restoring an embedded criterion summary", async () => {
     const router = createMemoryRouter([
       { path: "/criteria", element: <NestedCriterionPage /> },

@@ -1,5 +1,11 @@
 """V-081: a portable report must retain the saved finding, not only its excerpt."""
 
+import json
+import subprocess
+import sys
+from pathlib import Path
+from textwrap import dedent
+
 import fitz
 import pytest
 
@@ -9,7 +15,7 @@ from app.models.enums import CheckKind
 from app.report.export import _problem_labels, build_report_pdf
 from app.report.export_data import flag_export_detail, unassessed_references
 from app.report.schemas import EvidenceItem, ReportExportData
-from tests.test_report_export_perf import _sixty_criterion_report
+from tests.test_report_export_perf import _MAX_SECONDS, _sixty_criterion_report
 
 
 def _data(**updates):
@@ -22,6 +28,48 @@ def _data(**updates):
 def _text(pdf):
     with fitz.open(stream=pdf, filetype="pdf") as doc:
         return " ".join(" ".join(page.get_text().split()) for page in doc)
+
+
+def test_optional_comparison_export_keeps_all_records_and_qualified_continuations():
+    data = _data()
+    template = data.flags[0]
+    data.flags = [
+        template.model_copy(
+            update={
+                "id": record_id,
+                "check_kind": "originality_reuse",
+                "affects_readiness": False,
+                "severity": "high",
+                "evidence_excerpt": f"RECORD_{record_id}_START "
+                + ("Saved source passage. " * 400 if record_id == 41 else "Saved source passage. ")
+                + f"RECORD_{record_id}_END",
+            }
+        )
+        for record_id in reversed(range(39, 70))
+    ]
+    data.flag_details = {}
+    text = _text(build_report_pdf(data))
+    assert "Other integrity records: 0. Optional comparison leads: 31." in text
+    assert "Optional comparison leads (31)" in text
+    assert "High severity" not in text
+    for ordinal, record_id in enumerate(range(39, 70), start=1):
+        assert f"Comparison lead {ordinal} of 31. Record #{record_id}:" in text
+        assert f"RECORD_{record_id}_START" in text
+        assert f"RECORD_{record_id}_END" in text
+    assert "Comparison lead 3 of 31. Record #41 (continued)" in text
+    assert "Records can overlap or cover different scopes." in text
+
+
+def test_other_non_scoring_check_does_not_become_a_comparison_lead():
+    data = _data()
+    data.flags[0].check_kind = "internal_agreement"
+    data.flags[0].affects_readiness = False
+    text = _text(build_report_pdf(data))
+    assert "Other integrity records: 1. Optional comparison leads: 0." in text
+    assert "Finding 1:" in text
+    assert "Not scored" in text
+    assert "Comparison lead: not scored" not in text
+    assert "Comparison lead 1 of" not in text
 
 
 def test_export_keeps_recorded_issue_reason_identifier_and_resolution():
@@ -170,6 +218,60 @@ def test_pending_ai_basis_is_retained_escaped_and_splittable_without_claiming_a_
     assert "A recorded location does not establish support for a grade." in text
     assert "No grade has been accepted for this criterion." in text
     assert "AI reached no verdict for this criterion." not in text
+
+
+@pytest.mark.parametrize("requirement_phrases", [400, 1200])
+def test_long_pending_requirement_finishes_without_repeating_it_in_continuation_headers(
+    requirement_phrases,
+):
+    # A continuation header taller than its frame previously prevented useful
+    # pagination progress. Isolate the renderer so a recurrence fails boundedly.
+    script = dedent("""
+        import json
+        import sys
+        import fitz
+        from app.report.export import build_report_pdf
+        from app.report.schemas import EvidenceItem
+        from tests.test_report_export_details import _data
+
+        count = int(sys.argv[1])
+        data = _data()
+        row = data.report.results[0]
+        row.kind = 'semantic'
+        row.basis = 'llm'
+        row.outcome = 'escalated'
+        row.resolution = None
+        row.text = 'CRITERION_START <literal> & ' + 'Requirement text. ' * count + 'CRITERION_END'
+        row.reasoning = 'REASON_START ' + 'Explanatory support. ' * 700 + 'REASON_END'
+        row.evidence = [EvidenceItem(
+            quote='EVIDENCE_START ' + 'Saved evidence. ' * 700 + 'EVIDENCE_END',
+            anchor='paragraph 1',
+        )]
+        before = data.model_dump_json()
+        with fitz.open(stream=build_report_pdf(data), filetype='pdf') as document:
+            text = ' '.join(' '.join(page.get_text().split()) for page in document)
+            assert all(marker in text for marker in (
+                'CRITERION_START <literal> &', 'CRITERION_END',
+                'REASON_START', 'REASON_END', 'EVIDENCE_START', 'EVIDENCE_END',
+            ))
+            assert text.count('Requirement text.') == count
+            assert text.count('CRITERION_START') == 1
+            assert f'Criterion #{row.criterion_id} (continued)' in text
+        assert data.model_dump_json() == before
+        print(json.dumps({'all_content_retained': True, 'input_unchanged': True}))
+    """)
+    completed = subprocess.run(
+        [sys.executable, "-c", script, str(requirement_phrases)],
+        cwd=Path(__file__).resolve().parents[1],
+        capture_output=True,
+        text=True,
+        check=True,
+        timeout=_MAX_SECONDS,
+    )
+    assert json.loads(completed.stdout) == {
+        "all_content_retained": True,
+        "input_unchanged": True,
+    }
 
 
 @pytest.mark.parametrize("preface_length", [20, 30, 40, 50, 60])

@@ -187,7 +187,7 @@ describe("SignalReportPage", () => {
     // announced from its CONTENT, not its accessible name (which stays
     // empty with no aria-label), so this checks the role exists and wraps
     // the pending copy, not a computed name.
-    const status = screen.getByRole("status");
+    const status = screen.getByText("Step 2 of 2: nothing is saved yet").closest<HTMLElement>('[role="status"]')!;
     expect(within(status).getByText("Step 2 of 2: nothing is saved yet")).toBeInTheDocument();
     expect(within(status).getByText("Mark as meets criterion")).toBeInTheDocument();
   });
@@ -599,10 +599,12 @@ describe("SignalReportPage", () => {
     stubReport({ ...BASE_REPORT, status: "needs_review", unresolved_high_flag_count: 1 }, [], flags);
     renderWithProviders(<SignalReportPage />, { route: "/report/5", path: "/report/:checkRunId" });
 
-    expect(await screen.findByRole("button", { name: "High: 3 findings" })).toHaveAttribute("aria-pressed", "true");
+    expect(await screen.findByRole("button", { name: "High: 2 findings" })).toHaveAttribute("aria-pressed", "true");
     expect(screen.getByRole("link", { name: /Open high-severity findings counted for readiness: 1\./ })).toHaveTextContent("1");
     expect(screen.getAllByText("Needs Review").length).toBeGreaterThan(0);
-    expect(screen.getAllByText("Review lead: not scored")).toHaveLength(2);
+    expect(screen.getAllByText("Review lead: not scored")).toHaveLength(1);
+    expect(screen.getByText("Comparison lead: not scored")).toBeVisible();
+    expect(screen.getByText("Comparison lead 1 of 1. Record #2.")).toBeVisible();
     expect(screen.getAllByText("High severity", { exact: true })).toHaveLength(1);
     expect(screen.getByText(/Filters use recorded severity, including review leads/)).toBeInTheDocument();
     expect(screen.queryByText(/makes a report Not Ready by itself/)).not.toBeInTheDocument();

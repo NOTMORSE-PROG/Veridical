@@ -4218,6 +4218,14 @@
     line-height: 1;
   }
 
+  .signal-document-marker--comparison {
+    width: max-content;
+    min-width: var(--signal-review-marker-size);
+    padding-inline: var(--signal-space-2);
+    border-radius: var(--signal-radius-pill);
+    white-space: nowrap;
+  }
+
   .signal-document-marker--inline {
     position: static;
     flex: 0 0 auto;

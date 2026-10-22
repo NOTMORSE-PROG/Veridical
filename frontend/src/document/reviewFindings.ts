@@ -1,4 +1,5 @@
 import type { FlagRegionOut, FlagSummaryOut } from "../api/types";
+import { isOptionalComparisonLead } from "../domain/comparisonLeadIdentity";
 
 export interface ReviewFinding {
   key: string;
@@ -23,6 +24,7 @@ function reuseBaseKind(kind: string | null): string | null {
 }
 
 function findingIdentity(flag: FlagSummaryOut): string {
+  if (isOptionalComparisonLead(flag)) return `comparison-record:${flag.id}`;
   if (flag.check_kind !== "originality_reuse" || flag.matched_ref == null) {
     return `flag:${flag.id}`;
   }
@@ -49,12 +51,12 @@ function chooseRepresentative(flags: FlagSummaryOut[]): FlagSummaryOut {
 }
 
 /**
- * Builds the canonical review list once from the complete API response.
+ * Builds the review list from the complete API response.
  * Display numbers never depend on a later filter or resolution state.
  *
- * F7 emits whole-document, chapter, and passage records for one detected
- * relationship. They collapse only when persisted fields establish the same
- * archived source and base outcome. Unknown identities stay separate.
+ * Explicit non-scoring F7 entries remain individual comparison records.
+ * Other entries retain their existing grouping; these are presentation units,
+ * not an assertion of canonical scoring identity or independent facts.
  */
 export function buildReviewFindings(flags: FlagSummaryOut[]): ReviewFinding[] {
   const order: string[] = [];
@@ -70,6 +72,7 @@ export function buildReviewFindings(flags: FlagSummaryOut[]): ReviewFinding[] {
     }
   }
 
+  let otherNumber = 0;
   return order.map((key, index) => {
     const members = grouped.get(key)!;
     const representative = chooseRepresentative(members);
@@ -79,7 +82,7 @@ export function buildReviewFindings(flags: FlagSummaryOut[]): ReviewFinding[] {
     );
     return {
       key,
-      number: index + 1,
+      number: isOptionalComparisonLead(representative) ? index + 1 : ++otherNumber,
       flags: members,
       representative,
       severity,

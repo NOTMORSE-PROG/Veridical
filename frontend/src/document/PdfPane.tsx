@@ -12,9 +12,10 @@ import type { PDFDocumentProxy, PDFPageProxy, RenderTask } from "pdfjs-dist";
 import type { FlagRegionOut, FlagSummaryOut } from "../api/types";
 import { SeverityTag, type Severity } from "../components/SeverityTag";
 import { CHECK_KIND_SHORT_LABEL } from "../domain/checkKind";
-import { severityLabel } from "../domain/severity";
+import { COMPARISON_LEAD_COPY, comparisonLeadIdentity, isOptionalComparisonLead, sourceRecordPresentation, type ComparisonLeadSnapshot } from "../domain/comparisonLeadIdentity";
 import { truncateAtWord } from "../format/text";
 import { regionPrecision } from "./regionCopy";
+import { claimFocusContinuation, type FocusContinuation } from "../routing/focusContinuation";
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
   "pdfjs-dist/build/pdf.worker.min.mjs",
@@ -64,6 +65,8 @@ function ContinuousPdfPage({
   flagsById,
   selectedFlagId,
   findingNumbers,
+  comparisonLeads,
+  focusSelection,
   onSelectFlag,
   onVisibility,
   registerPage,
@@ -76,6 +79,8 @@ function ContinuousPdfPage({
   flagsById: ReadonlyMap<number, FlagSummaryOut>;
   selectedFlagId: number | null;
   findingNumbers: ReadonlyMap<number, number>;
+  comparisonLeads?: ComparisonLeadSnapshot;
+  focusSelection: boolean;
   onSelectFlag: (flagId: number) => void;
   onVisibility: (page: number, ratio: number) => void;
   registerPage: (page: number, element: HTMLElement | null) => void;
@@ -84,6 +89,9 @@ function ContinuousPdfPage({
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const textLayerRef = useRef<HTMLDivElement>(null);
   const markerRefs = useRef<Map<number, HTMLButtonElement>>(new Map());
+  const pendingSelectionFocus = useRef<FocusContinuation | null>(null);
+  const hasSelectedMarker = regions.some((region) => region.flag_id === selectedFlagId
+    && region.kind === "page_bbox" && region.page === metric.pageNumber && region.bbox);
   const renderTaskRef = useRef<RenderTask | null>(null);
   const textLayerTaskRef = useRef<pdfjsLib.TextLayer | null>(null);
   const [isNear, setIsNear] = useState(metric.pageNumber <= 2);
@@ -184,9 +192,19 @@ function ContinuousPdfPage({
   }, [displayWidth, isNear, metric.pageNumber, pdf]);
 
   useEffect(() => {
-    if (selectedFlagId === null || !isNear) return;
-    markerRefs.current.get(selectedFlagId)?.focus({ preventScroll: false });
-  }, [isNear, selectedFlagId, viewport]);
+    pendingSelectionFocus.current?.dispose();
+    pendingSelectionFocus.current = focusSelection && selectedFlagId !== null
+      ? claimFocusContinuation() : null;
+    return () => { pendingSelectionFocus.current?.dispose(); pendingSelectionFocus.current = null; };
+  }, [focusSelection, selectedFlagId]);
+
+  useEffect(() => {
+    if (selectedFlagId === null || !isNear || !focusSelection) return;
+    const marker = markerRefs.current.get(selectedFlagId);
+    if (!marker) return;
+    pendingSelectionFocus.current?.focus(marker);
+    pendingSelectionFocus.current = null;
+  }, [focusSelection, isNear, selectedFlagId, viewport, hasSelectedMarker]);
 
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
@@ -271,7 +289,7 @@ function ContinuousPdfPage({
                     className={`signal-document-evidence-region${highlight.selected ? " is-selected" : ""}`}
                     style={position}
                     aria-label={flag
-                      ? `Finding ${highlight.findingNumber}: ${CHECK_KIND_SHORT_LABEL[flag.check_kind] ?? flag.check_kind}. ${severityLabel(flag.severity)}. Page ${metric.pageNumber}. Exact passage.${highlight.selected ? " Selected." : ""}`
+                      ? `${sourceRecordPresentation(flag, highlight.findingNumber, comparisonLeads).label}: ${CHECK_KIND_SHORT_LABEL[flag.check_kind] ?? flag.check_kind}. ${sourceRecordPresentation(flag, highlight.findingNumber, comparisonLeads).qualification}. Page ${metric.pageNumber}. Exact passage.${highlight.selected ? " Selected." : ""}`
                       : `Finding ${highlight.findingNumber} on page ${metric.pageNumber}. Exact passage.${highlight.selected ? " Selected." : ""}`}
                     aria-pressed={highlight.selected}
                     aria-describedby={popoverFlag?.id === highlight.flagId ? `region-popover-${highlight.flagId}` : undefined}
@@ -281,7 +299,7 @@ function ContinuousPdfPage({
                     onBlur={() => setHoveredFlagId((id) => id === highlight.flagId ? null : id)}
                     onClick={() => onSelectFlag(highlight.flagId)}
                   >
-                    <span className="signal-document-marker" aria-hidden="true">{highlight.findingNumber}</span>
+                    <span className={`signal-document-marker${flag && isOptionalComparisonLead(flag) ? " signal-document-marker--comparison" : ""}`} aria-hidden="true">{flag ? sourceRecordPresentation(flag, highlight.findingNumber, comparisonLeads).marker : highlight.findingNumber}</span>
                   </button>
                 );
               });
@@ -291,7 +309,7 @@ function ContinuousPdfPage({
             <div id={`region-popover-${popoverFlag.id}`} role="tooltip" className="signal-document-marker-tooltip">
               <p>{CHECK_KIND_SHORT_LABEL[popoverFlag.check_kind] ?? popoverFlag.check_kind}</p>
               <p>{truncateAtWord(popoverFlag.evidence_excerpt, 140)}</p>
-              <SeverityTag severity={popoverFlag.severity as Severity} />
+              {isOptionalComparisonLead(popoverFlag) ? <><p>{comparisonLeadIdentity(popoverFlag, comparisonLeads).label}</p><span>{COMPARISON_LEAD_COPY.badge}</span></> : <SeverityTag severity={popoverFlag.severity as Severity} />}
             </div>
           )}
         </>
@@ -309,6 +327,8 @@ export function PdfPane({
   onSelectFlag,
   requestedPage,
   findingNumbers = EMPTY_FINDING_NUMBERS,
+  comparisonLeads,
+  focusSelection = true,
 }: {
   fileUrl: string;
   regions: FlagRegionOut[];
@@ -317,6 +337,8 @@ export function PdfPane({
   onSelectFlag: (flagId: number) => void;
   requestedPage: number | null;
   findingNumbers?: ReadonlyMap<number, number>;
+  comparisonLeads?: ComparisonLeadSnapshot;
+  focusSelection?: boolean;
 }) {
   const [pdf, setPdf] = useState<PDFDocumentProxy | null>(null);
   const [metrics, setMetrics] = useState<PageMetric[]>([]);
@@ -448,17 +470,19 @@ export function PdfPane({
           <output aria-live="polite">Page {currentPage} of {pdf?.numPages ?? "…"}</output>
         </div>
       </div>
+      {flags.some(isOptionalComparisonLead) && <p className="signal-field-hint">{COMPARISON_LEAD_COPY.markerLegend}</p>}
       {pdf && requestedPage !== null && (!Number.isSafeInteger(requestedPage) || requestedPage < 1 || requestedPage > pdf.numPages) && <p role="alert" className="signal-document-reconstruction-note">The recorded page is not available in this PDF. Inspect the manuscript manually; no replacement page was selected.</p>}
       {scopeRegions.length > 0 && (
         <div className="signal-document-scope-markers" role="group" aria-label="Findings without an exact passage location">
           {scopeRegions.map((region) => {
             const flag = flagsById.get(region.flag_id);
             const number = findingNumbers.get(region.flag_id) ?? 1;
+            const identity = flag ? sourceRecordPresentation(flag, number, comparisonLeads) : { label: `Finding ${number}`, marker: String(number) };
             const precision = regionPrecision(region);
             return (
               <button key={region.flag_id} type="button" aria-pressed={region.flag_id === selectedFlagId} onClick={() => onSelectFlag(region.flag_id)}>
-                <span aria-hidden="true">{number}</span>
-                <span>Finding {number} · {precision.label}{flag ? ` · ${CHECK_KIND_SHORT_LABEL[flag.check_kind] ?? flag.check_kind}` : ""}</span>
+                <span aria-hidden="true">{identity.marker}</span>
+                <span>{identity.label} · {precision.label}{flag ? ` · ${CHECK_KIND_SHORT_LABEL[flag.check_kind] ?? flag.check_kind}` : ""}</span>
               </button>
             );
           })}
@@ -489,6 +513,8 @@ export function PdfPane({
                 flagsById={flagsById}
                 selectedFlagId={selectedFlagId}
                 findingNumbers={findingNumbers}
+                comparisonLeads={comparisonLeads}
+                focusSelection={focusSelection}
                 onSelectFlag={onSelectFlag}
                 onVisibility={updateVisibility}
                 registerPage={registerPage}

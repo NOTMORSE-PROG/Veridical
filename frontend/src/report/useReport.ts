@@ -41,6 +41,15 @@ export function useFlags(checkRunId: number) {
   });
 }
 
+/** Observe existing complete context on a standalone detail, without fetching it. */
+export function useCachedReportFlags(checkRunId: number | undefined) {
+  return useQuery<FlagSummaryOut[]>({
+    queryKey: ["report", checkRunId, "flags"],
+    queryFn: () => api.get<FlagSummaryOut[]>(`/check-runs/${checkRunId}/flags`),
+    enabled: false,
+  });
+}
+
 // V-065: the manuscript viewer's metadata + per-flag anchor regions. Own
 // query key (not folded into ["report", checkRunId]) -- same "sibling
 // panel self-fetches" precedent as useFlags above, and this one is

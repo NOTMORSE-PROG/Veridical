@@ -46,7 +46,6 @@ from reportlab.platypus import (
     CondPageBreak,
     HRFlowable,
     Image,
-    KeepTogether,
     Paragraph,
     PTOContainer,
     SimpleDocTemplate,
@@ -70,6 +69,29 @@ _FONT_FAMILY = "PublicSans"
 _FALLBACK_FAMILY = "Helvetica"  # WinAnsiEncoding covers the same Filipino-name diacritics.
 
 _fonts_registered = False
+
+
+def _is_optional_comparison_lead(flag: FlagSummaryOut) -> bool:
+    return flag.check_kind == "originality_reuse" and flag.affects_readiness is False
+
+
+def _review_record_identities(flags: list[FlagSummaryOut]) -> dict[int, str]:
+    leads = sorted(
+        (flag for flag in flags if _is_optional_comparison_lead(flag)), key=lambda f: f.id
+    )
+    identities = {
+        flag.id: f"Comparison lead {ordinal} of {len(leads)}. Record #{flag.id}"
+        for ordinal, flag in enumerate(leads, start=1)
+    }
+    identities.update(
+        {
+            flag.id: f"Finding {ordinal}"
+            for ordinal, flag in enumerate(
+                (flag for flag in flags if not _is_optional_comparison_lead(flag)), start=1
+            )
+        }
+    )
+    return identities
 
 
 def _register_fonts() -> str:
@@ -554,6 +576,9 @@ def _pending_semantic_basis_flowables(
             parts.append(Paragraph(escape(location), styles["caption"]))
     else:
         parts.append(Paragraph(escape(labels["missing_excerpt"]), styles["body"]))
+    for part in parts:
+        if part.style is styles["body_bold"]:
+            part.keepWithNext = True
     return parts
 
 
@@ -888,7 +913,7 @@ def build_report_pdf(data: ReportExportData) -> bytes:
         for row in pending:
             block = [
                 Paragraph(
-                    f"{escape(row.text)} "
+                    f"Criterion #{row.criterion_id}: {escape(row.text)} "
                     f"<i>({_format_weight_importance(row.weight_importance, long=True)})</i>",
                     styles["body_bold"],
                 ),
@@ -906,8 +931,19 @@ def build_report_pdf(data: ReportExportData) -> bytes:
                     styles["body_bold"],
                 ),
             ]
-            flow.append(KeepTogether(block))
-            flow.extend(_pending_semantic_basis_flowables(row, styles))
+            for part in block:
+                part.keepWithNext = True
+            flow.append(
+                PTOContainer(
+                    [*block, *_pending_semantic_basis_flowables(row, styles)],
+                    header=[
+                        Paragraph(
+                            escape(f"Criterion #{row.criterion_id} (continued)"),
+                            styles["caption_bold"],
+                        )
+                    ],
+                )
+            )
             flow.append(Spacer(1, 6))
         flow.append(Spacer(1, 6))
 
@@ -1120,7 +1156,16 @@ def build_report_pdf(data: ReportExportData) -> bytes:
         labels = _semantic_support_labels()
         flow.append(Paragraph(escape(labels["title"]), styles["h2"]))
         flow.append(Paragraph(escape(labels["body"]), styles["body"]))
-    flag_intro = [Paragraph(f"Flags ({len(data.flags)})", styles["h2"])]
+    other_flag_count = sum(not _is_optional_comparison_lead(flag) for flag in data.flags)
+    lead_count = len(data.flags) - other_flag_count
+    flag_intro = [Paragraph("Integrity review", styles["h2"])]
+    flag_intro.append(
+        Paragraph(
+            f"Other integrity records: {other_flag_count}. "
+            f"Optional comparison leads: {lead_count}.",
+            styles["body"],
+        )
+    )
     docx_source = data.source_format == "docx" or any(
         image.reason_code == "docx_layout" for image in data.page_images.values()
     )
@@ -1150,18 +1195,25 @@ def build_report_pdf(data: ReportExportData) -> bytes:
             )
         )
     else:
-        finding_numbers = {flag.id: index for index, flag in enumerate(data.flags, start=1)}
-        by_kind: dict[str, list[FlagSummaryOut]] = {}
+        identities = _review_record_identities(data.flags)
+        by_kind: dict[tuple[str, bool], list[FlagSummaryOut]] = {}
         for f in data.flags:
-            by_kind.setdefault(f.check_kind, []).append(f)
-        for kind in sorted(by_kind, key=lambda k: _CHECK_KIND_ORDER.get(k, len(_CHECK_KIND_ORDER))):
-            group = by_kind[kind]
+            by_kind.setdefault((f.check_kind, _is_optional_comparison_lead(f)), []).append(f)
+        for kind, optional in sorted(
+            by_kind, key=lambda key: (key[1], _CHECK_KIND_ORDER.get(key[0], len(_CHECK_KIND_ORDER)))
+        ):
+            group = by_kind[(kind, optional)]
+            if optional:
+                group = sorted(group, key=lambda flag: flag.id)
             category_heading = Paragraph(
-                f"{_CHECK_KIND_LABEL.get(kind, kind).upper()} ({len(group)})", styles["h3"]
+                f"Optional comparison leads ({len(group)})"
+                if optional
+                else f"{_CHECK_KIND_LABEL.get(kind, kind).upper()} ({len(group)})",
+                styles["h3"],
             )
             for group_index, f in enumerate(group):
                 detail = data.flag_details.get(f.id, FlagExportDetailOut())
-                finding_number = finding_numbers[f.id]
+                record_identity = identities[f.id]
                 issue = _issue_title(detail.issue or f.problem_kind)
                 severity_label = {
                     "high": "High severity",
@@ -1173,15 +1225,17 @@ def build_report_pdf(data: ReportExportData) -> bytes:
                 # alone would not (extends the on-screen "never color
                 # alone" rule to a channel print actually needs).
                 caption_style = (
-                    styles["caption_bold"] if f.severity == "high" else styles["caption"]
+                    styles["caption_bold"]
+                    if f.severity == "high" and not optional
+                    else styles["caption"]
                 )
-                caption_text = (
-                    f"Anchor: {escape(_display_anchor(f.page_anchor))} · {escape(severity_label)}"
+                caption_text = f"Anchor: {escape(_display_anchor(f.page_anchor))} · " + (
+                    "Comparison lead: not scored" if optional else escape(severity_label)
                 )
                 if f.overridden:
                     caption_text += " · Overridden"
-                if not f.affects_readiness:
-                    caption_text += " · Comparison lead: not scored"
+                if f.affects_readiness is False and not optional:
+                    caption_text += " · Not scored"
                 header = Paragraph(caption_text, caption_style)
                 excerpt = Paragraph(escape(f.evidence_excerpt), styles["body"])
                 # design review finding, 2026-08-25 (measured against a
@@ -1198,9 +1252,7 @@ def build_report_pdf(data: ReportExportData) -> bytes:
                 divider = HRFlowable(
                     width=content_width, thickness=0.5, color=_RULE, spaceBefore=6, spaceAfter=6
                 )
-                heading = Paragraph(
-                    escape(f"Finding {finding_number}: {issue}"), styles["body_bold"]
-                )
+                heading = Paragraph(escape(f"{record_identity}: {issue}"), styles["body_bold"])
                 evidence_label = Paragraph(
                     "System comparison summary"
                     if detail.evidence_is_summary
@@ -1208,6 +1260,15 @@ def build_report_pdf(data: ReportExportData) -> bytes:
                     styles["caption_bold"],
                 )
                 prefix = list(flag_intro) + [category_heading] if group_index == 0 else []
+                if optional and group_index == 0:
+                    prefix.append(
+                        Paragraph(
+                            "Each record is a saved comparison lead. Records can overlap or cover "
+                            "different scopes. These leads do not affect readiness or block the "
+                            "instructor decision.",
+                            styles["body"],
+                        )
+                    )
                 flag_intro = []
                 start_items = [*prefix, divider, heading, header, evidence_label]
                 for item in start_items:
@@ -1316,7 +1377,7 @@ def build_report_pdf(data: ReportExportData) -> bytes:
                         header=[
                             Paragraph(
                                 escape(
-                                    f"Finding {finding_number} (continued) - "
+                                    f"{record_identity} (continued) - "
                                     f"Source location: {_display_anchor(f.page_anchor)}"
                                 ),
                                 styles["caption_bold"],

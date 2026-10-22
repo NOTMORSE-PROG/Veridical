@@ -484,10 +484,10 @@ describe("SignalDocumentViewerPage", () => {
     renderWithProviders(<SignalDocumentViewerPage />, { route: "/report/5/document?pane=analysis", path: "/report/:checkRunId/document" });
 
     expect(await screen.findByRole("heading", { name: "Review queue" })).toBeInTheDocument();
-    expect(screen.getByText("No integrity findings were recorded")).toBeInTheDocument();
+    expect(screen.getByText("No other integrity findings were recorded")).toBeInTheDocument();
     expect(screen.queryByText(REPORT.reason as string)).not.toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: "Final defense-readiness decision" })).not.toBeInTheDocument();
-    expect(screen.getByRole("tab", { name: "Review" })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("tab", { name: /^Review/ })).toHaveAttribute("aria-selected", "true");
     fireEvent.click(screen.getByRole("button", { name: "Review readiness and decision" }));
     expect(await screen.findByText(REPORT.reason as string)).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Final defense-readiness decision" })).toBeInTheDocument();
@@ -554,7 +554,7 @@ describe("SignalDocumentViewerPage", () => {
     }));
     renderWithProviders(<SignalDocumentViewerPage />, { route: "/report/5/document?pane=review", path: "/report/:checkRunId/document" });
 
-    expect(await screen.findByText("1 finding. 0 resolved.")).toBeInTheDocument();
+    expect(await screen.findByText("1 other finding. 0 resolved.")).toBeInTheDocument();
     expect(screen.getByText("3 recorded locations or scopes")).toBeInTheDocument();
     const row = screen.getByRole("button", { name: /Finding 1.*High passage similarity/s });
     fireEvent.click(row);
