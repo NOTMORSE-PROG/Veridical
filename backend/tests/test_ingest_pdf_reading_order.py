@@ -419,7 +419,7 @@ def test_nested_interleaved_regions_require_original_single_column_proof(adverse
         Region(
             [Region([Region([], [ids[0]]), Region([], [ids[2]])], []), Region([], [ids[1]])], []
         ),
-        dict(zip(ids, [100, 130, 160])),
+        dict(zip(ids, [100, 130, 160], strict=False)),
         set(),
         "unchanged-source-hash",
     )
