@@ -48,6 +48,12 @@ export function hasPendingRouteReturnFocus(path: string) {
   return pendingReturnFocus?.armed === true && pendingReturnFocus.returnPath === path;
 }
 
+/** Only the exact origin may reveal a registered comparison's page. */
+export function pendingRouteReturnElement(path: string) {
+  return pendingReturnFocus?.armed && pendingReturnFocus.returnPath === path
+    ? pendingReturnFocus.elementId : undefined;
+}
+
 function restoreRegisteredFocus(elementId: string): HTMLElement | null {
   const target = document.getElementById(elementId);
   if (!target) return null;
@@ -82,7 +88,7 @@ function observeUserIntent(
   // React can blur a still-connected node just before removing it. Neutral
   // focusout alone does not establish that the instructor moved focus.
   const onKey = (event: KeyboardEvent) => {
-    if (event.key === "Tab") retire();
+    if (["Tab", "PageDown", "PageUp", "ArrowDown", "ArrowUp", "Home", "End", " "].includes(event.key)) retire();
   };
   const onPointer = (event: PointerEvent) => {
     if (!target || !target.contains(event.target as Node)) retire();
@@ -91,11 +97,13 @@ function observeUserIntent(
   document.addEventListener("keydown", onKey, true);
   document.addEventListener("pointerdown", onPointer, true);
   window.addEventListener("blur", retire);
+  window.addEventListener("wheel", retire, { passive: true });
   return () => {
     document.removeEventListener("focusin", onFocus, true);
     document.removeEventListener("keydown", onKey, true);
     document.removeEventListener("pointerdown", onPointer, true);
     window.removeEventListener("blur", retire);
+    window.removeEventListener("wheel", retire);
   };
 }
 
@@ -146,12 +154,15 @@ export function useRouteFocus(
   title: string,
   headingRef: RefObject<HTMLElement | null>,
   returnFocus?: RouteReturnFocusRegistration,
+  asyncReturn?: { prefix: string; pending: boolean },
 ) {
   const location = useLocation();
   const navigationType = useNavigationType();
   const ranRef = useRef(false);
   const registeredReturnRef = useRef(false);
   const restoredRef = useRef<RestoredFocus | null>(null);
+  const deferredPrefix = asyncReturn?.prefix;
+  const deferredPending = asyncReturn?.pending;
 
   // Establish route/return focus before source panes place their requested
   // target in a passive effect, including when that source is already cached.
@@ -218,6 +229,10 @@ export function useRouteFocus(
       // Async content may arrive after the route. Search is time-bounded;
       // successful restoration then owns focus only until user intent,
       // removal reconciliation or route cleanup (including cache refresh).
+      const defer = deferredPending && deferredPrefix && pending.elementId.startsWith(deferredPrefix);
+      // A pending collection owns its lifetime; a timer cannot decide that
+      // a record is absent. Place focus before observing newer user intent.
+      if (defer && (document.activeElement === document.body || !document.activeElement)) headingRef.current?.focus();
       let settled = false;
       let restoring = false;
       let disposeOwnership: (() => void) | undefined;
@@ -244,7 +259,7 @@ export function useRouteFocus(
       });
       const scope = headingRef.current?.closest("main") ?? document.body;
       observer.observe(scope, { childList: true, subtree: true });
-      const timeoutId = window.setTimeout(() => {
+      const timeoutId = defer ? undefined : window.setTimeout(() => {
         if (settled) return;
         finishSearch();
         ((pending.fallbackElementId && document.getElementById(pending.fallbackElementId)) || headingRef.current)?.focus();
@@ -269,5 +284,5 @@ export function useRouteFocus(
     ranRef.current = true;
     if (hasNavigatedOnce) headingRef.current?.focus();
     hasNavigatedOnce = true;
-  }, [headingRef, location.pathname, location.search, navigationType, returnFocus, title]);
+  }, [headingRef, location.pathname, location.search, navigationType, returnFocus, title, deferredPrefix, deferredPending]);
 }

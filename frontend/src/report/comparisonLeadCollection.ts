@@ -1,5 +1,6 @@
 import type { FlagSummaryOut } from "../api/types";
 import { comparisonLeadSnapshot, type ComparisonLeadSnapshot } from "../domain/comparisonLeadIdentity";
+import { recoverableReadError } from "./reportReadState";
 
 export type ComparisonLeadState = "fetching" | "paused" | "error" | "success" | "unavailable";
 export interface ComparisonLeadCollection {
@@ -14,12 +15,13 @@ export function comparisonLeadCollection(runId: number, query: {
   fetchStatus: "fetching" | "paused" | "idle";
   isError: boolean;
   isSuccess: boolean;
+  error?: unknown;
 }): ComparisonLeadCollection {
   const state = query.fetchStatus === "fetching" ? "fetching"
     : query.fetchStatus === "paused" ? "paused"
       : query.isError ? "error"
         : query.isSuccess && query.data !== undefined ? "success" : "unavailable";
-  const data = query.data === undefined ? undefined : comparisonLeadSnapshot(runId, query.data);
+  const data = query.data === undefined || !recoverableReadError(query.error) ? undefined : comparisonLeadSnapshot(runId, query.data);
   const snapshot = state === "success" || data?.total ? data : undefined;
   return { state, snapshot, lastLoaded: state !== "success" && snapshot !== undefined };
 }

@@ -606,8 +606,10 @@ describe("SignalReportPage", () => {
     expect(screen.getByRole("link", { name: /Open high-severity findings counted for readiness: 1\./ })).toHaveTextContent("1");
     expect(screen.getAllByText("Needs Review").length).toBeGreaterThan(0);
     expect(screen.getAllByText("Review lead: not scored")).toHaveLength(1);
-    expect(screen.getByText("Comparison lead: not scored")).toBeVisible();
-    expect(screen.getByText("Comparison lead 1 of 1. Record #2.")).toBeVisible();
+    expect(screen.getByText("Not scored. Does not affect readiness or block your decision.")).toBeVisible();
+    expect(screen.getByRole("link", { name: /^Review evidence for Comparison lead 1 of 1\. Record #2\./ })).toBeVisible();
+    expect(screen.getByText("L1")).toBeVisible();
+    expect(screen.getByText("Record #2")).toBeVisible();
     expect(screen.getAllByText("High severity", { exact: true })).toHaveLength(1);
     expect(screen.getByText(/Filters use recorded severity, including review leads/)).toBeInTheDocument();
     expect(screen.queryByText(/makes a report Not Ready by itself/)).not.toBeInTheDocument();
@@ -715,7 +717,7 @@ describe("SignalReportPage", () => {
     // (Chromium does: "button"), so query it directly rather than via
     // getByRole -- the aria-label itself, which real assistive tech
     // reads, is what this regression test actually needs to prove.
-    const summaries = Array.from(document.querySelectorAll("summary"));
+    const summaries = Array.from(document.querySelectorAll(".signal-result-card summary"));
     expect(summaries.map((s) => s.getAttribute("aria-label"))).toEqual([
       "AI assessment details: Chapter 1 states the research problem",
       "AI assessment details: Findings answer the stated research questions",

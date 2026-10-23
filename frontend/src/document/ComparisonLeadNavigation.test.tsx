@@ -18,13 +18,13 @@ const REPORT = { check_run_id: 5, manuscript_id: 10, manuscript_group_label: "Lo
   decision: null, decided_at: null, decision_note: null, pending_review_count: 5, rubric_is_current: true,
   llm_mode: "real", rubric_needs_review: false, rubric_parse_issues: null, previous_status: null,
   previous_composite_score: null, integrity_check_status: [], results: [] };
-function setup(query = "", delay = false) {
+function setup(query = "", delay = false, report = REPORT) {
   vi.spyOn(document, "hasFocus").mockReturnValue(true);
   let release!: (response: Response) => void;
   const held = new Promise<Response>((resolve) => { release = resolve; });
   const fallback = stubFetchByPath({
     "/check-runs/5/document": { manuscript_id: 10, source_format: "pdf", available: true, original_filename: "source.pdf", page_count: 4, regions: [] },
-    "/check-runs/5/report": REPORT, "/check-runs/5/flags": [...RECORDS].reverse(), "/check-runs/5/escalated": [],
+    "/check-runs/5/report": report, "/check-runs/5/flags": [...RECORDS].reverse(), "/check-runs/5/escalated": [],
     "/check-runs/5/document/reuse-matches": { matches: [], passage_archive_size_n: 0 },
   });
   const fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -49,15 +49,49 @@ function response(id: number) {
 }
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 describe("optional comparison workspace navigation", () => {
+  it("places View review after its narrow pane commits, without relying on an early animation frame", async () => {
+    vi.stubGlobal("matchMedia", vi.fn(() => ({ matches: true, addEventListener: vi.fn(), removeEventListener: vi.fn() })));
+    const realFocus = HTMLElement.prototype.focus;
+    vi.spyOn(HTMLElement.prototype, "focus").mockImplementation(function (this: HTMLElement, options) {
+      if (this.closest("[data-active='false']")) return;
+      realFocus.call(this, options);
+    });
+    setup("&view=finding&finding=69");
+    await screen.findByText("Actual stored reasoning");
+    fireEvent.click(screen.getByRole("tab", { name: "Manuscript" }));
+    await waitFor(() => expect(screen.getByRole("tab", { name: "Manuscript" })).toHaveAttribute("aria-selected", "true"));
+    vi.spyOn(window, "requestAnimationFrame").mockImplementation((callback) => { callback(performance.now()); return 0; });
+    const action = screen.getByRole("button", { name: "View review" }); action.focus(); fireEvent.click(action);
+    await waitFor(() => expect(screen.getByRole("heading", { name: "High passage similarity" })).toHaveFocus());
+    expect(screen.getByText("Comparison lead 31 of 31. Record #69.")).toBeVisible();
+  });
+  it("starts comparison-only review with the actual evidence index and no empty queue scaffolding", async () => {
+    setup("", false, { ...REPORT, pending_review_count: 0 });
+    const heading = await screen.findByRole("heading", { name: "Comparison leads", level: 2 });
+    const section = heading.closest("section")!;
+    expect(section.parentElement?.firstElementChild).toBe(section);
+    expect(screen.queryByText("Your review tasks")).not.toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Review queue" })).not.toBeInTheDocument();
+    expect(screen.queryByText(/0 other findings|0 resolved|No integrity findings/)).not.toBeInTheDocument();
+    const about = screen.getByRole("button", { name: "About leads" });
+    expect(about.parentElement).toContainElement(screen.getByRole("group", { name: "Filter comparison leads" }));
+    expect(about).toHaveAttribute("aria-expanded", "false");
+    about.focus(); fireEvent.click(about);
+    expect(about).toHaveFocus();
+    expect(about).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByText(/These are optional saved comparison records/)).toBeVisible();
+    fireEvent.click(about);
+    expect(screen.getByText(/These are optional saved comparison records/)).not.toBeVisible();
+  });
   it("keeps five required judgments before 31 optional records without a combined task count", async () => {
     setup();
     const criteria = await screen.findByRole("heading", { name: "5 criteria need your judgment" });
-    const leads = screen.getByRole("heading", { name: "Optional comparison leads" });
+    const leads = screen.getByRole("heading", { name: "Comparison leads" });
     expect(criteria.compareDocumentPosition(leads) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(screen.getByText("31 recorded comparison leads")).toBeVisible();
+    expect(screen.getByText("31 records")).toBeVisible();
     const tab = screen.getByRole("tab", { name: /Review\. 5 criteria awaiting judgment\. 31 optional comparison leads/ });
     expect(tab).toHaveTextContent(/^Review$/); expect(tab).not.toHaveAccessibleName(/36|tasks/);
-    fireEvent.click(screen.getByRole("button", { name: "Review evidence for Comparison lead 3 of 31. Record #41." }));
+    fireEvent.click(screen.getByRole("button", { name: /^Review evidence for Comparison lead 3 of 31\. Record #41\./ }));
     await screen.findByText("Actual stored reasoning");
     fireEvent.click(screen.getByText("Recorded reasoning and technical details"));
     expect(await screen.findByText("Actual stored reasoning")).toBeVisible();
@@ -79,9 +113,9 @@ describe("optional comparison workspace navigation", () => {
     setup("&view=finding&finding=69");
     await screen.findByText("Actual stored reasoning");
     const back = screen.getByRole("button", { name: "Back to review queue" }); back.focus(); fireEvent.click(back);
-    const row = await screen.findByRole("button", { name: "Review evidence for Comparison lead 31 of 31. Record #69." });
+    const row = await screen.findByRole("button", { name: /^Review evidence for Comparison lead 31 of 31\. Record #69\./ });
     expect(row).toHaveFocus();
-    expect(screen.getAllByRole("button", { name: /Review evidence for Comparison lead/ })).toHaveLength(31);
+    expect(screen.getAllByRole("button", { name: /Review evidence for Comparison lead/ })).toHaveLength(7);
   });
   it("keeps the detail heading connected through delay/failure without stealing later focus", async () => {
     const { release } = setup("&view=finding&finding=41", true);

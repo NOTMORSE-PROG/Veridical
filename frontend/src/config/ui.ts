@@ -21,7 +21,7 @@ export const CRITERION_SCORE_UNITS = { none: 0, full: 100 } as const;
  * are positive; this value can therefore never be mistaken for one. */
 export const CRITERION_ANCHOR_REGION_ID = -2147483647;
 // Matches the existing single-pane document layout in signal.css.
-export const DOCUMENT_SINGLE_PANE_MEDIA_QUERY = "(max-width: 767px)";
+export const DOCUMENT_SINGLE_PANE_MEDIA_QUERY = "(max-width: 1199px)";
 export const PASSWORD_MIN_LENGTH = 8;
 export const LIBRARY_SEARCH_DEBOUNCE_MS = 400;
 // V-077: how often an own Library record that is still being read refreshes
@@ -35,6 +35,7 @@ export const STORED_FILES_PAGE_SIZE = 50;
 export const REVIEW_DESK_PAGE_SIZE = 20;
 export const FLAG_LIST_INITIAL_COUNT = 8;
 export const FLAG_LIST_BATCH_COUNT = 8;
+export const COMPARISON_LEAD_PAGE_SIZE = FLAG_LIST_INITIAL_COUNT;
 
 /** Protocol value shared with the group-program filter API. */
 export const UNSET_PROGRAM_FILTER = "__unset__";

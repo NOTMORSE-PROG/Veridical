@@ -750,7 +750,7 @@ export function SignalFlagsPanel({
   originalityScope?: OriginalityScopeValue | null;
 }) {
   const flagsQuery = useFlags(checkRunId);
-  const { data: flags } = flagsQuery;
+  const flags = recoverableReadError(flagsQuery.error) ? flagsQuery.data : undefined;
   const { data: me } = useMe();
   const viewedIds = useViewedFlagIds(me?.id);
   const otherFlags = flags?.filter((flag) => !isOptionalComparisonLead(flag));
@@ -758,6 +758,7 @@ export function SignalFlagsPanel({
   const flagsLastLoaded = flags !== undefined && (flagsQuery.fetchStatus !== "idle" || flagsQuery.isError);
   const usableFlags = flags !== undefined && (flags.length > 0 || optional.state === "success");
   const hasOptional = Boolean(optional.snapshot?.total);
+  const onlyOptional = optional.state === "success" && hasOptional && otherFlags?.length === 0;
   const openFindingCount = clusterFlagFindings(otherFlags?.filter((flag) => !flag.overridden) ?? []).length;
   // BUG-167: defaults the FILTER to the worst unresolved severity present,
   // not the declaration order -- see `defaultFlagView`'s own comment for
@@ -766,8 +767,8 @@ export function SignalFlagsPanel({
 
   return (
     <section id="integrity-signals" tabIndex={-1} className="signal-review-section" aria-labelledby="flags-heading">
-      <div className="signal-review-section__heading"><div><p className="signal-section-kicker">Integrity record</p><h2 id="flags-heading" tabIndex={-1}>Integrity signals</h2></div>{usableFlags && <span>{flagsLastLoaded ? "Last loaded: " : ""}{openFindingCount} {hasOptional ? "other open" : "open"} finding{openFindingCount === 1 ? "" : "s"}</span>}</div>
-      <p className="signal-review-section__intro">These are possible inconsistencies, not accusations. Open a signal to inspect its excerpt, source anchor, and available instructor action.</p>
+      <div className="signal-review-section__heading"><div><p className="signal-section-kicker">Integrity record</p><h2 id="flags-heading" tabIndex={-1}>Integrity signals</h2></div>{usableFlags && !onlyOptional && <span>{flagsLastLoaded ? "Last loaded: " : ""}{openFindingCount} {hasOptional ? "other open" : "open"} finding{openFindingCount === 1 ? "" : "s"}</span>}</div>
+      {!onlyOptional && <p className="signal-review-section__intro">These are possible inconsistencies, not accusations. Open a signal to inspect its excerpt, source anchor, and available instructor action.</p>}
       <OriginalityScope scope={originalityScope} showAddAction />
       {otherFlags && otherFlags.length > 0
         ? (
@@ -779,7 +780,7 @@ export function SignalFlagsPanel({
             viewedIds={viewedIds}
           />
         )
-        : optional.state === "success" ? <Alert title={hasOptional ? "No other integrity findings" : "No integrity signals"} tone={hasOptional || originalityUnassessed(originalityScope) ? "info" : "success"}>{hasOptional ? "The recorded optional comparisons are listed separately below." : "This run produced no checkable integrity signals."}</Alert>
+        : onlyOptional ? null : optional.state === "success" ? <Alert title="No integrity signals" tone={originalityUnassessed(originalityScope) ? "info" : "success"}>This run produced no checkable integrity signals.</Alert>
           : <p>{optional.state === "error" ? "Other findings could not be loaded." : optional.state === "paused" ? "Waiting to load other findings." : optional.state === "fetching" ? "Loading other findings." : "Other findings are not available."}</p>}
       <ComparisonLeadList collection={optional} showActions viewedIds={viewedIds} onRetry={() => { void flagsQuery.refetch(); }} />
     </section>
@@ -799,14 +800,15 @@ export function SignalPublicFlags({
   const optional = comparisonLeadCollection(checkRunId, { data: flags, fetchStatus: "idle", isSuccess: true, isError: false });
   const findingCount = clusterFlagFindings(otherFlags).length;
   const hasOptional = Boolean(optional.snapshot?.total);
+  const onlyOptional = hasOptional && otherFlags.length === 0;
   return (
     <section id="integrity-signals" tabIndex={-1} className="signal-review-section" aria-labelledby="flags-heading">
-      <div className="signal-review-section__heading"><div><p className="signal-section-kicker">Integrity record</p><h2 id="flags-heading">Possible inconsistencies</h2></div><span>{findingCount} {hasOptional ? "other " : ""}finding{findingCount === 1 ? "" : "s"}</span></div>
-      <p className="signal-review-section__intro">These are possible inconsistencies, not accusations. This shared view shows the bounded evidence the instructor chose to share; it does not expose the private Audit trail.</p>
+      <div className="signal-review-section__heading"><div><p className="signal-section-kicker">Integrity record</p><h2 id="flags-heading">Possible inconsistencies</h2></div>{!onlyOptional && <span>{findingCount} {hasOptional ? "other " : ""}finding{findingCount === 1 ? "" : "s"}</span>}</div>
+      {!onlyOptional && <p className="signal-review-section__intro">These are possible inconsistencies, not accusations. This shared view shows the bounded evidence the instructor chose to share; it does not expose the private Audit trail.</p>}
       <OriginalityScope scope={originalityScope} />
       {otherFlags.length
         ? <SignalFlagList flags={otherFlags} showActions={false} initialView="all" />
-        : <Alert title={hasOptional ? "No other integrity findings" : "No integrity signals"} tone={hasOptional || originalityUnassessed(originalityScope) ? "info" : "success"}>{hasOptional ? "The recorded optional comparisons are listed separately below." : "This run produced no shared integrity signals."}</Alert>}
+        : onlyOptional ? null : <Alert title="No integrity signals" tone={originalityUnassessed(originalityScope) ? "info" : "success"}>This run produced no shared integrity signals.</Alert>}
       <ComparisonLeadList collection={optional} showActions={false} />
     </section>
   );

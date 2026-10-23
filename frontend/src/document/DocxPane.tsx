@@ -1,3 +1,4 @@
+import { SourceViewDetails } from "./SourceViewDetails";
 // V-065 AC1 (DOCX gap), design review spec (2026-08-22): the reconstructed-
 // text pane's interactive half. Mirrors PdfPane's mechanism exactly (same
 // hover-preview/click-select/keyboard/Escape-dismiss/focus-on-select
@@ -5,7 +6,7 @@
 // implementations of one idea, not two diverging ones -- DOCX has no page
 // concept, so "jump to the right page" collapses to "scroll to the right
 // paragraph," which needs no render race to guard against at all.
-import { useEffect, useRef, useState } from "react";
+import { useId, useEffect, useRef, useState } from "react";
 import type { DocumentImageOut, DocumentParagraphOut, DocumentTableOut, FlagRegionOut, FlagSummaryOut } from "../api/types";
 import { SeverityTag, type Severity } from "../components/SeverityTag";
 import { CHECK_KIND_SHORT_LABEL } from "../domain/checkKind";
@@ -78,6 +79,9 @@ export function DocxPane({
   requestedParagraphAttempt?: number;
   scrollInParent?: boolean;
 }) {
+  const detailsId = useId();
+  const [detailsOpen, setDetailsOpen] = useState(false);
+  const comparisonMarkers = regions.some((region) => flags.some((flag) => flag.id === region.flag_id && isOptionalComparisonLead(flag)));
   const [hoveredFlagId, setHoveredFlagId] = useState<number | null>(null);
   const highlightRefs = useRef<Map<number, HTMLButtonElement>>(new Map());
   const pendingSelectionFocus = useRef<FocusContinuation | null>(null);
@@ -166,16 +170,9 @@ export function DocxPane({
       <div className="signal-document-toolbar">
         <div className="signal-document-toolbar__identity">
           <strong>Full manuscript</strong>
-          <span>DOCX · Reconstructed document</span>
+          <span>Reconstructed DOCX. Layout may differ.{comparisonMarkers && " · L: unscored comparison"}</span>
         </div>
-      </div>
-      {flags.some(isOptionalComparisonLead) && <p className="signal-field-hint">{COMPARISON_LEAD_COPY.markerLegend}</p>}
-      <div className="signal-document-reconstruction-note">
-        <p>
-          Extracted text, native tables and available embedded images appear in source order.
-          This is not Word page layout. Merged-cell layout, drawing placement, image cropping and
-          rotation may differ. Displaying an image does not assess its contents.
-        </p>
+        <div className="signal-document-toolbar__controls"><button type="button" aria-expanded={detailsOpen} aria-controls={detailsId} onClick={() => setDetailsOpen((value) => !value)}>Source view details</button></div>
       </div>
       {scopeRegions.length > 0 && (
         <div className="signal-document-scope-markers" role="group" aria-label="Findings without an exact paragraph location">
@@ -194,6 +191,7 @@ export function DocxPane({
         </div>
       )}
       <div role={scrollInParent ? undefined : "region"} tabIndex={scrollInParent ? undefined : 0} aria-label={scrollInParent ? undefined : "Full manuscript, scrollable"} className="signal-document-scroll signal-document-scroll--docx">
+        <SourceViewDetails id={detailsId} open={detailsOpen} format="docx" comparisonMarkers={comparisonMarkers} />
         <article ref={paperRef} className="signal-document-docx-paper" aria-label="Reconstructed manuscript document">
           <header className="signal-document-docx-paper__header">
             <span>Reconstructed manuscript</span>

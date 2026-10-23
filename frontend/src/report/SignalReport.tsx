@@ -16,7 +16,7 @@ import { SignalDecisionPanel } from "./SignalDecisionPanel";
 import { SignalCriteriaResults, SignalEscalatedPanel, SignalFlagsPanel } from "./SignalReviewSections";
 import { SignalShareDialog } from "./SignalShareDialog";
 import { coverageItems } from "./reportCoverage";
-import { useExportReportPdf, useReport } from "./useReport";
+import { useExportReportPdf, useFlags, useReport } from "./useReport";
 import { useShareLink } from "./useShare";
 import { FigureReadingsSummary } from "./FigureReadings";
 import { ReportReadNotice } from "./ReportReadNotice";
@@ -59,7 +59,8 @@ export function SignalReportPage() {
   const headingRef = useRef<HTMLHeadingElement>(null);
   const exportErrorRef = useRef<HTMLDivElement>(null);
   const exportInFlight = useRef(false);
-  useRouteFocus("Readiness report - VERIDICAL", headingRef);
+  const flagsQuery = useFlags(id);
+  useRouteFocus("Readiness report - VERIDICAL", headingRef, undefined, { prefix: "comparison-lead-", pending: isPending || flagsQuery.isPending || flagsQuery.fetchStatus !== "idle" });
 
   useEffect(() => {
     if (exportPdf.isError) exportErrorRef.current?.focus();
