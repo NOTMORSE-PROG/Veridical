@@ -126,6 +126,7 @@ async def test_get_report_returns_the_full_shape_for_a_done_run(session_factory)
         # the construction site with no existing test to catch it.
         assert report.manuscript_original_filename == "G-11-Thesis.pdf"
         assert report.composite_score == 100.0
+        assert report.assessment_provenance == "current"
         assert len(report.results) == 1
         row = report.results[0]
         assert row.criterion_id == criterion_id

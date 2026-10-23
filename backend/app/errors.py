@@ -108,6 +108,18 @@ class ActorContextChangedError(VeridicalError):
     code = "actor_context_changed"
 
 
+class ReportExportUnavailableError(VeridicalError):
+    """Saved text cannot be rendered faithfully; the assessment is unaffected."""
+
+    code = "report_export_unavailable"
+
+    def __str__(self):
+        return (
+            "PDF export stopped because some characters could not be displayed. "
+            "The report remains available in VERIDICAL."
+        )
+
+
 # HTTP mapping for the one exception handler (main.py). Codes absent here
 # are result STATES (not_applicable, unverifiable) that must never be
 # raised to HTTP; if one ever is, the handler still answers with the
@@ -125,6 +137,7 @@ HTTP_STATUS: dict[str, int] = {
     "document_preparation_busy": 503,
     "actor_context_changed": 409,
     "invalid_api_key": 422,
+    "report_export_unavailable": 422,
     # A rubric-decomposition parse that failed schema validation (V-010) —
     # user-actionable (re-review/re-upload); V-011 wraps this in a retry
     # loop so it only ever reaches HTTP after repeated failure.

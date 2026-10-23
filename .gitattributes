@@ -9,6 +9,9 @@
 *.woff binary
 *.woff2 binary
 
+# Preserve the upstream font license verbatim, including its trailing space.
+/backend/app/report/fonts/IBMPlexSans-LICENSE.txt -text whitespace=-blank-at-eol
+
 # V-081: frozen provenance identities cover the exact reviewed file bytes.
 /backend/tests/fixtures/v4_source_control_v2/recipe.json -text whitespace=trailing-space,space-before-tab,cr-at-eol
 /backend/tests/fixtures/v4_source_control_v2/provenance.json -text whitespace=trailing-space,space-before-tab,cr-at-eol

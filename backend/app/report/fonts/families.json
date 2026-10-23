@@ -1,0 +1,20 @@
+{
+  "primary": {
+    "name": "PublicSans",
+    "faces": {
+      "normal": {"name": "PublicSans", "file": "PublicSans-Regular.ttf"},
+      "bold": {"name": "PublicSans-Bold", "file": "PublicSans-Bold.ttf"},
+      "italic": {"name": "PublicSans-Italic", "file": "PublicSans-Italic.ttf"},
+      "boldItalic": {"name": "PublicSans-BoldItalic", "file": "PublicSans-BoldItalic.ttf"}
+    }
+  },
+  "fallback": {
+    "name": "IBMPlexSans",
+    "faces": {
+      "normal": {"name": "IBMPlexSans", "file": "IBMPlexSans-Regular.ttf"},
+      "bold": {"name": "IBMPlexSans-Bold", "file": "IBMPlexSans-Bold.ttf"},
+      "italic": {"name": "IBMPlexSans-Italic", "file": "IBMPlexSans-Italic.ttf"},
+      "boldItalic": {"name": "IBMPlexSans-BoldItalic", "file": "IBMPlexSans-BoldItalic.ttf"}
+    }
+  }
+}
