@@ -28,6 +28,7 @@ from app.checks.forensics.extract import extract_all_stats
 from app.checks.forensics.pcheck import evaluate_p_recalc
 from app.checks.forensics.sanity import evaluate_group_counts, evaluate_percentage_sums
 from app.checks.source_quality import persist_source_limitation
+from app.ingest.analytical_source import analytical_source
 from app.ingest.schemas import ExtractionResult
 from app.models.enums import CheckKind, ResultOutcome
 from app.models.run import CheckResult, Flag
@@ -62,12 +63,17 @@ def _compute_forensics_findings(extraction: ExtractionResult) -> _ForensicsCompu
     if coverage.get("coverage_reason"):
         outcome = ResultOutcome.escalated
 
-    full_text = "\n".join(b.text for b in extraction.blocks if not b.is_furniture)
+    source = analytical_source(extraction)
+    full_text = "\n".join(b.text for scope in source.scopes for b in scope if not b.is_furniture)
 
     grim_grimmer = evaluate_grim_grimmer(stats)
     flag_drafts: list[ForensicsFlagDraft] = [
         *grim_grimmer.flags,
-        *evaluate_p_recalc(inferential, full_text),
+        *evaluate_p_recalc(
+            inferential,
+            full_text,
+            tail_context_complete=not source.limited and not coverage.get("coverage_reason"),
+        ),
         *evaluate_percentage_sums(stats),
         *evaluate_group_counts(stats),
     ]

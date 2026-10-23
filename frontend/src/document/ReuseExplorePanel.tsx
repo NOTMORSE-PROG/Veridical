@@ -136,6 +136,7 @@ export function ReuseExplorePanel({
           {!isFetching && isError && <> <button type="button" onClick={(event) => retry(event, refetch)} className="font-medium underline">Try again</button></>}
         </p>
         <p>An empty result is not evidence of originality.</p>
+        {!!data?.n_source_candidates_withheld && <p>{data.n_source_candidates_withheld} selected comparison candidates were withheld because their source passages could not be verified. Those comparisons remain unassessed.</p>}
       </div>
 
       <fieldset className="border-b border-border py-1.5">

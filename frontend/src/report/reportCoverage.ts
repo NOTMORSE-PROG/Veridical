@@ -1,6 +1,8 @@
 import type { IntegrityCheckStatusOut, ReportOut } from "../api/types";
 import type { CoverageStatementItem } from "../ui/CoverageStatement";
 import { imageCoverageItem } from "./imageCoverage";
+import { nativeMathCoverageItem } from "./nativeMathCoverage";
+import { NATIVE_MATH_HISTORY_TITLE, NATIVE_MATH_HISTORY_LIMIT } from "../domain/nativeMathHistory";
 import { CITATION_HISTORY_REPORT_LIMIT, CITATION_HISTORY_TITLE } from "../domain/citationHistory";
 
 const INTEGRITY_LABEL: Record<IntegrityCheckStatusOut["check_kind"], string> = {
@@ -17,6 +19,16 @@ const INTEGRITY_LABEL: Record<IntegrityCheckStatusOut["check_kind"], string> = {
 function integrityCoverageItem(status: IntegrityCheckStatusOut, manuscriptId: number, checkRunId: number): CoverageStatementItem {
   const label = INTEGRITY_LABEL[status.check_kind];
   const reason = status.coverage_reason;
+  const native = status.check_kind === "statistical_forensics" ? nativeMathCoverageItem(status, checkRunId) : null;
+  if (native && ["native_math_unassessed", "native_math_inventory_unavailable", "image_content_unassessed"].includes(reason ?? "")) {
+    const image = reason === "image_content_unassessed" ? imageCoverageItem(status, checkRunId) : null;
+    return {
+      ...native,
+      subIssues: [...(native.subIssues ?? []), ...(image?.subIssues ?? [])],
+      sources: [...(native.sources ?? []), ...(image?.sources ?? [])],
+      detailsLabel: image ? "source assessment details" : native.detailsLabel,
+    };
+  }
   if (reason === "image_content_unassessed" && status.assessment_scope === "available_text_and_tables") {
     return imageCoverageItem(status, checkRunId);
   }
@@ -50,6 +62,9 @@ function integrityCoverageItem(status: IntegrityCheckStatusOut, manuscriptId: nu
     numeric_citation_scan_limit: "The numbered-citation scan reached its safety limit. Unread citations have not been assessed.",
     claim_support_unavailable: "Source details were checked where possible, but some cited claims could not be checked against source content.",
     statement_roles_unverified: "The check found possible objectives and results, but could not reliably establish that they describe this study. Comparison leads do not change readiness.",
+    native_math_source_incomplete: "Native Word source coverage is incomplete. The available text does not establish that objectives or results are absent.",
+    native_math_citation_incomplete: "Supported citations and reference details were checked where possible. Content affected by native Word equations was excluded, so unread content cannot establish that a reference is unused. Other citations or claims may remain unassessed.",
+    native_math_comparison_incomplete: "Some source content or selected Library candidates could not support a verified comparison. Independently supported prose leads remain available; native equations were not compared. This does not establish originality.",
   };
   if (reason && coverageCopy[reason]) {
     const imageDetails = status.check_kind === "statistical_forensics" &&
@@ -57,6 +72,7 @@ function integrityCoverageItem(status: IntegrityCheckStatusOut, manuscriptId: nu
         status.n_recovery_figures_unassessed || status.n_recovery_tables_unassessed)
       ? imageCoverageItem(status, checkRunId) : null;
     const subIssues: string[] = [];
+    if (status.n_source_candidates_withheld) subIssues.push(`${status.n_source_candidates_withheld} selected comparison candidates were withheld because their source passages could not be verified.`);
     if (status.n_skipped_api_down) subIssues.push(`${status.n_skipped_api_down} items skipped because a service was unavailable.`);
     if (status.n_skipped_quota) subIssues.push(`${status.n_skipped_quota} items skipped because AI capacity was unavailable.`);
     if (status.n_skipped_parse_failure) subIssues.push(`${status.n_skipped_parse_failure} items skipped because the model response could not be validated.`);
@@ -66,9 +82,9 @@ function integrityCoverageItem(status: IntegrityCheckStatusOut, manuscriptId: nu
     if (status.n_claim_support_unassessed) subIssues.push(`${status.n_claim_support_unassessed} cited ${status.n_claim_support_unassessed === 1 ? "source" : "sources"} with unassessed claim support`);
     return {
       key: status.check_kind, label, detail: coverageCopy[reason],
-      subIssues: [...subIssues, ...(imageDetails?.subIssues ?? [])],
-      sources: imageDetails?.sources,
-      detailsLabel: imageDetails ? "source and image assessment details" : undefined,
+      subIssues: [...subIssues, ...(imageDetails?.subIssues ?? []), ...(native?.subIssues ?? [])],
+      sources: [...(imageDetails?.sources ?? []), ...(native?.sources ?? [])],
+      detailsLabel: native ? "source assessment details" : imageDetails ? "source and image assessment details" : undefined,
       action: { to: `/report/${checkRunId}/document?view=decision`, label: "Open the paper" },
     };
   }
@@ -100,6 +116,9 @@ function integrityCoverageItem(status: IntegrityCheckStatusOut, manuscriptId: nu
 
 export function coverageItems(report: ReportOut): CoverageStatementItem[] {
   const items: CoverageStatementItem[] = [];
+  if (report.historical_native_math_unverified) {
+    items.push({ key: "historical_native_math_unverified", label: NATIVE_MATH_HISTORY_TITLE, detail: NATIVE_MATH_HISTORY_LIMIT });
+  }
   if (report.historical_citation_title_unverified) {
     items.push({ key: "historical_citation_title_unverified", label: CITATION_HISTORY_TITLE, detail: CITATION_HISTORY_REPORT_LIMIT });
   }

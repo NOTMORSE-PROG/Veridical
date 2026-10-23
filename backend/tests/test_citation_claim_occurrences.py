@@ -22,6 +22,7 @@ from app.ingest.patterns import load_patterns
 from app.ingest.schemas import ExtractionResult, SectionNode, SectionTree, TextBlock
 from app.models.enums import ResultOutcome
 from app.models.run import Flag
+from tests.native_math_fixtures import record_empty_native_inventory
 from tests.test_stabilization_integrity_controls import MemorySession, citation
 
 FIRST = "The study reports reduced execution time (Reyes, 2023)."
@@ -96,17 +97,19 @@ def source(claims, *, paragraph=False, references=(RAW,)):
             for index, raw in enumerate(references)
         ],
     ]
-    return ExtractionResult(
-        page_count=0 if paragraph else len(body) + 1,
-        anchor_kind="paragraph" if paragraph else "page",
-        image_only=False,
-        text_chars=sum(len(block.text) for block in blocks),
-        blocks=blocks,
-        images=[],
-        section_tree=SectionTree(
-            source="heuristics",
-            nodes=[SectionNode(title="References", level=1, **reference_location)],
-        ),
+    return record_empty_native_inventory(
+        ExtractionResult(
+            page_count=0 if paragraph else len(body) + 1,
+            anchor_kind="paragraph" if paragraph else "page",
+            image_only=False,
+            text_chars=sum(len(block.text) for block in blocks),
+            blocks=blocks,
+            images=[],
+            section_tree=SectionTree(
+                source="heuristics",
+                nodes=[SectionNode(title="References", level=1, **reference_location)],
+            ),
+        )
     )
 
 

@@ -1,5 +1,6 @@
 """Fresh F3 judgments use actual DOCX ingestion, stored rows and PostgreSQL."""
 
+import hashlib
 import os
 from decimal import Decimal
 
@@ -73,6 +74,7 @@ async def test_actual_ingestion_and_persisted_reference_criterion(
             group_label="Synthetic",
             file_ref=str(path),
             original_filename=path.name,
+            content_hash=hashlib.sha256(original).hexdigest(),
         )
         rubric = Rubric(
             instructor_id=owner.id, title="Synthetic bound", source_file="synthetic.docx"

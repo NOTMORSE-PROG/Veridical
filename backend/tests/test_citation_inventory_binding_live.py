@@ -1,5 +1,6 @@
 """F5 source membership survives ingestion, persistence and separate F3 review."""
 
+import hashlib
 import os
 from decimal import Decimal
 from unittest.mock import AsyncMock
@@ -63,7 +64,12 @@ async def test_fresh_f5_inventory_boundaries_survive_separate_criterion_review(
         owner = Instructor(email="inventory@example.test", display_name="Inventory control")
         session.add(owner)
         await session.commit()
-        manuscript = Manuscript(instructor_id=owner.id, group_label="Synthetic", file_ref=str(path))
+        manuscript = Manuscript(
+            instructor_id=owner.id,
+            group_label="Synthetic",
+            file_ref=str(path),
+            content_hash=hashlib.sha256(original).hexdigest(),
+        )
         rubric = Rubric(instructor_id=owner.id, title="Synthetic", source_file="format.docx")
         session.add_all([manuscript, rubric])
         await session.commit()

@@ -85,7 +85,7 @@ export function SignalReportPage() {
     report.previous_status
     || report.llm_mode !== "real"
     || report.rubric_needs_review
-    || (report.integrity_check_status ?? []).length > 0
+    || coverageItems(report).length > 0
   );
 
   return (

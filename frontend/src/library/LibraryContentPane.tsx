@@ -88,6 +88,7 @@ function FullDocumentPane({
         tables={paragraphsData?.tables}
         images={paragraphsData?.images}
         omittedImageOccurrences={paragraphsData?.omitted_image_occurrences}
+        nativeMath={paragraphsData?.native_math}
         imageBasePath={`/library/${manuscriptId}/document/images`}
         paragraphsPending={paragraphsPending}
         paragraphsError={paragraphsError}

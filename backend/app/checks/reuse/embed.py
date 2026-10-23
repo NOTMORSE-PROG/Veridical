@@ -38,6 +38,7 @@ from dataclasses import dataclass
 from typing import Literal
 
 from app.config import Settings, get_settings
+from app.ingest.analytical_source import AnalyticalSource, analytical_source
 from app.ingest.blockquotes import block_quote_block_ids, block_quote_ids_in_scope
 from app.ingest.normalize import normalize
 from app.ingest.patterns import HeadingPatterns, load_patterns
@@ -174,17 +175,30 @@ def compute_document_embeddings(
 ) -> DocumentEmbeddings:
     settings = settings or get_settings()
     patterns = load_patterns(settings.ingest_patterns_file)
+    source = analytical_source(extraction)
+
+    def embed_blocks(blocks):
+        vectors = []
+        for scope in source.scopes_for(blocks):
+            vector = embed_long_text(
+                "\n".join(b.text for b in scope if not b.is_furniture and b.text.strip()),
+                chunk_words=settings.reuse_embedding_chunk_words,
+                settings=settings,
+            )
+            if vector is not None:
+                vectors.append(vector)
+        return (
+            vectors[0] if len(vectors) == 1 else (_average_normalize(vectors) if vectors else None)
+        )
+
     chapters = [n for n in extraction.section_tree.nodes if n.level == 1]
     if _uses_unstructured_body(chapters, patterns):
         # Short papers can have body text but only acknowledgements/references
         # in the detected tree. Use exact body fragments, without inventing a
         # chapter or embedding the same ancillary content twice.
-        text = "\n".join(b.text for b in _unstructured_body_blocks(extraction, patterns))
         return DocumentEmbeddings(
             model_id=settings.embedding_model_id,
-            whole_document=embed_long_text(
-                text, chunk_words=settings.reuse_embedding_chunk_words, settings=settings
-            ),
+            whole_document=embed_blocks(_unstructured_body_blocks(extraction, patterns)),
             chapters=[],
         )
     content_blocks = non_reference_blocks(extraction, patterns)
@@ -212,9 +226,7 @@ def compute_document_embeddings(
         text = "\n".join(b.text for b in span_blocks if not b.is_furniture and b.text.strip())
         if not text.strip():
             continue
-        vector = embed_long_text(
-            text, chunk_words=settings.reuse_embedding_chunk_words, settings=settings
-        )
+        vector = embed_blocks(span_blocks)
         if vector is None:
             continue
         chapter_texts.append(text)
@@ -231,10 +243,14 @@ def compute_document_embeddings(
 
     whole_document = None
     if chapter_texts:
-        whole_document = embed_long_text(
-            "\n".join(chapter_texts),
-            chunk_words=settings.reuse_embedding_chunk_words,
-            settings=settings,
+        whole_document = (
+            _average_normalize([chapter.embedding for chapter in chapter_embeddings])
+            if source.limited
+            else embed_long_text(
+                "\n".join(chapter_texts),
+                chunk_words=settings.reuse_embedding_chunk_words,
+                settings=settings,
+            )
         )
 
     return DocumentEmbeddings(
@@ -428,6 +444,32 @@ def _build_passages(
     return drafts
 
 
+def _scoped_passages(
+    source: AnalyticalSource,
+    blocks: list[TextBlock],
+    *,
+    chunk_words: int,
+    ref_ids: set[int],
+    quote_ids: set[int],
+    context_words: int,
+) -> list[dict]:
+    drafts = []
+    offset = 0
+    for scope in source.scopes_for(blocks):
+        scope_text = "\n".join(block.text for block in scope)
+        for draft in _build_passages(
+            list(scope), chunk_words=chunk_words, ref_ids=ref_ids, quote_ids=quote_ids
+        ):
+            draft["context_text"] = _add_context(
+                scope_text, draft["char_start"], draft["char_end"], context_words
+            )
+            draft["char_start"] += offset
+            draft["char_end"] += offset
+            drafts.append(draft)
+        offset += len(scope_text) + 1
+    return drafts
+
+
 def compute_passage_embeddings(
     extraction: ExtractionResult, settings: Settings | None = None
 ) -> list[PassageEmbedding]:
@@ -437,6 +479,7 @@ def compute_passage_embeddings(
     the whole manuscript, not one call per passage."""
     settings = settings or get_settings()
     patterns = load_patterns(settings.ingest_patterns_file)
+    source = analytical_source(extraction)
     content_blocks = [b for b in extraction.blocks if not b.is_furniture]
     non_ref_ids = {id(b) for b in non_reference_blocks(extraction, patterns)}
     ref_ids = {id(b) for b in content_blocks if id(b) not in non_ref_ids}
@@ -497,46 +540,36 @@ def compute_passage_embeddings(
             ]
         if not span_blocks:
             continue
-        full_chapter_text = "\n".join(b.text for b in span_blocks)
-        for draft in _build_passages(
+        for draft in _scoped_passages(
+            source,
             span_blocks,
             chunk_words=settings.reuse_passage_chunk_words,
             ref_ids=ref_ids,
             quote_ids=quote_ids,
+            context_words=settings.reuse_passage_context_words,
         ):
             if chapter_is_reference_list:
                 draft["is_reference_list"] = True
             draft["chapter_index"] = chapter_idx
-            draft["context_text"] = _add_context(
-                full_chapter_text,
-                draft["char_start"],
-                draft["char_end"],
-                settings.reuse_passage_context_words,
-            )
             drafts.append(draft)
             texts.append(draft["text"])
 
     if unstructured:
         body_blocks = _unstructured_body_blocks(extraction, patterns)
-        full_body_text = "\n".join(b.text for b in body_blocks)
         body_quote_ids = (
             block_quote_ids_in_scope(body_blocks, settings)
             if extraction.anchor_kind == "page"
             else set()
         )
-        for draft in _build_passages(
+        for draft in _scoped_passages(
+            source,
             body_blocks,
             chunk_words=settings.reuse_passage_chunk_words,
             ref_ids=set(),  # exact complement already excludes reference intervals
             quote_ids=body_quote_ids,
+            context_words=settings.reuse_passage_context_words,
         ):
             draft["chapter_index"] = UNSTRUCTURED_BODY_SCOPE
-            draft["context_text"] = _add_context(
-                full_body_text,
-                draft["char_start"],
-                draft["char_end"],
-                settings.reuse_passage_context_words,
-            )
             drafts.append(draft)
             texts.append(draft["text"])
 

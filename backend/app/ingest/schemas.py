@@ -20,6 +20,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator
 
+from app.ingest.native_math_models import NativeMathInventory
 from app.ingest.recovery_models import RecoveryEnvelope
 
 Bbox = tuple[float, float, float, float]
@@ -478,6 +479,12 @@ class ExtractionResult(BaseModel):
     image_readings: list[ImageReading] | None = None
     figure_readings: list[FigureReading] | None = None
     docx_source_sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+    # Retain malformed legacy envelopes for explicit unavailable projection;
+    # consumers validate centrally rather than replacing them with zero.
+    native_math_inventory: NativeMathInventory | dict | None = None
+    # Transient expected manuscript identity supplied by an authorized consumer;
+    # never written into the extraction or accepted as a stored source witness.
+    analytical_source_sha256: str | None = Field(default=None, exclude=True)
     docx_omitted_image_occurrences: int = Field(default=0, ge=0)
     tables: list[TableBlock] = Field(default_factory=list)
     equations: list[EquationBlock] = Field(default_factory=list)

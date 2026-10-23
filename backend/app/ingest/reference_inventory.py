@@ -3,6 +3,7 @@
 from collections.abc import Sequence
 from typing import Protocol
 
+from app.ingest.analytical_source import analytical_source
 from app.ingest.normalize import normalize
 from app.ingest.references import ReferenceSelection, _has_body_text
 from app.ingest.schemas import ExtractionResult, TextBlock
@@ -77,6 +78,14 @@ def reference_source_scope_issues(
         coordinate = "page"
     if extraction.docx_omitted_image_occurrences:
         return ("reference_rich_content_unlocated",)
+    native = analytical_source(extraction)
+    if native.state in {"not_recorded", "unavailable"} or native.unlocated_occurrences:
+        return ("reference_native_math_scope_unavailable",)
+    if native.inventory is not None:
+        for container in native.inventory.containers:
+            position = container.paragraph
+            if position is not None and position >= start and (end is None or position < end):
+                return ("reference_native_math_unassessed",)
     for item in [*extraction.images, *extraction.tables, *extraction.equations]:
         position = getattr(item, coordinate)
         if position is None:

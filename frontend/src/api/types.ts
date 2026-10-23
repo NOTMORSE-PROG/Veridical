@@ -457,7 +457,7 @@ export interface IntegrityCheckStatusOut {
   n_claim_support_unassessed?: number;
   reference_list_page?: number | null;
   analysis_coverage?: "complete" | "partial" | "unsupported" | null;
-  assessment_scope?: "reference_metadata_only" | "available_text_and_tables" | null;
+  assessment_scope?: "reference_metadata_only" | "available_text_and_tables" | "available_text_and_reference_metadata" | null;
   n_reference_metadata_attempted?: number;
   n_metadata_api_down?: number;
   n_images_unassessed?: number;
@@ -466,6 +466,12 @@ export interface IntegrityCheckStatusOut {
   n_recovery_figures_unassessed?: number;
   n_recovery_tables_unassessed?: number;
   image_coverage_items?: { image_index: number; page: number | null; paragraph: number | null; reason: string }[];
+  native_math_inventory_state?: NativeMathSourceOut["state"] | null;
+  n_native_equations_unassessed?: number | null;
+  n_native_equations_unlocated?: number | null;
+  native_math_excluded_paragraphs?: number[];
+  n_source_candidates_withheld?: number;
+  native_math_coverage_items?: { paragraph: number | null; kind: "paragraph" | "table_cell"; n_occurrences: number }[];
 }
 
 /** V-077 (D-028): a count, not a judgment. "library" for checks since the
@@ -484,6 +490,7 @@ export interface ReportOut extends ReportCommon {
   figure_readings?: FigureReadingOut[] | null;
   historical_semantic_support_unverified?: boolean;
   historical_citation_title_unverified?: boolean;
+  historical_native_math_unverified?: boolean;
   // BUG-128: instructor-only -- lets the report deep-link an integrity-
   // check remedy straight into the Dashboard's existing "Run again"
   // (RerunModal) mechanism, which already keys off this id.
@@ -515,6 +522,7 @@ export interface PublicReportOut extends ReportCommon {
   semantic_support_unverified?: boolean;
   assessment_incomplete?: boolean;
   historical_citation_title_unverified?: boolean;
+  historical_native_math_unverified?: boolean;
   check_run_id: number;
   manuscript_group_label: string;
   manuscript_original_filename: string | null;
@@ -843,11 +851,32 @@ export interface DocumentParagraphsOut {
   tables?: DocumentTableOut[];
   images?: DocumentImageOut[];
   omitted_image_occurrences?: number;
+  native_math?: NativeMathSourceOut | null;
+}
+
+export interface NativeMathSourcePieceOut {
+  kind: "text" | "native_math";
+  text: string | null;
+  occurrence: number | null;
+}
+
+export interface NativeMathSourceContainerOut {
+  paragraph: number | null;
+  kind: "paragraph" | "table_cell";
+  pieces: NativeMathSourcePieceOut[];
+}
+
+export interface NativeMathSourceOut {
+  state: "complete" | "not_recorded" | "unavailable" | "not_applicable";
+  scope: "main_document_body";
+  occurrence_count: number | null;
+  containers: NativeMathSourceContainerOut[];
 }
 
 export interface DocumentTableOut {
   paragraph: number;
   rows: string[][];
+  native_cells?: { display_coordinates: [number, number][]; pieces: NativeMathSourcePieceOut[] }[];
 }
 
 export interface DocumentImageOut {
@@ -902,6 +931,7 @@ export interface ExcludedReuseMatchOut {
 export interface ReuseMatchesOut {
   passage_archive_size_n: number;
   matches: ExcludedReuseMatchOut[];
+  n_source_candidates_withheld?: number;
 }
 
 /** One model's own daily allowance. The Gemini free tier meters per model,

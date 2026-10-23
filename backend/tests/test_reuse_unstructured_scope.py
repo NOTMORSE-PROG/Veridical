@@ -12,6 +12,7 @@ from app.ingest.normalize import normalize
 from app.ingest.patterns import load_patterns
 from app.ingest.references import select_references
 from app.ingest.schemas import ExtractionResult, SectionNode, SectionTree, SourceLineSpan, TextBlock
+from tests.native_math_fixtures import record_empty_native_inventory
 
 
 def block(text, page=1, x=50):
@@ -379,6 +380,7 @@ def test_ancillary_fallback_preserves_docx_paragraph_anchors(encoded):
         SectionNode(title="Acknowledgements", level=1, paragraph=3),
         SectionNode(title="References", level=1, paragraph=5),
     ]
+    extraction = record_empty_native_inventory(extraction)
     before = extraction.model_dump()
     document = embed.compute_document_embeddings(extraction)
     passages = embed.compute_passage_embeddings(extraction)

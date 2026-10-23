@@ -32,10 +32,12 @@ from app.checks.reuse.query import (
     passage_archive_size,
     query_similar_passages,
 )
+from app.checks.reuse.source import passage_match_supported
 from app.checks.support import SOURCE_SCOPE_POLICY_VERSION
 from app.config import Settings, get_settings
 from app.errors import ConflictError, GoneError, NotFoundError
 from app.findings.policy import exclusion_reason, reuse_excerpt
+from app.ingest.analytical_source import analytical_source
 from app.ingest.figures import saved_figure_readings
 from app.ingest.regions import _flatten, recover_region
 from app.ingest.schemas import SectionTree
@@ -73,6 +75,7 @@ from app.report.schemas import (
     IntegrityCheckStatusOut,
     LevelledRatingOut,
     ManuscriptViewerOut,
+    NativeMathSourceOut,
     OriginalityScopeOut,
     PageEvidenceImageOut,
     ReportExportData,
@@ -601,6 +604,7 @@ async def report_out_for_check_run(
             in {
                 "reference_metadata_only",
                 "available_text_and_tables",
+                "available_text_and_reference_metadata",
             }
             else None,
             n_reference_metadata_attempted=(row.detail or {}).get(
@@ -617,6 +621,17 @@ async def report_out_for_check_run(
             image_coverage_items=[
                 {key: item.get(key) for key in ("image_index", "page", "paragraph", "reason")}
                 for item in (row.detail or {}).get("image_coverage_items", [])
+            ],
+            native_math_inventory_state=(row.detail or {}).get("native_math_inventory_state"),
+            n_source_candidates_withheld=(row.detail or {}).get("n_source_candidates_withheld", 0),
+            n_native_equations_unassessed=(row.detail or {}).get("n_native_equations_unassessed"),
+            n_native_equations_unlocated=(row.detail or {}).get("n_native_equations_unlocated"),
+            native_math_excluded_paragraphs=(row.detail or {}).get(
+                "native_math_excluded_paragraphs", []
+            ),
+            native_math_coverage_items=[
+                {key: item.get(key) for key in ("paragraph", "kind", "n_occurrences")}
+                for item in (row.detail or {}).get("native_math_coverage_items", [])
             ],
         )
         for row in integrity_rows
@@ -678,7 +693,21 @@ async def report_out_for_check_run(
             )
         )
     ).all()
+    forensics_row = await session.scalar(
+        select(CheckResult).where(
+            CheckResult.check_run_id == check_run_id,
+            CheckResult.kind == CheckKind.statistical_forensics,
+        )
+    )
     return ReportOut(
+        historical_native_math_unverified=(
+            Path(manuscript.file_ref).suffix.lower() == ".docx"
+            and check_run.status == CheckRunStatus.done
+            and (
+                forensics_row is None
+                or (forensics_row.detail or {}).get("native_math_coverage_version") != "v1"
+            )
+        ),
         historical_citation_title_unverified=any(
             citation_metadata_review_warning(
                 "citation_integrity", flag.evidence_excerpt, flag.detail or result.detail or {}
@@ -1186,6 +1215,13 @@ async def list_reuse_passage_matches(
             else m
             for m in excluded
         ]
+    source_cache = {}
+    supported_excluded = []
+    for match in excluded:
+        if await passage_match_supported(session, manuscript.id, match, settings, source_cache):
+            supported_excluded.append(match)
+    withheld = query_result.n_source_candidates_withheld + len(excluded) - len(supported_excluded)
+    excluded = supported_excluded
 
     section_tree = SectionTree.model_validate(manuscript.section_tree or {"source": "none"})
     doc = None
@@ -1250,7 +1286,9 @@ async def list_reuse_passage_matches(
             doc.close()
 
     return ReuseMatchesOut(
-        passage_archive_size_n=query_result.passage_archive_size_n, matches=results
+        passage_archive_size_n=query_result.passage_archive_size_n,
+        matches=results,
+        n_source_candidates_withheld=withheld,
     )
 
 
@@ -1384,16 +1422,58 @@ def manuscript_paragraphs_for(manuscript: Manuscript, settings: Settings) -> Doc
                 figure_reading=visual_payload,
             )
         )
+    native = analytical_source(extraction, expected_source_sha256=manuscript.content_hash or "")
+    native_cells = native.inventory.display_cells if native.inventory else []
+    native_cells_by_paragraph = {}
+    native_coordinates_by_paragraph = {}
+    for cell in native_cells:
+        native_cells_by_paragraph.setdefault(cell.paragraph, []).append(cell)
+        native_coordinates_by_paragraph.setdefault(cell.paragraph, set()).update(
+            cell.display_coordinates
+        )
     return DocumentParagraphsOut(
         paragraphs=paragraphs,
         tables=[
-            DocumentTableOut(paragraph=table.paragraph, rows=table.rows)
+            DocumentTableOut(
+                paragraph=table.paragraph,
+                rows=[
+                    [
+                        ""
+                        if (row_index, column_index)
+                        in native_coordinates_by_paragraph.get(table.paragraph, set())
+                        else value
+                        for column_index, value in enumerate(row)
+                    ]
+                    for row_index, row in enumerate(table.rows)
+                ],
+                native_cells=[
+                    {
+                        "display_coordinates": cell.display_coordinates,
+                        "pieces": [piece.model_dump() for piece in cell.pieces],
+                    }
+                    for cell in native_cells_by_paragraph.get(table.paragraph, [])
+                ],
+            )
             for table in extraction.tables
             if table.paragraph is not None and table.source == "native"
         ],
         images=image_items,
         omitted_image_occurrences=extraction.docx_omitted_image_occurrences
         + max(0, len(extraction.images) - settings.docx_image_max_count),
+        native_math=NativeMathSourceOut(
+            state=native.state,
+            occurrence_count=native.occurrence_count,
+            containers=[
+                {
+                    "paragraph": container.paragraph,
+                    "kind": container.kind,
+                    "pieces": [piece.model_dump() for piece in container.pieces],
+                }
+                for container in native.inventory.containers
+            ]
+            if native.inventory
+            else [],
+        ),
     )
 
 

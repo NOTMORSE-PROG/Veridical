@@ -23,6 +23,7 @@ from app.ingest.schemas import (
     TextBlock,
 )
 from app.models.enums import ResultOutcome
+from tests.native_math_fixtures import record_empty_native_inventory
 from tests.test_checks_structural_rules import FakeCitation, FakeCriterion, _ctx
 
 REF_A = "Reyes, J. (2024). Example source. Journal of Examples."
@@ -69,15 +70,17 @@ def source(entries=(), *, paragraph=True, heading=True, issue_page=None, legacy=
             for page in (1, 2)
         ]
     )
-    return ExtractionResult(
-        page_count=0 if paragraph else 2,
-        anchor_kind="paragraph" if paragraph else "page",
-        image_only=False,
-        text_chars=sum(len(block.text) for block in blocks),
-        blocks=blocks,
-        images=[],
-        section_tree=SectionTree(source="heuristics", nodes=nodes),
-        reading_order=records,
+    return record_empty_native_inventory(
+        ExtractionResult(
+            page_count=0 if paragraph else 2,
+            anchor_kind="paragraph" if paragraph else "page",
+            image_only=False,
+            text_chars=sum(len(block.text) for block in blocks),
+            blocks=blocks,
+            images=[],
+            section_tree=SectionTree(source="heuristics", nodes=nodes),
+            reading_order=records,
+        )
     )
 
 
@@ -200,8 +203,13 @@ async def test_actual_context_route_and_structural_result_withhold_unmeasured_gr
     session = SimpleNamespace(
         execute=AsyncMock(return_value=Rows()), add=lambda row: None, commit=AsyncMock()
     )
-    monkeypatch.setattr(context, "load_raw_store_async", AsyncMock(return_value=source([REF_A])))
-    ctx = await context.build_rule_context(session, SimpleNamespace(id=1), Settings(_env_file=None))
+    extraction = source([REF_A])
+    monkeypatch.setattr(context, "load_raw_store_async", AsyncMock(return_value=extraction))
+    ctx = await context.build_rule_context(
+        session,
+        SimpleNamespace(id=1, content_hash=extraction.docx_source_sha256),
+        Settings(_env_file=None),
+    )
     criterion = FakeCriterion(text)
     decision = route_criterion(criterion, criterion_id=1, raw_type="structural")
     result = await run_structural_check(session, 1, criterion, 1, decision, ctx)

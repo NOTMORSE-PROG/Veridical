@@ -119,6 +119,11 @@ COVERAGE_REASONS = frozenset(
         "claim_support_unavailable",
         "statement_roles_unverified",
         "image_content_unassessed",
+        "native_math_unassessed",
+        "native_math_inventory_unavailable",
+        "native_math_source_incomplete",
+        "native_math_citation_incomplete",
+        "native_math_comparison_incomplete",
     }
 )
 
@@ -128,6 +133,12 @@ class ImageAssessmentLocationOut(BaseModel):
     page: int | None = Field(default=None, gt=0)
     paragraph: int | None = Field(default=None, ge=0)
     reason: str
+
+
+class NativeMathAssessmentLocationOut(BaseModel):
+    paragraph: int | None = Field(default=None, ge=0)
+    kind: Literal["paragraph", "table_cell"]
+    n_occurrences: int = Field(ge=1)
 
 
 class IntegrityCheckStatusOut(BaseModel):
@@ -154,7 +165,14 @@ class IntegrityCheckStatusOut(BaseModel):
     n_claim_support_unassessed: int = 0
     reference_list_page: int | None = None
     analysis_coverage: Literal["complete", "partial", "unsupported"] | None = None
-    assessment_scope: Literal["reference_metadata_only", "available_text_and_tables"] | None = None
+    assessment_scope: (
+        Literal[
+            "reference_metadata_only",
+            "available_text_and_tables",
+            "available_text_and_reference_metadata",
+        ]
+        | None
+    ) = None
     n_reference_metadata_attempted: int = 0
     n_metadata_api_down: int = 0
     n_images_unassessed: int = 0
@@ -163,6 +181,14 @@ class IntegrityCheckStatusOut(BaseModel):
     n_recovery_figures_unassessed: int = 0
     n_recovery_tables_unassessed: int = 0
     image_coverage_items: list[ImageAssessmentLocationOut] = Field(default_factory=list)
+    native_math_inventory_state: (
+        Literal["complete", "not_recorded", "unavailable", "not_applicable"] | None
+    ) = None
+    n_native_equations_unassessed: int | None = Field(default=None, ge=0)
+    n_native_equations_unlocated: int | None = Field(default=None, ge=0)
+    native_math_coverage_items: list[NativeMathAssessmentLocationOut] = Field(default_factory=list)
+    native_math_excluded_paragraphs: list[int] = Field(default_factory=list)
+    n_source_candidates_withheld: int = Field(default=0, ge=0)
 
 
 class OriginalityScopeOut(BaseModel):
@@ -193,6 +219,7 @@ class ReportOut(BaseModel):
     # Compatibility name: missing current support-policy metadata, not an age test.
     historical_semantic_support_unverified: bool = False
     historical_citation_title_unverified: bool = False
+    historical_native_math_unverified: bool = False
     # BUG-128: instructor-only (never added to `PublicReportOut` below,
     # which has no instructor actions by design) -- lets the frontend
     # deep-link an integrity-check remedy straight into the existing
@@ -349,6 +376,7 @@ class PublicReportOut(BaseModel):
     # Coverage fact only: no private rationale, raw detail, or source identity.
     assessment_incomplete: bool = False
     historical_citation_title_unverified: bool = False
+    historical_native_math_unverified: bool = False
     semantic_support_unverified: bool = False
 
 
@@ -596,6 +624,7 @@ class DocumentParagraphOut(BaseModel):
 class DocumentTableOut(BaseModel):
     paragraph: int
     rows: list[list[str]]
+    native_cells: list["NativeMathTableCellOut"] = Field(default_factory=list)
 
 
 class DocumentImageOut(BaseModel):
@@ -609,11 +638,36 @@ class DocumentImageOut(BaseModel):
     figure_reading: FigureReading | None = None
 
 
+class NativeMathSourcePieceOut(BaseModel):
+    kind: Literal["text", "native_math"]
+    text: str | None = None
+    occurrence: int | None = Field(default=None, ge=0)
+
+
+class NativeMathSourceContainerOut(BaseModel):
+    paragraph: int | None = Field(default=None, ge=0)
+    kind: Literal["paragraph", "table_cell"]
+    pieces: list[NativeMathSourcePieceOut]
+
+
+class NativeMathTableCellOut(BaseModel):
+    display_coordinates: list[tuple[int, int]]
+    pieces: list[NativeMathSourcePieceOut]
+
+
+class NativeMathSourceOut(BaseModel):
+    state: Literal["complete", "not_recorded", "unavailable", "not_applicable"]
+    scope: Literal["main_document_body"] = "main_document_body"
+    occurrence_count: int | None = Field(default=None, ge=0)
+    containers: list[NativeMathSourceContainerOut] = Field(default_factory=list)
+
+
 class DocumentParagraphsOut(BaseModel):
     paragraphs: list[DocumentParagraphOut]
     tables: list[DocumentTableOut] = Field(default_factory=list)
     images: list[DocumentImageOut] = Field(default_factory=list)
     omitted_image_occurrences: int = 0
+    native_math: NativeMathSourceOut | None = None
 
 
 class ExcludedReuseMatchOut(BaseModel):
@@ -655,6 +709,7 @@ class ReuseMatchesOut(BaseModel):
 
     passage_archive_size_n: int
     matches: list[ExcludedReuseMatchOut]
+    n_source_candidates_withheld: int = Field(default=0, ge=0)
 
 
 class PageEvidenceImageOut(BaseModel):

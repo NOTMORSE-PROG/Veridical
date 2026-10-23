@@ -20,6 +20,7 @@ from app.checks.agreement.extract import extract_statements
 from app.checks.agreement.pair import run_agreement_pairing
 from app.checks.source_quality import persist_source_limitation
 from app.config import Settings
+from app.ingest.analytical_source import analytical_source
 from app.ingest.schemas import ExtractionResult
 from app.llm.base import LLMClient
 from app.models.enums import CheckKind, ResultOutcome
@@ -51,6 +52,7 @@ async def run_internal_agreement_check(
     )
     if source_stop is not None:
         return source_stop
+    source = analytical_source(extraction)
     outcome_extraction = extract_statements(extraction, settings=settings)
     intents, outcomes = outcome_extraction.intents, outcome_extraction.outcomes
 
@@ -59,12 +61,19 @@ async def run_internal_agreement_check(
             check_run_id=check_run_id,
             criterion_id=None,
             kind=CheckKind.internal_agreement,
-            outcome=ResultOutcome.not_applicable,
+            outcome=ResultOutcome.escalated if source.limited else ResultOutcome.not_applicable,
             detail={
+                **source.detail(),
+                **({"coverage_reason": "native_math_source_incomplete"} if source.limited else {}),
                 "n_intents": 0,
                 "n_outcomes": 0,
                 "n_flags": 0,
-                "note": "No objective/finding-style statements were detected in this manuscript.",
+                "note": (
+                    "No objective/finding-style statements were detected in the available source. "
+                    "Native Word source coverage is incomplete; this does not establish absence."
+                    if source.limited
+                    else "No objective/finding-style statements were detected in this manuscript."
+                ),
             },
         )
         session.add(result)
@@ -88,7 +97,12 @@ async def run_internal_agreement_check(
         return result
 
     pairing = await run_agreement_pairing(
-        llm, intents, outcomes, check_run_id=check_run_id, settings=settings
+        llm,
+        intents,
+        outcomes,
+        check_run_id=check_run_id,
+        settings=settings,
+        allow_absence_leads=not source.limited,
     )
 
     # BUG-073: a check that skipped even one candidate pair did NOT fully
@@ -114,6 +128,8 @@ async def run_internal_agreement_check(
         kind=CheckKind.internal_agreement,
         outcome=outcome,
         detail={
+            **source.detail(),
+            "absence_leads_withheld": source.limited,
             "n_intents": len(intents),
             "coverage_reason": "statement_roles_unverified",
             "reason": (

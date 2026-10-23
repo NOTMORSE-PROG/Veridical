@@ -1,0 +1,2 @@
+export const NATIVE_MATH_HISTORY_TITLE = "Saved native Word coverage is unverified";
+export const NATIVE_MATH_HISTORY_LIMIT = "The saved assessment does not establish whether native Word equations were inventoried or checked. Their presence and count are unknown for that assessment. The recorded assessment has not been recomputed.";

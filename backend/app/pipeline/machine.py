@@ -52,6 +52,7 @@ from app.checks.structural import run_structural_check
 from app.config import Settings, get_settings
 from app.errors import ApiDownError, FileMalformedError, QuotaExhaustedError
 from app.external.http import build_http_client
+from app.ingest.analytical_source import bind_analytical_source
 from app.ingest.patterns import load_patterns
 from app.ingest.service import load_raw_store_async
 from app.llm import get_llm_client_for
@@ -553,6 +554,7 @@ async def _run_semantic_stage(
     pending = [criteria_by_id[cid] for cid in semantic_criterion_ids if cid not in done_ids]
     if pending:
         extraction = await load_raw_store_async(settings, manuscript.id)
+        extraction = bind_analytical_source(extraction, manuscript.content_hash)
         try:
             await run_semantic_checks_with_consistency(
                 session,
@@ -660,6 +662,7 @@ async def _run_integrity_stage(
     extraction = None
     if None in (agreement_existing, citation_existing, forensics_existing, reuse_existing):
         extraction = await load_raw_store_async(settings, manuscript.id)
+        extraction = bind_analytical_source(extraction, manuscript.content_hash)
 
     if agreement_existing is None:
         agreement_result = await run_internal_agreement_check(

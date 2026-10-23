@@ -195,6 +195,7 @@ def _to_public_report(report: ReportOut) -> PublicReportOut:
         originality_scope=report.originality_scope,
         assessment_incomplete=bool(report.integrity_check_status),
         historical_citation_title_unverified=report.historical_citation_title_unverified,
+        historical_native_math_unverified=report.historical_native_math_unverified,
         semantic_support_unverified=report.historical_semantic_support_unverified,
     )
 

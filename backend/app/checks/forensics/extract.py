@@ -33,6 +33,7 @@ from typing import Literal
 from statcheck.extract_stats import extract_stats
 
 from app.checks.forensics.keywords import ForensicsKeywords, load_keywords
+from app.ingest.analytical_source import analytical_source
 from app.ingest.schemas import ExtractionResult, TableBlock, TextBlock
 
 _STAT_TYPES = ["t", "F", "r", "Chi2", "Z", "Q"]
@@ -272,8 +273,16 @@ def extract_descriptive_stats(
 
 
 def extract_all_stats(extraction: ExtractionResult) -> list[ReportedStat]:
-    body_blocks = [b for b in extraction.blocks if not b.is_furniture]
+    source = analytical_source(extraction)
+    body_blocks = [b for scope in source.scopes for b in scope if not b.is_furniture]
     return [
         *extract_inferential_stats(body_blocks),
-        *extract_descriptive_stats(extraction.tables),
+        *extract_descriptive_stats(
+            [
+                table
+                if any(table is safe for safe in source.tables)
+                else table.model_copy(update={"low_confidence": True})
+                for table in extraction.tables
+            ]
+        ),
     ]

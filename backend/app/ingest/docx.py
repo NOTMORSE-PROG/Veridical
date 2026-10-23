@@ -27,6 +27,7 @@ from docx.text.paragraph import Paragraph
 from app.config import Settings
 from app.errors import FileMalformedError, FileTooLargeError
 from app.ingest import sections
+from app.ingest.docx_math import inventory_native_math
 from app.ingest.docx_media import DocxMediaInventory
 from app.ingest.normalize import normalize
 from app.ingest.patterns import HeadingPatterns, load_patterns
@@ -122,6 +123,10 @@ def extract_document(path: str, settings: Settings) -> ExtractionResult:
     used_styles = False
     media = DocxMediaInventory(settings)
     omitted_image_occurrences = 0
+    native_math = inventory_native_math(document, source_sha256)
+    math_paragraphs = {
+        item.paragraph for item in native_math.containers if item.kind == "paragraph"
+    }
 
     for index, item in enumerate(document.iter_inner_content()):
         # Preserve table-cell drawings and empty image-only paragraphs, anchored
@@ -143,7 +148,9 @@ def extract_document(path: str, settings: Settings) -> ExtractionResult:
             continue
 
         text = normalize(item.text)
-        if not text:
+        if not text or index in math_paragraphs:
+            # Mixed prose is retained as separated source-display pieces in
+            # the inventory. It cannot become a false continuous sentence.
             continue
         bold_ratio, max_size = _run_typography(item)
         blocks.append(
@@ -164,7 +171,13 @@ def extract_document(path: str, settings: Settings) -> ExtractionResult:
             if _HEADING_STYLE.match(style_name) or style_name == _TITLE_STYLE:
                 used_styles = True
 
-    text_chars = sum(len(b.text) for b in blocks)
+    text_chars = sum(len(b.text) for b in blocks) + sum(
+        len(piece.text or "")
+        for container in native_math.containers
+        if container.kind == "paragraph"
+        for piece in container.pieces
+        if piece.kind == "text"
+    )
     if candidates:
         tree = SectionTree(
             source="styles" if used_styles else "heuristics",
@@ -184,6 +197,7 @@ def extract_document(path: str, settings: Settings) -> ExtractionResult:
         blocks=blocks,
         images=images,
         docx_source_sha256=source_sha256,
+        native_math_inventory=native_math,
         docx_omitted_image_occurrences=omitted_image_occurrences,
         tables=tables,
         geometry=_section_geometry(document),

@@ -62,7 +62,21 @@ def test_unknown_image_preserves_native_findings_but_not_a_clean_applicability_c
     with_image = _compute_forensics_findings(
         _extraction(text=text, images=[ImageBlock(page=1, bbox=(0, 0, 100, 100))])
     )
-    assert with_image.flag_drafts == baseline.flag_drafts
+    assert len(with_image.flag_drafts) == len(baseline.flag_drafts)
+    for actual, expected in zip(with_image.flag_drafts, baseline.flag_drafts, strict=True):
+        assert (actual.severity, actual.evidence_excerpt, actual.page_anchor) == (
+            expected.severity,
+            expected.evidence_excerpt,
+            expected.page_anchor,
+        )
+        assert {key: actual.detail[key] for key in expected.detail if key != "reason"} == {
+            key: value for key, value in expected.detail.items() if key != "reason"
+        }
+        # The robust error survives. Missing source also requires disclosure
+        # that either supported test-tail interpretation remains inconsistent.
+        assert actual.detail["reason"].startswith(expected.detail["reason"])
+        assert actual.detail["tail_context_complete"] is False
+        assert actual.detail["one_tailed_computed_p"] > 0
     assert with_image.image_coverage["n_images_unassessed"] == 1
     assert with_image.image_coverage["coverage_reason"] == "image_content_unassessed"
     assert with_image.outcome.value == "escalated"

@@ -375,25 +375,27 @@ def extract_statements(
 ) -> ExtractionOutcome:
     settings = settings or get_settings()
     cues = cues or load_cues(settings.agreement_cues_file)
-    blocks = _statement_blocks(extraction)
+    from app.ingest.analytical_source import analytical_source
 
-    statements = [
-        *_extract_list_statements(
-            blocks,
-            cues,
-            heading_max_words=settings.agreement_heading_max_words,
-            source_blocks=extraction.blocks,
-        ),
-        *_extract_modal_statements(
-            # Keep sentence context intact. Projected Title Case continuation
-            # lines are not independently proved headings, and may carry a
-            # scope/future-work guard that must never disappear from a sentence.
-            extraction.blocks,
-            cues,
-            cue_max_lead_words=settings.agreement_cue_max_lead_words,
-            heading_max_words=settings.agreement_heading_max_words,
-        ),
-    ]
+    statements = []
+    for scope in analytical_source(extraction).scopes:
+        scoped = extraction.model_copy(update={"blocks": list(scope)})
+        statements.extend(
+            _extract_list_statements(
+                _statement_blocks(scoped),
+                cues,
+                heading_max_words=settings.agreement_heading_max_words,
+                source_blocks=list(scope),
+            )
+        )
+        statements.extend(
+            _extract_modal_statements(
+                list(scope),
+                cues,
+                cue_max_lead_words=settings.agreement_cue_max_lead_words,
+                heading_max_words=settings.agreement_heading_max_words,
+            )
+        )
     threshold = settings.agreement_dedup_similarity_threshold
     # Deduped per-kind (not across the combined list) — an intent and an
     # outcome should never merge into each other even if their wording

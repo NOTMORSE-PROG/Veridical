@@ -24,6 +24,7 @@ from app.checks.source_quality import source_limitation_detail
 from app.checks.support import apply_support, check_support, context_limitation
 from app.config import Settings, get_settings
 from app.errors import VeridicalError
+from app.ingest.analytical_source import analytical_source
 from app.ingest.patterns import load_patterns
 from app.ingest.references import non_reference_blocks, select_references
 from app.ingest.schemas import ExtractionResult, SectionNode, TextBlock
@@ -34,7 +35,7 @@ from app.models.run import CheckResult
 PROMPT_TYPE = "semantic_grading"
 # v4 consumes reviewer stances and represents missing evidence as uncertainty.
 # Its new cache identity cannot reuse the earlier v3 judgment contract.
-PROMPT_VERSION = "v4"
+PROMPT_VERSION = "v5"
 _PROMPT_FILE = Path(__file__).parent / "prompts" / f"{PROMPT_TYPE}_{PROMPT_VERSION}.txt"
 _WHOLE_DOCUMENT_KEY = "__whole_document__"
 
@@ -58,9 +59,14 @@ class SemanticBatch:
     body_context: str | None = None
     reference_context: str | None = None
     scope_patterns_file: Path | None = None
+    source_scopes: tuple[tuple[TextBlock, ...], ...] | None = None
+    source_context: str | None = None
+    source_coverage: dict | None = None
 
     @property
     def context_text(self) -> str:
+        if self.source_context is not None:
+            return self.source_context
         return "\n".join(b.text for b in self.blocks if not b.is_furniture and b.text.strip())
 
 
@@ -112,12 +118,17 @@ def build_semantic_batches(
     patterns = load_patterns(settings.ingest_patterns_file)
     selected = select_references(extraction, patterns)
     body = non_reference_blocks(extraction, patterns, selection=selected, exclude_heading=True)
+    source = analytical_source(extraction)
+    scopes = source.scopes_for([b for b in extraction.blocks if not b.is_furniture])
     batch = SemanticBatch(
         "whole document",
-        [b for b in extraction.blocks if not b.is_furniture],
-        "\n".join(block.text for block in body) if not selected.issues and selected.span else None,
-        "\n".join(block.text for block in selected.span) if not selected.issues else None,
+        [b for scope in scopes for b in scope],
+        source.context(body) if not selected.issues and selected.span else None,
+        source.context(selected.span) if not selected.issues else None,
         settings.semantic_evidence_scope_patterns_file,
+        source_scopes=scopes,
+        source_context=source.context(extraction.blocks),
+        source_coverage=source.detail(),
     )
     return [
         (batch, eligible[start : start + size]) for start in range(0, len(eligible), size)
@@ -227,31 +238,37 @@ def _drop_claimed_quotes(
 
 
 def _verify_quotes(
-    quotes: list[str], blocks: list[TextBlock], anchor_kind: str
+    quotes: list[str],
+    blocks: list[TextBlock],
+    anchor_kind: str,
+    *,
+    scopes: tuple[tuple[TextBlock, ...], ...] | None = None,
 ) -> list[str] | None:
     """Reject the verdict if any quote is absent or its source location
     is missing or ambiguous. A supported page/paragraph is not a claim
     of an exact bounding box or of the quote's relevance to the criterion."""
-    full_text, spans = _normalized_layout(blocks, preserve_case=True)
-    folded_layout = None
+    source_scopes = scopes if scopes is not None else (tuple(blocks),)
+    layouts = [_normalized_layout(list(scope), preserve_case=True) for scope in source_scopes]
+    folded_layouts = None
     anchors = []
     for quote in quotes:
         normalized_quote = _WHITESPACE.sub(" ", quote).strip()
         if not normalized_quote:
             return None
-        source_text, source_spans = full_text, spans
-        if normalized_quote not in source_text:
+        source_layouts = layouts
+        if not any(normalized_quote in text for text, _spans in source_layouts):
             # Retain case-insensitive compatibility only when it identifies
             # one supported location. Exact source spelling takes precedence.
-            if folded_layout is None:
-                folded_layout = _normalized_layout(blocks)
-            source_text, source_spans = folded_layout
+            if folded_layouts is None:
+                folded_layouts = [_normalized_layout(list(scope)) for scope in source_scopes]
+            source_layouts = folded_layouts
             normalized_quote = normalized_quote.lower()
         locations: set[str | None] = set()
-        pos = source_text.find(normalized_quote)
-        while pos != -1:
-            locations.add(_anchor_at_position(pos, source_spans, anchor_kind))
-            pos = source_text.find(normalized_quote, pos + 1)
+        for source_text, source_spans in source_layouts:
+            pos = source_text.find(normalized_quote)
+            while pos != -1:
+                locations.add(_anchor_at_position(pos, source_spans, anchor_kind))
+                pos = source_text.find(normalized_quote, pos + 1)
         # Multiple occurrences on the same page support a page-only anchor,
         # not an exact rectangle. Never choose between different locations.
         if len(locations) != 1 or None in locations:
@@ -373,7 +390,9 @@ async def _grade_single_criterion(
     verdict = next((v for v in parsed.verdicts if v.index == 0), None)
     if verdict is None:
         return None
-    anchors = _verify_quotes(verdict.evidence_quotes, batch.blocks, anchor_kind)
+    anchors = _verify_quotes(
+        verdict.evidence_quotes, batch.blocks, anchor_kind, scopes=batch.source_scopes
+    )
     return verdict, anchors
 
 
@@ -494,7 +513,11 @@ async def grade_batch_verdicts(
             )
             continue
         quotes = verdict.evidence_quotes if verdict else None
-        anchors = _verify_quotes(quotes, batch.blocks, anchor_kind) if quotes else None
+        anchors = (
+            _verify_quotes(quotes, batch.blocks, anchor_kind, scopes=batch.source_scopes)
+            if quotes
+            else None
+        )
         if anchors is not None:
             quotes, anchors = _drop_claimed_quotes(quotes, anchors, claimed_quotes)
             if not quotes:
@@ -656,6 +679,7 @@ async def _grade_batch(
         g = graded[criterion.id]
         if g.verdict is None:
             escalated_detail: dict[str, Any] = {
+                "source_coverage": batch.source_coverage,
                 "basis": "llm",
                 "reason": g.escalation_reason,
                 "prompt_version": PROMPT_VERSION,
@@ -682,6 +706,7 @@ async def _grade_batch(
                     criterion,
                     ResultOutcome.escalated,
                     {
+                        "source_coverage": batch.source_coverage,
                         "basis": "llm",
                         "reason": (
                             f"The grading response used an unrecognized verdict "
@@ -693,6 +718,7 @@ async def _grade_batch(
             )
             continue
         detail: dict[str, Any] = {
+            "source_coverage": batch.source_coverage,
             "score": score,
             "basis": "llm",
             "verdict": g.verdict,

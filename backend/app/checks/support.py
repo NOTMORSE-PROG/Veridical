@@ -12,8 +12,8 @@ from app.checks.levels import match_level
 from app.models.enums import ResultOutcome
 
 PROMPT_TYPE = "semantic_support"
-PROMPT_VERSION = "v1"
-SOURCE_SCOPE_POLICY_VERSION = "source_obligations_v2"
+PROMPT_VERSION = "v2"
+SOURCE_SCOPE_POLICY_VERSION = "source_obligations_v3_native_scopes"
 _PROMPT = Path(__file__).parent / "prompts" / f"{PROMPT_TYPE}_{PROMPT_VERSION}.txt"
 SupportStatus = Literal["supported", "unsupported", "uncertain"]
 
@@ -34,6 +34,17 @@ class SupportItem(BaseModel):
 
 
 def context_limitation(batch: Any, settings: Any) -> dict[str, Any] | None:
+    if getattr(batch, "source_scopes", None) == ():
+        return {
+            "basis": "source-coverage",
+            "reason": (
+                "The retained source does not establish safe readable input for this criterion. "
+                "Native Word equation coverage is unavailable or affected containers "
+                "were excluded. "
+                "Review the original manuscript; no rubric rating was assigned."
+            ),
+            "source_coverage": getattr(batch, "source_coverage", None),
+        }
     if len(batch.context_text) <= settings.semantic_context_max_chars:
         return None
     return {
@@ -152,7 +163,12 @@ async def check_support(
                 ],
             }
         )
-    task = {"items": items, "source_scope": batch.label, "source_text": batch.context_text}
+    task = {
+        "items": items,
+        "source_scope": batch.label,
+        "source_text": batch.context_text,
+        "source_coverage": getattr(batch, "source_coverage", None),
+    }
     # One replacement prevents source strings resembling template slots from
     # being interpolated. JSON escaping keeps supplied data structurally separate.
     prompt = _PROMPT.read_text(encoding="utf-8").replace(

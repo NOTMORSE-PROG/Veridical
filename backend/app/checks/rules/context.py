@@ -9,6 +9,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.checks.rules import RuleContext
 from app.checks.rules.reference_inventory import measure_reference_inventory
 from app.config import Settings, get_settings
+from app.ingest.analytical_source import (
+    analytical_source,
+    bind_analytical_source,
+    section_order_source_complete,
+)
 from app.ingest.patterns import load_patterns
 from app.ingest.service import load_raw_store_async
 from app.models.citation import Citation
@@ -20,6 +25,8 @@ async def build_rule_context(
 ) -> RuleContext:
     settings = settings or get_settings()
     extraction = await load_raw_store_async(settings, manuscript.id)
+    extraction = bind_analytical_source(extraction, manuscript.content_hash)
+    native_source = analytical_source(extraction)
     citations = (
         (
             await session.execute(
@@ -46,5 +53,17 @@ async def build_rule_context(
         table_caption_min_ratio=settings.structural_table_caption_min_ratio,
         reference_inventory=measure_reference_inventory(
             extraction, list(citations), load_patterns(settings.ingest_patterns_file)
+        ),
+        section_order_source_complete=section_order_source_complete(extraction),
+        native_math_source_detail=analytical_source(extraction).detail(),
+        source_identity_verified=(
+            extraction.anchor_kind != "paragraph"
+            or bool(
+                manuscript.content_hash and extraction.docx_source_sha256 == manuscript.content_hash
+            )
+        ),
+        section_order_witnesses_verified=(
+            native_source.state in {"complete", "not_applicable"}
+            and not native_source.unlocated_occurrences
         ),
     )

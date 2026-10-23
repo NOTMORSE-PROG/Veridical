@@ -225,7 +225,8 @@ async def _ingest_manuscript(
     try:
         # Dispatch by sniffed content (extensions lie) — inside the stage
         # boundary so an unreadable file leaves the row `failed`, not stuck.
-        extractor = select_extractor(detect_format(file_path))
+        source_format = detect_format(file_path)
+        extractor = select_extractor(source_format)
         # BUG-180: `ingest_max_pages`/`max_docx_uncompressed_mb` are the
         # fix that actually bounds the work (checked before it starts);
         # this timeout is a second, independent backstop for the case
@@ -242,6 +243,10 @@ async def _ingest_manuscript(
             )
         except TimeoutError as exc:
             raise FileTooLargeError(messages.EXTRACTION_TIMED_OUT) from exc
+        # Only the fresh sniffed DOCX parser supplies this witness. Stage it
+        # locally until finalization; optional consumers may commit their own
+        # bookkeeping before ingestion is ready to publish its terminal row.
+        fresh_docx_hash = result.docx_source_sha256 if source_format == ".docx" else None
         # Separate optional CPU process, with its own bounds and native-source
         # mappings. It cannot erase an unresolved reading-order record.
         result = await preparation_lease.run(
@@ -292,7 +297,7 @@ async def _ingest_manuscript(
                     llm,
                     patterns,
                     settings,
-                    source_hash=manuscript.content_hash,
+                    source_hash=manuscript.content_hash or fresh_docx_hash,
                     preparation_lease=preparation_lease,
                 )
             except (LLMNotConfiguredError, ApiDownError, QuotaExhaustedError, InvalidApiKeyError):
@@ -312,6 +317,11 @@ async def _ingest_manuscript(
         )
         # Citation replacement and the terminal state are one transaction.
         finalizing = True
+        # Explicit fresh ingestion may enter below the upload boundary. Never
+        # replace an existing identity, including a mismatch, or infer one from
+        # an older raw-store read. Roll back this assignment with finalization.
+        if manuscript.content_hash is None and fresh_docx_hash:
+            manuscript.content_hash = fresh_docx_hash
         await session.execute(delete(Citation).where(Citation.manuscript_id == manuscript_id))
         session.add_all(Citation(manuscript_id=manuscript_id, **asdict(draft)) for draft in drafts)
         manuscript.section_tree = result.section_tree.model_dump()

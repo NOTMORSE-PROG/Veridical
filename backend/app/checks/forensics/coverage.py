@@ -3,10 +3,12 @@
 from collections import Counter
 
 from app.checks.forensics.extract import ReportedStat, table_statistical_cells_complete
+from app.ingest.analytical_source import analytical_source
 from app.ingest.schemas import ExtractionResult
 
 
 def image_coverage(extraction: ExtractionResult, stats: list[ReportedStat]) -> dict:
+    native_source = analytical_source(extraction)
     readings = extraction.image_readings or []
     ledger_valid = extraction.image_reading_version == "v1" and [
         row.image_index for row in readings
@@ -73,6 +75,7 @@ def image_coverage(extraction: ExtractionResult, stats: list[ReportedStat]) -> d
         or recovered_tables
     )
     return {
+        **native_source.detail(),
         "image_coverage_version": "v1",
         "n_image_occurrences": len(extraction.images),
         "n_image_readings_attempted": sum(row.attempted for row in readings) if ledger_valid else 0,
@@ -94,6 +97,21 @@ def image_coverage(extraction: ExtractionResult, stats: list[ReportedStat]) -> d
                 "analysis_coverage": "partial" if stats else "unsupported",
             }
             if incomplete
+            else {}
+        ),
+        **(
+            {
+                "coverage_reason": "image_content_unassessed"
+                if incomplete
+                else (
+                    "native_math_unassessed"
+                    if native_source.inventory is not None
+                    else "native_math_inventory_unavailable"
+                ),
+                "assessment_scope": "available_text_and_tables",
+                "analysis_coverage": "partial" if stats else "unsupported",
+            }
+            if native_source.limited
             else {}
         ),
     }

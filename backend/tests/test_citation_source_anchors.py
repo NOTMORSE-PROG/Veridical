@@ -9,6 +9,7 @@ from app.ingest.references import reference_entry_locations
 from app.ingest.schemas import ExtractionResult, SectionTree, TextBlock
 from app.models.enums import FlagSeverity, ResultOutcome
 from app.models.run import Flag
+from tests.native_math_fixtures import record_empty_native_inventory
 from tests.test_citations_partial_source import persisted, run
 
 
@@ -21,23 +22,25 @@ def manuscript(anchor_kind="page", *, numbered=False):
         ("[1] " if numbered else "") + "Reyes, J. (2023). An earlier study. Example Journal.",
         ("[2] " if numbered else "") + "Cruz, A. (2024). A different study. Example Journal.",
     ]
-    return ExtractionResult(
-        page_count=4 if anchor_kind == "page" else 1,
-        anchor_kind=anchor_kind,
-        image_only=False,
-        text_chars=sum(map(len, texts)),
-        section_tree=SectionTree(source="none", nodes=[]),
-        blocks=[
-            TextBlock(
-                text=text,
-                page=page if anchor_kind == "page" else None,
-                paragraph=paragraph if anchor_kind == "paragraph" else None,
-                max_font_size=11,
-                bold_ratio=0,
-            )
-            for text, page, paragraph in zip(texts, [1, 2, 3, 4], [3, 8, 10, 14], strict=True)
-        ],
-        images=[],
+    return record_empty_native_inventory(
+        ExtractionResult(
+            page_count=4 if anchor_kind == "page" else 1,
+            anchor_kind=anchor_kind,
+            image_only=False,
+            text_chars=sum(map(len, texts)),
+            section_tree=SectionTree(source="none", nodes=[]),
+            blocks=[
+                TextBlock(
+                    text=text,
+                    page=page if anchor_kind == "page" else None,
+                    paragraph=paragraph if anchor_kind == "paragraph" else None,
+                    max_font_size=11,
+                    bold_ratio=0,
+                )
+                for text, page, paragraph in zip(texts, [1, 2, 3, 4], [3, 8, 10, 14], strict=True)
+            ],
+            images=[],
+        )
     )
 
 

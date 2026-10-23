@@ -22,6 +22,7 @@ from app.checks.reuse.store import store_document_embeddings, store_passage_embe
 from app.config import get_settings
 from app.db import sqlalchemy_url
 from app.ingest.schemas import ExtractionResult, SectionNode, SectionTree, TextBlock
+from app.ingest.service import _write_raw_store, raw_store_path
 from app.models.enums import LibraryEntrySource, LibraryEntryStatus
 from app.models.instructor import Instructor
 from app.models.library import LibraryEntry
@@ -46,6 +47,15 @@ BODY_2 = (
     "combining deterministic checks with confidence-based escalation to the "
     "instructor."
 )
+
+
+@pytest.fixture(autouse=True)
+def _private_source_data(tmp_path, monkeypatch):
+    monkeypatch.setenv("DATA_DIR", str(tmp_path / "comparison-data"))
+    monkeypatch.setenv("STORAGE_BACKEND", "local")
+    get_settings.cache_clear()
+    yield
+    get_settings.cache_clear()
 
 
 @pytest.fixture(scope="module")
@@ -136,6 +146,7 @@ async def _manuscript(session_factory, instructor_id: int, *, content_hash: str 
 async def _library_entry(session_factory, manuscript_id: int) -> None:
     settings = get_settings()
     extraction = _extraction()
+    _write_raw_store(extraction, raw_store_path(settings, manuscript_id))
     async with session_factory() as session:
         await store_document_embeddings(
             session, manuscript_id, compute_document_embeddings(extraction, settings)
@@ -193,6 +204,7 @@ async def test_byte_identical_library_copies_are_reported_as_one_source(session_
 
     checker = await _instructor(session_factory)
     checked_id = await _manuscript(session_factory, checker, content_hash=None)
+    _write_raw_store(_extraction(), raw_store_path(get_settings(), checked_id))
     run_id = await _check_run(session_factory, checked_id, checker)
     async with session_factory() as session:
         result = await run_originality_reuse_check(
@@ -240,6 +252,7 @@ async def test_the_requesters_own_identical_copy_is_preferred(session_factory):
     await _library_entry(session_factory, own_id)
 
     checked_id = await _manuscript(session_factory, checker, content_hash=None)
+    _write_raw_store(_extraction(), raw_store_path(get_settings(), checked_id))
     run_id = await _check_run(session_factory, checked_id, checker)
     async with session_factory() as session:
         result = await run_originality_reuse_check(

@@ -60,6 +60,7 @@ from app.db import advisory_lock
 from app.errors import ConflictError, GoneError, NotFoundError, VeridicalError
 from app.groups.service import DEFAULT_GROUP_LABEL, UNSET_PROGRAM_FILTER
 from app.ingest.admission import PreparationLease, preparation_scope
+from app.ingest.analytical_source import bind_analytical_source
 from app.ingest.patterns import load_patterns
 from app.ingest.schemas import ExtractionResult
 from app.ingest.service import (
@@ -847,7 +848,11 @@ async def _submit_library_entry(
     # cannot undo a concurrent removal, and the guarded transitions below can
     # re-read the entry without losing the title-page proposals.
     await session.commit()
-    document, passages = await _embed(result, settings, preparation_lease=preparation_lease)
+    document, passages = await _embed(
+        bind_analytical_source(result, manuscript.content_hash),
+        settings,
+        preparation_lease=preparation_lease,
+    )
     if document.whole_document is None:
         return await _fail(
             session,
@@ -1003,7 +1008,9 @@ async def decide_library_entry(
     # Activation acquires advisory before UPDATE and revalidates expected state.
     # Release this read-only SHARE transaction before that mutation boundary.
     await session.commit()
-    document, passages = await _embed(result, settings)
+    document, passages = await _embed(
+        bind_analytical_source(result, manuscript.content_hash), settings
+    )
     if document.whole_document is None:
         raise ConflictError(messages.LIBRARY_SOURCE_MISSING)
     if not await _activate(

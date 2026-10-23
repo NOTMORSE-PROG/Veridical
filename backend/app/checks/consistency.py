@@ -389,6 +389,8 @@ async def vote_batch(
             vote.majority_verdict, vote.agreement, settings, criterion=criterion
         )
         detail = _vote_detail(batch, vote, shadow_detail)
+        if batch.source_coverage is not None:
+            detail["source_coverage"] = batch.source_coverage
         if vote.majority_verdict is not None:
             # V-069: `gate_vote` already confirmed this verdict decides
             # something -- re-deriving it here (rather than having

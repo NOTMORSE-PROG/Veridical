@@ -56,6 +56,7 @@ from app.external import gbooks as gbooks_client
 from app.external import openlibrary as openlibrary_client
 from app.external import s2 as s2_client
 from app.external.schemas import VerificationResult
+from app.ingest.analytical_source import analytical_source
 from app.ingest.patterns import HeadingPatterns
 from app.ingest.reference_inventory import (
     reference_row_binding_issues,
@@ -490,6 +491,7 @@ async def run_citation_integrity_check(
     settings: Settings,
     llm: LLMClient | None = None,
 ) -> CheckResult:
+    native_source = analytical_source(extraction)
     source_limit = source_limitation_detail(extraction)
     selection = select_references(extraction, patterns)
     inventory_issues: list[str] = []
@@ -532,6 +534,7 @@ async def run_citation_integrity_check(
     }
     if projection_reason:
         detail = {
+            **native_source.detail(),
             **inventory_detail,
             "analysis_coverage": "unsupported",
             "coverage_reason": projection_reason,
@@ -604,6 +607,7 @@ async def run_citation_integrity_check(
     body_blocks = (
         [] if metadata_only or projection_reason else non_reference_blocks(extraction, patterns)
     )
+    body_blocks = [block for scope in native_source.scopes_for(body_blocks) for block in scope]
     gaps: set[str] = set()
     in_text = extract_in_text_citations(body_blocks, settings=settings, coverage_gaps=gaps)
     cross = cross_match(in_text, citations)
@@ -621,39 +625,31 @@ async def run_citation_integrity_check(
         absence_candidates, identity_unassessed, identifier_leads = guarded_absence_candidates(
             absence_candidates, citations, body_blocks, settings
         )
+    native_absence_unassessed = (
+        {ref.order_index for ref in absence_candidates} if native_source.limited else set()
+    )
     # No supported body style or a partial scan cannot prove a reference unused.
     if (
         metadata_only
+        or native_source.limited
         or projection_reason
         or gaps
         or selection.issues
         or (not numbered and not cross.linked)
     ):
         absence_candidates = []
-    linkage_unassessed = (
-        len(numeric.absence_unassessed_references)
+    unassessed_indexes = (
+        {ref.order_index for ref in numeric.absence_unassessed_references}
         if numbered
-        else len(
-            {
-                ref.order_index
-                for ref in (cross.possibly_cited + (cross.uncited if not cross.linked else []))
-            }
-        )
-    )
+        else identity_unassessed
+        | {
+            ref.order_index
+            for ref in (cross.possibly_cited + (cross.uncited if not cross.linked else []))
+        }
+    ) | native_absence_unassessed
     if metadata_only or projection_reason or gaps or selection.issues:
-        linkage_unassessed = max(linkage_unassessed, len(citations))
-    if not numbered:
-        linkage_unassessed = (
-            len(
-                identity_unassessed
-                | {
-                    ref.order_index
-                    for ref in (cross.possibly_cited + (cross.uncited if not cross.linked else []))
-                }
-            )
-            if not (metadata_only or projection_reason or gaps or selection.issues)
-            else len(citations)
-        )
+        unassessed_indexes = {ref.order_index for ref in citations}
+    linkage_unassessed = len(unassessed_indexes)
     metadata_unassessed = set()
     comparison_unassessed = False
     metadata_api_down = 0
@@ -934,6 +930,8 @@ async def run_citation_integrity_check(
         if metadata_only
         else "reference_list_unavailable"
         if selection.issues or not citations
+        else "native_math_citation_incomplete"
+        if native_source.limited
         else "metadata_comparison_policy_unavailable"
         if policy_unavailable
         else "citation_metadata_comparison_unassessed"
@@ -969,7 +967,22 @@ async def run_citation_integrity_check(
         kind=CheckKind.citation_integrity,
         outcome=outcome,
         detail={
+            **native_source.detail(),
             **inventory_detail,
+            **(
+                {
+                    "analysis_coverage": "partial"
+                    if body_blocks
+                    or any(record["lookup_attempted"] for record in verification_records)
+                    else "unsupported",
+                    "assessment_scope": "available_text_and_reference_metadata",
+                    "n_reference_metadata_attempted": sum(
+                        record["lookup_attempted"] for record in verification_records
+                    ),
+                }
+                if native_source.limited
+                else {}
+            ),
             **(
                 {
                     "analysis_coverage": "partial"

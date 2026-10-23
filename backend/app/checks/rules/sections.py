@@ -95,6 +95,18 @@ def _node_anchor(node: SectionNode) -> str:
 
 
 def _run_required_section(criterion, ctx: RuleContext) -> RuleOutcome:
+    if not ctx.section_order_witnesses_verified:
+        return RuleOutcome(
+            outcome=ResultOutcome.unverifiable,
+            anchor="document",
+            detail={
+                "reason": (
+                    "The retained Word source does not establish a verified heading inventory. "
+                    "Review the original manuscript; section presence has not been rated."
+                ),
+                "source_coverage": ctx.native_math_source_detail,
+            },
+        )
     target = identify_target_section(criterion)
     if target is None:
         return RuleOutcome(
@@ -150,10 +162,26 @@ def _numeric_prefix(numbering: str | None) -> float | None:
 
 
 def _run_section_order(criterion, ctx: RuleContext) -> RuleOutcome:
+    source_limit = RuleOutcome(
+        outcome=ResultOutcome.unverifiable,
+        anchor="document",
+        detail={
+            "reason": (
+                "The available heading tree may omit content affected by native Word equations. "
+                "It cannot establish the order of all top-level sections. Review the original "
+                "manuscript; no rating was assigned for section order."
+            ),
+            "source_coverage": ctx.native_math_source_detail,
+        },
+    )
+    if not ctx.section_order_witnesses_verified:
+        return source_limit
     top_level = [n for n in ctx.section_tree.nodes if n.level == 1]
     numbered = [(n, _numeric_prefix(n.numbering)) for n in top_level]
     numbered = [(n, v) for n, v in numbered if v is not None]
     if len(numbered) < 2:
+        if not ctx.section_order_source_complete:
+            return source_limit
         return RuleOutcome(
             outcome=ResultOutcome.not_applicable,
             anchor="document",
@@ -173,6 +201,8 @@ def _run_section_order(criterion, ctx: RuleContext) -> RuleOutcome:
                 },
             )
         prev_node, prev_value = node, value
+    if not ctx.section_order_source_complete:
+        return source_limit
     return RuleOutcome(
         outcome=ResultOutcome.passed,
         anchor="document",

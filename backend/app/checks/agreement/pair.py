@@ -293,6 +293,7 @@ async def run_agreement_pairing(
     *,
     check_run_id: int | None,
     settings: Settings,
+    allow_absence_leads: bool = True,
 ) -> PairingResult:
     """Returns flags + the unmatched-outcome count (info-level, never a
     flag — ticket AC) + how many candidate pairs were skipped for quota
@@ -317,7 +318,11 @@ async def run_agreement_pairing(
         ),
     )
 
-    flags = [_unmatched_intent_flag(intent) for intent in unmatched_intents]
+    flags = (
+        [_unmatched_intent_flag(intent) for intent in unmatched_intents]
+        if allow_absence_leads
+        else []
+    )
     n_quota = n_api_down = n_parse_failure = 0
 
     chunk_size = max(1, settings.agreement_pairing_max_pairs_per_call)

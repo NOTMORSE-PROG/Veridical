@@ -5,6 +5,7 @@ import type { DocumentImageOut, DocumentTableOut } from "../api/types";
 import { Button } from "../ui/Button";
 import { Modal, ModalBackdrop } from "../components/Modal";
 import { FigureReadingDetails } from "../report/FigureReadings";
+import { NativeMathPieces } from "./NativeMathSource";
 
 const UNAVAILABLE: Record<string, string> = {
   unsupported_drawing: "This drawing cannot be displayed in the reconstructed view.",
@@ -111,17 +112,34 @@ export function DocxSourceMedia({ tables, images, imageBasePath, isVisible }: {
   isVisible: boolean;
 }) {
   return <>
-    {tables.map((table, index) => (
+    {tables.map((table, index) => {
+      const nativeByCoordinate = new Map<string, NonNullable<DocumentTableOut["native_cells"]>[number]>();
+      for (const cell of table.native_cells ?? []) {
+        for (const [row, column] of cell.display_coordinates) {
+          const coordinate = `${row}:${column}`;
+          if (!nativeByCoordinate.has(coordinate)) nativeByCoordinate.set(coordinate, cell);
+        }
+      }
+      return (
       <div key={index} className="signal-docx-source-table" role="region" tabIndex={0}
         aria-label={`Table at extracted paragraph ${table.paragraph + 1}, scrollable`}>
         <table>
           <caption>Source table · Extracted paragraph {table.paragraph + 1}</caption>
           <tbody>{table.rows.map((row, rowIndex) => <tr key={rowIndex}>
-            {row.map((cell, cellIndex) => <td key={cellIndex}>{cell}</td>)}
+            {row.map((cell, cellIndex) => {
+              const native = nativeByCoordinate.get(`${rowIndex}:${cellIndex}`);
+              return <td key={cellIndex}>{native ? <NativeMathPieces pieces={native.pieces} /> : cell}</td>;
+            })}
           </tr>)}</tbody>
         </table>
+        {table.native_cells?.filter((cell) => cell.display_coordinates.length === 0).map((cell, cellIndex) =>
+          <div key={cellIndex} className="signal-document-reconstruction-note">
+            <p>Native Word equation in a nested table cell. Its cell location in this reconstruction is unavailable.</p>
+            <p><NativeMathPieces pieces={cell.pieces} /></p>
+          </div>)}
       </div>
-    ))}
+      );
+    })}
     {images.map((image) => <SourceImage key={`${imageBasePath}/${image.image_index}`}
       image={image} basePath={imageBasePath} isVisible={isVisible} />)}
   </>;

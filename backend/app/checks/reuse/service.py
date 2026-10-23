@@ -29,9 +29,11 @@ from app.checks.reuse.query import (
     query_similar_passages,
     same_instructor_hash_duplicate,
 )
+from app.checks.reuse.source import coarse_candidate_supported, passage_match_supported
 from app.checks.source_quality import persist_source_limitation
 from app.config import Settings
 from app.findings.policy import reuse_reason
+from app.ingest.analytical_source import analytical_source
 from app.ingest.schemas import ExtractionResult
 from app.models.enums import CheckKind, FlagSeverity, ResultOutcome
 from app.models.run import CheckResult, Flag
@@ -321,6 +323,7 @@ async def run_originality_reuse_check(
     )
     if source_stop is not None:
         return source_stop
+    source = analytical_source(extraction)
     # BUG-152: off the event loop -- this runs the local model2vec encoder
     # over every chapter plus the whole document, real CPU work with no
     # I/O, on the single Render worker that also serves every other
@@ -346,8 +349,16 @@ async def run_originality_reuse_check(
             check_run_id=check_run_id,
             criterion_id=None,
             kind=CheckKind.originality_reuse,
-            outcome=ResultOutcome.passed if has_resubmission else ResultOutcome.not_applicable,
+            outcome=ResultOutcome.escalated
+            if source.limited
+            else (ResultOutcome.passed if has_resubmission else ResultOutcome.not_applicable),
             detail={
+                **source.detail(),
+                **(
+                    {"coverage_reason": "native_math_comparison_incomplete"}
+                    if source.limited
+                    else {}
+                ),
                 # backend review finding (BUG-140 review): 0 alongside a
                 # real flag read as internally inconsistent -- the
                 # embedding-based archive comparison never ran (nothing to
@@ -430,6 +441,34 @@ async def run_originality_reuse_check(
             passage_query_result,
             matches=[_remap(p, remapped) for p in passage_query_result.matches],
         )
+        # A canonical identical-byte copy may retain an older extraction.
+        # Revalidate the selected representative instead of transferring
+        # source-projection authority merely because the file hash matches.
+        source_cache = {}
+        supported_coarse = []
+        for match in query_result.matches:
+            if await coarse_candidate_supported(
+                session, match.matched_manuscript_id, settings, source_cache
+            ):
+                supported_coarse.append(match)
+        query_result = dataclasses.replace(
+            query_result,
+            matches=supported_coarse,
+            n_source_candidates_withheld=query_result.n_source_candidates_withheld
+            + len(query_result.matches)
+            - len(supported_coarse),
+        )
+        supported_passages = []
+        for match in passage_query_result.matches:
+            if await passage_match_supported(session, manuscript_id, match, settings, source_cache):
+                supported_passages.append(match)
+        passage_query_result = dataclasses.replace(
+            passage_query_result,
+            matches=supported_passages,
+            n_source_candidates_withheld=passage_query_result.n_source_candidates_withheld
+            + len(passage_query_result.matches)
+            - len(supported_passages),
+        )
     # BUG-097 (presentation-only remedy): computed once, applied to every
     # match this run produces — see `is_first_upload_for_instructor`'s own
     # docstring for why this changes wording/context only, never severity.
@@ -477,14 +516,25 @@ async def run_originality_reuse_check(
         and passage_query_result.passage_archive_size_n == 0
         and n_flags == 0
     )
+    withheld = (
+        query_result.n_source_candidates_withheld
+        + passage_query_result.n_source_candidates_withheld
+    )
+    native_limited = source.limited or bool(withheld)
 
     result = CheckResult(
         check_run_id=check_run_id,
         criterion_id=None,
         kind=CheckKind.originality_reuse,
-        outcome=ResultOutcome.not_applicable if no_comparisons else ResultOutcome.passed,
+        outcome=ResultOutcome.escalated
+        if native_limited
+        else (ResultOutcome.not_applicable if no_comparisons else ResultOutcome.passed),
         detail={
-            "coverage_reason": "no_comparison_archive" if no_comparisons else None,
+            **source.detail(),
+            "n_source_candidates_withheld": withheld,
+            "coverage_reason": "native_math_comparison_incomplete"
+            if native_limited
+            else ("no_comparison_archive" if no_comparisons else None),
             "comparison_ran": True,
             "archive_size_n": query_result.archive_size_n,
             # V-077: what this count measured. Results written before D-028

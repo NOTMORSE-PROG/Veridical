@@ -980,8 +980,18 @@ def build_report_pdf(data: ReportExportData) -> bytes:
         flow.append(Spacer(1, 6))
 
     # 4. Flags.
-    if report.integrity_check_status or report.historical_citation_title_unverified:
+    if (
+        report.integrity_check_status
+        or report.historical_citation_title_unverified
+        or report.historical_native_math_unverified
+    ):
         flow.append(Paragraph("Assessment limits", styles["h2"]))
+        if report.historical_native_math_unverified:
+            flow.append(
+                Paragraph(
+                    escape(_coverage_labels()["historical_native_math_unverified"]), styles["body"]
+                )
+            )
         if report.historical_citation_title_unverified:
             flow.append(
                 Paragraph(
@@ -1007,12 +1017,13 @@ def build_report_pdf(data: ReportExportData) -> bytes:
             elif coverage.assessment_scope == "available_text_and_tables":
                 reason = (
                     "Partially assessed. Statistical statements were extracted from readable "
-                    "text or tables. Some image content remains unassessed. "
+                    "text or tables. Some source content remains unassessed. "
                     "This limit is not a statistical error"
                     if coverage.analysis_coverage == "partial"
                     else "Not assessed. No supported statistical statements were found in "
-                    "readable text and tables. Unassessed images may contain information "
-                    "this check missed"
+                    "the text and tables used by this check. Unassessed source content may "
+                    "contain information this check missed. This does not mean the manuscript "
+                    "contains no statistics"
                 )
             elif coverage.analysis_coverage == "unsupported":
                 reason = (
@@ -1020,6 +1031,11 @@ def build_report_pdf(data: ReportExportData) -> bytes:
                     "No conclusion was made"
                 )
             counts = []
+            if coverage.n_source_candidates_withheld:
+                counts.append(
+                    f"{coverage.n_source_candidates_withheld} selected comparison candidates "
+                    "were withheld because their source could not be verified"
+                )
             if coverage.assessment_scope == "reference_metadata_only":
                 counts.append(
                     f"{coverage.n_reference_metadata_attempted} reference checks attempted"
@@ -1065,6 +1081,29 @@ def build_report_pdf(data: ReportExportData) -> bytes:
                 counts.append(
                     f"{coverage.n_equations_unassessed} {noun} transcribed but not evaluated"
                 )
+            if coverage.n_native_equations_unassessed:
+                noun = (
+                    "occurrence remains"
+                    if coverage.n_native_equations_unassessed == 1
+                    else "occurrences remain"
+                )
+                counts.append(
+                    f"{coverage.n_native_equations_unassessed} native Word equation "
+                    f"{noun} unassessed"
+                )
+                counts.append(
+                    "Native inventory scope: main document body; "
+                    "other package parts are not established"
+                )
+            elif coverage.native_math_inventory_state in {"not_recorded", "unavailable"}:
+                counts.append(
+                    "Native Word equation presence and count are unknown; this record does not "
+                    "establish that native equations were checked"
+                )
+            if coverage.native_math_excluded_paragraphs:
+                counts.append(
+                    "Text and table content affected by native Word equations was excluded"
+                )
             if coverage.n_recovery_figures_unassessed or coverage.n_recovery_tables_unassessed:
                 counts.append(
                     f"{coverage.n_recovery_figures_unassessed} figure and "
@@ -1072,6 +1111,22 @@ def build_report_pdf(data: ReportExportData) -> bytes:
                 )
             text = f"{label}: {reason}. " + "; ".join(counts)
             flow.append(Paragraph(escape(text), styles["body"]))
+            for item in coverage.native_math_coverage_items:
+                anchor = (
+                    f"Extracted paragraph {item.paragraph + 1}"
+                    if item.paragraph is not None
+                    else "Source location unavailable"
+                )
+                noun = "occurrence" if item.n_occurrences == 1 else "occurrences"
+                flow.append(
+                    Paragraph(
+                        escape(
+                            f"{anchor}: Native Word equations unassessed "
+                            f"({item.n_occurrences} {noun})."
+                        ),
+                        styles["caption"],
+                    )
+                )
             image_locations = {}
             for item in coverage.image_coverage_items:
                 anchor = (

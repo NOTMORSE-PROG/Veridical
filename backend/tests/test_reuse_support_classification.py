@@ -9,6 +9,8 @@ from app.checks.reuse.query import best_supporting_passage
 from app.checks.reuse.service import _supporting_passage_detail
 from app.config import get_settings
 from app.flags.service import _passage_pair_from_detail
+from app.ingest.schemas import ExtractionResult, SectionTree
+from app.models.manuscript import Manuscript
 
 
 @pytest.mark.parametrize(
@@ -21,7 +23,9 @@ from app.flags.service import _passage_pair_from_detail
         (0.95, "exact_duplicate"),
     ],
 )
-async def test_actual_scoped_factory_preserves_threshold_classification(similarity, level):
+async def test_actual_scoped_factory_preserves_threshold_classification(
+    similarity, level, monkeypatch
+):
     settings = get_settings().model_copy(
         update={
             "reuse_passage_high_similarity_threshold": 0.75,
@@ -41,6 +45,19 @@ async def test_actual_scoped_factory_preserves_threshold_classification(similari
         is_block_quote=False,
     )
 
+    async def read_pdf(*args):
+        return ExtractionResult(
+            page_count=1,
+            anchor_kind="page",
+            image_only=False,
+            text_chars=0,
+            blocks=[],
+            images=[],
+            section_tree=SectionTree(source="none", nodes=[]),
+        )
+
+    monkeypatch.setattr("app.checks.reuse.source.read_source", read_pdf)
+
     class Row:
         instructor_id = 8
         group_label = "Private identity must not be projected"
@@ -54,6 +71,14 @@ async def test_actual_scoped_factory_preserves_threshold_classification(similari
 
     class Session:
         calls = 0
+
+        async def get(self, model, identity):
+            assert model is Manuscript and identity == 13
+            # This classification control uses a selected PDF candidate; native
+            # Word inventory admission is exercised by its own DOCX controls.
+            return SimpleNamespace(
+                id=13, file_ref="synthetic.pdf", purged_at=None, content_hash=None
+            )
 
         async def execute(self, statement):
             self.calls += 1

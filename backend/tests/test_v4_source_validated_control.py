@@ -240,6 +240,7 @@ async def _exercise(session_factory, scratch_url, tmp_path, monkeypatch, *, hist
                 group_label="Synthetic control",
                 original_filename=source.name,
                 file_ref=str(source),
+                content_hash=hashlib.sha256(source.read_bytes()).hexdigest(),
             )
             session.add(manuscript)
             await session.commit()

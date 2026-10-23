@@ -119,4 +119,4 @@ def test_saved_image_coverage_survives_export_and_public_incomplete_notice(state
     if state == "partial":
         assert "Statistical statements were extracted from readable text or tables" in text
     else:
-        assert "Unassessed images may contain information this check missed" in text
+        assert "Unassessed source content may contain information this check missed" in text

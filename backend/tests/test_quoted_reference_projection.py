@@ -13,23 +13,26 @@ from app.ingest.references import extract_references, parse_reference, quoted_ti
 from app.ingest.schemas import ExtractionResult, SectionTree, TextBlock
 from app.models.citation import Citation
 from app.models.enums import CitationParseStatus
+from tests.native_math_fixtures import record_empty_native_inventory
 from tests.test_citations_partial_source import run
 
 RAW = 'Smith, J., & Cruz, A. (2024), "A source title," Proceedings of Examples, pp. 1-8.'
 
 
 def source(raw=RAW):
-    return ExtractionResult(
-        page_count=1,
-        anchor_kind="paragraph",
-        image_only=False,
-        text_chars=len(raw) + 10,
-        section_tree=SectionTree(source="none", nodes=[]),
-        blocks=[
-            TextBlock(text="References", paragraph=1, max_font_size=12, bold_ratio=1),
-            TextBlock(text=raw, paragraph=2, max_font_size=12, bold_ratio=0),
-        ],
-        images=[],
+    return record_empty_native_inventory(
+        ExtractionResult(
+            page_count=1,
+            anchor_kind="paragraph",
+            image_only=False,
+            text_chars=len(raw) + 10,
+            section_tree=SectionTree(source="none", nodes=[]),
+            blocks=[
+                TextBlock(text="References", paragraph=1, max_font_size=12, bold_ratio=1),
+                TextBlock(text=raw, paragraph=2, max_font_size=12, bold_ratio=0),
+            ],
+            images=[],
+        )
     )
 
 

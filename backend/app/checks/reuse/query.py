@@ -42,6 +42,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.checks.reuse.embed import DocumentEmbeddings, PassageEmbedding
+from app.checks.reuse.source import coarse_candidate_supported, passage_match_supported
 from app.config import Settings
 from app.groups.service import DEFAULT_GROUP_LABEL, normalize_group_name
 from app.models.enums import LibraryEntryStatus, ManuscriptOrigin
@@ -90,6 +91,7 @@ class OriginalityQueryResult:
     # in the archive at query time — shown even when 0 (charter rule 9:
     # honest about growing coverage, never hidden).
     archive_size_n: int
+    n_source_candidates_withheld: int = 0
 
 
 def _classify(similarity: float, settings: Settings) -> MatchLevel | None:
@@ -400,7 +402,18 @@ async def query_similar_manuscripts(
         )
     )
 
-    return OriginalityQueryResult(matches=matches, archive_size_n=archive_size_n)
+    source_cache = {}
+    supported = []
+    for match in matches:
+        if await coarse_candidate_supported(
+            session, match.matched_manuscript_id, settings, source_cache
+        ):
+            supported.append(match)
+    return OriginalityQueryResult(
+        matches=supported,
+        archive_size_n=archive_size_n,
+        n_source_candidates_withheld=len(matches) - len(supported),
+    )
 
 
 # --- Passage-level query (V-072, F7.4) --------------------------------------
@@ -611,6 +624,7 @@ async def best_supporting_passage(
     than one strong pairing, and that is exactly the case this ticket says
     must not stay high severity."""
     best: PassageMatch | None = None
+    source_cache = {}
     best_similarity = -1.0
     for passage in passages:
         if passage.is_reference_list or passage.is_block_quote:
@@ -647,8 +661,7 @@ async def best_supporting_passage(
         if similarity <= best_similarity:
             continue
         archive_row: ManuscriptPassageArchive = row[0]
-        best_similarity = similarity
-        best = PassageMatch(
+        candidate = PassageMatch(
             own_passage_index=passage.passage_index,
             own_chapter_index=passage.chapter_index,
             own_page=passage.page,
@@ -674,6 +687,21 @@ async def best_supporting_passage(
             matched_is_reference_list=archive_row.is_reference_list,
             matched_is_block_quote=archive_row.is_block_quote,
         )
+        # The caller's own source is validated by the main query path;
+        # this fallback must independently fence the selected Library side.
+        from app.checks.reuse.source import selected_native_source, selected_passage_supported
+
+        source = await selected_native_source(
+            session, matched_manuscript_id, settings, source_cache
+        )
+        if selected_passage_supported(
+            source,
+            text=candidate.matched_text,
+            context=candidate.matched_context_text,
+            paragraph=candidate.matched_paragraph,
+        ):
+            best_similarity = similarity
+            best = candidate
     return best
 
 
@@ -683,6 +711,7 @@ class PassageQueryResult:
     # Same cold-start disclosure purpose as `OriginalityQueryResult.archive_size_n`
     # (ticket AC5) — shown even when 0.
     passage_archive_size_n: int
+    n_source_candidates_withheld: int = 0
 
 
 async def query_similar_passages(
@@ -710,6 +739,8 @@ async def query_similar_passages(
     )
 
     matches: list[PassageMatch] = []
+    source_cache = {}
+    withheld = 0
     for passage in passages:
         if not include_reference_list and passage.is_reference_list:
             continue
@@ -724,5 +755,12 @@ async def query_similar_passages(
             settings=settings,
         )
         if match is not None:
-            matches.append(match)
-    return PassageQueryResult(matches=matches, passage_archive_size_n=archive_size_n)
+            if await passage_match_supported(session, manuscript_id, match, settings, source_cache):
+                matches.append(match)
+            else:
+                withheld += 1
+    return PassageQueryResult(
+        matches=matches,
+        passage_archive_size_n=archive_size_n,
+        n_source_candidates_withheld=withheld,
+    )

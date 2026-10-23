@@ -578,8 +578,11 @@ def test_shared_report_public_schema_is_an_exact_allow_list(
         "assessment_incomplete",
         "historical_citation_title_unverified",
         "semantic_support_unverified",
+        # Public uncertainty only; no source inventory or equation content.
+        "historical_native_math_unverified",
     }
     assert type(shared["report"]["assessment_incomplete"]) is bool
+    assert type(shared["report"]["historical_native_math_unverified"]) is bool
     assert set(shared["report"]["results"][0].keys()) == {
         "criterion_id",
         "text",

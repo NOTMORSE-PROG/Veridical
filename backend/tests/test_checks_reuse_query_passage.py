@@ -17,6 +17,7 @@ from app.checks.reuse.store import store_document_embeddings, store_passage_embe
 from app.config import get_settings
 from app.db import sqlalchemy_url
 from app.ingest.schemas import ExtractionResult, SectionNode, SectionTree, TextBlock
+from app.ingest.service import _write_raw_store, raw_store_path
 from app.models.enums import LibraryEntrySource, LibraryEntryStatus
 from app.models.instructor import Instructor
 from app.models.library import LibraryEntry
@@ -31,6 +32,15 @@ live = pytest.mark.skipif(
 pytestmark = live
 
 SCRATCH_DB = "veridical_reusepassagetest"
+
+
+@pytest.fixture(autouse=True)
+def _private_source_data(tmp_path, monkeypatch):
+    monkeypatch.setenv("DATA_DIR", str(tmp_path / "comparison-data"))
+    monkeypatch.setenv("STORAGE_BACKEND", "local")
+    get_settings.cache_clear()
+    yield
+    get_settings.cache_clear()
 
 
 @pytest.fixture(scope="module")
@@ -71,6 +81,15 @@ async def _clean(session_factory):
 
 
 _seed_counter = 0
+
+
+async def _run_with_saved_source(session, manuscript_id, run_id, extraction, settings, **kwargs):
+    # These vector controls enter below ingestion. Persist exactly the checked
+    # input as ingestion would, without mocking source admission or retrieval.
+    _write_raw_store(extraction, raw_store_path(settings, manuscript_id))
+    return await run_originality_reuse_check(
+        session, manuscript_id, run_id, extraction, settings, **kwargs
+    )
 
 
 async def _seed_manuscript_and_run(session_factory, *, group_label: str) -> tuple[int, int]:
@@ -143,6 +162,7 @@ async def _add_to_library(
     active. Replaces what the pre-D-028 write-back after a check used to do
     implicitly, so each test still seeds exactly the corpus it reasons about."""
     settings = get_settings()
+    _write_raw_store(extraction, raw_store_path(settings, manuscript_id))
     async with session_factory() as session:
         await store_document_embeddings(
             session, manuscript_id, compute_document_embeddings(extraction, settings)
@@ -174,7 +194,7 @@ async def test_reference_list_overlap_is_suppressed_by_default_and_revealed_when
         session_factory, group_label="Group A"
     )
     async with session_factory() as session:
-        await run_originality_reuse_check(
+        await _run_with_saved_source(
             session,
             manuscript_a,
             check_run_a,
@@ -199,7 +219,7 @@ async def test_reference_list_overlap_is_suppressed_by_default_and_revealed_when
     extraction_b = _extraction_with_references(unrelated_body, REFERENCE_ENTRY)
 
     async with session_factory() as session:
-        result = await run_originality_reuse_check(
+        result = await _run_with_saved_source(
             session, manuscript_b, check_run_b, extraction_b, settings
         )
         # Default: the reference-list match never became a scored PASSAGE
@@ -274,12 +294,12 @@ async def test_own_group_siblings_excluded_from_passage_matching(session_factory
     manuscript_a, check_run_a = await _seed_in_group()
     extraction = _extraction_with_references(BODY_TEXT, REFERENCE_ENTRY)
     async with session_factory() as session:
-        await run_originality_reuse_check(session, manuscript_a, check_run_a, extraction, settings)
+        await _run_with_saved_source(session, manuscript_a, check_run_a, extraction, settings)
         await _add_to_library(session_factory, manuscript_a, extraction)
 
     manuscript_b, check_run_b = await _seed_in_group()
     async with session_factory() as session:
-        result = await run_originality_reuse_check(
+        result = await _run_with_saved_source(
             session, manuscript_b, check_run_b, extraction, settings
         )
     assert result.detail["n_flags"] == 0
@@ -293,14 +313,14 @@ async def test_different_groups_same_body_text_still_flags_at_passage_level(sess
     )
     extraction = _extraction_with_references(BODY_TEXT, REFERENCE_ENTRY)
     async with session_factory() as session:
-        await run_originality_reuse_check(session, manuscript_a, check_run_a, extraction, settings)
+        await _run_with_saved_source(session, manuscript_a, check_run_a, extraction, settings)
         await _add_to_library(session_factory, manuscript_a, extraction)
 
     manuscript_b, check_run_b = await _seed_manuscript_and_run(
         session_factory, group_label="Group B"
     )
     async with session_factory() as session:
-        result = await run_originality_reuse_check(
+        result = await _run_with_saved_source(
             session, manuscript_b, check_run_b, extraction, settings
         )
     # Body-passage exact duplicate, but the reference-list passage does
@@ -347,9 +367,7 @@ async def test_exploration_toggle_recomputes_passages_for_a_manuscript_outside_t
     _write_raw_store(extraction_b, raw_store_path(settings, manuscript_b))
 
     async with session_factory() as session:
-        await run_originality_reuse_check(
-            session, manuscript_b, check_run_b, extraction_b, settings
-        )
+        await _run_with_saved_source(session, manuscript_b, check_run_b, extraction_b, settings)
         own_rows = await session.scalar(
             text("SELECT count(*) FROM manuscript_passage_archive WHERE manuscript_id = :id"),
             {"id": manuscript_b},

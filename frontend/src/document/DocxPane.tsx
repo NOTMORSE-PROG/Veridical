@@ -7,7 +7,8 @@ import { SourceViewDetails } from "./SourceViewDetails";
 // concept, so "jump to the right page" collapses to "scroll to the right
 // paragraph," which needs no render race to guard against at all.
 import { useId, useEffect, useRef, useState } from "react";
-import type { DocumentImageOut, DocumentParagraphOut, DocumentTableOut, FlagRegionOut, FlagSummaryOut } from "../api/types";
+import type { DocumentImageOut, DocumentParagraphOut, DocumentTableOut, FlagRegionOut, FlagSummaryOut, NativeMathSourceOut } from "../api/types";
+import { NativeMathPieces, NativeMathInventoryNote, nativeMathInventoryLabel } from "./NativeMathSource";
 import { SeverityTag, type Severity } from "../components/SeverityTag";
 import { CHECK_KIND_SHORT_LABEL } from "../domain/checkKind";
 import { truncateAtWord } from "../format/text";
@@ -46,6 +47,7 @@ export function DocxPane({
   tables = EMPTY_TABLES,
   images = EMPTY_IMAGES,
   omittedImageOccurrences = 0,
+  nativeMath,
   imageBasePath,
   onPlaceRequestedParagraph,
   requestedParagraphAttempt,
@@ -76,6 +78,7 @@ export function DocxPane({
   tables?: DocumentTableOut[];
   images?: DocumentImageOut[];
   omittedImageOccurrences?: number;
+  nativeMath?: NativeMathSourceOut | null;
   imageBasePath?: string;
   onPlaceRequestedParagraph?: (element: HTMLElement) => void;
   requestedParagraphAttempt?: number;
@@ -95,7 +98,7 @@ export function DocxPane({
     if (!target) return;
     if (onPlaceRequestedParagraph) onPlaceRequestedParagraph(target);
     else target.focus();
-  }, [requestedParagraph, paragraphs, tables, images, isVisible, onPlaceRequestedParagraph, requestedParagraphAttempt]);
+  }, [requestedParagraph, paragraphs, tables, images, nativeMath, isVisible, onPlaceRequestedParagraph, requestedParagraphAttempt]);
 
   const flagsById = new Map(flags.map((f) => [f.id, f]));
 
@@ -160,11 +163,13 @@ export function DocxPane({
     paragraphs !== undefined &&
     !paragraphs.some((p) => p.paragraph === selectedRegion.paragraph) &&
     !tables.some((t) => t.paragraph === selectedRegion.paragraph) &&
-    !images.some((image) => image.paragraph === selectedRegion.paragraph);
+    !images.some((image) => image.paragraph === selectedRegion.paragraph) &&
+    !nativeMath?.containers.some((container) => container.paragraph === selectedRegion.paragraph);
   const bodyPositions = [...new Set([
     ...(paragraphs ?? []).map((p) => p.paragraph),
     ...tables.map((table) => table.paragraph),
     ...images.map((image) => image.paragraph),
+    ...(nativeMath?.containers.flatMap((container) => container.paragraph === null ? [] : [container.paragraph]) ?? []),
   ])].sort((a, b) => a - b);
 
   return (
@@ -198,6 +203,7 @@ export function DocxPane({
           <header className="signal-document-docx-paper__header">
             <span>Reconstructed manuscript</span>
             <span>{paragraphs ? `${paragraphs.length} paragraphs · ${tables.length} tables · ${images.length} drawing occurrences` : "Extracting text"}</span>
+            {paragraphs && <span>{nativeMathInventoryLabel(nativeMath)} · Main document body</span>}
           </header>
           <div className="signal-document-docx-paper__body">
         {paragraphsError && (
@@ -222,6 +228,9 @@ export function DocxPane({
         {omittedImageOccurrences > 0 && <p role="status" className="signal-document-reconstruction-note">
           {omittedImageOccurrences} additional drawing occurrences exceed the source-view limit and are not displayed or assessed here.
         </p>}
+        {!paragraphsPending && !paragraphsError && <NativeMathInventoryNote source={nativeMath} />}
+        {nativeMath?.containers.some((container) => container.paragraph === null) &&
+          <p className="signal-document-reconstruction-note">Native Word equations were recorded, but their reconstructed source locations are unavailable. Check the original DOCX for their formulas and layout.</p>}
         {selectedParagraphMissing && (
           <p className="mb-3 rounded-lg bg-status-neutral-bg px-4 py-2.5 text-xs text-status-neutral-text">
             VERIDICAL could not locate the recorded paragraph in the reconstructed
@@ -236,6 +245,7 @@ export function DocxPane({
             const p = paragraphs.find((paragraph) => paragraph.paragraph === position);
             const sourceTables = tables.filter((table) => table.paragraph === position);
             const sourceImages = images.filter((image) => image.paragraph === position);
+            const nativeContainers = nativeMath?.containers.filter((container) => container.paragraph === position) ?? [];
             const renderText = () => {
               if (!p) return null;
             // Found live (report/44, real data): F7 reuse flags can anchor
@@ -362,6 +372,12 @@ export function DocxPane({
             return <section key={position} className="signal-docx-source-item"
               data-source-paragraph={!p ? position : undefined} tabIndex={!p ? -1 : undefined}>
               {renderText()}
+              {nativeContainers.length > 0 && <div className="signal-document-reconstruction-note">
+                <strong>Native Word equation not displayed</strong>
+                <p>Its formula is not displayed in this view or evaluated by statistical forensics.</p>
+                {nativeContainers.filter((container) => container.kind === "paragraph").map((container, index) =>
+                  <p key={index}><NativeMathPieces pieces={container.pieces} /></p>)}
+              </div>}
               {mediaFlags.length > 0 && <div className="signal-docx-source-findings" role="group" aria-label="Findings at this source location">
                 {mediaFlags.map((flagId) => <button key={flagId} type="button" data-source-record-id={flagId}
                   ref={(el) => { if (el) highlightRefs.current.set(flagId, el); else highlightRefs.current.delete(flagId); }}

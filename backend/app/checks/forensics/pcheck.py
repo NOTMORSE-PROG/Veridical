@@ -53,6 +53,7 @@ def recompute_p(
     alpha: float = 0.05,
     p_zero_error: bool = True,
     p_equal_alpha_sig: bool = True,
+    two_tailed: bool = True,
 ) -> PRecalcResult | None:
     """None means "not applicable" — missing fields, or a test type this
     module doesn't recompute (never guessed, ticket AC #3's own
@@ -87,12 +88,12 @@ def recompute_p(
                 p_dec=stat.p_value_precision,
                 test_dec=stat.test_value_precision,
                 OneTailedInTxt=one_tailed_in_text,
-                two_tailed=True,
+                two_tailed=two_tailed,
                 alpha=alpha,
                 pZeroError=p_zero_error,
                 pEqualAlphaSig=p_equal_alpha_sig,
                 OneTailedTxt=True,
-                OneTailedTests=False,
+                OneTailedTests=not two_tailed,
             )
     except Exception:  # noqa: BLE001 — never crash on a manuscript's own weird numbers
         return None
@@ -108,7 +109,9 @@ def recompute_p(
     )
 
 
-def evaluate_p_recalc(stats: list[ReportedStat], full_text: str) -> list[ForensicsFlagDraft]:
+def evaluate_p_recalc(
+    stats: list[ReportedStat], full_text: str, *, tail_context_complete: bool = True
+) -> list[ForensicsFlagDraft]:
     try:
         one_tailed_in_text = bool(extract_1tail(full_text))
     except Exception:  # noqa: BLE001 — mercy detection failing must never block the check
@@ -119,24 +122,39 @@ def evaluate_p_recalc(stats: list[ReportedStat], full_text: str) -> list[Forensi
         result = recompute_p(stat, one_tailed_in_text=one_tailed_in_text)
         if result is None or not result.error or not stat.raw_text:
             continue
+        alternative = None
+        if not tail_context_complete:
+            # Excluded source may contain the test-tail declaration. A mismatch
+            # must survive both interpretations; absence of the phrase in a
+            # shortened text cannot establish that it was a two-tailed test.
+            alternative = recompute_p(stat, one_tailed_in_text=False, two_tailed=False)
+            if alternative is None or not alternative.error:
+                continue
+        decision_error = result.decision_error and (
+            alternative is None or alternative.decision_error
+        )
         p_prec = stat.p_value_precision or 3
         reported_str = f"{stat.p_comparison or '='} {stat.p_value:.{p_prec}f}"
         computed_str = f"{result.computed_p:.{p_prec}f}"
-        wording = (
-            PVALUE_DECISION_ERROR_WORDING if result.decision_error else PVALUE_MISMATCH_WORDING
+        wording = PVALUE_DECISION_ERROR_WORDING if decision_error else PVALUE_MISMATCH_WORDING
+        reason = wording.format(
+            reported_p=reported_str, computed_p=computed_str, test_type=stat.test_type
         )
+        if alternative is not None:
+            reason += (
+                f" The one-tailed recalculation ({alternative.computed_p:.{p_prec}f}) "
+                "also differs. "
+                "Some source content was excluded, so the manuscript's test-tail description "
+                "could not be fully checked."
+            )
         flags.append(
             ForensicsFlagDraft(
-                severity=FlagSeverity.high if result.decision_error else FlagSeverity.med,
+                severity=FlagSeverity.high if decision_error else FlagSeverity.med,
                 evidence_excerpt=stat.raw_text,
                 page_anchor=stat.anchor,
                 detail={
-                    "kind": "p_value_decision_error"
-                    if result.decision_error
-                    else "p_value_mismatch",
-                    "reason": wording.format(
-                        reported_p=reported_str, computed_p=computed_str, test_type=stat.test_type
-                    ),
+                    "kind": "p_value_decision_error" if decision_error else "p_value_mismatch",
+                    "reason": reason,
                     "reported_p": stat.p_value,
                     "computed_p": result.computed_p,
                     "reported_p_display": reported_str,
@@ -146,6 +164,14 @@ def evaluate_p_recalc(stats: list[ReportedStat], full_text: str) -> list[Forensi
                     "df1": stat.df1,
                     "df2": stat.df2,
                     "one_tailed_in_text": one_tailed_in_text,
+                    **(
+                        {
+                            "tail_context_complete": False,
+                            "one_tailed_computed_p": alternative.computed_p,
+                        }
+                        if alternative is not None
+                        else {}
+                    ),
                 },
             )
         )

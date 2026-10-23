@@ -24,6 +24,7 @@ from app.db import sqlalchemy_url
 from app.findings.policy import exclusion_reason
 from app.groups.service import DEFAULT_GROUP_LABEL, normalize_group_name
 from app.ingest.schemas import ExtractionResult, SectionNode, SectionTree, TextBlock
+from app.ingest.service import _write_raw_store, raw_store_path
 from app.models.enums import LibraryEntrySource, LibraryEntryStatus, ResultOutcome
 from app.models.group import Group
 from app.models.instructor import Instructor
@@ -39,6 +40,15 @@ live = pytest.mark.skipif(
 pytestmark = live
 
 SCRATCH_DB = "veridical_reusequerytest"
+
+
+@pytest.fixture(autouse=True)
+def _private_source_data(tmp_path, monkeypatch):
+    monkeypatch.setenv("DATA_DIR", str(tmp_path / "comparison-data"))
+    monkeypatch.setenv("STORAGE_BACKEND", "local")
+    get_settings.cache_clear()
+    yield
+    get_settings.cache_clear()
 
 
 @pytest.fixture(scope="module")
@@ -81,6 +91,15 @@ async def _clean(session_factory):
 _seed_counter = 0
 
 
+async def _run_with_saved_source(session, manuscript_id, run_id, extraction, settings, **kwargs):
+    # These vector controls enter below ingestion. Persist exactly the checked
+    # input as ingestion would, without mocking source admission or retrieval.
+    _write_raw_store(extraction, raw_store_path(settings, manuscript_id))
+    return await run_originality_reuse_check(
+        session, manuscript_id, run_id, extraction, settings, **kwargs
+    )
+
+
 async def test_scoped_weak_support_keeps_text_without_inventing_a_passage_band(session_factory):
     """Real pgvector search retains weaker support without making a standalone lead."""
     import math
@@ -105,6 +124,27 @@ async def test_scoped_weak_support_keeps_text_without_inventing_a_passage_band(s
         session_factory, group_label="Scoped target"
     )
     rival, _ = await _seed_manuscript_and_run(session_factory, group_label="Wrong manuscript")
+    # This control constructs vectors directly, so persist the corresponding
+    # synthetic PDF extraction required by selected-source admission too.
+    _write_raw_store(
+        ExtractionResult(
+            page_count=4,
+            anchor_kind="page",
+            image_only=False,
+            text_chars=len("Before stored. Stored central excerpt After stored."),
+            blocks=[
+                TextBlock(
+                    page=4,
+                    text="Before stored. Stored central excerpt After stored.",
+                    max_font_size=11,
+                    bold_ratio=0,
+                )
+            ],
+            images=[],
+            section_tree=SectionTree(source="none", nodes=[]),
+        ),
+        raw_store_path(settings, target),
+    )
     own_vector = [1.0] + [0.0] * (settings.embedding_dim - 1)
     weak_vector = [0.2, math.sqrt(1 - 0.2**2)] + [0.0] * (settings.embedding_dim - 2)
     own = PassageEmbedding(
@@ -280,6 +320,7 @@ async def _add_to_library(
     active. Replaces what the pre-D-028 write-back after a check used to do
     implicitly, so each test still seeds exactly the corpus it reasons about."""
     settings = get_settings()
+    _write_raw_store(extraction, raw_store_path(settings, manuscript_id))
     async with session_factory() as session:
         await store_document_embeddings(
             session, manuscript_id, compute_document_embeddings(extraction, settings)
@@ -342,7 +383,7 @@ async def test_first_manuscript_ever_is_cold_start_honest(session_factory):
     )
     settings = get_settings()
     async with session_factory() as session:
-        result = await run_originality_reuse_check(
+        result = await _run_with_saved_source(
             session, manuscript_id, check_run_id, _extraction(CH1, CH2), settings
         )
         # V-077 (D-028): the check compares against the Library and never
@@ -424,7 +465,7 @@ async def test_reuploaded_duplicate_produces_a_high_severity_flag(session_factor
         session_factory, group_label="Group A"
     )
     async with session_factory() as session:
-        await run_originality_reuse_check(
+        await _run_with_saved_source(
             session, manuscript_a, check_run_a, _extraction(CH1, CH2), settings
         )
         await _add_to_library(session_factory, manuscript_a, _extraction(CH1, CH2))
@@ -434,7 +475,7 @@ async def test_reuploaded_duplicate_produces_a_high_severity_flag(session_factor
         session_factory, group_label="Group A (resubmission)"
     )
     async with session_factory() as session:
-        result = await run_originality_reuse_check(
+        result = await _run_with_saved_source(
             session, manuscript_b, check_run_b, _extraction(CH1, CH2), settings
         )
         assert result.detail["archive_size_n"] == 1  # compared against the first upload
@@ -484,7 +525,7 @@ async def test_whole_document_and_chapter_flags_carry_real_supporting_passage_ev
         session_factory, group_label="Group A"
     )
     async with session_factory() as session:
-        await run_originality_reuse_check(
+        await _run_with_saved_source(
             session, manuscript_a, check_run_a, _extraction(CH1, CH2), settings
         )
         await _add_to_library(session_factory, manuscript_a, _extraction(CH1, CH2))
@@ -493,7 +534,7 @@ async def test_whole_document_and_chapter_flags_carry_real_supporting_passage_ev
         session_factory, group_label="Group A (resubmission)"
     )
     async with session_factory() as session:
-        result = await run_originality_reuse_check(
+        result = await _run_with_saved_source(
             session, manuscript_b, check_run_b, _extraction(CH1, CH2), settings
         )
         rows = (
@@ -555,7 +596,7 @@ async def test_unevidenceable_whole_document_match_is_downgraded_from_high_sever
         session_factory, group_label="Group A"
     )
     async with session_factory() as session:
-        await run_originality_reuse_check(
+        await _run_with_saved_source(
             session, manuscript_a, check_run_a, _extraction_flat_no_chapters(CH1), settings
         )
         await _add_to_library(
@@ -583,7 +624,7 @@ async def test_unevidenceable_whole_document_match_is_downgraded_from_high_sever
         session_factory, group_label="Group A (resubmission)"
     )
     async with session_factory() as session:
-        result = await run_originality_reuse_check(
+        result = await _run_with_saved_source(
             session, manuscript_b, check_run_b, _extraction_flat_no_chapters(CH1), settings
         )
         rows = (
@@ -614,7 +655,7 @@ async def test_flat_document_library_match_preserves_passage_evidence_without_sc
     await _add_to_library(session_factory, source_id, _extraction_flat_no_chapters(CH1))
     manuscript_id, run_id = await _seed_manuscript_and_run(session_factory, group_label="Check")
     async with session_factory() as session:
-        result = await run_originality_reuse_check(
+        result = await _run_with_saved_source(
             session, manuscript_id, run_id, _extraction_flat_no_chapters(CH1), settings
         )
         rows = (
@@ -660,7 +701,7 @@ async def test_same_instructor_whole_document_resubmission_collapses_to_one_low_
         session_factory, instructor_id=instructor_id, group_id=None
     )
     async with session_factory() as session:
-        await run_originality_reuse_check(
+        await _run_with_saved_source(
             session,
             manuscript_a,
             check_run_a,
@@ -675,7 +716,7 @@ async def test_same_instructor_whole_document_resubmission_collapses_to_one_low_
         session_factory, instructor_id=instructor_id, group_id=None
     )
     async with session_factory() as session:
-        result = await run_originality_reuse_check(
+        result = await _run_with_saved_source(
             session,
             manuscript_b,
             check_run_b,
@@ -724,7 +765,7 @@ async def test_same_instructor_resubmission_names_the_actual_duplicate_source(
         session_factory, instructor_id=instructor_id, group_id=None
     )
     async with session_factory() as session:
-        await run_originality_reuse_check(
+        await _run_with_saved_source(
             session,
             manuscript_a,
             check_run_a,
@@ -743,7 +784,7 @@ async def test_same_instructor_resubmission_names_the_actual_duplicate_source(
         session_factory, instructor_id=instructor_id, group_id=None
     )
     async with session_factory() as session:
-        await run_originality_reuse_check(
+        await _run_with_saved_source(
             session,
             other_manuscript,
             other_check_run,
@@ -770,7 +811,7 @@ async def test_same_instructor_resubmission_names_the_actual_duplicate_source(
         session_factory, instructor_id=instructor_id, group_id=None
     )
     async with session_factory() as session:
-        result = await run_originality_reuse_check(
+        result = await _run_with_saved_source(
             session,
             manuscript_c,
             check_run_c,
@@ -915,7 +956,7 @@ async def test_repeated_resubmissions_never_grow_the_archive(session_factory):
         session_factory, instructor_id=instructor_id, group_id=None
     )
     async with session_factory() as session:
-        await run_originality_reuse_check(
+        await _run_with_saved_source(
             session,
             manuscript_a,
             check_run_a,
@@ -931,7 +972,7 @@ async def test_repeated_resubmissions_never_grow_the_archive(session_factory):
             session_factory, instructor_id=instructor_id, group_id=None
         )
         async with session_factory() as session:
-            result = await run_originality_reuse_check(
+            result = await _run_with_saved_source(
                 session,
                 manuscript_n,
                 check_run_n,
@@ -973,7 +1014,7 @@ async def test_first_upload_context_flagged_but_severity_untouched(session_facto
         session_factory, group_label="Group A"
     )
     async with session_factory() as session:
-        await run_originality_reuse_check(
+        await _run_with_saved_source(
             session, manuscript_a, check_run_a, _extraction(CH1, CH2), settings
         )
         await _add_to_library(session_factory, manuscript_a, _extraction(CH1, CH2))
@@ -984,7 +1025,7 @@ async def test_first_upload_context_flagged_but_severity_untouched(session_facto
         session_factory, group_label="Group B"
     )
     async with session_factory() as session:
-        result_b = await run_originality_reuse_check(
+        result_b = await _run_with_saved_source(
             session, manuscript_b, check_run_b, _extraction(CH1, CH2), settings
         )
         assert result_b.detail["first_upload_context"] is True
@@ -1023,7 +1064,7 @@ async def test_first_upload_context_flagged_but_severity_untouched(session_facto
         manuscript_c_id, check_run_c_id = manuscript_c.id, check_run_c.id
 
     async with session_factory() as session:
-        result_c = await run_originality_reuse_check(
+        result_c = await _run_with_saved_source(
             session, manuscript_c_id, check_run_c_id, _extraction(CH1, CH2), settings
         )
         assert result_c.detail["first_upload_context"] is False
@@ -1054,7 +1095,7 @@ async def test_same_groups_own_prior_submission_is_never_reuse(session_factory):
         session_factory, instructor_id=instructor_id, group_id=group_id
     )
     async with session_factory() as session:
-        await run_originality_reuse_check(
+        await _run_with_saved_source(
             session, manuscript_a, check_run_a, _extraction(CH1, CH2), settings
         )
         await _add_to_library(session_factory, manuscript_a, _extraction(CH1, CH2))
@@ -1064,7 +1105,7 @@ async def test_same_groups_own_prior_submission_is_never_reuse(session_factory):
         session_factory, instructor_id=instructor_id, group_id=group_id
     )
     async with session_factory() as session:
-        result = await run_originality_reuse_check(
+        result = await _run_with_saved_source(
             session, manuscript_b, check_run_b, _extraction(CH1, CH2), settings
         )
     assert result.detail["n_flags"] == 0
@@ -1084,7 +1125,7 @@ async def test_different_groups_still_flag_each_other(session_factory):
         session_factory, instructor_id=instructor_id, group_id=group_a
     )
     async with session_factory() as session:
-        await run_originality_reuse_check(
+        await _run_with_saved_source(
             session, manuscript_a, check_run_a, _extraction(CH1, CH2), settings
         )
         await _add_to_library(session_factory, manuscript_a, _extraction(CH1, CH2))
@@ -1093,7 +1134,7 @@ async def test_different_groups_still_flag_each_other(session_factory):
         session_factory, instructor_id=instructor_id, group_id=group_b
     )
     async with session_factory() as session:
-        result = await run_originality_reuse_check(
+        result = await _run_with_saved_source(
             session, manuscript_b, check_run_b, _extraction(CH1, CH2), settings
         )
     # V-072/F7.4: 2 more than before (one exact-duplicate passage flag per
@@ -1120,7 +1161,7 @@ async def test_ungrouped_default_bucket_is_not_exempted(session_factory):
         session_factory, instructor_id=instructor_id, group_id=ungrouped_id
     )
     async with session_factory() as session:
-        await run_originality_reuse_check(
+        await _run_with_saved_source(
             session, manuscript_a, check_run_a, _extraction(CH1, CH2), settings
         )
         await _add_to_library(session_factory, manuscript_a, _extraction(CH1, CH2))
@@ -1130,7 +1171,7 @@ async def test_ungrouped_default_bucket_is_not_exempted(session_factory):
         session_factory, instructor_id=instructor_id, group_id=ungrouped_id
     )
     async with session_factory() as session:
-        result = await run_originality_reuse_check(
+        result = await _run_with_saved_source(
             session, manuscript_b, check_run_b, _extraction(CH1, CH2), settings
         )
     # V-072/F7.4: 2 more than before (one exact-duplicate passage flag per
@@ -1190,7 +1231,7 @@ async def test_flag_text_never_leaks_matched_manuscripts_identity_or_headings(se
         session_factory, group_label=real_group_label
     )
     async with session_factory() as session:
-        await run_originality_reuse_check(
+        await _run_with_saved_source(
             session,
             manuscript_a,
             check_run_a,
@@ -1207,7 +1248,7 @@ async def test_flag_text_never_leaks_matched_manuscripts_identity_or_headings(se
         session_factory, group_label="Group B"
     )
     async with session_factory() as session:
-        result = await run_originality_reuse_check(
+        result = await _run_with_saved_source(
             session,
             manuscript_b,
             check_run_b,
@@ -1261,7 +1302,7 @@ async def test_transplanted_chapter_produces_a_chapter_level_flag(session_factor
         session_factory, group_label="Group A"
     )
     async with session_factory() as session:
-        await run_originality_reuse_check(
+        await _run_with_saved_source(
             session, manuscript_a, check_run_a, _extraction(CH1, CH2), settings
         )
         await _add_to_library(session_factory, manuscript_a, _extraction(CH1, CH2))
@@ -1274,7 +1315,7 @@ async def test_transplanted_chapter_produces_a_chapter_level_flag(session_factor
         session_factory, group_label="Group B"
     )
     async with session_factory() as session:
-        result = await run_originality_reuse_check(
+        result = await _run_with_saved_source(
             session, manuscript_b, check_run_b, _extraction(CH1, unrelated_ch2), settings
         )
         rows = (
@@ -1352,7 +1393,7 @@ async def test_chapter_flag_supporting_passage_is_scoped_to_the_matched_chapter(
         session_factory, group_label="Group A"
     )
     async with session_factory() as session:
-        await run_originality_reuse_check(
+        await _run_with_saved_source(
             session, manuscript_a, check_run_a, _extraction(CH1, CH2_EXTENDED), settings
         )
         await _add_to_library(session_factory, manuscript_a, _extraction(CH1, CH2_EXTENDED))
@@ -1386,7 +1427,7 @@ async def test_chapter_flag_supporting_passage_is_scoped_to_the_matched_chapter(
         session_factory, group_label="Group B"
     )
     async with session_factory() as session:
-        result = await run_originality_reuse_check(
+        result = await _run_with_saved_source(
             session, manuscript_b, check_run_b, extraction_b, settings
         )
         rows = (
@@ -1437,7 +1478,7 @@ async def test_same_topic_different_wording_does_not_flag(session_factory):
         session_factory, group_label="Group A"
     )
     async with session_factory() as session:
-        await run_originality_reuse_check(
+        await _run_with_saved_source(
             session, manuscript_a, check_run_a, _extraction(CH1, CH2), settings
         )
         await _add_to_library(session_factory, manuscript_a, _extraction(CH1, CH2))
@@ -1446,7 +1487,7 @@ async def test_same_topic_different_wording_does_not_flag(session_factory):
         session_factory, group_label="Group C"
     )
     async with session_factory() as session:
-        result = await run_originality_reuse_check(
+        result = await _run_with_saved_source(
             session,
             manuscript_b,
             check_run_b,
@@ -1465,7 +1506,7 @@ async def test_a_check_never_writes_into_the_corpus_or_matches_self(session_fact
         session_factory, group_label="Group A"
     )
     async with session_factory() as session:
-        result = await run_originality_reuse_check(
+        result = await _run_with_saved_source(
             session, manuscript_id, check_run_id, _extraction(CH1, CH2), settings
         )
     assert result.detail["n_flags"] == 0  # never matched itself
@@ -1493,7 +1534,7 @@ async def test_bug_151_writes_a_check_computed_audit_event_with_real_matched_ids
         session_factory, group_label="Group A"
     )
     async with session_factory() as session:
-        await run_originality_reuse_check(
+        await _run_with_saved_source(
             session, manuscript_a, check_run_a, _extraction(CH1, CH2), settings
         )
         await _add_to_library(session_factory, manuscript_a, _extraction(CH1, CH2))
@@ -1502,7 +1543,7 @@ async def test_bug_151_writes_a_check_computed_audit_event_with_real_matched_ids
         session_factory, group_label="Group B"
     )
     async with session_factory() as session:
-        await run_originality_reuse_check(
+        await _run_with_saved_source(
             session, manuscript_b, check_run_b, _extraction(CH1, CH2), settings
         )
         await _add_to_library(session_factory, manuscript_b, _extraction(CH1, CH2))
@@ -1545,7 +1586,7 @@ async def test_bug_151_no_embeddable_content_still_writes_a_check_computed_audit
         images=[],
     )
     async with session_factory() as session:
-        result = await run_originality_reuse_check(
+        result = await _run_with_saved_source(
             session, manuscript_id, check_run_id, empty_extraction, get_settings()
         )
         assert result.detail["note"] == "No embeddable content was extracted from this manuscript."
@@ -1574,7 +1615,7 @@ async def test_existing_result_guard_finds_the_completed_run(session_factory):
     settings = get_settings()
     extraction = _extraction(CH1, CH2)
     async with session_factory() as session:
-        first = await run_originality_reuse_check(
+        first = await _run_with_saved_source(
             session, manuscript_id, check_run_id, extraction, settings
         )
         existing = await existing_originality_reuse_result(session, check_run_id)

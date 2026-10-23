@@ -91,6 +91,10 @@ class RuleContext:
     citation_style_min_ratio: float
     table_caption_min_ratio: float
     reference_inventory: ReferenceInventory | None = None
+    section_order_source_complete: bool = True
+    native_math_source_detail: dict | None = None
+    source_identity_verified: bool = True
+    section_order_witnesses_verified: bool = True
 
 
 @dataclass(frozen=True)

@@ -144,6 +144,92 @@ async def snapshot(session_factory, manuscript_id):
         }
 
 
+@pytest.mark.parametrize("existing", [None, "mismatch"])
+async def test_fresh_docx_ingestion_binds_only_a_missing_source_identity(
+    session_factory, tmp_path, existing
+):
+    from app.ingest.analytical_source import analytical_source, bind_analytical_source
+
+    identity, _, _, source, expected_hash, _, _ = await seed(session_factory, tmp_path, "docx")
+    previous = None if existing is None else "0" * 64
+    async with session_factory() as session:
+        manuscript = await session.get(Manuscript, identity)
+        manuscript.content_hash = previous
+        await session.commit()
+        extraction = await service.ingest_manuscript(
+            session,
+            manuscript,
+            source,
+            Settings(_env_file=None, data_dir=tmp_path / "data"),
+            read_images=False,
+        )
+        assert extraction.docx_source_sha256 == expected_hash
+        assert manuscript.content_hash == (expected_hash if previous is None else previous)
+        bound = analytical_source(bind_analytical_source(extraction, manuscript.content_hash))
+        assert bound.state == ("complete" if previous is None else "unavailable")
+    saved = await snapshot(session_factory, identity)
+    assert saved["content_hash"] == (expected_hash if previous is None else previous)
+    assert saved["status"] == IngestStatus.done
+
+
+async def test_fresh_docx_identity_assignment_rolls_back_with_failed_finalization(
+    session_factory, tmp_path
+):
+    identity, _, _, source, _, _, _ = await seed(session_factory, tmp_path, "docx")
+    async with session_factory() as session:
+        manuscript = await session.get(Manuscript, identity)
+        manuscript.content_hash = None
+        await session.commit()
+    await install_fault(session_factory, identity, "deferred_commit")
+    try:
+        async with session_factory() as session:
+            manuscript = await session.get(Manuscript, identity)
+            with pytest.raises(DBAPIError):
+                await service.ingest_manuscript(
+                    session,
+                    manuscript,
+                    source,
+                    Settings(_env_file=None, data_dir=tmp_path / "data"),
+                    read_images=False,
+                )
+    finally:
+        async with session_factory() as session:
+            await session.execute(text("DROP TRIGGER ingest_finalize_test_fault ON manuscript"))
+            await session.commit()
+    saved = await snapshot(session_factory, identity)
+    assert saved["content_hash"] is None
+    assert saved["status"] == IngestStatus.failed
+    assert saved["citations"][0][2] == "Original, A. (2020). Old Reference. Example Journal."
+
+
+async def test_fresh_docx_identity_is_not_published_by_an_intermediate_consumer_commit(
+    session_factory, tmp_path, monkeypatch
+):
+    identity, _, _, source, _, _, _ = await seed(session_factory, tmp_path, "docx")
+    async with session_factory() as session:
+        manuscript = await session.get(Manuscript, identity)
+        manuscript.content_hash = None
+        await session.commit()
+
+    async def consumer_commits_then_fails(active_session, *_args):
+        await active_session.commit()
+        raise RuntimeError("Controlled optional-consumer failure")
+
+    monkeypatch.setattr(
+        service.vision, "prepare_image_readings", lambda *_args, **_kwargs: [object()]
+    )
+    monkeypatch.setattr(service, "get_llm_client_for", consumer_commits_then_fails)
+    async with session_factory() as session:
+        manuscript = await session.get(Manuscript, identity)
+        with pytest.raises(RuntimeError, match="Controlled optional-consumer failure"):
+            await service.ingest_manuscript(
+                session, manuscript, source, Settings(_env_file=None, data_dir=tmp_path / "data")
+            )
+    saved = await snapshot(session_factory, identity)
+    assert saved["content_hash"] is None
+    assert saved["status"] == IngestStatus.failed
+
+
 async def install_fault(session_factory, manuscript_id, fault):
     event = "UPDATE" if fault == "deferred_commit" else "INSERT"
     table = "manuscript" if fault == "deferred_commit" else "citation"

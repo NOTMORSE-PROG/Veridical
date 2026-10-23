@@ -77,7 +77,18 @@ async def run_structural_check(
 ) -> CheckResult:
     assert decision.kind == CheckKind.structural and decision.rule_id is not None
     spec = get_rule(decision.rule_id)
-    if spec is None:
+    if not ctx.source_identity_verified:
+        outcome = RuleOutcome(
+            outcome=ResultOutcome.unverifiable,
+            anchor="document",
+            detail={
+                "reason": (
+                    "The saved extraction could not be matched to this manuscript's source. "
+                    "Review the original manuscript; no automatic rating was assigned."
+                ),
+            },
+        )
+    elif spec is None:
         outcome = _missing_rule_outcome(decision.rule_id)
     else:
         try:
