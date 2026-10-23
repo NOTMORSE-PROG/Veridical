@@ -1,7 +1,13 @@
-import { fireEvent, screen, within } from "@testing-library/react";
+import { fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { useQueryClient, type QueryClient } from "@tanstack/react-query";
+import { ME_QUERY_KEY } from "../auth/useAuth";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { renderWithProviders, stubFetchByPath } from "../test/renderWithProviders";
+import { renderWithProviders as renderAppWithProviders, stubFetchByPath } from "../test/renderWithProviders";
 import { AuditLogPage } from "./AuditLog";
+
+function renderWithProviders(...args: Parameters<typeof renderAppWithProviders>) {
+  return renderAppWithProviders(args[0], { authInstructorId: 1, ...args[1] });
+}
 
 // Mobile card + desktop table both render in the DOM simultaneously (CSS
 // `sm:hidden`/`hidden sm:block` — jsdom applies no media queries), so every
@@ -45,11 +51,147 @@ const DETAIL = {
 describe("AuditLogPage", () => {
   afterEach(() => vi.unstubAllGlobals());
 
+  it("shows the actual historical Return and full reason without expanding Technical", async () => {
+    const row = { ...PAGE.items[0], event_type: "report_decided", prompt_type: null };
+    const note = "SANDBOX stored reason <img src='private'> & αβ";
+    vi.stubGlobal("fetch", stubFetchByPath({ "/audit": { ...PAGE, items: [row], total: 1 }, "/audit/42": {
+      ...row, payload: { instructor_id: 1, decision: "returned", note, status: "needs_review",
+        pending_criteria: [{ criterion_id: 35, check_result_id: 178, outcome: "escalated" }] },
+    } }));
+    renderWithProviders(<AuditLogPage />, { route: "/audit" });
+    fireEvent.click((await screen.findAllByRole("button", { name: "Detail" }))[0]);
+    const dialog = screen.getByRole("dialog");
+    expect(await within(dialog).findByText("Returned for revision")).toBeVisible();
+    expect(within(dialog).getByText(note)).toBeVisible();
+    expect(within(dialog).getByText("1 recorded item.")).toBeVisible();
+    expect(within(dialog).getByText("You")).toBeVisible();
+    expect(within(dialog).getByText("Technical record for reproducibility").parentElement).not.toHaveAttribute("open");
+    expect(dialog.querySelector("img")).toBeNull();
+  });
+
+  it("keeps the historical named-level gap explicit and does not attribute another actor to the reader", async () => {
+    const row = { ...PAGE.items[1], id: 328 };
+    vi.stubGlobal("fetch", stubFetchByPath({ "/audit": { ...PAGE, items: [row], total: 1 }, "/audit/328": {
+      ...row, payload: { instructor_id: 2, resolution: "mark_level", criterion_id: 35, check_result_id: 178, new_score: 50, ai_majority_verdict: "Proficient", reason: "SANDBOX actual recorded judgment reason." },
+    } }));
+    renderWithProviders(<AuditLogPage />, { route: "/audit" });
+    fireEvent.click((await screen.findAllByRole("button", { name: "Detail" }))[0]);
+    const dialog = screen.getByRole("dialog");
+    expect(await within(dialog).findByText(/selected level name is unavailable/)).toBeVisible();
+    expect(within(dialog).getByText("Instructor #2")).toBeVisible();
+    expect(within(dialog).getByText("SANDBOX actual recorded judgment reason.")).toBeVisible();
+    expect(within(dialog).queryByText("Satisfactory")).not.toBeInTheDocument();
+    expect(within(dialog).queryByText("You")).not.toBeInTheDocument();
+  });
+
+  it("opening and closing Detail preserves the selected Audit page", async () => {
+    vi.stubGlobal("fetch", stubFetchByPath({ "/audit": { ...PAGE, page: 2, total: 60 }, "/audit/42": DETAIL }));
+    renderWithProviders(<AuditLogPage />, { route: "/audit?page=2" });
+    expect(await screen.findByText("Page 2 of 3")).toBeVisible();
+    fireEvent.click(screen.getAllByRole("button", { name: "Detail" })[0]);
+    await screen.findByRole("dialog");
+    expect(screen.getByText("Page 2 of 3")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Close" }));
+    expect(screen.getByText("Page 2 of 3")).toBeVisible();
+  });
+
+  it.each([401, 403, 404])("hides both cached ordinary and raw private detail after terminal %s", async status => {
+    let client!: QueryClient;
+    let denied = false;
+    function Probe() { client = useQueryClient(); return <AuditLogPage />; }
+    const privateDetail = { ...DETAIL, event_type: "report_decided", payload: { decision: "returned", note: "PRIVATE-OLD-DECISION-REASON", instructor_id: 1 } };
+    const fetcher = stubFetchByPath({ "/audit": PAGE, "/audit/42": privateDetail });
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      if (denied && String(input).endsWith("/audit/42")) return new Response(JSON.stringify({ error: { code: "not_found", message: "This entry is unavailable." } }), { status });
+      return fetcher(input);
+    }));
+    renderWithProviders(<Probe />, { route: "/audit?detail=42" });
+    expect(await screen.findByText("PRIVATE-OLD-DECISION-REASON")).toBeVisible();
+    denied = true;
+    await client.invalidateQueries({ queryKey: ["audit-log"] });
+    expect(await screen.findByText("This entry is unavailable.")).toBeVisible();
+    expect(screen.queryByText("PRIVATE-OLD-DECISION-REASON")).not.toBeInTheDocument();
+    expect(screen.queryByText(/"note": "PRIVATE-OLD-DECISION-REASON"/)).not.toBeInTheDocument();
+  });
+
+  it("qualifies a retained same-entry 503 snapshot instead of presenting it as a current read", async () => {
+    let client!: QueryClient;
+    let unavailable = false;
+    function Probe() { client = useQueryClient(); return <AuditLogPage />; }
+    const fetcher = stubFetchByPath({ "/audit": PAGE, "/audit/42": { ...DETAIL, event_type: "report_decided", payload: { decision: "returned", note: "Authorized last loaded reason." } } });
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => unavailable && String(input).endsWith("/audit/42")
+      ? new Response(JSON.stringify({ error: { code: "api_down", message: "Temporarily unavailable." } }), { status: 503 }) : fetcher(input)));
+    renderWithProviders(<Probe />, { route: "/audit?detail=42" });
+    expect(await screen.findByText("Authorized last loaded reason.")).toBeVisible();
+    unavailable = true;
+    await client.invalidateQueries({ queryKey: ["audit-log"] });
+    expect(await screen.findByText(/Last loaded entry/)).toBeVisible();
+    expect(screen.getByText("Authorized last loaded reason.")).toBeVisible();
+  });
+
+  it.each(["heading", "newer focus", "closed"])("hands Retry focus to its persistent heading and preserves %s on late completion", async intent => {
+    let release!: (response: Response) => void;
+    let requested = 0;
+    const fetcher = stubFetchByPath({ "/audit": PAGE });
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      if (!String(input).endsWith("/audit/42")) return fetcher(input);
+      if (requested++ === 0) return new Response(JSON.stringify({ error: { code: "api_down", message: "Controlled unavailable entry." } }), { status: 503 });
+      return new Promise<Response>(resolve => { release = resolve; });
+    }));
+    renderWithProviders(<AuditLogPage />, { route: "/audit?detail=42" });
+    const retry = await screen.findByRole("button", { name: "Retry audit entry" });
+    retry.focus(); fireEvent.click(retry);
+    const heading = screen.getByRole("heading", { name: "Audit entry #42" });
+    expect(heading).toHaveFocus();
+    const close = screen.getByRole("button", { name: "Close" });
+    if (intent === "newer focus") close.focus();
+    else if (intent === "closed") fireEvent.click(close);
+    await waitFor(() => expect(release).toBeDefined());
+    release(new Response(JSON.stringify(DETAIL)));
+    if (intent === "closed") {
+      await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+      expect(screen.getByRole("heading", { name: "Audit" })).toHaveFocus();
+    } else {
+      await screen.findByText(/VERIDICAL completed/);
+      expect(intent === "heading" ? heading : close).toHaveFocus();
+    }
+  });
+
+  it.each([401, 403, 404])("hides cached private list metadata after a terminal list %s", async status => {
+    let client!: QueryClient;
+    let denied = false;
+    function Probe() { client = useQueryClient(); return <AuditLogPage />; }
+    const fetcher = stubFetchByPath({ "/audit": { ...PAGE, items: [{ ...PAGE.items[0], manuscript_group_label: "PRIVATE-OLD-GROUP" }] } });
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => denied && String(input).includes("/audit?")
+      ? new Response(JSON.stringify({ error: { code: "not_found", message: "Private list unavailable." } }), { status }) : fetcher(input)));
+    renderWithProviders(<Probe />, { route: "/audit" });
+    expect((await screen.findAllByText(/PRIVATE-OLD-GROUP/)).length).toBeGreaterThan(0);
+    denied = true;
+    await client.invalidateQueries({ queryKey: ["audit-log"] });
+    await waitFor(() => expect(screen.queryByText(/PRIVATE-OLD-GROUP/)).not.toBeInTheDocument());
+    expect(screen.queryByRole("button", { name: "Detail" })).not.toBeInTheDocument();
+  });
+
+  it("revokes old private content immediately when the authenticated reader changes", async () => {
+    let client!: QueryClient;
+    let secondReader = false;
+    function Probe() { client = useQueryClient(); return <AuditLogPage />; }
+    const fetcher = stubFetchByPath({ "/audit": PAGE, "/audit/42": { ...DETAIL, event_type: "report_decided", payload: { decision: "returned", note: "FIRST-READER-PRIVATE" } } });
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => secondReader && String(input).endsWith("/audit/42")
+      ? new Response(JSON.stringify({ error: { code: "not_found", message: "No owned entry." } }), { status: 404 }) : fetcher(input)));
+    renderWithProviders(<Probe />, { route: "/audit?detail=42" });
+    expect(await screen.findByText("FIRST-READER-PRIVATE")).toBeVisible();
+    secondReader = true;
+    client.setQueryData(ME_QUERY_KEY, { id: 2 });
+    await waitFor(() => expect(screen.queryByText("FIRST-READER-PRIVATE")).not.toBeInTheDocument());
+    expect(await screen.findByText("No owned entry.")).toBeVisible();
+  });
+
   it("lists audit events with their labels", async () => {
     vi.stubGlobal("fetch", stubFetchByPath({ "/audit": PAGE }));
     renderWithProviders(<AuditLogPage />, { route: "/audit", path: "/audit" });
     expect((await screen.findAllByText("AI call")).length).toBe(2);
-    expect(screen.getAllByText("Escalation resolved").length).toBe(2);
+    expect(screen.getAllByText("Criterion judgment recorded").length).toBe(2);
   });
 
   it("V-078: names stored-file deletion consistently and explains retained history", async () => {
@@ -61,7 +203,7 @@ describe("AuditLogPage", () => {
     renderWithProviders(<AuditLogPage />, { route: "/audit", path: "/audit" });
     expect((await screen.findAllByText("Stored file deleted")).length).toBe(2);
     fireEvent.click(screen.getAllByRole("button", { name: "Detail" })[0]);
-    expect(await screen.findByText(/You deleted the uploaded file and its extracted text/))
+    expect(await screen.findByText(/An instructor deleted the uploaded file and its extracted text/))
       .toHaveTextContent("Saved reports, decisions, comparison evidence and audit history are kept.");
     expect(screen.getByText(/cannot be used as a source in future originality checks/)).toBeInTheDocument();
     expect(screen.getByText("manuscript_purged", { selector: "code" })).toBeInTheDocument();
@@ -80,7 +222,7 @@ describe("AuditLogPage", () => {
     expect(rows[2]).toHaveTextContent("Entry #41");
     fireEvent.click(within(rows[1]).getByRole("button", { name: "Detail" }));
     expect(await screen.findByText(DETAIL.created_at)).toBeInTheDocument();
-    expect(screen.getByText("Stored time:")).toBeInTheDocument();
+    expect(screen.getByText("Stored time")).toBeInTheDocument();
     expect(screen.getByText(/Entry numbers identify records, not verified event times/)).toBeInTheDocument();
   });
 
@@ -242,6 +384,20 @@ describe("AuditLogPage", () => {
     expect(screen.getByRole("button", { name: "All" })).toHaveAttribute("aria-pressed", "false");
   });
 
+  it("retains the existing criterion-judgment filter URL and exact event query after relabelling", async () => {
+    const fetchMock = stubFetchByPath({ "/audit": PAGE });
+    vi.stubGlobal("fetch", fetchMock);
+    renderWithProviders(<AuditLogPage />, { route: "/audit?check_run_id=7&filter=Escalations", path: "/audit" });
+    await screen.findAllByText("Criterion judgment recorded");
+    expect(screen.getByRole("button", { name: "Criterion judgments" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("button", { name: "All" })).toHaveAttribute("aria-pressed", "false");
+    expect(new URL(String(fetchMock.mock.calls[0][0]), "http://localhost").searchParams.get("event_type")).toBe("escalation_resolved");
+    fireEvent.click(screen.getByRole("button", { name: "All" }));
+    fireEvent.click(screen.getByRole("button", { name: "Criterion judgments" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Criterion judgments" })).toHaveAttribute("aria-pressed", "true"));
+    expect(screen.queryByRole("button", { name: "Escalations" })).not.toBeInTheDocument();
+  });
+
   it("focuses and titles the page on arrival (route focus management, previously missing entirely)", async () => {
     vi.stubGlobal("fetch", stubFetchByPath({ "/audit": PAGE }));
     renderWithProviders(<AuditLogPage />, { route: "/audit", path: "/audit" });
@@ -274,7 +430,7 @@ describe("AuditLogPage", () => {
     fireEvent.click(screen.getAllByRole("button", { name: "Detail" })[0]);
     expect(await screen.findByRole("alert")).toHaveTextContent("No audit entry 42.");
     expect(screen.queryByText("Loading audit entry.")).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Try again" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Retry audit entry" })).toBeInTheDocument();
   });
 
   it("BUG (UX review finding): Previous/Next disabling itself no longer strands focus on <body> — it lands on the page indicator", async () => {
@@ -396,7 +552,7 @@ describe("AuditLogPage", () => {
   it("BUG-219: a non-LLM event never carries a mode tag, even defensively (the frontend's own gate, not just trust in the backend's)", async () => {
     vi.stubGlobal("fetch", stubFetchByPath({ "/audit": PAGE }));
     renderWithProviders(<AuditLogPage />, { route: "/audit", path: "/audit" });
-    await screen.findAllByText("Escalation resolved");
+    await screen.findAllByText("Criterion judgment recorded");
     expect(screen.queryByText("Test mode")).not.toBeInTheDocument();
     expect(screen.queryByText("Mode unknown")).not.toBeInTheDocument();
   });
@@ -488,7 +644,8 @@ describe("AuditLogPage", () => {
 
     fireEvent.click(screen.getAllByRole("button", { name: "Detail" })[0]);
     expect(await screen.findByText(/VERIDICAL does not allow this entry to be edited or deleted/)).toBeInTheDocument();
-    expect(screen.getByText(/only a database administrator could disable/)).toBeInTheDocument();
+    expect(screen.getByText(/A database trigger rejects UPDATE and DELETE while enabled/)).toBeInTheDocument();
+    expect(screen.getByText(/Privileged database access can bypass or disable this safeguard/)).toBeInTheDocument();
     expect(screen.queryByText(/^This entry is immutable/)).not.toBeInTheDocument();
   });
 });

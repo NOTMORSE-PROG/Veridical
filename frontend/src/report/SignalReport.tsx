@@ -2,11 +2,13 @@ import { WorkflowLink as Link } from "../routing/WorkflowLink";
 import { SEMANTIC_SUPPORT_REVIEW } from "../domain/semanticSupport";
 import { ReviewDeskReturnLink } from "../routing/ReviewDeskReturnLink";
 import { type MouseEvent, useEffect, useRef, useState } from "react";
-import { useParams } from "react-router";
+import { useLocation, useParams } from "react-router";
 import { ApiError } from "../api/client";
 import { TEST_AI_DISCLOSURE } from "../domain/aiModeDisclosure";
 import { manuscriptIdentity } from "../domain/manuscriptLabel";
-import { useRouteFocus } from "../routing/useRouteFocus";
+import { pendingRouteReturnElement, rememberRouteReturnFocus, useRouteFocus } from "../routing/useRouteFocus";
+import { auditDestination, validAuditReviewOrigin } from "../routing/auditReturn";
+import { AUDIT_RETURN } from "../config/signalRoutes";
 import { ActionLink } from "../ui/ActionLink";
 import { Alert } from "../ui/Alert";
 import { Button } from "../ui/Button";
@@ -50,6 +52,7 @@ function focusReportJumpTarget(
 export function SignalReportPage() {
   const { checkRunId } = useParams<{ checkRunId: string }>();
   const id = Number(checkRunId);
+  const location = useLocation();
   const { data, isPending, error, refetch, fetchStatus } = useReport(id);
   const report = usableReport(data, id, error);
   const readFailed = Boolean(report && error);
@@ -60,7 +63,12 @@ export function SignalReportPage() {
   const exportErrorRef = useRef<HTMLDivElement>(null);
   const exportInFlight = useRef(false);
   const flagsQuery = useFlags(id);
-  useRouteFocus("Readiness report - VERIDICAL", headingRef, undefined, { prefix: "comparison-lead-", pending: isPending || flagsQuery.isPending || flagsQuery.fetchStatus !== "idle" });
+  const auditOrigin = validAuditReviewOrigin(location.pathname + location.search + location.hash, id);
+  const returningToAuditSection = Boolean(location.hash && auditOrigin
+    && pendingRouteReturnElement(location.pathname + location.search) === auditOrigin.elementId);
+  useRouteFocus("Readiness report - VERIDICAL", headingRef, undefined, returningToAuditSection
+    ? { prefix: auditOrigin!.elementId, pending: isPending || fetchStatus !== "idle" }
+    : { prefix: "comparison-lead-", pending: isPending || flagsQuery.isPending || flagsQuery.fetchStatus !== "idle" });
 
   useEffect(() => {
     if (exportPdf.isError) exportErrorRef.current?.focus();
@@ -86,7 +94,7 @@ export function SignalReportPage() {
         <div>
           <nav aria-label="Breadcrumb"><ReviewDeskReturnLink>Review Desk</ReviewDeskReturnLink><span aria-hidden="true">/</span><span>Readiness report</span></nav>
           <p className="signal-eyebrow">Review · Evidence before decision</p>
-          <h1 ref={headingRef} tabIndex={-1}>Readiness report</h1>
+          <h1 ref={headingRef} id="readiness-report-heading" tabIndex={-1}>Readiness report</h1>
           {report && <p className="signal-route-header__intro">{identity?.primary} · checked against {report.rubric_title}</p>}
         </div>
         {report && <div>{readFailed && <span>Last loaded </span>}<ReadinessBand status={report.status} /></div>}
@@ -132,7 +140,11 @@ export function SignalReportPage() {
             <div className="signal-attached-flow signal-report-tools">
               <div className="signal-report-actions signal-control-cluster">
                 <ActionLink to={`/report/${report.check_run_id}/document`} variant="secondary">Open manuscript</ActionLink>
-                <ActionLink to={`/audit?check_run_id=${report.check_run_id}`} variant="secondary">View Audit</ActionLink>
+                <ActionLink id={`${AUDIT_RETURN.actionPrefix}${id}`} to={auditDestination(id, location)} variant="secondary" onClick={event => {
+                  if (event.defaultPrevented || event.button !== 0 || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
+                  const origin = validAuditReviewOrigin(location.pathname + location.search + location.hash, id);
+                  if (origin) rememberRouteReturnFocus(origin.focusPath, auditDestination(id, location), origin.elementId, { fallbackElementId: origin.fallbackElementId, scrollBlock: origin.scrollBlock });
+                }}>View Audit</ActionLink>
                 <Button variant="secondary" busy={exportPdf.isPending} onClick={exportReport}>{exportPdf.isPending ? "Preparing PDF" : "Export PDF"}</Button>
                 <Button variant="secondary" onClick={() => setShareOpen(true)}>{shareLink ? "Manage active share link" : "Share report"}</Button>
               </div>

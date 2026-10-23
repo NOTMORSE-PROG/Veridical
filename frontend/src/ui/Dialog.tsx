@@ -4,10 +4,10 @@ import { useInertBackground } from "../components/useInertBackground";
 import { cx } from "../components/cx";
 
 const FOCUSABLE =
-  'a[href], button:not([disabled]), textarea:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])';
+  'a[href], button:not([disabled]), textarea:not([disabled]), input:not([disabled]), select:not([disabled]), summary, [contenteditable="true"], [tabindex]:not([tabindex="-1"])';
 
 function focusable(container: HTMLElement): HTMLElement[] {
-  return Array.from(container.querySelectorAll<HTMLElement>(FOCUSABLE));
+  return Array.from(container.querySelectorAll<HTMLElement>(FOCUSABLE)).filter(available);
 }
 
 function available(target: HTMLElement | null): target is HTMLElement {
@@ -16,6 +16,8 @@ function available(target: HTMLElement | null): target is HTMLElement {
   for (let node: HTMLElement | null = target; node; node = node.parentElement) {
     const style = window.getComputedStyle(node);
     if (style.display === "none" || style.visibility === "hidden" || style.visibility === "collapse") return false;
+    if (node.tagName === "DETAILS" && !node.hasAttribute("open")
+      && !node.querySelector(":scope > summary")?.contains(target)) return false;
   }
   return true;
 }

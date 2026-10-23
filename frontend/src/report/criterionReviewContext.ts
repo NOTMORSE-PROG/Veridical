@@ -15,6 +15,8 @@ export interface ReviewDraft {
   reason: string;
   attempted: boolean;
   saving: boolean;
+  // A transport failure cannot establish whether this submitted revision committed.
+  uncertainRevision?: number;
   error?: unknown;
 }
 export interface ReviewCompletion {

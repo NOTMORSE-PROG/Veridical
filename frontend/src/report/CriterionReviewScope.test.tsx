@@ -61,7 +61,7 @@ function setup() {
     { path: "/shared/test", element: <p>Shared read only</p> },
   ], { initialEntries: ["/report/5"] });
   render(<QueryClientProvider client={client}><RouterProvider router={router} /></QueryClientProvider>);
-  return { client, router, fetch, held, failList() { failList = true; }, restoreList() { failList = false; } };
+  return { client, router, fetch, held, supersede() { revision += 1; }, failList() { failList = true; }, restoreList() { failList = false; } };
 }
 
 async function card(id: number) { return (await screen.findByRole("heading", { name: `Requirement ${id}` })).closest("article")!; }
@@ -190,12 +190,71 @@ describe("report-family private review ownership", () => {
     expect(within(await card(1)).getByRole("textbox")).toHaveValue("Retain through failed list request");
   });
 
-  it.each(["run", "outside", "public"])("retires drafts on %s scope exit", async (exit) => {
+  it.each(["run", "outside", "public"])("retires drafts only after explicit discard on %s scope exit", async (exit) => {
     const { router } = setup(); await draft(1, "First level", "Private reason must retire");
     await act(async () => { await router.navigate(exit === "run" ? "/report/6" : exit === "public" ? "/shared/test" : "/outside"); });
+    expect(await screen.findByRole("dialog", { name: "Leave this review with unsaved changes?" })).toBeVisible();
+    expect(router.state.location.pathname).toBe("/report/5");
+    fireEvent.click(screen.getByRole("button", { name: "Leave without saving" }));
     expect(screen.queryByDisplayValue("Private reason must retire")).not.toBeInTheDocument();
     await act(async () => { await router.navigate("/report/5"); });
     await card(1); expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
+  });
+
+  it("keeps both exact drafts and the triggering action after cancelling an exit", async () => {
+    const { router, fetch } = setup();
+    await draft(1, "First level", "  Exact first reason\nkept  ");
+    await draft(2, "Second level", "Second separate reason");
+    const trigger = within(await card(2)).getByRole("button", { name: "Confirm resolution" }); trigger.focus();
+    await act(async () => { await router.navigate("/outside"); });
+    fireEvent.click(await screen.findByRole("button", { name: "Keep reviewing" }));
+    expect(router.state.location.pathname).toBe("/report/5");
+    expect(within(await card(1)).getByRole("textbox")).toHaveValue("  Exact first reason\nkept  ");
+    expect(within(await card(2)).getByRole("textbox")).toHaveValue("Second separate reason");
+    expect(trigger).toHaveFocus();
+    expect(fetch.mock.calls.some(([, init]) => init?.method === "POST")).toBe(false);
+  });
+
+  it("retains an active save owner and requires a fresh exit intent after success", async () => {
+    const { router, held } = setup(); await draft(1, "First level", "Saving is not cancellation"); await confirm(1);
+    await act(async () => { await router.navigate("/outside"); });
+    const dialog = await screen.findByRole("dialog", { name: "Stay in this review" });
+    expect(within(dialog).queryByRole("button", { name: "Leave without saving" })).not.toBeInTheDocument();
+    await act(async () => { held[0].finish(); });
+    expect(router.state.location.pathname).toBe("/report/5");
+    expect(await screen.findByText("The review status has changed. Select Keep reviewing, then choose your destination again.")).toBeVisible();
+    fireEvent.click(within(dialog).getByRole("button", { name: "Keep reviewing" }));
+    await act(async () => { await router.navigate("/outside"); });
+    expect(await screen.findByText("Outside review")).toBeVisible();
+  });
+
+  it("keeps an ambiguous submission protected after a negative read at the same revision", async () => {
+    const { router, held, supersede } = setup(); await draft(1, "First level", "Ambiguous original submission"); await confirm(1);
+    await act(async () => { held[0].finish(false); });
+    const root = within(await card(1));
+    fireEvent.click(root.getByRole("button", { name: "Review current criterion" }));
+    await root.findByRole("button", { name: "Use this draft for the current criterion" });
+    expect(root.getByRole("button", { name: "Discard this draft" })).toBeDisabled();
+    await act(async () => { await router.navigate("/outside"); });
+    const dialog = await screen.findByRole("dialog", { name: "Stay in this review" });
+    expect(within(dialog).getByText(/Select Keep reviewing, then review the current criterion/)).toBeVisible();
+    expect(within(dialog).queryByRole("button", { name: "Leave without saving" })).not.toBeInTheDocument();
+    fireEvent.click(within(dialog).getByRole("button", { name: "Keep reviewing" }));
+    // A newer assessment fences the old expected revision; the draft still needs an explicit choice.
+    supersede();
+    fireEvent.click(root.getByRole("button", { name: "Review current criterion" }));
+    await waitFor(() => expect(root.getByRole("button", { name: "Discard this draft" })).toBeEnabled());
+    await act(async () => { await router.navigate("/outside"); });
+    fireEvent.click(await screen.findByRole("button", { name: "Leave without saving" }));
+    expect(await screen.findByText("Outside review")).toBeVisible();
+  });
+
+  it("allows explicit discard after a definitive stale refusal", async () => {
+    const { router, held } = setup(); await draft(1, "First level", "Definitive rollback refusal"); await confirm(1);
+    await act(async () => { held[0].finish(false, undefined, false, 409); });
+    await act(async () => { await router.navigate("/outside"); });
+    fireEvent.click(await screen.findByRole("button", { name: "Leave without saving" }));
+    expect(await screen.findByText("Outside review")).toBeVisible();
   });
 
   it.each([1, 2])("fences a late response after auth cache replacement for instructor %s", async (nextId) => {

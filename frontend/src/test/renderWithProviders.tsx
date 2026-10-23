@@ -8,7 +8,7 @@ import { vi } from "vitest";
 import { CriterionReviewProvider } from "../report/CriterionReviewScope";
 import { ME_QUERY_KEY } from "../auth/useAuth";
 
-type RenderOptions = { route?: string; path?: string; state?: Record<string, unknown>; reviewRunId?: number; reviewInstructorId?: number };
+type RenderOptions = { route?: string; path?: string; state?: Record<string, unknown>; reviewRunId?: number; reviewInstructorId?: number; authInstructorId?: number };
 
 export function renderWithProviders(
   ui: ReactElement,
@@ -18,12 +18,13 @@ export function renderWithProviders(
     state,
     reviewRunId,
     reviewInstructorId = 1,
+    authInstructorId,
   }: RenderOptions = {},
 ) {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   });
-  if (reviewRunId !== undefined) queryClient.setQueryData(ME_QUERY_KEY, { id: reviewInstructorId });
+  if (reviewRunId !== undefined || authInstructorId !== undefined) queryClient.setQueryData(ME_QUERY_KEY, { id: authInstructorId ?? reviewInstructorId });
   // A data router (createMemoryRouter), not plain MemoryRouter/Routes:
   // react-router's navigation-blocking hook (useBlocker, BUG-037) only
   // works inside a data router, and every screen under test must render

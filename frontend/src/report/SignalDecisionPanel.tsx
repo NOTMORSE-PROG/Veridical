@@ -131,7 +131,7 @@ export function SignalDecisionPanel({ report, manuscriptLabel, readFailed, retry
   function saved(current: ReportOut) { setReceipt(current); }
   return <section id="final-decision" tabIndex={-1} className="signal-decision-gate" aria-labelledby="decision-heading">
     <div className="signal-decision-gate__heading"><div><p className="signal-section-kicker">Decide - Instructor authority</p><h2 id="decision-heading" ref={headingRef} tabIndex={-1}>Final defense-readiness decision</h2></div>{report.decision && <span className={`signal-decision signal-decision--${report.decision}`}>{DECISION_LABEL[report.decision]}</span>}</div>
-    {receipt && <p role="status">{receipt.decision === "returned" ? `Return for revision recorded. ${receipt.pending_review_count} criteria remain unresolved.` : receipt.decision === null ? "Decision reopened. Earlier drafts still need current review before confirmation." : `${DECISION_LABEL[receipt.decision]} recorded.`}</p>}
+    {receipt && <p role="status" className="signal-decision-gate__receipt">{receipt.decision === "returned" ? `Return for revision recorded. ${receipt.pending_review_count} criteria remain unresolved.` : receipt.decision === null ? "Decision reopened. Earlier drafts still need current review before confirmation." : `${DECISION_LABEL[receipt.decision]} recorded.`}</p>}
     {readFailed && <DecisionReadRecovery retrying={retrying} onRetry={onRetry} />}
     {!report.rubric_is_current && <Alert title="A newer format version is active" tone="warning">This report remains pinned to the format used when the check ran. Start a new check if the newer version should govern your decision.</Alert>}
     {report.decision ? <div className="signal-decision-record">

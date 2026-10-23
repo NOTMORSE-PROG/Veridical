@@ -14,20 +14,25 @@
 // human-action-vs-automated-call distinction (icon + sr-only text, never
 // color alone) using data the backend already sends but this screen
 // never rendered.
-import { useEffect, useRef, useState } from "react";
-import { Link, useSearchParams } from "react-router";
+import { useEffect, useLayoutEffect, useRef, useState, type RefObject } from "react";
+import { useQueryClient } from "@tanstack/react-query";
+import { Link, useLocation, useSearchParams } from "react-router";
 import { ApiError } from "../api/client";
 import type { AuditLogSummary, LLMMode } from "../api/types";
 import { Chip } from "../components/Chip";
-import { Modal, ModalBackdrop } from "../components/Modal";
-import { useRouteFocus } from "../routing/useRouteFocus";
-import { useAuditLogDetail, useAuditLogPage } from "./useAudit";
+import { useActionLifetime } from "../auth/useActionLifetime";
+import { Dialog } from "../ui/Dialog";
+import { recoverableReadError } from "../report/reportReadState";
+import { instructorEventDetails, recordedActor } from "./instructorEventDetails";
+import { rememberRouteReturnFocus, useRouteFocus } from "../routing/useRouteFocus";
+import { readAuditReviewOrigin } from "../routing/auditReturn";
+import { auditOwnerCurrent, useAuditLogDetail, useAuditLogPage, useAuditOwner, type AuditOwner } from "./useAudit";
 
-const FILTERS: ReadonlyArray<{ label: string; eventType?: string; eventTypePrefix?: string }> = [
+const FILTERS: ReadonlyArray<{ label: string; value?: string; eventType?: string; eventTypePrefix?: string }> = [
   { label: "All" },
   { label: "AI calls", eventTypePrefix: "llm_" },
   { label: "Routing", eventType: "criterion_routing" },
-  { label: "Escalations", eventType: "escalation_resolved" },
+  { label: "Criterion judgments", value: "Escalations", eventType: "escalation_resolved" },
   { label: "Overrides", eventTypePrefix: "flag_" },
 ];
 
@@ -36,7 +41,7 @@ const EVENT_LABELS: Record<string, string> = {
   llm_cache_hit: "AI call (cached)",
   llm_call_failed: "AI call failed",
   criterion_routing: "Criterion routing",
-  escalation_resolved: "Escalation resolved",
+  escalation_resolved: "Criterion judgment recorded",
   flag_overridden: "Flag overridden",
   flag_annotated: "Flag annotated",
   rubric_parse_attempt: "Rubric parse attempt",
@@ -70,22 +75,22 @@ const EVENT_EXPLANATIONS: Record<string, string> = {
   llm_cache_hit: "VERIDICAL reused a matching stored AI response instead of spending another service call.",
   llm_call_failed: "An AI-assisted review step did not complete. The record preserves the failure context without treating it as an assessment.",
   criterion_routing: "VERIDICAL recorded whether a criterion could be checked by a deterministic rule or needed AI-assisted review.",
-  escalation_resolved: "You resolved a criterion that VERIDICAL had left for instructor judgment.",
-  flag_overridden: "You changed how a system finding should affect the readiness review.",
-  flag_annotated: "You added instructor context to a system finding.",
+  escalation_resolved: "An instructor resolved a criterion that VERIDICAL had left for instructor judgment.",
+  flag_overridden: "An instructor changed how a system finding should affect the readiness review.",
+  flag_annotated: "An instructor added context to a system finding.",
   rubric_parse_attempt: "VERIDICAL recorded an attempt to prepare review criteria from the uploaded required format.",
   llm_model_exhausted: "The configured AI service choices were unavailable, so the affected work was not treated as assessed.",
-  report_decided: "You recorded the final instructor outcome for this readiness review.",
-  report_reopened: "You reopened a previously recorded instructor outcome for further review.",
-  manuscript_purged: "You deleted the uploaded file and its extracted text. The manuscript cannot be used as a source in future originality checks. Saved reports, decisions, comparison evidence and audit history are kept.",
-  check_run_cancel_requested: "You requested that an active manuscript check stop at its next safe boundary.",
+  report_decided: "An instructor recorded the final outcome for this readiness review.",
+  report_reopened: "An instructor reopened a previously recorded outcome for further review.",
+  manuscript_purged: "An instructor deleted the uploaded file and its extracted text. The manuscript cannot be used as a source in future originality checks. Saved reports, decisions, comparison evidence and audit history are kept.",
+  check_run_cancel_requested: "An instructor requested that an active manuscript check stop at its next safe boundary.",
   check_run_cancelled: "VERIDICAL stopped the manuscript check and preserved its completed work and history.",
-  citation_source_confirmed: "You confirmed the source associated with a citation-integrity finding.",
-  manuscript_ingestion_failure_dismissed: "You removed a failed upload from the active Review Desk. Its record and history are kept.",
+  citation_source_confirmed: "An instructor confirmed the source associated with a citation-integrity finding.",
+  manuscript_ingestion_failure_dismissed: "An instructor removed a failed upload from the active Review Desk. Its record and history are kept.",
   library_entry_added: "A manuscript became a Library record, so originality checks now compare against it.",
-  library_entry_needs_decision: "A file you added closely matched one of your Library records, so it waits for your decision instead of being added.",
-  library_entry_failed: "VERIDICAL could not read text from a file you added, so it was not added to the Library.",
-  library_entry_edited: "You changed the details of one of your Library records.",
+  library_entry_needs_decision: "An uploaded file closely matched a recorded Library item and was held for an instructor decision instead of being added.",
+  library_entry_failed: "VERIDICAL could not read text from an uploaded file, so it was not added to the Library.",
+  library_entry_edited: "An instructor changed a Library record's details.",
   library_entry_removed: "A manuscript left the Library, so originality checks no longer compare against it.",
   library_orphan_corpus_rows_removed: "An operator cleanup removed comparison data that belonged to no Library record.",
 };
@@ -348,127 +353,109 @@ function EventContent({ row }: { row: AuditLogSummary }) {
   );
 }
 
-function AuditDetailModal({ id, onClose }: { id: number; onClose: () => void }) {
-  const { data, isLoading, isError, error, refetch } = useAuditLogDetail(id);
+function AuditDetailModal({ id, owner, onClose, fallbackFocusRef }: {
+  id: number; owner: AuditOwner; onClose: () => void;
+  fallbackFocusRef: RefObject<HTMLHeadingElement | null>;
+}) {
+  const query = useAuditLogDetail(id, owner);
+  const client = useQueryClient();
+  const isCurrent = useActionLifetime(`audit-detail:${id}`);
+  const data = auditOwnerCurrent(client, owner) && query.data?.id === id
+    && (!query.isError || recoverableReadError(query.error)) ? query.data : undefined;
   const payloadPreview = data ? JSON.stringify(data.payload, null, 2) : "";
-  const instructor = data ? isInstructorEvent(data.event_type) : false;
-  const instructorId =
-    data && typeof data.payload.instructor_id === "number" ? data.payload.instructor_id : null;
-
+  const details = data ? instructorEventDetails(data.event_type, data.payload) : undefined;
+  function close() { if (isCurrent()) onClose(); }
   return (
-    <ModalBackdrop>
-      <Modal title={`Audit entry #${id}`} onClose={onClose}>
-        {isLoading && (
-          <p role="status" aria-live="polite" aria-busy="true" className="text-sm text-ink-tertiary">
-            Loading audit entry.
-          </p>
-        )}
-        {isError && (
-          <div role="alert" className="text-sm text-status-attention-text">
-            {error instanceof ApiError ? error.message : "This audit entry couldn't be loaded."}{" "}
-            <button type="button" onClick={() => refetch()} className="font-medium underline">
-              Try again
-            </button>
-            .
+    <Dialog title={`Audit entry #${id}`} initialFocusTitle onClose={close} fallbackFocusRef={fallbackFocusRef} wide>
+      {query.isPending && !data && <p role="status" aria-busy="true">Loading audit entry.</p>}
+      {query.isError && <div role="alert" className="signal-copy-flow">
+        <p>{query.error instanceof ApiError ? query.error.message : "This audit entry could not be loaded."}</p>
+        <button type="button" onClick={event => {
+          if (!isCurrent()) return;
+          // Retire the disappearing control before the read starts. Completion
+          // never claims focus from a subsequent choice or a different dialog.
+          if (document.activeElement === event.currentTarget) {
+            event.currentTarget.closest('[role="dialog"]')?.querySelector<HTMLHeadingElement>("h2")?.focus();
+          }
+          void query.refetch();
+        }} className="signal-button signal-button--secondary">Retry audit entry</button>
+      </div>}
+      {data && <div className="signal-group-flow">
+        {query.isError && <p role="status">Last loaded entry. Its current availability could not be confirmed.</p>}
+        <section aria-labelledby={`audit-entry-${id}-meaning`} className="signal-audit-entry-summary signal-group-flow">
+          <h3 id={`audit-entry-${id}-meaning`}>{details?.heading ?? "What this records"}</h3>
+          {details ? <>
+            <dl className="signal-audit-entry-facts">
+              {details.fields.map(field => <div key={field.label} className={`signal-audit-entry-fact--${field.role}`}><dt>{field.label}</dt><dd>{field.value}</dd></div>)}
+            </dl>
+            {details.notice && <p>{details.notice}</p>}
+            {details.pendingItems && details.pendingItems.length > 0 && <details>
+              <summary>View recorded pending items</summary>
+              <ul>{details.pendingItems.map(item => <li key={item.resultId}>Criterion #{item.criterionId}, result #{item.resultId}: {item.outcome}</li>)}</ul>
+            </details>}
+            {details.pendingQualification && <p>{details.pendingQualification}</p>}
+          </> : <>
+            <p>{eventExplanation(data)}</p>
+            {eventSummary(data) && <p>Review context: {eventSummary(data)}.</p>}
+          </>}
+        </section>
+        <section aria-labelledby={`audit-entry-${id}-context`} className="signal-audit-entry-context signal-group-flow">
+          <h3 id={`audit-entry-${id}-context`}>Entry context</h3>
+          <dl className="signal-audit-entry-facts">
+            {!details && <div><dt>Event</dt><dd>{eventLabel(data)}</dd></div>}
+            <div><dt>Stored time</dt><dd>{formatEventTime(data.created_at)}</dd></div>
+            {data.check_run_id !== null && <div><dt>Check run</dt><dd>{data.check_run_id}</dd></div>}
+            {isInstructorEvent(data.event_type) && <div><dt>Performed by</dt><dd>{recordedActor(data.payload, owner.instructorId)}</dd></div>}
+            {data.manuscript_group_label && <div className="signal-audit-entry-fact--primary"><dt>Group</dt><dd>{data.manuscript_group_label}</dd></div>}
+            {data.manuscript_original_filename && <div className="signal-audit-entry-fact--primary"><dt>File</dt><dd>{data.manuscript_original_filename}</dd></div>}
+          </dl>
+        </section>
+        <p>This stored entry is read-only.</p>
+        <details className="signal-audit-technical">
+          <summary>Technical record for reproducibility</summary>
+          <div className="signal-copy-flow">
+            <p>These are the exact stored system values. Field names and identifiers remain unchanged so a technical reviewer can inspect the record or use it in a reproduction workflow.</p>
+            <p>VERIDICAL does not allow this entry to be edited or deleted. A database trigger rejects UPDATE and DELETE while enabled. Privileged database access can bypass or disable this safeguard.</p>
+            <p>Entry numbers identify records, not verified event times or transaction completion order. Older records may use different system clocks.</p>
+            <p>Stored timestamp: <code>{data.created_at}</code></p>
+            <p>Event type: <code>{data.event_type}</code></p>
+            {data.agreement_score !== null && <p><code>agreement_score: {data.agreement_score}</code></p>}
+            {data.input_hash && <p><code>input_hash: {data.input_hash}</code></p>}
+            <div><strong>Raw payload</strong><pre>{payloadPreview}</pre></div>
           </div>
-        )}
-        {data && (
-          <div className="flex flex-col gap-3 text-sm">
-            <div className="flex flex-wrap gap-x-4 gap-y-1 text-ink-secondary">
-              <span>
-                <b className="text-ink">Event:</b> {eventLabel(data)}
-              </span>
-              {data.check_run_id !== null && (
-                <span>
-                  <b className="text-ink">Check run:</b> {data.check_run_id}
-                </span>
-              )}
-              {data.manuscript_group_label && (
-                <span>
-                  <b className="text-ink">Group:</b> {data.manuscript_group_label}
-                </span>
-              )}
-              {data.manuscript_original_filename && (
-                <span>
-                  <b className="text-ink">File:</b> {data.manuscript_original_filename}
-                </span>
-              )}
-              {instructor && instructorId !== null && (
-                <span>
-                  <b className="text-ink">Performed by:</b> You
-                </span>
-              )}
-              <span>
-                <b className="text-ink">Stored time:</b>{" "}
-                {new Date(data.created_at).toLocaleString(undefined, {
-                  dateStyle: "medium",
-                  timeStyle: "medium",
-                })}
-              </span>
-            </div>
-            <section aria-labelledby={`audit-entry-${id}-meaning`} className="rounded-md border border-border bg-page p-3">
-              <h3 id={`audit-entry-${id}-meaning`} className="font-semibold text-ink">What this records</h3>
-              <p className="mt-1 text-ink-secondary">{eventExplanation(data)}</p>
-              {eventSummary(data) && (
-                <p className="mt-1 text-ink-secondary">Review context: {eventSummary(data)}.</p>
-              )}
-            </section>
-            <p className="rounded-md bg-status-info-bg px-2.5 py-1.5 text-xs text-status-info-text">
-              VERIDICAL does not allow this entry to be edited or deleted. The database
-              independently rejects any direct attempt to change or remove it, a safeguard only a
-              database administrator could disable. Its exact stored values remain available below
-              for technical inspection and reproduction workflows, but they are not required for
-              the instructor's review task.
-            </p>
-            <details className="rounded-md border border-border bg-panel p-3">
-              <summary className="min-h-11 cursor-pointer font-semibold text-link">
-                Technical record for reproducibility
-              </summary>
-              <p className="mb-2 text-xs text-ink-secondary">
-                These are the exact stored system values. Field names and identifiers are shown
-                unchanged so a technical reviewer can inspect the record or use it in a
-                reproduction workflow.
-              </p>
-              <p>
-                Entry numbers identify records, not verified event times or transaction completion
-                order. Older records may use different system clocks.
-              </p>
-              <p>Stored timestamp: <code>{data.created_at}</code></p>
-              <p>Event type: <code>{data.event_type}</code></p>
-              {data.agreement_score !== null && (
-                <div className="rounded-md bg-page px-2.5 py-1.5 font-mono text-xs break-all text-ink-tertiary">
-                  agreement_score: {data.agreement_score}
-                </div>
-              )}
-              {data.input_hash && (
-                <div className="mt-2 rounded-md bg-page px-2.5 py-1.5 font-mono text-xs break-all text-ink-tertiary">
-                  input_hash: {data.input_hash}
-                </div>
-              )}
-              <div className="mt-2">
-                <div className="mb-1 text-xs font-semibold tracking-header text-ink-tertiary uppercase">
-                  Raw payload
-                </div>
-                <pre className="max-h-80 overflow-auto rounded-md border border-border bg-page p-2.5 text-xs whitespace-pre-wrap break-words text-ink">
-                  {payloadPreview}
-                </pre>
-              </div>
-            </details>
-          </div>
-        )}
-      </Modal>
-    </ModalBackdrop>
+        </details>
+      </div>}
+    </Dialog>
   );
 }
 
 export function AuditLogPage() {
-  const headingRef = useRef<HTMLHeadingElement>(null);
-  useRouteFocus("Audit log - VERIDICAL", headingRef);
+  const { owner, access } = useAuditOwner();
+  if (!owner) return <div className="signal-route signal-page-flow signal-audit">
+    <h1>Audit</h1>
+    {access.isError ? <div role="alert"><p>Instructor access could not be confirmed. Private audit content is hidden.</p><button type="button" onClick={() => { void access.refetch(); }}>Retry instructor access</button></div>
+      : <p role="status">Checking instructor access.</p>}
+  </div>;
+  return <OwnedAuditLogPage key={`${owner.instructorId}:${owner.lifetime}`} owner={owner} />;
+}
 
+function OwnedAuditLogPage({ owner }: { owner: AuditOwner }) {
+  const headingRef = useRef<HTMLHeadingElement>(null);
+  const location = useLocation();
   const [searchParams, setSearchParams] = useSearchParams();
   const page = Number(searchParams.get("page") ?? "1");
   const checkRunIdParam = searchParams.get("check_run_id");
   const checkRunId = checkRunIdParam ? Number(checkRunIdParam) : undefined;
+  const origin = checkRunId === undefined ? undefined : readAuditReviewOrigin(location.search, checkRunId);
+  const originPath = origin?.focusPath;
+  const originAction = origin?.elementId;
+  const originFallback = origin?.fallbackElementId;
+  const originScrollBlock = origin?.scrollBlock;
+  useLayoutEffect(() => {
+    if (originPath && originAction) rememberRouteReturnFocus(originPath, location.pathname + location.search, originAction,
+      { armed: true, fallbackElementId: originFallback, scrollBlock: originScrollBlock });
+  }, [originPath, originAction, originFallback, originScrollBlock, location.pathname, location.search]);
+  useRouteFocus("Audit log - VERIDICAL", headingRef);
   const activeFilterLabel = searchParams.get("filter") ?? "All";
   const detailId = searchParams.get("detail") ? Number(searchParams.get("detail")) : null;
   const [announcement, setAnnouncement] = useState("");
@@ -483,15 +470,19 @@ export function AuditLogPage() {
     });
   }
 
-  const activeFilter = FILTERS.find((f) => f.label === activeFilterLabel) ?? FILTERS[0];
-  const { data, isLoading, isError, refetch } = useAuditLogPage(
+  const activeFilter = FILTERS.find((f) => (f.value ?? f.label) === activeFilterLabel) ?? FILTERS[0];
+  const listQuery = useAuditLogPage(
     {
       checkRunId,
       eventType: activeFilter.eventType,
       eventTypePrefix: activeFilter.eventTypePrefix,
     },
     page,
+    owner,
   );
+  const { isLoading, isError, refetch, isPlaceholderData } = listQuery;
+  const data = auditOwnerCurrent(useQueryClient(), owner)
+    && (!listQuery.isError || recoverableReadError(listQuery.error)) ? listQuery.data : undefined;
 
   useEffect(() => {
     if (!data) return;
@@ -521,7 +512,7 @@ export function AuditLogPage() {
     const next = new URLSearchParams(searchParams);
     if (value === null) next.delete(key);
     else next.set(key, value);
-    if (key !== "page") next.delete("page");
+    if (key !== "page" && key !== "detail") next.delete("page");
     setSearchParams(next);
   }
 
@@ -552,7 +543,7 @@ export function AuditLogPage() {
             <strong>Showing activity for check run {checkRunId}</strong>
             <span>This filtered record follows the selected readiness review.</span>
           </div>
-          <Link to={`/report/${checkRunId}`}>Return to readiness report</Link>
+          <Link to={origin?.returnPath ?? `/report/${checkRunId}`}>{origin?.returnPath.includes("/document") ? "Return to manuscript review" : "Return to readiness report"}</Link>
         </aside>
       )}
 
@@ -564,13 +555,13 @@ export function AuditLogPage() {
       <div className="flex flex-wrap items-center gap-2">
         <div role="group" aria-label="Filter by event type" className="flex flex-wrap items-center gap-1.5">
           {FILTERS.map((f) => {
-            const isActive = activeFilterLabel === f.label;
+            const isActive = activeFilter === f;
             return (
               <button
                 key={f.label}
                 type="button"
                 aria-pressed={isActive}
-                onClick={() => setParam("filter", f.label === "All" ? null : f.label)}
+                onClick={() => setParam("filter", f.label === "All" ? null : (f.value ?? f.label))}
                 className={
                   isActive
                     ? "on-dark inline-flex items-center gap-1 rounded-full bg-action px-3 py-1.5 text-xs font-semibold text-on-action"
@@ -613,6 +604,7 @@ export function AuditLogPage() {
 
       <div className="signal-group-flow signal-audit-records">
       <p className="signal-filter-help">
+        {isPlaceholderData && <span role="status">Loading page {page}. The entries below are from the last loaded page. </span>}
         Order: Highest entry number first. Stored times are shown unchanged and may not follow this order.
       </p>
       {isLoading && (
@@ -846,7 +838,7 @@ export function AuditLogPage() {
       </div>
 
       {detailId !== null && (
-        <AuditDetailModal id={detailId} onClose={() => setParam("detail", null)} />
+        <AuditDetailModal key={detailId} id={detailId} owner={owner} onClose={() => setParam("detail", null)} fallbackFocusRef={headingRef} />
       )}
     </div>
   );

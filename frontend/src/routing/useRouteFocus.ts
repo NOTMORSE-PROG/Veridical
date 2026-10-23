@@ -11,12 +11,14 @@ interface PendingReturnFocus {
   elementId: string;
   armed: boolean;
   fallbackElementId?: string;
+  scrollBlock?: ScrollLogicalPosition;
 }
 
 export interface RouteReturnFocusRegistration {
   returnPath: string;
   elementId: string;
   fallbackElementId?: string;
+  scrollBlock?: ScrollLogicalPosition;
 }
 
 let hasNavigatedOnce = false;
@@ -33,9 +35,9 @@ export function rememberRouteReturnFocus(
   returnPath: string,
   destinationPath: string,
   elementId: string,
-  options: { armed?: boolean; fallbackElementId?: string } = {},
+  options: { armed?: boolean; fallbackElementId?: string; scrollBlock?: ScrollLogicalPosition } = {},
 ) {
-  pendingReturnFocus = { returnPath, destinationPath, elementId, armed: options.armed ?? false, fallbackElementId: options.fallbackElementId };
+  pendingReturnFocus = { returnPath, destinationPath, elementId, armed: options.armed ?? false, fallbackElementId: options.fallbackElementId, scrollBlock: options.scrollBlock };
 }
 
 /** Retire only registrations owned by the named workflow's action prefix. */
@@ -54,7 +56,7 @@ export function pendingRouteReturnElement(path: string) {
     ? pendingReturnFocus.elementId : undefined;
 }
 
-function restoreRegisteredFocus(elementId: string): HTMLElement | null {
+function restoreRegisteredFocus(elementId: string, scrollBlock: ScrollLogicalPosition = "nearest"): HTMLElement | null {
   const target = document.getElementById(elementId);
   if (!target) return null;
 
@@ -67,11 +69,17 @@ function restoreRegisteredFocus(elementId: string): HTMLElement | null {
   }
   target.focus({ preventScroll: true });
   if (document.activeElement !== target) return null;
+  let ownsPlacement = true;
+  const removePlacementIntent = observeUserIntent(target, () => {
+    ownsPlacement = false;
+    removePlacementIntent();
+  });
   requestAnimationFrame(() => {
-    if (!target.isConnected || document.activeElement !== target) return;
+    removePlacementIntent();
+    if (!ownsPlacement || !target.isConnected || document.activeElement !== target) return;
     const bounds = target.getBoundingClientRect();
-    if (bounds.top < 0 || bounds.bottom > window.innerHeight) {
-      target.scrollIntoView({ block: "nearest" });
+    if (scrollBlock !== "nearest" || bounds.top < 0 || bounds.bottom > window.innerHeight) {
+      target.scrollIntoView({ block: scrollBlock });
     }
   });
   return target;
@@ -112,6 +120,7 @@ interface RestoredFocus {
   path: string;
   target: HTMLElement;
   fallbackElementId?: string;
+  scrollBlock?: ScrollLogicalPosition;
 }
 
 function observeRestoredFocus(
@@ -120,6 +129,7 @@ function observeRestoredFocus(
   retire: () => void,
   fallbackElementId?: string,
   nativeHashTarget?: HTMLElement | null,
+  scrollBlock?: ScrollLogicalPosition,
 ): () => void {
   const scope = headingRef.current?.closest("main") ?? target.closest("main") ?? document.body;
   let disposed = false;
@@ -135,7 +145,7 @@ function observeRestoredFocus(
     stop();
     if (!recover) return;
     const replacement = document.getElementById(target.id);
-    if (replacement && scope.contains(replacement) && restoreRegisteredFocus(target.id)) return;
+    if (replacement && scope.contains(replacement) && restoreRegisteredFocus(target.id, scrollBlock)) return;
     heading.focus();
   });
   const dispose = () => {
@@ -156,7 +166,7 @@ function observeRestoredFocus(
     // source action. Allow only that expected settlement in this frame;
     // keyboard, pointer, wheel, blur or any other focus already retires it.
     if (!disposed && document.activeElement === nativeHashTarget && target.isConnected) {
-      restoreRegisteredFocus(target.id);
+      restoreRegisteredFocus(target.id, scrollBlock);
     }
   });
   observer.observe(scope, { childList: true, subtree: true });
@@ -192,8 +202,8 @@ export function useRouteFocus(
     // return path." Harmless for a destination page with no meaningful
     // search (`location.search` is just "").
     const fullPath = location.pathname + location.search;
-    const watchRestoration = (target: HTMLElement, fallbackElementId?: string) => {
-      const ownership = { path: fullPath, target, fallbackElementId };
+    const watchRestoration = (target: HTMLElement, fallbackElementId?: string, scrollBlock?: ScrollLogicalPosition) => {
+      const ownership = { path: fullPath, target, fallbackElementId, scrollBlock };
       restoredRef.current = ownership;
       let hashTarget: HTMLElement | null = null;
       if (navigationType === "POP" && location.hash) {
@@ -202,12 +212,12 @@ export function useRouteFocus(
       }
       return observeRestoredFocus(target, headingRef, () => {
         if (restoredRef.current === ownership) restoredRef.current = null;
-      }, fallbackElementId, hashTarget);
+      }, fallbackElementId, hashTarget, scrollBlock);
     };
     const restored = restoredRef.current;
     if (restored?.path === fullPath && restored.target.isConnected
       && document.activeElement === restored.target) {
-      return watchRestoration(restored.target, restored.fallbackElementId);
+      return watchRestoration(restored.target, restored.fallbackElementId, restored.scrollBlock);
     }
     restoredRef.current = null;
 
@@ -221,6 +231,7 @@ export function useRouteFocus(
         elementId: returnFocus.elementId,
         armed: true,
         fallbackElementId: returnFocus.fallbackElementId,
+        scrollBlock: returnFocus.scrollBlock,
       };
       registeredReturnRef.current = true;
     }
@@ -235,7 +246,7 @@ export function useRouteFocus(
       // as the browser's own Back button, and an instructor has no way to
       // know the internal navigation-type distinction produces two
       // different experiences for what looks like the same action.
-      const target = restoreRegisteredFocus(pending.elementId);
+      const target = restoreRegisteredFocus(pending.elementId, pending.scrollBlock);
       if (target) {
         // React StrictMode immediately replays a newly mounted effect in
         // development. Mark this route pass as handled before clearing the
@@ -243,7 +254,7 @@ export function useRouteFocus(
         // route change and move focus from the restored control to the H1.
         ranRef.current = true;
         pendingReturnFocus = null;
-        return watchRestoration(target, pending.fallbackElementId);
+        return watchRestoration(target, pending.fallbackElementId, pending.scrollBlock);
       }
 
       // Async content may arrive after the route. Search is time-bounded;
@@ -271,11 +282,11 @@ export function useRouteFocus(
       const observer = new MutationObserver(() => {
         if (settled) return;
         restoring = true;
-        const appeared = restoreRegisteredFocus(pending.elementId);
+        const appeared = restoreRegisteredFocus(pending.elementId, pending.scrollBlock);
         restoring = false;
         if (!appeared) return;
         finishSearch();
-        disposeOwnership = watchRestoration(appeared, pending.fallbackElementId);
+        disposeOwnership = watchRestoration(appeared, pending.fallbackElementId, pending.scrollBlock);
       });
       const scope = headingRef.current?.closest("main") ?? document.body;
       observer.observe(scope, { childList: true, subtree: true });

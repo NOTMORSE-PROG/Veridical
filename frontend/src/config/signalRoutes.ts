@@ -34,6 +34,27 @@ export const LIBRARY_RETURN = {
   queryKeys: ["q", "program", "page"],
 } as const;
 
+/** F8.10: private history can return only to the same review. */
+export const AUDIT_RETURN = {
+  pathParam: "review_return",
+  maxPathLength: REVIEW_DESK_RETURN.maxPathLength,
+  actionPrefix: "report-audit-",
+  routePattern: /^\/report\/([1-9]\d*)(?:\/document)?$/,
+  criterionHashPattern: /^#criterion-record-([1-9]\d*)-([1-9]\d*)$/,
+  hashes: ["#review-criteria", "#escalated-heading", "#integrity-signals", "#criteria-results-heading", "#final-decision"],
+  positiveParams: ["finding", "flag", "match", "lead_page", "lead_return", "flags_visible", "lead_visible"],
+  deskQueues: {
+    needs_review: "needs_attention", checking: "checking", ready_to_decide: "checked",
+    complete: "decided", not_checked: "not_checked",
+  },
+  deskSorts: ["newest", "oldest", "group_asc", "needs_review_desc"],
+  enums: {
+    view: ["decision", "matches", "finding"], pane: ["review", "analysis", "manuscript"],
+    reading: ["full"], panel: ["explore"], ref: ["1"], quote: ["1"],
+    lead_view: ["all", "open", "resolved"], flags_view: ["all", "high", "med", "low", "open", "resolved"],
+  },
+} as const;
+
 /**
  * Stable workspace destinations. Workflow stages belong inside active tasks;
  * global navigation names places an instructor can predictably return to.

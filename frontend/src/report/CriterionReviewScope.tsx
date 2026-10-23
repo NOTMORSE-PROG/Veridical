@@ -1,7 +1,10 @@
 // F3/F8, screens 4h/4w: private drafts live only in this report route family.
 import { useQueryClient } from "@tanstack/react-query";
 import { useLayoutEffect, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
-import { Outlet, useLocation, useNavigate, useParams } from "react-router";
+import { Outlet, useBlocker, useLocation, useNavigate, useParams } from "react-router";
+import { ApiError } from "../api/client";
+import { Dialog } from "../ui/Dialog";
+import { Button } from "../ui/Button";
 import type { ResultRowCommon } from "../api/types";
 import { ME_QUERY_KEY, useMe } from "../auth/useAuth";
 import { RESOLUTION_REASON_MIN_LENGTH } from "../config/ui";
@@ -66,6 +69,16 @@ export function CriterionReviewProvider({ checkRunId, instructorId, children }: 
       && client.getQueryCache().find({ queryKey: ME_QUERY_KEY, exact: true }) === authQuery
       && client.getQueryData<{ id: number } | null>(ME_QUERY_KEY)?.id === instructorId;
   }
+  const exitKind = useRef<"drafts" | "saving" | "uncertain">("drafts");
+  const blocker = useBlocker(({ nextLocation }) => {
+    const sameOwner = nextLocation.pathname === `/report/${checkRunId}`
+      || nextLocation.pathname === `/report/${checkRunId}/document`;
+    if (sameOwner || nextLocation.pathname === "/signin" || !isCurrent()
+      || authQuery?.state.status !== "success" || records.current.size === 0) return false;
+    exitKind.current = [...records.current.values()].some(draft => draft.saving) ? "saving"
+      : [...records.current.values()].some(draft => draft.uncertainRevision !== undefined) ? "uncertain" : "drafts";
+    return true;
+  });
   const resolve = useResolveEscalation(checkRunId, isCurrent);
   const reportQuery = useReport(checkRunId);
   const itemsQuery = useEscalatedItems(checkRunId);
@@ -126,7 +139,7 @@ export function CriterionReviewProvider({ checkRunId, instructorId, children }: 
       if (draft && isDraftCurrent(draft)) update(id, (draft) => ({ ...draft, reason, attempted: false, error: undefined }));
     },
     cancel(id) {
-      if (!isCurrent() || records.current.get(id)?.saving) return;
+      if (!isCurrent() || records.current.get(id)?.saving || records.current.get(id)?.uncertainRevision !== undefined) return;
       const next = new Map(records.current); next.delete(id); publish(next);
     },
     confirm(id, message) {
@@ -166,7 +179,11 @@ export function CriterionReviewProvider({ checkRunId, instructorId, children }: 
       }).catch((error: unknown) => {
         focus?.dispose();
         if (!isCurrent() || records.current.get(id) !== submitted) return;
-        publish(new Map(records.current).set(id, { ...submitted, saving: false, frozen: true, reviewedRevision: undefined, error }));
+        // A genuine refusal is a no-write result under the transaction contract.
+        // Preserve any earlier ambiguous submission until its revision is fenced.
+        const refused = error instanceof ApiError && error.status >= 400 && error.status < 500 && error.status !== 408;
+        publish(new Map(records.current).set(id, { ...submitted, saving: false, frozen: true, reviewedRevision: undefined, error,
+          uncertainRevision: refused ? submitted.uncertainRevision : submitted.expectedRevision }));
       });
     },
     reconcile(items) {
@@ -192,6 +209,7 @@ export function CriterionReviewProvider({ checkRunId, instructorId, children }: 
           return;
         }
         update(id, d => ({ ...d, reviewedRevision: current.assessment_revision!,
+          uncertainRevision: d.uncertainRevision !== undefined && current.assessment_revision! <= d.uncertainRevision ? d.uncertainRevision : undefined,
           currentResolved: !itemRead.data.some(item => item.check_result_id === id && item.criterion_id === d.criterionId), error: undefined }));
       }).catch(() => {
         if (isCurrent() && records.current.get(id) === draft) update(id, d => ({ ...d,
@@ -213,5 +231,27 @@ export function CriterionReviewProvider({ checkRunId, instructorId, children }: 
         reviewedRevision: undefined, needsChoice: !supported, attempted: false, error: undefined }));
     },
   };
-  return <ReviewContext.Provider value={scope}>{children}</ReviewContext.Provider>;
+  return <ReviewContext.Provider value={scope}>{children}
+    {blocker.state === "blocked" && <Dialog
+      title={exitKind.current === "drafts" ? "Leave this review with unsaved changes?" : "Stay in this review"}
+      initialFocusTitle onClose={() => blocker.reset()}
+      actions={<>
+        <Button variant="secondary" onClick={() => blocker.reset()}>Keep reviewing</Button>
+        {exitKind.current === "drafts" && <Button variant="danger" onClick={() => {
+          // Recheck the live owner: a sibling save may have begun since the intent.
+          if (!isCurrent() || [...records.current.values()].some(draft => draft.saving || draft.uncertainRevision !== undefined)) {
+            blocker.reset(); return;
+          }
+          publish(new Map()); blocker.proceed();
+        }}>Leave without saving</Button>}
+      </>}>
+      <p>{exitKind.current === "drafts"
+        ? "Your unsaved criterion choices and reasons will be discarded if you leave this review."
+        : [...drafts.values()].some(draft => draft.saving)
+          ? "A criterion judgment is being saved. Stay in this review until saving is confirmed."
+          : [...drafts.values()].some(draft => draft.uncertainRevision !== undefined)
+            ? "Saving could not be confirmed. Your choice and reason are kept. Select Keep reviewing, then review the current criterion before trying again."
+            : "The review status has changed. Select Keep reviewing, then choose your destination again."}</p>
+    </Dialog>}
+  </ReviewContext.Provider>;
 }

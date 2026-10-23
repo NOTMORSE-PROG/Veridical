@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { EscalatedItemOut, FlagSummaryOut, ReportOut } from "../api/types";
 import { renderWithReviewProviders as renderWithProviders, stubFetchByPath } from "../test/renderWithProviders";
 import { SignalReportPage } from "./SignalReport";
+import { rememberRouteReturnFocus } from "../routing/useRouteFocus";
 
 const BASE_REPORT: ReportOut = {
   assessment_revision: 0,
@@ -86,6 +87,38 @@ function stubReport(report: ReportOut = BASE_REPORT, escalated: EscalatedItemOut
 }
 
 describe("SignalReportPage", () => {
+  it.each(["section", "criterion", "newer intent", "unavailable"])("preserves an owned slow Audit return without an early fallback: %s", async scenario => {
+    const canonical = scenario === "criterion" || scenario === "unavailable";
+    const criterion = scenario === "unavailable" ? 99 : 1;
+    const target = canonical ? `criterion-record-5-${criterion}` : "criteria-results-heading";
+    const path = `/report/5?criterion_record=${canonical ? criterion : "all"}`;
+    let release!: (value: Response) => void;
+    let held = false;
+    const fetcher = stubFetchByPath({ "/check-runs/5/escalated": [], "/check-runs/5/flags": [], "/check-runs/5/share": null });
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => String(input).includes("/check-runs/5/report")
+      ? held ? Promise.resolve(new Response(JSON.stringify(BASE_REPORT), { status: 200 }))
+        : new Promise<Response>(resolve => { held = true; release = resolve; }) : fetcher(input)));
+    rememberRouteReturnFocus(path, "/audit?check_run_id=5", target, { armed: true, fallbackElementId: "report-audit-5" });
+    renderWithProviders(<SignalReportPage />, { route: `${path}#${target}`, path: "/report/:checkRunId" });
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 650)); });
+    expect(screen.queryByRole("link", { name: "View Audit" })).not.toBeInTheDocument();
+    if (scenario === "newer intent") {
+      const control = document.createElement("button");
+      control.textContent = "New reader task";
+      document.body.append(control);
+      control.focus();
+    }
+    await act(async () => { release(new Response(JSON.stringify(BASE_REPORT), { status: 200 })); });
+    await screen.findByRole("link", { name: "View Audit" });
+    if (scenario === "newer intent") {
+      expect(screen.getByRole("button", { name: "New reader task" })).toHaveFocus();
+      screen.getByRole("button", { name: "New reader task" }).remove();
+    } else if (scenario === "unavailable") {
+      await waitFor(() => expect(screen.getByRole("link", { name: "View Audit" })).toHaveFocus(), { timeout: 2000 });
+      expect(screen.getByText("That recorded criterion is not available in this report.")).toBeVisible();
+    } else await waitFor(() => expect(document.getElementById(target)).toHaveFocus());
+  });
+
   it.each(["fake", "real", "unknown"] as const)("BUG-435: report AI disclosure is scoped to responses for mode %s", async (mode) => {
     stubReport({ ...BASE_REPORT, llm_mode: mode });
     renderWithProviders(<SignalReportPage />, { route: "/report/5", path: "/report/:checkRunId" });

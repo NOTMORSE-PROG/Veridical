@@ -27,6 +27,31 @@ function open(customReturn = true) {
 }
 
 describe("Dialog return focus", () => {
+  it("includes the native closed disclosure in the keyboard cycle without entering its hidden content", () => {
+    render(<Dialog title="Recorded event" initialFocusTitle onClose={() => {}}>
+      <details><summary>Technical record</summary><button>Hidden until expanded</button></details>
+      <button hidden>Hidden control</button>
+    </Dialog>);
+    const title = screen.getByRole("heading", { name: "Recorded event" });
+    expect(title).toHaveFocus();
+    fireEvent.keyDown(document, { key: "Tab", shiftKey: true });
+    expect(screen.getByText("Technical record")).toHaveFocus();
+    fireEvent.keyDown(document, { key: "Tab" });
+    expect(screen.getByRole("button", { name: "Close" })).toHaveFocus();
+    screen.getByText("Technical record").parentElement!.setAttribute("open", "");
+    title.focus();
+    fireEvent.keyDown(document, { key: "Tab", shiftKey: true });
+    expect(screen.getByRole("button", { name: "Hidden until expanded" })).toHaveFocus();
+  });
+
+  it("skips disabled fieldset controls while retaining the enabled first-legend control", () => {
+    render(<Dialog title="Recorded event" initialFocusTitle onClose={() => {}}>
+      <fieldset disabled><legend><button>Available legend action</button></legend><button>Disabled by fieldset</button></fieldset>
+    </Dialog>);
+    fireEvent.keyDown(document, { key: "Tab", shiftKey: true });
+    expect(screen.getByRole("button", { name: "Available legend action" })).toHaveFocus();
+  });
+
   it("preserves ordinary captured-trigger return without any caller options", () => {
     const trigger = open(false);
     fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Close" }));

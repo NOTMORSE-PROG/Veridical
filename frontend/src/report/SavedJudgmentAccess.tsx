@@ -24,7 +24,7 @@ export function SavedJudgmentAccess({ checkRunId }: { checkRunId: number }) {
     const completion = review.completion;
     if (completion) completion.focus?.focus(document.getElementById(`saved-receipt-${checkRunId}-${completion.result.criterion_id}`));
   }, [review.completion, checkRunId]);
-  return <div className="signal-group-flow">
+  return <div className="signal-saved-judgment-access signal-group-flow">
     {receipt && <div key={receipt.result.criterion_id} className="signal-attached-flow"
       onFocusCapture={() => setFocusedReceipt(receipt)}
       onBlurCapture={(event) => { if (!event.currentTarget.contains(event.relatedTarget)) setFocusedReceipt(undefined); }}>

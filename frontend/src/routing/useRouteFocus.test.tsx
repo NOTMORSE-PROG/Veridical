@@ -294,6 +294,26 @@ function HashOrigin() {
   </main>;
 }
 
+it.each(["place", "wheel", "Tab", "other focus"])("places an explicit reading return at its start while respecting %s", async intent => {
+  const frames = new Map<number, FrameRequestCallback>(); let frameId = 0;
+  vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => { frames.set(++frameId, callback); return frameId; });
+  vi.stubGlobal("cancelAnimationFrame", (id: number) => frames.delete(id));
+  const scroll = vi.spyOn(Element.prototype, "scrollIntoView");
+  rememberRouteReturnFocus("/hash-report", "/audit", "review-section", { armed: true, scrollBlock: "start" });
+  const router = createMemoryRouter([{ path: "/hash-report", element: <HashOrigin /> }], { initialEntries: ["/hash-report#review-section"] });
+  render(<RouterProvider router={router} />);
+  const target = document.getElementById("review-section")!;
+  expect(target).toHaveFocus();
+  if (intent === "wheel") fireEvent.wheel(window);
+  if (intent === "Tab") fireEvent.keyDown(document, { key: "Tab" });
+  if (intent === "other focus") screen.getByRole("button", { name: "Another task" }).focus();
+  act(() => { const pending = [...frames.values()]; frames.clear(); pending.forEach(callback => callback(performance.now())); });
+  if (intent === "place") expect(scroll).toHaveBeenCalledWith({ block: "start" });
+  else expect(scroll).not.toHaveBeenCalled();
+  scroll.mockRestore();
+  vi.unstubAllGlobals();
+});
+
 it.each(["settlement", "Tab", "pointer", "wheel", "blur", "other focus"])(
   "preserves exact POP source focus after hash settlement while respecting %s", async intent => {
     const frames = new Map<number, FrameRequestCallback>(); let frameId = 0;

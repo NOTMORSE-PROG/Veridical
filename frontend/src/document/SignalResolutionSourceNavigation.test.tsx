@@ -215,6 +215,7 @@ it("retires inspection mode across a different run before returning to an ordina
   await act(async () => { release(PARAGRAPHS); });
   await screen.findByText("The requested source paragraph");
   await act(async () => { await router.navigate("/report/6/document?view=decision&pane=manuscript"); });
+  fireEvent.click(await screen.findByRole("button", { name: "Leave without saving" }));
   await waitFor(() => expect(router.state.location.pathname).toBe("/report/6/document"));
   await act(async () => { await router.navigate("/report/5/document?view=decision&pane=manuscript&anchor=paragraph+2"); });
   await waitFor(() => expect(screen.getByText("The requested source paragraph")).toHaveFocus());
