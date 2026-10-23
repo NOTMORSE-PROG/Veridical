@@ -274,6 +274,8 @@
   --signal-type-meta: 0.75rem;
   --signal-type-label: 0.875rem;
   --signal-type-body: 1rem;
+  --signal-passage-column-min: 28rem;
+  --signal-passage-prose-max: 72ch;
   --signal-type-body-lg: 1.125rem;
   --signal-type-subhead: 1.25rem;
   --signal-type-section: 1.5rem;

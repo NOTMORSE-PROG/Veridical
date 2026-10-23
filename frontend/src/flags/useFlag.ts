@@ -2,6 +2,17 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api/client";
 import type { ConfirmCitationSourceOut, FlagOut, OverrideFlagOut } from "../api/types";
+import { ME_QUERY_KEY } from "../auth/useAuth";
+
+function flagMutationOwner(client: ReturnType<typeof useQueryClient>, flagId: number) {
+  const authQuery = client.getQueryCache().find({ queryKey: ME_QUERY_KEY, exact: true });
+  const instructorId = client.getQueryData<{ id: number } | null>(ME_QUERY_KEY)?.id;
+  const runId = client.getQueryData<FlagOut>(["flag", flagId])?.check_run_id;
+  return { accepts: (out: FlagOut) => authQuery !== undefined && instructorId !== undefined
+    && client.getQueryCache().find({ queryKey: ME_QUERY_KEY, exact: true }) === authQuery
+    && client.getQueryData<{ id: number } | null>(ME_QUERY_KEY)?.id === instructorId
+    && out?.id === flagId && runId !== undefined && out.check_run_id === runId };
+}
 
 export function useFlag(flagId: number) {
   return useQuery({
@@ -14,18 +25,21 @@ export function useFlag(flagId: number) {
 export function useAnnotateFlag(flagId: number) {
   const queryClient = useQueryClient();
   return useMutation({
+    onMutate: () => flagMutationOwner(queryClient, flagId),
     mutationFn: (annotation: string) =>
       api.post<FlagOut>(`/flags/${flagId}/annotate`, { annotation }),
-    onSuccess: (out) => queryClient.setQueryData(["flag", flagId], out),
+    onSuccess: (out, _input, owner) => { if (owner?.accepts(out)) queryClient.setQueryData(["flag", flagId], out); },
   });
 }
 
 export function useOverrideFlag(flagId: number) {
   const queryClient = useQueryClient();
   return useMutation({
+    onMutate: () => flagMutationOwner(queryClient, flagId),
     mutationFn: (reason: string) =>
       api.post<OverrideFlagOut>(`/flags/${flagId}/override`, { reason }),
-    onSuccess: (out) => {
+    onSuccess: (out, _input, owner) => {
+      if (!owner?.accepts(out) || out.report?.check_run_id !== out.check_run_id) return;
       queryClient.setQueryData(["flag", flagId], out);
       queryClient.setQueryData(["report", out.report.check_run_id], out.report);
       // BUG-033: the report's flags panel is its own query
@@ -47,9 +61,11 @@ export function useOverrideFlag(flagId: number) {
 export function useConfirmCitationSource(flagId: number) {
   const queryClient = useQueryClient();
   return useMutation({
+    onMutate: () => flagMutationOwner(queryClient, flagId),
     mutationFn: (reason: string) =>
       api.post<ConfirmCitationSourceOut>(`/flags/${flagId}/confirm-source`, { reason }),
-    onSuccess: (out) => {
+    onSuccess: (out, _input, owner) => {
+      if (!owner?.accepts(out) || out.report?.check_run_id !== out.check_run_id) return;
       queryClient.setQueryData(["flag", flagId], out);
       queryClient.setQueryData(["report", out.report.check_run_id], out.report);
       queryClient.invalidateQueries({ queryKey: ["report", out.report.check_run_id, "flags"] });

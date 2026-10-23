@@ -39,6 +39,7 @@ export function DocxPane({
   selectedFlagId,
   onSelectFlag,
   isVisible,
+  focusSelection = true,
   findingNumbers = EMPTY_FINDING_NUMBERS,
   comparisonLeads,
   requestedParagraph = null,
@@ -68,6 +69,7 @@ export function DocxPane({
   // Passed down so the effect can retry once the pane genuinely becomes
   // visible, not just once per selection.
   isVisible: boolean;
+  focusSelection?: boolean;
   findingNumbers?: ReadonlyMap<number, number>;
   comparisonLeads?: ComparisonLeadSnapshot;
   requestedParagraph?: number | null;
@@ -122,17 +124,17 @@ export function DocxPane({
 
   useEffect(() => {
     pendingSelectionFocus.current?.dispose();
-    pendingSelectionFocus.current = selectedFlagId !== null && isVisible ? claimFocusContinuation() : null;
+    pendingSelectionFocus.current = selectedFlagId !== null && isVisible && focusSelection ? claimFocusContinuation() : null;
     return () => { pendingSelectionFocus.current?.dispose(); pendingSelectionFocus.current = null; };
-  }, [selectedFlagId, isVisible]);
+  }, [selectedFlagId, isVisible, focusSelection]);
 
   useEffect(() => {
-    if (selectedFlagId === null || !isVisible) return;
+    if (selectedFlagId === null || !isVisible || !focusSelection) return;
     const el = highlightRefs.current.get(selectedFlagId);
     if (!el) return;
     pendingSelectionFocus.current?.focus(el);
     pendingSelectionFocus.current = null;
-  }, [selectedFlagId, paragraphs, tables, images, isVisible]);
+  }, [selectedFlagId, paragraphs, tables, images, isVisible, focusSelection]);
 
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {
@@ -281,6 +283,7 @@ export function DocxPane({
               const highlightButton = (
                 <button
                   type="button"
+                  data-source-record-id={primaryFlagId}
                   ref={(el) => {
                     if (el) highlightRefs.current.set(primaryFlagId, el);
                     else highlightRefs.current.delete(primaryFlagId);
@@ -322,6 +325,7 @@ export function DocxPane({
                       <button
                         key={flagId}
                         type="button"
+                        data-source-record-id={flagId}
                         ref={(el) => {
                           if (el) highlightRefs.current.set(flagId, el);
                           else highlightRefs.current.delete(flagId);
@@ -359,7 +363,7 @@ export function DocxPane({
               data-source-paragraph={!p ? position : undefined} tabIndex={!p ? -1 : undefined}>
               {renderText()}
               {mediaFlags.length > 0 && <div className="signal-docx-source-findings" role="group" aria-label="Findings at this source location">
-                {mediaFlags.map((flagId) => <button key={flagId} type="button"
+                {mediaFlags.map((flagId) => <button key={flagId} type="button" data-source-record-id={flagId}
                   ref={(el) => { if (el) highlightRefs.current.set(flagId, el); else highlightRefs.current.delete(flagId); }}
                   className={`signal-document-co-located-marker${flagId === selectedFlagId ? " is-selected" : ""}`}
                   aria-pressed={flagId === selectedFlagId} onClick={() => onSelectFlag(flagId)}>

@@ -8,6 +8,8 @@ import { truncateAtWord } from "../format/text";
 import type { FlagSummaryOut } from "../api/types";
 import { instructorAnchor } from "../domain/sourceAnchor";
 import { PassagePairPanel } from "./PassagePairPanel";
+import { COMPARISON_EXCERPT_PREVIEW_LENGTH } from "../config/ui";
+import { COMPARISON_LEAD_COPY, isOptionalComparisonLead } from "../domain/comparisonLeadIdentity";
 
 function SpinnerIcon() {
   return (
@@ -176,12 +178,11 @@ export function ReuseExplorePanel({
               className="flex min-h-11 w-full flex-col gap-1.5 border-b border-border px-3.5 py-3 text-left text-sm hover:bg-status-neutral-bg"
             >
               <p className={flag.overridden ? "text-ink-tertiary" : "text-ink-secondary"}>
-                {truncateAtWord(flag.evidence_excerpt, 140)}
+                {truncateAtWord(flag.evidence_excerpt, COMPARISON_EXCERPT_PREVIEW_LENGTH)}
               </p>
               <div className="flex flex-wrap items-center gap-1.5">
                 <AnchorPill anchor={instructorAnchor(flag.page_anchor)} />
-                <SeverityTag severity={flag.severity as Severity} />
-                {flag.affects_readiness === false && <StatusPill tone="neutral">Review lead: not scored</StatusPill>}
+                {isOptionalComparisonLead(flag) ? <StatusPill tone="neutral">{COMPARISON_LEAD_COPY.badge}</StatusPill> : <SeverityTag severity={flag.severity as Severity} />}
                 {flag.overridden && <StatusPill tone="neutral">Overridden</StatusPill>}
               </div>
             </button>
@@ -211,7 +212,7 @@ export function ReuseExplorePanel({
                     className="flex min-h-11 w-full items-center justify-between gap-2 px-3.5 py-2.5 text-left text-sm hover:bg-status-neutral-bg"
                   >
                     <span className="flex min-w-0 flex-1 flex-col gap-1.5">
-                      <span className="text-ink-secondary">{truncateAtWord(match.own_excerpt, 140)}</span>
+                      <span className="text-ink-secondary">{truncateAtWord(match.own_excerpt, COMPARISON_EXCERPT_PREVIEW_LENGTH)}</span>
                       <span className="flex flex-wrap items-center gap-1.5">
                         <StatusPill tone="neutral">Not included in readiness</StatusPill>
                         {match.excluded_reason.map((r) => (
@@ -238,6 +239,7 @@ export function ReuseExplorePanel({
                               : null
                         }
                         variant="excluded"
+                        placement="inspector"
                         excludedReason={match.excluded_reason}
                       />
                     </div>

@@ -11,7 +11,8 @@
 // `history.block`/`<Prompt>` were removed). `createRoutesFromElements`
 // keeps this file's JSX shape unchanged; every route's own rendered
 // behavior is identical to before.
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { QueryClientProvider } from "@tanstack/react-query";
+import { createAppQueryClient } from "./api/queryClient";
 import { createBrowserRouter, createRoutesFromElements, Route, RouterProvider } from "react-router";
 import { AuditLogPage } from "./audit/AuditLog";
 import { RequireAuth } from "./auth/RequireAuth";
@@ -36,7 +37,7 @@ import { SettingsPage } from "./settings/Settings";
 import { StoredFilesPage } from "./storedFiles/StoredFiles";
 import { SignalShell } from "./shell/SignalShell";
 
-const queryClient = new QueryClient();
+const queryClient = createAppQueryClient();
 
 const router = createBrowserRouter(
   createRoutesFromElements(

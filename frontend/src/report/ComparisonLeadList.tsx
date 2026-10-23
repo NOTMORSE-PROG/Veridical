@@ -1,6 +1,7 @@
 import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { useLocation, useNavigate, useSearchParams } from "react-router";
-import { COMPARISON_LEAD_PAGE_SIZE } from "../config/ui";
+import { COMPARISON_LEAD_PAGE_SIZE, COMPARISON_EXCERPT_PREVIEW_LENGTH } from "../config/ui";
+import { truncateAtWord } from "../format/text";
 import { COMPARISON_LEAD_COPY, COMPARISON_LEAD_HEADING_ID, comparisonLeadFilter, comparisonLeadIdentity, type ComparisonLeadFilter } from "../domain/comparisonLeadIdentity";
 import { isManuscriptQuote } from "../domain/evidenceDisplay";
 import { problemLabel } from "../domain/problemLabel";
@@ -156,9 +157,12 @@ export function ComparisonLeadList({ collection, showActions, viewedIds, onSelec
         const identity = comparisonLeadIdentity(record, snapshot);
         const actionId = `comparison-lead-${record.id}`;
         const title = problemLabel(record.problem_kind) ?? "Recorded comparison";
+        const cue = isManuscriptQuote(record) && record.evidence_excerpt.trim()
+          ? truncateAtWord(record.evidence_excerpt, COMPARISON_EXCERPT_PREVIEW_LENGTH) : null;
         const anchor = instructorAnchor(record.page_anchor);
-        const fullName = `${identity.label} ${title}. ${anchor}.`;
-        const row = <><span className="signal-comparison-row__marker" aria-hidden="true">{identity.marker}</span><span className="signal-comparison-row__body"><strong>{title}</strong><span className="signal-comparison-row__meta"><span>{anchor}</span><span>Record #{record.id}</span></span>{record.overridden ? <span className="signal-comparison-row__state">Resolved by instructor</span> : showActions && viewedIds?.has(record.id) ? <span className="signal-comparison-row__state">Viewed</span> : null}</span></>;
+        const fullName = `${identity.label} ${title}. ${anchor}.${cue ? ` Excerpt: ${cue}` : ""}`;
+        const libraryRef = Number.isSafeInteger(record.matched_ref) && record.matched_ref! > 0 ? record.matched_ref : null;
+        const row = <><span className="signal-comparison-row__marker" aria-hidden="true">{identity.marker}</span><span className="signal-comparison-row__body"><strong>{cue ? `“${cue}”` : title}</strong><span className="signal-comparison-row__meta"><span>{anchor}</span>{libraryRef !== null && <span>Library record #{libraryRef}</span>}<span>Record #{record.id}</span></span>{record.overridden ? <span className="signal-comparison-row__state">Resolved by instructor</span> : showActions && viewedIds?.has(record.id) ? <span className="signal-comparison-row__state">Viewed</span> : null}</span></>;
         return <li key={record.id}>{showActions ? onSelect
           ? <button className="signal-comparison-row" id={actionId} type="button" aria-label={`Review evidence for ${fullName}`} onClick={() => onSelect(record.id)}>{row}<TrailingChevronIcon /></button>
           : <WorkflowLink className="signal-comparison-row" id={actionId} to={`/flags/${record.id}`} aria-label={`Review evidence for ${fullName}`} state={{ routeReturnFocus: { returnPath: location.pathname + location.search, elementId: actionId, fallbackElementId: COMPARISON_LEAD_HEADING_ID } }}>{row}<TrailingChevronIcon /></WorkflowLink>

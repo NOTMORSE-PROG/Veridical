@@ -3334,6 +3334,47 @@
     grid-template-columns: minmax(0, 3fr) minmax(var(--signal-inspector-width), 2fr);
   }
 
+  .signal-document-workbench[data-reading="full"] .signal-document-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .signal-document-workbench[data-reading="full"] #manuscript-panel,
+  .signal-document-workbench[data-reading="full"] .signal-document-tabs {
+    display: none;
+  }
+
+  .signal-document-workbench[data-reading="full"] #review-panel {
+    display: block;
+    scroll-padding-block-start: calc(var(--signal-reading-bar-height, var(--signal-control-height-coarse)) + var(--signal-space-4));
+  }
+
+  .signal-document-workbench[data-reading="full"] .signal-document-selected {
+    inline-size: 100%;
+    max-inline-size: none;
+    min-inline-size: 0;
+  }
+
+  .signal-comparison-reading-bar {
+    position: sticky;
+    inset-block-start: 0;
+    z-index: var(--signal-z-sticky);
+    inline-size: 100%;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--signal-space-3);
+    padding: var(--signal-space-3);
+    border-block-end: var(--signal-border-hairline) solid var(--color-signal-border);
+    background: var(--color-signal-surface);
+  }
+
+  .signal-comparison-reading-bar > div {
+    display: grid;
+    gap: var(--signal-space-1);
+    font-size: var(--signal-type-label);
+  }
+
   .signal-document-pane,
   .signal-document-inspector {
     min-width: 0;
@@ -4368,8 +4409,41 @@
     padding-inline-start: var(--signal-space-4);
   }
 
-  .signal-document-selected .passage-pair__columns {
+  .passage-pair__columns {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--signal-space-6);
+    align-items: flex-start;
+  }
+
+  .passage-pair__block {
+    min-width: 0;
+    flex: 1 1 var(--signal-passage-column-min);
+    max-width: 100%;
+  }
+
+  .passage-pair--inspector .passage-pair__columns {
     flex-direction: column;
+  }
+
+  .passage-pair--inspector .passage-pair__block {
+    flex: 0 1 auto;
+    width: 100%;
+  }
+
+  .passage-pair__text {
+    font-size: var(--signal-type-body);
+    line-height: var(--signal-line-body);
+    overflow-wrap: anywhere;
+    max-inline-size: var(--signal-passage-prose-max);
+  }
+
+  .signal-comparison-status {
+    padding: var(--signal-space-1) var(--signal-space-3);
+    border-radius: var(--signal-radius-pill);
+    background: var(--color-signal-surface-muted);
+    color: var(--color-signal-ink-secondary);
+    font-size: var(--signal-type-label);
   }
 
   .signal-document-selected__header h2 {

@@ -181,8 +181,8 @@ describe("FlagDetailPage", () => {
     renderWithProviders(<FlagDetailPage />, { route: "/flags/5", path: "/flags/:flagId" });
 
     expect(await screen.findByText("Passage comparison", { selector: "h3" })).toBeInTheDocument();
-    expect(screen.getByText("Your manuscript · p. 31")).toBeInTheDocument();
-    expect(screen.getByText("Library record #3")).toBeInTheDocument();
+    expect(screen.getByText("Your manuscript excerpt")).toBeInTheDocument();
+    expect(screen.getByText("Stored comparison excerpt · Library record #3")).toBeInTheDocument();
     expect(screen.getAllByText(/hybrid rule-based and AI approach/)).toHaveLength(2);
   });
 
@@ -392,7 +392,7 @@ describe("FlagDetailPage", () => {
       "fetch",
       stubFetchByPath({ "/flags/5": FLAG, "/flags/5/override": overriddenFlag }),
     );
-    renderWithProviders(<FlagDetailPage />, { route: "/flags/5", path: "/flags/:flagId" });
+    renderWithProviders(<FlagDetailPage />, { route: "/flags/5", path: "/flags/:flagId", reviewRunId: 20 });
     await screen.findByText(/Wang, S\./);
     fireEvent.click(screen.getByRole("button", { name: "Override" }));
     fireEvent.change(await screen.findByRole("textbox", { name: "Reason (required)" }), {
@@ -568,6 +568,7 @@ function renderFlag(flag: FlagOut, extraHandlers: Record<string, unknown> = {}) 
   return renderWithProviders(<FlagDetailPage />, {
     route: "/flags/20",
     path: "/flags/:flagId",
+    reviewRunId: flag.check_run_id,
   });
 }
 

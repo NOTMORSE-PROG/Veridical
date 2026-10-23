@@ -41,13 +41,13 @@ describe("optional comparison list", () => {
     expect(screen.queryByText("Viewed")).not.toBeInTheDocument();
     const first = screen.getByText("Evidence", { selector: "summary#comparison-lead-39" });
     expect(first).toHaveAccessibleName(/^Evidence for Comparison lead 1 of 31\. Record #39\./);
-    expect(screen.getByText(/Public excerpt 39/)).not.toBeVisible();
+    expect(document.querySelector("#comparison-lead-39")?.closest("details")?.querySelector("blockquote")).not.toBeVisible();
     fireEvent.click(first);
-    expect(screen.getByText(/Public excerpt 39/)).toBeVisible();
+    expect(document.querySelector("#comparison-lead-39")?.closest("details")?.querySelector("blockquote")).toBeVisible();
     const page = screen.getByRole("button", { name: "Page 4" }); page.focus(); fireEvent.click(page);
     expect(document.getElementById("comparison-lead-63")).toHaveFocus();
     fireEvent.click(screen.getByText("Evidence", { selector: "summary#comparison-lead-69" }));
-    expect(screen.getByText(/Public excerpt 69/)).toBeVisible();
+    expect(document.querySelector("#comparison-lead-69")?.closest("details")?.querySelector("blockquote")).toBeVisible();
     expect(screen.getByText(/First-upload context:/)).toBeVisible();
     expect(document.body).not.toHaveTextContent("PRIVATE");
     expect(screen.queryByRole("link")).not.toBeInTheDocument();

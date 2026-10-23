@@ -563,7 +563,7 @@ describe("SignalDocumentViewerPage", () => {
     expect(await screen.findByText("Finding 1 selected")).toBeInTheDocument();
     expect(await screen.findByRole("heading", { name: "High passage similarity" })).toBeInTheDocument();
     expect(screen.getByText("Location 3 of 3. These records are presented as one finding; none of the stored data was removed.")).toBeInTheDocument();
-    expect(screen.getByText(/Yellow marks the selected manuscript location/)).toBeInTheDocument();
+    expect(screen.getByText(/Shaded wording appears in both stored passages/)).toBeInTheDocument();
     const comparison = screen.getByText("Passage comparison", { selector: "h3" });
     const reasoning = screen.getByText("Recorded reasoning and technical details");
     expect(comparison.compareDocumentPosition(reasoning) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();

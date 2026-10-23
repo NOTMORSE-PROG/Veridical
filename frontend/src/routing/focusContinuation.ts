@@ -26,10 +26,10 @@ export function claimFocusContinuation(owner: Element | null = document.activeEl
   return {
     dispose,
     owns,
-    focus(target: HTMLElement | null) {
+    focus(target: HTMLElement | null, options?: FocusOptions) {
       const allowedFocus = owns();
       dispose();
-      if (allowedFocus && target?.isConnected) target.focus();
+      if (allowedFocus && target?.isConnected) target.focus(options);
       return Boolean(allowedFocus && target && document.activeElement === target);
     },
   };

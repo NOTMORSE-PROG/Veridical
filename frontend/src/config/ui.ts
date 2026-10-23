@@ -36,6 +36,7 @@ export const REVIEW_DESK_PAGE_SIZE = 20;
 export const FLAG_LIST_INITIAL_COUNT = 8;
 export const FLAG_LIST_BATCH_COUNT = 8;
 export const COMPARISON_LEAD_PAGE_SIZE = FLAG_LIST_INITIAL_COUNT;
+export const COMPARISON_EXCERPT_PREVIEW_LENGTH = 140;
 
 /** Protocol value shared with the group-program filter API. */
 export const UNSET_PROGRAM_FILTER = "__unset__";

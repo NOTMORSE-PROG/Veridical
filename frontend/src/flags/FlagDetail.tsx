@@ -95,7 +95,7 @@ function EvidenceSection({
           Same component, same props, same "flag" variant already
           shipped on SignalDocumentViewer.tsx -- no new design here. */}
       {flag.passage_pair && (
-        <PassagePairPanel pair={flag.passage_pair} ownAnchor={instructorAnchor(flag.page_anchor)} variant="flag" />
+        <PassagePairPanel pair={flag.passage_pair} ownAnchor={instructorAnchor(flag.page_anchor)} wholeManuscript={!flag.is_passage_level} variant="flag" />
       )}
       {/* BUG-170: a reuse flag with no manuscript-sourced content at
           all (no quote, no passage panel) still needs an honest reason

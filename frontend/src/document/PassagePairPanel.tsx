@@ -39,9 +39,9 @@ export function PassageBlock({
   sharedRanges?: TextRange[];
 }) {
   return (
-    <div className="min-w-0 flex-1">
+    <div className="passage-pair__block">
       <p className="mb-1 text-xs font-semibold tracking-header text-ink-tertiary uppercase">{label}</p>
-      <div className="rounded-lg border border-border bg-page px-4 py-3 text-sm break-words text-ink">
+      <div className="passage-pair__text rounded-lg border border-border bg-page px-4 py-3 break-words text-ink">
         {before && <span className="text-ink-tertiary">{before} </span>}
         <span><HighlightedText text={excerpt} ranges={sharedRanges} /></span>
         {after && <span className="text-ink-tertiary"> {after}</span>}
@@ -55,17 +55,21 @@ export function PassagePairPanel({
   ownAnchor,
   variant,
   excludedReason = [],
+  placement = "full-page",
+  wholeManuscript = false,
 }: {
   pair: PassagePairOut;
   ownAnchor: string | null;
   variant: "flag" | "excluded";
   excludedReason?: ("reference_list" | "block_quote")[];
+  placement?: "inspector" | "full-page";
+  wholeManuscript?: boolean;
 }) {
   const shared = sharedPassageRanges(pair.own_excerpt, pair.matched_excerpt);
   const hasExactSharedWording = shared.left.length > 0;
 
   const excludedLead = (() => {
-    if (excludedReason.length === 0) return null;
+    if (variant !== "excluded" || excludedReason.length === 0) return null;
     const label =
       excludedReason.length === 2
         ? "the reference list and a detected block quote"
@@ -76,39 +80,35 @@ export function PassagePairPanel({
   })();
 
   return (
-    <section aria-label="Passage comparison" className="flex flex-col gap-3">
+    <section aria-label="Passage comparison" className={`passage-pair passage-pair--${placement} flex flex-col gap-3`}>
       <h3 className="sr-only" tabIndex={-1}>
         Passage comparison
       </h3>
-      <p className="text-sm text-ink-secondary">
-        {variant === "flag"
-          ? "Compare these stored passages yourself. Similar wording can have legitimate explanations."
-          : excludedLead}
-      </p>
-      <p className="text-xs text-ink-secondary"><b>Comparison lead: possible textual similarity.</b> Compare the stored passages in context. This similarity result does not establish identical passages or files, copying, authorship, or which document came first.</p>
-      {variant === "flag" && <p className="text-xs text-ink-secondary">This lead does not change readiness. The raw reproducibility value remains in Audit.</p>}
+      {excludedLead && <p className="text-sm text-ink-secondary">{excludedLead}</p>}
+      <p className="text-sm text-ink-secondary">Compare the stored passages in context. Similar wording does not establish identical passages or files, copying, authorship or which document came first.</p>
       <p className="text-xs text-ink-secondary">
         {hasExactSharedWording
-          ? "Highlighted wording appears in both recorded passages. Unhighlighted wording still matters to the comparison."
-          : "No stable exact phrase was found to highlight. The stored match may reflect broader textual similarity, so compare both passages manually."}
+          ? "Shaded wording appears in both stored passages."
+          : "No stable exact phrase was found to highlight. Compare both passages manually."}
       </p>
-      <div className="passage-pair__columns flex flex-col gap-3 xl:flex-row">
+      <p className="text-sm text-ink-secondary">These are stored excerpts, not complete source documents.</p>
+      {ownAnchor && <p className="text-xs text-ink-secondary">Recorded {wholeManuscript ? "scope" : "location"}: {ownAnchor}</p>}
+      <div className="passage-pair__columns">
         <PassageBlock
-          label={ownAnchor ? `Your manuscript · ${ownAnchor}` : "Your manuscript"}
+          label="Your manuscript excerpt"
           before={pair.own_context_before}
           excerpt={pair.own_excerpt}
           after={pair.own_context_after}
           sharedRanges={shared.left}
         />
-        <div className="min-w-0 flex-1">
+        <div className="passage-pair__block">
           <PassageBlock
-            label={`Library record #${pair.matched_ref}`}
+            label={`Stored comparison excerpt · Library record #${pair.matched_ref}`}
             before={pair.matched_context_before}
             excerpt={pair.matched_excerpt}
             after={pair.matched_context_after}
             sharedRanges={shared.right}
           />
-          <p className="mt-1 text-xs text-ink-tertiary">Stored excerpt, not the full document.</p>
           {/* V-066 (BUG-122 direction 2): "#N" used to be dead information
               -- the library now gives it somewhere real to go. */}
           <Link
@@ -119,10 +119,6 @@ export function PassagePairPanel({
           </Link>
         </div>
       </div>
-      <p className="text-xs text-ink-tertiary">
-        Showing {pair.context_words_each_side} words of context on each side of the matched passage.
-        This is not the full archived document.
-      </p>
     </section>
   );
 }
