@@ -52,6 +52,7 @@ _VALID_RESOLUTIONS = {
 # instructor (V-050).
 NEEDS_REVIEW_OUTCOMES = (
     ResultOutcome.escalated,
+    ResultOutcome.unverifiable,
     ResultOutcome.quota_exhausted,
     ResultOutcome.api_down,
 )
@@ -153,7 +154,7 @@ class EscalatedItem:
 
 
 async def list_escalated(session: AsyncSession, check_run_id: int) -> list[EscalatedItem]:
-    """Screen 4h's "needs your review" panel: every semantic criterion this
+    """Screen 4h's "needs your review" panel: every criterion this
     run could not decide on its own, oldest first so the panel order is
     stable across reloads.
 
@@ -164,7 +165,9 @@ async def list_escalated(session: AsyncSession, check_run_id: int) -> list[Escal
     - `quota_exhausted` / `api_down`: the AI never graded it at all. Nothing
       was judged; the item is here so the run stays USABLE without pretending
       an opinion exists.
-    Both are the instructor's to resolve, and neither ever scores itself.
+    - `unverifiable`: available inputs did not establish a grade, including
+      structural measurements whose source inventory could not be verified.
+    These are the instructor's to resolve; none scores itself.
     """
     rows = (
         await session.execute(

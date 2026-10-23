@@ -81,10 +81,11 @@ def test_public_support_fact_is_explicit_and_private_fields_stay_private(unverif
     assert all("raw_audit" not in row for row in public["results"])
 
 
-def test_pending_copy_does_not_erase_tentative_votes_or_rename_not_graded():
+def test_pending_copy_does_not_erase_tentative_votes_or_invent_an_ungraded_cause():
     assert _pending_review_reason("escalated") == "No grade has been accepted for this criterion."
-    assert "not graded" in _pending_review_reason("quota_exhausted")
-    assert "not graded" in _pending_review_reason("api_down")
+    assert _pending_review_reason("quota_exhausted") == _pending_review_reason("escalated")
+    assert _pending_review_reason("api_down") == _pending_review_reason("escalated")
+    assert _pending_review_reason("unverifiable") == _pending_review_reason("escalated")
     labels = _semantic_support_labels()
     assert labels["title"] == "AI evidence support needs review"
     assert "saved record" in labels["body"]

@@ -21,6 +21,7 @@ const PENDING_OUTCOMES: Readonly<Record<string, string>> = {
   escalated: "Needs instructor judgment",
   api_down: "Not graded: service unavailable",
   quota_exhausted: "Not graded: service allowance reached",
+  unverifiable: "Unverifiable",
 };
 
 export function recordedId(value: unknown): value is number {

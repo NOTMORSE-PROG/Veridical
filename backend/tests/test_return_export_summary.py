@@ -154,3 +154,55 @@ def test_long_decision_reason_is_labelled_on_each_continuation_page():
         assert len(note_pages) > 1
         assert all("Decision reason" in page for page in note_pages)
         assert text(document).count("LONG-NOTE-CONTROL") == 900
+
+
+@pytest.mark.parametrize("decision", [None, "returned"])
+@pytest.mark.parametrize(
+    ("kind", "outcome", "reason"),
+    [
+        ("structural", "unverifiable", "Reference <rows> & source inventory cannot be bound."),
+        ("structural", "unverifiable", None),
+        ("structural", "unverifiable", " \n\t "),
+        ("semantic", "escalated", "The recorded model votes did not reach agreement."),
+        ("semantic", "escalated", "The saved passages do not establish support for a grade."),
+        ("semantic", "quota_exhausted", "The recorded daily grading allowance was exhausted."),
+        ("semantic", "api_down", "The grading provider was unavailable during this attempt."),
+        ("semantic", "api_down", None),
+    ],
+)
+def test_ungraded_export_preserves_only_the_recorded_cause(decision, kind, outcome, reason):
+    value = report(decision=decision)
+    item = value.results[0]
+    item.kind, item.basis = kind, "rule" if kind == "structural" else "llm"
+    item.outcome, item.reason = outcome, reason
+    before = value.model_dump_json()
+    with rendered(value) as document:
+        content = " ".join(text(document).split())
+        assert "No grade has been accepted for this criterion." in content
+        assert "This criterion was not graded by AI" not in content
+        assert "capacity spent" not in content
+        if reason and reason.strip():
+            assert " ".join(reason.split()) in content
+        assert (
+            "Needs Your Review" if decision is None else "Unresolved At Time Of Decision"
+        ) in content
+        if kind == "semantic" and outcome == "escalated":
+            assert "No AI explanation is available for this review item." in content
+    assert value.model_dump_json() == before
+
+
+def test_long_structural_pending_reason_keeps_escaped_text_and_continuation():
+    value = report()
+    item = value.results[0]
+    item.kind, item.basis, item.outcome = "structural", "rule", "unverifiable"
+    item.reason = (
+        "CAUSE_START <rows> & " + "Source inventory remains incomplete. " * 500 + "CAUSE_END"
+    )
+    before = value.model_dump_json()
+    with rendered(value) as document:
+        content = " ".join(text(document).split())
+        assert len(document) > 1
+        assert "CAUSE_START <rows> &" in content and "CAUSE_END" in content
+        assert "Criterion #1 (continued)" in content
+        assert "capacity spent" not in content
+    assert value.model_dump_json() == before

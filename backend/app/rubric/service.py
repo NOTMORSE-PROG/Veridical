@@ -6,7 +6,6 @@ rubric with reports pinned to it is never silently mutated or dropped
 (measurement integrity, TESTING.md §2).
 """
 
-import asyncio
 import uuid
 from collections.abc import AsyncIterator
 from decimal import Decimal
@@ -18,6 +17,7 @@ from sqlalchemy.orm import selectinload
 
 from app.config import Settings, get_settings
 from app.errors import ConflictError, NotFoundError
+from app.ingest.admission import PreparationLease, preparation_scope
 from app.ingest.service import detect_format, save_upload, select_extractor
 from app.llm.base import LLMClient
 from app.models.enums import CriterionType, RubricParseStatus
@@ -38,6 +38,34 @@ async def create_rubric_from_upload(
     settings: Settings | None = None,
     *,
     instructor_id: int,
+    family_id: uuid.UUID | None = None,
+) -> Rubric:
+    """Share upload admission before a format family/version or stored file changes."""
+    settings = settings or get_settings()
+    with preparation_scope(settings) as lease:
+        return await _create_rubric_from_upload(
+            session,
+            chunks,
+            filename,
+            title,
+            llm,
+            settings,
+            instructor_id=instructor_id,
+            family_id=family_id,
+            preparation_lease=lease,
+        )
+
+
+async def _create_rubric_from_upload(
+    session: AsyncSession,
+    chunks: AsyncIterator[bytes],
+    filename: str,
+    title: str,
+    llm: LLMClient,
+    settings: Settings | None = None,
+    *,
+    instructor_id: int,
+    preparation_lease: PreparationLease,
     family_id: uuid.UUID | None = None,
 ) -> Rubric:
     """`family_id=None` (V-010 default) starts a brand-new family at
@@ -95,10 +123,9 @@ async def create_rubric_from_upload(
         await session.commit()
 
         extractor = select_extractor(detect_format(dest))
-        loop = asyncio.get_running_loop()
         # Extraction is CPU-bound — off the event loop (CODING.md §2), same
         # as manuscript ingestion.
-        result = await loop.run_in_executor(None, extractor, str(dest), settings)
+        result = await preparation_lease.run(extractor, str(dest), settings)
     except Exception:
         # BUG-027: an unreadable/corrupt file raises here, before there is
         # anything for the instructor to review (attempt_decomposition

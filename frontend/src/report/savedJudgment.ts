@@ -49,4 +49,3 @@ export function recordedGradeLabel(row: ResultRowCommon) {
   if (row.outcome === "failed") return "Does not meet";
   return "Recorded grade unavailable";
 }
-

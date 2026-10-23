@@ -78,8 +78,8 @@ def test_meaningful_differences_are_preserved(left, right):
         ("γ parameter", "Γ parameter", "title_case_unassessed"),
         ("αβ parameters", "ΑΒ parameters", "title_case_unassessed"),
         ("αβ parameters", "αΒ parameters", "title_case_unassessed"),
-    ("Maße in physics", "Masse in physics", "title_case_unassessed"),
-    ("ſine measurements", "sine measurements", "title_case_unassessed"),
+        ("Maße in physics", "Masse in physics", "title_case_unassessed"),
+        ("ſine measurements", "sine measurements", "title_case_unassessed"),
     ],
 )
 def test_ambiguity_is_unassessed_never_agreement(left, right, reason):

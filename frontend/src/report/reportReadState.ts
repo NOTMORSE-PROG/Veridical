@@ -13,4 +13,3 @@ export function usableReport(report: ReportOut | undefined, checkRunId: number, 
   return report?.check_run_id === checkRunId && recoverableReadError(error)
     ? report : undefined;
 }
-

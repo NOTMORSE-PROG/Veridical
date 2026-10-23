@@ -147,8 +147,6 @@ async def test_claim_occurrence_ledger_survives_persistence_and_reports_honest_c
     from app.external.schemas import VerificationResult
     from app.ingest.patterns import load_patterns
     from app.models.audit import AuditLog
-    from app.models.citation import Citation
-    from app.models.enums import CitationParseStatus
     from app.models.run import Flag
     from app.share.service import _to_public_report
     from tests.test_citation_claim_occurrences import (
@@ -159,6 +157,7 @@ async def test_claim_occurrence_ledger_survives_persistence_and_reports_honest_c
         ScriptedClaims,
         source,
     )
+    from tests.test_stabilization_integrity_controls import citation
 
     owner, run_id, _ = await _seed_done_run(session_factory)
     provider = AsyncMock(
@@ -171,15 +170,8 @@ async def test_claim_occurrence_ledger_survives_persistence_and_reports_honest_c
     settings = Settings(_env_file=None, claim_support_max_pairs_per_run=limit)
     async with session_factory() as session:
         run = await session.get(CheckRun, run_id)
-        reference = Citation(
-            manuscript_id=run.manuscript_id,
-            order_index=0,
-            raw_text=RAW,
-            authors=["Reyes, J."],
-            year=2023,
-            title="A Study",
-            parse_status=CitationParseStatus.parsed,
-        )
+        reference = citation(RAW)
+        reference.manuscript_id = run.manuscript_id
         session.add(reference)
         await session.commit()
         result = await verify.run_citation_integrity_check(

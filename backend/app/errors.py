@@ -98,6 +98,16 @@ class RateLimitedError(VeridicalError):
     code = "rate_limited"
 
 
+class DocumentPreparationBusyError(VeridicalError):
+    """Preparation admission rejected this attempt before durable work."""
+
+    code = "document_preparation_busy"
+
+
+class ActorContextChangedError(VeridicalError):
+    code = "actor_context_changed"
+
+
 class ReportExportUnavailableError(VeridicalError):
     """Saved text cannot be rendered faithfully; the assessment is unaffected."""
 
@@ -124,6 +134,8 @@ HTTP_STATUS: dict[str, int] = {
     "conflict": 409,
     "gone": 410,
     "rate_limited": 429,
+    "document_preparation_busy": 503,
+    "actor_context_changed": 409,
     "invalid_api_key": 422,
     "report_export_unavailable": 422,
     # A rubric-decomposition parse that failed schema validation (V-010) —

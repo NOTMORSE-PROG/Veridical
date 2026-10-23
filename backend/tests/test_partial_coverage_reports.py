@@ -111,7 +111,9 @@ def test_saved_image_coverage_survives_export_and_public_incomplete_notice(state
         text = " ".join(page.get_text().replace("\n", " ") for page in document)
     assert "2 image occurrences unassessed" in text
     assert "1 equation transcribed but not evaluated" in text
-    assert text.count("Extracted paragraph 5: Image assessment is not supported for this source") == 1
+    assert (
+        text.count("Extracted paragraph 5: Image assessment is not supported for this source") == 1
+    )
     assert "(2 image occurrences)" in text
     assert "These are coverage limitations, not findings against the manuscript" in text
     if state == "partial":

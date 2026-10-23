@@ -13,7 +13,7 @@ convention as `app/ingest/patterns.py`.
 
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, Protocol
+from typing import Any, Literal, Protocol
 
 from app.ingest.schemas import PageGeometry, SectionTree, TableBlock
 from app.models.enums import ResultOutcome
@@ -32,6 +32,18 @@ class CitationLike(Protocol):
     order_index: int
     raw_text: str
     parse_status: str
+
+
+@dataclass(frozen=True)
+class ReferenceInventory:
+    """A source-bound measurement, distinct from retained citation rows."""
+
+    status: Literal["complete", "unknown", "partial", "stale"]
+    count: int | None
+    reasons: tuple[str, ...] = ()
+    anchor: str = "reference list"
+    selected_group_count: int | None = None
+    retained_row_count: int | None = None
 
 
 @dataclass(frozen=True)
@@ -78,6 +90,7 @@ class RuleContext:
     margin_tolerance_pts: float
     citation_style_min_ratio: float
     table_caption_min_ratio: float
+    reference_inventory: ReferenceInventory | None = None
 
 
 @dataclass(frozen=True)

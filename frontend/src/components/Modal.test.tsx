@@ -18,6 +18,38 @@ afterEach(() => {
 });
 
 describe("Modal", () => {
+  it("retains enabled first-legend controls and links inside a disabled fieldset", () => {
+    render(<Modal title="Native fieldset semantics"><fieldset disabled>
+      <legend><button type="button">Enabled legend action</button></legend>
+      <input aria-label="Disabled input" />
+      <a href="/rubric">Available inspection link</a>
+    </fieldset></Modal>);
+    const legend = screen.getByRole("button", { name: "Enabled legend action" });
+    const link = screen.getByRole("link", { name: "Available inspection link" });
+    expect(screen.getByLabelText("Disabled input")).toBeDisabled();
+    expect(legend).toHaveFocus();
+    fireEvent.keyDown(document, { key: "Tab", shiftKey: true });
+    expect(link).toHaveFocus();
+    fireEvent.keyDown(document, { key: "Tab" });
+    expect(legend).toHaveFocus();
+  });
+  it.each(["hidden", "inert", "disabled"])("excludes retained %s context from initial focus and both wrap targets", (mode) => {
+    const blocked = <fieldset hidden={mode === "hidden"} inert={mode === "inert"} disabled={mode === "disabled"}>
+      <button type="button">Retained private action</button>
+    </fieldset>;
+    render(<Modal title="Session check" footer={blocked}>
+      {blocked}
+      <button type="button">First available</button>
+      <button type="button">Last available</button>
+    </Modal>);
+    const first = screen.getByRole("button", { name: "First available" });
+    const last = screen.getByRole("button", { name: "Last available" });
+    expect(first).toHaveFocus();
+    fireEvent.keyDown(document, { key: "Tab", shiftKey: true });
+    expect(last).toHaveFocus();
+    fireEvent.keyDown(document, { key: "Tab" });
+    expect(first).toHaveFocus();
+  });
   it("renders a dialog with its title", () => {
     render(<Modal title="Upload required format" />);
     expect(screen.getByRole("dialog")).toBeInTheDocument();

@@ -50,6 +50,18 @@ describe("stored instructor action presentation", () => {
     expect(JSON.stringify(result)).not.toMatch(/verified|complete count|all pending/i);
   });
 
+  it("retains an unverifiable criterion recorded by the integrated Return action without inventing its cause", () => {
+    const payload = { decision: "returned", status: "needs_review", note: "Inspect the missing source evidence.",
+      pending_criteria: [{ criterion_id: 42, check_result_id: 291, outcome: "unverifiable" }] };
+    const before = structuredClone(payload);
+    const result = instructorEventDetails("report_decided", payload)!;
+    expect(result.pendingItems).toEqual([{ criterionId: 42, resultId: 291, outcome: "Unverifiable" }]);
+    expect(result.fields.at(-1)!.value).toBe("1 recorded item.");
+    expect(result.pendingQualification).toBe("These are the items recorded in this entry, not a statement of the report's current unresolved criteria.");
+    expect(JSON.stringify(result.pendingItems)).not.toMatch(/AI|service|not assessed|not graded/i);
+    expect(payload).toEqual(before);
+  });
+
   it("describes the actual prior decision without asserting the report is still reopened now", () => {
     const result = instructorEventDetails("report_reopened", { reason: "Read the source again.", prior_decision: "returned", prior_note: "Original return reason.", prior_decided_at: "2026-10-23T01:02:03+00:00" })!;
     expect(result.fields).toContainEqual({ role: "secondary", label: "Previous recorded decision", value: "Returned for revision" });

@@ -30,6 +30,21 @@ MANUSCRIPT_SOURCE_MISSING = (
     "again to create a new reviewable copy."
 )
 
+MANUSCRIPT_PREPARATION_FAILED = (
+    "VERIDICAL could not finish preparing this manuscript. Try uploading it again."
+)
+
+UPLOAD_ACTOR_CONTEXT_CHANGED = (
+    "Your signed-in account changed. Open the upload form again to continue."
+)
+DOCUMENT_PREPARATION_BUSY = (
+    "VERIDICAL is busy preparing a document. This attempt did not add a document. Try again later."
+)
+
+DOCUMENT_PREPARATION_UNAVAILABLE = (
+    "Document preparation is unavailable. This attempt did not add a document. Try again later."
+)
+
 FILE_ENCRYPTED = (
     "The file is password-protected, so its text cannot be read. Please upload an unlocked copy."
 )
@@ -154,4 +169,9 @@ CRITERION_NOT_ASSESSABLE_FROM_DOCUMENT = (
     "VERIDICAL cannot check this from the document. It describes something "
     "you observe directly, such as a defense-day behavior or a physical "
     "requirement, not a property of the manuscript itself."
+)
+
+REFERENCE_LIST_UNASSESSABLE = (
+    "VERIDICAL could not reliably assess the reference count or citation style from "
+    "the available reference-list entries. Review the reference list manually."
 )

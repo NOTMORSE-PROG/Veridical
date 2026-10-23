@@ -6,7 +6,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, UploadFile
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.auth.dependencies import get_current_instructor
+from app.auth.dependencies import get_current_instructor, get_upload_instructor
 from app.config import get_settings
 from app.db import get_session
 from app.llm import get_llm_client_for
@@ -40,7 +40,7 @@ _CHUNK_BYTES = 1024 * 1024
 async def upload_rubric(
     file: UploadFile,
     session: Annotated[AsyncSession, Depends(get_session)],
-    instructor: Annotated[Instructor, Depends(get_current_instructor)],
+    instructor: Annotated[Instructor, Depends(get_upload_instructor)],
     title: str = "Untitled rubric",
     family_id: uuid.UUID | None = None,
 ) -> RubricOut:

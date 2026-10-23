@@ -1,6 +1,6 @@
 """V-081 containment and arithmetic regressions; not an accuracy benchmark."""
 
-from dataclasses import replace
+from dataclasses import asdict, replace
 from unittest.mock import AsyncMock
 
 import pytest
@@ -165,16 +165,9 @@ def source(body, raw_refs):
     )
 
 
-def citation(raw, index=0, parsed=True):
-    return Citation(
-        manuscript_id=1,
-        order_index=index,
-        raw_text=raw,
-        authors=["Reyes, J."] if parsed else None,
-        title="A Study" if parsed else None,
-        year=2023 if parsed else None,
-        parse_status=CitationParseStatus.parsed if parsed else CitationParseStatus.parse_failed,
-    )
+def citation(raw, index=0):
+    # Whole-stage controls use the same source-derived fields as ingestion.
+    return Citation(manuscript_id=1, **asdict(parse_reference(raw, index)))
 
 
 async def check(monkeypatch, body, refs, *, llm=None, abstract="A source abstract."):
@@ -221,7 +214,7 @@ async def test_present_unparsed_reference_does_not_become_an_orphan(monkeypatch)
     result, rows, provider, _ = await check(
         monkeypatch,
         "Prior work (Reyes, 2023).",
-        [citation("Reyes J. Study. Journal, 2023.", parsed=False)],
+        [citation("Reyes J. Study. Journal, 2023.")],
     )
     assert not any(isinstance(row, Flag) for row in rows)
     provider.assert_not_called()
@@ -230,12 +223,10 @@ async def test_present_unparsed_reference_does_not_become_an_orphan(monkeypatch)
 
 
 async def test_identifier_lookup_does_not_claim_incomplete_metadata_verified(monkeypatch):
-    ref = citation("Reyes J. (2023). doi:10.1234/known")
-    ref.title = None
-    ref.doi = "10.1234/known"
+    ref = citation("Reyes, J. (n.d.). A Study. Journal. doi:10.1234/known")
     result, _, provider, support = await check(
         monkeypatch,
-        "Prior work (Reyes, 2023).",
+        "Prior work (Reyes, n.d.).",
         [ref],
         llm=object(),
     )

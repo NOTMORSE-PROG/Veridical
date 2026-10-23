@@ -242,9 +242,17 @@ def ensure_local_file(settings: Settings, storage: Storage, file_ref: str) -> Pa
         except FileExistsError as publication_error:
             # Accept a competing fill only after verifying all downloaded bytes.
             try:
-                already_complete = local_path.read_bytes() == data
+                already_complete = _read_published_winner(local_path) == data
             except OSError:
                 raise publication_error from None
             if not already_complete:
                 raise
     return local_path
+
+
+def _read_published_winner(path: Path) -> bytes:
+    if os.name == "nt":
+        from app.storage._windows import read_published_winner
+
+        return read_published_winner(path)
+    return path.read_bytes()

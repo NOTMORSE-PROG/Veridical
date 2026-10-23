@@ -30,7 +30,10 @@ const FOCUSABLE_SELECTOR =
   'a[href], button:not([disabled]), textarea:not([disabled]), input:not([disabled]), select:not([disabled]), summary, [tabindex]:not([tabindex="-1"])';
 
 function getFocusable(container: HTMLElement): HTMLElement[] {
-  return Array.from(container.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR));
+  // Retained upload context stays mounted while session checks hide and
+  // disable it. Those descendants cannot be targets of the dialog trap.
+  return Array.from(container.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR))
+    .filter((element) => element.closest("[hidden], [inert]") === null && !element.matches(":disabled"));
 }
 
 // BUG-020: a Tab-based focus trap alone still leaves background content

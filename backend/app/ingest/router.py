@@ -12,7 +12,7 @@ from fastapi import APIRouter, Depends, Form, Query, UploadFile
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app import messages
-from app.auth.dependencies import get_current_instructor
+from app.auth.dependencies import get_current_instructor, get_upload_instructor
 from app.config import get_settings
 from app.db import get_session
 from app.groups.service import DEFAULT_GROUP_LABEL, program_name_for
@@ -53,7 +53,7 @@ _CHUNK_BYTES = 1024 * 1024
 async def ingest_manuscript_upload(
     file: UploadFile,
     session: Annotated[AsyncSession, Depends(get_session)],
-    instructor: Annotated[Instructor, Depends(get_current_instructor)],
+    instructor: Annotated[Instructor, Depends(get_upload_instructor)],
     # BUG-043: a bare scalar is a QUERY parameter in FastAPI, even on a
     # multipart endpoint, and silently dropped a form-field `group_label`
     # with no error. `Form()` reads it from the multipart body instead.

@@ -3,6 +3,8 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ApiError, api } from "../api/client";
 import type { CriterionType, Rubric, RubricListItem, RubricLevel } from "../api/types";
+import { verifyUploadFailure, type UploadAttemptScope } from "../auth/useUploadScope";
+import { StaleUploadContextError, UnconfirmedUploadError, validateRubricReceipt } from "../api/uploadOutcome";
 
 export function rubricQueryKey(id: number) {
   return ["rubric", id] as const;
@@ -26,30 +28,47 @@ export function useUploadRubric() {
       file,
       title,
       familyId,
+      scope,
     }: {
       file: File;
       title: string;
       familyId?: string;
+      scope: UploadAttemptScope;
     }) => {
+      await scope.verify();
       const form = new FormData();
       form.append("file", file);
       const query = new URLSearchParams({ title, ...(familyId ? { family_id: familyId } : {}) });
-      const res = await fetch(`${BASE_URL}/rubrics?${query.toString()}`, {
-        method: "POST",
-        credentials: "include",
-        body: form,
-      });
-      if (!res.ok) {
-        const body = (await res.json().catch(() => null)) as
-          | { error?: { code?: string; message?: string } }
-          | null;
-        throw new ApiError(
-          res.status,
-          body?.error?.code ?? "internal",
-          body?.error?.message ?? `Upload failed (${res.status}).`,
-        );
+      let receipt;
+      try {
+        const res = await fetch(`${BASE_URL}/rubrics?${query.toString()}`, {
+          method: "POST",
+          credentials: "include",
+          headers: { "X-Veridical-Expected-Instructor": String(scope.actorId) },
+          body: form,
+        });
+        if (!res.ok) {
+          const body = (await res.json().catch(() => null)) as
+            | { error?: { code?: string; message?: string } }
+            | null;
+          throw new ApiError(
+            res.status,
+            body?.error?.code ?? "internal",
+            body?.error?.message ?? `Upload failed (${res.status}).`,
+          );
+        }
+        const out: unknown = await res.json();
+        if (!scope.isCurrent()) throw new StaleUploadContextError();
+        receipt = validateRubricReceipt(out, familyId);
+      } catch (error) {
+        return verifyUploadFailure(error, scope);
       }
-      return (await res.json()) as Rubric;
+      try { await scope.verify(); }
+      catch (error) {
+        if (error instanceof StaleUploadContextError) throw error;
+        throw new UnconfirmedUploadError();
+      }
+      return receipt;
     },
   });
 }

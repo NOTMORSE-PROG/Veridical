@@ -138,14 +138,18 @@ def _raster(path, result, index, source_hash, settings):
     }
 
 
-async def read_figures(result, path, llm, patterns, settings, *, source_hash, enabled=True):
+async def read_figures(
+    result, path, llm, patterns, settings, *, source_hash, enabled=True, preparation_lease=None
+):
     selected = prepare_figures(result, patterns, settings, enabled=enabled)
     calls = 0
     for index in selected:
         entry = result.figure_readings[index]
         try:
-            png, binding = await asyncio.to_thread(
-                _raster, path, result, index, source_hash, settings
+            png, binding = (
+                await preparation_lease.run(_raster, path, result, index, source_hash, settings)
+                if preparation_lease is not None
+                else await asyncio.to_thread(_raster, path, result, index, source_hash, settings)
             )
         except (GoneError, ValueError, OSError, RuntimeError, IndexError):
             entry.status, entry.reason = "unavailable", "source_mismatch"

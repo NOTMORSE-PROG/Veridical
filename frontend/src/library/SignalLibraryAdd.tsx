@@ -1,10 +1,11 @@
 // V-077 (D-028), new screen 4aa: add manuscripts to the Library. Adding
 // stores a file as a comparison source and nothing else: no rubric, no
-// grade, no report. Files are sent one at a time (one extraction in memory
-// on the free-tier worker), and each outcome is announced as it lands.
+// grade, no report. This client sends files sequentially; shared server
+// admission separately bounds covered preparation work within one process.
 import { useEffect, useId, useRef, useState } from "react";
 import { Link, useBlocker } from "react-router";
 import { ApiError } from "../api/client";
+import { isDocumentPreparationBusy } from "../api/documentPreparation";
 import type { LibraryDuplicateRefOut, LibraryItemOut, LibrarySubmissionOut } from "../api/types";
 import { usePrograms } from "../dashboard/useDashboard";
 import { useRouteFocus } from "../routing/useRouteFocus";
@@ -42,8 +43,13 @@ type RowState =
   | { kind: "skipped" }
   | { kind: "failed"; message: string; item: LibraryItemOut | null }
   | { kind: "deleted" }
-  | { kind: "not_sent" }
+  | { kind: "not_attempted" }
+  | { kind: "preparation_busy"; message: string }
+  | { kind: "rate_limited"; message: string }
+  | { kind: "result_unknown" }
   | { kind: "rejected"; message: string };
+
+type StopCause = "preparation_busy" | "rate_limited" | "result_unknown";
 
 interface Row {
   key: string;
@@ -90,28 +96,52 @@ function rowStatusLabel(state: RowState): string {
       return "Could not read";
     case "deleted":
       return "Upload deleted";
-    case "not_sent":
-      return "Not sent";
+    case "not_attempted":
+      return "Not attempted";
+    case "preparation_busy":
+      return "Not added: preparation unavailable";
+    case "rate_limited":
+      return "Not added: upload limit reached";
+    case "result_unknown":
+      return "Result not confirmed";
     case "rejected":
       return "Could not add";
   }
 }
 
 function isSettled(state: RowState): boolean {
-  return state.kind !== "queued" && state.kind !== "sending";
+  return !["queued", "sending", "not_attempted", "result_unknown"].includes(state.kind);
+}
+
+function canRetry(state: RowState): boolean {
+  return ["not_attempted", "preparation_busy", "rate_limited"].includes(state.kind);
+}
+
+function usableItem(item: LibraryItemOut | null): item is LibraryItemOut {
+  return Boolean(item && Number.isSafeInteger(item.manuscript_id) && item.manuscript_id > 0
+    && typeof item.label === "string" && Array.isArray(item.proposed_fields)
+    && item.proposed_fields.every((field) => typeof field === "string"));
 }
 
 function outcomeFromSubmission(result: LibrarySubmissionOut): RowState {
-  if (result.outcome === "exact_duplicate") {
+  // A TypeScript response type cannot establish that a response was usable.
+  if (!result || typeof result.message !== "string") return { kind: "result_unknown" };
+  if (result.duplicate_of !== null && (!result.duplicate_of
+    || !Number.isSafeInteger(result.duplicate_of.manuscript_id) || result.duplicate_of.manuscript_id <= 0
+    || typeof result.duplicate_of.label !== "string"
+    || (result.duplicate_of.added_at !== null && (typeof result.duplicate_of.added_at !== "string"
+      || !Number.isFinite(Date.parse(result.duplicate_of.added_at)))))) return { kind: "result_unknown" };
+  if (result.item !== null && !usableItem(result.item)) return { kind: "result_unknown" };
+  if (result.outcome === "exact_duplicate" && result.item === null) {
     return { kind: "exact", duplicate: result.duplicate_of, message: result.message };
   }
-  if (result.outcome === "possible_duplicate" && result.item) {
+  if (result.outcome === "possible_duplicate" && result.item?.status === "needs_decision") {
     return { kind: "possible", item: result.item, duplicate: result.duplicate_of };
   }
-  if (result.outcome === "failed") return { kind: "failed", message: result.message, item: result.item };
-  if (result.item?.status === "processing") return { kind: "processing", item: result.item };
-  if (result.item) return { kind: "added", item: result.item };
-  return { kind: "rejected", message: result.message };
+  if (result.outcome === "failed" && (result.item === null || result.item.status === "failed")) return { kind: "failed", message: result.message, item: result.item };
+  if (result.outcome === "added" && result.item?.status === "processing") return { kind: "processing", item: result.item };
+  if (result.outcome === "added" && result.item?.status === "active") return { kind: "added", item: result.item };
+  return { kind: "result_unknown" };
 }
 
 function RowDetail({ row }: { row: Row }) {
@@ -149,7 +179,9 @@ function RowDetail({ row }: { row: Row }) {
   if (state.kind === "skipped") return <p>Not added. This copy was not kept.</p>;
   if (state.kind === "failed") return <p>{state.message}</p>;
   if (state.kind === "deleted") return <p>The unreadable upload was deleted.</p>;
-  if (state.kind === "not_sent") return <p>This file was not sent. Nothing was added.</p>;
+  if (state.kind === "not_attempted") return <p>This file has not been sent.</p>;
+  if (state.kind === "preparation_busy" || state.kind === "rate_limited") return <p>{state.message}</p>;
+  if (state.kind === "result_unknown") return <p>VERIDICAL could not confirm whether this attempt added a document. Check the Library before adding this file again.</p>;
   if (state.kind === "rejected") return <p>{state.message}</p>;
   return null;
 }
@@ -186,7 +218,9 @@ export function SignalLibraryAddPage() {
   const [phase, setPhase] = useState<"form" | "batch">("form");
   const [rows, setRows] = useState<Row[]>([]);
   const [running, setRunning] = useState(false);
-  const [rateLimited, setRateLimited] = useState(false);
+  const [runningTotal, setRunningTotal] = useState(0);
+  const [pauseCause, setPauseCause] = useState<StopCause | null>(null);
+  const [confirmNewUpload, setConfirmNewUpload] = useState(false);
   const [announcement, setAnnouncement] = useState("");
   const [deleteTarget, setDeleteTarget] = useState<Row | null>(null);
   const [skipTarget, setSkipTarget] = useState<Row | null>(null);
@@ -248,25 +282,31 @@ export function SignalLibraryAddPage() {
     return normalizeSchoolYear(schoolYear);
   }
 
-  async function sendOne(row: Row): Promise<"ok" | "stop"> {
+  async function sendOne(row: Row): Promise<"ok" | StopCause> {
     updateRow(row.key, { kind: "sending" });
     const shared = submissionRef.current;
     try {
       const result = await submitLibraryEntry({ file: row.file, ...shared });
       const state = outcomeFromSubmission(result);
       updateRow(row.key, state);
+      if (state.kind === "result_unknown") return "result_unknown";
       const done = rowsRef.current.filter((r) => isSettled(r.state)).length;
       setAnnouncement(`${row.file.name}: ${rowStatusLabel(state)}. ${done} of ${rowsRef.current.length} done.`);
       return "ok";
     } catch (error) {
+      if (isDocumentPreparationBusy(error)) {
+        updateRow(row.key, { kind: "preparation_busy", message: error.message });
+        return "preparation_busy";
+      }
       if (error instanceof ApiError && error.status === 429) {
-        updateRow(row.key, { kind: "not_sent" });
-        return "stop";
+        updateRow(row.key, { kind: "rate_limited", message: error.message });
+        return "rate_limited";
       }
       if (error instanceof ApiError && error.status < 500) {
         updateRow(row.key, { kind: "rejected", message: error.message });
       } else {
-        updateRow(row.key, { kind: "not_sent" });
+        updateRow(row.key, { kind: "result_unknown" });
+        return "result_unknown";
       }
       return "ok";
     }
@@ -274,16 +314,21 @@ export function SignalLibraryAddPage() {
 
   async function runQueue() {
     setRunning(true);
-    setRateLimited(false);
+    setRunningTotal(rowsRef.current.filter((row) => row.state.kind === "queued").length);
+    setPauseCause(null);
+    let stopped: StopCause | null = null;
+    let stoppedFilename = "";
     for (const row of rowsRef.current) {
       if (stopRequested.current) break;
       const current = rowsRef.current.find((r) => r.key === row.key);
       if (!current || current.state.kind !== "queued") continue;
       const result = await sendOne(current);
-      if (result === "stop") {
-        setRateLimited(true);
+      if (result !== "ok") {
+        stopped = result;
+        stoppedFilename = current.file.name;
+        setPauseCause(result);
         for (const remaining of rowsRef.current) {
-          if (remaining.state.kind === "queued") updateRow(remaining.key, { kind: "not_sent" });
+          if (remaining.state.kind === "queued") updateRow(remaining.key, { kind: "not_attempted" });
         }
         break;
       }
@@ -291,7 +336,9 @@ export function SignalLibraryAddPage() {
     setRunning(false);
     invalidateLibrary();
     const settled = rowsRef.current;
-    const added = settled.filter((r) => ["added", "processing", "added_anyway"].includes(r.state.kind)).length;
+    const added = settled.filter((r) => ["added", "added_anyway"].includes(r.state.kind)).length;
+    const unknown = settled.filter((r) => r.state.kind === "result_unknown").length;
+    const preparing = settled.filter((r) => r.state.kind === "processing").length;
     const waiting = settled.filter((r) => r.state.kind === "possible").length;
     const unreadable = settled.filter((r) => r.state.kind === "failed").length;
     const parts = [
@@ -299,7 +346,13 @@ export function SignalLibraryAddPage() {
       waiting ? `${plural(waiting, "possible duplicate", "possible duplicates")} waiting for your decision` : "",
       unreadable ? `${unreadable} could not be read` : "",
     ].filter(Boolean);
-    setAnnouncement(parts.length ? `Finished. ${parts.join(", ")}.` : "Finished.");
+    const outcome = parts.length ? ` ${parts.join(", ")}.` : "";
+    if (stopped === "preparation_busy") setAnnouncement(`Paused: document preparation unavailable.${outcome} Only remaining eligible files can be tried again. ${unknown ? `${unknown} upload results are still not confirmed.` : ""}`);
+    else if (stopped === "rate_limited") setAnnouncement(`Paused: limit for adding files reached.${outcome} ${unknown ? `${unknown} upload results are still not confirmed.` : ""}`);
+    else if (stopped === "result_unknown") setAnnouncement(`${stoppedFilename}: result not confirmed. The batch is paused. Review the results before adding this file again.${outcome} ${unknown} upload results are still not confirmed.`);
+    else if (unknown) setAnnouncement(`Remaining upload attempts have ended. ${unknown} upload results are still not confirmed.${outcome} Check the Library before adding those files again.`);
+    else if (preparing) setAnnouncement(`Upload requests ended. ${preparing} files are still being prepared.${outcome}`);
+    else setAnnouncement(parts.length ? `Finished.${outcome}` : "Finished.");
   }
 
   function submit() {
@@ -334,11 +387,15 @@ export function SignalLibraryAddPage() {
     void runQueue();
   }
 
-  function retryUnsent() {
+  function retryRemaining() {
+    if (running) return;
     for (const row of rowsRef.current) {
-      if (row.state.kind === "not_sent") updateRow(row.key, { kind: "queued" });
+      if (canRetry(row.state)) updateRow(row.key, { kind: "queued" });
     }
     stopRequested.current = false;
+    requestAnimationFrame(() => {
+      if (document.activeElement === document.body) batchHeadingRef.current?.focus();
+    });
     void runQueue();
   }
 
@@ -388,27 +445,36 @@ export function SignalLibraryAddPage() {
     setTeamName("");
     setAuthors([""]);
     setRows([]);
+    setPauseCause(null);
+    setConfirmNewUpload(false);
     rowsRef.current = [];
     setPhase("form");
     requestAnimationFrame(() => headingRef.current?.focus());
   }
 
   const doneCount = rows.filter((row) => isSettled(row.state)).length;
-  const addedCount = rows.filter((r) => ["added", "processing", "added_anyway"].includes(r.state.kind)).length;
+  const addedCount = rows.filter((r) => ["added", "added_anyway"].includes(r.state.kind)).length;
+  const unknownCount = rows.filter((r) => r.state.kind === "result_unknown").length;
+  const preparingCount = rows.filter((r) => r.state.kind === "processing").length;
   const outcomeSummary = [
-    `Added: ${addedCount}`,
+    `${unknownCount > 0 ? "Confirmed added" : "Added"}: ${addedCount}`,
     ...[
       ["already uploaded", rows.filter((r) => r.state.kind === "exact").length],
       ["waiting for your decision", rows.filter((r) => r.state.kind === "possible").length],
       ["could not be read", rows.filter((r) => r.state.kind === "failed").length],
       ["skipped", rows.filter((r) => r.state.kind === "skipped").length],
-      ["not sent", rows.filter((r) => r.state.kind === "not_sent").length],
+      ["still being prepared", preparingCount],
+      ["results not confirmed", unknownCount],
+      ["not attempted", rows.filter((r) => r.state.kind === "not_attempted").length],
+      ["preparation unavailable", rows.filter((r) => r.state.kind === "preparation_busy").length],
+      ["upload limit reached", rows.filter((r) => r.state.kind === "rate_limited").length],
+      ["could not add", rows.filter((r) => r.state.kind === "rejected").length],
     ]
       .filter(([, count]) => (count as number) > 0)
       .map(([label, count]) => `${label}: ${count}`),
   ].join(". ");
   const openDecisions = rows.filter((row) => row.state.kind === "possible").length;
-  const notSent = rows.filter((row) => row.state.kind === "not_sent").length;
+  const retryable = rows.filter((row) => canRetry(row.state)).length;
 
   return (
     <div className="signal-route signal-page-flow signal-library-add">
@@ -582,20 +648,44 @@ export function SignalLibraryAddPage() {
         <section className="signal-library-batch" aria-labelledby="library-batch-heading">
           <h2 id="library-batch-heading" ref={batchHeadingRef} tabIndex={-1}>
             {running
-              ? `Adding ${plural(rows.length, "file", "files")}`
+              ? `Adding ${plural(runningTotal, "file", "files")}`
+              : pauseCause === "preparation_busy"
+                ? "Paused: document preparation unavailable"
+              : pauseCause === "rate_limited"
+                ? "Paused: limit for adding files reached"
+              : unknownCount > 0
+                ? retryable > 0 ? "Paused: an upload result was not confirmed" : "Upload results need review"
+              : preparingCount > 0
+                ? "Upload results: some files are still being prepared"
               : addedCount > 0
                 ? `Finished: ${plural(addedCount, "file", "files")} added to the Library`
                 : "Finished: nothing was added to the Library"}
           </h2>
-          <p>{running ? `${doneCount} of ${rows.length} processed` : `${outcomeSummary}.`}</p>
+          <p>{running ? `${doneCount} confirmed upload responses in this batch. ${rows.length - doneCount} results pending or unconfirmed.` : `${outcomeSummary}.`}</p>
 
-          {rateLimited && (
+          {pauseCause === "rate_limited" && (
             <Alert tone="warning" title="Paused: limit for adding files reached">
-              <p>{plural(notSent, "file was", "files were")} not sent. Try again later.</p>
-              <Button type="button" variant="secondary" disabled={running} onClick={retryUnsent}>
-                Try unsent files again
-              </Button>
+              <p>This batch stopped at the upload limit. Earlier results remain below. Try remaining eligible files later.</p>
             </Alert>
+          )}
+          {pauseCause === "preparation_busy" && (
+            <Alert tone="warning" title="Document preparation unavailable">
+              <p>This batch is paused. The rejected attempt and files not attempted can be tried again later. Earlier results remain below.</p>
+            </Alert>
+          )}
+          {unknownCount > 0 && (
+            <Alert tone="warning" title="Some upload results are not confirmed">
+              <p>Check the collection and “Your uploads not in the Library”. An upload may still be being prepared or waiting for a duplicate decision.</p>
+              <p>Leaving this page does not save these local batch results. It does not cancel or settle an unconfirmed request.</p>
+            </Alert>
+          )}
+          {retryable > 0 && (
+            <div className="signal-group-flow">
+              <p>Try only files not attempted or rejected before document preparation. Unconfirmed results will not be sent again.</p>
+              <Button type="button" variant="secondary" disabled={running} onClick={retryRemaining}>
+                Try remaining files
+              </Button>
+            </div>
           )}
 
           <ol className="signal-library-batch__rows" aria-busy={running || undefined}>
@@ -665,18 +755,10 @@ export function SignalLibraryAddPage() {
                         Delete upload
                       </Button>
                     )}
-                    {state.kind === "not_sent" && !rateLimited && (
-                      <Button
-                        type="button"
-                        variant="secondary"
-                        disabled={running}
-                        onClick={() => {
-                          updateRow(row.key, { kind: "queued" });
-                          void runQueue();
-                        }}
-                      >
-                        Try again
-                      </Button>
+                    {state.kind === "result_unknown" && (
+                      <ActionLink to="/library" variant="quiet" aria-label={`Go to Library to review the result for ${name}`}>
+                        Go to Library
+                      </ActionLink>
                     )}
                   </div>
                   {state.kind === "possible" && state.error && <p role="alert">{state.error}</p>}
@@ -694,12 +776,27 @@ export function SignalLibraryAddPage() {
                 </p>
               )}
               <div className="signal-form__actions">
-                <Button type="button" variant="secondary" onClick={addMore}>Add more files</Button>
+                <Button type="button" variant="secondary" onClick={() => unknownCount > 0 ? setConfirmNewUpload(true) : addMore()}>
+                  {unknownCount > 0 ? "Start another upload" : "Add more files"}
+                </Button>
                 <ActionLink to="/library" variant="primary">Go to Library</ActionLink>
               </div>
             </div>
           )}
         </section>
+      )}
+
+      {confirmNewUpload && (
+        <Dialog
+          title="Start another upload?"
+          onClose={() => setConfirmNewUpload(false)}
+          actions={<>
+            <Button type="button" variant="secondary" onClick={() => setConfirmNewUpload(false)}>Keep these results</Button>
+            <Button type="button" variant="secondary" onClick={addMore}>Start another upload</Button>
+          </>}
+        >
+          <p>An earlier upload result is still unconfirmed. Starting another upload clears this page’s local results; it does not cancel or settle that request. Check the Library before uploading that file again.</p>
+        </Dialog>
       )}
 
       {blocker.state === "blocked" && (
@@ -797,7 +894,7 @@ function RowStatus({ state }: { state: RowState }) {
       ? "done"
       : state.kind === "sending"
         ? "running"
-        : state.kind === "not_sent" || state.kind === "rejected"
+        : ["preparation_busy", "rate_limited", "result_unknown", "rejected"].includes(state.kind)
           ? "attention"
           : "neutral";
   return (

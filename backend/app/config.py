@@ -220,6 +220,10 @@ class Settings(BaseSettings):
     # walk). Matches `gemini_request_timeout_seconds`'s own value as a
     # reasonable per-call ceiling.
     ingest_extraction_timeout_seconds: float = 60.0
+    # One supported preparation owner per process while native PDF parsing
+    # uses threads. This is admission control, not a measured memory guarantee.
+    # A cancelled awaiter retains admission until its native work finishes.
+    document_preparation_slots: int = Field(default=1, ge=1, le=1)
     # BUG-180: `store_passage_embeddings` (F7.4) had no cap on how many
     # rows one manuscript writes into the GLOBALLY SHARED reuse corpus --
     # at `reuse_passage_chunk_words: 150`, an oversized upload becomes

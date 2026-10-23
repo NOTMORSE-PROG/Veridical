@@ -509,12 +509,7 @@ def _source_caption(row: CriterionResultOut) -> str:
 
 
 def _pending_review_reason(outcome: str) -> str:
-    if outcome == "escalated":
-        return _semantic_support_labels()["pending"]
-    return (
-        "This criterion was not graded by AI (capacity spent or the grading service was "
-        "unavailable)."
-    )
+    return _semantic_support_labels()["pending"]
 
 
 def _pending_semantic_basis_flowables(
@@ -955,12 +950,11 @@ def build_report_pdf(data: ReportExportData) -> bytes:
                     f"<i>({_format_weight_importance(row.weight_importance, long=True)})</i>",
                     styles["body_bold"],
                 ),
-                Paragraph(
-                    escape(
-                        _pending_review_reason(row.outcome)
-                        + (" " + row.reason if row.reason else "")
-                    ),
-                    styles["body"],
+                Paragraph(escape(_pending_review_reason(row.outcome)), styles["body"]),
+                *(
+                    [Paragraph(escape(row.reason), styles["body"])]
+                    if row.reason and row.reason.strip()
+                    else []
                 ),
                 Paragraph(
                     "Not yet resolved. This is why this export is marked DRAFT."

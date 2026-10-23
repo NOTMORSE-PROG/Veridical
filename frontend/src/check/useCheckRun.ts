@@ -3,11 +3,12 @@
 // screen's polling query.
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api/client";
+import { verifyUploadFailure, type UploadAttemptScope } from "../auth/useUploadScope";
+import { StaleUploadContextError, UnconfirmedUploadError, validateIngestReceipt } from "../api/uploadOutcome";
 import type {
   CheckRun,
   ConfirmGroupResponse,
   ManuscriptGroup,
-  IngestSummary,
   PaginatedManuscripts,
   RerunEstimateOut,
   TitlePageProposal,
@@ -36,12 +37,29 @@ export function useManuscripts() {
 export function useIngestManuscript() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({ file }: { file: File }) => {
+    mutationFn: async ({ file, scope }: { file: File; scope: UploadAttemptScope }) => {
+      await scope.verify();
       const form = new FormData();
       form.append("file", file);
-      return api.post<IngestSummary>("/manuscripts/ingest", form);
+      let receipt;
+      try {
+        const out = await api.post<unknown>("/manuscripts/ingest", form, {
+          "X-Veridical-Expected-Instructor": String(scope.actorId),
+        });
+        if (!scope.isCurrent()) throw new StaleUploadContextError();
+        receipt = validateIngestReceipt(out);
+      } catch (error) {
+        return verifyUploadFailure(error, scope);
+      }
+      try { await scope.verify(); }
+      catch (error) {
+        if (error instanceof StaleUploadContextError) throw error;
+        throw new UnconfirmedUploadError();
+      }
+      return receipt;
     },
-    onSuccess: () => {
+    onSuccess: (_out, { scope }) => {
+      if (!scope.isCurrent()) return;
       // Invalidates BOTH ["manuscripts", "picker"] (New Check's dropdown)
       // and ["manuscripts", "table", ...] (the dashboard table) -- TanStack
       // Query matches by key prefix, so one call covers both without

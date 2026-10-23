@@ -14,6 +14,7 @@ from fastapi.testclient import TestClient
 import app.auth.service as auth_service
 from app.auth.security import hash_password
 from app.config import get_settings
+from app.report.service import aggregate_and_score
 
 live = pytest.mark.skipif(
     "DATABASE_URL" not in os.environ,
@@ -178,6 +179,7 @@ def logged_in_with_one_flag(client, api_scratch_url):
                 )
                 session.add(flag)
                 await session.commit()
+                await aggregate_and_score(session, check_run.id, commit=True)
                 return flag.id
         finally:
             await engine.dispose()
@@ -269,6 +271,7 @@ def logged_in_with_one_confirmable_citation_flag(client, api_scratch_url):
                 )
                 session.add(flag)
                 await session.commit()
+                await aggregate_and_score(session, check_run.id, commit=True)
                 return flag.id
         finally:
             await engine.dispose()
@@ -290,6 +293,14 @@ def test_override_requires_auth(client):
     assert client.post("/flags/1/override", json={"reason": "x"}).status_code == 401
 
 
+def observed_revision(client, flag_id):
+    response = client.get(f"/flags/{flag_id}")
+    assert response.status_code == 200
+    revision = response.json()["assessment_revision"]
+    assert type(revision) is int and revision >= 0
+    return revision
+
+
 def test_get_annotate_override_happy_path(logged_in_with_one_flag):
     client, flag_id = logged_in_with_one_flag
 
@@ -306,7 +317,11 @@ def test_get_annotate_override_happy_path(logged_in_with_one_flag):
     assert annotated.json()["annotation"] == "Looks off."
 
     overridden = client.post(
-        f"/flags/{flag_id}/override", json={"reason": "Checked the source myself."}
+        f"/flags/{flag_id}/override",
+        json={
+            "reason": "Checked the source myself.",
+            "expected_revision": observed_revision(client, flag_id),
+        },
     )
     assert overridden.status_code == 200
     body = overridden.json()
@@ -317,7 +332,13 @@ def test_get_annotate_override_happy_path(logged_in_with_one_flag):
 
 def test_override_without_a_reason_is_rejected_by_the_schema(logged_in_with_one_flag):
     client, flag_id = logged_in_with_one_flag
-    resp = client.post(f"/flags/{flag_id}/override", json={"reason": ""})
+    resp = client.post(
+        f"/flags/{flag_id}/override",
+        json={
+            "reason": "",
+            "expected_revision": observed_revision(client, flag_id),
+        },
+    )
     assert resp.status_code == 422
 
 
@@ -335,7 +356,10 @@ def test_confirm_source_happy_path(logged_in_with_one_confirmable_citation_flag)
     client, flag_id = logged_in_with_one_confirmable_citation_flag
     resp = client.post(
         f"/flags/{flag_id}/confirm-source",
-        json={"reason": "Verified on the publisher's own website."},
+        json={
+            "reason": "Verified on the publisher's own website.",
+            "expected_revision": observed_revision(client, flag_id),
+        },
     )
     assert resp.status_code == 200
     body = resp.json()
@@ -349,7 +373,13 @@ def test_confirm_source_without_a_reason_is_rejected_by_the_schema(
     logged_in_with_one_confirmable_citation_flag,
 ):
     client, flag_id = logged_in_with_one_confirmable_citation_flag
-    resp = client.post(f"/flags/{flag_id}/confirm-source", json={"reason": ""})
+    resp = client.post(
+        f"/flags/{flag_id}/confirm-source",
+        json={
+            "reason": "",
+            "expected_revision": observed_revision(client, flag_id),
+        },
+    )
     assert resp.status_code == 422
 
 
@@ -363,7 +393,13 @@ def test_confirm_source_whitespace_only_reason_is_rejected_by_the_schema(
     justification. Confirms the 422 fires at the HTTP boundary, and that
     nothing was mutated as a side effect of the rejected request."""
     client, flag_id = logged_in_with_one_confirmable_citation_flag
-    resp = client.post(f"/flags/{flag_id}/confirm-source", json={"reason": "   "})
+    resp = client.post(
+        f"/flags/{flag_id}/confirm-source",
+        json={
+            "reason": "   ",
+            "expected_revision": observed_revision(client, flag_id),
+        },
+    )
     assert resp.status_code == 422
 
     # Confirmed it never applied -- not just that it raised.
@@ -378,5 +414,11 @@ def test_confirm_source_on_a_flag_with_nothing_to_confirm_is_a_409(logged_in_wit
     reachable by an ordinary client through an ordinary mistake (wrong
     flag id), not just a theoretical path."""
     client, flag_id = logged_in_with_one_flag
-    resp = client.post(f"/flags/{flag_id}/confirm-source", json={"reason": "I checked it."})
+    resp = client.post(
+        f"/flags/{flag_id}/confirm-source",
+        json={
+            "reason": "I checked it.",
+            "expected_revision": observed_revision(client, flag_id),
+        },
+    )
     assert resp.status_code == 409
