@@ -230,7 +230,7 @@ describe("AdviserViewPage", () => {
     vi.stubGlobal("fetch", stubFetchByPath({ "/shared/tok123/report": shared() }));
     render();
     expect(
-      await screen.findByText("Items still awaiting instructor review"),
+      await screen.findByText("Unresolved criteria"),
     ).toBeInTheDocument();
   });
 
