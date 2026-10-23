@@ -70,7 +70,7 @@ def _passage_pair_from_detail(evidence_excerpt: str, detail: dict) -> PassagePai
         matched_context=supporting.get("matched_context_text", ""),
         matched_ref=supporting.get("matched_manuscript_id"),
         similarity=supporting.get("similarity", 0.0),
-        level=supporting.get("level", "high_similarity"),
+        level=supporting.get("level"),
     )
 
 

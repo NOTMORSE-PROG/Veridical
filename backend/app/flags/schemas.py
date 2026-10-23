@@ -32,7 +32,9 @@ class PassagePairOut(BaseModel):
     # wherever a match is shown.
     context_words_each_side: int
     similarity: float
-    level: str
+    # None for a supporting excerpt below standalone passage thresholds or
+    # historical support whose classification was not stored.
+    level: str | None
 
 
 class CitationSourceKeyOut(BaseModel):

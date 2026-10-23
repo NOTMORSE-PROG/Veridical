@@ -24,6 +24,64 @@ pytestmark = live
 SCRATCH_DB = "veridical_flagsapitest"
 
 
+@pytest.mark.parametrize(
+    "level_fields",
+    [{}, {"level": None}, {"level": "high_similarity"}, {"level": "exact_duplicate"}],
+)
+def test_private_flag_read_retains_unclassified_support(
+    logged_in_with_one_flag, api_scratch_url, level_fields
+):
+    import asyncio
+
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
+    from app.db import sqlalchemy_url
+    from app.models.enums import CheckKind
+    from app.models.run import CheckResult, Flag
+
+    client, flag_id = logged_in_with_one_flag
+
+    async def prepare():
+        engine = create_async_engine(sqlalchemy_url(api_scratch_url))
+        try:
+            async with async_sessionmaker(engine)() as session:
+                flag = await session.get(Flag, flag_id)
+                result = await session.get(CheckResult, flag.check_result_id)
+                result.kind = CheckKind.originality_reuse
+                flag.page_anchor = "whole document"
+                flag.detail = {
+                    "kind": "reuse_exact_duplicate",
+                    "affects_readiness": False,
+                    "supporting_passage": {
+                        "own_text": "Own excerpt",
+                        "own_context_text": "Before own. Own excerpt After own.",
+                        "matched_text": "Stored excerpt",
+                        "matched_context_text": "Before stored. Stored excerpt After stored.",
+                        "matched_manuscript_id": 13,
+                        "matched_group_label": "Foreign private identity",
+                        "similarity": 0.2,
+                        **level_fields,
+                    },
+                }
+                await session.commit()
+        finally:
+            await engine.dispose()
+
+    asyncio.run(prepare())
+    response = client.get(f"/flags/{flag_id}")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["passage_pair"]["level"] == level_fields.get("level")
+    assert body["passage_pair"]["own_excerpt"] == "Own excerpt"
+    assert body["passage_pair"]["matched_context_after"] == "After stored."
+    assert body["passage_pair"]["matched_ref"] == 13
+    assert body["evidence_unavailable"] is False
+    assert body["page_anchor"] == "whole document" and body["affects_readiness"] is False
+    assert "Foreign private identity" not in response.text
+    client.post("/auth/logout")
+    assert client.get(f"/flags/{flag_id}").status_code == 401
+
+
 @pytest.fixture(scope="module")
 def api_scratch_url():
     import asyncio

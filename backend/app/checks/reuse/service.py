@@ -210,10 +210,8 @@ def _supporting_passage_detail(supporting: PassageMatch) -> dict:
     templates' own docstring), so it can never double as `own_text` the
     way a genuine passage-level flag's `evidence_excerpt` does.
 
-    `level` is `supporting`'s OWN band (`_classify_passage` on its real
-    similarity, always a genuine classification -- both
-    `query_similar_passages` and `best_supporting_passage` only ever
-    return a `PassageMatch` with a real, non-fabricated `level`), not the
+    `level` is `supporting`'s OWN classification, or None when its real
+    similarity is below the configured standalone passage thresholds, not the
     parent whole-doc/chapter match's band. An earlier version of this fix
     echoed the parent's level instead, reasoning that the two should
     "agree" -- backend review found (live-reproduced, BUG-153 review)
@@ -256,6 +254,8 @@ def _passage_match_to_flag_draft(
     different shape from `_match_to_flag_draft` above (see the wording
     templates' own comment for why: real passage text as the excerpt,
     the explanatory sentence in `detail["reason"]` instead)."""
+    if match.level not in ("exact_duplicate", "high_similarity"):
+        raise ValueError("Unclassified supporting evidence cannot create a passage flag")
     if match.level == "exact_duplicate":
         severity = FlagSeverity.high
         template = EXACT_DUPLICATE_PASSAGE_WORDING

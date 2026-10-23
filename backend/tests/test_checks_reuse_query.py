@@ -81,6 +81,126 @@ async def _clean(session_factory):
 _seed_counter = 0
 
 
+async def test_scoped_weak_support_keeps_text_without_inventing_a_passage_band(session_factory):
+    """Real pgvector search retains weaker support without making a standalone lead."""
+    import math
+
+    from sqlalchemy import delete, select
+
+    from app.checks.reuse.embed import PassageEmbedding
+    from app.checks.reuse.query import _best_passage_match_for, best_supporting_passage
+    from app.checks.reuse.service import _supporting_passage_detail
+    from app.flags.service import _passage_pair_from_detail
+    from app.models.enums import CheckKind
+    from app.models.manuscript import ManuscriptPassageArchive
+    from app.models.run import CheckResult
+
+    settings = get_settings().model_copy(
+        update={
+            "reuse_passage_high_similarity_threshold": 0.75,
+            "reuse_passage_exact_duplicate_threshold": 0.95,
+        }
+    )
+    target, target_run = await _seed_manuscript_and_run(
+        session_factory, group_label="Scoped target"
+    )
+    rival, _ = await _seed_manuscript_and_run(session_factory, group_label="Wrong manuscript")
+    own_vector = [1.0] + [0.0] * (settings.embedding_dim - 1)
+    weak_vector = [0.2, math.sqrt(1 - 0.2**2)] + [0.0] * (settings.embedding_dim - 2)
+    own = PassageEmbedding(
+        passage_index=0,
+        chapter_index=1,
+        anchor_kind="page",
+        page=3,
+        paragraph=None,
+        char_start=0,
+        char_end=19,
+        text="Own central excerpt",
+        context_text="Before own. Own central excerpt After own.",
+        is_reference_list=False,
+        is_block_quote=False,
+        embedding=own_vector,
+    )
+    async with session_factory() as session:
+        for manuscript_id, chapter, index, vector in (
+            (target, 2, 0, weak_vector),
+            (target, 3, 1, own_vector),
+            (rival, 2, 0, own_vector),
+        ):
+            session.add(
+                ManuscriptPassageArchive(
+                    manuscript_id=manuscript_id,
+                    passage_index=index,
+                    chapter_index=chapter,
+                    page=4,
+                    paragraph=None,
+                    char_start=0,
+                    char_end=22,
+                    text="Stored central excerpt",
+                    context_text="Before stored. Stored central excerpt After stored.",
+                    is_reference_list=False,
+                    is_block_quote=False,
+                    embedding=vector,
+                    model_id=settings.embedding_model_id,
+                )
+            )
+        await session.commit()
+        match = await best_supporting_passage(
+            session, [own], target, settings, own_chapter_index=1, matched_chapter_index=2
+        )
+        assert match is not None and match.level is None
+        assert match.similarity == pytest.approx(0.2, abs=1e-6)
+        assert match.matched_manuscript_id == target and match.matched_chapter_index == 2
+        detail = _supporting_passage_detail(match)
+        record = CheckResult(
+            check_run_id=target_run,
+            kind=CheckKind.originality_reuse,
+            outcome=ResultOutcome.passed,
+            detail=detail,
+        )
+        session.add(record)
+        await session.commit()
+        async with session_factory() as reader:
+            recorded = await reader.scalar(
+                select(CheckResult.detail).where(CheckResult.id == record.id)
+            )
+        pair = _passage_pair_from_detail(
+            "Parent coarse comparison",
+            {"kind": "reuse_exact_duplicate", "supporting_passage": recorded},
+        )
+        assert pair is not None and pair.model_dump(mode="json")["level"] is None
+        assert (
+            pair.own_context_before == "Before own."
+            and pair.matched_context_after == "After stored."
+        )
+        assert (
+            await best_supporting_passage(
+                session, [own], target, settings, own_chapter_index=99, matched_chapter_index=2
+            )
+            is None
+        )
+        # The stronger wrong-manuscript/chapter examples do not contaminate the
+        # scoped support; standalone retrieval keeps its independent threshold.
+        assert match.matched_page == 4 and match.own_page == 3
+        await session.execute(
+            delete(ManuscriptPassageArchive).where(
+                ManuscriptPassageArchive.manuscript_id == target,
+                ManuscriptPassageArchive.chapter_index == 3,
+            )
+        )
+        assert (
+            await _best_passage_match_for(
+                session,
+                own,
+                exclude_manuscript_ids={rival},
+                include_reference_list=False,
+                include_block_quote=False,
+                settings=settings,
+            )
+            is None
+        )
+
+
 async def _seed_manuscript_and_run(session_factory, *, group_label: str) -> tuple[int, int]:
     global _seed_counter
     _seed_counter += 1

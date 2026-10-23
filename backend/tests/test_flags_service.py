@@ -153,10 +153,8 @@ def test_whole_document_flag_builds_pair_from_supporting_passage_detail():
     assert pair.matched_ref == 3
     assert pair.matched_excerpt == "The system architecture follows a three-tier design."
     assert pair.similarity == 0.94
-    # The pair's level echoes the PARENT match's own level (set by
-    # `checks.reuse.service._supporting_passage_detail`), not a
-    # separately-recomputed passage-level band -- see that function's own
-    # docstring for why a mismatch there would read as inconsistent.
+    # Read the passage's stored classification without inferring the parent
+    # band or recalculating it from current thresholds.
     assert pair.level == "exact_duplicate"
 
 
@@ -179,3 +177,35 @@ def test_chapter_flag_supporting_passage_also_builds_a_pair():
     assert pair is not None
     assert pair.matched_ref == 11
     assert pair.level == "high_similarity"
+
+
+@pytest.mark.parametrize(
+    "level_fields",
+    [{}, {"level": None}, {"level": "high_similarity"}, {"level": "exact_duplicate"}],
+)
+def test_unclassified_or_historical_support_preserves_the_actual_pair(level_fields):
+    detail = {
+        "kind": "reuse_exact_duplicate",
+        "supporting_passage": {
+            "own_text": "Own central excerpt",
+            "own_context_text": "Before own. Own central excerpt After own.",
+            "matched_text": "Stored central excerpt",
+            "matched_context_text": "Before stored. Stored central excerpt After stored.",
+            "matched_manuscript_id": 13,
+            "similarity": 0.2,
+            **level_fields,
+        },
+    }
+    pair = _passage_pair_from_detail("Parent summary is not passage evidence", detail)
+    assert pair is not None
+    assert pair.level == level_fields.get("level")
+    assert pair.model_dump(mode="json")["level"] == level_fields.get("level")
+    assert (pair.own_excerpt, pair.matched_excerpt) == (
+        "Own central excerpt",
+        "Stored central excerpt",
+    )
+    assert (pair.own_context_before, pair.own_context_after) == ("Before own.", "After own.")
+    assert (pair.matched_context_before, pair.matched_context_after) == (
+        "Before stored.",
+        "After stored.",
+    )

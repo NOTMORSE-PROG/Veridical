@@ -662,7 +662,7 @@ export interface PassagePairOut {
   matched_context_after: string | null;
   context_words_each_side: number;
   similarity: number;
-  level: "exact_duplicate" | "high_similarity";
+  level: "exact_duplicate" | "high_similarity" | null;
 }
 
 // BUG-078: what confirm-source would mark, if the instructor confirms this
