@@ -40,13 +40,11 @@ from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import ParagraphStyle
 from reportlab.lib.utils import ImageReader
 from reportlab.pdfbase import pdfmetrics
-from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.pdfgen.canvas import Canvas
 from reportlab.platypus import (
     CondPageBreak,
     HRFlowable,
     Image,
-    Paragraph,
     PTOContainer,
     SimpleDocTemplate,
     Spacer,
@@ -63,12 +61,7 @@ from app.report.schemas import (
     PageEvidenceImageOut,
     ReportExportData,
 )
-
-_FONTS_DIR = Path(__file__).parent / "fonts"
-_FONT_FAMILY = "PublicSans"
-_FALLBACK_FAMILY = "Helvetica"  # WinAnsiEncoding covers the same Filipino-name diacritics.
-
-_fonts_registered = False
+from app.report.text import Paragraph, clusters, draw_right_text, register_fonts, text_width
 
 
 def _is_optional_comparison_lead(flag: FlagSummaryOut) -> bool:
@@ -95,34 +88,7 @@ def _review_record_identities(flags: list[FlagSummaryOut]) -> dict[int, str]:
 
 
 def _register_fonts() -> str:
-    """Registers the vendored Public Sans TTFs once per process; returns
-    the family name to use (falls back to Helvetica, disclosed, if the
-    vendored files are ever missing rather than crashing the export)."""
-    global _fonts_registered
-    if _fonts_registered:
-        return _FONT_FAMILY
-    try:
-        pdfmetrics.registerFont(TTFont(_FONT_FAMILY, str(_FONTS_DIR / "PublicSans-Regular.ttf")))
-        pdfmetrics.registerFont(
-            TTFont(f"{_FONT_FAMILY}-Bold", str(_FONTS_DIR / "PublicSans-Bold.ttf"))
-        )
-        pdfmetrics.registerFont(
-            TTFont(f"{_FONT_FAMILY}-Italic", str(_FONTS_DIR / "PublicSans-Italic.ttf"))
-        )
-        pdfmetrics.registerFont(
-            TTFont(f"{_FONT_FAMILY}-BoldItalic", str(_FONTS_DIR / "PublicSans-BoldItalic.ttf"))
-        )
-        pdfmetrics.registerFontFamily(
-            _FONT_FAMILY,
-            normal=_FONT_FAMILY,
-            bold=f"{_FONT_FAMILY}-Bold",
-            italic=f"{_FONT_FAMILY}-Italic",
-            boldItalic=f"{_FONT_FAMILY}-BoldItalic",
-        )
-        _fonts_registered = True
-        return _FONT_FAMILY
-    except Exception:
-        return _FALLBACK_FAMILY
+    return register_fonts()
 
 
 # Direct reuse of tokens.css's own AA-checked hex values (DESIGN.md §1.3)
@@ -180,17 +146,18 @@ def _issue_title(issue: str | None) -> str:
 
 def _fit_running_identity(text: str, font: str, size: float, width: float) -> str:
     """Measured elision is only for repeated running identity, never source evidence."""
-    if pdfmetrics.stringWidth(text, font, size) <= width:
+    if text_width(text, font, size) <= width:
         return text
     suffix = "..."
-    low, high = 0, len(text)
+    pieces = list(clusters(text))
+    low, high = 0, len(pieces)
     while low < high:
         middle = (low + high + 1) // 2
-        if pdfmetrics.stringWidth(text[:middle] + suffix, font, size) <= width:
+        if text_width("".join(pieces[:middle]) + suffix, font, size) <= width:
             low = middle
         else:
             high = middle - 1
-    return text[:low] + suffix
+    return "".join(pieces[:low]) + suffix
 
 
 _TONE_COLORS = {
@@ -695,6 +662,7 @@ def build_report_pdf(data: ReportExportData) -> bytes:
     styles = _styles(font)
     report = data.report
     is_draft = report.decision is None
+    pending = [r for r in report.results if r.outcome in NEEDS_REVIEW_OUTCOMES and not r.resolution]
     export_dpi = get_settings().export_page_image_dpi
     generated_at = _format_date(datetime.now(UTC), with_time=True)
     footer_llm_disclosure = _LLM_MODE_DISCLOSURE.get(report.llm_mode)
@@ -822,7 +790,42 @@ def build_report_pdf(data: ReportExportData) -> bytes:
         )
     flow.append(Spacer(1, 12))
 
-    # 2. Verdict block.
+    # F8.5: show the human decision before the supporting assessment/appendix.
+    flow.append(Paragraph("Instructor decision", styles["body_bold"]))
+    if report.decision:
+        flow.append(
+            _tone_badge(
+                DECISION_LABEL.get(report.decision, report.decision),
+                DECISION_TONE.get(report.decision, "neutral"),
+                styles,
+            )
+        )
+        if report.decided_at:
+            flow.append(
+                Paragraph(f"Recorded {_format_date(report.decided_at)}.", styles["caption"])
+            )
+        if pending:
+            noun = "criterion remains" if len(pending) == 1 else "criteria remain"
+            flow.append(
+                Paragraph(f"{len(pending)} {noun} unresolved in this report.", styles["body"])
+            )
+            if report.decision == "returned":
+                flow.append(Paragraph("Returning did not grade or exclude them.", styles["body"]))
+            flow.append(
+                Paragraph("Reopen the report before changing their judgments.", styles["body"])
+            )
+        flow.append(
+            Paragraph(
+                '<link href="#instructor-decision-record">'
+                "See decision reason and full decision record.</link>",
+                styles["caption"],
+            )
+        )
+    else:
+        flow.append(Paragraph("Not recorded", styles["body"]))
+    flow.append(Spacer(1, 6))
+    flow.append(Paragraph("System readiness", styles["body_bold"]))
+    # 2. System band and subordinate calculation detail.
     flow.append(
         _tone_badge(
             READINESS_LABEL.get(report.status, report.status),
@@ -858,11 +861,31 @@ def build_report_pdf(data: ReportExportData) -> bytes:
     # below (owner-approved 2026-08-25) -- reproducible, present, never
     # the headline.
     if report.composite_score is not None:
+        label = {
+            "recorded_decision": "Recorded composite detail",
+            "recomputed_without_recorded_breakdown": (
+                "Recomputed composite detail under the current policy"
+            ),
+        }.get(report.assessment_provenance, "Composite score")
+        qualification = (
+            "partial criterion coverage; not the readiness verdict"
+            if pending
+            else "reproducible detail, not the verdict; see the readiness band above"
+        )
         flow.append(
             Paragraph(
-                f"Composite score: {report.composite_score}% (reproducible detail, "
-                "not the verdict; see the readiness band above).",
+                f"{label}: {report.composite_score}% ({qualification}).",
                 styles["caption"],
+            )
+        )
+    else:
+        flow.append(Paragraph("Composite detail: not available.", styles["caption"]))
+    if pending:
+        flow.append(
+            Paragraph(
+                f"Assessment coverage is incomplete: {len(pending)} of {len(report.results)} "
+                "criteria remain unresolved. This is not an assessment of every criterion.",
+                styles["body"],
             )
         )
     flow.append(
@@ -886,10 +909,15 @@ def build_report_pdf(data: ReportExportData) -> bytes:
         flow.append(
             Paragraph(
                 escape(
-                    "This rubric's own RATING, transcribed from its formula (not a VERIDICAL "
-                    f"judgment): {lr.achieved_points:g}/{lr.max_points:g} points = "
+                    f"Rubric formula detail: {lr.achieved_points:g}/{lr.max_points:g} points = "
                     f"{lr.rating_percent}% ({lr.n_decided} of {lr.n_levelled} levelled criteria "
-                    "decided)."
+                    "with recorded grades). "
+                    + (
+                        "Other criteria remain ungraded or unresolved as recorded. "
+                        if lr.n_decided < lr.n_levelled
+                        else ""
+                    )
+                    + "This is the rubric's formula, not the VERIDICAL readiness verdict."
                 ),
                 styles["caption"],
             )
@@ -906,13 +934,20 @@ def build_report_pdf(data: ReportExportData) -> bytes:
     # disappearing from the decided PDF entirely while `EscalatedPanel.tsx`
     # still showed it on screen. Render it either way; only the wording
     # changes with `is_draft`.
-    pending = [r for r in report.results if r.outcome in NEEDS_REVIEW_OUTCOMES and not r.resolution]
     if pending:
         flow.append(
             Paragraph(
                 "Needs Your Review" if is_draft else "Unresolved At Time Of Decision", styles["h2"]
             )
         )
+        if not is_draft:
+            flow.append(
+                Paragraph(
+                    "These criteria remain unresolved. Reopen the report before recording "
+                    "or changing their judgments.",
+                    styles["body"],
+                )
+            )
         for row in pending:
             block = [
                 Paragraph(
@@ -1462,7 +1497,7 @@ def build_report_pdf(data: ReportExportData) -> bytes:
     flow.append(Spacer(1, 12))
 
     # 7. Final decision.
-    flow.append(Paragraph("Final Decision", styles["h2"]))
+    flow.append(Paragraph('<a name="instructor-decision-record"/>Final Decision', styles["h2"]))
     if report.decision:
         flow.append(
             _tone_badge(
@@ -1476,7 +1511,14 @@ def build_report_pdf(data: ReportExportData) -> bytes:
         flow.append(Paragraph(f"Decided by the instructor on {decided_at}.", styles["body"]))
         if report.decision_note:
             flow.append(Spacer(1, 4))
-            note_table = Table([[Paragraph(escape(report.decision_note), styles["body"])]])
+            note_table = Table(
+                [
+                    [Paragraph("Decision reason", styles["body_bold"])],
+                    [Paragraph(escape(report.decision_note), styles["body"])],
+                ],
+                repeatRows=1,
+                splitInRow=1,
+            )
             note_table.setStyle(
                 TableStyle(
                     [
@@ -1531,7 +1573,7 @@ def build_report_pdf(data: ReportExportData) -> bytes:
             truncated = _fit_running_identity(
                 report.manuscript_group_label, font, 8, identity_width
             )
-            canvas.drawRightString(A4[0] - side_margin, A4[1] - 40, truncated)
+            draw_right_text(canvas, truncated, font, 8, A4[0] - side_margin, A4[1] - 40)
             canvas.setStrokeColor(_RULE)
             canvas.setLineWidth(0.5)
             canvas.line(54, A4[1] - 48, A4[0] - 54, A4[1] - 48)

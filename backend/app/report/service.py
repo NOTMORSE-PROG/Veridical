@@ -440,6 +440,7 @@ async def report_out_for_check_run(
     ]
 
     scoring_payload = await build_report_payload(session, check_run_id)
+    assessment_provenance = "current"
     if report is not None and report.decision is not None:
         # Preserve decided history, rather than replacing its recorded band
         # using a later eligibility policy. New checks use current eligibility.
@@ -453,6 +454,7 @@ async def report_out_for_check_run(
             .limit(1)
         )
         if recorded:
+            assessment_provenance = "recorded_decision"
             for key in ("thresholds", "flag_deduction", "unresolved_high_flag_count"):
                 if key in recorded:
                     scoring_payload[key] = recorded[key]
@@ -462,15 +464,17 @@ async def report_out_for_check_run(
                 if report.composite_score is not None
                 else None,
                 reason=(
-                    "Historical decided report. Its recorded readiness band is preserved; "
-                    "run a new check for the current assessment policy."
+                    "The readiness band recorded with the instructor's decision is preserved. "
+                    "Assessment rules may differ in a new check."
                 ),
             )
         else:
+            assessment_provenance = "recomputed_without_recorded_breakdown"
             scoring_payload["reason"] = (
-                "Historical decision preserved with recorded band "
+                "The instructor's decision is retained. Its recorded readiness band was "
                 f"{report.status.value.replace('_', ' ')}. "
-                "Its original scoring breakdown is unavailable. The assessment displayed here is "
+                "The original scoring breakdown is unavailable. "
+                "The assessment detail shown here is "
                 "recomputed under the current policy, not the original decision's calculation."
             )
     pending_review_count = await session.scalar(
@@ -680,6 +684,7 @@ async def report_out_for_check_run(
             for flag, result in citation_flag_rows
         ),
         assessment_revision=report.assessment_revision if report is not None else None,
+        assessment_provenance=assessment_provenance,
         historical_semantic_support_unverified=any(
             result.kind == CheckKind.semantic
             and (result.detail or {}).get("basis") == "llm"
@@ -1649,10 +1654,10 @@ async def decide_report(
         current_status = ReadinessStatus(current_scoring["status"])
         stripped_note = note.strip() if note and note.strip() else None
         minimum = settings.resolution_reason_min_length
-        requires_reason = (
-            (decision_enum == ReportDecision.returned and bool(pending_rows))
-            or (decision_enum, current_status) in DECISIONS_REQUIRING_A_REASON
-        )
+        requires_reason = (decision_enum == ReportDecision.returned and bool(pending_rows)) or (
+            decision_enum,
+            current_status,
+        ) in DECISIONS_REQUIRING_A_REASON
         if requires_reason and (stripped_note is None or len(stripped_note) < minimum):
             if decision_enum == ReportDecision.returned:
                 raise ConflictError(

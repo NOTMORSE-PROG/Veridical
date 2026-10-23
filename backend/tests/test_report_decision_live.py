@@ -71,7 +71,7 @@ async def _clean_tables(session_factory):
     yield
 
 
-async def _seed_decidable_run(session, *, rubric_is_active=True):
+async def _seed_decidable_run(session, *, rubric_is_active=True, record_verdict=True):
     """A DONE run with exactly one decidable (passed) criterion — nothing
     escalated, so decision is never blocked unless a test adds one."""
     instructor = Instructor(email=f"dec-{id(session)}@test.local", display_name="Dec Test")
@@ -111,7 +111,8 @@ async def _seed_decidable_run(session, *, rubric_is_active=True):
     )
     session.add(check_result)
     await session.commit()
-    await aggregate_and_score(session, check_run.id, commit=True)
+    if record_verdict:
+        await aggregate_and_score(session, check_run.id, commit=True)
     return instructor, check_run
 
 
@@ -239,12 +240,59 @@ async def test_decides_and_freezes_the_report(session_factory):
         assert report.decision == "approved"
         assert report.decision_note == "Looks ready."
         assert report.decided_at is not None
+        assert report.assessment_provenance == "recorded_decision"
+        assert "Historical" not in report.reason
 
         row = await session.scalar(
             select(ReadinessReport).where(ReadinessReport.check_run_id == check_run.id)
         )
         assert row.decision.value == "approved"
         assert row.decided_by_instructor_id == instructor.id
+
+
+async def test_missing_original_breakdown_has_distinct_provenance_without_rewriting_history(
+    session_factory,
+):
+    from datetime import UTC, datetime
+
+    from app.models.enums import ReadinessStatus, ReportDecision
+    from app.share.service import _to_public_report
+
+    async with session_factory() as session:
+        instructor, check_run = await _seed_decidable_run(session, record_verdict=False)
+        # A legacy imported row can lack its original breakdown. Never delete
+        # existing immutable audit events to manufacture that historical state.
+        row = ReadinessReport(
+            check_run_id=check_run.id,
+            status=ReadinessStatus.ready,
+            composite_score=Decimal("100"),
+            decision=ReportDecision.approved,
+            decided_at=datetime(2026, 1, 1, tzinfo=UTC),
+            decided_by_instructor_id=instructor.id,
+            decision_note="Legacy decision fixture.",
+        )
+        session.add(row)
+        await session.commit()
+        before = (
+            row.status,
+            row.composite_score,
+            row.decision,
+            row.decided_at,
+            row.assessment_revision,
+        )
+        result = await get_report(session, check_run.id, instructor.id)
+        assert result.assessment_provenance == "recomputed_without_recorded_breakdown"
+        assert "original scoring breakdown is unavailable" in result.reason
+        assert result.decision == "approved"
+        assert "assessment_provenance" not in _to_public_report(result).model_dump()
+        await session.refresh(row)
+        assert (
+            row.status,
+            row.composite_score,
+            row.decision,
+            row.decided_at,
+            row.assessment_revision,
+        ) == before
 
 
 async def test_note_is_optional(session_factory):

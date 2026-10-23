@@ -184,6 +184,9 @@ class OriginalityScopeOut(BaseModel):
 class ReportOut(BaseModel):
     check_run_id: int
     assessment_revision: int | None = None
+    assessment_provenance: (
+        Literal["current", "recorded_decision", "recomputed_without_recorded_breakdown"] | None
+    ) = None
     figure_readings: list[FigureReading] | None = None
     # Compatibility name: missing current support-policy metadata, not an age test.
     historical_semantic_support_unverified: bool = False
