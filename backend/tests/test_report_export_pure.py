@@ -28,6 +28,7 @@ _RESOLUTION = ResolutionOut(type="mark_pass", reason="Verified manually.", ai_ma
 
 def _row(case: dict) -> CriterionResultOut:
     return CriterionResultOut(
+        check_result_id=1,
         criterion_id=1,
         text="Has a references section",
         type=case["type"],

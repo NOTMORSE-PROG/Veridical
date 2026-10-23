@@ -3,7 +3,7 @@
 import asyncio
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Path, Response
+from fastapi import APIRouter, Depends, Path, Query, Response
 from fastapi.responses import FileResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -13,6 +13,13 @@ from app.db import get_session
 from app.models.instructor import Instructor
 from app.ratelimit import enforce_action_rate_limit
 from app.report.export import build_report_pdf
+from app.report.judgment_schemas import (
+    JudgmentContextOut,
+    JudgmentHistoryOut,
+    JudgmentRevisionIn,
+    JudgmentRevisionOut,
+)
+from app.report.judgments import get_judgment_context, get_judgment_history, revise_judgment
 from app.report.schemas import (
     DecisionIn,
     DocumentParagraphsOut,
@@ -42,6 +49,65 @@ from app.report.service import (
 )
 
 router = APIRouter(tags=["report"])
+
+
+@router.get(
+    "/check-runs/{check_run_id}/criteria/{criterion_id}/judgment", response_model=JudgmentContextOut
+)
+async def judgment_context_route(
+    check_run_id: int,
+    criterion_id: int,
+    response: Response,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    instructor: Annotated[Instructor, Depends(get_current_instructor)],
+) -> JudgmentContextOut:
+    response.headers["Cache-Control"] = "no-store"
+    return await get_judgment_context(session, check_run_id, criterion_id, instructor.id)
+
+
+@router.get(
+    "/check-runs/{check_run_id}/criteria/{criterion_id}/judgment/history",
+    response_model=JudgmentHistoryOut,
+)
+async def judgment_history_route(
+    check_run_id: int,
+    criterion_id: int,
+    response: Response,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    instructor: Annotated[Instructor, Depends(get_current_instructor)],
+    expected_revision: Annotated[int, Query(ge=0)],
+    expected_judgment_revision: Annotated[int, Query(ge=0)],
+    page_size: Annotated[int | None, Query(ge=1)] = None,
+    cursor: str | None = None,
+) -> JudgmentHistoryOut:
+    response.headers["Cache-Control"] = "no-store"
+    return await get_judgment_history(
+        session,
+        check_run_id,
+        criterion_id,
+        instructor.id,
+        expected_revision=expected_revision,
+        expected_judgment_revision=expected_judgment_revision,
+        page_size=page_size,
+        cursor=cursor,
+    )
+
+
+@router.post(
+    "/check-runs/{check_run_id}/criteria/{criterion_id}/judgment/revisions",
+    response_model=JudgmentRevisionOut,
+)
+async def judgment_revision_route(
+    check_run_id: int,
+    criterion_id: int,
+    body: JudgmentRevisionIn,
+    response: Response,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    instructor: Annotated[Instructor, Depends(get_current_instructor)],
+) -> JudgmentRevisionOut:
+    response.headers["Cache-Control"] = "no-store"
+    out = await revise_judgment(session, check_run_id, criterion_id, instructor.id, body)
+    return out.model_copy(update={"report": await attach_report_figures(session, out.report)})
 
 
 @router.get("/check-runs/{check_run_id}/report", response_model=ReportOut)

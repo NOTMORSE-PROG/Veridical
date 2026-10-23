@@ -9,12 +9,12 @@ persist time. The rest of this module (escalated-panel listing +
 resolution) is the consumer-facing half of the same ticket (V-023).
 """
 
+from copy import deepcopy
 from dataclasses import dataclass
-from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.checks.levels import is_levelled, match_level_by_ordinal, outcome_and_score
@@ -23,7 +23,8 @@ from app.errors import ConflictError, NotFoundError
 from app.models.audit import AuditLog
 from app.models.enums import ResultOutcome
 from app.models.rubric import Criterion
-from app.models.run import CheckResult
+from app.models.run import CheckResult, CheckRun
+from app.report.judgment_snapshot import snapshot_judgment
 
 # Instructor's resolution choices: accept whatever the AI's own majority
 # vote was, override to a specific verdict outright, or (V-068 AC2/BUG-096
@@ -203,73 +204,28 @@ async def list_escalated(session: AsyncSession, check_run_id: int) -> list[Escal
     return items
 
 
-async def resolve_escalation(
-    session: AsyncSession,
-    check_run_id: int,
-    check_result_id: int,
-    instructor_id: int,
+@dataclass(frozen=True)
+class ResolutionChoice:
+    outcome: ResultOutcome
+    score: float | None
+    level: dict[str, Any] | None
+
+
+def select_resolution(
+    criterion: Any,
+    detail: dict[str, Any],
     resolution: str,
-    reason: str,
-    settings: Settings | None = None,
     *,
-    # V-069 AC4: the level ORDINAL the instructor picked, required (and
-    # only meaningful) when `resolution == RESOLUTION_MARK_LEVEL`.
     level: int | None = None,
-    commit: bool,
-) -> CheckResult:
-    """One instructor decision on one escalated criterion (ticket AC): the
-    ONLY way an escalated result ever becomes a score contribution again —
-    never automatic (charter rule 1). The original AI vote is preserved
-    (never overwritten) so the report can show "AI said X · instructor
-    resolved to Y — reason" side by side; only `outcome`/`score` change to
-    reflect the human decision, which is what `aggregate_and_score`
-    actually counts.
-    """
-    # Reason presence/length is primarily enforced by the router's request
-    # schema (`ResolveEscalationIn`'s `field_validator`, CODING.md §1:
-    # routers validate); this is a defensive second check for any other
-    # caller of this service function. backend review finding (BUG-096
-    # review): this used to check presence only, so a caller that bypassed
-    # the schema would still let a one-character reason through -- the
-    # exact defect BUG-096 fixed at the schema layer, reopened one layer
-    # down.
-    settings = settings or get_settings()
-    if not reason or len(reason.strip()) < settings.resolution_reason_min_length:
-        raise ConflictError(
-            f"A reason of at least {settings.resolution_reason_min_length} characters is "
-            "required to resolve an escalated item."
-        )
+    allow_accept_majority: bool = True,
+) -> ResolutionChoice:
+    """Select the criterion's own grade without persistence or workflow changes."""
     if resolution not in _VALID_RESOLUTIONS:
         raise ConflictError(f"Unknown resolution {resolution!r}.")
-
-    result = await session.get(CheckResult, check_result_id, populate_existing=True)
-    if result is None or result.check_run_id != check_run_id:
-        raise NotFoundError(f"No check result {check_result_id} on check run {check_run_id}.")
-    # BUG-073 follow-up: an F4/F5 integrity check (criterion_id always
-    # None) can now also carry a needs-review outcome (a partially-
-    # executed run, quota_exhausted/api_down) -- this endpoint's whole
-    # resolution vocabulary (accept_majority/mark_pass/mark_fail/
-    # needs_document, `_OUTCOME_BY_VERDICT`/`_SCORE_BY_VERDICT`) is
-    # rubric-criterion grading semantics and doesn't mean anything for an
-    # integrity check. `list_escalated`'s own INNER JOIN to Criterion
-    # already keeps these off the review panel; this guard closes the
-    # same gap for a caller that reaches this endpoint directly with an
-    # integrity check's id instead of going through the panel.
-    if result.criterion_id is None:
+    if resolution == RESOLUTION_ACCEPT_MAJORITY and not allow_accept_majority:
         raise ConflictError(
-            "This isn't a rubric criterion awaiting review, so there's nothing to resolve here."
+            "Choose the judgment you are recording rather than accepting an AI vote."
         )
-    if result.outcome not in NEEDS_REVIEW_OUTCOMES:
-        raise ConflictError("This criterion isn't awaiting review, so there's nothing to resolve.")
-
-    # V-069 AC4: fetched unconditionally (cheap, single extra PK lookup) —
-    # needed by accept_majority (a levelled criterion's own vote uses its
-    # level vocabulary too), mark_level, and the pass/fail-on-a-levelled-
-    # criterion guard below, so a conditional fetch would just duplicate
-    # this same call three ways.
-    criterion = await session.get(Criterion, result.criterion_id)
-
-    detail = dict(result.detail or {})
     majority_verdict = detail.get("verdict")
     resolved_level: dict[str, Any] | None = None
 
@@ -334,6 +290,90 @@ async def resolve_escalation(
         # OUTCOMES, which `not_applicable` was never a member of).
         new_outcome, new_score = ResultOutcome.not_applicable, None
 
+    return ResolutionChoice(new_outcome, new_score, resolved_level)
+
+
+async def resolve_escalation(
+    session: AsyncSession,
+    check_run_id: int,
+    check_result_id: int,
+    instructor_id: int,
+    resolution: str,
+    reason: str,
+    settings: Settings | None = None,
+    *,
+    # V-069 AC4: the level ORDINAL the instructor picked, required (and
+    # only meaningful) when `resolution == RESOLUTION_MARK_LEVEL`.
+    level: int | None = None,
+    commit: bool,
+    assessment_revision: int | None = None,
+) -> CheckResult:
+    """One instructor decision on one escalated criterion (ticket AC): the
+    ONLY way an escalated result ever becomes a score contribution again —
+    never automatic (charter rule 1). The original AI vote is preserved
+    (never overwritten) so the report can show "AI said X · instructor
+    resolved to Y — reason" side by side; only `outcome`/`score` change to
+    reflect the human decision, which is what `aggregate_and_score`
+    actually counts.
+    """
+    # Reason presence/length is primarily enforced by the router's request
+    # schema (`ResolveEscalationIn`'s `field_validator`, CODING.md §1:
+    # routers validate); this is a defensive second check for any other
+    # caller of this service function. backend review finding (BUG-096
+    # review): this used to check presence only, so a caller that bypassed
+    # the schema would still let a one-character reason through -- the
+    # exact defect BUG-096 fixed at the schema layer, reopened one layer
+    # down.
+    settings = settings or get_settings()
+    if not reason or len(reason.strip()) < settings.resolution_reason_min_length:
+        raise ConflictError(
+            f"A reason of at least {settings.resolution_reason_min_length} characters is "
+            "required to resolve an escalated item."
+        )
+    if resolution not in _VALID_RESOLUTIONS:
+        raise ConflictError(f"Unknown resolution {resolution!r}.")
+
+    result = await session.get(CheckResult, check_result_id, populate_existing=True)
+    if result is None or result.check_run_id != check_run_id:
+        raise NotFoundError(f"No check result {check_result_id} on check run {check_run_id}.")
+    # BUG-073 follow-up: an F4/F5 integrity check (criterion_id always
+    # None) can now also carry a needs-review outcome (a partially-
+    # executed run, quota_exhausted/api_down) -- this endpoint's whole
+    # resolution vocabulary (accept_majority/mark_pass/mark_fail/
+    # needs_document, `_OUTCOME_BY_VERDICT`/`_SCORE_BY_VERDICT`) is
+    # rubric-criterion grading semantics and doesn't mean anything for an
+    # integrity check. `list_escalated`'s own INNER JOIN to Criterion
+    # already keeps these off the review panel; this guard closes the
+    # same gap for a caller that reaches this endpoint directly with an
+    # integrity check's id instead of going through the panel.
+    if result.criterion_id is None:
+        raise ConflictError(
+            "This isn't a rubric criterion awaiting review, so there's nothing to resolve here."
+        )
+    if result.outcome not in NEEDS_REVIEW_OUTCOMES:
+        raise ConflictError("This criterion isn't awaiting review, so there's nothing to resolve.")
+
+    # V-069 AC4: fetched unconditionally (cheap, single extra PK lookup) —
+    # needed by accept_majority (a levelled criterion's own vote uses its
+    # level vocabulary too), mark_level, and the pass/fail-on-a-levelled-
+    # criterion guard below, so a conditional fetch would just duplicate
+    # this same call three ways.
+    criterion = await session.get(Criterion, result.criterion_id)
+    run = await session.get(CheckRun, check_run_id)
+    if criterion is None or run is None or criterion.rubric_id != run.rubric_id:
+        raise NotFoundError("This criterion does not belong to the run's producing rubric.")
+
+    detail = dict(result.detail or {})
+    choice = select_resolution(criterion, detail, resolution, level=level)
+    majority_verdict = detail.get("verdict")
+    new_outcome, new_score, resolved_level = choice.outcome, choice.score, choice.level
+
+    detail["original_result"] = {
+        "outcome": result.outcome.value,
+        "score": float(result.score) if result.score is not None else None,
+        "level": deepcopy(detail.get("level")),
+    }
+
     if resolved_level is not None:
         detail["level"] = resolved_level
     elif "level" in detail:
@@ -344,9 +384,10 @@ async def resolve_escalation(
         del detail["level"]
 
     agreement = detail.get("agreement")
+    performed_at = await session.scalar(select(func.clock_timestamp()))
     detail["resolution"] = {
         "by_instructor_id": instructor_id,
-        "at": datetime.now(UTC).isoformat(),
+        "at": performed_at.isoformat(),
         "type": resolution,
         "reason": reason.strip(),
         "ai_majority_verdict": majority_verdict,
@@ -354,27 +395,45 @@ async def resolve_escalation(
     result.outcome = new_outcome
     result.score = new_score
     result.detail = detail
+    result.judgment_revision = 1
+    detail["judgment_history_incomplete"] = assessment_revision is None
 
     # Score history, aggregation and the response use the actual Numeric(5,2)
     # value persisted by the database, including fractional rubric levels.
     await session.flush()
     await session.refresh(result, ["score"])
 
+    payload = {
+        "check_result_id": check_result_id,
+        "criterion_id": result.criterion_id,
+        "instructor_id": instructor_id,
+        "resolution": resolution,
+        "reason": reason.strip(),
+        "ai_majority_verdict": majority_verdict,
+        "new_outcome": new_outcome.value,
+        "new_score": float(result.score) if result.score is not None else None,
+    }
+    if assessment_revision is not None:
+        after = snapshot_judgment(result)
+        payload["judgment"] = {
+            "schema_version": 1,
+            "check_run_id": check_run_id,
+            "criterion_id": result.criterion_id,
+            "check_result_id": result.id,
+            "action": "initial_resolution",
+            "before": None,
+            "after": after.model_dump(mode="json"),
+            "performed_by": instructor_id,
+            "assessment_revision_before": assessment_revision - 1,
+            "assessment_revision_after": assessment_revision,
+        }
     session.add(
         AuditLog(
             event_type="escalation_resolved",
             check_run_id=check_run_id,
+            created_at=performed_at,
             agreement_score=Decimal(str(agreement)) if agreement is not None else None,
-            payload={
-                "check_result_id": check_result_id,
-                "criterion_id": result.criterion_id,
-                "instructor_id": instructor_id,
-                "resolution": resolution,
-                "reason": reason.strip(),
-                "ai_majority_verdict": majority_verdict,
-                "new_outcome": new_outcome.value,
-                "new_score": float(result.score) if result.score is not None else None,
-            },
+            payload=payload,
         )
     )
     if commit:

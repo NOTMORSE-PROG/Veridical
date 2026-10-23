@@ -78,6 +78,10 @@ class CheckRun(Base, PkCreatedMixin):
 class CheckResult(Base, PkCreatedMixin):
     __tablename__ = "check_result"
 
+    __table_args__ = (
+        CheckConstraint("judgment_revision >= 0", name="judgment_revision_nonnegative"),
+    )
+
     check_run_id: Mapped[int] = mapped_column(
         BigInteger, ForeignKey("check_run.id", ondelete="CASCADE"), index=True
     )
@@ -89,6 +93,9 @@ class CheckResult(Base, PkCreatedMixin):
     outcome: Mapped[ResultOutcome] = mapped_column(Enum(ResultOutcome, native_enum=False))
     score: Mapped[Decimal | None] = mapped_column(Numeric(5, 2))
     detail: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    # NULL has no versioned instructor judgment; zero is a legacy baseline,
+    # never an inferred number of historical edits.
+    judgment_revision: Mapped[int | None] = mapped_column(BigInteger)
 
     check_run: Mapped["CheckRun"] = relationship(back_populates="results")
     flags: Mapped[list["Flag"]] = relationship(back_populates="check_result")

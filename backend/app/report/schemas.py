@@ -70,6 +70,8 @@ class CriterionResultOut(BaseModel):
     field is optional and the UI shows only what's actually present
     (never a fabricated placeholder)."""
 
+    check_result_id: int
+    judgment_revision: int | None = None
     criterion_id: int
     text: str
     type: str

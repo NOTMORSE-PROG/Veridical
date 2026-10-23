@@ -83,6 +83,7 @@ def _peak_native_memory_mb() -> float:
 def _sixty_criterion_report() -> ReportExportData:
     results = [
         CriterionResultOut(
+            check_result_id=i,
             criterion_id=i,
             text=f"Criterion {i}: checks a specific structural or content requirement of chapter "
             "formatting, in enough detail to be realistic.",

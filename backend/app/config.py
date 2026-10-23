@@ -399,6 +399,10 @@ class Settings(BaseSettings):
     # reason ("Verified in Chapter 2.") still clears it, high enough that
     # a single keystroke never does.
     resolution_reason_min_length: int = 10
+    judgment_revision_reason_max_length: int = Field(default=1000, gt=0)
+    judgment_history_page_size: int = Field(default=20, gt=0)
+    judgment_history_max_page_size: int = Field(default=100, gt=0)
+    judgment_history_cursor_max_length: int = Field(default=1024, gt=0)
 
     # --- Check-run orchestration (V-018, ENGINEERING §4) ---------------------
     # How often the background worker polls for the next runnable
@@ -944,6 +948,10 @@ class Settings(BaseSettings):
             )
         if self.audit_list_max_page < 1:
             raise ValueError("audit_list_max_page must be at least 1")
+        if self.judgment_history_page_size > self.judgment_history_max_page_size:
+            raise ValueError("judgment_history_page_size must not exceed its maximum")
+        if self.judgment_revision_reason_max_length < self.resolution_reason_min_length:
+            raise ValueError("judgment revision reason maximum must not be below its minimum")
         if self.content_hash_read_chunk_bytes < 1:
             raise ValueError("content_hash_read_chunk_bytes must be at least 1")
         if (

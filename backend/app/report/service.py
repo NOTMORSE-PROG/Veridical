@@ -306,6 +306,8 @@ def _to_criterion_result(
         else None
     )
     return CriterionResultOut(
+        check_result_id=result.id,
+        judgment_revision=result.judgment_revision,
         criterion_id=criterion.id,
         text=criterion.text,
         type=criterion.type.value,
@@ -1523,7 +1525,7 @@ async def resolve_escalation_for_run(
     level: int | None = None,
 ) -> ResolveEscalationOut:
     """Save a pending judgment, audit and readiness as one versioned action."""
-    async with assessment_write(session, check_run_id, instructor_id, expected_revision):
+    async with assessment_write(session, check_run_id, instructor_id, expected_revision) as parent:
         result = await resolve_escalation(
             session,
             check_run_id,
@@ -1533,6 +1535,7 @@ async def resolve_escalation_for_run(
             reason,
             level=level,
             commit=False,
+            assessment_revision=parent.assessment_revision,
         )
         await aggregate_and_score(session, check_run_id, commit=False)
         report = await get_report(session, check_run_id, instructor_id)

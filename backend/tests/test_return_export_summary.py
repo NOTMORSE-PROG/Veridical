@@ -11,6 +11,7 @@ from app.report.schemas import CriterionResultOut, LevelledRatingOut, ReportExpo
 
 def row(criterion_id=1, *, pending=True):
     return CriterionResultOut(
+        check_result_id=criterion_id,
         criterion_id=criterion_id,
         text=f"Custom criterion {criterion_id}",
         type="semantic",
