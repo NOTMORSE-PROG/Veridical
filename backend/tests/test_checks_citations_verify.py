@@ -6,6 +6,7 @@ flag / real book → existence-only, no false flag), wording-discipline
 """
 
 import os
+from dataclasses import asdict
 
 import httpx
 import pytest
@@ -26,6 +27,8 @@ from app.checks.citations.verify import (
 from app.config import get_settings
 from app.db import sqlalchemy_url
 from app.external.schemas import VerificationResult
+from app.ingest.patterns import load_patterns
+from app.ingest.references import extract_references, parse_reference
 from app.ingest.schemas import ExtractionResult, SectionTree, TextBlock
 from app.models.citation import Citation
 from app.models.enums import CitationParseStatus, FlagSeverity, ResultOutcome
@@ -113,6 +116,19 @@ def _citation(
     )
 
 
+def _source_bound_citations(extraction, raw_references):
+    """Whole-stage fixtures include the bibliography that ingestion would retain."""
+    extraction.blocks.append(TextBlock(page=1, text="References", max_font_size=14, bold_ratio=1))
+    extraction.blocks.extend(
+        TextBlock(page=1, text=raw, max_font_size=11, bold_ratio=0) for raw in raw_references
+    )
+    extraction.text_chars = sum(len(block.text) for block in extraction.blocks)
+    return [
+        Citation(manuscript_id=1, **asdict(draft))
+        for draft in extract_references(extraction, load_patterns())
+    ]
+
+
 def _client(handler) -> httpx.AsyncClient:
     return httpx.AsyncClient(transport=httpx.MockTransport(handler), follow_redirects=True)
 
@@ -145,8 +161,11 @@ async def test_metadata_snapshot_or_unassessed_reason_survives_full_assembly(
     from app.ingest.patterns import load_patterns
     from app.models.run import Flag
 
-    c = _citation(
-        doi="10.1234/control", title="Nanometer scale thermometry", authors=["Smith, J."], year=2018
+    c = Citation(
+        manuscript_id=1,
+        **asdict(
+            parse_reference("Smith, J. (2018). Nanometer scale thermometry. doi:10.1234/control", 0)
+        ),
     )
     extraction = ExtractionResult(
         page_count=1,
@@ -459,13 +478,15 @@ async def test_claim_support_flag_created_end_to_end(session_factory):
     from app.ingest.patterns import load_patterns
 
     patterns = load_patterns(get_settings().ingest_patterns_file)
-    citation = _citation(0, doi="10.1/reyes", title="A Study", authors=["Reyes, J."], year=2023)
+    citation = _source_bound_citations(
+        extraction, ["Reyes, J. (2023). A Study. Journal. doi:10.1234/reyes"]
+    )[0]
     check_run_id = await _seed_check_run(session_factory)
 
     def handler(request):
         if "crossref.org" in str(request.url):
             return httpx.Response(
-                200, json={"message": {"DOI": "10.1/reyes", "title": ["A Study"]}}
+                200, json={"message": {"DOI": "10.1234/reyes", "title": ["A Study"]}}
             )
         assert "semanticscholar.org" in str(request.url)
         return httpx.Response(
@@ -473,7 +494,7 @@ async def test_claim_support_flag_created_end_to_end(session_factory):
             json={
                 "title": "A Study",
                 "abstract": "We found a significant positive effect.",
-                "externalIds": {"DOI": "10.1/reyes"},
+                "externalIds": {"DOI": "10.1234/reyes"},
             },
         )
 
@@ -540,13 +561,15 @@ async def test_a_run_with_skipped_claim_support_pairs_does_not_report_passed(ses
     from app.ingest.patterns import load_patterns
 
     patterns = load_patterns(get_settings().ingest_patterns_file)
-    citation = _citation(0, doi="10.1/reyes", title="A Study", authors=["Reyes, J."], year=2023)
+    citation = _source_bound_citations(
+        extraction, ["Reyes, J. (2023). A Study. Journal. doi:10.1234/reyes"]
+    )[0]
     check_run_id = await _seed_check_run(session_factory)
 
     def handler(request):
         if "crossref.org" in str(request.url):
             return httpx.Response(
-                200, json={"message": {"DOI": "10.1/reyes", "title": ["A Study"]}}
+                200, json={"message": {"DOI": "10.1234/reyes", "title": ["A Study"]}}
             )
         assert "semanticscholar.org" in str(request.url)
         return httpx.Response(
@@ -554,7 +577,7 @@ async def test_a_run_with_skipped_claim_support_pairs_does_not_report_passed(ses
             json={
                 "title": "A Study",
                 "abstract": "We found a significant positive effect.",
-                "externalIds": {"DOI": "10.1/reyes"},
+                "externalIds": {"DOI": "10.1234/reyes"},
             },
         )
 
@@ -607,11 +630,15 @@ async def test_run_citation_integrity_check_persists_result_and_flags(
     from app.ingest.patterns import load_patterns
 
     patterns = load_patterns(get_settings().ingest_patterns_file)
-    citations = [_citation(0, doi="10.1/retracted-real")]
+    raw_references = [
+        "Smith, J. (2024). A Retraction Control. Journal. https://doi.org/10.1234/retracted-real"
+    ]
     if supported_body_style:
         # Add a linked citation as a separate positive control. The original
         # orphan-only input cannot establish that the body style was covered.
-        citations.append(_citation(1, authors=["Reyes, J."], year=2024))
+        raw_references.append(
+            "Reyes, J. (2024). A Linked Control. Journal. https://doi.org/10.1234/reyes-linked"
+        )
         extraction.blocks.append(
             TextBlock(
                 page=1,
@@ -620,14 +647,29 @@ async def test_run_citation_integrity_check_persists_result_and_flags(
                 bold_ratio=0,
             )
         )
+    citations = _source_bound_citations(extraction, raw_references)
     check_run_id = await _seed_check_run(session_factory)
 
     def handler(request):
+        if "semanticscholar.org" in str(request.url):
+            return httpx.Response(404)
+        if "reyes-linked" in str(request.url):
+            return httpx.Response(
+                200,
+                json={
+                    "message": {
+                        "DOI": "10.1234/reyes-linked",
+                        "title": ["A Linked Control"],
+                        "author": [{"family": "Reyes"}],
+                        "published": {"date-parts": [[2024]]},
+                    }
+                },
+            )
         return httpx.Response(
             200,
             json={
                 "message": {
-                    "DOI": "10.1/retracted-real",
+                    "DOI": "10.1234/retracted-real",
                     "title": ["RETRACTED: X"],
                     "update-to": [
                         {"type": "retraction", "label": "Retraction", "source": "publisher"}
@@ -651,7 +693,7 @@ async def test_run_citation_integrity_check_persists_result_and_flags(
         assert result.detail["n_linked"] == int(supported_body_style)
         assert result.detail["n_flags"] == 2 + int(supported_body_style)
         assert result.outcome == ResultOutcome.escalated
-        assert result.detail["n_metadata_skipped_insufficient"] == len(citations)
+        assert result.detail["n_metadata_skipped_insufficient"] == 0
         if not supported_body_style:
             assert result.detail["n_linkage_unassessed"] == 1
 

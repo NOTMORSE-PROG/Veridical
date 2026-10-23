@@ -87,8 +87,13 @@ def source(claims, *, paragraph=False, references=(RAW,)):
         *body,
         TextBlock(text="References", max_font_size=14, bold_ratio=1, **reference_location),
         *[
-            TextBlock(text=raw, max_font_size=11, bold_ratio=0, **reference_location)
-            for raw in references
+            TextBlock(
+                text=raw,
+                max_font_size=11,
+                bold_ratio=0,
+                **({"paragraph": len(body) + index + 1} if paragraph else reference_location),
+            )
+            for index, raw in enumerate(references)
         ],
     ]
     return ExtractionResult(

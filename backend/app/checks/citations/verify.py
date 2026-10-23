@@ -57,6 +57,10 @@ from app.external import openlibrary as openlibrary_client
 from app.external import s2 as s2_client
 from app.external.schemas import VerificationResult
 from app.ingest.patterns import HeadingPatterns
+from app.ingest.reference_inventory import (
+    reference_row_binding_issues,
+    reference_source_scope_issues,
+)
 from app.ingest.references import (
     ReferenceEntryLocation,
     extract_references,
@@ -488,20 +492,54 @@ async def run_citation_integrity_check(
 ) -> CheckResult:
     source_limit = source_limitation_detail(extraction)
     selection = select_references(extraction, patterns)
-    citations, source_projections = project_quoted_metadata(
-        citations, extraction, patterns, settings=settings
-    )
-    projection_reason = next(
-        (row["reason"] for row in source_projections.values() if row.get("reason")), None
-    )
+    inventory_issues: list[str] = []
+    # An empty inventory keeps its existing no-reference treatment. A nonempty
+    # assessment must bind the whole retained list before inferring absence or
+    # spending metadata/model calls, including ordinary unquoted references.
+    if citations:
+        inventory_issues.extend(selection.issues)
+        inventory_issues.extend(reference_row_binding_issues(selection.groups, citations))
+        inventory_issues.extend(reference_source_scope_issues(extraction, selection))
+    source_projections, canonical_drafts = {}, None
+    projection_reason = "reference_source_projection_unbound" if inventory_issues else None
+    if not projection_reason:
+        citations, source_projections = project_quoted_metadata(
+            citations, extraction, patterns, settings=settings
+        )
+        projection_reason = next(
+            (row["reason"] for row in source_projections.values() if row.get("reason")), None
+        )
+        if not projection_reason and citations:
+            canonical_drafts = extract_references(extraction, patterns)
+            if len(canonical_drafts) != len(citations):
+                inventory_issues.append("reference_metadata_inventory_unavailable")
+            elif any(
+                getattr(draft, field) != getattr(citation, field)
+                for draft, citation in zip(canonical_drafts, citations, strict=True)
+                for field in SOURCE_FIELDS
+                if field != "raw_text"  # already compared under canonical source normalization
+            ):
+                inventory_issues.append("reference_metadata_fields_mismatch")
+            if inventory_issues:
+                projection_reason = "reference_source_projection_unbound"
+    inventory_detail = {
+        "reference_inventory_status": "bound"
+        if citations and not projection_reason
+        else "not_captured",
+        "reference_inventory_issues": list(dict.fromkeys(inventory_issues)),
+        "n_source_reference_groups": len(selection.groups),
+        "n_retained_reference_rows": len(citations),
+    }
     if projection_reason:
         detail = {
+            **inventory_detail,
             "analysis_coverage": "unsupported",
             "coverage_reason": projection_reason,
             "n_references": len(citations),
             "n_metadata_skipped_insufficient": len(citations),
             "n_linkage_unassessed": len(citations),
             "n_claim_support_checked": 0,
+            "claim_support_inventory_status": "not_captured",
             "n_flags": 0,
             "reference_metadata_coverage": [
                 {
@@ -544,7 +582,11 @@ async def run_citation_integrity_check(
         # Metadata verification has a bounded source: the complete bibliography.
         # Admit it only when both source boundaries/provenance and the persisted
         # entries agree. No body fragments are joined across unsupported pages.
-        drafts = extract_references(extraction, patterns)
+        drafts = (
+            canonical_drafts
+            if canonical_drafts is not None
+            else extract_references(extraction, patterns)
+        )
         metadata_only = bool(
             drafts
             and len(drafts) == len(citations)
@@ -927,6 +969,7 @@ async def run_citation_integrity_check(
         kind=CheckKind.citation_integrity,
         outcome=outcome,
         detail={
+            **inventory_detail,
             **(
                 {
                     "analysis_coverage": "partial"
@@ -962,10 +1005,17 @@ async def run_citation_integrity_check(
             "reference_selection_issues": list(selection.issues),
             "citation_parse_issues": sorted(gaps),
             "n_claim_support_checked": claim_support_checked,
-            "n_claim_support_pairs_total": len(claim_support_pairs),
-            "n_claim_support_candidate_pairs_total": len(claim_occurrences),
-            "n_claim_support_pairs_unassessed": len(claim_occurrences) - claim_support_checked,
-            "claim_support_occurrences": claim_occurrences,
+            **(
+                {"claim_support_inventory_status": "not_captured"}
+                if metadata_only or not citations
+                else {
+                    "n_claim_support_pairs_total": len(claim_support_pairs),
+                    "n_claim_support_candidate_pairs_total": len(claim_occurrences),
+                    "n_claim_support_pairs_unassessed": len(claim_occurrences)
+                    - claim_support_checked,
+                    "claim_support_occurrences": claim_occurrences,
+                }
+            ),
             "n_claim_support_skipped_limit": skipped_support["limit"],
             "n_claim_support_skipped_quota": skipped_support["quota"],
             "n_claim_support_skipped_api_down": skipped_support["api_down"],

@@ -319,18 +319,24 @@ async def test_stored_prefix_cannot_reach_existence_or_abstract_lookup(monkeypat
 
 async def test_stored_prefix_assembly_records_unassessed_without_title_fallback(monkeypatch):
     source = wrapped_source()
-    result, _, provider, support = await run(monkeypatch, source, [legacy_citation()])
+    result, rows, provider, support = await run(monkeypatch, source, [legacy_citation()])
     provider.assert_not_called()
     support.assert_not_called()
     assert result.outcome == ResultOutcome.escalated
     assert result.detail["n_metadata_skipped_insufficient"] == 1
+    # Whole-source admission now precedes the narrower per-identifier guard.
+    # This legacy row also lacks the source's venue, so it is not the same entry.
+    assert result.detail["reference_inventory_issues"] == ["reference_inventory_text_mismatch"]
+    assert result.detail["claim_support_inventory_status"] == "not_captured"
+    assert result.detail["n_flags"] == 0
     assert result.detail["reference_metadata_coverage"] == [
         {
             "reference_order_index": 0,
             "status": "unassessed",
-            "reason": "ambiguous_identifier_wrap",
+            "reason": "reference_source_projection_unbound",
             "lookup_attempted": False,
             "metadata_complete": False,
+            "source_projection": None,
         }
     ]
 

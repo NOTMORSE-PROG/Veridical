@@ -2,7 +2,12 @@
 
 import pytest
 
+from app.checks.citations.extract import CitationFlagDraft
+from app.checks.citations.verify import _with_reference_anchor
+from app.ingest.patterns import load_patterns
+from app.ingest.references import reference_entry_locations
 from app.ingest.schemas import ExtractionResult, SectionTree, TextBlock
+from app.models.enums import FlagSeverity, ResultOutcome
 from app.models.run import Flag
 from tests.test_citations_partial_source import persisted, run
 
@@ -61,14 +66,38 @@ async def test_old_mismatched_reference_does_not_borrow_a_current_entry_location
 ):
     extraction = manuscript("paragraph")
     citations = persisted(extraction)
+    locations = {
+        (item.index, item.raw_text): item
+        for item in reference_entry_locations(extraction, load_patterns())
+    }
+    matched = CitationFlagDraft(
+        severity=FlagSeverity.low,
+        evidence_excerpt=citations[1].raw_text,
+        page_anchor="reference #2",
+        detail={"kind": "uncited_reference"},
+    )
+    assert (
+        _with_reference_anchor(matched, citations[1].order_index, locations).page_anchor
+        == "\u00b614"
+    )
     if mismatch == "raw_text":
         citations[1].raw_text += " Extra historical text."
     else:
         citations[1].order_index = 7
-    _, rows, _, _ = await run(monkeypatch, extraction, citations)
-    flag = next(
-        row for row in rows if isinstance(row, Flag) and row.detail["kind"] == "uncited_reference"
+    result, rows, metadata, support = await run(monkeypatch, extraction, citations)
+    assert result.outcome == ResultOutcome.escalated
+    assert result.detail["coverage_reason"] == "reference_source_projection_unbound"
+    assert not any(isinstance(row, Flag) for row in rows)
+    metadata.assert_not_called()
+    support.assert_not_called()
+    # Preserve the lower-level historical anchor guard as well as fresh admission.
+    draft = CitationFlagDraft(
+        severity=FlagSeverity.low,
+        evidence_excerpt=citations[1].raw_text,
+        page_anchor=f"reference #{citations[1].order_index + 1}",
+        detail={"kind": "uncited_reference"},
     )
+    flag = _with_reference_anchor(draft, citations[1].order_index, locations)
     assert flag.page_anchor == f"reference #{citations[1].order_index + 1}"
     assert flag.evidence_excerpt == citations[1].raw_text
 
