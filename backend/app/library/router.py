@@ -13,7 +13,7 @@ from fastapi.responses import FileResponse
 from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.auth.dependencies import get_current_instructor
+from app.auth.dependencies import get_current_instructor, get_upload_instructor
 from app.config import get_settings
 from app.db import get_session
 from app.library.schemas import (
@@ -100,7 +100,7 @@ async def list_library_route(
 async def submit_library_entry_route(
     file: UploadFile,
     session: Annotated[AsyncSession, Depends(get_session)],
-    instructor: Annotated[Instructor, Depends(get_current_instructor)],
+    instructor: Annotated[Instructor, Depends(get_upload_instructor)],
     metadata: Annotated[LibrarySubmissionIn, Depends(_submission_metadata)],
 ) -> LibrarySubmissionOut:
     """One file per request (the client sends a batch one at a time). The
@@ -147,7 +147,7 @@ async def decide_library_entry_route(
     manuscript_id: int,
     body: LibraryDecisionIn,
     session: Annotated[AsyncSession, Depends(get_session)],
-    instructor: Annotated[Instructor, Depends(get_current_instructor)],
+    instructor: Annotated[Instructor, Depends(get_upload_instructor)],
 ) -> LibraryEntryStateOut:
     return await decide_library_entry(
         session, instructor.id, manuscript_id, body.action, get_settings()
@@ -158,7 +158,7 @@ async def decide_library_entry_route(
 async def remove_library_entry_route(
     manuscript_id: int,
     session: Annotated[AsyncSession, Depends(get_session)],
-    instructor: Annotated[Instructor, Depends(get_current_instructor)],
+    instructor: Annotated[Instructor, Depends(get_upload_instructor)],
 ) -> LibraryEntryStateOut:
     return await remove_library_entry(session, instructor.id, manuscript_id, get_settings())
 

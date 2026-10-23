@@ -8,6 +8,7 @@ Library record) no longer exists.
 """
 
 import asyncio
+import hashlib
 import os
 from pathlib import Path
 
@@ -131,6 +132,72 @@ def _same_text_other_bytes() -> bytes:
     # Trailing bytes after %%EOF: a different file (different hash) whose
     # extracted text is identical.
     return _pdf() + b"\n% a re-exported copy\n"
+
+
+@pytest.mark.parametrize("path", ["/library/entries", "/library/21/decision", "/library/21/remove"])
+def test_captured_actor_mismatch_precedes_library_writes_with_real_cookie(
+    client, api_scratch_url, path
+):
+    _login(client, STRANGER)
+    actor = client.get("/auth/session").json()["instructor"]["id"]
+    assert actor == 2
+
+    def business_state():
+        tables = (
+            "library_entry",
+            "manuscript",
+            "citation",
+            "audit_log",
+            "manuscript_archive",
+            "manuscript_chapter_archive",
+            "manuscript_passage_archive",
+            "manuscript_group",
+            "group_member",
+            "program",
+        )
+        rows = {
+            table: _fetchval(
+                api_scratch_url,
+                f"SELECT md5(string_agg(to_jsonb(t)::text, '|' ORDER BY t.id)) FROM {table} t",
+            )
+            for table in tables
+        }
+        directory = get_settings().data_dir
+        files = {
+            str(file.relative_to(directory)): hashlib.sha256(file.read_bytes()).hexdigest()
+            for file in directory.rglob("*")
+            if file.is_file()
+        }
+        return rows, files
+
+    before = business_state()
+    body = (
+        {"json": {"action": "add"}}
+        if path.endswith("decision")
+        else {}
+        if path.endswith("remove")
+        else {"files": {"file": ("retained.docx", b"earlier actor bytes")}}
+    )
+    rejected = client.post(path, headers={"X-Veridical-Expected-Instructor": "1"}, **body)
+    assert rejected.status_code == 409, rejected.text
+    assert rejected.json()["error"]["code"] == "actor_context_changed"
+    assert business_state() == before
+    assert client.get("/auth/session").json()["instructor"]["id"] == actor
+    if path == "/library/entries":
+        accepted = client.post(
+            path,
+            headers={"X-Veridical-Expected-Instructor": str(actor)},
+            files={"file": ("current.pdf", _pdf(), "application/pdf")},
+        )
+        assert accepted.status_code == 200, accepted.text
+        manuscript_id = accepted.json()["item"]["manuscript_id"]
+        assert (
+            _fetchval(
+                api_scratch_url, "SELECT instructor_id FROM manuscript WHERE id=$1", manuscript_id
+            )
+            == actor
+        )
+        assert VISION_CALLS == []
 
 
 def _corpus_rows(url: str, manuscript_id: int) -> int:

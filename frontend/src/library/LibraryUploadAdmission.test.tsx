@@ -2,7 +2,7 @@
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { LibraryItemOut } from "../api/types";
-import { renderWithProviders } from "../test/renderWithProviders";
+import { renderWithUploadProviders } from "../test/renderWithUploadProviders";
 import { SignalLibraryAddPage } from "./SignalLibraryAdd";
 
 const ITEM: LibraryItemOut = {
@@ -20,7 +20,7 @@ const busy = () => new Response(JSON.stringify({ error: {
   message: "VERIDICAL is busy preparing a document. This attempt did not add a document. Try again later.",
 } }), { status: 503 });
 
-function start(names: string[], response: (file: File, form: FormData) => Response | Promise<Response>) {
+async function start(names: string[], response: (file: File, form: FormData) => Response | Promise<Response>) {
   const attempts: File[] = [];
   const forms: FormData[] = [];
   vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -34,7 +34,7 @@ function start(names: string[], response: (file: File, form: FormData) => Respon
     }
     return new Response(JSON.stringify([]), { status: 200 });
   }));
-  renderWithProviders(<SignalLibraryAddPage />, { route: "/library/add", path: "/library/add" });
+  await renderWithUploadProviders(<SignalLibraryAddPage />, { route: "/library/add", path: "/library/add" });
   const files = names.map((name) => new File([name], name, { type: "application/pdf" }));
   fireEvent.change(screen.getByLabelText("Manuscript files"), { target: { files } });
   fireEvent.change(screen.getByLabelText("School year (optional)"), { target: { value: "2025-2026" } });
@@ -51,7 +51,7 @@ afterEach(() => vi.unstubAllGlobals());
 describe("Preparation admission and unconfirmed Library attempts", () => {
   it("pauses added/busy/untouched and retries only the known eligible files with metadata", async () => {
     let available = false;
-    const { attempts, forms } = start(["first.pdf", "busy.pdf", "later.pdf"], (file) =>
+    const { attempts, forms } = await start(["first.pdf", "busy.pdf", "later.pdf"], (file) =>
       file.name === "busy.pdf" && !available ? busy() : added(),
     );
     await screen.findByRole("heading", { name: "Paused: document preparation unavailable" });
@@ -74,7 +74,7 @@ describe("Preparation admission and unconfirmed Library attempts", () => {
   });
 
   it.each(["transport", "generic503", "malformed200", "wrongStatus", "nonJSON", "contradictory200", "malformedDuplicateDate", "invalidDuplicateDate"])("preserves %s uncertainty through a later busy rejection and safe continuation", async (failure) => {
-    const { attempts } = start(["first.pdf", "unknown.pdf", "later.pdf"], (file) => {
+    const { attempts } = await start(["first.pdf", "unknown.pdf", "later.pdf"], (file) => {
       if (file.name === "unknown.pdf") {
         if (failure === "transport") throw new TypeError("Synthetic lost response");
         if (failure === "generic503") return new Response(JSON.stringify({ error: { code: "internal", message: "Unavailable" } }), { status: 503 });
@@ -114,7 +114,7 @@ describe("Preparation admission and unconfirmed Library attempts", () => {
 
   it.each(["first", "last"])("pauses on a busy %s file without a false finished result", async (position) => {
     const names = position === "first" ? ["busy.pdf", "later.pdf"] : ["earlier.pdf", "busy.pdf"];
-    const { attempts } = start(names, (file) => file.name === "busy.pdf" ? busy() : added());
+    const { attempts } = await start(names, (file) => file.name === "busy.pdf" ? busy() : added());
     await screen.findByRole("heading", { name: "Paused: document preparation unavailable" });
     expect(attempts.map((file) => file.name)).toEqual(position === "first" ? ["busy.pdf"] : names);
     expect(screen.queryByRole("heading", { name: /Finished/ })).not.toBeInTheDocument();
@@ -123,7 +123,7 @@ describe("Preparation admission and unconfirmed Library attempts", () => {
   });
 
   it("requires confirmation before clearing unknown results for an explicitly new upload", async () => {
-    const { attempts } = start(["unknown.pdf"], () => { throw new TypeError("Lost response"); });
+    const { attempts } = await start(["unknown.pdf"], () => { throw new TypeError("Lost response"); });
     await screen.findByRole("heading", { name: "Upload results need review" });
     expect(screen.queryByRole("button", { name: /Try/ })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Start another upload" }));
@@ -136,7 +136,7 @@ describe("Preparation admission and unconfirmed Library attempts", () => {
   });
 
   it("retains the actual file rejection instead of a busy or unknown result", async () => {
-    start(["bad.pdf"], () => new Response(JSON.stringify({ error: { code: "file_malformed", message: "The file could not be read." } }), { status: 422 }));
+    await start(["bad.pdf"], () => new Response(JSON.stringify({ error: { code: "file_malformed", message: "The file could not be read." } }), { status: 422 }));
     await screen.findByRole("heading", { name: "Finished: nothing was added to the Library" });
     expect(within(row("bad.pdf")).getByText("Could not add")).toBeInTheDocument();
     expect(within(row("bad.pdf")).getByText("The file could not be read.")).toBeInTheDocument();
@@ -144,7 +144,7 @@ describe("Preparation admission and unconfirmed Library attempts", () => {
   });
 
   it("keeps 429 distinct and never counts a processing response as confirmed added", async () => {
-    const { attempts } = start(["reading.pdf", "limited.pdf", "later.pdf"], (file) => file.name === "limited.pdf"
+    const { attempts } = await start(["reading.pdf", "limited.pdf", "later.pdf"], (file) => file.name === "limited.pdf"
       ? new Response(JSON.stringify({ error: { code: "rate_limit", message: "Try later" } }), { status: 429 })
       : added({ ...ITEM, status: "processing" }),
     );

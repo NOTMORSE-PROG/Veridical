@@ -10,7 +10,6 @@ import type {
   LibraryEntryUpdate,
   LibraryExcerptOut,
   LibraryItemOut,
-  LibrarySubmissionOut,
   ManuscriptViewerOut,
   PaginatedLibrary,
 } from "../api/types";
@@ -90,20 +89,6 @@ export interface LibrarySubmission {
   title?: string;
   teamName?: string;
   authors?: string[];
-}
-
-/** One file per request; the add screen sends a batch one at a time. */
-export function submitLibraryEntry(submission: LibrarySubmission): Promise<LibrarySubmissionOut> {
-  const form = new FormData();
-  form.append("file", submission.file);
-  if (submission.program) form.append("program", submission.program);
-  if (submission.schoolYear) form.append("school_year", submission.schoolYear);
-  if (submission.title) form.append("title", submission.title);
-  if (submission.teamName) form.append("team_name", submission.teamName);
-  for (const author of submission.authors ?? []) {
-    if (author.trim()) form.append("authors", author.trim());
-  }
-  return api.post<LibrarySubmissionOut>("/library/entries", form);
 }
 
 function useInvalidateLibrary() {

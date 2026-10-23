@@ -1,4 +1,4 @@
-"""F1/F2/F9: captured upload intent cannot select a different instructor.
+"""F1/F2/F7/F9: captured upload intent cannot select a different instructor.
 
 Actual routers and authentication dependency composition; the first business
 boundary is a sentinel. No database, upload service or provider is exercised.
@@ -15,6 +15,7 @@ from app.auth.dependencies import get_current_instructor
 from app.db import get_session
 from app.errors import UnauthenticatedError, VeridicalError
 from app.ingest import router as ingest_router
+from app.library import router as library_router
 from app.main import veridical_error_handler
 from app.rubric import router as rubric_router
 
@@ -23,7 +24,16 @@ class BusinessBoundaryReached(Exception):
     pass
 
 
-@pytest.mark.parametrize("path", ["/manuscripts/ingest", "/rubrics"])
+@pytest.mark.parametrize(
+    "path",
+    [
+        "/manuscripts/ingest",
+        "/rubrics",
+        "/library/entries",
+        "/library/21/decision",
+        "/library/21/remove",
+    ],
+)
 @pytest.mark.parametrize(
     ("actor", "expected", "status"),
     [
@@ -43,6 +53,7 @@ async def test_upload_intent_precedes_every_application_boundary(
     app = FastAPI()
     app.include_router(ingest_router.router)
     app.include_router(rubric_router.router)
+    app.include_router(library_router.router)
     app.add_exception_handler(VeridicalError, veridical_error_handler)
     reached = []
 
@@ -58,6 +69,14 @@ async def test_upload_intent_precedes_every_application_boundary(
         reached.append((action, instructor_id))
         raise BusinessBoundaryReached
 
+    async def decision_boundary(session, instructor_id, manuscript_id, action, settings):
+        reached.append(("library_decision", instructor_id))
+        raise BusinessBoundaryReached
+
+    async def remove_boundary(session, instructor_id, manuscript_id, settings):
+        reached.append(("library_remove", instructor_id))
+        raise BusinessBoundaryReached
+
     async def business_boundary_handler(request, exc):
         return JSONResponse(status_code=202, content={"boundary": "reached"})
 
@@ -66,18 +85,31 @@ async def test_upload_intent_precedes_every_application_boundary(
     app.add_exception_handler(BusinessBoundaryReached, business_boundary_handler)
     monkeypatch.setattr(ingest_router, "enforce_action_rate_limit", boundary)
     monkeypatch.setattr(rubric_router, "enforce_action_rate_limit", boundary)
+    monkeypatch.setattr(library_router, "enforce_action_rate_limit", boundary)
+    monkeypatch.setattr(library_router, "decide_library_entry", decision_boundary)
+    monkeypatch.setattr(library_router, "remove_library_entry", remove_boundary)
     headers = {} if expected is None else {"X-Veridical-Expected-Instructor": expected}
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=app), base_url="http://test"
     ) as client:
-        response = await client.post(
-            path, headers=headers, files={"file": ("intent.docx", b"test")}
+        body = (
+            {"json": {"action": "add"}}
+            if path.endswith("decision")
+            else {}
+            if path.endswith("remove")
+            else {"files": {"file": ("intent.docx", b"test")}}
         )
+        response = await client.post(path, headers=headers, **body)
     assert response.status_code == status, response.text
     if status == 202:
-        assert reached == [
-            ("manuscript_ingest" if path.endswith("ingest") else "rubric_upload", actor)
-        ]
+        action = {
+            "/manuscripts/ingest": "manuscript_ingest",
+            "/rubrics": "rubric_upload",
+            "/library/entries": "library_submission",
+            "/library/21/decision": "library_decision",
+            "/library/21/remove": "library_remove",
+        }[path]
+        assert reached == [(action, actor)]
     else:
         assert reached == []
     if status == 409:

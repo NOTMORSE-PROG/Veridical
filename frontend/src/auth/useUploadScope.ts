@@ -28,11 +28,12 @@ export function useUploadScope(contextKey?: string) {
   const validation = useRef(0);
   const inFlightValidation = useRef<Promise<void> | undefined>(undefined);
   const [status, setStatus] = useState<"checking" | "ready" | "unavailable" | "lost">("checking");
-  const isCurrent = useCallback(() => alive.current && !lost.current && owner.contextKey === currentContext.current
+  const ownsContext = useCallback(() => !lost.current && owner.contextKey === currentContext.current
     && owner.query !== undefined
     && owner.actorId !== undefined
     && client.getQueryCache().find({ queryKey: ME_QUERY_KEY, exact: true }) === owner.query
     && client.getQueryData<Instructor | null>(ME_QUERY_KEY)?.id === owner.actorId, [client, owner]);
+  const isCurrent = useCallback(() => alive.current && ownsContext(), [ownsContext]);
   const invalidate = useCallback(() => {
     lost.current = true;
     attempt.current += 1;
@@ -119,7 +120,7 @@ export function useUploadScope(contextKey?: string) {
       },
     };
   }
-  return { status, isCurrent, verify, capture };
+  return { status, ownsContext: ownsContext(), isCurrent, verify, capture };
 }
 
 export function rejectChangedUploadActor(error: unknown, scope: UploadAttemptScope) {

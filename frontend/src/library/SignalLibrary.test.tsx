@@ -12,6 +12,7 @@ import type {
 } from "../api/types";
 import { renderWithProviders, stubFetchByPath } from "../test/renderWithProviders";
 import { SignalLibraryPage } from "./SignalLibrary";
+import { renderWithUploadProviders } from "../test/renderWithUploadProviders";
 import { SignalLibraryAddPage } from "./SignalLibraryAdd";
 import { SignalLibraryComparePage } from "./SignalLibraryCompare";
 import { SignalLibraryDetailPage } from "./SignalLibraryDetail";
@@ -281,7 +282,7 @@ describe("Add manuscripts (4aa)", () => {
   it("requires at least one file and explains what adding does before anything is sent", async () => {
     const fetchMock = libraryFetch({ "/programs": [] });
     vi.stubGlobal("fetch", fetchMock);
-    renderWithProviders(<SignalLibraryAddPage />, { route: "/library/add", path: "/library/add" });
+    await renderWithUploadProviders(<SignalLibraryAddPage />, { route: "/library/add", path: "/library/add" });
 
     expect(await screen.findByRole("heading", { name: "Add manuscripts to the Library" })).toBeInTheDocument();
     expect(screen.getByText(/does not check it and produces no grade or report/)).toBeInTheDocument();
@@ -294,7 +295,7 @@ describe("Add manuscripts (4aa)", () => {
 
   it("rejects a file that is not a PDF or DOCX", async () => {
     vi.stubGlobal("fetch", libraryFetch({ "/programs": [] }));
-    renderWithProviders(<SignalLibraryAddPage />, { route: "/library/add", path: "/library/add" });
+    await renderWithUploadProviders(<SignalLibraryAddPage />, { route: "/library/add", path: "/library/add" });
     await screen.findByRole("heading", { name: "Add manuscripts to the Library" });
 
     chooseFiles(new File(["x"], "notes.txt", { type: "text/plain" }));
@@ -328,7 +329,7 @@ describe("Add manuscripts (4aa)", () => {
       return fetchMock(input, init);
     });
     vi.stubGlobal("fetch", wrapped);
-    renderWithProviders(<SignalLibraryAddPage />, { route: "/library/add", path: "/library/add" });
+    await renderWithUploadProviders(<SignalLibraryAddPage />, { route: "/library/add", path: "/library/add" });
     await screen.findByRole("heading", { name: "Add manuscripts to the Library" });
 
     chooseFiles(pdf("first.pdf"), pdf("second.pdf"));
@@ -365,7 +366,7 @@ describe("Add manuscripts (4aa)", () => {
         return undefined;
       }),
     );
-    renderWithProviders(<SignalLibraryAddPage />, { route: "/library/add", path: "/library/add" });
+    await renderWithUploadProviders(<SignalLibraryAddPage />, { route: "/library/add", path: "/library/add" });
     await screen.findByRole("heading", { name: "Add manuscripts to the Library" });
 
     chooseFiles(pdf("portal-copy.pdf"));
@@ -388,7 +389,7 @@ describe("Add manuscripts (4aa)", () => {
         return json(submission("added", OWN));
       }),
     );
-    renderWithProviders(<SignalLibraryAddPage />, { route: "/library/add", path: "/library/add" });
+    await renderWithUploadProviders(<SignalLibraryAddPage />, { route: "/library/add", path: "/library/add" });
     await screen.findByRole("heading", { name: "Add manuscripts to the Library" });
 
     chooseFiles(pdf("a.pdf"));
@@ -585,7 +586,7 @@ describe("V-077 first-time-user review fixes", () => {
         return json(submission("failed", null, { message: "VERIDICAL could not find readable text in this file." }));
       }),
     );
-    renderWithProviders(<SignalLibraryAddPage />, { route: "/library/add", path: "/library/add" });
+    await renderWithUploadProviders(<SignalLibraryAddPage />, { route: "/library/add", path: "/library/add" });
     await screen.findByRole("heading", { name: "Add manuscripts to the Library" });
 
     chooseFiles(pdf("scan.pdf"));
