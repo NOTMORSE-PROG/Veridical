@@ -5,6 +5,7 @@ import { renderWithProviders, stubFetchByPath } from "../test/renderWithProvider
 import { AdviserViewPage } from "./AdviserView";
 
 const BASE_REPORT: ReportOut = {
+  assessment_revision: 0,
   check_run_id: 5,
   manuscript_id: 5,
   manuscript_group_label: "G-Adviser",

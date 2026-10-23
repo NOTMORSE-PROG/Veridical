@@ -125,7 +125,7 @@ async def _seed_escalated_run(
     )
     session.add(check_result)
     await session.commit()
-    await aggregate_and_score(session, check_run.id)
+    await aggregate_and_score(session, check_run.id, commit=True)
     return instructor, check_run, check_result
 
 
@@ -156,6 +156,7 @@ async def test_resolve_accept_majority_updates_score_and_status_live(session_fac
             instructor.id,
             "accept_majority",
             "Agreed with the AI's majority call after reading the excerpt.",
+            expected_revision=0,
         )
         assert out.outcome == "passed"
         assert out.score == 100.0
@@ -179,6 +180,7 @@ async def test_resolve_mark_fail_overrides_the_ai_majority(session_factory):
             instructor.id,
             "mark_fail",
             "Checked myself — it doesn't.",
+            expected_revision=0,
         )
         assert out.outcome == "failed"
         assert out.score == 0.0
@@ -205,6 +207,7 @@ async def test_resolve_needs_document_excludes_without_blocking_decision(session
             instructor.id,
             "needs_document",
             "Cannot verify this without opening the manuscript myself.",
+            expected_revision=0,
         )
         assert out.outcome == "not_applicable"
         assert out.score is None
@@ -226,6 +229,7 @@ async def test_resolve_needs_document_excludes_without_blocking_decision(session
             instructor.id,
             "approved",
             "Approved despite the unresolved evidence gap on one criterion.",
+            expected_revision=1,
         )
         assert report.decision == "approved"
 
@@ -237,7 +241,13 @@ async def test_accept_majority_without_an_ai_majority_is_rejected(session_factor
         )
         with pytest.raises(ConflictError):
             await resolve_escalation_for_run(
-                session, check_run.id, check_result.id, instructor.id, "accept_majority", "reason"
+                session,
+                check_run.id,
+                check_result.id,
+                instructor.id,
+                "accept_majority",
+                "reason",
+                expected_revision=0,
             )
 
 
@@ -260,7 +270,13 @@ async def test_bug170_verdict_unrecognized_item_reports_agreement_but_rejects_ac
         assert panel[0].verdict_unrecognized is True
         with pytest.raises(ConflictError):
             await resolve_escalation_for_run(
-                session, check_run.id, check_result.id, instructor.id, "accept_majority", "reason"
+                session,
+                check_run.id,
+                check_result.id,
+                instructor.id,
+                "accept_majority",
+                "reason",
+                expected_revision=0,
             )
 
 
@@ -268,11 +284,23 @@ async def test_resolving_an_already_resolved_item_is_rejected(session_factory):
     async with session_factory() as session:
         instructor, check_run, check_result = await _seed_escalated_run(session)
         await resolve_escalation_for_run(
-            session, check_run.id, check_result.id, instructor.id, "mark_pass", "first resolution"
+            session,
+            check_run.id,
+            check_result.id,
+            instructor.id,
+            "mark_pass",
+            "first resolution",
+            expected_revision=0,
         )
         with pytest.raises(ConflictError):
             await resolve_escalation_for_run(
-                session, check_run.id, check_result.id, instructor.id, "mark_pass", "second attempt"
+                session,
+                check_run.id,
+                check_result.id,
+                instructor.id,
+                "mark_pass",
+                "second attempt",
+                expected_revision=0,
             )
 
 
@@ -354,5 +382,11 @@ async def test_cross_instructor_access_is_rejected_not_leaked(session_factory):
             await list_escalated_for_run(session, check_run.id, stranger.id)
         with pytest.raises(NotFoundError):
             await resolve_escalation_for_run(
-                session, check_run.id, check_result.id, stranger.id, "mark_pass", "reason"
+                session,
+                check_run.id,
+                check_result.id,
+                stranger.id,
+                "mark_pass",
+                "reason",
+                expected_revision=0,
             )

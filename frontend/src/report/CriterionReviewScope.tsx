@@ -5,7 +5,9 @@ import { Outlet, useLocation, useNavigate, useParams } from "react-router";
 import type { ResultRowCommon } from "../api/types";
 import { ME_QUERY_KEY, useMe } from "../auth/useAuth";
 import { RESOLUTION_REASON_MIN_LENGTH } from "../config/ui";
-import { useResolveEscalation } from "./useReport";
+import { useEscalatedItems, useReport, useResolveEscalation } from "./useReport";
+import { isAssessmentRevision } from "./assessmentRevision";
+import { criterionReviewNotices } from "../domain/criterionReview";
 import { ReviewContext, type ReviewCompletion, type ReviewDraft, type ReviewScope } from "./criterionReviewContext";
 import { claimFocusContinuation, type FocusContinuation } from "../routing/focusContinuation";
 import { confirmedJudgment, criterionRecordId, revealCriterionRecord, SAVED_CRITERION_PARAM } from "./savedJudgment";
@@ -65,6 +67,23 @@ export function CriterionReviewProvider({ checkRunId, instructorId, children }: 
       && client.getQueryData<{ id: number } | null>(ME_QUERY_KEY)?.id === instructorId;
   }
   const resolve = useResolveEscalation(checkRunId, isCurrent);
+  const reportQuery = useReport(checkRunId);
+  const itemsQuery = useEscalatedItems(checkRunId);
+  const assessment = reportQuery.isSuccess ? reportQuery.data : undefined;
+  const canChoose = assessment?.decision === null && isAssessmentRevision(assessment.assessment_revision);
+  useLayoutEffect(() => {
+    if (!assessment?.decision) return;
+    const next = new Map(records.current);
+    let changed = false;
+    next.forEach((draft, id) => {
+      if (!draft.frozen && !draft.saving) { next.set(id, { ...draft, frozen: true }); changed = true; }
+    });
+    if (changed) publish(next);
+  }, [assessment?.decision, assessment?.assessment_revision]);
+  function isDraftCurrent(draft: ReviewDraft) {
+    return canChoose && !draft.frozen && !draft.needsChoice && !draft.currentResolved
+      && draft.expectedRevision === assessment?.assessment_revision;
+  }
   function publish(next: Map<number, ReviewDraft>) {
     records.current = next;
     setDrafts(next);
@@ -75,7 +94,9 @@ export function CriterionReviewProvider({ checkRunId, instructorId, children }: 
     publish(new Map(records.current).set(id, change(draft)));
   }
   const scope: ReviewScope = {
-    checkRunId, drafts, completion, confirmed, savedNavigation,
+    checkRunId, decision: reportQuery.data?.decision, drafts, completion, confirmed, savedNavigation, isDraftCurrent, canChoose,
+    canUseCurrentDraft: draft => canChoose && !draft.currentResolved
+      && isAssessmentRevision(draft.reviewedRevision) && draft.reviewedRevision === assessment?.assessment_revision,
     viewSaved(criterionId, trigger) {
       if (!isCurrent()) return;
       const target = document.getElementById("criteria-results-heading");
@@ -90,19 +111,27 @@ export function CriterionReviewProvider({ checkRunId, instructorId, children }: 
         hash: criterionId === undefined ? "criteria-results-heading" : criterionRecordId(checkRunId, criterionId) }, { state: location.state });
     },
     choose(item, resolution, level) {
-      if (!isCurrent() || confirmedRecords.current.has(item.criterion_id) || records.current.get(item.check_result_id)?.saving) return;
+      const previous = records.current.get(item.check_result_id);
+      if (!isCurrent() || !canChoose || !isAssessmentRevision(assessment?.assessment_revision)
+        || confirmedRecords.current.has(item.criterion_id) || previous?.saving
+        || (previous && !previous.needsChoice && !isDraftCurrent(previous))) return;
       publish(new Map(records.current).set(item.check_result_id, {
-        criterionId: item.criterion_id, resolution, level, reason: "", attempted: false, saving: false,
+        criterionId: item.criterion_id, criterionText: item.criterion_text,
+        expectedRevision: assessment.assessment_revision, resolution, level,
+        reason: previous?.needsChoice ? previous.reason : "", attempted: false, saving: false,
       }));
     },
-    changeReason(id, reason) { update(id, (draft) => ({ ...draft, reason, attempted: false, error: undefined })); },
+    changeReason(id, reason) {
+      const draft = records.current.get(id);
+      if (draft && isDraftCurrent(draft)) update(id, (draft) => ({ ...draft, reason, attempted: false, error: undefined }));
+    },
     cancel(id) {
       if (!isCurrent() || records.current.get(id)?.saving) return;
       const next = new Map(records.current); next.delete(id); publish(next);
     },
     confirm(id, message) {
       const draft = records.current.get(id);
-      if (!isCurrent() || !draft || draft.saving) return;
+      if (!isCurrent() || !draft || draft.saving || !isDraftCurrent(draft)) return;
       if (draft.reason.trim().length < RESOLUTION_REASON_MIN_LENGTH) {
         update(id, (current) => ({ ...current, attempted: true }));
         return;
@@ -121,7 +150,7 @@ export function CriterionReviewProvider({ checkRunId, instructorId, children }: 
       publish(new Map(records.current).set(id, submitted));
       // The route owner, not an unmounted card's mutate callback, consumes
       // completion. No private draft is copied into report query records.
-      void resolve.mutateAsync({ checkResultId: id, criterionId: draft.criterionId, resolution: draft.resolution, level: draft.level, reason: draft.reason.trim() }).then((out) => {
+      void resolve.mutateAsync({ checkResultId: id, criterionId: draft.criterionId, resolution: draft.resolution, level: draft.level, reason: draft.reason.trim(), expectedRevision: draft.expectedRevision }).then((out) => {
         if (!isCurrent() || records.current.get(id) !== submitted) return;
         const result = confirmedJudgment(out, draft.criterionId, { resolution: draft.resolution, reason: draft.reason.trim(), level: draft.level });
         if (!result) return;
@@ -137,14 +166,51 @@ export function CriterionReviewProvider({ checkRunId, instructorId, children }: 
       }).catch((error: unknown) => {
         focus?.dispose();
         if (!isCurrent() || records.current.get(id) !== submitted) return;
-        publish(new Map(records.current).set(id, { ...submitted, saving: false, error }));
+        publish(new Map(records.current).set(id, { ...submitted, saving: false, frozen: true, reviewedRevision: undefined, error }));
       });
     },
     reconcile(items) {
       if (!isCurrent()) return;
       const unresolved = new Set(items.map((item) => item.check_result_id));
-      const next = new Map([...records.current].filter(([id, draft]) => draft.saving || unresolved.has(id)));
-      if (next.size !== records.current.size) publish(next);
+      const next = new Map(records.current);
+      let changed = false;
+      next.forEach((draft, id) => {
+        if (!draft.saving && !unresolved.has(id) && !draft.currentResolved) {
+          next.set(id, { ...draft, currentResolved: true, frozen: true }); changed = true;
+        }
+      });
+      if (changed) publish(next);
+    },
+    reviewCurrent(id) {
+      const draft = records.current.get(id);
+      if (!isCurrent() || !draft || draft.saving) return;
+      void Promise.all([reportQuery.refetch(), itemsQuery.refetch()]).then(([reportRead, itemRead]) => {
+        if (!isCurrent() || records.current.get(id) !== draft) return;
+        const current = reportRead.data;
+        if (!reportRead.isSuccess || !itemRead.isSuccess || !isAssessmentRevision(current?.assessment_revision)) {
+          update(id, d => ({ ...d, error: new Error("The current criterion could not be loaded. Your draft is kept; retry the current review.") }));
+          return;
+        }
+        update(id, d => ({ ...d, reviewedRevision: current.assessment_revision!,
+          currentResolved: !itemRead.data.some(item => item.check_result_id === id && item.criterion_id === d.criterionId), error: undefined }));
+      }).catch(() => {
+        if (isCurrent() && records.current.get(id) === draft) update(id, d => ({ ...d,
+          error: new Error("The current criterion could not be loaded. Your draft is kept; retry the current review.") }));
+      });
+    },
+    useCurrentDraft(id) {
+      const draft = records.current.get(id);
+      if (!isCurrent() || !draft || draft.saving || !canChoose || draft.currentResolved
+        || draft.reviewedRevision !== assessment?.assessment_revision || !isAssessmentRevision(draft.reviewedRevision)) return;
+      const item = itemsQuery.isSuccess ? itemsQuery.data.find(item => item.check_result_id === id && item.criterion_id === draft.criterionId) : undefined;
+      if (!item) return;
+      const supported = draft.resolution === "needs_document"
+        || (draft.resolution === "mark_level" ? item.levels?.some(level => level.level === draft.level)
+          : draft.resolution === "accept_majority" ? item.ai_majority_verdict !== null && !item.verdict_unrecognized
+            && !criterionReviewNotices(item).some(notice => notice.kind === "support")
+            : !item.levels?.length);
+      update(id, d => ({ ...d, expectedRevision: draft.reviewedRevision!, frozen: false,
+        reviewedRevision: undefined, needsChoice: !supported, attempted: false, error: undefined }));
     },
   };
   return <ReviewContext.Provider value={scope}>{children}</ReviewContext.Provider>;

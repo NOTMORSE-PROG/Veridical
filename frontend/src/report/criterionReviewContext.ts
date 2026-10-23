@@ -1,9 +1,15 @@
 import { createContext, useContext } from "react";
-import type { EscalatedItemOut, EscalationResolution, ResolveEscalationOut, ResultRowCommon } from "../api/types";
+import type { Decision, EscalatedItemOut, EscalationResolution, ResolveEscalationOut, ResultRowCommon } from "../api/types";
 import type { FocusContinuation } from "../routing/focusContinuation";
 
 export interface ReviewDraft {
   criterionId: number;
+  criterionText: string;
+  expectedRevision: number;
+  frozen?: boolean;
+  reviewedRevision?: number;
+  currentResolved?: boolean;
+  needsChoice?: boolean;
   resolution: EscalationResolution;
   level?: number;
   reason: string;
@@ -20,6 +26,7 @@ export interface ReviewCompletion {
 }
 export interface ReviewScope {
   checkRunId: number;
+  decision: Decision | null | undefined;
   drafts: ReadonlyMap<number, ReviewDraft>;
   completion?: ReviewCompletion;
   confirmed: ReadonlyMap<number, ResultRowCommon>;
@@ -30,6 +37,11 @@ export interface ReviewScope {
   cancel: (id: number) => void;
   confirm: (id: number, message: (out: ResolveEscalationOut) => string) => void;
   reconcile: (items: EscalatedItemOut[]) => void;
+  isDraftCurrent: (draft: ReviewDraft) => boolean;
+  canUseCurrentDraft: (draft: ReviewDraft) => boolean;
+  canChoose: boolean;
+  reviewCurrent: (id: number) => void;
+  useCurrentDraft: (id: number) => void;
 }
 export const ReviewContext = createContext<ReviewScope | null>(null);
 

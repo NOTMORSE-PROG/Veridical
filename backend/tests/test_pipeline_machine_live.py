@@ -1124,5 +1124,6 @@ async def test_degraded_run_is_reviewable_and_scores_nothing_by_itself(
             instructor_id,
             RESOLUTION_MARK_PASS,
             "Checked this section by hand before the defense.",
+            commit=True,
         )
         assert resolved.outcome == ResultOutcome.passed

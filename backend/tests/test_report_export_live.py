@@ -137,7 +137,7 @@ def logged_in_with_a_done_run(client, api_scratch_url):
                 )
                 check_run.status = CheckRunStatus.done
                 await session.commit()
-                await aggregate_and_score(session, check_run.id)
+                await aggregate_and_score(session, check_run.id, commit=True)
                 return check_run.id
         finally:
             await engine.dispose()
@@ -275,7 +275,7 @@ def test_export_shows_weight_as_an_importance_label_never_a_percentage(client, a
                 )
                 check_run.status = CheckRunStatus.done
                 await session.commit()
-                await aggregate_and_score(session, check_run.id)
+                await aggregate_and_score(session, check_run.id, commit=True)
                 return check_run.id
         finally:
             await engine.dispose()
@@ -400,7 +400,7 @@ def test_export_never_drops_a_pending_criterion_from_a_decided_report(client, ap
                 )
                 check_run.status = CheckRunStatus.done
                 await session.commit()
-                await aggregate_and_score(session, check_run.id)
+                await aggregate_and_score(session, check_run.id, commit=True)
                 # Decided directly at the ORM level -- `decide_report`
                 # itself would refuse this (proven by the test named
                 # above); this simulates the only way a decided report
@@ -513,7 +513,7 @@ def test_export_captions_a_criterion_by_kind_not_by_declared_type(client, api_sc
                     )
                 )
                 await session.commit()
-                await aggregate_and_score(session, check_run.id)
+                await aggregate_and_score(session, check_run.id, commit=True)
                 return check_run.id
         finally:
             await engine.dispose()
@@ -620,7 +620,7 @@ def test_export_survives_real_ampersand_bearing_citation_text(client, api_scratc
                 )
                 check_run.status = CheckRunStatus.done
                 await session.commit()
-                await aggregate_and_score(session, check_run.id)
+                await aggregate_and_score(session, check_run.id, commit=True)
                 return check_run.id
         finally:
             await engine.dispose()
@@ -749,7 +749,7 @@ def test_export_discloses_test_mode_run(client, api_scratch_url):
                 )
                 check_run.status = CheckRunStatus.done
                 await session.commit()
-                await aggregate_and_score(session, check_run.id)
+                await aggregate_and_score(session, check_run.id, commit=True)
                 return check_run.id
         finally:
             await engine.dispose()
@@ -870,7 +870,7 @@ def test_export_embeds_a_real_rendered_page_for_a_page_anchored_flag(
                 )
                 check_run.status = CheckRunStatus.done
                 await session.commit()
-                await aggregate_and_score(session, check_run.id)
+                await aggregate_and_score(session, check_run.id, commit=True)
                 return check_run.id
         finally:
             await engine.dispose()
@@ -969,7 +969,7 @@ def test_export_states_an_explicit_reason_for_a_docx_manuscript(client, api_scra
                 )
                 check_run.status = CheckRunStatus.done
                 await session.commit()
-                await aggregate_and_score(session, check_run.id)
+                await aggregate_and_score(session, check_run.id, commit=True)
                 return check_run.id
         finally:
             await engine.dispose()

@@ -41,6 +41,7 @@ const SUMMARY: FlagSummaryOut = {
 };
 
 const FLAG: FlagOut = {
+  assessment_revision: 0,
   id: 7,
   check_result_id: 9,
   check_run_id: 5,
@@ -66,6 +67,7 @@ const FLAG: FlagOut = {
 };
 
 const REPORT: ReportOut = {
+  assessment_revision: 0,
   check_run_id: 5,
   manuscript_id: 10,
   manuscript_group_label: "Group Syntax",

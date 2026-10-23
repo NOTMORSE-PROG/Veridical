@@ -26,6 +26,7 @@ from app.report.schemas import (
     ReuseMatchesOut,
 )
 from app.report.service import (
+    attach_report_figures,
     decide_report,
     get_manuscript_docx_image,
     get_manuscript_file_path,
@@ -49,7 +50,9 @@ async def get_report_route(
     session: Annotated[AsyncSession, Depends(get_session)],
     instructor: Annotated[Instructor, Depends(get_current_instructor)],
 ) -> ReportOut:
-    return await get_report(session, check_run_id, instructor.id)
+    report = await get_report(session, check_run_id, instructor.id)
+    await session.commit()
+    return await attach_report_figures(session, report)
 
 
 @router.get("/check-runs/{check_run_id}/report/export.pdf")
@@ -182,7 +185,7 @@ async def resolve_escalation_route(
     session: Annotated[AsyncSession, Depends(get_session)],
     instructor: Annotated[Instructor, Depends(get_current_instructor)],
 ) -> ResolveEscalationOut:
-    return await resolve_escalation_for_run(
+    out = await resolve_escalation_for_run(
         session,
         check_run_id,
         check_result_id,
@@ -190,7 +193,10 @@ async def resolve_escalation_route(
         body.resolution,
         body.reason,
         level=body.level,
+        expected_revision=body.expected_revision,
     )
+    out.report = await attach_report_figures(session, out.report)
+    return out
 
 
 @router.post("/check-runs/{check_run_id}/decision", response_model=ReportOut)
@@ -200,7 +206,15 @@ async def decide_report_route(
     session: Annotated[AsyncSession, Depends(get_session)],
     instructor: Annotated[Instructor, Depends(get_current_instructor)],
 ) -> ReportOut:
-    return await decide_report(session, check_run_id, instructor.id, body.decision, body.note)
+    report = await decide_report(
+        session,
+        check_run_id,
+        instructor.id,
+        body.decision,
+        body.note,
+        expected_revision=body.expected_revision,
+    )
+    return await attach_report_figures(session, report)
 
 
 @router.post("/check-runs/{check_run_id}/reopen", response_model=ReportOut)
@@ -210,4 +224,11 @@ async def reopen_report_route(
     session: Annotated[AsyncSession, Depends(get_session)],
     instructor: Annotated[Instructor, Depends(get_current_instructor)],
 ) -> ReportOut:
-    return await reopen_report(session, check_run_id, instructor.id, body.reason)
+    report = await reopen_report(
+        session,
+        check_run_id,
+        instructor.id,
+        body.reason,
+        expected_revision=body.expected_revision,
+    )
+    return await attach_report_figures(session, report)

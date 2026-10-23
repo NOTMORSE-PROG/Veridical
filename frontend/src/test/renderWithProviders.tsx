@@ -46,7 +46,7 @@ export function renderWithProviders(
 
 /** Explicit private report owner for isolated report/card component controls. */
 export function renderWithReviewProviders(ui: ReactElement<{ checkRunId?: number }>, options: RenderOptions = {}) {
-  const routeRunId = options.route?.match(/^\/report\/(\d+)/)?.[1];
+  const routeRunId = options.route?.match(/^\/report\/([^/?#]+)/)?.[1];
   return renderWithProviders(ui, { ...options, reviewRunId: routeRunId ? Number(routeRunId) : ui.props.checkRunId ?? 5 });
 }
 

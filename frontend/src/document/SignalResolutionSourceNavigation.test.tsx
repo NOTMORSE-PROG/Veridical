@@ -20,6 +20,7 @@ const ITEMS = [1, 2].map((id) => ({
   evidence: [{ quote: `Recorded quote ${id}`, anchor: `paragraph ${id + 1}` }],
 }));
 const REPORT = {
+  assessment_revision: 0,
   check_run_id: 5, manuscript_id: 10, manuscript_group_label: "Local navigation control",
   manuscript_original_filename: "source.docx", rubric_title: "Custom format", status: "needs_review",
   composite_score: null, thresholds: {}, reason: null, flag_deduction: 0,

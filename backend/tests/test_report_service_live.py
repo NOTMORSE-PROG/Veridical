@@ -116,7 +116,7 @@ async def test_aggregate_and_score_persists_a_real_report(session_factory):
         [(70, "passed", 100.0), (30, "failed", 0.0)],
     )
     async with session_factory() as session:
-        report = await aggregate_and_score(session, check_run_id)
+        report = await aggregate_and_score(session, check_run_id, commit=True)
         assert report.composite_score == Decimal("70.00")
         assert report.status == ReadinessStatus.conditionally_ready  # 60 <= 70 < 85
 
@@ -160,14 +160,14 @@ async def test_bug_151_writes_one_verdict_audit_row_per_genuine_change_not_per_c
             ).all()
 
     async with session_factory() as session:
-        await aggregate_and_score(session, check_run_id)
+        await aggregate_and_score(session, check_run_id, commit=True)
     rows = await _verdict_rows()
     assert len(rows) == 1
     assert rows[0].payload["composite_score"] == 70.0
 
     # Simulated crash/resume: called again with NOTHING changed underneath.
     async with session_factory() as session:
-        await aggregate_and_score(session, check_run_id)
+        await aggregate_and_score(session, check_run_id, commit=True)
     rows = await _verdict_rows()
     assert len(rows) == 1  # still one -- not a duplicate, indistinguishable row
 
@@ -185,7 +185,7 @@ async def test_bug_151_writes_one_verdict_audit_row_per_genuine_change_not_per_c
         )
         result.score = Decimal("50.0")
         await session.commit()
-        await aggregate_and_score(session, check_run_id)
+        await aggregate_and_score(session, check_run_id, commit=True)
     rows = await _verdict_rows()
     assert len(rows) == 2
     assert rows[1].payload["composite_score"] != rows[0].payload["composite_score"]
@@ -194,7 +194,7 @@ async def test_bug_151_writes_one_verdict_audit_row_per_genuine_change_not_per_c
 async def test_build_report_payload_matches_persisted_score(session_factory):
     check_run_id = await _seed(session_factory, [(100, "passed", 92.0)])
     async with session_factory() as session:
-        report = await aggregate_and_score(session, check_run_id)
+        report = await aggregate_and_score(session, check_run_id, commit=True)
         payload = await build_report_payload(session, check_run_id)
         assert float(report.composite_score) == payload["composite_score"]
         assert report.status.value == payload["status"]
@@ -205,7 +205,7 @@ async def test_build_report_payload_matches_persisted_score(session_factory):
 async def test_all_escalated_run_persists_needs_review_with_null_score(session_factory):
     check_run_id = await _seed(session_factory, [(100, "escalated", None)])
     async with session_factory() as session:
-        report = await aggregate_and_score(session, check_run_id)
+        report = await aggregate_and_score(session, check_run_id, commit=True)
         assert report.composite_score is None
         assert report.status == ReadinessStatus.needs_review
 
@@ -271,6 +271,7 @@ async def test_resolved_escalation_surfaces_the_instructor_decision_on_the_repor
             instructor.id,
             RESOLUTION_MARK_PASS,
             "Verified manually against the source PDF.",
+            commit=True,
         )
         assert resolved.outcome == ResultOutcome.passed
 

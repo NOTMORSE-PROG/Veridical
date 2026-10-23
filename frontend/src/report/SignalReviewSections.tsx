@@ -31,6 +31,7 @@ import { OriginalityScope } from "./OriginalityScope";
 import { originalityUnassessed } from "./originalityScopeState";
 import { Alert } from "../ui/Alert";
 import { Button } from "../ui/Button";
+import { Dialog } from "../ui/Dialog";
 import { clusterFlagFindings, type FlagFindingCluster } from "./flagClusters";
 import { useEscalatedItems, useFlags } from "./useReport";
 import { ReviewContext, useCriterionReviewScope } from "./criterionReviewContext";
@@ -39,6 +40,7 @@ import { recordedGradeLabel, criterionRecordId, sameSavedJudgment, SAVED_CRITERI
 import { ComparisonLeadList } from "./ComparisonLeadList";
 import { comparisonLeadCollection } from "./comparisonLeadCollection";
 import { resultDisplay } from "./ResultsTable";
+import { useExplicitActionFocus } from "../routing/useExplicitActionFocus";
 
 const OUTCOME_COPY: Record<ResultRowCommon["outcome"], { label: string; tone: string }> = {
   passed: { label: "Meets criterion", tone: "meets" },
@@ -514,6 +516,18 @@ function resolutionLabel(item: EscalatedItemOut, resolution: EscalationResolutio
   return item.levels?.find((entry) => entry.level === level)?.name ?? "Selected rubric level";
 }
 
+function DiscardReviewDraft({ checkRunId, id }: { checkRunId: number; id: number }) {
+  const review = useCriterionReviewScope(checkRunId);
+  const [confirm, setConfirm] = useState(false);
+  return <><Button variant="quiet" onClick={() => setConfirm(true)}>Discard this draft</Button>
+    {confirm && <Dialog title="Discard this unsaved criterion draft?" initialFocusTitle onClose={() => setConfirm(false)}
+      returnFocusTarget={() => document.getElementById(`signal-resolution-heading-${id}`) ?? document.getElementById("escalated-heading")}
+      actions={<><Button variant="secondary" onClick={() => setConfirm(false)}>Keep draft</Button>
+        <Button variant="danger" onClick={() => { review.cancel(id); setConfirm(false); }}>Discard draft</Button></>}>
+      <p>This removes the unsaved choice and reason from this review. Recorded judgments and their history are unchanged.</p>
+    </Dialog>}</>;
+}
+
 export type CriterionSourceTarget = (anchor: string, actionId: string) => string;
 export type CriterionSourceOpen = (anchor: string, actionId: string) => void;
 
@@ -530,11 +544,13 @@ function SignalResolutionCard({ item, checkRunId, sharedReasonId, sourceTarget, 
   const reason = pending?.reason ?? "";
   const attempted = pending?.attempted ?? false;
   const saving = pending?.saving ?? false;
+  const draftCurrent = pending ? review.isDraftCurrent(pending) : false;
   const [detailsOpen, setDetailsOpen] = useState(false);
   const reasonInvalid = attempted && reason.trim().length < RESOLUTION_REASON_MIN_LENGTH;
   const reasonErrorId = `signal-resolution-reason-${item.check_result_id}`;
   const criterionHeadingRef = useRef<HTMLHeadingElement>(null);
   const reasonRef = useRef<HTMLTextAreaElement>(null);
+  const followAction = useExplicitActionFocus(() => reasonRef.current ?? criterionHeadingRef.current);
   const requestedReasonFocus = useRef(false);
   useEffect(() => {
     if (pending && requestedReasonFocus.current) {
@@ -647,6 +663,19 @@ function SignalResolutionCard({ item, checkRunId, sharedReasonId, sourceTarget, 
           <>
             <p className="signal-section-kicker">Step 2 of 2: nothing is saved yet</p>
             <h4>{resolutionLabel(item, pending.resolution, pending.level)}</h4>
+            {!draftCurrent && !saving && <div className="signal-copy-flow">
+              <strong>{review.decision ? "Unsaved draft: report is read-only" : "Unsaved draft: current review required"}</strong>
+              {review.decision ? <><p>Reopen the decision before reviewing this draft.</p>
+                <ActionLink variant="secondary" to={`/report/${checkRunId}#final-decision`} onClick={() => {
+                  const target = document.getElementById("decision-heading");
+                  target?.focus(); target?.scrollIntoView({ block: "nearest" });
+                }}>Go to the recorded decision</ActionLink></>
+                : <><p>Review the current criterion before using this draft. Confirming remains a separate step.</p>
+                  <Button variant="secondary" onClick={() => review.reviewCurrent(item.check_result_id)}>Review current criterion</Button></>}
+              {review.canUseCurrentDraft(pending) && <><p>The current criterion and its evidence are shown above. This report is open for instructor review.</p>
+                <Button variant="secondary" onClick={event => followAction(event.currentTarget, () => review.useCurrentDraft(item.check_result_id))}>Use this draft for the current criterion</Button></>}
+              <DiscardReviewDraft checkRunId={checkRunId} id={item.check_result_id} />
+            </div>}
           </>
         )}
       </div>
@@ -657,12 +686,14 @@ function SignalResolutionCard({ item, checkRunId, sharedReasonId, sourceTarget, 
           <ol>{item.levels.map((level) => <li key={level.level}><strong>{level.name}</strong><span id={levelDescriptionId(level.level)}>{level.descriptor || "Description not recorded for this level."}</span></li>)}</ol>
         </details>
       )}
-      {!pending ? (
+      {!pending || pending.needsChoice ? (
         <div className="signal-resolution-options" aria-label={`Resolve: ${item.criterion_text}`}>
+          {!review.canChoose && <p>Reload the current report, or reopen its recorded decision, before making a judgment.</p>}
+          {pending?.needsChoice && <p>Your previous choice is no longer supported. Choose a current option; your unsaved reason is kept.</p>}
           {item.levels && item.levels.length > 0
-            ? item.levels.map((level) => <Button key={level.level} variant="secondary" aria-describedby={`${describedBy} ${levelDescriptionId(level.level)}`} onClick={() => choose("mark_level", level.level)}>{level.name}</Button>)
-            : <><Button variant="secondary" aria-describedby={describedBy} onClick={() => choose("mark_pass")}>Meets criterion</Button><Button variant="secondary" aria-describedby={describedBy} onClick={() => choose("mark_fail")}>Does not meet</Button></>}
-          <div className="signal-copy-flow"><Button variant="quiet" aria-describedby={`${describedBy} ${exclusionHintId}`} onClick={() => choose("needs_document")}>{CRITERION_EXCLUSION_COPY.action}</Button><p id={exclusionHintId} className="signal-field-hint">{CRITERION_EXCLUSION_COPY.hint}</p></div>
+            ? item.levels.map((level) => <Button key={level.level} variant="secondary" disabled={!review.canChoose} aria-describedby={`${describedBy} ${levelDescriptionId(level.level)}`} onClick={() => choose("mark_level", level.level)}>{level.name}</Button>)
+            : <><Button variant="secondary" disabled={!review.canChoose} aria-describedby={describedBy} onClick={() => choose("mark_pass")}>Meets criterion</Button><Button variant="secondary" disabled={!review.canChoose} aria-describedby={describedBy} onClick={() => choose("mark_fail")}>Does not meet</Button></>}
+          <div className="signal-copy-flow"><Button variant="quiet" disabled={!review.canChoose} aria-describedby={`${describedBy} ${exclusionHintId}`} onClick={() => choose("needs_document")}>{CRITERION_EXCLUSION_COPY.action}</Button><p id={exclusionHintId} className="signal-field-hint">{CRITERION_EXCLUSION_COPY.hint}</p></div>
           {/* BUG-170: `verdict_unrecognized` means accepting this verdict
               is guaranteed to 409 server-side (the passes agreed on a
               string that still doesn't name any of this criterion's own
@@ -671,18 +702,18 @@ function SignalResolutionCard({ item, checkRunId, sharedReasonId, sourceTarget, 
               recognise" incoherence this ticket named. `item.reason`
               already explains why, so removing the button loses no
               information. */}
-          {item.ai_majority_verdict !== null && !item.verdict_unrecognized && !reviewNotices.some((notice) => notice.kind === "support") && <Button variant={reviewNotices.some((notice) => notice.kind === "source_instructions") ? "quiet" : "secondary"} aria-describedby={describedBy} onClick={() => choose("accept_majority")}>Accept AI suggestion: {item.ai_majority_verdict}</Button>}
+          {item.ai_majority_verdict !== null && !item.verdict_unrecognized && !reviewNotices.some((notice) => notice.kind === "support") && <Button disabled={!review.canChoose} variant={reviewNotices.some((notice) => notice.kind === "source_instructions") ? "quiet" : "secondary"} aria-describedby={describedBy} onClick={() => choose("accept_majority")}>Accept AI suggestion: {item.ai_majority_verdict}</Button>}
         </div>
       ) : (
         <div className="signal-resolution-form">
           {excluding && <div className="signal-copy-flow"><p id={exclusionConsequenceId}>{CRITERION_EXCLUSION_COPY.consequence}</p><p>{CRITERION_EXCLUSION_COPY.cancel}</p></div>}
           {selectedLevel && <div className="signal-copy-flow"><p><strong>Selected level: {selectedLevel.name}</strong></p><p>{selectedLevel.descriptor || "Description not recorded for this level."}</p></div>}
-          <label><span>{excluding ? CRITERION_EXCLUSION_COPY.reason : "Reason (required)"}</span><textarea ref={reasonRef} disabled={saving} rows={3} value={reason} aria-invalid={reasonInvalid || undefined} aria-describedby={[excluding ? exclusionConsequenceId : null, reasonInvalid ? reasonErrorId : null].filter(Boolean).join(" ") || undefined} onChange={(event) => review.changeReason(item.check_result_id, event.target.value)} /></label>
+          <label><span>{excluding ? CRITERION_EXCLUSION_COPY.reason : "Reason (required)"}</span><textarea ref={reasonRef} disabled={saving} readOnly={!draftCurrent} rows={3} value={reason} aria-invalid={reasonInvalid || undefined} aria-describedby={[excluding ? exclusionConsequenceId : null, reasonInvalid ? reasonErrorId : null].filter(Boolean).join(" ") || undefined} onChange={(event) => review.changeReason(item.check_result_id, event.target.value)} /></label>
           <p className="signal-field-hint">This reason appears in the instructor report and export.</p>
           {reasonInvalid && <p id={reasonErrorId} role="alert" className="signal-field-error">{reason.trim() ? `Enter at least ${RESOLUTION_REASON_MIN_LENGTH} characters.` : "Enter a reason before confirming."}</p>}
           {saving && <p role="status">{REVIEW_DRAFT_COPY.saving}</p>}
-          {Boolean(pending.error) && <Alert title="Could not save this resolution" tone="error" role="alert">{pending.error instanceof Error ? pending.error.message : "Try again."}</Alert>}
-          <div><Button variant="secondary" disabled={saving} onClick={cancel}>Cancel</Button><Button data-criterion-confirm variant="brand" disabled={saving} aria-describedby={`${describedBy}${excluding ? ` ${exclusionConsequenceId}` : ""}`} busy={saving} onClick={confirm}>{excluding ? CRITERION_EXCLUSION_COPY.confirm : "Confirm resolution"}</Button></div>
+          {Boolean(pending.error) && <Alert title="Saving could not be confirmed" tone="error" role="alert">Your entered reason is kept. Review the current criterion before trying again.</Alert>}
+          <div>{draftCurrent && <Button variant="secondary" disabled={saving} onClick={cancel}>Cancel</Button>}<Button data-criterion-confirm variant="brand" disabled={saving || !draftCurrent} aria-describedby={`${describedBy}${excluding ? ` ${exclusionConsequenceId}` : ""}`} busy={saving} onClick={confirm}>{excluding ? CRITERION_EXCLUSION_COPY.confirm : "Confirm resolution"}</Button></div>
         </div>
       )}
     </article>
@@ -720,12 +751,21 @@ export function SignalEscalatedPanel({ checkRunId, sourceTarget, onOpenSource }:
 
   return (
     <section id="review-criteria" tabIndex={-1} data-tour="escalated-panel" className="signal-review-section signal-review-section--attention" aria-labelledby="escalated-heading">
-      <div className="signal-review-section__heading"><div><p className="signal-section-kicker">First review task</p><h2 id="escalated-heading" ref={headingRef} tabIndex={-1}>Criteria needing your judgment</h2></div><span>{fetchStatus === "fetching" ? loadedItems ? "Updating review list" : "Loading review list" : isError ? loadedItems ? "Review list needs refreshing" : "Review list unavailable" : awaitingList ? "Review list needs refreshing" : `${items?.length ?? 0} unresolved`}</span></div>
-      <p className="signal-review-section__intro">VERIDICAL did not settle these items. Review the evidence and record your own reasoned resolution; the final decision remains unavailable until they are resolved.</p>
-      <p className="signal-field-hint">{REVIEW_DRAFT_COPY.retention}</p>
-      <p className="signal-field-hint">{CRITERION_EXCLUSION_COPY.wait}</p>
+      <div className="signal-review-section__heading"><div><p className="signal-section-kicker">{review.decision ? "Preserved assessment" : "First review task"}</p><h2 id="escalated-heading" ref={headingRef} tabIndex={-1}>{review.decision === "returned" ? "Unresolved at time of return" : review.decision ? "Unresolved at time of decision" : "Criteria needing your judgment"}</h2></div><span>{fetchStatus === "fetching" ? loadedItems ? "Updating review list" : "Loading review list" : isError ? loadedItems ? "Review list needs refreshing" : "Review list unavailable" : awaitingList ? "Review list needs refreshing" : `${items?.length ?? 0} unresolved`}</span></div>
+      {review.decision ? <p className="signal-review-section__intro">These criteria were unresolved when the decision was recorded. Their outcomes, evidence and assessment limits are preserved. Reopen the decision before making further judgments.</p>
+        : <><p className="signal-review-section__intro">VERIDICAL did not settle these items. Review the evidence and record your own reasoned judgment. You can also return the manuscript for revision while leaving them unresolved; approval remains unavailable.</p>
+          <p className="signal-field-hint">{REVIEW_DRAFT_COPY.retention}</p>
+          <p className="signal-field-hint">{CRITERION_EXCLUSION_COPY.wait}</p></>}
       <p ref={announcementRef} tabIndex={-1} aria-live="polite" className="signal-live-region">{announcement}</p>
       {!accessUnavailable && <SavedJudgmentAccess checkRunId={checkRunId} />}
+      {!accessUnavailable && [...review.drafts].filter(([id, draft]) => draft.currentResolved && !draft.saving
+        && !items?.some(item => item.check_result_id === id)).map(([id, draft]) => <article key={`retained-${id}`} className="signal-resolution-card">
+        <h3 id={`signal-resolution-heading-${id}`} tabIndex={-1}>Unsaved draft: {draft.criterionText}</h3>
+        <p>This criterion is no longer in the unresolved list. This earlier draft remains unsaved and cannot replace its recorded judgment.</p>
+        <blockquote>{draft.reason || "No reason entered."}</blockquote>
+        <Button variant="secondary" onClick={event => review.viewSaved(draft.criterionId, event.currentTarget)}>Review recorded judgment</Button>
+        <DiscardReviewDraft checkRunId={checkRunId} id={id} />
+      </article>)}
       <div className="signal-attached-flow">
       {isPending && <p role="status">Loading criteria that need review.</p>}
       {isError && <Alert title={loadedItems ? "Could not update criteria needing review" : "Could not load criteria needing review"} tone="warning"><p>{loadedItems ? "Showing the last loaded review items. Retry the list to check which criteria still need attention." : "Retry the review list to check which criteria still need attention."}</p><Button variant="secondary" aria-disabled={fetchStatus === "fetching" || undefined} onClick={() => { if (fetchStatus !== "fetching") void refetch(); }}>Retry review items</Button></Alert>}

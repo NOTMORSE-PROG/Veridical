@@ -148,7 +148,7 @@ async def _seed_levelled_run(session, *, ai_majority_verdict="Proficient", agree
     )
     session.add_all([escalated_result, decided_plain_result])
     await session.commit()
-    await aggregate_and_score(session, check_run.id)
+    await aggregate_and_score(session, check_run.id, commit=True)
     return instructor, check_run, escalated_result, levelled_criterion, plain_criterion
 
 
@@ -177,6 +177,7 @@ async def test_mark_level_resolves_to_the_chosen_rung_and_updates_score_live(ses
             "mark_level",
             "Read the introduction myself -- it previews the structure but isn't engaging.",
             level=3,  # Proficient
+            expected_revision=0,
         )
         assert out.outcome == "passed"
         assert out.score == 75.0  # 3/4 * 100
@@ -203,6 +204,7 @@ async def test_mark_level_with_an_unknown_ordinal_is_rejected(session_factory):
                 "mark_level",
                 "Trying an ordinal this scale doesn't have.",
                 level=99,
+                expected_revision=0,
             )
 
 
@@ -219,6 +221,7 @@ async def test_mark_pass_on_a_levelled_criterion_is_rejected(session_factory):
                 instructor.id,
                 "mark_pass",
                 "Trying to force a binary decision onto a graded scale.",
+                expected_revision=0,
             )
 
 
@@ -243,6 +246,7 @@ async def test_mark_level_on_a_non_levelled_criterion_is_rejected(session_factor
                 "mark_level",
                 "This criterion has no scale to pick a level from.",
                 level=2,
+                expected_revision=0,
             )
 
 
@@ -258,6 +262,7 @@ async def test_accept_majority_on_a_levelled_criterion_uses_its_own_scale(sessio
             instructor.id,
             "accept_majority",
             "Agreed with the AI's own lean after reading the excerpt myself.",
+            expected_revision=0,
         )
         assert out.outcome == "passed"
         assert out.score == 100.0  # 4/4 * 100
@@ -274,6 +279,7 @@ async def test_report_shows_the_rubrics_own_levelled_rating(session_factory):
             "mark_level",
             "Read it myself -- Proficient, previews structure but not engaging.",
             level=3,
+            expected_revision=0,
         )
         report = await get_report(session, check_run.id, instructor.id)
         # V-069 AC2: only the ONE levelled criterion in this rubric counts
@@ -327,7 +333,7 @@ async def test_a_pass_fail_only_rubric_report_has_no_levelled_rating_live(sessio
             )
         )
         await session.commit()
-        await aggregate_and_score(session, check_run.id)
+        await aggregate_and_score(session, check_run.id, commit=True)
         report = await get_report(session, check_run.id, instructor.id)
         assert report.levelled_rating is None
         assert report.results[0].level is None

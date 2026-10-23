@@ -283,3 +283,43 @@ describe("route focus and announcement", () => {
     expect(document.activeElement).not.toBe(document.body);
   });
 });
+
+function HashOrigin() {
+  const heading = useRef<HTMLHeadingElement>(null);
+  useRouteFocus("Hash-origin report", heading);
+  return <main><h1 ref={heading} tabIndex={-1}>Hash-origin report</h1>
+    <section id="review-section" tabIndex={-1}>Review section</section>
+    <button>Another task</button>
+    <Link id="exact-hash-source" to="/document" onClick={() => rememberRouteReturnFocus("/hash-report", "/document", "exact-hash-source")}>Inspect this source</Link>
+  </main>;
+}
+
+it.each(["settlement", "Tab", "pointer", "wheel", "blur", "other focus"])(
+  "preserves exact POP source focus after hash settlement while respecting %s", async intent => {
+    const frames = new Map<number, FrameRequestCallback>(); let frameId = 0;
+    vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => { frames.set(++frameId, callback); return frameId; });
+    vi.stubGlobal("cancelAnimationFrame", (id: number) => frames.delete(id));
+    const router = createMemoryRouter([
+      { path: "/hash-report", element: <HashOrigin /> },
+      { path: "/document", element: <DocumentPage /> },
+    ], { initialEntries: ["/hash-report#review-section"] });
+    render(<RouterProvider router={router} />);
+    fireEvent.click(screen.getByRole("link", { name: "Inspect this source" }));
+    await screen.findByRole("heading", { name: "Source manuscript" });
+    frames.clear();
+    await act(async () => { await router.navigate(-1); });
+    const source = screen.getByRole("link", { name: "Inspect this source" });
+    expect(source).toHaveFocus();
+    const hash = document.getElementById("review-section")!;
+    if (intent === "Tab") fireEvent.keyDown(document, { key: "Tab" });
+    if (intent === "pointer") fireEvent.pointerDown(hash);
+    if (intent === "wheel") fireEvent.wheel(window);
+    if (intent === "blur") fireEvent(window, new Event("blur"));
+    act(() => hash.focus());
+    if (intent === "other focus") screen.getByRole("button", { name: "Another task" }).focus();
+    act(() => { const pending = [...frames.values()]; frames.clear(); pending.forEach(callback => callback(performance.now())); });
+    expect(source === document.activeElement).toBe(intent === "settlement");
+    if (intent === "other focus") expect(screen.getByRole("button", { name: "Another task" })).toHaveFocus();
+    vi.unstubAllGlobals();
+  },
+);

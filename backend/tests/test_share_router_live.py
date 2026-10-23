@@ -134,7 +134,7 @@ def logged_in_with_a_done_run(client, api_scratch_url):
                 )
                 check_run.status = CheckRunStatus.done
                 await session.commit()
-                await aggregate_and_score(session, check_run.id)
+                await aggregate_and_score(session, check_run.id, commit=True)
                 return check_run.id
         finally:
             await engine.dispose()
@@ -456,7 +456,7 @@ def logged_in_with_a_resolved_and_prior_run(client, api_scratch_url):
                 )
                 run1.status = CheckRunStatus.done
                 await session.commit()
-                await aggregate_and_score(session, run1.id)
+                await aggregate_and_score(session, run1.id, commit=True)
 
                 # Run 2: the run actually shared -- one criterion resolved
                 # out of escalation, carrying the instructor's own
@@ -482,7 +482,7 @@ def logged_in_with_a_resolved_and_prior_run(client, api_scratch_url):
                 )
                 run2.status = CheckRunStatus.done
                 await session.commit()
-                await aggregate_and_score(session, run2.id)
+                await aggregate_and_score(session, run2.id, commit=True)
                 return run2.id
         finally:
             await engine.dispose()

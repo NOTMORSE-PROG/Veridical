@@ -477,6 +477,7 @@ export interface OriginalityScope {
 
 export interface ReportOut extends ReportCommon {
   check_run_id: number;
+  assessment_revision: number | null;
   figure_readings?: FigureReadingOut[] | null;
   historical_semantic_support_unverified?: boolean;
   historical_citation_title_unverified?: boolean;
@@ -675,6 +676,7 @@ export interface CitationSourceKeyOut {
 }
 
 export interface FlagOut {
+  assessment_revision: number | null;
   citation_metadata_review_warning?: "quoted_title_projection_unverified" | null;
   citation_metadata_comparison?: {
     schema_version: string;

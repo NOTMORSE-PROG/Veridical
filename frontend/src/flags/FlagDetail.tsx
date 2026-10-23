@@ -29,6 +29,11 @@ import { AgreementComparison } from "./AgreementComparison";
 import { CitationComparison } from "./CitationComparison";
 import { CitationHistoryWarning } from "./CitationHistoryWarning";
 import { useAnnotateFlag, useFlag, useOverrideFlag } from "./useFlag";
+import { useFlagActionReview } from "./useFlagActionReview";
+import { FlagActionCurrentReview } from "./FlagActionCurrentReview";
+import { recoverableReadError } from "../report/reportReadState";
+import { useExplicitActionFocus } from "../routing/useExplicitActionFocus";
+import { isAssessmentRevision } from "../report/assessmentRevision";
 
 const SEVERITY_LABEL: Record<FlagOut["severity"], string> = {
   high: "High severity",
@@ -194,31 +199,40 @@ function AnnotationPanel({ flag }: { flag: FlagOut }) {
   );
 }
 
-function OverrideDialog({ flag, onClose }: { flag: FlagOut; onClose: () => void }) {
+function OverrideDialog({ flag, onClose, fallbackFocusRef }: { flag: FlagOut; onClose: () => void; fallbackFocusRef: React.RefObject<HTMLHeadingElement | null> }) {
   const [reason, setReason] = useState("");
   const [attempted, setAttempted] = useState(false);
   const override = useOverrideFlag(flag.id);
+  const review = useFlagActionReview(flag, "override");
+  const reasonRef = useRef<HTMLTextAreaElement>(null);
+  const followAction = useExplicitActionFocus(() => reasonRef.current);
   const errorId = useId();
   const invalid = attempted && reason.trim().length === 0;
 
   function confirm() {
     setAttempted(true);
-    if (!reason.trim()) return;
-    override.mutate(reason.trim(), { onSuccess: onClose });
+    if (!review.isCurrent() || !reason.trim() || !review.canSubmit || !isAssessmentRevision(review.expectedRevision)) return;
+    override.mutate({ reason: reason.trim(), expected_revision: review.expectedRevision }, {
+      onSuccess: () => { if (review.isCurrent()) onClose(); },
+      onError: review.freeze,
+    });
   }
 
   return (
     <Dialog
       title="Override this finding?"
+      fallbackFocusRef={fallbackFocusRef}
+      initialFocusTitle
       onClose={override.isPending ? undefined : onClose}
-      actions={<><Button variant="secondary" disabled={override.isPending} onClick={onClose}>Cancel</Button><Button variant="brand" busy={override.isPending} onClick={confirm}>Confirm override</Button></>}
+      actions={<><Button variant="secondary" disabled={override.isPending} onClick={onClose}>Cancel</Button><Button variant="brand" disabled={!review.canSubmit} busy={override.isPending} onClick={confirm}>Confirm override</Button></>}
     >
       <div className="signal-resolution-dialog" aria-busy={override.isPending}>
         <p>The original possible inconsistency remains in the evidence record. Your reason is recorded in Audit and the readiness band is recalculated.</p>
+        <FlagActionCurrentReview review={review} busy={override.isPending} onRebind={trigger => followAction(trigger, review.rebind)} />
         <label className="signal-evidence-field">
           <span>Reason (required)</span>
           <textarea
-            autoFocus
+            ref={reasonRef}
             rows={4}
             value={reason}
             disabled={override.isPending}
@@ -226,12 +240,13 @@ function OverrideDialog({ flag, onClose }: { flag: FlagOut; onClose: () => void 
             aria-describedby={invalid ? errorId : undefined}
             onChange={(event) => {
               setReason(event.target.value);
+              review.reasonChanged();
               if (attempted) setAttempted(false);
             }}
           />
         </label>
         {invalid && <p id={errorId} role="alert" className="signal-field-error">Enter a reason before confirming.</p>}
-        {override.isError && <Alert title="Could not override this finding" tone="error" role="alert">{override.error instanceof ApiError ? override.error.message : "Try again."}</Alert>}
+        {override.isError && <Alert title="Saving could not be confirmed" tone="error" role="alert">Your entered reason is kept. Review the current assessment before trying again.</Alert>}
       </div>
     </Dialog>
   );
@@ -241,53 +256,47 @@ function ResolutionControl({ flag }: { flag: FlagOut }) {
   const [overrideOpen, setOverrideOpen] = useState(false);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const overrideTriggerRef = useRef<HTMLButtonElement>(null);
+  const headingRef = useRef<HTMLHeadingElement>(null);
   const confirmSourceEligible = flag.check_kind === "citation_integrity" && flag.ai_verdict_summary === "unverifiable_not_found";
 
   function closeOverride() {
     setOverrideOpen(false);
-    queueMicrotask(() => overrideTriggerRef.current?.focus());
   }
 
-  if (flag.overridden) {
-    return (
+  const content = flag.overridden ? (
       <section className="signal-resolution-record" aria-labelledby="resolution-heading">
-        <div><p className="signal-section-kicker">Instructor resolution</p><h2 id="resolution-heading">{flag.confirmed_citation_source ? "Source confirmed" : "Finding overridden"}</h2></div>
+        <div><p className="signal-section-kicker">Instructor resolution</p><h2 ref={headingRef} tabIndex={-1} id="resolution-heading">{flag.confirmed_citation_source ? "Source confirmed" : "Finding overridden"}</h2></div>
         <p>{flag.confirmed_citation_source ? `You confirmed the source after checking it: ${flag.override_reason}.` : `You overrode this possible inconsistency: ${flag.override_reason}.`}</p>
         {flag.confirmed_citation_source && <p>Your confirmation applies only to this exact reference in your account, not to another reference or instructor. It does not establish support for a manuscript claim.</p>}
         <p>{isOptionalComparisonLead(flag) ? "The original comparison record remains above. This lead does not affect readiness." : "The original finding remains above, and the readiness band has been recalculated."}</p>
         <ActionLink to={`/report/${flag.check_run_id}`} variant="secondary">View updated report</ActionLink>
       </section>
-    );
-  }
-
-  if (flag.affects_readiness === false) {
-    return (
+    ) : flag.affects_readiness === false ? (
       <section className="signal-evidence-section" aria-labelledby="resolution-options-heading">
-        <h2 id="resolution-options-heading">Review lead: not scored</h2>
+        <h2 ref={headingRef} tabIndex={-1} id="resolution-options-heading">Review lead: not scored</h2>
         <p>This comparison does not change readiness. You can inspect the evidence without writing a comment or recording an override.</p>
       </section>
-    );
-  }
-
-  return (
+    ) : (
     <section className="signal-evidence-section signal-resolution-options" aria-labelledby="resolution-options-heading">
-      <div className="signal-section-heading"><div><p className="signal-section-kicker">Instructor action</p><h2 id="resolution-options-heading">Resolve only after checking the evidence</h2></div></div>
+      <div className="signal-section-heading"><div><p className="signal-section-kicker">Instructor action</p><h2 ref={headingRef} tabIndex={-1} id="resolution-options-heading">Resolve only after checking the evidence</h2></div></div>
       <p>{flag.ai_verdict_summary ? "This finding remains open unless you record a reasoned override." : "VERIDICAL did not reach a determination, so this finding does not affect readiness unless you affirm it."}</p>
       {confirmSourceEligible && (flag.citation_source_key ? (
         <div className="signal-confirm-source-option">
           <h3>Verified the source yourself?</h3>
-          <p>Confirming the source resolves this flag and updates the shared source record for any manuscript citing the same DOI, ISBN, or title.</p>
-          {flag.citation_source_key.kind === "title" && <Alert title="Title matches are less precise" tone="warning">Double-check that it is the same source before confirming it across VERIDICAL.</Alert>}
+          <p>This resolves this finding. Later checks may reuse your confirmation only for this exact reference and source key in your account.</p>
+          {flag.citation_source_key.kind === "title" && <Alert title="Title matches are less precise" tone="warning">Double-check that this is the source cited in the manuscript before confirming it.</Alert>}
           <Button variant="secondary" onClick={() => setConfirmOpen(true)}>Confirm this source</Button>
         </div>
       ) : (
         <Alert title="No source record can be confirmed" tone="info">VERIDICAL could not identify a DOI, ISBN, or title. If you verified the citation independently, override only this finding and explain why.</Alert>
       ))}
       <div className="signal-evidence-actions"><Button ref={overrideTriggerRef} variant="secondary" onClick={() => setOverrideOpen(true)}>Override</Button></div>
-      {overrideOpen && <OverrideDialog flag={flag} onClose={closeOverride} />}
-      {confirmOpen && <ConfirmCitationSourceModal flag={flag} onClose={() => setConfirmOpen(false)} />}
     </section>
   );
+  return <>{content}
+    {overrideOpen && <OverrideDialog key={`${flag.check_run_id}:${flag.id}:override`} flag={flag} fallbackFocusRef={headingRef} onClose={closeOverride} />}
+    {confirmOpen && <ConfirmCitationSourceModal key={`${flag.check_run_id}:${flag.id}:confirm-source`} flag={flag} fallbackFocusRef={headingRef} onClose={() => setConfirmOpen(false)} />}
+  </>;
 }
 
 export function FlagDetailPage() {
@@ -295,7 +304,8 @@ export function FlagDetailPage() {
   const routeLocation = useLocation();
   const id = Number(flagId);
   const validId = Number.isInteger(id) && id > 0;
-  const { data: flag, isPending, isError, error, refetch } = useFlag(id);
+  const { data, isPending, isError, error, refetch } = useFlag(id);
+  const flag = data?.id === id && recoverableReadError(error) ? data : undefined;
   const cachedFlags = useCachedReportFlags(flag?.check_run_id);
   const leadContext = flag ? comparisonLeadCollection(flag.check_run_id, cachedFlags) : undefined;
   const optionalComparison = Boolean(flag && isOptionalComparisonLead(flag));
@@ -334,7 +344,6 @@ export function FlagDetailPage() {
     }
     if (flag.overridden && previousResolved.current === false) {
       setAnnouncement(isOptionalComparisonLead(flag) ? "Comparison lead resolved. This does not affect readiness." : flag.confirmed_citation_source ? "Source confirmed. The readiness band was recalculated." : "Finding overridden. The readiness band was recalculated.");
-      resolutionRef.current?.focus();
     }
     previousResolved.current = flag.overridden;
   }, [flag]);
@@ -359,10 +368,11 @@ export function FlagDetailPage() {
         <Alert title="This evidence address is invalid" tone="error" role="alert"><ReviewDeskReturnLink variant="secondary">Return to Review Desk</ReviewDeskReturnLink></Alert>
       ) : isPending ? (
         <div role="status" aria-live="polite" aria-busy="true" className="signal-desk-loading"><span>Loading evidence…</span><i /><i /></div>
-      ) : isError || !flag ? (
+      ) : !flag ? (
         <Alert title="Could not load this evidence" tone="error" role="alert"><p>{error instanceof ApiError ? error.message : "Try again."}</p><Button variant="secondary" onClick={() => refetch()}>Try again</Button></Alert>
       ) : (
         <>
+          {isError && <Alert title="Could not update this evidence" tone="warning"><p>Showing the last loaded finding. Your entered reason is kept. Review the current assessment before confirming an action.</p><Button variant="secondary" onClick={() => { void refetch(); }}>Retry evidence</Button></Alert>}
           <p aria-live="polite" className="signal-live-region">{announcement}</p>
           {(!isCitationMetadataFinding(flag) || flag.llm_mode === "fake") && <ModeDisclosure mode={flag.llm_mode} registry={isCitationMetadataFinding(flag)} />}
           {flag.first_upload_context && <Alert title="Limited first-upload comparison context" tone="info">This signal was created while there were few manuscripts to compare against. The severity was not changed by that limitation.</Alert>}
@@ -382,7 +392,7 @@ export function FlagDetailPage() {
           <CitationHistoryWarning flag={flag} />
           <EvidenceSection flag={flag} sourcePath={sourcePath} sourceLinkId={sourceLinkId} />
 
-          <div ref={resolutionRef} tabIndex={-1}><ResolutionControl flag={flag} /></div>
+          <div ref={resolutionRef} tabIndex={-1}><ResolutionControl key={`${flag.check_run_id}:${flag.id}`} flag={flag} /></div>
           <AnnotationPanel flag={flag} />
         </>
       )}

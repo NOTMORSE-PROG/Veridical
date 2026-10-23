@@ -163,7 +163,7 @@ async def _seed_done_flagged_run(session, *, fake: bool):
     session.add(flag)
     check_run.status = CheckRunStatus.done
     await session.commit()
-    await aggregate_and_score(session, check_run.id)
+    await aggregate_and_score(session, check_run.id, commit=True)
     return instructor.id, check_run.id, flag.id
 
 
@@ -216,6 +216,6 @@ async def test_legacy_run_backfilled_to_unknown_not_claimed_real(session_factory
         check_run.status = CheckRunStatus.done
         await session.commit()
         await session.refresh(check_run)
-        await aggregate_and_score(session, check_run.id)
+        await aggregate_and_score(session, check_run.id, commit=True)
         report = await get_report(session, check_run.id, instructor.id)
         assert report.llm_mode == "unknown"

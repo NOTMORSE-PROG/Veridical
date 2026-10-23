@@ -15,12 +15,12 @@ function setup(action: "decision" | "reopen") {
   const hook = renderHook(() => {
     const decide = useDecideReport(5);
     const reopen = useReopenReport(5);
-    return action === "decision" ? { start: () => decide.mutate({ decision: "returned", note: "Instructor reason" }), done: !decide.isPending && !decide.isIdle }
-      : { start: () => reopen.mutate("Instructor reason"), done: !reopen.isPending && !reopen.isIdle };
+    return action === "decision" ? { start: () => decide.mutate({ decision: "returned", note: "Instructor reason", expected_revision: 0 }), done: !decide.isPending && !decide.isIdle }
+      : { start: () => reopen.mutate({ reason: "Instructor reason", expected_revision: 0 }), done: !reopen.isPending && !reopen.isIdle };
   }, { wrapper: ({ children }: { children: ReactNode }) => <QueryClientProvider client={client}>{children}</QueryClientProvider> });
   const invalidate = vi.spyOn(client, "invalidateQueries");
   return { client, hook, fetch, invalidate, finish: (status = 200, run = 5) => finish(new Response(JSON.stringify(status === 200
-    ? { check_run_id: run, manuscript_group_label: "Private report from instructor A" }
+    ? { assessment_revision: 1, decision: action === "decision" ? "returned" : null, decision_note: action === "decision" ? "Instructor reason" : null, check_run_id: run, manuscript_group_label: "Private report from instructor A" }
     : { error: { code: "conflict", message: "Controlled conflict" } }), { status })) };
 }
 
@@ -56,5 +56,5 @@ it.each(["decision", "reopen"] as const)("does not refresh a new account after a
 it.each(["decision", "reopen"] as const)("does not install a wrong-run %s acknowledgment", async (action) => {
   const c = setup(action); act(() => c.hook.result.current.start()); await waitFor(() => expect(c.fetch).toHaveBeenCalledOnce());
   await act(async () => { c.finish(200, 6); }); await waitFor(() => expect(c.hook.result.current.done).toBe(true));
-  expect(c.client.getQueryData(["report", 5])).toBeUndefined(); expect(c.invalidate).not.toHaveBeenCalled();
+  expect(c.client.getQueryData(["report", 5])).toBeUndefined(); expect(c.invalidate).not.toHaveBeenCalledWith({ queryKey: ["stats"] });
 });

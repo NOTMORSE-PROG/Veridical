@@ -27,7 +27,9 @@ from app.flags.schemas import (
     AgreementPairOut,
     CitationMetadataComparisonOut,
     CitationSourceKeyOut,
+    ConfirmCitationSourceOut,
     FlagOut,
+    OverrideFlagOut,
     PassagePairOut,
     PValueComparisonOut,
 )
@@ -35,8 +37,9 @@ from app.models.audit import AuditLog
 from app.models.manuscript import Manuscript
 from app.models.rubric import Criterion
 from app.models.run import CheckResult, CheckRun, Flag
+from app.report.assessment import assessment_write, lock_assessment
 from app.report.scoring import flag_ai_verdict_summary
-from app.report.service import aggregate_and_score, raise_if_decided
+from app.report.service import aggregate_and_score, get_report
 
 
 def _passage_pair_from_detail(evidence_excerpt: str, detail: dict) -> PassagePairOut | None:
@@ -117,6 +120,7 @@ async def _scoped_flag(
             .join(CheckRun, CheckRun.id == CheckResult.check_run_id)
             .join(Manuscript, Manuscript.id == CheckRun.manuscript_id)
             .where(Flag.id == flag_id, Manuscript.instructor_id == instructor_id)
+            .execution_options(populate_existing=True)
         )
     ).first()
     if row is None:
@@ -203,6 +207,8 @@ async def _to_flag_out(
     result: CheckResult,
     manuscript: Manuscript,
     check_run: CheckRun,
+    *,
+    assessment_revision: int | None = None,
 ) -> FlagOut:
     criterion_text = None
     if result.criterion_id is not None:
@@ -220,6 +226,7 @@ async def _to_flag_out(
     ) or "supporting_passage" in detail
     return FlagOut(
         id=flag.id,
+        assessment_revision=assessment_revision,
         check_result_id=result.id,
         check_run_id=result.check_run_id,
         manuscript_group_label=manuscript.group_label,
@@ -280,7 +287,16 @@ async def _to_flag_out(
 
 async def get_flag(session: AsyncSession, flag_id: int, instructor_id: int) -> FlagOut:
     flag, result, manuscript, check_run = await _scoped_flag(session, flag_id, instructor_id)
-    return await _to_flag_out(session, flag, result, manuscript, check_run)
+    report = await lock_assessment(session, result.check_run_id)
+    flag, result, manuscript, check_run = await _scoped_flag(session, flag_id, instructor_id)
+    return await _to_flag_out(
+        session,
+        flag,
+        result,
+        manuscript,
+        check_run,
+        assessment_revision=report.assessment_revision if report is not None else None,
+    )
 
 
 async def annotate_flag(
@@ -301,104 +317,106 @@ async def annotate_flag(
         )
     )
     await session.commit()
-    await session.refresh(flag)
-    return await _to_flag_out(session, flag, result, manuscript, check_run)
+    return await get_flag(session, flag_id, instructor_id)
 
 
 async def override_flag(
-    session: AsyncSession, flag_id: int, instructor_id: int, reason: str
-) -> tuple[FlagOut, int]:
-    """Overriding a flag never destroys the original AI/check finding
-    (ticket AC) — `evidence_excerpt`/`page_anchor`/the parent
-    `check_result.detail` are untouched; only `overridden`/
-    `override_reason` change, which is what the scoring engine already
-    watches (`_flag_deduction`, V-019). Returns the flag plus its
-    `check_run_id` so the router can hand back a fresh `ReportOut` in the
-    SAME response (ticket AC: "recomputes score/status immediately").
-
-    V-038: blocked once the report has been decided — a score-affecting
-    mutation on a report a human already signed off on must go through an
-    explicit reopen first (see `app.report.service.raise_if_decided`)."""
-    flag, result, manuscript, check_run = await _scoped_flag(session, flag_id, instructor_id)
-    await raise_if_decided(session, result.check_run_id)
-    flag.overridden = True
-    flag.override_reason = reason.strip()
-    session.add(
-        AuditLog(
-            event_type="flag_overridden",
-            check_run_id=result.check_run_id,
-            agreement_score=flag.confidence,
-            payload={
-                "flag_id": flag_id,
-                "check_result_id": result.id,
-                "instructor_id": instructor_id,
-                "reason": reason.strip(),
-                "severity": flag.severity.value,
-            },
+    session: AsyncSession,
+    flag_id: int,
+    instructor_id: int,
+    reason: str,
+    *,
+    expected_revision: int,
+) -> OverrideFlagOut:
+    """Override the owned flag and bind its rescore acknowledgment atomically."""
+    _flag, initial_result, _manuscript, _run = await _scoped_flag(session, flag_id, instructor_id)
+    run_id = initial_result.check_run_id
+    async with assessment_write(session, run_id, instructor_id, expected_revision) as report:
+        flag, result, manuscript, check_run = await _scoped_flag(session, flag_id, instructor_id)
+        flag.overridden = True
+        flag.override_reason = reason.strip()
+        session.add(
+            AuditLog(
+                event_type="flag_overridden",
+                check_run_id=run_id,
+                agreement_score=flag.confidence,
+                payload={
+                    "flag_id": flag_id,
+                    "check_result_id": result.id,
+                    "instructor_id": instructor_id,
+                    "reason": reason.strip(),
+                    "severity": flag.severity.value,
+                    "assessment_revision_before": expected_revision,
+                    "assessment_revision": report.assessment_revision,
+                },
+            )
         )
-    )
-    await session.commit()
-    await aggregate_and_score(session, result.check_run_id)
-    await session.refresh(flag)
-    return await _to_flag_out(session, flag, result, manuscript, check_run), result.check_run_id
+        await session.flush()
+        await aggregate_and_score(session, run_id, commit=False)
+        flag_out = await _to_flag_out(
+            session,
+            flag,
+            result,
+            manuscript,
+            check_run,
+            assessment_revision=report.assessment_revision,
+        )
+        out = OverrideFlagOut(
+            **flag_out.model_dump(), report=await get_report(session, run_id, instructor_id)
+        )
+    return out
 
 
 async def confirm_citation_source(
-    session: AsyncSession, flag_id: int, instructor_id: int, reason: str
-) -> tuple[FlagOut, int]:
-    """BUG-078/FEATURES.md §9: an "unverifiable, not found" citation flag
-    can be manually confirmed legitimate -- e.g. a real local/Philippine
-    source the four providers don't index. Two effects: (1) THIS flag is
-    overridden, same mechanics as `override_flag` (audit log,
-    `raise_if_decided` gate, live rescore, original finding never
-    destroyed) -- `flag.confirmed_citation_source` additionally records
-    that this path (not an ordinary override) is what resolved it, so the
-    terminal banner can say something true instead of "you overrode this
-    finding" (design review spec, 2026-08-24); (2) later checks may reuse this
-    account's confirmation only for the identical reference text and lookup
-    key. Provider metadata remains shared, but this judgment is not shared
-    with another instructor or another reference using the same key.
-
-    `reason` is instructor-authored ("Where you verified this") -- required,
-    same discipline as `override_flag`'s reason, and if anything a HIGHER
-    bar is warranted here (durable, account-specific), never a lower one.
-
-    Only reachable for a flag whose detail carries `key_kind`/`key_value`
-    (set by `verify.py` only when a real DOI/ISBN/title existed to key the
-    lookup on) — anything else is a `ConflictError`, never a silent no-op.
-
-    The owned flag and its audit trail commit together. The historical global
-    citation-cache confirmation bit is not written or used for suppression.
-    Existence confirmation never establishes claim support or hides retraction.
-    """
-    flag, result, manuscript, check_run = await _scoped_flag(session, flag_id, instructor_id)
-    await raise_if_decided(session, result.check_run_id)
-    detail = flag.detail or result.detail or {}
-    key_kind = detail.get("key_kind")
-    key_value = detail.get("key_value")
-    if detail.get("kind") != "unverifiable_not_found" or not key_kind or not key_value:
-        raise ConflictError("This flag has no citation source to confirm.")
-    if not await cache.citation_source_cached(session, key_kind=key_kind, key_value=key_value):
-        raise NotFoundError("No cached lookup exists yet for this citation.")
-    stripped_reason = reason.strip()
-    flag.overridden = True
-    flag.override_reason = stripped_reason
-    flag.confirmed_citation_source = True
-    session.add(
-        AuditLog(
-            event_type="citation_source_confirmed",
-            check_run_id=result.check_run_id,
-            payload={
-                "flag_id": flag_id,
-                "check_result_id": result.id,
-                "instructor_id": instructor_id,
-                "reason": stripped_reason,
-                "key_kind": key_kind,
-                "key_value": key_value,
-            },
+    session: AsyncSession,
+    flag_id: int,
+    instructor_id: int,
+    reason: str,
+    *,
+    expected_revision: int,
+) -> ConfirmCitationSourceOut:
+    """Confirm this account's source judgment with one audit, rescore and revision."""
+    _flag, initial_result, _manuscript, _run = await _scoped_flag(session, flag_id, instructor_id)
+    run_id = initial_result.check_run_id
+    async with assessment_write(session, run_id, instructor_id, expected_revision) as report:
+        flag, result, manuscript, check_run = await _scoped_flag(session, flag_id, instructor_id)
+        detail = flag.detail or result.detail or {}
+        key_kind, key_value = detail.get("key_kind"), detail.get("key_value")
+        if detail.get("kind") != "unverifiable_not_found" or not key_kind or not key_value:
+            raise ConflictError("This flag has no citation source to confirm.")
+        if not await cache.citation_source_cached(session, key_kind=key_kind, key_value=key_value):
+            raise NotFoundError("No cached lookup exists yet for this citation.")
+        stripped_reason = reason.strip()
+        flag.overridden = True
+        flag.override_reason = stripped_reason
+        flag.confirmed_citation_source = True
+        session.add(
+            AuditLog(
+                event_type="citation_source_confirmed",
+                check_run_id=run_id,
+                payload={
+                    "flag_id": flag_id,
+                    "check_result_id": result.id,
+                    "instructor_id": instructor_id,
+                    "reason": stripped_reason,
+                    "key_kind": key_kind,
+                    "key_value": key_value,
+                    "assessment_revision_before": expected_revision,
+                    "assessment_revision": report.assessment_revision,
+                },
+            )
         )
-    )
-    await session.commit()
-    await aggregate_and_score(session, result.check_run_id)
-    await session.refresh(flag)
-    return await _to_flag_out(session, flag, result, manuscript, check_run), result.check_run_id
+        await session.flush()
+        await aggregate_and_score(session, run_id, commit=False)
+        flag_out = await _to_flag_out(
+            session,
+            flag,
+            result,
+            manuscript,
+            check_run,
+            assessment_revision=report.assessment_revision,
+        )
+        out = ConfirmCitationSourceOut(
+            **flag_out.model_dump(), report=await get_report(session, run_id, instructor_id)
+        )
+    return out

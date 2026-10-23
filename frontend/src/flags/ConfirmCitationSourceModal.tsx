@@ -1,160 +1,52 @@
-// BUG-078/FEATURES.md §9 (screen 4i) — confirms a citation source
-// VERIDICAL couldn't find in CrossRef/Semantic Scholar/Open Library/
-// Google Books is nonetheless real (e.g. a local/Philippine source these
-// providers don't index). A modal, not OverrideControl's inline expand
-// (design review spec, 2026-08-24): unlike an ordinary override, this is
-// global (marks the shared citation_cache row so every OTHER instructor's
-// manuscript citing the identical source stops being flagged too) and
-// permanent (no un-confirm exists yet) — the hard rules already reserve a
-// custom Modal for exactly this class of consequential confirmation.
-import { useEffect, useId, useRef, useState } from "react";
-import { ApiError } from "../api/client";
-import type { CitationSourceKeyOut, FlagOut } from "../api/types";
-import { Modal, ModalBackdrop } from "../components/Modal";
-import { cx } from "../components/cx";
+// F5/F8, screen 4i: an explicit account-scoped source-existence judgment.
+import { useId, useRef, useState } from "react";
+import type { FlagOut } from "../api/types";
+import { INSTRUCTOR_NOTE_MAX_LENGTH } from "../config/ui";
+import { isAssessmentRevision } from "../report/assessmentRevision";
+import { Alert } from "../ui/Alert";
+import { Button } from "../ui/Button";
+import { Dialog } from "../ui/Dialog";
+import { FlagActionCurrentReview } from "./FlagActionCurrentReview";
 import { useConfirmCitationSource } from "./useFlag";
+import { useFlagActionReview } from "./useFlagActionReview";
+import { useExplicitActionFocus } from "../routing/useExplicitActionFocus";
 
-const KEY_LABEL: Record<CitationSourceKeyOut["kind"], string> = {
-  doi: "DOI",
-  isbn: "ISBN",
-  title: "title",
-};
-
-interface ConfirmCitationSourceModalProps {
-  flag: FlagOut;
-  onClose: () => void;
-}
-
-export function ConfirmCitationSourceModal({ flag, onClose }: ConfirmCitationSourceModalProps) {
+export function ConfirmCitationSourceModal({ flag, onClose, fallbackFocusRef }: { flag: FlagOut; onClose: () => void; fallbackFocusRef?: React.RefObject<HTMLHeadingElement | null> }) {
   const [reason, setReason] = useState("");
   const [attempted, setAttempted] = useState(false);
   const confirm = useConfirmCitationSource(flag.id);
-  const errorRef = useRef<HTMLParagraphElement>(null);
-  const reasonId = useId();
-  const reasonErrId = useId();
-  const key = flag.citation_source_key;
-
-  useEffect(() => {
-    if (confirm.isError) errorRef.current?.focus();
-  }, [confirm.isError]);
-
+  const review = useFlagActionReview(flag, "confirm-source");
+  const reasonRef = useRef<HTMLTextAreaElement>(null);
+  const followAction = useExplicitActionFocus(() => reasonRef.current);
+  const errorId = useId();
   const invalid = attempted && !reason.trim();
-
-  function handleConfirm() {
+  function submit() {
+    if (!review.isCurrent() || !review.canSubmit || !isAssessmentRevision(review.expectedRevision)) return;
     setAttempted(true);
-    if (!reason.trim()) return;
-    confirm.mutate(reason.trim(), { onSuccess: () => onClose() });
+    if (!reason.trim()) { reasonRef.current?.focus(); return; }
+    confirm.mutate({ reason: reason.trim(), expected_revision: review.expectedRevision }, {
+      onSuccess: () => { if (review.isCurrent()) onClose(); }, onError: review.freeze,
+    });
   }
-
-  const serverError =
-    confirm.error instanceof ApiError
-      ? confirm.error.message
-      : confirm.error
-        ? "Couldn't confirm this source. Try again."
-        : null;
-
-  return (
-    <ModalBackdrop>
-      <Modal
-        title="Confirm this source is legitimate?"
-        onClose={confirm.isPending ? undefined : onClose}
-        footer={
-          <>
-            <button
-              type="button"
-              onClick={onClose}
-              disabled={confirm.isPending}
-              className="flex h-11 items-center justify-center rounded-md border border-border-input bg-panel px-4 text-sm font-bold text-ink hover:bg-status-neutral-bg disabled:opacity-45"
-            >
-              Cancel
-            </button>
-            <button
-              type="button"
-              onClick={handleConfirm}
-              disabled={confirm.isPending}
-              aria-busy={confirm.isPending ? "true" : undefined}
-              className="flex h-11 items-center justify-center rounded-md bg-action px-4 text-sm font-bold text-on-action hover:bg-action-hover disabled:opacity-60"
-            >
-              {confirm.isPending ? "Confirming." : "Confirm this source"}
-            </button>
-          </>
-        }
-      >
-        <div className="signal-group-flow" aria-busy={confirm.isPending}>
-          <div className="flex flex-col gap-1">
-            <span className="text-xs font-semibold tracking-header text-ink-tertiary uppercase">
-              Source
-            </span>
-            {/* BUG-078 (UX review finding, live-reproduced): an unbounded
-                blockquote on a genuinely long evidence_excerpt pushed the
-                mandatory disclosure, reason field, and Confirm/Cancel
-                buttons off-screen -- capped and internally scrollable so
-                the rest of the modal (and the decision itself) always
-                stays reachable without scrolling past the whole quote. */}
-            <blockquote className="max-h-32 overflow-y-auto rounded-md border border-border bg-page px-3 py-2 text-sm break-words text-ink">
-              {flag.evidence_excerpt}
-            </blockquote>
-            {key?.kind === "title" ? (
-              <p className="rounded-md border border-status-caution-text/25 bg-status-caution-bg px-3 py-2 text-xs text-status-caution-text">
-                Matched by title, not a DOI or ISBN. A title match is less precise than an ID
-                match, so double-check this is really the same source before confirming.
-              </p>
-            ) : (
-              key && (
-                <p className="text-xs text-ink-tertiary break-words">
-                  Matched by {KEY_LABEL[key.kind]}: {key.value}
-                </p>
-              )
-            )}
-          </div>
-          <p className="text-sm text-ink-secondary">
-            Confirming this resolves this flag on this report, the same as an override.
-            VERIDICAL's readiness band recalculates immediately.
-          </p>
-          <p className="text-sm text-ink-secondary">
-            It also does one more thing. VERIDICAL checks this exact source, by its DOI, ISBN, or
-            title, across every manuscript that cites it. Confirming it here marks the source
-            itself as verified, so it will stop being flagged as unverifiable on{" "}
-            <b>any other manuscript that cites it, from any instructor</b>, not just this one.
-          </p>
-          <p className="text-sm text-ink-secondary">
-            <b>There's no way to undo this from within VERIDICAL yet.</b>
-          </p>
-          <div className="flex flex-col gap-1">
-            <label htmlFor={reasonId} className="text-sm font-medium text-ink">
-              Where you verified this (required)
-            </label>
-            <input
-              id={reasonId}
-              type="text"
-              value={reason}
-              onChange={(event) => {
-                setReason(event.target.value);
-                if (attempted) setAttempted(false);
-              }}
-              placeholder="e.g. publisher website, DOI resolver, institutional repository, physical copy"
-              disabled={confirm.isPending}
-              aria-invalid={invalid ? "true" : undefined}
-              aria-describedby={invalid ? reasonErrId : undefined}
-              className={cx(
-                "h-11 rounded-md border px-3 text-base text-ink sm:h-9",
-                invalid ? "border-2 border-status-attention-text" : "border-border-input",
-              )}
-            />
-            {invalid && (
-              <p id={reasonErrId} role="alert" className="text-sm text-status-attention-text">
-                Enter where you verified this before confirming.
-              </p>
-            )}
-          </div>
-          {serverError && (
-            <p ref={errorRef} role="alert" tabIndex={-1} className="text-sm font-medium text-danger">
-              <span className="sr-only">Error: </span>
-              {serverError}
-            </p>
-          )}
-        </div>
-      </Modal>
-    </ModalBackdrop>
-  );
+  return <Dialog title="Confirm this source exists?" initialFocusTitle fallbackFocusRef={fallbackFocusRef} onClose={confirm.isPending ? undefined : onClose}
+    actions={<><Button variant="secondary" disabled={confirm.isPending} onClick={onClose}>Cancel</Button>
+      <Button variant="brand" disabled={!review.canSubmit} busy={confirm.isPending} onClick={submit}>Confirm this source</Button></>}>
+    <div className="signal-group-flow" aria-busy={confirm.isPending}>
+      <h3>Reference being reviewed</h3>
+      <blockquote className="max-h-32 overflow-y-auto rounded-md border border-border bg-page px-3 py-2 text-sm break-words text-ink">{flag.evidence_excerpt}</blockquote>
+      {flag.citation_source_key && <p>Source key: {flag.citation_source_key.kind} - {flag.citation_source_key.value}</p>}
+      {flag.citation_source_key?.kind === "title" && <Alert title="Title matches are less precise" tone="warning">Check that this is the reference cited in the manuscript.</Alert>}
+      <p>This resolves this finding and recalculates this report. VERIDICAL may reuse your confirmation for this exact reference in later checks in your account.</p>
+      <p>It does not confirm other references or change another instructor's reports. Confirming source existence does not establish support for a manuscript claim.</p>
+      <p>This action cannot be undone through the interface.</p>
+      <FlagActionCurrentReview review={review} busy={confirm.isPending} onRebind={trigger => followAction(trigger, review.rebind)} />
+      <label className="signal-evidence-field"><span>Where you verified this (required)</span>
+        <textarea ref={reasonRef} rows={4} maxLength={INSTRUCTOR_NOTE_MAX_LENGTH} value={reason}
+          disabled={confirm.isPending} aria-invalid={invalid || undefined} aria-describedby={invalid ? errorId : undefined}
+          onChange={event => { setReason(event.target.value); review.reasonChanged(); setAttempted(false); }} />
+      </label>
+      {invalid && <p id={errorId} role="alert" className="signal-field-error">Enter where you verified this before confirming.</p>}
+      {confirm.isError && <Alert title="Saving could not be confirmed" tone="error" role="alert">Your entered reason is kept. Review the current assessment before trying again.</Alert>}
+    </div>
+  </Dialog>;
 }

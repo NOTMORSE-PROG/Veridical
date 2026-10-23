@@ -25,6 +25,7 @@ function Review() {
 function setup() {
   vi.spyOn(document, "hasFocus").mockReturnValue(true);
   let rows = [result(1), result(2), result(3, { outcome: "passed", score: 100, basis: "rule" })];
+  let revision = 0;
   let holdReport = false;
   let failReport = false;
   let staleReport = false;
@@ -32,9 +33,9 @@ function setup() {
   let failList = 0;
   const reports: Array<(response: Response) => void> = [];
   const posts: Array<{ id: number; finish: (success?: boolean) => void }> = [];
-  const report = () => ({ check_run_id: 5, results: rows, pending_review_count: rows.filter((row) => row.outcome === "escalated").length });
+  const report = () => ({ assessment_revision: revision, decision: null, check_run_id: 5, results: rows, pending_review_count: rows.filter((row) => row.outcome === "escalated").length });
   const reportResponse = () => new Response(JSON.stringify(failReport ? { error: { code: "unavailable", message: "Controlled report read failure" } }
-    : staleReport ? { ...report(), results: [result(3, { outcome: "passed", score: 100, basis: "rule" })] } : report()), { status: failReport ? 503 : 200 });
+    : staleReport ? { ...report(), assessment_revision: 0, results: [result(3, { outcome: "passed", score: 100, basis: "rule" })] } : report()), { status: failReport ? 503 : 200 });
   const fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const path = String(input);
     const resolve = path.match(/\/escalated\/(\d+)\/resolve$/);
@@ -46,6 +47,7 @@ function setup() {
         const row = result(id, { outcome: body.resolution === "needs_document" ? "not_applicable" : "passed",
           score: body.resolution === "needs_document" ? null : 100,
           resolution: { type: body.resolution, reason: body.reason, ai_majority_verdict: null } });
+        revision += 1;
         rows = rows.map((old) => old.criterion_id === row.criterion_id ? row : old);
         finish(new Response(JSON.stringify({ check_result_id: id, outcome: row.outcome, score: row.score, report: report() })));
       } });
@@ -89,12 +91,11 @@ describe("saved judgment retrieval", () => {
     expect(screen.getByRole("heading", { name: "Criteria needing your judgment" })).toHaveFocus();
     await act(async () => { control.posts[0].finish(); });
     expect(await screen.findByRole("heading", { name: "Judgment saved" })).toHaveFocus();
-    expect(screen.getByText("Last loaded: 0 saved instructor judgments.")).toBeVisible();
+    expect(screen.getByText("Last loaded: 1 saved instructor judgment.")).toBeVisible();
     expect(screen.queryByText("No saved instructor judgments yet.")).not.toBeInTheDocument();
     const view = screen.getByRole("button", { name: "View saved judgment: Custom requirement 1" });
     view.focus(); fireEvent.click(view);
-    expect(await screen.findByText("Loading the recorded judgment. Your saved acknowledgment remains above.")).toBeVisible();
-    expect(document.getElementById("criterion-record-5-101")).toBeNull();
+    await waitFor(() => expect(document.getElementById("criterion-record-5-101")).toHaveFocus());
     expect(screen.queryByText("That recorded criterion is not available in this report.")).not.toBeInTheDocument();
     await act(async () => { control.release(); });
     await waitFor(() => expect(document.getElementById("criterion-record-5-101")).toHaveFocus());
@@ -107,7 +108,7 @@ describe("saved judgment retrieval", () => {
     await confirm(1); await act(async () => { control.posts[0].finish(); });
     const view = await screen.findByRole("button", { name: "View saved judgment: Custom requirement 1" });
     view.focus(); fireEvent.click(view);
-    await screen.findByText("Loading the recorded judgment. Your saved acknowledgment remains above.");
+    await waitFor(() => expect(document.getElementById("criterion-record-5-101")).not.toBeNull());
     const other = screen.getByRole("button", { name: "Another task" }); other.focus();
     const disclosure = screen.getByText("Recorded criterion results").closest("details")!; disclosure.open = false;
     await act(async () => { control.release(); });
@@ -161,9 +162,10 @@ describe("saved judgment retrieval", () => {
     await confirm(1); await act(async () => { control.posts[0].finish(); });
     const view = await screen.findByRole("button", { name: "View saved judgment: Custom requirement 1" }); view.focus(); fireEvent.click(view);
     await act(async () => { control.release(false); });
-    expect(await screen.findByText("Your judgment was saved, but the recorded result could not be loaded.")).toBeVisible();
+    expect(await screen.findByText(/Could not load the current saved judgments/)).toBeVisible();
+    expect(document.getElementById("criterion-record-5-101")).not.toBeNull();
     expect(screen.getByRole("heading", { name: "Judgment saved" })).toBeVisible();
-    control.restoreReads(); fireEvent.click(screen.getByRole("button", { name: "Retry recorded result" }));
+    control.restoreReads(); fireEvent.click(screen.getByRole("button", { name: "Retry saved judgments" }));
     await screen.findByRole("button", { name: "View saved judgments (1)" });
     expect(control.fetch.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(1);
   });
@@ -171,23 +173,20 @@ describe("saved judgment retrieval", () => {
   it("has no receipt or saved-count increment when the save fails", async () => {
     const control = setup(); const button = await confirm(1);
     await act(async () => { control.posts[0].finish(false); });
-    await screen.findByText("Could not save this resolution");
-    expect(button).toBeEnabled();
+    await screen.findByText("Saving could not be confirmed");
+    expect(button).toBeDisabled();
     expect(screen.getByRole("textbox")).toHaveValue("Private reason for requirement 1.");
     expect(screen.queryByRole("heading", { name: "Judgment saved" })).not.toBeInTheDocument();
     expect(screen.getByText("No saved instructor judgments yet.")).toBeVisible();
   });
 
-  it("does not call a successfully loaded older snapshot zero saved judgments after a confirmed save", async () => {
+  it("retains the newer acknowledged judgment when an older GET completes later", async () => {
     const control = setup(); await screen.findByText("No saved instructor judgments yet."); control.hold();
     await confirm(1); await act(async () => { control.posts[0].finish(); });
     await act(async () => { control.release(true, true); });
-    expect(await screen.findByText("Your judgment was saved, but the loaded report does not confirm every saved result.")).toBeVisible();
-    expect(screen.getByText("Last loaded: 0 saved instructor judgments.")).toBeVisible();
+    expect(await screen.findByRole("button", { name: "View saved judgments (1)" })).toBeVisible();
     expect(screen.queryByText("No saved instructor judgments yet.")).not.toBeInTheDocument();
-    expect(screen.queryByText("No criterion records in this section")).not.toBeInTheDocument();
-    control.restoreReads(); fireEvent.click(screen.getByRole("button", { name: "Retry saved judgments" }));
-    await screen.findByRole("button", { name: "View saved judgments (1)" });
+    expect(screen.queryByText("Your judgment was saved, but the loaded report does not confirm every saved result.")).not.toBeInTheDocument();
     expect(control.fetch.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(1);
   });
 

@@ -6,6 +6,7 @@ import { renderWithReviewProviders as renderWithProviders, stubFetchByPath } fro
 import { SignalReportPage } from "./SignalReport";
 
 const BASE_REPORT: ReportOut = {
+  assessment_revision: 0,
   check_run_id: 5,
   manuscript_id: 5,
   manuscript_group_label: "Group Syntax",
@@ -130,7 +131,7 @@ describe("SignalReportPage", () => {
     await waitFor(() => expect(target).toHaveFocus());
   });
 
-  it("puts unresolved judgment first and blocks every final-decision action", async () => {
+  it("puts unresolved judgment first, permits reasoned return and blocks approval/rejection", async () => {
     const report: ReportOut = {
       ...BASE_REPORT,
       status: "needs_review",
@@ -160,7 +161,7 @@ describe("SignalReportPage", () => {
     expect(screen.getByText(ESCALATED.criterion_text)).toBeInTheDocument();
     expect(screen.getByText("1 unresolved")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Approve for defense" })).toBeDisabled();
-    expect(screen.getByRole("button", { name: "Return for revision" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Return for revision" })).toBeEnabled();
     expect(screen.getByRole("button", { name: "Reject manuscript" })).toBeDisabled();
   });
 
@@ -857,6 +858,7 @@ describe("SignalReportPage", () => {
 
     fireEvent.click(await screen.findByRole("button", { name: "Reject manuscript" }));
     const dialog = screen.getByRole("dialog", { name: "Reject this manuscript?" });
+    await waitFor(() => expect(within(dialog).getByRole("button", { name: "Reject manuscript" })).toBeEnabled());
     fireEvent.click(within(dialog).getByRole("button", { name: "Reject manuscript" }));
     expect(within(dialog).getByRole("alert")).toHaveTextContent("Enter a reason before confirming.");
   });
@@ -900,7 +902,7 @@ function readFailurePage(initial: ReportOut = BASE_REPORT, escalated: EscalatedI
         const body = JSON.parse(String(init.body));
         const row = { ...BASE_REPORT.results[0], criterion_id: ESCALATED.criterion_id, text: ESCALATED.criterion_text,
           resolution: { type: body.resolution, reason: body.reason, ai_majority_verdict: null } };
-        current = { ...current, pending_review_count: 0, results: [...BASE_REPORT.results, row] };
+        current = { ...current, assessment_revision: current.assessment_revision! + 1, pending_review_count: 0, results: [...BASE_REPORT.results, row] };
         return new Response(JSON.stringify({ check_result_id: ESCALATED.check_result_id, outcome: "passed", score: 100, report: current }));
       }
     }
@@ -934,10 +936,10 @@ describe("full report background-read continuity", () => {
     expect(screen.getByText("Last loaded readiness band")).toBeVisible();
     const view = screen.getByRole("button", { name: `View saved judgment: ${ESCALATED.criterion_text}` });
     view.focus(); fireEvent.click(view);
-    expect(await screen.findByText("Your judgment was saved, but the recorded result could not be loaded.")).toBeVisible();
-    expect(document.getElementById("criterion-record-5-2")).toBeNull();
+    expect(await screen.findByText(/Could not load the current saved judgments/)).toBeVisible();
+    expect(document.getElementById("criterion-record-5-2")).not.toBeNull();
     const other = screen.getByRole("link", { name: "Open manuscript" }); other.focus();
-    c.fresh(); fireEvent.click(screen.getByRole("button", { name: "Retry recorded result" }));
+    c.fresh(); fireEvent.click(screen.getByRole("button", { name: "Retry saved judgments" }));
     await waitFor(() => expect(document.getElementById("criterion-record-5-2")).not.toBeNull());
     expect(other).toHaveFocus(); expect(view.isConnected).toBe(true); expect(c.posts()).toBe(1);
     expect(screen.queryByText("Could not update this report")).not.toBeInTheDocument();
@@ -955,11 +957,11 @@ describe("full report background-read continuity", () => {
     await within(dialog).findByText("Reload the report before making or reopening a final decision.");
     expect(note).toHaveFocus(); expect(note).toHaveValue("Preserve this instructor note through the refresh.");
     const confirm = within(dialog).getByRole("button", { name: reopen ? "Reopen decision" : "Approve for defense" });
-    expect(confirm).toHaveAttribute("aria-disabled", "true"); fireEvent.click(confirm); expect(c.posts()).toBe(0);
+    expect(confirm).toBeDisabled(); fireEvent.click(confirm); expect(c.posts()).toBe(0);
     c.hold(); c.fresh(); fireEvent.click(within(dialog).getByRole("button", { name: "Retry report" }));
-    expect(confirm).toHaveAttribute("aria-disabled", "true"); fireEvent.click(confirm); expect(c.posts()).toBe(0);
+    expect(confirm).toBeDisabled(); fireEvent.click(confirm); expect(c.posts()).toBe(0);
     await act(async () => { c.release(); });
-    await waitFor(() => expect(confirm).not.toHaveAttribute("aria-disabled"));
+    await waitFor(() => expect(confirm).toBeEnabled());
     expect(note).toHaveValue("Preserve this instructor note through the refresh.");
     fireEvent.click(within(dialog).getByRole("button", { name: reopen ? "Keep decision" : "Cancel" }));
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument(); expect(c.posts()).toBe(0);
@@ -972,9 +974,9 @@ describe("full report background-read continuity", () => {
     fireEvent.change(note, { target: { value: "Original note stays available." } }); note.focus();
     c.fail(); await act(async () => { await c.refresh(); });
     await within(dialog).findByText("Reload the report before making or reopening a final decision.");
-    c.fresh({ ...BASE_REPORT, decision: "returned", decided_at: "2026-10-23T00:00:00Z" });
+    c.fresh({ ...BASE_REPORT, assessment_revision: 1, decision: "returned", decided_at: "2026-10-23T00:00:00Z" });
     fireEvent.click(within(dialog).getByRole("button", { name: "Retry report" }));
-    await within(dialog).findByText("The report changed. Close this dialog and review its current criteria and decision before deciding.");
+    await within(dialog).findByRole("button", { name: "Review current assessment" });
     expect(note).toHaveFocus(); expect(note).toHaveValue("Original note stays available.");
     fireEvent.click(within(dialog).getByRole("button", { name: "Approve for defense" })); expect(c.posts()).toBe(0);
   });
@@ -996,9 +998,9 @@ it("keeps an open reopen reason but refuses a decision that changed during repor
   fireEvent.change(note, { target: { value: "Reopen reason survives a changed record." } }); note.focus();
   c.fail(); await act(async () => { await c.refresh(); });
   await within(dialog).findByText("Reload the report before making or reopening a final decision.");
-  c.fresh({ ...BASE_REPORT, decision: "returned", decided_at: "2026-10-23T00:00:00Z" });
+  c.fresh({ ...BASE_REPORT, assessment_revision: 1, decision: "returned", decided_at: "2026-10-23T00:00:00Z" });
   fireEvent.click(within(dialog).getByRole("button", { name: "Retry report" }));
-  await within(dialog).findByText("The decision changed. Close this dialog and review its current record before reopening.");
+  await within(dialog).findByRole("button", { name: "Review current assessment" });
   expect(note).toHaveFocus(); expect(note).toHaveValue("Reopen reason survives a changed record.");
   fireEvent.click(within(dialog).getByRole("button", { name: "Reopen decision" })); expect(c.posts()).toBe(0);
   vi.unstubAllGlobals();

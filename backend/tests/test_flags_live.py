@@ -145,7 +145,7 @@ async def _seed_flagged_run(session):
     )
     session.add(flag)
     await session.commit()
-    await aggregate_and_score(session, check_run.id)
+    await aggregate_and_score(session, check_run.id, commit=True)
     return instructor, check_run, flag
 
 
@@ -171,22 +171,26 @@ async def test_override_recomputes_score_live_and_preserves_the_original_finding
     async with session_factory() as session:
         instructor, check_run, flag = await _seed_flagged_run(session)
 
-        before = await aggregate_and_score(session, check_run.id)
+        before = await aggregate_and_score(session, check_run.id, commit=True)
         # High-severity flag deduction applied — Not Ready despite a
         # perfect 100% weighted criterion score (ENGINEERING §5).
         assert before.status == ReadinessStatus.not_ready
 
-        flag_out, check_run_id = await override_flag(
-            session, flag.id, instructor.id, "Verified — this citation is not actually retracted."
+        flag_out = await override_flag(
+            session,
+            flag.id,
+            instructor.id,
+            "Verified — this citation is not actually retracted.",
+            expected_revision=0,
         )
-        assert check_run_id == check_run.id
+        assert flag_out.check_run_id == check_run.id
         assert flag_out.overridden is True
         assert flag_out.override_reason == "Verified — this citation is not actually retracted."
         # Original AI finding untouched — never destroyed by the override:
         assert flag_out.evidence_excerpt == "Wang, S. (2019). A study of things."
         assert flag_out.ai_verdict_summary == "not_supported"
 
-        after = await aggregate_and_score(session, check_run.id)
+        after = await aggregate_and_score(session, check_run.id, commit=True)
         assert after.status == ReadinessStatus.ready  # deduction gone, high-flag gate cleared
         assert after.composite_score == Decimal("100.00")
 
@@ -201,12 +205,22 @@ async def test_override_is_blocked_once_the_report_is_decided(session_factory):
     with no reopen and no audit trace of the drift."""
     async with session_factory() as session:
         instructor, check_run, flag = await _seed_flagged_run(session)
-        await decide_report(session, check_run.id, instructor.id, "rejected", None)
+        await decide_report(
+            session, check_run.id, instructor.id, "rejected", None, expected_revision=0
+        )
 
         with pytest.raises(ConflictError):
-            await override_flag(session, flag.id, instructor.id, "Trying to fix it post-decision.")
+            await override_flag(
+                session,
+                flag.id,
+                instructor.id,
+                "Trying to fix it post-decision.",
+                expected_revision=0,
+            )
 
         # Confirmed the override never applied — not just that it raised.
+        await session.refresh(flag)
+        await session.refresh(instructor)
         flag_out = await get_flag(session, flag.id, instructor.id)
         assert flag_out.overridden is False
 
@@ -261,7 +275,7 @@ async def _seed_confirmable_citation_flag(session):
     )
     session.add(flag)
     await session.commit()
-    await aggregate_and_score(session, check_run.id)
+    await aggregate_and_score(session, check_run.id, commit=True)
     return instructor, check_run, flag
 
 
@@ -277,10 +291,14 @@ async def test_confirm_citation_source_overrides_owned_flag_without_global_confi
         )
         assert pre_out.confirmed_citation_source is False
 
-        flag_out, check_run_id = await confirm_citation_source(
-            session, flag.id, instructor.id, "Verified on the publisher's own website."
+        flag_out = await confirm_citation_source(
+            session,
+            flag.id,
+            instructor.id,
+            "Verified on the publisher's own website.",
+            expected_revision=0,
         )
-        assert check_run_id == check_run.id
+        assert flag_out.check_run_id == check_run.id
         assert flag_out.overridden is True
         assert flag_out.override_reason == "Verified on the publisher's own website."
         assert flag_out.confirmed_citation_source is True
@@ -311,7 +329,11 @@ async def test_confirmation_reuse_is_owner_scoped_and_never_hides_retraction(ses
         session.add(other)
         await session.commit()
         await confirm_citation_source(
-            session, flag.id, instructor.id, "Checked in the publisher catalogue."
+            session,
+            flag.id,
+            instructor.id,
+            "Checked in the publisher catalogue.",
+            expected_revision=0,
         )
         key = {"key_kind": "doi", "key_value": "10.9999/local-source"}
         assert await is_instructor_confirmed(
@@ -364,8 +386,12 @@ async def test_confirm_citation_source_rejects_a_flag_with_nothing_to_confirm(se
     async with session_factory() as session:
         instructor, _, flag = await _seed_flagged_run(session)  # ordinary retraction-shaped flag
         with pytest.raises(ConflictError):
-            await confirm_citation_source(session, flag.id, instructor.id, "I checked it.")
+            await confirm_citation_source(
+                session, flag.id, instructor.id, "I checked it.", expected_revision=0
+            )
         # Confirmed it never applied -- not just that it raised.
+        await session.refresh(flag)
+        await session.refresh(instructor)
         flag_out = await get_flag(session, flag.id, instructor.id)
         assert flag_out.overridden is False
         assert flag_out.confirmed_citation_source is False
@@ -380,9 +406,12 @@ async def test_confirm_citation_source_is_blocked_once_the_report_is_decided(ses
             instructor.id,
             "rejected",
             "Deliberately disagreeing for this test.",
+            expected_revision=0,
         )
         with pytest.raises(ConflictError):
-            await confirm_citation_source(session, flag.id, instructor.id, "I checked it.")
+            await confirm_citation_source(
+                session, flag.id, instructor.id, "I checked it.", expected_revision=0
+            )
 
 
 async def _seed_two_flags_one_check_result(session):
@@ -678,7 +707,7 @@ async def test_no_verdict_high_flag_does_not_force_not_ready_live(session_factor
         session.add(no_verdict_flag)
         await session.commit()
 
-        report = await aggregate_and_score(session, check_run.id)
+        report = await aggregate_and_score(session, check_run.id, commit=True)
         assert report.status == ReadinessStatus.ready  # not forced not_ready by the empty flag
         assert report.composite_score == Decimal("100.00")
 
@@ -693,4 +722,4 @@ async def test_cross_instructor_access_is_rejected_not_leaked(session_factory):
         with pytest.raises(NotFoundError):
             await get_flag(session, flag.id, stranger.id)
         with pytest.raises(NotFoundError):
-            await override_flag(session, flag.id, stranger.id, "reason")
+            await override_flag(session, flag.id, stranger.id, "reason", expected_revision=0)
