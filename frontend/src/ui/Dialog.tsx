@@ -35,6 +35,7 @@ export function Dialog({
   onClose,
   wide = false,
   returnFocusTarget,
+  shouldRestoreFocus,
   fallbackFocusRef,
   closeButtonRef,
   initialFocusTitle = false,
@@ -47,6 +48,8 @@ export function Dialog({
   // Null preserves the captured trigger. Callers can supply a workflow
   // continuation and a persistent fallback without changing other dialogs.
   returnFocusTarget?: () => HTMLElement | null;
+  // An accepted caller may retire restoration after a newer workflow handoff.
+  shouldRestoreFocus?: () => boolean;
   fallbackFocusRef?: RefObject<HTMLElement | null>;
   closeButtonRef?: RefObject<HTMLButtonElement | null>;
   initialFocusTitle?: boolean;
@@ -60,8 +63,9 @@ export function Dialog({
   // focus before effects run; capturing inside the effect would then
   // remember the soon-to-be-unmounted field instead of the trigger.
   const returnTarget = useRef<HTMLElement | null>(document.activeElement as HTMLElement | null);
-  const returnOptions = useRef({ returnFocusTarget, fallback: () => fallbackFocusRef?.current ?? null });
+  const returnOptions = useRef({ returnFocusTarget, shouldRestoreFocus, fallback: () => fallbackFocusRef?.current ?? null });
   returnOptions.current.returnFocusTarget = returnFocusTarget;
+  returnOptions.current.shouldRestoreFocus = shouldRestoreFocus;
   returnOptions.current.fallback = () => fallbackFocusRef?.current ?? null;
 
   useEffect(() => {
@@ -78,6 +82,7 @@ export function Dialog({
       // dialog or deliberate outside focus before attempting either target.
       const active = document.activeElement as HTMLElement | null;
       if (available(active) && !dialog?.contains(active)) return;
+      if (options.shouldRestoreFocus && !options.shouldRestoreFocus()) return;
       const preferred = options.returnFocusTarget?.() ?? focusReturnTarget;
       if (!focusTarget(preferred)) focusTarget(options.fallback());
     };

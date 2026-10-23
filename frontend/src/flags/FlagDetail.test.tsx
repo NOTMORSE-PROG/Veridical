@@ -1,4 +1,6 @@
-import { fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { notifyManager, useQueryClient } from "@tanstack/react-query";
+import { ME_QUERY_KEY } from "../auth/useAuth";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ConfirmCitationSourceOut, FlagOut, ReportOut } from "../api/types";
 import { renderWithProviders, stubFetchByPath as baseStubFetchByPath } from "../test/renderWithProviders";
@@ -748,3 +750,127 @@ it.each(["Override", "Confirm this source"].flatMap(action => [503, 403].map(sta
     expect(editor).toHaveValue("Exact unsaved source verification reason");
   },
 );
+
+describe("BUG-459 accepted finding continuation", () => {
+  afterEach(() => {
+    notifyManager.setScheduler(callback => setTimeout(callback, 0));
+    vi.unstubAllGlobals();
+  });
+  it.each(["Override", "Confirm this source"].flatMap(action =>
+    ["none", "internal-tab", "title-wheel", "internal-pointer", "outside-dialog", "window-blur"].map(intent => ({ action, intent }))))(
+    "$action commits a persistent heading before deferred delivery ($intent)",
+    async ({ action, intent }) => {
+      const original = makeFlag();
+      const reason = "Checked this exact source independently.";
+      const confirmed = action === "Confirm this source";
+      const out: ConfirmCitationSourceOut = { ...original, assessment_revision: 1,
+        overridden: true, confirmed_citation_source: confirmed, override_reason: reason,
+        report: { ...REPORT, assessment_revision: 1 } };
+      let release!: () => void;
+      let posted = false;
+      const gate = new Promise<void>(resolve => { release = resolve; });
+      const ordinary = stubFetchByPath({ "/flags/20": original });
+      vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        if (String(input).endsWith(confirmed ? "/confirm-source" : "/override")) {
+          posted = true; await gate;
+          return new Response(JSON.stringify(out));
+        }
+        return ordinary(input, init);
+      }));
+      const view = renderWithProviders(<FlagDetailPage />, { route: "/flags/20", path: "/flags/:flagId", reviewRunId: 44 });
+      const trigger = await screen.findByRole("button", { name: action });
+      const persistentHeading = screen.getByRole("heading", { name: "Resolve only after checking the evidence" });
+      trigger.focus(); fireEvent.click(trigger);
+      const dialog = await screen.findByRole("dialog");
+      fireEvent.change(within(dialog).getByRole("textbox"), { target: { value: reason } });
+      const submit = within(dialog).getByRole("button", { name: confirmed ? action : "Confirm override" });
+      await waitFor(() => expect(submit).toBeEnabled());
+      fireEvent.click(submit);
+      await waitFor(() => expect(posted).toBe(true));
+      const queued: Array<() => void> = [];
+      notifyManager.setScheduler(callback => queued.push(callback));
+      let outside: HTMLButtonElement | undefined;
+      try {
+        if (intent === "internal-tab") { dialog.focus(); fireEvent.keyDown(dialog, { key: "Tab" }); }
+        if (intent === "title-wheel") {
+          within(dialog).getByRole("heading", { name: confirmed ? "Confirm this source exists?" : "Override this finding?" }).focus();
+          fireEvent.wheel(dialog);
+        }
+        if (intent === "internal-pointer") fireEvent.pointerDown(dialog);
+        if (intent === "outside-dialog") {
+          outside = document.createElement("button"); outside.textContent = "New workflow";
+          document.body.append(outside); outside.focus();
+        }
+        if (intent === "window-blur") fireEvent(window, new Event("blur"));
+        await act(async () => { release(); await gate; });
+        const heading = await screen.findByRole("heading", { name: confirmed ? "Source confirmed" : "Finding overridden" });
+        expect(heading).toBe(persistentHeading);
+        expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+        if (intent === "outside-dialog") expect(outside).toHaveFocus();
+        else if (intent === "window-blur") expect(heading).not.toHaveFocus();
+        else expect(heading).toHaveFocus();
+        // The instructor may move on after close, before observers deliver.
+        const annotation = screen.getByRole("textbox", { name: "Annotation" });
+        annotation.focus();
+        await act(async () => { while (queued.length) queued.shift()!(); });
+        expect(screen.getByRole("heading", { name: confirmed ? "Source confirmed" : "Finding overridden" })).toBe(heading);
+        expect(annotation).toHaveFocus();
+      } finally {
+        release();
+        notifyManager.setScheduler(callback => setTimeout(callback, 0));
+        await act(async () => { while (queued.length) queued.shift()!(); });
+        outside?.remove(); view.unmount();
+      }
+    },
+  );
+
+  it.each(["Override", "Confirm this source"].flatMap(action =>
+    ["unchanged", "actor-replaced", "actor-returned", "query-replaced"].map(owner => ({ action, owner }))))(
+    "$action revalidates ownership at close ($owner)",
+    async ({ action, owner }) => {
+      const reason = "Verified the exact saved source.";
+      const confirmed = action === "Confirm this source";
+      const out = { ...makeFlag(), assessment_revision: 1, overridden: true,
+        confirmed_citation_source: confirmed, override_reason: reason,
+        report: { ...REPORT, assessment_revision: 1 } };
+      vi.stubGlobal("fetch", stubFetchByPath({ "/flags/20": makeFlag(),
+        [confirmed ? "/flags/20/confirm-source" : "/flags/20/override"]: out }));
+      let client!: ReturnType<typeof useQueryClient>;
+      function Fixture() { client = useQueryClient(); return <FlagDetailPage />; }
+      const view = renderWithProviders(<Fixture />, { route: "/flags/20", path: "/flags/:flagId", reviewRunId: 44 });
+      const trigger = await screen.findByRole("button", { name: action });
+      trigger.focus(); fireEvent.click(trigger);
+      const dialog = await screen.findByRole("dialog");
+      fireEvent.change(within(dialog).getByRole("textbox"), { target: { value: reason } });
+      const submit = within(dialog).getByRole("button", { name: confirmed ? action : "Confirm override" });
+      await waitFor(() => expect(submit).toBeEnabled());
+      const queued: Array<() => void> = [];
+      notifyManager.setScheduler(callback => queued.push(callback));
+      // Mutation acceptance and React close commit are distinct boundaries.
+      // Replace ownership at the supported success event between them.
+      const stop = client.getMutationCache().subscribe(event => {
+        if (event.type !== "updated" || event.action.type !== "success") return;
+        stop();
+        if (owner === "query-replaced") {
+          client.removeQueries({ queryKey: ME_QUERY_KEY, exact: true });
+          client.setQueryData(ME_QUERY_KEY, { id: 1 });
+        } else if (owner !== "unchanged") {
+          client.setQueryData(ME_QUERY_KEY, { id: 2 });
+          if (owner === "actor-returned") client.setQueryData(ME_QUERY_KEY, { id: 1 });
+        }
+      });
+      try {
+        fireEvent.click(submit);
+        await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+        await act(async () => { while (queued.length) queued.shift()!(); });
+        const heading = screen.getByRole("heading", { name: confirmed ? "Source confirmed" : "Finding overridden" });
+        if (owner === "unchanged") expect(heading).toHaveFocus();
+        else expect(heading).not.toHaveFocus();
+      } finally {
+        stop(); notifyManager.setScheduler(callback => setTimeout(callback, 0));
+        await act(async () => { while (queued.length) queued.shift()!(); });
+        view.unmount();
+      }
+    },
+  );
+});

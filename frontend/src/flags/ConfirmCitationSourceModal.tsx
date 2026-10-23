@@ -10,8 +10,9 @@ import { FlagActionCurrentReview } from "./FlagActionCurrentReview";
 import { useConfirmCitationSource } from "./useFlag";
 import { useFlagActionReview } from "./useFlagActionReview";
 import { useExplicitActionFocus } from "../routing/useExplicitActionFocus";
+import { useFindingCompletion } from "./useFindingCompletion";
 
-export function ConfirmCitationSourceModal({ flag, onClose, fallbackFocusRef }: { flag: FlagOut; onClose: () => void; fallbackFocusRef?: React.RefObject<HTMLHeadingElement | null> }) {
+export function ConfirmCitationSourceModal({ flag, onClose, onAccepted, continuationIsCurrent, fallbackFocusRef }: { flag: FlagOut; onClose: () => void; onAccepted: (flag: FlagOut) => boolean; continuationIsCurrent: () => boolean; fallbackFocusRef?: React.RefObject<HTMLHeadingElement | null> }) {
   const [reason, setReason] = useState("");
   const [attempted, setAttempted] = useState(false);
   const confirm = useConfirmCitationSource(flag.id);
@@ -20,17 +21,26 @@ export function ConfirmCitationSourceModal({ flag, onClose, fallbackFocusRef }: 
   const followAction = useExplicitActionFocus(() => reasonRef.current);
   const errorId = useId();
   const invalid = attempted && !reason.trim();
+  const completion = useFindingCompletion();
+  const [accepted, setAccepted] = useState(false);
   function submit() {
-    if (!review.isCurrent() || !review.canSubmit || !isAssessmentRevision(review.expectedRevision)) return;
+    if (accepted || !review.isCurrent() || !review.canSubmit || !isAssessmentRevision(review.expectedRevision)) return;
     setAttempted(true);
     if (!reason.trim()) { reasonRef.current?.focus(); return; }
+    completion.begin(reasonRef.current);
     confirm.mutate({ reason: reason.trim(), expected_revision: review.expectedRevision }, {
-      onSuccess: () => { if (review.isCurrent()) onClose(); }, onError: review.freeze,
+      onSuccess: out => {
+        if (!review.isCurrent()) return;
+        if (onAccepted(out)) { completion.accept(); setAccepted(true); }
+        else review.freeze();
+      }, onError: review.freeze,
     });
   }
-  return <Dialog title="Confirm this source exists?" initialFocusTitle fallbackFocusRef={fallbackFocusRef} onClose={confirm.isPending ? undefined : onClose}
-    actions={<><Button variant="secondary" disabled={confirm.isPending} onClick={onClose}>Cancel</Button>
-      <Button variant="brand" disabled={!review.canSubmit} busy={confirm.isPending} onClick={submit}>Confirm this source</Button></>}>
+  return <Dialog title="Confirm this source exists?" initialFocusTitle fallbackFocusRef={fallbackFocusRef}
+    returnFocusTarget={() => completion.returnTarget(fallbackFocusRef?.current ?? null)} shouldRestoreFocus={() => completion.shouldRestore(continuationIsCurrent)}
+    onClose={confirm.isPending || accepted ? undefined : onClose}
+    actions={<><Button variant="secondary" disabled={confirm.isPending || accepted} onClick={onClose}>Cancel</Button>
+      <Button variant="brand" disabled={!review.canSubmit || accepted} busy={confirm.isPending} onClick={submit}>Confirm this source</Button></>}>
     <div className="signal-group-flow" aria-busy={confirm.isPending}>
       <h3>Reference being reviewed</h3>
       <blockquote className="max-h-32 overflow-y-auto rounded-md border border-border bg-page px-3 py-2 text-sm break-words text-ink">{flag.evidence_excerpt}</blockquote>

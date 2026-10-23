@@ -34,6 +34,9 @@ import { FlagActionCurrentReview } from "./FlagActionCurrentReview";
 import { recoverableReadError } from "../report/reportReadState";
 import { useExplicitActionFocus } from "../routing/useExplicitActionFocus";
 import { isAssessmentRevision } from "../report/assessmentRevision";
+import { keepNewerAssessment } from "../report/assessmentRevision";
+import { useQueryClient } from "@tanstack/react-query";
+import { useFindingCompletion, useFindingCompletionOwner } from "./useFindingCompletion";
 
 const SEVERITY_LABEL: Record<FlagOut["severity"], string> = {
   high: "High severity",
@@ -199,7 +202,7 @@ function AnnotationPanel({ flag }: { flag: FlagOut }) {
   );
 }
 
-function OverrideDialog({ flag, onClose, fallbackFocusRef }: { flag: FlagOut; onClose: () => void; fallbackFocusRef: React.RefObject<HTMLHeadingElement | null> }) {
+function OverrideDialog({ flag, onClose, onAccepted, continuationIsCurrent, fallbackFocusRef }: { flag: FlagOut; onClose: () => void; onAccepted: (flag: FlagOut) => boolean; continuationIsCurrent: () => boolean; fallbackFocusRef: React.RefObject<HTMLHeadingElement | null> }) {
   const [reason, setReason] = useState("");
   const [attempted, setAttempted] = useState(false);
   const override = useOverrideFlag(flag.id);
@@ -208,12 +211,18 @@ function OverrideDialog({ flag, onClose, fallbackFocusRef }: { flag: FlagOut; on
   const followAction = useExplicitActionFocus(() => reasonRef.current);
   const errorId = useId();
   const invalid = attempted && reason.trim().length === 0;
+  const completion = useFindingCompletion();
+  const [accepted, setAccepted] = useState(false);
 
   function confirm() {
     setAttempted(true);
-    if (!review.isCurrent() || !reason.trim() || !review.canSubmit || !isAssessmentRevision(review.expectedRevision)) return;
+    if (accepted || !review.isCurrent() || !reason.trim() || !review.canSubmit || !isAssessmentRevision(review.expectedRevision)) return;
+    completion.begin(reasonRef.current);
     override.mutate({ reason: reason.trim(), expected_revision: review.expectedRevision }, {
-      onSuccess: () => { if (review.isCurrent()) onClose(); },
+      onSuccess: out => {
+        if (review.isCurrent() && onAccepted(out)) { completion.accept(); setAccepted(true); }
+        else review.freeze();
+      },
       onError: review.freeze,
     });
   }
@@ -222,9 +231,11 @@ function OverrideDialog({ flag, onClose, fallbackFocusRef }: { flag: FlagOut; on
     <Dialog
       title="Override this finding?"
       fallbackFocusRef={fallbackFocusRef}
+      returnFocusTarget={() => completion.returnTarget(fallbackFocusRef.current)}
+      shouldRestoreFocus={() => completion.shouldRestore(continuationIsCurrent)}
       initialFocusTitle
-      onClose={override.isPending ? undefined : onClose}
-      actions={<><Button variant="secondary" disabled={override.isPending} onClick={onClose}>Cancel</Button><Button variant="brand" disabled={!review.canSubmit} busy={override.isPending} onClick={confirm}>Confirm override</Button></>}
+      onClose={override.isPending || accepted ? undefined : onClose}
+      actions={<><Button variant="secondary" disabled={override.isPending || accepted} onClick={onClose}>Cancel</Button><Button variant="brand" disabled={!review.canSubmit || accepted} busy={override.isPending} onClick={confirm}>Confirm override</Button></>}
     >
       <div className="signal-resolution-dialog" aria-busy={override.isPending}>
         <p>The original possible inconsistency remains in the evidence record. Your reason is recorded in Audit and the readiness band is recalculated.</p>
@@ -252,7 +263,17 @@ function OverrideDialog({ flag, onClose, fallbackFocusRef }: { flag: FlagOut; on
   );
 }
 
-function ResolutionControl({ flag }: { flag: FlagOut }) {
+function ResolutionControl({ flag: observedFlag }: { flag: FlagOut }) {
+  const client = useQueryClient();
+  const location = useLocation();
+  const isCurrent = useFindingCompletionOwner(`${location.key}:${observedFlag.check_run_id}:${observedFlag.id}:resolution`);
+  const [receipt, setReceipt] = useState<FlagOut>();
+  const flag = receipt && isCurrent() ? keepNewerAssessment(observedFlag, receipt) : observedFlag;
+  useEffect(() => {
+    if (receipt && isAssessmentRevision(observedFlag.assessment_revision)
+      && isAssessmentRevision(receipt.assessment_revision)
+      && observedFlag.assessment_revision >= receipt.assessment_revision) setReceipt(undefined);
+  }, [observedFlag.assessment_revision, receipt]);
   const [overrideOpen, setOverrideOpen] = useState(false);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const overrideTriggerRef = useRef<HTMLButtonElement>(null);
@@ -263,22 +284,37 @@ function ResolutionControl({ flag }: { flag: FlagOut }) {
     setOverrideOpen(false);
   }
 
-  const content = flag.overridden ? (
-      <section className="signal-resolution-record" aria-labelledby="resolution-heading">
-        <div><p className="signal-section-kicker">Instructor resolution</p><h2 ref={headingRef} tabIndex={-1} id="resolution-heading">{flag.confirmed_citation_source ? "Source confirmed" : "Finding overridden"}</h2></div>
+  function accept(out: FlagOut) {
+    const current = client.getQueryData<FlagOut>(["flag", observedFlag.id]);
+    const report = client.getQueryData<{ assessment_revision: number | null }>(["report", observedFlag.check_run_id]);
+    if (!isCurrent() || out.id !== observedFlag.id || out.check_run_id !== observedFlag.check_run_id
+      || !out.overridden || !isAssessmentRevision(out.assessment_revision)
+      || (current && keepNewerAssessment(current, out) !== out)
+      || (report && isAssessmentRevision(report.assessment_revision) && report.assessment_revision > out.assessment_revision)) return false;
+    setReceipt(out);
+    setOverrideOpen(false);
+    setConfirmOpen(false);
+    return true;
+  }
+
+  const terminal = flag.overridden;
+  const optional = flag.affects_readiness === false;
+  const headingId = terminal ? "resolution-heading" : "resolution-options-heading";
+  const content = <section className={terminal ? "signal-resolution-record" : optional ? "signal-evidence-section" : "signal-evidence-section signal-resolution-options"} aria-labelledby={headingId}>
+    <div className={terminal ? undefined : "signal-section-heading"}><div>
+      {!optional || terminal ? <p className="signal-section-kicker">{terminal ? "Instructor resolution" : "Instructor action"}</p> : null}
+      <h2 ref={headingRef} tabIndex={-1} id={headingId}>{terminal ? flag.confirmed_citation_source ? "Source confirmed" : "Finding overridden" : optional ? "Review lead: not scored" : "Resolve only after checking the evidence"}</h2>
+    </div></div>
+    {terminal ? <>
         <p>{flag.confirmed_citation_source ? `You confirmed the source after checking it: ${flag.override_reason}.` : `You overrode this possible inconsistency: ${flag.override_reason}.`}</p>
         {flag.confirmed_citation_source && <p>Your confirmation applies only to this exact reference in your account, not to another reference or instructor. It does not establish support for a manuscript claim.</p>}
         <p>{isOptionalComparisonLead(flag) ? "The original comparison record remains above. This lead does not affect readiness." : "The original finding remains above, and the readiness band has been recalculated."}</p>
         <ActionLink to={`/report/${flag.check_run_id}`} variant="secondary">View updated report</ActionLink>
-      </section>
-    ) : flag.affects_readiness === false ? (
-      <section className="signal-evidence-section" aria-labelledby="resolution-options-heading">
-        <h2 ref={headingRef} tabIndex={-1} id="resolution-options-heading">Review lead: not scored</h2>
+      </>
+    : optional ? <>
         <p>This comparison does not change readiness. You can inspect the evidence without writing a comment or recording an override.</p>
-      </section>
-    ) : (
-    <section className="signal-evidence-section signal-resolution-options" aria-labelledby="resolution-options-heading">
-      <div className="signal-section-heading"><div><p className="signal-section-kicker">Instructor action</p><h2 ref={headingRef} tabIndex={-1} id="resolution-options-heading">Resolve only after checking the evidence</h2></div></div>
+      </>
+    : <>
       <p>{flag.ai_verdict_summary ? "This finding remains open unless you record a reasoned override." : "VERIDICAL did not reach a determination, so this finding does not affect readiness unless you affirm it."}</p>
       {confirmSourceEligible && (flag.citation_source_key ? (
         <div className="signal-confirm-source-option">
@@ -291,11 +327,11 @@ function ResolutionControl({ flag }: { flag: FlagOut }) {
         <Alert title="No source record can be confirmed" tone="info">VERIDICAL could not identify a DOI, ISBN, or title. If you verified the citation independently, override only this finding and explain why.</Alert>
       ))}
       <div className="signal-evidence-actions"><Button ref={overrideTriggerRef} variant="secondary" onClick={() => setOverrideOpen(true)}>Override</Button></div>
-    </section>
-  );
+    </>}
+  </section>;
   return <>{content}
-    {overrideOpen && <OverrideDialog key={`${flag.check_run_id}:${flag.id}:override`} flag={flag} fallbackFocusRef={headingRef} onClose={closeOverride} />}
-    {confirmOpen && <ConfirmCitationSourceModal key={`${flag.check_run_id}:${flag.id}:confirm-source`} flag={flag} fallbackFocusRef={headingRef} onClose={() => setConfirmOpen(false)} />}
+    {overrideOpen && <OverrideDialog key={`${flag.check_run_id}:${flag.id}:override`} flag={flag} fallbackFocusRef={headingRef} continuationIsCurrent={isCurrent} onAccepted={accept} onClose={closeOverride} />}
+    {confirmOpen && <ConfirmCitationSourceModal key={`${flag.check_run_id}:${flag.id}:confirm-source`} flag={flag} fallbackFocusRef={headingRef} continuationIsCurrent={isCurrent} onAccepted={accept} onClose={() => setConfirmOpen(false)} />}
   </>;
 }
 
@@ -392,7 +428,7 @@ export function FlagDetailPage() {
           <CitationHistoryWarning flag={flag} />
           <EvidenceSection flag={flag} sourcePath={sourcePath} sourceLinkId={sourceLinkId} />
 
-          <div ref={resolutionRef} tabIndex={-1}><ResolutionControl key={`${flag.check_run_id}:${flag.id}`} flag={flag} /></div>
+          <div ref={resolutionRef} tabIndex={-1}><ResolutionControl key={`${routeLocation.key}:${flag.check_run_id}:${flag.id}`} flag={flag} /></div>
           <AnnotationPanel flag={flag} />
         </>
       )}
