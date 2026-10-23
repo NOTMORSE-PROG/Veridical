@@ -17,7 +17,7 @@ from app.flags.schemas import (
 )
 from app.flags.service import annotate_flag, confirm_citation_source, get_flag, override_flag
 from app.models.instructor import Instructor
-from app.report.service import get_report
+from app.report.service import attach_report_figures
 
 router = APIRouter(prefix="/flags", tags=["flags"])
 
@@ -48,9 +48,11 @@ async def override_flag_route(
     session: Annotated[AsyncSession, Depends(get_session)],
     instructor: Annotated[Instructor, Depends(get_current_instructor)],
 ) -> OverrideFlagOut:
-    flag_out, check_run_id = await override_flag(session, flag_id, instructor.id, body.reason)
-    report = await get_report(session, check_run_id, instructor.id)
-    return OverrideFlagOut(**flag_out.model_dump(), report=report)
+    out = await override_flag(
+        session, flag_id, instructor.id, body.reason, expected_revision=body.expected_revision
+    )
+    out.report = await attach_report_figures(session, out.report)
+    return out
 
 
 @router.post("/{flag_id}/confirm-source", response_model=ConfirmCitationSourceOut)
@@ -60,8 +62,8 @@ async def confirm_citation_source_route(
     session: Annotated[AsyncSession, Depends(get_session)],
     instructor: Annotated[Instructor, Depends(get_current_instructor)],
 ) -> ConfirmCitationSourceOut:
-    flag_out, check_run_id = await confirm_citation_source(
-        session, flag_id, instructor.id, body.reason
+    out = await confirm_citation_source(
+        session, flag_id, instructor.id, body.reason, expected_revision=body.expected_revision
     )
-    report = await get_report(session, check_run_id, instructor.id)
-    return ConfirmCitationSourceOut(**flag_out.model_dump(), report=report)
+    out.report = await attach_report_figures(session, out.report)
+    return out

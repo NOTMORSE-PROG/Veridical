@@ -14,6 +14,7 @@ from fastapi.testclient import TestClient
 import app.auth.service as auth_service
 from app.auth.security import hash_password
 from app.config import get_settings
+from app.report.service import aggregate_and_score
 
 live = pytest.mark.skipif(
     "DATABASE_URL" not in os.environ,
@@ -22,6 +23,64 @@ live = pytest.mark.skipif(
 pytestmark = live
 
 SCRATCH_DB = "veridical_flagsapitest"
+
+
+@pytest.mark.parametrize(
+    "level_fields",
+    [{}, {"level": None}, {"level": "high_similarity"}, {"level": "exact_duplicate"}],
+)
+def test_private_flag_read_retains_unclassified_support(
+    logged_in_with_one_flag, api_scratch_url, level_fields
+):
+    import asyncio
+
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
+    from app.db import sqlalchemy_url
+    from app.models.enums import CheckKind
+    from app.models.run import CheckResult, Flag
+
+    client, flag_id = logged_in_with_one_flag
+
+    async def prepare():
+        engine = create_async_engine(sqlalchemy_url(api_scratch_url))
+        try:
+            async with async_sessionmaker(engine)() as session:
+                flag = await session.get(Flag, flag_id)
+                result = await session.get(CheckResult, flag.check_result_id)
+                result.kind = CheckKind.originality_reuse
+                flag.page_anchor = "whole document"
+                flag.detail = {
+                    "kind": "reuse_exact_duplicate",
+                    "affects_readiness": False,
+                    "supporting_passage": {
+                        "own_text": "Own excerpt",
+                        "own_context_text": "Before own. Own excerpt After own.",
+                        "matched_text": "Stored excerpt",
+                        "matched_context_text": "Before stored. Stored excerpt After stored.",
+                        "matched_manuscript_id": 13,
+                        "matched_group_label": "Foreign private identity",
+                        "similarity": 0.2,
+                        **level_fields,
+                    },
+                }
+                await session.commit()
+        finally:
+            await engine.dispose()
+
+    asyncio.run(prepare())
+    response = client.get(f"/flags/{flag_id}")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["passage_pair"]["level"] == level_fields.get("level")
+    assert body["passage_pair"]["own_excerpt"] == "Own excerpt"
+    assert body["passage_pair"]["matched_context_after"] == "After stored."
+    assert body["passage_pair"]["matched_ref"] == 13
+    assert body["evidence_unavailable"] is False
+    assert body["page_anchor"] == "whole document" and body["affects_readiness"] is False
+    assert "Foreign private identity" not in response.text
+    client.post("/auth/logout")
+    assert client.get(f"/flags/{flag_id}").status_code == 401
 
 
 @pytest.fixture(scope="module")
@@ -120,6 +179,7 @@ def logged_in_with_one_flag(client, api_scratch_url):
                 )
                 session.add(flag)
                 await session.commit()
+                await aggregate_and_score(session, check_run.id, commit=True)
                 return flag.id
         finally:
             await engine.dispose()
@@ -211,6 +271,7 @@ def logged_in_with_one_confirmable_citation_flag(client, api_scratch_url):
                 )
                 session.add(flag)
                 await session.commit()
+                await aggregate_and_score(session, check_run.id, commit=True)
                 return flag.id
         finally:
             await engine.dispose()
@@ -232,6 +293,14 @@ def test_override_requires_auth(client):
     assert client.post("/flags/1/override", json={"reason": "x"}).status_code == 401
 
 
+def observed_revision(client, flag_id):
+    response = client.get(f"/flags/{flag_id}")
+    assert response.status_code == 200
+    revision = response.json()["assessment_revision"]
+    assert type(revision) is int and revision >= 0
+    return revision
+
+
 def test_get_annotate_override_happy_path(logged_in_with_one_flag):
     client, flag_id = logged_in_with_one_flag
 
@@ -248,7 +317,11 @@ def test_get_annotate_override_happy_path(logged_in_with_one_flag):
     assert annotated.json()["annotation"] == "Looks off."
 
     overridden = client.post(
-        f"/flags/{flag_id}/override", json={"reason": "Checked the source myself."}
+        f"/flags/{flag_id}/override",
+        json={
+            "reason": "Checked the source myself.",
+            "expected_revision": observed_revision(client, flag_id),
+        },
     )
     assert overridden.status_code == 200
     body = overridden.json()
@@ -259,7 +332,13 @@ def test_get_annotate_override_happy_path(logged_in_with_one_flag):
 
 def test_override_without_a_reason_is_rejected_by_the_schema(logged_in_with_one_flag):
     client, flag_id = logged_in_with_one_flag
-    resp = client.post(f"/flags/{flag_id}/override", json={"reason": ""})
+    resp = client.post(
+        f"/flags/{flag_id}/override",
+        json={
+            "reason": "",
+            "expected_revision": observed_revision(client, flag_id),
+        },
+    )
     assert resp.status_code == 422
 
 
@@ -277,7 +356,10 @@ def test_confirm_source_happy_path(logged_in_with_one_confirmable_citation_flag)
     client, flag_id = logged_in_with_one_confirmable_citation_flag
     resp = client.post(
         f"/flags/{flag_id}/confirm-source",
-        json={"reason": "Verified on the publisher's own website."},
+        json={
+            "reason": "Verified on the publisher's own website.",
+            "expected_revision": observed_revision(client, flag_id),
+        },
     )
     assert resp.status_code == 200
     body = resp.json()
@@ -291,7 +373,13 @@ def test_confirm_source_without_a_reason_is_rejected_by_the_schema(
     logged_in_with_one_confirmable_citation_flag,
 ):
     client, flag_id = logged_in_with_one_confirmable_citation_flag
-    resp = client.post(f"/flags/{flag_id}/confirm-source", json={"reason": ""})
+    resp = client.post(
+        f"/flags/{flag_id}/confirm-source",
+        json={
+            "reason": "",
+            "expected_revision": observed_revision(client, flag_id),
+        },
+    )
     assert resp.status_code == 422
 
 
@@ -305,7 +393,13 @@ def test_confirm_source_whitespace_only_reason_is_rejected_by_the_schema(
     justification. Confirms the 422 fires at the HTTP boundary, and that
     nothing was mutated as a side effect of the rejected request."""
     client, flag_id = logged_in_with_one_confirmable_citation_flag
-    resp = client.post(f"/flags/{flag_id}/confirm-source", json={"reason": "   "})
+    resp = client.post(
+        f"/flags/{flag_id}/confirm-source",
+        json={
+            "reason": "   ",
+            "expected_revision": observed_revision(client, flag_id),
+        },
+    )
     assert resp.status_code == 422
 
     # Confirmed it never applied -- not just that it raised.
@@ -320,5 +414,11 @@ def test_confirm_source_on_a_flag_with_nothing_to_confirm_is_a_409(logged_in_wit
     reachable by an ordinary client through an ordinary mistake (wrong
     flag id), not just a theoretical path."""
     client, flag_id = logged_in_with_one_flag
-    resp = client.post(f"/flags/{flag_id}/confirm-source", json={"reason": "I checked it."})
+    resp = client.post(
+        f"/flags/{flag_id}/confirm-source",
+        json={
+            "reason": "I checked it.",
+            "expected_revision": observed_revision(client, flag_id),
+        },
+    )
     assert resp.status_code == 409

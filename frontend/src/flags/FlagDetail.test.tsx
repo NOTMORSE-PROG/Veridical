@@ -1,11 +1,12 @@
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ConfirmCitationSourceOut, FlagOut, ReportOut } from "../api/types";
-import { renderWithProviders, stubFetchByPath } from "../test/renderWithProviders";
+import { renderWithProviders, stubFetchByPath as baseStubFetchByPath } from "../test/renderWithProviders";
 import { FlagDetailPage } from "./FlagDetail";
 import { CITATION_COMPARISON } from "../test/citationComparisonFixture";
 
 const FLAG = {
+  assessment_revision: 0,
   id: 5,
   check_result_id: 9,
   check_run_id: 20,
@@ -30,6 +31,11 @@ const FLAG = {
   citation_source_key: null,
   confirmed_citation_source: false,
 };
+
+function stubFetchByPath(handlers: Record<string, unknown>) {
+  return baseStubFetchByPath({ "/check-runs/20/report": { ...REPORT, check_run_id: 20 },
+    "/check-runs/44/report": REPORT, ...handlers });
+}
 
 describe("FlagDetailPage", () => {
   afterEach(() => vi.unstubAllGlobals());
@@ -181,8 +187,8 @@ describe("FlagDetailPage", () => {
     renderWithProviders(<FlagDetailPage />, { route: "/flags/5", path: "/flags/:flagId" });
 
     expect(await screen.findByText("Passage comparison", { selector: "h3" })).toBeInTheDocument();
-    expect(screen.getByText("Your manuscript · p. 31")).toBeInTheDocument();
-    expect(screen.getByText("Library record #3")).toBeInTheDocument();
+    expect(screen.getByText("Your manuscript excerpt")).toBeInTheDocument();
+    expect(screen.getByText("Stored comparison excerpt · Library record #3")).toBeInTheDocument();
     expect(screen.getAllByText(/hybrid rule-based and AI approach/)).toHaveLength(2);
   });
 
@@ -365,13 +371,13 @@ describe("FlagDetailPage", () => {
     ).toBeInTheDocument();
   });
 
-  it("requires a reason before confirming, validated on click (Confirm is never pre-disabled)", async () => {
+  it("requires a reason after the current assessment loads, validated on click", async () => {
     vi.stubGlobal("fetch", stubFetchByPath({ "/flags/5": FLAG }));
-    renderWithProviders(<FlagDetailPage />, { route: "/flags/5", path: "/flags/:flagId" });
+    renderWithProviders(<FlagDetailPage />, { route: "/flags/5", path: "/flags/:flagId", reviewRunId: 20 });
     await screen.findByText(/Wang, S\./);
     fireEvent.click(screen.getByRole("button", { name: "Override" }));
     const confirm = await screen.findByRole("button", { name: "Confirm override" });
-    expect(confirm).not.toBeDisabled();
+    await waitFor(() => expect(confirm).toBeEnabled());
     fireEvent.click(confirm);
 
     expect(await screen.findByText("Enter a reason before confirming.")).toBeInTheDocument();
@@ -384,16 +390,18 @@ describe("FlagDetailPage", () => {
   it("submits the override with the reason and shows the AI finding + the instructor's own reason side by side afterward", async () => {
     const overriddenFlag = {
       ...FLAG,
+      assessment_revision: 1,
       overridden: true,
       override_reason: "Checked myself, not actually retracted.",
-      report: { check_run_id: 20, results: [], status: "ready" },
+      report: { ...REPORT, assessment_revision: 1, check_run_id: 20, results: [], status: "ready" },
     };
     vi.stubGlobal(
       "fetch",
       stubFetchByPath({ "/flags/5": FLAG, "/flags/5/override": overriddenFlag }),
     );
-    renderWithProviders(<FlagDetailPage />, { route: "/flags/5", path: "/flags/:flagId" });
+    renderWithProviders(<FlagDetailPage />, { route: "/flags/5", path: "/flags/:flagId", reviewRunId: 20 });
     await screen.findByText(/Wang, S\./);
+    screen.getByRole("button", { name: "Override" }).focus();
     fireEvent.click(screen.getByRole("button", { name: "Override" }));
     fireEvent.change(await screen.findByRole("textbox", { name: "Reason (required)" }), {
       target: { value: "Checked myself, not actually retracted." },
@@ -410,7 +418,7 @@ describe("FlagDetailPage", () => {
     ).toHaveAttribute("href", "/report/20");
     // BUG (focus dropped to <body> after submit) regression guard:
     // focus must land on the terminal banner, not get stranded.
-    expect(document.activeElement).toBe(banner.closest('[tabindex="-1"]'));
+    expect(screen.getByRole("heading", { name: "Finding overridden" })).toHaveFocus();
   });
 
   it("BUG-069 item 4: an overridden flag's own header shows an Overridden pill, matching the report's flags list", async () => {
@@ -441,6 +449,7 @@ describe("FlagDetailPage", () => {
     renderWithProviders(<FlagDetailPage />, { route: "/flags/5", path: "/flags/:flagId" });
     await screen.findByText(/Wang, S\./);
     const overrideButton = screen.getByRole("button", { name: "Override" });
+    overrideButton.focus();
     fireEvent.click(overrideButton);
     fireEvent.click(await screen.findByRole("button", { name: "Cancel" }));
     expect(await screen.findByRole("button", { name: "Override" })).toHaveFocus();
@@ -508,6 +517,7 @@ describe("FlagDetailPage", () => {
 // source) rendering a DIFFERENT, honest banner and announcement for each.
 function makeFlag(overrides: Partial<FlagOut> = {}): FlagOut {
   return {
+    assessment_revision: 0,
     id: 20,
     check_result_id: 5,
     check_run_id: 44,
@@ -538,6 +548,7 @@ function makeFlag(overrides: Partial<FlagOut> = {}): FlagOut {
 // updated report" link's href) -- just needs to satisfy
 // ConfirmCitationSourceOut's `report: ReportOut` field shape.
 const REPORT: ReportOut = {
+  assessment_revision: 0,
   check_run_id: 44,
   manuscript_id: 44,
   manuscript_group_label: "VERIDICAL",
@@ -568,6 +579,7 @@ function renderFlag(flag: FlagOut, extraHandlers: Record<string, unknown> = {}) 
   return renderWithProviders(<FlagDetailPage />, {
     route: "/flags/20",
     path: "/flags/:flagId",
+    reviewRunId: flag.check_run_id,
   });
 }
 
@@ -614,8 +626,9 @@ describe("FlagDetail — BUG-078 confirm-source", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Confirm this source" }));
 
     const dialog = await screen.findByRole("dialog", {
-      name: "Confirm this source is legitimate?",
+      name: "Confirm this source exists?",
     });
+    await waitFor(() => expect(within(dialog).getByRole("button", { name: "Confirm this source" })).toBeEnabled());
     fireEvent.click(within(dialog).getByRole("button", { name: "Confirm this source" }));
 
     expect(
@@ -630,7 +643,7 @@ describe("FlagDetail — BUG-078 confirm-source", () => {
     renderFlag(makeFlag({ evidence_excerpt: "A very long citation. ".repeat(60) }));
     fireEvent.click(await screen.findByRole("button", { name: "Confirm this source" }));
     const dialog = await screen.findByRole("dialog", {
-      name: "Confirm this source is legitimate?",
+      name: "Confirm this source exists?",
     });
     const blockquote = within(dialog).getByText(/A very long citation\./);
     expect(blockquote.className).toContain("max-h-");
@@ -640,19 +653,20 @@ describe("FlagDetail — BUG-078 confirm-source", () => {
   it("shows a distinct caution note for a title-keyed (non-unique) match", async () => {
     renderFlag(makeFlag({ citation_source_key: { kind: "title", value: "a common thesis title" } }));
     fireEvent.click(await screen.findByRole("button", { name: "Confirm this source" }));
-    expect(await screen.findByText(/Matched by title, not a DOI or ISBN/)).toBeInTheDocument();
-    // The raw casefolded key value is deliberately not shown for a title match.
-    expect(screen.queryByText(/a common thesis title/)).not.toBeInTheDocument();
+    expect(await screen.findByText(/Check that this is the reference cited in the manuscript/)).toBeInTheDocument();
+    // The current source key is available for deliberate reference verification.
+    expect(screen.getByText(/a common thesis title/)).toBeVisible();
   });
 
   it("confirming resolves the flag with a distinct, honest banner — never the override wording", async () => {
     const confirmed: ConfirmCitationSourceOut = {
       ...makeFlag({
+        assessment_revision: 1,
         overridden: true,
         confirmed_citation_source: true,
         override_reason: "Verified on the publisher's own website.",
       }),
-      report: REPORT,
+      report: { ...REPORT, assessment_revision: 1 },
     };
     renderFlag(makeFlag(), {
       "/flags/20/confirm-source": confirmed,
@@ -660,7 +674,7 @@ describe("FlagDetail — BUG-078 confirm-source", () => {
 
     fireEvent.click(await screen.findByRole("button", { name: "Confirm this source" }));
     const dialog = await screen.findByRole("dialog", {
-      name: "Confirm this source is legitimate?",
+      name: "Confirm this source exists?",
     });
     fireEvent.change(screen.getByLabelText("Where you verified this (required)"), {
       target: { value: "Verified on the publisher's own website." },
@@ -697,3 +711,40 @@ describe("FlagDetail — BUG-078 confirm-source", () => {
     expect(screen.queryByText(/You confirmed the source after checking it/)).not.toBeInTheDocument();
   });
 });
+
+it.each(["Override", "Confirm this source"].flatMap(action => [503, 403].map(status => ({ action, status }))))(
+  "preserves the $action editor on transient read failure and removes inaccessible evidence ($status)",
+  async ({ action, status }) => {
+    let failFlag = false; let revision = 0;
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      const path = new URL(String(input), "http://localhost").pathname;
+      if (path === "/flags/20") return new Response(JSON.stringify(failFlag
+        ? { error: { code: "internal", message: "Controlled current-read failure" } }
+        : makeFlag({ assessment_revision: revision })), { status: failFlag ? status : 200 });
+      if (path === "/check-runs/44/report") return new Response(JSON.stringify({ ...REPORT, assessment_revision: 1 }));
+      if (path.endsWith("/escalated")) return new Response("[]");
+      return new Response(JSON.stringify({ instructor: { id: 1 } }));
+    }));
+    renderWithProviders(<FlagDetailPage />, { route: "/flags/20", path: "/flags/:flagId", reviewRunId: 44 });
+    fireEvent.click(await screen.findByRole("button", { name: action }));
+    const dialog = screen.getByRole("dialog"); const editor = within(dialog).getByRole("textbox");
+    fireEvent.change(editor, { target: { value: "Exact unsaved source verification reason" } });
+    failFlag = true;
+    fireEvent.click(within(dialog).getByRole("button", { name: "Review current assessment" }));
+    if (status === 403) {
+      await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+      expect(screen.getByText("Could not load this evidence")).toBeVisible();
+      expect(screen.queryByText(makeFlag().evidence_excerpt)).not.toBeInTheDocument(); return;
+    }
+    await within(dialog).findByText(/current finding and assessment could not be loaded together/);
+    expect(screen.getByRole("dialog")).toBe(dialog); expect(editor.isConnected).toBe(true);
+    expect(editor).toHaveValue("Exact unsaved source verification reason");
+    const submit = within(dialog).getByRole("button", { name: action === "Override" ? "Confirm override" : "Confirm this source" });
+    expect(submit).toBeDisabled(); failFlag = false; revision = 1;
+    fireEvent.click(within(dialog).getByRole("button", { name: "Review current assessment" }));
+    const rebind = await within(dialog).findByRole("button", { name: "Use my reason with this current assessment" });
+    expect(submit).toBeDisabled(); fireEvent.click(rebind);
+    await waitFor(() => expect(submit).toBeEnabled());
+    expect(editor).toHaveValue("Exact unsaved source verification reason");
+  },
+);

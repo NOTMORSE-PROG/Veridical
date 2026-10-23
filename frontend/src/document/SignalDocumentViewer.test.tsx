@@ -1,4 +1,5 @@
-import { fireEvent, screen, waitFor } from "@testing-library/react";
+import { useQueryClient, type QueryClient } from "@tanstack/react-query";
+import { act, fireEvent, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { CriterionResultOut, FlagOut, FlagSummaryOut, ManuscriptViewerOut, ReportOut } from "../api/types";
 import { renderWithReviewProviders as renderWithProviders, stubFetchByPath } from "../test/renderWithProviders";
@@ -40,6 +41,7 @@ const SUMMARY: FlagSummaryOut = {
 };
 
 const FLAG: FlagOut = {
+  assessment_revision: 0,
   id: 7,
   check_result_id: 9,
   check_run_id: 5,
@@ -65,6 +67,7 @@ const FLAG: FlagOut = {
 };
 
 const REPORT: ReportOut = {
+  assessment_revision: 0,
   check_run_id: 5,
   manuscript_id: 10,
   manuscript_group_label: "Group Syntax",
@@ -117,7 +120,7 @@ describe("SignalDocumentViewerPage", () => {
       "/check-runs/5/document/reuse-matches": { passage_archive_size_n: 4, matches: [] },
     }));
     renderWithProviders(<SignalDocumentViewerPage />, { route: "/report/5/document?view=decision&pane=review", path: "/report/:checkRunId/document" });
-    await screen.findByText("Criterion record, 0 entries");
+    await screen.findByText("Recorded criterion results, 0 entries");
     if (mode === "fake") {
       expect(screen.getByText("Test-mode AI responses")).toBeVisible();
       expect(screen.getByText("This run is recorded in test AI mode. AI responses use fixtures instead of real AI grading. Do not treat AI-derived judgments as a real assessment of the manuscript. Check the recorded evidence directly.")).toBeVisible();
@@ -152,7 +155,7 @@ describe("SignalDocumentViewerPage", () => {
       "/check-runs/5/escalated": [], "/check-runs/5/flags": [],
     }));
     renderWithProviders(<SignalDocumentViewerPage />, { route: "/report/5/document?view=decision&pane=review", path: "/report/:checkRunId/document" });
-    const summary = await screen.findByText("Criterion record, 5 entries");
+    const summary = await screen.findByText("Recorded criterion results, 5 entries");
     fireEvent.click(summary);
     expect(screen.getByRole("heading", { name: "Criterion records" })).toBeVisible();
     expect(screen.getAllByText("Not assessed: capacity reached")).toHaveLength(5);
@@ -404,7 +407,7 @@ describe("SignalDocumentViewerPage", () => {
     expect(await screen.findByRole("heading", { name: "Source manuscript unavailable" })).toBeInTheDocument();
     expect(screen.getByText("Stored content was removed by the instructor.")).toBeInTheDocument();
     expect(screen.getByText(/VERIDICAL cannot show the full manuscript/)).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "Review queue" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Integrity findings" })).toBeInTheDocument();
   });
 
   it("retains the recorded location and citation comparison after source deletion", async () => {
@@ -483,8 +486,8 @@ describe("SignalDocumentViewerPage", () => {
     }));
     renderWithProviders(<SignalDocumentViewerPage />, { route: "/report/5/document?pane=analysis", path: "/report/:checkRunId/document" });
 
-    expect(await screen.findByRole("heading", { name: "Review queue" })).toBeInTheDocument();
-    expect(screen.getByText("No other integrity findings were recorded")).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "No recorded evidence items" })).toBeInTheDocument();
+    expect(screen.getByText("This check has no integrity findings or comparison leads. Review assessment limits and readiness before recording your decision.")).toBeVisible();
     expect(screen.queryByText(REPORT.reason as string)).not.toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: "Final defense-readiness decision" })).not.toBeInTheDocument();
     expect(screen.getByRole("tab", { name: /^Review/ })).toHaveAttribute("aria-selected", "true");
@@ -554,7 +557,7 @@ describe("SignalDocumentViewerPage", () => {
     }));
     renderWithProviders(<SignalDocumentViewerPage />, { route: "/report/5/document?pane=review", path: "/report/:checkRunId/document" });
 
-    expect(await screen.findByText("1 other finding. 0 resolved.")).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "Integrity findings" })).toBeInTheDocument();
     expect(screen.getByText("3 recorded locations or scopes")).toBeInTheDocument();
     const row = screen.getByRole("button", { name: /Finding 1.*High passage similarity/s });
     fireEvent.click(row);
@@ -562,7 +565,7 @@ describe("SignalDocumentViewerPage", () => {
     expect(await screen.findByText("Finding 1 selected")).toBeInTheDocument();
     expect(await screen.findByRole("heading", { name: "High passage similarity" })).toBeInTheDocument();
     expect(screen.getByText("Location 3 of 3. These records are presented as one finding; none of the stored data was removed.")).toBeInTheDocument();
-    expect(screen.getByText(/Yellow marks the selected manuscript location/)).toBeInTheDocument();
+    expect(screen.getByText(/Shaded wording appears in both stored passages/)).toBeInTheDocument();
     const comparison = screen.getByText("Passage comparison", { selector: "h3" });
     const reasoning = screen.getByText("Recorded reasoning and technical details");
     expect(comparison.compareDocumentPosition(reasoning) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
@@ -571,7 +574,65 @@ describe("SignalDocumentViewerPage", () => {
     expect(screen.getByTestId("pdf-pane")).toHaveAttribute("data-selection", "111");
 
     fireEvent.click(screen.getByRole("button", { name: "Back to review queue" }));
-    expect(await screen.findByRole("heading", { name: "Review queue" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "Integrity findings" })).toBeInTheDocument();
     await waitFor(() => expect(screen.getByRole("button", { name: /Finding 1.*High passage similarity/s })).toHaveFocus());
   });
+});
+
+it("retains the workspace record and focus with qualified readiness across a transient report read failure", async () => {
+  let client: QueryClient; let failed = false;
+  function QueryAccess() { client = useQueryClient(); return null; }
+  const base = stubFetchByPath({ "/check-runs/5/document": VIEWER, "/check-runs/5/report": REPORT,
+    "/check-runs/5/escalated": [], "/check-runs/5/flags": [],
+    "/check-runs/5/document/reuse-matches": { passage_archive_size_n: 0, matches: [] } });
+  const fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    if (failed && String(input).endsWith("/report")) return new Response(JSON.stringify({ error: { code: "unavailable", message: "Controlled workspace read failure" } }), { status: 503 });
+    return base(input, init);
+  });
+  vi.stubGlobal("fetch", fetch);
+  renderWithProviders(<><QueryAccess /><SignalDocumentViewerPage /></>, { route: "/report/5/document?view=decision&pane=review", path: "/report/:checkRunId/document" });
+  const disclosure = (await screen.findByText("Recorded criterion results, 0 entries")).closest("details")!;
+  disclosure.open = true; const heading = screen.getByRole("heading", { name: "Criterion records" }); heading.focus();
+  failed = true; await act(async () => { await client.invalidateQueries({ queryKey: ["report", 5], exact: true }); });
+  await screen.findByText("Could not update this report");
+  expect(heading.isConnected).toBe(true); expect(heading).toHaveFocus(); expect(disclosure.open).toBe(true);
+  expect(screen.getByText("Last loaded system readiness")).toBeVisible();
+  fireEvent.click(screen.getByRole("button", { name: "Return for revision" }));
+  expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  failed = false; fireEvent.click(screen.getAllByRole("button", { name: "Retry report" })[0]);
+  await waitFor(() => expect(screen.queryByText("Could not update this report")).not.toBeInTheDocument());
+  expect(heading).toHaveFocus(); expect(disclosure.open).toBe(true);
+  vi.unstubAllGlobals();
+});
+
+it.each([401, 403, 404, 503])("keeps the evidence queue only for a recoverable report read (%s)", async (status) => {
+  let client!: QueryClient; let failed = false;
+  function QueryAccess() { client = useQueryClient(); return null; }
+  const base = stubFetchByPath({ "/check-runs/5/document": VIEWER, "/check-runs/5/report": REPORT,
+    "/check-runs/5/escalated": [], "/check-runs/5/flags": [SUMMARY],
+    "/check-runs/5/document/reuse-matches": { passage_archive_size_n: 0, matches: [] } });
+  const fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    if (failed && String(input).endsWith("/report")) return new Response(JSON.stringify({ error: { code: status === 503 ? "unavailable" : "not_available", message: "Controlled report read failure" } }), { status });
+    return base(input, init);
+  });
+  vi.stubGlobal("fetch", fetch);
+  renderWithProviders(<><QueryAccess /><SignalDocumentViewerPage /></>, { route: "/report/5/document?pane=review", path: "/report/:checkRunId/document" });
+  const heading = await screen.findByRole("heading", { name: "Integrity findings" });
+  const row = screen.getByRole("button", { name: /Finding 1.*Possible internal contradiction/s }); row.focus();
+  failed = true; await act(async () => { await client.invalidateQueries({ queryKey: ["report", 5], exact: true }); });
+  if (status === 503) {
+    expect(await screen.findByText("Could not update this report")).toBeVisible();
+    expect(heading.isConnected).toBe(true); expect(row).toHaveFocus();
+    expect(screen.getByText(/Showing the last loaded report/)).toBeVisible();
+    failed = false; fireEvent.click(screen.getByRole("button", { name: "Retry report" }));
+    await waitFor(() => expect(screen.queryByText("Could not update this report")).not.toBeInTheDocument());
+    expect(row).toHaveFocus();
+  } else {
+    await waitFor(() => expect(heading.isConnected).toBe(false));
+    expect(row.isConnected).toBe(false);
+    expect(screen.queryByRole("heading", { name: "Comparison leads" })).not.toBeInTheDocument();
+    expect(screen.queryByText("Readiness and decision")).not.toBeInTheDocument();
+  }
+  expect(fetch.mock.calls.every(([, init]) => !init?.method || init.method === "GET")).toBe(true);
+  vi.unstubAllGlobals();
 });

@@ -862,7 +862,7 @@ async def _run_check_run(
                 return
 
         if check_run.status == CheckRunStatus.aggregating:
-            await aggregate_and_score(session, check_run.id, settings)
+            await aggregate_and_score(session, check_run.id, settings, commit=True)
             _record_stage(check_run, CheckRunStatus.aggregating, status="done")
             await _transition_after_boundary(
                 session, check_run, CheckRunStatus.aggregating, settings, claim_token=claim_token

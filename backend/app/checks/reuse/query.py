@@ -428,7 +428,8 @@ class PassageMatch:
     own_context_text: str
     own_is_reference_list: bool
     own_is_block_quote: bool
-    level: MatchLevel
+    # Scoped supporting evidence may exist below standalone flag thresholds.
+    level: MatchLevel | None
     similarity: float
     matched_manuscript_id: int
     # Internal only, same BUG-050/097 convention as `SimilarityMatch` above
@@ -658,7 +659,7 @@ async def best_supporting_passage(
             own_context_text=passage.context_text,
             own_is_reference_list=passage.is_reference_list,
             own_is_block_quote=passage.is_block_quote,
-            level=_classify_passage(similarity, settings) or "high_similarity",
+            level=_classify_passage(similarity, settings),
             similarity=similarity,
             matched_manuscript_id=archive_row.manuscript_id,
             matched_instructor_id=row.instructor_id,

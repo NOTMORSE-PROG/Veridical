@@ -122,6 +122,7 @@ function AccountDisclosure() {
       {open && (
         <div id="signal-account-panel" className="signal-account__panel">
           <p title={me.display_name}>Signed in as <strong>{me.display_name}</strong></p>
+          <div className="signal-account__capacity"><CapacityStatement compact /></div>
           <ReplayTourControl onDone={() => setOpen(false)} />
           <button type="button" className="signal-account-action" onClick={() => logout.mutate()}>
             Sign out

@@ -61,7 +61,7 @@ describe("V-081: passage comparison display (BUG-434)", () => {
     expect(screen.getByText("Extracted paragraph 1")).toBeVisible();
     expect(screen.getByText("Extracted paragraph 3")).toBeVisible();
     expect(screen.getByText("p. 4")).toBeVisible();
-    expect(screen.getAllByText("Review lead: not scored")).toHaveLength(1);
+    expect(screen.getAllByText("Comparison lead: not scored")).toHaveLength(1);
     fireEvent.click(screen.getByRole("button", { name: /Extracted paragraph 3/ }));
     expect(onSelectFlag).toHaveBeenCalledWith(8);
     expect(FLAG.page_anchor).toBe("¶0");

@@ -15,29 +15,31 @@ def test_a_one_character_reason_is_rejected():
     `min_length=1` and was then published verbatim to the report, the
     exported PDF, and the public share link as "Marked Pass. x"."""
     with pytest.raises(ValidationError, match="at least"):
-        ResolveEscalationIn(resolution="mark_pass", reason="x")
+        ResolveEscalationIn(expected_revision=0, resolution="mark_pass", reason="x")
 
 
 def test_a_reason_of_only_whitespace_is_rejected():
     with pytest.raises(ValidationError, match="at least"):
-        ResolveEscalationIn(resolution="mark_pass", reason="          ")
+        ResolveEscalationIn(expected_revision=0, resolution="mark_pass", reason="          ")
 
 
 def test_a_real_reason_is_accepted_and_stripped():
-    parsed = ResolveEscalationIn(resolution="mark_pass", reason="  Verified in Chapter 2.  ")
+    parsed = ResolveEscalationIn(
+        expected_revision=0, resolution="mark_pass", reason="  Verified in Chapter 2.  "
+    )
     assert parsed.reason == "Verified in Chapter 2."
 
 
 def test_a_reason_exactly_at_the_minimum_is_accepted():
     minimum = Settings().resolution_reason_min_length
-    parsed = ResolveEscalationIn(resolution="mark_pass", reason="x" * minimum)
+    parsed = ResolveEscalationIn(expected_revision=0, resolution="mark_pass", reason="x" * minimum)
     assert len(parsed.reason) == minimum
 
 
 def test_a_reason_one_character_short_of_the_minimum_is_rejected():
     minimum = Settings().resolution_reason_min_length
     with pytest.raises(ValidationError, match="at least"):
-        ResolveEscalationIn(resolution="mark_pass", reason="x" * (minimum - 1))
+        ResolveEscalationIn(expected_revision=0, resolution="mark_pass", reason="x" * (minimum - 1))
 
 
 def test_default_minimum_matches_the_frontend_hardcoded_copy():
@@ -53,9 +55,9 @@ def test_bug_105_a_one_character_reopen_reason_is_rejected():
     """The identical defect BUG-096 fixed for `ResolveEscalationIn`,
     found on `ReopenIn` by backend review reviewing that same diff."""
     with pytest.raises(ValidationError, match="at least"):
-        ReopenIn(reason="x")
+        ReopenIn(expected_revision=0, reason="x")
 
 
 def test_bug_105_a_real_reopen_reason_is_accepted_and_stripped():
-    parsed = ReopenIn(reason="  Found a citation issue after deciding.  ")
+    parsed = ReopenIn(expected_revision=0, reason="  Found a citation issue after deciding.  ")
     assert parsed.reason == "Found a citation issue after deciding."

@@ -13,7 +13,7 @@ from typing import Any, Literal
 
 import pymupdf
 from pydantic import ValidationError
-from sqlalchemy import and_, func, or_, select, update
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app import messages
@@ -53,6 +53,7 @@ from app.models.enums import (
 from app.models.manuscript import Manuscript, ManuscriptPassageArchive
 from app.models.rubric import Criterion, Rubric
 from app.models.run import CheckResult, CheckRun, Flag, ReadinessReport
+from app.report.assessment import assessment_write, lock_assessment
 from app.report.docx_images import manuscript_docx_image_for
 from app.report.page_images import build_page_evidence_images
 from app.report.rating import compute_levelled_rating
@@ -99,6 +100,7 @@ async def _load_scorable_results(session: AsyncSession, check_run_id: int) -> li
             select(CheckResult, Criterion.weight)
             .join(Criterion, Criterion.id == CheckResult.criterion_id)
             .where(CheckResult.check_run_id == check_run_id)
+            .execution_options(populate_existing=True)
         )
     ).all()
     return [
@@ -118,6 +120,7 @@ async def _load_scorable_flags(session: AsyncSession, check_run_id: int) -> list
             select(Flag, CheckResult)
             .join(CheckResult, CheckResult.id == Flag.check_result_id)
             .where(CheckResult.check_run_id == check_run_id)
+            .execution_options(populate_existing=True)
         )
     ).all()
 
@@ -190,7 +193,7 @@ async def _assessment_incomplete(session: AsyncSession, check_run_id: int) -> bo
 
 
 async def aggregate_and_score(
-    session: AsyncSession, check_run_id: int, settings: Settings | None = None
+    session: AsyncSession, check_run_id: int, settings: Settings | None = None, *, commit: bool
 ) -> ReadinessReport:
     settings = settings or get_settings()
     results = await _load_scorable_results(session, check_run_id)
@@ -256,7 +259,10 @@ async def aggregate_and_score(
             check_run_id=check_run_id,
             payload=new_verdict_payload,
         )
-    await session.commit()
+    if commit:
+        await session.commit()
+    else:
+        await session.flush()
     await session.refresh(report)
     return report
 
@@ -363,6 +369,30 @@ async def get_report(session: AsyncSession, check_run_id: int, instructor_id: in
     return await report_out_for_check_run(session, check_run)
 
 
+async def attach_report_figures(
+    session: AsyncSession, report: ReportOut, settings: Settings | None = None
+) -> ReportOut:
+    """Read immutable source diagnostics after the assessment snapshot is bound.
+
+    Request owners release their assessment lock before this file work. Never
+    re-read score, decision or revision while enriching an acknowledgment.
+    """
+    settings = settings or get_settings()
+    manuscript = await session.get(Manuscript, report.manuscript_id, populate_existing=True)
+    if manuscript is None:
+        return report
+    try:
+        readings = saved_figure_readings(
+            await read_source(
+                session, manuscript, lambda: load_raw_store_async(settings, manuscript.id)
+            ),
+            manuscript.content_hash,
+        )
+    except (FileNotFoundError, ValidationError, OSError, GoneError):
+        readings = None
+    return report.model_copy(update={"figure_readings": readings})
+
+
 async def report_out_for_check_run(
     session: AsyncSession, check_run: CheckRun, settings: Settings | None = None
 ) -> ReportOut:
@@ -378,9 +408,7 @@ async def report_out_for_check_run(
 
     manuscript = await session.get(Manuscript, check_run.manuscript_id)
     rubric = await session.get(Rubric, check_run.rubric_id)
-    report = await session.scalar(
-        select(ReadinessReport).where(ReadinessReport.check_run_id == check_run_id)
-    )
+    report = await lock_assessment(session, check_run_id)
 
     rows = (
         await session.execute(
@@ -388,6 +416,7 @@ async def report_out_for_check_run(
             .join(Criterion, Criterion.id == CheckResult.criterion_id)
             .where(CheckResult.check_run_id == check_run_id)
             .order_by(Criterion.position)
+            .execution_options(populate_existing=True)
         )
     ).all()
     # D-023: weight is relative (scoring.py normalises, never a
@@ -633,15 +662,6 @@ async def report_out_for_check_run(
         else None
     )
 
-    try:
-        visual_readings = saved_figure_readings(
-            await read_source(
-                session, manuscript, lambda: load_raw_store_async(settings, manuscript.id)
-            ),
-            manuscript.content_hash,
-        )
-    except (FileNotFoundError, ValidationError, OSError, GoneError):
-        visual_readings = None
     citation_flag_rows = (
         await session.execute(
             select(Flag, CheckResult)
@@ -659,7 +679,7 @@ async def report_out_for_check_run(
             )
             for flag, result in citation_flag_rows
         ),
-        figure_readings=visual_readings,
+        assessment_revision=report.assessment_revision if report is not None else None,
         historical_semantic_support_unverified=any(
             result.kind == CheckKind.semantic
             and (result.detail or {}).get("basis") == "llm"
@@ -1456,6 +1476,10 @@ async def get_report_export_data(
     reference_limits = unassessed_references(
         citation_check.detail or {} if citation_check is not None else {}
     )
+    # The compound report/flags/detail snapshot is complete. This export request
+    # owns its read transaction; release assessment locks before source rendering.
+    await session.commit()
+    report = await attach_report_figures(session, report, settings)
     page_images = await read_source(
         session,
         manuscript,
@@ -1490,25 +1514,30 @@ async def resolve_escalation_for_run(
     resolution: str,
     reason: str,
     *,
+    expected_revision: int,
     level: int | None = None,
 ) -> ResolveEscalationOut:
-    """Resolves one escalated criterion, then recomputes the composite
-    score/status LIVE (ticket AC: "resolution updates score + status
-    live") — the response carries the fresh `ReportOut` so the frontend
-    never has to guess whether a follow-up fetch is needed."""
-    await _owned_check_run(session, check_run_id, instructor_id)
-    await raise_if_decided(session, check_run_id)
-    result = await resolve_escalation(
-        session, check_run_id, check_result_id, instructor_id, resolution, reason, level=level
-    )
-    await aggregate_and_score(session, check_run_id)
-    report = await get_report(session, check_run_id, instructor_id)
-    return ResolveEscalationOut(
-        check_result_id=result.id,
-        outcome=result.outcome.value,
-        score=float(result.score) if result.score is not None else None,
-        report=report,
-    )
+    """Save a pending judgment, audit and readiness as one versioned action."""
+    async with assessment_write(session, check_run_id, instructor_id, expected_revision):
+        result = await resolve_escalation(
+            session,
+            check_run_id,
+            check_result_id,
+            instructor_id,
+            resolution,
+            reason,
+            level=level,
+            commit=False,
+        )
+        await aggregate_and_score(session, check_run_id, commit=False)
+        report = await get_report(session, check_run_id, instructor_id)
+        out = ResolveEscalationOut(
+            check_result_id=result.id,
+            outcome=result.outcome.value,
+            score=float(result.score) if result.score is not None else None,
+            report=report,
+        )
+    return out
 
 
 async def _get_owned_report(
@@ -1585,136 +1614,109 @@ async def decide_report(
     decision: str,
     note: str | None,
     settings: Settings | None = None,
+    *,
+    expected_revision: int,
 ) -> ReportOut:
-    """The terminal gate (V-038, F8.5) — VERIDICAL never sets this itself
-    (charter rule 1); this is the ONE place a human decision gets
-    recorded. Blocked while any criterion still needs review (the
-    instructor must look at what the AI couldn't decide) and while the
-    report is already decided (must reopen first, explicitly, with a
-    reason — a decision is not silently overwritable)."""
-    report = await _get_owned_report(session, check_run_id, instructor_id)
-    if report.decision is not None:
-        raise ConflictError(
-            "This report has already been decided. Reopen it first to change the decision."
-        )
-    pending = await session.scalar(
-        select(func.count())
-        .select_from(CheckResult)
-        .where(
-            CheckResult.check_run_id == check_run_id,
-            CheckResult.outcome.in_(NEEDS_REVIEW_OUTCOMES),
-            # BUG-073 follow-up: same scoping fix as `report_out_for_check_run`'s
-            # own `pending_review_count` above -- without this, a partially-
-            # executed F4/F5 integrity check (criterion_id is always None)
-            # could block a decision forever on an item `list_escalated`'s
-            # own INNER JOIN makes structurally impossible to ever resolve.
-            CheckResult.criterion_id.isnot(None),
-        )
-    )
-    if pending:
-        raise ConflictError(
-            f"{pending} criteri{'on' if pending == 1 else 'a'} still need your review before "
-            "this report can be decided. Resolve them first."
-        )
-    # Compute the current assessment without committing. Persist it only in
-    # the conditional decision write, so a losing concurrent request cannot
-    # rewrite the winner's frozen scoring record or audit.
-    current_scoring = await build_report_payload(session, check_run_id, settings)
-    current_status = ReadinessStatus(current_scoring["status"])
-    current_score = current_scoring["composite_score"]
-    decision_enum = ReportDecision(decision)
-    stripped_note = note.strip() if note and note.strip() else None
-    if (decision_enum, current_status) in DECISIONS_REQUIRING_A_REASON:
-        # first-time-user review/backend review finding, live-reproduced: this used
-        # to check presence only, so "ok" satisfied it -- the escalation-
-        # resolution reason (BUG-096) enforces a real minimum on the exact
-        # same class of published, audit-trail justification; this is the
-        # SAME control on the higher-stakes action and had a lower bar
-        # than the one it trained the instructor to expect. Reuses
-        # `resolution_reason_min_length` rather than inventing a second
-        # number -- both are "a typed justification an instructor
-        # supplies, published to the report/PDF/share link."
-        minimum = (settings or get_settings()).resolution_reason_min_length
-        if not stripped_note or len(stripped_note) < minimum:
+    """Record the instructor decision against the exact assessment reviewed.
+
+    Return preserves unresolved criteria. Approval and rejection retain their
+    pending-judgment gate. Every decision freezes subsequent score changes.
+    """
+    settings = settings or get_settings()
+    try:
+        decision_enum = ReportDecision(decision)
+    except ValueError as error:
+        raise ConflictError("Choose an available instructor decision.") from error
+    async with assessment_write(session, check_run_id, instructor_id, expected_revision) as report:
+        pending_rows = (
+            await session.execute(
+                select(CheckResult.id, CheckResult.criterion_id, CheckResult.outcome)
+                .where(
+                    CheckResult.check_run_id == check_run_id,
+                    CheckResult.outcome.in_(NEEDS_REVIEW_OUTCOMES),
+                    CheckResult.criterion_id.isnot(None),
+                )
+                .order_by(CheckResult.id)
+            )
+        ).all()
+        if pending_rows and decision_enum != ReportDecision.returned:
+            count = len(pending_rows)
+            raise ConflictError(
+                f"{count} criteri{'on' if count == 1 else 'a'} still need your review "
+                "before approval or rejection. Resolve them first, or return for revision."
+            )
+        current_scoring = await build_report_payload(session, check_run_id, settings)
+        current_status = ReadinessStatus(current_scoring["status"])
+        stripped_note = note.strip() if note and note.strip() else None
+        minimum = settings.resolution_reason_min_length
+        requires_reason = (decision_enum == ReportDecision.returned and bool(pending_rows)) or (
+            decision_enum,
+            current_status,
+        ) in DECISIONS_REQUIRING_A_REASON
+        if requires_reason and (stripped_note is None or len(stripped_note) < minimum):
+            if decision_enum == ReportDecision.returned:
+                raise ConflictError(
+                    "Explain why this report is being returned for revision "
+                    f"in at least {minimum} characters."
+                )
             raise ConflictError(
                 f"This decision disagrees with VERIDICAL's own "
                 f"{current_status.value.replace('_', ' ')} verdict. Explain why in at least "
                 f"{minimum} characters, so the audit trail records the disagreement."
             )
-
-    # BUG-184: the read-then-write above (`report.decision is not None`
-    # checked, then set later) is a TOCTOU race — concurrent requests can
-    # all observe `decision IS NULL` and all proceed. A conditional
-    # `UPDATE ... WHERE decision IS NULL` is the database winner for that
-    # race, the same pattern `pipeline.machine._transition_after_boundary`
-    # already uses for the completion/cancel race: a request that loses
-    # gets 0 rows back and 409s honestly instead of 200-ing into an audit
-    # trail that records a decision which never took effect.
-    won = (
-        await session.execute(
-            update(ReadinessReport)
-            .where(ReadinessReport.id == report.id, ReadinessReport.decision.is_(None))
-            .values(
-                status=current_status,
-                composite_score=Decimal(str(round(current_score, 2)))
-                if current_score is not None
+        score = current_scoring["composite_score"]
+        report.status = current_status
+        report.composite_score = Decimal(str(round(score, 2))) if score is not None else None
+        report.decision = decision_enum
+        report.decided_at = await session.scalar(select(func.clock_timestamp()))
+        report.decided_by_instructor_id = instructor_id
+        report.decision_note = stripped_note
+        await session.flush()
+        await write_audit_event(
+            session,
+            event_type="verdict_computed",
+            check_run_id=check_run_id,
+            created_at=report.decided_at,
+            payload={
+                key: current_scoring[key]
+                for key in (
+                    "composite_score",
+                    "status",
+                    "reason",
+                    "thresholds",
+                    "flag_deduction",
+                    "unresolved_high_flag_count",
+                )
+            },
+        )
+        await write_audit_event(
+            session,
+            event_type="report_decided",
+            check_run_id=check_run_id,
+            created_at=report.decided_at,
+            payload={
+                "instructor_id": instructor_id,
+                "decision": decision,
+                "note": stripped_note,
+                "composite_score": float(report.composite_score)
+                if report.composite_score is not None
                 else None,
-                decision=decision_enum,
-                decided_at=func.clock_timestamp(),
-                decided_by_instructor_id=instructor_id,
-                decision_note=stripped_note,
-            )
-            .returning(ReadinessReport.id, ReadinessReport.decided_at)
+                "status": report.status.value,
+                "assessment_revision_before": expected_revision,
+                "assessment_revision": report.assessment_revision,
+                "pending_criteria": [
+                    {
+                        "check_result_id": row.id,
+                        "criterion_id": row.criterion_id,
+                        "outcome": row.outcome.value,
+                    }
+                    for row in pending_rows
+                ],
+                "assessment": current_scoring,
+            },
         )
-    ).first()
-    if won is None:
-        raise ConflictError(
-            "This report has already been decided. Reopen it first to change the decision."
-        )
-    await write_audit_event(
-        session,
-        event_type="verdict_computed",
-        check_run_id=check_run_id,
-        created_at=won.decided_at,
-        payload={
-            key: current_scoring[key]
-            for key in (
-                "composite_score",
-                "status",
-                "reason",
-                "thresholds",
-                "flag_deduction",
-                "unresolved_high_flag_count",
-            )
-        },
-    )
-    # The audit event is written only on the write that actually won —
-    # never before it, so a losing request can never leave behind a
-    # `report_decided` row for a decision that didn't persist.
-    #
-    # backend review finding: without a snapshot of what the instructor
-    # was actually looking at, a later score drift (a flag override or
-    # escalation resolved after this decision — both now blocked by
-    # `raise_if_decided`, but the snapshot is what makes any future gap
-    # in that guard DETECTABLE from the audit log alone, not just
-    # prevented today) would be invisible in the trail.
-    await write_audit_event(
-        session,
-        event_type="report_decided",
-        check_run_id=check_run_id,
-        created_at=won.decided_at,
-        payload={
-            "instructor_id": instructor_id,
-            "decision": decision,
-            "note": stripped_note,
-            "composite_score": (
-                float(report.composite_score) if report.composite_score is not None else None
-            ),
-            "status": report.status.value,
-        },
-    )
-    await session.commit()
-    return await get_report(session, check_run_id, instructor_id)
+        out = await get_report(session, check_run_id, instructor_id)
+    return out
 
 
 async def reopen_report(
@@ -1723,66 +1725,46 @@ async def reopen_report(
     instructor_id: int,
     reason: str,
     settings: Settings | None = None,
+    *,
+    expected_revision: int,
 ) -> ReportOut:
-    """Undoes a decision so a new one can be made — always explicit, always
-    reasoned (AC: "reopen logged with reason"). The prior decision isn't
-    erased from history: it's preserved in the immutable audit log
-    (`report_decided`, then this `report_reopened` event), even though the
-    report's own display fields reset to None (the "current decision"
-    fields, not the historical record — see the model's own docstring)."""
-    report = await _get_owned_report(session, check_run_id, instructor_id)
-    if report.decision is None:
-        raise ConflictError("This report hasn't been decided yet. There's nothing to reopen.")
-    # BUG-105: reason presence/length is primarily enforced by the
-    # router's request schema (`ReopenIn`'s `field_validator`); this is a
-    # defensive second check for any other caller of this service
-    # function, same reasoning `resolve_escalation` already documents.
+    """Explicitly reopen the reviewed decision without erasing its audit history."""
     minimum = (settings or get_settings()).resolution_reason_min_length
     if not reason or len(reason.strip()) < minimum:
         raise ConflictError(f"A reason of at least {minimum} characters is required to reopen.")
-
-    prior_decision = report.decision.value
-    prior_note = report.decision_note
-    # A delayed reopen must not clear a newer decision, even if that newer
-    # decision repeats the same outcome and note. Match the original stored
-    # snapshot at the write boundary; legacy nullable fields compare safely.
-    won = (
-        await session.execute(
-            update(ReadinessReport)
-            .where(
-                ReadinessReport.id == report.id,
-                ReadinessReport.decision == report.decision,
-                ReadinessReport.decided_at.is_not_distinct_from(report.decided_at),
-                ReadinessReport.decided_by_instructor_id.is_not_distinct_from(
-                    report.decided_by_instructor_id
-                ),
-                ReadinessReport.decision_note.is_not_distinct_from(prior_note),
-            )
-            .values(
-                decision=None, decided_at=None, decided_by_instructor_id=None, decision_note=None
-            )
-            .returning(ReadinessReport.id, func.clock_timestamp().label("reopened_at"))
+    async with assessment_write(
+        session, check_run_id, instructor_id, expected_revision, allow_decided=True
+    ) as report:
+        if report.decision is None:
+            raise ConflictError("This report hasn't been decided yet. There's nothing to reopen.")
+        prior_decision = report.decision.value
+        prior_note = report.decision_note
+        prior_at = report.decided_at
+        prior_actor = report.decided_by_instructor_id
+        report.decision = None
+        report.decided_at = None
+        report.decided_by_instructor_id = None
+        report.decision_note = None
+        await write_audit_event(
+            session,
+            event_type="report_reopened",
+            check_run_id=check_run_id,
+            created_at=await session.scalar(select(func.clock_timestamp())),
+            payload={
+                "instructor_id": instructor_id,
+                "reason": reason.strip(),
+                "prior_decision": prior_decision,
+                "prior_note": prior_note,
+                "prior_decided_at": prior_at.isoformat() if prior_at else None,
+                "prior_decided_by_instructor_id": prior_actor,
+                "composite_score": float(report.composite_score)
+                if report.composite_score is not None
+                else None,
+                "status": report.status.value,
+                "assessment_revision_before": expected_revision,
+                "assessment_revision": report.assessment_revision,
+            },
         )
-    ).first()
-    if won is None:
-        raise ConflictError(
-            "This decision changed while you were reopening it. Refresh and review it again."
-        )
-    await write_audit_event(
-        session,
-        event_type="report_reopened",
-        check_run_id=check_run_id,
-        created_at=won.reopened_at,
-        payload={
-            "instructor_id": instructor_id,
-            "reason": reason.strip(),
-            "prior_decision": prior_decision,
-            "prior_note": prior_note,
-            "composite_score": (
-                float(report.composite_score) if report.composite_score is not None else None
-            ),
-            "status": report.status.value,
-        },
-    )
-    await session.commit()
-    return await get_report(session, check_run_id, instructor_id)
+        await session.flush()
+        out = await get_report(session, check_run_id, instructor_id)
+    return out

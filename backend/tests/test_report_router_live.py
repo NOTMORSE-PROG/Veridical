@@ -124,7 +124,7 @@ def logged_in_with_a_done_run(client, api_scratch_url):
                 )
                 check_run.status = CheckRunStatus.done
                 await session.commit()
-                await aggregate_and_score(session, check_run.id)
+                await aggregate_and_score(session, check_run.id, commit=True)
                 return check_run.id
         finally:
             await engine.dispose()
@@ -168,7 +168,7 @@ def test_decide_then_reopen_over_http(logged_in_with_a_done_run):
     client, check_run_id = logged_in_with_a_done_run
     resp = client.post(
         f"/check-runs/{check_run_id}/decision",
-        json={"decision": "approved", "note": "Ready for defense."},
+        json={"decision": "approved", "note": "Ready for defense.", "expected_revision": 0},
     )
     assert resp.status_code == 200
     body = resp.json()
@@ -176,7 +176,10 @@ def test_decide_then_reopen_over_http(logged_in_with_a_done_run):
     assert body["decision_note"] == "Ready for defense."
 
     # Frozen: a second decision without reopening is rejected.
-    blocked = client.post(f"/check-runs/{check_run_id}/decision", json={"decision": "rejected"})
+    blocked = client.post(
+        f"/check-runs/{check_run_id}/decision",
+        json={"decision": "rejected", "expected_revision": 1},
+    )
     assert blocked.status_code == 409
 
     # A reopen with no reason fails validation before it ever reaches the
@@ -185,11 +188,15 @@ def test_decide_then_reopen_over_http(logged_in_with_a_done_run):
     assert bad_reopen.status_code == 422
 
     reopened = client.post(
-        f"/check-runs/{check_run_id}/reopen", json={"reason": "Adviser asked for a second look."}
+        f"/check-runs/{check_run_id}/reopen",
+        json={"reason": "Adviser asked for a second look.", "expected_revision": 1},
     )
     assert reopened.status_code == 200
     assert reopened.json()["decision"] is None
 
-    redecided = client.post(f"/check-runs/{check_run_id}/decision", json={"decision": "returned"})
+    redecided = client.post(
+        f"/check-runs/{check_run_id}/decision",
+        json={"decision": "returned", "expected_revision": 2},
+    )
     assert redecided.status_code == 200
     assert redecided.json()["decision"] == "returned"

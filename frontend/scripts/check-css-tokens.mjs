@@ -355,7 +355,9 @@ const FONT_FAMILY_DECLARATION = /\bfont-family\s*:\s*([^;]+)/i;
 // CSS custom properties cannot be used in media-query conditions. Keep the
 // shell thresholds and the Library's document-reading threshold (DESIGN §6,
 // V-079) are sanctioned. Other one-off breakpoints still fail this gate.
-const MEDIA_BREAKPOINT = /^@media \(max-width: (?:767|1023)px\) \{$/;
+// The manuscript workbench switches to manual panes at the documented
+// desktop reading-width boundary; other one-off sizes remain rejected.
+const MEDIA_BREAKPOINT = /^@media \(max-width: (?:767|1023|1199)px\) \{$/;
 
 function isCommentLine(code) {
   return code.startsWith("//") || code.startsWith("*") || code.startsWith("/*");

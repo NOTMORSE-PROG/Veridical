@@ -1,5 +1,7 @@
+import { SourceViewDetails } from "./SourceViewDetails";
 import {
   useCallback,
+  useId,
   useEffect,
   useMemo,
   useRef,
@@ -435,6 +437,9 @@ export function PdfPane({
     else setPageInput(String(currentPage));
   }
 
+  const detailsId = useId();
+  const [detailsOpen, setDetailsOpen] = useState(false);
+  const comparisonMarkers = regions.some((region) => flags.some((flag) => flag.id === region.flag_id && isOptionalComparisonLead(flag)));
   const scopeRegions = regions.filter((region) => region.kind !== "page_bbox");
   const pagesLabel = pdf ? `${pdf.numPages} ${pdf.numPages === 1 ? "page" : "pages"}` : "Loading pages";
   const zoomStyle = { inlineSize: `${zoom * 100}%` } as CSSProperties;
@@ -444,9 +449,10 @@ export function PdfPane({
       <div className="signal-document-toolbar">
         <div className="signal-document-toolbar__identity">
           <strong>Full manuscript</strong>
-          <span>Original PDF · {pagesLabel}</span>
+          <span>Original PDF · {pagesLabel}{comparisonMarkers && " · L: unscored comparison"}</span>
         </div>
         <div className="signal-document-toolbar__controls" role="group" aria-label="PDF page and zoom controls">
+          <button type="button" aria-expanded={detailsOpen} aria-controls={detailsId} onClick={() => setDetailsOpen((value) => !value)}>Source view details</button>
           <button type="button" onClick={() => setZoom((value) => Math.max(PDF_ZOOM_MIN, Number((value - PDF_ZOOM_STEP).toFixed(1))))} disabled={zoom <= PDF_ZOOM_MIN}>Zoom out</button>
           <button type="button" onClick={() => setZoom(1)} disabled={zoom === 1}>Fit width</button>
           <button type="button" onClick={() => setZoom((value) => Math.min(PDF_ZOOM_MAX, Number((value + PDF_ZOOM_STEP).toFixed(1))))} disabled={zoom >= PDF_ZOOM_MAX}>Zoom in</button>
@@ -470,7 +476,6 @@ export function PdfPane({
           <output aria-live="polite">Page {currentPage} of {pdf?.numPages ?? "…"}</output>
         </div>
       </div>
-      {flags.some(isOptionalComparisonLead) && <p className="signal-field-hint">{COMPARISON_LEAD_COPY.markerLegend}</p>}
       {pdf && requestedPage !== null && (!Number.isSafeInteger(requestedPage) || requestedPage < 1 || requestedPage > pdf.numPages) && <p role="alert" className="signal-document-reconstruction-note">The recorded page is not available in this PDF. Inspect the manuscript manually; no replacement page was selected.</p>}
       {scopeRegions.length > 0 && (
         <div className="signal-document-scope-markers" role="group" aria-label="Findings without an exact passage location">
@@ -489,6 +494,7 @@ export function PdfPane({
         </div>
       )}
       <div ref={scrollRef} role="region" tabIndex={0} aria-label="Full manuscript, scrollable" className="signal-document-scroll signal-document-scroll--pdf">
+        <SourceViewDetails id={detailsId} open={detailsOpen} format="pdf" comparisonMarkers={comparisonMarkers} />
         {loadError ? (
           <section className="signal-document-paper-state" role="alert">
             <p className="signal-section-kicker">PDF display unavailable</p>

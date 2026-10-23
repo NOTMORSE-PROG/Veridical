@@ -35,6 +35,7 @@ export function Dialog({
   returnFocusTarget,
   fallbackFocusRef,
   closeButtonRef,
+  initialFocusTitle = false,
 }: {
   title: ReactNode;
   children?: ReactNode;
@@ -46,10 +47,13 @@ export function Dialog({
   returnFocusTarget?: () => HTMLElement | null;
   fallbackFocusRef?: RefObject<HTMLElement | null>;
   closeButtonRef?: RefObject<HTMLButtonElement | null>;
+  initialFocusTitle?: boolean;
 }) {
   useInertBackground();
   const titleId = useId();
   const dialogRef = useRef<HTMLDivElement>(null);
+  const titleRef = useRef<HTMLHeadingElement>(null);
+  const focusTitle = useRef(initialFocusTitle);
   // Capture before the portal commits. A child with `autoFocus` can take
   // focus before effects run; capturing inside the effect would then
   // remember the soon-to-be-unmounted field instead of the trigger.
@@ -63,7 +67,7 @@ export function Dialog({
     const focusReturnTarget = returnTarget.current;
     const options = returnOptions.current;
     const [first] = dialog ? focusable(dialog) : [];
-    (first ?? dialog)?.focus();
+    (focusTitle.current ? titleRef.current : first ?? dialog)?.focus();
     const previousOverflow = document.body.style.overflow;
     document.body.style.overflow = "hidden";
     return () => {
@@ -92,7 +96,7 @@ export function Dialog({
       }
       const first = items[0];
       const last = items[items.length - 1];
-      if (event.shiftKey && document.activeElement === first) {
+      if (event.shiftKey && (document.activeElement === first || document.activeElement === titleRef.current)) {
         event.preventDefault();
         last.focus();
       } else if (!event.shiftKey && document.activeElement === last) {
@@ -115,7 +119,7 @@ export function Dialog({
         className={cx("signal-dialog", wide && "signal-dialog--wide")}
       >
         <header>
-          <h2 id={titleId}>{title}</h2>
+          <h2 id={titleId} ref={titleRef} tabIndex={initialFocusTitle ? -1 : undefined}>{title}</h2>
           {onClose && (
             <button ref={closeButtonRef} type="button" className="signal-icon-button" aria-label="Close" onClick={onClose}>
               <svg aria-hidden="true" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="square">

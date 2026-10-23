@@ -7,6 +7,7 @@ import { RequireAuth } from "../auth/RequireAuth";
 import { CriterionReviewLayout } from "./CriterionReviewScope";
 import { SignalEscalatedPanel } from "./SignalReviewSections";
 import { useReport } from "./useReport";
+import type { ResultRowCommon } from "../api/types";
 
 const ITEMS = [1, 2, 3].map((id) => ({
   check_result_id: id, criterion_id: id, criterion_text: `Requirement ${id}`, weight: 1,
@@ -14,6 +15,12 @@ const ITEMS = [1, 2, 3].map((id) => ({
   reason: null, review_reason: "low_confidence", evidence: [{ quote: `Excerpt ${id}`, anchor: `paragraph ${id}` }],
   levels: [{ level: 1, name: "First level", descriptor: "First descriptor", points: 1 }, { level: 2, name: "Second level", descriptor: "Second descriptor", points: 2 }],
 }));
+function savedRow(id: number, reason: string, level = 1): ResultRowCommon {
+  return { criterion_id: id, text: `Requirement ${id}`, type: "semantic", kind: "semantic", weight: 1,
+    weight_importance: "med", outcome: "passed", score: level * 50, basis: "llm", anchor: null, evidence: [], reasoning: null, reason: null,
+    level: { name: level === 1 ? "First level" : "Second level", ordinal: level, points: level, max_points: 2 },
+    resolution: { type: "mark_level", reason, ai_majority_verdict: null } };
+}
 function ReportObserver() { const { data } = useReport(Number(useParams().checkRunId)); return <p data-testid="recorded-pending">{data?.pending_review_count}</p>; }
 function Panel() { return <><ReportObserver /><SignalEscalatedPanel checkRunId={Number(useParams().checkRunId)} /></>; }
 function Source() { return <><ReportObserver /><h1 tabIndex={-1}>Source reading</h1><Link to="..">Return to report</Link></>; }
@@ -22,22 +29,26 @@ function setup() {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
   client.setQueryData(ME_QUERY_KEY, { id: 1 });
   let unresolved = [...ITEMS];
+  let saved: ResultRowCommon[] = [];
+  let revision = 0;
   let failList = false;
-  const held: Array<{ id: number; finish: (success?: boolean, response?: unknown, apply?: boolean) => void }> = [];
+  const held: Array<{ id: number; finish: (success?: boolean, response?: unknown, apply?: boolean, status?: number) => void }> = [];
   const fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const path = new URL(String(input), "http://localhost").pathname;
     const resolution = path.match(/\/escalated\/(\d+)\/resolve$/);
     if (resolution && init?.method === "POST") return await new Promise<Response>((resolve) => {
       const id = Number(resolution[1]);
-      held.push({ id, finish(success = true, response?: unknown, apply = true) {
-        if (success && apply) unresolved = unresolved.filter((item) => item.check_result_id !== id);
+      const body = JSON.parse(init.body as string) as { reason: string; level: number };
+      const row = savedRow(id, body.reason, body.level);
+      held.push({ id, finish(success = true, response?: unknown, apply = true, status = success ? 200 : 503) {
+        if (success && apply) { revision += 1; unresolved = unresolved.filter((item) => item.check_result_id !== id); saved = [...saved.filter((item) => item.criterion_id !== id), row]; }
         resolve(new Response(JSON.stringify(response ?? (success
-          ? { check_result_id: id, outcome: "passed", score: 100, report: { check_run_id: 5, results: [], pending_review_count: unresolved.length } }
-          : { error: { code: "internal", message: "Controlled save failure" } })), { status: success ? 200 : 503 }));
+          ? { check_result_id: id, outcome: "passed", score: row.score, report: { assessment_revision: revision, decision: null, check_run_id: 5, results: saved, pending_review_count: unresolved.length } }
+          : { error: { code: "internal", message: "Controlled save failure" } })), { status }));
       } });
     });
     if (path.endsWith("/escalated")) return new Response(JSON.stringify(failList ? { error: { code: "internal", message: "Controlled list failure" } } : unresolved), { status: failList ? 503 : 200 });
-    if (path.endsWith("/report")) return new Response(JSON.stringify({ check_run_id: Number(path.split("/")[2]), results: [], pending_review_count: unresolved.length }));
+    if (path.endsWith("/report")) return new Response(JSON.stringify({ assessment_revision: revision, decision: null, check_run_id: Number(path.split("/")[2]), results: saved, pending_review_count: unresolved.length }));
     return new Response(JSON.stringify({ instructor: { id: 1 } }));
   });
   vi.stubGlobal("fetch", fetch);
@@ -70,7 +81,7 @@ async function confirm(id: number) {
   const button = within(await card(id)).getByRole("button", { name: "Confirm resolution" });
   button.focus(); fireEvent.click(button);
 }
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
 describe("report-family private review ownership", () => {
   it.each([
@@ -81,24 +92,35 @@ describe("report-family private review ownership", () => {
   ])("retains a draft for an unconfirmed or mismatched success record $check_result_id", async (response) => {
     const { held, client } = setup(); await draft(1, "First level", "Exact reason until an authoritative result"); await confirm(1);
     await act(async () => { held[0].finish(true, response, false); });
-    expect(await screen.findByText("The server response did not confirm this resolution. Refresh the review before confirming again.")).toBeVisible();
+    expect(await screen.findByText("Saving could not be confirmed")).toBeVisible();
     // The control's server list also reports it unresolved; no success inferred.
     expect(within(await card(1)).getByRole("textbox")).toHaveValue("Exact reason until an authoritative result");
     expect(client.getQueryData(["report", 5])).not.toEqual(response.report);
     expect(screen.queryByText(/Criterion resolved as/)).not.toBeInTheDocument();
   });
 
-  it("refreshes authoritative report state when sibling responses arrive in reverse snapshot order", async () => {
-    const { held, client } = setup();
+  it("retains the losing sibling draft until current review binds it to the winner's newer revision", async () => {
+    const { held, client, fetch } = setup();
     await draft(1, "First level", "First independent confirmation"); await confirm(1);
     await draft(2, "Second level", "Second independent confirmation"); await confirm(2);
-    const newer = { check_result_id: 2, outcome: "passed", report: { check_run_id: 5, results: [], pending_review_count: 1 } };
-    await act(async () => { held[1].finish(true, newer); });
-    const older = { check_result_id: 1, outcome: "passed", report: { check_run_id: 5, results: [], pending_review_count: 2 } };
-    await act(async () => { held[0].finish(true, older); });
-    await waitFor(() => expect(screen.getByTestId("recorded-pending")).toHaveTextContent("1"));
-    expect(client.getQueryData(["report", 5])).toMatchObject({ pending_review_count: 1 });
+    await act(async () => { held[1].finish(); });
+    await act(async () => { held[0].finish(false, { error: { code: "conflict", message: "Assessment changed" } }, false, 409); });
+    await waitFor(() => expect(client.getQueryData(["report", 5])).toMatchObject({ assessment_revision: 1, pending_review_count: 2 }));
+    const losing = within(await card(1));
+    expect(losing.getByRole("textbox")).toHaveValue("First independent confirmation");
+    expect(losing.getByRole("button", { name: "Confirm resolution" })).toBeDisabled();
+    const posts = () => fetch.mock.calls.filter(([, init]) => init?.method === "POST");
+    expect(posts().map(([, init]) => JSON.parse(String(init?.body)).expected_revision)).toEqual([0, 0]);
+    fireEvent.click(losing.getByRole("button", { name: "Review current criterion" }));
+    fireEvent.click(await losing.findByRole("button", { name: "Use this draft for the current criterion" }));
+    expect(posts()).toHaveLength(2);
+    await confirm(1);
+    await waitFor(() => expect(held).toHaveLength(3));
+    expect(JSON.parse(String(posts()[2][1]?.body)).expected_revision).toBe(1);
+    await act(async () => { held[2].finish(); });
+    await waitFor(() => expect(client.getQueryData(["report", 5])).toMatchObject({ assessment_revision: 2, pending_review_count: 1 }));
   });
+
   it.each([1, 3])("retains two exact sibling choices through source from item %s and browser Back", async (sourceId) => {
     const { router, fetch } = setup();
     await draft(1, "First level", "  first reason\nwith whitespace  ");
@@ -133,10 +155,13 @@ describe("report-family private review ownership", () => {
     expect(within(await card(2)).getByRole("textbox")).toHaveValue("Second exact reason");
     if (success) {
       await waitFor(() => expect(screen.queryByRole("heading", { name: "Requirement 1" })).not.toBeInTheDocument());
-      expect(await screen.findByText(/Criterion resolved as Meets criterion/)).toBeInTheDocument();
+      expect(await screen.findByText(/Criterion resolved as First level/)).toBeInTheDocument();
     } else {
       expect(within(await card(1)).getByRole("textbox")).toHaveValue("First exact reason");
-      expect(await screen.findByText("Controlled save failure")).toBeVisible();
+      expect(await screen.findByText("Saving could not be confirmed")).toBeVisible();
+      const currentCard = within(await card(1));
+      fireEvent.click(currentCard.getByRole("button", { name: "Review current criterion" }));
+      fireEvent.click(await currentCard.findByRole("button", { name: "Use this draft for the current criterion" }));
       await confirm(1); await waitFor(() => expect(held).toHaveLength(2));
       expect(held.map((entry) => entry.id)).toEqual([1, 1]);
     }
@@ -160,8 +185,8 @@ describe("report-family private review ownership", () => {
     const state = setup(); await draft(1, "First level", "Retain through failed list request");
     state.failList();
     await act(async () => { await state.client.refetchQueries({ queryKey: ["report", 5, "escalated"] }); });
-    expect(await screen.findByText("Could not load criteria needing review")).toBeVisible();
-    state.restoreList(); fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+    expect(await screen.findByText("Could not update criteria needing review")).toBeVisible();
+    state.restoreList(); fireEvent.click(screen.getByRole("button", { name: "Retry review items" }));
     expect(within(await card(1)).getByRole("textbox")).toHaveValue("Retain through failed list request");
   });
 
@@ -197,4 +222,40 @@ describe("report-family private review ownership", () => {
     expect(client.getQueryData(["report", 5])).toBe(currentRecord);
     expect(screen.queryByText(/Criterion resolved as/)).not.toBeInTheDocument();
   });
+});
+
+it.each(["unconfirmed response", "service failure"])("requires current review and explicit rebind after %s", async failure => {
+  vi.spyOn(document, "hasFocus").mockReturnValue(true);
+  const control = setup(); const reason = "  Exact reason preserved through uncertain save\nwith whitespace  ";
+  await draft(1, "First level", reason); await confirm(1);
+  await waitFor(() => expect(control.held).toHaveLength(1));
+  await act(async () => {
+    if (failure === "service failure") control.held[0].finish(false);
+    else control.held[0].finish(true, { check_result_id: 1, outcome: "passed", report: { check_run_id: 5, results: [], assessment_revision: 1 } }, false);
+  });
+  const root = within(await card(1));
+  await waitFor(() => expect(root.getByRole("button", { name: "Confirm resolution" })).toBeDisabled());
+  expect(root.getByRole("textbox")).toHaveValue(reason);
+  fireEvent.click(root.getByRole("button", { name: "Review current criterion" }));
+  const rebind = await root.findByRole("button", { name: "Use this draft for the current criterion" });
+  rebind.focus(); fireEvent.click(rebind);
+  expect(root.getByRole("textbox")).toHaveFocus();
+  await waitFor(() => expect(root.getByRole("button", { name: "Confirm resolution" })).toBeEnabled());
+  expect(root.getByRole("textbox")).toHaveValue(reason);
+  expect(control.fetch.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(1);
+});
+
+it("shows a decided-state draft route and requires explicit current review after reopening", async () => {
+  const control = setup(); await draft(1, "First level", "Exact retained draft reason");
+  await act(async () => { control.client.setQueryData(["report", 5], { check_run_id: 5, assessment_revision: 1, decision: "returned", results: [], pending_review_count: 3 }); });
+  expect(await screen.findByRole("heading", { name: "Unresolved at time of return" })).toBeVisible();
+  const root = within(await card(1));
+  expect(root.queryByRole("button", { name: "Review current criterion" })).not.toBeInTheDocument();
+  expect(root.getByRole("link", { name: "Go to the recorded decision" })).toHaveAttribute("href", "/report/5#final-decision");
+  expect(root.getByRole("textbox")).toHaveAttribute("readonly");
+  expect(screen.queryByText(/Reopening did not save/)).not.toBeInTheDocument();
+  await act(async () => { control.client.setQueryData(["report", 5], { check_run_id: 5, assessment_revision: 2, decision: null, results: [], pending_review_count: 3 }); });
+  expect(root.getByRole("button", { name: "Confirm resolution" })).toBeDisabled();
+  expect(await root.findByRole("button", { name: "Review current criterion" })).toBeEnabled();
+  expect(root.getByRole("textbox")).toHaveValue("Exact retained draft reason");
 });

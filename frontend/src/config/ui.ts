@@ -13,13 +13,15 @@ export const WEIGHT_IMPORTANCE_PREVIEW = {
 // every reasoned instructor action uses one disclosed validation rule.
 export const RESOLUTION_REASON_MIN_LENGTH = 10;
 export const INSTRUCTOR_NOTE_MAX_LENGTH = 1000;
+// API encoding units for criterion results, independent of readiness thresholds.
+export const CRITERION_SCORE_UNITS = { none: 0, full: 100 } as const;
 
 /** Synthetic region id used only to route a criterion's recorded text
  * anchor through the existing document-pane focus engine. Real Flag ids
  * are positive; this value can therefore never be mistaken for one. */
 export const CRITERION_ANCHOR_REGION_ID = -2147483647;
 // Matches the existing single-pane document layout in signal.css.
-export const DOCUMENT_SINGLE_PANE_MEDIA_QUERY = "(max-width: 767px)";
+export const DOCUMENT_SINGLE_PANE_MEDIA_QUERY = "(max-width: 1199px)";
 export const PASSWORD_MIN_LENGTH = 8;
 export const LIBRARY_SEARCH_DEBOUNCE_MS = 400;
 // V-077: how often an own Library record that is still being read refreshes
@@ -33,6 +35,8 @@ export const STORED_FILES_PAGE_SIZE = 50;
 export const REVIEW_DESK_PAGE_SIZE = 20;
 export const FLAG_LIST_INITIAL_COUNT = 8;
 export const FLAG_LIST_BATCH_COUNT = 8;
+export const COMPARISON_LEAD_PAGE_SIZE = FLAG_LIST_INITIAL_COUNT;
+export const COMPARISON_EXCERPT_PREVIEW_LENGTH = 140;
 
 /** Protocol value shared with the group-program filter API. */
 export const UNSET_PROGRAM_FILTER = "__unset__";

@@ -215,6 +215,7 @@ async def resolve_escalation(
     # V-069 AC4: the level ORDINAL the instructor picked, required (and
     # only meaningful) when `resolution == RESOLUTION_MARK_LEVEL`.
     level: int | None = None,
+    commit: bool,
 ) -> CheckResult:
     """One instructor decision on one escalated criterion (ticket AC): the
     ONLY way an escalated result ever becomes a score contribution again —
@@ -241,7 +242,7 @@ async def resolve_escalation(
     if resolution not in _VALID_RESOLUTIONS:
         raise ConflictError(f"Unknown resolution {resolution!r}.")
 
-    result = await session.get(CheckResult, check_result_id)
+    result = await session.get(CheckResult, check_result_id, populate_existing=True)
     if result is None or result.check_run_id != check_run_id:
         raise NotFoundError(f"No check result {check_result_id} on check run {check_run_id}.")
     # BUG-073 follow-up: an F4/F5 integrity check (criterion_id always
@@ -354,6 +355,11 @@ async def resolve_escalation(
     result.score = new_score
     result.detail = detail
 
+    # Score history, aggregation and the response use the actual Numeric(5,2)
+    # value persisted by the database, including fractional rubric levels.
+    await session.flush()
+    await session.refresh(result, ["score"])
+
     session.add(
         AuditLog(
             event_type="escalation_resolved",
@@ -367,10 +373,11 @@ async def resolve_escalation(
                 "reason": reason.strip(),
                 "ai_majority_verdict": majority_verdict,
                 "new_outcome": new_outcome.value,
-                "new_score": new_score,
+                "new_score": float(result.score) if result.score is not None else None,
             },
         )
     )
-    await session.commit()
-    await session.refresh(result)
+    if commit:
+        await session.commit()
+        await session.refresh(result)
     return result

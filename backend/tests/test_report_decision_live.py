@@ -111,7 +111,7 @@ async def _seed_decidable_run(session, *, rubric_is_active=True):
     )
     session.add(check_result)
     await session.commit()
-    await aggregate_and_score(session, check_run.id)
+    await aggregate_and_score(session, check_run.id, commit=True)
     return instructor, check_run
 
 
@@ -154,7 +154,7 @@ async def _seed_not_ready_run(session):
     )
     session.add(check_result)
     await session.commit()
-    await aggregate_and_score(session, check_run.id)
+    await aggregate_and_score(session, check_run.id, commit=True)
     return instructor, check_run
 
 
@@ -202,7 +202,7 @@ async def _seed_needs_review_run(session):
     )
     session.add(check_result)
     await session.commit()
-    await aggregate_and_score(session, check_run.id)
+    await aggregate_and_score(session, check_run.id, commit=True)
     return instructor, check_run
 
 
@@ -227,14 +227,14 @@ async def _add_escalated_criterion(session, check_run):
     )
     session.add(check_result)
     await session.commit()
-    await aggregate_and_score(session, check_run.id)
+    await aggregate_and_score(session, check_run.id, commit=True)
 
 
 async def test_decides_and_freezes_the_report(session_factory):
     async with session_factory() as session:
         instructor, check_run = await _seed_decidable_run(session)
         report = await decide_report(
-            session, check_run.id, instructor.id, "approved", "Looks ready."
+            session, check_run.id, instructor.id, "approved", "Looks ready.", expected_revision=0
         )
         assert report.decision == "approved"
         assert report.decision_note == "Looks ready."
@@ -256,7 +256,9 @@ async def test_note_is_optional(session_factory):
     below."""
     async with session_factory() as session:
         instructor, check_run = await _seed_decidable_run(session)
-        report = await decide_report(session, check_run.id, instructor.id, "approved", None)
+        report = await decide_report(
+            session, check_run.id, instructor.id, "approved", None, expected_revision=0
+        )
         assert report.decision == "approved"
         assert report.decision_note is None
 
@@ -264,7 +266,9 @@ async def test_note_is_optional(session_factory):
 async def test_blank_note_normalizes_to_none(session_factory):
     async with session_factory() as session:
         instructor, check_run = await _seed_decidable_run(session)
-        report = await decide_report(session, check_run.id, instructor.id, "returned", "   ")
+        report = await decide_report(
+            session, check_run.id, instructor.id, "returned", "   ", expected_revision=0
+        )
         assert report.decision_note is None
 
 
@@ -273,9 +277,13 @@ async def test_deciding_with_unresolved_escalations_is_blocked_with_the_count(se
         instructor, check_run = await _seed_decidable_run(session)
         await _add_escalated_criterion(session, check_run)
         with pytest.raises(ConflictError, match="1 criterion"):
-            await decide_report(session, check_run.id, instructor.id, "approved", None)
+            await decide_report(
+                session, check_run.id, instructor.id, "approved", None, expected_revision=0
+            )
 
         # Confirmed still undecided — the block is real, not advisory.
+        await session.refresh(check_run)
+        await session.refresh(instructor)
         report = await get_report(session, check_run.id, instructor.id)
         assert report.decision is None
         assert report.pending_review_count == 1
@@ -311,6 +319,8 @@ async def test_a_partially_executed_integrity_check_never_blocks_or_inflates_pen
         )
         await session.commit()
 
+        await session.refresh(check_run)
+        await session.refresh(instructor)
         report = await get_report(session, check_run.id, instructor.id)
         assert report.pending_review_count == 0  # the criterion-only count is unaffected
 
@@ -320,13 +330,18 @@ async def test_a_partially_executed_integrity_check_never_blocks_or_inflates_pen
         from app.errors import ConflictError
 
         with pytest.raises(ConflictError, match="needs review"):
-            await decide_report(session, check_run.id, instructor.id, "approved", None)
+            await decide_report(
+                session, check_run.id, instructor.id, "approved", None, expected_revision=0
+            )
+        await session.refresh(check_run)
+        await session.refresh(instructor)
         decided = await decide_report(
             session,
             check_run.id,
             instructor.id,
             "approved",
             "Reviewed the unresolved integrity evidence independently.",
+            expected_revision=0,
         )
         assert decided.decision == "approved"
         assert decided.status == "needs_review"
@@ -451,9 +466,13 @@ async def test_v077_report_states_what_the_originality_check_compared_against(
 async def test_deciding_an_already_decided_report_is_rejected(session_factory):
     async with session_factory() as session:
         instructor, check_run = await _seed_decidable_run(session)
-        await decide_report(session, check_run.id, instructor.id, "approved", None)
+        await decide_report(
+            session, check_run.id, instructor.id, "approved", None, expected_revision=0
+        )
         with pytest.raises(ConflictError):
-            await decide_report(session, check_run.id, instructor.id, "rejected", None)
+            await decide_report(
+                session, check_run.id, instructor.id, "rejected", None, expected_revision=0
+            )
 
 
 async def test_approving_a_not_ready_report_without_a_reason_is_rejected(session_factory):
@@ -465,9 +484,13 @@ async def test_approving_a_not_ready_report_without_a_reason_is_rejected(session
     async with session_factory() as session:
         instructor, check_run = await _seed_not_ready_run(session)
         with pytest.raises(ConflictError, match="disagrees"):
-            await decide_report(session, check_run.id, instructor.id, "approved", None)
+            await decide_report(
+                session, check_run.id, instructor.id, "approved", None, expected_revision=0
+            )
 
         # Confirmed still undecided -- the block is real, not advisory.
+        await session.refresh(check_run)
+        await session.refresh(instructor)
         report = await get_report(session, check_run.id, instructor.id)
         assert report.decision is None
 
@@ -481,6 +504,7 @@ async def test_approving_a_not_ready_report_with_a_reason_succeeds(session_facto
             instructor.id,
             "approved",
             "Panel already reviewed the flagged sections and cleared them in person.",
+            expected_revision=0,
         )
         assert report.decision == "approved"
         assert report.decision_note == (
@@ -492,7 +516,9 @@ async def test_rejecting_a_ready_report_without_a_reason_is_rejected(session_fac
     async with session_factory() as session:
         instructor, check_run = await _seed_decidable_run(session)  # status: ready
         with pytest.raises(ConflictError, match="disagrees"):
-            await decide_report(session, check_run.id, instructor.id, "rejected", None)
+            await decide_report(
+                session, check_run.id, instructor.id, "rejected", None, expected_revision=0
+            )
 
 
 async def test_approving_a_ready_report_without_a_reason_is_allowed(session_factory):
@@ -502,7 +528,9 @@ async def test_approving_a_ready_report_without_a_reason_is_allowed(session_fact
     valuable signal, not paperwork for its own sake)."""
     async with session_factory() as session:
         instructor, check_run = await _seed_decidable_run(session)  # status: ready
-        report = await decide_report(session, check_run.id, instructor.id, "approved", None)
+        report = await decide_report(
+            session, check_run.id, instructor.id, "approved", None, expected_revision=0
+        )
         assert report.decision == "approved"
         assert report.decision_note is None
 
@@ -513,7 +541,9 @@ async def test_returning_a_report_for_revision_never_requires_a_reason(session_f
     `DECISIONS_REQUIRING_A_REASON` regardless of status."""
     async with session_factory() as session:
         instructor, check_run = await _seed_not_ready_run(session)
-        report = await decide_report(session, check_run.id, instructor.id, "returned", None)
+        report = await decide_report(
+            session, check_run.id, instructor.id, "returned", None, expected_revision=0
+        )
         assert report.decision == "returned"
 
 
@@ -529,12 +559,16 @@ async def test_approving_or_rejecting_a_needs_review_report_requires_a_reason(se
         assert report.composite_score is None
 
         with pytest.raises(ConflictError, match="disagrees"):
-            await decide_report(session, check_run.id, instructor.id, "approved", None)
+            await decide_report(
+                session, check_run.id, instructor.id, "approved", None, expected_revision=0
+            )
 
     async with session_factory() as session:
         instructor, check_run = await _seed_needs_review_run(session)
         with pytest.raises(ConflictError, match="disagrees"):
-            await decide_report(session, check_run.id, instructor.id, "rejected", None)
+            await decide_report(
+                session, check_run.id, instructor.id, "rejected", None, expected_revision=0
+            )
 
 
 async def test_a_short_reason_is_rejected_when_a_reason_is_required(session_factory):
@@ -547,8 +581,12 @@ async def test_a_short_reason_is_rejected_when_a_reason_is_required(session_fact
     async with session_factory() as session:
         instructor, check_run = await _seed_not_ready_run(session)
         with pytest.raises(ConflictError, match="at least 10 characters"):
-            await decide_report(session, check_run.id, instructor.id, "approved", "ok")
+            await decide_report(
+                session, check_run.id, instructor.id, "approved", "ok", expected_revision=0
+            )
 
+        await session.refresh(check_run)
+        await session.refresh(instructor)
         report = await get_report(session, check_run.id, instructor.id)
         assert report.decision is None
 
@@ -577,7 +615,13 @@ async def test_resolve_escalation_enforces_the_length_floor_even_bypassing_the_r
         )
         with pytest.raises(ConflictError, match="at least 10 characters"):
             await resolve_escalation_for_run(
-                session, check_run.id, escalated_result_id, instructor.id, "mark_pass", "ok"
+                session,
+                check_run.id,
+                escalated_result_id,
+                instructor.id,
+                "mark_pass",
+                "ok",
+                expected_revision=0,
             )
 
 
@@ -590,7 +634,9 @@ async def test_resolving_an_escalation_is_blocked_once_the_report_is_decided(ses
     boundary."""
     async with session_factory() as session:
         instructor, check_run = await _seed_decidable_run(session)
-        await decide_report(session, check_run.id, instructor.id, "approved", None)
+        await decide_report(
+            session, check_run.id, instructor.id, "approved", None, expected_revision=0
+        )
         await _add_escalated_criterion(session, check_run)
 
         escalated_result_id = await session.scalar(
@@ -601,24 +647,38 @@ async def test_resolving_an_escalation_is_blocked_once_the_report_is_decided(ses
         )
         with pytest.raises(ConflictError):
             await resolve_escalation_for_run(
-                session, check_run.id, escalated_result_id, instructor.id, "mark_pass", "reason"
+                session,
+                check_run.id,
+                escalated_result_id,
+                instructor.id,
+                "mark_pass",
+                "reason",
+                expected_revision=0,
             )
 
 
 async def test_reopen_clears_the_decision_and_requires_a_reason(session_factory):
     async with session_factory() as session:
         instructor, check_run = await _seed_decidable_run(session)
-        await decide_report(session, check_run.id, instructor.id, "approved", "Initial call.")
+        await decide_report(
+            session, check_run.id, instructor.id, "approved", "Initial call.", expected_revision=0
+        )
 
         report = await reopen_report(
-            session, check_run.id, instructor.id, "Found a citation issue after deciding."
+            session,
+            check_run.id,
+            instructor.id,
+            "Found a citation issue after deciding.",
+            expected_revision=1,
         )
         assert report.decision is None
         assert report.decision_note is None
         assert report.decided_at is None
 
         # Reopened -> can be decided again (not permanently locked).
-        redecided = await decide_report(session, check_run.id, instructor.id, "returned", None)
+        redecided = await decide_report(
+            session, check_run.id, instructor.id, "returned", None, expected_revision=2
+        )
         assert redecided.decision == "returned"
 
 
@@ -628,16 +688,18 @@ async def test_reopen_enforces_the_length_floor_even_bypassing_the_router(sessio
     defense-in-depth gap backend review found in `resolve_escalation`."""
     async with session_factory() as session:
         instructor, check_run = await _seed_decidable_run(session)
-        await decide_report(session, check_run.id, instructor.id, "approved", None)
+        await decide_report(
+            session, check_run.id, instructor.id, "approved", None, expected_revision=0
+        )
         with pytest.raises(ConflictError, match="at least 10 characters"):
-            await reopen_report(session, check_run.id, instructor.id, "ok")
+            await reopen_report(session, check_run.id, instructor.id, "ok", expected_revision=0)
 
 
 async def test_reopening_a_never_decided_report_is_rejected(session_factory):
     async with session_factory() as session:
         instructor, check_run = await _seed_decidable_run(session)
         with pytest.raises(ConflictError):
-            await reopen_report(session, check_run.id, instructor.id, "reason")
+            await reopen_report(session, check_run.id, instructor.id, "reason", expected_revision=0)
 
 
 async def test_reopen_writes_a_distinct_audit_event_preserving_the_prior_decision(session_factory):
@@ -648,9 +710,20 @@ async def test_reopen_writes_a_distinct_audit_event_preserving_the_prior_decisio
         # a reason -- unrelated to what THIS test asserts (the reopen
         # audit trail), so a real note here, not None.
         await decide_report(
-            session, check_run.id, instructor.id, "rejected", "Found a citation issue on review."
+            session,
+            check_run.id,
+            instructor.id,
+            "rejected",
+            "Found a citation issue on review.",
+            expected_revision=0,
         )
-        await reopen_report(session, check_run.id, instructor.id, "Instructor changed their mind.")
+        await reopen_report(
+            session,
+            check_run.id,
+            instructor.id,
+            "Instructor changed their mind.",
+            expected_revision=1,
+        )
 
         from app.models.audit import AuditLog
 
@@ -698,32 +771,28 @@ async def test_bug184_a_decision_committed_mid_race_is_rejected_not_silently_rec
     BUG-184's real probe hit."""
     import asyncio
 
-    import app.report.service as report_service
     from app.models.audit import AuditLog
 
     async with session_factory() as seed_session:
         instructor, check_run = await _seed_decidable_run(seed_session)
         instructor_id, check_run_id = instructor.id, check_run.id
 
-    real_get_owned_report = report_service._get_owned_report
+    import app.report.assessment as assessment
+
+    real_lock = assessment.lock_assessment
     session_a_read_done = asyncio.Event()
     session_b_committed = asyncio.Event()
-    call_count = 0
 
-    async def patched(*args, **kwargs):
-        nonlocal call_count
-        call_count += 1
-        result = await real_get_owned_report(*args, **kwargs)
-        if call_count == 1:
-            # Session A's own read just returned -- decision is still
-            # None at this real instant. Hold it here (simulating the
-            # scheduler giving Session B a full turn) until Session B has
-            # read, written, AND committed.
+    async def patched(session, check_run_id, *, write=False):
+        if write and asyncio.current_task().get_name() == "earlier-decision":
+            await session.scalar(
+                select(ReadinessReport).where(ReadinessReport.check_run_id == check_run_id)
+            )
             session_a_read_done.set()
-            await session_b_committed.wait()
-        return result
+            await asyncio.wait_for(session_b_committed.wait(), timeout=10)
+        return await real_lock(session, check_run_id, write=write)
 
-    monkeypatch.setattr(report_service, "_get_owned_report", patched)
+    monkeypatch.setattr(assessment, "lock_assessment", patched)
 
     async def session_a() -> str:
         async with session_factory() as session:
@@ -734,13 +803,14 @@ async def test_bug184_a_decision_committed_mid_race_is_rejected_not_silently_rec
                     instructor_id,
                     "rejected",
                     "Session A -- read first, should still lose.",
+                    expected_revision=0,
                 )
                 return "ok"
             except ConflictError:
                 return "conflict"
 
     async def session_b() -> None:
-        await session_a_read_done.wait()
+        await asyncio.wait_for(session_a_read_done.wait(), timeout=10)
         async with session_factory() as session:
             await decide_report(
                 session,
@@ -748,10 +818,14 @@ async def test_bug184_a_decision_committed_mid_race_is_rejected_not_silently_rec
                 instructor_id,
                 "approved",
                 "Session B -- reads second, commits first, should win.",
+                expected_revision=0,
             )
         session_b_committed.set()
 
-    result_a, _ = await asyncio.gather(session_a(), session_b())
+    result_a, _ = await asyncio.wait_for(
+        asyncio.gather(asyncio.create_task(session_a(), name="earlier-decision"), session_b()),
+        timeout=15,
+    )
 
     # Session A read `decision IS NULL` first, but Session B committed
     # first -- Session A must lose, not silently overwrite the winner.
@@ -796,6 +870,16 @@ async def test_cross_instructor_cannot_decide_or_reopen(session_factory):
         await session.commit()
 
         with pytest.raises(NotFoundError):
-            await decide_report(session, check_run.id, stranger.id, "approved", None)
+            await decide_report(
+                session, check_run.id, stranger.id, "approved", None, expected_revision=0
+            )
+        await session.refresh(check_run)
+        await session.refresh(stranger)
         with pytest.raises(NotFoundError):
-            await reopen_report(session, check_run.id, stranger.id, "reason")
+            await reopen_report(
+                session,
+                check_run.id,
+                stranger.id,
+                "Another instructor cannot reopen this report.",
+                expected_revision=0,
+            )

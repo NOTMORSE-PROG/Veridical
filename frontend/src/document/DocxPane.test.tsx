@@ -12,6 +12,22 @@ const props = {
 };
 
 describe("recorded DOCX source navigation", () => {
+  it("keeps reconstruction meaning visible and discloses generic mechanics without hiding affected-source warnings", () => {
+    render(<DocxPane {...props} omittedImageOccurrences={2} />);
+    expect(screen.getByText(/Reconstructed DOCX\. Layout may differ\./)).toBeVisible();
+    const control = screen.getByRole("button", { name: "Source view details" });
+    expect(control).toHaveAttribute("aria-expanded", "false");
+    expect(screen.getByText(/Merged cells, drawing placement/)).not.toBeVisible();
+    expect(screen.getByText(/2 additional drawing occurrences/)).toBeVisible();
+    fireEvent.click(control);
+    expect(control).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByRole("region", { name: "Source view details" })).toHaveAttribute("id", control.getAttribute("aria-controls"));
+    expect(screen.getByText(/Merged cells, drawing placement/)).toBeVisible();
+    expect(screen.getByText(/Showing an image does not mean its contents were assessed/)).toBeVisible();
+    fireEvent.click(control);
+    expect(screen.getByText(/Merged cells, drawing placement/)).not.toBeVisible();
+    expect(screen.getByText(/2 additional drawing occurrences/)).toBeVisible();
+  });
   afterEach(() => vi.restoreAllMocks());
   const leads: FlagSummaryOut[] = Array.from({ length: 31 }, (_, index) => ({
     id: index + 39, check_kind: "originality_reuse", affects_readiness: false,

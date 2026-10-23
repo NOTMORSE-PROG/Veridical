@@ -2,10 +2,12 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { createMemoryRouter, RouterProvider } from "react-router";
 import { afterEach, expect, it, vi } from "vitest";
+import { SignalReportPage } from "../report/SignalReport";
 import { SignalDocumentViewerPage } from "./SignalDocumentViewer";
 import { stubFetchByPath } from "../test/renderWithProviders";
 import { ME_QUERY_KEY } from "../auth/useAuth";
 import { CriterionReviewLayout } from "../report/CriterionReviewScope";
+import type { ResultRowCommon } from "../api/types";
 
 vi.mock("./PdfPane", () => ({ PdfPane: () => <div>PDF source</div> }));
 vi.mock("./ReuseExplorePanel", () => ({ ReuseExplorePanel: () => null }));
@@ -18,6 +20,7 @@ const ITEMS = [1, 2].map((id) => ({
   evidence: [{ quote: `Recorded quote ${id}`, anchor: `paragraph ${id + 1}` }],
 }));
 const REPORT = {
+  assessment_revision: 0,
   check_run_id: 5, manuscript_id: 10, manuscript_group_label: "Local navigation control",
   manuscript_original_filename: "source.docx", rubric_title: "Custom format", status: "needs_review",
   composite_score: null, thresholds: {}, reason: null, flag_deduction: 0,
@@ -27,15 +30,20 @@ const REPORT = {
   integrity_check_status: [], results: [],
 };
 const PARAGRAPHS = { paragraphs: [{ paragraph: 2, text: "The requested source paragraph", heading_level: null }, { paragraph: 3, text: "A second source paragraph", heading_level: null }], tables: [], images: [] };
+const SAVED: ResultRowCommon = { criterion_id: 77, text: "Previously saved custom criterion", type: "semantic", kind: "semantic",
+  weight: 1, weight_importance: "med", outcome: "passed", score: 100, basis: "llm", anchor: null, reasoning: null, reason: null,
+  evidence: [{ quote: "Recorded source for saved judgment", anchor: "paragraph 2" }],
+  resolution: { type: "mark_pass", reason: "A private saved instructor reason.", ai_majority_verdict: "fail" } };
 
-async function setup({ origin = ORIGIN, open = true, drafts: makeDrafts = true } = {}) {
+async function setup({ origin = ORIGIN, open = true, drafts: makeDrafts = true, saved = false, instructor = true, full = false } = {}) {
   vi.spyOn(document, "hasFocus").mockReturnValue(true);
   const scroll = vi.spyOn(Element.prototype, "scrollIntoView").mockImplementation(() => {});
   let release!: (body: typeof PARAGRAPHS) => void;
   const held = new Promise<typeof PARAGRAPHS>((resolve) => { release = resolve; });
   const normal = stubFetchByPath({
     "/check-runs/5/document": { manuscript_id: 10, source_format: "docx", available: true, original_filename: "source.docx", page_count: null, regions: [] },
-    "/check-runs/5/report": REPORT, "/check-runs/5/flags": [], "/check-runs/5/escalated": ITEMS,
+    "/check-runs/5/share": null,
+    "/check-runs/5/report": { ...REPORT, results: saved ? [{ ...SAVED, resolution: instructor ? SAVED.resolution : null }] : [] }, "/check-runs/5/flags": [], "/check-runs/5/escalated": ITEMS,
     "/check-runs/5/document/reuse-matches": { matches: [], passage_archive_size_n: 0 },
   });
   const fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -45,7 +53,7 @@ async function setup({ origin = ORIGIN, open = true, drafts: makeDrafts = true }
   vi.stubGlobal("fetch", fetch);
   const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
   client.setQueryData(ME_QUERY_KEY, { id: 1 });
-  const router = createMemoryRouter([{ path: "/report/:checkRunId", element: <CriterionReviewLayout />, children: [{ path: "document", element: <SignalDocumentViewerPage /> }] }], { initialEntries: [{ pathname: "/report/5/document", search: origin.slice(origin.indexOf("?")), state: { notice: "retained" } }] });
+  const router = createMemoryRouter([{ path: "/report/:checkRunId", element: <CriterionReviewLayout />, children: [{ index: true, element: <SignalReportPage /> }, { path: "document", element: <SignalDocumentViewerPage /> }] }], { initialEntries: [{ pathname: full ? "/report/5" : "/report/5/document", search: origin.slice(origin.indexOf("?")), state: { notice: "retained" } }] });
   render(<QueryClientProvider client={client}><RouterProvider router={router} /></QueryClientProvider>);
   const choices = await screen.findAllByRole("button", { name: "Meets criterion" });
   if (makeDrafts) {
@@ -57,7 +65,7 @@ async function setup({ origin = ORIGIN, open = true, drafts: makeDrafts = true }
     fireEvent.change(drafts[0], { target: { value: "First private draft" } });
     fireEvent.change(drafts[1], { target: { value: "Second private draft" } });
   }
-  const action = screen.getByRole("link", { name: /Open in manuscript: Extracted paragraph 3\. Criterion 1/ });
+  const action = document.getElementById("signal-resolution-source-5-1-0")!;
   if (open) {
     action.focus();
     fireEvent.click(action);
@@ -67,6 +75,41 @@ async function setup({ origin = ORIGIN, open = true, drafts: makeDrafts = true }
 }
 
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
+
+it("does not call an automatic criterion record an instructor's saved judgment on source return", async () => {
+  const control = await setup({ open: false, saved: true, instructor: false, drafts: false });
+  fireEvent.click(await screen.findByText("Recorded criterion results, 1 entry"));
+  fireEvent.click(document.getElementById("signal-criterion-evidence-5-77")!);
+  const action = document.getElementById("signal-saved-source-5-77-0")!; action.focus(); fireEvent.click(action);
+  await act(async () => { control.release(PARAGRAPHS); });
+  await screen.findByText("The requested source paragraph");
+  expect(screen.getByRole("button", { name: "Return to criterion record" })).toBeVisible();
+  expect(screen.queryByRole("button", { name: "Return to saved judgment" })).not.toBeInTheDocument();
+});
+
+it.each(["original action", "missing action", "missing criterion"])("returns to the same saved criterion with %s, preserving unrelated drafts", async (mode) => {
+  const control = await setup({ open: false, saved: true });
+  const view = await screen.findByRole("button", { name: "View saved judgments (1)" }); view.focus(); fireEvent.click(view);
+  await waitFor(() => expect(document.getElementById("criteria-results-heading")).toHaveFocus());
+  fireEvent.click(document.getElementById("signal-criterion-evidence-5-77")!);
+  const source = document.getElementById("signal-saved-source-5-77-0")!;
+  source.focus(); fireEvent.click(source);
+  await waitFor(() => expect(control.router.state.location.search).toContain("pane=manuscript"));
+  await act(async () => { control.release(PARAGRAPHS); });
+  await screen.findByText("The requested source paragraph");
+  if (mode !== "original action") await act(async () => {
+    control.client.setQueryData(["report", 5], { ...REPORT, results: mode === "missing criterion" ? [] : [{ ...SAVED, evidence: [] }] });
+  });
+  const back = screen.getByRole("button", { name: "Return to saved judgment" }); back.focus(); fireEvent.click(back);
+  const target = mode === "original action" ? "signal-saved-source-5-77-0"
+    : mode === "missing action" ? "criterion-record-5-77" : "criteria-results-heading";
+  await waitFor(() => expect(document.getElementById(target)).toHaveFocus());
+  expect(control.router.state.location.search).toContain("criterion_record=77");
+  expect(control.router.state.location.search).toContain("sentinel=kept");
+  expect(control.drafts[0]).toHaveValue("First private draft");
+  expect(control.drafts[1]).toHaveValue("Second private draft");
+  if (mode === "missing criterion") expect(screen.getByText("That recorded criterion is not available in this report.")).toBeVisible();
+});
 
 it("keeps two private drafts and the full decision context through delayed source, return and history", async () => {
   const { router, scroll, release, drafts, action, fetch, client } = await setup();
@@ -175,4 +218,23 @@ it("retires inspection mode across a different run before returning to an ordina
   await waitFor(() => expect(router.state.location.pathname).toBe("/report/6/document"));
   await act(async () => { await router.navigate("/report/5/document?view=decision&pane=manuscript&anchor=paragraph+2"); });
   await waitFor(() => expect(screen.getByText("The requested source paragraph")).toHaveFocus());
+});
+
+it.each(["explicit return", "browser Back"])("full report restores the exact saved source action through %s", async (mode) => {
+  const control = await setup({ origin: "/report/5?criterion_record=all&sentinel=kept", full: true, open: false, saved: true });
+  fireEvent.click(document.getElementById("signal-criterion-evidence-5-77")!);
+  const source = document.getElementById("signal-saved-source-5-77-0")!; source.focus(); fireEvent.click(source);
+  await act(async () => { control.release(PARAGRAPHS); });
+  await screen.findByText("The requested source paragraph");
+  const back = screen.getByRole("link", { name: "Return to saved judgment" });
+  expect(back).toHaveAttribute("href", "/report/5?criterion_record=77&sentinel=kept#signal-saved-source-5-77-0");
+  if (mode === "explicit return") { back.focus(); fireEvent.click(back); }
+  else await act(async () => { await control.router.navigate(-1); });
+  await waitFor(() => expect(document.getElementById("signal-saved-source-5-77-0")).toHaveFocus());
+  expect(document.getElementById("signal-saved-source-5-77-0")?.closest("details")).toHaveProperty("open", true);
+  expect(control.router.state.location.search).toContain("sentinel=kept");
+  expect(control.router.state.location.search).toContain("criterion_record=77");
+  expect(control.router.state.location.state).toEqual({ notice: "retained" });
+  expect(screen.getByDisplayValue("First private draft")).toBeVisible();
+  expect(screen.getByDisplayValue("Second private draft")).toBeVisible();
 });

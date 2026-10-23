@@ -183,6 +183,7 @@ class OriginalityScopeOut(BaseModel):
 
 class ReportOut(BaseModel):
     check_run_id: int
+    assessment_revision: int | None = None
     figure_readings: list[FigureReading] | None = None
     # Compatibility name: missing current support-policy metadata, not an age test.
     historical_semantic_support_unverified: bool = False
@@ -347,11 +348,13 @@ class PublicReportOut(BaseModel):
 
 
 class DecisionIn(BaseModel):
+    expected_revision: int = Field(strict=True, ge=0)
     decision: Literal["approved", "returned", "rejected"]
     note: str | None = None
 
 
 class ReopenIn(BaseModel):
+    expected_revision: int = Field(strict=True, ge=0)
     # Always required (the decision note is only conditionally required,
     # BUG-095) -- undoing a decision is exactly the kind of action this
     # project's own audit-trail philosophy (V-024) says must explain
@@ -419,6 +422,7 @@ class EscalatedItemOut(BaseModel):
 
 
 class ResolveEscalationIn(BaseModel):
+    expected_revision: int = Field(strict=True, ge=0)
     # "needs_document" (V-068 AC2, DECIDED 2026-08-16): a third option that
     # isn't a guess — excludes the criterion from the composite like
     # `not_applicable`, never blocks the decision.

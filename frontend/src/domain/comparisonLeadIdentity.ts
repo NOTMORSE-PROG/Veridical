@@ -15,14 +15,16 @@ export function comparisonLeadFilter(value: string | null): ComparisonLeadFilter
 }
 
 export const COMPARISON_LEAD_COPY = {
-  title: "Optional comparison leads",
-  intro: "Each record is a saved comparison lead. Records can overlap or cover different scopes. These leads do not affect readiness or block the instructor decision.",
+  title: "Comparison leads",
+  intro: "Optional evidence. These leads are not scored and do not block your decision.",
+  qualification: "Not scored. Does not affect readiness or block your decision.",
+  about: "These are optional saved comparison records. Records may overlap or cover different scopes. Inspect the source evidence before drawing a conclusion.",
   badge: "Comparison lead: not scored",
   markerLegend: "L marks a comparison lead. Comparison leads are not scored.",
-  viewed: "Viewed markers are saved in this browser. They do not resolve leads.",
+  viewed: "Viewed means you opened the evidence in this browser. It does not resolve the record and does not carry to another browser.",
   outsideFilter: "This comparison lead is outside the current filter.",
   lastLoaded: "Showing the last loaded comparison lead records.",
-  empty: "No optional comparison leads are available in this view.",
+  empty: "No comparison leads were recorded for this check.",
   unavailable: "Comparison lead records are not available.",
   failed: "Comparison lead records could not be loaded.",
 } as const;

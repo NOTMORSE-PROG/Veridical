@@ -168,10 +168,8 @@ def test_supporting_passage_detail_uses_the_passages_own_level_not_the_parents()
     duplicate" purely because a stronger AGGREGATE match happened to
     contain it (the more dangerous direction: a flag can still force Not
     Ready under BUG-150 while showing evidence stronger than it is). Fixed
-    to always use the supporting passage's OWN, independently classified
-    level -- both callers (`query_similar_passages` and
-    `best_supporting_passage`) only ever hand back a `PassageMatch` with a
-    real, non-fabricated `level`, so this is never a guess."""
+    to use the supporting passage's OWN classification. Scoped support below
+    standalone thresholds retains its text with no invented classification."""
     weak_supporting_passage = _passage_match(level="high_similarity", similarity=0.6)
     detail = _supporting_passage_detail(weak_supporting_passage)
     assert detail["level"] == "high_similarity"
@@ -181,6 +179,17 @@ def test_supporting_passage_detail_uses_the_passages_own_level_not_the_parents()
     detail = _supporting_passage_detail(strong_supporting_passage)
     assert detail["level"] == "exact_duplicate"
     assert detail["similarity"] == pytest.approx(0.99)
+
+    unclassified = _supporting_passage_detail(_passage_match(level=None, similarity=0.2))
+    assert unclassified["level"] is None
+    assert unclassified["own_text"]
+    assert unclassified["matched_text"]
+
+
+@pytest.mark.parametrize("level", [None, "unknown"])
+def test_unclassified_support_cannot_be_promoted_to_a_standalone_passage_flag(level):
+    with pytest.raises(ValueError, match="Unclassified supporting evidence"):
+        _passage_match_to_flag_draft(_passage_match(level=level))
 
 
 def test_supporting_passage_from_precomputed_is_scoped_to_the_matched_chapter_pair():

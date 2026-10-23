@@ -362,7 +362,8 @@ async def test_loss_during_aggregation_cannot_publish_done(session_factory, monk
     run_id, original = await claimed_run(session_factory, status=CheckRunStatus.aggregating)
     replacement = None
 
-    async def aggregate(*_args):
+    async def aggregate(*_args, commit):
+        assert commit is True
         nonlocal replacement
         replacement = await replace_claim(session_factory, run_id)
 

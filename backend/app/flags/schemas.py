@@ -32,7 +32,9 @@ class PassagePairOut(BaseModel):
     # wherever a match is shown.
     context_words_each_side: int
     similarity: float
-    level: str
+    # None for a supporting excerpt below standalone passage thresholds or
+    # historical support whose classification was not stored.
+    level: str | None
 
 
 class CitationSourceKeyOut(BaseModel):
@@ -88,6 +90,7 @@ class CitationMetadataComparisonOut(BaseModel):
 
 class FlagOut(BaseModel):
     id: int
+    assessment_revision: int | None = None
     check_result_id: int
     check_run_id: int
     manuscript_group_label: str
@@ -176,10 +179,12 @@ class AnnotateFlagIn(BaseModel):
 
 
 class OverrideFlagIn(BaseModel):
+    expected_revision: int = Field(strict=True, ge=0)
     reason: str = Field(min_length=1)
 
 
 class ConfirmCitationSourceIn(BaseModel):
+    expected_revision: int = Field(strict=True, ge=0)
     # BUG-078: instructor-authored (design review spec: "Where you verified
     # this"), same required-reason discipline as OverrideFlagIn -- not a
     # fixed/generated string, since this is a MORE consequential action

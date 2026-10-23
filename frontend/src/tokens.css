@@ -274,6 +274,8 @@
   --signal-type-meta: 0.75rem;
   --signal-type-label: 0.875rem;
   --signal-type-body: 1rem;
+  --signal-passage-column-min: 28rem;
+  --signal-passage-prose-max: 72ch;
   --signal-type-body-lg: 1.125rem;
   --signal-type-subhead: 1.25rem;
   --signal-type-section: 1.5rem;
@@ -442,6 +444,10 @@
   --signal-focus-ring-width: 3px;
   --signal-focus-ring-gap: 2px;
   --signal-review-marker-size: 1.75rem;
+  --signal-comparison-row-padding: var(--signal-space-4);
+  --signal-comparison-row-gap: var(--signal-space-3);
+  --signal-comparison-marker-size: var(--signal-review-marker-size);
+  --signal-comparison-page-gap: var(--signal-space-2);
   --signal-review-selected-ring-width: var(--signal-focus-ring-width);
   --signal-review-detail-measure: 42rem;
   --signal-review-queue-row-min-height: 4.5rem;

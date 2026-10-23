@@ -12,6 +12,15 @@ function row(overrides: Partial<ResultRowCommon> = {}): ResultRowCommon {
 }
 
 describe("Signal criterion judgment presentation", () => {
+  it("does not substitute a binary or AI grade for a missing recorded instructor level", () => {
+    renderWithProviders(<SignalCriteriaResults checkRunId={3} results={[row({
+      level: null, resolution: { type: "mark_level", reason: "", ai_majority_verdict: "Exemplary" },
+    })]} />);
+    expect(screen.getAllByText("Recorded grade unavailable")).toHaveLength(2);
+    expect(screen.getByText("No instructor reason is available in this record.")).toBeVisible();
+    expect(screen.queryByText("Meets criterion")).not.toBeInTheDocument();
+    expect(screen.queryByText("Exemplary")).not.toBeInTheDocument();
+  });
   it.each([false, true])("uses each rubric's exact level rather than pass/fail (public=%s)", (publicView) => {
     renderWithProviders(<SignalCriteriaResults checkRunId={3} publicView={publicView} results={[
       row({ score: 25, level: { name: "Limited", ordinal: 1, points: 1, max_points: 4 } }),
@@ -47,14 +56,14 @@ describe("Signal criterion judgment presentation", () => {
         { quote: "Another quote on the same page", anchor: "page 1" },
       ] }),
     ]} />);
-    fireEvent.click(screen.getByText("Review evidence and reasoning"));
+    fireEvent.click(screen.getByText("Recorded assessment details"));
     const actions = screen.getAllByRole("link");
     expect(actions).toHaveLength(2);
     expect(actions[0]).toHaveAccessibleName("Open in manuscript: page 1. Criterion 1: The source criterion");
     expect(actions[0]).toHaveAttribute("href", "/report/3/document?anchor=page%201");
     expect(actions[1]).toHaveAttribute("href", "/report/3/document?anchor=page%202");
     expect(screen.getByText("“Another quote on the same page”")).toBeInTheDocument();
-    expect(screen.getByText("Review evidence and reasoning")).toHaveAttribute("id", "signal-criterion-evidence-3-1");
+    expect(screen.getByText("Recorded assessment details")).toHaveAttribute("id", "signal-criterion-evidence-3-1");
   });
 
   it("retains a distinct row fallback, omits blank actions, and encodes original anchors", () => {
@@ -65,7 +74,7 @@ describe("Signal criterion judgment presentation", () => {
         { quote: "Unsupported stored anchor", anchor: rawAnchor },
       ] }),
     ]} />);
-    fireEvent.click(screen.getByText("Review evidence and reasoning"));
+    fireEvent.click(screen.getByText("Recorded assessment details"));
     expect(screen.getByText("No manuscript location was recorded for this excerpt.")).toBeInTheDocument();
     const actions = screen.getAllByRole("link");
     expect(actions).toHaveLength(2);
@@ -79,9 +88,71 @@ describe("Signal criterion judgment presentation", () => {
       row({ anchor: "page 1", evidence: [{ quote: "Recorded quote", anchor: "page 1" }] }),
       row({ criterion_id: 2, anchor: "page 2", evidence: [] }),
     ]} />);
-    for (const summary of screen.getAllByText("Review evidence and reasoning")) fireEvent.click(summary);
+    for (const summary of screen.getAllByText("Recorded assessment details")) fireEvent.click(summary);
     expect(screen.queryAllByRole("link")).toHaveLength(publicView ? 0 : 2);
     expect(screen.queryByText("Recorded criterion location: page 1")).not.toBeInTheDocument();
     expect(screen.getByText("“Recorded quote”")).toBeInTheDocument();
   });
+});
+
+
+describe("retained assessment provenance", () => {
+  it.each([false, true])("distinguishes retained AI content from the current instructor judgment (public=%s)", (publicView) => {
+    renderWithProviders(<SignalCriteriaResults checkRunId={3} publicView={publicView} results={[row({ basis: "llm", resolved: publicView,
+      outcome: "not_applicable", score: null, evidence: [{ quote: "Original automated excerpt", anchor: "paragraph 2" }],
+      resolution: { type: "needs_document", reason: "Private reason for excluding this criterion.", ai_majority_verdict: null },
+    })]} />);
+    fireEvent.click(screen.getByText("Earlier AI assessment"));
+    expect(screen.getByText("Earlier AI explanation:")).toBeVisible();
+    expect(screen.getByText("Original recorded reasoning.")).toBeVisible();
+    expect(screen.getByText("Recorded manuscript excerpts")).toBeVisible();
+    expect(screen.getAllByText("A recorded location does not establish support for a grade.")).toHaveLength(1);
+    if (publicView) {
+      expect(screen.queryByText("Private reason for excluding this criterion.")).not.toBeInTheDocument();
+      expect(screen.queryByText(/reason is shown above/)).not.toBeInTheDocument();
+      expect(screen.getByText(/They do not record the instructor's reason/)).toBeVisible();
+      expect(screen.queryByRole("link")).not.toBeInTheDocument();
+    } else {
+      expect(screen.getByText("Excluded from readiness calculation: needs another document. No grade recorded.")).toBeVisible();
+      expect(screen.getByText(/The instructor's reason is shown above/)).toBeVisible();
+      expect(screen.getByRole("link")).toHaveAttribute("href", "/report/3/document?anchor=paragraph%202");
+    }
+  });
+
+  it("keeps the rule writer's null basis distinct from unrecognized basis strings", () => {
+    renderWithProviders(<SignalCriteriaResults checkRunId={3} results={[
+      row({ type: "structural", kind: "structural" }),
+      row({ criterion_id: 2, text: "Unsupported source", type: "structural", kind: "structural", basis: "future-unknown" }),
+    ]} />);
+    fireEvent.click(screen.getByText("Rule-check details")); fireEvent.click(screen.getByText("Recorded assessment details"));
+    expect(screen.getByText("Recorded rule-check explanation:")).toBeVisible();
+    expect(screen.getByText("Recorded explanation, source not identified:")).toBeVisible();
+    expect(screen.queryByText(/AI explanation:/)).not.toBeInTheDocument();
+  });
+
+  it("does not attribute an inconsistent not-assessable tuple to AI, including its unresolved branch", () => {
+    renderWithProviders(<SignalCriteriaResults checkRunId={3} results={[row({ type: "not_assessable", basis: "llm", outcome: "escalated", score: null })]} />);
+    fireEvent.click(screen.getByText("Recorded assessment details"));
+    expect(screen.getByText("Recorded explanation, source not identified:")).toBeVisible();
+    expect(screen.queryByText(/AI explanation:/)).not.toBeInTheDocument();
+    expect(screen.queryByText("No grade accepted")).not.toBeInTheDocument();
+  });
+
+  it("keeps essential unresolved AI context but uses one empty assessment state", () => {
+    renderWithProviders(<SignalCriteriaResults checkRunId={3} results={[row({ basis: "llm", outcome: "escalated", score: null, reasoning: null })]} />);
+    fireEvent.click(screen.getByText("AI assessment details"));
+    expect(screen.getByText("No grade accepted")).toBeVisible();
+    expect(screen.getAllByText("No assessment details are available in this record.")).toHaveLength(1);
+    expect(screen.queryByText(/No AI explanation is available/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/No excerpt is available/)).not.toBeInTheDocument();
+  });
+});
+
+it("does not present a standalone recorded location as an excerpt", () => {
+  renderWithProviders(<SignalCriteriaResults checkRunId={3} results={[row({ anchor: "paragraph 2", reasoning: null })]} />);
+  fireEvent.click(screen.getByText("Recorded assessment details"));
+  expect(screen.queryByRole("heading", { name: "Recorded manuscript excerpts" })).not.toBeInTheDocument();
+  expect(screen.getByText("Recorded criterion location: paragraph 2")).toBeVisible();
+  expect(screen.getByText("No excerpt is available in this assessment record.")).toBeVisible();
+  expect(screen.getByRole("link")).toHaveAttribute("href", "/report/3/document?anchor=paragraph%202");
 });

@@ -9,7 +9,16 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Any
 
-from sqlalchemy import BigInteger, Boolean, DateTime, Enum, ForeignKey, Numeric, Text
+from sqlalchemy import (
+    BigInteger,
+    Boolean,
+    CheckConstraint,
+    DateTime,
+    Enum,
+    ForeignKey,
+    Numeric,
+    Text,
+)
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -131,9 +140,15 @@ class Flag(Base, PkCreatedMixin):
 class ReadinessReport(Base, PkCreatedMixin):
     __tablename__ = "readiness_report"
 
+    __table_args__ = (
+        CheckConstraint("assessment_revision >= 0", name="assessment_revision_nonnegative"),
+    )
+
     check_run_id: Mapped[int] = mapped_column(
         BigInteger, ForeignKey("check_run.id", ondelete="CASCADE"), unique=True
     )
+    # Existing records begin at zero; this is not a historical edit count.
+    assessment_revision: Mapped[int] = mapped_column(BigInteger, server_default="0")
     # NULL means "no real number exists" (V-019 edge case: an all-escalated
     # run, or a rubric whose decidable weight sum is zero) — never a
     # fabricated 0 or 100 (charter rule 9).

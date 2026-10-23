@@ -111,7 +111,7 @@ async def _seed_done_run(session_factory):
         )
         check_run.status = CheckRunStatus.done
         await session.commit()
-        await aggregate_and_score(session, check_run.id)
+        await aggregate_and_score(session, check_run.id, commit=True)
         return instructor.id, check_run.id, criterion.id
 
 
@@ -185,7 +185,7 @@ async def test_claim_occurrence_ledger_survives_persistence_and_reports_honest_c
         )
         saved_detail = result.detail
         result_id = result.id
-        await aggregate_and_score(session, run_id)
+        await aggregate_and_score(session, run_id, commit=True)
 
     provider.assert_awaited_once()
     async with session_factory() as session:
@@ -291,7 +291,7 @@ async def test_image_coverage_prevents_ready_and_uses_only_saved_safe_snapshot(s
     async with session_factory() as session:
         assert (await get_report(session, run_id, instructor_id)).status == "ready"
         result = await run_statistical_forensics_check(session, run_id, extraction)
-        await aggregate_and_score(session, run_id)
+        await aggregate_and_score(session, run_id, commit=True)
         report = await get_report(session, run_id, instructor_id)
         assert report.status == "needs_review"
         assert report.flag_deduction == 0

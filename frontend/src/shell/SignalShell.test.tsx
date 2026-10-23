@@ -24,6 +24,26 @@ function renderShell(route = "/library") {
 describe("SignalShell destination navigation", () => {
   afterEach(() => vi.unstubAllGlobals());
 
+  it.each(["available", "loading", "unavailable"])("keeps %s capacity accessible through Account using reads only", async (state) => {
+    const base = stubFetchByPath({ "/auth/session": { instructor: { id: 1, email: "instructor@demo.local", display_name: "Demo Instructor", onboarding_dismissed_at: "2026-01-01T00:00:00Z" } }, "/quota": { calls_used: 3, calls_remaining: 17, daily_limit: 20 } });
+    const fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input).endsWith("/quota")) {
+        if (state === "loading") return await new Promise<Response>(() => {});
+        if (state === "unavailable") return new Response(JSON.stringify({ error: { code: "unavailable", message: "Controlled unavailable quota" } }), { status: 503 });
+      }
+      return base(input, init);
+    });
+    vi.stubGlobal("fetch", fetch);
+    renderWithProviders(<SignalShell><p>Route content</p></SignalShell>);
+    const account = await screen.findByRole("button", { name: "Account" }); account.focus(); fireEvent.click(account);
+    const panel = document.getElementById("signal-account-panel")!;
+    await within(panel).findByText(state === "available" ? /calls left/ : state === "loading" ? /Checking capacity/ : "Capacity unavailable");
+    expect(account).toHaveAttribute("aria-expanded", "true");
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(account).toHaveFocus(); expect(account).toHaveAttribute("aria-expanded", "false");
+    expect(fetch.mock.calls.every(([, init]) => !init?.method || init.method === "GET")).toBe(true);
+  });
+
   it.each(["Account", "Menu"])("V-081: replay from Settings survives closing its %s menu", async (triggerName) => {
     const me = { id: 1, email: "instructor@demo.local", display_name: "Instructor", onboarding_dismissed_at: "2026-01-01T00:00:00Z" };
     const fetchMock = stubFetchByPath({

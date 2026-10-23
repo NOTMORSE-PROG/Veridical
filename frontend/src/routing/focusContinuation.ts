@@ -4,7 +4,7 @@ export function claimFocusContinuation(owner: Element | null = document.activeEl
   let disposed = false;
   const retire = () => { allowed = false; };
   const onKey = (event: KeyboardEvent) => {
-    if (["Tab", "PageDown", "PageUp", "ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) retire();
+    if (["Tab", "PageDown", "PageUp", "ArrowDown", "ArrowUp", "Home", "End", " "].includes(event.key)) retire();
   };
   const onFocus = (event: FocusEvent) => { if (event.target !== owner) retire(); };
   document.addEventListener("keydown", onKey, true);
@@ -21,14 +21,16 @@ export function claimFocusContinuation(owner: Element | null = document.activeEl
     window.removeEventListener("blur", retire);
     window.removeEventListener("wheel", retire);
   }
+  const owns = () => !disposed && allowed && document.hasFocus()
+    && (document.activeElement === owner || (owner?.isConnected === false && document.activeElement === document.body));
   return {
     dispose,
-    focus(target: HTMLElement | null) {
-      const owns = !disposed && allowed && document.hasFocus()
-        && (document.activeElement === owner || (owner?.isConnected === false && document.activeElement === document.body));
+    owns,
+    focus(target: HTMLElement | null, options?: FocusOptions) {
+      const allowedFocus = owns();
       dispose();
-      if (owns && target?.isConnected) target.focus();
-      return Boolean(owns && target && document.activeElement === target);
+      if (allowedFocus && target?.isConnected) target.focus(options);
+      return Boolean(allowedFocus && target && document.activeElement === target);
     },
   };
 }

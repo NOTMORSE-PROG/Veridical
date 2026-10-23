@@ -115,7 +115,7 @@ async def test_actual_ingestion_and_persisted_reference_criterion(
             assert "actual_count" not in result.detail
         elif expected == ResultOutcome.failed:
             assert result.detail["actual_count"] == 0
-        await aggregate_and_score(session, run.id, settings)
+        await aggregate_and_score(session, run.id, settings, commit=True)
     async with session_factory() as session:
         saved = await session.get(CheckResult, result_id)
         assert saved.outcome == expected
@@ -139,7 +139,14 @@ async def test_actual_ingestion_and_persisted_reference_criterion(
             assert pending[0].review_reason == "not_graded"
             assert pending[0].agreement is None and pending[0].votes == []
             with pytest.raises(ConflictError, match="still need your review"):
-                await decide_report(session, run_id, owner_id, "approved", "Manual control reason.")
+                await decide_report(
+                    session,
+                    run_id,
+                    owner_id,
+                    "approved",
+                    "Manual control reason.",
+                    expected_revision=report.assessment_revision,
+                )
             with pytest.raises(NotFoundError):
                 await resolve_escalation_for_run(
                     session,
@@ -148,7 +155,10 @@ async def test_actual_ingestion_and_persisted_reference_criterion(
                     owner_id + 1,
                     "mark_pass",
                     "The instructor inspected the original reference list manually.",
+                    expected_revision=report.assessment_revision,
                 )
+            # Atomic rejection rolls the transaction back and expires ORM state.
+            await session.refresh(saved)
             original_detail = saved.detail.copy()
             resolved = await resolve_escalation_for_run(
                 session,
@@ -157,7 +167,9 @@ async def test_actual_ingestion_and_persisted_reference_criterion(
                 owner_id,
                 "mark_pass",
                 "The instructor inspected the original reference list manually.",
+                expected_revision=report.assessment_revision,
             )
+            assert resolved.report.assessment_revision == report.assessment_revision + 1
             assert resolved.report.pending_review_count == 0
             assert resolved.report.status == "needs_review"  # separate F5 limit retained
             await session.refresh(saved)

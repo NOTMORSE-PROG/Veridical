@@ -108,7 +108,7 @@ async def test_fresh_f5_inventory_boundaries_survive_separate_criterion_review(
         assert not list(
             await session.scalars(select(Flag).where(Flag.check_result_id == result.id))
         )
-        await aggregate_and_score(session, run.id, settings)
+        await aggregate_and_score(session, run.id, settings, commit=True)
         report = await get_report(session, run.id, owner.id)
         if partial:
             assert structural.outcome == ResultOutcome.unverifiable
@@ -121,7 +121,9 @@ async def test_fresh_f5_inventory_boundaries_survive_separate_criterion_review(
                 owner.id,
                 "mark_pass",
                 "Scripted manual criterion override; the reference inventory remains unavailable.",
+                expected_revision=report.assessment_revision,
             )
+            assert resolved.report.assessment_revision == report.assessment_revision + 1
             assert resolved.report.pending_review_count == 0
             assert resolved.report.status == "needs_review"
             assert resolved.report.flag_deduction == 0
