@@ -5,9 +5,12 @@
 // instead of inventing a fake step sequence (charter rule 3: never
 // present unverified progress as fact).
 import { useEffect, useId, useRef, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router";
 import { ApiError } from "../api/client";
-import { isDocumentPreparationBusy } from "../api/documentPreparation";
+import { isKnownUploadRejection, isUploadFileError, StaleUploadContextError } from "../api/uploadOutcome";
+import { useUploadScope } from "../auth/useUploadScope";
+import { UploadAttemptNotice, UploadSessionNotice } from "../components/UploadAttemptNotice";
 import { cx } from "../components/cx";
 import { Modal, ModalBackdrop } from "../components/Modal";
 import { useUploadRubric } from "./useRubric";
@@ -59,12 +62,32 @@ export function UploadRubricModal({ onClose, familyId }: UploadRubricModalProps)
   const [file, setFile] = useState<File | null>(null);
   const [fieldError, setFieldError] = useState<string | null>(null);
   const upload = useUploadRubric();
+  const queryClient = useQueryClient();
+  const resetUpload = upload.reset;
+  const scope = useUploadScope(familyId);
+  const { status: scopeStatus, isCurrent: isScopeCurrent } = scope;
+  const [unknownFiles, setUnknownFiles] = useState<string[]>([]);
+  const [confirming, setConfirming] = useState(false);
+  const sending = useRef(false);
+  const recoveringFocus = useRef(false);
   const navigate = useNavigate();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const errorRef = useRef<HTMLParagraphElement>(null);
+  const receiptHeadingRef = useRef<HTMLHeadingElement>(null);
+  const submitRef = useRef<HTMLButtonElement>(null);
   const fileInputId = useId();
   const hintId = useId();
   const errorId = useId();
+
+  function checkSession() {
+    recoveringFocus.current = true;
+    void scope.verify().catch(() => {});
+  }
+  useEffect(() => {
+    if (scopeStatus !== "ready" || !recoveringFocus.current || !isScopeCurrent()) return;
+    recoveringFocus.current = false;
+    if (document.activeElement === document.body) fileInputRef.current?.focus();
+  }, [scopeStatus, isScopeCurrent]);
 
   // BUG-028: "Continue to review" is `disabled` while `upload.isPending`,
   // which drops focus to <body> per standard browser behavior for a
@@ -73,29 +96,81 @@ export function UploadRubricModal({ onClose, familyId }: UploadRubricModalProps)
   // still-open dialog. The field-validation path (missing file) never
   // disables the button, so it never loses focus and doesn't need this.
   useEffect(() => {
-    if (upload.isError) errorRef.current?.focus();
-  }, [upload.isError]);
+    if (upload.isError && scopeStatus === "ready" && isScopeCurrent()) errorRef.current?.focus();
+  }, [upload.isError, scopeStatus, isScopeCurrent]);
 
-  function handleContinue() {
+  useEffect(() => {
+    if (upload.data && scopeStatus === "ready" && isScopeCurrent()) receiptHeadingRef.current?.focus();
+  }, [upload.data, scopeStatus, isScopeCurrent]);
+
+  useEffect(() => {
+    if (scopeStatus !== "lost") return;
+    setFile(null);
+    setUnknownFiles([]);
+    resetUpload();
+  }, [scopeStatus, resetUpload]);
+
+  useEffect(() => {
+    if (unknownFiles.length === 0 || scopeStatus !== "ready" || !isScopeCurrent()) return;
+    void queryClient.invalidateQueries({ queryKey: ["rubric-families"] });
+    void queryClient.invalidateQueries({ queryKey: ["rubric-versions"] });
+    void queryClient.invalidateQueries({ queryKey: ["rubric"] });
+  }, [unknownFiles.length, scopeStatus, isScopeCurrent, queryClient]);
+
+  function handleContinue(confirmed = false) {
     setFieldError(null);
     if (!file) {
       setFieldError("Choose a format document before continuing.");
       return;
     }
-    upload.mutate(
-      { file, title: file.name, familyId },
-      { onSuccess: (rubric) => navigate(`/rubric/${rubric.id}/review`) },
-    );
+    if (sending.current || scopeStatus !== "ready" || !isScopeCurrent()) return;
+    if (unknownFiles.length > 0 && !confirmed) { setConfirming(true); return; }
+    const attempt = scope.capture();
+    const submittedFile = file;
+    const hadUnknown = unknownFiles.length > 0;
+    setConfirming(false);
+    sending.current = true;
+    upload.mutate({ file: submittedFile, title: submittedFile.name, familyId, scope: attempt }, {
+      onSuccess(rubric) { if (attempt.isCurrent() && !hadUnknown) navigate(`/rubric/${rubric.id}/review`); },
+      onError(error) {
+        if (attempt.isCurrent() && !(error instanceof StaleUploadContextError)
+          && !isKnownUploadRejection(error, "format")) {
+          setUnknownFiles((previous) => [...previous, submittedFile.name]);
+        }
+      },
+      onSettled() { sending.current = false; },
+    });
   }
 
   const serverError =
     upload.error instanceof ApiError
       ? upload.error.message
       : upload.error
-        ? "Upload failed. Please try again."
+        ? "VERIDICAL could not confirm this upload's result. Review your format records before starting another attempt."
         : null;
   const message = fieldError ?? serverError;
-  const fileError = Boolean(message) && (Boolean(fieldError) || !isDocumentPreparationBusy(upload.error));
+  const fileError = Boolean(fieldError) || isUploadFileError(upload.error);
+
+  if (scopeStatus === "lost") return <ModalBackdrop><Modal title="Upload required format" onClose={onClose}>
+    <UploadSessionNotice status={scopeStatus} onClose={onClose} onCheck={checkSession} />
+  </Modal></ModalBackdrop>;
+
+  if (upload.data && unknownFiles.length > 0) return <ModalBackdrop><Modal title="Upload required format" onClose={onClose}>
+    {scopeStatus !== "ready" && <UploadSessionNotice status={scopeStatus} onClose={onClose}
+      onCheck={checkSession} />}
+    <fieldset disabled={scopeStatus !== "ready"} hidden={scopeStatus !== "ready"}
+      inert={scopeStatus !== "ready"} className={scopeStatus !== "ready" ? "hidden" : "contents"}>
+    <div className="signal-group-flow">
+      <h3 ref={receiptHeadingRef} tabIndex={-1} className="font-bold text-ink">Latest draft confirmed</h3>
+      <p>{upload.data.title}, version {upload.data.version}.</p>
+      <p>One or more earlier upload results remain unconfirmed. This receipt confirms only the latest attempt.</p>
+      <p>Reviewing this draft closes this upload form. Earlier results remain unconfirmed; the selected file and local attempt notices will not be retained after you leave.</p>
+      <button type="button" className="font-bold underline" onClick={() => { void scope.verify().then(() => {
+        if (isScopeCurrent()) navigate(`/rubric/${upload.data.id}/review`);
+      }).catch(() => {}); }}>Review latest draft</button>
+      <button type="button" className="font-bold underline" onClick={onClose}>Close form</button>
+    </div></fieldset>
+  </Modal></ModalBackdrop>;
 
   return (
     <ModalBackdrop>
@@ -103,26 +178,33 @@ export function UploadRubricModal({ onClose, familyId }: UploadRubricModalProps)
         title={familyId ? "Upload new format version" : "Upload required format"}
         onClose={upload.isPending ? undefined : onClose}
         footer={
-          <>
+          scopeStatus !== "ready" ? null : <>
             <button
               type="button"
               onClick={onClose}
               disabled={upload.isPending}
               className="flex h-11 items-center justify-center rounded-md border border-border-input bg-panel px-4 text-sm font-bold text-ink hover:bg-status-neutral-bg disabled:opacity-45"
             >
-              Cancel
+              {unknownFiles.length > 0 ? "Close form" : "Cancel"}
             </button>
             <button
+              ref={submitRef}
               type="button"
-              onClick={handleContinue}
+              onClick={() => handleContinue()}
               disabled={upload.isPending}
               className="flex h-11 items-center justify-center rounded-md bg-action px-4 text-sm font-bold text-on-action hover:bg-action-hover disabled:opacity-60"
             >
-              {upload.isPending ? "Parsing" : "Continue to review"}
+              {upload.isPending ? "Parsing" : unknownFiles.length > 0 ? "Start another upload attempt" : "Continue to review"}
             </button>
           </>
         }
       >
+        {scopeStatus !== "ready" && <UploadSessionNotice status={scopeStatus} onClose={onClose}
+          onCheck={checkSession} />}
+        <fieldset disabled={scopeStatus !== "ready"} hidden={scopeStatus !== "ready"}
+          inert={scopeStatus !== "ready"} className={scopeStatus !== "ready" ? "hidden" : "contents"}>
+        <UploadAttemptNotice kind="format" filenames={unknownFiles} selectedFilename={file?.name} familyId={familyId} confirming={confirming}
+          onConfirm={() => handleContinue(true)} onCancel={() => { setConfirming(false); submitRef.current?.focus(); }} />
         <div className="signal-group-flow" aria-busy={upload.isPending}>
           <div className="flex flex-col gap-1.5">
             <span className="text-sm font-medium text-ink">Format document</span>
@@ -147,6 +229,7 @@ export function UploadRubricModal({ onClose, familyId }: UploadRubricModalProps)
                   // the next Continue click (matches design review's spec:
                   // the "File selected" state has no error styling).
                   setFieldError(null);
+                  setConfirming(false);
                   upload.reset();
                 }}
                 className="file-trigger-input sr-only"
@@ -187,6 +270,7 @@ export function UploadRubricModal({ onClose, familyId }: UploadRubricModalProps)
                 aria-label={`Remove ${file.name}`}
                 onClick={() => {
                   setFile(null);
+                  setConfirming(false);
                   fileInputRef.current?.focus();
                 }}
                 className="flex h-11 w-11 flex-none items-center justify-center rounded-sm text-ink-tertiary hover:bg-status-neutral-bg hover:text-ink disabled:opacity-45"
@@ -224,6 +308,7 @@ export function UploadRubricModal({ onClose, familyId }: UploadRubricModalProps)
             successfully parsed format goes to your review before anything is confirmed or used.
           </p>
         </div>
+        </fieldset>
       </Modal>
     </ModalBackdrop>
   );

@@ -104,6 +104,10 @@ class DocumentPreparationBusyError(VeridicalError):
     code = "document_preparation_busy"
 
 
+class ActorContextChangedError(VeridicalError):
+    code = "actor_context_changed"
+
+
 # HTTP mapping for the one exception handler (main.py). Codes absent here
 # are result STATES (not_applicable, unverifiable) that must never be
 # raised to HTTP; if one ever is, the handler still answers with the
@@ -119,6 +123,7 @@ HTTP_STATUS: dict[str, int] = {
     "gone": 410,
     "rate_limited": 429,
     "document_preparation_busy": 503,
+    "actor_context_changed": 409,
     "invalid_api_key": 422,
     # A rubric-decomposition parse that failed schema validation (V-010) —
     # user-actionable (re-review/re-upload); V-011 wraps this in a retry

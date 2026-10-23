@@ -17,8 +17,11 @@
 // group gets set from this screen; ingest always starts at the
 // "Ungrouped" default (`resolve_or_create_group`'s own fallback).
 import { useEffect, useId, useRef, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { ApiError } from "../api/client";
-import { isDocumentPreparationBusy } from "../api/documentPreparation";
+import { isKnownUploadRejection, isUploadFileError, StaleUploadContextError } from "../api/uploadOutcome";
+import { useUploadScope } from "../auth/useUploadScope";
+import { UploadAttemptNotice, UploadSessionNotice } from "../components/UploadAttemptNotice";
 import { Modal, ModalBackdrop } from "../components/Modal";
 import type { ConfirmGroupResponse, TitlePageProposal } from "../api/types";
 import { Button } from "../ui/Button";
@@ -102,15 +105,34 @@ export function UploadManuscriptModal({ onClose, onUploadSuccess }: UploadManusc
   const [groupResolved, setGroupResolved] = useState(false);
   const [actionsTarget, setActionsTarget] = useState<HTMLDivElement | null>(null);
   const ingest = useIngestManuscript();
+  const queryClient = useQueryClient();
+  const resetIngest = ingest.reset;
+  const scope = useUploadScope();
+  const { status: scopeStatus, isCurrent: isScopeCurrent } = scope;
+  const [unknownFiles, setUnknownFiles] = useState<string[]>([]);
+  const [confirming, setConfirming] = useState(false);
+  const sending = useRef(false);
+  const recoveringFocus = useRef(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const errorRef = useRef<HTMLParagraphElement>(null);
   const resultHeadingRef = useRef<HTMLHeadingElement>(null);
   const uploadAnotherRef = useRef<HTMLButtonElement>(null);
   const startCheckRef = useRef<HTMLButtonElement>(null);
+  const submitRef = useRef<HTMLButtonElement>(null);
   const fileInputId = useId();
   const hintId = useId();
   const errorId = useId();
   const lastCreatedManuscriptId = useRef<number | undefined>(undefined);
+
+  function checkSession() {
+    recoveringFocus.current = true;
+    void scope.verify().catch(() => {});
+  }
+  useEffect(() => {
+    if (scopeStatus !== "ready" || !recoveringFocus.current || !isScopeCurrent()) return;
+    recoveringFocus.current = false;
+    if (document.activeElement === document.body) fileInputRef.current?.focus();
+  }, [scopeStatus, isScopeCurrent]);
 
   // Same BUG-028 rationale as UploadRubricModal: a focused element that
   // becomes `disabled` mid-pending drops focus to <body>. Moving focus to
@@ -118,33 +140,61 @@ export function UploadManuscriptModal({ onClose, onUploadSuccess }: UploadManusc
   // guard (this modal has no field that's ever focused-then-disabled on
   // the error path itself).
   useEffect(() => {
-    if (ingest.isError) errorRef.current?.focus();
-  }, [ingest.isError]);
+    if (ingest.isError && scopeStatus === "ready" && isScopeCurrent()) errorRef.current?.focus();
+  }, [ingest.isError, scopeStatus, isScopeCurrent]);
 
   // BUG-234/UX review: the asynchronous form-to-result replacement used to
   // unmount the focused Upload button and strand focus on <body>. A visible
   // result heading gives keyboard and screen-reader users the same immediate
   // feedback sighted pointer users receive.
   useEffect(() => {
-    if (ingest.data) {
+    if (ingest.data && scopeStatus === "ready" && isScopeCurrent()) {
       resultHeadingRef.current?.focus();
       // Duplicate notices describe an earlier copy; ingestion still creates
       // a new unchecked manuscript that must remain discoverable on close.
       lastCreatedManuscriptId.current = ingest.data.manuscript_id;
     }
-  }, [ingest.data]);
+  }, [ingest.data, scopeStatus, isScopeCurrent]);
+
+  useEffect(() => {
+    if (scopeStatus !== "lost") return;
+    setFile(null);
+    setUnknownFiles([]);
+    lastCreatedManuscriptId.current = undefined;
+    resetIngest();
+  }, [scopeStatus, resetIngest]);
+
+  useEffect(() => {
+    if (unknownFiles.length === 0 || scopeStatus !== "ready" || !isScopeCurrent()) return;
+    void queryClient.invalidateQueries({ queryKey: ["manuscripts"] });
+    void queryClient.invalidateQueries({ queryKey: ["stats"] });
+  }, [unknownFiles.length, scopeStatus, isScopeCurrent, queryClient]);
 
   function handleClose() {
-    onClose(lastCreatedManuscriptId.current);
+    onClose(isScopeCurrent() ? lastCreatedManuscriptId.current : undefined);
   }
 
-  function handleUpload() {
+  function handleUpload(confirmed = false) {
     setFieldError(null);
     if (!file) {
       setFieldError("Choose a manuscript file before uploading.");
       return;
     }
-    ingest.mutate({ file });
+    if (sending.current || scopeStatus !== "ready" || !isScopeCurrent()) return;
+    if (unknownFiles.length > 0 && !confirmed) { setConfirming(true); return; }
+    const attempt = scope.capture();
+    const submittedFile = file;
+    setConfirming(false);
+    sending.current = true;
+    ingest.mutate({ file: submittedFile, scope: attempt }, {
+      onError(error) {
+        if (attempt.isCurrent() && !(error instanceof StaleUploadContextError)
+          && !isKnownUploadRejection(error, "manuscript")) {
+          setUnknownFiles((previous) => [...previous, submittedFile.name]);
+        }
+      },
+      onSettled() { sending.current = false; },
+    });
   }
 
   function handleUploadAnother() {
@@ -158,10 +208,10 @@ export function UploadManuscriptModal({ onClose, onUploadSuccess }: UploadManusc
     ingest.error instanceof ApiError
       ? ingest.error.message
       : ingest.error
-        ? "Could not reach VERIDICAL to upload this file. Check your connection and try again."
+        ? "VERIDICAL could not confirm this upload's result. Review your uploads before starting another attempt."
         : null;
   const message = fieldError ?? serverError;
-  const fileError = Boolean(message) && (Boolean(fieldError) || !isDocumentPreparationBusy(ingest.error));
+  const fileError = Boolean(fieldError) || isUploadFileError(ingest.error);
   const summary = ingest.data;
 
   const extractionNotes = summary?.notes.filter((note) => note.trim()) ?? [];
@@ -186,10 +236,14 @@ export function UploadManuscriptModal({ onClose, onUploadSuccess }: UploadManusc
   // everywhere else this codebase enforces it: a control that unmounts
   // mid-interaction must hand focus somewhere real.
   useEffect(() => {
-    if (!groupResolved) return;
+    if (!groupResolved || scopeStatus !== "ready" || !isScopeCurrent()) return;
     if (summary?.existing_upload) startCheckRef.current?.focus();
     else uploadAnotherRef.current?.focus();
-  }, [groupResolved, summary?.existing_upload]);
+  }, [groupResolved, summary?.existing_upload, scopeStatus, isScopeCurrent]);
+
+  if (scopeStatus === "lost") return <ModalBackdrop><Modal title="Upload manuscript" onClose={handleClose}>
+    <UploadSessionNotice status={scopeStatus} onClose={handleClose} onCheck={checkSession} />
+  </Modal></ModalBackdrop>;
 
   return (
     <ModalBackdrop>
@@ -199,7 +253,7 @@ export function UploadManuscriptModal({ onClose, onUploadSuccess }: UploadManusc
         className="signal-upload-sheet"
         onClose={ingest.isPending ? undefined : handleClose}
         footer={
-          summary ? (
+          scopeStatus !== "ready" ? null : summary ? (
             showGroupProposal ? <div ref={setActionsTarget} /> : (
               <>
                 <button
@@ -213,7 +267,9 @@ export function UploadManuscriptModal({ onClose, onUploadSuccess }: UploadManusc
                 <button
                   ref={startCheckRef}
                   type="button"
-                  onClick={() => onUploadSuccess(summary.manuscript_id)}
+                  onClick={() => { void scope.verify().then(() => {
+                    if (isScopeCurrent()) onUploadSuccess(summary.manuscript_id);
+                  }).catch(() => {}); }}
                   className="flex h-11 items-center justify-center rounded-md bg-action px-4 text-sm font-bold text-on-action hover:bg-action-hover"
                 >
                   Start a check with this manuscript
@@ -228,21 +284,28 @@ export function UploadManuscriptModal({ onClose, onUploadSuccess }: UploadManusc
                 disabled={ingest.isPending}
                 className="flex h-11 items-center justify-center rounded-md border border-border-input bg-panel px-4 text-sm font-bold text-ink hover:bg-status-neutral-bg disabled:opacity-45"
               >
-                Cancel
+                {unknownFiles.length > 0 ? "Close form" : "Cancel"}
               </button>
               <button
+                ref={submitRef}
                 type="button"
-                onClick={handleUpload}
+                onClick={() => handleUpload()}
                 disabled={ingest.isPending}
                 aria-busy={ingest.isPending ? "true" : undefined}
                 className="flex h-11 items-center justify-center rounded-md bg-action px-4 text-sm font-bold text-on-action hover:bg-action-hover disabled:opacity-60"
               >
-                {ingest.isPending ? "Uploading." : "Upload manuscript"}
+                {ingest.isPending ? "Uploading." : unknownFiles.length > 0 ? "Start another upload attempt" : "Upload manuscript"}
               </button>
             </>
           )
         }
       >
+        {scopeStatus !== "ready" && <UploadSessionNotice status={scopeStatus} onClose={handleClose}
+          onCheck={checkSession} />}
+        <fieldset disabled={scopeStatus !== "ready"} hidden={scopeStatus !== "ready"}
+          inert={scopeStatus !== "ready"} className={scopeStatus !== "ready" ? "hidden" : "contents"}>
+        <UploadAttemptNotice kind="manuscript" filenames={unknownFiles} selectedFilename={file?.name} confirming={confirming}
+          onConfirm={() => handleUpload(true)} onCancel={() => { setConfirming(false); submitRef.current?.focus(); }} />
         {summary ? (
           <div className="signal-group-flow signal-upload-summary">
             <h3 ref={resultHeadingRef} tabIndex={-1} className="text-base font-bold text-ink">
@@ -331,6 +394,7 @@ export function UploadManuscriptModal({ onClose, onUploadSuccess }: UploadManusc
                   onChange={(event) => {
                     setFile(event.target.files?.[0] ?? null);
                     setFieldError(null);
+                    setConfirming(false);
                     ingest.reset();
                   }}
                   className="file-trigger-input sr-only"
@@ -370,6 +434,7 @@ export function UploadManuscriptModal({ onClose, onUploadSuccess }: UploadManusc
                   aria-label={`Remove ${file.name}`}
                   onClick={() => {
                     setFile(null);
+                    setConfirming(false);
                     fileInputRef.current?.focus();
                   }}
                   className="flex h-11 w-11 flex-none items-center justify-center rounded-sm text-ink-tertiary hover:bg-status-neutral-bg hover:text-ink disabled:opacity-45"
@@ -400,6 +465,7 @@ export function UploadManuscriptModal({ onClose, onUploadSuccess }: UploadManusc
             )}
           </div>
         )}
+        </fieldset>
       </Modal>
     </ModalBackdrop>
   );

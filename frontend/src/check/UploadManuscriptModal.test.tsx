@@ -1,6 +1,6 @@
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { renderWithProviders } from "../test/renderWithProviders";
+import { renderWithUploadProviders } from "../test/renderWithUploadProviders";
 import { UploadManuscriptModal } from "./UploadManuscriptModal";
 
 // V-063: an "empty" proposal (nothing usable found, no extraction
@@ -49,7 +49,7 @@ describe("UploadManuscriptModal", () => {
       message: "VERIDICAL is busy preparing a document. This attempt did not add a document. Try again later.",
     } }), { status: 503 }));
     vi.stubGlobal("fetch", fetchMock);
-    renderWithProviders(<UploadManuscriptModal onClose={() => {}} onUploadSuccess={() => {}} />);
+    await renderWithUploadProviders(<UploadManuscriptModal onClose={() => {}} onUploadSuccess={() => {}} />);
     chooseFile();
     const input = screen.getByLabelText("Choose file") as HTMLInputElement;
     const file = input.files?.[0];
@@ -68,17 +68,17 @@ describe("UploadManuscriptModal", () => {
     expect((fetchMock.mock.calls[1] as unknown as [string, RequestInit])[1].body).toBeInstanceOf(FormData);
   });
 
-  it("shows an inline validation message when uploading with no file chosen", () => {
+  it("shows an inline validation message when uploading with no file chosen", async () => {
     vi.stubGlobal("fetch", vi.fn());
-    renderWithProviders(<UploadManuscriptModal onClose={() => {}} onUploadSuccess={() => {}} />);
+    await renderWithUploadProviders(<UploadManuscriptModal onClose={() => {}} onUploadSuccess={() => {}} />);
     fireEvent.click(screen.getByRole("button", { name: "Upload manuscript" }));
     expect(screen.getByRole("alert")).toHaveTextContent(
       "Choose a manuscript file before uploading.",
     );
   });
 
-  it("V-077: says before upload that checked manuscripts are compared against the Library, not added to it", () => {
-    renderWithProviders(<UploadManuscriptModal onClose={() => {}} onUploadSuccess={() => {}} />);
+  it("V-077: says before upload that checked manuscripts are compared against the Library, not added to it", async () => {
+    await renderWithUploadProviders(<UploadManuscriptModal onClose={() => {}} onUploadSuccess={() => {}} />);
     expect(
       screen.getByText(/Checked manuscripts are compared against the Library and are not added to it/),
     ).toBeInTheDocument();
@@ -89,7 +89,7 @@ describe("UploadManuscriptModal", () => {
       async (_input: RequestInfo | URL, _init?: RequestInit) => new Response(JSON.stringify(SUMMARY), { status: 200 }),
     );
     vi.stubGlobal("fetch", fetchMock);
-    renderWithProviders(<UploadManuscriptModal onClose={() => {}} onUploadSuccess={() => {}} />);
+    await renderWithUploadProviders(<UploadManuscriptModal onClose={() => {}} onUploadSuccess={() => {}} />);
 
     expect(screen.queryByLabelText(/Group name or label/)).not.toBeInTheDocument();
     chooseFile();
@@ -106,14 +106,14 @@ describe("UploadManuscriptModal", () => {
   it("shows real, honest facts on success, not a bare checkmark, and offers to start a check", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify(SUMMARY), { status: 200 })));
     const onUploadSuccess = vi.fn();
-    renderWithProviders(<UploadManuscriptModal onClose={() => {}} onUploadSuccess={onUploadSuccess} />);
+    await renderWithUploadProviders(<UploadManuscriptModal onClose={() => {}} onUploadSuccess={onUploadSuccess} />);
 
     chooseFile();
     fireEvent.click(screen.getByRole("button", { name: "Upload manuscript" }));
 
     expect(await screen.findByText("12 pages parsed. 5 reference records extracted.")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Start a check with this manuscript" }));
-    expect(onUploadSuccess).toHaveBeenCalledWith(42);
+    await waitFor(() => expect(onUploadSuccess).toHaveBeenCalledWith(42));
   });
 
   it.each([null, {
@@ -126,7 +126,7 @@ describe("UploadManuscriptModal", () => {
     vi.stubGlobal("fetch", fetchMock);
     const onClose = vi.fn();
     const onUploadSuccess = vi.fn();
-    renderWithProviders(<UploadManuscriptModal onClose={onClose} onUploadSuccess={onUploadSuccess} />);
+    await renderWithUploadProviders(<UploadManuscriptModal onClose={onClose} onUploadSuccess={onUploadSuccess} />);
     chooseFile();
     fireEvent.click(screen.getByRole("button", { name: "Upload manuscript" }));
     await screen.findByRole("heading", { name: existingUpload ? "You uploaded this file before" : "Upload complete" });
@@ -136,11 +136,11 @@ describe("UploadManuscriptModal", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
-  it("V-081: cancelling before upload has no manuscript to reveal and sends no request", () => {
+  it("V-081: cancelling before upload has no manuscript to reveal and sends no request", async () => {
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
     const onClose = vi.fn();
-    renderWithProviders(<UploadManuscriptModal onClose={onClose} onUploadSuccess={() => {}} />);
+    await renderWithUploadProviders(<UploadManuscriptModal onClose={onClose} onUploadSuccess={() => {}} />);
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
     expect(onClose).toHaveBeenCalledExactlyOnceWith(undefined);
     expect(fetchMock).not.toHaveBeenCalled();
@@ -149,7 +149,7 @@ describe("UploadManuscriptModal", () => {
   it("V-081: cancelling Upload another still reveals the manuscript already saved", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify(SUMMARY), { status: 200 })));
     const onClose = vi.fn();
-    renderWithProviders(<UploadManuscriptModal onClose={onClose} onUploadSuccess={() => {}} />);
+    await renderWithUploadProviders(<UploadManuscriptModal onClose={onClose} onUploadSuccess={() => {}} />);
     chooseFile();
     fireEvent.click(screen.getByRole("button", { name: "Upload manuscript" }));
     await screen.findByRole("heading", { name: "Upload complete" });
@@ -163,7 +163,7 @@ describe("UploadManuscriptModal", () => {
       "fetch",
       vi.fn(async () => new Response(JSON.stringify({ ...SUMMARY, citations: 0 }), { status: 200 })),
     );
-    renderWithProviders(<UploadManuscriptModal onClose={() => {}} onUploadSuccess={() => {}} />);
+    await renderWithUploadProviders(<UploadManuscriptModal onClose={() => {}} onUploadSuccess={() => {}} />);
     chooseFile();
     fireEvent.click(screen.getByRole("button", { name: "Upload manuscript" }));
     expect(await screen.findByText("12 pages parsed. 0 reference records extracted.")).toBeInTheDocument();
@@ -181,9 +181,15 @@ describe("UploadManuscriptModal", () => {
       ...SUMMARY, anchor_kind: anchorKind, page_count: pages, citations, notes: [note],
     }), { status: 200 })));
     const onUploadSuccess = vi.fn();
-    renderWithProviders(<UploadManuscriptModal onClose={() => {}} onUploadSuccess={onUploadSuccess} />);
+    await renderWithUploadProviders(<UploadManuscriptModal onClose={() => {}} onUploadSuccess={onUploadSuccess} />);
     chooseFile(); // The returned location contract wins even for a .pdf filename.
     fireEvent.click(screen.getByRole("button", { name: "Upload manuscript" }));
+    if (anchorKind === undefined) {
+      expect(await screen.findByRole("alert")).toHaveTextContent("could not confirm");
+      expect(screen.queryByRole("heading", { name: "Upload complete" })).not.toBeInTheDocument();
+      expect(onUploadSuccess).not.toHaveBeenCalled();
+      return;
+    }
     expect(await screen.findByText(expected)).toBeInTheDocument();
     expect(screen.queryByText(/0 pages parsed/)).not.toBeInTheDocument();
     expect(screen.getByRole("region", { name: "Extraction notes" })).toHaveTextContent(note);
@@ -191,7 +197,7 @@ describe("UploadManuscriptModal", () => {
     const heading = screen.getByRole("heading", { name: "Upload complete" });
     await waitFor(() => expect(document.activeElement).toBe(heading));
     fireEvent.click(screen.getByRole("button", { name: "Start a check with this manuscript" }));
-    expect(onUploadSuccess).toHaveBeenCalledWith(42);
+    await waitFor(() => expect(onUploadSuccess).toHaveBeenCalledWith(42));
   });
 
   it("displays source-reading limitations for an ordinary text PDF", async () => {
@@ -199,7 +205,7 @@ describe("UploadManuscriptModal", () => {
     vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({
       ...SUMMARY, citations: 0, image_only: false, notes: [note],
     }), { status: 200 })));
-    renderWithProviders(<UploadManuscriptModal onClose={() => {}} onUploadSuccess={() => {}} />);
+    await renderWithUploadProviders(<UploadManuscriptModal onClose={() => {}} onUploadSuccess={() => {}} />);
     chooseFile();
     fireEvent.click(screen.getByRole("button", { name: "Upload manuscript" }));
     expect(await screen.findByText(note)).toBeInTheDocument();
@@ -224,7 +230,7 @@ describe("UploadManuscriptModal", () => {
         ),
       ),
     );
-    renderWithProviders(<UploadManuscriptModal onClose={() => {}} onUploadSuccess={() => {}} />);
+    await renderWithUploadProviders(<UploadManuscriptModal onClose={() => {}} onUploadSuccess={() => {}} />);
     chooseFile();
     fireEvent.click(screen.getByRole("button", { name: "Upload manuscript" }));
 
@@ -257,7 +263,7 @@ describe("UploadManuscriptModal", () => {
         ),
       ),
     );
-    renderWithProviders(<UploadManuscriptModal onClose={() => {}} onUploadSuccess={() => {}} />);
+    await renderWithUploadProviders(<UploadManuscriptModal onClose={() => {}} onUploadSuccess={() => {}} />);
     chooseFile();
     fireEvent.click(screen.getByRole("button", { name: "Upload manuscript" }));
 
@@ -290,7 +296,7 @@ describe("UploadManuscriptModal", () => {
         );
       }),
     );
-    renderWithProviders(<UploadManuscriptModal onClose={() => {}} onUploadSuccess={() => {}} />);
+    await renderWithUploadProviders(<UploadManuscriptModal onClose={() => {}} onUploadSuccess={() => {}} />);
     chooseFile();
     fireEvent.click(screen.getByRole("button", { name: "Upload manuscript" }));
 
@@ -314,7 +320,7 @@ describe("UploadManuscriptModal", () => {
         ),
       ),
     );
-    renderWithProviders(<UploadManuscriptModal onClose={() => {}} onUploadSuccess={() => {}} />);
+    await renderWithUploadProviders(<UploadManuscriptModal onClose={() => {}} onUploadSuccess={() => {}} />);
     chooseFile();
     fireEvent.click(screen.getByRole("button", { name: "Upload manuscript" }));
     expect(await screen.findByText("This document contains little or no selectable text.")).toBeInTheDocument();
@@ -330,7 +336,7 @@ describe("UploadManuscriptModal", () => {
         ),
       ),
     );
-    renderWithProviders(<UploadManuscriptModal onClose={() => {}} onUploadSuccess={() => {}} />);
+    await renderWithUploadProviders(<UploadManuscriptModal onClose={() => {}} onUploadSuccess={() => {}} />);
     chooseFile();
     fireEvent.click(screen.getByRole("button", { name: "Upload manuscript" }));
     expect(await screen.findByRole("alert")).toHaveTextContent(
@@ -340,14 +346,14 @@ describe("UploadManuscriptModal", () => {
 
   it("BUG-032-adjacent: a mid-upload connection loss reads as a real, actionable network error, not a silent stall", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => { throw new TypeError("Failed to fetch"); }));
-    renderWithProviders(<UploadManuscriptModal onClose={() => {}} onUploadSuccess={() => {}} />);
+    await renderWithUploadProviders(<UploadManuscriptModal onClose={() => {}} onUploadSuccess={() => {}} />);
     chooseFile();
     fireEvent.click(screen.getByRole("button", { name: "Upload manuscript" }));
     expect(await screen.findByRole("alert")).toHaveTextContent(
-      "Could not reach VERIDICAL to upload this file. Check your connection and try again.",
+      "VERIDICAL could not confirm this upload's result. Review your uploads before starting another attempt.",
     );
-    // Busy state cannot outlive the failed request -- retry is live immediately.
-    expect(screen.getByRole("button", { name: "Upload manuscript" })).not.toBeDisabled();
+    // A lost response is not a known rejection. A new request needs explicit confirmation.
+    expect(screen.getByRole("button", { name: "Start another upload attempt" })).not.toBeDisabled();
   });
 
   it("moves focus to the error message on a failed upload, instead of stranding it at <body>", async () => {
@@ -357,7 +363,7 @@ describe("UploadManuscriptModal", () => {
         new Response(JSON.stringify({ error: { code: "file_malformed", message: "Bad file." } }), { status: 422 }),
       ),
     );
-    renderWithProviders(<UploadManuscriptModal onClose={() => {}} onUploadSuccess={() => {}} />);
+    await renderWithUploadProviders(<UploadManuscriptModal onClose={() => {}} onUploadSuccess={() => {}} />);
     chooseFile();
     fireEvent.click(screen.getByRole("button", { name: "Upload manuscript" }));
     const alert = await screen.findByRole("alert");
@@ -387,7 +393,7 @@ describe("UploadManuscriptModal", () => {
         return new Response(JSON.stringify(proposalSummary), { status: 200 });
       }),
     );
-    renderWithProviders(<UploadManuscriptModal onClose={() => {}} onUploadSuccess={() => {}} />);
+    await renderWithUploadProviders(<UploadManuscriptModal onClose={() => {}} onUploadSuccess={() => {}} />);
     chooseFile();
     fireEvent.click(screen.getByRole("button", { name: "Upload manuscript" }));
 
@@ -429,7 +435,7 @@ describe("UploadManuscriptModal", () => {
         ),
       ),
     );
-    renderWithProviders(<UploadManuscriptModal onClose={() => {}} onUploadSuccess={() => {}} />);
+    await renderWithUploadProviders(<UploadManuscriptModal onClose={() => {}} onUploadSuccess={() => {}} />);
     chooseFile();
     fireEvent.click(screen.getByRole("button", { name: "Upload manuscript" }));
 
@@ -462,7 +468,7 @@ describe("UploadManuscriptModal", () => {
       return new Response(JSON.stringify(proposalSummary), { status: 200 });
     });
     vi.stubGlobal("fetch", fetchMock);
-    renderWithProviders(<UploadManuscriptModal onClose={() => {}} onUploadSuccess={() => {}} />);
+    await renderWithUploadProviders(<UploadManuscriptModal onClose={() => {}} onUploadSuccess={() => {}} />);
     chooseFile();
     fireEvent.click(screen.getByRole("button", { name: "Upload manuscript" }));
 
@@ -483,7 +489,7 @@ describe("UploadManuscriptModal", () => {
 
   it("'Upload another' resets the form back to a fresh idle state", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify(SUMMARY), { status: 200 })));
-    renderWithProviders(<UploadManuscriptModal onClose={() => {}} onUploadSuccess={() => {}} />);
+    await renderWithUploadProviders(<UploadManuscriptModal onClose={() => {}} onUploadSuccess={() => {}} />);
     chooseFile();
     fireEvent.click(screen.getByRole("button", { name: "Upload manuscript" }));
     await screen.findByRole("heading", { name: "Upload complete" });

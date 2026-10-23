@@ -34,6 +34,9 @@ MANUSCRIPT_PREPARATION_FAILED = (
     "VERIDICAL could not finish preparing this manuscript. Try uploading it again."
 )
 
+UPLOAD_ACTOR_CONTEXT_CHANGED = (
+    "Your signed-in account changed. Open the upload form again to continue."
+)
 DOCUMENT_PREPARATION_BUSY = (
     "VERIDICAL is busy preparing a document. This attempt did not add a document. Try again later."
 )

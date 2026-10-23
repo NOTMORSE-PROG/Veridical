@@ -816,6 +816,9 @@ describe("DashboardPage", () => {
   it.each(["start", "close"])("V-059/V-081: uploaded manuscript handoff via %s", async (nextAction) => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const path = new URL(typeof input === "string" ? input : input.toString(), "http://localhost").pathname;
+      if (path === "/auth/session") return new Response(JSON.stringify({ instructor: {
+        id: 1, email: "a@b.com", display_name: "Demo Instructor", onboarding_dismissed_at: null,
+      } }), { status: 200 });
       if (path === "/auth/me") {
         return new Response(
           JSON.stringify({ id: 1, email: "a@b.com", display_name: "Demo Instructor" }),
@@ -840,6 +843,7 @@ describe("DashboardPage", () => {
             citations: 3,
             vision_status: "none",
             notes: [],
+            existing_upload: null,
             group_proposal: {
               title: null,
               short_name: null,
@@ -880,12 +884,13 @@ describe("DashboardPage", () => {
       return new Response("not found", { status: 404 });
     });
     vi.stubGlobal("fetch", fetchMock);
-    renderWithProviders(<DashboardPage />, { route: "/dashboard?q=previous-search" });
+    renderWithProviders(<DashboardPage />, { route: "/dashboard?q=previous-search", uploadInstructorId: 1 });
 
     fireEvent.click(await screen.findByRole("button", { name: "Add manuscript" }));
     const dialog = await screen.findByRole("dialog");
     const file = new File(["dummy"], "thesis.pdf", { type: "application/pdf" });
-    const input = document.querySelector('input[type="file"]') as HTMLInputElement;
+    const input = await within(dialog).findByLabelText<HTMLInputElement>("Choose file");
+    await waitFor(() => expect(input).not.toBeDisabled());
     fireEvent.change(input, { target: { files: [file] } });
     // Scoped to the dialog: the header's own "Upload manuscript" CTA is
     // still in the DOM behind the modal and shares the same accessible
