@@ -384,7 +384,7 @@ def test_existing_destination_requires_exact_complete_competing_bytes(
     monkeypatch.setattr(
         storage_module.os, "rename" if os.name == "nt" else "link", existing_destination
     )
-    monkeypatch.setattr(Path, "read_bytes", controlled_read)
+    monkeypatch.setattr(storage_module, "_read_published_winner", controlled_read)
     if competing_state == "same":
         assert ensure_local_file(settings, DurableBytes(payload), str(final_path)) == final_path
         assert original_read(final_path) == payload
