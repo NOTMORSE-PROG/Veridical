@@ -6,6 +6,32 @@ import { UploadRubricModal } from "./UploadRubricModal";
 describe("UploadRubricModal", () => {
   afterEach(() => vi.unstubAllGlobals());
 
+  it("retains a new-version file on exact preparation busy without blaming the file", async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ error: {
+      code: "document_preparation_busy",
+      message: "Document preparation is unavailable. This attempt did not add a document. Try again later.",
+    } }), { status: 503 }));
+    vi.stubGlobal("fetch", fetchMock);
+    renderWithProviders(<UploadRubricModal onClose={() => {}} familyId="existing-family" />);
+    const file = new File(["dummy"], "format.docx");
+    const input = screen.getByLabelText("Choose file") as HTMLInputElement;
+    fireEvent.change(input, { target: { files: [file] } });
+    fireEvent.click(screen.getByRole("button", { name: "Continue to review" }));
+    const alert = await screen.findByRole("alert");
+    await waitFor(() => expect(alert).toHaveFocus());
+    expect(alert).toHaveTextContent("preparation is unavailable");
+    expect(input).not.toHaveAttribute("aria-invalid");
+    expect(input.getAttribute("aria-describedby")).not.toContain(alert.id);
+    expect(input.files?.[0]).toBe(file);
+    expect(screen.getByRole("heading", { name: "Upload new format version" })).toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    fireEvent.click(screen.getByRole("button", { name: "Continue to review" }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    const [url, init] = fetchMock.mock.calls[1] as unknown as [string, RequestInit];
+    expect(new URL(url, "http://localhost").searchParams.get("family_id")).toBe("existing-family");
+    expect(init.body).toBeInstanceOf(FormData);
+  });
+
   it("shows an inline validation message when Continue is clicked with no file chosen", () => {
     vi.stubGlobal("fetch", vi.fn());
     renderWithProviders(<UploadRubricModal onClose={() => {}} />);

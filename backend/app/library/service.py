@@ -59,6 +59,7 @@ from app.config import Settings, get_settings
 from app.db import advisory_lock
 from app.errors import ConflictError, GoneError, NotFoundError, VeridicalError
 from app.groups.service import DEFAULT_GROUP_LABEL, UNSET_PROGRAM_FILTER
+from app.ingest.admission import PreparationLease, preparation_scope
 from app.ingest.patterns import load_patterns
 from app.ingest.schemas import ExtractionResult
 from app.ingest.service import (
@@ -527,17 +528,33 @@ async def _own_possible_duplicate(
 
 
 async def _embed(
-    result: ExtractionResult, settings: Settings
+    result: ExtractionResult,
+    settings: Settings,
+    *,
+    preparation_lease: PreparationLease | None = None,
 ) -> tuple[DocumentEmbeddings, list[PassageEmbedding]]:
     """Local model2vec work, off the event loop (BUG-152)."""
     loop = asyncio.get_running_loop()
-    document = await loop.run_in_executor(None, compute_document_embeddings, result, settings)
-    passages = await loop.run_in_executor(None, compute_passage_embeddings, result, settings)
+    document = (
+        await preparation_lease.run(compute_document_embeddings, result, settings)
+        if preparation_lease is not None
+        else await loop.run_in_executor(None, compute_document_embeddings, result, settings)
+    )
+    passages = (
+        await preparation_lease.run(compute_passage_embeddings, result, settings)
+        if preparation_lease is not None
+        else await loop.run_in_executor(None, compute_passage_embeddings, result, settings)
+    )
     return document, passages
 
 
 async def _discard_late_work(
-    session: AsyncSession, entry: LibraryEntry, manuscript: Manuscript, settings: Settings
+    session: AsyncSession,
+    entry: LibraryEntry,
+    manuscript: Manuscript,
+    settings: Settings,
+    *,
+    preparation_lease: PreparationLease | None = None,
 ) -> None:
     """The entry left the Library (removed, skipped, purged) while this
     request was still reading or embedding it. Delete only after a real
@@ -552,9 +569,12 @@ async def _discard_late_work(
         return
     await delete_archive_rows(session, manuscript.id)
     if entry.source == LibraryEntrySource.library_submission:
-        await asyncio.get_running_loop().run_in_executor(
-            None, delete_stored_files, manuscript, settings
-        )
+        if preparation_lease is not None:
+            await preparation_lease.run(delete_stored_files, manuscript, settings)
+        else:
+            await asyncio.get_running_loop().run_in_executor(
+                None, delete_stored_files, manuscript, settings
+            )
         if manuscript.purged_at is None:
             manuscript.purged_at = datetime.now(UTC)
     await session.commit()
@@ -583,6 +603,7 @@ async def _activate(
     *,
     expected: LibraryEntryStatus,
     decision: str | None,
+    preparation_lease: PreparationLease | None = None,
 ) -> bool:
     """Enter the Library: comparison rows and the status change commit in ONE
     transaction, so a crash can never leave rows for a non-active entry. Under
@@ -592,7 +613,9 @@ async def _activate(
     used to be undone by this write)."""
     async with advisory_lock(session, manuscript.id):
         if not await _still(session, entry, manuscript, expected):
-            await _discard_late_work(session, entry, manuscript, settings)
+            await _discard_late_work(
+                session, entry, manuscript, settings, preparation_lease=preparation_lease
+            )
             return False
         await store_document_embeddings(session, manuscript.id, document, commit=False)
         if passages:
@@ -630,10 +653,14 @@ async def _fail(
     manuscript: Manuscript,
     detail: str,
     settings: Settings,
+    *,
+    preparation_lease: PreparationLease | None = None,
 ) -> LibrarySubmissionOut:
     async with advisory_lock(session, manuscript.id):
         if not await _still(session, entry, manuscript, LibraryEntryStatus.processing):
-            await _discard_late_work(session, entry, manuscript, settings)
+            await _discard_late_work(
+                session, entry, manuscript, settings, preparation_lease=preparation_lease
+            )
             return _removed_while_reading()
         entry.status = LibraryEntryStatus.failed
         entry.failure_detail = detail
@@ -662,15 +689,37 @@ async def submit_library_entry(
     instructor_id: int,
     settings: Settings,
 ) -> LibrarySubmissionOut:
+    """Admit before consuming this upload or creating a Library processing record."""
+    with preparation_scope(settings) as lease:
+        return await _submit_library_entry(
+            session,
+            chunks,
+            filename,
+            metadata,
+            instructor_id=instructor_id,
+            settings=settings,
+            preparation_lease=lease,
+        )
+
+
+async def _submit_library_entry(
+    session: AsyncSession,
+    chunks: AsyncIterator[bytes],
+    filename: str,
+    metadata: LibrarySubmissionIn,
+    *,
+    instructor_id: int,
+    settings: Settings,
+    preparation_lease: PreparationLease,
+) -> LibrarySubmissionOut:
     """One file per call; the client submits a batch one file at a time,
-    which keeps peak memory to one extraction on the free-tier worker.
+    while shared server admission independently bounds upload preparation owners.
 
     Nothing is stored durably or recorded until the content is a readable
     document type and is not a copy of one of the requester's own entries
     (security review, 2026-10-13: any file type used to reach durable
     storage, and identical failed retries each stored a new copy)."""
     program_id = await _program_id(session, metadata.program)
-    loop = asyncio.get_running_loop()
     suffix = Path(filename).suffix.lower()[:8]
     uploads = settings.data_dir / settings.manuscript_upload_subdir
     # Server-owned names only: the original filename never touches the
@@ -679,7 +728,7 @@ async def submit_library_entry(
     try:
         try:
             await save_upload(chunks, pending, settings)
-            select_extractor(await loop.run_in_executor(None, detect_format, pending))
+            select_extractor(await preparation_lease.run(detect_format, pending))
         except VeridicalError as exc:
             return LibrarySubmissionOut(
                 outcome=LibrarySubmissionOutcome.failed,
@@ -687,8 +736,8 @@ async def submit_library_entry(
                 duplicate_of=None,
                 message=str(exc),
             )
-        content_hash = await loop.run_in_executor(
-            None, hash_file_sha256, pending, settings.content_hash_read_chunk_bytes
+        content_hash = await preparation_lease.run(
+            hash_file_sha256, pending, settings.content_hash_read_chunk_bytes
         )
 
         existing = await _own_entry_with_hash(session, instructor_id, content_hash)
@@ -736,11 +785,11 @@ async def submit_library_entry(
 
         dest = uploads / f"{manuscript.id}{suffix}"
         try:
-            await loop.run_in_executor(None, os.replace, pending, dest)
+            await preparation_lease.run(os.replace, pending, dest)
             # BUG-138: durable copy before the row claims the file exists.
             storage = get_storage(settings)
-            await loop.run_in_executor(
-                None, storage.put_file, dest, storage_key_for(settings, str(dest))
+            await preparation_lease.run(
+                storage.put_file, dest, storage_key_for(settings, str(dest))
             )
         except Exception:
             # Nothing references these rows yet: remove them entirely, so a
@@ -765,7 +814,14 @@ async def submit_library_entry(
         pending.unlink(missing_ok=True)
 
     try:
-        result = await ingest_manuscript(session, manuscript, dest, settings, read_images=False)
+        result = await ingest_manuscript(
+            session,
+            manuscript,
+            dest,
+            settings,
+            read_images=False,
+            _preparation_lease=preparation_lease,
+        )
     except VeridicalError:
         return await _fail(
             session,
@@ -773,19 +829,34 @@ async def submit_library_entry(
             manuscript,
             manuscript.ingest_failure_detail or messages.LIBRARY_FILE_UNREADABLE,
             settings,
+            preparation_lease=preparation_lease,
         )
     except Exception:
         logger.exception("Library submission %s failed during extraction", manuscript.id)
-        return await _fail(session, entry, manuscript, messages.LIBRARY_FILE_UNREADABLE, settings)
+        return await _fail(
+            session,
+            entry,
+            manuscript,
+            messages.LIBRARY_FILE_UNREADABLE,
+            settings,
+            preparation_lease=preparation_lease,
+        )
 
     _fill_from_title_page(entry, result, settings)
     # Committed now: only the detail columns change (never `status`), so this
     # cannot undo a concurrent removal, and the guarded transitions below can
     # re-read the entry without losing the title-page proposals.
     await session.commit()
-    document, passages = await _embed(result, settings)
+    document, passages = await _embed(result, settings, preparation_lease=preparation_lease)
     if document.whole_document is None:
-        return await _fail(session, entry, manuscript, messages.LIBRARY_NO_READABLE_TEXT, settings)
+        return await _fail(
+            session,
+            entry,
+            manuscript,
+            messages.LIBRARY_NO_READABLE_TEXT,
+            settings,
+            preparation_lease=preparation_lease,
+        )
 
     duplicate = await _own_possible_duplicate(
         session, instructor_id, manuscript.id, document.whole_document, settings
@@ -794,7 +865,9 @@ async def submit_library_entry(
         duplicate_entry, duplicate_manuscript, similarity = duplicate
         async with advisory_lock(session, manuscript.id):
             if not await _still(session, entry, manuscript, LibraryEntryStatus.processing):
-                await _discard_late_work(session, entry, manuscript, settings)
+                await _discard_late_work(
+                    session, entry, manuscript, settings, preparation_lease=preparation_lease
+                )
                 return _removed_while_reading()
             entry.status = LibraryEntryStatus.needs_decision
             entry.possible_duplicate_of_id = duplicate_entry.id
@@ -826,6 +899,7 @@ async def submit_library_entry(
         settings,
         expected=LibraryEntryStatus.processing,
         decision=None,
+        preparation_lease=preparation_lease,
     ):
         return _removed_while_reading()
     return LibrarySubmissionOut(

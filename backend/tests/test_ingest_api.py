@@ -297,6 +297,12 @@ def test_concurrent_exact_uploads_leave_at_least_one_response_linked(client):
     with ThreadPoolExecutor(max_workers=2) as pool:
         responses = list(pool.map(upload, ["concurrent-a.pdf", "concurrent-b.pdf"]))
 
+    # F1 admission rejects occupied preparation before durable upload work.
+    # Explicit later attempts still have to preserve the original history link.
+    for index, response in enumerate(responses):
+        if response.status_code == 503:
+            assert response.json()["error"]["code"] == "document_preparation_busy"
+            responses[index] = upload(["concurrent-a.pdf", "concurrent-b.pdf"][index])
     for response in responses:
         assert response.status_code == 200, response.text
     bodies = [response.json() for response in responses]

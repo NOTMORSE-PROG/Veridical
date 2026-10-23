@@ -118,6 +118,12 @@ async def test_concurrent_uploads_for_a_brand_new_group_name_never_500_and_share
             )
 
     responses = await asyncio.gather(*(one_upload(i) for i in range(10)))
+    # Preparation has no waiting queue. Rejected attempts make no group, then
+    # an explicit retry after the accepted owner exits must resolve the same one.
+    for index, response in enumerate(responses):
+        if response.status_code == 503:
+            assert response.json()["error"]["code"] == "document_preparation_busy"
+            responses[index] = await one_upload(index)
     assert all(r.status_code == 200 for r in responses), [
         (r.status_code, r.text) for r in responses
     ]
@@ -138,5 +144,46 @@ async def test_concurrent_uploads_for_a_brand_new_group_name_never_500_and_share
                 )
             )
             assert group_count == 1
+    finally:
+        await engine.dispose()
+
+
+async def test_group_resolution_itself_still_handles_ten_independent_transactions(
+    app, seeded_instructor, api_scratch_url
+):
+    """Keep the original unique-key race control below upload admission."""
+    import asyncio
+
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
+    from app.db import sqlalchemy_url
+    from app.groups.service import resolve_or_create_group
+    from app.models.group import Group
+
+    engine = create_async_engine(sqlalchemy_url(api_scratch_url))
+    factory = async_sessionmaker(engine, expire_on_commit=False)
+    ready = asyncio.Event()
+
+    async def resolve():
+        async with factory() as session:
+            await ready.wait()
+            group = await resolve_or_create_group(session, seeded_instructor, "Race Condition Team")
+            await session.commit()
+            return group.id
+
+    try:
+        tasks = [asyncio.create_task(resolve()) for _ in range(10)]
+        ready.set()
+        ids = await asyncio.gather(*tasks)
+        assert len(set(ids)) == 1
+        async with factory() as session:
+            assert (
+                await session.scalar(
+                    select(func.count())
+                    .select_from(Group)
+                    .where(Group.instructor_id == seeded_instructor)
+                )
+                == 1
+            )
     finally:
         await engine.dispose()

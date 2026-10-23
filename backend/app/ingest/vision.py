@@ -35,6 +35,7 @@ from pydantic import BaseModel, ValidationError
 
 from app.config import Settings
 from app.errors import ApiDownError, QuotaExhaustedError
+from app.ingest.admission import PreparationLease
 from app.ingest.patterns import HeadingPatterns
 from app.ingest.schemas import (
     EquationBlock,
@@ -69,6 +70,8 @@ async def read_images(
     llm: LLMClient,
     patterns: HeadingPatterns,
     settings: Settings,
+    *,
+    preparation_lease: PreparationLease | None = None,
 ) -> int:
     """Run the vision pass, merging tables/equations into `result` in
     place. Returns the number of LLM calls made (quota accounting)."""
@@ -85,7 +88,11 @@ async def read_images(
         reading = result.image_readings[index]
         # Rendering is CPU-bound — off the event loop (CODING.md §2).
         try:
-            png = await loop.run_in_executor(None, _crop, file_path, image, settings)
+            png = (
+                await preparation_lease.run(_crop, file_path, image, settings)
+                if preparation_lease is not None
+                else await loop.run_in_executor(None, _crop, file_path, image, settings)
+            )
         except (ValueError, RuntimeError, IndexError):
             reading.status, reading.reason = "failed", "crop_unavailable"
             continue

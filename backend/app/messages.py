@@ -34,6 +34,14 @@ MANUSCRIPT_PREPARATION_FAILED = (
     "VERIDICAL could not finish preparing this manuscript. Try uploading it again."
 )
 
+DOCUMENT_PREPARATION_BUSY = (
+    "VERIDICAL is busy preparing a document. This attempt did not add a document. Try again later."
+)
+
+DOCUMENT_PREPARATION_UNAVAILABLE = (
+    "Document preparation is unavailable. This attempt did not add a document. Try again later."
+)
+
 FILE_ENCRYPTED = (
     "The file is password-protected, so its text cannot be read. Please upload an unlocked copy."
 )

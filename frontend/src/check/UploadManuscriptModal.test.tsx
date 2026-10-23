@@ -43,6 +43,31 @@ function chooseFile() {
 describe("UploadManuscriptModal", () => {
   afterEach(() => vi.unstubAllGlobals());
 
+  it("keeps the file and form error focus for exact preparation busy, without file-invalid semantics", async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ error: {
+      code: "document_preparation_busy",
+      message: "VERIDICAL is busy preparing a document. This attempt did not add a document. Try again later.",
+    } }), { status: 503 }));
+    vi.stubGlobal("fetch", fetchMock);
+    renderWithProviders(<UploadManuscriptModal onClose={() => {}} onUploadSuccess={() => {}} />);
+    chooseFile();
+    const input = screen.getByLabelText("Choose file") as HTMLInputElement;
+    const file = input.files?.[0];
+    fireEvent.click(screen.getByRole("button", { name: "Upload manuscript" }));
+    const alert = await screen.findByRole("alert");
+    await waitFor(() => expect(alert).toHaveFocus());
+    expect(alert).toHaveTextContent("This attempt did not add a document");
+    expect(input).not.toHaveAttribute("aria-invalid");
+    expect(input.getAttribute("aria-describedby")).not.toContain(alert.id);
+    expect(input.files?.[0]).toBe(file);
+    expect(screen.getByText("thesis.pdf")).toBeInTheDocument();
+    expect(screen.queryByText("Upload complete")).not.toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    fireEvent.click(screen.getByRole("button", { name: "Upload manuscript" }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    expect((fetchMock.mock.calls[1] as unknown as [string, RequestInit])[1].body).toBeInstanceOf(FormData);
+  });
+
   it("shows an inline validation message when uploading with no file chosen", () => {
     vi.stubGlobal("fetch", vi.fn());
     renderWithProviders(<UploadManuscriptModal onClose={() => {}} onUploadSuccess={() => {}} />);

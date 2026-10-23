@@ -1,7 +1,7 @@
 """Ingestion orchestration: file → extraction → DB row + raw store.
 
 The ingest stage of the pipeline (ENGINEERING.md §4). Extraction itself is
-CPU-bound and runs in the default threadpool; this module owns the status
+CPU-bound and runs in the owned preparation executor; this module owns the status
 transitions on the manuscript row and the raw-store write.
 """
 
@@ -46,6 +46,7 @@ from app.groups.service import (
     validate_group_fields,
 )
 from app.ingest import docx, figures, pdf, references, vision
+from app.ingest.admission import PreparationLease, preparation_scope
 from app.ingest.patterns import load_patterns
 from app.ingest.recovery import recover_layout, selected_pages
 from app.ingest.schemas import (
@@ -188,6 +189,29 @@ async def ingest_manuscript(
     settings: Settings | None = None,
     *,
     read_images: bool = True,
+    _preparation_lease: PreparationLease | None = None,
+) -> ExtractionResult:
+    """Admit direct callers too; nested uploads borrow the same preparation owner."""
+    settings = settings or get_settings()
+    with preparation_scope(settings, _preparation_lease) as lease:
+        return await _ingest_manuscript(
+            session,
+            manuscript,
+            file_path,
+            settings,
+            read_images=read_images,
+            preparation_lease=lease,
+        )
+
+
+async def _ingest_manuscript(
+    session: AsyncSession,
+    manuscript: Manuscript,
+    file_path: Path,
+    settings: Settings | None = None,
+    *,
+    read_images: bool = True,
+    preparation_lease: PreparationLease,
 ) -> ExtractionResult:
     """`read_images=False` (V-077, Library submissions) skips the vision
     pass, the only Gemini call in ingestion: a Library manuscript is stored
@@ -197,7 +221,6 @@ async def ingest_manuscript(
     manuscript_id, instructor_id = manuscript.id, manuscript.instructor_id
     manuscript.ingest_status = IngestStatus.processing
     await session.commit()
-    loop = asyncio.get_running_loop()
     finalizing = False
     try:
         # Dispatch by sniffed content (extensions lie) — inside the stage
@@ -214,18 +237,18 @@ async def ingest_manuscript(
         # running to completion in the background, its result discarded.
         try:
             result = await asyncio.wait_for(
-                loop.run_in_executor(None, extractor, str(file_path), settings),
+                preparation_lease.run(extractor, str(file_path), settings),
                 timeout=settings.ingest_extraction_timeout_seconds,
             )
         except TimeoutError as exc:
             raise FileTooLargeError(messages.EXTRACTION_TIMED_OUT) from exc
         # Separate optional CPU process, with its own bounds and native-source
         # mappings. It cannot erase an unresolved reading-order record.
-        result = await loop.run_in_executor(
-            None, _recover_with_cache, result, file_path, settings, manuscript.id
+        result = await preparation_lease.run(
+            _recover_with_cache, result, file_path, settings, manuscript.id
         )
         patterns = load_patterns(settings.ingest_patterns_file)
-        drafts = await loop.run_in_executor(None, references.extract_references, result, patterns)
+        drafts = await preparation_lease.run(references.extract_references, result, patterns)
         selected_images = vision.prepare_image_readings(
             result, patterns, settings, enabled=read_images
         )
@@ -234,7 +257,9 @@ async def ingest_manuscript(
             # BEFORE the raw store is written, so the store is complete.
             if selected_images:
                 llm = await get_llm_client_for(session, settings, manuscript.instructor_id)
-                await vision.read_images(result, file_path, llm, patterns, settings)
+                await vision.read_images(
+                    result, file_path, llm, patterns, settings, preparation_lease=preparation_lease
+                )
         except (LLMNotConfiguredError, ApiDownError, QuotaExhaustedError) as exc:
             # No client (real mode before V-009), or the queue's own
             # retries were exhausted, or the daily quota ran out: image
@@ -262,22 +287,28 @@ async def ingest_manuscript(
             try:
                 llm = await get_llm_client_for(session, settings, manuscript.instructor_id)
                 await figures.read_figures(
-                    result, file_path, llm, patterns, settings, source_hash=manuscript.content_hash
+                    result,
+                    file_path,
+                    llm,
+                    patterns,
+                    settings,
+                    source_hash=manuscript.content_hash,
+                    preparation_lease=preparation_lease,
                 )
             except (LLMNotConfiguredError, ApiDownError, QuotaExhaustedError, InvalidApiKeyError):
                 for entry in result.figure_readings or []:
                     if entry.reason == "not_attempted":
                         entry.status, entry.reason = "unavailable", "service_unavailable"
         raw_path = raw_store_path(settings, manuscript.id)
-        await loop.run_in_executor(None, _write_raw_store, result, raw_path)
+        await preparation_lease.run(_write_raw_store, result, raw_path)
         # BUG-138: same durability as the upload itself -- without this, the
         # extraction JSON survives only until the next redeploy/idle-wake,
         # and every resumed check run past that point dies deep in the
         # pipeline with a raw FileNotFoundError (the exact failure this
         # ticket measured on check run 5, `GROUND.pdf`).
         storage = get_storage(settings)
-        await loop.run_in_executor(
-            None, storage.put_file, raw_path, storage_key_for(settings, str(raw_path))
+        await preparation_lease.run(
+            storage.put_file, raw_path, storage_key_for(settings, str(raw_path))
         )
         # Citation replacement and the terminal state are one transaction.
         finalizing = True
@@ -381,6 +412,30 @@ async def ingest_upload(
     *,
     instructor_id: int,
 ) -> tuple[Manuscript, ExtractionResult, int, TitlePageProposal, Manuscript | None]:
+    """Reject occupied preparation before creating groups, rows or stored uploads."""
+    settings = settings or get_settings()
+    with preparation_scope(settings) as lease:
+        return await _ingest_upload(
+            session,
+            chunks,
+            filename,
+            group_label,
+            settings,
+            instructor_id=instructor_id,
+            preparation_lease=lease,
+        )
+
+
+async def _ingest_upload(
+    session: AsyncSession,
+    chunks: AsyncIterator[bytes],
+    filename: str,
+    group_label: str,
+    settings: Settings | None = None,
+    *,
+    instructor_id: int,
+    preparation_lease: PreparationLease,
+) -> tuple[Manuscript, ExtractionResult, int, TitlePageProposal, Manuscript | None]:
     """Full upload flow for the HTTP surface: save (size-capped) → own row
     → ingest. `instructor_id` is the authenticated caller (BUG-002/D-020) —
     this endpoint used to attach uploads to whichever instructor had the
@@ -437,16 +492,14 @@ async def ingest_upload(
     # BUG-140: content identity, computed once here (off the event loop --
     # a chunked SHA-256 read of up to `max_upload_mb`) rather than derived
     # later from bytes that may no longer be on local disk (BUG-138).
-    manuscript.content_hash = await asyncio.get_running_loop().run_in_executor(
-        None, hash_file_sha256, dest, settings.content_hash_read_chunk_bytes
+    manuscript.content_hash = await preparation_lease.run(
+        hash_file_sha256, dest, settings.content_hash_read_chunk_bytes
     )
     # BUG-138: durably persist the upload BEFORE the row claims it exists --
     # a failed R2 write raises here rather than leaving `file_ref` pointing
     # at a copy that only ever lived on Render's ephemeral disk.
     storage = get_storage(settings)
-    await asyncio.get_running_loop().run_in_executor(
-        None, storage.put_file, dest, storage_key_for(settings, str(dest))
-    )
+    await preparation_lease.run(storage.put_file, dest, storage_key_for(settings, str(dest)))
     manuscript.file_ref = str(dest)
     await session.commit()
     # BUG-234: the upload is now durably backed and its hash is committed.
@@ -471,7 +524,9 @@ async def ingest_upload(
         )
         .limit(1)
     )
-    result = await ingest_manuscript(session, manuscript, dest, settings)
+    result = await ingest_manuscript(
+        session, manuscript, dest, settings, _preparation_lease=preparation_lease
+    )
     n_citations = (
         await session.scalar(
             select(func.count())

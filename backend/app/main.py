@@ -24,6 +24,11 @@ from app.errors import HTTP_STATUS, VeridicalError
 from app.flags.router import router as flags_router
 from app.groups.router import router as groups_router
 from app.groups.service import seed_default_programs
+from app.ingest.admission import (
+    begin_preparation_shutdown,
+    finish_preparation_lifespan,
+    start_preparation_admission,
+)
 from app.ingest.router import router as ingest_router
 from app.library.router import router as library_router
 from app.llm.router import router as llm_router
@@ -124,21 +129,32 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
         await _prewarm_embedding_model_on_boot()
 
     settings = get_settings()
-    wake_event = asyncio.Event()
-    app.state.pipeline_wake_event = wake_event
-    task = asyncio.create_task(
-        worker_loop(
-            wake_event=wake_event,
-            periodic=settings.veridical_env == "prod" or settings.pipeline_worker_autostart,
-        ),
-        name="pipeline-scheduler",
-    )
+    preparation_handle = start_preparation_admission(settings)
+    task = None
     try:
+        wake_event = asyncio.Event()
+        app.state.pipeline_wake_event = wake_event
+        task = asyncio.create_task(
+            worker_loop(
+                wake_event=wake_event,
+                periodic=settings.veridical_env == "prod" or settings.pipeline_worker_autostart,
+            ),
+            name="pipeline-scheduler",
+        )
         yield
     finally:
-        task.cancel()
-        with suppress(asyncio.CancelledError):
-            await task
+        retiring = begin_preparation_shutdown(preparation_handle)
+        try:
+            if task is not None:
+                task.cancel()
+                with suppress(asyncio.CancelledError):
+                    await task
+        finally:
+            logging.getLogger(__name__).info(
+                "Preparation shutdown retains %s lease(s); native threads are not terminated",
+                retiring.active_owners,
+            )
+            finish_preparation_lifespan(preparation_handle)
 
 
 app = FastAPI(

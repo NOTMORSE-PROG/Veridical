@@ -98,6 +98,12 @@ class RateLimitedError(VeridicalError):
     code = "rate_limited"
 
 
+class DocumentPreparationBusyError(VeridicalError):
+    """Preparation admission rejected this attempt before durable work."""
+
+    code = "document_preparation_busy"
+
+
 # HTTP mapping for the one exception handler (main.py). Codes absent here
 # are result STATES (not_applicable, unverifiable) that must never be
 # raised to HTTP; if one ever is, the handler still answers with the
@@ -112,6 +118,7 @@ HTTP_STATUS: dict[str, int] = {
     "conflict": 409,
     "gone": 410,
     "rate_limited": 429,
+    "document_preparation_busy": 503,
     "invalid_api_key": 422,
     # A rubric-decomposition parse that failed schema validation (V-010) —
     # user-actionable (re-review/re-upload); V-011 wraps this in a retry

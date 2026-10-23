@@ -7,9 +7,37 @@ works, migration by migration)."""
 
 from unittest.mock import patch
 
+import pytest
 from fastapi.testclient import TestClient
 
 from app.config import get_settings
+
+
+async def test_preparation_lifespan_closes_if_startup_fails_after_admission_start(monkeypatch):
+    from app import main
+    from app.ingest import admission
+
+    monkeypatch.setenv("VERIDICAL_ENV", "dev")
+    get_settings.cache_clear()
+    try:
+        with (
+            patch("app.main.asyncio.Event", side_effect=RuntimeError("Controlled startup failure")),
+            pytest.raises(RuntimeError, match="Controlled startup failure"),
+        ):
+            async with main._lifespan(main.app):
+                pytest.fail("Startup must not have reached yield")
+        assert admission._managed_lifespan is None
+        assert not admission._managed_closing
+        retired = admission._current
+        assert retired is not None and retired.drained and not retired.accepting
+        handle = admission.start_preparation_admission(get_settings())
+        try:
+            assert handle.controller is not retired
+        finally:
+            admission.begin_preparation_shutdown(handle)
+            admission.finish_preparation_lifespan(handle)
+    finally:
+        get_settings.cache_clear()
 
 
 def test_prod_env_triggers_a_migration_check_on_startup(monkeypatch):

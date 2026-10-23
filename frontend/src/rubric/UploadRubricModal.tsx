@@ -7,6 +7,7 @@
 import { useEffect, useId, useRef, useState } from "react";
 import { useNavigate } from "react-router";
 import { ApiError } from "../api/client";
+import { isDocumentPreparationBusy } from "../api/documentPreparation";
 import { cx } from "../components/cx";
 import { Modal, ModalBackdrop } from "../components/Modal";
 import { useUploadRubric } from "./useRubric";
@@ -94,6 +95,7 @@ export function UploadRubricModal({ onClose, familyId }: UploadRubricModalProps)
         ? "Upload failed. Please try again."
         : null;
   const message = fieldError ?? serverError;
+  const fileError = Boolean(message) && (Boolean(fieldError) || !isDocumentPreparationBusy(upload.error));
 
   return (
     <ModalBackdrop>
@@ -135,8 +137,8 @@ export function UploadRubricModal({ onClose, familyId }: UploadRubricModalProps)
                 type="file"
                 accept=".pdf,.docx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
                 disabled={upload.isPending}
-                aria-describedby={message ? `${hintId} ${errorId}` : hintId}
-                aria-invalid={message ? true : undefined}
+                aria-describedby={fileError ? `${hintId} ${errorId}` : hintId}
+                aria-invalid={fileError ? true : undefined}
                 onChange={(event) => {
                   setFile(event.target.files?.[0] ?? null);
                   // Choosing a file is the natural "I've addressed the
@@ -155,7 +157,7 @@ export function UploadRubricModal({ onClose, familyId }: UploadRubricModalProps)
                   "inline-flex h-11 w-full items-center justify-center gap-2 rounded-md border px-4 text-sm font-bold sm:w-auto",
                   upload.isPending
                     ? "cursor-not-allowed border-border-disabled bg-panel text-ink-tertiary opacity-60"
-                    : message
+                    : fileError
                       ? "cursor-pointer border-2 border-danger bg-panel text-ink hover:bg-status-neutral-bg"
                       : "cursor-pointer border-border-input bg-panel text-ink hover:bg-status-neutral-bg",
                 )}

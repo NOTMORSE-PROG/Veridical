@@ -18,6 +18,7 @@
 // "Ungrouped" default (`resolve_or_create_group`'s own fallback).
 import { useEffect, useId, useRef, useState } from "react";
 import { ApiError } from "../api/client";
+import { isDocumentPreparationBusy } from "../api/documentPreparation";
 import { Modal, ModalBackdrop } from "../components/Modal";
 import type { ConfirmGroupResponse, TitlePageProposal } from "../api/types";
 import { Button } from "../ui/Button";
@@ -160,6 +161,7 @@ export function UploadManuscriptModal({ onClose, onUploadSuccess }: UploadManusc
         ? "Could not reach VERIDICAL to upload this file. Check your connection and try again."
         : null;
   const message = fieldError ?? serverError;
+  const fileError = Boolean(message) && (Boolean(fieldError) || !isDocumentPreparationBusy(ingest.error));
   const summary = ingest.data;
 
   const extractionNotes = summary?.notes.filter((note) => note.trim()) ?? [];
@@ -324,8 +326,8 @@ export function UploadManuscriptModal({ onClose, onUploadSuccess }: UploadManusc
                   type="file"
                   accept=".pdf,.docx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
                   disabled={ingest.isPending}
-                  aria-describedby={message ? `${hintId} ${errorId}` : hintId}
-                  aria-invalid={message ? true : undefined}
+                  aria-describedby={fileError ? `${hintId} ${errorId}` : hintId}
+                  aria-invalid={fileError ? true : undefined}
                   onChange={(event) => {
                     setFile(event.target.files?.[0] ?? null);
                     setFieldError(null);
@@ -338,7 +340,7 @@ export function UploadManuscriptModal({ onClose, onUploadSuccess }: UploadManusc
                   className={
                     ingest.isPending
                       ? "inline-flex h-11 w-full cursor-not-allowed items-center justify-center gap-2 rounded-md border border-border-disabled bg-panel px-4 text-sm font-bold text-ink-tertiary opacity-60 sm:w-auto"
-                      : message
+                      : fileError
                         ? "inline-flex h-11 w-full cursor-pointer items-center justify-center gap-2 rounded-md border-2 border-danger bg-panel px-4 text-sm font-bold text-ink hover:bg-status-neutral-bg sm:w-auto"
                         : "inline-flex h-11 w-full cursor-pointer items-center justify-center gap-2 rounded-md border border-border-input bg-panel px-4 text-sm font-bold text-ink hover:bg-status-neutral-bg sm:w-auto"
                   }
