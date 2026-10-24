@@ -1,6 +1,5 @@
-import { useQueryClient } from "@tanstack/react-query";
-import { useCallback, useEffect, useLayoutEffect, useMemo, useState, useSyncExternalStore } from "react";
-import { ME_QUERY_KEY } from "../auth/useAuth";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useState } from "react";
+import { useAuthOwner } from "../auth/queryOwner";
 import { claimFocusContinuation, type FocusContinuation } from "../routing/focusContinuation";
 import { useExportReportPdf } from "./useReport";
 
@@ -10,20 +9,11 @@ type ActionState = { attempt: Attempt; status: "pending" | "ready" | "error"; er
 
 /** F8.6, screen 4h: delivery may outlive a page; its status and focus may not. */
 export function useReportPdfExportAction(checkRunId: number, errorTarget: { current: HTMLDivElement | null }) {
-  const queryClient = useQueryClient();
-  const cache = queryClient.getQueryCache();
-  const authState = useSyncExternalStore(
-    listener => cache.subscribe(listener),
-    () => cache.find({ queryKey: ME_QUERY_KEY, exact: true })?.state,
-  );
-  const authQuery = cache.find({ queryKey: ME_QUERY_KEY, exact: true });
-  const actorId = (authState?.data as { id?: number } | null)?.id;
-  const scope = useMemo(() => ({ checkRunId, authQuery, actorId, live: false, attempt: null as Attempt | null }), [checkRunId, authQuery, actorId]);
+  const owner = useAuthOwner();
+  const scope = useMemo(() => ({ checkRunId, owner, live: false, attempt: null as Attempt | null }), [checkRunId, owner]);
   const [state, setState] = useState<ActionState | null>(null);
   const exportPdf = useExportReportPdf(checkRunId);
-  const ownsScope = useCallback(() => scope.live && scope.authQuery !== undefined && scope.actorId !== undefined
-    && cache.find({ queryKey: ME_QUERY_KEY, exact: true }) === scope.authQuery
-    && queryClient.getQueryData<{ id: number } | null>(ME_QUERY_KEY)?.id === scope.actorId, [scope, cache, queryClient]);
+  const ownsScope = useCallback(() => scope.live && scope.owner.isCurrent(), [scope]);
   const current = useCallback((attempt: Attempt) => ownsScope() && scope.attempt === attempt && attempt.request.owner.isCurrent(), [scope, ownsScope]);
 
   useLayoutEffect(() => {

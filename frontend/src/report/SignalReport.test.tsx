@@ -928,10 +928,11 @@ describe("SignalReportPage", () => {
 
     fireEvent.click(await screen.findByRole("button", { name: "Share report" }));
     const dialog = screen.getByRole("dialog", { name: "Share this report" });
-    expect(within(dialog).getByText("Treat this link as semi-confidential")).toBeInTheDocument();
+    expect(within(dialog).getByText("Shared links require no sign-in and can be forwarded. They are read-only and do not give access to your Review Desk, Audit, settings or other reports.")).toBeInTheDocument();
     expect(
       await within(dialog).findByRole("button", { name: "Create read-only link" }),
     ).toBeInTheDocument();
+    expect(within(dialog).getByText("No active link.")).toBeVisible();
     expect(within(dialog).queryByText("92%")).not.toBeInTheDocument();
   });
 

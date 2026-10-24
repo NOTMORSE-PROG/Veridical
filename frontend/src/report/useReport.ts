@@ -4,7 +4,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ApiError, api } from "../api/client";
 import { confirmedJudgment } from "./savedJudgment";
-import { ME_QUERY_KEY } from "../auth/useAuth";
+import { captureAuthOwner as reportMutationOwner } from "../auth/queryOwner";
 import { isAssessmentRevision, keepNewerAssessment } from "./assessmentRevision";
 import type {
   Decision,
@@ -187,16 +187,6 @@ function refetchReportOnConflict(queryClient: ReturnType<typeof useQueryClient>,
       queryClient.invalidateQueries({ queryKey: ["report", checkRunId] });
     }
   };
-}
-
-// A response belongs to the authentication query that submitted it, including
-// logout/login to the same instructor. An old callback cannot refill a new cache.
-function reportMutationOwner(queryClient: ReturnType<typeof useQueryClient>) {
-  const authQuery = queryClient.getQueryCache().find({ queryKey: ME_QUERY_KEY, exact: true });
-  const instructorId = queryClient.getQueryData<{ id: number } | null>(ME_QUERY_KEY)?.id;
-  return { isCurrent: () => authQuery !== undefined && instructorId !== undefined
-    && queryClient.getQueryCache().find({ queryKey: ME_QUERY_KEY, exact: true }) === authQuery
-    && queryClient.getQueryData<{ id: number } | null>(ME_QUERY_KEY)?.id === instructorId };
 }
 
 export function useDecideReport(checkRunId: number) {

@@ -67,7 +67,7 @@ export function stubFetchByPath(handlers: Record<string, unknown>) {
     // focused BUG-186 tests exercise the new response shape directly.
     const exactHandler = handlers[path];
     const legacyAuthHandler = path === "/auth/session" ? handlers["/auth/me"] : undefined;
-    const handler = exactHandler ?? legacyAuthHandler;
+    const handler = exactHandler === undefined ? legacyAuthHandler : exactHandler;
     if (handler === undefined) {
       return new Response(JSON.stringify({ error: { code: "internal", message: "no handler" } }), {
         status: 404,
