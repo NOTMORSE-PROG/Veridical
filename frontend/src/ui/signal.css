@@ -5839,7 +5839,7 @@
 
   .signal-shared-route {
     display: grid;
-    gap: var(--signal-rhythm-section);
+    gap: var(--signal-rhythm-related);
   }
 
   .signal-shared-report-header {
@@ -5849,12 +5849,20 @@
   .signal-shared-verdict {
     display: grid;
     grid-template-columns: var(--signal-report-hero-grid);
-    gap: var(--signal-space-8);
+    gap: var(--signal-space-5);
     border-block-start: var(--signal-border-brand) solid var(--color-signal-brand);
     border-radius: var(--signal-radius-panel);
     background: var(--color-signal-foundation);
     color: var(--color-signal-surface);
-    padding: var(--signal-space-8);
+    padding: var(--signal-space-5);
+  }
+
+  .signal-shared-route :is(#criteria-results-heading, #shared-decision-heading) {
+    scroll-margin-block-start: calc(var(--signal-public-header-min-height) + var(--signal-space-4));
+  }
+
+  .signal-shared-verdict > .signal-control-cluster {
+    grid-column: 1 / -1;
   }
 
   .signal-shared-verdict h2 {

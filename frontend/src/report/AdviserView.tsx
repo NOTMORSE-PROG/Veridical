@@ -1,23 +1,30 @@
 // Screen 4l — public, read-only adviser view (F8.7). This is deliberately
 // outside the authenticated workspace and exposes only the public contract.
-import { type ReactNode, useEffect, useRef } from "react";
-import { Link, useParams } from "react-router";
+import { type MouseEvent, type ReactNode, useEffect, useRef } from "react";
+import { Link, useLocation, useParams } from "react-router";
 import { ApiError } from "../api/client";
 import { DECISION_LABEL } from "../domain/decisionTone";
-import { TEST_AI_DISCLOSURE } from "../domain/aiModeDisclosure";
-import { SEMANTIC_SUPPORT_REVIEW } from "../domain/semanticSupport";
-import { NATIVE_MATH_HISTORY_TITLE, NATIVE_MATH_HISTORY_LIMIT } from "../domain/nativeMathHistory";
 import { manuscriptIdentity } from "../domain/manuscriptLabel";
 import { isUnresolvedSharedCriterion } from "../domain/sharedCriterionReview";
 import { Alert } from "../ui/Alert";
-import { CITATION_HISTORY_SHARED_LIMIT, CITATION_HISTORY_TITLE } from "../domain/citationHistory";
 import { Button } from "../ui/Button";
-import { ReadinessBand } from "../ui/ReadinessBand";
+import { ActionLink } from "../ui/ActionLink";
 import { SignalMark, SignalWordmark } from "../ui/SignalMark";
 import { SignalCriteriaResults, SignalPublicFlags } from "./SignalReviewSections";
 import { useSharedReport } from "./useShare";
 import { RuleScopeSummary } from "./RuleScopeNotice";
 import { unconfirmedAutomaticRuleRows } from "../domain/ruleScope";
+import { SharedAssessmentContext } from "./SharedAssessmentContext";
+
+function focusSharedSection(event: MouseEvent<HTMLAnchorElement>) {
+  if (event.defaultPrevented || event.button !== 0 || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
+  const targetId = event.currentTarget.hash.slice(1);
+  requestAnimationFrame(() => {
+    const target = document.getElementById(targetId);
+    target?.scrollIntoView({ block: "start" });
+    target?.focus({ preventScroll: true });
+  });
+}
 
 function useNoindexMeta() {
   useEffect(() => {
@@ -45,6 +52,7 @@ function SharedChrome({ children, reportAvailable = true }: { children: ReactNod
 
 export function AdviserViewPage() {
   const { token } = useParams<{ token: string }>();
+  const location = useLocation();
   const { data, isPending, isError, error } = useSharedReport(token ?? "");
   const headingRef = useRef<HTMLHeadingElement>(null);
   const errorRef = useRef<HTMLHeadingElement>(null);
@@ -75,21 +83,16 @@ export function AdviserViewPage() {
   return (
     <SharedChrome>
       <div className="signal-shared-route signal-page-flow">
-        <header className="signal-route-header signal-shared-report-header"><div><p className="signal-eyebrow">Shared faculty review</p><h1 ref={headingRef} tabIndex={-1}>Readiness report</h1><p className="signal-route-header__intro">{identity.primary} · checked against {report.rubric_title}</p></div><ReadinessBand status={report.status} /></header>
+        <header className="signal-route-header signal-shared-report-header"><div><p className="signal-eyebrow">Shared faculty review</p><h1 ref={headingRef} tabIndex={-1}>Readiness report</h1><p className="signal-route-header__intro">{identity.primary} · checked against {report.rubric_title}</p></div></header>
 
-        <section className="signal-shared-verdict" aria-labelledby="shared-band-heading"><div><p className="signal-section-kicker">{scopeUnconfirmed ? "Saved readiness band" : "VERIDICAL readiness band"}</p><h2 id="shared-band-heading">{report.status === "ready" ? "Ready" : report.status === "conditionally_ready" ? "Conditionally Ready" : report.status === "not_ready" ? "Not Ready" : "Needs Review"}</h2><p>{report.reason ?? "This band comes from the recorded criterion outcomes and integrity signals. It does not approve or block a defense."}</p><RuleScopeSummary rows={report.results} checkRunId={report.check_run_id} publicView /></div><dl><div><dt>Unresolved criteria</dt><dd>{pendingCount}</dd></div><div><dt>Instructor decision</dt><dd>{report.decision ? DECISION_LABEL[report.decision] : "Not recorded"}</dd></div></dl></section>
+        <SharedAssessmentContext report={report} />
 
-        {report.llm_mode !== "real" && <Alert title={report.llm_mode === "fake" ? TEST_AI_DISCLOSURE.title : "AI mode could not be verified"} tone="warning">{report.llm_mode === "fake" ? TEST_AI_DISCLOSURE.body : "This run predates reliable AI-mode tracking. Treat AI-derived outcomes cautiously."}</Alert>}
-        {report.rubric_needs_review && <Alert title="The required format had parser uncertainty" tone="warning"><p>The instructor activated it despite the warning.</p>{report.rubric_parse_issues?.length ? <ul>{report.rubric_parse_issues.map((issue) => <li key={issue}>{issue}</li>)}</ul> : null}</Alert>}
-        {report.assessment_incomplete && <Alert title="Assessment limits" tone="warning">Some integrity checks were not fully assessed. Unchecked content is not treated as passed. The instructor decision remains separate from these limitations.</Alert>}
-        {report.historical_native_math_unverified && <Alert title={NATIVE_MATH_HISTORY_TITLE} tone="warning">{NATIVE_MATH_HISTORY_LIMIT}</Alert>}
-        {report.semantic_support_unverified && <Alert title={SEMANTIC_SUPPORT_REVIEW.title} tone="warning"><p>{SEMANTIC_SUPPORT_REVIEW.body}</p><p>{SEMANTIC_SUPPORT_REVIEW.shared}</p></Alert>}
+        <section className="signal-shared-verdict" aria-labelledby="shared-band-heading"><div><p className="signal-section-kicker">{scopeUnconfirmed ? "Saved readiness band" : "VERIDICAL readiness band"}</p><h2 id="shared-band-heading">{report.status === "ready" ? "Ready" : report.status === "conditionally_ready" ? "Conditionally Ready" : report.status === "not_ready" ? "Not Ready" : "Needs Review"}</h2><p>{report.reason ?? "This band comes from the recorded criterion outcomes and integrity signals. It does not approve or block a defense."}</p><RuleScopeSummary rows={report.results} checkRunId={report.check_run_id} publicView linkToRecords={false} /></div><dl><div><dt>Unresolved criteria</dt><dd>{pendingCount}</dd></div><div><dt>Instructor decision</dt><dd>{report.decision ? DECISION_LABEL[report.decision] : "Not recorded"}</dd></div></dl><div className="signal-control-cluster"><ActionLink to={{ pathname: location.pathname, search: location.search, hash: "criteria-results-heading" }} onClick={focusSharedSection} variant="secondary" className="signal-on-dark">Review criterion records</ActionLink><ActionLink to={{ pathname: location.pathname, search: location.search, hash: "shared-decision-heading" }} onClick={focusSharedSection} variant="quiet" className="signal-on-dark">Read final decision</ActionLink></div></section>
 
-        {report.historical_citation_title_unverified && <Alert title={CITATION_HISTORY_TITLE} tone="warning">{CITATION_HISTORY_SHARED_LIMIT}</Alert>}
-        <SignalPublicFlags flags={flags} originalityScope={report.originality_scope} checkRunId={report.check_run_id} />
         <SignalCriteriaResults results={report.results} checkRunId={report.check_run_id} publicView />
+        <SignalPublicFlags flags={flags} originalityScope={report.originality_scope} checkRunId={report.check_run_id} />
 
-        <section className="signal-shared-decision" aria-labelledby="shared-decision-heading"><div><p className="signal-section-kicker">Instructor authority</p><h2 id="shared-decision-heading">Final decision</h2></div>{report.decision ? <><span className={`signal-decision signal-decision--${report.decision}`}>{DECISION_LABEL[report.decision]}</span><p>Recorded by the instructor. VERIDICAL did not make this decision.</p>{report.decision_note && <blockquote><strong>Decision note</strong><span>{report.decision_note}</span></blockquote>}</> : <Alert title="No final instructor decision has been recorded" tone="info">The readiness band above is an aid for review, not an approval or block.</Alert>}</section>
+        <section className="signal-shared-decision" aria-labelledby="shared-decision-heading"><div><p className="signal-section-kicker">Instructor authority</p><h2 id="shared-decision-heading" tabIndex={-1}>Final decision</h2></div>{report.decision ? <><span className={`signal-decision signal-decision--${report.decision}`}>{DECISION_LABEL[report.decision]}</span><p>Recorded by the instructor. VERIDICAL did not make this decision.</p>{report.decision_note && <blockquote><strong>Decision note</strong><span>{report.decision_note}</span></blockquote>}</> : <><p>No final instructor decision has been recorded.</p><p>The readiness band above is an aid for review, not an approval or block.</p></>}</section>
       </div>
     </SharedChrome>
   );

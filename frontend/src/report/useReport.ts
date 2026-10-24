@@ -250,17 +250,31 @@ export function useReopenReport(checkRunId: number) {
 // latency: the ticket's own AC is "<30s"), and can't distinguish a
 // failed export from a successful one without a page navigation.
 export function useExportReportPdf(checkRunId: number) {
-  return useMutation({
-    mutationFn: () => api.getBlob(`/check-runs/${checkRunId}/report/export.pdf`),
-    onSuccess: (blob) => {
+  const queryClient = useQueryClient();
+  const createRequest = () => ({ runId: checkRunId, owner: reportMutationOwner(queryClient) });
+  const mutation = useMutation({
+    mutationFn: (request: ReturnType<typeof createRequest>) => {
+      if (!request.owner.isCurrent() || !Number.isInteger(request.runId) || request.runId <= 0) {
+        throw new ApiError(401, "unauthorized", "Sign in again before exporting this report.");
+      }
+      return api.getBlob(`/check-runs/${request.runId}/report/export.pdf`);
+    },
+    onSuccess: (blob, request) => {
+      // A response can outlive its observer. Recheck the invoking auth lifetime
+      // before any DOM delivery; ordinary same-owner navigation is allowed.
+      if (!request.owner.isCurrent()) return;
       const url = URL.createObjectURL(blob);
       const link = document.createElement("a");
       link.href = url;
-      link.download = `veridical-report-${checkRunId}.pdf`;
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
-      URL.revokeObjectURL(url);
+      link.download = `veridical-report-${request.runId}.pdf`;
+      try {
+        document.body.appendChild(link);
+        link.click();
+      } finally {
+        link.remove();
+        URL.revokeObjectURL(url);
+      }
     },
   });
+  return { ...mutation, createRequest };
 }

@@ -1,4 +1,4 @@
-import { screen, waitFor } from "@testing-library/react";
+import { fireEvent, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { FlagSummaryOut, PublicCriterionResultOut, ReportOut, SharedReportOut } from "../api/types";
 import { renderWithProviders, stubFetchByPath } from "../test/renderWithProviders";
@@ -99,6 +99,52 @@ function publicCountPayload(outcomes: PublicCriterionResultOut["outcome"][]): Sh
 }
 
 describe("AdviserViewPage", () => {
+  it("keeps all public qualifications open in one context and puts records before findings", async () => {
+    const payload = publicCountPayload(["passed", "escalated"]);
+    Object.assign(payload.report, { rubric_needs_review: true,
+      rubric_parse_issues: ["SECONDARY_FORMAT_DETAIL", "SECONDARY_FORMAT_DETAIL"], assessment_incomplete: true,
+      semantic_support_unverified: true, historical_native_math_unverified: true,
+      historical_citation_title_unverified: true });
+    const fetch = stubFetchByPath({ "/shared/tok123/report": payload });
+    vi.stubGlobal("fetch", fetch);
+    render();
+    const context = await screen.findByRole("complementary", { name: "Assessment context" });
+    for (const title of ["Test-mode AI responses", "Required format review", "Assessment limits", "AI evidence support needs review", "Saved native Word coverage is unverified", "Historical title comparison needs review"]) {
+      expect(screen.getByText(title)).toBeVisible();
+      expect(context).toContainElement(screen.getByText(title));
+    }
+    expect(screen.getAllByText("Needs Review")).toHaveLength(1);
+    expect(screen.getAllByText("SECONDARY_FORMAT_DETAIL")).toHaveLength(2);
+    expect(screen.getAllByText("SECONDARY_FORMAT_DETAIL")[0]).not.toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "Show required-format review details" }));
+    expect(screen.getAllByText("SECONDARY_FORMAT_DETAIL")[0]).toBeVisible();
+    const criteria = screen.getByRole("heading", { name: "Criterion records" });
+    const findings = screen.getByRole("heading", { name: "Possible inconsistencies" });
+    expect(criteria.compareDocumentPosition(findings) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(screen.getByRole("link", { name: "Review criterion records" })).toHaveAttribute("href", "/shared/tok123#criteria-results-heading");
+    expect(screen.getByRole("link", { name: "Read final decision" })).toHaveAttribute("href", "/shared/tok123#shared-decision-heading");
+    expect(fetch.mock.calls.every(([input]) => String(input).includes("/shared/tok123/report"))).toBe(true);
+  });
+  it("preserves public query context and focuses the actual destination headings", async () => {
+    vi.stubGlobal("fetch", stubFetchByPath({ "/shared/tok123/report": shared() }));
+    renderWithProviders(<AdviserViewPage />, { route: "/shared/tok123?reader=faculty", path: "/shared/:token" });
+    const records = await screen.findByRole("link", { name: "Review criterion records" });
+    expect(records).toHaveAttribute("href", "/shared/tok123?reader=faculty#criteria-results-heading");
+    fireEvent.click(records);
+    await waitFor(() => expect(screen.getByRole("heading", { name: "Criterion records" })).toHaveFocus());
+    fireEvent.click(screen.getByRole("link", { name: "Read final decision" }));
+    await waitFor(() => expect(screen.getByRole("heading", { name: "Final decision" })).toHaveFocus());
+  });
+
+  it("omits context when no public qualifier applies without inferring successful checks", async () => {
+    vi.stubGlobal("fetch", stubFetchByPath({ "/shared/tok123/report": shared() }));
+    render();
+    await screen.findByRole("heading", { name: "Criterion records" });
+    expect(screen.queryByRole("complementary", { name: "Assessment context" })).not.toBeInTheDocument();
+    expect(screen.getByText("This run produced no shared integrity signals.")).toBeVisible();
+    expect(screen.queryByText(/All checks passed/)).not.toBeInTheDocument();
+  });
+
   it.each([
     ["escalated", 1], ["unverifiable", 1], ["quota_exhausted", 1], ["api_down", 1],
     ["passed", 0], ["failed", 0], ["not_applicable", 0],
@@ -159,7 +205,7 @@ describe("AdviserViewPage", () => {
     await screen.findAllByText("Conditionally Ready");
     if (flag) {
       expect(screen.getByText("AI evidence support needs review")).toBeVisible();
-      expect(screen.getByText("Ask the instructor for access to the manuscript if needed.")).toBeVisible();
+      expect(screen.getByText("Ask the instructor for manuscript access or clarification if needed.")).toBeVisible();
     } else expect(screen.queryByText("AI evidence support needs review")).not.toBeInTheDocument();
     expect(screen.queryByText(/suggestions predate criterion-support/)).not.toBeInTheDocument();
     expect(screen.queryByRole("link", { name: /Open in manuscript/ })).not.toBeInTheDocument();
@@ -170,7 +216,7 @@ describe("AdviserViewPage", () => {
     render();
     expect((await screen.findAllByText("Historical title comparison needs review")).length).toBeGreaterThan(1);
     expect(screen.getByText(/this report has not been recomputed/)).toBeInTheDocument();
-    expect(screen.getByText(/may include publication details/)).toHaveTextContent("ask the instructor to run a new check");
+    expect(screen.getByText(/may include publication details/)).toHaveTextContent("Verify affected titles before relying on those differences; this report has not been recomputed.");
     expect(screen.queryByText(/Review the warning on each affected finding/)).not.toBeInTheDocument();
   });
 
@@ -189,7 +235,7 @@ describe("AdviserViewPage", () => {
     );
     render();
     expect(await screen.findByText("Test-mode AI responses")).toBeInTheDocument();
-    expect(screen.getByText("This run is recorded in test AI mode. AI responses use fixtures instead of real AI grading. Do not treat AI-derived judgments as a real assessment of the manuscript. Check the recorded evidence directly.")).toBeVisible();
+    expect(screen.getByText("These fixture responses are not a real manuscript assessment.")).toBeVisible();
     expect(screen.queryByText(/Fixture responses produced this report/)).not.toBeInTheDocument();
   });
 
@@ -236,7 +282,7 @@ describe("AdviserViewPage", () => {
     );
     render();
     expect(
-      await screen.findByText("The required format had parser uncertainty"),
+      await screen.findByText("Required format review"),
     ).toBeInTheDocument();
   });
 
@@ -307,7 +353,7 @@ describe("AdviserViewPage", () => {
     render();
     await screen.findAllByText("Has an abstract");
     expect(
-      screen.getByText("No final instructor decision has been recorded"),
+      screen.getByText("No final instructor decision has been recorded."),
     ).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /Approve for defense/ })).not.toBeInTheDocument();
   });

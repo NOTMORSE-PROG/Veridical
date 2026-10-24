@@ -880,7 +880,7 @@ export function SignalPublicFlags({
       <OriginalityScope scope={originalityScope} />
       {otherFlags.length
         ? <SignalFlagList flags={otherFlags} showActions={false} initialView="all" />
-        : onlyOptional ? null : <Alert title="No integrity signals" tone={originalityUnassessed(originalityScope) ? "info" : "success"}>This run produced no shared integrity signals.</Alert>}
+        : onlyOptional ? null : <p>This run produced no shared integrity signals.</p>}
       <ComparisonLeadList collection={optional} showActions={false} />
     </section>
   );

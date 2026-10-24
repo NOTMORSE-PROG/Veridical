@@ -2,7 +2,7 @@ import { WorkflowLink as Link } from "../routing/WorkflowLink";
 import { reportAssessmentNotices } from "../domain/reportAssessmentContext";
 import { ReportAssessmentContext } from "./ReportAssessmentContext";
 import { ReviewDeskReturnLink } from "../routing/ReviewDeskReturnLink";
-import { type MouseEvent, useEffect, useRef, useState } from "react";
+import { type MouseEvent, useRef, useState } from "react";
 import { useLocation, useParams } from "react-router";
 import { ApiError } from "../api/client";
 import { manuscriptIdentity } from "../domain/manuscriptLabel";
@@ -21,11 +21,12 @@ import { coverageItems } from "./reportCoverage";
 import { unconfirmedAutomaticRuleRows } from "../domain/ruleScope";
 import { RuleScopeSummary } from "./RuleScopeNotice";
 import { isOptionalComparisonLead } from "../domain/comparisonLeadIdentity";
-import { useExportReportPdf, useFlags, useReport } from "./useReport";
+import { useFlags, useReport } from "./useReport";
 import { useShareLink } from "./useShare";
 import { FigureReadingsSummary } from "./FigureReadings";
 import { ReportReadNotice } from "./ReportReadNotice";
 import { usableReport } from "./reportReadState";
+import { useReportPdfExportAction } from "./useReportPdfExportAction";
 import { REPORT_SECTION_TARGETS } from "./reportSectionNavigation";
 
 // Router-managed jumps preserve draft blockers and route state. They need
@@ -52,12 +53,11 @@ export function SignalReportPage() {
   const { data, isPending, error, refetch, fetchStatus } = useReport(id);
   const report = usableReport(data, id, error);
   const readFailed = Boolean(report && error);
-  const exportPdf = useExportReportPdf(id);
   const { data: shareLink } = useShareLink(id);
   const [shareOpen, setShareOpen] = useState(false);
   const headingRef = useRef<HTMLHeadingElement>(null);
   const exportErrorRef = useRef<HTMLDivElement>(null);
-  const exportInFlight = useRef(false);
+  const exportPdf = useReportPdfExportAction(id, exportErrorRef);
   const flagsQuery = useFlags(id);
   const auditOrigin = validAuditReviewOrigin(location.pathname + location.search + location.hash, id);
   const returningToAuditSection = Boolean(location.hash && auditOrigin
@@ -68,16 +68,6 @@ export function SignalReportPage() {
     ? { prefix: auditOrigin!.elementId, pending: isPending || fetchStatus !== "idle" }
     : returningToReportSection ? { prefix: sectionFocus!, pending: isPending || fetchStatus !== "idle" }
     : { prefix: "comparison-lead-", pending: isPending || flagsQuery.isPending || flagsQuery.fetchStatus !== "idle" });
-
-  useEffect(() => {
-    if (exportPdf.isError) exportErrorRef.current?.focus();
-  }, [exportPdf.isError]);
-
-  function exportReport() {
-    if (exportInFlight.current) return;
-    exportInFlight.current = true;
-    exportPdf.mutate(undefined, { onSettled: () => { exportInFlight.current = false; } });
-  }
 
   const identity = report ? manuscriptIdentity(report.manuscript_group_label, report.manuscript_original_filename) : undefined;
   const limits = report ? coverageItems(report) : [];
@@ -150,10 +140,11 @@ export function SignalReportPage() {
                   const origin = validAuditReviewOrigin(location.pathname + location.search + location.hash, id);
                   if (origin) rememberRouteReturnFocus(origin.focusPath, auditDestination(id, location), origin.elementId, { fallbackElementId: origin.fallbackElementId, scrollBlock: origin.scrollBlock });
                 }}>View Audit</ActionLink>
-                <Button variant="quiet" aria-describedby="report-export-accessibility-note" busy={exportPdf.isPending} onClick={exportReport}>{exportPdf.isPending ? "Preparing PDF" : "Export PDF"}</Button>
+                <Button variant="quiet" aria-describedby="report-export-accessibility-note" aria-busy={exportPdf.isPending || undefined} aria-disabled={exportPdf.isPending || undefined} onClick={event => exportPdf.start(event.currentTarget)}>{exportPdf.isPending ? "Preparing PDF" : "Export PDF"}</Button>
                 <Button variant="quiet" onClick={() => setShareOpen(true)}>{shareLink ? "Manage active share link" : "Share report"}</Button>
               </div>
               <p id="report-export-accessibility-note" className="signal-field-hint">Downloaded PDFs are not optimized for screen readers. Use this on-screen report for accessible review.</p>
+              <p role="status" aria-live="polite" className="sr-only">{exportPdf.isPending ? "Preparing PDF." : exportPdf.isReady ? "PDF is ready." : ""}</p>
               {exportPdf.isError && <div ref={exportErrorRef} tabIndex={-1}><Alert title="Could not export this report" tone="error" role="alert">{exportPdf.error instanceof ApiError ? exportPdf.error.message : "Try again."}</Alert></div>}
             </div>
           </div>
