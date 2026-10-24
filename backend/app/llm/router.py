@@ -37,7 +37,7 @@ async def get_quota(
             daily_limit=pool_daily_capacity(pool),
             calls_remaining=pool_daily_capacity(pool),
             cache_hits_today=0,
-            cache_hit_rate=0.0,
+            cache_hit_rate=None,
             reset_at=next_reset_for(settings.llm_quota_reset_timezone).isoformat(),
             rpm_limit=pool[0].rpm,
             models=[
@@ -50,6 +50,7 @@ async def get_quota(
                     rpm_limit=spec.rpm,
                     vision=spec.vision,
                     exhausted=False,
+                    budget_aliases=list(spec.budget_aliases),
                 )
                 for spec in pool
             ],

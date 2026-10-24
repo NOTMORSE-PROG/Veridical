@@ -14,7 +14,7 @@ from datetime import datetime, timedelta
 from typing import Any, Protocol
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -68,6 +68,10 @@ class TransportServerError(Exception):
     """Transport signaled a 5xx — retry with backoff, then `api_down`."""
 
 
+class _LocalBudgetExhausted(TransportDailyQuotaExhausted):
+    """Local records reached the configured cap; no provider closure occurred."""
+
+
 class TransportModelUnavailable(Exception):
     """The requested model cannot serve this operation; try an eligible reserve."""
 
@@ -103,11 +107,10 @@ def next_reset_for(tz_name: str) -> datetime:
 class LLMQueue:
     """Spends a POOL of models, not one (V-049).
 
-    Gemini meters requests-per-day per model, so the pool is a list of
-    independent quota islands tried in order: the queue only moves to the
-    next model once the current one's own day is spent or the provider
-    explicitly reports that model unavailable for the operation. A single pinned
-    model would cap the product at that model's RPD.
+    Requested models are tried in configured order. Local budgets include
+    configured historical aliases; they do not prove independent provider quota
+    buckets or current provider availability. A daily-limit or unavailable-model
+    response moves routing to the next eligible configured entry.
     """
 
     def __init__(
@@ -382,7 +385,8 @@ class LLMQueue:
                 # the island for the rest of the day, and try the next model —
                 # this is the self-correction that the 20-vs-1400 drift needed.
                 async with self._session_factory() as session:
-                    await self._close_island(session, spec)
+                    if not isinstance(exc, _LocalBudgetExhausted):
+                        await self._close_island(session, spec)
                     await self._write_audit(
                         session,
                         event_type="llm_model_exhausted",
@@ -390,7 +394,13 @@ class LLMQueue:
                         prompt_version=prompt_version,
                         input_hash=input_hash,
                         check_run_id=check_run_id,
-                        response={"error": str(exc), "model": spec.model},
+                        response={
+                            "error": str(exc),
+                            "model": spec.model,
+                            "cause": "local_budget"
+                            if isinstance(exc, _LocalBudgetExhausted)
+                            else "provider_daily_limit",
+                        },
                         context=context,
                         prompt=prompt,
                         model=spec.model,
@@ -537,35 +547,53 @@ class LLMQueue:
         used_by_model = {model: (calls, hits) for model, calls, hits in rows}
 
         per_model: list[dict[str, Any]] = []
+        active = {spec.model for spec in self._pool}
+        alias_targets = {alias: spec.model for spec in self._pool for alias in spec.budget_aliases}
         for spec in self._pool:
-            calls, hits = used_by_model.get(spec.model, (0, 0))
+            own_calls, hits = used_by_model.get(spec.model, (0, 0))
+            historical = sum(used_by_model.get(alias, (0, 0))[0] for alias in spec.budget_aliases)
+            raw_debits = own_calls + historical
             per_model.append(
                 {
                     "model": spec.model,
-                    "calls_used": calls,
+                    "calls_used": min(raw_debits, spec.daily_quota),
+                    "recorded_budget_debits": raw_debits,
+                    "historical_budget_debits": historical,
+                    "budget_aliases": list(spec.budget_aliases),
                     "daily_limit": spec.daily_quota,
-                    "calls_remaining": max(spec.daily_quota - calls, 0),
+                    "calls_remaining": max(spec.daily_quota - raw_debits, 0),
+                    # Requested-ID cache records appear once in the ledger.
                     "cache_hits_today": hits,
                     "rpm_limit": spec.rpm,
                     "vision": spec.vision,
-                    "exhausted": calls >= spec.daily_quota,
+                    "exhausted": raw_debits >= spec.daily_quota,
                 }
             )
 
-        calls_used = sum(entry["calls_used"] for entry in per_model)
-        cache_hits = sum(entry["cache_hits_today"] for entry in per_model)
-        daily_limit = pool_daily_capacity(self._pool)
-        total = calls_used + cache_hits
+        legacy_models = [
+            {
+                "model": model,
+                "recorded_budget_debits": calls,
+                "cache_hits_today": hits,
+                "budget_model": alias_targets.get(model),
+            }
+            for model, (calls, hits) in sorted(used_by_model.items())
+            if model not in active
+        ]
         return {
             "quota_day": day,
-            "calls_used": calls_used,
-            "daily_limit": daily_limit,
-            "calls_remaining": max(daily_limit - calls_used, 0),
-            "cache_hits_today": cache_hits,
-            "cache_hit_rate": round(cache_hits / total, 3) if total else 0.0,
+            "calls_used": sum(entry["calls_used"] for entry in per_model),
+            "daily_limit": pool_daily_capacity(self._pool),
+            "calls_remaining": sum(entry["calls_remaining"] for entry in per_model),
+            "recorded_budget_debits": sum(calls for calls, _ in used_by_model.values()),
+            "cache_hits_today": sum(hits for _, hits in used_by_model.values()),
+            # A daily-limit closure can pin the budget counter to its cap.
+            # It cannot supply a physical-request denominator for a cache rate.
+            "cache_hit_rate": None,
             "reset_at": self._next_reset().isoformat(),
             "rpm_limit": self._pool[0].rpm,
             "models": per_model,
+            "legacy_models": legacy_models,
         }
 
     def _quota_conflict_target(self) -> dict[str, Any]:
@@ -587,54 +615,74 @@ class LLMQueue:
             "index_where": LLMQuotaCounter.instructor_id.isnot(None),
         }
 
-    async def _try_reserve_quota(self, session: AsyncSession, spec: ModelSpec) -> bool:
-        """Atomic check-and-increment for ONE model's island (INSERT ... ON
-        CONFLICT ... WHERE): safe under concurrent workers even though Render
-        runs one dyno today (ticket V-009 edge case — don't bake in the
-        single-dyno assumption).
+    def _quota_owner_filter(self):
+        return (
+            LLMQuotaCounter.instructor_id.is_(None)
+            if self._instructor_id is None
+            else LLMQuotaCounter.instructor_id == self._instructor_id
+        )
 
-        Returns False (rather than raising) when this island is spent: the
-        caller decides whether another model can serve the call.
+    async def _lock_budget(
+        self, session: AsyncSession, spec: ModelSpec, day: str
+    ) -> LLMQuotaCounter:
+        """Serialize new-policy writers on the canonical owner/day row.
+
+        Old writers must be drained before the alias policy is activated.
+        Historical rows retain their original requested identities and values.
+        """
+        await session.execute(
+            pg_insert(LLMQuotaCounter)
+            .values(
+                quota_day=day,
+                model=spec.model,
+                instructor_id=self._instructor_id,
+                call_count=0,
+                cache_hit_count=0,
+            )
+            .on_conflict_do_nothing(**self._quota_conflict_target())
+        )
+        return (
+            await session.scalars(
+                select(LLMQuotaCounter)
+                .where(
+                    LLMQuotaCounter.quota_day == day,
+                    LLMQuotaCounter.model == spec.model,
+                    self._quota_owner_filter(),
+                )
+                .with_for_update()
+            )
+        ).one()
+
+    async def _try_reserve_quota(self, session: AsyncSession, spec: ModelSpec) -> bool:
+        """Reserve against canonical plus alias records under one local cap.
+
+        The transaction ends before any transport call or retry wait. Independent
+        queue instances use the same database lock, rather than a process lock.
         """
         day = self._quota_day()
-        stmt = (
-            pg_insert(LLMQuotaCounter)
-            .values(
-                quota_day=day,
-                model=spec.model,
-                instructor_id=self._instructor_id,
-                call_count=1,
-                cache_hit_count=0,
+        counter = await self._lock_budget(session, spec, day)
+        recorded = await session.scalar(
+            select(func.coalesce(func.sum(LLMQuotaCounter.call_count), 0)).where(
+                LLMQuotaCounter.quota_day == day,
+                LLMQuotaCounter.model.in_((spec.model, *spec.budget_aliases)),
+                self._quota_owner_filter(),
             )
-            .on_conflict_do_update(
-                **self._quota_conflict_target(),
-                set_={"call_count": LLMQuotaCounter.call_count + 1},
-                where=LLMQuotaCounter.call_count < spec.daily_quota,
-            )
-            .returning(LLMQuotaCounter.call_count)
         )
-        return (await session.execute(stmt)).first() is not None
+        if recorded >= spec.daily_quota:
+            return False
+        counter.call_count += 1
+        await session.flush()
+        return True
 
     async def _close_island(self, session: AsyncSession, spec: ModelSpec) -> None:
-        """Pin a model's counter to its configured cap because the API itself
-        said the day is over — so the rest of the day's calls skip it without
-        re-asking (and `/quota` shows the truth, not our stale guess)."""
-        day = self._quota_day()
-        stmt = (
-            pg_insert(LLMQuotaCounter)
-            .values(
-                quota_day=day,
-                model=spec.model,
-                instructor_id=self._instructor_id,
-                call_count=spec.daily_quota,
-                cache_hit_count=0,
-            )
-            .on_conflict_do_update(
-                **self._quota_conflict_target(),
-                set_={"call_count": spec.daily_quota},
-            )
-        )
-        await session.execute(stmt)
+        """A provider daily-limit response closes the configured local budget.
+
+        This conservative hold is not a count of physical attempts. Never lower
+        previously saved debits, even when configuration now has a smaller cap.
+        """
+        counter = await self._lock_budget(session, spec, self._quota_day())
+        counter.call_count = max(counter.call_count, spec.daily_quota)
+        await session.flush()
 
     async def _note_cache_hit(self, session: AsyncSession, *, model: str) -> None:
         day = self._quota_day()
@@ -769,7 +817,7 @@ class LLMQueue:
                 reserved = await self._try_reserve_quota(session, spec)
                 await session.commit()
             if not reserved:
-                raise TransportDailyQuotaExhausted("Local provider-attempt allowance exhausted.")
+                raise _LocalBudgetExhausted("Configured local request budget reached.")
             # Each SDK invocation has its own reservation, RPM acquisition and
             # durable attempt record, including attempts returning no response.
             async with self._session_factory() as session:

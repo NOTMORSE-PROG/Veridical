@@ -3,6 +3,7 @@ audit logging. Needs a live Postgres (same convention as test_schema.py);
 runs against its own scratch database.
 """
 
+import asyncio
 import os
 import uuid
 from typing import Any
@@ -26,7 +27,7 @@ from app.llm.queue import (
 from app.llm.result import GenerationResult
 from app.models.audit import AuditLog
 from app.models.instructor import Instructor
-from app.models.llm import LLMResponseCache
+from app.models.llm import LLMQuotaCounter, LLMResponseCache
 
 live = pytest.mark.skipif(
     "DATABASE_URL" not in os.environ,
@@ -885,3 +886,176 @@ async def test_instructor_own_key_exhaustion_leaves_the_shared_islands_untouched
     )
     response = await shared.submit(prompt_type="t", prompt="p3", prompt_version="v1")
     assert response == {"ok": True}
+
+
+@pytest.mark.parametrize("owner_index", [None, 0, 1])
+async def test_alias_final_slot_is_atomic_across_independent_queues(
+    session_factory, instructor_ids, owner_index
+):
+    owner = None if owner_index is None else instructor_ids[owner_index]
+    spec = ModelSpec("current", 100, 20, False, budget_aliases=("old",))
+    transports = [ScriptedTransport(responses=[{"winner": index}]) for index in range(2)]
+    queues = [
+        _make_queue(session_factory, t, pool=(spec,), instructor_id=owner) for t in transports
+    ]
+    async with session_factory() as session:
+        session.add(
+            LLMQuotaCounter(
+                quota_day=queues[0]._quota_day(),
+                model="old",
+                instructor_id=owner,
+                call_count=19,
+                cache_hit_count=3,
+            )
+        )
+        await session.commit()
+    results = await asyncio.gather(
+        *[
+            queue.submit(prompt_type="t", prompt=f"distinct request {index}", prompt_version="v1")
+            for index, queue in enumerate(queues)
+        ],
+        return_exceptions=True,
+    )
+    assert sum(isinstance(result, dict) for result in results) == 1
+    assert sum(isinstance(result, QuotaExhaustedError) for result in results) == 1
+    assert sum(len(t.calls) for t in transports) == 1
+    async with session_factory() as session:
+        rows = {row.model: row for row in (await session.scalars(select(LLMQuotaCounter))).all()}
+    assert rows["old"].call_count == 19 and rows["old"].cache_hit_count == 3
+    # Local exhaustion must not pin a fresh canonical counter to 20.
+    assert rows["current"].call_count == 1
+    status = await queues[0].get_quota_status()
+    assert status["calls_used"] == 20 and status["calls_remaining"] == 0
+    assert status["recorded_budget_debits"] == 20
+
+
+async def test_alias_reservation_serializes_on_canonical_database_lock(session_factory):
+    spec = ModelSpec("current", 100, 20, False, budget_aliases=("old",))
+    first = _make_queue(session_factory, ScriptedTransport(), pool=(spec,))
+    second = _make_queue(session_factory, ScriptedTransport(), pool=(spec,))
+    async with session_factory() as holder:
+        await first._lock_budget(holder, spec, first._quota_day())
+
+        async def reserve():
+            async with session_factory() as contender:
+                result = await second._try_reserve_quota(contender, spec)
+                await contender.commit()
+                return result
+
+        task = asyncio.create_task(reserve())
+        try:
+            with pytest.raises(TimeoutError):
+                await asyncio.wait_for(asyncio.shield(task), timeout=0.1)
+            await holder.commit()
+            assert await asyncio.wait_for(task, timeout=5) is True
+        finally:
+            if not task.done():
+                task.cancel()
+                await asyncio.gather(task, return_exceptions=True)
+
+
+async def test_alias_history_is_visible_and_unassigned_records_do_not_spend_current_budget(
+    session_factory,
+):
+    spec = ModelSpec("current", 100, 20, False, budget_aliases=("old",))
+    queue = _make_queue(session_factory, ScriptedTransport(), pool=(spec,))
+    async with session_factory() as session:
+        session.add_all(
+            [
+                LLMQuotaCounter(
+                    quota_day=queue._quota_day(), model=name, call_count=calls, cache_hit_count=hits
+                )
+                for name, calls, hits in [
+                    ("current", 3, 2),
+                    ("old", 20, 3),
+                    ("retired", 8, 1),
+                    ("unknown", 2, 0),
+                ]
+            ]
+        )
+        await session.commit()
+    status = await queue.get_quota_status()
+    assert status["calls_used"] == 20 and status["calls_remaining"] == 0
+    assert status["models"][0]["recorded_budget_debits"] == 23
+    assert status["models"][0]["historical_budget_debits"] == 20
+    assert status["recorded_budget_debits"] == 33
+    assert status["cache_hits_today"] == 6 and status["cache_hit_rate"] is None
+    assert status["legacy_models"] == [
+        {
+            "model": "old",
+            "recorded_budget_debits": 20,
+            "cache_hits_today": 3,
+            "budget_model": "current",
+        },
+        {
+            "model": "retired",
+            "recorded_budget_debits": 8,
+            "cache_hits_today": 1,
+            "budget_model": None,
+        },
+        {
+            "model": "unknown",
+            "recorded_budget_debits": 2,
+            "cache_hits_today": 0,
+            "budget_model": None,
+        },
+    ]
+
+
+async def test_provider_closure_never_lowers_prior_debits(session_factory):
+    spec = ModelSpec("current", 100, 20, False, budget_aliases=("old",))
+    queue = _make_queue(session_factory, ScriptedTransport(), pool=(spec,))
+    async with session_factory() as session:
+        session.add_all(
+            [
+                LLMQuotaCounter(
+                    quota_day=queue._quota_day(), model=name, call_count=calls, cache_hit_count=4
+                )
+                for name, calls in [("current", 30), ("old", 7)]
+            ]
+        )
+        await session.commit()
+    async with session_factory() as session:
+        await queue._close_island(session, spec)
+        await session.commit()
+    async with session_factory() as session:
+        rows = {
+            row.model: (row.call_count, row.cache_hit_count)
+            for row in (await session.scalars(select(LLMQuotaCounter))).all()
+        }
+    assert rows == {"current": (30, 4), "old": (7, 4)}
+
+
+async def test_alias_records_are_scoped_by_owner_and_budget_day(session_factory, instructor_ids):
+    own_a, own_b = instructor_ids
+    spec = ModelSpec("current", 100, 1, False, budget_aliases=("old",))
+    queue = _make_queue(
+        session_factory,
+        ScriptedTransport(responses=[{"ok": True}]),
+        pool=(spec,),
+        instructor_id=own_a,
+    )
+    async with session_factory() as session:
+        session.add_all(
+            [
+                LLMQuotaCounter(
+                    quota_day=day,
+                    model="old",
+                    instructor_id=owner,
+                    call_count=20,
+                    cache_hit_count=3,
+                )
+                for day, owner in [
+                    (queue._quota_day(), None),
+                    (queue._quota_day(), own_b),
+                    ("2000-01-01", own_a),
+                ]
+            ]
+        )
+        await session.commit()
+    assert await queue.submit(prompt_type="t", prompt="own current day", prompt_version="v1") == {
+        "ok": True
+    }
+    status = await queue.get_quota_status()
+    assert status["recorded_budget_debits"] == 1 and status["cache_hits_today"] == 0
+    assert status["legacy_models"] == []

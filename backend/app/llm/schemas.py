@@ -6,8 +6,7 @@ from pydantic import BaseModel, Field
 
 
 class ModelQuotaStatus(BaseModel):
-    """One model's own quota island (V-049) — the free tier meters per
-    model, so "how much is left" is only answerable per model."""
+    """One configured local budget, including any historical aliases."""
 
     model: str
     calls_used: int
@@ -17,6 +16,18 @@ class ModelQuotaStatus(BaseModel):
     rpm_limit: int
     vision: bool
     exhausted: bool
+    budget_aliases: list[str] = Field(default_factory=list)
+    recorded_budget_debits: int = 0
+    historical_budget_debits: int = 0
+
+
+class LegacyModelBudget(BaseModel):
+    """Saved requested-ID records outside the active routing configuration."""
+
+    model: str
+    recorded_budget_debits: int
+    cache_hits_today: int
+    budget_model: str | None = None
 
 
 class QuotaStatus(BaseModel):
@@ -33,9 +44,11 @@ class QuotaStatus(BaseModel):
     daily_limit: int
     calls_remaining: int
     cache_hits_today: int
-    cache_hit_rate: float
+    cache_hit_rate: float | None
     reset_at: str
     # The primary model's RPM — kept for the existing meter; per-model RPM
     # is in `models`.
     rpm_limit: int
     models: list[ModelQuotaStatus] = Field(default_factory=list)
+    recorded_budget_debits: int = 0
+    legacy_models: list[LegacyModelBudget] = Field(default_factory=list)
