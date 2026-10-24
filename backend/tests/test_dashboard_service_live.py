@@ -36,6 +36,123 @@ pytestmark = live
 SCRATCH_DB = "veridical_dashboardtest"
 
 
+@pytest.mark.parametrize("outcome", [ResultOutcome.passed, ResultOutcome.escalated])
+async def test_bug216_stats_do_not_mix_a_concurrent_run_completion(
+    session_factory, monkeypatch, outcome
+):
+    """Commit after the first stats read, rather than hoping to hit a race."""
+    async with session_factory() as setup:
+        owner = Instructor(email="snapshot@demo.local", display_name="Snapshot")
+        setup.add(owner)
+        await setup.commit()
+        run = await _make_run(setup, owner, run_status=CheckRunStatus.aggregating)
+        criterion = Criterion(
+            rubric_id=run.rubric_id,
+            type="structural",
+            text="Document requirement",
+            weight=Decimal("10"),
+            position=0,
+        )
+        setup.add(criterion)
+        await setup.commit()
+        owner_id, run_id, criterion_id = owner.id, run.id, criterion.id
+
+    async with session_factory() as reader:
+        # Authentication has already read through this request transaction.
+        assert await reader.scalar(select(Instructor.id).where(Instructor.id == owner_id))
+        original_scalar, original_execute = reader.scalar, reader.execute
+        committed = False
+
+        async def commit_completion_after_read(result):
+            nonlocal committed
+            if not committed:
+                async with session_factory() as writer:
+                    current = await writer.get(CheckRun, run_id)
+                    current.status = CheckRunStatus.done
+                    writer.add(
+                        ReadinessReport(
+                            check_run_id=run_id,
+                            status=(
+                                ReadinessStatus.ready
+                                if outcome == ResultOutcome.passed
+                                else ReadinessStatus.needs_review
+                            ),
+                        )
+                    )
+                    writer.add(
+                        CheckResult(
+                            check_run_id=run_id,
+                            criterion_id=criterion_id,
+                            kind=CheckKind.structural,
+                            outcome=outcome,
+                        )
+                    )
+                    await writer.commit()
+                committed = True
+            return result
+
+        async def scalar(*args, **kwargs):
+            return await commit_completion_after_read(await original_scalar(*args, **kwargs))
+
+        async def execute(*args, **kwargs):
+            return await commit_completion_after_read(await original_execute(*args, **kwargs))
+
+        with monkeypatch.context() as patch:
+            patch.setattr(reader, "scalar", scalar)
+            patch.setattr(reader, "execute", execute)
+            stats = await get_dashboard_stats(reader, owner_id)
+        assert committed, "The competing transaction must really commit during the request"
+        assert stats.manuscripts_checked == 0
+        assert (
+            stats.ready_count
+            + stats.conditionally_ready_count
+            + stats.not_ready_count
+            + stats.needs_review_count
+        ) == 0
+        assert stats.checking_count == 1
+        assert stats.ready_to_decide_count == stats.needs_attention_count == 0
+        assert stats.escalations_awaiting_review == 0
+        assert stats.escalation_rate is None
+
+    # A later request must observe the committed completion without stale cache.
+    async with session_factory() as reader:
+        stats = await get_dashboard_stats(reader, owner_id)
+        assert stats.manuscripts_checked == 1
+        assert stats.checking_count == 0
+        assert (
+            stats.ready_count == stats.ready_to_decide_count == int(outcome == ResultOutcome.passed)
+        )
+        assert (
+            stats.needs_review_count
+            == stats.needs_attention_count
+            == int(outcome == ResultOutcome.escalated)
+        )
+        assert stats.escalations_awaiting_review == int(outcome == ResultOutcome.escalated)
+
+
+async def test_bug216_stats_preserve_the_callers_open_transaction(session_factory):
+    async with session_factory() as reader:
+        owner = Instructor(email="caller@demo.local", display_name="Caller")
+        reader.add(owner)
+        await reader.commit()
+        # A pending caller write must remain visible here and uncommitted elsewhere.
+        pending = Manuscript(
+            instructor_id=owner.id,
+            group_label="Pending",
+            file_ref="pending.docx",
+            ingest_status=IngestStatus.done,
+        )
+        reader.add(pending)
+        await reader.flush()
+        transaction = reader.get_transaction()
+        stats = await get_dashboard_stats(reader, owner.id)
+        assert stats.not_checked_count == 1
+        assert reader.get_transaction() is transaction
+        async with session_factory() as observer:
+            assert await observer.get(Manuscript, pending.id) is None
+        await reader.rollback()
+
+
 @pytest.fixture(scope="module")
 def scratch_url():
     import asyncio

@@ -2,7 +2,7 @@
 queries over what V-018/V-019 already persist — no new state.
 """
 
-from sqlalchemy import and_, func, or_, select
+from sqlalchemy import and_, func, or_, select, true
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.checks.escalation import NEEDS_REVIEW_OUTCOMES
@@ -39,55 +39,40 @@ async def get_dashboard_stats(
         .where(Manuscript.instructor_id == instructor_id, CheckRun.status == CheckRunStatus.done)
         .group_by(CheckRun.manuscript_id)
     )
-    latest_done_run_ids = latest_done_run_ids_select.subquery()
+    latest_done_run_ids = latest_done_run_ids_select.cte("latest_done_runs")
 
-    manuscripts_checked = await session.scalar(
-        select(func.count()).select_from(latest_done_run_ids)
+    # Aggregate each population independently: joining reports to criterion
+    # rows before counting would multiply reports with multiple criteria.
+    report_counts = (
+        select(
+            *(
+                func.count().filter(ReadinessReport.status == status).label(f"{status.value}_count")
+                for status in ReadinessStatus
+            ),
+            func.count().filter(ReadinessReport.decision.is_not(None)).label("decided_count"),
+        )
+        .where(ReadinessReport.check_run_id.in_(select(latest_done_run_ids.c.run_id)))
+        .subquery("report_counts")
     )
-
-    status_rows = (
-        await session.execute(
-            select(ReadinessReport.status, func.count())
-            .select_from(ReadinessReport)
-            .where(ReadinessReport.check_run_id.in_(select(latest_done_run_ids.c.run_id)))
-            .group_by(ReadinessReport.status)
-        )
-    ).all()
-    status_counts = {status: count for status, count in status_rows}
-
-    # V-038: how many of these are actually decided (F8.5), not just
-    # scored -- same latest-done-run scope as every other count here.
-    decided_count = (
-        await session.scalar(
-            select(func.count())
-            .select_from(ReadinessReport)
-            .where(
-                ReadinessReport.check_run_id.in_(select(latest_done_run_ids.c.run_id)),
-                ReadinessReport.decision.is_not(None),
-            )
-        )
-    ) or 0
 
     # Only rubric-criterion results count toward escalation rate/awaiting-
     # review — integrity checks (F4-F7, criterion_id NULL) don't exist in
     # V2 and aren't part of this ratio's meaning either way. Scoped to the
     # same latest-done-run set as everything else above (BUG-012).
-    criterion_result_rows = (
-        await session.execute(
-            select(CheckResult.outcome, func.count())
-            .select_from(CheckResult)
-            .where(
-                CheckResult.check_run_id.in_(select(latest_done_run_ids.c.run_id)),
-                CheckResult.criterion_id.is_not(None),
-            )
-            .group_by(CheckResult.outcome)
+    criterion_counts = (
+        select(
+            func.count().label("total_criterion_results"),
+            func.count().filter(CheckResult.outcome == ResultOutcome.escalated).label("escalated"),
+            func.count()
+            .filter(CheckResult.outcome.in_(NEEDS_REVIEW_OUTCOMES))
+            .label("escalations_awaiting_review"),
         )
-    ).all()
-    outcome_counts = {outcome: count for outcome, count in criterion_result_rows}
-    escalated = outcome_counts.get(ResultOutcome.escalated, 0)
-    pending_review = sum(outcome_counts.get(outcome, 0) for outcome in NEEDS_REVIEW_OUTCOMES)
-    total_criterion_results = sum(outcome_counts.values())
-    escalation_rate = escalated / total_criterion_results if total_criterion_results > 0 else None
+        .where(
+            CheckResult.check_run_id.in_(select(latest_done_run_ids.c.run_id)),
+            CheckResult.criterion_id.is_not(None),
+        )
+        .subquery("criterion_counts")
+    )
 
     # BUG-212: "Needs you" and "In progress" tab badges need real counts
     # too, mirroring `list_manuscripts`'s own `needs_attention`/`checking`
@@ -141,37 +126,22 @@ async def get_dashboard_stats(
         .correlate(Manuscript)
         .exists()
     )
-    ready_to_decide_count = (
-        await session.scalar(
-            select(func.count())
-            .select_from(Manuscript)
-            .where(
-                *manuscript_scope,
-                latest_run_status == CheckRunStatus.done,
-                ~has_decision,
-                per_manuscript_escalation_count == 0,
+    queue_counts = (
+        select(
+            func.count()
+            .filter(
+                and_(
+                    latest_run_status == CheckRunStatus.done,
+                    ~has_decision,
+                    per_manuscript_escalation_count == 0,
+                )
             )
-        )
-    ) or 0
-
-    complete_queue_count = (
-        await session.scalar(
-            select(func.count())
-            .select_from(Manuscript)
-            .where(
-                *manuscript_scope,
-                latest_run_status == CheckRunStatus.done,
-                has_decision,
-            )
-        )
-    ) or 0
-
-    needs_attention_count = (
-        await session.scalar(
-            select(func.count())
-            .select_from(Manuscript)
-            .where(
-                *manuscript_scope,
+            .label("ready_to_decide_count"),
+            func.count()
+            .filter(and_(latest_run_status == CheckRunStatus.done, has_decision))
+            .label("complete_queue_count"),
+            func.count()
+            .filter(
                 or_(
                     and_(
                         latest_run_status == CheckRunStatus.done,
@@ -184,15 +154,9 @@ async def get_dashboard_stats(
                     ),
                 ),
             )
-        )
-    ) or 0
-
-    checking_count = (
-        await session.scalar(
-            select(func.count())
-            .select_from(Manuscript)
-            .where(
-                *manuscript_scope,
+            .label("needs_attention_count"),
+            func.count()
+            .filter(
                 latest_run_status.in_(
                     (
                         CheckRunStatus.queued,
@@ -204,37 +168,65 @@ async def get_dashboard_stats(
                     )
                 ),
             )
+            .label("checking_count"),
+            func.count()
+            .filter(
+                and_(
+                    Manuscript.ingest_status == IngestStatus.done,
+                    latest_run_status.is_(None),
+                )
+            )
+            .label("not_checked_count"),
         )
-    ) or 0
+        .select_from(Manuscript)
+        .where(*manuscript_scope)
+        .subquery("queue_counts")
+    )
 
-    not_checked_count = (
-        await session.scalar(
-            select(func.count())
-            .select_from(Manuscript)
-            .where(
-                *manuscript_scope,
-                Manuscript.ingest_status == IngestStatus.done,
-                latest_run_status.is_(None),
+    # BUG-216 / F8: one statement gives every aggregate the same PostgreSQL
+    # snapshot. Authentication may already have read through this session;
+    # preserve that transaction rather than changing isolation or committing it.
+    counts = (
+        (
+            await session.execute(
+                select(
+                    select(func.count())
+                    .select_from(latest_done_run_ids)
+                    .scalar_subquery()
+                    .label("manuscripts_checked"),
+                    *report_counts.c,
+                    *criterion_counts.c,
+                    *queue_counts.c,
+                )
+                .select_from(report_counts)
+                .join(criterion_counts, true())
+                .join(queue_counts, true())
             )
         )
-    ) or 0
+        .mappings()
+        .one()
+    )
+    total_criterion_results = counts["total_criterion_results"]
+    escalation_rate = (
+        counts["escalated"] / total_criterion_results if total_criterion_results else None
+    )
 
     return DashboardStats(
-        manuscripts_checked=manuscripts_checked or 0,
-        ready_count=status_counts.get(ReadinessStatus.ready, 0),
-        conditionally_ready_count=status_counts.get(ReadinessStatus.conditionally_ready, 0),
-        not_ready_count=status_counts.get(ReadinessStatus.not_ready, 0),
-        needs_review_count=status_counts.get(ReadinessStatus.needs_review, 0),
-        escalations_awaiting_review=pending_review,
+        manuscripts_checked=counts["manuscripts_checked"],
+        ready_count=counts["ready_count"],
+        conditionally_ready_count=counts["conditionally_ready_count"],
+        not_ready_count=counts["not_ready_count"],
+        needs_review_count=counts["needs_review_count"],
+        escalations_awaiting_review=counts["escalations_awaiting_review"],
         escalation_rate=escalation_rate,
         escalation_budget=settings.escalation_budget,
         system_underperforming=(
             escalation_rate is not None and escalation_rate > settings.escalation_budget
         ),
-        decided_count=decided_count,
-        complete_queue_count=complete_queue_count,
-        ready_to_decide_count=ready_to_decide_count,
-        needs_attention_count=needs_attention_count,
-        checking_count=checking_count,
-        not_checked_count=not_checked_count,
+        decided_count=counts["decided_count"],
+        complete_queue_count=counts["complete_queue_count"],
+        ready_to_decide_count=counts["ready_to_decide_count"],
+        needs_attention_count=counts["needs_attention_count"],
+        checking_count=counts["checking_count"],
+        not_checked_count=counts["not_checked_count"],
     )
