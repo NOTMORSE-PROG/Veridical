@@ -159,13 +159,19 @@ def test_pending_and_instructor_resolved_facts_retain_their_distinct_relationshi
     )
     data.report.results = [pending, resolved]
     data.report.decision = None
-    text = _text(build_report_pdf(data))
+    pdf = build_report_pdf(data)
+    text = _text(pdf)
     assert text.count("PENDING_GLOSSARY") == 1
     assert 'The saved heading lookup searched for "glossary".' in text
     assert "Earlier recorded rule facts" in text
     assert 'The saved heading lookup matched "ABSTRACT" for "abstract".' in text
     assert "I reviewed the full manuscript and recorded a different grade." in text
     assert "Not yet resolved" in text
+    with fitz.open(stream=pdf, filetype="pdf") as document:
+        for page in document:
+            page_text = page.get_text()
+            if "Earlier recorded rule facts" in page_text:
+                assert "RESOLVED_ABSTRACT" in page_text or "Criterion #202 (continued)" in page_text
 
 
 def test_long_order_facts_split_without_losing_or_reordering_saved_headings():

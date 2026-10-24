@@ -1544,8 +1544,17 @@ def build_report_pdf(data: ReportExportData) -> bytes:
     if resolved:
         flow.append(Paragraph("Escalation Resolutions", styles["h2"]))
         for row in resolved:
-            for part in _criterion_flowable(row, styles):
-                flow.append(part)
+            flow.append(
+                PTOContainer(
+                    _criterion_flowable(row, styles),
+                    header=[
+                        Paragraph(
+                            escape(f"Criterion #{row.criterion_id} (continued)"),
+                            styles["caption_bold"],
+                        )
+                    ],
+                )
+            )
             flow.append(Spacer(1, 8))
 
     # 6. Criteria results table (excludes pending/resolved rows, already shown above).
