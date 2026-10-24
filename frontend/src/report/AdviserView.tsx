@@ -8,6 +8,7 @@ import { TEST_AI_DISCLOSURE } from "../domain/aiModeDisclosure";
 import { SEMANTIC_SUPPORT_REVIEW } from "../domain/semanticSupport";
 import { NATIVE_MATH_HISTORY_TITLE, NATIVE_MATH_HISTORY_LIMIT } from "../domain/nativeMathHistory";
 import { manuscriptIdentity } from "../domain/manuscriptLabel";
+import { isUnresolvedSharedCriterion } from "../domain/sharedCriterionReview";
 import { Alert } from "../ui/Alert";
 import { CITATION_HISTORY_SHARED_LIMIT, CITATION_HISTORY_TITLE } from "../domain/citationHistory";
 import { Button } from "../ui/Button";
@@ -66,7 +67,7 @@ export function AdviserViewPage() {
 
   const { report, flags } = data;
   const identity = manuscriptIdentity(report.manuscript_group_label, report.manuscript_original_filename);
-  const pendingCount = report.results.filter((row) => row.outcome === "escalated" || row.outcome === "api_down" || row.outcome === "quota_exhausted").length;
+  const pendingCount = report.results.filter(isUnresolvedSharedCriterion).length;
 
   return (
     <SharedChrome>

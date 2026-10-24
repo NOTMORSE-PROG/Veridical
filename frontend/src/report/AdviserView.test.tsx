@@ -1,6 +1,6 @@
 import { screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { FlagSummaryOut, ReportOut, SharedReportOut } from "../api/types";
+import type { FlagSummaryOut, PublicCriterionResultOut, ReportOut, SharedReportOut } from "../api/types";
 import { renderWithProviders, stubFetchByPath } from "../test/renderWithProviders";
 import { AdviserViewPage } from "./AdviserView";
 
@@ -82,7 +82,65 @@ function shared(overrides: Partial<SharedReportOut> = {}): SharedReportOut {
   return { report: BASE_REPORT, flags: [], ...overrides };
 }
 
+function publicCountPayload(outcomes: PublicCriterionResultOut["outcome"][]): SharedReportOut {
+  return { report: {
+    check_run_id: 5, manuscript_group_label: "Synthetic shared-count control", manuscript_original_filename: null,
+    rubric_title: "Synthetic criteria", status: "needs_review", composite_score: null, thresholds: BASE_REPORT.thresholds,
+    reason: "Review the recorded criteria and assessment limits.", flag_deduction: 0, unresolved_high_flag_count: 0,
+    decision: null, decided_at: null, decision_note: null, rubric_is_current: true, llm_mode: "fake",
+    rubric_needs_review: false, rubric_parse_issues: null,
+    results: outcomes.map((outcome, index) => ({
+      criterion_id: index + 1, text: `Shared criterion ${index + 1}`, type: "semantic", kind: "semantic",
+      weight: 1, weight_importance: "med", outcome, score: outcome === "passed" ? 100 : outcome === "failed" ? 0 : null,
+      basis: "llm", anchor: null, reasoning: null, reason: null, evidence: [],
+      resolved: outcome === "passed" || outcome === "failed" || outcome === "not_applicable",
+    })),
+  }, flags: [] };
+}
+
 describe("AdviserViewPage", () => {
+  it.each([
+    ["escalated", 1], ["unverifiable", 1], ["quota_exhausted", 1], ["api_down", 1],
+    ["passed", 0], ["failed", 0], ["not_applicable", 0],
+  ] as const)("counts only unresolved public criterion outcome %s", async (outcome, count) => {
+    const payload = publicCountPayload([outcome]);
+    expect(payload.report).not.toHaveProperty("pending_review_count");
+    vi.stubGlobal("fetch", stubFetchByPath({ "/shared/tok123/report": payload }));
+    render();
+    const label = await screen.findByText("Unresolved criteria");
+    expect(label.nextElementSibling).toHaveTextContent(String(count));
+  });
+
+  it("counts all four unresolved outcomes among resolved rows without a private count", async () => {
+    vi.stubGlobal("fetch", stubFetchByPath({ "/shared/tok123/report": publicCountPayload([
+      "passed", "unverifiable", "failed", "escalated", "not_applicable", "api_down", "quota_exhausted",
+    ]) }));
+    render();
+    expect((await screen.findByText("Unresolved criteria")).nextElementSibling).toHaveTextContent("4");
+  });
+
+  it("keeps the criterion count at zero with an open High flag and assessment limits", async () => {
+    const payload = publicCountPayload(["passed", "failed", "not_applicable"]);
+    payload.flags = [{ ...SAMPLE_FLAG, severity: "high" }];
+    payload.report.assessment_incomplete = true;
+    payload.report.unresolved_high_flag_count = 1;
+    payload.report.status = "not_ready";
+    vi.stubGlobal("fetch", stubFetchByPath({ "/shared/tok123/report": payload }));
+    render();
+    expect((await screen.findByText("Unresolved criteria")).nextElementSibling).toHaveTextContent("0");
+    expect(screen.getByText("Assessment limits")).toBeInTheDocument();
+    expect(screen.getByText(/95% accuracy/)).toBeInTheDocument();
+  });
+
+  it("uses the newly projected resolved outcome when the shared report is reopened", async () => {
+    vi.stubGlobal("fetch", stubFetchByPath({ "/shared/tok123/report": publicCountPayload(["escalated"]) }));
+    const first = render();
+    expect((await screen.findByText("Unresolved criteria")).nextElementSibling).toHaveTextContent("1");
+    first.unmount();
+    vi.stubGlobal("fetch", stubFetchByPath({ "/shared/tok123/report": publicCountPayload(["passed"]) }));
+    render();
+    expect((await screen.findByText("Unresolved criteria")).nextElementSibling).toHaveTextContent("0");
+  });
   // Global `afterEach(cleanup)` (src/test/setup.ts) already unmounts the
   // component after every test, which runs useNoindexMeta's own effect
   // cleanup -- a second, manual removal here raced it and threw
