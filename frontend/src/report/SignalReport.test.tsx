@@ -753,8 +753,8 @@ describe("SignalReportPage", () => {
     // reads, is what this regression test actually needs to prove.
     const summaries = Array.from(document.querySelectorAll(".signal-result-card summary"));
     expect(summaries.map((s) => s.getAttribute("aria-label"))).toEqual([
-      "AI assessment details: Chapter 1 states the research problem",
-      "AI assessment details: Findings answer the stated research questions",
+      "AI assessment details: source coverage not recorded: Chapter 1 states the research problem",
+      "AI assessment details: source coverage not recorded: Findings answer the stated research questions",
     ]);
   });
 

@@ -1,10 +1,13 @@
 import { expect, it } from "vitest";
-import type { ResultRowCommon } from "../api/types";
+import type { CriterionResultOut, ResultRowCommon } from "../api/types";
 import { criterionAssessmentDetails } from "./criterionAssessment";
 
-const row: ResultRowCommon = { criterion_id: 1, text: "Custom requirement", type: "semantic", kind: "semantic", basis: "llm",
+const row: CriterionResultOut = { criterion_id: 1, text: "Custom requirement", type: "semantic", kind: "semantic", basis: "llm",
   weight: 1, weight_importance: "med", outcome: "passed", score: 100, reasoning: "Original automated explanation.",
-  reason: null, anchor: null, evidence: [], resolution: null };
+  reason: null, anchor: null, evidence: [], resolution: null,
+  source_coverage: { native_math_coverage_version: "v1", native_math_inventory_state: "not_applicable",
+    native_math_inventory_scope: null, n_native_equations_unassessed: 0, n_native_equations_unlocated: null,
+    native_math_excluded_paragraphs: [], native_math_coverage_items: [] } };
 
 it.each([
   ["semantic", "semantic", "llm", "ai"], ["structural", "semantic", "llm", "ai"],

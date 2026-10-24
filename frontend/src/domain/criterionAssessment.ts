@@ -1,4 +1,5 @@
 import type { ResultRowCommon } from "../api/types";
+import { criterionCoverageSuffix, privateCriterionCoverage } from "./criterionSourceCoverage";
 
 type AssessmentSource = "ai" | "rule" | "unknown";
 const ASSESSMENT_COPY = {
@@ -13,7 +14,8 @@ export function criterionAssessmentDetails(row: ResultRowCommon, publicView: boo
   const instructorRecorded = publicView ? row.resolved === true : row.resolution != null;
   const explanation = Boolean(row.reasoning?.trim());
   const hasLocations = Boolean(row.anchor?.trim() || row.evidence.some((item) => item.anchor?.trim()));
-  const hasDetails = Boolean(explanation || hasLocations || row.evidence.length || row.reason?.trim());
+  const sourceCoverage = privateCriterionCoverage(row, publicView);
+  const hasDetails = Boolean(explanation || hasLocations || row.evidence.length || row.reason?.trim() || sourceCoverage);
   const copy = ASSESSMENT_COPY[source];
   const relationship: string[] = [];
   if (instructorRecorded && hasDetails) {
@@ -33,8 +35,8 @@ export function criterionAssessmentDetails(row: ResultRowCommon, publicView: boo
         : "These locations are not recorded as references supplied with an instructor reason.");
     }
   }
-  return { source, instructorRecorded, hasDetails, hasLocations,
-    summary: instructorRecorded ? copy.earlier : copy.automatic,
+  return { source, instructorRecorded, hasDetails, hasLocations, sourceCoverage,
+    summary: (instructorRecorded ? copy.earlier : copy.automatic) + criterionCoverageSuffix(sourceCoverage),
     explanationLabel: instructorRecorded ? copy.earlierExplanation : copy.explanation,
     missingExplanation: copy.missing, relationship: relationship.join(" ") };
 }

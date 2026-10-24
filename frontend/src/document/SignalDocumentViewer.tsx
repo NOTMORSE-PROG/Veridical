@@ -41,7 +41,7 @@ import {
   useManuscriptViewer,
   useReport,
 } from "../report/useReport";
-import { useRouteFocus } from "../routing/useRouteFocus";
+import { clearRouteReturnFocus, rememberRouteReturnFocus, useRouteFocus } from "../routing/useRouteFocus";
 import { criterionRecordId, revealCriterionRecord, SAVED_CRITERION_PARAM } from "../report/savedJudgment";
 import { claimFocusContinuation, type FocusContinuation } from "../routing/focusContinuation";
 import { ActionLink } from "../ui/ActionLink";
@@ -126,7 +126,7 @@ function ReviewQueue({ findings, regions, sourceAvailability, report, collection
   onFilter: (filter: ReviewFilter) => void;
   onSelect: (id: number) => void;
   onExplore: () => void;
-  onDecision: () => void;
+  onDecision: (target: "criteria" | "readiness") => void;
 }) {
   const open = findings.filter((finding) => !finding.isResolved);
   const resolved = findings.filter((finding) => finding.isResolved);
@@ -138,7 +138,7 @@ function ReviewQueue({ findings, regions, sourceAvailability, report, collection
       {report.pending_review_count > 0 && (
         <section className="signal-document-criterion-task" aria-labelledby="criterion-task-heading">
           <div><h2 id="criterion-task-heading">{report.pending_review_count} {report.pending_review_count === 1 ? "criterion needs" : "criteria need"} your judgment</h2></div>
-          <Button variant="secondary" onClick={onDecision}>Review criteria</Button>
+          <Button variant="secondary" onClick={() => onDecision("criteria")}>Review criteria</Button>
         </section>
       )}
       {findings.length > 0 && (
@@ -185,7 +185,7 @@ function ReviewQueue({ findings, regions, sourceAvailability, report, collection
           <div><dt>Open integrity findings</dt><dd>{collection.state === "success" ? open.length : findings.length > 0 ? `Last loaded: ${open.length}` : "Not confirmed"}</dd></div>
           <div><dt>Instructor decision</dt><dd>{report.decision ? DECISION_LABEL[report.decision] : "Not recorded"}</dd></div>
         </dl>
-        <div className="signal-document-readiness-card__actions"><Button variant="secondary" onClick={onDecision}>Review readiness and decision</Button><ActionLink to={`/report/${report.check_run_id}`} variant="quiet">Open full readiness report</ActionLink></div>
+        <div className="signal-document-readiness-card__actions"><Button variant="secondary" onClick={() => onDecision("readiness")}>Review readiness and decision</Button><ActionLink to={`/report/${report.check_run_id}`} variant="quiet">Open full readiness report</ActionLink></div>
       </section>
     </div>
   );
@@ -350,7 +350,7 @@ function ReadinessDecision({ checkRunId, report: loadedReport, pending, error, r
       <SignalEscalatedPanel checkRunId={report.check_run_id} sourceTarget={sourceTarget} onOpenSource={onOpenSource} />
       <details className="signal-document-analysis__criteria"><summary>Recorded criterion results, {criterionRecords.length} {criterionRecords.length === 1 ? "entry" : "entries"}</summary><SignalCriteriaResults results={criterionRecords} checkRunId={report.check_run_id} sourceTarget={sourceTarget} onOpenSource={onOpenSource} /></details>
       <section className="signal-document-analysis__summary" aria-labelledby="analysis-heading" aria-describedby={readFailed ? "report-read-failure" : undefined}>
-        <div className="signal-document-inspector__heading"><p className="signal-section-kicker">After the evidence</p><h2 id="analysis-heading">Readiness and decision</h2><p>Use this summary after reviewing the evidence. The instructor records the final decision.</p></div>
+        <div className="signal-document-inspector__heading"><p className="signal-section-kicker">After the evidence</p><h2 id="analysis-heading" tabIndex={-1}>Readiness and decision</h2><p>Use this summary after reviewing the evidence. The instructor records the final decision.</p></div>
         <div className="signal-document-analysis__readiness">
           <div><span>{readFailed ? "Last loaded system readiness" : "System readiness"}</span><ReadinessBand status={report.status} /></div>
           <p>{report.reason ?? "This band comes from the recorded criterion outcomes and integrity findings."}</p>
@@ -386,7 +386,7 @@ function ReviewHome({ checkRunId, report, reportPending, reportRetrying, reportE
   onFilter: (filter: ReviewFilter) => void;
   onSelect: (id: number) => void;
   onExplore: () => void;
-  onDecision: () => void;
+  onDecision: (target: "criteria" | "readiness") => void;
 }) {
   if (reportPending) return <div role="status" aria-live="polite" aria-busy="true" className="signal-desk-loading"><span>Loading review queue.</span><i /><i /></div>;
   const availableReport = usableReport(report, checkRunId, reportError);
@@ -407,7 +407,7 @@ export function SignalDocumentViewerPage() {
   const parsedAnchorRegion = criterionAnchorRegion(recordedAnchor);
   const view = searchParams.get("view");
   const isExploring = view === "matches" || searchParams.get("panel") === "explore";
-  const isDecision = view === "decision";
+  const isDecision = !isExploring && view === "decision";
   const includeReferenceList = searchParams.get("ref") === "1";
   const includeBlockQuote = searchParams.get("quote") === "1";
   const expandedMatchId = searchParams.get("match");
@@ -464,7 +464,7 @@ export function SignalDocumentViewerPage() {
     data: flags, error: flagsQuery.error, fetchStatus: flagsQuery.fetchStatus, isError: flagsQuery.isError, isSuccess: flagsQuery.isSuccess,
   }), [id, flags, flagsQuery.error, flagsQuery.fetchStatus, flagsQuery.isError, flagsQuery.isSuccess]);
   const numbersByFlagId = useMemo(() => findingNumberByFlagId(findings), [findings]);
-  const selectedFinding = findingForFlag(findings, requestedFlagId);
+  const selectedFinding = isDecision ? null : findingForFlag(findings, requestedFlagId);
   const selectedComparison = Boolean(selectedFinding && isOptionalComparisonLead(selectedFinding.representative));
   const fullWidthReading = searchParams.get("reading") === "full" && selectedComparison
     && optional.snapshot?.ordinalById.has(requestedFlagId ?? 0) === true && !isExploring && !isDecision && !recordedAnchor;
@@ -514,6 +514,25 @@ export function SignalDocumentViewerPage() {
     setSearchParams(next, { replace });
   }
 
+  function taskParameters(change?: (next: URLSearchParams) => void) {
+    clearRouteReturnFocus(`signal-saved-source-${id}-`);
+    clearRouteReturnFocus(`signal-resolution-source-${id}-`);
+    if (sourcePlacement.current) sourcePlacement.current.allowed = false;
+    returnSourceFocus.current = undefined;
+    criterionInspectionRun.current = null;
+    setCriterionSource(undefined);
+    leadContinuation.current?.ownership.dispose();
+    leadContinuation.current = undefined;
+    const next = new URLSearchParams(searchParams);
+    next.delete(SAVED_CRITERION_PARAM);
+    change?.(next);
+    return next;
+  }
+
+  function updateTask(change: (next: URLSearchParams) => void, replace = false) {
+    setSearchParams(taskParameters(change), { replace });
+  }
+
   function criterionSourceTarget(anchor: string) {
     const next = new URLSearchParams(searchParams);
     next.set("anchor", anchor);
@@ -536,6 +555,10 @@ export function SignalDocumentViewerPage() {
     const recordCriterionId = record?.criterion_id;
     if (recordCriterionId !== undefined) originParams.set(SAVED_CRITERION_PARAM, String(recordCriterionId));
     const origin = originParams.toString();
+    if (owned) {
+      rememberRouteReturnFocus(`/report/${id}/document?${searchParams}`, `/report/${id}/document?${destination}`, actionId,
+        { fallbackElementId: recordCriterionId === undefined ? "escalated-heading" : criterionRecordId(id, recordCriterionId) });
+    }
     criterionInspectionRun.current = id;
     setCriterionSource({ attempt: ++sourceAttemptSequence.current, run: id, anchor, origin, from: searchParams.toString(), destination, actionId, recordCriterionId, recordIsInstructor: Boolean(record?.resolution) });
     if (owned) {
@@ -632,7 +655,7 @@ export function SignalDocumentViewerPage() {
     queueScrollRef.current = inspectorRef.current?.scrollTop ?? 0;
     queueFocusRef.current = finding.representative.id;
     if (isOptionalComparisonLead(finding.representative)) {
-      const next = new URLSearchParams(searchParams);
+      const next = taskParameters();
       next.set("view", "finding"); next.set("finding", String(flagId)); next.set("location", String(flagId)); next.set("pane", "review");
       next.delete("lead_return"); next.delete("lead_visible");
       const position = filteredComparisons.findIndex((item) => item.key === finding.key);
@@ -643,7 +666,7 @@ export function SignalDocumentViewerPage() {
       setSearchParams(next, { replace });
       return;
     }
-    update((next) => {
+    updateTask((next) => {
       next.set("view", "finding");
       next.set("finding", String(finding.representative.id));
       next.set("location", String(flagId));
@@ -667,7 +690,7 @@ export function SignalDocumentViewerPage() {
   function showQueue() {
     if (selectedComparison && selectedFinding) {
       restoreQueueRef.current = false;
-      const next = new URLSearchParams(searchParams);
+      const next = taskParameters();
       next.set("view", "queue"); next.set("pane", "review");
       for (const key of ["finding", "flag", "location", "anchor", "panel", "match", "reading"]) next.delete(key);
       const position = filteredComparisons.findIndex((finding) => finding.key === selectedFinding.key);
@@ -683,7 +706,7 @@ export function SignalDocumentViewerPage() {
       return;
     }
     restoreQueueRef.current = true;
-    update((next) => {
+    updateTask((next) => {
       next.set("view", "queue");
       next.set("pane", "review");
       next.delete("finding");
@@ -705,7 +728,7 @@ export function SignalDocumentViewerPage() {
   }, [selectedFinding, isDecision, isExploring, flagsQuery.isPending]);
 
   function openExplore() {
-    update((next) => {
+    updateTask((next) => {
       next.set("view", "matches");
       next.set("pane", "review");
       next.delete("finding");
@@ -717,8 +740,8 @@ export function SignalDocumentViewerPage() {
     });
   }
 
-  function openDecision() {
-    update((next) => {
+  function openDecision(target: "criteria" | "readiness") {
+    const next = taskParameters((next) => {
       next.set("view", "decision");
       next.set("pane", "review");
       next.delete("finding");
@@ -728,14 +751,17 @@ export function SignalDocumentViewerPage() {
       next.delete("panel");
       next.delete("match");
     });
+    ownLeadContinuation(next, target === "criteria" ? "escalated-heading" : "analysis-heading");
+    setSearchParams(next);
   }
 
   function setFilter(value: ReviewFilter) {
-    update((next) => {
+    updateTask((next) => {
       if (value === "open") next.delete("filter");
       else next.set("filter", value);
       next.set("view", "queue");
       next.set("pane", "review");
+      for (const key of ["finding", "flag", "location", "anchor", "panel", "match"]) next.delete(key);
     }, true);
   }
 
@@ -744,7 +770,7 @@ export function SignalDocumentViewerPage() {
   }
 
   function setMatch(value: string | null) {
-    update((next) => { if (value) { next.set("match", value); next.delete("pane"); } else next.delete("match"); });
+    updateTask((next) => { if (value) { next.set("match", value); next.delete("pane"); } else next.delete("match"); });
   }
 
   function selectPane(pane: "manuscript" | "review", moveFocus = false) {
@@ -790,7 +816,7 @@ export function SignalDocumentViewerPage() {
       : anchorRegion;
   const requestedPage = selectedRegion?.page ?? null;
   const browseRegions = representativeRegions(findings, viewer?.regions ?? []);
-  const visibleRegions = recordedAnchor
+  const visibleRegions = recordedAnchor || isDecision
     ? []
     : isExploring && expandedMatch
       ? [...browseRegions, expandedMatch.own_region]

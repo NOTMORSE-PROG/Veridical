@@ -6,8 +6,9 @@ import { SignalReportPage } from "../report/SignalReport";
 import { SignalDocumentViewerPage } from "./SignalDocumentViewer";
 import { stubFetchByPath } from "../test/renderWithProviders";
 import { ME_QUERY_KEY } from "../auth/useAuth";
+import { clearRouteReturnFocus } from "../routing/useRouteFocus";
 import { CriterionReviewLayout } from "../report/CriterionReviewScope";
-import type { ResultRowCommon } from "../api/types";
+import type { CriterionSourceCoverage, ResultRowCommon } from "../api/types";
 
 vi.mock("./PdfPane", () => ({ PdfPane: () => <div>PDF source</div> }));
 vi.mock("./ReuseExplorePanel", () => ({ ReuseExplorePanel: () => null }));
@@ -34,8 +35,27 @@ const SAVED: ResultRowCommon = { criterion_id: 77, text: "Previously saved custo
   weight: 1, weight_importance: "med", outcome: "passed", score: 100, basis: "llm", anchor: null, reasoning: null, reason: null,
   evidence: [{ quote: "Recorded source for saved judgment", anchor: "paragraph 2" }],
   resolution: { type: "mark_pass", reason: "A private saved instructor reason.", ai_majority_verdict: "fail" } };
+const COVERAGE: CriterionSourceCoverage = { native_math_coverage_version: "v1", native_math_inventory_state: "complete",
+  native_math_inventory_scope: "main_document_body", n_native_equations_unassessed: 2, n_native_equations_unlocated: 0,
+  native_math_excluded_paragraphs: [2, 3], native_math_coverage_items: [
+    { paragraph: 2, kind: "paragraph", n_occurrences: 1 }, { paragraph: 3, kind: "paragraph", n_occurrences: 1 }] };
 
-async function setup({ origin = ORIGIN, open = true, drafts: makeDrafts = true, saved = false, instructor = true, full = false } = {}) {
+it("retires a saved destination when explicitly returning to unresolved criteria, keeping both drafts", async () => {
+  const control = await setup({ open: false, saved: true });
+  const view = await screen.findByRole("button", { name: "View saved judgments (1)" }); view.focus(); fireEvent.click(view);
+  await waitFor(() => expect(control.router.state.location.search).toContain("criterion_record=all"));
+  const queue = screen.getByRole("button", { name: "Back to review queue" }); queue.focus(); fireEvent.click(queue);
+  await screen.findByRole("button", { name: "Review criteria" });
+  expect(control.router.state.location.search).not.toContain("criterion_record");
+  const criteria = screen.getByRole("button", { name: "Review criteria" }); criteria.focus(); fireEvent.click(criteria);
+  await waitFor(() => expect(document.getElementById("escalated-heading")).toHaveFocus());
+  expect(control.router.state.location.search).not.toContain("criterion_record");
+  expect(screen.getByDisplayValue("First private draft")).toBeVisible();
+  expect(screen.getByDisplayValue("Second private draft")).toBeVisible();
+  expect(control.fetch.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(0);
+});
+
+async function setup({ origin = ORIGIN, open = true, drafts: makeDrafts = true, saved = false, instructor = true, full = false, coverage = undefined as CriterionSourceCoverage | undefined } = {}) {
   vi.spyOn(document, "hasFocus").mockReturnValue(true);
   const scroll = vi.spyOn(Element.prototype, "scrollIntoView").mockImplementation(() => {});
   let release!: (body: typeof PARAGRAPHS) => void;
@@ -43,7 +63,7 @@ async function setup({ origin = ORIGIN, open = true, drafts: makeDrafts = true, 
   const normal = stubFetchByPath({
     "/check-runs/5/document": { manuscript_id: 10, source_format: "docx", available: true, original_filename: "source.docx", page_count: null, regions: [] },
     "/check-runs/5/share": null,
-    "/check-runs/5/report": { ...REPORT, results: saved ? [{ ...SAVED, resolution: instructor ? SAVED.resolution : null }] : [] }, "/check-runs/5/flags": [], "/check-runs/5/escalated": ITEMS,
+    "/check-runs/5/report": { ...REPORT, results: saved ? [{ ...SAVED, source_coverage: coverage, resolution: instructor ? SAVED.resolution : null }] : [] }, "/check-runs/5/flags": [], "/check-runs/5/escalated": ITEMS,
     "/check-runs/5/document/reuse-matches": { matches: [], passage_archive_size_n: 0 },
   });
   const fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -74,7 +94,53 @@ async function setup({ origin = ORIGIN, open = true, drafts: makeDrafts = true, 
   return { client, router, scroll, release, drafts, action, fetch };
 }
 
-afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
+afterEach(() => { clearRouteReturnFocus("signal-saved-source-"); clearRouteReturnFocus("signal-resolution-source-"); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
+
+it("retires a source return on an explicit queue task before delayed source data and Back", async () => {
+  const control = await setup();
+  const queue = screen.getByRole("button", { name: "Back to review queue" }); queue.focus(); fireEvent.click(queue);
+  const criteria = await screen.findByRole("button", { name: "Review criteria" }); criteria.focus();
+  await act(async () => control.release(PARAGRAPHS));
+  expect(criteria).toHaveFocus();
+  await act(async () => { await control.router.navigate(-1); await control.router.navigate(-1); });
+  expect(document.getElementById("signal-resolution-source-5-1-0")).not.toHaveFocus();
+  expect(screen.getByDisplayValue("First private draft")).toHaveValue("First private draft");
+});
+
+it("does not register a Back focus claim for an unowned source activation", async () => {
+  const control = await setup({ open: false });
+  expect(control.action).not.toHaveFocus(); fireEvent.click(control.action);
+  await act(async () => control.release(PARAGRAPHS));
+  await screen.findByText("The requested source paragraph");
+  await act(async () => { await control.router.navigate(-1); });
+  expect(document.getElementById("signal-resolution-source-5-1-0")).not.toHaveFocus();
+  expect(screen.getByDisplayValue("Second private draft")).toHaveValue("Second private draft");
+});
+
+it.each(["explicit return", "browser Back"])("restores the exact nested coverage action with both drafts through %s", async mode => {
+  const control = await setup({ open: false, saved: true, coverage: COVERAGE });
+  const view = await screen.findByRole("button", { name: "View saved judgments (1)" }); view.focus(); fireEvent.click(view);
+  const outer = screen.getByLabelText("Earlier AI assessment: source content omitted: Previously saved custom criterion").closest("details")!;
+  outer.open = true;
+  const nested = screen.getByLabelText("Source scope and locations: Previously saved custom criterion").closest("details")!;
+  nested.open = true;
+  const action = document.getElementById("signal-saved-source-5-77-2")!;
+  expect(document.querySelectorAll("#signal-saved-source-5-77-2")).toHaveLength(1);
+  expect(document.getElementById("signal-saved-source-5-77-3")).not.toBeNull();
+  action.focus(); fireEvent.click(action);
+  await act(async () => control.release(PARAGRAPHS));
+  await screen.findByText("The requested source paragraph");
+  outer.open = false; nested.open = false;
+  if (mode === "browser Back") await act(async () => { await control.router.navigate(-1); });
+  else {
+    const back = screen.getByRole("button", { name: "Return to saved judgment" }); back.focus(); fireEvent.click(back);
+  }
+  await waitFor(() => expect(document.getElementById("signal-saved-source-5-77-2")).toHaveFocus());
+  expect(outer).toHaveProperty("open", true); expect(nested).toHaveProperty("open", true);
+  expect(screen.getByDisplayValue("First private draft")).toHaveValue("First private draft");
+  expect(screen.getByDisplayValue("Second private draft")).toHaveValue("Second private draft");
+  expect(control.fetch.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(0);
+});
 
 it("does not call an automatic criterion record an instructor's saved judgment on source return", async () => {
   const control = await setup({ open: false, saved: true, instructor: false, drafts: false });

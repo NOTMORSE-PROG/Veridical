@@ -365,7 +365,18 @@ export interface CriterionLevel {
   max_points: number;
 }
 
+export interface CriterionSourceCoverage {
+  native_math_coverage_version: "v1" | null;
+  native_math_inventory_state: "complete" | "not_recorded" | "unavailable" | "not_applicable";
+  native_math_inventory_scope: "main_document_body" | null;
+  n_native_equations_unassessed: number | null;
+  n_native_equations_unlocated: number | null;
+  native_math_excluded_paragraphs: number[];
+  native_math_coverage_items: { paragraph: number | null; kind: "paragraph" | "table_cell"; n_occurrences: number }[];
+}
+
 export interface CriterionResultOut extends ResultRowCommon {
+  source_coverage?: CriterionSourceCoverage | null;
   resolution: ResolutionOut | null;
   /** Private write identity; older retained client fixtures may lack these fields. */
   check_result_id?: number;

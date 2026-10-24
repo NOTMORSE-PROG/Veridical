@@ -105,6 +105,16 @@ function stubViewer(viewer: ManuscriptViewerOut = VIEWER, report: ReportOut = RE
 }
 
 describe("SignalDocumentViewerPage", () => {
+  it.each(["", "&finding=7", "&finding=7&anchor=page%209"])("keeps criterion source context neutral with stale selection %s", async stale => {
+    stubViewer();
+    renderWithProviders(<SignalDocumentViewerPage />, { route: `/report/5/document?view=decision&pane=review${stale}`, path: "/report/:checkRunId/document" });
+    await screen.findByRole("heading", { name: "Readiness and decision" });
+    const pane = await screen.findByTestId("pdf-pane");
+    expect(pane).toHaveAttribute("data-regions", "0");
+    expect(pane).toHaveAttribute("data-selection", "");
+    expect(pane).toHaveAttribute("data-page", stale.includes("anchor=") ? "9" : "");
+    expect(screen.queryByText("Finding 1 selected")).not.toBeInTheDocument();
+  });
   it.each([undefined, false, true])("shows one record-based support notice and no age/rerun warning when flagged=%s", async (flag) => {
     stubViewer(VIEWER, { ...REPORT, historical_semantic_support_unverified: flag });
     renderWithProviders(<SignalDocumentViewerPage />, { route: "/report/5/document?view=decision&pane=review", path: "/report/:checkRunId/document" });

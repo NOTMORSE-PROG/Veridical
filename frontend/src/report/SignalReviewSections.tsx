@@ -1,4 +1,5 @@
 import { criterionAssessmentDetails } from "../domain/criterionAssessment";
+import { CriterionSourceCoverage } from "./CriterionSourceCoverage";
 import { recoverableReadError } from "./reportReadState";
 import { reviewDeskDestination } from "../routing/reviewDeskReturn";
 import { useContext, useEffect, useMemo, useRef, useState } from "react";
@@ -897,9 +898,9 @@ export function SignalCriteriaResults({ results, checkRunId, publicView = false,
         const unresolvedAi = assessment.source === "ai" && !assessment.instructorRecorded && row.outcome === "escalated";
         const excerptAnchors = new Set(row.evidence.map((item) => item.anchor).filter((anchor) => anchor?.trim()));
         const seenAnchors = new Set<string>();
-        const sourceAction = (anchor: string) => {
+        const sourceAction = (anchor: string, stableSlot?: number) => {
           const sourceIndex = row.evidence.findIndex((entry) => entry.anchor === anchor);
-          const actionId = `signal-saved-source-${checkRunId}-${row.criterion_id}-${sourceIndex < 0 ? row.evidence.length : sourceIndex}`;
+          const actionId = `signal-saved-source-${checkRunId}-${row.criterion_id}-${stableSlot ?? (sourceIndex < 0 ? row.evidence.length : sourceIndex)}`;
           const destination = sourceTarget?.(anchor, actionId) ?? reviewDeskDestination(`/report/${checkRunId}/document?anchor=${encodeURIComponent(anchor)}`, location);
           const fullReport = location.pathname === `/report/${checkRunId}`;
           const originParams = new URLSearchParams(location.search);
@@ -936,6 +937,7 @@ export function SignalCriteriaResults({ results, checkRunId, publicView = false,
               {privateScope && row.resolution && <RecordedJudgmentTools checkRunId={checkRunId} criterionId={row.criterion_id} criterionText={row.text} canonical={row} />}
               <details><summary id={evidenceSummaryId} aria-label={`${assessment.summary}: ${row.text}`}>{assessment.summary}</summary><div className="signal-result-card__evidence">
                 {assessment.relationship && <p>{assessment.relationship}</p>}
+                {assessment.sourceCoverage && <CriterionSourceCoverage value={assessment.sourceCoverage} sourceAction={sourceAction} firstSlot={row.evidence.length + 1} criterionText={row.text} />}
                 {unresolvedAi && <><p><strong>No grade accepted</strong></p><p>{RECORDED_GRADE_BASIS.review}</p><p>{RECORDED_GRADE_BASIS.qualification}</p></>}
                 {!assessment.hasDetails ? <p>No assessment details are available in this record.</p> : <>
                 {row.evidence.length > 0 && <h4>Recorded manuscript excerpts</h4>}

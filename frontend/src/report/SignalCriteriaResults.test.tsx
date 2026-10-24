@@ -1,13 +1,16 @@
 import { fireEvent, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
-import type { ResultRowCommon } from "../api/types";
+import type { CriterionResultOut } from "../api/types";
 import { renderWithProviders } from "../test/renderWithProviders";
 import { SignalCriteriaResults } from "./SignalReviewSections";
 
-function row(overrides: Partial<ResultRowCommon> = {}): ResultRowCommon {
+function row(overrides: Partial<CriterionResultOut> = {}): CriterionResultOut {
   return { criterion_id: 1, text: "The source criterion", type: "semantic", kind: "semantic",
     weight: 1, weight_importance: "med", outcome: "passed", score: 100, basis: null,
     anchor: null, reasoning: "Original recorded reasoning.", reason: null, evidence: [], resolution: null,
+    source_coverage: { native_math_coverage_version: "v1", native_math_inventory_state: "not_applicable",
+      native_math_inventory_scope: null, n_native_equations_unassessed: 0, n_native_equations_unlocated: null,
+      native_math_excluded_paragraphs: [], native_math_coverage_items: [] },
     ...overrides };
 }
 
