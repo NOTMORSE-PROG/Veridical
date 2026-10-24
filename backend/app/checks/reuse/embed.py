@@ -34,7 +34,9 @@ ONE mechanism for both edge cases rather than two.
 """
 
 import re
+from bisect import bisect_left, bisect_right
 from dataclasses import dataclass
+from operator import itemgetter
 from typing import Literal
 
 from app.config import Settings, get_settings
@@ -345,12 +347,17 @@ def split_context(context_text: str, excerpt: str) -> tuple[str | None, str | No
     return before, after
 
 
-def _add_context(full_text: str, char_start: int, char_end: int, context_words: int) -> str:
+def _add_context(
+    full_text: str,
+    char_start: int,
+    char_end: int,
+    context_words: int,
+    *,
+    word_spans: list[tuple[int, int]] | None = None,
+) -> str:
     """Widens [char_start, char_end) by up to `context_words` real words on
     each side, never past the chapter's own text — the bounded window the
     ticket's `reuse_passage_context_words` setting controls."""
-    before_words = _word_spans(full_text[:char_start])
-    after_words = _word_spans(full_text[char_end:])
     # backend review finding (V-072 review, 2026-08-20): `-context_words`
     # as a Python negative index is wrong at `context_words == 0` --
     # `-0 == 0`, so `before_words[-0]` was the FIRST preceding word, not
@@ -359,16 +366,23 @@ def _add_context(full_text: str, char_start: int, char_end: int, context_words: 
     # default (60) but this function IS the bounded-excerpt mechanism the
     # owner's Branch B ruling requires, so a config value producing the
     # opposite of what it says is a real latent correctness bug, not a
-    # cosmetic one. Written as three explicit branches instead of Python's
-    # negative-index trick so `context_words == 0` can never resurface.
-    if context_words <= 0:
-        pre_start = char_start
-    elif len(before_words) <= context_words:
-        pre_start = 0
-    else:
-        pre_start = before_words[len(before_words) - context_words][0]
-    kept_after = after_words[:context_words]
-    post_end = char_end + kept_after[-1][1] if kept_after else char_end
+    # cosmetic one. Handle zero explicitly before indexed context lookup.
+    if context_words == 0:
+        return full_text[char_start:char_end]
+    if context_words < 0:
+        # Preserve the existing slice behavior for legacy negative settings.
+        after_words = _word_spans(full_text[char_end:])[:context_words]
+        post_end = char_end + after_words[-1][1] if after_words else char_end
+        return full_text[char_start:post_end]
+    spans = _word_spans(full_text) if word_spans is None else word_spans
+    before_count = bisect_left(spans, char_start, key=itemgetter(0))
+    after_start = bisect_right(spans, char_end, key=itemgetter(1))
+    pre_start = 0 if before_count <= context_words else spans[before_count - context_words][0]
+    post_end = (
+        spans[min(after_start + context_words, len(spans)) - 1][1]
+        if after_start < len(spans)
+        else char_end
+    )
     return full_text[pre_start:post_end]
 
 
@@ -457,11 +471,18 @@ def _scoped_passages(
     offset = 0
     for scope in source.scopes_for(blocks):
         scope_text = "\n".join(block.text for block in scope)
+        # BUG-208 / F7: reuse one index inside this exact contiguous source
+        # scope. Rescanning its prefix/suffix for every passage is quadratic.
+        word_spans = _word_spans(scope_text) if context_words else []
         for draft in _build_passages(
             list(scope), chunk_words=chunk_words, ref_ids=ref_ids, quote_ids=quote_ids
         ):
             draft["context_text"] = _add_context(
-                scope_text, draft["char_start"], draft["char_end"], context_words
+                scope_text,
+                draft["char_start"],
+                draft["char_end"],
+                context_words,
+                word_spans=word_spans,
             )
             draft["char_start"] += offset
             draft["char_end"] += offset
@@ -475,8 +496,8 @@ def compute_passage_embeddings(
 ) -> list[PassageEmbedding]:
     """F7.4's chunker: passage-level vectors for every chapter's content,
     INCLUDING reference-list and block-quote passages (tagged, not
-    dropped — see module note above). One batched `embed_texts` call for
-    the whole manuscript, not one call per passage."""
+    dropped — see module note above). Encoder calls use configured batches;
+    the full ordered passage inventory remains available for comparison."""
     settings = settings or get_settings()
     patterns = load_patterns(settings.ingest_patterns_file)
     source = analytical_source(extraction)
@@ -496,7 +517,6 @@ def compute_passage_embeddings(
         else None
     )
     drafts: list[dict] = []
-    texts: list[str] = []
 
     for chapter_idx, node in enumerate(chapters):
         # BUG-114 (passage-level extension, backend review finding on this
@@ -552,7 +572,6 @@ def compute_passage_embeddings(
                 draft["is_reference_list"] = True
             draft["chapter_index"] = chapter_idx
             drafts.append(draft)
-            texts.append(draft["text"])
 
     if unstructured:
         body_blocks = _unstructured_body_blocks(extraction, patterns)
@@ -571,26 +590,27 @@ def compute_passage_embeddings(
         ):
             draft["chapter_index"] = UNSTRUCTURED_BODY_SCOPE
             drafts.append(draft)
-            texts.append(draft["text"])
 
-    if not texts:
-        return []
-
-    vectors = embed_texts(texts, settings)
-    return [
-        PassageEmbedding(
-            passage_index=i,
-            chapter_index=draft["chapter_index"],
-            anchor_kind=extraction.anchor_kind,
-            page=draft["page"],
-            paragraph=draft["paragraph"],
-            char_start=draft["char_start"],
-            char_end=draft["char_end"],
-            text=draft["text"],
-            context_text=draft["context_text"],
-            is_reference_list=draft["is_reference_list"],
-            is_block_quote=draft["is_block_quote"],
-            embedding=vector,
-        )
-        for i, (draft, vector) in enumerate(zip(drafts, vectors, strict=True))
-    ]
+    passages: list[PassageEmbedding] = []
+    batch_size = settings.reuse_passage_embedding_batch_size
+    for start in range(0, len(drafts), batch_size):
+        batch = drafts[start : start + batch_size]
+        vectors = embed_texts([draft["text"] for draft in batch], settings)
+        for i, (draft, vector) in enumerate(zip(batch, vectors, strict=True), start=start):
+            passages.append(
+                PassageEmbedding(
+                    passage_index=i,
+                    chapter_index=draft["chapter_index"],
+                    anchor_kind=extraction.anchor_kind,
+                    page=draft["page"],
+                    paragraph=draft["paragraph"],
+                    char_start=draft["char_start"],
+                    char_end=draft["char_end"],
+                    text=draft["text"],
+                    context_text=draft["context_text"],
+                    is_reference_list=draft["is_reference_list"],
+                    is_block_quote=draft["is_block_quote"],
+                    embedding=vector,
+                )
+            )
+    return passages

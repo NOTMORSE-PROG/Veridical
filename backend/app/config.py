@@ -767,6 +767,9 @@ class Settings(BaseSettings):
     # nearly as cleanly as the chapter-level calibration; 150 gives a little
     # headroom above that measured floor without approaching chapter size.
     reuse_passage_chunk_words: int = 150
+    # Bound each local encoder call without truncating the manuscript's
+    # passage inventory. Total output storage still grows with passage count.
+    reuse_passage_embedding_batch_size: int = Field(default=512, ge=1)
     # Bounded context window (words each side of the exact matched passage)
     # persisted alongside it at archive-build time -- the bounded-excerpt
     # rule (owner ruling, carried from V-058/BUG-050 Branch B) requires a
