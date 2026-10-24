@@ -591,7 +591,8 @@ def _rule_facts_flowables(row: CriterionResultOut, styles: dict[str, ParagraphSt
 
 
 def _criterion_flowable(row: CriterionResultOut, styles: dict[str, ParagraphStyle]) -> list:
-    parts = [Paragraph(escape(row.text), styles["cell_bold"])]
+    title = f"Criterion #{row.criterion_id}: {row.text}" if row.resolution else row.text
+    parts = [Paragraph(escape(title), styles["cell_bold"])]
     caption_bits = [] if row.resolution else [_source_caption(row)]
     # V-069 AC5: the decided rung's own points, alongside the level name
     # already shown as the row's Result column — this is the "score" half
