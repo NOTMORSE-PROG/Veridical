@@ -24,6 +24,7 @@ def test_instructor_attribution_is_inside_its_splittable_reason_not_a_trailing_c
     if resolution == "mark_level":
         row.level = CriterionLevelOut(ordinal=0, name="Recorded <level>", points=2, max_points=5)
     parts = _criterion_flowable(row, _styles("Helvetica"))
+    assert parts[0].getKeepWithNext()
     reason_parts = [part for part in parts if reason.strip() in part.getPlainText()]
     assert len(reason_parts) == 1
     assert reason_parts[0].getPlainText().startswith("Resolved by instructor.")

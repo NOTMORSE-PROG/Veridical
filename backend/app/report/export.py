@@ -579,6 +579,7 @@ def _criterion_flowable(row: CriterionResultOut, styles: dict[str, ParagraphStyl
     if row.level is not None:
         caption_bits.append(f"{row.level.points:g}/{row.level.max_points:g} pts")
     if row.resolution:
+        parts[0].keepWithNext = True
         verb = (
             f"Marked {row.level.name}"
             if row.resolution.type == "mark_level" and row.level is not None
