@@ -73,7 +73,7 @@ async function requestBlob(path: string): Promise<Blob> {
 }
 
 export const api = {
-  get: <T>(path: string): Promise<T> => request<T>(path),
+  get: <T>(path: string, options?: Pick<RequestInit, "signal">): Promise<T> => request<T>(path, options),
   getBlob: (path: string): Promise<Blob> => requestBlob(path),
   post: <T>(path: string, body?: unknown, headers?: Record<string, string>): Promise<T> =>
     request<T>(path, {

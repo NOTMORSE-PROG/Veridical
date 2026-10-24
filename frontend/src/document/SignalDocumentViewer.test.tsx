@@ -8,8 +8,8 @@ import { CITATION_COMPARISON } from "../test/citationComparisonFixture";
 import { localDate } from "../domain/localDate";
 
 vi.mock("./PdfPane", () => ({
-  PdfPane: ({ requestedPage, selectedFlagId, fileUrl, regions }: { requestedPage: number | null; selectedFlagId: number | null; fileUrl: string; regions: unknown[] }) => (
-    <div data-testid="pdf-pane" data-page={requestedPage ?? ""} data-selection={selectedFlagId ?? ""} data-file={fileUrl} data-regions={regions.length}>PDF source</div>
+  PdfPane: ({ requestedPage, selectedFlagId, fileUrl, regions, onReadText }: { requestedPage: number | null; selectedFlagId: number | null; fileUrl: string; regions: unknown[]; onReadText?: () => void }) => (
+    <div data-testid="pdf-pane" data-page={requestedPage ?? ""} data-selection={selectedFlagId ?? ""} data-file={fileUrl} data-regions={regions.length}>PDF source<button onClick={onReadText}>Read text</button></div>
   ),
 }));
 vi.mock("./DocxPane", () => ({ DocxPane: () => <div>DOCX source</div> }));
@@ -105,6 +105,53 @@ function stubViewer(viewer: ManuscriptViewerOut = VIEWER, report: ReportOut = RE
 }
 
 describe("SignalDocumentViewerPage", () => {
+  it("keeps an edited pending criterion draft through text, current PDF and selected PDF return", async () => {
+    const row: CriterionResultOut = {
+      criterion_id: 1, check_result_id: 41, text: "Pending evidence judgment", type: "semantic", kind: "semantic",
+      weight: 1, weight_importance: "med", outcome: "escalated", score: null, basis: "llm", anchor: "page 4",
+      reasoning: "Recorded uncertainty.", reason: "Needs instructor judgment.",
+      evidence: [{ quote: "Recorded paragraph.", anchor: "page 4" }], resolution: null,
+    };
+    const baseFetch = stubFetchByPath({
+      "/check-runs/5/document": VIEWER, "/check-runs/5/report": { ...REPORT, pending_review_count: 1, results: [row] },
+      "/check-runs/5/escalated": [{ check_result_id: 41, criterion_id: 1, criterion_text: row.text,
+        weight: 1, agreement: null, votes: [null, null], ai_majority_verdict: null, reason: "Needs instructor judgment.",
+        review_reason: "low_confidence", unverified_evidence: null, reasoning: row.reasoning, evidence: row.evidence }],
+      "/check-runs/5/flags": [], "/check-runs/5/document/reuse-matches": { passage_archive_size_n: 0, matches: [] },
+    });
+    const fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = new URL(String(input), "http://localhost");
+      if (url.pathname.endsWith("/page-text")) {
+        const page = Number(url.searchParams.get("page"));
+        return new Response(JSON.stringify({ check_run_id: 5, manuscript_id: 10, page, page_count: 42,
+          state: "available", reason: null, blocks: [{ text: `Reading saved page ${page}.`, is_furniture: false }],
+          saved_block_count: 1, omitted_block_count: 0 }));
+      }
+      return baseFetch(input, init);
+    });
+    vi.stubGlobal("fetch", fetch);
+    renderWithProviders(<SignalDocumentViewerPage />, { route: "/report/5/document?view=decision&pane=review", path: "/report/:checkRunId/document" });
+    fireEvent.click(await screen.findByRole("button", { name: "Meets criterion" }));
+    const reason = await screen.findByRole("textbox", { name: "Reason (required)" });
+    const entered = "  Unsaved instructor judgment\nwith exact whitespace.  ";
+    fireEvent.change(reason, { target: { value: entered } });
+    const open = screen.getByRole("link", { name: "Open in manuscript: page 4. Pending evidence judgment" });
+    open.focus(); fireEvent.click(open);
+    const read = screen.getByRole("button", { name: "Read text" }); read.focus(); fireEvent.click(read);
+    await screen.findByText("Reading saved page 4.");
+    fireEvent.click(screen.getByRole("button", { name: "Next" }));
+    await screen.findByText("Reading saved page 5.");
+    fireEvent.click(screen.getAllByRole("button", { name: "View original PDF p. 5" })[0]);
+    expect(screen.getByTestId("pdf-pane")).toHaveAttribute("data-page", "5");
+    fireEvent.click(screen.getByRole("button", { name: "Read text" }));
+    await screen.findByText("Reading saved page 5.");
+    fireEvent.click(screen.getByRole("button", { name: "Return to selected PDF p. 4" }));
+    expect(screen.getByTestId("pdf-pane")).toHaveAttribute("data-page", "4");
+    const back = screen.getByRole("button", { name: "Return to criterion review" }); back.focus(); fireEvent.click(back);
+    expect(screen.getByRole("textbox", { name: "Reason (required)" })).toHaveValue(entered);
+    expect(screen.getByRole("link", { name: "Open in manuscript: page 4. Pending evidence judgment" })).toHaveFocus();
+    expect(fetch.mock.calls.every(([, init]) => !init?.method || init.method === "GET")).toBe(true);
+  });
   it.each(["", "&finding=7", "&finding=7&anchor=page%209"])("keeps criterion source context neutral with stale selection %s", async stale => {
     stubViewer();
     renderWithProviders(<SignalDocumentViewerPage />, { route: `/report/5/document?view=decision&pane=review${stale}`, path: "/report/:checkRunId/document" });
@@ -114,6 +161,36 @@ describe("SignalDocumentViewerPage", () => {
     expect(pane).toHaveAttribute("data-selection", "");
     expect(pane).toHaveAttribute("data-page", stale.includes("anchor=") ? "9" : "");
     expect(screen.queryByText("Finding 1 selected")).not.toBeInTheDocument();
+  });
+  it("keeps criterion return context through PDF text browsing without a judgment write", async () => {
+    const row: CriterionResultOut = {
+      criterion_id: 1, text: "Recorded source control", type: "structural", kind: "structural",
+      weight: 1, weight_importance: "med", outcome: "passed", score: 100,
+      basis: null, anchor: "page 4", reasoning: null, reason: null,
+      evidence: [{ quote: "Recorded paragraph.", anchor: "page 4" }], resolution: null,
+    };
+    const fetch = stubFetchByPath({
+      "/check-runs/5/document": VIEWER, "/check-runs/5/report": { ...REPORT, results: [row] },
+      "/check-runs/5/escalated": [], "/check-runs/5/flags": [],
+      "/check-runs/5/document/reuse-matches": { passage_archive_size_n: 0, matches: [] },
+      "/check-runs/5/document/page-text": { check_run_id: 5, manuscript_id: 10, page: 4, page_count: 42, state: "available", reason: null,
+        blocks: [{ text: "Verified page-four reading text.", is_furniture: false }], saved_block_count: 1, omitted_block_count: 0 },
+    });
+    vi.stubGlobal("fetch", fetch);
+    renderWithProviders(<SignalDocumentViewerPage />, { route: "/report/5/document?view=decision&pane=review", path: "/report/:checkRunId/document" });
+    await screen.findByText("Recorded criterion results, 1 entry");
+    fireEvent.click(screen.getByText("Recorded criterion results, 1 entry"));
+    const details = document.getElementById("signal-criterion-evidence-5-1");
+    expect(details).not.toBeNull(); fireEvent.click(details!);
+    const open = await screen.findByRole("link", { name: "Open in manuscript: page 4. Criterion 1: Recorded source control" });
+    open.focus(); fireEvent.click(open);
+    expect(await screen.findByRole("button", { name: "Return to criterion record" })).toBeInTheDocument();
+    const read = screen.getByRole("button", { name: "Read text" }); read.focus(); fireEvent.click(read);
+    await screen.findByText("Verified page-four reading text.");
+    const back = screen.getByRole("button", { name: "Return to criterion record" });
+    back.focus(); fireEvent.click(back);
+    expect(screen.getByRole("link", { name: "Open in manuscript: page 4. Criterion 1: Recorded source control" })).toHaveFocus();
+    expect(fetch.mock.calls.every(([, init]) => !init?.method || init.method === "GET")).toBe(true);
   });
   it.each([undefined, false, true])("shows one record-based support notice and no age/rerun warning when flagged=%s", async (flag) => {
     stubViewer(VIEWER, { ...REPORT, historical_semantic_support_unverified: flag });

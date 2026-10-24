@@ -1,4 +1,6 @@
 import { criterionSourceReturn } from "../report/criterionSourceReturn";
+import { PdfSourceReader } from "./PdfSourceReader";
+import { clearPdfReading, sameSourceTask } from "./usePdfPageText";
 import { useQueryClient } from "@tanstack/react-query";
 import { ReviewDeskReturnLink } from "../routing/ReviewDeskReturnLink";
 import { type KeyboardEvent, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
@@ -52,7 +54,6 @@ import { DocxPane } from "./DocxPane";
 import { useSelectedSourceReveal } from "./useSelectedSourceReveal";
 import { scrollReviewEvidence } from "./scrollReviewEvidence";
 import { PassagePairPanel } from "./PassagePairPanel";
-import { PdfPane } from "./PdfPane";
 import { regionPrecision, type SourceAvailability } from "./regionCopy";
 import {
   buildReviewFindings,
@@ -507,6 +508,7 @@ export function SignalDocumentViewerPage() {
   function update(change: (next: URLSearchParams) => void, replace = false) {
     const next = new URLSearchParams(searchParams);
     change(next);
+    if (["finding", "flag", "location", "anchor", "match"].some((key) => next.get(key) !== searchParams.get(key))) clearPdfReading(next);
     setSearchParams(next, { replace });
   }
 
@@ -521,6 +523,7 @@ export function SignalDocumentViewerPage() {
     leadContinuation.current = undefined;
     const next = new URLSearchParams(searchParams);
     next.delete(SAVED_CRITERION_PARAM);
+    clearPdfReading(next);
     change?.(next);
     return next;
   }
@@ -531,6 +534,7 @@ export function SignalDocumentViewerPage() {
 
   function criterionSourceTarget(anchor: string) {
     const next = new URLSearchParams(searchParams);
+    clearPdfReading(next);
     next.set("anchor", anchor);
     next.set("pane", "manuscript");
     return `/report/${id}/document?${next}`;
@@ -541,7 +545,7 @@ export function SignalDocumentViewerPage() {
     const owned = action?.isConnected === true && document.activeElement === action && document.hasFocus();
     const target = new URL(criterionSourceTarget(anchor), window.location.origin);
     const destination = target.search.slice(1);
-    const originSearch = criterionSource?.run === id && criterionSource.destination === searchParams.toString()
+    const originSearch = criterionSource?.run === id && sameSourceTask(criterionSource.destination, searchParams.toString())
       ? criterionSource.origin : searchParams.toString();
     const originParams = new URLSearchParams(originSearch);
     originParams.set("pane", "review");
@@ -576,8 +580,8 @@ export function SignalDocumentViewerPage() {
     sourceFocusOwner.current = null;
   }, [id]);
   useEffect(() => {
-    const ownTransition = criterionSource && sourceQuery === criterionSource.from && !sourcePlacement.current?.adopted;
-    if (criterionSource && (criterionSource.run !== id || (!ownTransition && sourceQuery !== criterionSource.destination && sourceQuery !== criterionSource.origin))) setCriterionSource(undefined);
+    const ownTransition = criterionSource && sameSourceTask(sourceQuery, criterionSource.from) && !sourcePlacement.current?.adopted;
+    if (criterionSource && (criterionSource.run !== id || (!ownTransition && !sameSourceTask(sourceQuery, criterionSource.destination) && !sameSourceTask(sourceQuery, criterionSource.origin)))) setCriterionSource(undefined);
   }, [id, sourceQuery, criterionSource]);
   useEffect(() => {
     const attempt = sourcePlacement.current;
@@ -664,6 +668,7 @@ export function SignalDocumentViewerPage() {
     }
     updateTask((next) => {
       next.set("view", "finding");
+      clearPdfReading(next);
       next.set("finding", String(finding.representative.id));
       next.set("location", String(flagId));
       next.delete("flag");
@@ -848,8 +853,9 @@ export function SignalDocumentViewerPage() {
             </div>
             <div className="signal-document-grid">
               <div ref={sourcePanelRef} tabIndex={docxScrollInPane ? 0 : -1} id="manuscript-panel" role="tabpanel" aria-labelledby="manuscript-tab" data-active={activeTab === "manuscript"} data-source-format={viewer?.source_format} className="signal-document-pane">
+                {viewer?.available && viewer.source_format !== "pdf" && searchParams.get("source") === "page_text" && <p className="signal-document-reconstruction-note" role="status">Page text is available only for PDF sources. Showing the available source view.</p>}
                 {reportOrigin && <ActionLink to={`${reportOrigin.returnPath}#${reportOrigin.elementId}`} state={reportOrigin.state} variant="secondary">{reportQuery.data?.results.find((row) => row.criterion_id === reportOrigin.criterionId)?.resolution ? "Return to saved judgment" : "Return to criterion record"}</ActionLink>}
-                {criterionSource?.run === id && isDecision && sourceQuery === criterionSource.destination && <Button variant="secondary" onClick={returnToCriterion}>{criterionSource.recordCriterionId === undefined ? "Return to criterion review" : criterionSource.recordIsInstructor ? "Return to saved judgment" : "Return to criterion record"}</Button>}
+                {criterionSource?.run === id && isDecision && sameSourceTask(sourceQuery, criterionSource.destination) && <Button variant="secondary" onClick={returnToCriterion}>{criterionSource.recordCriterionId === undefined ? "Return to criterion review" : criterionSource.recordIsInstructor ? "Return to saved judgment" : "Return to criterion record"}</Button>}
                 {selectedFinding && selectedSummary && selectedPrecision && (
                   <div className="signal-document-selection-strip" role="status"><div><strong>{selectedComparison ? `${comparisonLeadIdentity(selectedSummary, optional.snapshot).marker} · Record #${selectedSummary.id}` : `Finding ${selectedFinding.number} selected`}</strong><span>{instructorAnchor(recordedAnchor ?? selectedSummary.page_anchor)} · {selectedComparison ? "Comparison lead, not scored" : selectedPrecision.label}</span></div><div><Button variant="secondary" onClick={showSelectedReview}>View review</Button>{selectedRegion?.kind === "paragraph_only" && <Button variant="quiet" onClick={revealRecordedLocation}>Show recorded location</Button>}<Button variant="quiet" onClick={showQueue}>Clear selection</Button></div></div>
                 )}
@@ -859,7 +865,7 @@ export function SignalDocumentViewerPage() {
                 {viewerQuery.isPending ? <div className="signal-document-source"><div className="signal-document-toolbar"><div className="signal-document-toolbar__identity"><strong>Full manuscript</strong><span>Loading stored source</span></div></div><div className="signal-document-scroll"><section role="status" aria-live="polite" aria-busy="true" className="signal-document-pdf-skeleton"><span>Loading full manuscript.</span><i /><i /><i /></section></div></div>
                   : viewerQuery.isError || !viewer ? <div className="signal-document-source"><div className="signal-document-toolbar"><div className="signal-document-toolbar__identity"><strong>Full manuscript</strong><span>Stored source</span></div></div><div className="signal-document-scroll"><section className="signal-document-paper-state"><Alert title="The manuscript could not be loaded" tone="error" role="alert"><p>VERIDICAL could not load the stored source view. The Review pane loads separately and may also need to be retried.</p><Button variant="secondary" onClick={() => viewerQuery.refetch()}>Try source again</Button><ReviewDeskReturnLink variant="quiet">Return to Review Desk</ReviewDeskReturnLink></Alert></section></div></div>
                     : !viewer.available ? <div className="signal-document-source"><div className="signal-document-toolbar"><div className="signal-document-toolbar__identity"><strong>Full manuscript</strong><span>{viewer.original_filename ?? "Stored source"}</span></div></div><div className="signal-document-scroll"><section className="signal-document-unavailable"><p className="signal-section-kicker">Stored source unavailable</p><h2>Source manuscript unavailable</h2><p>{viewer.purged_at ? `The stored source file was deleted on ${localDate(viewer.purged_at)} and can no longer be opened.` : viewer.unavailable_reason}</p><p>You can still review the recorded evidence and readiness details, but VERIDICAL cannot show the full manuscript.</p><ActionLink to={`/report/${id}`} variant="brand">Open full readiness report</ActionLink></section></div></div>
-                      : viewer.source_format === "pdf" ? <PdfPane fileUrl={`${BASE_URL}/check-runs/${id}/document/file`} regions={visibleRegions} flags={flags ?? []} selectedFlagId={selectedRegionId} onSelectFlag={selectFinding} requestedPage={requestedPage} findingNumbers={numbersByFlagId} comparisonLeads={optional.snapshot} focusSelection={activeTab === "manuscript" && !fullWidthReading} />
+                      : viewer.source_format === "pdf" ? <PdfSourceReader key={`${me?.id ?? "unknown"}:${id}`} run={id} manuscript={viewer.manuscript_id} actor={me?.id} visible={sourcePhysicallyVisible} fileUrl={`${BASE_URL}/check-runs/${id}/document/file`} regions={visibleRegions} flags={flags ?? []} selectedFlagId={selectedRegionId} onSelectFlag={selectFinding} requestedPage={requestedPage} findingNumbers={numbersByFlagId} comparisonLeads={optional.snapshot} focusSelection={activeTab === "manuscript" && !fullWidthReading} />
                         : viewer.source_format === "docx" ? <DocxPane key={id} paragraphs={paragraphsQuery.data?.paragraphs} tables={paragraphsQuery.data?.tables} images={paragraphsQuery.data?.images} omittedImageOccurrences={paragraphsQuery.data?.omitted_image_occurrences} nativeMath={paragraphsQuery.data?.native_math} imageBasePath={`/check-runs/${id}/document/images`} paragraphsPending={paragraphsQuery.isPending} paragraphsError={paragraphsQuery.isError} onRetry={() => paragraphsQuery.refetch()} regions={visibleRegions} flags={flags ?? []} selectedFlagId={selectedRegionId} onSelectFlag={selectFinding} isVisible={sourcePhysicallyVisible} focusSelection={activeTab === "manuscript" && !fullWidthReading} findingNumbers={numbersByFlagId} comparisonLeads={optional.snapshot} requestedParagraph={anchorRegion?.paragraph ?? null} onPlaceRequestedParagraph={criterionInspectionRun.current === id && isDecision ? placeCriterionSource : undefined} requestedParagraphAttempt={criterionSource?.attempt} scrollInParent={docxScrollInPane} />
                           : <div className="signal-document-source"><div className="signal-document-toolbar"><div className="signal-document-toolbar__identity"><strong>Full manuscript</strong><span>{viewer.original_filename ?? "Unsupported source"}</span></div></div><div className="signal-document-scroll"><section className="signal-document-paper-state"><Alert title="This manuscript format cannot be displayed here" tone="warning"><p>Use the recorded excerpts and anchors in Review, or open the full readiness report.</p><ActionLink to={`/report/${id}`} variant="secondary">Open full readiness report</ActionLink></Alert></section></div></div>}
               </div>

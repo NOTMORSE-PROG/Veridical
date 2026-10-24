@@ -254,6 +254,7 @@ function ContinuousPdfPage({
       className="signal-document-pdf-page"
       style={aspectStyle}
       aria-label={`Page ${metric.pageNumber} of ${totalPages}`}
+      tabIndex={-1}
       data-page={metric.pageNumber}
     >
       {isNear ? (
@@ -331,6 +332,9 @@ export function PdfPane({
   findingNumbers = EMPTY_FINDING_NUMBERS,
   comparisonLeads,
   focusSelection = true,
+  onReadText,
+  onObservedPage,
+  onPlaceRequestedPage,
 }: {
   fileUrl: string;
   regions: FlagRegionOut[];
@@ -341,6 +345,9 @@ export function PdfPane({
   findingNumbers?: ReadonlyMap<number, number>;
   comparisonLeads?: ComparisonLeadSnapshot;
   focusSelection?: boolean;
+  onReadText?: () => void;
+  onObservedPage?: (page: number) => void;
+  onPlaceRequestedPage?: (page: number, element: HTMLElement) => void;
 }) {
   const [pdf, setPdf] = useState<PDFDocumentProxy | null>(null);
   const [metrics, setMetrics] = useState<PageMetric[]>([]);
@@ -403,8 +410,8 @@ export function PdfPane({
         mostVisibleRatio = candidateRatio;
       }
     }
-    if (mostVisibleRatio > 0) setCurrentPage(mostVisiblePage);
-  }, []);
+    if (mostVisibleRatio > 0) { setCurrentPage(mostVisiblePage); onObservedPage?.(mostVisiblePage); }
+  }, [onObservedPage]);
 
   const scrollToPage = useCallback((page: number, behavior: ScrollBehavior = "smooth") => {
     const total = pdf?.numPages ?? metrics.length;
@@ -423,13 +430,19 @@ export function PdfPane({
     });
     setCurrentPage(target);
     setPageInput(String(target));
-  }, [metrics.length, pdf?.numPages]);
+    onObservedPage?.(target);
+  }, [metrics.length, pdf?.numPages, onObservedPage]);
 
   useEffect(() => {
     if (requestedPage === null || metrics.length === 0) return;
     if (!Number.isSafeInteger(requestedPage) || requestedPage < 1 || requestedPage > metrics.length) return;
-    requestAnimationFrame(() => scrollToPage(requestedPage, "auto"));
-  }, [metrics.length, requestedPage, scrollToPage]);
+    const frame = requestAnimationFrame(() => {
+      scrollToPage(requestedPage, "auto");
+      const element = pageRefs.current.get(requestedPage);
+      if (element) onPlaceRequestedPage?.(requestedPage, element);
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [metrics.length, requestedPage, scrollToPage, onPlaceRequestedPage]);
 
   function commitPageInput() {
     const page = Number(pageInput);
@@ -452,6 +465,7 @@ export function PdfPane({
           <span>Original PDF · {pagesLabel}{comparisonMarkers && " · L: unscored comparison"}</span>
         </div>
         <div className="signal-document-toolbar__controls" role="group" aria-label="PDF page and zoom controls">
+          {onReadText && <button type="button" aria-label="Read extracted text from the current PDF page" onClick={onReadText}>Read text</button>}
           <button type="button" aria-expanded={detailsOpen} aria-controls={detailsId} onClick={() => setDetailsOpen((value) => !value)}>Source view details</button>
           <button type="button" onClick={() => setZoom((value) => Math.max(PDF_ZOOM_MIN, Number((value - PDF_ZOOM_STEP).toFixed(1))))} disabled={zoom <= PDF_ZOOM_MIN}>Zoom out</button>
           <button type="button" onClick={() => setZoom(1)} disabled={zoom === 1}>Fit width</button>

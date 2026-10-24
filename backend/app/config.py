@@ -78,6 +78,14 @@ class Settings(BaseSettings):
     # Guarded source-preserving ordering. New unresolved pages fail closed;
     # legacy extractions are unknown, never retrospectively labelled ordered.
     ingest_reading_order_strategy: Literal["legacy", "native_regions_v1"] = "native_regions_v1"
+    # Optional local-cache PDF reading aid; these bound Python read/output work,
+    # not native PDF decoding memory or execution time.
+    pdf_page_text_slots: int = Field(default=1, gt=0)
+    pdf_page_text_raw_max_bytes: int = Field(default=33554432, gt=0)
+    pdf_page_text_max_blocks: int = Field(default=256, gt=0)
+    pdf_page_text_max_chars: int = Field(default=40000, gt=0)
+    pdf_page_text_max_bytes: int = Field(default=262144, ge=1024)
+    pdf_page_text_rate_limit_max_attempts: int = Field(default=120, gt=0)
     ingest_reading_order_max_lines_per_page: int = Field(default=4000, gt=0)
     ingest_reading_order_max_nodes_per_page: int = Field(default=8000, gt=0)
     ingest_reading_order_max_depth: int = Field(default=32, gt=0)

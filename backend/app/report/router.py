@@ -20,6 +20,7 @@ from app.report.judgment_schemas import (
     JudgmentRevisionOut,
 )
 from app.report.judgments import get_judgment_context, get_judgment_history, revise_judgment
+from app.report.page_text import PdfPageTextOut, get_manuscript_page_text
 from app.report.schemas import (
     DecisionIn,
     DocumentParagraphsOut,
@@ -206,6 +207,21 @@ async def get_manuscript_paragraphs_route(
     same way the PDF file bytes are (`.../document/file` below) -- DOCX
     sources only, never a purged manuscript."""
     return await get_manuscript_paragraphs(session, check_run_id, instructor.id)
+
+
+@router.get("/check-runs/{check_run_id}/document/page-text", response_model=PdfPageTextOut)
+async def get_manuscript_page_text_route(
+    check_run_id: int,
+    page: Annotated[int, Query(ge=1)],
+    response: Response,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    instructor: Annotated[Instructor, Depends(get_current_instructor)],
+) -> PdfPageTextOut:
+    settings = get_settings()
+    enforce_action_rate_limit(settings, "pdf_page_text", instructor.id)
+    response.headers["Cache-Control"] = "private, no-store"
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    return await get_manuscript_page_text(session, check_run_id, instructor.id, page, settings)
 
 
 @router.get("/check-runs/{check_run_id}/document/images/{image_index}")
