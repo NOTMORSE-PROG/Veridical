@@ -7489,4 +7489,8 @@
   .signal-format-requirements li {
     overflow-wrap: anywhere;
   }
+  .signal-format-requirements ol {
+    list-style: decimal;
+    padding-inline-start: var(--signal-space-5);
+  }
 }
