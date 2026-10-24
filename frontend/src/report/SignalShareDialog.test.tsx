@@ -172,3 +172,14 @@ it("a create acknowledgment with failed status reconciliation stays uncertain un
   await screen.findByText("Active read-only link."); expect(api.post).toHaveBeenCalledOnce();
   expect(screen.queryByText("Share link created.")).not.toBeInTheDocument();
 });
+
+it.each(["Revoke link", "Regenerate link"])("Cancel returns owned focus to %s without a write", async name => {
+  vi.spyOn(document, "hasFocus").mockReturnValue(true);
+  setup(undefined, async () => LINK);
+  const post = vi.spyOn(api, "post"); const remove = vi.spyOn(api, "delete");
+  const trigger = await screen.findByRole("button", { name }); trigger.focus(); fireEvent.click(trigger);
+  const cancel = screen.getByRole("button", { name: "Cancel" }); cancel.focus(); fireEvent.click(cancel);
+  await waitFor(() => expect(screen.getByRole("button", { name })).toHaveFocus());
+  expect(screen.queryByRole("button", { name: "Cancel" })).not.toBeInTheDocument();
+  expect(post).not.toHaveBeenCalled(); expect(remove).not.toHaveBeenCalled();
+});

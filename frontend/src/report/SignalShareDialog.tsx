@@ -2,6 +2,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { type AuthOwner, useAuthOwner } from "../auth/queryOwner";
 import { SHARE_EXPIRY_OPTIONS } from "../config/ui";
+import { useExplicitActionFocus } from "../routing/useExplicitActionFocus";
 import { claimFocusContinuation, type FocusContinuation } from "../routing/focusContinuation";
 import { Alert } from "../ui/Alert";
 import { Button } from "../ui/Button";
@@ -60,7 +61,17 @@ function ShareDialogSession({ checkRunId, manuscriptLabel, onClose, owner, shoul
   const confirmRef = useRef<HTMLDivElement>(null);
   const urlRef = useRef<HTMLInputElement>(null);
   const createRef = useRef<HTMLButtonElement>(null);
+  const regenerateRef = useRef<HTMLButtonElement>(null);
+  const revokeRef = useRef<HTMLButtonElement>(null);
+  const cancelOrigin = useRef<{ action: "regenerate" | "revoke"; token: string } | null>(null);
   const isCurrent = useCallback(() => live.current && owner.isCurrent(), [owner]);
+  const cancelAndRestore = useExplicitActionFocus(() => {
+    const origin = cancelOrigin.current; cancelOrigin.current = null;
+    const state = client.getQueryState(["share", checkRunId]);
+    const current = client.getQueryData<{ token: string } | null>(["share", checkRunId]);
+    if (!origin || !isCurrent() || state?.status !== "success" || state.fetchStatus !== "idle" || current?.token !== origin.token) return null;
+    return origin.action === "revoke" ? revokeRef.current : regenerateRef.current;
+  });
   const confirmed = query.isSuccess && !query.isError && query.fetchStatus === "idle" && !uncertain;
   const busy = create.isPending || revoke.isPending;
   const refreshing = query.fetchStatus !== "idle" || query.isPending;
@@ -165,8 +176,12 @@ function ShareDialogSession({ checkRunId, manuscriptLabel, onClose, owner, shoul
         <p className="signal-field-hint">Created {dateFormatter.format(new Date(link.created_at))}. {link.expires_at ? `Expires ${dateFormatter.format(new Date(link.expires_at))}.` : "No expiry set."}</p>
         <label><span>Replacement link expiry</span><select disabled={busy} value={replacementSelection} onChange={event => setReplacementSelection(event.target.value as ExpirySelection)}><option value="current">Keep current expiry</option>{SHARE_EXPIRY_OPTIONS.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}</select></label>
         {replacementSelection !== "current" && <Alert title="Replacement options" tone="info" role="status">Regenerating will issue a new link with {selectedOption?.label.toLowerCase()}. The current link will stop working immediately.</Alert>}
-        {!activeConfirmation && <div className="signal-share-dialog__actions"><Button variant="secondary" onClick={() => { if (canAct()) setConfirming({ action: "regenerate", token: link.token }); }}>Regenerate link</Button><Button variant="danger" onClick={() => { if (canAct()) setConfirming({ action: "revoke", token: link.token }); }}>Revoke link</Button></div>}
-        {activeConfirmation && <div ref={confirmRef} tabIndex={-1} className="signal-share-dialog__confirm"><p>{activeConfirmation.action === "revoke" ? "Revoke this link now? Anyone using it will lose access immediately." : "Replace the current link now? It will stop working as soon as the new link is issued."}</p><div><Button variant="secondary" disabled={busy} onClick={() => { if (!inFlight.current && isCurrent()) setConfirming(undefined); }}>Cancel</Button>{activeConfirmation.action === "revoke" ? <Button variant="danger" busy={revoke.isPending} onClick={event => change("revoke", event.currentTarget)}>Revoke link</Button> : <Button variant="brand" busy={create.isPending} onClick={event => change("regenerate", event.currentTarget)}>Create replacement link</Button>}</div></div>}
+        {!activeConfirmation && <div className="signal-share-dialog__actions"><Button ref={regenerateRef} variant="secondary" onClick={() => { if (canAct()) setConfirming({ action: "regenerate", token: link.token }); }}>Regenerate link</Button><Button ref={revokeRef} variant="danger" onClick={() => { if (canAct()) setConfirming({ action: "revoke", token: link.token }); }}>Revoke link</Button></div>}
+        {activeConfirmation && <div ref={confirmRef} tabIndex={-1} className="signal-share-dialog__confirm"><p>{activeConfirmation.action === "revoke" ? "Revoke this link now? Anyone using it will lose access immediately." : "Replace the current link now? It will stop working as soon as the new link is issued."}</p><div><Button variant="secondary" disabled={busy} onClick={event => {
+          if (inFlight.current || !isCurrent() || !activeConfirmation) return;
+          cancelOrigin.current = document.activeElement === event.currentTarget ? activeConfirmation : null;
+          cancelAndRestore(event.currentTarget, () => setConfirming(undefined));
+        }}>Cancel</Button>{activeConfirmation.action === "revoke" ? <Button variant="danger" busy={revoke.isPending} onClick={event => change("revoke", event.currentTarget)}>Revoke link</Button> : <Button variant="brand" busy={create.isPending} onClick={event => change("regenerate", event.currentTarget)}>Create replacement link</Button>}</div></div>}
       </div>)}
     </div>
   </Dialog>;
