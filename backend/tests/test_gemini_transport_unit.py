@@ -7,8 +7,15 @@ from typing import Any
 
 import httpx
 import pytest
+from google.genai.errors import ClientError, ServerError
 
-from app.llm.queue import TransportServerError
+from app.llm.queue import (
+    TransportDailyQuotaExhausted,
+    TransportInvalidKey,
+    TransportModelUnavailable,
+    TransportRateLimited,
+    TransportServerError,
+)
 from app.llm.transport import GeminiTransport
 
 
@@ -72,3 +79,71 @@ async def test_timeout_maps_to_recoverable_transport_failure_and_sdk_cannot_retr
     transport._client.aio.models.generate_content = timed_out
     with pytest.raises(TransportServerError, match="timed out"):
         await transport.generate(model="m", prompt="p", temperature=0)
+
+
+def _transport_with_error(error):
+    transport = _transport_with_response(None)
+
+    async def rejected(**kwargs):
+        raise error
+
+    transport._client.aio.models.generate_content = rejected
+    return transport
+
+
+@pytest.mark.parametrize("model", ["retired", "models/retired"])
+@pytest.mark.parametrize(
+    "message",
+    [
+        "models/retired is not found for API version v1beta, "
+        "or is not supported for generateContent.",
+        "models/retired was not found for API version v1beta.",
+        "models/retired is not supported for generateContent.",
+    ],
+)
+async def test_recognized_exact_model_404_is_sanitized_availability(model, message):
+    error = ClientError(404, {"error": {"status": "NOT_FOUND", "message": message}})
+    transport = _transport_with_error(error)
+    with pytest.raises(TransportModelUnavailable) as caught:
+        await transport.generate(model=model, prompt="private prompt", temperature=0)
+    assert str(caught.value) == "The requested model cannot serve this operation."
+    assert caught.value.__cause__ is error
+
+
+@pytest.mark.parametrize(
+    "code,status,message",
+    [
+        (404, "NOT_FOUND", "files/input was not found"),
+        (404, "NOT_FOUND", "models/retired-other is not found for API version v1beta"),
+        (404, "NOT_FOUND", "models/retired is not found in the input document"),
+        (404, "NOT_FOUND", "file missing; models/retired is not found for API version v1beta"),
+        (404, "NOT_FOUND", "models/retired"),
+        (404, "NOT_FOUND", None),
+        (404, "UNKNOWN", "models/retired is not found for API version v1beta"),
+        (400, "NOT_FOUND", "models/retired is not found for API version v1beta"),
+        (400, "INVALID_ARGUMENT", "Malformed request"),
+    ],
+)
+async def test_other_client_errors_are_not_reclassified(code, status, message):
+    error = ClientError(code, {"error": {"status": status, "message": message}})
+    transport = _transport_with_error(error)
+    with pytest.raises(ClientError) as caught:
+        await transport.generate(model="retired", prompt="p", temperature=0)
+    assert caught.value is error
+
+
+@pytest.mark.parametrize(
+    "code,message,expected",
+    [
+        (401, "Rejected key", TransportInvalidKey),
+        (403, "Denied key", TransportInvalidKey),
+        (429, "GenerateRequestsPerMinutePerProjectPerModel-FreeTier", TransportRateLimited),
+        (429, "GenerateRequestsPerDayPerProjectPerModel-FreeTier", TransportDailyQuotaExhausted),
+        (503, "Service unavailable", TransportServerError),
+    ],
+)
+async def test_existing_provider_failure_classes_are_preserved(code, message, expected):
+    error_type = ServerError if code >= 500 else ClientError
+    transport = _transport_with_error(error_type(code, {"error": {"message": message}}))
+    with pytest.raises(expected):
+        await transport.generate(model="retired", prompt="p", temperature=0)

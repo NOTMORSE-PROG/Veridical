@@ -4,8 +4,9 @@
 non-terminal status, it walks every remaining stage in one call (queued
 -> ingesting -> structural -> semantic -> integrity -> aggregating ->
 done), stopping only on a terminal failure or a `PipelineBlockedError`
-(quota_exhausted / api_down — parked, not failed, D-001's resumability
-requirement). Every stage's own work is idempotent: it queries already-
+(explicit quota wait or unfinished ingestion; legacy stored blocks remain
+resumable). Terminal semantic service outages instead retain an honest partial
+assessment for instructor review (D-015). Every stage's own work is idempotent: it queries already-
 persisted `check_result` rows and skips criteria that already have one,
 so calling this again after a crash (or a block clears) resumes exactly
 where it left off — no duplicate LLM calls for completed work (ticket
@@ -605,12 +606,25 @@ async def _run_semantic_stage(
                 stage_fields["degraded_code"] = "quota_exhausted"
             _record_stage(check_run, CheckRunStatus.semantic, **stage_fields)
             return
-        except ApiDownError as exc:
-            retry_seconds = settings.pipeline_api_down_retry_seconds
-            resume_at = datetime.now(UTC) + timedelta(seconds=retry_seconds)
-            raise PipelineBlockedError(
-                StageBlock(code="api_down", message=str(exc), resume_at=resume_at)
-            ) from exc
+        except ApiDownError:
+            # The existing owned stage transition publishes these pending rows
+            # and their progress metadata together. No per-row commit may escape
+            # the cancellation/claim boundary on this availability-floor path.
+            await cancellation_boundary()
+            ungraded = await _degrade_pending_semantic(
+                session,
+                check_run,
+                criteria_by_id,
+                semantic_criterion_ids,
+                outcome=ResultOutcome.api_down,
+                reason=settings.pipeline_api_down_degraded_reason,
+                commit=False,
+            )
+            stage_fields = {"status": "done", "n_criteria": len(semantic_criterion_ids)}
+            if ungraded > 0:
+                stage_fields.update(degraded_count=ungraded, degraded_code="api_down")
+            _record_stage(check_run, CheckRunStatus.semantic, **stage_fields)
+            return
     _record_stage(
         check_run, CheckRunStatus.semantic, status="done", n_criteria=len(semantic_criterion_ids)
     )
@@ -624,14 +638,17 @@ async def _degrade_pending_semantic(
     *,
     outcome: ResultOutcome,
     reason: str,
+    commit: bool = True,
 ) -> int:
     """Write an honest non-verdict for every semantic criterion still without
     a result. Re-queried (not reused) because the grading pass may have
-    persisted some results before the budget ran out — those keep their real
+    persisted some results before availability failed — those keep their real
     AI grades."""
     done_ids = await _existing_result_criterion_ids(session, check_run.id, CheckKind.semantic)
     pending = [criteria_by_id[cid] for cid in semantic_criterion_ids if cid not in done_ids]
-    await record_ungraded(session, check_run.id, pending, outcome=outcome, reason=reason)
+    await record_ungraded(
+        session, check_run.id, pending, outcome=outcome, reason=reason, commit=commit
+    )
     return len(pending)
 
 

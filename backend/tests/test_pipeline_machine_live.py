@@ -172,6 +172,206 @@ async def _seed(session_factory, tmp_path, monkeypatch, *, ingest_status=IngestS
         return check_run.id, [c.id for c in criteria], settings
 
 
+@pytest.mark.parametrize("all_unavailable", [False, True])
+async def test_model_404_recovers_or_retains_partial_report_without_losing_structural_results(
+    session_factory, tmp_path, monkeypatch, all_unavailable
+):
+    """Actual SDK classification/queue/persistence; generated answers are fixtures."""
+    import json
+    from copy import deepcopy
+    from types import SimpleNamespace
+
+    from google.genai.errors import ClientError
+
+    from app.llm.client import GeminiLLMClient
+    from app.llm.pool import ModelSpec
+    from app.llm.queue import LLMQueue
+    from app.llm.transport import GeminiTransport
+    from app.models.audit import AuditLog
+
+    run_id, criterion_ids, settings = await _seed(session_factory, tmp_path, monkeypatch)
+    async with session_factory() as session:
+        await session.execute(text("TRUNCATE llm_quota_counter, llm_response_cache"))
+        await session.commit()
+
+    class ControlledModels:
+        unavailable = {"head", "reserve"} if all_unavailable else {"head"}
+        calls = []
+        prompt_type = "semantic_grading"
+
+        async def generate_content(self, *, model, contents, config):
+            self.calls.append(model)
+            if model in self.unavailable:
+                raise ClientError(
+                    404,
+                    {
+                        "error": {
+                            "status": "NOT_FOUND",
+                            "message": f"models/{model} is not found for API version v1beta, "
+                            "or is not supported for generateContent.",
+                        }
+                    },
+                )
+            answer = await FakeLLMClient().complete(self.prompt_type, contents)
+            return SimpleNamespace(text=json.dumps(answer))
+
+    models = ControlledModels()
+    monkeypatch.setattr(
+        "app.llm.transport.genai.Client",
+        lambda **_: SimpleNamespace(aio=SimpleNamespace(models=models)),
+    )
+    queue = LLMQueue(
+        transport=GeminiTransport(api_key="controlled-no-key", timeout_seconds=1),
+        session_factory=session_factory,
+        pool=tuple(
+            ModelSpec(model=name, rpm=100, daily_quota=100, vision=True)
+            for name in ("head", "reserve")
+        ),
+        temperature=0,
+        max_retries=3,
+        retry_base_seconds=0,
+        reset_timezone=settings.llm_quota_reset_timezone,
+    )
+    queued = GeminiLLMClient(queue)
+
+    class ControlledLLM:
+        async def complete(self, prompt_type, prompt, **kwargs):
+            if prompt_type not in {"semantic_grading", "semantic_support"}:
+                return await FakeLLMClient().complete(prompt_type, prompt, **kwargs)
+            models.prompt_type = prompt_type
+            return await queued.complete(prompt_type, prompt, **kwargs)
+
+    llm = ControlledLLM()
+    async with session_factory() as session:
+        run = await session.get(CheckRun, run_id)
+        await run_check_run(session, run, settings, llm)
+        if all_unavailable:
+            assert run.status == CheckRunStatus.done
+            assert "blocked" not in run.stage_status
+            assert run.stage_status["stages"]["semantic"]["degraded_code"] == "api_down"
+            assert run.stage_status["stages"]["semantic"]["degraded_count"] == 2
+            assert "failed" not in run.stage_status
+            assert models.calls == ["head", "reserve"]
+        else:
+            assert run.status == CheckRunStatus.done
+            assert "blocked" not in run.stage_status
+            assert models.calls[:2] == ["head", "reserve"]
+
+    async with session_factory() as verify:
+        structural = (
+            (
+                await verify.execute(
+                    select(CheckResult).where(
+                        CheckResult.check_run_id == run_id, CheckResult.kind == CheckKind.structural
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        assert len(structural) == 1 and structural[0].criterion_id == criterion_ids[0]
+        original_structural = (structural[0].id, structural[0].outcome)
+        if all_unavailable:
+            semantic = (
+                (
+                    await verify.execute(
+                        select(CheckResult).where(
+                            CheckResult.check_run_id == run_id,
+                            CheckResult.kind == CheckKind.semantic,
+                        )
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            assert len(semantic) == 2
+            assert {row.criterion_id for row in semantic} == set(criterion_ids[1:])
+            assert all(
+                row.outcome == ResultOutcome.api_down
+                and row.score is None
+                and row.detail["basis"] == "not-graded"
+                and row.detail["reason"] == settings.pipeline_api_down_degraded_reason
+                for row in semantic
+            )
+            partial = (
+                await verify.execute(
+                    select(ReadinessReport).where(ReadinessReport.check_run_id == run_id)
+                )
+            ).scalar_one()
+            assert partial.status == ReadinessStatus.needs_review
+            semantic_snapshot = sorted(
+                (row.id, row.criterion_id, row.outcome, row.score, deepcopy(row.detail))
+                for row in semantic
+            )
+            report_snapshot = deepcopy(
+                {
+                    column.key: getattr(partial, column.key)
+                    for column in ReadinessReport.__table__.columns
+                }
+            )
+        failures = (
+            (
+                await verify.execute(
+                    select(AuditLog).where(
+                        AuditLog.check_run_id == run_id, AuditLog.event_type == "llm_call_failed"
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        assert failures
+        assert all(row.payload["response"]["error_code"] == "model_unavailable" for row in failures)
+
+    if all_unavailable:
+        models.unavailable = set()
+        recorded_calls = list(models.calls)
+        async with session_factory() as session:
+            run = await session.get(CheckRun, run_id)
+            await run_check_run(session, run, settings, llm)
+            assert run.status == CheckRunStatus.done
+            assert "blocked" not in run.stage_status
+        async with session_factory() as verify:
+            results = (
+                (
+                    await verify.execute(
+                        select(CheckResult).where(CheckResult.check_run_id == run_id)
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            structural = [row for row in results if row.kind == CheckKind.structural]
+            assert [(row.id, row.outcome) for row in structural] == [original_structural]
+            assert {row.criterion_id for row in results if row.kind == CheckKind.semantic} == set(
+                criterion_ids[1:]
+            )
+            assert all(
+                row.outcome == ResultOutcome.api_down and row.score is None
+                for row in results
+                if row.kind == CheckKind.semantic
+            )
+            # Availability recovery cannot refill this completed assessment.
+            assert models.calls == recorded_calls
+            assert (
+                sorted(
+                    (row.id, row.criterion_id, row.outcome, row.score, row.detail)
+                    for row in results
+                    if row.kind == CheckKind.semantic
+                )
+                == semantic_snapshot
+            )
+            report = (
+                await verify.execute(
+                    select(ReadinessReport).where(ReadinessReport.check_run_id == run_id)
+                )
+            ).scalar_one()
+            assert {
+                column.key: getattr(report, column.key)
+                for column in ReadinessReport.__table__.columns
+            } == report_snapshot
+
+
 # Sanity check on the fixture PDF: the two semantic criteria above really
 # do land in two DIFFERENT section batches (required for the resumability
 # test below to mean anything).

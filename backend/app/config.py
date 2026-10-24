@@ -472,6 +472,14 @@ class Settings(BaseSettings):
         "Not graded by AI. Today's free AI capacity was reached. "
         "Needs your review, or re-run this check after the daily reset."
     )
+    # Service outages are distinct from quota exhaustion and never imply that
+    # an AI judgment was recorded. This reason can persist before later stages.
+    pipeline_api_down_degraded_reason: str = (
+        "Not graded by AI. The AI service was unavailable, so no completed grade "
+        "was recorded for this criterion. AI grading of this criterion will not "
+        "retry automatically in this run. If a report is produced, review the "
+        "manuscript and record your own judgment there. You can also start a new check later."
+    )
     # The scheduler always waits for accepted-request wakeups. Production
     # independently polls durable queued work (BUG-136); this flag enables
     # that periodic recovery outside production as an explicit local opt-in.

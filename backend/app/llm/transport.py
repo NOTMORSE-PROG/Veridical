@@ -1,6 +1,7 @@
 """The ONE module that imports the google-genai SDK (CODING.md §2)."""
 
 import json
+import re
 from typing import Any
 
 import httpx
@@ -11,6 +12,7 @@ from google.genai import types as genai_types
 from app.llm.queue import (
     TransportDailyQuotaExhausted,
     TransportInvalidKey,
+    TransportModelUnavailable,
     TransportRateLimited,
     TransportServerError,
 )
@@ -26,6 +28,23 @@ _DAILY_QUOTA_MARKERS = ("PerDay", "RequestsPerDay", "GenerateRequestsPerDayPerPr
 
 def _is_daily_quota_error(exc: Exception) -> bool:
     return any(marker in str(exc) for marker in _DAILY_QUOTA_MARKERS)
+
+
+def _is_model_unavailable_error(exc: genai_errors.APIError, model: str) -> bool:
+    # GenerateContent also uses 404 for missing input resources. Recognize
+    # only the provider's model/operation response for this exact model;
+    # unknown resource failures must retain their separate client semantics.
+    if exc.code != 404 or exc.status != "NOT_FOUND" or not isinstance(exc.message, str):
+        return False
+    resource = "models/" + model.removeprefix("models/")
+    return (
+        re.match(
+            rf"^{re.escape(resource)} (?:is|was) "
+            r"(?:not found for API version\b|not supported for generateContent\b)",
+            exc.message,
+        )
+        is not None
+    )
 
 
 class GeminiTransport:
@@ -67,6 +86,10 @@ class GeminiTransport:
         except httpx.TransportError as exc:
             raise TransportServerError("The model service connection failed or timed out.") from exc
         except genai_errors.APIError as exc:
+            if _is_model_unavailable_error(exc, model):
+                raise TransportModelUnavailable(
+                    "The requested model cannot serve this operation."
+                ) from exc
             if exc.code == 429:
                 if _is_daily_quota_error(exc):
                     raise TransportDailyQuotaExhausted(str(exc)) from exc

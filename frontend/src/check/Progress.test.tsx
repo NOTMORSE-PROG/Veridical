@@ -259,8 +259,51 @@ describe("CheckProgressPage", () => {
     await screen.findByRole("link", { name: "Open manuscript review" });
     expect(screen.getByText("Needs review")).toBeInTheDocument();
     expect(
-      screen.getByText(/3 of 12 criteria were not graded by AI \(today's free AI capacity was reached\)\. 9 criteria were graded normally\./),
+      screen.getByText(/3 of 12 criteria were not graded by AI \(today's free AI capacity was reached\)/),
     ).toBeInTheDocument();
+    expect(screen.queryByText(/graded normally/)).not.toBeInTheDocument();
+    expect(screen.getByText(/after the daily reset/)).toBeInTheDocument();
+  });
+
+  it.each(["done", "integrity", "failed", "cancelled"])("keeps outage advice stage-local when the run is %s", async (status) => {
+    const run = {
+      ...DEGRADED, status,
+      stage_status: { ...DEGRADED.stage_status, stages: {
+        ...DEGRADED.stage_status.stages,
+        semantic: { status: "done", n_criteria: 12, degraded_count: 3, degraded_code: "api_down" },
+      } },
+    };
+    vi.stubGlobal("fetch", stubFetchByPath({ "/check-runs/5": run }));
+    renderWithProviders(<CheckProgressPage />, { route: "/checks/5", path: "/checks/:checkRunId" });
+    const detail = await screen.findByText(/3 of 12 semantic criteria have no completed AI grade because an AI service was unavailable/);
+    expect(detail).toHaveTextContent("AI grading of these ungraded semantic criteria will not retry automatically in this run. Other checks may continue.");
+    expect(detail).toHaveTextContent("If a report is produced, review the ungraded criteria in manuscript review and record your own judgments. You can also start a new check later.");
+    expect(detail).not.toHaveTextContent(/daily reset|graded normally|This completed run/);
+    expect(screen.getByText("Needs review")).toBeInTheDocument();
+    if (status !== "done") expect(screen.queryByRole("link", { name: "Open manuscript review" })).not.toBeInTheDocument();
+  });
+
+  it("does not promise a quota reset for an unknown degraded cause", async () => {
+    vi.stubGlobal("fetch", stubFetchByPath({ "/check-runs/5": {
+      ...DEGRADED, stage_status: { stages: { semantic: {
+        status: "done", n_criteria: 12, degraded_count: 3, degraded_code: "new_service_cause",
+      } } },
+    } }));
+    renderWithProviders(<CheckProgressPage />, { route: "/checks/5", path: "/checks/:checkRunId" });
+    const detail = await screen.findByText(/3 of 12 criteria were not graded by AI/);
+    expect(detail).not.toHaveTextContent(/daily reset|graded normally/);
+  });
+
+  it("does not invent an outage warning when no criterion was degraded", async () => {
+    vi.stubGlobal("fetch", stubFetchByPath({ "/check-runs/5": {
+      ...DEGRADED, stage_status: { stages: { semantic: {
+        status: "done", n_criteria: 12, degraded_count: 0, degraded_code: "api_down",
+      } } },
+    } }));
+    renderWithProviders(<CheckProgressPage />, { route: "/checks/5", path: "/checks/:checkRunId" });
+    await screen.findByRole("link", { name: "Open manuscript review" });
+    expect(screen.queryByText("Needs review")).not.toBeInTheDocument();
+    expect(screen.queryByText(/service was unavailable/)).not.toBeInTheDocument();
   });
 
   it("shows a real loading state, then a real fetch-error state with a working retry", async () => {

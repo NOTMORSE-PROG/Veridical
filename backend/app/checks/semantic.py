@@ -594,6 +594,7 @@ async def record_ungraded(
     *,
     outcome: ResultOutcome,
     reason: str,
+    commit: bool = True,
 ) -> list[CheckResult]:
     """Record criteria the AI never got to grade, as an honest STATE rather
     than a verdict (V-050, availability floor).
@@ -605,9 +606,8 @@ async def record_ungraded(
     AI looked and was unsure — and the scoring engine already excludes both
     from the composite rather than counting them as passes (F8.1).
 
-    Tier-0 shadow signals are still computed and attached: they are free,
-    local, and give the instructor something concrete to look at even when no
-    LLM ran. They never decide the outcome (D-012).
+    With `commit=False`, records remain pending for the caller's owned stage
+    transaction. The default retains the existing per-result publication.
     """
     return [
         await _persist(
@@ -616,6 +616,7 @@ async def record_ungraded(
             criterion,
             outcome,
             {"basis": "not-graded", "reason": reason},
+            commit=commit,
         )
         for criterion in criteria
     ]
@@ -627,6 +628,8 @@ async def _persist(
     criterion: Any,
     outcome: ResultOutcome,
     detail: dict[str, Any],
+    *,
+    commit: bool = True,
 ) -> CheckResult:
     result = CheckResult(
         check_run_id=check_run_id,
@@ -637,7 +640,8 @@ async def _persist(
         detail={k: v for k, v in detail.items() if k != "score"},
     )
     session.add(result)
-    await session.commit()
+    if commit:
+        await session.commit()
     return result
 
 

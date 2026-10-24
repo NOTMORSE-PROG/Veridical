@@ -80,9 +80,14 @@ function progressSummary(run: CheckRun): ProgressSummary {
 function degradedDetail(entry: { n_criteria?: number; degraded_count?: number; degraded_code?: string }): string {
   const total = entry.n_criteria ?? 0;
   const degraded = entry.degraded_count ?? 0;
-  const graded = total - degraded;
+  if (entry.degraded_code === "api_down") {
+    return `${degraded} of ${total} semantic criteria have no completed AI grade because an AI service was unavailable. AI grading of these ungraded semantic criteria will not retry automatically in this run. Other checks may continue. If a report is produced, review the ungraded criteria in manuscript review and record your own judgments. You can also start a new check later.`;
+  }
   const reason = DEGRADED_REASONS[entry.degraded_code ?? ""] ?? "an AI service issue";
-  return `${degraded} of ${total} criteria were not graded by AI (${reason}). ${graded} ${graded === 1 ? "criterion was" : "criteria were"} graded normally. Review the ungraded criteria directly, or re-run this check after the daily reset.`;
+  const recovery = entry.degraded_code === "quota_exhausted"
+    ? "Review the ungraded criteria directly, or start a new check after the daily reset."
+    : "Review the ungraded criteria directly, or start a new check later.";
+  return `${degraded} of ${total} criteria were not graded by AI (${reason}). ${recovery}`;
 }
 
 type StageState = "attention" | "blocked" | "done" | "pending" | "running" | "skipped";

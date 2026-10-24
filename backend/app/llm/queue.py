@@ -33,6 +33,7 @@ __all__ = [
     "Transport",
     "TransportDailyQuotaExhausted",
     "TransportInvalidKey",
+    "TransportModelUnavailable",
     "TransportRateLimited",
     "TransportServerError",
 ]
@@ -64,6 +65,10 @@ class TransportDailyQuotaExhausted(Exception):
 
 class TransportServerError(Exception):
     """Transport signaled a 5xx — retry with backoff, then `api_down`."""
+
+
+class TransportModelUnavailable(Exception):
+    """The requested model cannot serve this operation; try an eligible reserve."""
 
 
 class TransportInvalidKey(Exception):
@@ -99,7 +104,8 @@ class LLMQueue:
 
     Gemini meters requests-per-day per model, so the pool is a list of
     independent quota islands tried in order: the queue only moves to the
-    next model once the current one's own day is spent. A single pinned
+    next model once the current one's own day is spent or the provider
+    explicitly reports that model unavailable for the operation. A single pinned
     model would cap the product at that model's RPD.
     """
 
@@ -330,6 +336,7 @@ class LLMQueue:
                 return cached
 
         exhausted: list[str] = []
+        unavailable: list[str] = []
         for spec in candidates:
             input_hash = hashes[spec.model]
 
@@ -343,6 +350,29 @@ class LLMQueue:
                     input_hash=input_hash,
                     check_run_id=check_run_id,
                 )
+            except TransportModelUnavailable:
+                # A model-specific 404 is neither a spent allowance nor a
+                # transient failure. Keep the physical attempt reservation,
+                # record a sanitized failure, and try the existing reserve.
+                async with self._session_factory() as session:
+                    await self._write_audit(
+                        session,
+                        event_type="llm_call_failed",
+                        prompt_type=prompt_type,
+                        prompt_version=prompt_version,
+                        input_hash=input_hash,
+                        check_run_id=check_run_id,
+                        response={
+                            "error_code": "model_unavailable",
+                            "error": "The requested model cannot serve this operation.",
+                        },
+                        context=context,
+                        prompt=prompt,
+                        model=spec.model,
+                    )
+                    await session.commit()
+                unavailable.append(spec.model)
+                continue
             except TransportDailyQuotaExhausted as exc:
                 # Reality disagreed with our counter (the real cap moved, or
                 # something outside this app spent it). Believe the API, close
@@ -431,6 +461,11 @@ class LLMQueue:
 
             return response
 
+        if unavailable:
+            # Other candidates may have spent their allowance, but claiming
+            # that every model exhausted quota would erase the availability
+            # failure. Reuse the existing honest API-unavailable handling.
+            raise ApiDownError("No eligible model could serve this call; a model was unavailable.")
         if not candidates:
             # BUG-035 follow-up (backend review): reachable only if every
             # candidate model has daily_quota=0 (or, for the image path,

@@ -18,6 +18,7 @@ from app.llm.queue import (
     LLMQueue,
     TransportDailyQuotaExhausted,
     TransportInvalidKey,
+    TransportModelUnavailable,
     TransportRateLimited,
     TransportServerError,
 )
@@ -411,6 +412,98 @@ class PerModelTransport:
                 "GenerateRequestsPerDayPerProjectPerModel-FreeTier quotaValue: '20'"
             )
         return {"served_by": model}
+
+
+class AvailabilityTransport(PerModelTransport):
+    def __init__(self, *, unavailable=(), daily_exhausted=()):
+        super().__init__(daily_exhausted=set(daily_exhausted))
+        self.unavailable = set(unavailable)
+
+    async def generate(self, *, model, prompt, temperature, **context):
+        if model in self.unavailable:
+            self.calls.append(model)
+            raise TransportModelUnavailable("raw provider details must not enter the audit")
+        return await super().generate(
+            model=model, prompt=prompt, temperature=temperature, **context
+        )
+
+
+async def test_unavailable_model_uses_reserve_and_preserves_real_accounting_and_cache(
+    session_factory,
+):
+    from app.models.llm import LLMQuotaCounter, LLMResponseCache
+
+    transport = AvailabilityTransport(unavailable={"head"})
+    queue = _make_queue(session_factory, transport, pool=_pool(("head", 50, 1), ("reserve", 50, 1)))
+    request = dict(prompt_type="t", prompt="same input", prompt_version="v1")
+    assert await queue.submit(**request) == {"served_by": "reserve"}
+    assert await queue.submit(**request) == {"served_by": "reserve"}
+    assert transport.calls == ["head", "reserve"]
+    async with session_factory() as session:
+        counters = (await session.execute(select(LLMQuotaCounter))).scalars().all()
+        assert {row.model: row.call_count for row in counters} == {"head": 1, "reserve": 1}
+        cache = (await session.execute(select(LLMResponseCache))).scalar_one()
+        assert cache.model == "reserve"
+        audits = (await session.execute(select(AuditLog).order_by(AuditLog.id))).scalars().all()
+        assert [row.event_type for row in audits] == [
+            "llm_transport_attempt",
+            "llm_call_failed",
+            "llm_transport_attempt",
+            "llm_call",
+            "llm_cache_hit",
+        ]
+        failed = audits[1]
+        assert failed.payload["response"] == {
+            "error_code": "model_unavailable",
+            "error": "The requested model cannot serve this operation.",
+        }
+        assert failed.payload["model"] == "head"
+        assert audits[3].payload["model"] == "reserve"
+        assert cache.input_hash == audits[3].input_hash == audits[4].input_hash
+        assert failed.input_hash != cache.input_hash
+    status = await queue.get_quota_status()
+    assert all(not model["exhausted"] for model in status["models"])
+
+
+@pytest.mark.parametrize("daily_exhausted", [(), ("head",), ("reserve",)])
+async def test_unavailable_and_mixed_pool_failures_do_not_claim_all_quota_spent(
+    session_factory, daily_exhausted
+):
+    unavailable = {"head", "reserve"} - set(daily_exhausted)
+    transport = AvailabilityTransport(unavailable=unavailable, daily_exhausted=daily_exhausted)
+    queue = _make_queue(session_factory, transport, pool=_pool(("head", 50, 1), ("reserve", 50, 1)))
+    with pytest.raises(ApiDownError, match="model was unavailable"):
+        await queue.submit(prompt_type="t", prompt="p", prompt_version="v1")
+    assert transport.calls == ["head", "reserve"]
+    status = await queue.get_quota_status()
+    for model in status["models"]:
+        assert model["calls_used"] == (50 if model["model"] in daily_exhausted else 1)
+        assert model["exhausted"] is (model["model"] in daily_exhausted)
+    async with session_factory() as session:
+        exhausted = (
+            (
+                await session.execute(
+                    select(AuditLog).where(AuditLog.event_type == "llm_model_exhausted")
+                )
+            )
+            .scalars()
+            .all()
+        )
+        assert {row.payload["model"] for row in exhausted} == set(daily_exhausted)
+
+
+async def test_vision_unavailability_uses_only_enabled_vision_reserve(session_factory):
+    transport = AvailabilityTransport(unavailable={"head"})
+    queue = _make_queue(
+        session_factory,
+        transport,
+        pool=_pool(("head", 50, 1), ("text", 50, 0), ("disabled", 0, 1), ("reserve", 50, 1)),
+    )
+    result = await queue.submit(
+        prompt_type="vision", prompt="p", prompt_version="v1", images=[b"png"]
+    )
+    assert result == {"served_by": "reserve"}
+    assert transport.calls == ["head", "reserve"]
 
 
 async def test_pool_fails_over_to_the_next_model_when_an_island_is_spent(session_factory):
