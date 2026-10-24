@@ -46,7 +46,7 @@ from app.checks.reuse.service import (
     existing_originality_reuse_result,
     run_originality_reuse_check,
 )
-from app.checks.router import RouteDecision, apply_routing, route_criteria
+from app.checks.router import RouteDecision, apply_routing, decode_routing_plan, route_criteria
 from app.checks.rules.context import build_rule_context
 from app.checks.semantic import record_ungraded
 from app.checks.structural import run_structural_check
@@ -468,13 +468,9 @@ def is_blocked(check_run: CheckRun, *, now: datetime | None = None) -> bool:
     return datetime.fromisoformat(resume_at) > now
 
 
-async def _existing_result_criterion_ids(
-    session: AsyncSession, check_run_id: int, kind: CheckKind
-) -> set[int]:
+async def _existing_result_criterion_ids(session: AsyncSession, check_run_id: int) -> set[int]:
     ids = await session.scalars(
-        select(CheckResult.criterion_id).where(
-            CheckResult.check_run_id == check_run_id, CheckResult.kind == kind
-        )
+        select(CheckResult.criterion_id).where(CheckResult.check_run_id == check_run_id)
     )
     return {i for i in ids if i is not None}
 
@@ -482,17 +478,57 @@ async def _existing_result_criterion_ids(
 async def _routed_decisions(
     session: AsyncSession, check_run: CheckRun, criteria: list[Any]
 ) -> list[RouteDecision]:
-    """Routing (V-015) is pure and cheap to recompute every call, but its
-    SIDE EFFECT (the audit_log row + persisted not_applicable results for
-    unroutable criteria) must only ever happen ONCE per check_run."""
-    decisions = route_criteria(criteria)
-    already_routed = await session.scalar(
-        select(func.count())
-        .select_from(AuditLog)
-        .where(AuditLog.check_run_id == check_run.id, AuditLog.event_type == "criterion_routing")
+    """Publish a fresh plan once, then preserve it across worker/code restarts."""
+    plans = list(
+        await session.scalars(
+            select(AuditLog)
+            .where(
+                AuditLog.check_run_id == check_run.id, AuditLog.event_type == "criterion_routing"
+            )
+            .order_by(AuditLog.id)
+        )
     )
-    if not already_routed:
-        await apply_routing(session, check_run.id, decisions)
+    existing = await _existing_result_criterion_ids(session, check_run.id)
+    if plans:
+        try:
+            decoded = [
+                decode_routing_plan(plan.payload, {criterion.id for criterion in criteria})
+                for plan in plans
+            ]
+            decisions = decoded[0]
+            terminal_ids = {decision.criterion_id for decision in decisions if decision.unroutable}
+            terminal_rows = (
+                list(
+                    await session.scalars(
+                        select(CheckResult)
+                        .where(
+                            CheckResult.check_run_id == check_run.id,
+                            CheckResult.criterion_id.in_(terminal_ids),
+                        )
+                        .execution_options(populate_existing=True)
+                    )
+                )
+                if terminal_ids
+                else []
+            )
+            valid_terminal_ids = {
+                row.criterion_id
+                for row in terminal_rows
+                if row.kind == CheckKind.semantic
+                and row.outcome == ResultOutcome.not_applicable
+                and row.score is None
+            }
+            if any(plan != decisions for plan in decoded[1:]) or valid_terminal_ids != terminal_ids:
+                raise ValueError("The saved routing state is inconsistent.")
+        except ValueError as exc:
+            raise TerminalFailure(
+                "evaluation_plan_unavailable", messages.EVALUATION_PLAN_UNAVAILABLE
+            ) from exc
+        return decisions
+    if existing or check_run.status != CheckRunStatus.structural:
+        raise TerminalFailure("evaluation_plan_unavailable", messages.EVALUATION_PLAN_UNAVAILABLE)
+    decisions = route_criteria(criteria)
+    await apply_routing(session, check_run.id, decisions)
     return decisions
 
 
@@ -524,7 +560,7 @@ async def _run_structural_stage(
     structural_decisions = [
         d for d in decisions if d.kind == CheckKind.structural and not d.unroutable
     ]
-    done_ids = await _existing_result_criterion_ids(session, check_run.id, CheckKind.structural)
+    done_ids = await _existing_result_criterion_ids(session, check_run.id)
     pending = [d for d in structural_decisions if d.criterion_id not in done_ids]
     if pending:
         ctx = await build_rule_context(session, manuscript, settings)
@@ -551,7 +587,7 @@ async def _run_semantic_stage(
     semantic_criterion_ids = [
         d.criterion_id for d in decisions if d.kind == CheckKind.semantic and not d.unroutable
     ]
-    done_ids = await _existing_result_criterion_ids(session, check_run.id, CheckKind.semantic)
+    done_ids = await _existing_result_criterion_ids(session, check_run.id)
     pending = [criteria_by_id[cid] for cid in semantic_criterion_ids if cid not in done_ids]
     if pending:
         extraction = await load_raw_store_async(settings, manuscript.id)
@@ -644,7 +680,7 @@ async def _degrade_pending_semantic(
     a result. Re-queried (not reused) because the grading pass may have
     persisted some results before availability failed — those keep their real
     AI grades."""
-    done_ids = await _existing_result_criterion_ids(session, check_run.id, CheckKind.semantic)
+    done_ids = await _existing_result_criterion_ids(session, check_run.id)
     pending = [criteria_by_id[cid] for cid in semantic_criterion_ids if cid not in done_ids]
     await record_ungraded(
         session, check_run.id, pending, outcome=outcome, reason=reason, commit=commit

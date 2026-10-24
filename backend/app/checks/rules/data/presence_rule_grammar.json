@@ -1,0 +1,9 @@
+{
+  "_comment": "Positive whole-input presence claims only. Targets come from existing heading vocabulary. Extra instructions remain semantic.",
+  "subjects": ["manuscript", "document", "paper", "report", "thesis", "dissertation", "submission"],
+  "patterns": [
+    "(?:(?:the|this)\\s+)?(?:{{subjects}})\\s+(?:(?:must|shall|should)\\s+)?(?:include|contain|have|has|includes|contains)\\s+(?:(?:an?|the)\\s+)?{{target}}(?:\\s+section)?[.!]?",
+    "(?:(?:the|this|an?)\\s+)?{{target}}(?:\\s+section)?\\s+(?:(?:must|shall|should)\\s+)?(?:be\\s+)?(?:present|included|provided|required)[.!]?",
+    "(?:include|provide)\\s+(?:(?:an?|the)\\s+)?{{target}}(?:\\s+section)?[.!]?"
+  ]
+}

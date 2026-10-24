@@ -599,6 +599,7 @@ def test_shared_report_public_schema_is_an_exact_allow_list(
         "reasoning",
         # Explicitly approved structural observations, including saved headings.
         "rule_facts",
+        "rule_scope_unconfirmed",
         "reason",
         "evidence",
         # V-069 AC5: the decided level IS the judgment for a levelled

@@ -5,18 +5,15 @@ rule is honestly `not_applicable` there, never a fake pass/fail.
 """
 
 from app.checks.rules import RuleContext, RuleOutcome, RuleSpec, register_rule
-from app.checks.rules.bounds import extract_bound
-from app.checks.rules.keywords import contains_any, full_text, load_keywords
+from app.checks.rules.keywords import full_text
+from app.checks.rules.page_bounds import parse_page_bound
 from app.models.enums import ResultOutcome
-
-_KEYWORDS = load_keywords()
 
 RULE_ID = "page_limit"
 
 
 def _matches(criterion) -> bool:
-    text = full_text(criterion)
-    return contains_any(text, _KEYWORDS.page_nouns) and extract_bound(text) is not None
+    return parse_page_bound(full_text(criterion)).state == "recognized"
 
 
 def _within(kind: str, low: float, high: float | None, actual: float) -> bool:
@@ -60,12 +57,17 @@ def _run(criterion, ctx: RuleContext) -> RuleOutcome:
             },
         )
     text = full_text(criterion)
-    bound = extract_bound(text)
+    bound = parse_page_bound(text).bound
     if bound is None:
         return RuleOutcome(
-            outcome=ResultOutcome.not_applicable,
+            outcome=ResultOutcome.unverifiable,
             anchor="document",
-            detail={"reason": "Could not extract a page bound from the criterion wording."},
+            detail={
+                "reason": (
+                    "The complete page requirement could not be checked by the page-count rule. "
+                    "Review the full requirement directly."
+                )
+            },
         )
     ok = _within(bound.kind, bound.low, bound.high, ctx.page_count)
     anchor = f"document ({ctx.page_count} pages)"

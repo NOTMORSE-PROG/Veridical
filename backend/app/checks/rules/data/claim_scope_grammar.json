@@ -1,0 +1,17 @@
+{
+  "_comment": "A named-section claim may reach only a family whose complete supported scope matches. Empty allowed set means abstain, never unrestricted.",
+  "document_subjects": ["manuscript", "document", "paper", "report", "thesis", "dissertation", "submission"],
+  "reference_subjects": ["references", "bibliography", "reference list"],
+  "reference_units": ["reference", "references", "citation", "citations", "source", "sources"],
+  "count_adjectives": ["major"],
+  "number": "[0-9]+(?:\\.[0-9]+)?",
+  "bound": "(?:(?:at least|minimum(?: of)?|no (?:less|fewer) than|not less than|at most|maximum(?: of)?|no more than|not (?:exceed|more than)|must not exceed|up to|exactly)\\s+{{number}}|(?:>=|<=)\\s*{{number}}|(?:between|from)\\s+{{number}}\\s+(?:and|to)\\s+{{number}}|{{number}})",
+  "citation_patterns": [
+    "(?:the\\s+)?APA\\s+year-in-parentheses\\s+pattern\\s+in\\s+(?:the\\s+)?(?:{{references}})\\s+(?:must\\s+)?meets?\\s+the\\s+configured\\s+threshold[.!]?"
+  ],
+  "reference_count_patterns": [
+    "{{bound}}\\s+(?:(?:{{adjectives}})\\s+)?(?:{{units}})[.!]?",
+    "(?:(?:the|this)\\s+)?(?:{{documents}}|{{references}})\\s+(?:(?:must|shall|should)\\s+)?(?:include|contain|have|has|includes|contains)\\s+{{bound}}\\s+(?:(?:{{adjectives}})\\s+)?(?:{{units}})[.!]?",
+    "(?:(?:the|this)\\s+)?(?:{{references}})\\s*:\\s*{{bound}}\\s+(?:(?:{{adjectives}})\\s+)?(?:{{units}})[.!]?"
+  ]
+}

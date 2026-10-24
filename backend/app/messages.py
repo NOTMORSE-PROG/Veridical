@@ -19,6 +19,11 @@ ticket for the full account of why this docstring was corrected instead.
 
 UNSUPPORTED_FILE_TYPE = "Unsupported file type '{suffix}'. Supported types: {supported}."
 
+EVALUATION_PLAN_UNAVAILABLE = (
+    "This check's saved evaluation plan could not be read. Completed results are retained. "
+    "Start a new check to evaluate the manuscript."
+)
+
 FILE_UNREADABLE = (
     "The file could not be read as a document. It may be corrupted or "
     "incomplete. Please re-export and upload it again."

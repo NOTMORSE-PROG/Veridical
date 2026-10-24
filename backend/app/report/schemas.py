@@ -77,6 +77,7 @@ class CriterionResultOut(BaseModel):
     judgment_revision: int | None = None
     source_coverage: CriterionSourceCoverageOut | None = None
     rule_facts: RuleFacts | None = None
+    rule_scope_unconfirmed: bool = False
     criterion_id: int
     text: str
     type: str
@@ -313,6 +314,8 @@ class PublicCriterionResultOut(BaseModel):
     grows."""
 
     criterion_id: int
+    # Safe disclosure only; private capability digests are never published.
+    rule_scope_unconfirmed: bool = False
     text: str
     type: str
     weight: float

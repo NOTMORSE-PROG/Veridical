@@ -683,30 +683,21 @@ def test_bug_048_all_eleven_real_tip_criteria_route_and_execute_with_no_false_st
     # Acceptable(2)" must NOT match table_formatting_presence via the
     # "acceptable" contains "table" substring collision -- that produced
     # a confident, wrong FAIL ("No tables were found in the manuscript").
-    # With the collision gone, the criterion's own mention of
-    # "bibliography" legitimately matches `required_section_present`
-    # instead (the generic, load-last "does a named section exist" rule)
-    # -- and, via the reference_titles synonym fix above, correctly finds
-    # the document's real "REFERENCES" section rather than falsely
-    # failing on a bibliography/references naming mismatch.
+    # BUG-387: formatting correctness cannot be established merely because
+    # a bibliography heading exists. Preserve all original instructions and
+    # defer this compound criterion rather than substituting a presence pass.
     bibliography_format_decision = decisions[9]
-    assert bibliography_format_decision.kind == CheckKind.structural
-    assert bibliography_format_decision.rule_id == REQUIRED_SECTION_RULE_ID
-    bibliography_outcome = get_rule(REQUIRED_SECTION_RULE_ID).run(
-        FakeCriterion(text=criteria[9]["text"], evidence=criteria[9]["evidence_needed"]), ctx
-    )
-    assert bibliography_outcome.outcome == ResultOutcome.passed
-    assert bibliography_outcome.detail["matched_title"] == "REFERENCES"
+    assert bibliography_format_decision.kind == CheckKind.semantic
+    assert bibliography_format_decision.rule_id is None and bibliography_format_decision.degraded
 
-    # BUG-048 root cause 2: routes to reference_count_min_max (a real
-    # reference noun AND a real bound ARE present in the text), but the
+    # BUG-048 root cause 2: a real reference noun and bound exist, but the
     # bound `extract_bound` actually finds ("<= 2 internet sites", a
     # per-level sub-constraint) is not about the total reference count --
-    # it must resolve to `unverifiable`, never a false FAIL against the
-    # document's real 17 references.
+    # complete criterion must defer, never a false FAIL against 17 entries.
+    # The direct executor's unit refusal remains a separate adverse control.
     reference_count_decision = decisions[10]
-    assert reference_count_decision.kind == CheckKind.structural
-    assert reference_count_decision.rule_id == REFERENCE_COUNT_RULE_ID
+    assert reference_count_decision.kind == CheckKind.semantic
+    assert reference_count_decision.rule_id is None and reference_count_decision.degraded
     spec = get_rule(REFERENCE_COUNT_RULE_ID)
     criterion = FakeCriterion(text=criteria[10]["text"], evidence=criteria[10]["evidence_needed"])
     outcome = spec.run(criterion, ctx)

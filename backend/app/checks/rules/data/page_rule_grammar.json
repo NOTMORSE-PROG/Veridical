@@ -1,0 +1,40 @@
+{
+  "_comment": [
+    "Conservative whole-document page-count grammar for F3.2.",
+    "Vocabulary and accepted wording are data; unrecognized page constraints keep semantic routing.",
+    "Only integer min/max/exact bounds are settled. No substring, local-section or compound matching.",
+    "This packaged file is independent of the legacy generic structural bound settings."
+  ],
+  "units": ["page", "pages", "pp"],
+  "abbreviated_units": ["pp"],
+  "subjects": ["manuscript", "document", "paper", "report", "thesis", "dissertation", "submission"],
+  "numbers": {
+    "zero": 0, "one": 1, "two": 2, "three": 3, "four": 4,
+    "five": 5, "six": 6, "seven": 7, "eight": 8, "nine": 9,
+    "ten": 10, "eleven": 11, "twelve": 12, "thirteen": 13,
+    "fourteen": 14, "fifteen": 15, "sixteen": 16, "seventeen": 17,
+    "eighteen": 18, "nineteen": 19, "twenty": 20, "thirty": 30,
+    "forty": 40, "fifty": 50, "sixty": 60, "seventy": 70,
+    "eighty": 80, "ninety": 90
+  },
+  "compound_first": ["twenty", "thirty", "forty", "fifty", "sixty", "seventy", "eighty", "ninety"],
+  "compound_second": ["one", "two", "three", "four", "five", "six", "seven", "eight", "nine"],
+  "word_separator": "[ -]",
+  "integer": "[0-9]+",
+  "prefix": "(?:(?:(?:the|this)\\s+)?(?:(?:pdf|docx)\\s+)?(?:{{subjects}})\\s+)?(?:(?:must|shall|should)\\s+)?(?:(?:contains?|have|has|includes?|be|is)\\s+)?",
+  "suffix": "(?:\\s+(?:in total|overall))?[.!]?",
+  "comparisons": {
+    "min": "(?:(?:at least|(?:a )?minimum(?: of)?|no (?:less|fewer) than|not less than)\\s+|(?:>=|≥)\\s*)",
+    "max": "(?:(?:at most|(?:a )?maximum(?: of)?|no more than|not (?:exceed|more than)|up to)\\s+|(?:<=|≤)\\s*)",
+    "exact": "(?:exactly\\s+)?"
+  },
+  "pattern": "{{prefix}}{{comparison}}(?P<number>{{number}})\\s*(?P<unit>{{units}}){{suffix}}",
+  "unit_signals": [
+    "(?:{{long_units}})",
+    "(?<![a-z])(?:{{abbreviated_units}})",
+    "(?:[0-9]+|(?<![a-z])(?:{{number}}))[^a-z0-9]*(?:{{units}})"
+  ],
+  "non_count_patterns": [
+    "(?:(?:(?:the|this)\\s+)?(?:{{subjects}})\\s+(?:must|shall|should)\\s+)?include\\s+(?:a\\s+|the\\s+)?title[ -]page[.!]?"
+  ]
+}

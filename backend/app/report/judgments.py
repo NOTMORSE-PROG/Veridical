@@ -28,7 +28,7 @@ from app.report.judgment_schemas import (
     OriginalJudgmentAssessment,
 )
 from app.report.judgment_snapshot import judgment_grade_identity, snapshot_judgment
-from app.report.rule_facts import project_rule_facts
+from app.report.rule_facts import project_rule_facts, project_rule_scope_unconfirmed
 from app.report.schemas import EvidenceItem, RubricLevelOut
 from app.report.source_coverage import project_source_coverage
 
@@ -123,6 +123,11 @@ def _original(
     from app.report.judgment_snapshot import stored_level
 
     return OriginalJudgmentAssessment(
+        rule_scope_unconfirmed=project_rule_scope_unconfirmed(
+            detail, criterion=criterion, kind=result.kind.value, outcome=result.outcome.value
+        )
+        if criterion is not None
+        else False,
         source_coverage=project_source_coverage(detail.get("source_coverage")),
         rule_facts=project_rule_facts(
             detail,

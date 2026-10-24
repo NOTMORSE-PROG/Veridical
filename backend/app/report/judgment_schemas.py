@@ -84,6 +84,7 @@ class JudgmentChoices(PrivateJudgmentModel):
 class OriginalJudgmentAssessment(PrivateJudgmentModel):
     source_coverage: CriterionSourceCoverageOut | None = None
     rule_facts: RuleFacts | None = None
+    rule_scope_unconfirmed: bool = False
     kind: str
     basis: str | None
     reason: str | None

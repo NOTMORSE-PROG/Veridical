@@ -15,6 +15,8 @@ from pydantic import (
     model_validator,
 )
 
+from app.checks.rules.presence import PRESENCE_SCOPE_VERSION, presence_input_digest
+
 
 class _Facts(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True, frozen=True)
@@ -292,3 +294,19 @@ def rule_facts_presentation(facts: RuleFacts) -> tuple[list[str], list[str]]:
         copy["citation_" + facts.threshold_relation],
         copy["citation_scope"],
     ], []
+
+
+def project_rule_scope_unconfirmed(detail: object, *, criterion, kind: str, outcome: str) -> bool:
+    """Read saved capability provenance; never run today's grammar on an old grade."""
+    facts = project_rule_facts(
+        detail, criterion_type=criterion.type.value, kind=kind, outcome=outcome
+    )
+    if not isinstance(facts, HeadingFacts):
+        return False
+    scope = detail.get("section_presence_scope")
+    return not (
+        isinstance(scope, dict)
+        and scope.get("version") == PRESENCE_SCOPE_VERSION
+        and scope.get("rule_id") == facts.rule_id
+        and scope.get("input_digest") == presence_input_digest(criterion)
+    )

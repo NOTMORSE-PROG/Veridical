@@ -14,6 +14,7 @@ from collections.abc import Iterator
 
 from app.checks.rules import RuleContext, RuleOutcome, RuleSpec, register_rule
 from app.checks.rules.keywords import contains_any, full_text, load_keywords
+from app.checks.rules.presence import is_presence_claim, presence_scope_record
 from app.ingest.patterns import load_patterns
 from app.ingest.schemas import SectionNode, SectionTree
 from app.models.enums import ResultOutcome
@@ -83,7 +84,7 @@ def find_section_node(target: str, tree: SectionTree) -> SectionNode | None:
 
 
 def _matches_required_section(criterion) -> bool:
-    return identify_target_section(criterion) is not None
+    return is_presence_claim(criterion, identify_target_section(criterion))
 
 
 def _node_anchor(node: SectionNode) -> str:
@@ -108,18 +109,27 @@ def _run_required_section(criterion, ctx: RuleContext) -> RuleOutcome:
             },
         )
     target = identify_target_section(criterion)
-    if target is None:
+    if not is_presence_claim(criterion, target):
         return RuleOutcome(
-            outcome=ResultOutcome.not_applicable,
+            outcome=ResultOutcome.unverifiable,
             anchor="document",
-            detail={"reason": "Could not identify which section this criterion refers to."},
+            detail={
+                "reason": (
+                    "The complete requirement could not be checked by heading presence. "
+                    "Review the full requirement directly."
+                )
+            },
         )
     node = find_section_node(target, ctx.section_tree)
     if node is not None:
         return RuleOutcome(
             outcome=ResultOutcome.passed,
             anchor=_node_anchor(node),
-            detail={"target": target, "matched_title": node.title},
+            detail={
+                "target": target,
+                "matched_title": node.title,
+                "section_presence_scope": presence_scope_record(criterion),
+            },
         )
     # BUG-221 (charter rule 1): a title-match miss here is NOT proof the
     # section is genuinely absent -- it is equally consistent with the
@@ -137,6 +147,7 @@ def _run_required_section(criterion, ctx: RuleContext) -> RuleOutcome:
         anchor="not found in document structure",
         detail={
             "target": target,
+            "section_presence_scope": presence_scope_record(criterion),
             "reason": (
                 f"No section matching '{target}' was found in the parsed section tree. "
                 "This may mean the section is genuinely missing, or that it exists under "

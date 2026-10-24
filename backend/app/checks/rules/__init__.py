@@ -141,7 +141,22 @@ def registered_rules() -> list[RuleSpec]:
 
 
 def find_matching_rule(criterion: CriterionLike) -> RuleSpec | None:
+    from app.checks.rules.claim_scope import allowed_named_section_rules, complete_reference_claim
+    from app.checks.rules.keywords import full_text
+    from app.checks.rules.page_bounds import parse_page_bound
+    from app.checks.rules.sections import identify_target_section
+
+    if parse_page_bound(full_text(criterion)).state == "unsupported":
+        return None
+    allowed = allowed_named_section_rules(criterion, identify_target_section(criterion))
     for spec in _REGISTRY.values():
+        if allowed is not None and spec.rule_id not in allowed:
+            continue
+        if spec.rule_id in {
+            "reference_count_min_max",
+            "citation_style_sniff",
+        } and not complete_reference_claim(criterion, spec.rule_id):
+            continue
         if spec.matches(criterion):
             return spec
     return None

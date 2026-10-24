@@ -8,7 +8,7 @@ import pytest
 from app.checks.rules import get_rule
 from app.checks.rules.sections import REQUIRED_SECTION_RULE_ID
 from app.ingest.schemas import PageGeometry, SectionNode, TableBlock
-from app.models.enums import CheckKind, CriterionType
+from app.models.enums import CheckKind, CriterionType, ResultOutcome
 from app.report.rule_facts import project_rule_facts, rule_facts_presentation
 from app.report.service import _to_criterion_result
 from tests.test_checks_structural_rules import FakeCitation, FakeCriterion, _ctx, _tree
@@ -38,6 +38,87 @@ def test_real_heading_lookup_observation_survives_report_projection():
     assert projected.anchor == "page 2"
     assert projected.reasoning is None
     assert projected.score == 100 and projected.outcome == "passed"
+    assert projected.rule_scope_unconfirmed is False
+
+
+@pytest.mark.parametrize(
+    "mutation", ["missing", "wrong_input", "wrong_version", "wrong_rule", "malformed"]
+)
+def test_legacy_scope_qualification_uses_saved_provenance_without_regrading(mutation):
+    from app.checks.rules.presence import presence_scope_record
+    from app.report.judgments import _original
+
+    criterion = SimpleNamespace(
+        id=2,
+        type=CriterionType.structural,
+        text="The manuscript must include an Abstract",
+        evidence=None,
+        weight=1,
+    )
+    detail = {
+        "rule_id": "required_section_present",
+        "target": "abstract",
+        "matched_title": "ABSTRACT",
+    }
+    if mutation != "missing":
+        marker = presence_scope_record(criterion)
+        if mutation == "wrong_input":
+            marker["input_digest"] = "private-digest-does-not-bind"
+        elif mutation == "wrong_version":
+            marker["version"] = "unknown"
+        elif mutation == "wrong_rule":
+            marker["rule_id"] = "page_limit"
+        detail["section_presence_scope"] = [] if mutation == "malformed" else marker
+    result = SimpleNamespace(
+        id=1,
+        judgment_revision=0,
+        kind=CheckKind.structural,
+        outcome=ResultOutcome.passed,
+        score=100,
+        detail=detail,
+    )
+    before = deepcopy(detail)
+    projected = _to_criterion_result(result, criterion, importance="med")
+    original = _original(result, criterion)
+    assert projected.rule_scope_unconfirmed and original.rule_scope_unconfirmed
+    assert projected.outcome == "passed" and projected.score == 100
+    assert detail == before and result.judgment_revision == 0
+    assert "private-digest" not in projected.model_dump_json()
+
+
+def test_scope_marker_is_not_reconstructed_from_todays_matcher_on_read(monkeypatch):
+    from app.checks.rules import presence
+
+    criterion = SimpleNamespace(
+        id=2,
+        type=CriterionType.structural,
+        text="The manuscript must include an Abstract",
+        evidence=None,
+        weight=1,
+    )
+    detail = {
+        "rule_id": "required_section_present",
+        "target": "abstract",
+        "matched_title": "ABSTRACT",
+        "section_presence_scope": presence.presence_scope_record(criterion),
+    }
+    result = SimpleNamespace(
+        id=1,
+        judgment_revision=0,
+        kind=CheckKind.structural,
+        outcome=ResultOutcome.passed,
+        score=100,
+        detail=detail,
+    )
+
+    def forbidden(*args, **kwargs):
+        raise AssertionError("Report reads must not execute the current grammar")
+
+    monkeypatch.setattr(presence, "is_presence_claim", forbidden)
+    monkeypatch.setattr(presence, "load_presence_grammar", forbidden)
+    assert not _to_criterion_result(result, criterion, importance="med").rule_scope_unconfirmed
+    criterion.evidence = "At most 250 words."
+    assert _to_criterion_result(result, criterion, importance="med").rule_scope_unconfirmed
 
 
 def _project(detail, outcome="passed", **kwargs):

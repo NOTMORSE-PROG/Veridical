@@ -17,7 +17,9 @@ Four outcomes per criterion:
 """
 
 from dataclasses import dataclass
+from typing import Literal
 
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.checks.rules import CriterionLike, find_matching_rule
@@ -43,6 +45,47 @@ class RouteDecision:
     degraded: bool
     note: str | None
     unroutable: bool = False
+
+
+class _SavedDecision(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    criterion_id: int = Field(gt=0)
+    kind: Literal["structural", "semantic"]
+    rule_id: str | None
+    degraded: bool
+    note: str | None
+    unroutable: bool
+
+    @model_validator(mode="after")
+    def compatible(self):
+        if self.kind == "structural":
+            if self.unroutable or not isinstance(self.rule_id, str) or not self.rule_id.strip():
+                raise ValueError("A saved structural plan requires its recorded rule identity.")
+        elif self.rule_id is not None:
+            raise ValueError("A saved semantic plan has no structural rule identity.")
+        return self
+
+
+def decode_routing_plan(payload: object, criterion_ids: set[int]) -> list[RouteDecision]:
+    """Bind an immutable recorded plan without rerunning current recognition."""
+    raw = payload.get("decisions") if isinstance(payload, dict) else None
+    if not isinstance(raw, list):
+        raise ValueError("The recorded routing plan is unavailable.")
+    saved = [_SavedDecision.model_validate(value) for value in raw]
+    ids = [value.criterion_id for value in saved]
+    if len(ids) != len(set(ids)) or set(ids) != criterion_ids:
+        raise ValueError("The recorded routing plan does not match this check's criteria.")
+    return [
+        RouteDecision(
+            value.criterion_id,
+            CheckKind(value.kind),
+            value.rule_id,
+            value.degraded,
+            value.note,
+            value.unroutable,
+        )
+        for value in saved
+    ]
 
 
 def route_criterion(criterion: CriterionLike, *, criterion_id: int, raw_type: str) -> RouteDecision:

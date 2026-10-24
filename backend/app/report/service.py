@@ -59,7 +59,7 @@ from app.report.assessment import assessment_write, lock_assessment
 from app.report.docx_images import manuscript_docx_image_for
 from app.report.page_images import build_page_evidence_images
 from app.report.rating import compute_levelled_rating
-from app.report.rule_facts import project_rule_facts
+from app.report.rule_facts import project_rule_facts, project_rule_scope_unconfirmed
 from app.report.schemas import (
     COVERAGE_REASONS,
     CriterionLevelOut,
@@ -311,6 +311,9 @@ def _to_criterion_result(
         else None
     )
     return CriterionResultOut(
+        rule_scope_unconfirmed=project_rule_scope_unconfirmed(
+            detail, criterion=criterion, kind=result.kind.value, outcome=result.outcome.value
+        ),
         source_coverage=project_source_coverage(detail.get("source_coverage")),
         rule_facts=project_rule_facts(
             detail,

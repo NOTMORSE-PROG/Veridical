@@ -15,5 +15,5 @@
   "table_nouns": ["table", "tables"],
   "table_format_nouns": ["caption", "captioned", "format", "formatted", "numbered", "labeled", "labelled"],
   "order_nouns": ["order", "sequence", "ordering"],
-  "section_reference_nouns": ["chapter", "section"]
+  "section_reference_nouns": ["chapter", "chapters", "section", "sections"]
 }
