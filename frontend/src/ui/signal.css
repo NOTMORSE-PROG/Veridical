@@ -5865,6 +5865,15 @@
     grid-column: 1 / -1;
   }
 
+  .signal-shared-verdict .signal-button--quiet {
+    color: var(--color-signal-brand);
+  }
+
+  .signal-shared-verdict .signal-button--quiet:is(:hover, :active, :focus-visible) {
+    background: var(--color-signal-track-on-dark);
+    color: var(--color-signal-surface);
+  }
+
   .signal-shared-verdict h2 {
     margin: var(--signal-space-2) 0;
     color: var(--color-signal-brand);
