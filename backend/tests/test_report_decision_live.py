@@ -5,6 +5,7 @@ reasoned reopen, and the superseded-rubric warning signal.
 
 import os
 from decimal import Decimal
+from uuid import uuid4
 
 import pytest
 from sqlalchemy import select, text
@@ -74,7 +75,7 @@ async def _clean_tables(session_factory):
 async def _seed_decidable_run(session, *, rubric_is_active=True, record_verdict=True):
     """A DONE run with exactly one decidable (passed) criterion — nothing
     escalated, so decision is never blocked unless a test adds one."""
-    instructor = Instructor(email=f"dec-{id(session)}@test.local", display_name="Dec Test")
+    instructor = Instructor(email=f"dec-{uuid4().hex}@test.local", display_name="Dec Test")
     session.add(instructor)
     await session.commit()
     manuscript = Manuscript(instructor_id=instructor.id, group_label="G", file_ref="x.pdf")
@@ -121,7 +122,7 @@ async def _seed_not_ready_run(session):
     0, well below the default `not_ready_max_score` floor, so its status
     is `not_ready`. BUG-095's test fixture: approving this without a
     reason must be rejected."""
-    instructor = Instructor(email=f"notready-{id(session)}@test.local", display_name="NR Test")
+    instructor = Instructor(email=f"notready-{uuid4().hex}@test.local", display_name="NR Test")
     session.add(instructor)
     await session.commit()
     manuscript = Manuscript(instructor_id=instructor.id, group_label="G", file_ref="x.pdf")
@@ -169,7 +170,7 @@ async def _seed_needs_review_run(session):
     is the only thing standing between this state and a one-click,
     zero-signal, zero-explanation decision (backend review finding,
     BUG-095 follow-up)."""
-    instructor = Instructor(email=f"needsreview-{id(session)}@test.local", display_name="NR2 Test")
+    instructor = Instructor(email=f"needsreview-{uuid4().hex}@test.local", display_name="NR2 Test")
     session.add(instructor)
     await session.commit()
     manuscript = Manuscript(instructor_id=instructor.id, group_label="G", file_ref="x.pdf")

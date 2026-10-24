@@ -17,6 +17,7 @@ import { Button } from "../ui/Button";
 import { Dialog } from "../ui/Dialog";
 import { LibraryContentPane, type LibraryDocumentState } from "./LibraryContentPane";
 import { AuthorFields } from "./SignalLibraryAdd";
+import { PassageIndexingDetails } from "./PassageIndexingDetails";
 import { formatLibraryDate, libraryRecordName, normalizeSchoolYear } from "./libraryFormat";
 import {
   useDecideLibraryEntry,
@@ -490,6 +491,7 @@ export function SignalLibraryDetailPage() {
                 className="signal-library-record"
               >
                 {item.is_own ? <OwnDetails item={item} /> : <ForeignDetails item={item} />}
+                {item.status === "active" && <PassageIndexingDetails value={item.passage_indexing} />}
               </aside>
             </div>
           </section>

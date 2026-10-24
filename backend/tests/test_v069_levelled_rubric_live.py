@@ -7,6 +7,7 @@ report's `levelled_rating` transcription. Same scratch-DB convention as
 
 import os
 from decimal import Decimal
+from uuid import uuid4
 
 import pytest
 from sqlalchemy import select, text
@@ -84,7 +85,7 @@ async def _seed_levelled_run(session, *, ai_majority_verdict="Proficient", agree
     (a disagreeing vote pending instructor review) and one ordinary
     pass/fail criterion already decided -- proves AC3 (pass/fail
     unaffected) and AC4 (level-scoped resolution) inside the same run."""
-    instructor = Instructor(email=f"v069-{id(session)}@test.local", display_name="V069 Test")
+    instructor = Instructor(email=f"v069-{uuid4().hex}@test.local", display_name="V069 Test")
     session.add(instructor)
     await session.commit()
     manuscript = Manuscript(instructor_id=instructor.id, group_label="G", file_ref="x.pdf")

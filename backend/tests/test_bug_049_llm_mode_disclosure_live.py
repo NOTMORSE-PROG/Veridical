@@ -14,6 +14,7 @@ instructor's own report, the flag evidence page, AND the public
 
 import os
 from decimal import Decimal
+from uuid import uuid4
 
 import pytest
 from sqlalchemy import text
@@ -78,7 +79,7 @@ async def _clean_tables(session_factory):
 
 
 async def _seed_instructor_and_pair(session):
-    instructor = Instructor(email=f"bug049-{id(session)}@test.local", display_name="BUG-049 Test")
+    instructor = Instructor(email=f"bug049-{uuid4().hex}@test.local", display_name="BUG-049 Test")
     session.add(instructor)
     await session.commit()
     manuscript = Manuscript(

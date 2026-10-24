@@ -235,7 +235,12 @@ class Settings(BaseSettings):
     # uses threads. This is admission control, not a measured memory guarantee.
     # A cancelled awaiter retains admission until its native work finishes.
     document_preparation_slots: int = Field(default=1, ge=1, le=1)
-    # BUG-180: `store_passage_embeddings` (F7.4) had no cap on how many
+    # BUG-208 / D-028: current Library preparation and persistence use the
+    # same nonnegative prefix budget, with measured indexing scope saved at
+    # activation. Checked-manuscript passages are never cut by this setting.
+    # Inventory counting and document/chapter work have separate costs.
+    # Historical pre-D-028 BUG-180 rationale follows:
+    # `store_passage_embeddings` (F7.4) had no cap on how many
     # rows one manuscript writes into the GLOBALLY SHARED reuse corpus --
     # at `reuse_passage_chunk_words: 150`, an oversized upload becomes
     # hundreds of thousands of embedded rows degrading match quality and
@@ -272,7 +277,7 @@ class Settings(BaseSettings):
     # volume or passage count; a dense, text-heavy DOCX well under that
     # ceiling could still drive this same unbounded-compute cost. Follow-up:
     # BUG-208.
-    reuse_max_passages_per_manuscript: int = 5000
+    reuse_max_passages_per_manuscript: int = Field(default=5000, ge=0)
 
     # --- LLM queue (V-009, ENGINEERING §3) -----------------------------------
     # Pinned model id (not the "-latest" alias): golden-set comparisons

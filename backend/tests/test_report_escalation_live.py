@@ -5,6 +5,7 @@ the charter rule 1 guard (no code path auto-decides a low-confidence item).
 
 import os
 from decimal import Decimal
+from uuid import uuid4
 
 import pytest
 from sqlalchemy import select, text
@@ -76,7 +77,7 @@ async def _seed_escalated_run(
     """One check_run with one semantic criterion sitting at `escalated`,
     shaped exactly like `app.checks.consistency`'s own persisted output
     (agreement + votes + a majority verdict pending instructor review)."""
-    instructor = Instructor(email=f"esc-{id(session)}@test.local", display_name="Esc Test")
+    instructor = Instructor(email=f"esc-{uuid4().hex}@test.local", display_name="Esc Test")
     session.add(instructor)
     await session.commit()
     manuscript = Manuscript(instructor_id=instructor.id, group_label="G", file_ref="x.pdf")

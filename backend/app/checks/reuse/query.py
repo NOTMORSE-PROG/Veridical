@@ -38,7 +38,7 @@ redesigning this function.
 from dataclasses import dataclass
 from typing import Literal
 
-from sqlalchemy import func, select
+from sqlalchemy import Numeric, and_, case, cast, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.checks.reuse.embed import DocumentEmbeddings, PassageEmbedding
@@ -92,6 +92,7 @@ class OriginalityQueryResult:
     # honest about growing coverage, never hidden).
     archive_size_n: int
     n_source_candidates_withheld: int = 0
+    library_passage_indexing: dict | None = None
 
 
 def _classify(similarity: float, settings: Settings) -> MatchLevel | None:
@@ -102,19 +103,88 @@ def _classify(similarity: float, settings: Settings) -> MatchLevel | None:
     return None
 
 
-async def _archive_size(
+def _indexing_scope_predicates():
+    """SQL counterpart of the strict, source-bound snapshot projector.
+
+    CASE protects row-dependent casts; malformed JSON stays unknown. Numeric
+    avoids narrowing otherwise valid integer metadata to a fixed-width cast.
+    """
+    value = LibraryEntry.passage_indexing_snapshot
+
+    def integer_field(key):
+        field = value[key]
+        return case(
+            (
+                and_(
+                    func.jsonb_typeof(field) == "number",
+                    field.astext.op("~")(r"^[0-9]+$"),
+                ),
+                cast(field.astext, Numeric),
+            ),
+            else_=None,
+        )
+
+    limit = integer_field("limit")
+    found = integer_field("passages_found")
+    indexed = integer_field("passages_indexed")
+    measured = and_(
+        value["inventory_state"].astext == "measured",
+        found.is_not(None),
+        indexed == func.least(found, limit),
+    )
+    unavailable = and_(
+        value["inventory_state"].astext == "unavailable",
+        func.jsonb_typeof(value["passages_found"]) == "null",
+        indexed == 0,
+    )
+    valid = func.coalesce(
+        and_(
+            func.jsonb_typeof(value) == "object",
+            value["version"].astext == "v1",
+            func.jsonb_typeof(value["source_sha256"]) == "string",
+            value["source_sha256"].astext.op("~")(r"^[a-f0-9]{64}$"),
+            value["source_sha256"].astext == Manuscript.content_hash,
+            func.jsonb_typeof(value["model_id"]) == "string",
+            func.length(value["model_id"].astext) > 0,
+            value["model_id"].astext == ManuscriptArchive.model_id,
+            limit.is_not(None),
+            indexed.is_not(None),
+            or_(measured, unavailable),
+        ),
+        False,
+    )
+    return and_(valid, measured, indexed < found), and_(valid, unavailable), ~valid
+
+
+async def _archive_scope(
     session: AsyncSession, *, exclude_manuscript_ids: set[int], settings: Settings
-) -> int:
-    return (
-        await session.scalar(
-            select(func.count())
+) -> tuple[int, dict]:
+    # One snapshot and bounded response for count and indexing facts.
+    # LEFT JOIN preserves orphan legacy archive rows as unknown scope.
+    partial, unavailable, unknown = _indexing_scope_predicates()
+    row = (
+        await session.execute(
+            select(
+                func.count(),
+                func.coalesce(func.bool_or(partial), False),
+                func.coalesce(func.bool_or(unavailable), False),
+                func.coalesce(func.bool_or(unknown), False),
+            )
             .select_from(ManuscriptArchive)
+            .outerjoin(Manuscript, Manuscript.id == ManuscriptArchive.manuscript_id)
+            .outerjoin(LibraryEntry, LibraryEntry.manuscript_id == ManuscriptArchive.manuscript_id)
             .where(
                 ManuscriptArchive.model_id == settings.embedding_model_id,
                 ManuscriptArchive.manuscript_id.notin_(exclude_manuscript_ids),
             )
         )
-    ) or 0
+    ).one()
+    return row[0], {
+        "version": "v1",
+        "partial": row[1],
+        "unavailable": row[2],
+        "not_recorded": row[3],
+    }
 
 
 async def _best_whole_document_match(
@@ -388,7 +458,9 @@ async def query_similar_manuscripts(
 ) -> OriginalityQueryResult:
     exclude = {manuscript_id, *(exclude_manuscript_ids or set())}
     exclude |= await _group_sibling_manuscript_ids(session, manuscript_id)
-    archive_size_n = await _archive_size(session, exclude_manuscript_ids=exclude, settings=settings)
+    archive_size_n, indexing = await _archive_scope(
+        session, exclude_manuscript_ids=exclude, settings=settings
+    )
 
     matches: list[SimilarityMatch] = []
     whole_doc_match = await _best_whole_document_match(
@@ -412,6 +484,7 @@ async def query_similar_manuscripts(
     return OriginalityQueryResult(
         matches=supported,
         archive_size_n=archive_size_n,
+        library_passage_indexing=indexing,
         n_source_candidates_withheld=len(matches) - len(supported),
     )
 

@@ -541,6 +541,9 @@ async def run_originality_reuse_check(
             # have no "corpus" key; they counted the pre-Library archive.
             "corpus": "library",
             "passage_archive_size_n": passage_query_result.passage_archive_size_n,
+            # Saved facts from the same aggregate as the initial corpus count.
+            # Later Library mutations must not rewrite this report's scope.
+            "library_passage_indexing": query_result.library_passage_indexing,
             "n_flags": n_flags,
             "first_upload_context": first_upload,
             "passages_found": len(passages),

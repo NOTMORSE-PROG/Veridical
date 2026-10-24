@@ -7,6 +7,7 @@ from pydantic import BaseModel, Field, field_validator
 
 from app.config import get_settings
 from app.ingest.schemas import FigureReading
+from app.library.passage_indexing import LibraryPassageIndexingSummary
 from app.report.source_coverage import CriterionSourceCoverageOut
 
 
@@ -194,6 +195,7 @@ class IntegrityCheckStatusOut(BaseModel):
 
 
 class OriginalityScopeOut(BaseModel):
+    library_passage_indexing: LibraryPassageIndexingSummary | None = None
     """V-077 (D-028): what the originality check compared against, shown on
     screen so an empty result over an empty Library can never read as
     evidence of originality. `compared_count` is the check's own recorded

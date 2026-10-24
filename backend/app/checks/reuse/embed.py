@@ -466,6 +466,7 @@ def _scoped_passages(
     ref_ids: set[int],
     quote_ids: set[int],
     context_words: int,
+    context_limit: int | None = None,
 ) -> list[dict]:
     drafts = []
     offset = 0
@@ -473,17 +474,19 @@ def _scoped_passages(
         scope_text = "\n".join(block.text for block in scope)
         # BUG-208 / F7: reuse one index inside this exact contiguous source
         # scope. Rescanning its prefix/suffix for every passage is quadratic.
-        word_spans = _word_spans(scope_text) if context_words else []
+        prepare_context = context_limit is None or len(drafts) < context_limit
+        word_spans = _word_spans(scope_text) if context_words and prepare_context else []
         for draft in _build_passages(
             list(scope), chunk_words=chunk_words, ref_ids=ref_ids, quote_ids=quote_ids
         ):
-            draft["context_text"] = _add_context(
-                scope_text,
-                draft["char_start"],
-                draft["char_end"],
-                context_words,
-                word_spans=word_spans,
-            )
+            if context_limit is None or len(drafts) < context_limit:
+                draft["context_text"] = _add_context(
+                    scope_text,
+                    draft["char_start"],
+                    draft["char_end"],
+                    context_words,
+                    word_spans=word_spans,
+                )
             draft["char_start"] += offset
             draft["char_end"] += offset
             drafts.append(draft)
@@ -491,14 +494,14 @@ def _scoped_passages(
     return drafts
 
 
-def compute_passage_embeddings(
-    extraction: ExtractionResult, settings: Settings | None = None
-) -> list[PassageEmbedding]:
-    """F7.4's chunker: passage-level vectors for every chapter's content,
-    INCLUDING reference-list and block-quote passages (tagged, not
-    dropped — see module note above). Encoder calls use configured batches;
-    the full ordered passage inventory remains available for comparison."""
-    settings = settings or get_settings()
+def _passage_drafts(
+    extraction: ExtractionResult, settings: Settings, *, context_limit: int | None = None
+) -> list[dict] | None:
+    """Keep the shared ordered inventory; prepare only requested contexts.
+
+    None records a refused inventory, distinct from a measured empty list.
+    The Library can count its tail without constructing discarded contexts.
+    """
     patterns = load_patterns(settings.ingest_patterns_file)
     source = analytical_source(extraction)
     content_blocks = [b for b in extraction.blocks if not b.is_furniture]
@@ -510,7 +513,7 @@ def compute_passage_embeddings(
     unstructured = _uses_unstructured_body(chapters, patterns)
     reference_selection = select_references(extraction, patterns) if unstructured else None
     if reference_selection is not None and reference_selection.issues:
-        return []
+        return None
     reference_chapter = (
         _selected_reference_chapter(chapters, reference_selection, extraction.anchor_kind, patterns)
         if reference_selection is not None
@@ -567,6 +570,7 @@ def compute_passage_embeddings(
             ref_ids=ref_ids,
             quote_ids=quote_ids,
             context_words=settings.reuse_passage_context_words,
+            context_limit=None if context_limit is None else max(0, context_limit - len(drafts)),
         ):
             if chapter_is_reference_list:
                 draft["is_reference_list"] = True
@@ -587,10 +591,17 @@ def compute_passage_embeddings(
             ref_ids=set(),  # exact complement already excludes reference intervals
             quote_ids=body_quote_ids,
             context_words=settings.reuse_passage_context_words,
+            context_limit=None if context_limit is None else max(0, context_limit - len(drafts)),
         ):
             draft["chapter_index"] = UNSTRUCTURED_BODY_SCOPE
             drafts.append(draft)
 
+    return drafts
+
+
+def _embed_passage_drafts(
+    drafts: list[dict], extraction: ExtractionResult, settings: Settings
+) -> list[PassageEmbedding]:
     passages: list[PassageEmbedding] = []
     batch_size = settings.reuse_passage_embedding_batch_size
     for start in range(0, len(drafts), batch_size):
@@ -614,3 +625,43 @@ def compute_passage_embeddings(
                 )
             )
     return passages
+
+
+def compute_passage_embeddings(
+    extraction: ExtractionResult, settings: Settings | None = None
+) -> list[PassageEmbedding]:
+    """F7.4: compare every available passage of the checked manuscript.
+
+    Reference-list and block-quote passages remain tagged, not dropped.
+    The Library storage budget never limits this consumer's evidence.
+    """
+    settings = settings or get_settings()
+    drafts = _passage_drafts(extraction, settings)
+    return _embed_passage_drafts(drafts or [], extraction, settings)
+
+
+@dataclass(frozen=True)
+class LibraryPassageEmbeddings:
+    """Measured Library preparation, before any persistence or projection."""
+
+    passages: list[PassageEmbedding]
+    passages_found: int | None
+    limit: int
+    inventory_state: Literal["measured", "unavailable"]
+
+
+def compute_library_passage_embeddings(
+    extraction: ExtractionResult, settings: Settings | None = None
+) -> LibraryPassageEmbeddings:
+    """F7/BUG-208: encode only the existing Library storage prefix.
+
+    Inventory enumeration and document/chapter work have separate costs;
+    this bounds passage context/vector construction, not all ingestion CPU.
+    """
+    settings = settings or get_settings()
+    limit = settings.reuse_max_passages_per_manuscript
+    drafts = _passage_drafts(extraction, settings, context_limit=limit)
+    if drafts is None:
+        return LibraryPassageEmbeddings([], None, limit, "unavailable")
+    passages = _embed_passage_drafts(drafts[:limit], extraction, settings)
+    return LibraryPassageEmbeddings(passages, len(drafts), limit, "measured")

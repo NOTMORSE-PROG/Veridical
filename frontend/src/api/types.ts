@@ -489,6 +489,12 @@ export interface IntegrityCheckStatusOut {
  * Library became separate; "pre_library" for older checks that counted the
  * former automatic archive. */
 export interface OriginalityScope {
+  library_passage_indexing?: {
+    version: "v1";
+    partial: boolean;
+    unavailable: boolean;
+    not_recorded: boolean;
+  } | null;
   compared_count: number | null;
   corpus: "library" | "pre_library";
   /** "no_text": no readable text, so no comparison ran at all. */
@@ -1039,7 +1045,14 @@ export interface LibraryDuplicateRefOut {
   added_at: string | null;
 }
 
+export interface PassageIndexing {
+  state: "complete" | "partial" | "unavailable" | "not_recorded";
+  passages_found: number | null;
+  passages_indexed: number | null;
+}
+
 export interface LibraryItemOut {
+  passage_indexing?: PassageIndexing | null;
   manuscript_id: number;
   is_own: boolean;
   /** Own: title, team name, filename, or record label. Foreign: always
@@ -1093,6 +1106,7 @@ export interface LibraryEntryUpdate {
 }
 
 export interface LibraryEntryStateOut {
+  passage_indexing?: PassageIndexing | null;
   manuscript_id: number;
   status: LibraryEntryStatus;
   added_at: string | null;

@@ -49,9 +49,10 @@ from app.archive.service import delete_archive_rows, delete_stored_files
 from app.audit.service import write_audit_event
 from app.checks.reuse.embed import (
     DocumentEmbeddings,
+    LibraryPassageEmbeddings,
     PassageEmbedding,
     compute_document_embeddings,
-    compute_passage_embeddings,
+    compute_library_passage_embeddings,
     split_context,
 )
 from app.checks.reuse.store import store_document_embeddings, store_passage_embeddings
@@ -73,6 +74,7 @@ from app.ingest.service import (
     select_extractor,
 )
 from app.ingest.titlepage import extract_title_page
+from app.library.passage_indexing import indexing_snapshot, project_passage_indexing
 from app.library.schemas import (
     LibraryChapterExcerptOut,
     LibraryDuplicateRefOut,
@@ -178,6 +180,7 @@ def _item_out(
     *,
     requesting_instructor_id: int,
     duplicate_of: LibraryDuplicateRefOut | None = None,
+    archived_model_id: str | None = None,
 ) -> LibraryItemOut:
     """BUG-147: another account's entry keeps only what the shared corpus
     needs to stay explainable (record number, program, school year, date
@@ -200,6 +203,9 @@ def _item_out(
             source=None,
             added_at=entry.added_at,
             created_at=entry.created_at,
+            passage_indexing=project_passage_indexing(
+                entry.passage_indexing_snapshot, manuscript.content_hash, archived_model_id
+            ),
         )
     return LibraryItemOut(
         manuscript_id=manuscript.id,
@@ -223,14 +229,18 @@ def _item_out(
             entry.failure_detail if entry.status == LibraryEntryStatus.failed else None
         ),
         stalled=_is_stalled(entry),
+        passage_indexing=project_passage_indexing(
+            entry.passage_indexing_snapshot, manuscript.content_hash, archived_model_id
+        ),
     )
 
 
 def _entry_select():
     return (
-        select(LibraryEntry, Manuscript, Program.name)
+        select(LibraryEntry, Manuscript, Program.name, ManuscriptArchive.model_id)
         .join(Manuscript, Manuscript.id == LibraryEntry.manuscript_id)
         .outerjoin(Program, Program.id == LibraryEntry.program_id)
+        .outerjoin(ManuscriptArchive, ManuscriptArchive.manuscript_id == Manuscript.id)
     )
 
 
@@ -336,13 +346,14 @@ async def list_library(
             .limit(page_size)
         )
     ).all()
-    own_entries = [e for e, m, _ in rows if m.instructor_id == instructor_id]
+    own_entries = [e for e, m, _, _model in rows if m.instructor_id == instructor_id]
     refs = await _duplicate_refs(session, instructor_id, own_entries)
     items = [
         _item_out(
             entry,
             manuscript,
             program_name,
+            archived_model_id=archived_model_id,
             requesting_instructor_id=instructor_id,
             duplicate_of=(
                 refs.get(entry.possible_duplicate_of_id)
@@ -350,7 +361,7 @@ async def list_library(
                 else None
             ),
         )
-        for entry, manuscript, program_name in rows
+        for entry, manuscript, program_name, archived_model_id in rows
     ]
     return PaginatedLibrary(items=items, total=total, page=page, page_size=page_size)
 
@@ -367,7 +378,7 @@ async def get_library_item(
     ).first()
     if row is None:
         raise NotFoundError(f"No Library record with id {manuscript_id}.")
-    entry, manuscript, program_name = row
+    entry, manuscript, program_name, archived_model_id = row
     duplicate_of = None
     if manuscript.instructor_id == instructor_id:
         duplicate_of = (await _duplicate_refs(session, instructor_id, [entry])).get(
@@ -379,6 +390,7 @@ async def get_library_item(
         program_name,
         requesting_instructor_id=instructor_id,
         duplicate_of=duplicate_of,
+        archived_model_id=archived_model_id,
     )
 
 
@@ -534,7 +546,7 @@ async def _embed(
     settings: Settings,
     *,
     preparation_lease: PreparationLease | None = None,
-) -> tuple[DocumentEmbeddings, list[PassageEmbedding]]:
+) -> tuple[DocumentEmbeddings, LibraryPassageEmbeddings]:
     """Local model2vec work, off the event loop (BUG-152)."""
     loop = asyncio.get_running_loop()
     document = (
@@ -543,9 +555,9 @@ async def _embed(
         else await loop.run_in_executor(None, compute_document_embeddings, result, settings)
     )
     passages = (
-        await preparation_lease.run(compute_passage_embeddings, result, settings)
+        await preparation_lease.run(compute_library_passage_embeddings, result, settings)
         if preparation_lease is not None
-        else await loop.run_in_executor(None, compute_passage_embeddings, result, settings)
+        else await loop.run_in_executor(None, compute_library_passage_embeddings, result, settings)
     )
     return document, passages
 
@@ -606,6 +618,7 @@ async def _activate(
     expected: LibraryEntryStatus,
     decision: str | None,
     preparation_lease: PreparationLease | None = None,
+    passage_inventory: LibraryPassageEmbeddings | None = None,
 ) -> bool:
     """Enter the Library: comparison rows and the status change commit in ONE
     transaction, so a crash can never leave rows for a non-active entry. Under
@@ -622,6 +635,11 @@ async def _activate(
         await store_document_embeddings(session, manuscript.id, document, commit=False)
         if passages:
             await store_passage_embeddings(session, manuscript.id, passages, settings, commit=False)
+        entry.passage_indexing_snapshot = (
+            indexing_snapshot(passage_inventory, manuscript.content_hash, document.model_id)
+            if passage_inventory is not None
+            else None
+        )
         entry.status = LibraryEntryStatus.active
         entry.added_at = datetime.now(UTC)
         await write_audit_event(
@@ -633,7 +651,13 @@ async def _activate(
                 "source": entry.source.value,
                 "decision": decision,
                 "passages_stored": min(len(passages), settings.reuse_max_passages_per_manuscript),
-                "passages_found": len(passages),
+                "passages_found": (
+                    passage_inventory.passages_found
+                    if passage_inventory is not None
+                    else len(passages)
+                ),
+                "passages_embedded": len(passages),
+                "passage_indexing": entry.passage_indexing_snapshot,
             },
         )
         await session.commit()
@@ -849,7 +873,7 @@ async def _submit_library_entry(
     # cannot undo a concurrent removal, and the guarded transitions below can
     # re-read the entry without losing the title-page proposals.
     await session.commit()
-    document, passages = await _embed(
+    document, passage_inventory = await _embed(
         bind_analytical_source(result, manuscript.content_hash),
         settings,
         preparation_lease=preparation_lease,
@@ -901,11 +925,12 @@ async def _submit_library_entry(
         entry,
         manuscript,
         document,
-        passages,
+        passage_inventory.passages,
         settings,
         expected=LibraryEntryStatus.processing,
         decision=None,
         preparation_lease=preparation_lease,
+        passage_inventory=passage_inventory,
     ):
         return _removed_while_reading()
     return LibrarySubmissionOut(
@@ -1009,7 +1034,7 @@ async def decide_library_entry(
     # Activation acquires advisory before UPDATE and revalidates expected state.
     # Release this read-only SHARE transaction before that mutation boundary.
     await session.commit()
-    document, passages = await _embed(
+    document, passage_inventory = await _embed(
         bind_analytical_source(result, manuscript.content_hash), settings
     )
     if document.whole_document is None:
@@ -1019,10 +1044,11 @@ async def decide_library_entry(
         entry,
         manuscript,
         document,
-        passages,
+        passage_inventory.passages,
         settings,
         expected=LibraryEntryStatus.needs_decision,
         decision="add_anyway",
+        passage_inventory=passage_inventory,
     ):
         raise ConflictError(messages.LIBRARY_NOT_AWAITING_DECISION)
     return LibraryEntryStateOut(
@@ -1030,6 +1056,9 @@ async def decide_library_entry(
         status=entry.status,
         added_at=entry.added_at,
         removed_at=None,
+        passage_indexing=project_passage_indexing(
+            entry.passage_indexing_snapshot, manuscript.content_hash, document.model_id
+        ),
     )
 
 

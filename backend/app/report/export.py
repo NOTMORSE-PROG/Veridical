@@ -54,6 +54,7 @@ from reportlab.platypus import (
 
 from app.checks.escalation import NEEDS_REVIEW_OUTCOMES as _NEEDS_REVIEW_OUTCOMES_ENUM
 from app.config import get_settings
+from app.library.passage_indexing import indexing_scope_sentences
 from app.report.schemas import (
     CriterionResultOut,
     FlagExportDetailOut,
@@ -441,6 +442,30 @@ def _archive_disclosure(
         "processed manuscripts in VERIDICAL's archive, before the Library became a "
         "separate collection."
     )
+
+
+def _originality_scope_flowables(data: ReportExportData, styles: dict[str, ParagraphStyle]) -> list:
+    """F7 qualifications belong before the comparison records they qualify."""
+    scope = data.report.originality_scope
+    items = [
+        Paragraph(
+            _archive_disclosure(
+                data.archive_size_n,
+                scope.corpus if scope else None,
+                scope.not_compared_reason if scope else None,
+            ),
+            styles["caption"],
+        ),
+        Spacer(1, 10),
+    ]
+    if scope and scope.compared_count and not scope.not_compared_reason:
+        sentences = indexing_scope_sentences(scope.library_passage_indexing)
+        if sentences and scope.library_passage_indexing is not None:
+            items.append(Paragraph("Passage comparison limits", styles["h3"]))
+        items.extend(Paragraph(escape(sentence), styles["caption"]) for sentence in sentences)
+        if sentences:
+            items.append(Spacer(1, 10))
+    return items
 
 
 def _tone_badge(label: str, tone: str, styles: dict[str, ParagraphStyle]) -> Table:
@@ -1272,6 +1297,7 @@ def build_report_pdf(data: ReportExportData) -> bytes:
         )
     )
     flag_intro.append(Spacer(1, 6))
+    scope_emitted = False
     if not data.flags:
         flow.extend(flag_intro)
         flow.append(
@@ -1356,6 +1382,9 @@ def build_report_pdf(data: ReportExportData) -> bytes:
                             styles["body"],
                         )
                     )
+                if kind == "originality_reuse" and group_index == 0 and not scope_emitted:
+                    prefix.extend(_originality_scope_flowables(data, styles))
+                    scope_emitted = True
                 flag_intro = []
                 start_items = [*prefix, divider, heading, header, evidence_label]
                 for item in start_items:
@@ -1474,18 +1503,8 @@ def build_report_pdf(data: ReportExportData) -> bytes:
                 )
                 flow.append(Spacer(1, 8))
     flow.append(Spacer(1, 4))
-    scope = data.report.originality_scope
-    flow.append(
-        Paragraph(
-            _archive_disclosure(
-                data.archive_size_n,
-                scope.corpus if scope else None,
-                scope.not_compared_reason if scope else None,
-            ),
-            styles["caption"],
-        )
-    )
-    flow.append(Spacer(1, 10))
+    if not scope_emitted:
+        flow.extend(_originality_scope_flowables(data, styles))
 
     # 5. Escalation resolutions.
     resolved = [r for r in report.results if r.resolution]

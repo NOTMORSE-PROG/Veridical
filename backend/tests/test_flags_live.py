@@ -14,6 +14,7 @@ below for that shape.
 
 import os
 from decimal import Decimal
+from uuid import uuid4
 
 import pytest
 from sqlalchemy import select, text
@@ -83,7 +84,7 @@ async def _seed_flagged_run(session):
     produce) carrying one HIGH-severity flag, plus one PASSING semantic
     criterion so the composite score is a real number a flag deduction
     can visibly move."""
-    instructor = Instructor(email=f"flags-{id(session)}@test.local", display_name="Flags Test")
+    instructor = Instructor(email=f"flags-{uuid4().hex}@test.local", display_name="Flags Test")
     session.add(instructor)
     await session.commit()
     manuscript = Manuscript(instructor_id=instructor.id, group_label="G", file_ref="x.pdf")
@@ -230,7 +231,7 @@ async def _seed_confirmable_citation_flag(session):
     matching `citation_cache` row already present -- the row a check run
     would have created on its own first (uncached) lookup, which is
     always true by the time a flag referencing it exists."""
-    instructor = Instructor(email=f"confirm-{id(session)}@test.local", display_name="Confirm Test")
+    instructor = Instructor(email=f"confirm-{uuid4().hex}@test.local", display_name="Confirm Test")
     session.add(instructor)
     await session.commit()
     manuscript = Manuscript(instructor_id=instructor.id, group_label="G", file_ref="x.pdf")
@@ -421,7 +422,7 @@ async def _seed_two_flags_one_check_result(session):
     reason for adding `Flag.detail`). Proves two flags sharing a
     check_result get independent reasons rather than the check_result's
     one shared `detail` bleeding into both."""
-    instructor = Instructor(email=f"flags3-{id(session)}@test.local", display_name="Flags Test 3")
+    instructor = Instructor(email=f"flags3-{uuid4().hex}@test.local", display_name="Flags Test 3")
     session.add(instructor)
     await session.commit()
     manuscript = Manuscript(instructor_id=instructor.id, group_label="G", file_ref="x.docx")
@@ -493,7 +494,7 @@ async def test_ai_reasoning_is_suppressed_when_identical_to_evidence_excerpt(ses
     `test_flag_detail_takes_priority_over_check_result_detail` above) must
     still come through unsuppressed."""
     async with session_factory() as session:
-        instructor = Instructor(email=f"dupreason-{id(session)}@test.local", display_name="T")
+        instructor = Instructor(email=f"dupreason-{uuid4().hex}@test.local", display_name="T")
         session.add(instructor)
         await session.commit()
         manuscript = Manuscript(instructor_id=instructor.id, group_label="G", file_ref="x.pdf")
@@ -553,7 +554,7 @@ async def test_evidence_unavailable_flag_reaches_the_api_distinguishably(session
     about `_to_flag_out`'s wiring, not about how the upstream check
     decided to set the key."""
     async with session_factory() as session:
-        instructor = Instructor(email=f"evidenceunavail-{id(session)}@test.local", display_name="T")
+        instructor = Instructor(email=f"evidenceunavail-{uuid4().hex}@test.local", display_name="T")
         session.add(instructor)
         await session.commit()
         manuscript = Manuscript(instructor_id=instructor.id, group_label="G", file_ref="x.pdf")
@@ -618,7 +619,7 @@ async def test_passage_level_flag_reaches_the_api_as_such(session_factory):
     whole-document/chapter/resubmission reuse flag (evidence_excerpt is a
     system-authored template sentence, never a quote)."""
     async with session_factory() as session:
-        instructor = Instructor(email=f"passagelevel-{id(session)}@test.local", display_name="T")
+        instructor = Instructor(email=f"passagelevel-{uuid4().hex}@test.local", display_name="T")
         session.add(instructor)
         await session.commit()
         manuscript = Manuscript(instructor_id=instructor.id, group_label="G", file_ref="x.pdf")
@@ -662,7 +663,7 @@ async def test_no_verdict_high_flag_does_not_force_not_ready_live(session_factor
     the guarantee, the same way `_seed_two_flags_one_check_result` proves
     the per-flag-detail shape without running a real check."""
     async with session_factory() as session:
-        instructor = Instructor(email=f"noverdict-{id(session)}@test.local", display_name="T")
+        instructor = Instructor(email=f"noverdict-{uuid4().hex}@test.local", display_name="T")
         session.add(instructor)
         await session.commit()
         manuscript = Manuscript(instructor_id=instructor.id, group_label="G", file_ref="x.pdf")

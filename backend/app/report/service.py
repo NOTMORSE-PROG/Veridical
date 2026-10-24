@@ -41,6 +41,7 @@ from app.ingest.figures import saved_figure_readings
 from app.ingest.regions import _flatten, recover_region
 from app.ingest.schemas import SectionTree
 from app.ingest.service import load_raw_store, load_raw_store_async
+from app.library.passage_indexing import project_indexing_summary
 from app.models.audit import AuditLog
 from app.models.enums import (
     CheckKind,
@@ -653,6 +654,16 @@ async def report_out_for_check_run(
         compared = originality_detail.get("archive_size_n")
         ran = originality_detail.get("comparison_ran", "note" not in originality_detail)
         originality_scope = OriginalityScopeOut(
+            library_passage_indexing=(
+                summary.model_dump(mode="json")
+                if (
+                    summary := project_indexing_summary(
+                        originality_detail.get("library_passage_indexing")
+                    )
+                )
+                is not None
+                else None
+            ),
             compared_count=compared if isinstance(compared, int) and ran else None,
             corpus="library" if originality_detail.get("corpus") == "library" else "pre_library",
             not_compared_reason=(

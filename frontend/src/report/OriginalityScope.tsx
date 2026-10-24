@@ -5,6 +5,7 @@
 import type { OriginalityScope as Scope } from "../api/types";
 import { ActionLink } from "../ui/ActionLink";
 import { Alert } from "../ui/Alert";
+import { LibraryPassageScope } from "./LibraryPassageScope";
 
 export function OriginalityScope({
   scope,
@@ -49,10 +50,13 @@ export function OriginalityScope({
   }
   const noun = count === 1 ? "record" : "records";
   return (
+    <>
     <p className="signal-originality-scope">
       {scope.corpus === "library"
         ? `Originality and reuse: compared against ${count} Library ${noun} when this check ran. Manuscripts that are not in the Library were not compared.`
         : `Originality and reuse: compared against ${count} stored ${noun} when this check ran, before the Library became a separate collection.`}
     </p>
+    <LibraryPassageScope summary={scope.library_passage_indexing} />
+    </>
   );
 }

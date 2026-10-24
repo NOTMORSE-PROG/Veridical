@@ -55,6 +55,8 @@ class LibraryEntry(Base, PkCreatedMixin):
     )
     # Vetted `messages.py` text only (same rule as `ingest_failure_detail`).
     failure_detail: Mapped[str | None] = mapped_column(Text)
+    # Source/model-bound preparation facts; NULL preserves unknown legacy scope.
+    passage_indexing_snapshot: Mapped[dict | None] = mapped_column(JSONB)
     added_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     removed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     removal_reason: Mapped[LibraryRemovalReason | None] = mapped_column(

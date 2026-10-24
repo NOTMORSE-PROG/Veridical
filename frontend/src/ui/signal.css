@@ -1,4 +1,25 @@
 @layer components {
+  .signal-library-passage-marker {
+    min-inline-size: 0;
+    overflow-wrap: anywhere;
+    color: var(--color-signal-ink-secondary);
+    font-size: var(--signal-type-meta);
+    line-height: var(--signal-line-meta);
+  }
+  .signal-library-passage-indexing {
+    min-inline-size: 0;
+    margin-block-start: var(--signal-rhythm-group);
+    color: var(--color-signal-ink-secondary);
+    font-size: var(--signal-type-body);
+    line-height: var(--signal-line-body);
+    overflow-wrap: anywhere;
+  }
+  .signal-library-passage-indexing > * + * {
+    margin-block-start: var(--signal-rhythm-attached);
+  }
+  .signal-library-passage-indexing h2 {
+    color: var(--color-signal-ink);
+  }
   .signal-theme {
     min-height: 100%;
     background: var(--color-signal-canvas);

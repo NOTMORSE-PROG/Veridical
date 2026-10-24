@@ -8,7 +8,7 @@ import { ApiError } from "../api/client";
 import { isDocumentPreparationBusy } from "../api/documentPreparation";
 import { StaleUploadContextError, UploadSessionUnavailableError } from "../api/uploadOutcome";
 import { UploadSessionNotice } from "../components/UploadAttemptNotice";
-import type { LibraryDuplicateRefOut, LibraryItemOut, LibrarySubmissionOut } from "../api/types";
+import type { LibraryDuplicateRefOut, LibraryItemOut, LibrarySubmissionOut, PassageIndexing } from "../api/types";
 import { usePrograms } from "../dashboard/useDashboard";
 import { useRouteFocus } from "../routing/useRouteFocus";
 import { claimFocusContinuation } from "../routing/focusContinuation";
@@ -17,6 +17,7 @@ import { Alert } from "../ui/Alert";
 import { Button } from "../ui/Button";
 import { Dialog } from "../ui/Dialog";
 import { LibraryEntryStatus } from "./LibraryEntryStatus";
+import { passageAdditionAnnouncement, passageIndexingText } from "./passageIndexing";
 import { formatLibraryDate, normalizeSchoolYear } from "./libraryFormat";
 import { useLibraryInvalidation } from "./useLibrary";
 import { decideOwnedLibraryEntry, removeOwnedLibraryEntry, submitOwnedLibraryEntry } from "./libraryUploadRequests";
@@ -40,7 +41,7 @@ type RowState =
       error?: string;
       unconfirmed?: boolean;
     }
-  | { kind: "added_anyway"; manuscriptId: number }
+  | { kind: "added_anyway"; manuscriptId: number; passageIndexing?: PassageIndexing | null }
   | { kind: "skipped" }
   | { kind: "failed"; message: string; item: LibraryItemOut | null; deletionUnconfirmed?: boolean }
   | { kind: "deleted" }
@@ -152,10 +153,10 @@ function RowDetail({ row }: { row: Row }) {
   if (state.kind === "added") {
     const fromTitlePage = state.item.proposed_fields.includes("title");
     return (
-      <p>
+      <div><p>
         Added as “{state.item.label}”.
         {fromTitlePage && " This title was proposed from the first page; check it on the record."}
-      </p>
+      </p><p>{passageIndexingText(state.item.passage_indexing)}</p></div>
     );
   }
   if (state.kind === "processing") return <p>It joins the Library when reading finishes.</p>;
@@ -178,7 +179,7 @@ function RowDetail({ row }: { row: Row }) {
       </p>
     );
   }
-  if (state.kind === "added_anyway") return <p>Added anyway. It is now a comparison source.</p>;
+  if (state.kind === "added_anyway") return <div><p>Added anyway. It is now a comparison source.</p><p>{passageIndexingText(state.passageIndexing)}</p></div>;
   if (state.kind === "skipped") return <p>Not added. This copy was not kept.</p>;
   if (state.kind === "failed") return <p>{state.deletionUnconfirmed ? "The deletion result is not confirmed. Review this record in the Library." : state.message}</p>;
   if (state.kind === "deleted") return <p>The unreadable upload was deleted.</p>;
@@ -326,7 +327,7 @@ export function SignalLibraryAddPage() {
       updateRow(row.key, state, operation);
       if (state.kind === "result_unknown") return "result_unknown";
       const done = rowsRef.current.filter((r) => isSettled(r.state)).length;
-      setAnnouncement(`${row.file.name}: ${rowStatusLabel(state)}. ${done} of ${rowsRef.current.length} done.`);
+      setAnnouncement(`${row.file.name}: ${state.kind === "added" ? passageAdditionAnnouncement(state.item.passage_indexing) : rowStatusLabel(state)}. ${done} of ${rowsRef.current.length} done.`);
       return "ok";
     } catch (error) {
       if (error instanceof StaleUploadContextError || !operation.isCurrent()) return "retired";
@@ -461,13 +462,13 @@ export function SignalLibraryAddPage() {
     let focusQueued = false;
     let admitted = false;
     try {
-      await decideOwnedLibraryEntry(item.manuscript_id, action, operation.scope, () => {
+      const confirmed = await decideOwnedLibraryEntry(item.manuscript_id, action, operation.scope, () => {
         operation.admitted(); admitted = true;
         updateRow(row.key, { ...prior, deciding: action, error: undefined }, operation);
       });
       if (!operation.isCurrent()) return;
-      updateRow(row.key, action === "add" ? { kind: "added_anyway", manuscriptId: item.manuscript_id } : { kind: "skipped" }, operation);
-      setAnnouncement(`${row.file.name}: ${action === "add" ? "added anyway" : "skipped, this copy was not kept"}.`);
+      updateRow(row.key, action === "add" ? { kind: "added_anyway", manuscriptId: item.manuscript_id, passageIndexing: confirmed.passage_indexing } : { kind: "skipped" }, operation);
+      setAnnouncement(`${row.file.name}: ${action === "add" ? passageAdditionAnnouncement(confirmed.passage_indexing) : "skipped, this copy was not kept"}.`);
       invalidateLibrary(item.manuscript_id, action === "skip");
       if (action === "skip") { setSkipTarget(null); focus.dispose(); }
       else { focusQueued = true; queueFocus(operation, () => document.getElementById(`library-add-status-${row.key}`), focus); }

@@ -13,6 +13,7 @@ import { ActionLink } from "../ui/ActionLink";
 import { Alert } from "../ui/Alert";
 import { Button } from "../ui/Button";
 import { LibraryEntryStatus } from "./LibraryEntryStatus";
+import { passageIndexingMarker } from "./passageIndexing";
 import { LibraryRecoveryActions } from "./LibraryRecoveryActions";
 import { formatLibraryDate, libraryRecordName } from "./libraryFormat";
 import {
@@ -236,6 +237,8 @@ function LibraryCard({
   const showTeam = item.is_own && item.team_name && normalize(item.team_name) !== normalize(name);
   const showFile = item.is_own && item.original_filename && normalize(item.original_filename) !== normalize(name);
   const titleId = 'library-title-' + item.manuscript_id;
+  const scopeId = 'library-passage-scope-' + item.manuscript_id;
+  const scopeMarker = passageIndexingMarker(item.passage_indexing);
   return (
     <li>
       <article className="signal-library-card" aria-labelledby={titleId}>
@@ -245,6 +248,7 @@ function LibraryCard({
             <span className="signal-library-ownership">
               {item.is_own ? "Your record" : "Shared record"}
             </span>
+            {scopeMarker && <span id={scopeId} className="signal-library-passage-marker">{scopeMarker}</span>}
             {compareMode && (
               <label className="signal-library-select" data-disabled={disabled || undefined}>
                 <input
@@ -285,6 +289,7 @@ function LibraryCard({
               to={sourceDestination}
               variant="secondary"
               aria-label={'View manuscript: ' + name}
+              aria-describedby={scopeMarker ? scopeId : undefined}
             >
               View manuscript
             </ActionLink>

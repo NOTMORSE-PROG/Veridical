@@ -17,6 +17,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
+from app.library.passage_indexing import PassageIndexingOut
 from app.models.enums import LibraryEntrySource, LibraryEntryStatus
 
 
@@ -32,6 +33,7 @@ class LibraryDuplicateRefOut(BaseModel):
 
 
 class LibraryItemOut(BaseModel):
+    passage_indexing: PassageIndexingOut = Field(default_factory=PassageIndexingOut)
     manuscript_id: int
     is_own: bool
     # Own: title, else team name, else filename, else the record label.
@@ -109,6 +111,7 @@ class LibraryDecisionIn(BaseModel):
 
 
 class LibraryEntryStateOut(BaseModel):
+    passage_indexing: PassageIndexingOut = Field(default_factory=PassageIndexingOut)
     manuscript_id: int
     status: LibraryEntryStatus
     added_at: datetime | None
