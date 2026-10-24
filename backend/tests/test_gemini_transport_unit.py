@@ -66,7 +66,8 @@ async def test_empty_response_raises_transport_server_error():
 async def test_valid_json_response_parses_normally():
     transport = _transport_with_response('{"pong": true}')
     result = await transport.generate(model="m", prompt="p", temperature=0.0)
-    assert result == {"pong": True}
+    assert result.payload == {"pong": True}
+    assert result.model_version is None
 
 
 async def test_timeout_maps_to_recoverable_transport_failure_and_sdk_cannot_retry():

@@ -16,6 +16,7 @@ from app.llm.queue import (
     TransportRateLimited,
     TransportServerError,
 )
+from app.llm.result import GenerationResult
 
 # Google returns BOTH per-minute and per-day caps as a 429; only the
 # `quotaId` distinguishes them (verified live 2026-07-26 against this
@@ -56,7 +57,7 @@ class GeminiTransport:
 
     async def generate(
         self, *, model: str, prompt: str, temperature: float, **context: Any
-    ) -> dict[str, Any]:
+    ) -> GenerationResult:
         # Multimodal (V-007 vision pass): image PNG bytes ride in the
         # `images` context kwarg and must become Parts, or they'd silently
         # never reach the model — text-only calls (V-010 rubric parsing,
@@ -110,7 +111,9 @@ class GeminiTransport:
         if not text:
             raise TransportServerError("Gemini returned an empty response.")
         try:
-            return json.loads(text)
+            return GenerationResult(
+                payload=json.loads(text), model_version=getattr(response, "model_version", None)
+            )
         except json.JSONDecodeError as exc:
             # response_mime_type="application/json" asks for JSON but
             # doesn't guarantee syntactically valid JSON every time (seen

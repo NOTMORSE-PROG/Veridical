@@ -4,6 +4,7 @@ runs against its own scratch database.
 """
 
 import os
+import uuid
 from typing import Any
 
 import pytest
@@ -22,16 +23,16 @@ from app.llm.queue import (
     TransportRateLimited,
     TransportServerError,
 )
+from app.llm.result import GenerationResult
 from app.models.audit import AuditLog
 from app.models.instructor import Instructor
+from app.models.llm import LLMResponseCache
 
 live = pytest.mark.skipif(
     "DATABASE_URL" not in os.environ,
     reason="integration: needs a live Postgres (CI service or local docker-compose)",
 )
 pytestmark = live
-
-SCRATCH_DB = "veridical_llmtest"
 
 
 @pytest.fixture(scope="module")
@@ -42,18 +43,19 @@ def llm_scratch_url():
     from tests.test_schema import _admin_execute, _alembic_config, _swap_db
 
     base = os.environ["DATABASE_URL"]
-    asyncio.run(_admin_execute(base, f'DROP DATABASE IF EXISTS "{SCRATCH_DB}"'))
-    asyncio.run(_admin_execute(base, f'CREATE DATABASE "{SCRATCH_DB}"'))
-    url = _swap_db(base, SCRATCH_DB)
+    scratch_db = "veridical_llmtest_" + uuid.uuid4().hex
+    asyncio.run(_admin_execute(base, f'CREATE DATABASE "{scratch_db}"'))
+    url = _swap_db(base, scratch_db)
     command.upgrade(_alembic_config(url), "head")
     yield url
-    asyncio.run(_admin_execute(base, f'DROP DATABASE IF EXISTS "{SCRATCH_DB}" WITH (FORCE)'))
+    asyncio.run(_admin_execute(base, f'DROP DATABASE "{scratch_db}"'))
 
 
 @pytest.fixture()
-def session_factory(llm_scratch_url):
+async def session_factory(llm_scratch_url):
     engine = create_async_engine(sqlalchemy_url(llm_scratch_url))
     yield async_sessionmaker(engine, expire_on_commit=False)
+    await engine.dispose()
 
 
 @pytest.fixture(autouse=True)
@@ -135,6 +137,78 @@ async def test_successful_call_writes_audit_log_with_prompt_version_and_hash(ses
     assert row.prompt_version == "v1"
     assert len(row.input_hash) == 64
     assert row.payload["response"] == {"criteria": []}
+
+
+async def test_reported_version_survives_persistence_and_a_new_queue_cache_hit(session_factory):
+    payload = {"criteria": [{"text": "synthetic source requirement"}]}
+    transport = ScriptedTransport(
+        responses=[GenerationResult(payload=payload, model_version="reported-version-control")]
+    )
+    first = _make_queue(session_factory, transport)
+    request = dict(
+        prompt_type="rubric_decomposition", prompt="version control", prompt_version="v1"
+    )
+    assert await first.submit(**request) == payload
+    second_transport = ScriptedTransport(fail_times=1)
+    second = _make_queue(session_factory, second_transport)
+    assert await second.submit(**request) == payload
+    assert len(transport.calls) == 1 and second_transport.calls == []
+    async with session_factory() as session:
+        cached = (await session.scalars(select(LLMResponseCache))).one()
+        events = (await session.scalars(select(AuditLog).order_by(AuditLog.id))).all()
+    assert cached.response == payload and cached.model_version == "reported-version-control"
+    completed = [event for event in events if event.event_type in ("llm_call", "llm_cache_hit")]
+    assert [event.event_type for event in completed] == ["llm_call", "llm_cache_hit"]
+    for event, source in zip(completed, ("generation", "cache"), strict=True):
+        assert event.payload["model"] == event.payload["requested_model"] == "test-model"
+        assert event.payload["model_version"] == "reported-version-control"
+        assert event.payload["response_source"] == source
+        assert event.payload["response"] == payload
+
+
+async def test_legacy_cache_json_cannot_invent_provider_version(session_factory):
+    payload = {"model_version": "untrusted-model-json", "criteria": []}
+    transport = ScriptedTransport(responses=[payload])
+    queue = _make_queue(session_factory, transport)
+    request = dict(
+        prompt_type="rubric_decomposition", prompt="unknown version", prompt_version="v1"
+    )
+    assert await queue.submit(**request) == payload
+    assert (
+        await _make_queue(session_factory, ScriptedTransport(fail_times=1)).submit(**request)
+        == payload
+    )
+    async with session_factory() as session:
+        cached = (await session.scalars(select(LLMResponseCache))).one()
+        events = (
+            await session.scalars(
+                select(AuditLog).where(AuditLog.event_type.in_(("llm_call", "llm_cache_hit")))
+            )
+        ).all()
+    assert cached.model_version is None
+    assert all(event.payload["model_version"] is None for event in events)
+    assert all(event.payload["model_version_source"] == "unrecorded" for event in events)
+
+
+async def test_cache_first_writer_preserves_payload_and_version_as_one_record(session_factory):
+    queue = _make_queue(session_factory, ScriptedTransport())
+    async with session_factory() as session:
+        for payload, version in [
+            ({"writer": "first"}, "version-first"),
+            ({"writer": "second"}, "version-second"),
+        ]:
+            await queue._write_cache(
+                session,
+                input_hash="a" * 64,
+                prompt_version="v1",
+                response=payload,
+                model="test-model",
+                model_version=version,
+            )
+            await session.commit()
+        cached = await queue._get_cached(session, "a" * 64)
+    assert cached.payload == {"writer": "first"}
+    assert cached.model_version == "version-first"
 
 
 async def test_daily_counter_survives_simulated_restart(session_factory):

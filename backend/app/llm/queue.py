@@ -21,6 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from app.config import get_settings
 from app.errors import ApiDownError, QuotaExhaustedError, RuntimeApiKeyRejectedError
 from app.llm.pool import ModelSpec, pool_daily_capacity
+from app.llm.result import GenerationResult, generation_result
 from app.models.audit import AuditLog
 from app.models.llm import LLMQuotaCounter, LLMResponseCache
 from app.rate_governor import ClockFn, RateGovernor, SleepFn, _default_sleep
@@ -44,7 +45,7 @@ class Transport(Protocol):
 
     async def generate(
         self, *, model: str, prompt: str, temperature: float, **context: Any
-    ) -> dict[str, Any]: ...
+    ) -> GenerationResult | dict[str, Any]: ...
 
 
 class TransportRateLimited(Exception):
@@ -319,6 +320,7 @@ class LLMQueue:
                 cached = await self._get_cached(session, hashes[spec.model])
                 if cached is None:
                     continue
+                cached = generation_result(cached)
                 await self._note_cache_hit(session, model=spec.model)
                 await self._write_audit(
                     session,
@@ -327,13 +329,14 @@ class LLMQueue:
                     prompt_version=prompt_version,
                     input_hash=hashes[spec.model],
                     check_run_id=check_run_id,
-                    response=cached,
+                    response=cached.payload,
                     context=context,
                     prompt=prompt,
                     model=spec.model,
+                    model_version=cached.model_version,
                 )
                 await session.commit()
-                return cached
+                return cached.payload
 
         exhausted: list[str] = []
         unavailable: list[str] = []
@@ -341,7 +344,7 @@ class LLMQueue:
             input_hash = hashes[spec.model]
 
             try:
-                response = await self._call_with_retry(
+                generated = await self._call_with_retry(
                     spec=spec,
                     prompt=prompt,
                     context=context,
@@ -438,6 +441,7 @@ class LLMQueue:
                 raise
 
             async with self._session_factory() as session:
+                response = generated.payload
                 await self._write_audit(
                     session,
                     event_type="llm_call",
@@ -449,6 +453,7 @@ class LLMQueue:
                     context=context,
                     prompt=prompt,
                     model=spec.model,
+                    model_version=generated.model_version,
                 )
                 await self._write_cache(
                     session,
@@ -456,6 +461,7 @@ class LLMQueue:
                     prompt_version=prompt_version,
                     response=response,
                     model=spec.model,
+                    model_version=generated.model_version,
                 )
                 await session.commit()
 
@@ -648,10 +654,13 @@ class LLMQueue:
         )
         await session.execute(stmt)
 
-    async def _get_cached(self, session: AsyncSession, input_hash: str) -> dict[str, Any] | None:
-        return await session.scalar(
-            select(LLMResponseCache.response).where(LLMResponseCache.input_hash == input_hash)
+    async def _get_cached(self, session: AsyncSession, input_hash: str) -> GenerationResult | None:
+        row = await session.scalar(
+            select(LLMResponseCache).where(LLMResponseCache.input_hash == input_hash)
         )
+        if row is None or row.response is None:
+            return None
+        return GenerationResult(payload=row.response, model_version=row.model_version)
 
     async def _write_cache(
         self,
@@ -659,8 +668,9 @@ class LLMQueue:
         *,
         input_hash: str,
         prompt_version: str,
-        response: dict[str, Any],
+        response: Any,
         model: str,
+        model_version: str | None = None,
     ) -> None:
         stmt = (
             pg_insert(LLMResponseCache)
@@ -669,6 +679,7 @@ class LLMQueue:
                 prompt_version=prompt_version,
                 model=model,
                 response=response,
+                model_version=model_version,
             )
             .on_conflict_do_nothing(index_elements=[LLMResponseCache.input_hash])
         )
@@ -683,10 +694,11 @@ class LLMQueue:
         prompt_version: str,
         input_hash: str,
         check_run_id: int | None,
-        response: dict[str, Any],
+        response: Any,
         context: dict[str, Any] | None = None,
         prompt: str = "",
         model: str | None = None,
+        model_version: str | None = None,
     ) -> None:
         # `prompt`/`context` (e.g. V-022's `consistency_pass`) are stored
         # alongside the response so `tools/replay_call.py` (V-024) can
@@ -705,10 +717,23 @@ class LLMQueue:
                 input_hash=input_hash,
                 payload={
                     "prompt_type": prompt_type,
-                    # The model that ACTUALLY served the call, not the pool
-                    # head — a replay (V-024) must reconstruct the real call,
-                    # and a verdict's model is part of its provenance.
+                    # Requested identity remains the cache/hash/replay input.
+                    # A provider redirect can serve a different version.
                     "model": model or self._model,
+                    "requested_model": model or self._model,
+                    "model_version": model_version,
+                    "model_version_source": (
+                        "cached_response" if event_type == "llm_cache_hit" else "provider_response"
+                    )
+                    if model_version is not None
+                    else "unrecorded",
+                    "response_source": (
+                        "cache"
+                        if event_type == "llm_cache_hit"
+                        else "generation"
+                        if event_type == "llm_call"
+                        else "not_recorded"
+                    ),
                     # BUG-219: explicit, not just the absence of fake.py's
                     # own `"fake_llm": True` — a row written before this fix
                     # shipped has neither key, and the audit summary's
@@ -736,7 +761,7 @@ class LLMQueue:
         prompt_version: str,
         input_hash: str,
         check_run_id: int | None,
-    ) -> dict[str, Any]:
+    ) -> GenerationResult:
         last_exc: Exception | None = None
         for attempt in range(self._max_retries):
             await self._governors[spec.model].acquire()
@@ -762,8 +787,10 @@ class LLMQueue:
                 )
                 await session.commit()
             try:
-                return await self._transport.generate(
-                    model=spec.model, prompt=prompt, temperature=self._temperature, **context
+                return generation_result(
+                    await self._transport.generate(
+                        model=spec.model, prompt=prompt, temperature=self._temperature, **context
+                    )
                 )
             except TransportDailyQuotaExhausted:
                 # Never retried: the window is a DAY, not seconds. Propagate
