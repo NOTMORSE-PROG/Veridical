@@ -985,6 +985,8 @@ export interface LegacyModelBudget {
 }
 
 export interface QuotaStatus {
+  /** Client selection only; configured does not establish provider access. */
+  key_state?: "configured" | "unavailable" | "not_checked";
   recorded_budget_debits?: number;
   legacy_models?: LegacyModelBudget[];
   mode: "fake" | "live";

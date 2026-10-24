@@ -215,10 +215,17 @@ function QuotaChip() {
   if (isPending) label = accessibleLabel = "Loading local AI budget...";
   else if (!isError && quota) {
     if (quota.mode === "fake") label = accessibleLabel = "Test mode";
+    else if (quota.key_state === "unavailable") {
+      label = "AI setup unavailable";
+      accessibleLabel = "AI setup unavailable. Saved local budget records are available in Settings.";
+    } else if (quota.key_state !== "configured") {
+      label = "AI setup status unknown";
+      accessibleLabel = "AI setup status unknown. Local budget records do not establish whether AI requests can run.";
+    }
     else if (Number.isFinite(quota.calls_remaining)) {
       const remaining = Math.max(0, quota.calls_remaining);
       label = remaining === 0 ? "Local AI budget reached" : `Local AI budget: ${remaining.toLocaleString()} remaining`;
-      accessibleLabel = `Local AI request budget: ${remaining} remaining. Provider allowance is not verified here.`;
+      accessibleLabel = `Local AI request budget: ${remaining} remaining. AI configuration was found. Provider access and allowance have not been verified here.`;
     }
   }
   return <span role="status" aria-label={accessibleLabel} className="inline-flex items-center rounded-full border border-border bg-panel px-2.5 py-1 text-xs text-ink-tertiary">{label}</span>;

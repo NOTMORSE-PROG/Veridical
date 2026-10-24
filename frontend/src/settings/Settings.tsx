@@ -478,7 +478,15 @@ function ApiKeySection() {
   );
 }
 
-function ModelRow({ model }: { model: ModelQuotaStatus }) {
+type AISetup = "configured" | "unavailable" | "unknown" | "test";
+
+function ModelRoutingPill({ model, setup }: { model: ModelQuotaStatus; setup: AISetup }) {
+  if (setup === "unavailable") return <StatusPill tone="attention">AI setup unavailable</StatusPill>;
+  if (setup === "unknown") return <StatusPill tone="neutral">AI setup status unknown</StatusPill>;
+  return <StatusPill tone={model.exhausted ? "attention" : "neutral"}>{model.exhausted ? "Unavailable for routing today" : "Configured"}</StatusPill>;
+}
+
+function ModelRow({ model, setup }: { model: ModelQuotaStatus; setup: AISetup }) {
   return (
     <tr>
       <th scope="row">{model.model}</th>
@@ -486,12 +494,12 @@ function ModelRow({ model }: { model: ModelQuotaStatus }) {
       <td>{model.calls_remaining}</td>
       <td>{model.cache_hits_today}</td>
       <td>{model.vision ? "Yes" : "No"}</td>
-      <td><StatusPill tone={model.exhausted ? "attention" : "neutral"}>{model.exhausted ? "Unavailable for routing today" : "Configured"}</StatusPill></td>
+      <td><ModelRoutingPill model={model} setup={setup} /></td>
     </tr>
   );
 }
 
-function ModelCapacityTable({ models }: { models: ModelQuotaStatus[] }) {
+function ModelCapacityTable({ models, setup }: { models: ModelQuotaStatus[]; setup: AISetup }) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const [overflows, setOverflows] = useState(false);
   const helpId = useId();
@@ -527,7 +535,7 @@ function ModelCapacityTable({ models }: { models: ModelQuotaStatus[] }) {
             <th scope="col">Image requests enabled</th>
             <th scope="col">Routing status</th>
           </tr></thead>
-          <tbody>{models.map((model) => <ModelRow key={model.model} model={model} />)}</tbody>
+          <tbody>{models.map((model) => <ModelRow key={model.model} model={model} setup={setup} />)}</tbody>
         </table>
       </div>
       {overflows && <p id={helpId} className="mt-2 text-xs text-ink-secondary">Scroll across to see all model details.</p>}
@@ -566,6 +574,8 @@ function QuotaSection() {
 
   const { remainingPct, tone } = quotaRemaining(quota.calls_used, quota.daily_limit);
   const fillColor = `var(--color-status-${tone}-text)`;
+  const setup: AISetup = quota.mode === "fake" ? "test" : quota.key_state === "configured"
+    ? "configured" : quota.key_state === "unavailable" ? "unavailable" : "unknown";
 
   return (
     <SectionCard headingId="quota-heading" title="Local AI budget">
@@ -580,7 +590,13 @@ function QuotaSection() {
             Test mode is active. These budget figures do not represent live provider usage.
           </p>
         )}
-        <div
+        {setup === "unavailable" && <div role="status" aria-live="polite">
+          <p>No usable AI configuration was available for this status check. Saved shared-key budget records are shown below.</p>
+          <p>Review the Personal key section, or ask the deployment administrator to check shared AI configuration. You can still review available results and record your own judgments.</p>
+        </div>}
+        {setup === "configured" && <p role="status">AI configuration found. Provider access has not been verified.</p>}
+        {setup === "unknown" && <p role="status">AI setup status is unknown. These local budget records do not establish whether AI requests can run.</p>}
+        {(setup === "configured" || setup === "test") && <div
           aria-hidden="true"
           className="h-2 w-full max-w-xs overflow-hidden rounded-full"
           style={{ backgroundColor: "var(--color-neutral-150)" }}
@@ -589,9 +605,9 @@ function QuotaSection() {
             className="block h-full rounded-full"
             style={{ width: `${remainingPct}%`, backgroundColor: fillColor }}
           />
-        </div>
+        </div>}
         <p className="text-sm text-ink">
-          Remaining local request budget: {quota.calls_remaining}
+          {setup === "unavailable" || setup === "unknown" ? "Remaining budget in this local record" : "Remaining local request budget"}: {quota.calls_remaining}
         </p>
         <p>Configured daily limit: {quota.daily_limit}</p>
         <p>Recorded local budget: {quota.recorded_budget_debits ?? quota.calls_used}</p>
@@ -614,7 +630,7 @@ function QuotaSection() {
                   <span className="min-w-0 wrap-anywhere font-medium text-ink">
                     {model.model}
                   </span>
-                  <StatusPill tone={model.exhausted ? "attention" : "neutral"}>{model.exhausted ? "Unavailable for routing today" : "Configured"}</StatusPill>
+                  <ModelRoutingPill model={model} setup={setup} />
                 </div>
                 <p className="mt-1 text-xs text-ink-tertiary">
                   {model.recorded_budget_debits ?? model.calls_used} / {model.daily_limit} recorded budget / configured limit · {model.calls_remaining} local budget remaining ·{" "}
@@ -623,7 +639,7 @@ function QuotaSection() {
               </li>
             ))}
           </ul>
-          <ModelCapacityTable models={quota.models} />
+          <ModelCapacityTable models={quota.models} setup={setup} />
           {quota.models.filter((model) => (model.historical_budget_debits ?? 0) > 0).map((model) => <p key={model.model} className="mt-2 text-sm text-ink-secondary">
             Requested model {model.model} includes {model.historical_budget_debits} recorded budget debits from earlier identifiers: {model.budget_aliases?.join(", ")}. The remaining local budget includes a conservative reservation for earlier model records. A reservation is a local safety measure, not a count of additional API requests.
           </p>)}

@@ -21,9 +21,11 @@ function CapacityStatement() {
   if (isPending) return <span className="signal-capacity" role="status">Loading local AI budget...</span>;
   if (isError || !quota) return <span className="signal-capacity" role="status">Local AI budget unavailable</span>;
   if (quota.mode === "fake") return <span className="signal-capacity" role="status">Test mode</span>;
+  if (quota.key_state === "unavailable") return <span className="signal-capacity" role="status" aria-label="AI setup unavailable. Saved local budget records are available in Settings.">AI setup unavailable</span>;
+  if (quota.key_state !== "configured") return <span className="signal-capacity" role="status" aria-label="AI setup status unknown. Local budget records do not establish whether AI requests can run.">AI setup status unknown</span>;
   if (!Number.isFinite(quota.calls_remaining)) return <span className="signal-capacity" role="status">Local AI budget unavailable</span>;
   const remaining = Math.max(0, quota.calls_remaining);
-  return <span className="signal-capacity" role="status" aria-label={`Local AI request budget: ${remaining} remaining. Provider allowance is not verified here.`}>
+  return <span className="signal-capacity" role="status" aria-label={`Local AI request budget: ${remaining} remaining. AI configuration was found. Provider access and allowance have not been verified here.`}>
     {remaining === 0 ? "Local AI budget reached" : `Local AI budget: ${remaining.toLocaleString()} remaining`}
   </span>;
 }

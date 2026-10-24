@@ -15,7 +15,7 @@ function renderShell(route = "/library") {
           onboarding_dismissed_at: "2026-01-01T00:00:00Z",
         },
       },
-      "/quota": { calls_used: 3, calls_remaining: 17, daily_limit: 20 },
+      "/quota": { mode: "live", key_state: "configured", calls_used: 3, calls_remaining: 17, daily_limit: 20 },
     }),
   );
   return renderWithProviders(<SignalShell><p>Route content</p></SignalShell>, { route });
@@ -24,19 +24,33 @@ function renderShell(route = "/library") {
 describe("SignalShell destination navigation", () => {
   afterEach(() => vi.unstubAllGlobals());
 
+  it.each([
+    ["unavailable", 17, "AI setup unavailable"], ["unavailable", 0, "AI setup unavailable"],
+    ["not_checked", 17, "AI setup status unknown"], [undefined, 17, "AI setup status unknown"],
+    ["future", 17, "AI setup status unknown"], ["configured", 0, "Local AI budget reached"],
+  ])("prioritizes setup state %s over remaining budget %s", async (key_state, calls_remaining, text) => {
+    vi.stubGlobal("fetch", stubFetchByPath({
+      "/auth/session": { instructor: { id: 1, email: "instructor@demo.local", display_name: "Instructor", onboarding_dismissed_at: "2026-01-01T00:00:00Z" } },
+      "/quota": { mode: "live", key_state, calls_remaining },
+    }));
+    renderWithProviders(<SignalShell><p>Route content</p></SignalShell>);
+    expect((await screen.findAllByText(text as string)).length).toBeGreaterThan(0);
+    expect(screen.queryByText(/17 remaining/)).not.toBeInTheDocument();
+  });
+
   it.each(["fake", "unknown"])("does not advertise available provider requests for %s budget data", async state => {
     vi.stubGlobal("fetch", stubFetchByPath({
       "/auth/session": { instructor: { id: 1, email: "instructor@demo.local", display_name: "Instructor", onboarding_dismissed_at: "2026-01-01T00:00:00Z" } },
       "/quota": { mode: state === "fake" ? "fake" : "live", calls_remaining: state === "fake" ? 300 : null },
     }));
     renderWithProviders(<SignalShell><p>Route content</p></SignalShell>);
-    await screen.findAllByText(state === "fake" ? "Test mode" : "Local AI budget unavailable");
+    await screen.findAllByText(state === "fake" ? "Test mode" : "AI setup status unknown");
     expect(screen.queryByText(/300 remaining/)).not.toBeInTheDocument();
     expect(screen.queryByText(/calls left/)).not.toBeInTheDocument();
   });
 
   it.each(["available", "loading", "unavailable"])("keeps %s capacity accessible through Account using reads only", async (state) => {
-    const base = stubFetchByPath({ "/auth/session": { instructor: { id: 1, email: "instructor@demo.local", display_name: "Demo Instructor", onboarding_dismissed_at: "2026-01-01T00:00:00Z" } }, "/quota": { calls_used: 3, calls_remaining: 17, daily_limit: 20 } });
+    const base = stubFetchByPath({ "/auth/session": { instructor: { id: 1, email: "instructor@demo.local", display_name: "Demo Instructor", onboarding_dismissed_at: "2026-01-01T00:00:00Z" } }, "/quota": { mode: "live", key_state: "configured", calls_used: 3, calls_remaining: 17, daily_limit: 20 } });
     const fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       if (String(input).endsWith("/quota")) {
         if (state === "loading") return await new Promise<Response>(() => {});

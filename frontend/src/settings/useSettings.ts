@@ -22,6 +22,8 @@ export function useSetApiKey() {
     mutationFn: (body: SetApiKeyIn) => api.post<SettingsOut>("/settings/api-key", body),
     onSuccess: (settings) => {
       queryClient.setQueryData(["settings"], settings);
+      // Clear the previous key's record while the current ledger is read.
+      void queryClient.resetQueries({ queryKey: ["quota"], exact: true });
     },
   });
 }
@@ -32,6 +34,7 @@ export function useDeleteApiKey() {
     mutationFn: () => api.delete<SettingsOut>("/settings/api-key"),
     onSuccess: (settings) => {
       queryClient.setQueryData(["settings"], settings);
+      void queryClient.resetQueries({ queryKey: ["quota"], exact: true });
     },
   });
 }

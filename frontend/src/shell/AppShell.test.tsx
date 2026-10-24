@@ -16,6 +16,7 @@ import { AppShell } from "./AppShell";
 // media-query support jsdom doesn't have).
 
 const QUOTA = {
+  key_state: "configured",
   mode: "fake",
   quota_day: "2026-07-25",
   calls_used: 0,
@@ -29,6 +30,13 @@ const QUOTA = {
 
 describe("AppShell", () => {
   afterEach(() => vi.unstubAllGlobals());
+
+  it.each(["unavailable", "not_checked", undefined, "future"])("qualifies setup state %s without presenting a usable request count", async key_state => {
+    vi.stubGlobal("fetch", stubFetchByPath({ "/quota": { ...QUOTA, mode: "live", key_state } }));
+    renderWithProviders(<AppShell><div /></AppShell>);
+    expect(await screen.findByText(key_state === "unavailable" ? "AI setup unavailable" : "AI setup status unknown")).toBeInTheDocument();
+    expect(screen.queryByText(/1,400 remaining/)).not.toBeInTheDocument();
+  });
 
   it("shows the signed-in instructor's initials and a real (not invented) quota direction", async () => {
     vi.stubGlobal(

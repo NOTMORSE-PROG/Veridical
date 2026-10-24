@@ -34,10 +34,9 @@ class QuotaStatus(BaseModel):
     mode: Literal["fake", "live"]
     # Selection eligibility only; configured never means provider-verified.
     key_state: Literal["configured", "unavailable", "not_checked"] = "not_checked"
-    # V-052 (BYOK): which key this status describes -- "own" only when the
-    # requesting instructor has their own Gemini key configured and this
-    # reflects THEIR island, "shared" otherwise (including fake mode, which
-    # never spends a real key of either kind -- charter rule 9, honesty).
+    # Local ledger owner: own for a selected personal client, shared for shared
+    # records, including passive missing-configuration reads and test mode.
+    # This field does not establish usable credentials or provider independence.
     key_source: Literal["own", "shared"]
     quota_day: str
     # Effective configured local budget usage, not physical API attempts.

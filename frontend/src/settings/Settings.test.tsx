@@ -12,6 +12,7 @@ const ME: Instructor = {
 };
 
 const QUOTA: QuotaStatus = {
+  key_state: "configured",
   mode: "live",
   key_source: "shared",
   quota_day: "2026-08-14",
@@ -65,6 +66,83 @@ function baseHandlers(overrides: Record<string, unknown> = {}) {
 
 describe("SettingsPage", () => {
   afterEach(() => vi.unstubAllGlobals());
+
+  it.each(["save", "remove"])("clears stale setup state after key %s and waits for the fresh ledger", async operation => {
+    let quotaReads = 0;
+    let release!: (response: Response) => void;
+    const held = new Promise<Response>(resolve => { release = resolve; });
+    const initial = { ...QUOTA, key_state: operation === "save" ? "unavailable" : "configured", key_source: operation === "save" ? "shared" : "own" };
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = new URL(input.toString(), "http://localhost").pathname;
+      if (path === "/quota") {
+        quotaReads += 1;
+        return quotaReads === 1 ? new Response(JSON.stringify(initial)) : held;
+      }
+      if (path === "/settings/api-key") {
+        expect(init?.method).toBe(operation === "save" ? "POST" : "DELETE");
+        return new Response(JSON.stringify({ ...SETTINGS,
+          api_key: { byok_available: true, has_own_api_key: operation === "save" } }));
+      }
+      const body = baseHandlers({ "/settings": { ...SETTINGS,
+        api_key: { byok_available: true, has_own_api_key: operation === "remove" } } })[path as "/settings"];
+      return new Response(JSON.stringify(body));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    renderWithProviders(<SettingsPage />);
+    await screen.findByText(operation === "save" ? /No usable AI configuration/ : "AI configuration found. Provider access has not been verified.");
+    if (operation === "save") fireEvent.change(await screen.findByLabelText("Gemini API key"), { target: { value: "controlled-not-sent-to-provider" } });
+    fireEvent.click(await screen.findByRole("button", { name: operation === "save" ? "Save key" : "Remove key" }));
+    try {
+      expect(await screen.findByText("Loading local AI budget...")).toBeVisible();
+      expect(screen.queryByText("Quota record: personal key")).not.toBeInTheDocument();
+      expect(screen.queryByText("Quota record: shared key")).not.toBeInTheDocument();
+      release(new Response(JSON.stringify({ ...QUOTA, key_state: operation === "save" ? "configured" : "unavailable",
+        key_source: operation === "save" ? "own" : "shared", calls_remaining: 17 })));
+      expect(await screen.findByText(operation === "save" ? "Remaining local request budget: 17" : "Remaining budget in this local record: 17")).toBeVisible();
+      expect(screen.getByText(operation === "save" ? "Quota record: personal key" : "Quota record: shared key")).toBeVisible();
+      expect(quotaReads).toBe(2);
+      expect(fetchMock.mock.calls.filter(([input]) => input.toString().endsWith("/settings/api-key"))).toHaveLength(1);
+    } finally { release(new Response(JSON.stringify({ error: { code: "api_down", message: "Controlled read failure" } }), { status: 503 })); }
+  });
+
+  it("keeps a successful key save separate from a failed ledger refresh", async () => {
+    let reads = 0;
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      const path = new URL(input.toString(), "http://localhost").pathname;
+      if (path === "/quota") return ++reads === 1 ? new Response(JSON.stringify(QUOTA))
+        : new Response(JSON.stringify({ error: { code: "api_down", message: "Controlled read failure" } }), { status: 503 });
+      if (path === "/settings/api-key") return new Response(JSON.stringify({ ...SETTINGS, api_key: { byok_available: true, has_own_api_key: true } }));
+      return new Response(JSON.stringify(baseHandlers()[path as "/settings"]));
+    }));
+    renderWithProviders(<SettingsPage />);
+    await screen.findByText("Remaining local request budget: 260");
+    fireEvent.change(await screen.findByLabelText("Gemini API key"), { target: { value: "controlled-not-sent-to-provider" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save key" }));
+    expect(await screen.findByText(/Could not load the local AI budget right now/)).toBeVisible();
+    expect(screen.getByRole("button", { name: "Remove key" })).toBeVisible();
+    expect(screen.queryByText("AI configuration found. Provider access has not been verified.")).not.toBeInTheDocument();
+    expect(screen.queryByText("Remaining local request budget: 260")).not.toBeInTheDocument();
+  });
+
+  it.each(["unavailable", "not_checked", undefined, "future"])("keeps saved budget records visible for setup state %s", async key_state => {
+    vi.stubGlobal("fetch", stubFetchByPath(baseHandlers({ "/quota": {
+      ...QUOTA, key_state, calls_remaining: 0, recorded_budget_debits: 33,
+      legacy_models: [{ model: "earlier-request", recorded_budget_debits: 20, cache_hits_today: 3, budget_model: null }],
+    } })));
+    renderWithProviders(<SettingsPage />);
+    const ledger = await screen.findByRole("region", { name: "Earlier model records for this budget day" });
+    expect(within(ledger).getByRole("heading", { name: "earlier-request" })).toBeVisible();
+    expect(screen.getByText("Remaining budget in this local record: 0")).toBeVisible();
+    expect(screen.getByText("Recorded local budget: 33")).toBeVisible();
+    const notice = key_state === "unavailable" ? "No usable AI configuration was available for this status check. Saved shared-key budget records are shown below."
+      : "AI setup status is unknown. These local budget records do not establish whether AI requests can run.";
+    expect(screen.getByText(notice)).toBeVisible();
+    const section = screen.getByRole("region", { name: "Local AI budget" });
+    expect(section.querySelector('div[aria-hidden="true"]')).toBeNull();
+    expect(within(section).getAllByText(key_state === "unavailable" ? "AI setup unavailable" : "AI setup status unknown").length).toBe(2);
+    expect(within(section).queryByText("Configured")).not.toBeInTheDocument();
+    expect(within(section).queryByText("Unavailable for routing today")).not.toBeInTheDocument();
+  });
 
   it("keeps earlier budget records visible and qualifies the raw counter without a cache percentage", async () => {
     vi.stubGlobal("fetch", stubFetchByPath(baseHandlers({ "/quota": {
