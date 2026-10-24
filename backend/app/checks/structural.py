@@ -25,14 +25,18 @@ _OUTCOME_SCORE = {
 
 
 def _missing_rule_outcome(rule_id: str) -> RuleOutcome:
-    """Defensive only: the router named a `rule_id` that isn't registered
-    (e.g. a rule was removed after routing ran). Never crashes the run —
-    degrades to an honest not_applicable, same charter-rule-1 guarantee
-    V-015 already gives unroutable criteria."""
+    """A routed rule disappeared: preserve the run and require manual review.
+
+    Failure to execute does not establish that the requirement is inapplicable.
+    Intentional document-inapplicable routing remains the router's responsibility.
+    """
     return RuleOutcome(
-        outcome=ResultOutcome.not_applicable,
+        outcome=ResultOutcome.unverifiable,
         anchor="document",
-        detail={"reason": f"Rule '{rule_id}' is not registered."},
+        detail={
+            "reason": f"Rule '{rule_id}' is not registered.",
+            "failure_kind": "rule_not_registered",
+        },
     )
 
 
@@ -45,8 +49,9 @@ def _raising_rule_outcome(rule_id: str, exc: Exception) -> RuleOutcome:
     catch-all and fail the WHOLE run, including every criterion already
     passed and every integrity check not yet reached. Same charter-rule-1
     treatment as `_missing_rule_outcome`, extended rather than a second
-    convention invented: this ONE criterion degrades to an honest
-    not_applicable while the run keeps going.
+    convention invented: the run keeps going. BUG-469 retains this
+    containment but leaves the criterion unassessed and pending review;
+    an execution failure cannot establish non-applicability.
 
     `reason` is the one `detail` key `report/service.py` projects to the
     instructor-facing screen (`CriterionResultOut.reason`) -- it must stay
@@ -59,10 +64,11 @@ def _raising_rule_outcome(rule_id: str, exc: Exception) -> RuleOutcome:
     discoverable without being instructor-facing."""
     logger.exception("structural rule %r raised while grading criterion", rule_id)
     return RuleOutcome(
-        outcome=ResultOutcome.not_applicable,
+        outcome=ResultOutcome.unverifiable,
         anchor="document",
         detail={
-            "reason": f"Rule '{rule_id}' could not be evaluated automatically for this manuscript."
+            "reason": f"Rule '{rule_id}' could not be evaluated automatically for this manuscript.",
+            "failure_kind": "rule_execution_failed",
         },
     )
 

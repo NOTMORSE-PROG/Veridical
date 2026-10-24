@@ -155,15 +155,13 @@ async def test_structural_check_persists_a_real_pass_from_a_real_manuscript(
         assert stored.score == 100.0
 
 
-async def test_a_raising_rule_degrades_to_not_applicable_instead_of_killing_the_run(
+async def test_a_raising_rule_stays_unassessed_without_killing_the_run(
     tmp_path, monkeypatch, session_factory
 ):
-    """BUG-161: `_missing_rule_outcome` already gives an UNREGISTERED rule
-    an honest not_applicable instead of crashing the run -- nothing gave
-    the same treatment to a rule that IS registered but RAISES (bbox math,
-    reference parsing over arbitrary student PDF content is exactly what
-    produces the degenerate input that trips this). This criterion alone
-    must degrade; the caller must never see the exception."""
+    """Preserve BUG-161 containment and BUG-469's unassessed failure state.
+
+    An internal rule error must not escape or become a settled N/A exclusion.
+    """
     from app.ingest.service import ingest_manuscript
 
     monkeypatch.setenv("DATA_DIR", str(tmp_path / "data"))
@@ -235,7 +233,7 @@ async def test_a_raising_rule_degrades_to_not_applicable_instead_of_killing_the_
         result = await run_structural_check(
             session, check_run.id, criterion, criterion.id, decision, ctx
         )
-        assert result.outcome == ResultOutcome.not_applicable
+        assert result.outcome == ResultOutcome.unverifiable
         assert result.score is None
         assert result.detail["rule_id"] == "synthetic_raising_rule"
         # Instructor-facing reason (charter rule 3): honest, but must never
@@ -250,4 +248,4 @@ async def test_a_raising_rule_degrades_to_not_applicable_instead_of_killing_the_
                 select(CheckResult).where(CheckResult.criterion_id == criterion.id)
             )
         ).scalar_one()
-        assert stored.outcome == ResultOutcome.not_applicable
+        assert stored.outcome == ResultOutcome.unverifiable
