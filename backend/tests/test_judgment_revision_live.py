@@ -19,6 +19,7 @@ from app.report.judgments import get_judgment_context, get_judgment_history, rev
 from app.report.service import decide_report, reopen_report, resolve_escalation_for_run
 from app.share.service import _to_public_report
 from tests.test_assessment_revision_live import REASON, seed, stored
+from tests.test_criterion_source_coverage import complete
 from tests.test_schema import _admin_execute, _alembic_config, _swap_db
 
 pytestmark = pytest.mark.skipif("DATABASE_URL" not in os.environ, reason="owned Postgres required")
@@ -127,6 +128,41 @@ async def test_actual_revision_ack_history_and_original_evidence_are_coherent(fa
     )
     assert ack.context.original_assessment.original_outcome == "escalated"
     assert ack.context.original_assessment.reason == "Recorded uncertainty"
+
+
+@pytest.mark.asyncio
+async def test_revision_preserves_recorded_source_limits_in_both_private_views(factory):
+    owner, run, criterion, result_id, _, _ = await initial(factory)
+    coverage = complete(
+        2,
+        0,
+        [7],
+        [
+            {"paragraph": 7, "kind": "table_cell", "n_occurrences": 1},
+            {"paragraph": 7, "kind": "table_cell", "n_occurrences": 1},
+        ],
+    )
+    async with factory() as session:
+        result = await session.get(CheckResult, result_id)
+        result.detail = {**result.detail, "source_coverage": deepcopy(coverage)}
+        await session.commit()
+    async with factory() as session:
+        before = await get_judgment_context(session, run, criterion, owner)
+    assert before.original_assessment.source_coverage.model_dump() == coverage
+    async with factory() as session:
+        ack = await revise_judgment(session, run, criterion, owner, revision())
+    assert (
+        ack.context.original_assessment.source_coverage
+        == before.original_assessment.source_coverage
+    )
+    row = next(value for value in ack.report.results if value.criterion_id == criterion)
+    assert row.source_coverage.model_dump() == coverage
+    _, rows, _ = await stored(factory, run)
+    assert (
+        next(value for value in rows if value.id == result_id).detail["source_coverage"] == coverage
+    )
+    public = _to_public_report(ack.report).model_dump(mode="json")
+    assert all("source_coverage" not in value for value in public["results"])
 
 
 @pytest.mark.asyncio

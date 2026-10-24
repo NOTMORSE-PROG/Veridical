@@ -7,6 +7,7 @@ from pydantic import BaseModel, Field, field_validator
 
 from app.config import get_settings
 from app.ingest.schemas import FigureReading
+from app.report.source_coverage import CriterionSourceCoverageOut
 
 
 class EvidenceItem(BaseModel):
@@ -72,6 +73,7 @@ class CriterionResultOut(BaseModel):
 
     check_result_id: int
     judgment_revision: int | None = None
+    source_coverage: CriterionSourceCoverageOut | None = None
     criterion_id: int
     text: str
     type: str

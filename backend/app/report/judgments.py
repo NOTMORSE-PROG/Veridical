@@ -29,6 +29,7 @@ from app.report.judgment_schemas import (
 )
 from app.report.judgment_snapshot import judgment_grade_identity, snapshot_judgment
 from app.report.schemas import EvidenceItem, RubricLevelOut
+from app.report.source_coverage import project_source_coverage
 
 
 async def _owned_parent(session: AsyncSession, run_id: int, actor_id: int):
@@ -119,6 +120,7 @@ def _original(result: CheckResult) -> OriginalJudgmentAssessment:
     from app.report.judgment_snapshot import stored_level
 
     return OriginalJudgmentAssessment(
+        source_coverage=project_source_coverage(detail.get("source_coverage")),
         kind=result.kind.value,
         basis=detail.get("basis") if isinstance(detail.get("basis"), str) else None,
         reason=detail.get("reason") if isinstance(detail.get("reason"), str) else None,

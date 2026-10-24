@@ -92,6 +92,7 @@ from app.report.scoring import (
     score_check_run,
     scoring_result_as_dict,
 )
+from app.report.source_coverage import project_source_coverage
 from app.report.weight_importance import WeightImportance, weight_importance
 from app.storage import ensure_local_file, get_storage
 from app.storage.access import read_source
@@ -309,6 +310,7 @@ def _to_criterion_result(
         else None
     )
     return CriterionResultOut(
+        source_coverage=project_source_coverage(detail.get("source_coverage")),
         check_result_id=result.id,
         judgment_revision=result.judgment_revision,
         criterion_id=criterion.id,

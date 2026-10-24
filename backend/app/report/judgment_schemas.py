@@ -8,6 +8,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 from app.config import get_settings
 from app.report.schemas import CriterionLevelOut, EvidenceItem, ReportOut, RubricLevelOut
+from app.report.source_coverage import CriterionSourceCoverageOut
 
 ResolutionType = Literal[
     "mark_pass", "mark_fail", "mark_level", "needs_document", "accept_majority"
@@ -80,6 +81,7 @@ class JudgmentChoices(PrivateJudgmentModel):
 
 
 class OriginalJudgmentAssessment(PrivateJudgmentModel):
+    source_coverage: CriterionSourceCoverageOut | None = None
     kind: str
     basis: str | None
     reason: str | None
