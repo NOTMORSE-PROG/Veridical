@@ -241,18 +241,48 @@ async def get_llm_client_for(
     return own_client
 
 
+class _BudgetStatusTransport:
+    """A passive ledger reader has no generation capability or credentials."""
+
+    async def generate(
+        self, *, model: str, prompt: str, temperature: float, **context: Any
+    ) -> dict[str, Any]:
+        raise RuntimeError("A budget status reader cannot generate responses.")
+
+
+async def _shared_budget_status(settings: Settings) -> dict[str, Any]:
+    queue = LLMQueue(
+        transport=_BudgetStatusTransport(),
+        session_factory=db.get_session_factory(),
+        pool=load_model_pool(settings.llm_model_pool_file),
+        temperature=settings.gemini_temperature,
+        max_retries=settings.llm_max_retries,
+        retry_base_seconds=settings.llm_retry_base_seconds,
+        reset_timezone=settings.llm_quota_reset_timezone,
+        instructor_id=None,
+        cache_bypass=settings.llm_cache_bypass,
+        cache_contract_version=settings.llm_cache_contract_version,
+    )
+    return await queue.get_quota_status()
+
+
 async def get_quota_status_for(
     session: AsyncSession, settings: Settings, instructor_id: int
 ) -> tuple[dict[str, Any], str]:
-    """Quota status plus which key it describes ("own"/"shared") -- the
-    AC's "quota meter shows your key vs shared key honestly". Reports the
-    instructor's OWN island when they have a key configured and decryptable
-    (what matters to them is their own remaining capacity, not the shared
-    pool's), the shared pool's otherwise."""
-    own_client = await _resolve_own_client(session, settings, instructor_id)
-    if own_client is not None:
-        return await own_client.queue.get_quota_status(), "own"
-    return await _shared_client(settings).queue.get_quota_status(), "shared"
+    """Read the selected local ledger, qualifying missing AI configuration.
+
+    Selection retains the existing personal/shared and warm-client policy.
+    Missing configuration permits a passive shared-ledger read, not generation.
+    Ledger or unrelated selection failures remain failures.
+    """
+    try:
+        own_client = await _resolve_own_client(session, settings, instructor_id)
+        client = own_client if own_client is not None else _shared_client(settings)
+    except LLMNotConfiguredError:
+        status = await _shared_budget_status(settings)
+        return {**status, "key_state": "unavailable"}, "shared"
+    status = await client.queue.get_quota_status()
+    return {**status, "key_state": "configured"}, "own" if own_client is not None else "shared"
 
 
 def get_llm_queue(settings: Settings) -> LLMQueue:

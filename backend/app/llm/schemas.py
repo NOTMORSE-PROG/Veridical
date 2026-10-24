@@ -32,6 +32,8 @@ class LegacyModelBudget(BaseModel):
 
 class QuotaStatus(BaseModel):
     mode: Literal["fake", "live"]
+    # Selection eligibility only; configured never means provider-verified.
+    key_state: Literal["configured", "unavailable", "not_checked"] = "not_checked"
     # V-052 (BYOK): which key this status describes -- "own" only when the
     # requesting instructor has their own Gemini key configured and this
     # reflects THEIR island, "shared" otherwise (including fake mode, which

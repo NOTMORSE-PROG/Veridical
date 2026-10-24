@@ -31,6 +31,7 @@ async def get_quota(
         pool = load_model_pool(settings.llm_model_pool_file)
         return QuotaStatus(
             mode="fake",
+            key_state="not_checked",
             key_source="shared",
             quota_day=quota_day_for(settings.llm_quota_reset_timezone),
             calls_used=0,
