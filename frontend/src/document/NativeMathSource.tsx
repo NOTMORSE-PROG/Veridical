@@ -16,7 +16,8 @@ export function nativeMathInventoryLabel(source?: NativeMathSourceOut | null): s
 }
 
 export function NativeMathInventoryNote({ source }: { source?: NativeMathSourceOut | null }) {
-  if (source?.state === "complete") return null;
+  if (source?.state === "complete") return (source.occurrence_count ?? 0) > 0
+    ? <p className="signal-document-reconstruction-note">Native Word equation formulas are not displayed in this reconstruction or evaluated by statistical forensics. Check the original DOCX for the formulas.</p> : null;
   return <p className="signal-document-reconstruction-note">
     {source?.state === "unavailable"
       ? "The native Word equation inventory could not be verified against this source. Their presence and count are unknown."

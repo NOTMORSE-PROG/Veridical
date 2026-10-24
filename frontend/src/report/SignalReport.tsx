@@ -1,10 +1,10 @@
 import { WorkflowLink as Link } from "../routing/WorkflowLink";
-import { SEMANTIC_SUPPORT_REVIEW } from "../domain/semanticSupport";
+import { reportAssessmentNotices } from "../domain/reportAssessmentContext";
+import { ReportAssessmentContext } from "./ReportAssessmentContext";
 import { ReviewDeskReturnLink } from "../routing/ReviewDeskReturnLink";
 import { type MouseEvent, useEffect, useRef, useState } from "react";
 import { useLocation, useParams } from "react-router";
 import { ApiError } from "../api/client";
-import { TEST_AI_DISCLOSURE } from "../domain/aiModeDisclosure";
 import { manuscriptIdentity } from "../domain/manuscriptLabel";
 import { pendingRouteReturnElement, rememberRouteReturnFocus, useRouteFocus } from "../routing/useRouteFocus";
 import { auditDestination, validAuditReviewOrigin } from "../routing/auditReturn";
@@ -109,6 +109,7 @@ export function SignalReportPage() {
       ) : (
         <>
           {readFailed && <ReportReadNotice retrying={fetchStatus === "fetching"} onRetry={() => { void refetch(); }} />}
+          <ReportAssessmentContext notices={reportAssessmentNotices(report, "report")} />
           <section className="signal-report-hero" aria-labelledby="readiness-band-heading" aria-describedby={readFailed ? "report-read-failure" : undefined}>
             <div className="signal-report-hero__branch" aria-hidden="true"><i /><i /><i /></div>
             <div><p className="signal-section-kicker">{readFailed ? "Last loaded readiness band" : "VERIDICAL readiness band"}</p><h2 id="readiness-band-heading">{report.status === "ready" ? "Ready" : report.status === "conditionally_ready" ? "Conditionally Ready" : report.status === "not_ready" ? "Not Ready" : "Needs Review"}</h2><p>{report.reason ?? "This band is derived from the recorded criterion outcomes and integrity signals. Review the evidence below before deciding."}</p></div>
@@ -157,7 +158,6 @@ export function SignalReportPage() {
             <div className="signal-group-flow signal-report-notices">
               {report.previous_status && <section className="signal-report-history" aria-label="Previous check comparison"><span>Previous run</span><ReadinessBand status={report.previous_status} /><span aria-hidden="true">→</span><span>Current run</span><ReadinessBand status={report.status} /><p>Bands come from separate historical runs. Open Audit for the underlying reproducible values.</p></section>}
 
-              {report.llm_mode !== "real" && <Alert title={report.llm_mode === "fake" ? TEST_AI_DISCLOSURE.title : "AI mode could not be verified"} tone="warning">{report.llm_mode === "fake" ? TEST_AI_DISCLOSURE.body : "This run predates reliable AI-mode tracking. Treat AI-derived outcomes cautiously."}</Alert>}
 
               <CoverageStatement
                 state="partial"
@@ -169,8 +169,7 @@ export function SignalReportPage() {
             </div>
           )}
 
-          {report.historical_semantic_support_unverified && <Alert title={SEMANTIC_SUPPORT_REVIEW.title} tone="warning">{SEMANTIC_SUPPORT_REVIEW.body}</Alert>}
-          <SignalEscalatedPanel checkRunId={report.check_run_id} />
+          <SignalEscalatedPanel checkRunId={report.check_run_id} assessmentContextExternal />
           <FigureReadingsSummary readings={report.figure_readings} checkRunId={report.check_run_id} />
           <SignalFlagsPanel checkRunId={report.check_run_id} unresolvedHighFlagCount={report.unresolved_high_flag_count} originalityScope={report.originality_scope} />
           <SignalCriteriaResults results={report.results.filter((row) => row.outcome !== "escalated")} checkRunId={report.check_run_id} />

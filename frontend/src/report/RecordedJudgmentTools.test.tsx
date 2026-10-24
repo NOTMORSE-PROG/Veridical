@@ -386,3 +386,27 @@ describe("Explicit saved-judgment revision", () => {
     await act(async () => {});
   });
 });
+
+
+describe("revision action provenance", () => {
+  it("keeps visible short context on revision entry and inside confirmation actions", async () => {
+    const control = setup();
+    const revise = await screen.findByRole("button", { name: /^Revise recorded judgment:/ });
+    expect(revise).toHaveAccessibleDescription(/AI response mode is unverified/);
+    for (const id of revise.getAttribute("aria-describedby")!.split(/\s+/)) expect(document.getElementById(id)).toBeVisible();
+    fireEvent.click(revise);
+    const reason = await screen.findByRole("textbox");
+    fireEvent.change(reason, { target: { value: NEW_REASON.repeat(12) } });
+    const review = screen.getByRole("button", { name: "Review revision" });
+    expect(review).toHaveAccessibleDescription(/AI response mode is unverified/);
+    fireEvent.click(review);
+    const dialog = await screen.findByRole("dialog", { name: "Save revised judgment?" });
+    const save = within(dialog).getByRole("button", { name: "Save revised judgment" });
+    expect(save).toHaveAccessibleDescription(/AI response mode is unverified/);
+    const footer = save.closest("footer")!;
+    expect(within(footer).getByText("AI response mode is unverified.")).toBeVisible();
+    fireEvent.click(within(dialog).getByRole("button", { name: "Back to editing" }));
+    expect(screen.getByRole("textbox")).toHaveValue(NEW_REASON.repeat(12));
+    expect(control.posts).toHaveLength(0);
+  });
+});

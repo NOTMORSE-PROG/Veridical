@@ -1,3 +1,4 @@
+import { ActionAssessmentContext, ReportAssessmentContext } from "./ReportAssessmentContext";
 import { criterionAssessmentDetails } from "../domain/criterionAssessment";
 import { CriterionSourceCoverage } from "./CriterionSourceCoverage";
 import { recoverableReadError } from "./reportReadState";
@@ -593,7 +594,8 @@ function SignalResolutionCard({ item, checkRunId, sharedReasonId, sourceTarget, 
   const reasonId = `signal-resolution-context-reason-${item.check_result_id}`;
   const injectionId = `signal-resolution-injection-${item.check_result_id}`;
   const unverifiedId = `signal-resolution-unverified-${item.check_result_id}`;
-  const qualificationId = `signal-resolution-basis-${item.check_result_id}`;
+  const instructionId = `signal-review-instructions-${checkRunId}`;
+  const actionContextId = `signal-resolution-context-${checkRunId}-${item.check_result_id}-${pending && !pending.needsChoice ? "confirm" : "choose"}`;
   const exclusionHintId = `signal-exclusion-hint-${item.check_result_id}`;
   const exclusionConsequenceId = `signal-exclusion-consequence-${item.check_result_id}`;
   const excluding = pending?.resolution === "needs_document";
@@ -609,7 +611,8 @@ function SignalResolutionCard({ item, checkRunId, sharedReasonId, sourceTarget, 
   const describedBy = [
     reviewStateId,
     ...reviewNotices.map((notice) => noticeId(notice.kind)),
-    qualificationId,
+    instructionId,
+    Boolean(review.assessmentNotices?.length) && actionContextId,
     sharedReasonId || (item.reason && reasonId),
     showInjectionSnippet && injectionId,
     item.unverified_evidence && item.unverified_evidence.length > 0 && unverifiedId,
@@ -621,18 +624,17 @@ function SignalResolutionCard({ item, checkRunId, sharedReasonId, sourceTarget, 
     <article className="signal-resolution-card">
       <div className="signal-resolution-card__context">
         <div><p className="signal-section-kicker">Criterion requiring judgment</p><h3 id={`signal-resolution-heading-${item.check_result_id}`} ref={criterionHeadingRef} tabIndex={-1}>{item.criterion_text}</h3></div>
+        <strong id={reviewStateId}>No grade accepted</strong>
         {reviewNotices.map((notice) => <p key={notice.kind} id={noticeId(notice.kind)} className="signal-resolution-card__vote">{notice.text}</p>)}
-        <div className="signal-copy-flow"><strong id={reviewStateId}>No grade accepted</strong><p>{RECORDED_GRADE_BASIS.review}</p><p id={qualificationId}>{RECORDED_GRADE_BASIS.qualification}</p></div>
         {sharedReasonId
           ? <p>Unresolved. The shared review reason above applies to this criterion.</p>
           : item.reason && <p id={reasonId}>{item.reason}</p>}
         {showInjectionSnippet && (
-          <blockquote id={injectionId} className="signal-unverified-evidence"><strong>Text addressed at an automated grader</strong><span>“{item.injection_matched_snippet}”</span></blockquote>
+          <blockquote className="signal-unverified-evidence"><strong id={injectionId}>Text addressed at an automated grader</strong><span>“{item.injection_matched_snippet}”</span></blockquote>
         )}
         {item.unverified_evidence && item.unverified_evidence.length > 0 && (
-          <div id={unverifiedId} className="signal-unverified-evidence"><strong>Could not verify against the source</strong>{item.unverified_evidence.map((quote) => <blockquote key={quote}>“{quote}”</blockquote>)}</div>
+          <div className="signal-unverified-evidence"><strong id={unverifiedId}>Could not verify against the source</strong>{item.unverified_evidence.map((quote) => <blockquote key={quote}>“{quote}”</blockquote>)}</div>
         )}
-        {item.reasoning?.trim() ? <div className="signal-copy-flow"><strong>Recorded AI explanation</strong><p>{item.reasoning}</p></div> : <p>{RECORDED_GRADE_BASIS.missingExplanation}</p>}
         {Boolean(item.evidence?.length) && <strong>Recorded passages and locations</strong>}
         {item.evidence?.map((entry, index) => {
           const actionId = `signal-resolution-source-${checkRunId}-${item.check_result_id}-${index}`;
@@ -645,6 +647,7 @@ function SignalResolutionCard({ item, checkRunId, sharedReasonId, sourceTarget, 
           }}>Open in manuscript: {instructorAnchor(entry.anchor)}</ActionLink></> : <p>{RECORDED_GRADE_BASIS.missingLocation}</p>}</div>;
         })}
         {!item.evidence?.length && <p>{RECORDED_GRADE_BASIS.missingExcerpt}</p>}
+        {item.reasoning?.trim() ? <div className="signal-copy-flow"><strong>Recorded AI explanation</strong><p>{item.reasoning}</p></div> : <p>{RECORDED_GRADE_BASIS.missingExplanation}</p>}
         <Button variant="quiet" aria-expanded={detailsOpen} aria-controls={detailsId}
           aria-label={`${detailsOpen ? "Hide" : "Show"} ${CRITERION_REVIEW_COPY.details} for ${item.criterion_text}`}
           onClick={() => setDetailsOpen((open) => !open)}>
@@ -664,6 +667,7 @@ function SignalResolutionCard({ item, checkRunId, sharedReasonId, sourceTarget, 
       <div className="signal-resolution-form__pending" role="status" aria-live="polite">
         {pending && (
           <>
+            <p className="signal-field-hint">{REVIEW_DRAFT_COPY.retention}</p>
             <p className="signal-section-kicker">{saving ? "Step 2 of 2: saving judgment" : pending.uncertainRevision !== undefined ? "Step 2 of 2: save outcome unconfirmed" : "Step 2 of 2: nothing is saved yet"}</p>
             {pending.uncertainRevision !== undefined && <p>Saving could not be confirmed. Your choice and reason are kept. You cannot discard them or leave this review yet. Review the current criterion before trying again.</p>}
             <h4>{resolutionLabel(item, pending.resolution, pending.level)}</h4>
@@ -692,12 +696,13 @@ function SignalResolutionCard({ item, checkRunId, sharedReasonId, sourceTarget, 
       )}
       {!pending || pending.needsChoice ? (
         <div className="signal-resolution-options" aria-label={`Resolve: ${item.criterion_text}`}>
+          <ActionAssessmentContext id={actionContextId} notices={review.assessmentNotices ?? []} />
           {!review.canChoose && <p>Reload the current report, or reopen its recorded decision, before making a judgment.</p>}
           {pending?.needsChoice && <p>Your previous choice is no longer supported. Choose a current option; your unsaved reason is kept.</p>}
           {item.levels && item.levels.length > 0
             ? item.levels.map((level) => <Button key={level.level} variant="secondary" disabled={!review.canChoose} aria-describedby={`${describedBy} ${levelDescriptionId(level.level)}`} onClick={() => choose("mark_level", level.level)}>{level.name}</Button>)
             : <><Button variant="secondary" disabled={!review.canChoose} aria-describedby={describedBy} onClick={() => choose("mark_pass")}>Meets criterion</Button><Button variant="secondary" disabled={!review.canChoose} aria-describedby={describedBy} onClick={() => choose("mark_fail")}>Does not meet</Button></>}
-          <div className="signal-copy-flow"><Button variant="quiet" disabled={!review.canChoose} aria-describedby={`${describedBy} ${exclusionHintId}`} onClick={() => choose("needs_document")}>{CRITERION_EXCLUSION_COPY.action}</Button><p id={exclusionHintId} className="signal-field-hint">{CRITERION_EXCLUSION_COPY.hint}</p></div>
+          <div className="signal-copy-flow"><Button variant="quiet" disabled={!review.canChoose} aria-describedby={`${describedBy} ${exclusionHintId}`} onClick={() => choose("needs_document")}>{CRITERION_EXCLUSION_COPY.action}</Button><p id={exclusionHintId} className="signal-field-hint">{CRITERION_EXCLUSION_COPY.hint} <span>{CRITERION_EXCLUSION_COPY.wait}</span></p></div>
           {/* BUG-170: `verdict_unrecognized` means accepting this verdict
               is guaranteed to 409 server-side (the passes agreed on a
               string that still doesn't name any of this criterion's own
@@ -717,6 +722,7 @@ function SignalResolutionCard({ item, checkRunId, sharedReasonId, sourceTarget, 
           {reasonInvalid && <p id={reasonErrorId} role="alert" className="signal-field-error">{reason.trim() ? `Enter at least ${RESOLUTION_REASON_MIN_LENGTH} characters.` : "Enter a reason before confirming."}</p>}
           {saving && <p role="status">{REVIEW_DRAFT_COPY.saving}</p>}
           {Boolean(pending.error) && <Alert title="Saving could not be confirmed" tone="error" role="alert">Your entered reason is kept. Review the current criterion before trying again.</Alert>}
+          <ActionAssessmentContext id={actionContextId} notices={review.assessmentNotices ?? []} />
           <div>{draftCurrent && <Button variant="secondary" disabled={saving || pending?.uncertainRevision !== undefined} onClick={cancel}>Cancel</Button>}<Button data-criterion-confirm variant="brand" disabled={saving || !draftCurrent} aria-describedby={`${describedBy}${excluding ? ` ${exclusionConsequenceId}` : ""}`} busy={saving} onClick={confirm}>{excluding ? CRITERION_EXCLUSION_COPY.confirm : "Confirm resolution"}</Button></div>
         </div>
       )}
@@ -724,7 +730,7 @@ function SignalResolutionCard({ item, checkRunId, sharedReasonId, sourceTarget, 
   );
 }
 
-export function SignalEscalatedPanel({ checkRunId, sourceTarget, onOpenSource }: { checkRunId: number; sourceTarget?: CriterionSourceTarget; onOpenSource?: CriterionSourceOpen }) {
+export function SignalEscalatedPanel({ checkRunId, sourceTarget, onOpenSource, assessmentContextExternal = false }: { checkRunId: number; sourceTarget?: CriterionSourceTarget; onOpenSource?: CriterionSourceOpen; assessmentContextExternal?: boolean }) {
   const { data, isPending, isError, error, fetchStatus, refetch } = useEscalatedItems(checkRunId);
   const accessUnavailable = !recoverableReadError(error);
   const loadedItems = accessUnavailable ? undefined : data;
@@ -755,13 +761,12 @@ export function SignalEscalatedPanel({ checkRunId, sourceTarget, onOpenSource }:
 
   return (
     <section id="review-criteria" tabIndex={-1} data-tour="escalated-panel" className="signal-review-section signal-review-section--attention" aria-labelledby="escalated-heading">
-      <div className="signal-review-section__heading"><div><p className="signal-section-kicker">{review.decision ? "Preserved assessment" : "First review task"}</p><h2 id="escalated-heading" ref={headingRef} tabIndex={-1}>{review.decision === "returned" ? "Unresolved at time of return" : review.decision ? "Unresolved at time of decision" : "Criteria needing your judgment"}</h2></div><span>{fetchStatus === "fetching" ? loadedItems ? "Updating review list" : "Loading review list" : isError ? loadedItems ? "Review list needs refreshing" : "Review list unavailable" : awaitingList ? "Review list needs refreshing" : `${items?.length ?? 0} unresolved`}</span></div>
-      {review.decision ? <p className="signal-review-section__intro">These criteria were unresolved when the decision was recorded. Their outcomes, evidence and assessment limits are preserved. Reopen the decision before making further judgments.</p>
-        : <><p className="signal-review-section__intro">VERIDICAL did not settle these items. Review the evidence and record your own reasoned judgment. You can also return the manuscript for revision while leaving them unresolved; approval remains unavailable.</p>
-          <p className="signal-field-hint signal-review-section__support">{REVIEW_DRAFT_COPY.retention}</p>
-          <p className="signal-field-hint signal-review-section__support">{CRITERION_EXCLUSION_COPY.wait}</p></>}
+      <div className="signal-review-section__heading"><div>{review.decision && <p className="signal-section-kicker">Preserved assessment</p>}<h2 id="escalated-heading" ref={headingRef} tabIndex={-1}>{review.decision === "returned" ? "Unresolved at time of return" : review.decision ? "Unresolved at time of decision" : "Criteria needing your judgment"}</h2></div><span>{fetchStatus === "fetching" ? loadedItems ? "Updating review list" : "Loading review list" : isError ? loadedItems ? "Review list needs refreshing" : "Review list unavailable" : awaitingList ? "Review list needs refreshing" : `${items?.length ?? 0} unresolved`}</span></div>
+      {review.decision ? <p id={`signal-review-instructions-${checkRunId}`} className="signal-review-section__intro">These criteria were unresolved when the decision was recorded. Their outcomes, evidence and assessment limits are preserved. Reopen the decision before making further judgments.</p>
+        : <p id={`signal-review-instructions-${checkRunId}`} className="signal-review-section__intro">Read the criterion and manuscript, choose a grade, then give your reason. <span>{RECORDED_GRADE_BASIS.qualification}</span></p>}
+      {!assessmentContextExternal && <ReportAssessmentContext notices={review.assessmentNotices ?? []} />}
       <p ref={announcementRef} tabIndex={-1} aria-live="polite" className="signal-live-region">{announcement}</p>
-      {!accessUnavailable && <SavedJudgmentAccess checkRunId={checkRunId} />}
+      {!accessUnavailable && <SavedJudgmentAccess checkRunId={checkRunId} hideEmpty />}
       {!accessUnavailable && [...review.drafts].filter(([id, draft]) => draft.currentResolved && !draft.saving
         && !items?.some(item => item.check_result_id === id)).map(([id, draft]) => <article key={`retained-${id}`} className="signal-resolution-card">
         <h3 id={`signal-resolution-heading-${id}`} tabIndex={-1}>Retained entry: {draft.criterionText}</h3>

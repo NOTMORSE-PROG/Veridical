@@ -10,8 +10,6 @@ import { checkKindMeta, findingVerificationPrompt, isPValueFinding } from "../do
 import { DECISION_LABEL } from "../domain/decisionTone";
 import { agreementEvidenceType, evidenceDisplayState } from "../domain/evidenceDisplay";
 import { manuscriptIdentity } from "../domain/manuscriptLabel";
-import { TEST_AI_DISCLOSURE } from "../domain/aiModeDisclosure";
-import { SEMANTIC_SUPPORT_REVIEW } from "../domain/semanticSupport";
 import { problemLabel } from "../domain/problemLabel";
 import { severityLabel } from "../domain/severity";
 import { systemFindingCopy } from "../domain/systemFindingCopy";
@@ -346,7 +344,6 @@ function ReadinessDecision({ checkRunId, report: loadedReport, pending, error, r
     <div className="signal-document-analysis">
       <Button variant="quiet" onClick={onBack}>Back to review queue</Button>
       {readFailed && <ReportReadNotice retrying={retrying} onRetry={onRetry} />}
-      {report.historical_semantic_support_unverified && <Alert title={SEMANTIC_SUPPORT_REVIEW.title} tone="warning">{SEMANTIC_SUPPORT_REVIEW.body}</Alert>}
       <SignalEscalatedPanel checkRunId={report.check_run_id} sourceTarget={sourceTarget} onOpenSource={onOpenSource} />
       <details className="signal-document-analysis__criteria"><summary>Recorded criterion results, {criterionRecords.length} {criterionRecords.length === 1 ? "entry" : "entries"}</summary><SignalCriteriaResults results={criterionRecords} checkRunId={report.check_run_id} sourceTarget={sourceTarget} onOpenSource={onOpenSource} /></details>
       <section className="signal-document-analysis__summary" aria-labelledby="analysis-heading" aria-describedby={readFailed ? "report-read-failure" : undefined}>
@@ -359,7 +356,6 @@ function ReadinessDecision({ checkRunId, report: loadedReport, pending, error, r
           <ActionLink to={`/report/${report.check_run_id}`} variant="secondary">Open full readiness report</ActionLink>
         </div>
       </section>
-      {report.llm_mode !== "real" && <Alert title={report.llm_mode === "fake" ? TEST_AI_DISCLOSURE.title : "AI mode could not be verified"} tone="warning">{report.llm_mode === "fake" ? TEST_AI_DISCLOSURE.body : "This run predates reliable AI-mode tracking. Treat AI-derived outcomes cautiously."}</Alert>}
       {coverage.length > 0 && <CoverageStatement state="partial" headingId="workspace-coverage-heading" heading="Assessment limits" intro="Results below cover only the checks that ran. Unchecked content is not treated as passed." items={coverage} />}
       <FigureReadingsSummary readings={report.figure_readings} checkRunId={checkRunId} />
       <SignalDecisionPanel report={report} manuscriptLabel={identity.primary} readFailed={readFailed} retrying={retrying} onRetry={onRetry} />

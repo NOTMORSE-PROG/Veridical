@@ -11,7 +11,7 @@ import { criterionRecordId, recordedGradeLabel, revealCriterionRecord, atLeastSa
 import { useReport } from "./useReport";
 import { judgmentVersion } from "./judgmentRecord";
 
-export function SavedJudgmentAccess({ checkRunId }: { checkRunId: number }) {
+export function SavedJudgmentAccess({ checkRunId, hideEmpty = false }: { checkRunId: number; hideEmpty?: boolean }) {
   const review = useCriterionReviewScope(checkRunId);
   const query = useReport(checkRunId);
   const [focusedReceipt, setFocusedReceipt] = useState<ReviewCompletion>();
@@ -46,7 +46,7 @@ export function SavedJudgmentAccess({ checkRunId }: { checkRunId: number }) {
       {qualified && <p className="signal-field-hint">Last loaded: {count} saved instructor {count === 1 ? "judgment" : "judgments"}.</p>}
       {count > 0
         ? <Button variant="quiet" onClick={(event) => review.viewSaved(undefined, event.currentTarget)}>{qualified ? "View last loaded saved judgments" : `View saved judgments (${count})`}</Button>
-        : !qualified && <p className="signal-field-hint">No saved instructor judgments yet.</p>}
+        : !qualified && !hideEmpty && <p className="signal-field-hint">No saved instructor judgments yet.</p>}
     </div>}
     {refreshing && <p className="signal-field-hint" role="status">{query.fetchStatus === "paused" ? "Waiting to update saved judgments." : "Updating saved judgments."}</p>}
     {query.isError && <p className="signal-field-hint">Could not load the current saved judgments. <Button variant="quiet" onClick={() => { void query.refetch(); }}>Retry saved judgments</Button></p>}

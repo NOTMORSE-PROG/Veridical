@@ -67,3 +67,22 @@ describe("native Word source gaps", () => {
     expect(screen.getAllByText("[Native Word equation not displayed]")).toHaveLength(3);
   });
 });
+
+
+describe("native omission context and real table slots", () => {
+  it("shows one assessment qualification and does not add a gap label above an already represented table occurrence", () => {
+    render(<DocxPane {...props} nativeMath={{ ...native, containers: [{ ...native.containers[0], kind: "table_cell" }] }}
+      tables={[{ paragraph: 1, rows: [[""]], native_cells: [{ display_coordinates: [[0, 0]], pieces: native.containers[0].pieces }] }]} />);
+    expect(screen.getAllByText(/formulas are not displayed in this reconstruction or evaluated by statistical forensics/)).toHaveLength(1);
+    expect(screen.getAllByText("[Native Word equation not displayed]")).toHaveLength(1);
+    expect(screen.queryByText("Native Word equation not displayed")).not.toBeInTheDocument();
+    expect(screen.getByRole("cell")).toHaveTextContent("p = . [Native Word equation not displayed] 001");
+  });
+  it("retains a table occurrence when its slot is absent from the reconstructed table", () => {
+    render(<DocxPane {...props} nativeMath={{ ...native, containers: [{ ...native.containers[0], kind: "table_cell" }] }}
+      tables={[{ paragraph: 1, rows: [["Separate retained cell"]], native_cells: [] }]} />);
+    expect(screen.getByText("[Native Word equation not displayed]")).toBeVisible();
+    expect(screen.getByRole("cell")).toHaveTextContent("Separate retained cell");
+    expect(screen.getByText(/p =/)).toBeVisible();
+  });
+});

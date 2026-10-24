@@ -26,7 +26,7 @@ export const CRITERION_REVIEW_COPY = {
   unrecognizedGrade: "The recorded suggestion is not a recognized grade for this criterion.",
   notGraded: "A completed grade is not available in this review record.",
   tentativeSuggestion: "A tentative AI suggestion is recorded. Review it against the criterion and manuscript.",
-  details: "technical assessment details",
+  details: "assessment record",
   detailsTitle: "Recorded assessment details",
   detailsQualification: "These entries describe stored grading results. They do not count provider requests or independent reviewers.",
   entriesLabel: "Recorded result entries",

@@ -1,3 +1,4 @@
+import { ActionAssessmentContext } from "./ReportAssessmentContext";
 // F3.5/F8.3, screens 4h/4w: revise a saved criterion in its evidence context.
 import { useLayoutEffect, useRef, useState } from "react";
 import type { JudgmentSnapshot } from "../api/judgments";
@@ -63,6 +64,10 @@ export function RecordedJudgmentTools({ checkRunId, criterionId, criterionText, 
     setPurpose(next); scope.open(criterionId, next);
   }
   const id = `judgment-revision-${checkRunId}-${criterionId}`;
+  const contextDescription = review.assessmentNotices?.length ? `${id}-context` : undefined;
+  const editorContextDescription = contextDescription ? `${id}-editor-context` : undefined;
+  const confirmContextDescription = contextDescription ? `${id}-confirm-context` : undefined;
+  const reviewContextDescription = contextDescription ? `${id}-review-context` : undefined;
   const writable = draft && scope.canWrite(draft);
   const current = record?.context?.current;
   const receipt = focusedReceipt ?? record?.receipt;
@@ -78,11 +83,12 @@ export function RecordedJudgmentTools({ checkRunId, criterionId, criterionText, 
   }
   const proposal = confirmation && scope.proposal(confirmation);
   return <div className="signal-judgment-tools signal-group-flow">
+    {!draft && <ActionAssessmentContext id={`${id}-context`} notices={review.assessmentNotices ?? []} />}
     <div className="signal-control-cluster">
       {!draft && (review.decision
         ? <p>Reopen this report to revise recorded judgments.</p>
         : <Button ref={reviseRef} variant="secondary" disabled={record?.loading}
-          aria-label={`Revise recorded judgment: ${criterionText}`}
+          aria-label={`Revise recorded judgment: ${criterionText}`} aria-describedby={contextDescription}
           onClick={event => open("revise", event.currentTarget)}>Revise recorded judgment</Button>)}
       {draft?.uncertainRevision === undefined && !record?.abandonedAttempt && <Button variant="quiet" aria-expanded={record?.historyOpen ?? false} aria-controls={`${id}-history`}
         aria-label={`Judgment history: ${criterionText}`} onClick={event => {
@@ -123,7 +129,8 @@ export function RecordedJudgmentTools({ checkRunId, criterionId, criterionText, 
           </>}
           {scope.canRebind(criterionId) && <Button variant="secondary" onClick={event => followRebind(event.currentTarget, () => scope.rebind(criterionId))}>Use this draft with the current judgment</Button>}
         </div>}
-        <fieldset disabled={!writable} className="signal-group-flow"><legend>Revised judgment</legend>
+        <ActionAssessmentContext id={`${id}-editor-context`} notices={review.assessmentNotices ?? []} />
+        <fieldset disabled={!writable} className="signal-group-flow" aria-describedby={editorContextDescription}><legend>Revised judgment</legend>
           {draft.bound.choices.kind === "levelled" ? draft.bound.choices.levels.map(level => <label key={level.level} className="signal-choice">
             <input type="radio" name={`${id}-choice`} checked={draft.resolution === "mark_level" && draft.level === level.level}
               onChange={() => scope.change(criterionId, { resolution: "mark_level", level: level.level })} />
@@ -139,12 +146,13 @@ export function RecordedJudgmentTools({ checkRunId, criterionId, criterionText, 
         <div className="signal-field signal-evidence-field"><label htmlFor={`${id}-reason`}>New reason for revision (required)</label>
           <p id={`${id}-hint`} className="signal-field-hint">Explain the judgment you are recording now. The previous judgment and reason will remain in your private judgment history.</p>
           <textarea id={`${id}-reason`} ref={reasonRef} value={draft.reason} disabled={!writable} maxLength={INSTRUCTOR_NOTE_MAX_LENGTH}
-            aria-describedby={`${id}-hint${draft.error && draft.uncertainRevision === undefined ? ` ${id}-error` : ""}`}
+            aria-describedby={`${editorContextDescription ? `${editorContextDescription} ` : ""}${id}-hint${draft.error && draft.uncertainRevision === undefined ? ` ${id}-error` : ""}`}
             aria-invalid={draft.attempted && Boolean(draft.error) && draft.uncertainRevision === undefined}
             onChange={event => scope.change(criterionId, { reason: event.target.value })} />
         </div>
         {draft.error && draft.uncertainRevision === undefined && <p id={`${id}-error`} role="alert">{draft.error}</p>}
-        <div className="signal-control-cluster"><Button ref={reviewRef} variant="brand" disabled={!writable} busy={draft.saving}
+        <ActionAssessmentContext id={`${id}-review-context`} notices={review.assessmentNotices ?? []} />
+        <div className="signal-control-cluster"><Button ref={reviewRef} aria-describedby={reviewContextDescription} variant="brand" disabled={!writable} busy={draft.saving}
           onClick={() => { if (scope.review(criterionId)) setConfirmation({ ...draft }); else reasonRef.current?.focus(); }}>Review revision</Button>
           <Button variant="secondary" disabled={draft.saving || draft.uncertainRevision !== undefined} onClick={event => cancel(event.currentTarget)}>Cancel revision</Button></div>
       </div>}
@@ -182,15 +190,15 @@ export function RecordedJudgmentTools({ checkRunId, criterionId, criterionText, 
     {confirmation && proposal && <Dialog title="Save revised judgment?" initialFocusTitle
       onClose={sending ? undefined : () => setConfirmation(undefined)} returnFocusTarget={() => completion.returnTarget(receiptRef.current) ?? reviewRef.current}
       fallbackFocusRef={currentHeading} shouldRestoreFocus={() => completion.shouldRestore(scope.isCurrent)}
-      actions={<><Button variant="secondary" disabled={sending} onClick={() => setConfirmation(undefined)}>Back to editing</Button>
-        <Button variant="brand" disabled={sending || !draft || !scope.canWrite(draft)} busy={sending} onClick={async event => {
+      actions={<div className="signal-judgment-confirm-actions"><ActionAssessmentContext id={`${id}-confirm-context`} notices={review.assessmentNotices ?? []} /><div className="signal-control-cluster"><Button variant="secondary" disabled={sending} onClick={() => setConfirmation(undefined)}>Back to editing</Button>
+        <Button variant="brand" aria-describedby={confirmContextDescription} disabled={sending || !draft || !scope.canWrite(draft)} busy={sending} onClick={async event => {
           if (sending) return;
           completion.begin(event.currentTarget); setSending(true);
           const accepted = await scope.confirm(criterionId);
           if (!scope.isCurrent()) return;
           if (accepted) completion.accept();
           setSending(false); setConfirmation(undefined);
-        }}>Save revised judgment</Button></>}>
+        }}>Save revised judgment</Button></div></div>}>
       <div className="signal-group-flow" data-judgment-dialog={id}><p>{criterionText}</p><section><h3>Current judgment</h3><Snapshot value={confirmation.bound.current!} /></section>
         <section><h3>Revised judgment</h3><p><strong>{judgmentLabel(proposal)}</strong></p><p><strong>New instructor reason:</strong> {confirmation.reason.trim()}</p>
           {proposal.resolution_type === "needs_document" && <p>{CRITERION_EXCLUSION_COPY.noGrade}</p>}</section>

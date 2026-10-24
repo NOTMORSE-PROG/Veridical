@@ -133,7 +133,7 @@ describe("SignalDocumentViewerPage", () => {
     await screen.findByText("Recorded criterion results, 0 entries");
     if (mode === "fake") {
       expect(screen.getByText("Test-mode AI responses")).toBeVisible();
-      expect(screen.getByText("This run is recorded in test AI mode. AI responses use fixtures instead of real AI grading. Do not treat AI-derived judgments as a real assessment of the manuscript. Check the recorded evidence directly.")).toBeVisible();
+      expect(screen.getByText("These fixture responses are not a real manuscript assessment.")).toBeVisible();
       expect(screen.queryByText(/This review was produced with fixture responses/)).not.toBeInTheDocument();
     } else {
       expect(screen.queryByText("Test-mode AI responses")).not.toBeInTheDocument();

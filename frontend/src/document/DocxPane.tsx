@@ -246,6 +246,10 @@ export function DocxPane({
             const sourceTables = tables.filter((table) => table.paragraph === position);
             const sourceImages = images.filter((image) => image.paragraph === position);
             const nativeContainers = nativeMath?.containers.filter((container) => container.paragraph === position) ?? [];
+            const tableOccurrences = new Set(sourceTables.flatMap(table => table.native_cells?.flatMap(cell =>
+              cell.pieces.flatMap(piece => piece.kind === "native_math" && piece.occurrence !== null ? [piece.occurrence] : [])) ?? []));
+            const gapContainers = nativeContainers.filter(container => container.kind === "paragraph"
+              || container.pieces.some(piece => piece.kind === "native_math" && (piece.occurrence === null || !tableOccurrences.has(piece.occurrence))));
             const renderText = () => {
               if (!p) return null;
             // Found live (report/44, real data): F7 reuse flags can anchor
@@ -372,11 +376,11 @@ export function DocxPane({
             return <section key={position} className="signal-docx-source-item"
               data-source-paragraph={!p ? position : undefined} tabIndex={!p ? -1 : undefined}>
               {renderText()}
-              {nativeContainers.length > 0 && <div className="signal-document-reconstruction-note">
-                <strong>Native Word equation not displayed</strong>
-                <p>Its formula is not displayed in this view or evaluated by statistical forensics.</p>
-                {nativeContainers.filter((container) => container.kind === "paragraph").map((container, index) =>
-                  <p key={index}><NativeMathPieces pieces={container.pieces} /></p>)}
+              {gapContainers.length > 0 && <div className="signal-document-reconstruction-note">
+                {gapContainers.map((container, index) => <p key={index}>
+                  {!container.pieces.some(piece => piece.kind === "native_math") && <strong>Native Word equation not displayed</strong>}
+                  <NativeMathPieces pieces={container.pieces} />
+                </p>)}
               </div>}
               {mediaFlags.length > 0 && <div className="signal-docx-source-findings" role="group" aria-label="Findings at this source location">
                 {mediaFlags.map((flagId) => <button key={flagId} type="button" data-source-record-id={flagId}

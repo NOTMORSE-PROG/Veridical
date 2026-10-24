@@ -125,7 +125,7 @@ describe("SignalReportPage", () => {
     await screen.findByRole("link", { name: "Open manuscript" });
     if (mode === "fake") {
       expect(screen.getByText("Test-mode AI responses")).toBeVisible();
-      expect(screen.getByText("This run is recorded in test AI mode. AI responses use fixtures instead of real AI grading. Do not treat AI-derived judgments as a real assessment of the manuscript. Check the recorded evidence directly.")).toBeVisible();
+      expect(screen.getByText("These fixture responses are not a real manuscript assessment.")).toBeVisible();
       expect(screen.queryByText(/This report was produced with fixture responses/)).not.toBeInTheDocument();
     } else {
       expect(screen.queryByText("Test-mode AI responses")).not.toBeInTheDocument();
@@ -138,7 +138,7 @@ describe("SignalReportPage", () => {
     renderWithProviders(<SignalReportPage />, { route: "/report/5", path: "/report/:checkRunId" });
     expect(await screen.findByText("AI evidence support needs review"))
       .toBeInTheDocument();
-    expect(screen.getByText(/The saved record does not confirm/)).toBeVisible();
+    expect(screen.getByText(/Evidence checks are not confirmed for every criterion/)).toBeVisible();
     expect(screen.queryByText(/suggestions predate criterion-support validation/)).not.toBeInTheDocument();
   });
   afterEach(() => vi.unstubAllGlobals());
@@ -1037,4 +1037,27 @@ it("keeps an open reopen reason but refuses a decision that changed during repor
   expect(note).toHaveFocus(); expect(note).toHaveValue("Reopen reason survives a changed record.");
   fireEvent.click(within(dialog).getByRole("button", { name: "Reopen decision" })); expect(c.posts()).toBe(0);
   vi.unstubAllGlobals();
+});
+
+
+describe("assessment context before instructor judgment", () => {
+  afterEach(() => vi.unstubAllGlobals());
+  it.each([true, false])("keeps test provenance and conditioned support context before actions (support=%s)", async flagged => {
+    stubReport({ ...BASE_REPORT, llm_mode: "fake", historical_semantic_support_unverified: flagged }, [ESCALATED]);
+    renderWithProviders(<SignalReportPage />, { route: "/report/5?criterion_record=2", path: "/report/:checkRunId" });
+    const action = await screen.findByRole("button", { name: "Meets criterion" });
+    const context = screen.getByRole("complementary", { name: "Assessment context" });
+    expect(context.compareDocumentPosition(action) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(action).toHaveAccessibleDescription(/Test AI responses. Not a real AI assessment/);
+    if (flagged) expect(action).toHaveAccessibleDescription(/AI evidence checks are not all confirmed/);
+    else expect(action).not.toHaveAccessibleDescription(/Evidence checks/);
+    expect(screen.getAllByText("Test-mode AI responses")).toHaveLength(1);
+    expect(action.closest("article")!.querySelector(".signal-action-assessment-context")).toBeVisible();
+    const ids = action.getAttribute("aria-describedby")!.split(/\s+/);
+    expect(ids.every(id => document.getElementById(id))).toBe(true);
+    fireEvent.click(action);
+    expect(screen.getByRole("button", { name: "Confirm resolution" })).toHaveAccessibleDescription(/Test AI responses. Not a real AI assessment/);
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(screen.getByRole("heading", { name: ESCALATED.criterion_text })).toHaveFocus();
+  });
 });

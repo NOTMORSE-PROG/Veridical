@@ -2471,6 +2471,36 @@
     border-inline-start: var(--signal-border-brand) solid var(--color-signal-warning-text);
   }
 
+  .signal-assessment-context {
+    display: flex;
+    align-items: start;
+    gap: var(--signal-space-2);
+    padding: var(--signal-space-3);
+    color: var(--color-signal-warning-text);
+    background: var(--color-signal-warning-bg);
+    border-radius: var(--signal-radius-compact);
+    font-size: var(--signal-type-label);
+    line-height: var(--signal-line-body);
+  }
+
+  .signal-judgment-confirm-actions { flex: 1; display: grid; gap: var(--signal-space-3); }
+  .signal-resolution-options > p.signal-action-assessment-context,
+  .signal-resolution-form > p.signal-action-assessment-context,
+  .signal-judgment-tools .signal-action-assessment-context,
+  .signal-judgment-confirm-actions .signal-action-assessment-context {
+    color: var(--color-signal-warning-text);
+    font-size: var(--signal-type-label);
+    line-height: var(--signal-line-body);
+    font-weight: var(--signal-weight-semibold);
+  }
+  .signal-action-assessment-context strong { font-weight: inherit; }
+  .signal-resolution-options > .signal-action-assessment-context { flex-basis: 100%; }
+  .signal-assessment-context p { margin: 0; }
+  .signal-assessment-context p + p { margin-block-start: var(--signal-space-2); }
+  #review-criteria > .signal-review-section__heading { padding: var(--signal-space-4); }
+  #review-criteria > .signal-review-section__intro { padding: var(--signal-space-3) var(--signal-space-4); }
+  #review-criteria > .signal-assessment-context { margin-inline: var(--signal-space-4); }
+
   .signal-review-section__heading,
   .signal-decision-gate__heading {
     display: flex;

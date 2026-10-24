@@ -2,6 +2,7 @@
 import { useIsMutating, useQueryClient } from "@tanstack/react-query";
 import { useLayoutEffect, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import { Outlet, useBlocker, useLocation, useNavigate, useParams } from "react-router";
+import { reportAssessmentNotices } from "../domain/reportAssessmentContext";
 import { ApiError } from "../api/client";
 import { Dialog } from "../ui/Dialog";
 import { Button } from "../ui/Button";
@@ -126,6 +127,7 @@ export function CriterionReviewProvider({ checkRunId, instructorId, children }: 
   }
   const scope: ReviewScope = {
     checkRunId, decision: reportQuery.data?.decision, drafts, completion, confirmed, savedNavigation, isDraftCurrent, canChoose, revisions,
+    assessmentNotices: reportAssessmentNotices(reportQuery.data, location.pathname.endsWith("/document") ? "manuscript" : "report"),
     canUseCurrentDraft: draft => canChoose && !draft.currentResolved
       && isAssessmentRevision(draft.reviewedRevision) && draft.reviewedRevision === assessment?.assessment_revision,
     viewSaved(criterionId, trigger) {

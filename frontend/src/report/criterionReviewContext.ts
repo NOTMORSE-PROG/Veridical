@@ -1,6 +1,7 @@
 import { createContext, useContext } from "react";
 import type { Decision, EscalatedItemOut, EscalationResolution, ResolveEscalationOut, ResultRowCommon } from "../api/types";
 import type { FocusContinuation } from "../routing/focusContinuation";
+import type { AssessmentNotice } from "../domain/reportAssessmentContext";
 import type { RevisionScope } from "./useJudgmentRevisions";
 
 export interface ReviewDraft {
@@ -30,6 +31,7 @@ export interface ReviewCompletion {
 export interface ReviewScope {
   checkRunId: number;
   decision: Decision | null | undefined;
+  assessmentNotices?: AssessmentNotice[];
   drafts: ReadonlyMap<number, ReviewDraft>;
   completion?: ReviewCompletion;
   confirmed: ReadonlyMap<number, ResultRowCommon>;

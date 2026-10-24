@@ -22,6 +22,13 @@ function Review() {
   </details><button>Another task</button><p data-testid="current-route">{location.search}</p></>;
 }
 
+async function initialReviewReady() {
+  await waitFor(() => {
+    const article = screen.getByRole("heading", { name: "Custom requirement 1" }).closest("article")!;
+    expect(within(article).getByRole("button", { name: "Meets criterion" })).toBeEnabled();
+  });
+}
+
 function setup() {
   vi.spyOn(document, "hasFocus").mockReturnValue(true);
   let rows = [result(1), result(2), result(3, { outcome: "passed", score: 100, basis: "rule" })];
@@ -84,7 +91,7 @@ afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 describe("saved judgment retrieval", () => {
   it("acknowledges a save before a held report, qualifies the count and reveals only the refreshed exact row", async () => {
     const control = setup();
-    await screen.findByText("No saved instructor judgments yet.");
+    await initialReviewReady();
     control.hold();
     const button = await confirm(1);
     expect(button).toBeDisabled();
@@ -104,7 +111,7 @@ describe("saved judgment retrieval", () => {
   });
 
   it("retires delayed reveal and focus after another task while its report is held", async () => {
-    const control = setup(); await screen.findByText("No saved instructor judgments yet."); control.hold();
+    const control = setup(); await initialReviewReady(); control.hold();
     await confirm(1); await act(async () => { control.posts[0].finish(); });
     const view = await screen.findByRole("button", { name: "View saved judgment: Custom requirement 1" });
     view.focus(); fireEvent.click(view);
@@ -158,7 +165,7 @@ describe("saved judgment retrieval", () => {
   });
 
   it("distinguishes saved judgment from a failed read and retries only the GET", async () => {
-    const control = setup(); await screen.findByText("No saved instructor judgments yet."); control.hold();
+    const control = setup(); await initialReviewReady(); control.hold();
     await confirm(1); await act(async () => { control.posts[0].finish(); });
     const view = await screen.findByRole("button", { name: "View saved judgment: Custom requirement 1" }); view.focus(); fireEvent.click(view);
     await act(async () => { control.release(false); });
@@ -177,11 +184,11 @@ describe("saved judgment retrieval", () => {
     expect(button).toBeDisabled();
     expect(screen.getByRole("textbox")).toHaveValue("Private reason for requirement 1.");
     expect(screen.queryByRole("heading", { name: "Judgment saved" })).not.toBeInTheDocument();
-    expect(screen.getByText("No saved instructor judgments yet.")).toBeVisible();
+    expect(screen.queryByRole("button", { name: /^View saved judgments/ })).not.toBeInTheDocument();
   });
 
   it("retains the newer acknowledged judgment when an older GET completes later", async () => {
-    const control = setup(); await screen.findByText("No saved instructor judgments yet."); control.hold();
+    const control = setup(); await initialReviewReady(); control.hold();
     await confirm(1); await act(async () => { control.posts[0].finish(); });
     await act(async () => { control.release(true, true); });
     expect(await screen.findByRole("button", { name: "View saved judgments (1)" })).toBeVisible();
