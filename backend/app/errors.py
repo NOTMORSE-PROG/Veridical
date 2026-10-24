@@ -111,6 +111,19 @@ class DocumentPreparationBusyError(VeridicalError):
     code = "document_preparation_busy"
 
 
+class FormatAIConfigurationError(VeridicalError):
+    """Format client resolution refused this attempt before creation started."""
+
+    code = "ai_not_configured"
+
+    def __str__(self):
+        return (
+            "AI format parsing could not start because no usable AI configuration was available. "
+            "No format draft was created by this attempt. Review your AI settings or contact "
+            "the deployment administrator, then try again."
+        )
+
+
 class ActorContextChangedError(VeridicalError):
     code = "actor_context_changed"
 
@@ -142,6 +155,7 @@ HTTP_STATUS: dict[str, int] = {
     "gone": 410,
     "rate_limited": 429,
     "document_preparation_busy": 503,
+    "ai_not_configured": 503,
     "actor_context_changed": 409,
     "invalid_api_key": 422,
     "report_export_unavailable": 422,

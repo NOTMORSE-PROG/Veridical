@@ -16,6 +16,7 @@ export function isKnownUploadRejection(error: unknown, kind: "manuscript" | "for
     || (error.status === 429 && error.code === "rate_limited")
     || (error.status === 401 && error.code === "unauthenticated")
     || (error.status === 409 && error.code === "actor_context_changed")
+    || (kind === "format" && error.status === 503 && error.code === "ai_not_configured")
     || (kind === "format" && ((error.status === 413 && error.code === "too_large")
       || (error.status === 422 && error.code === "file_malformed")))
   ));

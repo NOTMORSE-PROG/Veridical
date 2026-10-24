@@ -9,7 +9,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.auth.dependencies import get_current_instructor, get_upload_instructor
 from app.config import get_settings
 from app.db import get_session
-from app.llm import get_llm_client_for
+from app.errors import FormatAIConfigurationError
+from app.llm import LLMNotConfiguredError, get_llm_client_for
 from app.models.instructor import Instructor
 from app.ratelimit import enforce_action_rate_limit
 from app.rubric.schemas import (
@@ -50,7 +51,11 @@ async def upload_rubric(
 
     settings = get_settings()
     enforce_action_rate_limit(settings, "rubric_upload", instructor.id)
-    llm = await get_llm_client_for(session, settings, instructor.id)
+    try:
+        llm = await get_llm_client_for(session, settings, instructor.id)
+    except LLMNotConfiguredError:
+        # Only this boundary proves the attempt has not started creation.
+        raise FormatAIConfigurationError() from None
     rubric = await create_rubric_from_upload(
         session,
         chunks(),

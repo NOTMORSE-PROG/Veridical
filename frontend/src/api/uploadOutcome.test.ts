@@ -47,6 +47,8 @@ describe("upload receipt evidence", () => {
   });
   it.each([
     [503, "document_preparation_busy", true, true], [503, "api_down", false, false],
+    [503, "ai_not_configured", false, true], [500, "ai_not_configured", false, false],
+    [503, "internal", false, false], [422, "ai_not_configured", false, false],
     [429, "rate_limited", true, true], [429, "quota_exhausted", false, false],
     [413, "too_large", false, true], [422, "file_malformed", false, true],
     [422, "invalid_api_key", false, false], [404, "not_found", false, false],

@@ -1,10 +1,58 @@
-import { fireEvent, screen, waitFor } from "@testing-library/react";
+import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { renderWithUploadProviders } from "../test/renderWithUploadProviders";
 import { UploadRubricModal } from "./UploadRubricModal";
 
 describe("UploadRubricModal", () => {
   afterEach(() => vi.unstubAllGlobals());
+
+  it("retains a configuration-rejected file for explicit retry without an unknown notice", async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ error: {
+      code: "ai_not_configured",
+      message: "No format draft was created by this attempt. Review your AI settings, then try again.",
+    } }), { status: 503 }));
+    vi.stubGlobal("fetch", fetchMock);
+    await renderWithUploadProviders(<UploadRubricModal onClose={() => {}} />);
+    const file = new File(["dummy"], "format.docx");
+    const input = screen.getByLabelText("Choose file") as HTMLInputElement;
+    fireEvent.change(input, { target: { files: [file] } });
+    fireEvent.click(screen.getByRole("button", { name: "Continue to review" }));
+    const alert = await screen.findByRole("alert");
+    await waitFor(() => expect(alert).toHaveFocus());
+    expect(alert).toHaveTextContent("by this attempt");
+    expect(input.files?.[0]).toBe(file);
+    expect(input).not.toHaveAttribute("aria-invalid");
+    expect(screen.queryByRole("button", { name: "Start another upload attempt" })).not.toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    fireEvent.click(screen.getByRole("button", { name: "Continue to review" }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+  });
+
+  it("preserves an earlier unknown result when the next attempt is configuration-rejected", async () => {
+    const fetchMock = vi.fn()
+      .mockRejectedValueOnce(new TypeError("controlled lost response"))
+      .mockResolvedValue(new Response(JSON.stringify({ error: {
+        code: "ai_not_configured", message: "No format draft was created by this attempt.",
+      } }), { status: 503 }));
+    vi.stubGlobal("fetch", fetchMock);
+    await renderWithUploadProviders(<UploadRubricModal onClose={() => {}} />);
+    const input = screen.getByLabelText("Choose file") as HTMLInputElement;
+    const first = new File(["first"], "earlier.docx");
+    fireEvent.change(input, { target: { files: [first] } });
+    fireEvent.click(screen.getByRole("button", { name: "Continue to review" }));
+    await screen.findByRole("button", { name: "Start another upload attempt" });
+    const second = new File(["second"], "latest.docx");
+    fireEvent.change(input, { target: { files: [second] } });
+    fireEvent.click(screen.getByRole("button", { name: "Start another upload attempt" }));
+    fireEvent.click(screen.getByRole("button", { name: "Upload a new draft" }));
+    await screen.findByText("No format draft was created by this attempt.");
+    expect(input.files?.[0]).toBe(second);
+    const unknown = screen.getByRole("region", { name: "Unconfirmed upload results" });
+    expect(unknown).toHaveTextContent("earlier.docx");
+    expect(unknown).not.toHaveTextContent("latest.docx");
+    expect(within(unknown).getByText("One or more upload results remain unconfirmed")).toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
 
   it("retains a new-version file on exact preparation busy without blaming the file", async () => {
     const fetchMock = vi.fn(async () => new Response(JSON.stringify({ error: {
