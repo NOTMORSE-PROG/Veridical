@@ -7438,7 +7438,8 @@
   .signal-judgment-tools button {
     overflow-wrap: anywhere;
   }
-  .signal-judgment-tools .signal-choice {
+  .signal-judgment-tools .signal-choice,
+  .signal-format-choices .signal-choice {
     display: flex;
     gap: var(--signal-space-3);
     align-items: baseline;
@@ -7449,11 +7450,13 @@
     background: var(--color-signal-surface);
     cursor: pointer;
   }
-  .signal-judgment-tools .signal-choice:has(input:checked) {
+  .signal-judgment-tools .signal-choice:has(input:checked),
+  .signal-format-choices .signal-choice:has(input:checked) {
     background: var(--signal-brand-selection-soft);
     border-color: var(--color-signal-ink);
   }
-  .signal-judgment-tools .signal-choice > span {
+  .signal-judgment-tools .signal-choice > span,
+  .signal-format-choices .signal-choice > span {
     display: grid;
     gap: var(--signal-space-1);
     min-inline-size: 0;
@@ -7462,5 +7465,28 @@
   .signal-judgment-tools textarea {
     min-block-size: var(--signal-control-height-coarse);
     resize: vertical;
+  }
+}
+
+@layer components {
+  /* F2/F3, 4e/4m: readable format identity and optional saved requirements. */
+  .signal-format-choices,
+  .signal-format-requirements {
+    min-inline-size: 0;
+    margin: 0;
+    padding: 0;
+    border: 0;
+    display: grid;
+    gap: var(--signal-space-3);
+  }
+  .signal-format-choices legend {
+    margin-block-end: var(--signal-space-2);
+  }
+  .signal-format-choice-context {
+    color: var(--color-signal-ink-secondary);
+    font-size: var(--signal-type-label);
+  }
+  .signal-format-requirements li {
+    overflow-wrap: anywhere;
   }
 }

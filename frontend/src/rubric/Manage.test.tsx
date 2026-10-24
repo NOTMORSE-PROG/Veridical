@@ -118,9 +118,9 @@ describe("ManageRubricPage", () => {
     renderWithProviders(<><ManageRubricPage /><CurrentLocation /></>, { route: `/rubric?family=${second.rubric_family_id}` });
     const select = await screen.findByLabelText("Required format");
     expect(select).toHaveValue(second.rubric_family_id);
-    expect(screen.getByRole("option", { name: `${V1.title} (v1) · Family ${FAMILY_ID}` })).toBeInTheDocument();
-    expect(screen.getByRole("option", { name: `${second.title} (v1) · Family ${second.rubric_family_id}` })).toBeInTheDocument();
-    expect(select).toHaveAccessibleDescription(`Selected format: ${second.title}. Version 1. Family ${second.rubric_family_id}.`);
+    expect(screen.getByRole("option", { name: /V1.pdf \(v1\).*4 criteria.*Format #10/ })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: /V1.pdf \(v1\).*4 criteria.*Format #99/ })).toBeInTheDocument();
+    expect(select).toHaveAccessibleDescription(/Selected format: V1.pdf \(v1\).*4 criteria.*Format #99/);
     expect(screen.getByRole("link", { name: "View criteria" })).toHaveAttribute("href", "/rubric/99/review");
     fireEvent.change(select, { target: { value: FAMILY_ID } });
     await waitFor(() => expect(screen.getByLabelText("Current location")).toHaveTextContent(`/rubric?family=${FAMILY_ID}`));

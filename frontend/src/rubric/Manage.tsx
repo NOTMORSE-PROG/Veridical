@@ -4,6 +4,7 @@ import { useEffect, useId, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router";
 import { ApiError } from "../api/client";
 import type { RubricListItem } from "../api/types";
+import { formatChoiceLabel } from "../domain/formatIdentity";
 import { usePrograms } from "../dashboard/useDashboard";
 import { useRouteFocus } from "../routing/useRouteFocus";
 import { ActionLink } from "../ui/ActionLink";
@@ -197,9 +198,9 @@ export function ManageRubricPage() {
               setSearchParams(next);
             }}
           >
-            {families?.map((item) => <option key={item.rubric_family_id} value={item.rubric_family_id}>{item.title} (v{item.version}) · Family {item.rubric_family_id}</option>)}
+            {families?.map((item) => <option key={item.rubric_family_id} value={item.rubric_family_id}>{formatChoiceLabel(item, families)}</option>)}
           </select>
-          <p id="selected-format-identity" className="signal-family-switcher__identity">Selected format: {family.title}. Version {family.version}. Family {family.rubric_family_id}.</p>
+          <p id="selected-format-identity" className="signal-family-switcher__identity">Selected format: {formatChoiceLabel(family, families ?? [])}.</p>
           <p>{families?.length} format families are available. Reports remain pinned to the version that produced them.</p>
         </div>
       )}

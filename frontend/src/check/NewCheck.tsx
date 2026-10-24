@@ -1,4 +1,4 @@
-// Screen 4f — New manuscript check (modal, F3.1-F3.6). Manuscripts are
+// Screen 4e — New manuscript check (modal, F3.1-F3.6). Manuscripts are
 // uploaded/ingested separately (V-008); this modal only picks WHICH
 // already-ingested manuscript to run against WHICH active rubric.
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -9,6 +9,8 @@ import { Modal, ModalBackdrop } from "../components/Modal";
 import { formatManuscriptOption, manuscriptIdentity } from "../domain/manuscriptLabel";
 import { isRubricEligibleForProgram } from "../domain/rubricEligibility";
 import { useRubricFamilies } from "../rubric/useRubric";
+import { FormatRequirements } from "../rubric/FormatRequirements";
+import { formatChoiceContext, formatCriteriaCount } from "../domain/formatIdentity";
 import { useCreateCheckRun, useManuscripts } from "./useCheckRun";
 
 function SpinnerIcon() {
@@ -84,7 +86,7 @@ export function NewCheckModal({
   const [focusSummaryToken, setFocusSummaryToken] = useState(0);
 
   const manuscriptSelectRef = useRef<HTMLSelectElement>(null);
-  const rubricSelectRef = useRef<HTMLSelectElement>(null);
+  const rubricSelectRef = useRef<HTMLInputElement>(null);
   const summaryRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -205,7 +207,7 @@ export function NewCheckModal({
     } else if (eligibleFamilies.length > 1 && rubricId === "") {
       problems.push({
         id: "rubric",
-        message: "Choose which active rubric to check against.",
+        message: "Choose the required format for this check.",
         action: () => rubricSelectRef.current?.focus(),
       });
     }
@@ -394,10 +396,9 @@ export function NewCheckModal({
           </div>
 
           {familiesForPicker.length > 1 && (
-            <div className="flex flex-col gap-1.5">
-              <span id="rubric-label" className="text-sm font-medium text-ink">
-                Rubric
-              </span>
+            <fieldset className="signal-format-choices" aria-describedby={rubricInvalid ? "rubric-hint rubric-err" : "rubric-hint"}>
+              <legend id="rubric-label" className="text-sm font-medium text-ink">Required format</legend>
+              <p id="rubric-hint" className="text-sm text-ink-secondary">Choose the requirements for this check.</p>
               {familiesPending ? (
                 <div role="status" aria-live="polite" aria-busy="true" className="flex h-9 items-center gap-2 rounded-md border border-border bg-page px-3 text-sm text-ink-secondary">
                   <SpinnerIcon />
@@ -413,32 +414,19 @@ export function NewCheckModal({
                 </div>
               ) : (
                 <>
-                  <select
-                    ref={rubricSelectRef}
-                    aria-labelledby="rubric-label"
-                    value={rubricId}
-                    onChange={(event) =>
-                      setChosenRubricId(event.target.value === "" ? "" : Number(event.target.value))
-                    }
-                    aria-invalid={rubricInvalid ? "true" : undefined}
-                    aria-describedby={rubricInvalid ? "rubric-err" : undefined}
-                    className={`min-h-11 w-full rounded-md border bg-panel px-3 text-base text-ink sm:h-9 ${rubricInvalid ? "border-2 border-status-attention-text" : "border-border-input"}`}
-                  >
-                    <option value="">Select an active rubric.</option>
-                    {familiesForPicker.map((f) => (
-                      <option key={f.id} value={f.id}>
-                        {f.title} (v{f.version}) · Family {f.rubric_family_id}
-                      </option>
-                    ))}
-                  </select>
+                  {familiesForPicker.map((f, index) => <label key={f.id} className="signal-choice">
+                    <input ref={index === 0 ? rubricSelectRef : undefined} type="radio" name="required-format" value={f.id}
+                      checked={rubricId === f.id} onChange={() => setChosenRubricId(f.id)} aria-invalid={rubricInvalid ? "true" : undefined} />
+                    <span><strong>{f.title} <span>Version {f.version}</span></strong><span className="signal-format-choice-context">{formatChoiceContext(f, familiesForPicker)}</span></span>
+                  </label>)}
                   {rubricInvalid && (
                     <p id="rubric-err" className="text-sm text-status-attention-text">
-                      Choose which active rubric to check against.
+                      Choose the required format for this check.
                     </p>
                   )}
                 </>
               )}
-            </div>
+            </fieldset>
           )}
 
           {selectedRubric && (
@@ -448,10 +436,10 @@ export function NewCheckModal({
             // keyboard/touch, so the safer fix is not hiding anything in
             // the first place (UX review finding, V-055 4f review).
             <div className="rounded-md bg-status-info-bg px-3 py-2 text-sm break-words text-status-info-text">
-              Runs against <b>{selectedRubric.title}</b> v{selectedRubric.version},{" "}
-              {selectedRubric.criteria_count} criteria. Family {selectedRubric.rubric_family_id}.
+              Selected requirements: <b>{selectedRubric.title}</b>, version {selectedRubric.version}, with {formatCriteriaCount(selectedRubric.criteria_count)}.
             </div>
           )}
+          {selectedRubric && <FormatRequirements key={`${selectedRubric.id}:${selectedRubric.rubric_family_id}:${selectedRubric.version}`} selected={selectedRubric} onUnconfirmed={refetchFamilies} />}
 
           {/* V-064 (UX review finding, AC4): with exactly one eligible
               rubric, the picker above never renders at all (its own

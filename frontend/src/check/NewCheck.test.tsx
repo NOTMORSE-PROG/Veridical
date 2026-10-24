@@ -43,6 +43,70 @@ const ONE_ACTIVE_FAMILY = [
 describe("NewCheckModal", () => {
   afterEach(() => vi.unstubAllGlobals());
 
+  it("BUG-465: distinguishes same-name active versions by saved criteria and lets the instructor read the chosen requirements", async () => {
+    const first = { ...ONE_ACTIVE_FAMILY[0], title: "Required format.docx", criteria_count: 3, program: null };
+    const second = { ...first, id: 10, rubric_family_id: "fam-2", criteria_count: 2 };
+    const criteria = ["State the software architecture.", "Provide design evidence.", "Discuss limitations."];
+    vi.stubGlobal("fetch", stubFetchByPath({ "/manuscripts": MANUSCRIPTS, "/rubric-families": [first, second],
+      "/rubrics/9": { ...first, criteria: criteria.map((text, index) => ({ id: index + 1, type: "semantic", text, position: index, evidence: null, weight: 1 })) },
+    }));
+    renderWithProviders(<NewCheckModal onClose={() => {}} />, { authInstructorId: 1 });
+    const choice = await screen.findByRole("radio", { name: /Required format.docx.*3 criteria.*Format #9/ });
+    expect(screen.getByRole("radio", { name: /Required format.docx.*2 criteria.*Format #10/ })).not.toBeChecked();
+    expect(choice).not.toBeChecked();
+    fireEvent.click(choice);
+    fireEvent.click(screen.getByRole("button", { name: "View criteria" }));
+    for (const text of criteria) expect(await screen.findByText(text)).toBeVisible();
+    expect(screen.getByRole("button", { name: "Hide criteria" })).toHaveAttribute("aria-expanded", "true");
+    expect(screen.queryByText(/Family fam-/)).not.toBeInTheDocument();
+  });
+
+  it("BUG-465: a late previous-format response cannot replace the chosen version's requirements or manuscript", async () => {
+    const first = { ...ONE_ACTIVE_FAMILY[0], criteria_count: 1, program: null };
+    const second = { ...first, id: 10, rubric_family_id: "fam-2" };
+    let finish!: (response: Response) => void;
+    let retiredSignal: AbortSignal | null | undefined;
+    const base = stubFetchByPath({ "/manuscripts": MANUSCRIPTS, "/rubric-families": [first, second],
+      "/rubrics/10": { ...second, criteria: [{ id: 2, text: "Current chosen requirement.", type: "semantic", position: 1 }] },
+    });
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input).endsWith("/rubrics/9")) { retiredSignal = init?.signal; return new Promise<Response>(resolve => { finish = resolve; }); }
+      return base(input, init);
+    }));
+    renderWithProviders(<NewCheckModal onClose={() => {}} />, { authInstructorId: 1 });
+    fireEvent.change(await screen.findByRole("combobox", { name: /manuscript/i }), { target: { value: "1" } });
+    fireEvent.click(screen.getByRole("radio", { name: /Format #9/ }));
+    fireEvent.click(screen.getByRole("button", { name: "View criteria" }));
+    await waitFor(() => expect(finish).toBeDefined());
+    fireEvent.click(screen.getByRole("radio", { name: /Format #10/ }));
+    expect(screen.queryByRole("button", { name: "Hide criteria" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "View criteria" }));
+    expect(await screen.findByText("Current chosen requirement.")).toBeVisible();
+    finish(new Response(JSON.stringify({ ...first, criteria: [{ id: 1, text: "RETIRED-PRIVATE-REQUIREMENT", type: "semantic", position: 1 }] }), { status: 200 }));
+    await waitFor(() => expect(retiredSignal?.aborted).toBe(true));
+    expect(screen.queryByText("RETIRED-PRIVATE-REQUIREMENT")).not.toBeInTheDocument();
+    expect(screen.getByRole("combobox", { name: /manuscript/i })).toHaveValue("1");
+  });
+
+  it("BUG-465: submits the explicitly chosen version once even when its optional preview fails", async () => {
+    const first = { ...ONE_ACTIVE_FAMILY[0], criteria_count: 1, program: null };
+    const second = { ...first, id: 10, rubric_family_id: "fam-2" };
+    const fetcher = stubFetchByPath({ "/manuscripts": MANUSCRIPTS, "/rubric-families": [first, second],
+      "/rubrics/10": new Response(JSON.stringify({ error: { code: "internal", message: "Read unavailable." } }), { status: 503 }),
+      "/check-runs": { id: 42, status: "queued" },
+    });
+    vi.stubGlobal("fetch", fetcher);
+    renderWithProviders(<NewCheckModal onClose={() => {}} />, { authInstructorId: 1 });
+    fireEvent.change(await screen.findByRole("combobox", { name: /manuscript/i }), { target: { value: "1" } });
+    fireEvent.click(screen.getByRole("radio", { name: /Format #10/ }));
+    fireEvent.click(screen.getByRole("button", { name: "View criteria" }));
+    expect(await screen.findByText("Requirements could not be loaded.")).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "Start check" }));
+    await waitFor(() => expect(fetcher.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(1));
+    const call = fetcher.mock.calls.find(([, init]) => init?.method === "POST");
+    expect(JSON.parse(String(call?.[1]?.body))).toEqual({ manuscript_id: 1, rubric_id: 10 });
+  });
+
   it("only lists ingested manuscripts", async () => {
     vi.stubGlobal(
       "fetch",
@@ -343,8 +407,8 @@ describe("NewCheckModal", () => {
     expect(
       await screen.findByText("This manuscript's program is not set, so every active rubric is offered."),
     ).toBeInTheDocument();
-    expect(screen.getByRole("option", { name: /CS Format/ })).toBeInTheDocument();
-    expect(screen.getByRole("option", { name: /IT Format/ })).toBeInTheDocument();
+    expect(screen.getByRole("radio", { name: /CS Format/ })).toBeInTheDocument();
+    expect(screen.getByRole("radio", { name: /IT Format/ })).toBeInTheDocument();
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 
