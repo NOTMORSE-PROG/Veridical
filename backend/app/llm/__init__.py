@@ -229,13 +229,16 @@ async def get_llm_client_for(
     """
     if settings.veridical_fake_llm:
         return get_llm_client(settings)
-    shared = _shared_client(settings)
     if instructor_id is None:
-        return shared
+        return _shared_client(settings)
     own_client = await _resolve_own_client(session, settings, instructor_id)
     if own_client is None:
-        return shared
-    return FallbackLLMClient(primary=own_client, fallback=shared)
+        return _shared_client(settings)
+    # A usable personal client does not require shared credentials. Keep a warm
+    # shared singleton eligible under the existing process-cache contract.
+    if settings.gemini_api_key or _real_client is not None:
+        return FallbackLLMClient(primary=own_client, fallback=_shared_client(settings))
+    return own_client
 
 
 async def get_quota_status_for(

@@ -480,6 +480,21 @@ class Settings(BaseSettings):
         "retry automatically in this run. If a report is produced, review the "
         "manuscript and record your own judgment there. You can also start a new check later."
     )
+    pipeline_ai_not_configured_degraded_reason: str = (
+        "Not graded by AI. No usable AI configuration was available for this check, "
+        "so no completed AI grade was recorded for this criterion. AI grading of "
+        "this criterion will not retry automatically in this run. If a report is "
+        "produced, review the manuscript and record your own judgment there. You "
+        "can also start a new check after AI configuration is available."
+    )
+    pipeline_ai_key_rejected_degraded_reason: str = (
+        "Not graded by AI. The configured AI key was rejected during an AI request, "
+        "and no applicable alternative completed that request. No completed AI "
+        "grade was recorded for this criterion. AI grading of this criterion will "
+        "not retry automatically in this run. If a report is produced, review the "
+        "manuscript and record your own judgment there. You can also start a new "
+        "check after AI access is restored."
+    )
     # The scheduler always waits for accepted-request wakeups. Production
     # independently polls durable queued work (BUG-136); this flag enables
     # that periodic recovery outside production as an explicit local opt-in.

@@ -90,6 +90,13 @@ class InvalidApiKeyError(VeridicalError):
     code = "invalid_api_key"
 
 
+class RuntimeApiKeyRejectedError(InvalidApiKeyError):
+    """An AI request received the transport's classified authentication rejection.
+
+    Save-time validation uses the base type for other probe failures as well.
+    """
+
+
 class RateLimitedError(VeridicalError):
     """Too many requests in the configured window (BUG-004/D-020) — resume
     once the window resets; distinct from `unauthenticated` because the

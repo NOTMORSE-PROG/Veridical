@@ -32,6 +32,7 @@ from app.checks.injection import InjectionSignal, detect_injection_signal
 from app.config import Settings
 from app.errors import ApiDownError, QuotaExhaustedError, VeridicalError
 from app.llm.base import LLMClient
+from app.llm.resolution import AIUnavailableError
 from app.ml.embeddings import cosine_similarity, embed_texts
 from app.models.enums import FlagSeverity
 
@@ -119,10 +120,18 @@ class PairingResult:
     n_skipped_quota: int
     n_skipped_api_down: int
     n_skipped_parse_failure: int
+    n_skipped_ai_not_configured: int = 0
+    n_skipped_ai_key_rejected: int = 0
 
     @property
     def n_skipped_total(self) -> int:
-        return self.n_skipped_quota + self.n_skipped_api_down + self.n_skipped_parse_failure
+        return (
+            self.n_skipped_quota
+            + self.n_skipped_api_down
+            + self.n_skipped_parse_failure
+            + self.n_skipped_ai_not_configured
+            + self.n_skipped_ai_key_rejected
+        )
 
 
 # --- candidate generation (Tier 1, local) -------------------------------------
@@ -324,12 +333,16 @@ async def run_agreement_pairing(
         else []
     )
     n_quota = n_api_down = n_parse_failure = 0
+    unavailable = {"ai_not_configured": 0, "ai_key_rejected": 0}
 
     chunk_size = max(1, settings.agreement_pairing_max_pairs_per_call)
     for start in range(0, len(candidates), chunk_size):
         chunk = candidates[start : start + chunk_size]
         try:
             verdicts = await _judge_batch(llm, chunk, check_run_id=check_run_id)
+        except AIUnavailableError as exc:
+            unavailable[exc.cause] += len(candidates) - start
+            break
         except QuotaExhaustedError:
             # BUG-080: quota exhaustion is terminal for the whole run, not
             # just this chunk -- every remaining candidate would fail
@@ -368,4 +381,6 @@ async def run_agreement_pairing(
         n_skipped_quota=n_quota,
         n_skipped_api_down=n_api_down,
         n_skipped_parse_failure=n_parse_failure,
+        n_skipped_ai_not_configured=unavailable["ai_not_configured"],
+        n_skipped_ai_key_rejected=unavailable["ai_key_rejected"],
     )

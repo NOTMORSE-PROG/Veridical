@@ -911,7 +911,9 @@ async def run_citation_integrity_check(
         reason: sum(
             item["eligible"] and item["unassessed_reason"] == reason for item in claim_occurrences
         )
-        for reason in ("limit", "quota", "api_down", "parse_failure")
+        for reason in (
+            "limit", "quota", "api_down", "parse_failure", "ai_not_configured", "ai_key_rejected"
+        )
     }
 
     # BUG-073: a check that skipped even one pair did NOT fully execute --
@@ -952,7 +954,12 @@ async def run_citation_integrity_check(
     )
     if coverage_reason:
         outcome = ResultOutcome.escalated
-    elif metadata_not_found or skipped_support["parse_failure"] > 0:
+    elif (
+        metadata_not_found
+        or skipped_support["parse_failure"] > 0
+        or skipped_support["ai_not_configured"] > 0
+        or skipped_support["ai_key_rejected"] > 0
+    ):
         outcome = ResultOutcome.unverifiable
     elif metadata_api_down or skipped_support["api_down"] > 0:
         outcome = ResultOutcome.api_down
@@ -1033,6 +1040,8 @@ async def run_citation_integrity_check(
             "n_claim_support_skipped_quota": skipped_support["quota"],
             "n_claim_support_skipped_api_down": skipped_support["api_down"],
             "n_claim_support_skipped_parse_failure": skipped_support["parse_failure"],
+            "n_claim_support_skipped_ai_not_configured": skipped_support["ai_not_configured"],
+            "n_claim_support_skipped_ai_key_rejected": skipped_support["ai_key_rejected"],
             "n_flags": len(flag_drafts),
         },
     )

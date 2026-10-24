@@ -312,7 +312,7 @@ describe("SettingsPage", () => {
     await screen.findByText("Prof Cruz");
 
     expect(
-      await screen.findByText(/Bringing your own API key isn't available on this deployment yet/),
+      await screen.findByText(/Personal API keys are not available on this deployment/),
     ).toBeInTheDocument();
     expect(screen.queryByLabelText("Gemini API key")).not.toBeInTheDocument();
   });
@@ -324,7 +324,7 @@ describe("SettingsPage", () => {
 
     expect(await screen.findByLabelText("Gemini API key")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Save key" })).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: /Get a free key from Google AI Studio/ })).toHaveAttribute(
+    expect(screen.getByRole("link", { name: /Open Google AI Studio/ })).toHaveAttribute(
       "href",
       "https://aistudio.google.com/app/apikey",
     );
@@ -365,7 +365,7 @@ describe("SettingsPage", () => {
     fireEvent.click(screen.getByRole("button", { name: "Save key" }));
 
     const configured = await screen.findByText(
-      "Your own Gemini API key is active. AI grading now uses your quota, not the shared pool.",
+      "A personal Gemini key is saved for this account. Future AI requests can use it when it can be read and is accepted by the service. Available capacity depends on the provider's project limits.",
     );
     expect(configured).toBeInTheDocument();
     expect(document.activeElement).toBe(configured);
@@ -450,7 +450,7 @@ describe("SettingsPage", () => {
     );
     renderWithProviders(<SettingsPage />);
     await screen.findByText("Prof Cruz");
-    expect(await screen.findByText("Using your own key")).toBeInTheDocument();
+    expect(await screen.findByText("Quota record: personal key")).toBeInTheDocument();
   });
 
   it("suppresses the key-source pill in fake mode (numbers are simulated either way)", async () => {
@@ -461,7 +461,7 @@ describe("SettingsPage", () => {
     renderWithProviders(<SettingsPage />);
     await screen.findByText("Prof Cruz");
     await screen.findByText("Running in test mode. These numbers are simulated, not real API usage.");
-    expect(screen.queryByText("Using the shared key")).not.toBeInTheDocument();
-    expect(screen.queryByText("Using your own key")).not.toBeInTheDocument();
+    expect(screen.queryByText("Quota record: shared key")).not.toBeInTheDocument();
+    expect(screen.queryByText("Quota record: personal key")).not.toBeInTheDocument();
   });
 });

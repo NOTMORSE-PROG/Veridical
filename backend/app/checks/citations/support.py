@@ -32,6 +32,7 @@ from app.checks.injection import InjectionSignal, detect_injection_signal
 from app.config import Settings
 from app.errors import ApiDownError, QuotaExhaustedError, VeridicalError
 from app.llm.base import LLMClient
+from app.llm.resolution import AIUnavailableError
 from app.models.citation import Citation
 from app.models.enums import FlagSeverity
 
@@ -264,6 +265,8 @@ class ClaimSupportResult:
     n_skipped_parse_failure: int
     n_skipped_limit: int = 0
     pair_results: list[ClaimSupportPairResult] = field(default_factory=list)
+    n_skipped_ai_not_configured: int = 0
+    n_skipped_ai_key_rejected: int = 0
 
     @property
     def n_skipped_total(self) -> int:
@@ -272,6 +275,8 @@ class ClaimSupportResult:
             + self.n_skipped_api_down
             + self.n_skipped_parse_failure
             + self.n_skipped_limit
+            + self.n_skipped_ai_not_configured
+            + self.n_skipped_ai_key_rejected
         )
 
 
@@ -287,6 +292,7 @@ async def run_claim_support_check(
 
     flags: list[CitationFlagDraft] = []
     n_quota = n_api_down = n_parse_failure = 0
+    unavailable = {"ai_not_configured": 0, "ai_key_rejected": 0}
     admitted_count = min(len(pairs), settings.claim_support_max_pairs_per_run)
     n_limit = len(pairs) - admitted_count
     pair_results = [
@@ -317,6 +323,15 @@ async def run_claim_support_check(
 
         try:
             verdicts = await _judge_batch(llm, chunk, check_run_id=check_run_id)
+        except AIUnavailableError as exc:
+            unavailable[exc.cause] += admitted_count - start
+            pair_results.extend(
+                skipped(index, exc.cause)
+                if exc.request_attempted
+                else ClaimSupportPairResult(index, "unassessed", exc.cause)
+                for index in range(start, admitted_count)
+            )
+            break
         except QuotaExhaustedError:
             # BUG-080: quota exhaustion is terminal for the whole run, not
             # just this chunk -- every remaining pair would fail identically,
@@ -388,4 +403,6 @@ async def run_claim_support_check(
         n_parse_failure,
         n_limit,
         sorted(pair_results, key=lambda result: result.pair_index),
+        n_skipped_ai_not_configured=unavailable["ai_not_configured"],
+        n_skipped_ai_key_rejected=unavailable["ai_key_rejected"],
     )

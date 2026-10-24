@@ -80,6 +80,12 @@ function progressSummary(run: CheckRun): ProgressSummary {
 function degradedDetail(entry: { n_criteria?: number; degraded_count?: number; degraded_code?: string }): string {
   const total = entry.n_criteria ?? 0;
   const degraded = entry.degraded_count ?? 0;
+  if (entry.degraded_code === "ai_not_configured") {
+    return `${degraded} of ${total} semantic criteria have no completed AI grade because no usable AI configuration was available for this check. AI grading of these ungraded semantic criteria will not retry automatically in this run. Other checks may continue. If a report is produced, review the ungraded criteria in manuscript review and record your own judgments. You can also start a new check after AI configuration is available.`;
+  }
+  if (entry.degraded_code === "ai_key_rejected") {
+    return `${degraded} of ${total} semantic criteria have no completed AI grade because the configured AI key was rejected during an AI request and no applicable alternative completed that request. AI grading of these ungraded semantic criteria will not retry automatically in this run. Other checks may continue. If a report is produced, review the ungraded criteria in manuscript review and record your own judgments. You can also start a new check after AI access is restored.`;
+  }
   if (entry.degraded_code === "api_down") {
     return `${degraded} of ${total} semantic criteria have no completed AI grade because an AI service was unavailable. AI grading of these ungraded semantic criteria will not retry automatically in this run. Other checks may continue. If a report is produced, review the ungraded criteria in manuscript review and record your own judgments. You can also start a new check later.`;
   }

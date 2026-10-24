@@ -59,6 +59,7 @@ from app.ingest.service import load_raw_store_async
 from app.llm import get_llm_client_for
 from app.llm.base import LLMClient
 from app.llm.queue import next_reset_for
+from app.llm.resolution import AIUnavailableError, RunLLMClient
 from app.models.audit import AuditLog
 from app.models.citation import Citation
 from app.models.enums import CheckKind, CheckRunStatus, IngestStatus, ResultOutcome
@@ -642,6 +643,28 @@ async def _run_semantic_stage(
                 stage_fields["degraded_code"] = "quota_exhausted"
             _record_stage(check_run, CheckRunStatus.semantic, **stage_fields)
             return
+        except AIUnavailableError as exc:
+            await cancellation_boundary()
+            reason = (
+                settings.pipeline_ai_key_rejected_degraded_reason
+                if exc.cause == "ai_key_rejected"
+                else settings.pipeline_ai_not_configured_degraded_reason
+            )
+            ungraded = await _degrade_pending_semantic(
+                session,
+                check_run,
+                criteria_by_id,
+                semantic_criterion_ids,
+                outcome=ResultOutcome.unverifiable,
+                reason=reason,
+                commit=False,
+                cause=exc.cause,
+            )
+            stage_fields = {"status": "done", "n_criteria": len(semantic_criterion_ids)}
+            if ungraded > 0:
+                stage_fields.update(degraded_count=ungraded, degraded_code=exc.cause)
+            _record_stage(check_run, CheckRunStatus.semantic, **stage_fields)
+            return
         except ApiDownError:
             # The existing owned stage transition publishes these pending rows
             # and their progress metadata together. No per-row commit may escape
@@ -675,6 +698,7 @@ async def _degrade_pending_semantic(
     outcome: ResultOutcome,
     reason: str,
     commit: bool = True,
+    cause: str | None = None,
 ) -> int:
     """Write an honest non-verdict for every semantic criterion still without
     a result. Re-queried (not reused) because the grading pass may have
@@ -683,7 +707,13 @@ async def _degrade_pending_semantic(
     done_ids = await _existing_result_criterion_ids(session, check_run.id)
     pending = [criteria_by_id[cid] for cid in semantic_criterion_ids if cid not in done_ids]
     await record_ungraded(
-        session, check_run.id, pending, outcome=outcome, reason=reason, commit=commit
+        session,
+        check_run.id,
+        pending,
+        outcome=outcome,
+        reason=reason,
+        commit=commit,
+        **({"cause": cause} if cause is not None else {}),
     )
     return len(pending)
 
@@ -845,9 +875,16 @@ async def _run_check_run(
     # used instead of always spending the shared key -- `llm` stays
     # injectable (tests, and the vision-pass path in ingest/service.py
     # which resolves its own client earlier, before a CheckRun exists).
-    llm = llm or await get_llm_client_for(
-        session, settings, manuscript.instructor_id if manuscript is not None else None
-    )
+    supplied_client = llm
+
+    async def resolve_client() -> LLMClient:
+        if supplied_client is not None:
+            return supplied_client
+        return await get_llm_client_for(
+            session, settings, manuscript.instructor_id if manuscript is not None else None
+        )
+
+    llm = RunLLMClient(resolve_client)
     rubric = await session.scalar(
         select(Rubric)
         .where(Rubric.id == check_run.rubric_id)

@@ -111,6 +111,8 @@ class CriterionResultOut(BaseModel):
 
 COVERAGE_REASONS = frozenset(
     {
+        "ai_not_configured",
+        "ai_key_rejected",
         "source_reading_order_unresolved",
         "source_reading_order_partial",
         "reference_metadata_insufficient",

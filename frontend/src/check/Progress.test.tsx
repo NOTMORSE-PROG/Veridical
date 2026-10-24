@@ -530,3 +530,25 @@ describe("CheckProgressPage", () => {
     vi.useRealTimers();
   });
 });
+
+
+describe("AI configuration progress", () => {
+  afterEach(() => vi.unstubAllGlobals());
+  it.each([
+    ["ai_not_configured", "no usable AI configuration was available for this check"],
+    ["ai_key_rejected", "no applicable alternative completed that request"],
+  ])("keeps %s distinct and provides conditional manual recovery", async (code, cause) => {
+    const run = { ...DONE, stage_status: { stages: { semantic: {
+      status: "done", n_criteria: 5, degraded_count: 2, degraded_code: code,
+    } } } };
+    vi.stubGlobal("fetch", stubFetchByPath({ "/check-runs/5": run }));
+    renderWithProviders(<CheckProgressPage />, { route: "/checks/5", path: "/checks/:checkRunId" });
+    await screen.findByRole("link", { name: "Open manuscript review" });
+    expect(screen.getByText("Needs review")).toBeInTheDocument();
+    const detail = screen.getByText(new RegExp(cause));
+    expect(detail).toHaveTextContent("2 of 5 semantic criteria have no completed AI grade");
+    expect(detail).toHaveTextContent("If a report is produced");
+    expect(detail).toHaveTextContent("will not retry automatically in this run");
+    expect(detail).not.toHaveTextContent("daily reset");
+  });
+});

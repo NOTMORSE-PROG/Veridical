@@ -323,13 +323,10 @@ function ApiKeySection() {
     return (
       <SectionCard headingId="api-key-heading" title="Personal Gemini key">
         <p className="text-sm text-ink-secondary">
-          VERIDICAL currently shares one free Gemini key across every instructor, so the AI
-          capacity everyone sees is split between all of you. Bringing your own key lets your AI
-          grading draw from your own quota instead.
+          A personal Gemini key can be used for future AI requests when this deployment supports it. Adding a key does not guarantee additional capacity. Available capacity depends on the provider's project limits.
         </p>
         <p className="mt-3 rounded-md border border-status-attention-text/25 bg-status-attention-bg p-3 text-sm text-status-attention-text">
-          Bringing your own API key isn't available on this deployment yet. Ask your
-          administrator to enable it. Until then, VERIDICAL grades using the shared key.
+          Personal API keys are not available on this deployment. You can still review available results and record your own judgments. Ask the deployment administrator if AI configuration is needed.
         </p>
       </SectionCard>
     );
@@ -361,7 +358,7 @@ function ApiKeySection() {
       {
         onSuccess: () => {
           setValue("");
-          setAnnouncement("Your own API key is saved and active.");
+          setAnnouncement("Your personal key was saved. Existing checks have not been re-run.");
         },
       },
     );
@@ -369,7 +366,7 @@ function ApiKeySection() {
 
   function handleDelete() {
     deleteKey.mutate(undefined, {
-      onSuccess: () => setAnnouncement("Removed. AI grading now uses the shared key."),
+      onSuccess: () => setAnnouncement("Your personal key was removed. Shared AI configuration can be used if it is available. Existing checks have not been re-run."),
     });
   }
 
@@ -379,7 +376,7 @@ function ApiKeySection() {
     return (
       <SectionCard headingId="api-key-heading" title="Personal Gemini key">
         <p ref={configuredRef} tabIndex={-1} className="text-sm text-ink">
-          Your own Gemini API key is active. AI grading now uses your quota, not the shared pool.
+          A personal Gemini key is saved for this account. Future AI requests can use it when it can be read and is accepted by the service. Available capacity depends on the provider's project limits.
         </p>
         <p role="status" aria-live="polite" className="sr-only">
           {announcement}
@@ -407,8 +404,7 @@ function ApiKeySection() {
           {deleteKey.isPending ? "Removing." : "Remove key"}
         </button>
         <p className="mt-1.5 text-xs text-ink-tertiary">
-          Removing switches AI grading back to the shared key immediately. You can add your key
-          again any time.
+          Removing your key removes its saved configuration from your account. It does not cancel checks that are already running or re-run existing checks. Shared AI configuration can be used if it is available. You can add a personal key again later.
         </p>
       </SectionCard>
     );
@@ -417,14 +413,10 @@ function ApiKeySection() {
   return (
     <SectionCard headingId="api-key-heading" title="Personal Gemini key">
       <p className="text-sm text-ink-secondary">
-        VERIDICAL currently shares one free Gemini key across every instructor, so the AI
-        capacity everyone sees is split between all of you. Add your own free Gemini API key and
-        your AI grading draws from your own quota instead, so your runs never compete with
-        anyone else's for capacity.
+        You can save a personal Gemini key for future AI requests. Adding a key does not guarantee additional capacity. Available capacity depends on the provider's project limits.
       </p>
       <p className="mt-1 text-sm text-ink-secondary">
-        This is optional. VERIDICAL grades manuscripts using the shared key whether or not you
-        add your own, and you can remove your key at any time.
+        Adding a key is optional. Shared AI configuration can be used if it is available. You can review available results and record your own judgments without adding a key. Saving or removing a key does not re-run existing checks.
       </p>
       <a
         href="https://aistudio.google.com/app/apikey"
@@ -432,7 +424,7 @@ function ApiKeySection() {
         rel="noopener noreferrer"
         className="mt-2 inline-flex min-h-11 items-center gap-1 text-sm font-medium text-link underline hover:text-link-hover"
       >
-        Get a free key from Google AI Studio
+        Open Google AI Studio
         <span className="sr-only"> (opens in a new tab)</span>
       </a>
 
@@ -580,7 +572,7 @@ function QuotaSection() {
       <div className="flex flex-col gap-2">
         {quota.mode === "live" && (
           <StatusPill tone={quota.key_source === "own" ? "success" : "neutral"}>
-            {quota.key_source === "own" ? "Using your own key" : "Using the shared key"}
+            {quota.key_source === "own" ? "Quota record: personal key" : "Quota record: shared key"}
           </StatusPill>
         )}
         {quota.mode === "fake" && (

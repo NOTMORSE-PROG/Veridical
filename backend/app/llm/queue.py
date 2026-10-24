@@ -19,7 +19,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.config import get_settings
-from app.errors import ApiDownError, InvalidApiKeyError, QuotaExhaustedError
+from app.errors import ApiDownError, QuotaExhaustedError, RuntimeApiKeyRejectedError
 from app.llm.pool import ModelSpec, pool_daily_capacity
 from app.models.audit import AuditLog
 from app.models.llm import LLMQuotaCounter, LLMResponseCache
@@ -419,7 +419,7 @@ class LLMQueue:
                         model=spec.model,
                     )
                     await session.commit()
-                raise InvalidApiKeyError(f"Gemini rejected this API key: {exc}") from exc
+                raise RuntimeApiKeyRejectedError(f"Gemini rejected this API key: {exc}") from exc
             except ApiDownError as exc:
                 async with self._session_factory() as session:
                     await self._write_audit(

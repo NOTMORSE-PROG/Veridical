@@ -24,5 +24,7 @@
   "citation_metadata_comparison_unassessed": "Some reference titles could not be compared reliably because of ambiguous formatting, case or missing metadata. Those comparisons and their claim support remain unassessed",
   "title_hyphenation_unassessed": "Hyphenation differs between the reference title and registry title. The title comparison remains unassessed.",
   "title_case_unassessed": "Title capitalization may change scientific meaning. The title comparison remains unassessed.",
-  "title_metadata_unavailable": "A complete title was not recorded for both sides. The title comparison remains unassessed."
+  "title_metadata_unavailable": "A complete title was not recorded for both sides. The title comparison remains unassessed.",
+  "ai_not_configured": "AI-dependent parts of this check were not assessed because no usable AI configuration was available. Any independently completed results remain available. Unassessed comparisons or claims are not treated as passed. This is a system limit, not a finding against the manuscript.",
+  "ai_key_rejected": "AI-dependent parts of this check were not assessed because the configured AI key was rejected during an AI request and no applicable alternative completed that request. Any independently completed results remain available. Unassessed comparisons or claims are not treated as passed. This is a system limit, not a finding against the manuscript."
 }

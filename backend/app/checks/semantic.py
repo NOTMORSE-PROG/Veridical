@@ -595,6 +595,7 @@ async def record_ungraded(
     outcome: ResultOutcome,
     reason: str,
     commit: bool = True,
+    cause: str | None = None,
 ) -> list[CheckResult]:
     """Record criteria the AI never got to grade, as an honest STATE rather
     than a verdict (V-050, availability floor).
@@ -615,7 +616,11 @@ async def record_ungraded(
             check_run_id,
             criterion,
             outcome,
-            {"basis": "not-graded", "reason": reason},
+            {
+                "basis": "not-graded",
+                "reason": reason,
+                **({"ungraded_cause": cause} if cause is not None else {}),
+            },
             commit=commit,
         )
         for criterion in criteria

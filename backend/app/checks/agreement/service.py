@@ -113,7 +113,11 @@ async def run_internal_agreement_check(
     # hide behind a more benign-sounding cause) first, then `api_down`,
     # then `quota_exhausted` last. Real per-cause counts always live in
     # `detail` regardless of which one outcome wins.
-    if pairing.n_skipped_parse_failure > 0:
+    if (
+        pairing.n_skipped_parse_failure > 0
+        or pairing.n_skipped_ai_not_configured > 0
+        or pairing.n_skipped_ai_key_rejected > 0
+    ):
         outcome = ResultOutcome.unverifiable
     elif pairing.n_skipped_api_down > 0:
         outcome = ResultOutcome.api_down
@@ -143,6 +147,8 @@ async def run_internal_agreement_check(
             "n_skipped_quota": pairing.n_skipped_quota,
             "n_skipped_api_down": pairing.n_skipped_api_down,
             "n_skipped_parse_failure": pairing.n_skipped_parse_failure,
+            "n_skipped_ai_not_configured": pairing.n_skipped_ai_not_configured,
+            "n_skipped_ai_key_rejected": pairing.n_skipped_ai_key_rejected,
         },
     )
     session.add(result)

@@ -28,9 +28,34 @@ describe("partial source coverage", () => {
     const report = { manuscript_id: 2, check_run_id: 3, integrity_check_status: statuses } as ReportOut;
     const before = JSON.stringify(report);
     const items = coverageItems(report);
-    expect(items.map(value => value.key)).toEqual(["internal_agreement", "citation_integrity", "statistical_forensics", "originality_reuse"]);
+    expect(items.map(value => value.key.split(":")[0])).toEqual(["internal_agreement", "citation_integrity", "statistical_forensics", "originality_reuse"]);
+    expect(items.find(value => value.key.startsWith("statistical_forensics"))?.sources).toHaveLength(2);
+    expect(new Set(items.map(value => value.key)).size).toBe(items.length);
     expect(JSON.stringify(report)).toBe(before);
   });
+  it.each(["ai_not_configured", "ai_key_rejected"])(
+    "retains the original source limit alongside %s without duplicating source counts",
+    (cause) => {
+      const report = {
+        manuscript_id: 2, check_run_id: 3,
+        integrity_check_status: [status, {
+          check_kind: "citation_integrity", outcome: "unverifiable",
+          n_skipped_quota: 0, n_skipped_api_down: 0, n_skipped_parse_failure: 0,
+          coverage_reason: cause,
+        }],
+      } as ReportOut;
+      const before = JSON.stringify(report);
+      const rows = coverageItems(report);
+      expect(rows).toHaveLength(2);
+      expect(rows[0].detail).toContain("Citation matching across the manuscript was not assessed");
+      expect(rows[0].subIssues?.join(" ")).toContain("3 reference checks attempted");
+      expect(rows[1].detail).toContain("AI-dependent parts of this check were not assessed");
+      expect(rows[1].detail).toContain("not a finding against the manuscript");
+      expect(rows[1].subIssues).toEqual([]);
+      expect(rows[1].key).not.toBe(rows[0].key);
+      expect(JSON.stringify(report)).toBe(before);
+    },
+  );
   it("adds a current limitation without changing a historical report record", () => {
     const report = { manuscript_id: 2, check_run_id: 3, integrity_check_status: [], historical_citation_title_unverified: true } as unknown as ReportOut;
     const before = JSON.stringify(report);

@@ -50,6 +50,8 @@ function integrityCoverageItem(status: IntegrityCheckStatusOut, manuscriptId: nu
     };
   }
   const coverageCopy: Record<string, string> = {
+    ai_not_configured: "AI-dependent parts of this check were not assessed because no usable AI configuration was available. Any independently completed results remain available. Unassessed comparisons or claims are not treated as passed. This is a system limit, not a finding against the manuscript.",
+    ai_key_rejected: "AI-dependent parts of this check were not assessed because the configured AI key was rejected during an AI request and no applicable alternative completed that request. Any independently completed results remain available. Unassessed comparisons or claims are not treated as passed. This is a system limit, not a finding against the manuscript.",
     metadata_comparison_policy_unavailable: "Reference metadata comparison could not run because its comparison policy was unavailable. No lookup or claim-support assessment was made for those DOI references.",
     reference_metadata_policy_unavailable: "Reference metadata could not be parsed because its parsing policy was unavailable. Reference lookups and claim support remain unassessed.",
     reference_source_projection_unbound: "The saved reference entries could not be matched to the current source inventory. Reference lookups and claim support remain unassessed.",
@@ -81,7 +83,7 @@ function integrityCoverageItem(status: IntegrityCheckStatusOut, manuscriptId: nu
     if (status.n_linkage_unassessed) subIssues.push(`${status.n_linkage_unassessed} reference ${status.n_linkage_unassessed === 1 ? "link" : "links"} unassessed`);
     if (status.n_claim_support_unassessed) subIssues.push(`${status.n_claim_support_unassessed} cited ${status.n_claim_support_unassessed === 1 ? "source" : "sources"} with unassessed claim support`);
     return {
-      key: status.check_kind, label, detail: coverageCopy[reason],
+      key: `${status.check_kind}:${reason}`, label, detail: coverageCopy[reason],
       subIssues: [...subIssues, ...(imageDetails?.subIssues ?? []), ...(native?.subIssues ?? [])],
       sources: [...(imageDetails?.sources ?? []), ...(native?.sources ?? [])],
       detailsLabel: native ? "source assessment details" : imageDetails ? "source and image assessment details" : undefined,
