@@ -64,6 +64,8 @@ from app.report.schemas import (
     PageEvidenceImageOut,
     ReportExportData,
 )
+from app.report.source_coverage import project_source_coverage
+from app.report.source_inventory import NativeSourceNote, group_native_source_notes
 from app.report.text import Paragraph, clusters, draw_right_text, register_fonts, text_width
 
 
@@ -125,6 +127,107 @@ def _problem_labels() -> dict[str, str]:
 @lru_cache
 def _coverage_labels() -> dict[str, str]:
     return json.loads((Path(__file__).parent / "data" / "coverage_labels.json").read_text("utf-8"))
+
+
+@lru_cache
+def _native_source_note_copy() -> dict[str, str]:
+    return json.loads(
+        (Path(__file__).parent / "data" / "native_source_note_copy.json").read_text("utf-8")
+    )
+
+
+def _native_source_note_flowables(
+    note: NativeSourceNote,
+    styles: dict[str, ParagraphStyle],
+    frame_size: tuple[float, float] | None = None,
+) -> list:
+    copy = _native_source_note_copy()
+    labels = ", ".join(_CHECK_KIND_LABEL.get(kind, kind) for kind in note.checks)
+    title = Paragraph(escape(copy["heading"].format(number=note.number)), styles["body_bold"])
+    title.keepWithNext = True
+    body = [Paragraph(escape(copy["applies"].format(checks=labels)), styles["body"])]
+    if len(note.checks) > 1:
+        body.append(Paragraph(escape(copy["shared"]), styles["body"]))
+    if note.state == "complete" and note.count is not None:
+        body.append(
+            Paragraph(
+                escape(
+                    copy["count"].format(
+                        count=note.count, noun=copy["singular" if note.count == 1 else "plural"]
+                    )
+                ),
+                styles["body"],
+            )
+        )
+        body.append(Paragraph(escape(copy["scope"]), styles["body"]))
+        if note.unlocated:
+            body.append(
+                Paragraph(
+                    escape(
+                        copy["unlocated"].format(
+                            count=note.unlocated,
+                            noun=copy[
+                                "unlocated_singular" if note.unlocated == 1 else "unlocated_plural"
+                            ],
+                        )
+                    ),
+                    styles["body"],
+                )
+            )
+        elif note.unlocated is None:
+            body.append(Paragraph(escape(copy["unlocated_unknown"]), styles["body"]))
+    else:
+        body.append(Paragraph(escape(copy.get(note.state, copy["unknown"])), styles["body"]))
+    initial = []
+    if frame_size:
+        width, height = frame_size
+        prefix = [title, *body]
+        required = sum(
+            part.wrap(width, height)[1] + part.getSpaceBefore() + part.getSpaceAfter()
+            for part in prefix
+        )
+        if required <= height:
+            initial.append(CondPageBreak(required))
+    if note.excluded:
+        body.append(Paragraph(escape(copy["excluded"]), styles["body"]))
+        body.append(
+            Paragraph(
+                escape(
+                    copy["excluded_positions"].format(
+                        positions=", ".join(str(value + 1) for value in note.excluded)
+                    )
+                ),
+                styles["caption"],
+            )
+        )
+    for kind, paragraph, count in note.items:
+        anchor = (
+            f"Extracted paragraph {paragraph + 1}"
+            if paragraph is not None
+            else "Source location unavailable"
+        )
+        noun = "occurrence" if count == 1 else "occurrences"
+        location_kind = ", table" if kind == "table_cell" else ""
+        body.append(
+            Paragraph(
+                escape(
+                    f"{anchor}: Native Word equations unassessed ({count} {noun}{location_kind})."
+                ),
+                styles["caption"],
+            )
+        )
+    return [
+        *initial,
+        title,
+        PTOContainer(
+            body,
+            header=[
+                Paragraph(
+                    escape(copy["continued"].format(number=note.number)), styles["caption_bold"]
+                )
+            ],
+        ),
+    ]
 
 
 @lru_cache
@@ -493,6 +596,13 @@ def _result_display(row: CriterionResultOut) -> tuple[str, str]:
     # (owner-approved treatment), never Pass/Partial/Fail — the neutral
     # "info" tone matches the on-screen `ResultsTable.tsx` treatment (a
     # level is a rung on a scale, not a pass/fail valence).
+    if (
+        row.rule_scope_unconfirmed
+        and row.resolution is None
+        and row.outcome in {"passed", "failed"}
+    ):
+        saved_label, _ = _result_display(row.model_copy(update={"rule_scope_unconfirmed": False}))
+        return f"Previously recorded: {saved_label}", "neutral"
     if row.level is not None:
         return row.level.name, "info"
     is_partial = row.outcome == "passed" and row.score is not None and round(row.score) == 50
@@ -572,6 +682,47 @@ def _pending_semantic_basis_flowables(
     return parts
 
 
+def _criterion_source_flowables(row: CriterionResultOut, styles: dict[str, ParagraphStyle]) -> list:
+    coverage = row.source_coverage
+    if coverage is None:
+        if row.kind != "semantic":
+            return []
+        coverage = project_source_coverage(None)
+    state = coverage.native_math_inventory_state
+    if state == "not_applicable" or (state == "not_recorded" and row.kind != "semantic"):
+        return []
+    count = coverage.n_native_equations_unassessed
+    if state == "complete" and count == 0:
+        return []
+    copy = _native_source_note_copy()
+    title = Paragraph(
+        escape(copy["criterion_earlier_heading" if row.resolution else "criterion_heading"]),
+        styles["body_bold"],
+    )
+    title.keepWithNext = True
+    parts = [title]
+    if state == "complete":
+        parts.append(
+            Paragraph(
+                escape(
+                    copy["criterion_omitted"].format(
+                        count=count,
+                        noun=copy["criterion_singular" if count == 1 else "criterion_plural"],
+                    )
+                ),
+                styles["body"],
+            )
+        )
+        if coverage.native_math_excluded_paragraphs:
+            parts.append(Paragraph(escape(copy["excluded"]), styles["body"]))
+        if coverage.n_native_equations_unlocated:
+            parts.append(Paragraph(escape(copy["unlocated_limit"]), styles["body"]))
+        parts.append(Paragraph(escape(copy["scope"]), styles["caption"]))
+    else:
+        parts.append(Paragraph(escape(copy[state]), styles["body"]))
+    return parts
+
+
 def _rule_facts_flowables(row: CriterionResultOut, styles: dict[str, ParagraphStyle]) -> list:
     if row.rule_facts is None:
         return []
@@ -599,6 +750,8 @@ def _rule_facts_flowables(row: CriterionResultOut, styles: dict[str, ParagraphSt
 def _criterion_flowable(row: CriterionResultOut, styles: dict[str, ParagraphStyle]) -> list:
     title = f"Criterion #{row.criterion_id}: {row.text}" if row.resolution else row.text
     parts = [Paragraph(escape(title), styles["cell_bold"])]
+    if not row.resolution:
+        parts.extend(_criterion_source_flowables(row, styles))
     caption_bits = [] if row.resolution else [_source_caption(row)]
     # V-069 AC5: the decided rung's own points, alongside the level name
     # already shown as the row's Result column — this is the "score" half
@@ -628,6 +781,7 @@ def _criterion_flowable(row: CriterionResultOut, styles: dict[str, ParagraphStyl
                     styles["cell_caption"],
                 )
             )
+        parts.extend(_criterion_source_flowables(row, styles))
     elif row.evidence:
         parts.append(Paragraph(escape(row.evidence[0].quote), styles["cell"]))
         parts.append(
@@ -1030,6 +1184,7 @@ def build_report_pdf(data: ReportExportData) -> bytes:
                     f"<i>({_format_weight_importance(row.weight_importance, long=True)})</i>",
                     styles["body_bold"],
                 ),
+                *_criterion_source_flowables(row, styles),
                 Paragraph(escape(_pending_review_reason(row.outcome)), styles["body"]),
                 *(
                     [Paragraph(escape(row.reason), styles["body"])]
@@ -1083,7 +1238,12 @@ def build_report_pdf(data: ReportExportData) -> bytes:
                     styles["body"],
                 )
             )
-        for coverage in report.integrity_check_status:
+        coverages = sorted(
+            report.integrity_check_status,
+            key=lambda value: _CHECK_KIND_ORDER.get(value.check_kind, len(_CHECK_KIND_ORDER)),
+        )
+        native_notes, native_references = group_native_source_notes(coverages)
+        for coverage, native_reference in zip(coverages, native_references, strict=True):
             label = _CHECK_KIND_LABEL.get(coverage.check_kind, coverage.check_kind)
             reason = _coverage_labels().get(
                 coverage.coverage_reason,
@@ -1165,29 +1325,8 @@ def build_report_pdf(data: ReportExportData) -> bytes:
                 counts.append(
                     f"{coverage.n_equations_unassessed} {noun} transcribed but not evaluated"
                 )
-            if coverage.n_native_equations_unassessed:
-                noun = (
-                    "occurrence remains"
-                    if coverage.n_native_equations_unassessed == 1
-                    else "occurrences remain"
-                )
-                counts.append(
-                    f"{coverage.n_native_equations_unassessed} native Word equation "
-                    f"{noun} unassessed"
-                )
-                counts.append(
-                    "Native inventory scope: main document body; "
-                    "other package parts are not established"
-                )
-            elif coverage.native_math_inventory_state in {"not_recorded", "unavailable"}:
-                counts.append(
-                    "Native Word equation presence and count are unknown; this record does not "
-                    "establish that native equations were checked"
-                )
-            if coverage.native_math_excluded_paragraphs:
-                counts.append(
-                    "Text and table content affected by native Word equations was excluded"
-                )
+            if native_reference is not None:
+                counts.append(f"Native source coverage: note {native_reference}")
             if coverage.n_recovery_figures_unassessed or coverage.n_recovery_tables_unassessed:
                 counts.append(
                     f"{coverage.n_recovery_figures_unassessed} figure and "
@@ -1195,22 +1334,6 @@ def build_report_pdf(data: ReportExportData) -> bytes:
                 )
             text = f"{label}: {reason}. " + "; ".join(counts)
             flow.append(Paragraph(escape(text), styles["body"]))
-            for item in coverage.native_math_coverage_items:
-                anchor = (
-                    f"Extracted paragraph {item.paragraph + 1}"
-                    if item.paragraph is not None
-                    else "Source location unavailable"
-                )
-                noun = "occurrence" if item.n_occurrences == 1 else "occurrences"
-                flow.append(
-                    Paragraph(
-                        escape(
-                            f"{anchor}: Native Word equations unassessed "
-                            f"({item.n_occurrences} {noun})."
-                        ),
-                        styles["caption"],
-                    )
-                )
             image_locations = {}
             for item in coverage.image_coverage_items:
                 anchor = (
@@ -1231,6 +1354,11 @@ def build_report_pdf(data: ReportExportData) -> bytes:
                         styles["caption"],
                     )
                 )
+        for note in native_notes:
+            print_frame = Frame(0, 0, doc.width, doc.height)
+            flow.extend(
+                _native_source_note_flowables(note, styles, (print_frame._aW, print_frame._aH))
+            )
         flow.append(
             Paragraph(
                 "These are coverage limitations, not findings against the manuscript. "
@@ -1272,7 +1400,7 @@ def build_report_pdf(data: ReportExportData) -> bytes:
                     styles["body"],
                 )
             )
-    if data.report.figure_readings is not None:
+    if data.report.figure_readings:
         readings = data.report.figure_readings
         available = [item for item in readings if item.status == "available"]
         flow.append(Paragraph("Saved visual readings", styles["h2"]))
