@@ -146,10 +146,10 @@ class LLMQueue:
         self._transport = transport
         self._session_factory = session_factory
         self._pool = pool
-        # V-052 (BYOK): None = this queue spends the shared pool key; a real
-        # id = an instructor's own key, a genuinely separate Gemini quota
-        # island (see LLMQuotaCounter's own docstring for the partial-index
-        # reasoning). Threaded into every quota-table read/write below.
+        # V-052 (BYOK): None identifies shared-key local records; a real
+        # instructor id selects that instructor's separate local ledger.
+        # Different keys do not establish separate provider projects or extra
+        # quota. Threaded into every quota-table read/write below.
         self._instructor_id = instructor_id
         # BUG-162: off by default -- every existing caller keeps today's
         # cache-saving behavior unchanged. True only for a deliberate

@@ -97,7 +97,14 @@ async def run(audit_id: int, *, fake: bool, live: bool) -> None:
     prompt_version = row.prompt_version or "unversioned"
 
     print(f"audit_log id={row.id}  event={row.event_type}  check_run_id={row.check_run_id}")
-    print(f"prompt_type={prompt_type}  model={model}  temperature={temperature}")
+    print(f"prompt_type={prompt_type}  requested_model={model}  temperature={temperature}")
+    version = payload.get("model_version")
+    version = version.strip() if isinstance(version, str) and version.strip() else "Not recorded"
+    if payload.get("fake_llm") is True:
+        version = "Not applicable: test-mode response"
+    print(f"provider_reported_model_version={version}")
+    if row.event_type == "llm_cache_hit":
+        print("Cached response reused; this event records no new generation.")
     print(f"prompt_version={prompt_version}  context={context}")
     print(f"stored input_hash={row.input_hash}")
     if not prompt:
@@ -146,7 +153,8 @@ async def run(audit_id: int, *, fake: bool, live: bool) -> None:
         response = await transport.generate(
             model=model, prompt=prompt, temperature=temperature or 0.0, **context
         )
-        print(f"\n--- live-replay response ---\n{json.dumps(response, indent=2)}")
+        print(f"provider_reported_model_version={response.model_version or 'Not recorded'}")
+        print(f"\n--- live-replay response ---\n{json.dumps(response.payload, indent=2)}")
 
 
 def main() -> None:

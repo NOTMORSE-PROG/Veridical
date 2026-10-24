@@ -1,4 +1,4 @@
-import { fireEvent, screen, waitFor } from "@testing-library/react";
+import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Instructor, QuotaStatus, SettingsOut } from "../api/types";
 import { renderWithProviders, stubFetchByPath } from "../test/renderWithProviders";
@@ -66,6 +66,40 @@ function baseHandlers(overrides: Record<string, unknown> = {}) {
 describe("SettingsPage", () => {
   afterEach(() => vi.unstubAllGlobals());
 
+  it("keeps earlier budget records visible and qualifies the raw counter without a cache percentage", async () => {
+    vi.stubGlobal("fetch", stubFetchByPath(baseHandlers({ "/quota": {
+      ...QUOTA, calls_used: 20, calls_remaining: 0, recorded_budget_debits: 31,
+      cache_hit_rate: null, cache_hits_today: 8,
+      models: [{ ...QUOTA.models![0], model: "current-request", calls_used: 20,
+        daily_limit: 20, calls_remaining: 0, recorded_budget_debits: 23,
+        historical_budget_debits: 20, budget_aliases: ["earlier-request"], exhausted: true }],
+      legacy_models: [{ model: "earlier-request", recorded_budget_debits: 20,
+        cache_hits_today: 3, budget_model: "current-request" },
+        { model: "retired-request", recorded_budget_debits: 8, cache_hits_today: 1, budget_model: null }],
+    } })));
+    renderWithProviders(<SettingsPage />);
+    const ledger = await screen.findByRole("region", { name: "Earlier model records for this budget day" });
+    expect(within(ledger).getByRole("heading", { name: "earlier-request" })).toBeVisible();
+    expect(within(ledger).getByRole("heading", { name: "retired-request" })).toBeVisible();
+    expect(screen.getByText("Remaining local request budget: 0")).toBeVisible();
+    expect(screen.getByText("Recorded local budget: 31")).toBeVisible();
+    expect(screen.getByText("Cached responses reused today: 8")).toBeVisible();
+    expect(screen.getByText(/Provider allowance and current availability are not verified here/)).toBeVisible();
+    expect(screen.queryByText(/%.*served from cache/)).not.toBeInTheDocument();
+  });
+
+  it.each(["cache", "generation", "test", "unknown"] as const)("labels %s model provenance separately from the requested identity", async source => {
+    vi.stubGlobal("fetch", stubFetchByPath(baseHandlers({ "/settings": { ...SETTINGS,
+      prompt_versions: [{ ...SETTINGS.prompt_versions[0], requested_model: "stored-requested-id",
+        model_version: source === "unknown" ? null : "stored-provider-version", response_source: source }],
+    } })));
+    renderWithProviders(<SettingsPage />);
+    expect(await screen.findByText(/Requested model: stored-requested-id/)).toBeVisible();
+    const expected = source === "test" ? "Not applicable: test-mode response" : source === "unknown" ? "Not recorded" : "stored-provider-version";
+    expect(screen.getByText(new RegExp(`Provider-reported model version.*: ${expected}`))).toBeVisible();
+    if (source === "cache") expect(screen.getByText("This entry reused a stored response. No new generation is recorded by this event.")).toBeVisible();
+  });
+
   it("shows the profile as read-only with an explicit non-editable disclosure", async () => {
     vi.stubGlobal("fetch", stubFetchByPath(baseHandlers()));
     renderWithProviders(<SettingsPage />);
@@ -84,7 +118,7 @@ describe("SettingsPage", () => {
     for (const [linkName, headingName] of [
       ["Account", "Profile"],
       ["Personal key", "Personal Gemini key"],
-      ["AI capacity", "AI capacity"],
+      ["Local AI budget", "Local AI budget"],
       ["Review rules", "Review rules and technical record"],
     ]) {
       const heading = screen.getByRole("heading", { name: headingName });
@@ -215,9 +249,9 @@ describe("SettingsPage", () => {
     renderWithProviders(<SettingsPage />);
     await screen.findByText("Prof Cruz");
 
-    expect(await screen.findByText("40 of 300 AI calls used today (87% left)")).toBeInTheDocument();
+    expect(await screen.findByText("Remaining local request budget: 260")).toBeInTheDocument();
     expect(
-      screen.getByText("Running in test mode. These numbers are simulated, not real API usage."),
+      screen.getByText("Test mode is active. These budget figures do not represent live provider usage."),
     ).toBeInTheDocument();
     expect(screen.getAllByText("gemini-3.5-flash").length).toBe(2); // mobile card + desktop grid
   });
@@ -248,7 +282,7 @@ describe("SettingsPage", () => {
 
     const table = container.querySelector("table");
     expect(table).toBeInTheDocument();
-    expect(table!.querySelector("caption")).toHaveTextContent("Daily AI capacity by model");
+    expect(table!.querySelector("caption")).toHaveTextContent("Configured models and local budget");
 
     const columnHeaderCount = table!.querySelectorAll('th[scope="col"]').length;
     expect(columnHeaderCount).toBe(6);
@@ -460,7 +494,7 @@ describe("SettingsPage", () => {
     );
     renderWithProviders(<SettingsPage />);
     await screen.findByText("Prof Cruz");
-    await screen.findByText("Running in test mode. These numbers are simulated, not real API usage.");
+    await screen.findByText("Test mode is active. These budget figures do not represent live provider usage.");
     expect(screen.queryByText("Quota record: shared key")).not.toBeInTheDocument();
     expect(screen.queryByText("Quota record: personal key")).not.toBeInTheDocument();
   });

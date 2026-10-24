@@ -14,25 +14,24 @@ from app.models.base import Base, PkCreatedMixin
 
 
 class LLMQuotaCounter(Base, PkCreatedMixin):
-    """One row per (Pacific calendar day, model, key owner) — Gemini's own
-    reset boundary, and its own metering granularity.
+    """Local records per (configured budget day, requested model, key owner).
 
-    Per-MODEL, not per-day-globally (V-049): the free tier's 429 names the
-    model in its `quotaDimensions`, so each model carries an independent
-    daily allowance. A single global counter can only ever describe one
-    model's island and would mis-report the pool's real remaining capacity.
+    Original requested identities and debits remain saved. A configured
+    historical alias can contribute to another entry's conservative local cap;
+    this does not establish independent or shared provider quota buckets.
 
     `instructor_id` NULL = the shared pool key; a real id = that
-    instructor's own BYOK key (V-052) — a genuinely separate Gemini quota
-    island, never mixed with the shared counter for the same model. Two
+    instructor's own BYOK key (V-052), never mixed with the shared local
+    counter for the same model. Different keys do not prove different provider
+    projects or additional capacity. Two
     partial unique indexes (not one plain constraint) because Postgres
     unique constraints treat NULL as distinct from every other NULL, which
     would let unlimited shared-key rows exist for the same (day, model);
     see migration 0022 (same pattern as `share_link`'s migration 0020).
 
-    `call_count` gates that island's budget; `cache_hit_count` is tracked
-    separately so the quota meter can show cache-hit rate (D-011) without
-    it counting against the real quota.
+    `call_count` gates the local budget and may include a daily-limit closure
+    hold. It is not a physical-attempt count. `cache_hit_count` records reuse
+    separately and does not consume that local budget.
     """
 
     __tablename__ = "llm_quota_counter"

@@ -34,7 +34,6 @@ import { type FocusEvent, type ReactNode, useEffect, useRef, useState } from "re
 import { Link, useLocation } from "react-router";
 import { useQuota } from "../api/useQuota";
 import { useLogout, useMe } from "../auth/useAuth";
-import { quotaRemaining } from "../domain/quotaTone";
 import { CoachMark } from "../onboarding/CoachMark";
 import { TourProvider, useTour } from "../onboarding/TourContext";
 
@@ -211,70 +210,18 @@ function MobileAccountBlock({ onNavigate }: { onNavigate: () => void }) {
 
 function QuotaChip() {
   const { data: quota, isPending, isError } = useQuota();
-
-  if (isPending) {
-    return (
-      <span className="inline-flex items-center gap-1.5 rounded-full border border-border bg-panel px-2.5 py-1 text-xs whitespace-nowrap text-ink-tertiary">
-        <span aria-hidden="true" className="h-3 w-8 animate-pulse motion-reduce:animate-none rounded-full bg-neutral-150 lg:w-20" />
-        <span className="sr-only">Loading AI capacity</span>
-      </span>
-    );
+  let label = "Local AI budget unavailable";
+  let accessibleLabel = label;
+  if (isPending) label = accessibleLabel = "Loading local AI budget...";
+  else if (!isError && quota) {
+    if (quota.mode === "fake") label = accessibleLabel = "Test mode";
+    else if (Number.isFinite(quota.calls_remaining)) {
+      const remaining = Math.max(0, quota.calls_remaining);
+      label = remaining === 0 ? "Local AI budget reached" : `Local AI budget: ${remaining.toLocaleString()} remaining`;
+      accessibleLabel = `Local AI request budget: ${remaining} remaining. Provider allowance is not verified here.`;
+    }
   }
-  if (isError || !quota) {
-    return (
-      <span className="inline-flex items-center rounded-full border border-border bg-panel px-2.5 py-1 text-xs whitespace-nowrap text-ink-tertiary">
-        <span aria-hidden="true" className="lg:hidden">
-          N/A
-        </span>
-        <span aria-hidden="true" className="hidden lg:inline">
-          AI capacity unavailable
-        </span>
-        <span className="sr-only">AI capacity unavailable</span>
-      </span>
-    );
-  }
-  // Three-tier tone, same tone family the rest of the app uses for
-  // "system/process state" (V-056): quota is a hard operational
-  // constraint central to this product's economics (ground rule 2) but
-  // previously rendered as quiet text, indistinguishable in
-  // weight from decorative chrome — Nielsen's visibility-of-system-status
-  // heuristic. Now a compact filled meter, not just a number. Shared with
-  // Settings' own fuller quota view (V-042) via domain/quotaTone.ts, so
-  // the two screens can't silently disagree about "how bad is this".
-  const { remainingPct, atZero, tone } = quotaRemaining(quota.calls_used, quota.daily_limit);
-  // Full sentence at lg:+ (matches the nav's own breakpoint below); a
-  // short-but-still-directional badge below it (never a bare number,
-  // BUG-017) since the full sentence doesn't fit the header once the
-  // desktop nav is hidden and the hamburger is the only other content.
-  const shortText = atZero ? "0% left" : `${remainingPct}% left`;
-  const longText = atZero
-    ? "No AI capacity left today"
-    : `AI capacity: ${remainingPct}% remaining today`;
-  const fillColor = `var(--color-status-${tone}-text)`;
-  return (
-    <span
-      className="inline-flex items-center gap-2 rounded-full border border-border bg-panel py-1 pr-2.5 pl-1.5 text-xs whitespace-nowrap"
-      style={{ color: tone === "neutral" ? undefined : fillColor }}
-    >
-      <span
-        aria-hidden="true"
-        className="h-1.5 w-10 flex-none overflow-hidden rounded-full lg:w-14"
-        style={{ backgroundColor: "var(--color-neutral-150)" }}
-      >
-        <span
-          className="block h-full rounded-full"
-          style={{ width: `${remainingPct}%`, backgroundColor: fillColor }}
-        />
-      </span>
-      <span aria-hidden="true" className="lg:hidden">
-        {shortText}
-      </span>
-      <span aria-hidden="true" className="hidden lg:inline">
-        {longText}
-      </span>
-      <span className="sr-only">{longText}</span>
-    </span>
-  );
+  return <span role="status" aria-label={accessibleLabel} className="inline-flex items-center rounded-full border border-border bg-panel px-2.5 py-1 text-xs text-ink-tertiary">{label}</span>;
 }
 
 // BUG-069 item 2 (Jakob's law: a top-right avatar universally opens a

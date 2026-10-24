@@ -418,6 +418,11 @@ function AuditDetailModal({ id, owner, onClose, fallbackFocusRef }: {
             <p>Event type: <code>{data.event_type}</code></p>
             {data.agreement_score !== null && <p><code>agreement_score: {data.agreement_score}</code></p>}
             {data.input_hash && <p><code>input_hash: {data.input_hash}</code></p>}
+            {data.event_type.startsWith("llm_") && <div>
+              <p>Requested model: {typeof data.payload?.requested_model === "string" ? data.payload.requested_model : typeof data.payload?.model === "string" ? data.payload.model : "Not recorded"}</p>
+              <p>{data.event_type === "llm_cache_hit" ? "Provider-reported model version of cached response" : "Provider-reported model version"}: {data.llm_execution_mode === "fake" ? "Not applicable: test-mode response" : typeof data.payload?.model_version === "string" && data.payload.model_version.trim() ? data.payload.model_version : "Not recorded"}</p>
+              {data.event_type === "llm_cache_hit" && <p>This entry reused a stored response. No new generation is recorded by this event.</p>}
+            </div>}
             <div><strong>Raw payload</strong><pre>{payloadPreview}</pre></div>
           </div>
         </details>

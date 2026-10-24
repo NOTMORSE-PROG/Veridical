@@ -16,19 +16,16 @@ function initials(name: string): string {
     .join("");
 }
 
-function CapacityStatement({ compact = false }: { compact?: boolean }) {
+function CapacityStatement() {
   const { data: quota, isPending, isError } = useQuota();
-  if (isPending) {
-    return <span className="signal-capacity" role="status">Checking capacity…</span>;
-  }
-  if (isError || !quota) return <span className="signal-capacity">Capacity unavailable</span>;
+  if (isPending) return <span className="signal-capacity" role="status">Loading local AI budget...</span>;
+  if (isError || !quota) return <span className="signal-capacity" role="status">Local AI budget unavailable</span>;
+  if (quota.mode === "fake") return <span className="signal-capacity" role="status">Test mode</span>;
+  if (!Number.isFinite(quota.calls_remaining)) return <span className="signal-capacity" role="status">Local AI budget unavailable</span>;
   const remaining = Math.max(0, quota.calls_remaining);
-  return (
-    <span className="signal-capacity">
-      <strong>{remaining.toLocaleString()}</strong>{" "}
-      {compact ? "calls left" : `AI call${remaining === 1 ? "" : "s"} available today`}
-    </span>
-  );
+  return <span className="signal-capacity" role="status" aria-label={`Local AI request budget: ${remaining} remaining. Provider allowance is not verified here.`}>
+    {remaining === 0 ? "Local AI budget reached" : `Local AI budget: ${remaining.toLocaleString()} remaining`}
+  </span>;
 }
 
 function WorkspaceNavigation({
@@ -122,7 +119,7 @@ function AccountDisclosure() {
       {open && (
         <div id="signal-account-panel" className="signal-account__panel">
           <p title={me.display_name}>Signed in as <strong>{me.display_name}</strong></p>
-          <div className="signal-account__capacity"><CapacityStatement compact /></div>
+          <div className="signal-account__capacity"><CapacityStatement /></div>
           <ReplayTourControl onDone={() => setOpen(false)} />
           <button type="button" className="signal-account-action" onClick={() => logout.mutate()}>
             Sign out
@@ -222,7 +219,7 @@ export function SignalShell({ children }: { children?: ReactNode }) {
             </Link>
             <WorkspaceNavigation label="Primary navigation" />
             <div className="signal-workspace-header__utilities">
-              <CapacityStatement compact />
+              <CapacityStatement />
               <AccountDisclosure />
             </div>
             <MobileWorkspaceMenu />

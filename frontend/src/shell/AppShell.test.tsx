@@ -49,7 +49,8 @@ describe("AppShell", () => {
     // visible (mobile-hidden) span and an sr-only span carry the same
     // full sentence, since a short mobile badge ("100% left") replaces it
     // visually below the sm: breakpoint but the accessible name stays full.
-    expect(screen.getAllByText("AI capacity: 100% remaining today").length).toBe(2);
+    expect(await screen.findByText("Test mode")).toBeInTheDocument();
+    expect(screen.queryByText(/remaining today/)).not.toBeInTheDocument();
   });
 
   it("BUG-017: shows an unambiguous 'no capacity left' state, not a bare 0%", async () => {
@@ -57,7 +58,7 @@ describe("AppShell", () => {
       "fetch",
       stubFetchByPath({
         "/auth/me": { id: 1, email: "a@b.com", display_name: "Demo Instructor" },
-        "/quota": { ...QUOTA, calls_used: 1400, calls_remaining: 0 },
+        "/quota": { ...QUOTA, mode: "live", calls_used: 1400, calls_remaining: 0 },
       }),
     );
     renderWithProviders(
@@ -66,7 +67,7 @@ describe("AppShell", () => {
       </AppShell>,
       { route: "/dashboard" },
     );
-    expect((await screen.findAllByText("No AI capacity left today")).length).toBe(2);
+    expect(await screen.findByText("Local AI budget reached")).toBeInTheDocument();
   });
 
   it("marks the active nav link with aria-current, not just a class (BUG-015 area)", async () => {

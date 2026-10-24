@@ -962,9 +962,11 @@ export interface ReuseMatchesOut {
   n_source_candidates_withheld?: number;
 }
 
-/** One model's own daily allowance. The Gemini free tier meters per model,
- * so the quota meter's totals are sums over these islands (V-049). */
+/** Configured local budget, including any historical aliases. */
 export interface ModelQuotaStatus {
+  budget_aliases?: string[];
+  recorded_budget_debits?: number;
+  historical_budget_debits?: number;
   model: string;
   calls_used: number;
   daily_limit: number;
@@ -975,7 +977,16 @@ export interface ModelQuotaStatus {
   exhausted: boolean;
 }
 
+export interface LegacyModelBudget {
+  model: string;
+  recorded_budget_debits: number;
+  cache_hits_today: number;
+  budget_model: string | null;
+}
+
 export interface QuotaStatus {
+  recorded_budget_debits?: number;
+  legacy_models?: LegacyModelBudget[];
   mode: "fake" | "live";
   /** V-052 (BYOK): "own" only when this instructor has their own Gemini
    * key configured and this status reflects THEIR island; "shared"
@@ -988,7 +999,7 @@ export interface QuotaStatus {
   daily_limit: number;
   calls_remaining: number;
   cache_hits_today: number;
-  cache_hit_rate: number;
+  cache_hit_rate: number | null;
   reset_at: string;
   rpm_limit: number;
   models?: ModelQuotaStatus[];
@@ -1155,6 +1166,9 @@ export interface ThresholdsOut {
 }
 
 export interface PromptVersionOut {
+  requested_model?: string;
+  model_version?: string | null;
+  response_source?: "test" | "cache" | "generation" | "unknown";
   prompt_type: string;
   prompt_version: string;
   model: string;

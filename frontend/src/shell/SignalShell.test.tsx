@@ -24,6 +24,17 @@ function renderShell(route = "/library") {
 describe("SignalShell destination navigation", () => {
   afterEach(() => vi.unstubAllGlobals());
 
+  it.each(["fake", "unknown"])("does not advertise available provider requests for %s budget data", async state => {
+    vi.stubGlobal("fetch", stubFetchByPath({
+      "/auth/session": { instructor: { id: 1, email: "instructor@demo.local", display_name: "Instructor", onboarding_dismissed_at: "2026-01-01T00:00:00Z" } },
+      "/quota": { mode: state === "fake" ? "fake" : "live", calls_remaining: state === "fake" ? 300 : null },
+    }));
+    renderWithProviders(<SignalShell><p>Route content</p></SignalShell>);
+    await screen.findAllByText(state === "fake" ? "Test mode" : "Local AI budget unavailable");
+    expect(screen.queryByText(/300 remaining/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/calls left/)).not.toBeInTheDocument();
+  });
+
   it.each(["available", "loading", "unavailable"])("keeps %s capacity accessible through Account using reads only", async (state) => {
     const base = stubFetchByPath({ "/auth/session": { instructor: { id: 1, email: "instructor@demo.local", display_name: "Demo Instructor", onboarding_dismissed_at: "2026-01-01T00:00:00Z" } }, "/quota": { calls_used: 3, calls_remaining: 17, daily_limit: 20 } });
     const fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -37,7 +48,7 @@ describe("SignalShell destination navigation", () => {
     renderWithProviders(<SignalShell><p>Route content</p></SignalShell>);
     const account = await screen.findByRole("button", { name: "Account" }); account.focus(); fireEvent.click(account);
     const panel = document.getElementById("signal-account-panel")!;
-    await within(panel).findByText(state === "available" ? /calls left/ : state === "loading" ? /Checking capacity/ : "Capacity unavailable");
+    await within(panel).findByText(state === "available" ? /Local AI budget: 17 remaining/ : state === "loading" ? /Loading local AI budget/ : "Local AI budget unavailable");
     expect(account).toHaveAttribute("aria-expanded", "true");
     fireEvent.keyDown(document, { key: "Escape" });
     expect(account).toHaveFocus(); expect(account).toHaveAttribute("aria-expanded", "false");

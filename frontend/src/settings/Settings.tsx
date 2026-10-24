@@ -482,11 +482,11 @@ function ModelRow({ model }: { model: ModelQuotaStatus }) {
   return (
     <tr>
       <th scope="row">{model.model}</th>
-      <td>{model.calls_used} / {model.daily_limit}</td>
+      <td>{model.recorded_budget_debits ?? model.calls_used} / {model.daily_limit}</td>
       <td>{model.calls_remaining}</td>
       <td>{model.cache_hits_today}</td>
       <td>{model.vision ? "Yes" : "No"}</td>
-      <td>{model.exhausted && <StatusPill tone="attention">Exhausted</StatusPill>}</td>
+      <td><StatusPill tone={model.exhausted ? "attention" : "neutral"}>{model.exhausted ? "Unavailable for routing today" : "Configured"}</StatusPill></td>
     </tr>
   );
 }
@@ -512,20 +512,20 @@ function ModelCapacityTable({ models }: { models: ModelQuotaStatus[] }) {
       <div
         ref={scrollRef}
         role="region"
-        aria-label="Daily AI capacity by model"
+        aria-label="Configured models and local budget"
         aria-describedby={overflows ? helpId : undefined}
         tabIndex={overflows ? 0 : undefined}
         className="signal-model-capacity-scroll"
       >
         <table className="signal-model-capacity-table">
-          <caption>Daily AI capacity by model</caption>
+          <caption>Configured models and local budget</caption>
           <thead><tr>
-            <th scope="col">Model</th>
-            <th scope="col">Used / Limit</th>
-            <th scope="col">Remaining</th>
-            <th scope="col">Cache hits</th>
-            <th scope="col">Images</th>
-            <th scope="col">Status</th>
+            <th scope="col">Requested model</th>
+            <th scope="col">Recorded budget / Configured limit</th>
+            <th scope="col">Local budget remaining</th>
+            <th scope="col">Cached responses reused</th>
+            <th scope="col">Image requests enabled</th>
+            <th scope="col">Routing status</th>
           </tr></thead>
           <tbody>{models.map((model) => <ModelRow key={model.model} model={model} />)}</tbody>
         </table>
@@ -540,21 +540,21 @@ function QuotaSection() {
 
   if (isPending) {
     return (
-      <SectionCard headingId="quota-heading" title="AI capacity">
+      <SectionCard headingId="quota-heading" title="Local AI budget">
         <div role="status" aria-live="polite" aria-busy="true" className="text-sm text-ink-tertiary">
-          Loading AI capacity…
+          Loading local AI budget...
         </div>
       </SectionCard>
     );
   }
   if (isError || !quota) {
     return (
-      <SectionCard headingId="quota-heading" title="AI capacity">
+      <SectionCard headingId="quota-heading" title="Local AI budget">
         <div
           role="alert"
           className="rounded-md border border-status-attention-text/25 bg-status-attention-bg p-3 text-sm text-status-attention-text"
         >
-          Could not load AI capacity right now.{" "}
+          Could not load the local AI budget right now.{" "}
           <button type="button" onClick={() => refetch()} className="underline">
             Try again
           </button>
@@ -568,7 +568,7 @@ function QuotaSection() {
   const fillColor = `var(--color-status-${tone}-text)`;
 
   return (
-    <SectionCard headingId="quota-heading" title="AI capacity">
+    <SectionCard headingId="quota-heading" title="Local AI budget">
       <div className="flex flex-col gap-2">
         {quota.mode === "live" && (
           <StatusPill tone={quota.key_source === "own" ? "success" : "neutral"}>
@@ -577,7 +577,7 @@ function QuotaSection() {
         )}
         {quota.mode === "fake" && (
           <p className="text-xs font-medium text-status-caution-text">
-            Running in test mode. These numbers are simulated, not real API usage.
+            Test mode is active. These budget figures do not represent live provider usage.
           </p>
         )}
         <div
@@ -591,13 +591,17 @@ function QuotaSection() {
           />
         </div>
         <p className="text-sm text-ink">
-          {quota.calls_used} of {quota.daily_limit} AI calls used today ({remainingPct}% left)
+          Remaining local request budget: {quota.calls_remaining}
+        </p>
+        <p>Configured daily limit: {quota.daily_limit}</p>
+        <p>Recorded local budget: {quota.recorded_budget_debits ?? quota.calls_used}</p>
+        <p>These are configured limits and local budget records. Provider allowance and current availability are not verified here.</p>
+        <p>Recorded local budget can include a closed limit after a provider limit response. It is not an exact count of API requests.</p>
+        <p className="text-sm text-ink-tertiary">
+          Local budget resets {new Date(quota.reset_at).toLocaleString()}
         </p>
         <p className="text-sm text-ink-tertiary">
-          Resets {new Date(quota.reset_at).toLocaleString()}
-        </p>
-        <p className="text-sm text-ink-tertiary">
-          {Math.round(quota.cache_hit_rate * 100)}% of today's calls were served from cache
+          Cached responses reused today: {quota.cache_hits_today}
         </p>
       </div>
 
@@ -610,18 +614,31 @@ function QuotaSection() {
                   <span className="min-w-0 wrap-anywhere font-medium text-ink">
                     {model.model}
                   </span>
-                  {model.exhausted && <StatusPill tone="attention">Exhausted</StatusPill>}
+                  <StatusPill tone={model.exhausted ? "attention" : "neutral"}>{model.exhausted ? "Unavailable for routing today" : "Configured"}</StatusPill>
                 </div>
                 <p className="mt-1 text-xs text-ink-tertiary">
-                  {model.calls_used} / {model.daily_limit} used · {model.calls_remaining} left ·{" "}
-                  {model.cache_hits_today} cache hits · {model.vision ? "vision" : "no vision"}
+                  {model.recorded_budget_debits ?? model.calls_used} / {model.daily_limit} recorded budget / configured limit · {model.calls_remaining} local budget remaining ·{" "}
+                  {model.cache_hits_today} cached responses reused · Image requests enabled: {model.vision ? "Yes" : "No"}
                 </p>
               </li>
             ))}
           </ul>
           <ModelCapacityTable models={quota.models} />
+          {quota.models.filter((model) => (model.historical_budget_debits ?? 0) > 0).map((model) => <p key={model.model} className="mt-2 text-sm text-ink-secondary">
+            Requested model {model.model} includes {model.historical_budget_debits} recorded budget debits from earlier identifiers: {model.budget_aliases?.join(", ")}. The remaining local budget includes a conservative reservation for earlier model records. A reservation is a local safety measure, not a count of additional API requests.
+          </p>)}
         </div>
       )}
+      {quota.models?.length === 0 && <p>No models are currently configured for new requests.</p>}
+      {!!quota.legacy_models?.length && <section className="mt-4" aria-label="Earlier model records for this budget day">
+        <h3 className="font-semibold">Earlier model records for this budget day</h3>
+        <p>These requested model identifiers are no longer used for new requests. Their saved budget and cache records remain available.</p>
+        <ul className="mt-2 flex flex-col gap-2">{quota.legacy_models.map((record) => <li key={record.model} className="rounded-md border border-border p-3 text-sm">
+          <h4 className="font-medium wrap-anywhere">{record.model}</h4><p>No longer configured</p>
+          <p>Recorded local budget: {record.recorded_budget_debits} · Cached responses reused: {record.cache_hits_today}</p>
+          {record.budget_model && <p>Included in the local budget for requested model {record.budget_model}.</p>}
+        </li>)}</ul>
+      </section>}
     </SectionCard>
   );
 }
@@ -713,9 +730,11 @@ function TransparencySection() {
                   <span className="font-medium text-ink">{p.prompt_type}</span>
                   <span className="text-ink-tertiary">
                     {" "}
-                    · {p.model} · prompt v{p.prompt_version.replace(/^v/, "")} · Last recorded{" "}
+                    · Requested model: {p.requested_model ?? p.model} · prompt v{p.prompt_version.replace(/^v/, "")} · Last recorded{" "}
                     {new Date(p.observed_at).toLocaleString()}
                   </span>
+                  <p>{p.response_source === "cache" ? "Provider-reported model version of cached response" : "Provider-reported model version"}: {p.response_source === "test" ? "Not applicable: test-mode response" : p.model_version ?? "Not recorded"}</p>
+                  {p.response_source === "cache" && <p>This entry reused a stored response. No new generation is recorded by this event.</p>}
                 </li>
               ))}
             </ul>
@@ -733,9 +752,9 @@ export function SettingsPage() {
   return (
     <div className="signal-route signal-page-flow signal-settings">
       <header className="signal-route-header">
-        <div><p className="signal-eyebrow">Workspace utility</p><h1 ref={headingRef} tabIndex={-1}>Workspace settings</h1><p className="signal-route-header__intro">Manage account access, AI capacity, review rules, and technical records.</p></div>
+        <div><p className="signal-eyebrow">Workspace utility</p><h1 ref={headingRef} tabIndex={-1}>Workspace settings</h1><p className="signal-route-header__intro">Manage account access, local AI budget, review rules, and technical records.</p></div>
       </header>
-      <nav aria-label="Settings sections" className="signal-settings-nav"><a href="#profile-heading" onClick={focusSettingsSection}>Account</a><a href="#api-key-heading" onClick={focusSettingsSection}>Personal key</a><a href="#quota-heading" onClick={focusSettingsSection}>AI capacity</a><a href="#transparency-heading" onClick={focusSettingsSection}>Review rules</a></nav>
+      <nav aria-label="Settings sections" className="signal-settings-nav"><a href="#profile-heading" onClick={focusSettingsSection}>Account</a><a href="#api-key-heading" onClick={focusSettingsSection}>Personal key</a><a href="#quota-heading" onClick={focusSettingsSection}>Local AI budget</a><a href="#transparency-heading" onClick={focusSettingsSection}>Review rules</a></nav>
       <div className="signal-settings-stack signal-page-flow">
         <ProfileSection />
         <PasswordSection />

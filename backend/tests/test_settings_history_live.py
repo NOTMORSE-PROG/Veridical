@@ -2,17 +2,62 @@
 
 from datetime import UTC, datetime
 
+import pytest
+
 from app.config import Settings
 from app.models.audit import AuditLog
 from app.models.instructor import Instructor
 from app.settings.service import get_settings_view
 from tests import test_audit_live as audit_fixtures
+from tests import test_llm_queue as queue_fixtures
 
 # Reuse the isolated migrated audit database, never the running application's DB.
 pytestmark = audit_fixtures.live
-scratch_url = audit_fixtures.scratch_url
-session_factory = audit_fixtures.session_factory
+llm_scratch_url = queue_fixtures.llm_scratch_url
+session_factory = queue_fixtures.session_factory
 _clean_tables = audit_fixtures._clean_tables
+
+
+@pytest.mark.parametrize(
+    ("event", "fake", "version", "expected_source", "expected_version"),
+    [
+        ("llm_call", False, " provider-version ", "generation", "provider-version"),
+        ("llm_cache_hit", False, "cached-version", "cache", "cached-version"),
+        ("llm_call", True, "fixture-is-not-provider", "test", None),
+        ("llm_call", None, None, "unknown", None),
+        ("llm_cache_hit", None, None, "unknown", None),
+        ("llm_call", False, "  ", "generation", None),
+        ("llm_call", False, {"untrusted": "value"}, "generation", None),
+    ],
+)
+async def test_settings_history_projects_only_recorded_technical_metadata(
+    session_factory, event, fake, version, expected_source, expected_version
+):
+    async with session_factory() as session:
+        instructor = Instructor(email="projection@test.local", display_name="Projection")
+        session.add(instructor)
+        await session.commit()
+        run = await audit_fixtures._make_run(session, instructor)
+        payload = {
+            "prompt_type": "semantic_grading",
+            "model": "requested-legacy-id",
+            "model_version": version,
+            "response": {"model_version": "model-json-cannot-supply-version"},
+        }
+        if fake is not None:
+            payload["fake_llm"] = fake
+        session.add(
+            AuditLog(
+                event_type=event, check_run_id=run.id, prompt_version="recorded-v1", payload=payload
+            )
+        )
+        await session.commit()
+        view = await get_settings_view(session, Settings(), instructor)
+        recorded = view.prompt_versions[0]
+        assert recorded.requested_model == "requested-legacy-id"
+        assert recorded.model_version == expected_version
+        assert recorded.response_source == expected_source
+        assert "model-json-cannot" not in view.model_dump_json()
 
 
 async def test_settings_history_uses_owned_run_not_another_accounts_newer_call(session_factory):
@@ -57,6 +102,9 @@ async def test_settings_history_uses_owned_run_not_another_accounts_newer_call(s
             "prompt_version",
             "model",
             "observed_at",
+            "requested_model",
+            "model_version",
+            "response_source",
         }
         assert "Private source" not in foreign_view.model_dump_json()
 

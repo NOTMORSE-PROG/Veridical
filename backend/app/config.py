@@ -280,26 +280,20 @@ class Settings(BaseSettings):
     reuse_max_passages_per_manuscript: int = Field(default=5000, ge=0)
 
     # --- LLM queue (V-009, ENGINEERING §3) -----------------------------------
-    # Pinned model id (not the "-latest" alias): golden-set comparisons
-    # (TESTING §2) are meaningless across silently-changing models. Verified
-    # 2026-07-25 live against this project's key: gemini-2.5-flash and
-    # gemini-2.5-flash-lite 404 ("no longer available to new users");
-    # gemini-3.5-flash responds.
+    # Legacy compatibility setting; the application factory routes through the
+    # configured model pool. A requested ID does not prove serving identity.
+    # July observations are historical; see the pool's dated lifecycle review.
     gemini_model: str = "gemini-3.5-flash"
     gemini_temperature: float = 0.0
     # Per-attempt network timeout for a Gemini call.
     gemini_request_timeout_seconds: float = 60.0
-    # Override the packaged model-pool file (app/llm/data/model_pool.json)
-    # without a code change; empty = packaged default. The pool is the
-    # ordered list of models the queue may spend, each with its OWN measured
-    # per-day/per-minute limits — see app/llm/pool.py for why per-model.
+    # Override requested membership, order and conservative local budgets.
+    # Blank uses app/llm/data/model_pool.json, including historical aliases.
+    # Configured totals do not establish current provider allowance.
     llm_model_pool_file: Path | None = None
-    # Fallback limits, used ONLY for the single-model form (a caller that
-    # pins one model explicitly). The pool file carries the real per-model
-    # numbers. MEASURED 2026-07-26 against this project's key (V-049,
-    # tools/probe_gemini_quota.py) — the previously documented ~1,500/day
-    # was wrong for this model by 70x: gemini-3.5-flash allows exactly 20
-    # requests/day on the free tier.
+    # Legacy single-model local limits, retained from July 26 observations.
+    # The previous ~1,500/day assumption was retracted then; these defaults
+    # are not a fresh measurement or provider entitlement.
     llm_rpm: int = 10
     llm_daily_quota: int = 20
     # Timezone Gemini resets against — NOT local time (ticket V-009 edge case).
@@ -558,8 +552,8 @@ class Settings(BaseSettings):
     login_rate_limit_window_seconds: float = 300.0
     # Per-instructor throttle on quota-spending endpoints (check-run
     # creation, manuscript ingest, rubric upload — BUG-004/D-020): defense-
-    # in-depth against one actor exhausting the shared 300-calls/day Gemini
-    # pool (D-001/D-014, ~17 manuscripts/day sizing). 20/hour is generous
+    # in-depth against one actor exhausting the configured shared local
+    # budget. This throttle does not establish provider capacity. 20/hour is generous
     # for real usage and bounds a runaway loop or hostile actor; same class
     # of judgment call as the login limiter's 5/300s above, not a measured
     # external number.

@@ -52,11 +52,32 @@ async def get_settings_view(
         model = payload.get("model")
         if not prompt_type or not model or row.prompt_version is None:
             continue
+        requested = payload.get("requested_model")
+        version = payload.get("model_version")
+        fake = payload.get("fake_llm")
+        source = (
+            "test"
+            if fake is True
+            else "cache"
+            if fake is False and row.event_type == "llm_cache_hit"
+            else "generation"
+            if fake is False and row.event_type == "llm_call"
+            else "unknown"
+        )
         prompt_versions.append(
             PromptVersionOut(
                 prompt_type=prompt_type,
                 prompt_version=row.prompt_version,
                 model=model,
+                requested_model=requested.strip()
+                if isinstance(requested, str) and requested.strip()
+                else model,
+                model_version=(
+                    version.strip()
+                    if isinstance(version, str) and version.strip() and fake is not True
+                    else None
+                ),
+                response_source=source,
                 observed_at=row.created_at,
             )
         )

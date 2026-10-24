@@ -38,8 +38,7 @@ class QuotaStatus(BaseModel):
     # never spends a real key of either kind -- charter rule 9, honesty).
     key_source: Literal["own", "shared"]
     quota_day: str
-    # Aggregated across the pool: the number capacity claims are priced
-    # against (D-001/D-014).
+    # Effective configured local budget usage, not physical API attempts.
     calls_used: int
     daily_limit: int
     calls_remaining: int

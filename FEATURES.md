@@ -96,7 +96,7 @@ Routes structural items to deterministic rules and semantic items to AI grading 
 | F3.3 | AI-assisted semantic grading via **Gemini Flash** | 🟢 | Each semantic criterion graded with cited evidence excerpts from the manuscript |
 | F3.4 | **Self-consistency**: 2 differently-stanced grading passes + a conditional tie-break on disagreement, majority vote + agreement score | 🟢 | Two identical-temperature-0 passes would carry little more information than one; two genuinely different stances (V-054/D-017) do, at 2/3 the quota cost of a blind N=3. Agreement score stored per item |
 | F3.5 | **Confidence-based escalation**: low agreement ⇒ "Needs instructor review" flag, never auto-decided | 🟢 | Escalated items visually distinct in the report; count shown in summary |
-| F3.6 | Pinned model + temperature + prompt version per run | 🟢 | Recorded in audit log; two runs of the same manuscript+rubric are comparable |
+| F3.6 | Recorded requested model, temperature and prompt version per AI call | 🟢 | Audit records the requested routing ID and optional provider-reported model version for each response, including cache reuse. Failover may select another configured entry; missing versions remain unknown. These records support tracing and qualified comparisons, not a guarantee of identical serving models or outputs. |
 
 **Stated limitation (BUG-045):** F3.4's two grading passes read the same
 manuscript text, so an instruction embedded in that text (e.g. "ignore the
@@ -225,7 +225,7 @@ No student login, submission gate, queue, or student resubmission step is requir
 |---|---|---|---|
 | Backend | Python, FastAPI | Python 3.12 + **FastAPI** ✔ unchanged | — |
 | Ingestion | GROBID, PyMuPDF, Docling, Nougat | **PyMuPDF + python-docx + Gemini multimodal**; Docling optional (local); GROBID via free HuggingFace Space as optional fallback | GROBID needs 2–4 GB RAM — no free tier provides it (Render free = 512 MB). Nougat needs a GPU. Gemini's multimodal free tier covers image tables/equations at zero cost |
-| AI/LLM | Groq API free tier | **Gemini Flash free tier** (primary LLM) | Groq free = 6K tokens/min, ~1K req/day — one 80-page manuscript (~60K+ tokens) would crawl. Gemini Flash free = 250K tokens/min, 1M-token context (whole manuscript in one call), **300 req/day measured across the model pool** (corrected 2026-08-16; the "~1,500/day" written here originally was retracted by D-001/D-014 — a single model allows 20/day) |
+| AI/LLM | Groq API free tier | **Gemini Flash free tier** (primary LLM) | Groq free = 6K tokens/min, ~1K req/day — one 80-page manuscript (~60K+ tokens) would crawl. Gemini Flash free = 250K tokens/min, 1M-token context (whole manuscript in one call), **260/day configured local budget (220 image-enabled), not measured current provider capacity**; July observations and the August correction are historical. Provider project/tier limits and availability need separate verification |
 | ML utilities | scikit-learn, cross-encoder NLI | **model2vec (potion-base-8M) local embeddings for candidate-generation similarity only**; entailment/contradiction judgment is Gemini Tier 2, not a local NLI model | scikit-learn and a cross-encoder NLI model have zero occurrences in `backend/` — the cross-encoder was measured at 487MB RSS (V-030/V-035) and deliberately ruled out against Render's 512MB ceiling before this project's own free-tier constraint |
 | Statistical forensics | (to build) | **statcheck_python, pysprite, grim_test** (existing open source) | Validated implementations exist; reuse them, don't reimplement |
 | Database | PostgreSQL via Neon + pgvector | ✔ unchanged | Free tier confirmed adequate |
@@ -251,13 +251,13 @@ To stay comfortably inside free-tier quota during defense season and to strength
 2. **Tier 1 — local lightweight models** (CPU, in-process, free): static sentence embeddings (Model2Vec-class, ~8MB at ~90% of MiniLM quality) for candidate-generation similarity work only — a quantized NLI cross-encoder for entailment/contradiction was measured at 487MB RSS and deliberately ruled out against Render's 512MB ceiling (see the correction below); that judgment step is Tier 2 (Gemini), not local.
 3. **Tier 2 — Gemini as the arbiter**: called only where lower tiers are inconclusive or the criterion is irreducibly judgmental — batched, cached by input hash (re-runs cost ~0 calls), self-consistency as 2 passes + tie-break.
 
-Each tier escalates only its uncertain residue upward, ending at the instructor — the same human-in-the-loop principle, applied uniformly at every level. Estimated effect: worst-case ~103 Gemini calls/manuscript drops to ~17. **At the real measured budget of 300 req/day (pooled), that is ~17 manuscripts/day, with no headroom to spare** (D-011 as CORRECTED by D-014). Every verdict is labeled with its basis (rule / signal / local model / AI) in the report.
+Each tier escalates only its uncertain residue upward, ending at the instructor — the same human-in-the-loop principle, applied uniformly at every level. Estimated effect: worst-case ~103 Gemini calls/manuscript drops to ~17. **Current qualification (2026-10-24): the four-entry configuration sums to 260 local budget units/day, including 220 for image-enabled entries. This is configuration arithmetic, not measured current provider capacity or demonstrated manuscript throughput.** The earlier pooled-capacity interpretation is retained below as history and is superseded for current claims. Every verdict is labeled with its basis (rule / signal / local model / AI) in the report.
 
-> ⚠️ **CORRECTED 2026-08-16.** This paragraph previously read *"≈340/day at 20 groups — 4.4× headroom under the daily budget"*, computed against the pre-measurement figure of ~1,500 req/day. That figure was retracted on 2026-07-26: `gemini-3.5-flash` allows **20 req/day** free, and the engineered model pool yields a measured **300/day** — see `context/DECISIONS.md` D-001 and D-014, which state in terms *"Do not quote 1,500 anywhere."* The correction survived in DECISIONS.md and never reached this file, which was edited eleven days later without it. Found by the 2026-08-16 whole-product audit (Track C, C1/C2).
+> ⚠️ **Historical correction, 2026-08-16; current capacity interpretation superseded 2026-10-24.** This paragraph previously read *"≈340/day at 20 groups — 4.4× headroom under the daily budget"*, computed against the pre-measurement figure of ~1,500 req/day. That figure was retracted on 2026-07-26: `gemini-3.5-flash` allows **20 req/day** free, and the engineered model pool yields a measured **300/day** — see `context/DECISIONS.md` D-001 and D-014, which state in terms *"Do not quote 1,500 anywhere."* The correction survived in DECISIONS.md and never reached this file, which was edited eleven days later without it. Found by the 2026-08-16 whole-product audit (Track C, C1/C2).
 
-> 📌 **Action for the paper:** update Table 3.2 (APIs), Table 3.4 (software), and §3.2 ingestion tools to reflect this column, so the documentation and the build don't diverge. **Use ~17 manuscripts/day with no headroom — NOT the retracted "20 groups/day, 4.4× headroom".** The cascade amendment above strengthens Chapter 2's hybrid-system argument (rule-then-AI literature) and gives Chapter 3 a defensible quota-feasibility analysis.
+> 📌 **Action for the paper:** update Table 3.2 (APIs), Table 3.4 (software), and §3.2 ingestion tools to reflect this column, so the documentation and the build don't diverge. **Do not use either historical throughput estimate as current capacity evidence. Current project allowance and end-to-end throughput require a separate dated measurement.** The cascade amendment above strengthens Chapter 2's hybrid-system argument (rule-then-AI literature) and gives Chapter 3 a defensible quota-feasibility analysis.
 >
-> The honest version is also the more interesting finding: documented 1,500 → measured 20 → engineered 300 is a real result, reported against the team's own interest, and Chapter 3 should present it as one.
+> The dated July observations and August correction remain historical findings. They do not establish current capacity, independence of every configured entry, or present throughput.
 >
 > ⚠️ Two further Chapter 3 corrections the same audit found, both **verified against the repo** (Track F, F2): Table 3.4 lists **GROBID, Docling, Nougat, Groq, scikit-learn,** and a **cross-encoder NLI model** — all six have **zero occurrences in `backend/`**. The shipped stack is PyMuPDF + python-docx + Gemini (vision and grading), and the cross-encoder was **measured at 487MB RSS by V-030/V-035 and deliberately ruled out** against Render's 512MB ceiling. That rejection is a genuine engineering finding and belongs in the paper; the tool it rejected does not belong in the stack table. `README.md` already states the true stack, so the paper currently contradicts a public file in this repo.
 
@@ -265,9 +265,25 @@ Each tier escalates only its uncertain residue upward, ending at the instructor 
 
 ## 6. External API Integrations (verified July 2026)
 
+**Gemini lifecycle/accounting amendment, 2026-10-24:** new routing removes the
+documented `gemini-3.5-flash` redirect and retired
+`gemini-3.1-flash-lite-preview`. Retained model order, limits and image flags are
+unchanged. Historical `gemini-3.5-flash` debits conservatively share the retained
+`gemini-3.6-flash` local cap; other inactive records stay visible without granting
+new allowance or debiting unrelated models. Counters include possible limit
+closure holds and are not physical request counts. Requested model identity and
+optional provider-reported version are distinct in cache/audit/technical records;
+missing historical versions remain unknown. No real-provider call, fresh capacity,
+new model-admission, accuracy or throughput measurement accompanied this review.
+Google's [lifecycle](https://ai.google.dev/gemini-api/docs/deprecations/),
+[release notes](https://ai.google.dev/gemini-api/docs/changelog) and
+[rate-limit documentation](https://ai.google.dev/gemini-api/docs/rate-limits)
+support the documentation review, not this project's current allowance.
+
+
 | API | Used by | Cost | Rate limit | Handling |
 |---|---|---|---|---|
-| Gemini API (Flash, free tier) | F1.3, F2, F3, F4, F5.4 | Free | ~10–15 req/min, **300 req/day measured across the engineered model pool** (a single model gives only 20/day — D-001/D-014; the retracted "~1,500/day" figure was corrected out on 2026-08-16), 250K tokens/min | Central LLM queue; batch criteria per call; daily-quota meter on dashboard; per-instructor BYOK (V-052) is the only lever that grows capacity with adoption |
+| Gemini API (Flash, free tier) | F1.3, F2, F3, F4, F5.4 | Free-tier operating target | Local configured limits: 260/day total, 220/day image-enabled; not measured current provider allowance. July observations are historical. | Central queue, cached responses and conservative historical-alias budget. Project/tier limits and availability require separate verification; separate keys do not prove separate project capacity. |
 | CrossRef REST API | F5.2, F5.3 | Free | Polite pool (add `mailto`) | 1 req/sec queue + citation cache (F5.6) |
 | Retraction Watch (via Crossref) | F5.3 | **Free** (Crossref acquired it, 2023) | Same as CrossRef | Same queue; also downloadable as full CSV for offline bulk checks |
 | Semantic Scholar API | F5.2, F5.4 | Free (API key) | **1 req/sec** | Secondary lookup only, cached |
@@ -286,11 +302,11 @@ Each tier escalates only its uncertain residue upward, ending at the instructor 
 ### 7.2 AI grading validation (the part the panel will ask about)
 - **Golden dataset:** 10–20 real anonymized capstone excerpts, hand-graded by the Capstone Instructor (binary pass/fail per criterion + a one-line reason). Stored in the repo as JSONL, versioned
 - Every prompt or rubric-handling change re-runs the golden set; agreement with the instructor's grades is the regression metric — a change that drops agreement doesn't ship
-- **Pinning:** same model, same temperature, same prompt version across a run (a rubric or prompt change = a measurement change; comparisons across versions are invalid)
+- **Recorded generation settings:** retain each call's requested model ID, temperature and prompt version, and optional provider-reported version. A rubric, prompt, routing or serving-version change can affect comparisons; an unchanged requested ID does not guarantee the same serving model or output. Review these differences before comparing runs.
 - **Self-consistency as confidence:** 2 differently-stanced passes + a conditional tie-break on disagreement, majority vote; the agreement score *is* the confidence signal that drives escalation (F3.5) — one mechanism, validated once, used everywhere
 
 ### 7.3 Debugging & observability
-- Every AI call logged to the audit table — prompt version, raw prompt and response (byte-for-byte), parsed result — so any bad grade can be **traced exactly** and **re-graded under the same pinned model, temperature, and prompt version**. Two fields are conditional, not universal: an input hash is attached only in real-API mode (keyed to the response cache; fake-LLM mode has no cache to key, so it has none), and an agreement score is attached at the escalation/flag level, not on every individual call. In fake-LLM mode the re-grade is bit-identical (canned responses); against the real Gemini API, pinning guarantees the same inputs and settings but not bit-identical output — a documented property of hosted LLM APIs, not something this pinning alone can close
+- Every AI call logged to the audit table — prompt version, raw prompt and response (byte-for-byte), parsed result — so any bad grade can be **traced exactly** and **reconstructed using the same stored requested model ID, temperature, and prompt version**. Two fields are conditional, not universal: an input hash is attached only in real-API mode (keyed to the response cache; fake-LLM mode has no cache to key, so it has none), and an agreement score is attached at the escalation/flag level, not on every individual call. In fake-LLM mode the re-grade is bit-identical (canned responses); against the real Gemini API, a requested ID can redirect to a different serving version. Optional provider-reported version metadata is stored separately, including on cache reuse; missing history stays unknown. Reconstructed inputs do not guarantee the same serving model or bit-identical output
 - Structured error taxonomy: *API down* ≠ *source unverifiable* ≠ *check not applicable* — each renders differently in the report so a network hiccup never reads as an integrity problem
 - Per-stage status in Flow B doubles as the debugging view: a stuck run shows exactly which stage and which external call
 - Local dev: `docker-compose` (API + Postgres/pgvector) mirrors production; `.env`-switchable fake-LLM mode (canned responses) so the UI and pipeline are testable without burning Gemini quota
@@ -334,7 +350,7 @@ Each phase ends demo-able; the applicability gates (F6.5 etc.) mean partially-bu
 
 | Risk | Impact | Mitigation |
 |---|---|---|
-| Gemini free daily quota (**300 req/day measured across the model pool** — corrected 2026-08-16 from the retracted ~1,500 figure, D-001/D-014) exhausted during defense season | Checks stall mid-batch. **At ~17 calls/manuscript this is ~17 manuscripts/day with no headroom — a real capacity ceiling, not a comfortable margin** | Batch criteria per call (1M context = whole manuscript in one prompt); dashboard quota meter; queue resumes next day; optional second Google Cloud project as spare quota |
+| Configured local AI budget or provider allowance unavailable during defense season | Checks can remain incomplete; the configured 260/day total does not establish current throughput | Batch and cache; retain earlier usage; expose truthful incomplete/provider states; resume after the configured reset or verified service recovery. No assumed extra project capacity. |
 | Render free tier cold start (after 15 min idle; Render says about one minute, while the 2026-09-25 G26 observation took 73.358 s) | "Is it broken?" first impression | Frontend shows sign-in checking, then an explicit delayed free-server state, and keeps the same request alive through a successful landing; the result remains a dated observation, not an SLA |
 | Citation APIs weak on local/Philippine sources | Legit local citations flagged unverifiable | Explicit "unverifiable ≠ fake" wording + manual-review flag (already the design); cache instructor's manual confirmations so the same source isn't re-flagged |
 | AI grading inconsistency | Trust collapse with instructor/panel | Self-consistency voting, escalation, golden-dataset regression (§7.2); instructor override always available |

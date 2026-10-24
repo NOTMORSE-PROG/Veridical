@@ -6,6 +6,7 @@ runs against its own scratch database.
 import asyncio
 import os
 import uuid
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -25,6 +26,7 @@ from app.llm.queue import (
     TransportServerError,
 )
 from app.llm.result import GenerationResult
+from app.llm.transport import GeminiTransport
 from app.models.audit import AuditLog
 from app.models.instructor import Instructor
 from app.models.llm import LLMQuotaCounter, LLMResponseCache
@@ -34,6 +36,54 @@ live = pytest.mark.skipif(
     reason="integration: needs a live Postgres (CI service or local docker-compose)",
 )
 pytestmark = live
+
+
+async def test_actual_sdk_transport_version_survives_queue_cache_and_new_queue(session_factory):
+    from google.genai import types
+
+    payload = {"synthetic": "original payload"}
+    import json
+
+    reply = types.GenerateContentResponse(
+        candidates=[
+            types.Candidate(
+                content=types.Content(role="model", parts=[types.Part(text=json.dumps(payload))])
+            )
+        ],
+        model_version="reported-provider-control",
+    )
+    calls = []
+
+    async def generated(**kwargs):
+        calls.append(kwargs)
+        return reply
+
+    transport = object.__new__(GeminiTransport)
+    transport._timeout_ms = 1000
+    transport._client = SimpleNamespace(
+        aio=SimpleNamespace(models=SimpleNamespace(generate_content=generated))
+    )
+    request = dict(prompt_type="t", prompt="controlled SDK chain", prompt_version="v1")
+    assert await _make_queue(session_factory, transport).submit(**request) == payload
+    assert (
+        await _make_queue(session_factory, ScriptedTransport(fail_times=1)).submit(**request)
+        == payload
+    )
+    assert len(calls) == 1
+    async with session_factory() as session:
+        cached = (await session.scalars(select(LLMResponseCache))).one()
+        events = (
+            await session.scalars(
+                select(AuditLog).where(AuditLog.event_type.in_(("llm_call", "llm_cache_hit")))
+            )
+        ).all()
+    assert cached.model_version == "reported-provider-control" and cached.response == payload
+    assert len(events) == 2
+    assert all(event.payload["model_version"] == "reported-provider-control" for event in events)
+    assert all(
+        event.payload["model"] == event.payload["requested_model"] == "test-model"
+        for event in events
+    )
 
 
 @pytest.fixture(scope="module")
@@ -746,9 +796,9 @@ async def test_image_calls_never_fail_over_onto_a_text_only_model(session_factor
     assert len(image["sha256"]) == 64
 
 
-async def test_audit_row_records_the_model_that_actually_served_the_call(session_factory):
-    """A verdict's provenance is the model that produced it — the pool head
-    is not evidence (V-024 replay must reconstruct the real call)."""
+async def test_audit_row_records_requested_model_selected_after_failover(session_factory):
+    """Audit retains the requested routing ID selected after failover;
+    provider-reported version is a separate optional field."""
     transport = PerModelTransport(daily_exhausted={"head"})
     queue = _make_queue(
         session_factory,

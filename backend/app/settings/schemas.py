@@ -1,4 +1,5 @@
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel, Field
 
@@ -18,6 +19,9 @@ class PromptVersionOut(BaseModel):
     prompt_type: str
     prompt_version: str
     model: str
+    requested_model: str | None = None
+    model_version: str | None = None
+    response_source: Literal["test", "cache", "generation", "unknown"] = "unknown"
     # The real audit-log row this was read from -- "as of" honesty, not a
     # static claim (a version could change between page loads).
     observed_at: datetime

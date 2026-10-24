@@ -51,6 +51,21 @@ const DETAIL = {
 describe("AuditLogPage", () => {
   afterEach(() => vi.unstubAllGlobals());
 
+  it.each(["real", "fake", "unknown"])("preserves cached requested identity and %s serving provenance in the technical record", async mode => {
+    const row = { ...PAGE.items[0], event_type: "llm_cache_hit", llm_execution_mode: mode };
+    vi.stubGlobal("fetch", stubFetchByPath({ "/audit": { ...PAGE, items: [row], total: 1 }, "/audit/42": {
+      ...DETAIL, ...row, payload: { ...DETAIL.payload, model: "stored-requested",
+        model_version: mode === "unknown" ? null : "stored-provider-version" },
+    } }));
+    renderWithProviders(<AuditLogPage />, { route: "/audit?detail=42" });
+    const dialog = await screen.findByRole("dialog");
+    fireEvent.click(await within(dialog).findByText("Technical record for reproducibility"));
+    expect(await within(dialog).findByText("Requested model: stored-requested")).toBeVisible();
+    const expected = mode === "fake" ? "Not applicable: test-mode response" : mode === "unknown" ? "Not recorded" : "stored-provider-version";
+    expect(within(dialog).getByText(`Provider-reported model version of cached response: ${expected}`)).toBeVisible();
+    expect(within(dialog).getByText("This entry reused a stored response. No new generation is recorded by this event.")).toBeVisible();
+  });
+
   it("BUG-463: identifies an actual-shaped recorded revision as an instructor action and shows its performer", async () => {
     const row = { ...PAGE.items[1], id: 398, event_type: "judgment_revised", check_run_id: 25, created_at: "2026-10-24T03:10:34.869928Z" };
     vi.stubGlobal("fetch", stubFetchByPath({ "/audit": { ...PAGE, items: [row], total: 1 }, "/audit/398": {

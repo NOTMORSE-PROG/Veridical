@@ -36,6 +36,35 @@ that is an operating target rather than a provider-enforced spending cap.
 Cloudflare R2 usage beyond its included Standard allowance is billable, and
 budget alerts notify rather than pausing usage.
 
+## Local AI budgets and recorded model identity
+
+The October 24, 2026 configuration retains four requested Gemini models with
+unchanged local limits and image-routing flags. A documented redirect alias and
+retired preview were removed from new routing after a public-documentation review.
+The configured limits sum to 260 per budget day (220 for image-enabled entries);
+these are software limits, not a fresh measurement of provider allowance,
+availability or independent quota buckets. July probe notes remain dated history.
+Provider limits apply at project scope and can vary by model and tier; distinct
+API keys do not establish additional project capacity.
+
+Earlier model budget/cache records remain visible. A configured alias shares a
+conservative local cap with its retained target without moving or resetting old
+records. A provider daily-limit response can close that local budget, so recorded
+debits are not an exact count of API attempts. Cache reuse is shown separately.
+
+Requested identity remains the cache/hash/replay input. When the SDK supplies a
+model version, it is saved separately with the response and retained on cache
+reuse; older or absent versions remain unrecorded. Neither a requested ID nor a
+recorded version guarantees deterministic future output.
+
+Before starting this queue version, apply migration `0042` and drain old queue
+writers before activating the alias policy. Mixed old/new writers are not covered
+by its reservation guarantee. No real-provider call or new capacity/accuracy
+measurement was performed for this configuration review. See Google's
+[model lifecycle](https://ai.google.dev/gemini-api/docs/deprecations/),
+[release notes](https://ai.google.dev/gemini-api/docs/changelog) and
+[rate limits](https://ai.google.dev/gemini-api/docs/rate-limits).
+
 ## Getting started (dev)
 
 ```bash

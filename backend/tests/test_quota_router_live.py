@@ -3,6 +3,7 @@
 """
 
 import os
+import uuid
 
 import pytest
 from fastapi.testclient import TestClient
@@ -17,8 +18,6 @@ live = pytest.mark.skipif(
 )
 pytestmark = live
 
-SCRATCH_DB = "veridical_quotaapitest"
-
 
 @pytest.fixture(scope="module")
 def api_scratch_url():
@@ -28,12 +27,12 @@ def api_scratch_url():
     from tests.test_schema import _admin_execute, _alembic_config, _swap_db
 
     base = os.environ["DATABASE_URL"]
-    asyncio.run(_admin_execute(base, f'DROP DATABASE IF EXISTS "{SCRATCH_DB}"'))
-    asyncio.run(_admin_execute(base, f'CREATE DATABASE "{SCRATCH_DB}"'))
-    url = _swap_db(base, SCRATCH_DB)
+    scratch_db = "veridical_quotaapitest_" + uuid.uuid4().hex
+    asyncio.run(_admin_execute(base, f'CREATE DATABASE "{scratch_db}"'))
+    url = _swap_db(base, scratch_db)
     command.upgrade(_alembic_config(url), "head")
     yield url
-    asyncio.run(_admin_execute(base, f'DROP DATABASE IF EXISTS "{SCRATCH_DB}" WITH (FORCE)'))
+    asyncio.run(_admin_execute(base, f'DROP DATABASE "{scratch_db}"'))
 
 
 @pytest.fixture()
@@ -51,6 +50,8 @@ def client(api_scratch_url, monkeypatch):
 
     with TestClient(app) as c:
         yield c
+        if db._engine is not None:
+            c.portal.call(db._engine.dispose)
     db._engine = None
 
 
@@ -95,5 +96,7 @@ def test_quota_route_reports_fake_mode_honestly(logged_in):
     body = resp.json()
     assert body["mode"] == "fake"
     assert body["calls_used"] == 0
-    assert body["cache_hit_rate"] == 0.0
+    assert body["cache_hit_rate"] is None
+    assert body["recorded_budget_debits"] == 0
+    assert body["legacy_models"] == []
     assert "reset_at" in body
