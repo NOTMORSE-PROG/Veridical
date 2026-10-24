@@ -14,9 +14,9 @@ import pytest
 from app.llm.pool import ModelPoolError, ModelSpec, load_model_pool, pool_daily_capacity
 
 
-def _write_pool(tmp_path, models):
+def _write_pool(tmp_path, models, **metadata):
     path = tmp_path / "pool.json"
-    path.write_text(json.dumps({"models": models}), encoding="utf-8")
+    path.write_text(json.dumps({"models": models, **metadata}), encoding="utf-8")
     return path
 
 
@@ -85,3 +85,70 @@ def test_pool_reads_vision_flag_and_note(tmp_path):
         True,
         "measured",
     )
+
+
+def test_budget_alias_mapping_binds_only_the_retained_target(tmp_path):
+    path = _write_pool(
+        tmp_path,
+        [
+            {"model": "current", "rpm": 5, "daily_quota": 20},
+            {"model": "other", "rpm": 10, "daily_quota": 30},
+        ],
+        budget_aliases={"previous": "current", "older": "current"},
+    )
+    first, second = load_model_pool(path)
+    assert first.budget_aliases == ("previous", "older")
+    assert second.budget_aliases == ()
+    assert pool_daily_capacity((first, second)) == 50
+
+
+@pytest.mark.parametrize(
+    "aliases",
+    [
+        {"current": "other"},
+        {"previous": "missing"},
+        {"previous": "previous"},
+        {"a": "b", "b": "current"},
+        {"a": "b", "b": "a"},
+        {"": "current"},
+        {"previous": " "},
+        {"previous": 3},
+        {" previous ": "current", "previous": "other"},
+        ["previous", "current"],
+        None,
+    ],
+)
+def test_pool_rejects_ambiguous_budget_aliases(tmp_path, aliases):
+    path = _write_pool(
+        tmp_path,
+        [
+            {"model": "current", "rpm": 5, "daily_quota": 20},
+            {"model": "other", "rpm": 5, "daily_quota": 20},
+        ],
+        budget_aliases=aliases,
+    )
+    with pytest.raises(ModelPoolError, match="alias"):
+        load_model_pool(path)
+
+
+def test_pool_without_alias_metadata_preserves_existing_constructor_contract(tmp_path):
+    (spec,) = load_model_pool(_write_pool(tmp_path, [{"model": "m", "rpm": 5, "daily_quota": 20}]))
+    assert spec == ModelSpec(model="m", rpm=5, daily_quota=20, vision=False)
+
+
+@pytest.mark.parametrize(
+    "raw_aliases",
+    [
+        '"budget_aliases":{"previous":"current","previous":"other"}',
+        '"budget_aliases":{"previous":"current"},"budget_aliases":{"previous":"other"}',
+    ],
+)
+def test_pool_rejects_literal_duplicate_json_policy_members(tmp_path, raw_aliases):
+    path = tmp_path / "pool.json"
+    models = [
+        {"model": "current", "rpm": 5, "daily_quota": 20},
+        {"model": "other", "rpm": 5, "daily_quota": 20},
+    ]
+    path.write_text('{"models":' + json.dumps(models) + "," + raw_aliases + "}", encoding="utf-8")
+    with pytest.raises(ModelPoolError, match="duplicate JSON"):
+        load_model_pool(path)

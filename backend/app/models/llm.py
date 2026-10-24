@@ -6,7 +6,7 @@ in-memory counter would silently reset the daily budget (ENGINEERING §3).
 
 from typing import Any
 
-from sqlalchemy import BigInteger, DateTime, ForeignKey, Index, Integer, String, func, text
+from sqlalchemy import BigInteger, DateTime, ForeignKey, Index, Integer, String, Text, func, text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -77,3 +77,6 @@ class LLMResponseCache(Base, PkCreatedMixin):
     prompt_version: Mapped[str] = mapped_column(String(100))
     model: Mapped[str] = mapped_column(String(100))
     response: Mapped[dict[str, Any]] = mapped_column(JSONB)
+    # Optional provider metadata from the original generation. Legacy rows stay
+    # NULL; a requested model string is not evidence of its serving version.
+    model_version: Mapped[str | None] = mapped_column(Text, nullable=True)
