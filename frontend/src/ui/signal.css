@@ -2479,12 +2479,12 @@
     box-shadow: var(--signal-shadow-raised);
   }
 
-  .signal-report :is(#review-criteria, #escalated-heading, #integrity-signals, #criteria-results-heading, #final-decision, [id^="criterion-record-"]) {
+  .signal-report :is(#review-criteria, #escalated-heading, #integrity-signals, #criteria-results-heading, #coverage-statement-heading, #final-decision, [id^="criterion-record-"]) {
     scroll-margin-block-start: calc(var(--signal-workspace-header-height) + var(--signal-space-4));
   }
 
   @media (max-width: 1023px) {
-    .signal-report :is(#review-criteria, #escalated-heading, #integrity-signals, #criteria-results-heading, #final-decision, [id^="criterion-record-"]) {
+    .signal-report :is(#review-criteria, #escalated-heading, #integrity-signals, #criteria-results-heading, #coverage-statement-heading, #final-decision, [id^="criterion-record-"]) {
       scroll-margin-block-start: calc(var(--signal-workspace-header-compact-height) + var(--signal-space-4));
     }
   }

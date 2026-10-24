@@ -4,6 +4,7 @@ import { CriterionSourceCoverage } from "./CriterionSourceCoverage";
 import { RuleFactsDetails } from "./RuleFactsDetails";
 import { RuleScopeNotice } from "./RuleScopeNotice";
 import { coverageItems } from "./reportCoverage";
+import { focusReportSection } from "./reportSectionNavigation";
 import { pendingAssessmentRow } from "./pendingAssessmentRow";
 import { recoverableReadError } from "./reportReadState";
 import { reviewDeskDestination } from "../routing/reviewDeskReturn";
@@ -654,7 +655,7 @@ function SignalResolutionCard({ item, checkRunId, sharedReasonId, sourceTarget, 
         )}
         {assessment?.ruleScopeUnconfirmed && <RuleScopeNotice />}
         {assessment?.sourceCoverage && <CriterionSourceCoverage value={assessment.sourceCoverage} sourceAction={coverageSourceAction} firstSlot={item.evidence?.length ?? 0} criterionText={item.criterion_text} />}
-        {reportHasLimits && <p className="signal-field-hint">Some checks in this report have assessment limits.{" "}<ActionLink to={{ pathname: `/report/${checkRunId}`, search: location.search, hash: "coverage-statement-heading" }} variant="quiet">Review assessment limits</ActionLink></p>}
+        {reportHasLimits && <p className="signal-field-hint">Some checks in this report have assessment limits.{" "}<ActionLink to={{ pathname: `/report/${checkRunId}`, search: location.search, hash: "coverage-statement-heading" }} variant="quiet" onClick={event => focusReportSection(event, location, "coverage-statement-heading")}>Review assessment limits</ActionLink></p>}
         {assessment?.ruleFacts && <RuleFactsDetails facts={assessment.ruleFacts} />}
         {Boolean(item.evidence?.length) && <strong>Recorded passages and locations</strong>}
         {item.evidence?.map((entry, index) => {

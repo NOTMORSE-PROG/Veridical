@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { EscalatedItemOut, FlagSummaryOut, ReportOut } from "../api/types";
 import { renderWithReviewProviders as renderWithProviders, stubFetchByPath } from "../test/renderWithProviders";
 import { SignalReportPage } from "./SignalReport";
-import { rememberRouteReturnFocus } from "../routing/useRouteFocus";
+import { pendingRouteReturnElement, rememberRouteReturnFocus } from "../routing/useRouteFocus";
 
 const BASE_REPORT: ReportOut = {
   assessment_revision: 0,
@@ -87,6 +87,20 @@ function stubReport(report: ReportOut = BASE_REPORT, escalated: EscalatedItemOut
 }
 
 describe("SignalReportPage", () => {
+  it.each(["review-criteria", "criteria-results-heading", "coverage-statement-heading"])("preserves a workspace section intent while its destination report is slow: %s", async target => {
+    const path = "/report/5?criterion_record=all";
+    let release!: (value: Response) => void;
+    const report = { ...BASE_REPORT, rubric_needs_review: true, rubric_parse_issues: ["Check the retained format."] };
+    const fallback = stubFetchByPath({ "/check-runs/5/escalated": [], "/check-runs/5/flags": [], "/check-runs/5/share": null });
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => String(input).includes("/check-runs/5/report")
+      ? new Promise<Response>(resolve => { release = resolve; }) : fallback(input)));
+    rememberRouteReturnFocus(path, "/report/5/document", target, { armed: true, fallbackElementId: "readiness-report-heading", scrollBlock: "start" });
+    renderWithProviders(<SignalReportPage />, { route: `${path}#${target}`, path: "/report/:checkRunId" });
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 650)); });
+    expect(pendingRouteReturnElement(path)).toBe(target);
+    await act(async () => { release(new Response(JSON.stringify(report), { status: 200 })); });
+    await waitFor(() => expect(document.getElementById(target)).toHaveFocus());
+  });
   it.each(["section", "criterion", "newer intent", "unavailable"])("preserves an owned slow Audit return without an early fallback: %s", async scenario => {
     const canonical = scenario === "criterion" || scenario === "unavailable";
     const criterion = scenario === "unavailable" ? 99 : 1;

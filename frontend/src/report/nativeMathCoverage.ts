@@ -27,6 +27,6 @@ export function nativeMathCoverageItem(status: IntegrityCheckStatusOut, checkRun
       label: `${item.paragraph === null ? "Source location unavailable" : `Extracted paragraph ${item.paragraph + 1}${item.kind === "table_cell" ? ", table" : ""}`}: Native Word equations unassessed (${item.n_occurrences} ${item.n_occurrences === 1 ? "occurrence" : "occurrences"}, source record ${index + 1})`,
       to: item.paragraph === null ? null : `/report/${checkRunId}/document?anchor=${encodeURIComponent(`paragraph ${item.paragraph}`)}&coverage=native_math`,
     })),
-    action: { to: `/report/${checkRunId}/document?coverage=native_math`, label: "Open the paper" },
+    action: { to: `/report/${checkRunId}/document?coverage=native_math`, label: "Inspect native equation coverage" },
   };
 }

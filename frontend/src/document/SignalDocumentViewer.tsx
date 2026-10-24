@@ -181,11 +181,12 @@ function ReviewQueue({ findings, regions, sourceAvailability, report, collection
         <p className="signal-section-kicker">After the evidence</p>
         <h3 id="readiness-card-heading">Readiness and decision</h3>
         <dl>
-          <div><dt>System readiness</dt><dd><ReadinessBand status={report.status} /></dd></div>
+          <div><dt>{unconfirmedAutomaticRuleRows(report.results).length ? "Saved readiness band" : "System readiness"}</dt><dd><ReadinessBand status={report.status} /></dd></div>
           <div><dt>Criteria needing judgment</dt><dd>{report.pending_review_count}</dd></div>
           <div><dt>Open integrity findings</dt><dd>{collection.state === "success" ? open.length : findings.length > 0 ? `Last loaded: ${open.length}` : "Not confirmed"}</dd></div>
           <div><dt>Instructor decision</dt><dd>{report.decision ? DECISION_LABEL[report.decision] : "Not recorded"}</dd></div>
         </dl>
+        <RuleScopeSummary rows={report.results} checkRunId={report.check_run_id} />
         <div className="signal-document-readiness-card__actions"><Button variant="secondary" onClick={() => onDecision("readiness")}>Review readiness and decision</Button><ActionLink to={`/report/${report.check_run_id}`} variant="quiet">Open full readiness report</ActionLink></div>
       </section>
     </div>
@@ -253,7 +254,6 @@ function SelectedFinding({ finding, total, locationFlagId, region, sourceAvailab
         <Button variant="quiet" disabled={optional ? undefined : !canNext} aria-disabled={optional ? !canNext : undefined} onClick={() => move(canNext, onNext)}>{optional ? "Next comparison lead" : "Next finding"}</Button>
       </div>}
     </header>
-    {optional && <p>{COMPARISON_LEAD_COPY.intro}</p>}
     {optional && collection.lastLoaded && <div role="status" className="signal-field-hint">{collection.state === "error" ? "The comparison list could not be refreshed. Showing last loaded records." : collection.state === "paused" ? "Waiting for a connection. Showing last loaded comparison records." : "Updating comparison records. Showing last loaded records."}{collection.state === "error" && <Button variant="quiet" onClick={retryComparisonList}>Retry comparison list</Button>}</div>}
     {detail && query.isError && <Alert title="These details could not be refreshed" tone="warning"><p>Showing the last loaded record. Check its source before drawing a conclusion.</p><Button variant="quiet" onClick={() => { void query.refetch(); }}>Try again</Button></Alert>}
     {query.isPending && !detail ? <div role="status" aria-live="polite" aria-busy={query.fetchStatus === "fetching"} className="signal-desk-loading"><span>{query.fetchStatus === "paused" ? "Waiting to load" : "Loading"} {optional ? "comparison lead record" : `Finding ${finding.number}`}.</span><i /><i /></div>
@@ -280,6 +280,8 @@ function SelectedFindingEvidence({ finding, flag, locationFlagId, region, source
   const citationMetadata = isCitationMetadataFinding(flag);
   const title = findingTitle(finding);
   const locationIndex = finding.flags.findIndex((member) => member.id === locationFlagId);
+  const recordedSummary = !showsManuscriptQuote ? systemFindingCopy(flag.evidence_excerpt, flag.ai_verdict_summary, "evidence") : null;
+  const recordedReasoning = reasoningText ? systemFindingCopy(reasoningText, flag.ai_verdict_summary, "reasoning") : null;
 
   return <>
       {!optional && <dl className="signal-document-finding-facts">
@@ -334,7 +336,7 @@ function SelectedFindingEvidence({ finding, flag, locationFlagId, region, source
           <div><dt>Evidence type</dt><dd>{flag.passage_pair ? "Recorded passage comparison" : "Comparison without a stored pair"}</dd></div>
           <div><dt>Recorded location</dt><dd>{(sourceAnchor ?? flag.page_anchor).trim() ? instructorAnchor(sourceAnchor ?? flag.page_anchor) : "No location was recorded."}</dd></div>
         </dl>}
-        <p>This is the system's full recorded explanation. It is supporting information, not an instructor decision.</p>{reasoningText ? <p>{systemFindingCopy(reasoningText, flag.ai_verdict_summary, "reasoning")}</p> : <p>No additional recorded reasoning is available.</p>}</details>}
+        <p>This is the system's full recorded explanation. It is supporting information, not an instructor decision.</p>{optional && recordedReasoning && recordedReasoning === recordedSummary ? <p>The recorded explanation is shown in the check result above.</p> : recordedReasoning ? <p>{recordedReasoning}</p> : <p>No additional recorded reasoning is available.</p>}</details>}
       <ActionLink id={`comparison-lead-actions-${flag.id}`} to={`/flags/${flag.id}`} variant="secondary"
         state={{ routeReturnFocus: { returnPath: reviewLocation.pathname + reviewLocation.search, elementId: `comparison-lead-actions-${flag.id}`, fallbackElementId: "selected-finding-heading" } }}>Review instructor actions for this location</ActionLink>
   </>;

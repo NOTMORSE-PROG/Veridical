@@ -26,6 +26,7 @@ import { useShareLink } from "./useShare";
 import { FigureReadingsSummary } from "./FigureReadings";
 import { ReportReadNotice } from "./ReportReadNotice";
 import { usableReport } from "./reportReadState";
+import { REPORT_SECTION_TARGETS } from "./reportSectionNavigation";
 
 // Router-managed jumps preserve draft blockers and route state. They need
 // explicit target scrolling and focus after navigation; modified clicks
@@ -61,8 +62,11 @@ export function SignalReportPage() {
   const auditOrigin = validAuditReviewOrigin(location.pathname + location.search + location.hash, id);
   const returningToAuditSection = Boolean(location.hash && auditOrigin
     && pendingRouteReturnElement(location.pathname + location.search) === auditOrigin.elementId);
+  const sectionFocus = pendingRouteReturnElement(location.pathname + location.search);
+  const returningToReportSection = REPORT_SECTION_TARGETS.some(target => target === sectionFocus);
   useRouteFocus("Readiness report - VERIDICAL", headingRef, undefined, returningToAuditSection
     ? { prefix: auditOrigin!.elementId, pending: isPending || fetchStatus !== "idle" }
+    : returningToReportSection ? { prefix: sectionFocus!, pending: isPending || fetchStatus !== "idle" }
     : { prefix: "comparison-lead-", pending: isPending || flagsQuery.isPending || flagsQuery.fetchStatus !== "idle" });
 
   useEffect(() => {
