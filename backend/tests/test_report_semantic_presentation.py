@@ -10,10 +10,32 @@ from app.report.export import (
     _semantic_support_labels,
     _styles,
 )
-from app.report.schemas import EvidenceItem, ResolutionOut
+from app.report.schemas import CriterionLevelOut, EvidenceItem, ResolutionOut
 from app.report.service import _to_escalated_out
 from app.share.service import _to_public_report
 from tests.test_report_export_perf import _sixty_criterion_report
+
+
+@pytest.mark.parametrize("resolution", ["mark_fail", "needs_document", "accept_majority", "mark_level"])
+def test_instructor_attribution_is_inside_its_splittable_reason_not_a_trailing_caption(resolution):
+    row = _sixty_criterion_report().report.results[0]
+    reason = "Saved <instructor> & reason. " * 100
+    row.resolution = ResolutionOut(type=resolution, reason=reason, ai_majority_verdict="Recorded suggestion")
+    if resolution == "mark_level":
+        row.level = CriterionLevelOut(ordinal=0, name="Recorded <level>", points=2, max_points=5)
+    parts = _criterion_flowable(row, _styles("Helvetica"))
+    reason_parts = [part for part in parts if reason.strip() in part.getPlainText()]
+    assert len(reason_parts) == 1
+    assert reason_parts[0].getPlainText().startswith("Resolved by instructor.")
+    assert not reason_parts[0].getKeepWithNext()
+    assert all(part.getPlainText() != "Resolved by instructor" for part in parts)
+    assert sum(part.getPlainText().count("Resolved by instructor") for part in parts) == 1
+    assert any("Recorded suggestion" in part.getPlainText() for part in parts)
+    if resolution == "needs_document":
+        assert any("No grade recorded." in part.getPlainText() for part in parts)
+    if resolution == "mark_level":
+        assert any("Marked Recorded <level>" in part.getPlainText() for part in parts)
+        assert any(part.getPlainText() == "2/5 pts" for part in parts)
 
 
 @pytest.mark.parametrize("excluded", [False, True])

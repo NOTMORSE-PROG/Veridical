@@ -572,7 +572,7 @@ def _pending_semantic_basis_flowables(
 
 def _criterion_flowable(row: CriterionResultOut, styles: dict[str, ParagraphStyle]) -> list:
     parts = [Paragraph(escape(row.text), styles["cell_bold"])]
-    caption_bits = [_source_caption(row)]
+    caption_bits = [] if row.resolution else [_source_caption(row)]
     # V-069 AC5: the decided rung's own points, alongside the level name
     # already shown as the row's Result column — this is the "score" half
     # of AC2's "shows a per-criterion level and score."
@@ -585,7 +585,10 @@ def _criterion_flowable(row: CriterionResultOut, styles: dict[str, ParagraphStyl
             else RESOLUTION_VERB.get(row.resolution.type, "Resolved by instructor")
         )
         parts.append(
-            Paragraph(f"<b>{escape(verb)}.</b> {escape(row.resolution.reason)}", styles["cell"])
+            Paragraph(
+                f"Resolved by instructor. <b>{escape(verb)}.</b> {escape(row.resolution.reason)}",
+                styles["cell"],
+            )
         )
         if row.resolution.type == "needs_document":
             parts.append(Paragraph("No grade recorded.", styles["cell_caption"]))
@@ -608,7 +611,8 @@ def _criterion_flowable(row: CriterionResultOut, styles: dict[str, ParagraphStyl
             parts.append(Paragraph(escape(row.reasoning or row.reason or ""), styles["cell"]))
     elif row.reasoning or row.reason:
         parts.append(Paragraph(escape(row.reasoning or row.reason or ""), styles["cell"]))
-    parts.append(Paragraph(" · ".join(escape(c) for c in caption_bits), styles["cell_caption"]))
+    if caption_bits:
+        parts.append(Paragraph(" · ".join(escape(c) for c in caption_bits), styles["cell_caption"]))
     return parts
 
 
