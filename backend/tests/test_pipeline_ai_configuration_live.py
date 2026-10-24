@@ -246,3 +246,68 @@ async def test_cancellation_wins_before_configuration_placeholders(
     async with session_factory() as observer:
         assert (await observer.get(CheckRun, run_id)).status == CheckRunStatus.cancelled
         assert len(await rows(observer, run_id)) == 1
+
+
+async def test_private_cause_projection_preserves_primary_source_status_and_defaults(
+    session_factory, tmp_path, monkeypatch
+):
+    """Projection fixtures exercise stored detail, not new analytical judgments."""
+    from app.report.service import get_report
+    from app.share.service import _to_public_report
+
+    run_id, _, settings = await _seed(session_factory, tmp_path, monkeypatch)
+    install_failure(monkeypatch, "ai_not_configured")
+    async with session_factory() as session:
+        await machine.run_check_run(session, await session.get(CheckRun, run_id), settings)
+    async with session_factory() as session:
+        run = await session.get(CheckRun, run_id)
+        actor = (await session.get(Manuscript, run.manuscript_id)).instructor_id
+        # This stored-detail projection fixture represents incomplete integrity
+        # work. A genuine zero-candidate/not-applicable result is intentionally
+        # excluded by the producer and must not gain an invented AI limitation.
+        for kind in (CheckKind.internal_agreement, CheckKind.citation_integrity):
+            stored = await session.scalar(
+                select(CheckResult).where(
+                    CheckResult.check_run_id == run_id, CheckResult.kind == kind
+                )
+            )
+            stored.outcome = ResultOutcome.unverifiable
+        await session.commit()
+        original = await get_report(session, run_id, actor)
+        primary = [s.model_dump() for s in original.integrity_check_status]
+        for kind in (CheckKind.internal_agreement, CheckKind.citation_integrity):
+            result = await session.scalar(
+                select(CheckResult).where(
+                    CheckResult.check_run_id == run_id, CheckResult.kind == kind
+                )
+            )
+            old_detail = copy.deepcopy(result.detail)
+            prefix = (
+                "n_skipped_" if kind == CheckKind.internal_agreement else "n_claim_support_skipped_"
+            )
+            for cause in ("ai_not_configured", "ai_key_rejected"):
+                for count in (0, -1, True, "2", None, 2):
+                    result.detail = {**old_detail, prefix + cause: count}
+                    await session.commit()
+                    projected = await get_report(session, run_id, actor)
+                    statuses = projected.integrity_check_status
+                    assert [s.model_dump() for s in statuses[: len(primary)]] == primary
+                    supplemental = statuses[len(primary) :]
+                    assert len(supplemental) == (1 if type(count) is int and count > 0 else 0)
+                    if supplemental:
+                        extra = supplemental[0]
+                        assert extra.check_kind == kind.value and extra.coverage_reason == cause
+                        assert extra.n_skipped_api_down == extra.n_skipped_quota == 0
+                        assert extra.n_skipped_parse_failure == extra.n_source_pages_unassessed == 0
+                        assert extra.native_math_inventory_state is None
+                        assert extra.n_native_equations_unassessed is None
+                        assert extra.native_math_coverage_items == []
+                        assert extra.assessment_scope is None and extra.analysis_coverage is None
+                        public = _to_public_report(projected).model_dump()
+                        assert public["assessment_incomplete"] is True
+                        assert "integrity_check_status" not in public
+                        assert cause not in str(public)
+                    await session.refresh(result)
+                    assert result.detail == {**old_detail, prefix + cause: count}
+            result.detail = old_detail
+            await session.commit()

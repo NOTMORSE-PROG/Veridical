@@ -648,6 +648,28 @@ async def report_out_for_check_run(
         )
         for row in integrity_rows
     ]
+    # Keep source and statement-role limits intact. AI capability is a separate
+    # private disclosure in the existing status shape, without repeated counts
+    # or source/native-inventory fields from the primary record.
+    for row in integrity_rows:
+        if row.kind not in {CheckKind.internal_agreement, CheckKind.citation_integrity}:
+            continue
+        for cause in ("ai_not_configured", "ai_key_rejected"):
+            count = _integrity_skip_count(row.kind, row.detail, cause)
+            if type(count) is not int or count <= 0:
+                continue
+            if (row.detail or {}).get("coverage_reason") == cause:
+                continue
+            integrity_check_status.append(
+                IntegrityCheckStatusOut(
+                    check_kind=row.kind.value,
+                    outcome=row.outcome.value,
+                    coverage_reason=cause,
+                    n_skipped_quota=0,
+                    n_skipped_api_down=0,
+                    n_skipped_parse_failure=0,
+                )
+            )
 
     # V-077 (D-028): what the originality check compared against. Read from
     # the run's own F7 result, never recomputed from today's Library size,
