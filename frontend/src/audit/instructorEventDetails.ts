@@ -2,6 +2,12 @@
 import { CRITERION_EXCLUSION_COPY } from "../domain/criterionReview";
 import { DECISION_LABEL } from "../domain/decisionTone";
 import { READINESS_LABEL } from "../domain/readinessTone";
+import type { AuditLogDetail, CriterionLevel } from "../api/types";
+import type { JudgmentSnapshot } from "../api/judgments";
+import { judgmentLabel, snapshotValid } from "../report/judgmentRecord";
+import { auditEventOrigin } from "./eventOrigin";
+
+type EntryBinding = Pick<AuditLogDetail, "event_type" | "check_run_id" | "created_at">;
 
 export interface RecordedPendingItem {
   criterionId: number;
@@ -91,14 +97,94 @@ function pendingSnapshot(payload: Record<string, unknown>) {
   };
 }
 
-export function recordedActor(payload: unknown, readerId: unknown): string {
-  const actor = record(payload)?.instructor_id;
+function ownValues(value: Record<string, unknown>, keys: readonly string[]): boolean {
+  return keys.every(key => Object.hasOwn(value, key));
+}
+
+function snapshot(raw: unknown): JudgmentSnapshot | undefined {
+  const value = record(raw);
+  if (!value || !ownValues(value, ["judgment_revision", "resolution_type", "outcome", "score", "level", "reason", "actor_id", "recorded_at", "provenance"])
+    || !Number.isSafeInteger(value.judgment_revision) || (value.judgment_revision as number) < 0
+    || typeof value.resolution_type !== "string" || !["mark_pass", "mark_fail", "mark_level", "needs_document", "accept_majority"].includes(value.resolution_type)
+    || typeof value.outcome !== "string" || !["passed", "failed", "not_applicable"].includes(value.outcome)
+    || !(value.score === null || typeof value.score === "number" && Number.isFinite(value.score))
+    || typeof value.reason !== "string" || !value.reason.trim()
+    || !(value.actor_id === null || recordedId(value.actor_id))
+    || !(value.recorded_at === null || typeof value.recorded_at === "string" && timestampIdentity(value.recorded_at) !== undefined)
+    || !["recorded", "legacy_partial"].includes(value.provenance as string)) return;
+  let level: CriterionLevel | null = null;
+  if (value.level !== null) {
+    const candidate = record(value.level);
+    if (!candidate || !ownValues(candidate, ["ordinal", "name", "points", "max_points"])
+      || !Number.isSafeInteger(candidate.ordinal) || typeof candidate.name !== "string" || !candidate.name.trim()
+      || typeof candidate.points !== "number" || !Number.isFinite(candidate.points)
+      || typeof candidate.max_points !== "number" || !Number.isFinite(candidate.max_points)) return;
+    level = { ordinal: candidate.ordinal as number, name: candidate.name, points: candidate.points, max_points: candidate.max_points };
+    if (value.resolution_type !== "mark_level" && value.resolution_type !== "accept_majority") return;
+  }
+  // All nested types are guarded before invoking the typed domain validator.
+  const decoded = { ...value, level } as unknown as JudgmentSnapshot;
+  return snapshotValid(decoded) ? decoded : undefined;
+}
+
+function timestampIdentity(value: unknown): string | undefined {
+  if (typeof value !== "string") return;
+  const match = /^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})(?:\.(\d{1,9}))?(Z|[+-]\d{2}:\d{2})$/.exec(value);
+  if (!match) return;
+  const local = Date.parse(`${match[1]}Z`);
+  if (!Number.isFinite(local) || new Date(local).toISOString().slice(0, 19) !== match[1]) return;
+  const base = Date.parse(`${match[1]}${match[3]}`);
+  if (!Number.isFinite(base)) return;
+  return `${base}:${(match[2] ?? "").padEnd(9, "0")}`;
+}
+
+function revision(raw: unknown, entry: EntryBinding | undefined) {
+  const payload = record(raw);
+  const body = payload && Object.hasOwn(payload, "judgment") ? record(payload.judgment) : undefined;
+  if (!entry || entry.event_type !== "judgment_revised" || !body
+    || !ownValues(body, ["schema_version", "action", "check_run_id", "criterion_id", "check_result_id", "performed_by", "before", "after", "assessment_revision_before", "assessment_revision_after"])
+    || body.schema_version !== 1 || body.action !== "judgment_revised"
+    || !recordedId(body.check_run_id) || body.check_run_id !== entry.check_run_id
+    || !recordedId(body.criterion_id) || !recordedId(body.check_result_id) || !recordedId(body.performed_by)
+    || !Number.isSafeInteger(body.assessment_revision_before) || (body.assessment_revision_before as number) < 0
+    || body.assessment_revision_after !== (body.assessment_revision_before as number) + 1
+    || !Number.isSafeInteger(body.assessment_revision_after)) return;
+  const before = snapshot(body.before);
+  const after = snapshot(body.after);
+  if (!before || !after || after.provenance !== "recorded" || after.actor_id !== body.performed_by
+    || after.judgment_revision !== before.judgment_revision + 1
+    || timestampIdentity(after.recorded_at) !== timestampIdentity(entry.created_at)
+    || timestampIdentity(entry.created_at) === undefined) return;
+  if (payload && Object.hasOwn(payload, "instructor_id") && payload.instructor_id !== body.performed_by) return;
+  return { criterionId: body.criterion_id, resultId: body.check_result_id, actor: body.performed_by, before, after };
+}
+
+export function recordedActor(payload: unknown, readerId: unknown, entry?: EntryBinding): string {
+  const legacy = record(payload);
+  const actor = entry?.event_type === "judgment_revised" ? revision(payload, entry)?.actor
+    : (!entry || auditEventOrigin(entry.event_type) === "instructor") && legacy && Object.hasOwn(legacy, "instructor_id") ? legacy.instructor_id : undefined;
   return recordedId(actor) ? recordedId(readerId) && actor === readerId ? "You" : `Instructor #${actor}`
     : "Instructor attribution unavailable";
 }
 
-export function instructorEventDetails(event: string, rawPayload: unknown): InstructorEventDetails | undefined {
+export function instructorEventDetails(event: string, rawPayload: unknown, entry?: EntryBinding): InstructorEventDetails | undefined {
   const payload = record(rawPayload) ?? {};
+  if (event === "judgment_revised") {
+    const saved = revision(rawPayload, entry);
+    return {
+      heading: "Criterion judgment revised",
+      fields: [
+        { role: "primary", label: "Criterion", value: saved ? `Criterion #${saved.criterionId}` : "Unavailable in this entry." },
+        { role: "primary", label: "Previous recorded judgment", value: saved ? judgmentLabel(saved.before) : "Unavailable in this entry." },
+        { role: "primary", label: "Revised judgment", value: saved ? judgmentLabel(saved.after) : "Unavailable in this entry." },
+        { role: "reason", label: "Revision reason", value: saved?.after.reason ?? "Unavailable in this entry." },
+        { role: "reason", label: "Previous instructor reason", value: saved?.before.reason ?? "Unavailable in this entry." },
+        { role: "secondary", label: "Recorded result identifier", value: saved ? `#${saved.resultId}` : "Unavailable in this entry." },
+      ],
+      notice: saved ? "This entry records a revision at that time. The current report may contain later judgments or decisions."
+        : "Some recorded judgment details could not be summarized. The stored record is available below.",
+    };
+  }
   if (event === "report_decided") {
     const pending = pendingSnapshot(payload);
     return {

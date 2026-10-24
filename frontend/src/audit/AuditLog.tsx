@@ -24,6 +24,7 @@ import { useActionLifetime } from "../auth/useActionLifetime";
 import { Dialog } from "../ui/Dialog";
 import { recoverableReadError } from "../report/reportReadState";
 import { instructorEventDetails, recordedActor } from "./instructorEventDetails";
+import { auditEventOrigin, type AuditEventOrigin } from "./eventOrigin";
 import { rememberRouteReturnFocus, useRouteFocus } from "../routing/useRouteFocus";
 import { readAuditReviewOrigin } from "../routing/auditReturn";
 import { auditOwnerCurrent, useAuditLogDetail, useAuditLogPage, useAuditOwner, type AuditOwner } from "./useAudit";
@@ -32,7 +33,8 @@ const FILTERS: ReadonlyArray<{ label: string; value?: string; eventType?: string
   { label: "All" },
   { label: "AI calls", eventTypePrefix: "llm_" },
   { label: "Routing", eventType: "criterion_routing" },
-  { label: "Criterion judgments", value: "Escalations", eventType: "escalation_resolved" },
+  { label: "Initial judgments", value: "Escalations", eventType: "escalation_resolved" },
+  { label: "Judgment revisions", eventType: "judgment_revised" },
   { label: "Overrides", eventTypePrefix: "flag_" },
 ];
 
@@ -42,6 +44,7 @@ const EVENT_LABELS: Record<string, string> = {
   llm_call_failed: "AI call failed",
   criterion_routing: "Criterion routing",
   escalation_resolved: "Criterion judgment recorded",
+  judgment_revised: "Criterion judgment revised",
   flag_overridden: "Flag overridden",
   flag_annotated: "Flag annotated",
   rubric_parse_attempt: "Rubric parse attempt",
@@ -76,6 +79,7 @@ const EVENT_EXPLANATIONS: Record<string, string> = {
   llm_call_failed: "An AI-assisted review step did not complete. The record preserves the failure context without treating it as an assessment.",
   criterion_routing: "VERIDICAL recorded whether a criterion could be checked by a deterministic rule or needed AI-assisted review.",
   escalation_resolved: "An instructor resolved a criterion that VERIDICAL had left for instructor judgment.",
+  judgment_revised: "An instructor revised a previously recorded criterion judgment. The earlier judgment remains in the review history.",
   flag_overridden: "An instructor changed how a system finding should affect the readiness review.",
   flag_annotated: "An instructor added context to a system finding.",
   rubric_parse_attempt: "VERIDICAL recorded an attempt to prepare review criteria from the uploaded required format.",
@@ -151,14 +155,16 @@ function humanizeIdentifier(value: string): string {
 }
 
 function eventLabel(row: AuditLogSummary): string {
-  const byMode = row.llm_execution_mode && EVENT_LABELS_BY_MODE[row.event_type]?.[row.llm_execution_mode];
-  return byMode ?? EVENT_LABELS[row.event_type] ?? humanizeIdentifier(row.event_type);
+  const modes = Object.hasOwn(EVENT_LABELS_BY_MODE, row.event_type) ? EVENT_LABELS_BY_MODE[row.event_type] : undefined;
+  const byMode = row.llm_execution_mode && modes && Object.hasOwn(modes, row.llm_execution_mode) ? modes[row.llm_execution_mode] : undefined;
+  return byMode ?? (Object.hasOwn(EVENT_LABELS, row.event_type) ? EVENT_LABELS[row.event_type] : humanizeIdentifier(row.event_type));
 }
 
 function eventExplanation(row: AuditLogSummary): string {
-  const byMode = row.llm_execution_mode && EVENT_EXPLANATIONS_BY_MODE[row.event_type]?.[row.llm_execution_mode];
+  const modes = Object.hasOwn(EVENT_EXPLANATIONS_BY_MODE, row.event_type) ? EVENT_EXPLANATIONS_BY_MODE[row.event_type] : undefined;
+  const byMode = row.llm_execution_mode && modes && Object.hasOwn(modes, row.llm_execution_mode) ? modes[row.llm_execution_mode] : undefined;
   return byMode
-    ?? EVENT_EXPLANATIONS[row.event_type]
+    ?? (Object.hasOwn(EVENT_EXPLANATIONS, row.event_type) ? EVENT_EXPLANATIONS[row.event_type] : undefined)
     ?? "VERIDICAL preserved this activity as part of the review's immutable history.";
 }
 
@@ -224,7 +230,7 @@ function ExecutionModeTag({ mode }: { mode: LLMMode | null }) {
 
 function eventSummary(row: AuditLogSummary): string {
   const parts: string[] = [];
-  if (row.prompt_type) parts.push(PROMPT_LABELS[row.prompt_type] ?? humanizeIdentifier(row.prompt_type));
+  if (row.prompt_type) parts.push(Object.hasOwn(PROMPT_LABELS, row.prompt_type) ? PROMPT_LABELS[row.prompt_type] : humanizeIdentifier(row.prompt_type));
   if (row.prompt_version) parts.push(`prompt v${row.prompt_version.replace(/^v/, "")}`);
   // `agreement_score` is deliberately absent from the instructor summary.
   // The audit contract does not carry its denominator or provenance: a
@@ -249,6 +255,7 @@ type AuditRowGroup =
   | {
       kind: "group";
       eventType: string;
+      checkRunId: number | null;
       label: string;
       groupLabel: string | null;
       executionMode: LLMMode | null;
@@ -258,12 +265,13 @@ type AuditRowGroup =
 function groupConsecutive(items: AuditLogSummary[]): AuditRowGroup[] {
   const out: AuditRowGroup[] = [];
   for (const row of items) {
-    const canGroup = !isInstructorEvent(row.event_type);
+    const canGroup = auditEventOrigin(row.event_type) === "automated";
     const last = out[out.length - 1];
     if (
       canGroup &&
       last?.kind === "group" &&
       last.eventType === row.event_type &&
+      last.checkRunId === row.check_run_id &&
       last.groupLabel === (row.manuscript_group_label ?? null) &&
       // BUG-219: a fixture-mode run and a real-model run must never
       // collapse into one summary row that can only state one label — this
@@ -278,6 +286,7 @@ function groupConsecutive(items: AuditLogSummary[]): AuditRowGroup[] {
       out.push({
         kind: "group",
         eventType: row.event_type,
+        checkRunId: row.check_run_id,
         label: eventLabel(row),
         groupLabel: row.manuscript_group_label ?? null,
         executionMode: row.llm_execution_mode,
@@ -292,25 +301,11 @@ function groupConsecutive(items: AuditLogSummary[]): AuditRowGroup[] {
   return out.map((g) => (g.kind === "group" && g.rows.length === 1 ? { kind: "single", row: g.rows[0] } : g));
 }
 
-function isInstructorEvent(eventType: string): boolean {
-  return (
-    eventType === "flag_overridden" ||
-    eventType === "flag_annotated" ||
-    eventType === "escalation_resolved" ||
-    eventType === "report_decided" ||
-    eventType === "report_reopened" ||
-    eventType === "manuscript_purged" ||
-    eventType === "check_run_cancel_requested" ||
-    eventType === "citation_source_confirmed" ||
-    eventType === "manuscript_ingestion_failure_dismissed"
-  );
-}
-
 function formatEventTime(iso: string): string {
   return new Date(iso).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "medium" });
 }
 
-function ActorIcon({ instructor }: { instructor: boolean }) {
+function ActorIcon({ origin }: { origin: AuditEventOrigin }) {
   const common = {
     "aria-hidden": true as const,
     viewBox: "0 0 24 24",
@@ -323,27 +318,28 @@ function ActorIcon({ instructor }: { instructor: boolean }) {
     strokeLinejoin: "round" as const,
     className: "-mt-0.5 inline-block shrink-0 text-ink-tertiary",
   };
-  return instructor ? (
+  return origin === "instructor" ? (
     <svg {...common}>
       <circle cx="12" cy="8" r="3.2" />
       <path d="M5.5 20a6.5 6.5 0 0 1 13 0" />
     </svg>
-  ) : (
+  ) : origin === "automated" ? (
     <svg {...common}>
       <path d="M20 12a8 8 0 1 0-2.5 5.8" />
       <path d="M20 8v4h-4" />
     </svg>
-  );
+  ) : <svg {...common}><path d="M7 3h7l4 4v14H6V3Z" /><path d="M13 3v5h5M9 12h6M9 16h6" /></svg>;
 }
 
 function EventContent({ row }: { row: AuditLogSummary }) {
-  const instructor = isInstructorEvent(row.event_type);
+  const origin = auditEventOrigin(row.event_type);
   const summary = eventSummary(row);
   return (
     <>
-      <ActorIcon instructor={instructor} />{" "}
-      <span className="sr-only">{instructor ? "Instructor action: " : "Automated: "}</span>
+      <ActorIcon origin={origin} />{" "}
+      <span className="sr-only">{origin === "instructor" ? "Instructor action: " : origin === "automated" ? "Automated: " : "Recorded activity: "}</span>
       <b>{eventLabel(row)}</b>
+      {origin === "unknown" && <span className="text-ink-secondary"> · Origin unavailable</span>}
       <ExecutionModeTag mode={row.llm_execution_mode} />
       {summary && <span className="text-ink-secondary"> · {summary}</span>}
       {row.manuscript_group_label && (
@@ -363,7 +359,7 @@ function AuditDetailModal({ id, owner, onClose, fallbackFocusRef }: {
   const data = auditOwnerCurrent(client, owner) && query.data?.id === id
     && (!query.isError || recoverableReadError(query.error)) ? query.data : undefined;
   const payloadPreview = data ? JSON.stringify(data.payload, null, 2) : "";
-  const details = data ? instructorEventDetails(data.event_type, data.payload) : undefined;
+  const details = data ? instructorEventDetails(data.event_type, data.payload, data) : undefined;
   function close() { if (isCurrent()) onClose(); }
   return (
     <Dialog title={`Audit entry #${id}`} initialFocusTitle onClose={close} fallbackFocusRef={fallbackFocusRef} wide>
@@ -405,7 +401,8 @@ function AuditDetailModal({ id, owner, onClose, fallbackFocusRef }: {
             {!details && <div><dt>Event</dt><dd>{eventLabel(data)}</dd></div>}
             <div><dt>Stored time</dt><dd>{formatEventTime(data.created_at)}</dd></div>
             {data.check_run_id !== null && <div><dt>Check run</dt><dd>{data.check_run_id}</dd></div>}
-            {isInstructorEvent(data.event_type) && <div><dt>Performed by</dt><dd>{recordedActor(data.payload, owner.instructorId)}</dd></div>}
+            {auditEventOrigin(data.event_type) === "instructor" && <div><dt>Performed by</dt><dd>{recordedActor(data.payload, owner.instructorId, data)}</dd></div>}
+            {auditEventOrigin(data.event_type) === "unknown" && <div><dt>Action origin</dt><dd>Not established by this entry.</dd></div>}
             {data.manuscript_group_label && <div className="signal-audit-entry-fact--primary"><dt>Group</dt><dd>{data.manuscript_group_label}</dd></div>}
             {data.manuscript_original_filename && <div className="signal-audit-entry-fact--primary"><dt>File</dt><dd>{data.manuscript_original_filename}</dd></div>}
           </dl>
@@ -513,6 +510,7 @@ function OwnedAuditLogPage({ owner }: { owner: AuditOwner }) {
     if (value === null) next.delete(key);
     else next.set(key, value);
     if (key !== "page" && key !== "detail") next.delete("page");
+    if (key === "filter") next.delete("detail");
     setSearchParams(next);
   }
 

@@ -1,11 +1,75 @@
 import { describe, expect, it } from "vitest";
 import { instructorEventDetails, recordedActor } from "./instructorEventDetails";
 
+const REVISION_ENTRY = { event_type: "judgment_revised", check_run_id: 25, created_at: "2026-10-24T03:10:34.869928Z" };
+function revisionPayload() {
+  const after = { judgment_revision: 2, resolution_type: "mark_fail", outcome: "failed", score: 0, level: null,
+    reason: "Revised full reason <not markup> & text.  ", actor_id: 5, recorded_at: REVISION_ENTRY.created_at, provenance: "recorded" };
+  return { judgment: { schema_version: 1, action: "judgment_revised", check_run_id: 25, criterion_id: 40,
+    check_result_id: 214, performed_by: 5, assessment_revision_before: 1, assessment_revision_after: 2,
+    before: { ...after, judgment_revision: 1, reason: "Original full reason.", recorded_at: "2026-10-24T03:09:39.748868Z" }, after } };
+}
+
 function fields(event: string, payload: unknown) {
   return Object.fromEntries(instructorEventDetails(event, payload)!.fields.map(field => [field.label, field.value]));
 }
 
 describe("stored instructor action presentation", () => {
+  it("BUG-463: reads the bound performer and full before/after reasons without assuming a grade change", () => {
+    const payload = revisionPayload();
+    const before = structuredClone(payload);
+    const result = instructorEventDetails("judgment_revised", payload, REVISION_ENTRY)!;
+    expect(result.fields.filter(field => field.value === "Does not meet")).toHaveLength(2);
+    expect(result.fields).toContainEqual({ role: "reason", label: "Revision reason", value: payload.judgment.after.reason });
+    expect(result.fields).toContainEqual({ role: "reason", label: "Previous instructor reason", value: payload.judgment.before.reason });
+    expect(recordedActor(payload, 5, REVISION_ENTRY)).toBe("You");
+    expect(recordedActor(payload, 1, REVISION_ENTRY)).toBe("Instructor #5");
+    expect(recordedActor(payload, undefined, REVISION_ENTRY)).toBe("Instructor #5");
+    expect(payload).toEqual(before);
+  });
+
+  it.each([
+    { schema_version: 2 }, { action: "initial_resolution" }, { check_run_id: 26 },
+    { performed_by: true }, { performed_by: "5" }, { performed_by: 0 }, { performed_by: -1 },
+    { performed_by: Number.MAX_SAFE_INTEGER + 1 }, { assessment_revision_after: 4 },
+    { assessment_revision_before: -1 }, { criterion_id: "40" }, { check_result_id: null },
+    { after: null }, { before: [] },
+  ])("BUG-463: withholds every ordinary revision fact for inconsistent envelope %j", patch => {
+    const payload = { judgment: { ...revisionPayload().judgment, ...patch } };
+    const result = instructorEventDetails("judgment_revised", payload, REVISION_ENTRY)!;
+    expect(result.fields.every(field => field.value === "Unavailable in this entry.")).toBe(true);
+    expect(recordedActor(payload, 5, REVISION_ENTRY)).toBe("Instructor attribution unavailable");
+    expect(result.notice).toContain("could not be summarized");
+  });
+
+  it.each([
+    { actor_id: 6 }, { actor_id: undefined }, { actor_id: "5" }, { judgment_revision: 4 },
+    { recorded_at: "2026-10-24T03:10:34.869929Z" }, { recorded_at: "2026-02-30T03:10:34.869928Z" },
+    { recorded_at: "2026-10-24T03:10:34" }, { reason: "" }, { score: true },
+    { level: { name: null } }, { level: { ordinal: 1, name: "Invented grade", points: 1, max_points: 1 } },
+    { resolution_type: "mark_pass", score: 100 }, { provenance: "legacy_partial" },
+  ])("BUG-463: safely rejects malformed or contradictory revised snapshot %j", patch => {
+    const payload = revisionPayload();
+    const raw = { judgment: { ...payload.judgment, after: { ...payload.judgment.after, ...patch } } };
+    expect(instructorEventDetails("judgment_revised", raw, REVISION_ENTRY)!.fields.every(field => field.value === "Unavailable in this entry.")).toBe(true);
+    expect(recordedActor(raw, 5, REVISION_ENTRY)).toBe("Instructor attribution unavailable");
+  });
+
+  it("BUG-463: accepts equivalent UTC offsets while retaining microsecond identity", () => {
+    const payload = revisionPayload();
+    payload.judgment.after.recorded_at = "2026-10-24T11:10:34.869928+08:00";
+    expect(recordedActor(payload, 5, REVISION_ENTRY)).toBe("You");
+    expect(recordedActor(payload, 5, { ...REVISION_ENTRY, created_at: "2026-10-24T03:10:34.869927Z" })).toBe("Instructor attribution unavailable");
+  });
+
+  it("BUG-463: refuses a conflicting legacy actor and inherited nested attributes without fallbacks", () => {
+    const payload = revisionPayload();
+    expect(recordedActor({ ...payload, instructor_id: 1 }, 5, REVISION_ENTRY)).toBe("Instructor attribution unavailable");
+    expect(recordedActor({ ...payload, instructor_id: 5 }, 5, REVISION_ENTRY)).toBe("You");
+    expect(recordedActor({ judgment: Object.create(payload.judgment) }, 5, REVISION_ENTRY)).toBe("Instructor attribution unavailable");
+    expect(recordedActor(payload, 5, { ...REVISION_ENTRY, check_run_id: 26 })).toBe("Instructor attribution unavailable");
+    expect(recordedActor({ instructor_id: 5 }, 5, REVISION_ENTRY)).toBe("Instructor attribution unavailable");
+  });
   it("reads the actual returned outcome and reason without consulting a current report", () => {
     const payload = { decision: "returned", note: "Original full reason <not markup> & αβ", status: "needs_review",
       pending_criteria: [{ criterion_id: 35, check_result_id: 178, outcome: "escalated" }] };

@@ -51,6 +51,40 @@ const DETAIL = {
 describe("AuditLogPage", () => {
   afterEach(() => vi.unstubAllGlobals());
 
+  it("BUG-463: identifies an actual-shaped recorded revision as an instructor action and shows its performer", async () => {
+    const row = { ...PAGE.items[1], id: 398, event_type: "judgment_revised", check_run_id: 25, created_at: "2026-10-24T03:10:34.869928Z" };
+    vi.stubGlobal("fetch", stubFetchByPath({ "/audit": { ...PAGE, items: [row], total: 1 }, "/audit/398": {
+      ...row, payload: { judgment: { schema_version: 1, action: "judgment_revised", check_run_id: 25,
+        criterion_id: 40, check_result_id: 214, performed_by: 5,
+        assessment_revision_before: 1, assessment_revision_after: 2,
+        before: { judgment_revision: 1, actor_id: 5, resolution_type: "mark_fail", outcome: "failed", score: 0,
+          level: null, reason: "The design evidence is missing.", provenance: "recorded", recorded_at: "2026-10-24T03:09:39.748868Z" },
+        after: { judgment_revision: 2, actor_id: 5, resolution_type: "mark_fail", outcome: "failed", score: 0,
+          level: null, reason: "The recorded revision clarifies the missing architecture evidence.",
+          provenance: "recorded", recorded_at: "2026-10-24T03:10:34.869928Z" } } },
+    } }));
+    renderWithProviders(<AuditLogPage />, { route: "/audit?detail=398" });
+    const dialog = await screen.findByRole("dialog");
+    expect(await within(dialog).findByText("Instructor #5")).toBeVisible();
+    expect(screen.queryByText("Automated:")).not.toBeInTheDocument();
+    expect(screen.getAllByText("Instructor action:").length).toBeGreaterThan(0);
+    expect(within(dialog).getByText("The recorded revision clarifies the missing architecture evidence.")).toBeVisible();
+    expect(within(dialog).getByText("The design evidence is missing.")).toBeVisible();
+    expect(within(dialog).getByText("Technical record for reproducibility").parentElement).not.toHaveAttribute("open");
+  });
+
+  it.each(["judgment_revised", "future_review_event", "library_entry_removed"])(
+    "BUG-463: never groups adjacent %s records as known automated activity", async event_type => {
+      const items = [398, 397].map(id => ({ ...PAGE.items[1], id, event_type }));
+      vi.stubGlobal("fetch", stubFetchByPath({ "/audit": { ...PAGE, items } }));
+      renderWithProviders(<AuditLogPage />, { route: "/audit" });
+      await screen.findByRole("table");
+      expect(screen.getAllByRole("button", { name: "Detail" })).toHaveLength(4);
+      expect(screen.queryByText("Automated:")).not.toBeInTheDocument();
+      expect(screen.queryByText("Grouped entries")).not.toBeInTheDocument();
+    },
+  );
+
   it("shows the actual historical Return and full reason without expanding Technical", async () => {
     const row = { ...PAGE.items[0], event_type: "report_decided", prompt_type: null };
     const note = "SANDBOX stored reason <img src='private'> & αβ";
@@ -389,13 +423,47 @@ describe("AuditLogPage", () => {
     vi.stubGlobal("fetch", fetchMock);
     renderWithProviders(<AuditLogPage />, { route: "/audit?check_run_id=7&filter=Escalations", path: "/audit" });
     await screen.findAllByText("Criterion judgment recorded");
-    expect(screen.getByRole("button", { name: "Criterion judgments" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("button", { name: "Initial judgments" })).toHaveAttribute("aria-pressed", "true");
     expect(screen.getByRole("button", { name: "All" })).toHaveAttribute("aria-pressed", "false");
     expect(new URL(String(fetchMock.mock.calls[0][0]), "http://localhost").searchParams.get("event_type")).toBe("escalation_resolved");
     fireEvent.click(screen.getByRole("button", { name: "All" }));
-    fireEvent.click(screen.getByRole("button", { name: "Criterion judgments" }));
-    await waitFor(() => expect(screen.getByRole("button", { name: "Criterion judgments" })).toHaveAttribute("aria-pressed", "true"));
+    fireEvent.click(screen.getByRole("button", { name: "Initial judgments" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Initial judgments" })).toHaveAttribute("aria-pressed", "true"));
     expect(screen.queryByRole("button", { name: "Escalations" })).not.toBeInTheDocument();
+  });
+
+  it("BUG-463: the revision filter queries exact revisions, resets page and closes the previous detail", async () => {
+    const fetchMock = stubFetchByPath({ "/audit": { ...PAGE, page: 2, total: 60 }, "/audit/42": DETAIL });
+    vi.stubGlobal("fetch", fetchMock);
+    renderWithProviders(<AuditLogPage />, { route: "/audit?check_run_id=7&filter=Escalations&page=2&detail=42", path: "/audit" });
+    await screen.findByRole("dialog");
+    fireEvent.click(screen.getByRole("button", { name: "Judgment revisions" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    expect(screen.getByRole("button", { name: "Judgment revisions" })).toHaveAttribute("aria-pressed", "true");
+    const request = fetchMock.mock.calls.map(call => new URL(String(call[0]), "http://localhost"))
+      .find(url => url.searchParams.get("event_type") === "judgment_revised");
+    expect(request?.searchParams.get("check_run_id")).toBe("7");
+    expect(request?.searchParams.get("page")).toBe("1");
+    expect(request?.searchParams.has("event_type_prefix")).toBe(false);
+  });
+
+  it("BUG-463: keeps known automated entries from different runs separate despite matching group labels", async () => {
+    const items = [7, 8].map(check_run_id => ({ ...PAGE.items[0], id: check_run_id, check_run_id }));
+    vi.stubGlobal("fetch", stubFetchByPath({ "/audit": { ...PAGE, items } }));
+    renderWithProviders(<AuditLogPage />, { route: "/audit" });
+    await screen.findByRole("table");
+    expect(screen.getAllByRole("button", { name: "Detail" })).toHaveLength(4);
+    expect(screen.queryByText("Grouped entries")).not.toBeInTheDocument();
+  });
+
+  it.each(["toString", "constructor", "__proto__", "llm_future_event"])("BUG-463: qualifies unfamiliar %s instead of inferring origin or inherited labels", async event_type => {
+    const row = { ...PAGE.items[0], event_type, prompt_type: "toString" };
+    vi.stubGlobal("fetch", stubFetchByPath({ "/audit": { ...PAGE, items: [row], total: 1 }, "/audit/42": { ...row, payload: { instructor_id: 1 } } }));
+    renderWithProviders(<AuditLogPage />, { route: "/audit?detail=42" });
+    expect(await screen.findByText("Not established by this entry.")).toBeVisible();
+    expect(screen.getAllByText(/Origin unavailable/)).toHaveLength(2);
+    expect(screen.queryByText("You")).not.toBeInTheDocument();
+    expect(screen.queryByText("Automated:")).not.toBeInTheDocument();
   });
 
   it("focuses and titles the page on arrival (route focus management, previously missing entirely)", async () => {
