@@ -53,11 +53,52 @@ def _real_quotes_from_prompt(prompt: str) -> list[str]:
     match = _MANUSCRIPT_TEXT_RE.search(prompt)
     if not match:
         return []
+    text = match.group(1)
+    blocks = [text]
+    try:
+        envelope = json.loads(text)
+    except (ValueError, RecursionError):
+        if text.lstrip().startswith(("{", "[")):
+            return []
+    else:
+        # A manuscript can itself contain JSON examples. Only the source
+        # envelope's declared keys distinguish its metadata from ordinary text.
+        if isinstance(envelope, dict) and any(
+            key in envelope
+            for key in ("source_coverage", "source_limitation", "contiguous_source_scopes")
+        ):
+            coverage = envelope.get("source_coverage")
+            scopes = envelope.get("contiguous_source_scopes")
+            if (
+                not isinstance(coverage, dict)
+                or coverage.get("native_math_coverage_version") != "v1"
+                or not isinstance(envelope.get("source_limitation"), str)
+                or not isinstance(scopes, list)
+                or any(not isinstance(scope, list) for scope in scopes)
+            ):
+                return []
+            blocks = []
+            for scope in scopes:
+                for block in scope:
+                    if (
+                        not isinstance(block, dict)
+                        or "paragraph" not in block
+                        or not isinstance(block.get("text"), str)
+                        or (
+                            block["paragraph"] is not None
+                            and (type(block["paragraph"]) is not int or block["paragraph"] < 0)
+                        )
+                    ):
+                        return []
+                    blocks.append(block["text"])
     quotes = []
-    for line in match.group(1).split("\n"):
-        words = line.split()
-        if len(words) >= _REAL_QUOTE_WORD_COUNT:
-            quotes.append(" ".join(words[:_REAL_QUOTE_WORD_COUNT]))
+    # Coverage and limitation metadata never become manuscript candidates.
+    # Each source block and its lines remain separate across omitted material.
+    for block in blocks:
+        for line in block.splitlines():
+            words = line.split()
+            if len(words) >= _REAL_QUOTE_WORD_COUNT:
+                quotes.append(" ".join(words[:_REAL_QUOTE_WORD_COUNT]))
     return quotes
 
 
@@ -79,16 +120,15 @@ def _with_real_quotes(response: dict[str, Any], prompt: str) -> dict[str, Any]:
     extraction is deterministic given the same prompt, so this alone is
     enough to reach a real, verified majority in fake mode -- no new
     per-pass fixtures needed for the base "Accept AI is reachable" case.
-    Falls back to the fixture's own placeholder quotes (still
-    unverifiable, an honest no-op) when the prompt carries no extractable
-    manuscript text, rather than fabricating one."""
+    Without an extractable source candidate, return an empty evidence list.
+    Scripted fixture judgments still require the application's evidence checks."""
     quotes = _real_quotes_from_prompt(prompt)
-    if not quotes or "verdicts" not in response:
+    if "verdicts" not in response:
         return response
     return {
         **response,
         "verdicts": [
-            {**v, "evidence_quotes": [quotes[i % len(quotes)]]}
+            {**v, "evidence_quotes": [quotes[i % len(quotes)]] if quotes else []}
             for i, v in enumerate(response["verdicts"])
         ],
     }
