@@ -7,19 +7,24 @@ import { CRITERION_EXCLUSION_COPY } from "../domain/criterionReview";
 import { claimFocusContinuation, type FocusContinuation } from "../routing/focusContinuation";
 import { Button } from "../ui/Button";
 import { useCriterionReviewScope, type ReviewCompletion } from "./criterionReviewContext";
-import { criterionRecordId, recordedGradeLabel, revealCriterionRecord, sameSavedJudgment, SAVED_CRITERION_PARAM } from "./savedJudgment";
+import { criterionRecordId, recordedGradeLabel, revealCriterionRecord, atLeastSavedJudgment, SAVED_CRITERION_PARAM } from "./savedJudgment";
 import { useReport } from "./useReport";
+import { judgmentVersion } from "./judgmentRecord";
 
 export function SavedJudgmentAccess({ checkRunId }: { checkRunId: number }) {
   const review = useCriterionReviewScope(checkRunId);
   const query = useReport(checkRunId);
   const [focusedReceipt, setFocusedReceipt] = useState<ReviewCompletion>();
-  const receipt = focusedReceipt ?? review.completion;
+  const retainedReceipt = focusedReceipt ?? review.completion;
+  const receipt = retainedReceipt && !review.revisions.records.get(retainedReceipt.result.criterion_id)?.unavailable ? retainedReceipt : undefined;
   const results = Array.isArray(query.data?.results) ? query.data.results : undefined;
   const count = results?.filter((row) => row.resolution != null).length;
   const refreshing = query.fetchStatus !== "idle";
-  const awaitingConfirmed = [...review.confirmed.values()].some((saved) => !results?.some((row) => sameSavedJudgment(row, saved)));
+  const awaitingConfirmed = [...review.confirmed.values()].some((saved) => !results?.some((row) => atLeastSavedJudgment(row, saved)));
   const qualified = refreshing || query.isError || awaitingConfirmed;
+  const currentReceiptRow = results?.find(row => row.criterion_id === receipt?.result.criterion_id);
+  const pastReceipt = receipt && currentReceiptRow && judgmentVersion(receipt.result) !== undefined
+    && judgmentVersion(currentReceiptRow) !== undefined && judgmentVersion(currentReceiptRow)! > judgmentVersion(receipt.result)!;
   useEffect(() => {
     const completion = review.completion;
     if (completion) completion.focus?.focus(document.getElementById(`saved-receipt-${checkRunId}-${completion.result.criterion_id}`));
@@ -29,6 +34,7 @@ export function SavedJudgmentAccess({ checkRunId }: { checkRunId: number }) {
       onFocusCapture={() => setFocusedReceipt(receipt)}
       onBlurCapture={(event) => { if (!event.currentTarget.contains(event.relatedTarget)) setFocusedReceipt(undefined); }}>
       <h3 id={`saved-receipt-${checkRunId}-${receipt.result.criterion_id}`} tabIndex={-1}>Judgment saved</h3>
+      {pastReceipt && <p>Past saved acknowledgment. View the recorded judgment for its current state.</p>}
       <p>{receipt.result.text}</p>
       {receipt.result.resolution?.type === "needs_document"
         ? <p>{CRITERION_EXCLUSION_COPY.recorded}. {CRITERION_EXCLUSION_COPY.noGrade}</p>
@@ -58,7 +64,8 @@ export function SavedCriterionDestination({ checkRunId, results }: { checkRunId:
   const criterionId = raw !== null && raw !== "all" && Number.isSafeInteger(parsed) && parsed > 0 ? parsed : undefined;
   const all = raw === "all";
   const confirmed = criterionId === undefined ? undefined : review.confirmed.get(criterionId);
-  const available = all || (criterionId !== undefined && results.some((row) => row.criterion_id === criterionId && (!confirmed || sameSavedJudgment(row, confirmed))));
+  const available = all || (criterionId !== undefined && !review.revisions.records.get(criterionId)?.unavailable
+    && results.some((row) => row.criterion_id === criterionId && (!confirmed || atLeastSavedJudgment(row, confirmed))));
   const navigation = review.savedNavigation;
   const ownNavigation = navigation && (all ? navigation.criterionId === undefined : navigation.criterionId === criterionId);
   const claim = useRef<FocusContinuation | undefined>(undefined);

@@ -367,6 +367,9 @@ export interface CriterionLevel {
 
 export interface CriterionResultOut extends ResultRowCommon {
   resolution: ResolutionOut | null;
+  /** Private write identity; older retained client fixtures may lack these fields. */
+  check_result_id?: number;
+  judgment_revision?: number | null;
 }
 
 /** BUG-044 fix: the public, unauthenticated adviser view's per-criterion

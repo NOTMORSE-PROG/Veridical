@@ -1,6 +1,7 @@
 import { createContext, useContext } from "react";
 import type { Decision, EscalatedItemOut, EscalationResolution, ResolveEscalationOut, ResultRowCommon } from "../api/types";
 import type { FocusContinuation } from "../routing/focusContinuation";
+import type { RevisionScope } from "./useJudgmentRevisions";
 
 export interface ReviewDraft {
   criterionId: number;
@@ -42,6 +43,7 @@ export interface ReviewScope {
   isDraftCurrent: (draft: ReviewDraft) => boolean;
   canUseCurrentDraft: (draft: ReviewDraft) => boolean;
   canChoose: boolean;
+  revisions: RevisionScope;
   reviewCurrent: (id: number) => void;
   useCurrentDraft: (id: number) => void;
 }

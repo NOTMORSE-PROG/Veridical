@@ -73,7 +73,8 @@ function DecisionDialog({ decision, report, manuscriptLabel, onClose, onSaved, f
       {readFailed && <DecisionReadRecovery retrying={retrying} onRetry={onRetry} />}
       <CurrentAssessmentReview review={review} busy={decide.isPending} onRebind={trigger => followAction(trigger, review.rebind)} />
       <p>This records {manuscriptLabel} as {copy.phrase}{pendingReturn ? ` with ${report.pending_review_count} unresolved criteria. Returning does not grade or exclude them.` : "."} The report becomes read-only until you reopen it with a reason.</p>
-      {drafts && drafts.drafts.size > 0 && <p>Your criterion drafts stay unsaved and locked. After reopening, review each current criterion before using its draft.</p>}
+      {drafts && (drafts.drafts.size > 0 || drafts.revisions.hasDrafts) && <p>Your entered criterion drafts are kept and locked. After reopening, review each current criterion before using its draft.</p>}
+      {drafts?.revisions.hasUnknownAttempt && <p>An earlier revision save could not be confirmed. This decision uses the current judgments shown and does not cancel that request.</p>}
       <label><span>{pendingReturn ? "Reason for return (required)" : reasonRequired ? "Reason (required)" : "Note (optional)"}</span>
         <textarea ref={reasonRef} rows={4} maxLength={INSTRUCTOR_NOTE_MAX_LENGTH} disabled={decide.isPending} value={note}
           aria-invalid={invalid || undefined} aria-describedby={invalid ? errorId : "signal-decision-note-hint"}

@@ -1,5 +1,5 @@
 // F3/F8, screens 4h/4w: private drafts live only in this report route family.
-import { useQueryClient } from "@tanstack/react-query";
+import { useIsMutating, useQueryClient } from "@tanstack/react-query";
 import { useLayoutEffect, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import { Outlet, useBlocker, useLocation, useNavigate, useParams } from "react-router";
 import { ApiError } from "../api/client";
@@ -14,6 +14,8 @@ import { criterionReviewNotices } from "../domain/criterionReview";
 import { ReviewContext, type ReviewCompletion, type ReviewDraft, type ReviewScope } from "./criterionReviewContext";
 import { claimFocusContinuation, type FocusContinuation } from "../routing/focusContinuation";
 import { confirmedJudgment, criterionRecordId, revealCriterionRecord, SAVED_CRITERION_PARAM } from "./savedJudgment";
+import { useJudgmentRevisions } from "./useJudgmentRevisions";
+import type { RevisionDraft } from "./useJudgmentRevisions";
 
 // Query identity changes on cache clear, including logout/login to the same
 // instructor. Data identity alone does not distinguish those auth lifetimes.
@@ -47,6 +49,7 @@ export function CriterionReviewProvider({ checkRunId, instructorId, children }: 
 }) {
   const client = useQueryClient();
   const location = useLocation();
+  const mutating = useIsMutating();
   const navigate = useNavigate();
   const [authQuery] = useState(() => client.getQueryCache().find({ queryKey: ME_QUERY_KEY, exact: true }));
   const alive = useRef(false);
@@ -69,20 +72,35 @@ export function CriterionReviewProvider({ checkRunId, instructorId, children }: 
       && client.getQueryCache().find({ queryKey: ME_QUERY_KEY, exact: true }) === authQuery
       && client.getQueryData<{ id: number } | null>(ME_QUERY_KEY)?.id === instructorId;
   }
-  const exitKind = useRef<"drafts" | "saving" | "uncertain">("drafts");
+  const exitKind = useRef<"drafts" | "saving" | "uncertain" | "revisionUnknown">("drafts");
+  const exitCapture = useRef<{ pending: Map<number, ReviewDraft>; revisions: ReadonlyMap<number, RevisionDraft> } | undefined>(undefined);
+  const reportQuery = useReport(checkRunId);
+  const assessment = reportQuery.isSuccess ? reportQuery.data : undefined;
+  const revisions = useJudgmentRevisions(checkRunId, isCurrent, assessment,
+    reportQuery.isSuccess && reportQuery.fetchStatus === "idle", () => reportQuery.refetch(),
+    () => mutating > 0 || client.getMutationCache().getAll().some(mutation => mutation.state.status === "pending")
+      || [...records.current.values()].some(draft => draft.saving));
+  useLayoutEffect(() => {
+    function beforeUnload(event: BeforeUnloadEvent) {
+      if (!isCurrent() || (records.current.size === 0 && !revisions.hasDrafts)) return;
+      event.preventDefault(); event.returnValue = "";
+    }
+    window.addEventListener("beforeunload", beforeUnload);
+    return () => window.removeEventListener("beforeunload", beforeUnload);
+  });
   const blocker = useBlocker(({ nextLocation }) => {
     const sameOwner = nextLocation.pathname === `/report/${checkRunId}`
       || nextLocation.pathname === `/report/${checkRunId}/document`;
     if (sameOwner || nextLocation.pathname === "/signin" || !isCurrent()
-      || authQuery?.state.status !== "success" || records.current.size === 0) return false;
-    exitKind.current = [...records.current.values()].some(draft => draft.saving) ? "saving"
-      : [...records.current.values()].some(draft => draft.uncertainRevision !== undefined) ? "uncertain" : "drafts";
+      || authQuery?.state.status !== "success" || (records.current.size === 0 && !revisions.hasDrafts)) return false;
+    exitKind.current = revisions.busy || [...records.current.values()].some(draft => draft.saving) ? "saving"
+      : [...records.current.values()].some(draft => draft.uncertainRevision !== undefined) ? "uncertain"
+        : revisions.uncertain ? "revisionUnknown" : "drafts";
+    exitCapture.current = { pending: new Map(records.current), revisions: revisions.captureDrafts() };
     return true;
   });
   const resolve = useResolveEscalation(checkRunId, isCurrent);
-  const reportQuery = useReport(checkRunId);
   const itemsQuery = useEscalatedItems(checkRunId);
-  const assessment = reportQuery.isSuccess ? reportQuery.data : undefined;
   const canChoose = assessment?.decision === null && isAssessmentRevision(assessment.assessment_revision);
   useLayoutEffect(() => {
     if (!assessment?.decision) return;
@@ -107,7 +125,7 @@ export function CriterionReviewProvider({ checkRunId, instructorId, children }: 
     publish(new Map(records.current).set(id, change(draft)));
   }
   const scope: ReviewScope = {
-    checkRunId, decision: reportQuery.data?.decision, drafts, completion, confirmed, savedNavigation, isDraftCurrent, canChoose,
+    checkRunId, decision: reportQuery.data?.decision, drafts, completion, confirmed, savedNavigation, isDraftCurrent, canChoose, revisions,
     canUseCurrentDraft: draft => canChoose && !draft.currentResolved
       && isAssessmentRevision(draft.reviewedRevision) && draft.reviewedRevision === assessment?.assessment_revision,
     viewSaved(criterionId, trigger) {
@@ -233,13 +251,28 @@ export function CriterionReviewProvider({ checkRunId, instructorId, children }: 
   };
   return <ReviewContext.Provider value={scope}>{children}
     {blocker.state === "blocked" && <Dialog
-      title={exitKind.current === "drafts" ? "Leave this review with unsaved changes?" : "Stay in this review"}
+      title={exitKind.current === "drafts" ? "Leave this review with unsaved changes?"
+        : exitKind.current === "revisionUnknown" ? "Leave with an unconfirmed revision save?" : "Stay in this review"}
       initialFocusTitle onClose={() => blocker.reset()}
       actions={<>
         <Button variant="secondary" onClick={() => blocker.reset()}>Keep reviewing</Button>
+        {exitKind.current === "revisionUnknown" && <Button variant="danger" disabled={!revisions.canStop()} onClick={() => {
+          const captured = exitCapture.current;
+          if (!isCurrent() || !captured || !revisions.canStop()
+            || [...records.current.values()].some(draft => draft.saving || draft.uncertainRevision !== undefined)
+            || captured.pending.size !== records.current.size
+            || [...records.current].some(([id, draft]) => captured.pending.get(id) !== draft)
+            || !revisions.abandonAll(captured.revisions)) { blocker.reset(); return; }
+          publish(new Map()); blocker.proceed();
+        }}>Stop editing and leave</Button>}
         {exitKind.current === "drafts" && <Button variant="danger" onClick={() => {
           // Recheck the live owner: a sibling save may have begun since the intent.
-          if (!isCurrent() || [...records.current.values()].some(draft => draft.saving || draft.uncertainRevision !== undefined)) {
+          const captured = exitCapture.current;
+          if (!isCurrent() || !captured || !revisions.canStop() || revisions.uncertain
+            || [...records.current.values()].some(draft => draft.saving || draft.uncertainRevision !== undefined)
+            || captured.pending.size !== records.current.size
+            || [...records.current].some(([id, draft]) => captured.pending.get(id) !== draft)
+            || !revisions.abandonAll(captured.revisions)) {
             blocker.reset(); return;
           }
           publish(new Map()); blocker.proceed();
@@ -247,11 +280,15 @@ export function CriterionReviewProvider({ checkRunId, instructorId, children }: 
       </>}>
       <p>{exitKind.current === "drafts"
         ? "Your unsaved criterion choices and reasons will be discarded if you leave this review."
-        : [...drafts.values()].some(draft => draft.saving)
+        : exitKind.current === "revisionUnknown"
+          ? "The outcome of an earlier revision save is unknown. Leaving removes your entered revision from this review. It does not cancel or reverse the earlier request. Review the current judgment when you return."
+        : revisions.busy || [...drafts.values()].some(draft => draft.saving)
           ? "A criterion judgment is being saved. Stay in this review until saving is confirmed."
-          : [...drafts.values()].some(draft => draft.uncertainRevision !== undefined)
+          : revisions.uncertain || [...drafts.values()].some(draft => draft.uncertainRevision !== undefined)
             ? "Saving could not be confirmed. Your choice and reason are kept. Select Keep reviewing, then review the current criterion before trying again."
             : "The review status has changed. Select Keep reviewing, then choose your destination again."}</p>
+      {exitKind.current === "revisionUnknown" && (drafts.size > 0 || [...revisions.records.values()].some(record => record.draft && record.draft.uncertainRevision === undefined))
+        && <p>Your other unsaved criterion choices and reasons will also be discarded.</p>}
     </Dialog>}
   </ReviewContext.Provider>;
 }

@@ -7361,3 +7361,55 @@
     overflow-wrap: anywhere;
   }
 }
+
+@layer components {
+  /* V-085, 4h/4w: named choices and long private reasons stay in the criterion. */
+  .signal-judgment-tools,
+  .signal-judgment-tools fieldset {
+    min-inline-size: 0;
+  }
+  .signal-judgment-tools fieldset {
+    margin: 0;
+    padding: 0;
+    border: 0;
+  }
+  .signal-judgment-tools h4,
+  .signal-judgment-tools h5,
+  .signal-judgment-tools h6,
+  .signal-judgment-tools legend {
+    margin: 0;
+    font-size: var(--signal-type-body);
+    font-weight: var(--signal-weight-bold);
+    line-height: var(--signal-line-section);
+  }
+  .signal-judgment-tools p,
+  .signal-judgment-tools textarea,
+  .signal-judgment-tools button {
+    overflow-wrap: anywhere;
+  }
+  .signal-judgment-tools .signal-choice {
+    display: flex;
+    gap: var(--signal-space-3);
+    align-items: baseline;
+    min-block-size: var(--signal-control-height-coarse);
+    padding: var(--signal-space-3);
+    border: var(--signal-border-hairline) solid var(--color-signal-border-strong);
+    border-radius: var(--signal-radius-control);
+    background: var(--color-signal-surface);
+    cursor: pointer;
+  }
+  .signal-judgment-tools .signal-choice:has(input:checked) {
+    background: var(--signal-brand-selection-soft);
+    border-color: var(--color-signal-ink);
+  }
+  .signal-judgment-tools .signal-choice > span {
+    display: grid;
+    gap: var(--signal-space-1);
+    min-inline-size: 0;
+    overflow-wrap: anywhere;
+  }
+  .signal-judgment-tools textarea {
+    min-block-size: var(--signal-control-height-coarse);
+    resize: vertical;
+  }
+}

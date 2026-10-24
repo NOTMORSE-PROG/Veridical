@@ -36,7 +36,8 @@ import { clusterFlagFindings, type FlagFindingCluster } from "./flagClusters";
 import { useEscalatedItems, useFlags } from "./useReport";
 import { ReviewContext, useCriterionReviewScope } from "./criterionReviewContext";
 import { SavedCriterionDestination, SavedJudgmentAccess } from "./SavedJudgmentAccess";
-import { recordedGradeLabel, criterionRecordId, sameSavedJudgment, SAVED_CRITERION_PARAM } from "./savedJudgment";
+import { recordedGradeLabel, criterionRecordId, atLeastSavedJudgment, SAVED_CRITERION_PARAM } from "./savedJudgment";
+import { RecordedJudgmentTools } from "./RecordedJudgmentTools";
 import { ComparisonLeadList } from "./ComparisonLeadList";
 import { comparisonLeadCollection } from "./comparisonLeadCollection";
 import { resultDisplay } from "./ResultsTable";
@@ -869,16 +870,22 @@ export function SignalCriteriaResults({ results, checkRunId, publicView = false,
   const privateScope = !publicView && review?.checkRunId === checkRunId;
   const rows = results.filter((row) => {
     const confirmed = privateScope ? review.confirmed.get(row.criterion_id) : undefined;
-    return !confirmed || sameSavedJudgment(row, confirmed);
+    return !confirmed || atLeastSavedJudgment(row, confirmed);
   });
   const updating = rows.length !== results.length || (privateScope
-    && [...review.confirmed.values()].some((saved) => !rows.some((row) => sameSavedJudgment(row, saved))));
+    && [...review.confirmed.values()].some((saved) => !rows.some((row) => atLeastSavedJudgment(row, saved))));
   return (
     <section className="signal-review-section" aria-labelledby="criteria-results-heading">
       <div className="signal-review-section__heading"><div><p className="signal-section-kicker">Criterion record</p><h2 id="criteria-results-heading" tabIndex={-1}>Criterion records</h2></div><span>{updating ? "Recorded results updating" : `${rows.length} ${rows.length === 1 ? "record" : "records"}`}</span></div>
       <p className="signal-review-section__intro">Each row shows the recorded status and any available evidence. A criterion marked Not assessed has no assessment result. Importance is shown as Low, Medium or High.</p>
       {privateScope && <SavedCriterionDestination checkRunId={checkRunId} results={rows} />}
       {rows.length ? <ol className="signal-result-list">{rows.map((row, index) => {
+        if (privateScope && review.revisions.records.get(row.criterion_id)?.unavailable) {
+          return <li key={row.criterion_id} className="signal-result-card"><div className="signal-result-card__top" />
+            <h3 id={criterionRecordId(checkRunId, row.criterion_id)} tabIndex={-1}>Recorded criterion unavailable</h3>
+            <p>This criterion could not be accessed. Its last loaded private details have been cleared.</p>
+            <Button variant="secondary" onClick={() => review.revisions.open(row.criterion_id, "current")}>Retry recorded criterion</Button></li>;
+        }
         const display = resultDisplay(row);
         const outcome = !publicView && row.resolution?.type === "mark_level" && !row.level?.name?.trim()
           ? { label: "Recorded grade unavailable", tone: "neutral" }
@@ -926,6 +933,7 @@ export function SignalCriteriaResults({ results, checkRunId, publicView = false,
                 links/buttons list can't tell them apart without a per-criterion
                 accessible name, same fix already applied to the flag "Review
                 evidence" links and the escalation resolve-button groups. */}
+              {privateScope && row.resolution && <RecordedJudgmentTools checkRunId={checkRunId} criterionId={row.criterion_id} criterionText={row.text} canonical={row} />}
               <details><summary id={evidenceSummaryId} aria-label={`${assessment.summary}: ${row.text}`}>{assessment.summary}</summary><div className="signal-result-card__evidence">
                 {assessment.relationship && <p>{assessment.relationship}</p>}
                 {unresolvedAi && <><p><strong>No grade accepted</strong></p><p>{RECORDED_GRADE_BASIS.review}</p><p>{RECORDED_GRADE_BASIS.qualification}</p></>}

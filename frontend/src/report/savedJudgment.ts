@@ -2,6 +2,7 @@
 import type { EscalationResolution, ResolveEscalationOut, ResultRowCommon } from "../api/types";
 import { resultDisplay } from "./ResultsTable";
 import { CRITERION_SCORE_UNITS } from "../config/ui";
+import { judgmentVersion } from "./judgmentRecord";
 
 export const SAVED_CRITERION_PARAM = "criterion_record";
 export const criterionRecordId = (run: number, criterion: number) => `criterion-record-${run}-${criterion}`;
@@ -35,6 +36,19 @@ export function sameSavedJudgment(row: ResultRowCommon, saved: ResultRowCommon) 
   return row.criterion_id === saved.criterion_id && row.outcome === saved.outcome && row.score === saved.score
     && row.level?.ordinal === saved.level?.ordinal && row.level?.name === saved.level?.name
     && row.resolution?.type === saved.resolution?.type && row.resolution?.reason === saved.resolution?.reason;
+}
+
+export function atLeastSavedJudgment(row: ResultRowCommon, saved: ResultRowCommon) {
+  if (row.criterion_id !== saved.criterion_id) return false;
+  const incoming = judgmentVersion(row);
+  const prior = judgmentVersion(saved);
+  if (incoming !== undefined && prior !== undefined) {
+    const currentId = (row as { check_result_id?: number }).check_result_id;
+    const priorId = (saved as { check_result_id?: number }).check_result_id;
+    return Number.isSafeInteger(currentId) && currentId === priorId
+      && (incoming > prior || (incoming === prior && sameSavedJudgment(row, saved)));
+  }
+  return sameSavedJudgment(row, saved);
 }
 
 export function revealCriterionRecord(target: HTMLElement) {
