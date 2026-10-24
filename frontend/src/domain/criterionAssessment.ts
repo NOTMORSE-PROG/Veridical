@@ -17,6 +17,8 @@ export function criterionAssessmentDetails(row: ResultRowCommon, publicView: boo
   const hasLocations = Boolean(row.anchor?.trim() || row.evidence.some((item) => item.anchor?.trim()));
   const sourceCoverage = privateCriterionCoverage(row, publicView);
   const ruleFacts = source === "rule" ? criterionRuleFacts(row.rule_facts) : undefined;
+  const ruleScopeUnconfirmed = row.rule_scope_unconfirmed === true && source === "rule"
+    && row.rule_facts?.rule_id === "required_section_present" && ruleFacts !== undefined;
   const hasDetails = Boolean(explanation || hasLocations || row.evidence.length || row.reason?.trim() || sourceCoverage || ruleFacts);
   const copy = ASSESSMENT_COPY[source];
   const relationship: string[] = [];
@@ -37,7 +39,7 @@ export function criterionAssessmentDetails(row: ResultRowCommon, publicView: boo
         : "These locations are not recorded as references supplied with an instructor reason.");
     }
   }
-  return { source, instructorRecorded, hasDetails, hasLocations, sourceCoverage, ruleFacts,
+  return { source, instructorRecorded, hasDetails, hasLocations, sourceCoverage, ruleFacts, ruleScopeUnconfirmed,
     summary: (instructorRecorded ? copy.earlier : copy.automatic) + criterionCoverageSuffix(sourceCoverage),
     explanationLabel: instructorRecorded ? copy.earlierExplanation : copy.explanation,
     missingExplanation: copy.missing, relationship: relationship.join(" ") };

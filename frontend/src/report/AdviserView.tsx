@@ -16,6 +16,8 @@ import { ReadinessBand } from "../ui/ReadinessBand";
 import { SignalMark, SignalWordmark } from "../ui/SignalMark";
 import { SignalCriteriaResults, SignalPublicFlags } from "./SignalReviewSections";
 import { useSharedReport } from "./useShare";
+import { RuleScopeSummary } from "./RuleScopeNotice";
+import { unconfirmedAutomaticRuleRows } from "../domain/ruleScope";
 
 function useNoindexMeta() {
   useEffect(() => {
@@ -68,13 +70,14 @@ export function AdviserViewPage() {
   const { report, flags } = data;
   const identity = manuscriptIdentity(report.manuscript_group_label, report.manuscript_original_filename);
   const pendingCount = report.results.filter(isUnresolvedSharedCriterion).length;
+  const scopeUnconfirmed = unconfirmedAutomaticRuleRows(report.results, true).length > 0;
 
   return (
     <SharedChrome>
       <div className="signal-shared-route signal-page-flow">
         <header className="signal-route-header signal-shared-report-header"><div><p className="signal-eyebrow">Shared faculty review</p><h1 ref={headingRef} tabIndex={-1}>Readiness report</h1><p className="signal-route-header__intro">{identity.primary} · checked against {report.rubric_title}</p></div><ReadinessBand status={report.status} /></header>
 
-        <section className="signal-shared-verdict" aria-labelledby="shared-band-heading"><div><p className="signal-section-kicker">VERIDICAL readiness band</p><h2 id="shared-band-heading">{report.status === "ready" ? "Ready" : report.status === "conditionally_ready" ? "Conditionally Ready" : report.status === "not_ready" ? "Not Ready" : "Needs Review"}</h2><p>{report.reason ?? "This band comes from the recorded criterion outcomes and integrity signals. It does not approve or block a defense."}</p></div><dl><div><dt>Unresolved criteria</dt><dd>{pendingCount}</dd></div><div><dt>Instructor decision</dt><dd>{report.decision ? DECISION_LABEL[report.decision] : "Not recorded"}</dd></div></dl></section>
+        <section className="signal-shared-verdict" aria-labelledby="shared-band-heading"><div><p className="signal-section-kicker">{scopeUnconfirmed ? "Saved readiness band" : "VERIDICAL readiness band"}</p><h2 id="shared-band-heading">{report.status === "ready" ? "Ready" : report.status === "conditionally_ready" ? "Conditionally Ready" : report.status === "not_ready" ? "Not Ready" : "Needs Review"}</h2><p>{report.reason ?? "This band comes from the recorded criterion outcomes and integrity signals. It does not approve or block a defense."}</p><RuleScopeSummary rows={report.results} checkRunId={report.check_run_id} publicView /></div><dl><div><dt>Unresolved criteria</dt><dd>{pendingCount}</dd></div><div><dt>Instructor decision</dt><dd>{report.decision ? DECISION_LABEL[report.decision] : "Not recorded"}</dd></div></dl></section>
 
         {report.llm_mode !== "real" && <Alert title={report.llm_mode === "fake" ? TEST_AI_DISCLOSURE.title : "AI mode could not be verified"} tone="warning">{report.llm_mode === "fake" ? TEST_AI_DISCLOSURE.body : "This run predates reliable AI-mode tracking. Treat AI-derived outcomes cautiously."}</Alert>}
         {report.rubric_needs_review && <Alert title="The required format had parser uncertainty" tone="warning"><p>The instructor activated it despite the warning.</p>{report.rubric_parse_issues?.length ? <ul>{report.rubric_parse_issues.map((issue) => <li key={issue}>{issue}</li>)}</ul> : null}</Alert>}

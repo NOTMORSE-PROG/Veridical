@@ -190,6 +190,29 @@ describe("SignalEscalatedPanel / SignalResolutionCard", () => {
     expect(screen.getByText("No grade accepted")).toBeVisible();
   });
 
+  it.each([true, false])("places omitted source coverage beside the pending judgment only for the current epoch (%s)", async matching => {
+    const item = { ...REAL_MAJORITY, assessment_revision: matching ? 4 : 3 };
+    const row = { ...savedRow(item, ""), check_result_id: item.check_result_id, outcome: "escalated", resolution: null,
+      source_coverage: { native_math_coverage_version: "v1", native_math_inventory_state: "complete",
+        native_math_inventory_scope: "main_document_body", n_native_equations_unassessed: 1,
+        n_native_equations_unlocated: 0, native_math_excluded_paragraphs: [7],
+        native_math_coverage_items: [{ paragraph: 7, kind: "paragraph", n_occurrences: 1 }] } };
+    vi.stubGlobal("fetch", stubFetchByPath({ "/check-runs/5/escalated": [item], "/check-runs/5/report": reportWith({ assessment_revision: 4, results: [row] }) }));
+    renderWithProviders(<SignalEscalatedPanel checkRunId={5} />);
+    const choice = await screen.findByRole("button", { name: "Accept AI suggestion: pass" });
+    if (matching) {
+      const limitation = await screen.findByText("Source content omitted.");
+      expect(limitation).toBeVisible();
+      expect(limitation.compareDocumentPosition(choice) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+      const scope = screen.getByText("Source scope and locations");
+      fireEvent.click(scope);
+      expect(screen.getByRole("link", { name: "Open in manuscript: Extracted paragraph 8" })).toHaveAttribute("href", "/report/5/document?anchor=paragraph%207");
+    } else {
+      expect(screen.queryByText("Source content omitted.")).not.toBeInTheDocument();
+      expect(screen.queryByText("Source scope and locations")).not.toBeInTheDocument();
+    }
+  });
+
   it("keeps the AI explanation label when a current canonical AI method is established", async () => {
     const item = { ...REAL_MAJORITY, assessment_revision: 4, reasoning: "Actual retained AI explanation" };
     const row = { ...savedRow(item, ""), check_result_id: item.check_result_id, outcome: "escalated", resolution: null };

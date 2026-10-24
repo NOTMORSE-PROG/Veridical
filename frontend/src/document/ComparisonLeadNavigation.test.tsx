@@ -52,6 +52,32 @@ function response(id: number, withPair = false) {
 }
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 describe("optional comparison workspace navigation", () => {
+  it.each([false, true])("keeps a whole-manuscript comparison concise without hiding unavailable evidence (%s)", async unavailable => {
+    const control = setup("&view=finding&finding=41");
+    const base = control.fetch.getMockImplementation()!;
+    control.fetch.mockImplementation(async (input, init) => {
+      if (new URL(String(input), "http://localhost").pathname !== "/flags/41") return base(input, init);
+      const saved = await response(41).json();
+      return new Response(JSON.stringify({ ...saved, is_passage_level: false, page_anchor: "whole document", evidence_unavailable: unavailable }));
+    });
+    await screen.findByText("Recorded check result:");
+    if (!unavailable) {
+      expect(screen.getByText("Whole-manuscript comparison.")).toBeVisible();
+      expect(screen.getByText(/No passage pair was saved/)).toBeVisible();
+      expect(screen.queryByRole("heading", { name: "Evidence to compare or check" })).not.toBeInTheDocument();
+      expect(screen.queryByText("No supporting passage was stored")).not.toBeInTheDocument();
+      expect(screen.queryByRole("heading", { name: "What the instructor should verify" })).not.toBeInTheDocument();
+    } else {
+      expect(screen.getByText("No supporting passage was stored")).toBeVisible();
+      expect(screen.getByText(/could not show a passage/)).toBeVisible();
+      expect(screen.queryByText(/No passage pair was saved/)).not.toBeInTheDocument();
+    }
+    expect(screen.getByText("Check method")).not.toBeVisible();
+    fireEvent.click(screen.getByText("Recorded reasoning and technical details"));
+    expect(screen.getByText("Check method")).toBeVisible();
+    expect(screen.getByText("Actual stored reasoning")).toBeVisible();
+    expect(screen.getByRole("link", { name: "Review instructor actions for this location" })).toHaveAttribute("href", "/flags/41");
+  });
   it.each([401, 403, 404, 503])("does not claim a selected record disappeared after a failed collection read (%s)", async status => {
     const c = setup("&view=finding&finding=41", false, REPORT, true);
     await screen.findByRole("button", { name: "Review in full width" });

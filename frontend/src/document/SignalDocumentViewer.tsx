@@ -30,6 +30,8 @@ import { CitationComparison } from "../flags/CitationComparison";
 import { CitationHistoryWarning } from "../flags/CitationHistoryWarning";
 import { findingMethodLabel, isCitationMetadataFinding } from "../domain/findingMethod";
 import { SignalDecisionPanel } from "../report/SignalDecisionPanel";
+import { RuleScopeSummary } from "../report/RuleScopeNotice";
+import { unconfirmedAutomaticRuleRows } from "../domain/ruleScope";
 import { ReportReadNotice } from "../report/ReportReadNotice";
 import { recoverableReadError, usableReport } from "../report/reportReadState";
 import { SignalCriteriaResults, SignalEscalatedPanel, type CriterionSourceOpen, type CriterionSourceTarget } from "../report/SignalReviewSections";
@@ -270,6 +272,8 @@ function SelectedFindingEvidence({ finding, flag, locationFlagId, region, source
   const { showsManuscriptQuote, reasoningText, showsManuscriptEvidence, isResubmission } = evidenceDisplayState(flag);
   const precision = regionPrecision(region, sourceAvailability);
   const comparative = flag.check_kind === "originality_reuse";
+  const optional = isOptionalComparisonLead(flag);
+  const wholeComparisonWithoutPair = optional && !flag.is_passage_level && !flag.passage_pair && !flag.evidence_unavailable;
   const kindMeta = checkKindMeta(flag.check_kind);
   const verificationPrompt = findingVerificationPrompt(flag.check_kind, flag.ai_verdict_summary, !!flag.passage_pair, !!flag.citation_metadata_comparison);
   const pValueFinding = flag.check_kind === "statistical_forensics" && isPValueFinding(flag.ai_verdict_summary);
@@ -278,14 +282,16 @@ function SelectedFindingEvidence({ finding, flag, locationFlagId, region, source
   const locationIndex = finding.flags.findIndex((member) => member.id === locationFlagId);
 
   return <>
-      <dl className="signal-document-finding-facts">
+      {!optional && <dl className="signal-document-finding-facts">
         <div><dt>Check</dt><dd>{kindMeta.eyebrow}</dd></div>
         <div><dt>How exact is this location?</dt><dd>{precision.label}</dd></div>
         <div><dt>Recorded location</dt><dd>{(sourceAnchor ?? flag.page_anchor).trim() ? instructorAnchor(sourceAnchor ?? flag.page_anchor) : "No location was recorded."}</dd></div>
         <div><dt>Check method</dt><dd>{findingMethodLabel(flag)}</dd></div>
         <div><dt>Evidence type</dt><dd>{citationMetadata ? flag.citation_metadata_comparison ? "Recorded registry metadata comparison" : "Registry comparison without saved provider metadata" : flag.check_kind === "internal_agreement" ? agreementEvidenceType(flag) : comparative ? flag.passage_pair ? "Recorded passage comparison" : "Comparison without a stored pair" : "Single-location check"}</dd></div>
-      </dl>
-      <p className="signal-document-precision-note"><strong>{precision.label}.</strong> {precision.helper}</p>
+      </dl>}
+      {wholeComparisonWithoutPair
+        ? <p className="signal-document-precision-note"><strong>Whole-manuscript comparison.</strong> No passage pair was saved.</p>
+        : <p className="signal-document-precision-note"><strong>{precision.label}.</strong> {precision.helper}{optional && flag.is_passage_level && <span> Recorded location: {instructorAnchor(sourceAnchor ?? flag.page_anchor)}.</span>}</p>}
       {finding.flags.length > 1 && (
         <section className="signal-document-locations" aria-labelledby="finding-locations-heading">
           <h3 id="finding-locations-heading">Recorded locations and scopes</h3>
@@ -300,7 +306,7 @@ function SelectedFindingEvidence({ finding, flag, locationFlagId, region, source
       </section>}
       {isOptionalComparisonLead(flag) && !showsManuscriptQuote && <p><strong>Recorded check result:</strong> {systemFindingCopy(flag.evidence_excerpt, flag.ai_verdict_summary, "evidence")}</p>}
       <CitationHistoryWarning flag={flag} />
-      <section aria-labelledby="evidence-heading" className="signal-document-detail-section">
+      {!wholeComparisonWithoutPair && <section aria-labelledby="evidence-heading" className="signal-document-detail-section">
         <h3 id="evidence-heading" tabIndex={-1}>Evidence to compare or check</h3>
         {flag.passage_pair && canExpand && !fullWidth && <Button id={`comparison-reading-expand-${locationFlagId}`} variant="secondary" onClick={onExpand}>Review in full width</Button>}
         {flag.passage_pair && <PassagePairPanel pair={flag.passage_pair} ownAnchor={instructorAnchor(flag.page_anchor)} wholeManuscript={!flag.is_passage_level} variant="flag" placement={fullWidth ? "full-page" : "inspector"} />}
@@ -309,9 +315,9 @@ function SelectedFindingEvidence({ finding, flag, locationFlagId, region, source
         <AgreementComparison flag={flag} findingNumber={finding.number} />
         <CitationComparison flag={flag} />
         {flag.ai_verdict_summary === "orphan_in_text_citation" ? <p className="signal-field-hint">The saved check did not link this citation to a reference-list entry. A matching entry is not available for side-by-side comparison.</p> : !citationMetadata && !comparative && !pValueFinding && flag.check_kind !== "internal_agreement" && <p className="signal-field-hint">This check evaluates one manuscript location. A second passage does not apply.</p>}
-      </section>
+      </section>}
       {flag.passage_pair && <Button variant="quiet" onClick={onExplore}>See other passage matches</Button>}
-      {!showsManuscriptEvidence && (
+      {!showsManuscriptEvidence && !wholeComparisonWithoutPair && (
         <Alert title={isResubmission ? "No passage pair is available" : "No supporting passage was stored"} tone={isResubmission ? "info" : "warning"}>
           {isResubmission
             ? "This finding was recorded from a whole-manuscript check. VERIDICAL did not store two passages that can be compared side by side. Review the recorded scope and technical details before deciding."
@@ -320,8 +326,15 @@ function SelectedFindingEvidence({ finding, flag, locationFlagId, region, source
               : "VERIDICAL did not store two passages that can be compared side by side. Review the recorded scope and technical details before deciding."}
         </Alert>
       )}
-      <section aria-labelledby="verify-heading" className="signal-document-detail-section signal-document-detail-section--verify"><h3 id="verify-heading">What the instructor should verify</h3><p>{verificationPrompt}</p></section>
-      {(!pValueFinding || flag.p_value_comparison) && <details className="signal-document-recorded-reasoning"><summary>{flag.citation_metadata_review_warning ? "Original recorded explanation and technical details" : "Recorded reasoning and technical details"}</summary><p>This is the system's full recorded explanation. It is supporting information, not an instructor decision.</p>{reasoningText ? <p>{systemFindingCopy(reasoningText, flag.ai_verdict_summary, "reasoning")}</p> : <p>No additional recorded reasoning is available.</p>}</details>}
+      {!wholeComparisonWithoutPair && <section aria-labelledby="verify-heading" className="signal-document-detail-section signal-document-detail-section--verify"><h3 id="verify-heading">What the instructor should verify</h3><p>{verificationPrompt}</p></section>}
+      {(!pValueFinding || flag.p_value_comparison) && <details className="signal-document-recorded-reasoning"><summary>{flag.citation_metadata_review_warning ? "Original recorded explanation and technical details" : "Recorded reasoning and technical details"}</summary>
+        {optional && <dl className="signal-document-finding-facts">
+          <div><dt>Check</dt><dd>{kindMeta.eyebrow}</dd></div>
+          <div><dt>Check method</dt><dd>{findingMethodLabel(flag)}</dd></div>
+          <div><dt>Evidence type</dt><dd>{flag.passage_pair ? "Recorded passage comparison" : "Comparison without a stored pair"}</dd></div>
+          <div><dt>Recorded location</dt><dd>{(sourceAnchor ?? flag.page_anchor).trim() ? instructorAnchor(sourceAnchor ?? flag.page_anchor) : "No location was recorded."}</dd></div>
+        </dl>}
+        <p>This is the system's full recorded explanation. It is supporting information, not an instructor decision.</p>{reasoningText ? <p>{systemFindingCopy(reasoningText, flag.ai_verdict_summary, "reasoning")}</p> : <p>No additional recorded reasoning is available.</p>}</details>}
       <ActionLink id={`comparison-lead-actions-${flag.id}`} to={`/flags/${flag.id}`} variant="secondary"
         state={{ routeReturnFocus: { returnPath: reviewLocation.pathname + reviewLocation.search, elementId: `comparison-lead-actions-${flag.id}`, fallbackElementId: "selected-finding-heading" } }}>Review instructor actions for this location</ActionLink>
   </>;
@@ -350,8 +363,9 @@ function ReadinessDecision({ checkRunId, report: loadedReport, pending, error, r
       <section className="signal-document-analysis__summary" aria-labelledby="analysis-heading" aria-describedby={readFailed ? "report-read-failure" : undefined}>
         <div className="signal-document-inspector__heading"><p className="signal-section-kicker">After the evidence</p><h2 id="analysis-heading" tabIndex={-1}>Readiness and decision</h2><p>Use this summary after reviewing the evidence. The instructor records the final decision.</p></div>
         <div className="signal-document-analysis__readiness">
-          <div><span>{readFailed ? "Last loaded system readiness" : "System readiness"}</span><ReadinessBand status={report.status} /></div>
+          <div><span>{readFailed ? "Last loaded system readiness" : unconfirmedAutomaticRuleRows(report.results).length ? "Saved readiness band" : "System readiness"}</span><ReadinessBand status={report.status} /></div>
           <p>{report.reason ?? "This band comes from the recorded criterion outcomes and integrity findings."}</p>
+          <RuleScopeSummary rows={report.results} checkRunId={report.check_run_id} />
           <dl><div><dt>Criteria needing your judgment</dt><dd>{report.pending_review_count}</dd></div><div><dt>Open high-severity findings</dt><dd>{report.unresolved_high_flag_count}</dd></div><div><dt>Instructor decision</dt><dd>{report.decision ? DECISION_LABEL[report.decision] : "Not recorded"}</dd></div></dl>
           <p className="signal-field-hint">{identity.primary} was checked against {report.rubric_title}.</p>
           <ActionLink to={`/report/${report.check_run_id}`} variant="secondary">Open full readiness report</ActionLink>

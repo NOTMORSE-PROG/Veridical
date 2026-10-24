@@ -31,6 +31,7 @@ export interface JudgmentContext {
   };
   original_assessment: {
     rule_facts?: CriterionRuleFacts | null;
+    rule_scope_unconfirmed?: boolean;
     source_coverage?: CriterionSourceCoverage | null;
     kind: string; basis: string | null; reason: string | null; reasoning: string | null;
     ai_majority_verdict: string | null; evidence: EvidenceItem[];

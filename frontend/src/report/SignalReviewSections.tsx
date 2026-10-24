@@ -2,6 +2,8 @@ import { ActionAssessmentContext, ReportAssessmentContext } from "./ReportAssess
 import { criterionAssessmentDetails } from "../domain/criterionAssessment";
 import { CriterionSourceCoverage } from "./CriterionSourceCoverage";
 import { RuleFactsDetails } from "./RuleFactsDetails";
+import { RuleScopeNotice } from "./RuleScopeNotice";
+import { coverageItems } from "./reportCoverage";
 import { pendingAssessmentRow } from "./pendingAssessmentRow";
 import { recoverableReadError } from "./reportReadState";
 import { reviewDeskDestination } from "../routing/reviewDeskReturn";
@@ -550,6 +552,17 @@ function SignalResolutionCard({ item, checkRunId, sharedReasonId, sourceTarget, 
   const canonical = currentItems && review.assessmentCurrent?.()
     ? pendingAssessmentRow(review.assessment, item, checkRunId) : undefined;
   const assessment = canonical ? criterionAssessmentDetails(canonical, false) : undefined;
+  const currentAssessment = review.assessmentCurrent?.() ? review.assessment : undefined;
+  const reportHasLimits = currentAssessment && coverageItems(currentAssessment).length > 0;
+  const coverageSourceAction = (anchor: string, slot: number) => {
+    const actionId = `signal-resolution-coverage-${checkRunId}-${item.check_result_id}-${slot}`;
+    const target = sourceTarget?.(anchor, actionId) ?? reviewDeskDestination(`/report/${checkRunId}/document?anchor=${encodeURIComponent(anchor)}`, location);
+    return <ActionLink id={actionId} to={target} variant="quiet" onClick={event => {
+      if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+      if (onOpenSource) { event.preventDefault(); onOpenSource(anchor, actionId); }
+      else rememberRouteReturnFocus(location.pathname + location.search, target, actionId);
+    }}>Open in manuscript: {instructorAnchor(anchor)}</ActionLink>;
+  };
   const pending = review.drafts.get(item.check_result_id);
   const reason = pending?.reason ?? "";
   const attempted = pending?.attempted ?? false;
@@ -639,6 +652,9 @@ function SignalResolutionCard({ item, checkRunId, sharedReasonId, sourceTarget, 
         {item.unverified_evidence && item.unverified_evidence.length > 0 && (
           <div className="signal-unverified-evidence"><strong id={unverifiedId}>Could not verify against the source</strong>{item.unverified_evidence.map((quote) => <blockquote key={quote}>“{quote}”</blockquote>)}</div>
         )}
+        {assessment?.ruleScopeUnconfirmed && <RuleScopeNotice />}
+        {assessment?.sourceCoverage && <CriterionSourceCoverage value={assessment.sourceCoverage} sourceAction={coverageSourceAction} firstSlot={item.evidence?.length ?? 0} criterionText={item.criterion_text} />}
+        {reportHasLimits && <p className="signal-field-hint">Some checks in this report have assessment limits.{" "}<ActionLink to={{ pathname: `/report/${checkRunId}`, search: location.search, hash: "coverage-statement-heading" }} variant="quiet">Review assessment limits</ActionLink></p>}
         {assessment?.ruleFacts && <RuleFactsDetails facts={assessment.ruleFacts} />}
         {Boolean(item.evidence?.length) && <strong>Recorded passages and locations</strong>}
         {item.evidence?.map((entry, index) => {
@@ -899,13 +915,13 @@ export function SignalCriteriaResults({ results, checkRunId, publicView = false,
             <Button variant="secondary" onClick={() => review.revisions.open(row.criterion_id, "current")}>Retry recorded criterion</Button></li>;
         }
         const display = resultDisplay(row);
+        const assessment = criterionAssessmentDetails(row, publicView);
         const outcome = !publicView && row.resolution?.type === "mark_level" && !row.level?.name?.trim()
           ? { label: "Recorded grade unavailable", tone: "neutral" }
           : row.level ? { label: `Level: ${display.label}`, tone: "neutral" }
           : display.tone === "caution" ? { label: "Partly meets criterion", tone: "warning" }
           : OUTCOME_COPY[row.outcome];
         const evidenceSummaryId = `signal-criterion-evidence-${checkRunId}-${row.criterion_id}`;
-        const assessment = criterionAssessmentDetails(row, publicView);
         const unresolvedAi = assessment.source === "ai" && !assessment.instructorRecorded && row.outcome === "escalated";
         const excerptAnchors = new Set(row.evidence.map((item) => item.anchor).filter((anchor) => anchor?.trim()));
         const seenAnchors = new Set<string>();
@@ -941,11 +957,12 @@ export function SignalCriteriaResults({ results, checkRunId, publicView = false,
             }}
           >Open in manuscript: {instructorAnchor(anchor)}</ActionLink>;
         };
-        return <li key={row.criterion_id} className="signal-result-card"><div className="signal-result-card__top"><span className="signal-result-card__number">{index + 1}</span><span className={`signal-outcome signal-outcome--${outcome.tone}`}>{outcome.label}</span><span className={`signal-importance signal-importance--${row.weight_importance === "med" ? "medium" : row.weight_importance}`}>{row.weight_importance === "med" ? "Medium" : `${row.weight_importance.slice(0, 1).toUpperCase()}${row.weight_importance.slice(1)}`} importance</span></div><h3 id={criterionRecordId(checkRunId, row.criterion_id)} tabIndex={-1}>{row.text}</h3>{!publicView && row.resolution && <p className="signal-resolution-note"><strong>Instructor judgment</strong></p>}{!publicView && row.resolution?.type === "needs_document" && <p className="signal-resolution-note">{CRITERION_EXCLUSION_COPY.recorded}. {CRITERION_EXCLUSION_COPY.noGrade}</p>}{!publicView && row.resolution && <>{row.resolution.type !== "needs_document" && <p className="signal-resolution-note"><strong>Recorded grade:</strong> {recordedGradeLabel(row)}</p>}<p className="signal-resolution-note"><strong>Instructor reason:</strong> {row.resolution.reason?.trim() ? row.resolution.reason : "No instructor reason is available in this record."}</p></>}{/* BUG-065: this summary repeats verbatim once per row -- a screen-reader
+        return <li key={row.criterion_id} className="signal-result-card"><div className="signal-result-card__top"><span className="signal-result-card__number">{index + 1}</span><span className={`signal-outcome signal-outcome--${assessment.ruleScopeUnconfirmed && !assessment.instructorRecorded ? "neutral" : outcome.tone}`}>{assessment.ruleScopeUnconfirmed && !assessment.instructorRecorded ? "Previously recorded: " : ""}{outcome.label}</span><span className={`signal-importance signal-importance--${row.weight_importance === "med" ? "medium" : row.weight_importance}`}>{row.weight_importance === "med" ? "Medium" : `${row.weight_importance.slice(0, 1).toUpperCase()}${row.weight_importance.slice(1)}`} importance</span></div><h3 id={criterionRecordId(checkRunId, row.criterion_id)} tabIndex={-1}>{row.text}</h3>{assessment.ruleScopeUnconfirmed && !assessment.instructorRecorded && <RuleScopeNotice />}{!publicView && row.resolution && <p className="signal-resolution-note"><strong>Instructor judgment</strong></p>}{!publicView && row.resolution?.type === "needs_document" && <p className="signal-resolution-note">{CRITERION_EXCLUSION_COPY.recorded}. {CRITERION_EXCLUSION_COPY.noGrade}</p>}{!publicView && row.resolution && <>{row.resolution.type !== "needs_document" && <p className="signal-resolution-note"><strong>Recorded grade:</strong> {recordedGradeLabel(row)}</p>}<p className="signal-resolution-note"><strong>Instructor reason:</strong> {row.resolution.reason?.trim() ? row.resolution.reason : "No instructor reason is available in this record."}</p></>}{/* BUG-065: this summary repeats verbatim once per row -- a screen-reader
                 links/buttons list can't tell them apart without a per-criterion
                 accessible name, same fix already applied to the flag "Review
                 evidence" links and the escalation resolve-button groups. */}
               {privateScope && row.resolution && <RecordedJudgmentTools checkRunId={checkRunId} criterionId={row.criterion_id} criterionText={row.text} canonical={row} />}
+              {assessment.ruleScopeUnconfirmed && assessment.instructorRecorded && <RuleScopeNotice earlier />}
               <details><summary id={evidenceSummaryId} aria-label={`${assessment.summary}: ${row.text}`}>{assessment.summary}</summary><div className="signal-result-card__evidence">
                 {assessment.relationship && <p>{assessment.relationship}</p>}
                 {assessment.sourceCoverage && <CriterionSourceCoverage value={assessment.sourceCoverage} sourceAction={sourceAction} firstSlot={row.evidence.length + 1} criterionText={row.text} />}

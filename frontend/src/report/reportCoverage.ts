@@ -131,7 +131,8 @@ export function coverageItems(report: ReportOut): CoverageStatementItem[] {
       action: { to: "/rubric", label: "Review required format" },
     });
   }
-  for (const status of report.integrity_check_status ?? []) {
+  const order = Object.keys(INTEGRITY_LABEL);
+  for (const status of [...(report.integrity_check_status ?? [])].sort((a, b) => order.indexOf(a.check_kind) - order.indexOf(b.check_kind))) {
     items.push(integrityCoverageItem(status, report.manuscript_id, report.check_run_id));
   }
   return items;

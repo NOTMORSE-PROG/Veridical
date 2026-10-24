@@ -13,6 +13,10 @@ import { resultDisplay } from "./ResultsTable";
 import { useDecisionReview } from "./useDecisionReview";
 import { useDecideReport, useReopenReport } from "./useReport";
 import { useExplicitActionFocus } from "../routing/useExplicitActionFocus";
+import { RuleScopeSummary } from "./RuleScopeNotice";
+import { unconfirmedAutomaticRuleRows } from "../domain/ruleScope";
+import { WorkflowLink } from "../routing/WorkflowLink";
+import { useLocation } from "react-router";
 
 const dateFormatter = new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" });
 const DECISION_COPY: Record<Decision, { title: string; confirm: string; phrase: string }> = {
@@ -33,6 +37,7 @@ function CurrentAssessmentReview({ review, busy, onRebind }: { review: ReturnTyp
     {review.error && <p role="alert">{review.error}</p>}
     {review.reviewed && <div className="signal-copy-flow"><h3>Current assessment</h3>
       <ReadinessBand status={review.reviewed.status} />
+      <RuleScopeSummary rows={review.reviewed.results} checkRunId={review.reviewed.check_run_id} linkToRecords={false} />
       <p>{review.reviewed.pending_review_count} criteria remain unresolved. Instructor decision: {review.reviewed.decision ? DECISION_LABEL[review.reviewed.decision] : "Not recorded"}.</p>
       <ul>{review.reviewed.results.map(row => <li key={row.criterion_id}>{row.text}: {resultDisplay(row).label}</li>)}</ul>
       {review.canRebind && <Button variant="secondary" disabled={busy} onClick={event => onRebind(event.currentTarget)}>Use my reason with this current assessment</Button>}
@@ -69,7 +74,8 @@ function DecisionDialog({ decision, report, manuscriptLabel, onClose, onSaved, f
     actions={<><Button variant="secondary" disabled={decide.isPending} onClick={onClose}>Cancel</Button>
       <Button variant={decision === "rejected" ? "danger" : "brand"} disabled={!review.canSubmit} busy={decide.isPending} onClick={submit}>{decide.isPending && decision === "returned" ? "Recording return" : copy.confirm}</Button></>}>
     <div className="signal-decision-dialog" aria-busy={decide.isPending}>
-      <div className="signal-decision-dialog__band"><span>{readFailed ? "Last loaded readiness band" : "VERIDICAL readiness band"}</span><ReadinessBand status={report.status} /></div>
+      <div className="signal-decision-dialog__band"><span>{readFailed ? "Last loaded readiness band" : unconfirmedAutomaticRuleRows(report.results).length ? "Saved readiness band" : "VERIDICAL readiness band"}</span><ReadinessBand status={report.status} /></div>
+      <RuleScopeSummary rows={report.results} checkRunId={report.check_run_id} linkToRecords={false} />
       {readFailed && <DecisionReadRecovery retrying={retrying} onRetry={onRetry} />}
       <CurrentAssessmentReview review={review} busy={decide.isPending} onRebind={trigger => followAction(trigger, review.rebind)} />
       <p>This records {manuscriptLabel} as {copy.phrase}{pendingReturn ? ` with ${report.pending_review_count} unresolved criteria. Returning does not grade or exclude them.` : "."} The report becomes read-only until you reopen it with a reason.</p>
@@ -110,6 +116,7 @@ function ReopenDialog({ report, onClose, onSaved, fallbackFocusRef, readFailed, 
     actions={<><Button variant="secondary" disabled={reopen.isPending} onClick={onClose}>Keep decision</Button>
       <Button variant="brand" disabled={!review.canSubmit} busy={reopen.isPending} onClick={submit}>Reopen decision</Button></>}>
     <div className="signal-decision-dialog">
+      <RuleScopeSummary rows={report.results} checkRunId={report.check_run_id} linkToRecords={false} />
       {readFailed && <DecisionReadRecovery retrying={retrying} onRetry={onRetry} />}
       <CurrentAssessmentReview review={review} busy={reopen.isPending} onRebind={trigger => followAction(trigger, review.rebind)} />
       <p>The current decision stays in Audit. Reopening permits further instructor review. It does not confirm or save earlier unsaved drafts; review each current criterion before using its draft.</p>
@@ -123,6 +130,7 @@ function ReopenDialog({ report, onClose, onSaved, fallbackFocusRef, readFailed, 
 }
 
 export function SignalDecisionPanel({ report, manuscriptLabel, readFailed, retrying, onRetry }: ReportReadRecovery & { report: ReportOut; manuscriptLabel: string }) {
+  const location = useLocation();
   const [openDecision, setOpenDecision] = useState<Decision>();
   const [reopen, setReopen] = useState(false);
   const [receipt, setReceipt] = useState<ReportOut>();
@@ -134,6 +142,7 @@ export function SignalDecisionPanel({ report, manuscriptLabel, readFailed, retry
     <div className="signal-decision-gate__heading"><div><p className="signal-section-kicker">Decide - Instructor authority</p><h2 id="decision-heading" ref={headingRef} tabIndex={-1}>Final defense-readiness decision</h2></div>{report.decision && <span className={`signal-decision signal-decision--${report.decision}`}>{DECISION_LABEL[report.decision]}</span>}</div>
     {receipt && <p role="status" className="signal-decision-gate__receipt">{receipt.decision === "returned" ? `Return for revision recorded. ${receipt.pending_review_count} criteria remain unresolved.` : receipt.decision === null ? "Decision reopened. Earlier drafts still need current review before confirmation." : `${DECISION_LABEL[receipt.decision]} recorded.`}</p>}
     {readFailed && <DecisionReadRecovery retrying={retrying} onRetry={onRetry} />}
+    <RuleScopeSummary rows={report.results} checkRunId={report.check_run_id} />
     {!report.rubric_is_current && <Alert title="A newer format version is active" tone="warning">This report remains pinned to the format used when the check ran. Start a new check if the newer version should govern your decision.</Alert>}
     {report.decision ? <div className="signal-decision-record">
       <p>Recorded by you{report.decided_at ? ` on ${dateFormatter.format(new Date(report.decided_at))}` : ""}. This is the instructor's decision, not an automated approval or block.</p>
@@ -142,7 +151,10 @@ export function SignalDecisionPanel({ report, manuscriptLabel, readFailed, retry
       <Button variant="secondary" disabled={unavailable} onClick={() => setReopen(true)}>Reopen this decision</Button>
     </div> : <div className="signal-decision-choice">
       <p>VERIDICAL provides a readiness band and checkable evidence. You make the final decision after reviewing the full record above.</p>
-      {pending && <Alert title={`${report.pending_review_count} ${report.pending_review_count === 1 ? "criterion needs" : "criteria need"} your judgment`} tone="warning">You can return this manuscript for revision with a reason. Returning does not grade or exclude these criteria. Approval remains unavailable. <a href="#review-criteria">Review unresolved criteria.</a></Alert>}
+      {pending && <Alert title={`${report.pending_review_count} ${report.pending_review_count === 1 ? "criterion needs" : "criteria need"} your judgment`} tone="warning">You can return this manuscript for revision with a reason. Returning does not grade or exclude these criteria. Approval remains unavailable. <WorkflowLink to={{ pathname: `/report/${report.check_run_id}`, search: location.search, hash: "review-criteria" }} onClick={event => {
+        if (event.defaultPrevented || event.button !== 0 || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
+        requestAnimationFrame(() => { const target = document.getElementById("review-criteria"); target?.scrollIntoView({ block: "start" }); target?.focus({ preventScroll: true }); });
+      }}>Review unresolved criteria.</WorkflowLink></Alert>}
       <div className="signal-decision-choice__actions">
         <Button variant="brand" disabled={pending || unavailable} onClick={() => setOpenDecision("approved")}>Approve for defense</Button>
         <Button variant="secondary" disabled={unavailable} onClick={() => setOpenDecision("returned")}>Return for revision</Button>

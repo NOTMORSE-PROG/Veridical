@@ -346,6 +346,7 @@ export interface ResultRowCommon {
   reason: string | null;
   evidence: EvidenceItem[];
   rule_facts?: CriterionRuleFacts | null;
+  rule_scope_unconfirmed?: boolean;
   // Optional, not absent: `CriterionResultOut` (instructor-facing) always
   // carries a real value; `PublicCriterionResultOut` (BUG-044) doesn't
   // declare the field at all, which TypeScript treats as compatible with

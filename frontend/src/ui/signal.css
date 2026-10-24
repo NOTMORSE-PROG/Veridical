@@ -2307,14 +2307,14 @@
   .signal-report-hero {
     position: relative;
     display: grid;
-    grid-template-columns: var(--signal-report-hero-grid);
-    gap: var(--signal-space-10);
+    grid-template-columns: minmax(0, 1fr);
+    gap: var(--signal-space-5);
     overflow: hidden;
     border-block-start: var(--signal-border-brand) solid var(--color-signal-brand);
     border-radius: var(--signal-radius-panel);
     background: var(--color-signal-foundation);
     color: var(--color-signal-surface);
-    padding: var(--signal-space-8);
+    padding: var(--signal-space-5);
     box-shadow: var(--signal-shadow-raised);
   }
 
@@ -2340,6 +2340,7 @@
 
   .signal-report-hero dl {
     display: grid;
+    grid-template-columns: var(--signal-report-facts-grid);
     gap: var(--signal-space-3);
     align-self: center;
     margin: 0;
@@ -2596,7 +2597,7 @@
   .signal-coverage-list {
     display: flex;
     flex-direction: column;
-    gap: var(--signal-space-4);
+    gap: 0;
     margin: 0;
     padding: var(--signal-space-6);
     padding-block-start: 0;
@@ -2605,12 +2606,11 @@
 
   .signal-coverage-list__item {
     display: grid;
-    grid-template-columns: auto minmax(0, 1fr);
+    grid-template-columns: var(--signal-coverage-ledger-grid);
     gap: var(--signal-space-3);
     align-items: start;
-    border: var(--signal-border-hairline) solid var(--color-signal-border);
-    border-radius: var(--signal-radius-control);
-    padding: var(--signal-space-4);
+    border-block-start: var(--signal-border-hairline) solid var(--color-signal-border);
+    padding-block: var(--signal-space-4);
     background: var(--color-signal-surface);
   }
 
@@ -2633,7 +2633,7 @@
 
   .signal-coverage-list__body {
     min-width: 0;
-    grid-column: 1 / -1;
+    grid-column: 2;
   }
 
   .signal-coverage-list__body ul {
@@ -2646,9 +2646,32 @@
   .signal-coverage-list__action {
     min-width: 0;
     max-inline-size: 100%;
-    grid-column: 1 / -1;
+    grid-column: 2;
     justify-self: start;
     white-space: normal;
+  }
+
+  .signal-report.signal-page-flow {
+    gap: var(--signal-rhythm-related);
+  }
+
+  .signal-coverage-ledger > .signal-control-cluster {
+    padding: var(--signal-space-6);
+    padding-block-start: 0;
+  }
+
+  .signal-report-task-actions a {
+    display: inline-flex;
+    align-items: center;
+    min-block-size: var(--signal-control-height);
+    padding-inline: var(--signal-space-3);
+    border: var(--signal-border-hairline) solid currentColor;
+    border-radius: var(--signal-radius-control);
+  }
+
+  .signal-rule-scope {
+    max-inline-size: var(--signal-prose-width);
+    overflow-wrap: anywhere;
   }
 
   .signal-resolution-list,
@@ -6717,6 +6740,16 @@
     .signal-decision-gate__heading {
       align-items: flex-start;
       flex-direction: column;
+    }
+
+    .signal-report-hero dl,
+    .signal-coverage-list__item {
+      grid-template-columns: minmax(0, 1fr);
+    }
+
+    .signal-coverage-list__body,
+    .signal-coverage-list__action {
+      grid-column: 1;
     }
 
     .signal-report-hero,

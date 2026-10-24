@@ -581,7 +581,13 @@ def _rule_facts_flowables(row: CriterionResultOut, styles: dict[str, ParagraphSt
         styles["body_bold"],
     )
     title.keepWithNext = True
-    parts = [title]
+    parts = []
+    if row.rule_scope_unconfirmed:
+        qualification = rule_facts_copy()["scope_qualification"]
+        if row.resolution:
+            qualification = "Earlier rule record. " + qualification
+        parts.append(Paragraph(escape(qualification), styles["body"]))
+    parts.append(title)
     for index, text in enumerate(paragraphs):
         parts.append(Paragraph(escape(text), styles["body"]))
         if index == 0:
@@ -874,7 +880,17 @@ def build_report_pdf(data: ReportExportData) -> bytes:
     else:
         flow.append(Paragraph("Not recorded", styles["body"]))
     flow.append(Spacer(1, 6))
-    flow.append(Paragraph("System readiness", styles["body_bold"]))
+    unconfirmed = sum(
+        row.rule_scope_unconfirmed
+        and row.resolution is None
+        and row.outcome in {"passed", "failed"}
+        for row in report.results
+    )
+    flow.append(
+        Paragraph(
+            "Saved readiness band" if unconfirmed else "System readiness", styles["body_bold"]
+        )
+    )
     # 2. System band and subordinate calculation detail.
     flow.append(
         _tone_badge(
@@ -930,6 +946,15 @@ def build_report_pdf(data: ReportExportData) -> bytes:
         )
     else:
         flow.append(Paragraph("Composite detail: not available.", styles["caption"]))
+    if unconfirmed:
+        noun = "result" if unconfirmed == 1 else "results"
+        flow.append(
+            Paragraph(
+                f"Complete-requirement coverage is unconfirmed for {unconfirmed} recorded rule "
+                f"{noun}. Review the criterion records before relying on this saved band.",
+                styles["body"],
+            )
+        )
     if pending:
         flow.append(
             Paragraph(

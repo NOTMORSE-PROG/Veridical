@@ -1,6 +1,5 @@
 import { useId, useState, type ReactNode } from "react";
 import { ActionLink } from "./ActionLink";
-import { WarningTriangleIcon } from "./Alert";
 import { Button } from "./Button";
 
 export interface CoverageStatementItem {
@@ -18,18 +17,19 @@ function CoverageDetails({ item }: { item: CoverageStatementItem }) {
   const id = useId();
   const content = <>
     {item.subIssues && item.subIssues.length > 0 &&
-      <ul>{item.subIssues.map((issue) => <li key={issue}>{issue}</li>)}</ul>}
+      <ul>{item.subIssues.map((issue, index) => <li key={`${index}:${issue}`}>{issue}</li>)}</ul>}
     {item.sources && item.sources.length > 0 && <ul>
-      {item.sources.map((source) => <li key={source.label}>
+      {item.sources.map((source, index) => <li key={`${index}:${source.label}`}>
         {source.to ? <ActionLink to={source.to} variant="quiet">{source.label}</ActionLink> : source.label}
       </li>)}
     </ul>}
   </>;
-  if (!item.detailsLabel) return content;
+  if (!item.subIssues?.length && !item.sources?.length) return null;
+  const label = item.detailsLabel ?? `${item.label} assessment details`;
   return <>
     <Button variant="quiet" aria-expanded={expanded} aria-controls={id}
       onClick={() => setExpanded((value) => !value)}>
-      {expanded ? "Hide" : "Show"} {item.detailsLabel}
+      {expanded ? "Hide" : "Show"} {label}
     </Button>
     <div id={id} hidden={!expanded}>{content}</div>
   </>;
@@ -61,12 +61,16 @@ interface CoverageStatementProps {
 // rather than N separately-competing alerts.
 export function CoverageStatement({ headingId, kicker = "Assessment coverage", heading, intro, items }: CoverageStatementProps) {
   if (items.length === 0) return null;
+  const sharedActions = items.flatMap(item => item.action ? [item.action] : []).filter((action, index, actions) =>
+    actions.findIndex(other => other.to === action.to && other.label === action.label && other.ariaLabel === action.ariaLabel) === index
+      && actions.filter(other => other.to === action.to && other.label === action.label && other.ariaLabel === action.ariaLabel).length > 1);
+  const shared = (item: CoverageStatementItem) => item.action && sharedActions.some(action => action.to === item.action?.to && action.label === item.action?.label && action.ariaLabel === item.action?.ariaLabel);
   return (
-    <section className="signal-review-section signal-review-section--attention" aria-labelledby={headingId}>
+    <section className="signal-review-section signal-review-section--attention signal-coverage-ledger" aria-labelledby={headingId}>
       <div className="signal-review-section__heading">
         <div>
           <p className="signal-section-kicker">{kicker}</p>
-          <h2 id={headingId}>{heading}</h2>
+          <h2 id={headingId} tabIndex={-1}>{heading}</h2>
         </div>
         <span>{items.length} {items.length === 1 ? "limitation" : "limitations"}</span>
       </div>
@@ -74,13 +78,12 @@ export function CoverageStatement({ headingId, kicker = "Assessment coverage", h
       <ul className="signal-coverage-list">
         {items.map((item) => (
           <li className="signal-coverage-list__item" key={item.key}>
-            <WarningTriangleIcon />
             <p className="signal-coverage-list__label">{item.label}</p>
             <div className="signal-coverage-list__body">
               <p>{item.detail}</p>
               <CoverageDetails item={item} />
             </div>
-            {item.action && (
+            {item.action && !shared(item) && (
               <ActionLink className="signal-coverage-list__action" to={item.action.to} variant="secondary" aria-label={item.action.ariaLabel ?? item.action.label}>
                 {item.action.label}
               </ActionLink>
@@ -88,6 +91,9 @@ export function CoverageStatement({ headingId, kicker = "Assessment coverage", h
           </li>
         ))}
       </ul>
+      {sharedActions.length > 0 && <div className="signal-control-cluster">{sharedActions.map(action => <ActionLink key={`${action.to}:${action.label}:${action.ariaLabel ?? ""}`} to={action.to} variant="quiet" aria-label={action.ariaLabel ?? (action.label === "Open the paper" ? "Open manuscript for manual review" : action.label)}>
+        {action.label === "Open the paper" ? "Open manuscript for manual review" : action.label}
+      </ActionLink>)}</div>}
     </section>
   );
 }

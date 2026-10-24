@@ -4,6 +4,7 @@
   "heading_match": "The saved heading lookup matched \"{matched_title}\" for \"{target}\".",
   "heading_search": "The saved heading lookup searched for \"{target}\".",
   "heading_scope": "This observation covers the heading lookup only.",
+  "scope_qualification": "The saved record establishes a heading lookup; coverage of the complete requirement is not established.",
   "order": "The saved order-check record contains these top-level headings, in this order:",
   "order_scope": "This observation covers the headings retained in this check.",
   "pages": "Recorded page count: {count}.",

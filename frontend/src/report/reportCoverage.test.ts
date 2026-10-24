@@ -17,6 +17,20 @@ function item(patch: Partial<IntegrityCheckStatusOut> = {}) {
 }
 
 describe("partial source coverage", () => {
+  it("keeps check-domain order stable without mutating recorded arrays or dropping duplicate sources", () => {
+    const native = { paragraph: 7, kind: "paragraph" as const, n_occurrences: 1 };
+    const statuses = (["originality_reuse", "statistical_forensics", "citation_integrity", "internal_agreement"] as const).map(check_kind => ({
+      ...status, check_kind, assessment_scope: null, analysis_coverage: null,
+      coverage_reason: "source_reading_order_unresolved", n_native_equations_unassessed: 2,
+      native_math_inventory_state: "complete", native_math_inventory_scope: "main_document_body",
+      native_math_coverage_items: [native, { ...native }],
+    })) as IntegrityCheckStatusOut[];
+    const report = { manuscript_id: 2, check_run_id: 3, integrity_check_status: statuses } as ReportOut;
+    const before = JSON.stringify(report);
+    const items = coverageItems(report);
+    expect(items.map(value => value.key)).toEqual(["internal_agreement", "citation_integrity", "statistical_forensics", "originality_reuse"]);
+    expect(JSON.stringify(report)).toBe(before);
+  });
   it("adds a current limitation without changing a historical report record", () => {
     const report = { manuscript_id: 2, check_run_id: 3, integrity_check_status: [], historical_citation_title_unverified: true } as unknown as ReportOut;
     const before = JSON.stringify(report);

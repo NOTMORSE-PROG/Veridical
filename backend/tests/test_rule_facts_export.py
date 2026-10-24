@@ -4,6 +4,7 @@ from copy import deepcopy
 from types import SimpleNamespace
 
 import fitz
+import pytest
 
 from app.models.enums import CheckKind, CriterionType, ResultOutcome
 from app.report.export import build_report_pdf
@@ -37,6 +38,38 @@ def _data():
 def _text(pdf):
     with fitz.open(stream=pdf, filetype="pdf") as document:
         return " ".join(" ".join(page.get_text().split()) for page in document)
+
+
+@pytest.mark.parametrize("instructor_recorded", [False, True])
+def test_legacy_heading_scope_qualifies_saved_band_or_earlier_record_without_regrading(
+    instructor_recorded,
+):
+    data = _data()
+    row = data.report.results[0]
+    row.rule_facts = _facts(
+        {"rule_id": "required_section_present", "target": "abstract", "matched_title": "Abstract"}
+    )
+    row.rule_scope_unconfirmed = True
+    if instructor_recorded:
+        row.resolution = ResolutionOut(
+            type="mark_fail", reason="I checked the full requirement.", ai_majority_verdict=None
+        )
+        row.outcome, row.score = "failed", 0
+    before = data.model_dump_json()
+    text = _text(build_report_pdf(data))
+    assert (
+        "The saved record establishes a heading lookup; "
+        "coverage of the complete requirement is not established."
+        in text
+    )
+    if instructor_recorded:
+        assert "Earlier rule record." in text
+        assert "I checked the full requirement." in text
+        assert "Complete-requirement coverage is unconfirmed for 1" not in text
+    else:
+        assert "Saved readiness band" in text
+        assert "Complete-requirement coverage is unconfirmed for 1 recorded rule result." in text
+    assert data.model_dump_json() == before
 
 
 def test_private_original_and_public_fact_allowlists_match_without_mutating_saved_detail():

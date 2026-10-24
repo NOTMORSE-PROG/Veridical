@@ -621,7 +621,8 @@ describe("SignalReportPage", () => {
 
       fireEvent.click(await screen.findByRole("link", { name: /Inspect signals/ }));
       await waitFor(() => expect(screen.getByRole("region", { name: "Integrity signals" })).toHaveFocus());
-      expect(scrollIntoView).not.toHaveBeenCalled();
+      expect(scrollIntoView).toHaveBeenCalledWith({ block: "start" });
+      scrollIntoView.mockClear();
 
       fireEvent.click(screen.getByRole("link", { name: /Open high-severity findings counted for readiness: 1\./ }));
       await waitFor(() => expect(scrollIntoView).toHaveBeenCalledTimes(1));
