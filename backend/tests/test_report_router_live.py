@@ -164,6 +164,88 @@ def test_decision_route_requires_auth(client):
     assert resp.status_code == 401
 
 
+def _set_run_original(url, run_id, path, extraction=None):
+    import asyncio
+
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
+    from app.db import sqlalchemy_url
+    from app.models.manuscript import Manuscript
+    from app.models.run import CheckRun
+
+    async def update():
+        engine = create_async_engine(sqlalchemy_url(url))
+        try:
+            async with async_sessionmaker(engine, expire_on_commit=False)() as session:
+                run = await session.get(CheckRun, run_id)
+                manuscript = await session.get(Manuscript, run.manuscript_id)
+                manuscript.file_ref = str(path)
+                manuscript.original_filename = path.name
+                if extraction is not None:
+                    manuscript.content_hash = extraction.docx_source_sha256
+                    manuscript.section_tree = extraction.section_tree.model_dump(mode="json")
+                await session.commit()
+                return manuscript.id
+        finally:
+            await engine.dispose()
+
+    return asyncio.run(update())
+
+
+@pytest.mark.parametrize("kind,suffix", [("pdf", ".docx"), ("pdf", ".txt"), ("docx", ".pdf")])
+def test_authenticated_source_routes_follow_bytes(
+    logged_in_with_a_done_run, api_scratch_url, tmp_path, kind, suffix
+):
+    import hashlib
+
+    from app.ingest.docx import extract_document
+    from app.ingest.service import _write_raw_store, raw_store_path
+    from tests.test_ingest_fixtures import FIXTURE_DIR
+
+    client, run_id = logged_in_with_a_done_run
+    path = tmp_path / f"paper{suffix}"
+    payload = (FIXTURE_DIR / ("image_table.pdf" if kind == "pdf" else "native.docx")).read_bytes()
+    path.write_bytes(payload)
+    extraction = extract_document(str(path), get_settings()) if kind == "docx" else None
+    mid = _set_run_original(api_scratch_url, run_id, path, extraction)
+    if extraction is not None:
+        raw = raw_store_path(get_settings(), mid)
+        _write_raw_store(extraction, raw)
+        before = hashlib.sha256(raw.read_bytes()).hexdigest()
+    viewer = client.get(f"/check-runs/{run_id}/document")
+    assert viewer.status_code == 200, viewer.text
+    assert viewer.json()["source_format"] == kind and viewer.json()["available"] is True
+    file = client.get(f"/check-runs/{run_id}/document/file")
+    paragraphs = client.get(f"/check-runs/{run_id}/document/paragraphs")
+    if kind == "pdf":
+        assert viewer.json()["page_count"] == 2
+        assert file.status_code == 200 and file.content == payload
+        assert file.headers["content-type"].startswith("application/pdf")
+        assert file.headers["cache-control"] == "private, no-store"
+        assert file.headers["x-content-type-options"] == "nosniff"
+        assert paragraphs.status_code == 409
+    else:
+        assert file.status_code == 409
+        assert paragraphs.status_code == 200 and paragraphs.json()["paragraphs"]
+        assert hashlib.sha256(raw.read_bytes()).hexdigest() == before
+    assert path.read_bytes() == payload
+    client.post("/auth/logout")
+    for route in ("document", "document/file", "document/paragraphs"):
+        assert client.get(f"/check-runs/{run_id}/{route}").status_code == 401
+
+
+def test_authenticated_source_rejects_corrupt_pdf(
+    logged_in_with_a_done_run, api_scratch_url, tmp_path
+):
+    client, run_id = logged_in_with_a_done_run
+    path = tmp_path / "broken.docx"
+    path.write_bytes(b"%PDF-1.4 broken")
+    _set_run_original(api_scratch_url, run_id, path)
+    response = client.get(f"/check-runs/{run_id}/document")
+    assert response.status_code == 200 and response.json()["available"] is False
+    assert client.get(f"/check-runs/{run_id}/document/file").status_code == 409
+
+
 def test_decide_then_reopen_over_http(logged_in_with_a_done_run):
     client, check_run_id = logged_in_with_a_done_run
     resp = client.post(

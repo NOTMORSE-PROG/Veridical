@@ -59,6 +59,7 @@ from app.ingest.schemas import (
     PaginatedManuscripts,
 )
 from app.ingest.titlepage import TitlePageProposal, extract_title_page
+from app.ingest.zip_bounds import check_docx_directory_size
 from app.llm import LLMNotConfiguredError, get_llm_client_for
 from app.models.citation import Citation
 from app.models.enums import (
@@ -107,7 +108,7 @@ _ZIP_MAGIC = b"PK\x03\x04"
 _OLE_MAGIC = b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1"
 
 
-def detect_format(file_path: Path) -> str:
+def detect_format(file_path: Path, settings: Settings | None = None) -> str:
     """Sniff the REAL type from content — extensions are user input and
     lie (a DOCX renamed to .pdf must still parse as a DOCX, V-008 edge
     case). Returns an EXTRACTORS key or the honest non-key (".doc") so
@@ -117,6 +118,7 @@ def detect_format(file_path: Path) -> str:
     if head.startswith(_PDF_MAGIC):
         return ".pdf"
     if head.startswith(_ZIP_MAGIC):
+        check_docx_directory_size(file_path, settings or get_settings())
         try:
             with zipfile.ZipFile(file_path) as zf:
                 if any(name.startswith("word/") for name in zf.namelist()):

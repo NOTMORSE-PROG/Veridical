@@ -237,7 +237,11 @@ async def get_manuscript_file_route(
     submitted bytes here (V-065 Q1: never re-rasterized server-side). A
     purged manuscript raises `GoneError` (410), not a silent empty body."""
     path = await get_manuscript_file_path(session, check_run_id, instructor.id, get_settings())
-    return FileResponse(path, media_type="application/pdf")
+    return FileResponse(
+        path,
+        media_type="application/pdf",
+        headers={"Cache-Control": "private, no-store", "X-Content-Type-Options": "nosniff"},
+    )
 
 
 @router.post(

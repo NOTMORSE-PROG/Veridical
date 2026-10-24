@@ -896,6 +896,7 @@ def test_export_states_an_explicit_reason_for_a_docx_manuscript(client, api_scra
     missing image."""
     import asyncio
 
+    from docx import Document
     from sqlalchemy import text
     from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
@@ -908,7 +909,7 @@ def test_export_states_an_explicit_reason_for_a_docx_manuscript(client, api_scra
     from app.report.service import aggregate_and_score
 
     docx_path = tmp_path / "manuscript.docx"
-    docx_path.write_bytes(b"not a real docx, never opened by this path")
+    Document().save(docx_path)
 
     async def seed():
         engine = create_async_engine(sqlalchemy_url(api_scratch_url))

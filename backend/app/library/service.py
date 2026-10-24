@@ -106,7 +106,8 @@ from app.report.service import (
     manuscript_paragraphs_for,
     manuscript_viewer_for,
 )
-from app.storage import ensure_local_file, get_storage, storage_key_for
+from app.report.source_files import readable_source_file
+from app.storage import get_storage, storage_key_for
 from app.storage.access import lock_source, read_source
 
 # Lengths come from the columns themselves, so a schema change cannot leave
@@ -1131,21 +1132,19 @@ async def get_library_paragraphs(
     )
 
 
-async def get_library_original_file_path(
+async def get_library_original_file(
     session: AsyncSession, instructor_id: int, manuscript_id: int, settings: Settings
-) -> Path:
+) -> tuple[Path, str]:
     """V-079: the original PDF/DOCX, including DOCX layout unavailable in the
     extracted-text reader. Same active-Library authorization as the full reader."""
     manuscript = await _resolve_readable_library_manuscript(session, instructor_id, manuscript_id)
     if manuscript.purged_at is not None:
         raise GoneError("This manuscript's source file was purged and can no longer be read.")
-    if Path(manuscript.file_ref).suffix.lower() not in {".pdf", ".docx"}:
-        raise ConflictError("This manuscript's source file format is not supported.")
 
-    def resolve_original() -> Path:
+    def resolve_original() -> tuple[Path, str]:
         # Client construction can perform blocking credential discovery as well
         # as retrieval; keep both operations off the request's event loop.
-        return ensure_local_file(settings, get_storage(settings), manuscript.file_ref)
+        return readable_source_file(manuscript, settings)
 
     try:
         return await read_source(session, manuscript, lambda: asyncio.to_thread(resolve_original))

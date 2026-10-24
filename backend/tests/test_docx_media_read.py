@@ -58,6 +58,17 @@ def test_native_table_and_images_survive_saved_json_and_public_projection(saved)
         assert manuscript_docx_image_for(manuscript, index, settings) == (_png_bytes(), "image/png")
 
 
+def test_source_bound_images_and_table_ignore_misleading_pdf_name(saved):
+    settings, manuscript, _, path = saved
+    renamed = path.with_suffix(".pdf")
+    path.rename(renamed)
+    manuscript.file_ref = str(renamed)
+    assert manuscript_docx_image_for(manuscript, 0, settings) == (_png_bytes(), "image/png")
+    projection = manuscript_paragraphs_for(manuscript, settings)
+    assert projection.tables[0].rows == [["Original table text", ""]]
+    assert len(projection.images) == 2
+
+
 @pytest.mark.parametrize("index", [-1, 2, 999999])
 def test_out_of_range_index_is_not_python_negative_indexing(saved, index):
     settings, manuscript, _, _ = saved
@@ -73,8 +84,10 @@ def test_purged_source_is_unavailable_even_if_original_bytes_remain(saved):
 
 
 def test_non_docx_source_is_not_opened_as_a_package(saved):
+    from tests.test_ingest_fixtures import FIXTURE_DIR
+
     settings, manuscript, _, _ = saved
-    manuscript.file_ref = "source.pdf"
+    manuscript.file_ref = str(FIXTURE_DIR / "native.pdf")
     with pytest.raises(ConflictError):
         manuscript_docx_image_for(manuscript, 0, settings)
 
@@ -89,7 +102,7 @@ def test_legacy_record_does_not_reparse_or_fetch_original(saved, monkeypatch, mi
     else:
         extraction.images[0].docx_source = None
     _save(saved)
-    monkeypatch.setattr(media, "ensure_local_file", lambda *args: pytest.fail("Read original"))
+    monkeypatch.setattr(media, "manuscript_source_file", lambda *args: pytest.fail("Read original"))
     with pytest.raises(GoneError):
         manuscript_docx_image_for(manuscript, 0, settings)
     response = manuscript_paragraphs_for(manuscript, settings)

@@ -39,6 +39,7 @@ from app.ingest.schemas import (
     TableBlock,
     TextBlock,
 )
+from app.ingest.zip_bounds import check_docx_directory_size
 from app.messages import DOCX_EXPANDS_TOO_LARGE, FILE_UNREADABLE
 
 EMU_PER_POINT = 12700  # OOXML length unit (true invariant)
@@ -83,6 +84,7 @@ def _check_uncompressed_size(path: str, settings: Settings) -> None:
     member in memory at once, regardless of what either size field claims.
     """
     limit = settings.max_docx_uncompressed_mb * 1024 * 1024
+    check_docx_directory_size(path, settings)
     with zipfile.ZipFile(path) as zf:
         declared_total = 0
         member_names = set()

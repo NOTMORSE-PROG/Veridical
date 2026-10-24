@@ -113,7 +113,9 @@ def test_manuscript_file_path_does_not_relabel_storage_outage(tmp_path, monkeypa
 
     settings = Settings(data_dir=tmp_path)
     manuscript = Manuscript(file_ref=str(tmp_path / "uploads" / "1.pdf"), purged_at=None)
-    monkeypatch.setattr(report_service, "get_storage", lambda _settings: UnavailableStorage())
+    monkeypatch.setattr(
+        "app.report.source_files.get_storage", lambda _settings: UnavailableStorage()
+    )
 
     with pytest.raises(TimeoutError, match="storage timed out"):
         report_service.manuscript_file_path_for(manuscript, settings)
@@ -131,7 +133,7 @@ def test_manuscript_file_path_does_not_relabel_storage_config_error(tmp_path, mo
     def misconfigured_storage(_settings):
         raise RuntimeError("storage is misconfigured")
 
-    monkeypatch.setattr(report_service, "get_storage", misconfigured_storage)
+    monkeypatch.setattr("app.report.source_files.get_storage", misconfigured_storage)
 
     with pytest.raises(RuntimeError, match="storage is misconfigured"):
         report_service.manuscript_file_path_for(manuscript, settings)
@@ -176,7 +178,7 @@ def client(api_scratch_url, tmp_path, monkeypatch):
 
     shared_storage = FakeStorage()
     monkeypatch.setattr(ingest_service, "get_storage", lambda settings: shared_storage)
-    monkeypatch.setattr(report_service, "get_storage", lambda settings: shared_storage)
+    monkeypatch.setattr("app.report.source_files.get_storage", lambda settings: shared_storage)
     monkeypatch.setattr(archive_service, "get_storage", lambda settings: shared_storage)
     monkeypatch.setattr(library_service, "get_storage", lambda settings: shared_storage)
 

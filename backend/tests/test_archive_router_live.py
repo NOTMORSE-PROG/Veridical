@@ -142,7 +142,9 @@ def seeded(client, api_scratch_url, tmp_path):
                 await session.commit()
 
                 upload_path = upload_dir / f"{mine.id}.pdf"
-                upload_path.write_bytes(b"%PDF-1.4 fake")
+                from tests.test_ingest_fixtures import FIXTURE_DIR
+
+                upload_path.write_bytes((FIXTURE_DIR / "native.pdf").read_bytes())
                 raw_path = raw_store_path(settings, mine.id)
                 raw_path.write_text("{}")
                 mine.file_ref = str(upload_path)
@@ -878,7 +880,7 @@ def test_purge_is_visible_in_owner_audit_without_exposing_it_to_another_instruct
 
 
 @pytest.mark.parametrize("cancel_count", [0, 1, 2])
-@pytest.mark.parametrize("source_kind", ["pdf", "extraction"])
+@pytest.mark.parametrize("source_kind", ["pdf", "extraction", "malformed_pdf"])
 def test_inflight_source_hydration_cannot_restore_bytes_after_purge(
     seeded, api_scratch_url, monkeypatch, cancel_count, source_kind
 ):
@@ -899,8 +901,13 @@ def test_inflight_source_hydration_cannot_restore_bytes_after_purge(
 
     _, ids = seeded
     settings = get_settings()
-    source_module = report if source_kind == "pdf" else ingestion
-    local_source = Path(ids["upload_path"] if source_kind == "pdf" else ids["raw_path"])
+    from app.report import source_files
+
+    is_pdf = source_kind != "extraction"
+    source_module = source_files if is_pdf else ingestion
+    local_source = Path(ids["upload_path"] if is_pdf else ids["raw_path"])
+    if source_kind == "malformed_pdf":
+        local_source.write_bytes(b"%PDF-1.4 fake")
     if source_kind == "extraction":
         extraction = ExtractionResult(
             page_count=1,
@@ -990,6 +997,10 @@ def test_inflight_source_hydration_cannot_restore_bytes_after_purge(
             assert not isinstance(purge_result, BaseException), purge_result
             if cancel_count:
                 assert isinstance(read_result, asyncio.CancelledError)
+            elif source_kind == "malformed_pdf":
+                from app.errors import ConflictError
+
+                assert isinstance(read_result, ConflictError)
             elif source_kind == "pdf":
                 assert read_result == local_source
             else:

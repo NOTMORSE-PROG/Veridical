@@ -183,6 +183,9 @@ class Settings(BaseSettings):
     # ceiling -- `info.file_size` is attacker-controlled central-directory
     # metadata a crafted archive can understate.
     max_docx_uncompressed_mb: int = 150
+    # Bound directory allocation separately: empty ZIP members evade a
+    # decompressed-content budget. Enforced before ZipFile construction.
+    docx_zip_directory_max_bytes: int = Field(default=1_048_576, ge=1)
     # Native DOCX raster display only, never an opt-in to model assessment.
     # Per-source bounds complement the archive's actual-decompression guard.
     docx_image_max_bytes: int = Field(default=16_777_216, ge=1)

@@ -456,7 +456,7 @@ def test_authorized_source_dto_keeps_safe_cell_fragments_without_private_xml(tmp
     monkeypatch.setattr(service, "load_raw_store", lambda settings, manuscript_id: result)
     manuscript = SimpleNamespace(
         id=1,
-        file_ref="source.docx",
+        file_ref=str(tmp_path / "source.docx"),
         purged_at=None,
         content_hash=result.docx_source_sha256,
         section_tree=result.section_tree.model_dump(mode="json"),

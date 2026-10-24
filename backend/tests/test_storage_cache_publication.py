@@ -17,6 +17,7 @@ from app.ingest import service as ingestion
 from app.ingest.schemas import ExtractionResult, SectionTree, TextBlock
 from app.models.manuscript import Manuscript
 from app.report import service as report
+from app.report import source_files
 from app.storage import ensure_local_file
 from tests.test_ingest_fixtures import FIXTURE_DIR
 
@@ -99,6 +100,9 @@ def test_second_actual_source_reader_cannot_consume_first_partial_write(
             return report.manuscript_file_path_for(manuscript, settings).read_bytes()
 
     else:
+        original = Path(manuscript.file_ref)
+        original.parent.mkdir(parents=True, exist_ok=True)
+        original.write_bytes((FIXTURE_DIR / "native.docx").read_bytes())
         extraction = ExtractionResult(
             page_count=0,
             anchor_kind="paragraph",
@@ -119,7 +123,7 @@ def test_second_actual_source_reader_cannot_consume_first_partial_write(
             return final_path.read_bytes()
 
     durable = DurableBytes(payload)
-    monkeypatch.setattr(report, "get_storage", lambda _settings: durable)
+    monkeypatch.setattr(source_files, "get_storage", lambda _settings: durable)
     monkeypatch.setattr(ingestion, "get_storage", lambda _settings: durable)
     written, release = threading.Event(), threading.Event()
     pause_first_writer(monkeypatch, written, release)
@@ -134,7 +138,8 @@ def test_second_actual_source_reader_cannot_consume_first_partial_write(
         finally:
             release.set()
         assert first.result(timeout=5) == payload
-    assert sorted(path for path in tmp_path.rglob("*") if path.is_file()) == [final_path]
+    expected = [final_path] if source_kind == "pdf" else [final_path, original]
+    assert sorted(path for path in tmp_path.rglob("*") if path.is_file()) == sorted(expected)
 
 
 def test_warm_cache_does_not_download_or_rewrite(tmp_path):
@@ -437,6 +442,9 @@ def test_simultaneous_cold_source_consumers_keep_published_winner_readable(
             assert path.read_bytes() == payload
 
     else:
+        original = Path(manuscript.file_ref)
+        original.parent.mkdir(parents=True, exist_ok=True)
+        original.write_bytes((FIXTURE_DIR / "native.docx").read_bytes())
         extraction = ExtractionResult(
             page_count=0,
             anchor_kind="paragraph",
@@ -461,11 +469,12 @@ def test_simultaneous_cold_source_consumers_keep_published_winner_readable(
             return payload
 
     durable = SimultaneousStorage()
-    monkeypatch.setattr(report, "get_storage", lambda _settings: durable)
+    monkeypatch.setattr(source_files, "get_storage", lambda _settings: durable)
     monkeypatch.setattr(ingestion, "get_storage", lambda _settings: durable)
     with ThreadPoolExecutor(max_workers=6) as pool:
         readers = [pool.submit(consume) for _ in range(6)]
         for reader in readers:
             reader.result(timeout=10)
     assert final_path.read_bytes() == payload
-    assert [path for path in tmp_path.rglob("*") if path.is_file()] == [final_path]
+    expected = [final_path] if source_kind == "pdf" else [final_path, original]
+    assert sorted(path for path in tmp_path.rglob("*") if path.is_file()) == sorted(expected)

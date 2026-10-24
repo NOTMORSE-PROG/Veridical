@@ -16,7 +16,6 @@ from pydantic import ValidationError
 from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app import messages
 from app.audit.service import write_audit_event
 from app.checks.citations.history_review import citation_metadata_review_warning
 from app.checks.escalation import (
@@ -93,8 +92,8 @@ from app.report.scoring import (
     scoring_result_as_dict,
 )
 from app.report.source_coverage import project_source_coverage
+from app.report.source_files import manuscript_source_file, open_source_pdf, readable_source_file
 from app.report.weight_importance import WeightImportance, weight_importance
-from app.storage import ensure_local_file, get_storage
 from app.storage.access import read_source
 
 
@@ -927,32 +926,25 @@ def _open_manuscript_source(
     a PDF that won't open) -- a DOCX source returns `(None, "docx", None)`:
     no doc to open, but that is a normal, available manuscript, not an
     error. Callers own closing `doc`."""
-    suffix = Path(manuscript.file_ref).suffix.lower()
-    source_format: Literal["pdf", "docx", "unknown"] = (
-        "pdf" if suffix == ".pdf" else "docx" if suffix == ".docx" else "unknown"
-    )
+    source_format: Literal["pdf", "docx", "unknown"] = "unknown"
     if manuscript.purged_at is not None:
         return (
             None,
             source_format,
             "This manuscript's source file was deleted and can no longer be viewed.",
         )
-    if source_format == "unknown":
-        return (
-            None,
-            source_format,
-            "This manuscript's source file format isn't supported for viewing.",
-        )
-    if source_format == "docx":
-        return None, source_format, None
     try:
         # BUG-138: re-populates the local cache from durable storage first
         # if Render's ephemeral disk lost it since upload -- the honest
         # "could not be opened" reason below now only fires for a
         # genuinely-gone file (pre-migration rows), not every file past the
         # next redeploy.
-        local_path = ensure_local_file(settings, get_storage(settings), manuscript.file_ref)
-        doc = pymupdf.open(local_path)
+        local_path, source_format = manuscript_source_file(manuscript, settings)
+        if source_format == "docx":
+            return None, source_format, None
+        doc = open_source_pdf(local_path)
+    except (GoneError, ConflictError) as exc:
+        return None, source_format, str(exc)
     except (
         FileNotFoundError,
         pymupdf.FileDataError,
@@ -972,20 +964,17 @@ def _open_manuscript_pdf_or_none(
     fallback as `_open_manuscript_source`, but excluded-match rendering is a
     nice-to-have (the caller falls back to unavailable regions), so a
     failure here is silent rather than reasoned like the viewer's."""
-    if manuscript.purged_at is not None:
-        return None
-    try:
-        local_path = ensure_local_file(settings, get_storage(settings), manuscript.file_ref)
-        return pymupdf.open(local_path)
-    except (
-        FileNotFoundError,
-        pymupdf.FileDataError,
-        pymupdf.FileNotFoundError,
-        RuntimeError,
-        ValueError,
-        OSError,
-    ):
-        return None
+    doc, _, _ = _open_manuscript_source(manuscript, settings)
+    return doc
+
+
+def _manuscript_export_source_format(
+    manuscript: Manuscript, settings: Settings
+) -> Literal["pdf", "docx", "unknown"]:
+    doc, source_format, _ = _open_manuscript_source(manuscript, settings)
+    if doc is not None:
+        doc.close()
+    return source_format
 
 
 async def manuscript_viewer_for(
@@ -1227,7 +1216,7 @@ async def list_reuse_passage_matches(
 
     section_tree = SectionTree.model_validate(manuscript.section_tree or {"source": "none"})
     doc = None
-    if Path(manuscript.file_ref).suffix.lower() == ".pdf" and manuscript.purged_at is None:
+    if manuscript.purged_at is None:
         # BUG-138 (backend review finding): off the event loop, same reason
         # as `_open_manuscript_source` above.
         doc = await read_source(
@@ -1325,15 +1314,10 @@ def manuscript_file_path_for(manuscript: Manuscript, settings: Settings) -> Path
     Render's ephemeral disk lost it. BUG-139: an authorized, known manuscript
     whose source is absent from both storage layers is honestly gone; storage
     configuration and network failures retain their own exception types."""
-    if manuscript.purged_at is not None:
-        raise GoneError("This manuscript's source file was purged and can no longer be read.")
-    if Path(manuscript.file_ref).suffix.lower() != ".pdf":
+    path, source_format = readable_source_file(manuscript, settings)
+    if source_format != "pdf":
         raise ConflictError("This manuscript's source file isn't a PDF.")
-    storage = get_storage(settings)
-    try:
-        return ensure_local_file(settings, storage, manuscript.file_ref)
-    except FileNotFoundError:
-        raise GoneError(messages.MANUSCRIPT_SOURCE_MISSING) from None
+    return path
 
 
 async def get_manuscript_paragraphs(
@@ -1361,9 +1345,8 @@ def manuscript_paragraphs_for(manuscript: Manuscript, settings: Settings) -> Doc
     """The ownership-independent core of `get_manuscript_paragraphs`
     (V-066, same extraction rationale as `manuscript_viewer_for` above).
     Callers own resolving AND authorizing `manuscript` first."""
-    if manuscript.purged_at is not None:
-        raise GoneError("This manuscript's source file was purged and can no longer be read.")
-    if Path(manuscript.file_ref).suffix.lower() != ".docx":
+    _, source_format = manuscript_source_file(manuscript, settings)
+    if source_format != "docx":
         raise ConflictError("This manuscript's source file isn't a DOCX.")
     # backend review finding (2026-08-22): this is the first caller of
     # `load_raw_store` reached directly from a synchronous HTTP request --
@@ -1585,12 +1568,11 @@ async def get_report_export_data(
         page_images=page_images,
         flag_details=flag_details,
         unassessed_references=reference_limits,
-        source_format=(
-            "docx"
-            if Path(manuscript.file_ref).suffix.lower() == ".docx"
-            else "pdf"
-            if Path(manuscript.file_ref).suffix.lower() == ".pdf"
-            else "unknown"
+        source_format=await read_source(
+            session,
+            manuscript,
+            lambda: asyncio.to_thread(_manuscript_export_source_format, manuscript, settings),
+            allow_purged=True,
         ),
     )
 

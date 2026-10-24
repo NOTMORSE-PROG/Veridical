@@ -34,7 +34,7 @@ from app.library.service import (
     get_library_excerpt,
     get_library_file_path,
     get_library_item,
-    get_library_original_file_path,
+    get_library_original_file,
     get_library_paragraphs,
     list_library,
     remove_library_entry,
@@ -192,7 +192,11 @@ async def get_library_file_route(
     instructor: Annotated[Instructor, Depends(get_current_instructor)],
 ) -> FileResponse:
     path = await get_library_file_path(session, instructor.id, manuscript_id, get_settings())
-    return FileResponse(path, media_type="application/pdf")
+    return FileResponse(
+        path,
+        media_type="application/pdf",
+        headers={"Cache-Control": "private, no-store", "X-Content-Type-Options": "nosniff"},
+    )
 
 
 @router.get("/library/{manuscript_id}/document/paragraphs", response_model=DocumentParagraphsOut)
@@ -230,10 +234,10 @@ async def get_library_original_file_route(
     instructor: Annotated[Instructor, Depends(get_current_instructor)],
 ) -> FileResponse:
     """Authenticated original download; a neutral name preserves record-field redaction."""
-    path = await get_library_original_file_path(
+    path, source_format = await get_library_original_file(
         session, instructor.id, manuscript_id, get_settings()
     )
-    suffix = path.suffix.lower()
+    suffix = f".{source_format}"
     media_type = (
         "application/pdf"
         if suffix == ".pdf"
@@ -243,4 +247,5 @@ async def get_library_original_file_route(
         path,
         media_type=media_type,
         filename=f"library-record-{manuscript_id}{suffix}",
+        headers={"Cache-Control": "private, no-store", "X-Content-Type-Options": "nosniff"},
     )

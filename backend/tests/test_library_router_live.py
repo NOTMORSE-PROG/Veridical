@@ -496,9 +496,10 @@ def test_other_instructors_can_read_active_files_but_not_private_uploads_or_writ
     assert file_response.status_code == 200
     assert file_response.content == _pdf()
     assert file_response.headers["Cache-Control"] == "private, no-store"
-    import app.library.service as library_service
 
-    storage_factory = library_service.get_storage
+    import app.report.source_files as source_files
+
+    storage_factory = source_files.get_storage
     storage_threads = []
 
     def checked_storage(settings):
@@ -509,7 +510,7 @@ def test_other_instructors_can_read_active_files_but_not_private_uploads_or_writ
         storage_threads.append(True)
         return storage_factory(settings)
 
-    monkeypatch.setattr(library_service, "get_storage", checked_storage)
+    monkeypatch.setattr(source_files, "get_storage", checked_storage)
     original = client.get(f"/library/{active}/document/original")
     assert original.status_code == 200 and original.content == _pdf()
     assert storage_threads
@@ -554,6 +555,43 @@ def test_other_instructors_can_read_full_docx_text_and_lose_access_after_removal
         response = client.get(f"/library/{mid}/{suffix}")
         assert response.status_code == 404
         assert response.headers["Cache-Control"] == "private, no-store"
+
+
+@pytest.mark.parametrize(
+    "kind,name", [("pdf", "paper.docx"), ("pdf", "paper.txt"), ("docx", "paper.pdf")]
+)
+def test_library_source_and_download_use_actual_format(client, kind, name):
+    _login(client, OWNER)
+    payload = (FIXTURES / f"native.{kind}").read_bytes()
+    mid = _submit(client, payload, name)["item"]["manuscript_id"]
+    _login(client, STRANGER)
+    viewer = client.get(f"/library/{mid}/document")
+    assert viewer.status_code == 200 and viewer.json()["source_format"] == kind
+    assert viewer.json()["available"] is True
+    assert viewer.json()["original_filename"] is None
+    original = client.get(f"/library/{mid}/document/original")
+    assert original.status_code == 200 and original.content == payload
+    assert original.headers["cache-control"] == "private, no-store"
+    assert original.headers["x-content-type-options"] == "nosniff"
+    assert f"library-record-{mid}.{kind}" in original.headers["content-disposition"]
+    assert name not in original.headers["content-disposition"]
+    pdf = client.get(f"/library/{mid}/document/file")
+    text = client.get(f"/library/{mid}/document/paragraphs")
+    if kind == "pdf":
+        assert original.headers["content-type"].startswith("application/pdf")
+        assert pdf.status_code == 200 and pdf.content == payload
+        assert pdf.headers["cache-control"] == "private, no-store"
+        assert text.status_code == 409
+    else:
+        assert original.headers["content-type"].startswith(
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        )
+        assert pdf.status_code == 409 and text.status_code == 200
+        assert text.json()["paragraphs"]
+    _login(client, OWNER)
+    assert client.post(f"/library/{mid}/remove").status_code == 200
+    _login(client, STRANGER)
+    assert client.get(f"/library/{mid}/document/original").status_code == 404
 
 
 def test_original_docx_images_follow_each_read_surfaces_own_access_policy(
