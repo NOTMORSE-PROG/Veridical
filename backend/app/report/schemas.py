@@ -221,6 +221,8 @@ class ReportOut(BaseModel):
     # Compatibility name: missing current support-policy metadata, not an age test.
     historical_semantic_support_unverified: bool = False
     historical_citation_title_unverified: bool = False
+    # Compatibility name: unrecorded coverage, including unknown applicability;
+    # this does not identify the source format or measure equation presence.
     historical_native_math_unverified: bool = False
     # BUG-128: instructor-only (never added to `PublicReportOut` below,
     # which has no instructor actions by design) -- lets the frontend

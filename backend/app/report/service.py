@@ -702,8 +702,7 @@ async def report_out_for_check_run(
     )
     return ReportOut(
         historical_native_math_unverified=(
-            Path(manuscript.file_ref).suffix.lower() == ".docx"
-            and check_run.status == CheckRunStatus.done
+            check_run.status == CheckRunStatus.done
             and (
                 forensics_row is None
                 or (forensics_row.detail or {}).get("native_math_coverage_version") != "v1"

@@ -246,6 +246,181 @@ def test_authenticated_source_rejects_corrupt_pdf(
     assert client.get(f"/check-runs/{run_id}/document/file").status_code == 409
 
 
+def _configure_saved_native_coverage(url, run_id, suffix, detail, purged):
+    import asyncio
+    from datetime import UTC, datetime
+
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
+    from app.db import sqlalchemy_url
+    from app.models.enums import CheckKind, ResultOutcome
+    from app.models.manuscript import Manuscript
+    from app.models.run import CheckResult, CheckRun
+    from app.report.service import aggregate_and_score
+
+    async def setup():
+        engine = create_async_engine(sqlalchemy_url(url))
+        try:
+            async with async_sessionmaker(engine, expire_on_commit=False)() as session:
+                run = await session.get(CheckRun, run_id)
+                manuscript = await session.get(Manuscript, run.manuscript_id)
+                manuscript.file_ref = f"original-no-longer-present{suffix}"
+                manuscript.purged_at = datetime.now(UTC) if purged else None
+                if detail is not None:
+                    limited = detail.get("native_math_inventory_state") in {
+                        "not_recorded",
+                        "unavailable",
+                    } or bool(detail.get("n_native_equations_unassessed"))
+                    session.add(
+                        CheckResult(
+                            check_run_id=run_id,
+                            kind=CheckKind.statistical_forensics,
+                            outcome=ResultOutcome.unverifiable
+                            if limited
+                            else ResultOutcome.not_applicable,
+                            detail=detail,
+                        )
+                    )
+                await session.commit()
+                await aggregate_and_score(session, run_id, commit=True)
+        finally:
+            await engine.dispose()
+
+    asyncio.run(setup())
+
+
+def _saved_assessment_rows(url):
+    import asyncio
+
+    from sqlalchemy import text
+    from sqlalchemy.ext.asyncio import create_async_engine
+
+    from app.db import sqlalchemy_url
+
+    async def snapshot():
+        engine = create_async_engine(sqlalchemy_url(url))
+        try:
+            async with engine.connect() as connection:
+                return {
+                    table: await connection.scalar(
+                        text(
+                            "SELECT coalesce(jsonb_agg(to_jsonb(t) ORDER BY id), '[]'::jsonb) "
+                            f"FROM {table} t"
+                        )
+                    )
+                    for table in (
+                        "check_run",
+                        "check_result",
+                        "flag",
+                        "readiness_report",
+                        "rubric",
+                        "criterion",
+                        "manuscript",
+                        "audit_log",
+                    )
+                }
+        finally:
+            await engine.dispose()
+
+    return asyncio.run(snapshot())
+
+
+@pytest.mark.parametrize("suffix", [".pdf", ".docx"])
+@pytest.mark.parametrize(
+    "detail,purged,expected",
+    [
+        pytest.param(None, False, True, id="no-recorded-check"),
+        pytest.param({}, False, True, id="legacy-check-no-marker"),
+        pytest.param({"native_math_coverage_version": "v0"}, False, True, id="old-marker"),
+        pytest.param(None, True, True, id="purged-unknown-record"),
+        pytest.param(
+            {
+                "native_math_coverage_version": "v1",
+                "native_math_inventory_state": "complete",
+                "n_native_equations_unassessed": 0,
+            },
+            False,
+            False,
+            id="recorded-zero",
+        ),
+        pytest.param(
+            {
+                "native_math_coverage_version": "v1",
+                "native_math_inventory_state": "complete",
+                "n_native_equations_unassessed": 2,
+                "coverage_reason": "native_math_unassessed",
+                "analysis_coverage": "unsupported",
+                "assessment_scope": "available_text_and_tables",
+            },
+            False,
+            False,
+            id="recorded-positive-unassessed",
+        ),
+        pytest.param(
+            {
+                "native_math_coverage_version": "v1",
+                "native_math_inventory_state": "not_applicable",
+                "n_native_equations_unassessed": 0,
+            },
+            True,
+            False,
+            id="purged-recorded-not-applicable",
+        ),
+        pytest.param(
+            {
+                "native_math_coverage_version": "v1",
+                "native_math_inventory_state": "not_recorded",
+                "n_native_equations_unassessed": None,
+                "coverage_reason": "native_math_inventory_unavailable",
+                "analysis_coverage": "unsupported",
+                "assessment_scope": "available_text_and_tables",
+            },
+            False,
+            False,
+            id="current-unrecorded-inventory",
+        ),
+        pytest.param(
+            {
+                "native_math_coverage_version": "v1",
+                "native_math_inventory_state": "unavailable",
+                "n_native_equations_unassessed": None,
+                "coverage_reason": "native_math_inventory_unavailable",
+                "analysis_coverage": "unsupported",
+                "assessment_scope": "available_text_and_tables",
+            },
+            False,
+            False,
+            id="current-unavailable-inventory",
+        ),
+    ],
+)
+def test_saved_native_coverage_uses_recorded_metadata_without_original_reads_or_rewrites(
+    logged_in_with_a_done_run, api_scratch_url, monkeypatch, suffix, detail, purged, expected
+):
+    client, run_id = logged_in_with_a_done_run
+    _configure_saved_native_coverage(api_scratch_url, run_id, suffix, detail, purged)
+    before = _saved_assessment_rows(api_scratch_url)
+
+    def original_read_forbidden(*args, **kwargs):
+        pytest.fail("Saved coverage projection must not inspect an original source")
+
+    monkeypatch.setattr("app.report.service.manuscript_source_file", original_read_forbidden)
+    response = client.get(f"/check-runs/{run_id}/report")
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["historical_native_math_unverified"] is expected
+    if detail and detail.get("coverage_reason"):
+        current = next(
+            row
+            for row in body["integrity_check_status"]
+            if row["check_kind"] == "statistical_forensics"
+        )
+        assert current["coverage_reason"] == detail["coverage_reason"]
+        assert current["native_math_inventory_state"] == detail["native_math_inventory_state"]
+        assert current["n_native_equations_unassessed"] == detail["n_native_equations_unassessed"]
+    assert _saved_assessment_rows(api_scratch_url) == before
+
+
 def test_decide_then_reopen_over_http(logged_in_with_a_done_run):
     client, check_run_id = logged_in_with_a_done_run
     resp = client.post(
