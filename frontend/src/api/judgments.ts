@@ -1,5 +1,5 @@
 // F3.5/F8.3, screens 4h/4w: authenticated judgment records only.
-import type { CriterionLevel, CriterionSourceCoverage, Decision, EscalationResolution, EvidenceItem, ReportOut } from "./types";
+import type { CriterionLevel, CriterionRuleFacts, CriterionSourceCoverage, Decision, EscalationResolution, EvidenceItem, ReportOut } from "./types";
 
 export type RevisionResolution = Exclude<EscalationResolution, "accept_majority">;
 export interface JudgmentSnapshot {
@@ -30,6 +30,7 @@ export interface JudgmentContext {
     unavailable_reason: string | null;
   };
   original_assessment: {
+    rule_facts?: CriterionRuleFacts | null;
     source_coverage?: CriterionSourceCoverage | null;
     kind: string; basis: string | null; reason: string | null; reasoning: string | null;
     ai_majority_verdict: string | null; evidence: EvidenceItem[];

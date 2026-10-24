@@ -28,6 +28,7 @@ from app.report.judgment_schemas import (
     OriginalJudgmentAssessment,
 )
 from app.report.judgment_snapshot import judgment_grade_identity, snapshot_judgment
+from app.report.rule_facts import project_rule_facts
 from app.report.schemas import EvidenceItem, RubricLevelOut
 from app.report.source_coverage import project_source_coverage
 
@@ -103,7 +104,9 @@ def _choices(criterion: Criterion) -> JudgmentChoices:
         )
 
 
-def _original(result: CheckResult) -> OriginalJudgmentAssessment:
+def _original(
+    result: CheckResult, criterion: Criterion | None = None
+) -> OriginalJudgmentAssessment:
     detail = result.detail if isinstance(result.detail, dict) else {}
     evidence = []
     unavailable = not isinstance(detail.get("evidence", []), list)
@@ -121,6 +124,14 @@ def _original(result: CheckResult) -> OriginalJudgmentAssessment:
 
     return OriginalJudgmentAssessment(
         source_coverage=project_source_coverage(detail.get("source_coverage")),
+        rule_facts=project_rule_facts(
+            detail,
+            criterion_type=criterion.type.value,
+            kind=result.kind.value,
+            outcome=result.outcome.value,
+        )
+        if criterion is not None
+        else None,
         kind=result.kind.value,
         basis=detail.get("basis") if isinstance(detail.get("basis"), str) else None,
         reason=detail.get("reason") if isinstance(detail.get("reason"), str) else None,
@@ -168,7 +179,7 @@ def _context(run_id: int, report: ReadinessReport, result: CheckResult, criterio
         unavailable_reason=unavailable,
         current=current,
         choices=choices,
-        original_assessment=_original(result),
+        original_assessment=_original(result, criterion),
     )
 
 

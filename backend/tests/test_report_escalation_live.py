@@ -379,14 +379,18 @@ async def test_cross_instructor_access_is_rejected_not_leaked(session_factory):
         session.add(stranger)
         await session.commit()
 
+        # A refused service read rolls back its transaction and expires ORM
+        # instances. Preserve request identities before exercising both refusals.
+        run_id, result_id, stranger_id = check_run.id, check_result.id, stranger.id
+
         with pytest.raises(NotFoundError):
-            await list_escalated_for_run(session, check_run.id, stranger.id)
+            await list_escalated_for_run(session, run_id, stranger_id)
         with pytest.raises(NotFoundError):
             await resolve_escalation_for_run(
                 session,
-                check_run.id,
-                check_result.id,
-                stranger.id,
+                run_id,
+                result_id,
+                stranger_id,
                 "mark_pass",
                 "reason",
                 expected_revision=0,

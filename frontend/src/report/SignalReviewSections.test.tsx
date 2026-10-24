@@ -163,11 +163,40 @@ describe("SignalEscalatedPanel / SignalResolutionCard", () => {
     expect(screen.queryByText(/any active share link/)).not.toBeInTheDocument();
   });
 
-  it.each([null, " \n\t "])("states when a tentative suggestion has no usable explanation (%s) or located excerpt", async (reasoning) => {
+  it.each([null, " \n\t "])("keeps missing explanation neutral without a current canonical method (%s)", async (reasoning) => {
     vi.stubGlobal("fetch", stubFetchByPath({ "/check-runs/5/escalated": [{ ...REAL_MAJORITY, reasoning }] }));
     renderWithProviders(<SignalEscalatedPanel checkRunId={5} />);
-    expect(await screen.findByText("No AI explanation is available for this review item.")).toBeVisible();
+    expect(await screen.findByText("No explanation is available in this assessment record.")).toBeVisible();
     expect(screen.getByText("No located excerpt is available for this review item.")).toBeVisible();
+  });
+
+  it.each([true, false])("shows pending structural facts only with matching current assessment epochs (%s)", async matching => {
+    const item = { ...REAL_MAJORITY, assessment_revision: matching ? 4 : 3, votes: [], ai_majority_verdict: null,
+      reason: "The heading lookup did not locate a Glossary." };
+    const row = { ...savedRow(item, ""), check_result_id: item.check_result_id, outcome: "escalated", resolution: null,
+      type: "structural", kind: "structural", basis: null,
+      rule_facts: { rule_id: "required_section_present", target: "glossary", matched_title: null } };
+    vi.stubGlobal("fetch", stubFetchByPath({ "/check-runs/5/escalated": [item], "/check-runs/5/report": reportWith({ assessment_revision: 4, results: [row] }) }));
+    renderWithProviders(<SignalEscalatedPanel checkRunId={5} />);
+    await screen.findByRole("button", { name: "Meets criterion" });
+    if (matching) {
+      expect(await screen.findByText('The saved heading lookup searched for "glossary".')).toBeVisible();
+      expect(screen.queryByText("No located excerpt is available for this review item.")).not.toBeInTheDocument();
+    } else {
+      expect(screen.queryByRole("heading", { name: "Recorded rule facts" })).not.toBeInTheDocument();
+    }
+    expect(screen.getByText(item.reason)).toBeVisible();
+    expect(screen.queryByText("Recorded AI explanation")).not.toBeInTheDocument();
+    expect(screen.getByText("No grade accepted")).toBeVisible();
+  });
+
+  it("keeps the AI explanation label when a current canonical AI method is established", async () => {
+    const item = { ...REAL_MAJORITY, assessment_revision: 4, reasoning: "Actual retained AI explanation" };
+    const row = { ...savedRow(item, ""), check_result_id: item.check_result_id, outcome: "escalated", resolution: null };
+    vi.stubGlobal("fetch", stubFetchByPath({ "/check-runs/5/escalated": [item], "/check-runs/5/report": reportWith({ assessment_revision: 4, results: [row] }) }));
+    renderWithProviders(<SignalEscalatedPanel checkRunId={5} />);
+    expect(await screen.findByText("Recorded AI explanation:")).toBeVisible();
+    expect(screen.getByText(item.reasoning)).toBeVisible();
   });
 
   it.each([false, true])("qualifies unresolved public AI basis while excluding resolved=%s", (resolved) => {

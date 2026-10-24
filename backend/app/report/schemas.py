@@ -8,6 +8,7 @@ from pydantic import BaseModel, Field, field_validator
 from app.config import get_settings
 from app.ingest.schemas import FigureReading
 from app.library.passage_indexing import LibraryPassageIndexingSummary
+from app.report.rule_facts import RuleFacts
 from app.report.source_coverage import CriterionSourceCoverageOut
 
 
@@ -75,6 +76,7 @@ class CriterionResultOut(BaseModel):
     check_result_id: int
     judgment_revision: int | None = None
     source_coverage: CriterionSourceCoverageOut | None = None
+    rule_facts: RuleFacts | None = None
     criterion_id: int
     text: str
     type: str
@@ -324,6 +326,10 @@ class PublicCriterionResultOut(BaseModel):
     reason: str | None
     evidence: list[EvidenceItem]
     # V-069 AC5: the adviser view carries the level too, same as the
+    # Saved rule observations deliberately publish only their typed fields,
+    # including recorded heading text, never arbitrary result detail.
+    rule_facts: RuleFacts | None = None
+    # V-069 AC5: the adviser view carries the level too, same as the
     # instructor-facing report — a level name is what was decided, not
     # instructor-private reasoning (unlike `resolution`, deliberately
     # still excluded here).
@@ -418,6 +424,7 @@ class EscalatedItemOut(BaseModel):
     """One row of the "needs your review" panel (V-023, rendered FIRST on
     screen 4h — never a silent score contribution)."""
 
+    assessment_revision: int | None = Field(default=None, strict=True, ge=0)
     check_result_id: int
     criterion_id: int
     criterion_text: str

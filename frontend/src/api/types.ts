@@ -309,6 +309,14 @@ export interface ResolutionOut {
 // and the new `PublicReportOut` below satisfy them structurally --
 // adding a field to `ReportOut` alone can never again make it reach a
 // shared component's public rendering path.
+export type CriterionRuleFacts =
+  | { rule_id: "required_section_present"; target: string; matched_title?: string | null }
+  | { rule_id: "section_order"; checked_sections: string[] }
+  | { rule_id: "page_limit" | "reference_count_min_max"; actual_count: number; expected: { kind: "min" | "max" | "exact" | "range"; low: number; high?: number | null } }
+  | { rule_id: "table_formatting_presence"; total_tables: number; captioned: number }
+  | { rule_id: "margins_spacing"; checked_pages_or_sections?: number | null; side?: "left" | "top" | "right" | "bottom" | null; actual_pts?: number | null }
+  | { rule_id: "citation_style_sniff"; threshold_relation: "met" | "below" };
+
 export interface ResultRowCommon {
   criterion_id: number;
   text: string;
@@ -337,6 +345,7 @@ export interface ResultRowCommon {
   reasoning: string | null;
   reason: string | null;
   evidence: EvidenceItem[];
+  rule_facts?: CriterionRuleFacts | null;
   // Optional, not absent: `CriterionResultOut` (instructor-facing) always
   // carries a real value; `PublicCriterionResultOut` (BUG-044) doesn't
   // declare the field at all, which TypeScript treats as compatible with
@@ -605,6 +614,7 @@ export interface PaginatedAuditLog {
 }
 
 export interface EscalatedItemOut {
+  assessment_revision?: number | null;
   check_result_id: number;
   criterion_id: number;
   criterion_text: string;

@@ -165,6 +165,7 @@ def _to_public_report(report: ReportOut) -> PublicReportOut:
                 reasoning=r.reasoning,
                 reason=r.reason,
                 evidence=r.evidence,
+                rule_facts=r.rule_facts,
                 # V-069 AC5: the level IS the judgment for this row
                 # (owner-approved treatment) -- deliberately published,
                 # same reasoning BUG-052 already applied to

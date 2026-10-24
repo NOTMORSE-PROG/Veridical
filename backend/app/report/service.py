@@ -59,6 +59,7 @@ from app.report.assessment import assessment_write, lock_assessment
 from app.report.docx_images import manuscript_docx_image_for
 from app.report.page_images import build_page_evidence_images
 from app.report.rating import compute_levelled_rating
+from app.report.rule_facts import project_rule_facts
 from app.report.schemas import (
     COVERAGE_REASONS,
     CriterionLevelOut,
@@ -311,6 +312,12 @@ def _to_criterion_result(
     )
     return CriterionResultOut(
         source_coverage=project_source_coverage(detail.get("source_coverage")),
+        rule_facts=project_rule_facts(
+            detail,
+            criterion_type=criterion.type.value,
+            kind=result.kind.value,
+            outcome=result.outcome.value,
+        ),
         check_result_id=result.id,
         judgment_revision=result.judgment_revision,
         criterion_id=criterion.id,
@@ -766,8 +773,11 @@ async def report_out_for_check_run(
     )
 
 
-def _to_escalated_out(item: EscalatedItem) -> EscalatedItemOut:
+def _to_escalated_out(
+    item: EscalatedItem, assessment_revision: int | None = None
+) -> EscalatedItemOut:
     return EscalatedItemOut(
+        assessment_revision=assessment_revision,
         check_result_id=item.check_result_id,
         criterion_id=item.criterion_id,
         criterion_text=item.criterion_text,
@@ -792,11 +802,20 @@ def _to_escalated_out(item: EscalatedItem) -> EscalatedItemOut:
 async def list_escalated_for_run(
     session: AsyncSession, check_run_id: int, instructor_id: int
 ) -> list[EscalatedItemOut]:
-    """The escalated panel's data source (V-023, screen 4h, "AI wasn't
-    sure — review these")."""
-    await _owned_check_run(session, check_run_id, instructor_id)
-    items = await list_escalated(session, check_run_id)
-    return [_to_escalated_out(item) for item in items]
+    """Bind pending rows to a recorded assessment epoch, without source I/O."""
+    try:
+        await _owned_check_run(session, check_run_id, instructor_id)
+        report = await lock_assessment(session, check_run_id)
+        items = await list_escalated(session, check_run_id)
+        out = [
+            _to_escalated_out(item, report.assessment_revision if report is not None else None)
+            for item in items
+        ]
+        await session.commit()
+        return out
+    except BaseException:
+        await session.rollback()
+        raise
 
 
 # BUG-033/design review spec: fixed F4→F7 declaration order — flags never

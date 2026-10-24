@@ -43,6 +43,7 @@ from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfgen.canvas import Canvas
 from reportlab.platypus import (
     CondPageBreak,
+    Frame,
     HRFlowable,
     Image,
     PTOContainer,
@@ -55,6 +56,7 @@ from reportlab.platypus import (
 from app.checks.escalation import NEEDS_REVIEW_OUTCOMES as _NEEDS_REVIEW_OUTCOMES_ENUM
 from app.config import get_settings
 from app.library.passage_indexing import indexing_scope_sentences
+from app.report.rule_facts import rule_facts_copy, rule_facts_presentation
 from app.report.schemas import (
     CriterionResultOut,
     FlagExportDetailOut,
@@ -570,6 +572,24 @@ def _pending_semantic_basis_flowables(
     return parts
 
 
+def _rule_facts_flowables(row: CriterionResultOut, styles: dict[str, ParagraphStyle]) -> list:
+    if row.rule_facts is None:
+        return []
+    paragraphs, headings = rule_facts_presentation(row.rule_facts)
+    title = Paragraph(
+        escape(rule_facts_copy()["earlier_heading" if row.resolution else "heading"]),
+        styles["body_bold"],
+    )
+    title.keepWithNext = True
+    parts = [title]
+    for index, text in enumerate(paragraphs):
+        parts.append(Paragraph(escape(text), styles["body"]))
+        if index == 0:
+            for number, heading in enumerate(headings, start=1):
+                parts.append(Paragraph(escape(f"{number}. {heading}"), styles["body"]))
+    return parts
+
+
 def _criterion_flowable(row: CriterionResultOut, styles: dict[str, ParagraphStyle]) -> list:
     parts = [Paragraph(escape(row.text), styles["cell_bold"])]
     caption_bits = [] if row.resolution else [_source_caption(row)]
@@ -612,6 +632,10 @@ def _criterion_flowable(row: CriterionResultOut, styles: dict[str, ParagraphStyl
             parts.append(Paragraph(escape(row.reasoning or row.reason or ""), styles["cell"]))
     elif row.reasoning or row.reason:
         parts.append(Paragraph(escape(row.reasoning or row.reason or ""), styles["cell"]))
+    facts = _rule_facts_flowables(row, styles)
+    if facts and not row.resolution:
+        parts[0].keepWithNext = True
+    parts.extend(facts)
     if caption_bits:
         parts.append(Paragraph(" · ".join(escape(c) for c in caption_bits), styles["cell_caption"]))
     return parts
@@ -997,7 +1021,11 @@ def build_report_pdf(data: ReportExportData) -> bytes:
                 part.keepWithNext = True
             flow.append(
                 PTOContainer(
-                    [*block, *_pending_semantic_basis_flowables(row, styles)],
+                    [
+                        *block,
+                        *_rule_facts_flowables(row, styles),
+                        *_pending_semantic_basis_flowables(row, styles),
+                    ],
                     header=[
                         Paragraph(
                             escape(f"Criterion #{row.criterion_id} (continued)"),
@@ -1530,6 +1558,28 @@ def build_report_pdf(data: ReportExportData) -> bytes:
             Paragraph("Criterion", styles["cell_bold"]),
             Paragraph("Result", styles["cell_bold"]),
         ]
+
+        def criteria_table(rows):
+            table = Table(rows, colWidths=[62, content_width - 62 - 85, 85], repeatRows=1)
+            table_style = [
+                ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#f1f2f5")),
+                ("LINEBELOW", (0, 0), (-1, 0), 0.75, _RULE),
+                ("LINEBELOW", (0, 1), (-1, -1), 0.5, _RULE),
+                ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                ("TOPPADDING", (0, 0), (-1, -1), 5),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
+                ("LEFTPADDING", (0, 0), (-1, -1), 4),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 4),
+            ]
+            for i in range(1, len(rows)):
+                if i % 2 == 0:
+                    table_style.append(("BACKGROUND", (0, i), (-1, i), _ZEBRA))
+            table.setStyle(TableStyle(table_style))
+            return table
+
+        # Match SimpleDocTemplate's actual default Frame padding. Only an
+        # individually oversized record leaves the compact table layout.
+        print_frame = Frame(0, 0, doc.width, doc.height)
         rows = [header]
         for row in remaining:
             label, tone = _result_display(row)
@@ -1542,29 +1592,42 @@ def build_report_pdf(data: ReportExportData) -> bytes:
                 parent=styles["cell_bold"] if row.weight_importance == "high" else styles["cell"],
                 textColor=importance_ink,
             )
-            rows.append(
-                [
-                    Paragraph(_format_weight_importance(row.weight_importance), importance_style),
-                    _criterion_flowable(row, styles),
-                    Paragraph(escape(label), result_style),
-                ]
+            candidate = [
+                Paragraph(_format_weight_importance(row.weight_importance), importance_style),
+                _criterion_flowable(row, styles),
+                Paragraph(escape(label), result_style),
+            ]
+            measured = criteria_table([header, candidate]).wrap(print_frame._aW, print_frame._aH)[1]
+            if measured <= print_frame._aH:
+                rows.append(candidate)
+                continue
+            if len(rows) > 1:
+                flow.append(criteria_table(rows))
+                rows = [header]
+            identity = Paragraph(
+                escape(
+                    f"Criterion #{row.criterion_id}: {label}. "
+                    f"{_format_weight_importance(row.weight_importance, long=True)}."
+                ),
+                styles["body_bold"],
             )
-        table = Table(rows, colWidths=[62, content_width - 62 - 85, 85], repeatRows=1)
-        table_style = [
-            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#f1f2f5")),
-            ("LINEBELOW", (0, 0), (-1, 0), 0.75, _RULE),
-            ("LINEBELOW", (0, 1), (-1, -1), 0.5, _RULE),
-            ("VALIGN", (0, 0), (-1, -1), "TOP"),
-            ("TOPPADDING", (0, 0), (-1, -1), 5),
-            ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
-            ("LEFTPADDING", (0, 0), (-1, -1), 4),
-            ("RIGHTPADDING", (0, 0), (-1, -1), 4),
-        ]
-        for i in range(1, len(rows)):
-            if i % 2 == 0:
-                table_style.append(("BACKGROUND", (0, i), (-1, i), _ZEBRA))
-        table.setStyle(TableStyle(table_style))
-        flow.append(table)
+            identity.keepWithNext = True
+            parts = _criterion_flowable(row, styles)
+            parts[0].keepWithNext = True
+            flow.append(
+                PTOContainer(
+                    [identity, *parts],
+                    header=[
+                        Paragraph(
+                            escape(f"Criterion #{row.criterion_id} (continued)"),
+                            styles["caption_bold"],
+                        )
+                    ],
+                )
+            )
+            flow.append(Spacer(1, 8))
+        if len(rows) > 1:
+            flow.append(criteria_table(rows))
     else:
         flow.append(Paragraph("No additional criteria to show.", styles["body"]))
     flow.append(Spacer(1, 12))

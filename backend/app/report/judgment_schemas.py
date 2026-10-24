@@ -7,6 +7,7 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from app.config import get_settings
+from app.report.rule_facts import RuleFacts
 from app.report.schemas import CriterionLevelOut, EvidenceItem, ReportOut, RubricLevelOut
 from app.report.source_coverage import CriterionSourceCoverageOut
 
@@ -82,6 +83,7 @@ class JudgmentChoices(PrivateJudgmentModel):
 
 class OriginalJudgmentAssessment(PrivateJudgmentModel):
     source_coverage: CriterionSourceCoverageOut | None = None
+    rule_facts: RuleFacts | None = None
     kind: str
     basis: str | None
     reason: str | None

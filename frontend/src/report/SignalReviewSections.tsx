@@ -1,6 +1,8 @@
 import { ActionAssessmentContext, ReportAssessmentContext } from "./ReportAssessmentContext";
 import { criterionAssessmentDetails } from "../domain/criterionAssessment";
 import { CriterionSourceCoverage } from "./CriterionSourceCoverage";
+import { RuleFactsDetails } from "./RuleFactsDetails";
+import { pendingAssessmentRow } from "./pendingAssessmentRow";
 import { recoverableReadError } from "./reportReadState";
 import { reviewDeskDestination } from "../routing/reviewDeskReturn";
 import { useContext, useEffect, useMemo, useRef, useState } from "react";
@@ -535,15 +537,19 @@ function DiscardReviewDraft({ checkRunId, id }: { checkRunId: number; id: number
 export type CriterionSourceTarget = (anchor: string, actionId: string) => string;
 export type CriterionSourceOpen = (anchor: string, actionId: string) => void;
 
-function SignalResolutionCard({ item, checkRunId, sharedReasonId, sourceTarget, onOpenSource }: {
+function SignalResolutionCard({ item, checkRunId, sharedReasonId, sourceTarget, onOpenSource, currentItems }: {
   item: EscalatedItemOut;
   checkRunId: number;
   sharedReasonId?: string;
   sourceTarget?: CriterionSourceTarget;
   onOpenSource?: CriterionSourceOpen;
+  currentItems: boolean;
 }) {
   const location = useLocation();
   const review = useCriterionReviewScope(checkRunId);
+  const canonical = currentItems && review.assessmentCurrent?.()
+    ? pendingAssessmentRow(review.assessment, item, checkRunId) : undefined;
+  const assessment = canonical ? criterionAssessmentDetails(canonical, false) : undefined;
   const pending = review.drafts.get(item.check_result_id);
   const reason = pending?.reason ?? "";
   const attempted = pending?.attempted ?? false;
@@ -633,6 +639,7 @@ function SignalResolutionCard({ item, checkRunId, sharedReasonId, sourceTarget, 
         {item.unverified_evidence && item.unverified_evidence.length > 0 && (
           <div className="signal-unverified-evidence"><strong id={unverifiedId}>Could not verify against the source</strong>{item.unverified_evidence.map((quote) => <blockquote key={quote}>“{quote}”</blockquote>)}</div>
         )}
+        {assessment?.ruleFacts && <RuleFactsDetails facts={assessment.ruleFacts} />}
         {Boolean(item.evidence?.length) && <strong>Recorded passages and locations</strong>}
         {item.evidence?.map((entry, index) => {
           const actionId = `signal-resolution-source-${checkRunId}-${item.check_result_id}-${index}`;
@@ -644,8 +651,9 @@ function SignalResolutionCard({ item, checkRunId, sharedReasonId, sourceTarget, 
             } else if (!onOpenSource) rememberRouteReturnFocus(location.pathname + location.search, target, actionId);
           }}>Open in manuscript: {instructorAnchor(entry.anchor)}</ActionLink></> : <p>{RECORDED_GRADE_BASIS.missingLocation}</p>}</div>;
         })}
-        {!item.evidence?.length && <p>{RECORDED_GRADE_BASIS.missingExcerpt}</p>}
-        {item.reasoning?.trim() ? <div className="signal-copy-flow"><strong>Recorded AI explanation</strong><p>{item.reasoning}</p></div> : <p>{RECORDED_GRADE_BASIS.missingExplanation}</p>}
+        {!item.evidence?.length && !assessment?.ruleFacts && <p>{RECORDED_GRADE_BASIS.missingExcerpt}</p>}
+        {item.reasoning?.trim() ? <div className="signal-copy-flow"><strong>{assessment?.explanationLabel ?? "Recorded explanation:"}</strong><p>{item.reasoning}</p></div>
+          : !assessment?.ruleFacts && (assessment?.source === "ai" || !item.reason?.trim()) && <p>{assessment?.missingExplanation ?? "No explanation is available in this assessment record."}</p>}
         <Button variant="quiet" aria-expanded={detailsOpen} aria-controls={detailsId}
           aria-label={`${detailsOpen ? "Hide" : "Show"} ${CRITERION_REVIEW_COPY.details} for ${item.criterion_text}`}
           onClick={() => setDetailsOpen((open) => !open)}>
@@ -780,7 +788,7 @@ export function SignalEscalatedPanel({ checkRunId, sourceTarget, onOpenSource, a
       {awaitingList && !isError && <Alert title="Your judgment is saved" tone="info">Refresh the review list to confirm whether other criteria still need attention. <Button variant="quiet" onClick={() => { void refetch(); }}>Refresh review items</Button></Alert>}
       {sharedReason && <Alert title="Shared review reason" tone="warning"><p id={sharedReasonId}>{sharedReason}</p></Alert>}
       {hasItems
-        ? <div className="signal-resolution-list">{items?.map((item) => <SignalResolutionCard key={`${checkRunId}-${item.check_result_id}`} item={item} checkRunId={checkRunId} sourceTarget={sourceTarget} onOpenSource={onOpenSource} sharedReasonId={sharedReason ? sharedReasonId : undefined} />)}</div>
+        ? <div className="signal-resolution-list">{items?.map((item) => <SignalResolutionCard key={`${checkRunId}-${item.check_result_id}`} item={item} checkRunId={checkRunId} sourceTarget={sourceTarget} onOpenSource={onOpenSource} sharedReasonId={sharedReason ? sharedReasonId : undefined} currentItems={!isPending && !isError && fetchStatus === "idle"} />)}</div>
         : !awaitingList && !isPending && !isError && fetchStatus === "idle" && <Alert title="No unresolved criteria" tone="success">Every criterion has a recorded outcome. Continue to the integrity signals.</Alert>}
       </div>
     </section>
@@ -943,6 +951,7 @@ export function SignalCriteriaResults({ results, checkRunId, publicView = false,
                 {assessment.sourceCoverage && <CriterionSourceCoverage value={assessment.sourceCoverage} sourceAction={sourceAction} firstSlot={row.evidence.length + 1} criterionText={row.text} />}
                 {unresolvedAi && <><p><strong>No grade accepted</strong></p><p>{RECORDED_GRADE_BASIS.review}</p><p>{RECORDED_GRADE_BASIS.qualification}</p></>}
                 {!assessment.hasDetails ? <p>No assessment details are available in this record.</p> : <>
+                {assessment.ruleFacts && <RuleFactsDetails facts={assessment.ruleFacts} earlier={assessment.instructorRecorded} />}
                 {row.evidence.length > 0 && <h4>Recorded manuscript excerpts</h4>}
                 {!unresolvedAi && assessment.hasLocations && <p>{RECORDED_GRADE_BASIS.qualification}</p>}
                 {row.evidence.length ? row.evidence.map((item, evidenceIndex) => {
@@ -954,9 +963,9 @@ export function SignalCriteriaResults({ results, checkRunId, publicView = false,
                     {!hasAnchor && <p>No manuscript location was recorded for this excerpt.</p>}
                     {!publicView && showAction && sourceAction(item.anchor)}
                   </div>;
-                }) : <p>{unresolvedAi ? RECORDED_GRADE_BASIS.missingExcerpt : "No excerpt is available in this assessment record."}</p>}
+                }) : !assessment.ruleFacts && <p>{unresolvedAi ? RECORDED_GRADE_BASIS.missingExcerpt : "No excerpt is available in this assessment record."}</p>}
                 {!publicView && row.anchor?.trim() && !excerptAnchors.has(row.anchor) && <div className="signal-attached-flow"><p>Recorded criterion location: {row.anchor}</p>{sourceAction(row.anchor)}</div>}
-                {row.reasoning?.trim() ? <p><strong>{assessment.explanationLabel}</strong> {row.reasoning}</p> : <p>{unresolvedAi ? RECORDED_GRADE_BASIS.missingExplanation : assessment.missingExplanation}</p>}
+                {row.reasoning?.trim() ? <p><strong>{assessment.explanationLabel}</strong> {row.reasoning}</p> : !assessment.ruleFacts && (unresolvedAi || !row.reason?.trim()) && <p>{unresolvedAi ? RECORDED_GRADE_BASIS.missingExplanation : assessment.missingExplanation}</p>}
                 {row.reason?.trim() && <p><strong>Recorded system note:</strong> {row.reason}</p>}
                 </>}
               </div></details></li>;

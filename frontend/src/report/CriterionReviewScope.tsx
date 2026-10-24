@@ -127,6 +127,9 @@ export function CriterionReviewProvider({ checkRunId, instructorId, children }: 
   }
   const scope: ReviewScope = {
     checkRunId, decision: reportQuery.data?.decision, drafts, completion, confirmed, savedNavigation, isDraftCurrent, canChoose, revisions,
+    assessment,
+    assessmentCurrent: () => isCurrent() && reportQuery.isSuccess && reportQuery.fetchStatus === "idle"
+      && !reportQuery.isError && assessment?.check_run_id === checkRunId && isAssessmentRevision(assessment.assessment_revision),
     assessmentNotices: reportAssessmentNotices(reportQuery.data, location.pathname.endsWith("/document") ? "manuscript" : "report"),
     canUseCurrentDraft: draft => canChoose && !draft.currentResolved
       && isAssessmentRevision(draft.reviewedRevision) && draft.reviewedRevision === assessment?.assessment_revision,

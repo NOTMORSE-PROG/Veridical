@@ -34,7 +34,7 @@ describe("instructor assessment interpretation", () => {
 
   it("states missing explanation and located evidence even without a tentative majority", async () => {
     await show(record({ votes: [null, null], reasoning: " \n\t " }));
-    expect(screen.getByText("No AI explanation is available for this review item.")).toBeVisible();
+    expect(screen.getByText("No explanation is available in this assessment record.")).toBeVisible();
     expect(screen.getByText("No located excerpt is available for this review item.")).toBeVisible();
     expect(screen.queryByText(/No valid verdict|No AI assessment was recorded/)).not.toBeInTheDocument();
   });

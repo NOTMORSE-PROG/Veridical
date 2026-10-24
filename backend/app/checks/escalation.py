@@ -179,6 +179,7 @@ async def list_escalated(session: AsyncSession, check_run_id: int) -> list[Escal
                 CheckResult.outcome.in_(NEEDS_REVIEW_OUTCOMES),
             )
             .order_by(CheckResult.created_at)
+            .execution_options(populate_existing=True)
         )
     ).all()
     items = []
