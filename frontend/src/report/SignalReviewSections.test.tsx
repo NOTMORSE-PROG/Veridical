@@ -362,6 +362,7 @@ describe("SignalEscalatedPanel / SignalResolutionCard", () => {
   });
 
   it("explains exclusion on the focused field and keeps the item unresolved when canceled", async () => {
+    vi.spyOn(document, "hasFocus").mockReturnValue(true);
     const fetch = stubFetchByPath({ "/check-runs/5/escalated": [REAL_MAJORITY] });
     vi.stubGlobal("fetch", fetch);
     renderWithProviders(<SignalEscalatedPanel checkRunId={5} />);
@@ -376,7 +377,8 @@ describe("SignalEscalatedPanel / SignalResolutionCard", () => {
     fireEvent.click(screen.getByRole("button", { name: "Confirm exclusion" }));
     expect(reason).toHaveAttribute("aria-invalid", "true");
     expect(reason).toHaveAccessibleDescription(/Other review requirements still apply.*Enter a reason before confirming/);
-    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    const cancel = screen.getByRole("button", { name: "Cancel" });
+    cancel.focus(); fireEvent.click(cancel);
     expect(screen.getByRole("heading", { name: REAL_MAJORITY.criterion_text })).toHaveFocus();
     expect(screen.getByText("1 unresolved")).toBeVisible();
     expect(fetch.mock.calls.some(([, init]) => init?.method === "POST")).toBe(false);
@@ -436,19 +438,21 @@ describe("SignalEscalatedPanel / SignalResolutionCard", () => {
     expect(within(card).getByRole("heading", { name: "Exclude: needs another document" })).toBeVisible();
   });
 
-  it("requires a reason before confirming, announced without moving focus away from the field (WCAG 4.1.3)", async () => {
+  it("returns focus to the invalid reason after the instructor activates Confirm", async () => {
     vi.stubGlobal("fetch", stubFetchByPath({ "/check-runs/5/escalated": [REAL_MAJORITY] }));
     renderWithProviders(<SignalEscalatedPanel checkRunId={5} />);
 
     fireEvent.click(await screen.findByRole("button", { name: "Accept AI suggestion: pass" }));
     const confirmButton = screen.getByRole("button", { name: "Confirm resolution" });
     expect(confirmButton).not.toBeDisabled();
+    confirmButton.focus();
     fireEvent.click(confirmButton);
 
     const error = await screen.findByText("Enter a reason before confirming.");
     expect(error).toHaveAttribute("role", "alert");
     const reasonInput = screen.getByRole("textbox", { name: "Reason (required)" });
     expect(reasonInput).toHaveAttribute("aria-invalid", "true");
+    expect(reasonInput).toHaveFocus();
   });
 
   it("rejects a too-short reason instead of publishing it verbatim", async () => {
@@ -647,5 +651,18 @@ describe("SignalEscalatedPanel / SignalResolutionCard", () => {
     // resolution list below it.
     expect(screen.getByRole("heading", { name: "Criteria needing your judgment" })).toBeInTheDocument();
     expect(screen.getByText("No unresolved criteria")).toBeInTheDocument();
+  });
+});
+
+
+describe("cancel focus ownership", () => {
+  it("does not place focus from a background document after removing the local draft", async () => {
+    vi.spyOn(document, "hasFocus").mockReturnValue(false);
+    vi.stubGlobal("fetch", stubFetchByPath({ "/check-runs/5/escalated": [REAL_MAJORITY] }));
+    renderWithProviders(<SignalEscalatedPanel checkRunId={5} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Meets criterion" }));
+    const cancel = screen.getByRole("button", { name: "Cancel" }); cancel.focus(); fireEvent.click(cancel);
+    expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: REAL_MAJORITY.criterion_text })).not.toHaveFocus();
   });
 });

@@ -568,15 +568,13 @@ function SignalResolutionCard({ item, checkRunId, sharedReasonId, sourceTarget, 
     review.choose(item, resolution, level);
   }
 
-  function cancel() {
+  function cancel(trigger: HTMLElement) {
     if (saving) return;
-    review.cancel(item.check_result_id);
-    // The persistent criterion heading keeps the explicit Cancel action
-    // from dropping keyboard focus when the reason form disappears.
-    criterionHeadingRef.current?.focus();
+    followAction(trigger, () => review.cancel(item.check_result_id));
   }
 
   function confirm() {
+    requestedReasonFocus.current = draftCurrent && !saving && reason.trim().length < RESOLUTION_REASON_MIN_LENGTH;
     const submittedResolution = pending?.resolution;
     review.confirm(item.check_result_id, (out) => {
       if (submittedResolution === "needs_document") return CRITERION_EXCLUSION_COPY.success;
@@ -723,7 +721,7 @@ function SignalResolutionCard({ item, checkRunId, sharedReasonId, sourceTarget, 
           {saving && <p role="status">{REVIEW_DRAFT_COPY.saving}</p>}
           {Boolean(pending.error) && <Alert title="Saving could not be confirmed" tone="error" role="alert">Your entered reason is kept. Review the current criterion before trying again.</Alert>}
           <ActionAssessmentContext id={actionContextId} notices={review.assessmentNotices ?? []} />
-          <div>{draftCurrent && <Button variant="secondary" disabled={saving || pending?.uncertainRevision !== undefined} onClick={cancel}>Cancel</Button>}<Button data-criterion-confirm variant="brand" disabled={saving || !draftCurrent} aria-describedby={`${describedBy}${excluding ? ` ${exclusionConsequenceId}` : ""}`} busy={saving} onClick={confirm}>{excluding ? CRITERION_EXCLUSION_COPY.confirm : "Confirm resolution"}</Button></div>
+          <div>{draftCurrent && <Button variant="secondary" disabled={saving || pending?.uncertainRevision !== undefined} onClick={event => cancel(event.currentTarget)}>Cancel</Button>}<Button data-criterion-confirm variant="brand" disabled={saving || !draftCurrent} aria-describedby={`${describedBy}${excluding ? ` ${exclusionConsequenceId}` : ""}`} busy={saving} onClick={confirm}>{excluding ? CRITERION_EXCLUSION_COPY.confirm : "Confirm resolution"}</Button></div>
         </div>
       )}
     </article>

@@ -228,13 +228,24 @@ describe("SignalReportPage", () => {
   });
 
   it("returns focus to the criterion heading on Cancel, not to <body> (BUG-145)", async () => {
+    vi.spyOn(document, "hasFocus").mockReturnValue(true);
     stubReport(BASE_REPORT, [ESCALATED]);
     renderWithProviders(<SignalReportPage />, { route: "/report/5", path: "/report/:checkRunId" });
 
     fireEvent.click(await screen.findByRole("button", { name: "Meets criterion" }));
-    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    const cancel = screen.getByRole("button", { name: "Cancel" });
+    const heading = screen.getByRole("heading", { name: ESCALATED.criterion_text });
+    const focusedBeforeRemoval: boolean[] = [];
+    const originalFocus = heading.focus;
+    vi.spyOn(heading, "focus").mockImplementation((options) => {
+      focusedBeforeRemoval.push(cancel.isConnected);
+      originalFocus.call(heading, options);
+    });
+    cancel.focus();
+    fireEvent.click(cancel);
 
-    expect(screen.getByRole("heading", { name: ESCALATED.criterion_text })).toHaveFocus();
+    expect(heading).toHaveFocus();
+    expect(focusedBeforeRemoval).toEqual([false]);
     expect(screen.getByRole("button", { name: "Meets criterion" })).toBeInTheDocument();
   });
 
@@ -1043,6 +1054,7 @@ it("keeps an open reopen reason but refuses a decision that changed during repor
 describe("assessment context before instructor judgment", () => {
   afterEach(() => vi.unstubAllGlobals());
   it.each([true, false])("keeps test provenance and conditioned support context before actions (support=%s)", async flagged => {
+    vi.spyOn(document, "hasFocus").mockReturnValue(true);
     stubReport({ ...BASE_REPORT, llm_mode: "fake", historical_semantic_support_unverified: flagged }, [ESCALATED]);
     renderWithProviders(<SignalReportPage />, { route: "/report/5?criterion_record=2", path: "/report/:checkRunId" });
     const action = await screen.findByRole("button", { name: "Meets criterion" });
@@ -1057,7 +1069,8 @@ describe("assessment context before instructor judgment", () => {
     expect(ids.every(id => document.getElementById(id))).toBe(true);
     fireEvent.click(action);
     expect(screen.getByRole("button", { name: "Confirm resolution" })).toHaveAccessibleDescription(/Test AI responses. Not a real AI assessment/);
-    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    const cancel = screen.getByRole("button", { name: "Cancel" });
+    cancel.focus(); fireEvent.click(cancel);
     expect(screen.getByRole("heading", { name: ESCALATED.criterion_text })).toHaveFocus();
   });
 });
