@@ -140,6 +140,12 @@ class ReportExportUnavailableError(VeridicalError):
         )
 
 
+class SourceReadUnavailableError(VeridicalError):
+    """An authorized local source read failed; no assessment was changed."""
+
+    code = "source_read_unavailable"
+
+
 # HTTP mapping for the one exception handler (main.py). Codes absent here
 # are result STATES (not_applicable, unverifiable) that must never be
 # raised to HTTP; if one ever is, the handler still answers with the
@@ -159,6 +165,7 @@ HTTP_STATUS: dict[str, int] = {
     "actor_context_changed": 409,
     "invalid_api_key": 422,
     "report_export_unavailable": 422,
+    "source_read_unavailable": 503,
     # A rubric-decomposition parse that failed schema validation (V-010) —
     # user-actionable (re-review/re-upload); V-011 wraps this in a retry
     # loop so it only ever reaches HTTP after repeated failure.

@@ -116,7 +116,7 @@ async def _create_rubric_from_upload(
     await session.refresh(rubric)
 
     suffix = Path(filename).suffix.lower()[:8]
-    dest = settings.data_dir / "rubric_uploads" / f"{rubric.id}{suffix}"
+    dest = settings.data_dir / settings.rubric_upload_subdir / f"{rubric.id}{suffix}"
     try:
         await save_upload(chunks, dest, settings)
         rubric.source_file = str(dest)

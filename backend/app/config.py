@@ -878,6 +878,14 @@ class Settings(BaseSettings):
     # `data_dir` stays the local CACHE in both modes -- see `app/storage/`.
     storage_backend: str = "local"
     manuscript_upload_subdir: str = "uploads"
+    rubric_upload_subdir: str = "rubric_uploads"
+
+    @field_validator("rubric_upload_subdir")
+    @classmethod
+    def validate_rubric_upload_subdir(cls, value: str) -> str:
+        if not value or value in (".", "..") or any(c in value for c in "/\\:\x00"):
+            raise ValueError("RUBRIC_UPLOAD_SUBDIR must be one directory name")
+        return value
 
     @field_validator("manuscript_upload_subdir")
     @classmethod
