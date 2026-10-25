@@ -32,15 +32,17 @@ function SectionCard({
   headingId,
   title,
   children,
+  budget = false,
 }: {
   headingId: string;
   title: string;
   children: ReactNode;
+  budget?: boolean;
 }) {
   return (
     <section
       aria-labelledby={headingId}
-      className="signal-settings-section rounded-lg border border-border bg-panel p-4 shadow-sm sm:p-5"
+      className={cx("signal-settings-section rounded-lg border border-border bg-panel p-4 shadow-sm sm:p-5", budget && "signal-settings-section--budget")}
     >
       <h2 id={headingId} tabIndex={-1} className="text-md mb-3 font-bold text-ink">
         {title}
@@ -502,26 +504,24 @@ function ApiKeySection() {
 
 type AISetup = "configured" | "unavailable" | "unknown" | "test";
 
-function ModelRoutingPill({ model, setup }: { model: ModelQuotaStatus; setup: AISetup }) {
-  if (setup === "unavailable") return <StatusPill tone="attention">AI setup unavailable</StatusPill>;
-  if (setup === "unknown") return <StatusPill tone="neutral">AI setup status unknown</StatusPill>;
-  return <StatusPill tone={model.exhausted ? "attention" : "neutral"}>{model.exhausted ? "Unavailable for routing today" : "Configured"}</StatusPill>;
+function ModelLocalBudgetPill({ model }: { model: ModelQuotaStatus }) {
+  return <span className="signal-model-local-status"><StatusPill tone={model.exhausted ? "attention" : "neutral"}>{model.exhausted ? "Limit reached" : "Below limit"}</StatusPill></span>;
 }
 
-function ModelRow({ model, setup }: { model: ModelQuotaStatus; setup: AISetup }) {
+function ModelRow({ model }: { model: ModelQuotaStatus }) {
   return (
     <tr>
       <th scope="row">{model.model}</th>
-      <td>{model.recorded_budget_debits ?? model.calls_used} / {model.daily_limit}</td>
-      <td>{model.calls_remaining}</td>
-      <td>{model.cache_hits_today}</td>
+      <td><ModelLocalBudgetPill model={model} /></td>
+      <td className="signal-model-capacity-number">{model.recorded_budget_debits ?? model.calls_used} / {model.daily_limit}</td>
+      <td className="signal-model-capacity-number">{model.calls_remaining}</td>
+      <td className="signal-model-capacity-number">{model.cache_hits_today}</td>
       <td>{model.vision ? "Yes" : "No"}</td>
-      <td><ModelRoutingPill model={model} setup={setup} /></td>
     </tr>
   );
 }
 
-function ModelCapacityTable({ models, setup }: { models: ModelQuotaStatus[]; setup: AISetup }) {
+function ModelCapacityTable({ models }: { models: ModelQuotaStatus[] }) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const [overflows, setOverflows] = useState(false);
   const helpId = useId();
@@ -551,13 +551,13 @@ function ModelCapacityTable({ models, setup }: { models: ModelQuotaStatus[]; set
           <caption>Configured models and local budget</caption>
           <thead><tr>
             <th scope="col">Requested model</th>
-            <th scope="col">Recorded budget / Configured limit</th>
-            <th scope="col">Local budget remaining</th>
-            <th scope="col">Cached responses reused</th>
+            <th scope="col">Local budget status</th>
+            <th scope="col" className="signal-model-capacity-number">Recorded budget / Configured limit</th>
+            <th scope="col" className="signal-model-capacity-number">Local budget remaining</th>
+            <th scope="col" className="signal-model-capacity-number">Cached responses reused</th>
             <th scope="col">Image requests enabled</th>
-            <th scope="col">Routing status</th>
           </tr></thead>
-          <tbody>{models.map((model) => <ModelRow key={model.model} model={model} setup={setup} />)}</tbody>
+          <tbody>{models.map((model) => <ModelRow key={model.model} model={model} />)}</tbody>
         </table>
       </div>
       {overflows && <p id={helpId} className="mt-2 text-xs text-ink-secondary">Scroll across to see all model details.</p>}
@@ -570,7 +570,7 @@ function QuotaSection() {
 
   if (isPending) {
     return (
-      <SectionCard headingId="quota-heading" title="Local AI budget">
+      <SectionCard headingId="quota-heading" title="Local AI budget" budget>
         <div role="status" aria-live="polite" aria-busy="true" className="text-sm text-ink-tertiary">
           Loading local AI budget...
         </div>
@@ -579,7 +579,7 @@ function QuotaSection() {
   }
   if (isError || !quota) {
     return (
-      <SectionCard headingId="quota-heading" title="Local AI budget">
+      <SectionCard headingId="quota-heading" title="Local AI budget" budget>
         <div
           role="alert"
           className="rounded-md border border-status-attention-text/25 bg-status-attention-bg p-3 text-sm text-status-attention-text"
@@ -600,8 +600,8 @@ function QuotaSection() {
     ? "configured" : quota.key_state === "unavailable" ? "unavailable" : "unknown";
 
   return (
-    <SectionCard headingId="quota-heading" title="Local AI budget">
-      <div className="flex flex-col gap-2">
+    <SectionCard headingId="quota-heading" title="Local AI budget" budget>
+      <div className="signal-settings-budget-copy flex flex-col gap-2">
         {quota.mode === "live" && (
           <StatusPill tone={quota.key_source === "own" ? "success" : "neutral"}>
             {quota.key_source === "own" ? "Quota record: personal key" : "Quota record: shared key"}
@@ -652,17 +652,19 @@ function QuotaSection() {
                   <span className="min-w-0 wrap-anywhere font-medium text-ink">
                     {model.model}
                   </span>
-                  <ModelRoutingPill model={model} setup={setup} />
+                  <ModelLocalBudgetPill model={model} />
                 </div>
-                <p className="mt-1 text-xs text-ink-tertiary">
-                  {model.recorded_budget_debits ?? model.calls_used} / {model.daily_limit} recorded budget / configured limit · {model.calls_remaining} local budget remaining ·{" "}
-                  {model.cache_hits_today} cached responses reused · Image requests enabled: {model.vision ? "Yes" : "No"}
-                </p>
+                <dl className="signal-settings-model-metrics">
+                  <div><dt>Recorded budget / Configured limit</dt><dd>{model.recorded_budget_debits ?? model.calls_used} / {model.daily_limit}</dd></div>
+                  <div><dt>Local budget remaining</dt><dd>{model.calls_remaining}</dd></div>
+                  <div><dt>Cached responses reused</dt><dd>{model.cache_hits_today}</dd></div>
+                  <div><dt>Image requests enabled</dt><dd>{model.vision ? "Yes" : "No"}</dd></div>
+                </dl>
               </li>
             ))}
           </ul>
-          <ModelCapacityTable models={quota.models} setup={setup} />
-          {quota.models.filter((model) => (model.historical_budget_debits ?? 0) > 0).map((model) => <p key={model.model} className="mt-2 text-sm text-ink-secondary">
+          <ModelCapacityTable models={quota.models} />
+          {quota.models.filter((model) => (model.historical_budget_debits ?? 0) > 0).map((model) => <p key={model.model} className="signal-settings-budget-copy mt-2 text-sm text-ink-secondary wrap-anywhere">
             Requested model {model.model} includes {model.historical_budget_debits} recorded budget debits from earlier identifiers: {model.budget_aliases?.join(", ")}. The remaining local budget includes a conservative reservation for earlier model records. A reservation is a local safety measure, not a count of additional API requests.
           </p>)}
         </div>

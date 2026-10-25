@@ -1057,7 +1057,8 @@
     inline-size: 100%;
     min-inline-size: var(--signal-first-use-measure);
     border-collapse: collapse;
-    font-size: var(--signal-type-meta);
+    font-size: var(--signal-type-label);
+    line-height: var(--signal-line-label);
     color: var(--color-signal-ink-secondary);
   }
 
@@ -1067,7 +1068,7 @@
     padding: var(--signal-space-2) var(--signal-space-3);
     text-align: start;
     vertical-align: top;
-    overflow-wrap: anywhere;
+    overflow-wrap: normal;
   }
 
   .signal-model-capacity-table caption,
@@ -1075,6 +1076,33 @@
     background: var(--color-signal-surface-muted);
     color: var(--color-signal-ink);
     font-weight: var(--signal-weight-semibold);
+  }
+
+  .signal-model-capacity-table caption {
+    font-size: var(--signal-type-body);
+  }
+
+  .signal-model-capacity-table .signal-model-capacity-number {
+    text-align: end;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .signal-model-capacity-table tbody th[scope="row"] {
+    overflow-wrap: anywhere;
+  }
+
+  .signal-model-local-status {
+    display: inline-block;
+    max-inline-size: 100%;
+  }
+
+  .signal-model-local-status > span {
+    max-inline-size: 100%;
+    overflow-wrap: normal;
+  }
+
+  .signal-model-local-status svg {
+    flex-shrink: 0;
   }
 
   .signal-model-capacity-table tr {
@@ -4796,10 +4824,16 @@
   }
 
   .signal-settings {
-    max-width: var(--signal-prose-width);
+    max-width: var(--signal-workbench-width);
+  }
+
+  .signal-settings > .signal-route-header {
+    max-inline-size: var(--signal-prose-width);
   }
 
   .signal-settings-nav {
+    inline-size: fit-content;
+    max-inline-size: var(--signal-prose-width);
     position: sticky;
     z-index: var(--signal-z-raised);
     inset-block-start: var(--signal-workspace-header-height);
@@ -4828,16 +4862,46 @@
 
   .signal-settings-stack {
     display: grid;
+    grid-template-columns: minmax(0, 1fr);
     gap: var(--signal-rhythm-section);
   }
 
   .signal-settings-section {
+    inline-size: 100%;
+    min-inline-size: 0;
+    max-inline-size: var(--signal-prose-width);
     border-color: var(--color-signal-border);
     border-block-start: var(--signal-border-brand) solid var(--color-signal-brand);
     border-radius: var(--signal-radius-panel);
     padding: var(--signal-space-6);
     background: var(--color-signal-surface);
     box-shadow: var(--signal-shadow-raised);
+  }
+
+  .signal-settings-section--budget {
+    max-inline-size: none;
+  }
+
+  .signal-settings-budget-copy {
+    max-inline-size: var(--signal-prose-width);
+  }
+
+  .signal-settings-model-metrics {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: var(--signal-space-3);
+    margin-block-start: var(--signal-space-2);
+  }
+
+  .signal-settings-model-metrics dt {
+    font-size: var(--signal-type-meta);
+    color: var(--color-signal-ink-secondary);
+  }
+
+  .signal-settings-model-metrics dd {
+    margin: 0;
+    font-size: var(--signal-type-label);
+    font-variant-numeric: tabular-nums;
   }
 
   .signal-settings-section > h2 {
@@ -7570,5 +7634,11 @@
   .signal-rule-facts ol {
     list-style: decimal;
     padding-inline-start: var(--signal-space-5);
+  }
+}
+
+@layer utilities {
+  .signal-model-local-status > span {
+    white-space: normal;
   }
 }

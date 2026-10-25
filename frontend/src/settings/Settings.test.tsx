@@ -193,7 +193,8 @@ describe("SettingsPage", () => {
     expect(screen.getByText(notice)).toBeVisible();
     const section = screen.getByRole("region", { name: "Local AI budget" });
     expect(section.querySelector('div[aria-hidden="true"]')).toBeNull();
-    expect(within(section).getAllByText(key_state === "unavailable" ? "AI setup unavailable" : "AI setup status unknown").length).toBe(2);
+    expect(within(section).queryByText(key_state === "unavailable" ? "AI setup unavailable" : "AI setup status unknown")).not.toBeInTheDocument();
+    expect(within(section).getAllByText("Below limit")).toHaveLength(2);
     expect(within(section).queryByText("Configured")).not.toBeInTheDocument();
     expect(within(section).queryByText("Unavailable for routing today")).not.toBeInTheDocument();
   });
@@ -418,6 +419,11 @@ describe("SettingsPage", () => {
 
     const columnHeaderCount = table!.querySelectorAll('th[scope="col"]').length;
     expect(columnHeaderCount).toBe(6);
+    expect(Array.from(table!.querySelectorAll('th[scope="col"]')).map(cell => cell.textContent)).toEqual([
+      "Requested model", "Local budget status", "Recorded budget / Configured limit", "Local budget remaining", "Cached responses reused", "Image requests enabled",
+    ]);
+    expect(within(table!).getByText("Below limit")).toBeInTheDocument();
+    expect(within(table!).getByText("Limit reached")).toBeInTheDocument();
 
     const rows = table!.querySelectorAll("tr");
     expect(rows.length).toBeGreaterThan(0);
@@ -631,4 +637,23 @@ describe("SettingsPage", () => {
     expect(screen.queryByText("Quota record: shared key")).not.toBeInTheDocument();
     expect(screen.queryByText("Quota record: personal key")).not.toBeInTheDocument();
   });
+});
+
+it("distinguishes recorded local limits while the one global setup explanation remains unavailable", async () => {
+  const long = "requested-model-".repeat(20);
+  vi.stubGlobal("fetch", stubFetchByPath(baseHandlers({ "/quota": { ...QUOTA, key_state: "unavailable",
+    models: [{ ...QUOTA.models![0], model: long, exhausted: false }, { ...QUOTA.models![0], model: "closed-model", exhausted: true, calls_remaining: 0 }],
+  } })));
+  renderWithProviders(<SettingsPage />);
+  await screen.findByText("No usable AI configuration was available for this status check. Saved shared-key budget records are shown below.");
+  const budget = screen.getByRole("region", { name: "Local AI budget" });
+  expect(within(budget).getAllByText("No usable AI configuration was available for this status check. Saved shared-key budget records are shown below.")).toHaveLength(1);
+  const table = within(budget).getByRole("table");
+  const rows = within(table).getAllByRole("row").slice(1);
+  expect(within(rows[0]).getByRole("rowheader", { name: long })).toBeInTheDocument();
+  expect(within(rows[0]).getByText("Below limit")).toBeInTheDocument();
+  expect(within(rows[1]).getByText("Limit reached")).toBeInTheDocument();
+  expect(within(budget).queryByText("Configured")).not.toBeInTheDocument();
+  expect(within(budget).queryByText("AI setup unavailable")).not.toBeInTheDocument();
+  expect(within(budget).getByText("These are configured limits and local budget records. Provider allowance and current availability are not verified here.")).toBeVisible();
 });
