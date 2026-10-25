@@ -52,6 +52,14 @@ def test_initial_record_route_freeze_history_and_private_access(logged_in_with_a
     assert ack["context"]["assessment_revision"] == ack["report"]["assessment_revision"] == 3
     assert http.post(base + "/records", json={**body, "expected_revision": 2}).status_code == 409
     assert http.post(base + "/records", json={**body, "expected_revision": 3}).status_code == 409
+    exported = http.get(f"/check-runs/{run}/report/export.pdf")
+    assert exported.status_code == 200
+    import fitz
+
+    with fitz.open(stream=exported.content, filetype="pdf") as document:
+        text = " ".join(" ".join(page.get_text() for page in document).split())
+    assert "Instructor Judgments" in text and "Instructor judgment recorded." in text
+    assert "Escalation Resolutions" not in text and reason in text
     revised_reason = "Further manuscript evidence supports my revised instructor judgment."
     revised = http.post(
         base + "/revisions",

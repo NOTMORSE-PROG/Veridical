@@ -1,7 +1,7 @@
 """Private saved-judgment revision contracts (F3.5/F8.3, screens 4h/4w)."""
 
 from datetime import datetime
-from math import isfinite
+from math import isfinite, ulp
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -188,10 +188,27 @@ class JudgmentHistoryEntry(PrivateJudgmentModel):
             if self.action != "judgment_recorded" or self.original_assessment is None:
                 raise ValueError("The initial judgment event lacks its original assessment.")
             from app.checks.levels import outcome_and_score
+            from app.models.run import CheckResult
 
             original = self.original_assessment
             _, full, _ = outcome_and_score(None, "pass")
             _, empty, _ = outcome_and_score(None, "fail")
+            if self.after.resolution_type == "accept_majority":
+                raise ValueError("An initial judgment must record an explicit instructor choice.")
+            if (
+                self.after.resolution_type in ("mark_pass", "mark_fail", "needs_document")
+                and self.after.level is not None
+            ):
+                raise ValueError("A binary judgment or exclusion cannot carry a named grade.")
+            if self.after.resolution_type == "mark_level":
+                level = self.after.level
+                precision = CheckResult.__table__.c.score.type.scale
+                tolerance = 10**-precision / 2 + ulp(full)
+                if (
+                    level is None
+                    or abs(self.after.score - level.points / level.max_points * full) > tolerance
+                ):
+                    raise ValueError("The recorded named grade and stored score disagree.")
             if (
                 original.kind not in ("structural", "semantic")
                 or original.original_outcome not in ("passed", "failed")

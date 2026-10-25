@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from alembic import command
 from app.db import sqlalchemy_url
 from app.errors import ConflictError, NotFoundError
+from app.models.rubric import Criterion
 from app.models.run import CheckResult
 from app.report.judgment_schemas import JudgmentRecordIn, JudgmentRevisionIn
 from app.report.judgments import (
@@ -153,6 +154,30 @@ async def test_record_then_revision_keeps_initial_automated_grade_and_distinct_e
         next(row for row in rows if row.id == result_id).detail["original_result"]["outcome"]
         == "passed"
     )
+
+
+@pytest.mark.asyncio
+async def test_initial_named_grade_retains_database_rounded_normalization(factory):
+    owner, run, criterion, _, _ = await settled(factory, levelled=True)
+    async with factory() as session:
+        producing = await session.get(Criterion, criterion)
+        producing.levels = [
+            {"level": 0, "name": "Absent", "points": 0, "descriptor": "No evidence"},
+            {"level": 2, "name": "Developing", "points": 1, "descriptor": "Some evidence"},
+            {"level": 5, "name": "Complete", "points": 3, "descriptor": "Complete evidence"},
+        ]
+        await session.commit()
+        ack = await record_judgment(
+            session, run, criterion, owner, entry(resolution="mark_level", level=2)
+        )
+    assert ack.context.current.score == 33.33
+    assert ack.context.current.level.name == "Developing"
+    assert ack.context.current.level.points == 1 and ack.context.current.level.max_points == 3
+    async with factory() as session:
+        history = await get_judgment_history(
+            session, run, criterion, owner, expected_revision=1, expected_judgment_revision=1
+        )
+    assert history.entries[0].after == ack.context.current and not history.history_incomplete
 
 
 @pytest.mark.asyncio

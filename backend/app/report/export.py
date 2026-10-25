@@ -633,7 +633,7 @@ def _source_caption(row: CriterionResultOut) -> str:
     decided by a rule says "Rule-checked" here even when the rubric calls
     it semantic."""
     if row.resolution:
-        return "Resolved by instructor"
+        return "Instructor judgment"
     # BUG-092/UX review finding (2026-08-24): same fix as the frontend's
     # `sourceCaption` (`ResultsTable.tsx`) -- a `not_assessable` criterion
     # is deliberately never AI-graded, but its `kind` is a
@@ -764,11 +764,12 @@ def _criterion_flowable(row: CriterionResultOut, styles: dict[str, ParagraphStyl
         verb = (
             f"Marked {row.level.name}"
             if row.resolution.type == "mark_level" and row.level is not None
-            else RESOLUTION_VERB.get(row.resolution.type, "Resolved by instructor")
+            else RESOLUTION_VERB.get(row.resolution.type, "Judgment recorded")
         )
         parts.append(
             Paragraph(
-                f"Resolved by instructor. <b>{escape(verb)}.</b> {escape(row.resolution.reason)}",
+                f"Instructor judgment recorded. <b>{escape(verb)}.</b> "
+                f"{escape(row.resolution.reason)}",
                 styles["cell"],
             )
         )
@@ -1666,7 +1667,7 @@ def build_report_pdf(data: ReportExportData) -> bytes:
                 if f.overridden and detail.override_reason:
                     finding.append(
                         Paragraph(
-                            "<b>Recorded instructor resolution:</b> "
+                            "<b>Recorded instructor judgment:</b> "
                             + escape(detail.override_reason),
                             styles["body"],
                         )
@@ -1697,10 +1698,10 @@ def build_report_pdf(data: ReportExportData) -> bytes:
     if not scope_emitted:
         flow.extend(_originality_scope_flowables(data, styles))
 
-    # 5. Escalation resolutions.
+    # 5. Recorded judgments, including initial review of settled criteria.
     resolved = [r for r in report.results if r.resolution]
     if resolved:
-        flow.append(Paragraph("Escalation Resolutions", styles["h2"]))
+        flow.append(Paragraph("Instructor Judgments", styles["h2"]))
         for row in resolved:
             flow.append(
                 PTOContainer(

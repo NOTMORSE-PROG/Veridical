@@ -207,3 +207,45 @@ def test_original_named_level_refuses_coerced_or_inconsistent_facts():
         row.payload["judgment"]["original_assessment"]["original_level"] = level
         with pytest.raises(ValidationError):
             history_entry(row)
+
+
+def test_initial_event_does_not_substitute_accepting_an_ai_vote_for_an_explicit_judgment():
+    row = event()
+    row.payload["judgment"]["after"]["resolution_type"] = "accept_majority"
+    with pytest.raises(ValidationError):
+        history_entry(row)
+
+
+def test_new_named_judgment_history_requires_consistent_stored_score():
+    row = event()
+    after = row.payload["judgment"]["after"]
+    after.update(
+        resolution_type="mark_level",
+        level={"ordinal": 0, "name": "Absent", "points": 0, "max_points": 2},
+    )
+    with pytest.raises(ValidationError):
+        history_entry(row)
+    after["score"] = 0
+    assert history_entry(row).after.score == 0
+
+
+@pytest.mark.parametrize(
+    "resolution,outcome,score",
+    [
+        ("mark_pass", "passed", 100),
+        ("mark_fail", "failed", 0),
+        ("needs_document", "not_applicable", None),
+    ],
+)
+def test_initial_binary_or_excluded_history_cannot_carry_an_unrelated_named_grade(
+    resolution, outcome, score
+):
+    row = event()
+    row.payload["judgment"]["after"].update(
+        resolution_type=resolution,
+        outcome=outcome,
+        score=score,
+        level={"ordinal": 0, "name": "Unrelated named grade", "points": 0, "max_points": 2},
+    )
+    with pytest.raises(ValidationError):
+        history_entry(row)
