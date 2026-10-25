@@ -1,0 +1,30 @@
+{
+  "version": "v1",
+  "number": "[-+]?(?:\\d+(?:\\.\\d+)?|\\.\\d+)(?:[eE][-+]?\\d+)?",
+  "observed_number": "$NUMBER(?:\\s*[\\u00d7\\u00b7*]\\s*10\\s*(?:\\^\\s*[-+\\u2212]?\\d+|[\\u207b\\u207a]?[\\u2070\\u00b9\\u00b2\\u00b3\\u2074-\\u2079]+)|\\s*\\^\\s*[-+\\u2212]?\\d+|[\\u207b\\u207a]?[\\u2070\\u00b9\\u00b2\\u00b3\\u2074-\\u2079]+|[%\\u2030])?",
+  "character_replacements": {
+    "\u03c7": "X",
+    "\u03a7": "X",
+    "\u2212": "-"
+  },
+  "thousands_comma": "(?<=\\d),(?=\\d{3}\\b)",
+  "explicit_df_prefix": "(?P<head>(?<![A-Za-z0-9_])(?:t|r|Q|X2?|\\[CHI\\])\\s*\\(\\s*)(?i:df)\\s*=\\s*(?=$NUMBER\\s*(?:,\\s*N\\s*=\\s*$NUMBER\\s*)?\\))",
+  "p_token": "(?<![A-Za-z])p\\s*(?P<comparison>[<>=])\\s*(?P<number>$NUMBER)$",
+  "numeric_continuation": "\\s*(?:[\\u00d7\\u00b7*/^%\\u2030]|[+-]\\s*\\d|[eE][-+]?\\d|[\\u2070\\u00b9\\u00b2\\u00b3\\u2074-\\u2079\\u207b\\u207a]|\\.(?=\\d))",
+  "statistic_prefix_word_character": "\\w",
+  "families": {
+    "t": "t\\s*\\(\\s*(?P<df2>$NUMBER)\\s*\\)",
+    "r": "r\\s*\\(\\s*(?P<df2>$NUMBER)\\s*\\)",
+    "F": "F\\s*\\(\\s*(?P<df1>$NUMBER)\\s*,\\s*(?P<df2>$NUMBER)\\s*\\)",
+    "Chi2": "(?:X2?|\\[CHI\\]|\\[DELTA\\]G)\\s*\\(\\s*(?P<df1>$NUMBER)\\s*(?:,\\s*N\\s*=\\s*$NUMBER\\s*)?\\)",
+    "Q": "Q\\s*\\(\\s*(?P<df1>$NUMBER)\\s*\\)",
+    "Z": "[Zz]"
+  },
+  "test_value_suffix": "\\s*(?P<comparison>[<>=])\\s*(?P<number>$NUMBER)\\s*,\\s*",
+  "result_candidates": [
+    "(?<![A-Za-z0-9_])(?:t|F|r|[Zz]|Q(?:w|b|within|between)?|[\u03c7\u03a7](?:\u00b2|2)?|X2?)\\s*\\([^()]*\\)\\s*[=<>\u2264\u2265]{1,2}\\s*$OBSERVED(?:\\s*,\\s*p\\s*[=<>\u2264\u2265]{1,2}\\s*$OBSERVED)?",
+    "(?<![A-Za-z0-9_])(?:t|F|r|[Zz]|Q|[\u03c7\u03a7](?:\u00b2|2)?|X2?)\\s*[=<>\u2264\u2265]{1,2}\\s*$OBSERVED[^\\d.;!?\\r\\n]*\\bdf\\s*=\\s*$NUMBER[^\\d.;!?\\r\\n]*\\bp\\s*[=<>\u2264\u2265]{1,2}\\s*$OBSERVED",
+    "(?<![A-Za-z0-9_])(?:t|F|r|[Zz]|Q|[\u03c7\u03a7](?:\u00b2|2)?|X2?)\\s*[=<>\u2264\u2265]{1,2}\\s*$OBSERVED\\s*[,;]\\s*p\\s*[=<>\u2264\u2265]{1,2}\\s*$OBSERVED"
+  ],
+  "chi_squared_pattern": "(?<=X)\\u00b2(?=\\s*\\()"
+}

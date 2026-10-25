@@ -1251,7 +1251,16 @@ def build_report_pdf(data: ReportExportData) -> bytes:
                 coverage.coverage_reason,
                 (coverage.coverage_reason or coverage.outcome).replace("_", " "),
             )
-            if coverage.assessment_scope == "reference_metadata_only":
+            if coverage.coverage_reason == "statistical_notation_unassessed":
+                key = (
+                    "statistical_notation_partial"
+                    if coverage.analysis_coverage == "partial"
+                    else "statistical_notation_unsupported"
+                )
+                reason = (
+                    _coverage_labels()[key] + " " + _coverage_labels()["statistical_notation_limit"]
+                ).rstrip(".")
+            elif coverage.assessment_scope == "reference_metadata_only":
                 reason = (
                     "Partially assessed. Reference details were checked where possible. "
                     "Citation matching and claim support across the manuscript were not assessed"
@@ -1276,6 +1285,22 @@ def build_report_pdf(data: ReportExportData) -> bytes:
                     "Not assessed. VERIDICAL could not establish a reliable source for this check. "
                     "No conclusion was made"
                 )
+            if (
+                coverage.statistical_notation_unassessed is True
+                and coverage.coverage_reason != "statistical_notation_unassessed"
+            ):
+                key = (
+                    "statistical_notation_partial"
+                    if coverage.analysis_coverage == "partial"
+                    else "statistical_notation_unsupported"
+                )
+                reason = (
+                    reason.rstrip(".")
+                    + ". "
+                    + _coverage_labels()[key]
+                    + " "
+                    + _coverage_labels()["statistical_notation_limit"]
+                ).rstrip(".")
             counts = []
             if coverage.n_source_candidates_withheld:
                 counts.append(

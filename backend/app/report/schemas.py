@@ -128,6 +128,7 @@ COVERAGE_REASONS = frozenset(
         "claim_support_unavailable",
         "statement_roles_unverified",
         "image_content_unassessed",
+        "statistical_notation_unassessed",
         "native_math_unassessed",
         "native_math_inventory_unavailable",
         "native_math_source_incomplete",
@@ -174,6 +175,7 @@ class IntegrityCheckStatusOut(BaseModel):
     n_claim_support_unassessed: int = 0
     reference_list_page: int | None = None
     analysis_coverage: Literal["complete", "partial", "unsupported"] | None = None
+    statistical_notation_unassessed: bool | None = None
     assessment_scope: (
         Literal[
             "reference_metadata_only",

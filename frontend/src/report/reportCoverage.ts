@@ -1,4 +1,5 @@
 import type { IntegrityCheckStatusOut, ReportOut } from "../api/types";
+import notationCopy from "./statisticalNotationCopy.json";
 import type { CoverageStatementItem } from "../ui/CoverageStatement";
 import { imageCoverageItem } from "./imageCoverage";
 import { nativeMathCoverageItem } from "./nativeMathCoverage";
@@ -17,6 +18,24 @@ const INTEGRITY_LABEL: Record<IntegrityCheckStatusOut["check_kind"], string> = {
 // wording and recovery destinations here prevents the two surfaces from
 // making different claims about the same incomplete check.
 function integrityCoverageItem(status: IntegrityCheckStatusOut, manuscriptId: number, checkRunId: number): CoverageStatementItem {
+  const notation = status.check_kind === "statistical_forensics"
+    && (status.statistical_notation_unassessed === true || status.coverage_reason === "statistical_notation_unassessed");
+  const detail = status.analysis_coverage === "partial" ? notationCopy.partial : notationCopy.unsupported;
+  if (notation && status.coverage_reason === "statistical_notation_unassessed") {
+    const label = INTEGRITY_LABEL[status.check_kind];
+    return {
+      key: status.check_kind,
+      label: `${label} · ${status.analysis_coverage === "partial" ? "Partially assessed" : "Not assessed"}`,
+      detail,
+      subIssues: [notationCopy.limit],
+      action: { to: `/report/${checkRunId}/document?view=decision`, label: "Open the paper" },
+    };
+  }
+  const existing = baseIntegrityCoverageItem(status, manuscriptId, checkRunId);
+  return notation ? { ...existing, subIssues: [...(existing.subIssues ?? []), detail, notationCopy.limit] } : existing;
+}
+
+function baseIntegrityCoverageItem(status: IntegrityCheckStatusOut, manuscriptId: number, checkRunId: number): CoverageStatementItem {
   const label = INTEGRITY_LABEL[status.check_kind];
   const reason = status.coverage_reason;
   const native = status.check_kind === "statistical_forensics" ? nativeMathCoverageItem(status, checkRunId) : null;

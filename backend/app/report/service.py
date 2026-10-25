@@ -341,6 +341,22 @@ def _to_criterion_result(
     )
 
 
+def _statistical_notation_state(detail: dict | None) -> bool | None:
+    """An absent historical inventory cannot establish an examined empty set."""
+    detail = detail or {}
+    ledger = detail.get("statistical_notation_coverage")
+    value = detail.get("statistical_notation_unassessed")
+    if (
+        not isinstance(ledger, dict)
+        or ledger.get("version") != "v1"
+        or not isinstance(ledger.get("items"), list)
+        or type(value) is not bool
+        or value != bool(ledger["items"])
+    ):
+        return None
+    return value
+
+
 def _integrity_skip_count(kind: CheckKind, detail: dict[str, Any] | None, cause: str) -> int:
     """BUG-125: F4's own `detail` (agreement/service.py) keys skip counts
     `n_skipped_{cause}`; F5's (citations/verify.py) scopes the same three
@@ -604,6 +620,9 @@ async def report_out_for_check_run(
             n_linkage_unassessed=(row.detail or {}).get("n_linkage_unassessed", 0),
             n_source_pages_unassessed=(row.detail or {}).get("n_source_pages_unassessed", 0),
             n_claim_support_unassessed=(row.detail or {}).get("n_claim_support_unassessed", 0),
+            statistical_notation_unassessed=_statistical_notation_state(row.detail)
+            if row.kind == CheckKind.statistical_forensics
+            else None,
             reference_list_page=(row.detail or {}).get("reference_list_page"),
             analysis_coverage=(row.detail or {}).get("analysis_coverage")
             if (row.detail or {}).get("analysis_coverage") in {"complete", "partial", "unsupported"}

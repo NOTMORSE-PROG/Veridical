@@ -1,0 +1,5 @@
+{
+  "partial": "Supported statistical statements were extracted. Other statistical notation could not be assessed reliably. Check the original statements in the manuscript.",
+  "unsupported": "Statistical notation was found, but this check could not assess it reliably. Check the original statements in the manuscript.",
+  "limit": "This limit alone does not show that a statistic is wrong."
+}

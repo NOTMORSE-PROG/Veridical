@@ -110,7 +110,11 @@ def recompute_p(
 
 
 def evaluate_p_recalc(
-    stats: list[ReportedStat], full_text: str, *, tail_context_complete: bool = True
+    stats: list[ReportedStat],
+    full_text: str,
+    *,
+    tail_context_complete: bool = True,
+    unassessed_stats: list[ReportedStat] | None = None,
 ) -> list[ForensicsFlagDraft]:
     try:
         one_tailed_in_text = bool(extract_1tail(full_text))
@@ -120,7 +124,11 @@ def evaluate_p_recalc(
     flags: list[ForensicsFlagDraft] = []
     for stat in stats:
         result = recompute_p(stat, one_tailed_in_text=one_tailed_in_text)
-        if result is None or not result.error or not stat.raw_text:
+        if result is None:
+            if unassessed_stats is not None:
+                unassessed_stats.append(stat)
+            continue
+        if not result.error or not stat.raw_text:
             continue
         alternative = None
         if not tail_context_complete:

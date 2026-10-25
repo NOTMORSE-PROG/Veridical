@@ -484,6 +484,7 @@ export interface IntegrityCheckStatusOut {
   n_claim_support_unassessed?: number;
   reference_list_page?: number | null;
   analysis_coverage?: "complete" | "partial" | "unsupported" | null;
+  statistical_notation_unassessed?: boolean | null;
   assessment_scope?: "reference_metadata_only" | "available_text_and_tables" | "available_text_and_reference_metadata" | null;
   n_reference_metadata_attempted?: number;
   n_metadata_api_down?: number;

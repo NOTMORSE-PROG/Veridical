@@ -25,6 +25,7 @@ from app.audit.service import write_audit_event
 from app.checks.forensics.checks import ForensicsFlagDraft, evaluate_grim_grimmer
 from app.checks.forensics.coverage import image_coverage
 from app.checks.forensics.extract import extract_all_stats
+from app.checks.forensics.notation import text_notation_coverage
 from app.checks.forensics.pcheck import evaluate_p_recalc
 from app.checks.forensics.sanity import evaluate_group_counts, evaluate_percentage_sums
 from app.checks.source_quality import persist_source_limitation
@@ -60,20 +61,31 @@ def _compute_forensics_findings(extraction: ExtractionResult) -> _ForensicsCompu
 
     outcome = ResultOutcome.passed if (inferential or descriptive) else ResultOutcome.not_applicable
     coverage = image_coverage(extraction, stats)
-    if coverage.get("coverage_reason"):
-        outcome = ResultOutcome.escalated
+    tail_context_limited = bool(coverage.get("coverage_reason"))
 
     source = analytical_source(extraction)
     full_text = "\n".join(b.text for scope in source.scopes for b in scope if not b.is_furniture)
+    unassessed_stats = []
+    p_flags = evaluate_p_recalc(
+        inferential,
+        full_text,
+        tail_context_complete=not source.limited and not tail_context_limited,
+        unassessed_stats=unassessed_stats,
+    )
+    unassessed_ids = {id(stat) for stat in unassessed_stats}
+    assessed_stats = [stat for stat in stats if id(stat) not in unassessed_ids]
+    coverage.update(text_notation_coverage(extraction, assessed_stats))
+    if coverage["statistical_notation_unassessed"]:
+        coverage.setdefault("coverage_reason", "statistical_notation_unassessed")
+        coverage["assessment_scope"] = "available_text_and_tables"
+        coverage["analysis_coverage"] = "partial" if assessed_stats else "unsupported"
+    if coverage.get("coverage_reason"):
+        outcome = ResultOutcome.escalated
 
     grim_grimmer = evaluate_grim_grimmer(stats)
     flag_drafts: list[ForensicsFlagDraft] = [
         *grim_grimmer.flags,
-        *evaluate_p_recalc(
-            inferential,
-            full_text,
-            tail_context_complete=not source.limited and not coverage.get("coverage_reason"),
-        ),
+        *p_flags,
         *evaluate_percentage_sums(stats),
         *evaluate_group_counts(stats),
     ]

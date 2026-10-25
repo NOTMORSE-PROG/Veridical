@@ -27,12 +27,14 @@ import io
 import math
 import re
 import warnings
+from collections import defaultdict, deque
 from dataclasses import dataclass
 from typing import Literal
 
 from statcheck.extract_stats import extract_stats
 
 from app.checks.forensics.keywords import ForensicsKeywords, load_keywords
+from app.checks.forensics.notation import bind_library_row, library_ranges, normalize_notation
 from app.ingest.analytical_source import analytical_source
 from app.ingest.schemas import ExtractionResult, TableBlock, TextBlock
 
@@ -43,8 +45,6 @@ _STAT_TYPES = ["t", "F", "r", "Chi2", "Z", "Q"]
 # Unicode character. PyMuPDF/python-docx extraction gives us the raw
 # Unicode glyphs directly (no HTML), so this covers what that replacement
 # doesn't.
-_CHI_UNICODE = re.compile("[χΧ]")
-_SUPERSCRIPT_TWO = "²"
 # Only a comma directly between digits, followed by exactly a 3-digit
 # group (thousands separator shape) — NOT the ordinary APA comma between
 # a test statistic and its p-value ("t(28) = 2.45, p = .021" must survive
@@ -53,9 +53,7 @@ _THOUSANDS_COMMA = re.compile(r"(?<=\d),(?=\d{3}\b)")
 
 
 def normalize_for_statcheck(text: str) -> str:
-    text = _CHI_UNICODE.sub("X", text)
-    text = text.replace(_SUPERSCRIPT_TWO, "2")
-    return _THOUSANDS_COMMA.sub("", text)
+    return normalize_notation(text).text
 
 
 @dataclass(frozen=True)
@@ -91,16 +89,17 @@ class ReportedStat:
     test_comparison: str | None = None  # "=" (statcheck only ever reports this)
     p_value: float | None = None
     p_comparison: str | None = None  # "=" | "<" | ">"
-    # Decimal-place counts statcheck's own extractor already computes
-    # (its `test_dec`/`dec` columns) — needed by V-033's p-recalculation
-    # (rounding tolerance depends on reported precision), not by V-032's
-    # GRIM/GRIMMER (descriptive-stat precision only, read from raw_text).
+    # Decimal-place counts verified against the bound printed tokens.
+    # Whitespace and a leading zero must not change rounding precision.
     test_value_precision: int | None = None
     p_value_precision: int | None = None
     # --- descriptive (from table columns) ---
     stat_name: Literal["n", "mean", "sd", "percentage"] | None = None
     value: float | None = None
     group_label: str | None = None  # the row's own first-column label, if any
+    source_block_index: int | None = None
+    source_start: int | None = None
+    source_end: int | None = None
 
 
 def _anchor_for(*, page: int | None, paragraph: int | None) -> str:
@@ -131,10 +130,10 @@ def _as_int(value: object) -> int | None:
 
 def extract_inferential_stats(blocks: list[TextBlock]) -> list[ReportedStat]:
     out: list[ReportedStat] = []
-    for block in blocks:
+    for block_index, block in enumerate(blocks):
         if block.is_furniture or not block.text.strip():
             continue
-        normalized = normalize_for_statcheck(block.text)
+        normalized = normalize_notation(block.text)
         try:
             # statcheck's own extract_stats() `print()`s a snippet of the
             # matched text on certain internal parse failures (read in its
@@ -146,13 +145,19 @@ def extract_inferential_stats(blocks: list[TextBlock]) -> list[ReportedStat]:
                 contextlib.redirect_stdout(io.StringIO()),
             ):
                 warnings.simplefilter("ignore")
-                df = extract_stats(normalized, stat=_STAT_TYPES, name="block")
+                df = extract_stats(normalized.text, stat=_STAT_TYPES, name="block")
         except Exception:  # noqa: BLE001 — QA property: never crash on arbitrary text
             continue
         if df.empty:
             continue
+        ranges = defaultdict(deque)
+        for start, end in library_ranges(normalized):
+            ranges[normalized.text[start:end]].append((start, end))
         anchor = _anchor_for(page=block.page, paragraph=block.paragraph)
         for row in df.to_dict("records"):
+            binding = bind_library_row(row, normalized, ranges.get(row.get("Raw"), deque()))
+            if binding is None:
+                continue
             out.append(
                 ReportedStat(
                     kind="inferential",
@@ -160,7 +165,8 @@ def extract_inferential_stats(blocks: list[TextBlock]) -> list[ReportedStat]:
                     page=block.page,
                     paragraph=block.paragraph,
                     source="text",
-                    raw_text=str(row.get("Raw", "")),
+                    **binding,
+                    source_block_index=block_index,
                     test_type=row.get("Statistic"),
                     df1=_as_float(row.get("df1")),
                     df2=_as_float(row.get("df2")),
@@ -168,8 +174,6 @@ def extract_inferential_stats(blocks: list[TextBlock]) -> list[ReportedStat]:
                     test_comparison=row.get("Test_Comparison"),
                     p_value=_as_float(row.get("Reported_P_Value")),
                     p_comparison=row.get("Reported_Comparison"),
-                    test_value_precision=_as_int(row.get("test_dec")),
-                    p_value_precision=_as_int(row.get("dec")),
                 )
             )
     return out
