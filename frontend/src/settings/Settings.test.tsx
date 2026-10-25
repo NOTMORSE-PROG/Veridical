@@ -1,8 +1,10 @@
-import { fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Instructor, QuotaStatus, SettingsOut } from "../api/types";
 import { renderWithProviders, stubFetchByPath } from "../test/renderWithProviders";
 import { SettingsPage } from "./Settings";
+import { ME_QUERY_KEY } from "../auth/useAuth";
 
 const ME: Instructor = {
   id: 1,
@@ -66,6 +68,58 @@ function baseHandlers(overrides: Record<string, unknown> = {}) {
 
 describe("SettingsPage", () => {
   afterEach(() => vi.unstubAllGlobals());
+
+  it.each(["save", "remove"].flatMap(operation =>
+    ["other account", "same account new login"].flatMap(lifetime =>
+      ["success", "failure"].map(outcome => ({ operation, lifetime, outcome }))),
+  ))("ignores late key $operation $outcome after $lifetime", async ({ operation, lifetime, outcome }) => {
+    let client!: QueryClient;
+    function CaptureClient() { client = useQueryClient(); return <SettingsPage />; }
+    let quotaReads = 0;
+    let release!: (response: Response) => void;
+    const held = new Promise<Response>(resolve => { release = resolve; });
+    const initialSettings = { ...SETTINGS, api_key: { byok_available: true, has_own_api_key: operation === "remove" } };
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      const path = new URL(input.toString(), "http://localhost").pathname;
+      if (path === "/settings/api-key") return held;
+      if (path === "/quota") { quotaReads += 1; return new Response(JSON.stringify(QUOTA)); }
+      return new Response(JSON.stringify(baseHandlers({ "/settings": initialSettings })[path as "/settings"]));
+    }));
+    renderWithProviders(<CaptureClient />, { authInstructorId: ME.id });
+    await screen.findByText("Quota record: shared key");
+    if (operation === "save") fireEvent.change(await screen.findByLabelText("Gemini API key"), { target: { value: "previous-owner-private-draft" } });
+    fireEvent.click(await screen.findByRole("button", { name: operation === "save" ? "Save key" : "Remove key" }));
+    await waitFor(() => expect(client.getMutationCache().getAll()).toHaveLength(1));
+    const pending = client.getMutationCache().getAll()[0];
+    await waitFor(() => expect(pending.state.status).toBe("pending"));
+    const currentSettings = { ...SETTINGS, thresholds: { ...SETTINGS.thresholds, ready_min_score: 92 } };
+    const currentQuota = { ...QUOTA, calls_remaining: 173 };
+    act(() => {
+      if (lifetime === "same account new login") client.removeQueries({ queryKey: ME_QUERY_KEY, exact: true });
+      client.setQueryData(ME_QUERY_KEY, { ...ME, id: lifetime === "other account" ? 2 : ME.id });
+      client.setQueryData(["settings"], currentSettings);
+      client.setQueryData(["quota"], currentQuota);
+    });
+    const input = await screen.findByLabelText("Gemini API key");
+    // The prior account's private draft and pending action must disappear.
+    const draftAfterSwitch = (input as HTMLInputElement).value;
+    fireEvent.change(input, { target: { value: "current-owner-unsaved-draft" } });
+    const readsBeforeCompletion = quotaReads;
+    await act(async () => {
+      release(outcome === "success" ? new Response(JSON.stringify({ ...initialSettings,
+        api_key: { byok_available: true, has_own_api_key: operation === "save" } }))
+        : new Response(JSON.stringify({ error: { code: "invalid_api_key", message: "Previous owner request failed." } }), { status: 422 }));
+    });
+    await waitFor(() => expect(pending.state.status).not.toBe("pending"));
+    expect(client.getQueryData(["settings"])).toEqual(currentSettings);
+    expect(client.getQueryData(["quota"])).toEqual(currentQuota);
+    expect(quotaReads).toBe(readsBeforeCompletion);
+    expect(screen.getByLabelText("Gemini API key")).toHaveValue("current-owner-unsaved-draft");
+    expect(screen.getByRole("button", { name: "Save key" })).toBeEnabled();
+    expect(screen.queryByText(/Your personal key was (saved|removed)/)).not.toBeInTheDocument();
+    expect(screen.queryByText("Previous owner request failed.")).not.toBeInTheDocument();
+    expect(draftAfterSwitch).toBe("");
+  });
 
   it.each(["save", "remove"])("clears stale setup state after key %s and waits for the fresh ledger", async operation => {
     let quotaReads = 0;
@@ -518,6 +572,7 @@ describe("SettingsPage", () => {
     expect(error.closest('[role="alert"]')).toBeInTheDocument();
     expect(document.activeElement).toBe(error.closest('[role="alert"]'));
     expect(screen.queryByRole("button", { name: "Remove key" })).not.toBeInTheDocument();
+    expect(screen.getByLabelText("Gemini API key")).toHaveValue("bad-key");
   });
 
   it("removing a key reverts to the create form and moves focus back to the input", async () => {

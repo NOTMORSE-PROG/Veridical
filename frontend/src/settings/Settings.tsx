@@ -12,6 +12,7 @@ import {
   type ReactNode,
   useEffect,
   useId,
+  useLayoutEffect,
   useRef,
   useState,
 } from "react";
@@ -21,6 +22,7 @@ import type { ModelQuotaStatus } from "../api/types";
 import { StatusPill } from "../components/StatusPill";
 import { cx } from "../components/cx";
 import { useChangePassword, useMe } from "../auth/useAuth";
+import { useAuthOwner } from "../auth/queryOwner";
 import { quotaRemaining } from "../domain/quotaTone";
 import { useRouteFocus } from "../routing/useRouteFocus";
 import { PASSWORD_MIN_LENGTH } from "../config/ui";
@@ -262,6 +264,7 @@ function PasswordSection() {
 // load-error, unavailable-on-this-deployment (disabled, never hidden --
 // charter rule 9), and configured-vs-not (form vs. status+remove).
 function ApiKeySection() {
+  const owner = useAuthOwner();
   const { data, isPending, isError, refetch } = useSettings();
   const setKey = useSetApiKey();
   const deleteKey = useDeleteApiKey();
@@ -273,7 +276,22 @@ function ApiKeySection() {
   const configuredRef = useRef<HTMLParagraphElement>(null);
   const prevHasOwnKey = useRef<boolean | null>(null);
 
-  const activeError = setKey.error ?? deleteKey.error;
+  const { reset: resetSave } = setKey;
+  const { reset: resetDelete } = deleteKey;
+  // Private drafts and acknowledgments belong to one authentication lifetime.
+  useLayoutEffect(() => {
+    setValue("");
+    setAttempted(false);
+    setAnnouncement("");
+    prevHasOwnKey.current = null;
+    resetSave();
+    resetDelete();
+  }, [owner.authQuery, owner.actorId, resetSave, resetDelete]);
+
+  const saving = setKey.isPending && setKey.variables?.owner.isCurrent();
+  const removing = deleteKey.isPending && deleteKey.variables?.owner.isCurrent();
+  const activeError = (setKey.variables?.owner.isCurrent() ? setKey.error : null)
+    ?? (deleteKey.variables?.owner.isCurrent() ? deleteKey.error : null);
   useEffect(() => {
     if (activeError) errorRef.current?.focus();
   }, [activeError]);
@@ -356,7 +374,8 @@ function ApiKeySection() {
     setKey.mutate(
       { api_key: value },
       {
-        onSuccess: () => {
+        onSuccess: (_settings, request) => {
+          if (!request.owner.isCurrent()) return;
           setValue("");
           setAnnouncement("Your personal key was saved. Existing checks have not been re-run.");
         },
@@ -366,7 +385,10 @@ function ApiKeySection() {
 
   function handleDelete() {
     deleteKey.mutate(undefined, {
-      onSuccess: () => setAnnouncement("Your personal key was removed. Shared AI configuration can be used if it is available. Existing checks have not been re-run."),
+      onSuccess: (_settings, request) => {
+        if (!request.owner.isCurrent()) return;
+        setAnnouncement("Your personal key was removed. Shared AI configuration can be used if it is available. Existing checks have not been re-run.");
+      },
     });
   }
 
@@ -397,11 +419,11 @@ function ApiKeySection() {
         <button
           type="button"
           onClick={handleDelete}
-          disabled={deleteKey.isPending}
-          aria-busy={deleteKey.isPending ? "true" : undefined}
+          disabled={removing}
+          aria-busy={removing ? "true" : undefined}
           className="mt-3 flex h-11 items-center justify-center self-start rounded-md border border-border-input bg-panel px-4 text-sm font-bold text-ink hover:bg-status-neutral-bg disabled:opacity-60"
         >
-          {deleteKey.isPending ? "Removing." : "Remove key"}
+          {removing ? "Removing." : "Remove key"}
         </button>
         <p className="mt-1.5 text-xs text-ink-tertiary">
           Removing your key removes its saved configuration from your account. It does not cancel checks that are already running or re-run existing checks. Shared AI configuration can be used if it is available. You can add a personal key again later.
@@ -467,11 +489,11 @@ function ApiKeySection() {
 
         <button
           type="submit"
-          disabled={setKey.isPending}
-          aria-busy={setKey.isPending ? "true" : undefined}
+          disabled={saving}
+          aria-busy={saving ? "true" : undefined}
           className="flex h-11 items-center justify-center self-start rounded-md bg-action px-4 text-sm font-bold text-on-action hover:bg-action-hover disabled:opacity-60"
         >
-          {setKey.isPending ? "Validating key." : "Save key"}
+          {saving ? "Validating key." : "Save key"}
         </button>
       </form>
     </SectionCard>
