@@ -1,8 +1,10 @@
 """V-081 containment and arithmetic regressions; not an accuracy benchmark."""
 
 from dataclasses import asdict, replace
+from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
+import httpx
 import pytest
 
 from app.checks.agreement.extract import Statement
@@ -14,14 +16,21 @@ from app.checks.forensics.grim import grim_check
 from app.checks.forensics.pcheck import recompute_p
 from app.config import Settings
 from app.external.schemas import VerificationResult
-from app.findings.policy import reuse_excerpt, reuse_reason, reuse_reasoning
+from app.findings.policy import exclusion_reason, reuse_excerpt, reuse_reason, reuse_reasoning
 from app.ingest.patterns import load_patterns
 from app.ingest.references import parse_reference
 from app.ingest.schemas import ExtractionResult, SectionNode, SectionTree, TextBlock
 from app.models.citation import Citation
-from app.models.enums import CitationParseStatus, FlagSeverity, ReadinessStatus, ResultOutcome
-from app.models.run import Flag
+from app.models.enums import (
+    CheckKind,
+    CitationParseStatus,
+    FlagSeverity,
+    ReadinessStatus,
+    ResultOutcome,
+)
+from app.models.run import CheckResult, Flag
 from app.report.scoring import ScorableFlag, ScorableResult, score_check_run
+from app.report.service import _load_scorable_flags
 
 
 @pytest.mark.parametrize(
@@ -168,6 +177,123 @@ def source(body, raw_refs):
 def citation(raw, index=0):
     # Whole-stage controls use the same source-derived fields as ingestion.
     return Citation(manuscript_id=1, **asdict(parse_reference(raw, index)))
+
+
+@pytest.mark.parametrize("failure", ["html", "null", "list", 400, 422, 401, 403, 410, 429, 503])
+async def test_failed_book_lookup_preserves_healthy_neighbor_and_no_absence_cache(
+    monkeypatch, failure
+):
+    refs = [
+        citation("Alvarez, A. (2023). First Book. ISBN: 9780132350884."),
+        citation("Reyes, J. (2024). Second Book. ISBN: 9780201616224.", 1),
+    ]
+    assert refs[0].isbn == "9780132350884" and refs[1].isbn == "9780201616224"
+    requests = []
+
+    class Governor:
+        acquisitions = 0
+
+        async def acquire(self):
+            self.acquisitions += 1
+
+    governor = Governor()
+
+    def response(request):
+        requests.append(request.url.path)
+        if refs[0].isbn in request.url.path:
+            if isinstance(failure, int):
+                return httpx.Response(failure)
+            body = {"html": b"<html>upstream error</html>", "null": b"null", "list": b"[]"}[failure]
+            return httpx.Response(200, content=body)
+        return httpx.Response(200, json={"title": "Second Book", "key": "/books/CONTROLLED"})
+
+    stored = AsyncMock()
+    monkeypatch.setattr(verify.cache, "get_cached", AsyncMock(return_value=None))
+    monkeypatch.setattr(verify.cache, "store_result", stored)
+    monkeypatch.setattr(verify.cache, "is_instructor_confirmed", AsyncMock(return_value=False))
+    monkeypatch.setattr(verify.openlibrary_client, "_get_governor", lambda _settings: governor)
+    monkeypatch.setattr(verify, "write_audit_event", AsyncMock())
+    session = MemorySession()
+    async with httpx.AsyncClient(transport=httpx.MockTransport(response)) as client:
+        result = await verify.run_citation_integrity_check(
+            session,
+            client,
+            1,
+            refs,
+            source("Prior work (Alvarez, 2023; Reyes, 2024).", [ref.raw_text for ref in refs]),
+            load_patterns(),
+            Settings(_env_file=None, external_max_retries=1, external_retry_base_seconds=0),
+        )
+    statuses = {
+        row["reference_order_index"]: row["status"]
+        for row in result.detail["reference_metadata_coverage"]
+    }
+    assert statuses == {0: "api_down", 1: "existence_confirmed"}
+    assert result.detail["n_metadata_api_down"] == 1
+    assert result.detail["n_metadata_not_found"] == 0
+    stored.assert_awaited_once()
+    assert stored.await_args.kwargs["key_value"] == refs[1].isbn
+    assert stored.await_args.kwargs["result"].found is True
+    unavailable = [
+        row
+        for row in session.rows
+        if isinstance(row, Flag) and row.detail.get("kind") == "unverifiable_api_down"
+    ]
+    assert len(unavailable) == 1
+    assert unavailable[0].detail["affects_readiness"] is False
+    assert exclusion_reason("citation_integrity", unavailable[0].detail) == "unassessed_evidence"
+    expected_bad_attempts = 2 if failure in ("html", "null", "list", 429, 503) else 1
+    assert len(requests) == governor.acquisitions == expected_bad_attempts + 1
+    assert requests[-1].endswith(f"/{refs[1].isbn}.json")
+
+
+async def test_current_flag_projection_excludes_exact_legacy_outage_without_hiding_real_neighbor():
+    result = CheckResult(
+        id=1,
+        check_run_id=1,
+        criterion_id=None,
+        kind=CheckKind.citation_integrity,
+        outcome=ResultOutcome.api_down,
+        detail={},
+    )
+    details = [
+        {"kind": "unverifiable_api_down"},
+        {"kind": "unverifiable_api_down", "affects_readiness": False},
+        {"kind": "unverifiable_not_found"},
+    ]
+    flags = [
+        Flag(
+            id=index,
+            check_result_id=1,
+            severity=FlagSeverity.low,
+            overridden=False,
+            evidence_excerpt=f"Reference {index}",
+            page_anchor="p. 2",
+            detail=detail,
+        )
+        for index, detail in enumerate(details, 1)
+    ]
+    session = SimpleNamespace(
+        execute=AsyncMock(
+            return_value=SimpleNamespace(all=lambda: [(flag, result) for flag in flags])
+        )
+    )
+    projected = await _load_scorable_flags(session, 1)
+    assert [flag.has_verdict for flag in projected] == [False, False, True]
+    scored = score_check_run([ScorableResult(1, 1, ResultOutcome.passed, 100)], projected[:2])
+    assert scored.flag_deduction == 0
+    assert scored.status == ReadinessStatus.ready
+    assert details[0] == {
+        "kind": "unverifiable_api_down"
+    }  # Read projection does not backfill facts.
+
+
+@pytest.mark.parametrize(
+    "kind", ["unverifiable_not_found", "retracted_source", "corrected_source", "unknown"]
+)
+def test_citation_unavailability_exclusion_does_not_silence_real_or_unknown_findings(kind):
+    assert exclusion_reason("citation_integrity", {"kind": kind}) is None
+    assert exclusion_reason("statistical_forensics", {"kind": "unverifiable_api_down"}) is None
 
 
 async def check(monkeypatch, body, refs, *, llm=None, abstract="A source abstract."):

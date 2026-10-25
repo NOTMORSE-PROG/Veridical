@@ -11,7 +11,7 @@ export const PROBLEM_LABEL: Partial<Record<string, string>> = {
   agreement_unmatched_intent: "Possible objective-to-outcome gap",
   retracted_source: "Possibly retracted source",
   corrected_source: "Correction on record for this source",
-  unverifiable_api_down: "Verification service was unreachable",
+  unverifiable_api_down: "Source lookup not completed",
   unverifiable_not_found: "Source not found in the databases checked",
   uncited_reference: "Reference may not be cited in the manuscript body",
   grim_inconsistent: "Reported mean may not fit the sample size",

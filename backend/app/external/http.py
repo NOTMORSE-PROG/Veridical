@@ -3,9 +3,9 @@
 raising the ONE taxonomy code (`ApiDownError`) a caller needs to handle —
 same shape as `app/llm/queue.py`'s transport retry, generalized past Gemini.
 
-A 4xx (other than 429) is NEVER retried and never raised as `api_down` —
-it means "this identifier doesn't exist/is malformed", a fact for the
-caller to turn into `found=False`, not a transport failure.
+A 404 alone is a missing-record answer. Other non-retryable refusals
+mean the lookup could not be completed, not that a publication is absent.
+Malformed or non-object JSON uses the existing bounded retry budget.
 """
 
 import asyncio
@@ -45,14 +45,14 @@ async def get_json(
 ) -> dict | None:
     """Returns the parsed JSON body, or None for a 404 (a clean "doesn't
     exist" answer, not a failure). Raises `ApiDownError` after exhausting
-    retries on a timeout/connection error/5xx/429."""
+    retries on request/response failures, or immediately on another refusal."""
     sleep = sleep or _default_sleep
     last_exc: Exception | None = None
     for attempt in range(max_retries + 1):
         await governor.acquire()
         try:
             response = await client.get(url, params=params, headers=headers)
-        except (httpx.TimeoutException, httpx.TransportError) as exc:
+        except httpx.RequestError as exc:
             last_exc = exc
         else:
             if response.status_code == 404:
@@ -64,11 +64,20 @@ async def get_json(
                     response=response,
                 )
             elif response.status_code >= 400:
-                response.raise_for_status()  # a real, non-retryable client error
+                raise ApiDownError(
+                    f"{provider} lookup could not be completed (HTTP {response.status_code})."
+                )
             else:
-                return response.json()
+                try:
+                    payload = response.json()
+                except ValueError as exc:
+                    last_exc = exc
+                else:
+                    if isinstance(payload, dict):
+                        return payload
+                    last_exc = ValueError(f"{provider} returned a non-object JSON response.")
         if attempt < max_retries:
             await sleep(retry_base_seconds * (2**attempt))
     raise ApiDownError(
-        f"{provider} did not respond after {max_retries + 1} attempts."
+        f"{provider} lookup could not be completed after {max_retries + 1} attempts."
     ) from last_exc

@@ -10,6 +10,9 @@ def exclusion_reason(kind: str, detail: dict[str, Any] | None = None) -> str | N
         # Statement-role extraction has not established dependable own-study
         # attribution. Located quotes alone do not resolve that limitation.
         return "statement_roles_unverified"
+    if kind == "citation_integrity" and (detail or {}).get("kind") == "unverifiable_api_down":
+        # Older unavailable-lookup flags predate the explicit eligibility marker.
+        return "unassessed_evidence"
     if (detail or {}).get("affects_readiness") is False:
         return "unassessed_evidence"
     return None

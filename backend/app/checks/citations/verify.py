@@ -126,8 +126,9 @@ UNVERIFIABLE_NOT_FOUND_WORDING = (
     "manually. Unverifiable, not necessarily incorrect."
 )
 UNVERIFIABLE_API_DOWN_WORDING = (
-    "Could not check this source right now, the verification service(s) "
-    "were unreachable. Re-run this check later to verify."
+    "The lookup for this source could not be completed. "
+    "This does not show that the source is missing. "
+    "Review the reference details or check the source manually."
 )
 
 
@@ -439,7 +440,11 @@ def _verdict_flag_draft(citation: Citation, verdict: CitationVerdict) -> Citatio
             severity=FlagSeverity.low,
             evidence_excerpt=citation.raw_text,
             page_anchor=anchor,
-            detail={"kind": "unverifiable_api_down", "reason": UNVERIFIABLE_API_DOWN_WORDING},
+            detail={
+                "kind": "unverifiable_api_down",
+                "reason": UNVERIFIABLE_API_DOWN_WORDING,
+                "affects_readiness": False,
+            },
         )
     detail = {
         "kind": "unverifiable_not_found",
