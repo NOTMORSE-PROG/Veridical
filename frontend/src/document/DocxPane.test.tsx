@@ -12,6 +12,12 @@ const props = {
 };
 
 describe("recorded DOCX source navigation", () => {
+  it("shows a failed reading state without continuing to announce extraction", () => {
+    render(<DocxPane {...props} paragraphs={undefined} paragraphsError paragraphsPending={false} />);
+    expect(screen.getByText("Reading view unavailable")).toBeInTheDocument();
+    expect(screen.queryByText(/Extracting text|Loading reading view/)).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Try again" })).toBeEnabled();
+  });
   it("keeps reconstruction meaning visible and discloses generic mechanics without hiding affected-source warnings", () => {
     render(<DocxPane {...props} omittedImageOccurrences={2} />);
     expect(screen.getByText(/Reconstructed DOCX\. Layout may differ\./)).toBeVisible();

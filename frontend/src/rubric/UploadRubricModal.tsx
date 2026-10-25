@@ -17,9 +17,9 @@ import { useUploadRubric } from "./useRubric";
 
 interface UploadRubricModalProps {
   onClose: () => void;
-  /** Set when uploading a NEW VERSION of an existing family (screen 4m's
-   * "Upload new format") — omitted for a brand-new format (screen 4b). */
+  /** Set for the selected family's Upload new version action (screen 4m). */
   familyId?: string;
+  familyLabel?: string;
 }
 
 function UploadIcon() {
@@ -58,7 +58,7 @@ function SpinnerIcon() {
   );
 }
 
-export function UploadRubricModal({ onClose, familyId }: UploadRubricModalProps) {
+export function UploadRubricModal({ onClose, familyId, familyLabel }: UploadRubricModalProps) {
   const [file, setFile] = useState<File | null>(null);
   const [fieldError, setFieldError] = useState<string | null>(null);
   const upload = useUploadRubric();
@@ -151,16 +151,17 @@ export function UploadRubricModal({ onClose, familyId }: UploadRubricModalProps)
   const message = fieldError ?? serverError;
   const fileError = Boolean(fieldError) || isUploadFileError(upload.error);
 
-  if (scopeStatus === "lost") return <ModalBackdrop><Modal title="Upload required format" onClose={onClose}>
+  if (scopeStatus === "lost") return <ModalBackdrop><Modal title={familyId ? "Upload new format version" : "Upload required format"} onClose={onClose}>
     <UploadSessionNotice status={scopeStatus} onClose={onClose} onCheck={checkSession} />
   </Modal></ModalBackdrop>;
 
-  if (upload.data && unknownFiles.length > 0) return <ModalBackdrop><Modal title="Upload required format" onClose={onClose}>
+  if (upload.data && unknownFiles.length > 0) return <ModalBackdrop><Modal title={familyId ? "Upload new format version" : "Upload required format"} onClose={onClose}>
     {scopeStatus !== "ready" && <UploadSessionNotice status={scopeStatus} onClose={onClose}
       onCheck={checkSession} />}
     <fieldset disabled={scopeStatus !== "ready"} hidden={scopeStatus !== "ready"}
       inert={scopeStatus !== "ready"} className={scopeStatus !== "ready" ? "hidden" : "contents"}>
     <div className="signal-group-flow">
+      {familyId && familyLabel && <p>New version of <strong>{familyLabel}</strong>.</p>}
       <h3 ref={receiptHeadingRef} tabIndex={-1} className="font-bold text-ink">Latest draft confirmed</h3>
       <p>{upload.data.title}, version {upload.data.version}.</p>
       <p>One or more earlier upload results remain unconfirmed. This receipt confirms only the latest attempt.</p>
@@ -206,6 +207,7 @@ export function UploadRubricModal({ onClose, familyId }: UploadRubricModalProps)
         <UploadAttemptNotice kind="format" filenames={unknownFiles} selectedFilename={file?.name} familyId={familyId} confirming={confirming}
           onConfirm={() => handleContinue(true)} onCancel={() => { setConfirming(false); submitRef.current?.focus(); }} />
         <div className="signal-group-flow" aria-busy={upload.isPending}>
+          {familyId && familyLabel && <p>New version of <strong>{familyLabel}</strong>.</p>}
           <div className="flex flex-col gap-1.5">
             <span className="text-sm font-medium text-ink">Format document</span>
             <p id={hintId} className="text-sm text-ink-secondary">

@@ -392,7 +392,6 @@ export function PdfPane({
       task = pdfjsLib.getDocument(options);
       const document = await task.promise;
       if (cancelled) return;
-      setPdf(document);
       const pageMetrics = await Promise.all(
         Array.from({ length: document.numPages }, async (_, index) => {
           const page = await document.getPage(index + 1);
@@ -400,7 +399,10 @@ export function PdfPane({
           return { pageNumber: index + 1, width: viewport.width, height: viewport.height };
         }),
       );
-      if (!cancelled) setMetrics(pageMetrics);
+      if (!cancelled) {
+        setPdf(document);
+        setMetrics(pageMetrics);
+      }
     }
     openDocument().catch(() => {
       if (!cancelled) setLoadError(true);
@@ -481,7 +483,7 @@ export function PdfPane({
   const [detailsOpen, setDetailsOpen] = useState(false);
   const comparisonMarkers = regions.some((region) => flags.some((flag) => flag.id === region.flag_id && isOptionalComparisonLead(flag)));
   const scopeRegions = regions.filter((region) => region.kind !== "page_bbox");
-  const pagesLabel = pdf ? `${pdf.numPages} ${pdf.numPages === 1 ? "page" : "pages"}` : "Loading pages";
+  const pagesLabel = loadError ? "Preview unavailable" : pdf ? `${pdf.numPages} ${pdf.numPages === 1 ? "page" : "pages"}` : "Loading pages";
   const zoomStyle = {
     inlineSize: `${zoom * 100}%`,
     maxInlineSize: `calc(var(--signal-paper-max-inline-size) * ${zoom})`,
@@ -501,9 +503,9 @@ export function PdfPane({
         <div className="signal-document-toolbar__controls" role="group" aria-label="PDF page and zoom controls">
           {onReadText && <button type="button" aria-label="Read extracted text from the current PDF page" onClick={onReadText}>Read text</button>}
           <button type="button" aria-expanded={detailsOpen} aria-controls={detailsId} onClick={() => setDetailsOpen((value) => !value)}>Source view details</button>
-          <button type="button" onClick={() => changeZoom(Math.max(PDF_ZOOM_MIN, Number((zoom - PDF_ZOOM_STEP).toFixed(1))))} disabled={zoom <= PDF_ZOOM_MIN}>Zoom out</button>
-          <button type="button" onClick={() => changeZoom(1)} disabled={zoom === 1}>Fit width</button>
-          <button type="button" onClick={() => changeZoom(Math.min(PDF_ZOOM_MAX, Number((zoom + PDF_ZOOM_STEP).toFixed(1))))} disabled={zoom >= PDF_ZOOM_MAX}>Zoom in</button>
+          <button type="button" onClick={() => changeZoom(Math.max(PDF_ZOOM_MIN, Number((zoom - PDF_ZOOM_STEP).toFixed(1))))} disabled={!pdf || zoom <= PDF_ZOOM_MIN}>Zoom out</button>
+          <button type="button" onClick={() => changeZoom(1)} disabled={!pdf || zoom === 1}>Fit width</button>
+          <button type="button" onClick={() => changeZoom(Math.min(PDF_ZOOM_MAX, Number((zoom + PDF_ZOOM_STEP).toFixed(1))))} disabled={!pdf || zoom >= PDF_ZOOM_MAX}>Zoom in</button>
           <label>
             <span>Go to page</span>
             <input
@@ -511,6 +513,7 @@ export function PdfPane({
               inputMode="numeric"
               min={1}
               max={pdf?.numPages ?? 1}
+              disabled={!pdf}
               value={pageInput}
               onChange={(event) => setPageInput(event.target.value)}
               onKeyDown={(event) => {
@@ -521,7 +524,7 @@ export function PdfPane({
             />
           </label>
           <button type="button" aria-label="Go to entered page" onClick={commitPageInput} disabled={!pdf || !pageInput.trim()}>Go</button>
-          <output aria-live="polite">Page {currentPage} of {pdf?.numPages ?? "…"}</output>
+          <output aria-live="polite">{pdf ? `Page ${currentPage} of ${pdf.numPages}` : loadError ? "Page navigation unavailable" : "Loading page navigation"}</output>
         </div>
       </div>
       {pdf && requestedPage !== null && (!Number.isSafeInteger(requestedPage) || requestedPage < 1 || requestedPage > pdf.numPages) && <p role="alert" className="signal-document-reconstruction-note">The recorded page is not available in this PDF. Inspect the manuscript manually; no replacement page was selected.</p>}

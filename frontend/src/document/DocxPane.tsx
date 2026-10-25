@@ -210,7 +210,7 @@ export function DocxPane({
         <article ref={paperRef} className="signal-document-docx-paper" aria-label={formatDocument ? "Required format reading view" : "Reconstructed manuscript document"}>
           <header className="signal-document-docx-paper__header">
             <span>{formatDocument ? "DOCX reading view. Layout may differ." : "Reconstructed manuscript"}</span>
-            <span>{paragraphs ? `${paragraphs.length} paragraphs · ${tables.length} tables · ${images.length} drawing occurrences` : "Extracting text"}</span>
+            <span>{paragraphsError ? "Reading view unavailable" : paragraphs ? `${paragraphs.length} paragraphs · ${tables.length} tables · ${images.length} drawing occurrences` : "Loading reading view"}</span>
             {paragraphs && <span>{nativeMathInventoryLabel(nativeMath)} · Main document body</span>}
           </header>
           <div className="signal-document-docx-paper__body">

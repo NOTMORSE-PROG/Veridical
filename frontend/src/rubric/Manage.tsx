@@ -87,7 +87,7 @@ export function ManageRubricPage() {
   const { data: versions } = useRubricVersions(family?.rubric_family_id);
   const activate = useActivateRubric();
   const remove = useDeleteRubric();
-  const [uploadOpen, setUploadOpen] = useState(false);
+  const [uploadTarget, setUploadTarget] = useState<{ familyId?: string; familyLabel?: string } | null>(null);
   const [rerunOpen, setRerunOpen] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<DeleteTarget>();
   const [deleteError, setDeleteError] = useState<string>();
@@ -159,9 +159,9 @@ export function ManageRubricPage() {
         <section className="signal-first-use" aria-labelledby="no-format-heading">
           <p className="signal-eyebrow">Required format</p><h2 id="no-format-heading">No required format yet</h2>
           <p>Upload a PDF or DOCX. VERIDICAL prepares a draft set of criteria for your review.</p>
-          <Button variant="brand" onClick={() => setUploadOpen(true)}>Upload required format</Button>
+          <Button variant="brand" onClick={() => setUploadTarget({})}>Upload required format</Button>
         </section>
-        {uploadOpen && <UploadRubricModal onClose={() => setUploadOpen(false)} />}
+        {uploadTarget && <UploadRubricModal {...uploadTarget} onClose={() => setUploadTarget(null)} />}
       </div>
     );
   }
@@ -179,7 +179,7 @@ export function ManageRubricPage() {
           <h1 ref={headingRef} tabIndex={-1}>Rubric Studio</h1>
           <p className="signal-route-header__intro">Manage the required format, review prepared criteria, and keep report-producing versions traceable.</p>
         </div>
-        <div className="signal-route-actions"><Button variant="brand" onClick={() => setUploadOpen(true)}>Upload new format</Button></div>
+        <div className="signal-route-actions"><Button variant="brand" onClick={() => setUploadTarget({})}>Upload new format</Button></div>
       </header>
 
       <p className="signal-live-region" role="status" aria-live="polite">{liveMessage}</p>
@@ -223,6 +223,7 @@ export function ManageRubricPage() {
             {activeVersion ? "View criteria" : "Review and activate"}
           </ActionLink>
           <ActionLink to={`/rubric/${displayVersion.id}/review?source=original`} variant="secondary">View original format</ActionLink>
+          <Button variant="secondary" onClick={() => setUploadTarget({ familyId: family.rubric_family_id, familyLabel: formatChoiceLabel(displayVersion, families ?? []) })}>Upload new version</Button>
           {activeVersion && <Button variant="secondary" onClick={() => setRerunOpen(true)}>Re-run manuscripts</Button>}
         </div>
       </section>
@@ -279,7 +280,7 @@ export function ManageRubricPage() {
           </div>
         </Dialog>
       )}
-      {uploadOpen && <UploadRubricModal onClose={() => setUploadOpen(false)} />}
+      {uploadTarget && <UploadRubricModal {...uploadTarget} onClose={() => setUploadTarget(null)} />}
       {rerunOpen && <RerunModal onClose={() => setRerunOpen(false)} />}
     </div>
   );

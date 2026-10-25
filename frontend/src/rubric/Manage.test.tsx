@@ -42,6 +42,56 @@ function CurrentLocation() {
 describe("ManageRubricPage", () => {
   afterEach(() => vi.unstubAllGlobals());
 
+  it("binds a contextual version upload to the selected family and clears it before a new format", async () => {
+    const second: RubricListItem = { ...V1, id: 99, rubric_family_id: "33333333-3333-3333-3333-333333333333" };
+    const posts: URL[] = [];
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = new URL(String(input), "http://localhost");
+      if (init?.method === "POST" && url.pathname === "/rubrics") {
+        posts.push(url);
+        expect(init.body).toBeInstanceOf(FormData);
+        return new Response(JSON.stringify({ error: { code: "file_malformed", message: "Controlled unreadable format." } }), { status: 422 });
+      }
+      return stubFetchByPath({
+        "/auth/me": { id: 1 },
+        "/rubric-families": [V1, second],
+        [`/rubric-families/${FAMILY_ID}/versions`]: [V1],
+        [`/rubric-families/${second.rubric_family_id}/versions`]: [second],
+      })(input, init);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    renderWithProviders(<ManageRubricPage />, { route: `/rubric?family=${second.rubric_family_id}`, uploadInstructorId: 1 });
+    const versionButton = await screen.findByRole("button", { name: "Upload new version" });
+    versionButton.focus();
+    fireEvent.click(versionButton);
+    expect(screen.getByRole("dialog", { name: "Upload new format version" })).toHaveTextContent(/New version of V1.pdf.*Format #99/);
+    const file = new File(["source"], "required-format.docx");
+    const send = async () => {
+      const input = screen.getByLabelText("Choose file");
+      await waitFor(() => expect(input).not.toBeDisabled());
+      fireEvent.change(input, { target: { files: [file] } });
+      fireEvent.click(screen.getByRole("button", { name: "Continue to review" }));
+      await screen.findByText("Controlled unreadable format.");
+    };
+    await send();
+    expect(posts).toHaveLength(1);
+    expect(posts[0].searchParams.get("family_id")).toBe(second.rubric_family_id);
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(screen.getByRole("button", { name: "Upload new version" })).toHaveFocus();
+    fireEvent.click(screen.getByRole("button", { name: "Upload new format" }));
+    expect(screen.getByRole("dialog", { name: "Upload required format" })).not.toHaveTextContent("New version of");
+    await send();
+    expect(posts).toHaveLength(2);
+    expect(posts[1].searchParams.has("family_id")).toBe(false);
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    fireEvent.change(screen.getByLabelText("Required format"), { target: { value: FAMILY_ID } });
+    fireEvent.click(screen.getByRole("button", { name: "Upload new version" }));
+    expect(screen.getByRole("dialog", { name: "Upload new format version" })).toHaveTextContent(/New version of V1.pdf.*Format #10/);
+    await send();
+    expect(posts).toHaveLength(3);
+    expect(posts[2].searchParams.get("family_id")).toBe(FAMILY_ID);
+  });
+
   it("shows the active format and every version, newest first", async () => {
     vi.stubGlobal(
       "fetch",

@@ -256,10 +256,32 @@ describe("PdfPane page visibility", () => {
     mocks.getDocument.mockImplementationOnce(() => ({ promise: Promise.reject(new Error("Temporary source read failure")), destroy: vi.fn() }));
     render(<PdfPane {...props} fileUrl="short.pdf" documentKind="required_format" />);
     expect(await screen.findByRole("alert")).toHaveTextContent("Your prepared criteria remain available");
+    expect(screen.getByText("Original PDF · Preview unavailable")).toBeInTheDocument();
+    expect(screen.getByText("Page navigation unavailable")).toBeInTheDocument();
+    expect(screen.queryByText(/Loading pages|Loading page navigation|Page 1 of/)).not.toBeInTheDocument();
+    expect(screen.getByRole("spinbutton")).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Zoom in" })).toBeDisabled();
     fireEvent.click(screen.getByRole("button", { name: "Try again" }));
     expect(await screen.findByLabelText("Page 2 of 2")).toBeInTheDocument();
     expect(screen.getByRole("region", { name: "Original format, scrollable" })).toBeInTheDocument();
     expect(screen.getByRole("img", { name: "Rendered page 1 of the required format" })).toBeInTheDocument();
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("keeps navigation unavailable when the PDF opens but its page metrics fail", async () => {
+    mocks.getDocument.mockImplementationOnce(() => ({
+      promise: Promise.resolve({ numPages: 2, getPage: async () => { throw new Error("Page metadata unavailable"); } }),
+      destroy: vi.fn(),
+    }));
+    render(<PdfPane {...props} fileUrl="short.pdf" documentKind="required_format" />);
+    await screen.findByRole("alert");
+    expect(screen.getByText("Original PDF · Preview unavailable")).toBeInTheDocument();
+    expect(screen.getByText("Page navigation unavailable")).toBeInTheDocument();
+    expect(screen.queryByText(/Page 1 of/)).not.toBeInTheDocument();
+    expect(screen.getByRole("spinbutton")).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Zoom in" })).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+    expect(await screen.findByLabelText("Page 2 of 2")).toBeInTheDocument();
+    expect(screen.getByRole("spinbutton")).toBeEnabled();
   });
 });
