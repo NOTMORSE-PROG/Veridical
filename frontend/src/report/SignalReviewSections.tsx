@@ -6,6 +6,7 @@ import { RuleScopeNotice } from "./RuleScopeNotice";
 import { coverageItems } from "./reportCoverage";
 import { focusReportSection } from "./reportSectionNavigation";
 import { pendingAssessmentRow } from "./pendingAssessmentRow";
+import { clearPdfReading } from "../document/usePdfPageText";
 import { recoverableReadError } from "./reportReadState";
 import { reviewDeskDestination } from "../routing/reviewDeskReturn";
 import { useContext, useEffect, useMemo, useRef, useState } from "react";
@@ -555,13 +556,31 @@ function SignalResolutionCard({ item, checkRunId, sharedReasonId, sourceTarget, 
   const assessment = canonical ? criterionAssessmentDetails(canonical, false) : undefined;
   const currentAssessment = review.assessmentCurrent?.() ? review.assessment : undefined;
   const reportHasLimits = currentAssessment && coverageItems(currentAssessment).length > 0;
+  const pendingSource = (anchor: string, actionId: string) => {
+    const fullReport = !onOpenSource && location.pathname === `/report/${checkRunId}`;
+    const params = new URLSearchParams(location.search);
+    if (fullReport) {
+      ["finding", "flag", "location", "panel", "match", "criterion_record"].forEach(key => params.delete(key));
+      clearPdfReading(params);
+      params.set("view", "decision"); params.set("pane", "manuscript"); params.set("anchor", anchor);
+    }
+    const target = sourceTarget?.(anchor, actionId) ?? reviewDeskDestination(fullReport
+      ? `/report/${checkRunId}/document?${params}`
+      : `/report/${checkRunId}/document?anchor=${encodeURIComponent(anchor)}`, location);
+    const state = fullReport ? {
+      ...(location.state && typeof location.state === "object" && !Array.isArray(location.state)
+        ? Object.fromEntries(Object.entries(location.state).filter(([key]) => key !== "criterionRecordReturn" && key !== "pendingCriterionReturn")) : {}),
+      pendingCriterionReturn: { kind: "pending", returnPath: location.pathname + location.search, elementId: actionId, checkResultId: item.check_result_id },
+    } : undefined;
+    return { target, state };
+  };
   const coverageSourceAction = (anchor: string, slot: number) => {
     const actionId = `signal-resolution-coverage-${checkRunId}-${item.check_result_id}-${slot}`;
-    const target = sourceTarget?.(anchor, actionId) ?? reviewDeskDestination(`/report/${checkRunId}/document?anchor=${encodeURIComponent(anchor)}`, location);
-    return <ActionLink id={actionId} to={target} variant="quiet" onClick={event => {
-      if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+    const { target, state } = pendingSource(anchor, actionId);
+    return <ActionLink id={actionId} state={state} to={target} variant="quiet" onClick={event => {
+      if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
       if (onOpenSource) { event.preventDefault(); onOpenSource(anchor, actionId); }
-      else rememberRouteReturnFocus(location.pathname + location.search, target, actionId);
+      else rememberRouteReturnFocus(location.pathname + location.search, target, actionId, { fallbackElementId: [`signal-resolution-heading-${item.check_result_id}`, "escalated-heading", "readiness-report-heading"] });
     }}>Open in manuscript: {instructorAnchor(anchor)}</ActionLink>;
   };
   const pending = review.drafts.get(item.check_result_id);
@@ -660,12 +679,13 @@ function SignalResolutionCard({ item, checkRunId, sharedReasonId, sourceTarget, 
         {Boolean(item.evidence?.length) && <strong>Recorded passages and locations</strong>}
         {item.evidence?.map((entry, index) => {
           const actionId = `signal-resolution-source-${checkRunId}-${item.check_result_id}-${index}`;
-          const target = sourceTarget?.(entry.anchor, actionId) ?? reviewDeskDestination(`/report/${checkRunId}/document?anchor=${encodeURIComponent(entry.anchor)}`, location);
-          return <div className="signal-attached-flow" key={`${entry.anchor}-${index}`}><blockquote>“{entry.quote}”</blockquote>{entry.anchor.trim() ? <><p>{instructorAnchor(entry.anchor)}</p><ActionLink id={actionId} variant="quiet" to={target} aria-label={`Open in manuscript: ${instructorAnchor(entry.anchor)}. ${item.criterion_text}`} onClick={(event) => {
-            if (onOpenSource && event.button === 0 && !event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey) {
+          const { target, state } = pendingSource(entry.anchor, actionId);
+          return <div className="signal-attached-flow" key={`${entry.anchor}-${index}`}><blockquote>“{entry.quote}”</blockquote>{entry.anchor.trim() ? <><p>{instructorAnchor(entry.anchor)}</p><ActionLink id={actionId} variant="quiet" state={state} to={target} aria-label={`Open in manuscript: ${instructorAnchor(entry.anchor)}. ${item.criterion_text}`} onClick={(event) => {
+            if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+            if (onOpenSource) {
               event.preventDefault();
               onOpenSource(entry.anchor, actionId);
-            } else if (!onOpenSource) rememberRouteReturnFocus(location.pathname + location.search, target, actionId);
+            } else rememberRouteReturnFocus(location.pathname + location.search, target, actionId, { fallbackElementId: [`signal-resolution-heading-${item.check_result_id}`, "escalated-heading", "readiness-report-heading"] });
           }}>Open in manuscript: {instructorAnchor(entry.anchor)}</ActionLink></> : <p>{RECORDED_GRADE_BASIS.missingLocation}</p>}</div>;
         })}
         {!item.evidence?.length && !assessment?.ruleFacts && <p>{RECORDED_GRADE_BASIS.missingExcerpt}</p>}

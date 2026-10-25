@@ -10,14 +10,14 @@ interface PendingReturnFocus {
   destinationPath: string;
   elementId: string;
   armed: boolean;
-  fallbackElementId?: string;
+  fallbackElementId?: string | readonly string[];
   scrollBlock?: ScrollLogicalPosition;
 }
 
 export interface RouteReturnFocusRegistration {
   returnPath: string;
   elementId: string;
-  fallbackElementId?: string;
+  fallbackElementId?: string | readonly string[];
   scrollBlock?: ScrollLogicalPosition;
 }
 
@@ -35,7 +35,7 @@ export function rememberRouteReturnFocus(
   returnPath: string,
   destinationPath: string,
   elementId: string,
-  options: { armed?: boolean; fallbackElementId?: string; scrollBlock?: ScrollLogicalPosition } = {},
+  options: { armed?: boolean; fallbackElementId?: string | readonly string[]; scrollBlock?: ScrollLogicalPosition } = {},
 ) {
   pendingReturnFocus = { returnPath, destinationPath, elementId, armed: options.armed ?? false, fallbackElementId: options.fallbackElementId, scrollBlock: options.scrollBlock };
 }
@@ -54,6 +54,14 @@ export function hasPendingRouteReturnFocus(path: string) {
 export function pendingRouteReturnElement(path: string) {
   return pendingReturnFocus?.armed && pendingReturnFocus.returnPath === path
     ? pendingReturnFocus.elementId : undefined;
+}
+
+function fallbackTarget(ids: string | readonly string[] | undefined): HTMLElement | null {
+  for (const id of typeof ids === "string" ? [ids] : ids ?? []) {
+    const target = document.getElementById(id);
+    if (target) return target;
+  }
+  return null;
 }
 
 function restoreRegisteredFocus(elementId: string, scrollBlock: ScrollLogicalPosition = "nearest"): HTMLElement | null {
@@ -83,6 +91,13 @@ function restoreRegisteredFocus(elementId: string, scrollBlock: ScrollLogicalPos
     }
   });
   return target;
+}
+
+function restoreFallbackFocus(ids: string | readonly string[] | undefined, heading: HTMLElement | null) {
+  for (const id of typeof ids === "string" ? [ids] : ids ?? []) {
+    if (restoreRegisteredFocus(id)) return;
+  }
+  if (heading && !restoreRegisteredFocus(heading.id)) heading.focus();
 }
 
 function observeUserIntent(
@@ -119,7 +134,7 @@ function observeUserIntent(
 interface RestoredFocus {
   path: string;
   target: HTMLElement;
-  fallbackElementId?: string;
+  fallbackElementId?: string | readonly string[];
   scrollBlock?: ScrollLogicalPosition;
 }
 
@@ -127,7 +142,7 @@ function observeRestoredFocus(
   target: HTMLElement,
   headingRef: RefObject<HTMLElement | null>,
   retire: () => void,
-  fallbackElementId?: string,
+  fallbackElementId?: string | readonly string[],
   nativeHashTarget?: HTMLElement | null,
   scrollBlock?: ScrollLogicalPosition,
 ): () => void {
@@ -139,14 +154,14 @@ function observeRestoredFocus(
   const observer = new MutationObserver(() => {
     if (disposed || target.isConnected) return;
     const active = document.activeElement;
-    const heading = (fallbackElementId && document.getElementById(fallbackElementId)) || headingRef.current;
+    const heading = fallbackTarget(fallbackElementId) ?? headingRef.current;
     const recover = scope.isConnected && heading?.isConnected
       && (active === document.body || active === null || active === target);
     stop();
     if (!recover) return;
     const replacement = document.getElementById(target.id);
     if (replacement && scope.contains(replacement) && restoreRegisteredFocus(target.id, scrollBlock)) return;
-    heading.focus();
+    restoreFallbackFocus(fallbackElementId, headingRef.current);
   });
   const dispose = () => {
     disposed = true;
@@ -202,7 +217,7 @@ export function useRouteFocus(
     // return path." Harmless for a destination page with no meaningful
     // search (`location.search` is just "").
     const fullPath = location.pathname + location.search;
-    const watchRestoration = (target: HTMLElement, fallbackElementId?: string, scrollBlock?: ScrollLogicalPosition) => {
+    const watchRestoration = (target: HTMLElement, fallbackElementId?: string | readonly string[], scrollBlock?: ScrollLogicalPosition) => {
       const ownership = { path: fullPath, target, fallbackElementId, scrollBlock };
       restoredRef.current = ownership;
       let hashTarget: HTMLElement | null = null;
@@ -293,7 +308,7 @@ export function useRouteFocus(
       const timeoutId = defer ? undefined : window.setTimeout(() => {
         if (settled) return;
         finishSearch();
-        ((pending.fallbackElementId && document.getElementById(pending.fallbackElementId)) || headingRef.current)?.focus();
+        restoreFallbackFocus(pending.fallbackElementId, headingRef.current);
       }, RETURN_FOCUS_OBSERVER_TIMEOUT_MS);
       const removeIntent = observeUserIntent(null, finishSearch, () => restoring);
       return () => {

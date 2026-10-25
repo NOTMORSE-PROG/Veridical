@@ -1,3 +1,4 @@
+import { useEscalatedItems } from "../report/useReport";
 import { criterionSourceReturn } from "../report/criterionSourceReturn";
 import { PdfSourceReader } from "./PdfSourceReader";
 import { clearPdfReading, sameSourceTask } from "./usePdfPageText";
@@ -447,6 +448,10 @@ export function SignalDocumentViewerPage() {
 
   const viewerQuery = useManuscriptViewer(id);
   const reportQuery = useReport(id);
+  const pendingReviewQuery = useEscalatedItems(id);
+  const pendingOriginRows = reportOrigin?.kind === "pending" && pendingReviewQuery.isSuccess && !pendingReviewQuery.isError && pendingReviewQuery.fetchStatus === "idle"
+    ? pendingReviewQuery.data.filter(row => row.check_result_id === reportOrigin.checkResultId) : [];
+  const pendingOriginText = pendingOriginRows.length === 1 ? pendingOriginRows[0].criterion_text : undefined;
   const flagsQuery = useFlags(id);
   const flags = recoverableReadError(flagsQuery.error) ? flagsQuery.data : undefined;
   useRouteFocus("Manuscript review - VERIDICAL", headingRef, reportOrigin, { prefix: "comparison-lead-", pending: flagsQuery.isPending || flagsQuery.fetchStatus !== "idle" });
@@ -531,6 +536,7 @@ export function SignalDocumentViewerPage() {
   function taskParameters(change?: (next: URLSearchParams) => void) {
     clearRouteReturnFocus(`signal-saved-source-${id}-`);
     clearRouteReturnFocus(`signal-resolution-source-${id}-`);
+    clearRouteReturnFocus(`signal-resolution-coverage-${id}-`);
     if (sourcePlacement.current) sourcePlacement.current.allowed = false;
     returnSourceFocus.current = undefined;
     criterionInspectionRun.current = null;
@@ -584,7 +590,7 @@ export function SignalDocumentViewerPage() {
     sourceFocusOwner.current = owned && (document.activeElement === sourcePanelRef.current || document.activeElement === manuscriptTabRef.current)
       ? document.activeElement as HTMLElement : null;
     sourcePlacement.current = { run: id, origin: searchParams.toString(), destination, adopted: false, allowed: sourceFocusOwner.current !== null };
-    setSearchParams(new URLSearchParams(destination), { state: location.state });
+    setSearchParams(new URLSearchParams(destination), { state: reportOrigin ? reportOrigin.state : location.state });
   }
 
   const sourceQuery = searchParams.toString();
@@ -870,8 +876,11 @@ export function SignalDocumentViewerPage() {
             <div className="signal-document-grid">
               <div ref={sourcePanelRef} tabIndex={docxScrollInPane ? 0 : -1} id="manuscript-panel" role="tabpanel" aria-labelledby="manuscript-tab" data-active={activeTab === "manuscript"} data-source-format={viewer?.source_format} className="signal-document-pane">
                 {viewer?.available && viewer.source_format !== "pdf" && searchParams.get("source") === "page_text" && <p className="signal-document-reconstruction-note" role="status">Page text is available only for PDF sources. Showing the available source view.</p>}
-                {reportOrigin && <ActionLink to={`${reportOrigin.returnPath}#${reportOrigin.elementId}`} state={reportOrigin.state} variant="secondary">{reportQuery.data?.results.find((row) => row.criterion_id === reportOrigin.criterionId)?.resolution ? "Return to saved judgment" : "Return to criterion record"}</ActionLink>}
-                {criterionSource?.run === id && isDecision && sameSourceTask(sourceQuery, criterionSource.destination) && <Button variant="secondary" onClick={returnToCriterion}>{criterionSource.recordCriterionId === undefined ? "Return to criterion review" : criterionSource.recordIsInstructor ? "Return to saved judgment" : "Return to criterion record"}</Button>}
+                {reportOrigin?.kind === "pending" ? <div className="signal-copy-flow">
+                  <p><strong>Source opened from criterion review</strong>{pendingOriginText && <>: {pendingOriginText}</>}</p>
+                  <ActionLink to={`${reportOrigin.returnPath}#${reportOrigin.elementId}`} state={reportOrigin.state} variant="secondary" aria-label={pendingOriginText ? `Return to criterion review: ${pendingOriginText}` : undefined}>Return to criterion review</ActionLink>
+                </div> : reportOrigin && <ActionLink to={`${reportOrigin.returnPath}#${reportOrigin.elementId}`} state={reportOrigin.state} variant="secondary">{reportQuery.data?.results.find((row) => row.criterion_id === reportOrigin.criterionId)?.resolution ? "Return to saved judgment" : "Return to criterion record"}</ActionLink>}
+                {!reportOrigin && criterionSource?.run === id && isDecision && sameSourceTask(sourceQuery, criterionSource.destination) && <Button variant="secondary" onClick={returnToCriterion}>{criterionSource.recordCriterionId === undefined ? "Return to criterion review" : criterionSource.recordIsInstructor ? "Return to saved judgment" : "Return to criterion record"}</Button>}
                 {selectedFinding && selectedSummary && selectedPrecision && (
                   <div className="signal-document-selection-strip" role="status"><div><strong>{selectedComparison ? `${comparisonLeadIdentity(selectedSummary, optional.snapshot).marker} · Record #${selectedSummary.id}` : `Finding ${selectedFinding.number} selected`}</strong><span>{instructorAnchor(recordedAnchor ?? selectedSummary.page_anchor)} · {selectedComparison ? "Comparison lead, not scored" : selectedPrecision.label}</span></div><div><Button variant="secondary" onClick={showSelectedReview}>View review</Button>{selectedRegion?.kind === "paragraph_only" && <Button variant="quiet" onClick={revealRecordedLocation}>Show recorded location</Button>}<Button variant="quiet" onClick={showQueue}>Clear selection</Button></div></div>
                 )}

@@ -1,8 +1,9 @@
+import { pendingCriterionSourceAction } from "./criterionSourceReturn";
 import { WorkflowLink as Link } from "../routing/WorkflowLink";
 import { reportAssessmentNotices } from "../domain/reportAssessmentContext";
 import { ReportAssessmentContext } from "./ReportAssessmentContext";
 import { ReviewDeskReturnLink } from "../routing/ReviewDeskReturnLink";
-import { type MouseEvent, useRef, useState } from "react";
+import { type MouseEvent, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useParams } from "react-router";
 import { ApiError } from "../api/client";
 import { manuscriptIdentity } from "../domain/manuscriptLabel";
@@ -21,7 +22,7 @@ import { coverageItems } from "./reportCoverage";
 import { unconfirmedAutomaticRuleRows } from "../domain/ruleScope";
 import { RuleScopeSummary } from "./RuleScopeNotice";
 import { isOptionalComparisonLead } from "../domain/comparisonLeadIdentity";
-import { useFlags, useReport } from "./useReport";
+import { useEscalatedItems, useFlags, useReport } from "./useReport";
 import { useShareLink } from "./useShare";
 import { FigureReadingsSummary } from "./FigureReadings";
 import { ReportReadNotice } from "./ReportReadNotice";
@@ -59,12 +60,25 @@ export function SignalReportPage() {
   const exportErrorRef = useRef<HTMLDivElement>(null);
   const exportPdf = useReportPdfExportAction(id, exportErrorRef);
   const flagsQuery = useFlags(id);
+  const pendingReviewQuery = useEscalatedItems(id);
+  // Capture before route-focus consumes its registration on this navigation.
+  const sourceReturnNavigation = useMemo(() => ({ key: location.key, action: pendingCriterionSourceAction(
+    pendingRouteReturnElement(location.pathname + location.search), id) }), [id, location.pathname, location.search, location.key]);
+  const pendingSourceReturn = sourceReturnNavigation.action;
+  const pendingSourceSettled = Boolean(report && !error && fetchStatus === "idle"
+    && pendingReviewQuery.isSuccess && !pendingReviewQuery.isError && pendingReviewQuery.fetchStatus === "idle");
+  const [missingSourceAction, setMissingSourceAction] = useState(false);
+  useEffect(() => {
+    setMissingSourceAction(Boolean(pendingSourceReturn && pendingSourceSettled && !document.getElementById(pendingSourceReturn.elementId)));
+  }, [pendingSourceReturn, pendingSourceSettled, pendingReviewQuery.data, report]);
   const auditOrigin = validAuditReviewOrigin(location.pathname + location.search + location.hash, id);
   const returningToAuditSection = Boolean(location.hash && auditOrigin
     && pendingRouteReturnElement(location.pathname + location.search) === auditOrigin.elementId);
   const sectionFocus = pendingRouteReturnElement(location.pathname + location.search);
   const returningToReportSection = REPORT_SECTION_TARGETS.some(target => target === sectionFocus);
-  useRouteFocus("Readiness report - VERIDICAL", headingRef, undefined, returningToAuditSection
+  useRouteFocus("Readiness report - VERIDICAL", headingRef, undefined, pendingSourceReturn
+    ? { prefix: pendingSourceReturn.elementId, pending: !pendingSourceSettled }
+    : returningToAuditSection
     ? { prefix: auditOrigin!.elementId, pending: isPending || fetchStatus !== "idle" }
     : returningToReportSection ? { prefix: sectionFocus!, pending: isPending || fetchStatus !== "idle" }
     : { prefix: "comparison-lead-", pending: isPending || flagsQuery.isPending || flagsQuery.fetchStatus !== "idle" });
@@ -100,6 +114,7 @@ export function SignalReportPage() {
       ) : (
         <>
           {readFailed && <ReportReadNotice retrying={fetchStatus === "fetching"} onRetry={() => { void refetch(); }} />}
+          <p role="status" aria-live="polite" className={missingSourceAction ? undefined : "sr-only"}>{missingSourceAction ? "The original source action is no longer available. Review the current report below." : ""}</p>
           <ReportAssessmentContext notices={reportAssessmentNotices(report, "report")} />
           <section className="signal-report-hero" aria-labelledby="readiness-band-heading" aria-describedby={readFailed ? "report-read-failure" : undefined}>
             <div className="signal-report-hero__branch" aria-hidden="true"><i /><i /><i /></div>
