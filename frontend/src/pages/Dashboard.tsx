@@ -16,7 +16,7 @@ import {
   useDismissFailedManuscript,
   useReviewDeskPage,
 } from "../dashboard/useReviewDesk";
-import { useDashboardStats, usePrograms } from "../dashboard/useDashboard";
+import { useDashboardStats, useManuscriptsPage, usePrograms } from "../dashboard/useDashboard";
 import { DECISION_LABEL } from "../domain/decisionTone";
 import { manuscriptIdentity } from "../domain/manuscriptLabel";
 import { useRouteFocus } from "../routing/useRouteFocus";
@@ -329,11 +329,13 @@ function ReviewDesk({
   onStartCheck,
   onRerun,
   onSetGroup,
+  noManuscripts = false,
 }: {
   onUploadManuscript: () => void;
   onStartCheck: (id: number) => void;
   onRerun: (id: number) => void;
   onSetGroup: (id: number) => void;
+  noManuscripts?: boolean;
 }) {
   const location = useLocation();
   const [params, setParams] = useSearchParams();
@@ -555,9 +557,11 @@ function ReviewDesk({
         {usableList && data.items.length === 0 && (
           <div className="signal-desk-empty">
             <div className="signal-desk-empty__mark" aria-hidden="true" />
-            <h3>{q || program ? `No matches in ${queueTitle}` : queue === "not_checked" ? "No unchecked manuscripts" : "This queue is clear"}</h3>
+            <h3>{noManuscripts ? "No manuscripts uploaded yet" : q || program ? `No matches in ${queueTitle}` : queue === "not_checked" ? "No unchecked manuscripts" : "This queue is clear"}</h3>
             <p>
-              {q || program
+              {noManuscripts
+                ? "Add a manuscript now, or finish reviewing your required format first."
+                : q || program
                 ? "Clear the filters or choose another queue."
                 : queue === "not_checked"
                   ? "New uploads appear here after preparation. Previously checked manuscripts stay in their other queues."
@@ -618,7 +622,8 @@ function ReviewDesk({
 }
 
 export function DashboardPage() {
-  const { data: families, isPending: familiesPending } = useRubricFamilies();
+  const familyQuery = useRubricFamilies();
+  const { data: families, isPending: familiesPending } = familyQuery;
   const [uploadFormatOpen, setUploadFormatOpen] = useState(false);
   const [uploadManuscriptOpen, setUploadManuscriptOpen] = useState(false);
   const [newCheckOpen, setNewCheckOpen] = useState(false);
@@ -626,6 +631,7 @@ export function DashboardPage() {
   const [rerunOpen, setRerunOpen] = useState(false);
   const [rerunInitialIds, setRerunInitialIds] = useState<number[]>();
   const [setGroupManuscriptId, setSetGroupManuscriptId] = useState<number>();
+  const [deskUsed, setDeskUsed] = useState(false);
   const headingRef = useRef<HTMLHeadingElement>(null);
   useRouteFocus("Review Desk - VERIDICAL", headingRef);
 
@@ -657,6 +663,13 @@ export function DashboardPage() {
     () => (families ?? []).some((family) => family.is_active),
     [families],
   );
+  const presence = useManuscriptsPage(1, REVIEW_DESK_PAGE_SIZE, undefined,
+    familyQuery.isSuccess && !hasActiveRubric);
+  const confirmedEmpty = presence.isSuccess && !presence.isError && presence.data.total === 0;
+  const explicitDeskQuery = ["queue", "q", "program", "sort", "page", "status", "needs_review"]
+    .some((key) => rerunParams.has(key));
+  const firstUse = !deskUsed && !explicitDeskQuery && familyQuery.isSuccess
+    && families?.length === 0 && confirmedEmpty;
 
   function openCheck(manuscriptId?: number) {
     setPreselectManuscriptId(manuscriptId);
@@ -684,12 +697,46 @@ export function DashboardPage() {
         </div>
       </header>
 
-      {familiesPending ? (
-        <div className="signal-desk-loading" role="status" aria-busy="true">
-          <span>Preparing your Review Desk…</span><i /><i />
-        </div>
-      ) : hasActiveRubric ? (
+      {familiesPending && <p role="status">Checking your required format.</p>}
+      {familyQuery.isError && (
+        <section className="signal-desk-format-status" aria-labelledby="desk-format-status-heading">
+          <div>
+            <h2 id="desk-format-status-heading">Required format could not be checked</h2>
+            <p>You can still review your manuscripts. Try again to check which format is active.</p>
+          </div>
+          <Button variant="secondary" onClick={() => void familyQuery.refetch()} disabled={familyQuery.isFetching}>
+            {familyQuery.isFetching ? "Checking format…" : "Try again"}
+          </Button>
+        </section>
+      )}
+      {firstUse && <FirstUse onUpload={() => setUploadFormatOpen(true)} />}
+      {familyQuery.isSuccess && !hasActiveRubric && !firstUse && (
+        <section className="signal-desk-format-status" aria-labelledby="desk-format-status-heading">
+          <div>
+            <h2 id="desk-format-status-heading">{families?.length === 1
+              ? "Continue reviewing your required format"
+              : families && families.length > 1
+                ? "Choose a required format to finish setup"
+                : "Add a required format before checking"}</h2>
+            {families?.length === 1 && <p><strong>{families[0].title} · Version {families[0].version}</strong></p>}
+            <p>{families?.length === 1
+              ? "Review and confirm the prepared criteria before starting a check."
+              : families && families.length > 1
+                ? "Review a prepared format and activate the version you want to use for new checks."
+                : presence.isSuccess && presence.data.total > 0
+                  ? "Your uploaded manuscripts remain available below. Upload your program’s format, then review the prepared criteria."
+                  : "Upload your program’s format, then review the prepared criteria. Any existing manuscripts can still be reviewed below."}</p>
+          </div>
+          {families?.length === 1
+            ? <ActionLink to={`/rubric/${families[0].id}/review`}>Continue review</ActionLink>
+            : families && families.length > 1
+              ? <ActionLink to="/rubric">Manage required formats</ActionLink>
+              : <Button variant="brand" data-tour="upload-format-cta" onClick={() => setUploadFormatOpen(true)}>Upload required format</Button>}
+        </section>
+      )}
+      <div hidden={firstUse} onFocusCapture={() => setDeskUsed(true)} onPointerDownCapture={() => setDeskUsed(true)} onKeyDownCapture={() => setDeskUsed(true)}>
         <ReviewDesk
+          noManuscripts={confirmedEmpty && !hasActiveRubric}
           onUploadManuscript={() => setUploadManuscriptOpen(true)}
           onStartCheck={openCheck}
           onRerun={(id) => {
@@ -698,9 +745,7 @@ export function DashboardPage() {
           }}
           onSetGroup={setSetGroupManuscriptId}
         />
-      ) : (
-        <FirstUse onUpload={() => setUploadFormatOpen(true)} />
-      )}
+      </div>
 
       {newCheckOpen && (
         <NewCheckModal

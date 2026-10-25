@@ -41,12 +41,13 @@ export function useDashboardStats() {
 // V-062 (AC5): `program` is optional -- omitted entirely (not sent as an
 // empty string) when the filter is cleared, matching the query builder
 // pattern `useRerunEstimate` already uses.
-export function useManuscriptsPage(page: number, pageSize = 20, program?: string) {
+export function useManuscriptsPage(page: number, pageSize = 20, program?: string, enabled = true) {
   const query = program ? `&program=${encodeURIComponent(program)}` : "";
   return useQuery({
     queryKey: ["manuscripts", "table", page, pageSize, program ?? null],
     queryFn: () =>
       api.get<PaginatedManuscripts>(`/manuscripts?page=${page}&page_size=${pageSize}${query}`),
+    enabled,
   });
 }
 

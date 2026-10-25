@@ -1537,6 +1537,23 @@
     box-shadow: var(--signal-shadow-raised);
   }
 
+  .signal-desk-format-status {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: var(--signal-space-3);
+    padding: var(--signal-space-4);
+    border: var(--signal-border-hairline) solid var(--color-signal-border);
+    border-radius: var(--signal-radius-panel);
+    background: var(--color-signal-surface);
+  }
+
+  .signal-desk-format-status > div { max-inline-size: var(--signal-prose-width); }
+  .signal-desk-format-status h2 { font-size: var(--signal-type-subhead); }
+  .signal-desk-format-status p { margin-block: var(--signal-space-2) 0; }
+  .signal-desk-format-status > .signal-button { flex: none; }
+
   .signal-first-use > p:not(.signal-eyebrow) {
     max-width: var(--signal-prose-width);
     margin: 0;

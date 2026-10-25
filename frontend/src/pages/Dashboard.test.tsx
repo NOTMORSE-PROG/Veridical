@@ -556,6 +556,9 @@ describe("DashboardPage", () => {
           onboarding_dismissed_at: "2026-01-01T00:00:00Z",
         },
         "/rubric-families": [],
+        "/manuscripts": { items: [], total: 0, page: 1, page_size: 20 },
+        "/stats": { ...STATS, not_checked_count: 0 },
+        "/programs": [],
       }),
     );
     renderWithProviders(<DashboardPage />);
@@ -565,6 +568,127 @@ describe("DashboardPage", () => {
     expect(screen.getByRole("button", { name: "Upload required format" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Start a check" })).toBeEnabled();
     expect(screen.getByRole("list", { name: "First check setup" })).toBeInTheDocument();
+    expect(screen.queryByRole("navigation", { name: "Review Desk queues" })).not.toBeInTheDocument();
+  });
+
+  it("keeps existing manuscripts accessible beside a saved inactive format and links to its exact draft", async () => {
+    vi.stubGlobal("fetch", stubFetchByPath({
+      "/rubric-families": [{ ...ACTIVE_FAMILY[0], is_active: false, version: 3 }],
+      "/manuscripts": MANUSCRIPTS_PAGE, "/stats": STATS, "/programs": [],
+    }));
+    renderWithProviders(<DashboardPage />, { route: "/dashboard?queue=not_checked&sort=oldest&program=BSIT" });
+    expect(await screen.findByRole("heading", { name: "Continue reviewing your required format" })).toBeInTheDocument();
+    expect(screen.getByText("TIP Format · Version 3")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /Continue review/ })).toHaveAttribute("href", "/rubric/9/review");
+    expect(await screen.findByRole("navigation", { name: "Review Desk queues" })).toBeInTheDocument();
+    expect((await screen.findAllByText("G-11")).length).toBeGreaterThan(0);
+    expect(screen.queryByText("No required format yet")).not.toBeInTheDocument();
+  });
+
+  it("does not infer an empty account from no formats or an empty selected queue", async () => {
+    const fallback = stubFetchByPath({ "/rubric-families": [], "/stats": STATS, "/programs": [] });
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = new URL(input.toString(), "http://localhost");
+      if (url.pathname === "/manuscripts") return Promise.resolve(Response.json(url.searchParams.has("status")
+        ? { ...MANUSCRIPTS_PAGE, items: [], total: 0 } : MANUSCRIPTS_PAGE));
+      return fallback(input, init);
+    }));
+    renderWithProviders(<DashboardPage />);
+    expect(await screen.findByRole("heading", { name: "Add a required format before checking" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "This queue is clear" })).toBeInTheDocument();
+    expect(screen.getByRole("navigation", { name: "Review Desk queues" })).toBeInTheDocument();
+    expect(screen.queryByText("No required format yet")).not.toBeInTheDocument();
+  });
+
+  it("keeps the queue and unsent search through a failed format lookup and retry", async () => {
+    let familyCalls = 0;
+    let finish!: (response: Response) => void;
+    const fallback = stubFetchByPath({ "/manuscripts": MANUSCRIPTS_PAGE, "/stats": STATS, "/programs": [] });
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      if (new URL(input.toString(), "http://localhost").pathname === "/rubric-families") {
+        familyCalls += 1;
+        return familyCalls === 1 ? Promise.resolve(Response.json({}, { status: 503 }))
+          : new Promise<Response>((resolve) => { finish = resolve; });
+      }
+      return fallback(input, init);
+    }));
+    renderWithProviders(<DashboardPage />);
+    const section = await screen.findByRole("region", { name: "Required format could not be checked" });
+    expect((await screen.findAllByText("G-11")).length).toBeGreaterThan(0);
+    const search = screen.getByRole("searchbox");
+    fireEvent.change(search, { target: { value: "Unsubmitted faculty search" } });
+    fireEvent.click(within(section).getByRole("button", { name: "Try again" }));
+    await waitFor(() => expect(familyCalls).toBe(2));
+    expect(search).toHaveValue("Unsubmitted faculty search");
+    await act(async () => finish(Response.json(ACTIVE_FAMILY)));
+    await waitFor(() => expect(screen.queryByRole("heading", { name: "Required format could not be checked" })).not.toBeInTheDocument());
+    expect(screen.getByRole("searchbox")).toBe(search);
+    expect(search).toHaveValue("Unsubmitted faculty search");
+    expect(screen.queryByText("No required format yet")).not.toBeInTheDocument();
+  });
+
+  it("does not hide records behind a pending format request", async () => {
+    const fallback = stubFetchByPath({ "/manuscripts": MANUSCRIPTS_PAGE, "/stats": STATS, "/programs": [] });
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL, init?: RequestInit) =>
+      new URL(input.toString(), "http://localhost").pathname === "/rubric-families"
+        ? new Promise<Response>(() => {}) : fallback(input, init)));
+    renderWithProviders(<DashboardPage />);
+    expect((await screen.findAllByText("G-11")).length).toBeGreaterThan(0);
+    expect(screen.getByText("Checking your required format.")).toBeInTheDocument();
+    expect(screen.queryByText("No required format yet")).not.toBeInTheDocument();
+  });
+
+  it("offers format management rather than guessing between inactive families", async () => {
+    vi.stubGlobal("fetch", stubFetchByPath({
+      "/rubric-families": [{ ...ACTIVE_FAMILY[0], is_active: false }, { ...ACTIVE_FAMILY[0], id: 12, is_active: false }],
+      "/manuscripts": MANUSCRIPTS_PAGE, "/stats": STATS, "/programs": [],
+    }));
+    renderWithProviders(<DashboardPage />);
+    expect(await screen.findByRole("link", { name: /Manage required formats/ })).toHaveAttribute("href", "/rubric");
+    expect(screen.queryByRole("link", { name: /Continue review/ })).not.toBeInTheDocument();
+  });
+
+  it("does not hide a focused working queue when format retry discovers a truly empty account", async () => {
+    let familyCalls = 0;
+    let finish!: (response: Response) => void;
+    const fallback = stubFetchByPath({ "/manuscripts": { ...MANUSCRIPTS_PAGE, items: [], total: 0 }, "/stats": STATS, "/programs": [] });
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      if (new URL(input.toString(), "http://localhost").pathname === "/rubric-families") {
+        familyCalls += 1;
+        return familyCalls === 1 ? Promise.resolve(Response.json({}, { status: 503 }))
+          : new Promise<Response>((resolve) => { finish = resolve; });
+      }
+      return fallback(input, init);
+    }));
+    renderWithProviders(<DashboardPage />);
+    const section = await screen.findByRole("region", { name: "Required format could not be checked" });
+    fireEvent.click(within(section).getByRole("button", { name: "Try again" }));
+    await waitFor(() => expect(familyCalls).toBe(2));
+    const search = screen.getByRole("searchbox");
+    act(() => search.focus());
+    fireEvent.change(search, { target: { value: "Unsubmitted search" } });
+    await act(async () => finish(Response.json([])));
+    await screen.findByText("No manuscripts uploaded yet");
+    expect(search).toHaveFocus();
+    expect(search).toBeVisible();
+    expect(search).toHaveValue("Unsubmitted search");
+    expect(screen.queryByText("No required format yet")).not.toBeInTheDocument();
+  });
+
+  it("does not assert uploaded records exist before an unfiltered presence lookup succeeds", async () => {
+    const fallback = stubFetchByPath({ "/rubric-families": [], "/stats": STATS, "/programs": [] });
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = new URL(input.toString(), "http://localhost");
+      if (url.pathname === "/manuscripts") return url.searchParams.has("status")
+        ? Promise.resolve(Response.json({ ...MANUSCRIPTS_PAGE, total: 0, items: [] }))
+        : new Promise<Response>(() => {});
+      return fallback(input, init);
+    }));
+    renderWithProviders(<DashboardPage />);
+    await screen.findByRole("heading", { name: "Add a required format before checking" });
+    expect(screen.getByText(/Any existing manuscripts can still be reviewed below/)).toBeInTheDocument();
+    expect(screen.queryByText(/Your uploaded manuscripts remain available below/)).not.toBeInTheDocument();
+    expect(screen.queryByText("No required format yet")).not.toBeInTheDocument();
   });
 
   it("BUG-023: 'New check' with no active rubric explains what's missing instead of dead-clicking silently", async () => {
