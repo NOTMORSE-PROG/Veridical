@@ -18,6 +18,7 @@ from sqlalchemy import select, text
 
 import app.pipeline.machine as pipeline_machine
 from app import messages
+from app.checks.router import apply_routing, route_criteria
 from app.checks.rules.sections import identify_target_section
 from app.config import get_settings
 from app.db import advisory_lock
@@ -870,6 +871,14 @@ async def test_cancellation_wins_when_the_active_stage_then_raises(
 
     async with session_factory() as setup:
         run = await setup.get(CheckRun, check_run_id)
+        criteria = list(
+            await setup.scalars(
+                select(Criterion)
+                .where(Criterion.rubric_id == run.rubric_id)
+                .order_by(Criterion.position, Criterion.id)
+            )
+        )
+        await apply_routing(setup, check_run_id, route_criteria(criteria))
         manuscript = await setup.get(Manuscript, run.manuscript_id)
         instructor_id = manuscript.instructor_id
         run.status = CheckRunStatus.semantic
@@ -878,11 +887,29 @@ async def test_cancellation_wins_when_the_active_stage_then_raises(
     async with session_factory() as worker:
         run = await worker.get(CheckRun, check_run_id)
         task = asyncio.create_task(run_check_run(worker, run, settings, FakeLLMClient()))
-        await entered_stage.wait()
-        async with session_factory() as request:
-            await cancel_check_run(request, check_run_id, instructor_id)
-        release_failure.set()
-        await task
+        entered_task = asyncio.create_task(entered_stage.wait())
+        try:
+            done, _pending = await asyncio.wait(
+                {task, entered_task}, timeout=5, return_when=asyncio.FIRST_COMPLETED
+            )
+            if task in done:
+                await task
+                pytest.fail(
+                    f"Worker finished before cancellation could enter the stage: "
+                    f"{run.status.value}, {run.stage_status}"
+                )
+            assert entered_task in done, "Worker did not reach the semantic stage within the bound"
+            assert not task.done(), "Worker must still be inside the held semantic stage"
+            async with session_factory() as request:
+                await cancel_check_run(request, check_run_id, instructor_id)
+            release_failure.set()
+            await asyncio.wait_for(task, 5)
+        finally:
+            release_failure.set()
+            for pending in (entered_task, task):
+                if not pending.done():
+                    pending.cancel()
+            await asyncio.wait_for(asyncio.gather(entered_task, task, return_exceptions=True), 5)
 
     async with session_factory() as verify:
         run = await verify.get(CheckRun, check_run_id)

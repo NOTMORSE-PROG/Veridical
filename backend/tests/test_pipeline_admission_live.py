@@ -8,6 +8,7 @@ import pytest
 from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
+from app.checks.router import apply_routing
 from app.config import Settings, get_settings
 from app.db import sqlalchemy_url
 from app.errors import FileMalformedError
@@ -373,12 +374,14 @@ async def test_loss_during_aggregation_cannot_publish_done(session_factory, monk
     monkeypatch.setattr(machine, "aggregate_and_score", aggregate)
     async with session_factory() as pipeline:
         run = await pipeline.get(CheckRun, run_id)
+        await apply_routing(pipeline, run_id, [])
         assert (
             await machine.run_check_run(
                 pipeline, run, get_settings(), FakeLLMClient(), claim_token=token
             )
             is False
         )
+    assert replacement is not None
     async with session_factory() as observer:
         run = await observer.get(CheckRun, run_id)
         assert run.status == CheckRunStatus.aggregating

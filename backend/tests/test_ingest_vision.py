@@ -14,6 +14,7 @@ from app.ingest.patterns import load_patterns
 from app.ingest.pdf import extract_document
 from app.llm.base import LLMClient
 from app.llm.fake import FakeLLMClient
+from app.models.instructor import Instructor
 from tests.test_ingest_pdf import PdfBuilder
 
 KNOWN_ROWS = [
@@ -148,6 +149,10 @@ class _StubSession:
 
     async def commit(self) -> None:
         return None
+
+    async def get(self, model, identity):
+        assert model is Instructor
+        return Instructor(id=identity, gemini_api_key_encrypted=None)
 
     async def execute(self, *_args: Any, **_kw: Any) -> None:
         return None
