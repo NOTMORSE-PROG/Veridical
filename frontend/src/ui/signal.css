@@ -3914,7 +3914,6 @@
   .signal-document-pdf-page {
     position: relative;
     width: 100%;
-    max-width: var(--signal-paper-max-inline-size);
     flex: 0 0 auto;
     margin-inline: auto;
     border: var(--signal-border-hairline) solid var(--signal-paper-border);

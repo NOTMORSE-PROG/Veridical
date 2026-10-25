@@ -468,7 +468,10 @@ export function PdfPane({
   const comparisonMarkers = regions.some((region) => flags.some((flag) => flag.id === region.flag_id && isOptionalComparisonLead(flag)));
   const scopeRegions = regions.filter((region) => region.kind !== "page_bbox");
   const pagesLabel = pdf ? `${pdf.numPages} ${pdf.numPages === 1 ? "page" : "pages"}` : "Loading pages";
-  const zoomStyle = { inlineSize: `${zoom * 100}%` } as CSSProperties;
+  const zoomStyle = {
+    inlineSize: `${zoom * 100}%`,
+    maxInlineSize: `calc(var(--signal-paper-max-inline-size) * ${zoom})`,
+  } as CSSProperties;
   function changeZoom(value: number) {
     reading.prepareZoom();
     setZoom(value);
