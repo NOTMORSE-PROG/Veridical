@@ -3805,6 +3805,33 @@
     text-align: center;
   }
 
+  .signal-document-source-context {
+    display: flex;
+    flex: none;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--signal-space-3);
+    padding: var(--signal-space-3) var(--signal-space-4);
+    border-block-end: var(--signal-border-hairline) solid var(--color-signal-border);
+    background: var(--color-signal-canvas);
+  }
+
+  .signal-document-source-context p {
+    flex: 1 1 var(--signal-case-rail-width);
+    min-inline-size: 0;
+    margin: 0;
+    font-size: var(--signal-type-label);
+    line-height: var(--signal-line-body);
+    overflow-wrap: anywhere;
+  }
+
+  .signal-document-source-context > .signal-button {
+    flex: 0 0 auto;
+    inline-size: fit-content;
+    max-inline-size: 100%;
+    white-space: normal;
+  }
+
   .signal-document-reconstruction-note {
     border-block-end: var(--signal-border-hairline) solid var(--color-signal-border);
     padding: var(--signal-space-2) var(--signal-space-4);

@@ -878,7 +878,7 @@ export function SignalDocumentViewerPage() {
             <div className="signal-document-grid">
               <div ref={sourcePanelRef} tabIndex={docxScrollInPane ? 0 : -1} id="manuscript-panel" role="tabpanel" aria-labelledby="manuscript-tab" data-active={activeTab === "manuscript"} data-source-format={viewer?.source_format} className="signal-document-pane">
                 {viewer?.available && viewer.source_format !== "pdf" && searchParams.get("source") === "page_text" && <p className="signal-document-reconstruction-note" role="status">Page text is available only for PDF sources. Showing the available source view.</p>}
-                {reportOrigin?.kind === "pending" ? <div className="signal-copy-flow">
+                {reportOrigin?.kind === "pending" ? <div className="signal-document-source-context">
                   <p><strong>Source opened from criterion review</strong>{pendingOriginText && <>: {pendingOriginText}</>}</p>
                   <ActionLink to={`${reportOrigin.returnPath}#${reportOrigin.elementId}`} state={reportOrigin.state} variant="secondary" aria-label={pendingOriginText ? `Return to criterion review: ${pendingOriginText}` : undefined}>Return to criterion review</ActionLink>
                 </div> : reportOrigin && <ActionLink to={`${reportOrigin.returnPath}#${reportOrigin.elementId}`} state={reportOrigin.state} variant="secondary">{reportQuery.data?.results.find((row) => row.criterion_id === reportOrigin.criterionId)?.resolution ? "Return to saved judgment" : "Return to criterion record"}</ActionLink>}
