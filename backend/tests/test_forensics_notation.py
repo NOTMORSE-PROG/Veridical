@@ -1,6 +1,7 @@
 """F6/V-081 BUG-260: source-bound notation, precision and incomplete coverage."""
 
 import pytest
+from scipy import stats as scipy_stats
 
 from app.checks.forensics import extract as extraction_module
 from app.checks.forensics.extract import extract_inferential_stats
@@ -44,7 +45,9 @@ def test_equivalent_source_precision_and_correct_p_remain_unflagged(p_token, deg
     assert (stat.test_value_precision, stat.p_value_precision) == (2, 3)
     assert stat.raw_text == text and stat.anchor == "p. 7"
     checked = recompute_p(stat, one_tailed_in_text=False)
-    assert checked is not None and checked.computed_p == pytest.approx(0.010630991789989047)
+    assert checked is not None and checked.computed_p == pytest.approx(
+        2 * scipy_stats.t.sf(2.58, 190.82), rel=1e-12
+    )
     assert checked.error is checked.decision_error is False
     assert _compute_forensics_findings(document(text)).flag_drafts == []
 

@@ -1,13 +1,14 @@
 """statcheck p-value recomputation (F6.4, V-033) — wraps
-`statcheck_python`'s own `process_stats`/`compute_p`/`error_test`/
-`decision_error_test` directly (D-003), applied to V-031's already-
+`statcheck_python`'s own `compute_p`/`error_test`/`decision_error_test`
+directly (D-003), applied to V-031's already-
 extracted `ReportedStat` records rather than re-extracting from raw text
 a second time (statcheck's own `extract_stats` already ran once, in
 V-031's `extract_inferential_stats`).
 
-One-tailed mercy (ticket edge case: "don't flag if one-tailed would make
-it consistent — inherit that mercy") is `process_stats`'s own built-in
-behavior when `OneTailedTxt=True` — not reimplemented here, just enabled.
+The orchestration preserves reported degrees of freedom; the upstream
+`process_stats` wrapper rounds them to integers. One-tailed mercy retains
+the upstream rule: a permitted one-tailed interpretation can resolve an
+otherwise inconsistent two-tailed result.
 """
 
 import contextlib
@@ -16,8 +17,10 @@ import math
 import warnings
 from dataclasses import dataclass
 
+from statcheck.compute_p import compute_p
+from statcheck.decision_error_test import decision_error_test
+from statcheck.error_test import error_test
 from statcheck.extract_1tail import extract_1tail
-from statcheck.process_stats import process_stats
 
 from app.checks.forensics.checks import ForensicsFlagDraft
 from app.checks.forensics.extract import ReportedStat
@@ -44,6 +47,51 @@ class PRecalcResult:
     computed_p: float
     error: bool
     decision_error: bool
+
+
+def _evaluate_tail(
+    stat: ReportedStat,
+    test_value: float,
+    *,
+    two_tailed: bool,
+    alpha: float,
+    p_zero_error: bool,
+    p_equal_alpha_sig: bool,
+) -> PRecalcResult | None:
+    """Reuse library judgments with the source df, without integer coercion."""
+    distribution = {
+        "test_type": stat.test_type,
+        "test_stat": test_value,
+        "df1": stat.df1,
+        "df2": stat.df2,
+        "two_tailed": two_tailed,
+    }
+    computed_p = float(compute_p(**distribution))
+    if not math.isfinite(computed_p):
+        return None
+    comparisons = {
+        "reported_p": stat.p_value,
+        "p_comparison": stat.p_comparison or "=",
+        "test_comparison": stat.test_comparison or "=",
+        "alpha": alpha,
+    }
+    error = error_test(
+        **distribution,
+        **comparisons,
+        p_dec=stat.p_value_precision,
+        test_dec=stat.test_value_precision,
+        pZeroError=p_zero_error,
+    )
+    if error is None:
+        return None
+    decision_error = (
+        decision_error_test(**comparisons, computed_p=computed_p, pEqualAlphaSig=p_equal_alpha_sig)
+        if error
+        else False
+    )
+    if decision_error is None:
+        return None
+    return PRecalcResult(computed_p, bool(error), bool(decision_error))
 
 
 def recompute_p(
@@ -77,36 +125,31 @@ def recompute_p(
             # Same defensive stdout suppression as V-031's extraction —
             # statcheck's internals print on some failure paths.
             warnings.simplefilter("ignore")
-            df = process_stats(
-                stat.test_type,
-                test_stat=test_value,
-                df1=stat.df1,
-                df2=stat.df2,
-                reported_p=stat.p_value,
-                p_comparison=stat.p_comparison or "=",
-                test_comparison=stat.test_comparison or "=",
-                p_dec=stat.p_value_precision,
-                test_dec=stat.test_value_precision,
-                OneTailedInTxt=one_tailed_in_text,
+            result = _evaluate_tail(
+                stat,
+                test_value,
                 two_tailed=two_tailed,
                 alpha=alpha,
-                pZeroError=p_zero_error,
-                pEqualAlphaSig=p_equal_alpha_sig,
-                OneTailedTxt=True,
-                OneTailedTests=not two_tailed,
+                p_zero_error=p_zero_error,
+                p_equal_alpha_sig=p_equal_alpha_sig,
             )
+            if result is not None and result.error and one_tailed_in_text and two_tailed:
+                alternative = _evaluate_tail(
+                    stat,
+                    test_value,
+                    two_tailed=False,
+                    alpha=alpha,
+                    p_zero_error=p_zero_error,
+                    p_equal_alpha_sig=p_equal_alpha_sig,
+                )
+                if alternative is None:
+                    return None
+                if not alternative.error:
+                    result = alternative
     except Exception:  # noqa: BLE001 — never crash on a manuscript's own weird numbers
         return None
 
-    row = df.iloc[0]
-    computed_p = float(row["computed_p"])
-    if not math.isfinite(computed_p):
-        return None
-    return PRecalcResult(
-        computed_p=computed_p,
-        error=bool(row["error"]),
-        decision_error=bool(row["decision_error"]),
-    )
+    return result
 
 
 def evaluate_p_recalc(
