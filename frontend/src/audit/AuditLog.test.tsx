@@ -88,7 +88,29 @@ describe("AuditLogPage", () => {
     expect(within(dialog).getByText("Technical record for reproducibility").parentElement).not.toHaveAttribute("open");
   });
 
-  it.each(["judgment_revised", "future_review_event", "library_entry_removed"])(
+  it("identifies the first judgment on an assessed criterion as an instructor action", async () => {
+    const row = { ...PAGE.items[1], id: 399, event_type: "judgment_recorded", check_run_id: 25, created_at: "2026-10-24T03:10:34.869928Z" };
+    vi.stubGlobal("fetch", stubFetchByPath({ "/audit": { ...PAGE, items: [row], total: 1 }, "/audit/399": {
+      ...row, payload: { judgment: { schema_version: 2, action: "judgment_recorded", check_run_id: 25,
+        criterion_id: 40, check_result_id: 214, performed_by: 5, before: null,
+        assessment_revision_before: 0, assessment_revision_after: 1,
+        original_assessment: { kind: "semantic", original_outcome: "passed", original_score: 100, original_level: null },
+        after: { judgment_revision: 1, actor_id: 5, resolution_type: "mark_fail", outcome: "failed", score: 0,
+          level: null, reason: "I inspected the design evidence before recording this judgment.",
+          provenance: "recorded", recorded_at: row.created_at } } },
+    } }));
+    renderWithProviders(<AuditLogPage />, { route: "/audit?detail=399" });
+    const dialog = await screen.findByRole("dialog");
+    expect(await within(dialog).findByText("Instructor #5")).toBeVisible();
+    expect(screen.getAllByText("Instructor action:").length).toBeGreaterThan(0);
+    expect(within(dialog).getByText("Original automated assessment")).toBeVisible();
+    expect(within(dialog).getByText("Meets criterion")).toBeVisible();
+    expect(within(dialog).getByText("Does not meet")).toBeVisible();
+    expect(within(dialog).getByText("I inspected the design evidence before recording this judgment.")).toBeVisible();
+    expect(within(dialog).getByText("Technical record for reproducibility").parentElement).not.toHaveAttribute("open");
+  });
+
+  it.each(["judgment_revised", "judgment_recorded", "future_review_event", "library_entry_removed"])(
     "BUG-463: never groups adjacent %s records as known automated activity", async event_type => {
       const items = [398, 397].map(id => ({ ...PAGE.items[1], id, event_type }));
       vi.stubGlobal("fetch", stubFetchByPath({ "/audit": { ...PAGE, items } }));
@@ -438,13 +460,16 @@ describe("AuditLogPage", () => {
     vi.stubGlobal("fetch", fetchMock);
     renderWithProviders(<AuditLogPage />, { route: "/audit?check_run_id=7&filter=Escalations", path: "/audit" });
     await screen.findAllByText("Criterion judgment recorded");
-    expect(screen.getByRole("button", { name: "Initial judgments" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("button", { name: "Judgments on pending criteria" })).toHaveAttribute("aria-pressed", "true");
     expect(screen.getByRole("button", { name: "All" })).toHaveAttribute("aria-pressed", "false");
     expect(new URL(String(fetchMock.mock.calls[0][0]), "http://localhost").searchParams.get("event_type")).toBe("escalation_resolved");
     fireEvent.click(screen.getByRole("button", { name: "All" }));
-    fireEvent.click(screen.getByRole("button", { name: "Initial judgments" }));
-    await waitFor(() => expect(screen.getByRole("button", { name: "Initial judgments" })).toHaveAttribute("aria-pressed", "true"));
+    fireEvent.click(screen.getByRole("button", { name: "Judgments on pending criteria" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Judgments on pending criteria" })).toHaveAttribute("aria-pressed", "true"));
     expect(screen.queryByRole("button", { name: "Escalations" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Judgments on assessed criteria" }));
+    await waitFor(() => expect(fetchMock.mock.calls.some(call => new URL(String(call[0]), "http://localhost").searchParams.get("event_type") === "judgment_recorded")).toBe(true));
+    expect(screen.getByRole("button", { name: "Judgments on assessed criteria" })).toHaveAttribute("aria-pressed", "true");
   });
 
   it("BUG-463: the revision filter queries exact revisions, resets page and closes the previous detail", async () => {

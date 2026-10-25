@@ -14,6 +14,63 @@ function fields(event: string, payload: unknown) {
   return Object.fromEntries(instructorEventDetails(event, payload)!.fields.map(field => [field.label, field.value]));
 }
 
+const INITIAL_ENTRY = { ...REVISION_ENTRY, event_type: "judgment_recorded" };
+function initialPayload(): { judgment: Record<string, unknown> } {
+  const revised = revisionPayload().judgment;
+  return { judgment: { ...revised, schema_version: 2, action: "judgment_recorded", before: null,
+    assessment_revision_before: 0, assessment_revision_after: 1,
+    after: { ...revised.after, judgment_revision: 1 },
+    original_assessment: { kind: "semantic", original_outcome: "passed", original_score: 100, original_level: null } } };
+}
+
+describe("initial instructor action audit", () => {
+  it("keeps the real automated band separate from the first manual judgment and full reason", () => {
+    const payload = initialPayload();
+    const before = structuredClone(payload);
+    const result = instructorEventDetails("judgment_recorded", payload, INITIAL_ENTRY)!;
+    expect(result.fields).toContainEqual({ role: "primary", label: "Original automated assessment", value: "Meets criterion" });
+    expect(result.fields).toContainEqual({ role: "primary", label: "Instructor judgment", value: "Does not meet" });
+    expect(result.fields).toContainEqual({ role: "reason", label: "Instructor reason", value: revisionPayload().judgment.after.reason });
+    expect(result.fields.some(field => field.label.includes("Previous instructor"))).toBe(false);
+    expect(recordedActor(payload, 5, INITIAL_ENTRY)).toBe("You");
+    expect(result.notice).toContain("at that time");
+    expect(payload).toEqual(before);
+  });
+
+  it.each([
+    { schema_version: 1 }, { action: "initial_resolution" }, { before: {} }, { check_run_id: 26 },
+    { criterion_id: "40" }, { performed_by: true }, { performed_by: 6 },
+    { assessment_revision_after: 2 }, { assessment_revision_before: -1 }, { original_assessment: null },
+    { original_assessment: { kind: "semantic", original_outcome: "passed", original_score: true, original_level: null } },
+    { original_assessment: { kind: "semantic", original_outcome: "api_down", original_score: null, original_level: null } },
+  ])("withholds attribution and all derived facts for invalid schema-2 envelope %j", change => {
+    const payload = initialPayload(); Object.assign(payload.judgment, change);
+    const result = instructorEventDetails("judgment_recorded", payload, INITIAL_ENTRY)!;
+    expect(result.fields.every(field => field.value === "Unavailable in this entry.")).toBe(true);
+    expect(recordedActor(payload, 5, INITIAL_ENTRY)).toBe("Instructor attribution unavailable");
+  });
+
+  it("does not turn an AI-majority action or inconsistent named grade into a new instructor record", () => {
+    const payload = initialPayload();
+    const after = payload.judgment.after as Record<string, unknown>;
+    Object.assign(after, { resolution_type: "accept_majority" });
+    expect(instructorEventDetails("judgment_recorded", payload, INITIAL_ENTRY)!.fields.every(field => field.value === "Unavailable in this entry.")).toBe(true);
+    Object.assign(after, { resolution_type: "mark_level", outcome: "passed", score: 100,
+      level: { ordinal: 0, name: "Absent", points: 0, max_points: 2 } });
+    expect(recordedActor(payload, 5, INITIAL_ENTRY)).toBe("Instructor attribution unavailable");
+    after.score = 0;
+    expect(instructorEventDetails("judgment_recorded", payload, INITIAL_ENTRY)!.fields).toContainEqual({ role: "primary", label: "Instructor judgment", value: "Absent" });
+  });
+
+  it("binds actual event time and run without a legacy actor fallback", () => {
+    const payload = initialPayload();
+    expect(recordedActor(payload, 5, { ...INITIAL_ENTRY, created_at: "2026-10-24T03:10:34.869927Z" })).toBe("Instructor attribution unavailable");
+    expect(recordedActor(payload, 5, { ...INITIAL_ENTRY, check_run_id: 99 })).toBe("Instructor attribution unavailable");
+    expect(recordedActor({ ...payload, instructor_id: 6 }, 5, INITIAL_ENTRY)).toBe("Instructor attribution unavailable");
+    expect(recordedActor({ instructor_id: 5 }, 5, INITIAL_ENTRY)).toBe("Instructor attribution unavailable");
+  });
+});
+
 describe("stored instructor action presentation", () => {
   it("BUG-463: reads the bound performer and full before/after reasons without assuming a grade change", () => {
     const payload = revisionPayload();

@@ -13,6 +13,7 @@ import { useContext, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate, useSearchParams } from "react-router";
 import { CITATION_HISTORY_TITLE } from "../domain/citationHistory";
 import type {
+  CriterionResultOut,
   EscalatedItemOut,
   EscalationResolution,
   FlagSummaryOut,
@@ -990,7 +991,9 @@ export function SignalCriteriaResults({ results, checkRunId, publicView = false,
                 links/buttons list can't tell them apart without a per-criterion
                 accessible name, same fix already applied to the flag "Review
                 evidence" links and the escalation resolve-button groups. */}
-              {privateScope && row.resolution && <RecordedJudgmentTools checkRunId={checkRunId} criterionId={row.criterion_id} criterionText={row.text} canonical={row} />}
+              {privateScope && (row.resolution || (row.type !== "not_assessable" && (row as CriterionResultOut).judgment_revision == null
+                && ["structural", "semantic"].includes(row.kind) && ["passed", "failed"].includes(row.outcome)))
+                && <RecordedJudgmentTools checkRunId={checkRunId} criterionId={row.criterion_id} criterionText={row.text} canonical={row} />}
               {assessment.ruleScopeUnconfirmed && assessment.instructorRecorded && <RuleScopeNotice earlier />}
               <details><summary id={evidenceSummaryId} aria-label={`${assessment.summary}: ${row.text}`}>{assessment.summary}</summary><div className="signal-result-card__evidence">
                 {assessment.relationship && <p>{assessment.relationship}</p>}

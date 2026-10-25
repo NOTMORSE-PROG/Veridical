@@ -3,8 +3,8 @@ import { CRITERION_EXCLUSION_COPY } from "../domain/criterionReview";
 import { DECISION_LABEL } from "../domain/decisionTone";
 import { READINESS_LABEL } from "../domain/readinessTone";
 import type { AuditLogDetail, CriterionLevel } from "../api/types";
-import type { JudgmentSnapshot } from "../api/judgments";
-import { judgmentLabel, snapshotValid } from "../report/judgmentRecord";
+import type { JudgmentContext, JudgmentSnapshot } from "../api/judgments";
+import { judgmentLabel, originalAssessmentValid, originalJudgmentLabel, recordedLevelScoreConsistent, snapshotValid } from "../report/judgmentRecord";
 import { auditEventOrigin } from "./eventOrigin";
 
 type EntryBinding = Pick<AuditLogDetail, "event_type" | "check_run_id" | "created_at">;
@@ -159,9 +159,35 @@ function revision(raw: unknown, entry: EntryBinding | undefined) {
   return { criterionId: body.criterion_id, resultId: body.check_result_id, actor: body.performed_by, before, after };
 }
 
+function initialJudgment(raw: unknown, entry: EntryBinding | undefined) {
+  const payload = record(raw);
+  const body = payload && Object.hasOwn(payload, "judgment") ? record(payload.judgment) : undefined;
+  if (!entry || entry.event_type !== "judgment_recorded" || !body
+    || !ownValues(body, ["schema_version", "action", "check_run_id", "criterion_id", "check_result_id", "performed_by", "before", "after", "original_assessment", "assessment_revision_before", "assessment_revision_after"])
+    || body.schema_version !== 2 || body.action !== "judgment_recorded" || body.before !== null
+    || !recordedId(body.check_run_id) || body.check_run_id !== entry.check_run_id
+    || !recordedId(body.criterion_id) || !recordedId(body.check_result_id) || !recordedId(body.performed_by)
+    || !Number.isSafeInteger(body.assessment_revision_before) || (body.assessment_revision_before as number) < 0
+    || body.assessment_revision_after !== (body.assessment_revision_before as number) + 1
+    || !Number.isSafeInteger(body.assessment_revision_after)) return;
+  const after = snapshot(body.after);
+  const original = record(body.original_assessment);
+  if (!after || after.provenance !== "recorded" || after.actor_id !== body.performed_by
+    || after.resolution_type === "accept_majority" || !recordedLevelScoreConsistent(after)
+    || after.judgment_revision !== 1
+    || timestampIdentity(after.recorded_at) !== timestampIdentity(entry.created_at)
+    || timestampIdentity(entry.created_at) === undefined || !original
+    || !ownValues(original, ["kind", "original_outcome", "original_score", "original_level"])
+    || !originalAssessmentValid(original as unknown as JudgmentContext["original_assessment"])) return;
+  if (payload && Object.hasOwn(payload, "instructor_id") && payload.instructor_id !== body.performed_by) return;
+  return { criterionId: body.criterion_id, resultId: body.check_result_id, actor: body.performed_by, after,
+    original: original as unknown as JudgmentContext["original_assessment"] };
+}
+
 export function recordedActor(payload: unknown, readerId: unknown, entry?: EntryBinding): string {
   const legacy = record(payload);
-  const actor = entry?.event_type === "judgment_revised" ? revision(payload, entry)?.actor
+  const actor = entry?.event_type === "judgment_recorded" ? initialJudgment(payload, entry)?.actor
+    : entry?.event_type === "judgment_revised" ? revision(payload, entry)?.actor
     : (!entry || auditEventOrigin(entry.event_type) === "instructor") && legacy && Object.hasOwn(legacy, "instructor_id") ? legacy.instructor_id : undefined;
   return recordedId(actor) ? recordedId(readerId) && actor === readerId ? "You" : `Instructor #${actor}`
     : "Instructor attribution unavailable";
@@ -169,6 +195,21 @@ export function recordedActor(payload: unknown, readerId: unknown, entry?: Entry
 
 export function instructorEventDetails(event: string, rawPayload: unknown, entry?: EntryBinding): InstructorEventDetails | undefined {
   const payload = record(rawPayload) ?? {};
+  if (event === "judgment_recorded") {
+    const saved = initialJudgment(rawPayload, entry);
+    return {
+      heading: "Criterion judgment recorded",
+      fields: [
+        { role: "primary", label: "Criterion", value: saved ? `Criterion #${saved.criterionId}` : "Unavailable in this entry." },
+        { role: "primary", label: "Original automated assessment", value: saved ? originalJudgmentLabel(saved.original) : "Unavailable in this entry." },
+        { role: "primary", label: "Instructor judgment", value: saved ? judgmentLabel(saved.after) : "Unavailable in this entry." },
+        { role: "reason", label: "Instructor reason", value: saved?.after.reason ?? "Unavailable in this entry." },
+        { role: "secondary", label: "Recorded result identifier", value: saved ? `#${saved.resultId}` : "Unavailable in this entry." },
+      ],
+      notice: saved ? "This entry records the judgment at that time. The current report may contain later judgments or decisions."
+        : "Some recorded judgment details could not be summarized. The stored record is available below.",
+    };
+  }
   if (event === "judgment_revised") {
     const saved = revision(rawPayload, entry);
     return {

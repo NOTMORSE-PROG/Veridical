@@ -21,6 +21,8 @@ export interface JudgmentContext {
   assessment_revision: number;
   decision: Decision | null;
   can_revise: boolean;
+  /** Older revision-only responses cannot grant initial recording authority. */
+  can_record?: boolean;
   unavailable_reason: string | null;
   current: JudgmentSnapshot | null;
   choices: {
@@ -40,21 +42,28 @@ export interface JudgmentContext {
     original_level: CriterionLevel | null;
   };
 }
-export interface JudgmentHistoryEntry {
-  schema_version: 1; entry_id: number; check_run_id: number; criterion_id: number;
-  check_result_id: number; action: "initial_resolution" | "judgment_revised";
+interface JudgmentHistoryFacts {
+  entry_id: number; check_run_id: number; criterion_id: number;
+  check_result_id: number;
   assessment_revision_before: number; assessment_revision_after: number;
   before: JudgmentSnapshot | null; after: JudgmentSnapshot;
   performed_by: number; performed_at: string;
 }
+export type JudgmentHistoryEntry = JudgmentHistoryFacts & (
+  { schema_version: 1; action: "initial_resolution" | "judgment_revised"; original_assessment?: null }
+  | { schema_version: 2; action: "judgment_recorded"; original_assessment: JudgmentContext["original_assessment"] }
+);
 export interface JudgmentHistory {
   check_run_id: number; criterion_id: number; check_result_id: number;
   assessment_revision: number; judgment_revision: number; current: JudgmentSnapshot;
   entries: JudgmentHistoryEntry[]; history_incomplete: boolean; next_cursor: string | null;
 }
-export interface JudgmentRevisionInput {
-  expected_revision: number; expected_judgment_revision: number;
+export interface JudgmentRecordInput {
+  expected_revision: number;
   resolution: RevisionResolution; level?: number; reason: string;
+}
+export interface JudgmentRevisionInput extends JudgmentRecordInput {
+  expected_judgment_revision: number;
 }
 export interface JudgmentRevisionOutput {
   context: JudgmentContext; entry: JudgmentHistoryEntry; report: ReportOut;

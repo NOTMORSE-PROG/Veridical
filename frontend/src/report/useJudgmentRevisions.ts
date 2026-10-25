@@ -2,16 +2,17 @@
 import { useLayoutEffect, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { ApiError, api } from "../api/client";
-import type { JudgmentContext, JudgmentHistory, JudgmentRevisionInput, JudgmentRevisionOutput, JudgmentSnapshot, RevisionResolution } from "../api/judgments";
+import type { JudgmentContext, JudgmentHistory, JudgmentRecordInput, JudgmentRevisionInput, JudgmentRevisionOutput, JudgmentSnapshot, RevisionResolution } from "../api/judgments";
 import type { ReportOut } from "../api/types";
 import { ME_QUERY_KEY } from "../auth/useAuth";
 import { CRITERION_SCORE_UNITS, INSTRUCTOR_NOTE_MAX_LENGTH, RESOLUTION_REASON_MIN_LENGTH } from "../config/ui";
 import { keepNewerAssessment } from "./assessmentRevision";
-import { contextInReport, contextMatches, historyEntryMatches, revisionAcknowledged, sameJudgmentGrade, snapshotValid } from "./judgmentRecord";
+import { contextInReport, contextMatches, historyEntryMatches, recordAcknowledged, revisionAcknowledged, sameJudgmentGrade, snapshotValid, type JudgmentProposal } from "./judgmentRecord";
 import { claimFocusContinuation, type FocusContinuation } from "../routing/focusContinuation";
 import { criterionRecordId } from "./savedJudgment";
 
 export interface RevisionDraft {
+  kind: "record" | "revise";
   bound: JudgmentContext;
   resolution?: RevisionResolution;
   level?: number;
@@ -36,7 +37,7 @@ export interface RevisionRecord {
   historyLoading?: boolean;
   historyError?: string;
   historyOperation?: number;
-  abandonedAttempt?: { expectedRevision: number; expectedJudgmentRevision: number; generation: number; unknown: true };
+  abandonedAttempt?: { kind: "record" | "revise"; expectedRevision: number; expectedJudgmentRevision?: number; generation: number; unknown: true };
 }
 export interface RevisionScope {
   isCurrent: () => boolean;
@@ -45,7 +46,7 @@ export interface RevisionScope {
   hasDrafts: boolean;
   busy: boolean;
   uncertain: boolean;
-  open: (criterion: number, purpose: "revise" | "history" | "current") => void;
+  open: (criterion: number, purpose: "record" | "revise" | "history" | "current") => void;
   closeHistory: (criterion: number) => void;
   history: (criterion: number, more?: boolean) => void;
   change: (criterion: number, change: Pick<Partial<RevisionDraft>, "resolution" | "level" | "reason">) => void;
@@ -54,7 +55,7 @@ export interface RevisionScope {
   canRebind: (criterion: number) => boolean;
   rebind: (criterion: number) => void;
   confirm: (criterion: number) => Promise<boolean>;
-  proposal: (draft: RevisionDraft) => JudgmentSnapshot | undefined;
+  proposal: (draft: RevisionDraft) => JudgmentProposal | undefined;
   review: (criterion: number) => boolean;
   canStop: () => boolean;
   hasUnknownAttempt: boolean;
@@ -106,7 +107,7 @@ export function useJudgmentRevisions(checkRunId: number, ownerCurrent: () => boo
     return { resolution, level: current?.level?.ordinal };
   }
   function changed(draft: RevisionDraft) {
-    const baseline = initialChoice(draft.bound);
+    const baseline: { resolution?: RevisionResolution; level?: number } = draft.kind === "record" ? {} : initialChoice(draft.bound);
     return draft.reason.length > 0 || draft.resolution !== baseline.resolution || draft.level !== baseline.level
       || draft.saving || draft.uncertainRevision !== undefined;
   }
@@ -115,8 +116,8 @@ export function useJudgmentRevisions(checkRunId: number, ownerCurrent: () => boo
     const draft = record.draft;
     return { ...record, draft: undefined, loading: false, readOperation: ++sequence.current,
       historyLoading: false, historyOperation: ++sequence.current,
-      abandonedAttempt: draft?.uncertainRevision !== undefined && draft.bound.current
-        ? { expectedRevision: draft.uncertainRevision, expectedJudgmentRevision: draft.bound.current.judgment_revision,
+      abandonedAttempt: draft?.uncertainRevision !== undefined
+        ? { kind: draft.kind, expectedRevision: draft.uncertainRevision, expectedJudgmentRevision: draft.bound.current?.judgment_revision,
           generation: draft.sending!, unknown: true } : record.abandonedAttempt };
   }
   function put(id: number, record: RevisionRecord) {
@@ -133,21 +134,23 @@ export function useJudgmentRevisions(checkRunId: number, ownerCurrent: () => boo
     return false;
   }
   const canWrite = (draft: RevisionDraft) => reportReady && report?.decision === null
-    && draft.bound.can_revise && !draft.frozen && !draft.saving && draft.uncertainRevision === undefined
+    && (draft.kind === "record" ? draft.bound.can_record === true && draft.bound.current === null
+      : draft.bound.can_revise && draft.bound.current !== null)
+    && !draft.frozen && !draft.saving && draft.uncertainRevision === undefined
     && report.assessment_revision === draft.bound.assessment_revision;
-  function proposal(draft: RevisionDraft): JudgmentSnapshot | undefined {
+  function proposal(draft: RevisionDraft): JudgmentProposal | undefined {
     const current = draft.bound.current;
-    if (!current || !draft.resolution) return;
+    if ((draft.kind === "revise" && !current) || !draft.resolution) return;
     if (draft.resolution !== "needs_document" && (draft.bound.choices.kind === "levelled"
       ? draft.resolution !== "mark_level" : draft.resolution === "mark_level")) return;
-    const common = { ...current, resolution_type: draft.resolution, reason: draft.reason.trim() };
+    const common = { resolution_type: draft.resolution, reason: draft.reason.trim() };
     if (draft.resolution === "needs_document") return { ...common, level: null, outcome: "not_applicable", score: null };
     if (draft.resolution === "mark_level") {
       const rung = draft.bound.choices.levels.find(level => level.level === draft.level);
       if (!rung) return;
       // The draft label is the selected named grade, not client-computed score arithmetic.
       return { ...common, level: { name: rung.name, ordinal: rung.level, points: rung.points,
-        max_points: Math.max(...draft.bound.choices.levels.map(level => level.points)) }, outcome: "passed", score: current.score };
+        max_points: Math.max(...draft.bound.choices.levels.map(level => level.points)) }, outcome: "passed", score: current?.score ?? null };
     }
     return { ...common, level: null, outcome: draft.resolution === "mark_pass" ? "passed" : "failed",
       score: draft.resolution === "mark_pass" ? CRITERION_SCORE_UNITS.full : CRITERION_SCORE_UNITS.none };
@@ -156,7 +159,7 @@ export function useJudgmentRevisions(checkRunId: number, ownerCurrent: () => boo
     const record = store.current.get(criterion);
     const current = record?.context;
     const draft = record?.draft;
-    return Boolean(current?.current && current.can_revise && reportReady && report?.decision === null
+    return Boolean(current && (current.current ? current.can_revise : current.can_record) && reportReady && report?.decision === null
       && !record?.loading && !record?.readError && draft && !draft.saving
       && report.assessment_revision === current.assessment_revision
       && (draft.uncertainRevision === undefined || current.assessment_revision > draft.uncertainRevision));
@@ -164,8 +167,8 @@ export function useJudgmentRevisions(checkRunId: number, ownerCurrent: () => boo
   function validation(draft: RevisionDraft): string | undefined {
     const proposed = proposal(draft);
     const reason = draft.reason.trim();
-    if (!proposed) return "Choose a supported revised judgment.";
-    if (!reason) return "Enter a new reason for this revision.";
+    if (!proposed) return draft.kind === "record" ? "Choose your judgment before continuing." : "Choose a supported revised judgment.";
+    if (!reason) return draft.kind === "record" ? "Enter a reason for your judgment." : "Enter a new reason for this revision.";
     if (reason.length < RESOLUTION_REASON_MIN_LENGTH) return `Enter at least ${RESOLUTION_REASON_MIN_LENGTH} characters for the new reason.`;
     if (reason.length > INSTRUCTOR_NOTE_MAX_LENGTH) return `Use at most ${INSTRUCTOR_NOTE_MAX_LENGTH} characters for the new reason.`;
     if (draft.bound.current && sameJudgmentGrade(proposed, draft.bound.current) && reason === draft.bound.current.reason.trim()) {
@@ -206,7 +209,7 @@ export function useJudgmentRevisions(checkRunId: number, ownerCurrent: () => boo
       put(criterion, { ...latest, historyLoading: false, historyError: "Judgment history could not be loaded. Review the current judgment before retrying history." });
     }
   }
-  async function open(criterion: number, purpose: "revise" | "history" | "current") {
+  async function open(criterion: number, purpose: "record" | "revise" | "history" | "current") {
     if (!isCurrent()) return;
     const previous = store.current.get(criterion);
     if (previous?.draft?.saving) return;
@@ -226,8 +229,11 @@ export function useJudgmentRevisions(checkRunId: number, ownerCurrent: () => boo
         || latest.context?.current?.judgment_revision !== context.current?.judgment_revision;
       let draft = latest.draft;
       if (purpose === "revise" && !draft && context.can_revise && context.current) {
-        draft = { bound: context, ...initialChoice(context), reason: "",
+        draft = { kind: "revise", bound: context, ...initialChoice(context), reason: "",
           frozen: false, attempted: false, saving: false };
+      }
+      if (purpose === "record" && !draft && context.can_record && context.current === null) {
+        draft = { kind: "record", bound: context, reason: "", frozen: false, attempted: false, saving: false };
       }
       put(criterion, { ...latest, context, draft, loading: false, unavailable: false,
         history: changed ? undefined : latest.history,
@@ -287,13 +293,13 @@ export function useJudgmentRevisions(checkRunId: number, ownerCurrent: () => boo
     rebind(criterion) {
       const record = store.current.get(criterion);
       if (!record?.draft || !record.context || !canRebind(criterion)) return;
-      put(criterion, { ...record, draft: { ...record.draft, bound: record.context, frozen: false,
+      put(criterion, { ...record, draft: { ...record.draft, kind: record.context.current ? "revise" : "record", bound: record.context, frozen: false,
         attempted: false, uncertainRevision: undefined, error: undefined } });
     },
     async confirm(criterion) {
       const record = store.current.get(criterion);
       const draft = record?.draft;
-      if (!isCurrent() || !record || !draft || !canWrite(draft) || !draft.bound.current) return false;
+      if (!isCurrent() || !record || !draft || !canWrite(draft)) return false;
       const reason = draft.reason.trim();
       const error = validation(draft);
       if (error) {
@@ -301,15 +307,20 @@ export function useJudgmentRevisions(checkRunId: number, ownerCurrent: () => boo
         return false;
       }
       const sending = ++sequence.current;
-      const body: JudgmentRevisionInput = { expected_revision: draft.bound.assessment_revision,
-        expected_judgment_revision: draft.bound.current.judgment_revision,
+      const common: JudgmentRecordInput = { expected_revision: draft.bound.assessment_revision,
         resolution: draft.resolution!, level: draft.resolution === "mark_level" ? draft.level : undefined, reason };
+      const submission: { kind: "record"; body: JudgmentRecordInput } | { kind: "revise"; body: JudgmentRevisionInput; before: JudgmentSnapshot }
+        = draft.kind === "record" ? { kind: "record", body: common }
+          : { kind: "revise", body: { ...common, expected_judgment_revision: draft.bound.current!.judgment_revision }, before: draft.bound.current! };
+      const body = submission.body;
       put(criterion, { ...record, draft: { ...draft, saving: true, sending, error: undefined } });
       try {
-        const out = await api.post<JudgmentRevisionOutput>(`/check-runs/${checkRunId}/criteria/${criterion}/judgment/revisions`, body);
+        const out = await api.post<JudgmentRevisionOutput>(`/check-runs/${checkRunId}/criteria/${criterion}/judgment/${submission.kind === "record" ? "records" : "revisions"}`, body);
         const latest = store.current.get(criterion);
         if (!isCurrent() || latest?.draft?.sending !== sending) return false;
-        if (actor === undefined || !revisionAcknowledged(out, checkRunId, criterion, body, draft.bound.current, actor, draft.bound.check_result_id)) throw new Error("Invalid revision acknowledgment");
+        if (actor === undefined || !(submission.kind === "record"
+          ? recordAcknowledged(out, checkRunId, criterion, submission.body, draft.bound, actor)
+          : revisionAcknowledged(out, checkRunId, criterion, submission.body, submission.before, actor, draft.bound.check_result_id))) throw new Error("Invalid judgment acknowledgment");
         client.setQueryData<ReportOut>(["report", checkRunId], current => keepNewerAssessment(current, out.report));
         put(criterion, { ...latest, context: out.context, draft: undefined, receipt: out, history: undefined,
           historyOperation: ++sequence.current, historyLoading: false });

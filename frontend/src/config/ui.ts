@@ -15,6 +15,9 @@ export const RESOLUTION_REASON_MIN_LENGTH = 10;
 export const INSTRUCTOR_NOTE_MAX_LENGTH = 1000;
 // API encoding units for criterion results, independent of readiness thresholds.
 export const CRITERION_SCORE_UNITS = { none: 0, full: 100 } as const;
+// Stored check_result.score uses Numeric(5, 2). This bounds acknowledgment
+// validation at storage precision; it does not calculate a displayed grade.
+export const CRITERION_SCORE_DECIMAL_PLACES = 2;
 
 /** Synthetic region id used only to route a criterion's recorded text
  * anchor through the existing document-pane focus engine. Real Flag ids
