@@ -400,7 +400,7 @@ export function DocxPane({
                   {flagsById.has(flagId) ? sourceRecordPresentation(flagsById.get(flagId)!, findingNumbers.get(flagId) ?? 1, comparisonLeads).label : `Finding ${findingNumbers.get(flagId) ?? 1}`} · source location only
                 </button>)}
               </div>}
-              <DocxSourceMedia tables={sourceTables} images={sourceImages} imageBasePath={imageBasePath} sourceQuery={sourceQuery} loadImage={loadImage} isVisible={isVisible} />
+              <DocxSourceMedia tables={sourceTables} images={sourceImages} imageBasePath={imageBasePath} sourceQuery={sourceQuery} loadImage={loadImage} isVisible={isVisible} readingOnly={formatDocument} />
             </section>;
           })}
           </div>

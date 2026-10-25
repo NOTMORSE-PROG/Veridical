@@ -146,6 +146,7 @@ describe("recorded DOCX source navigation", () => {
     fireEvent.click(expand);
     const dialog = screen.getByRole("dialog", { name: "Source image 1" });
     expect(dialog).toBeInTheDocument();
+    expect(dialog).toHaveTextContent("Image reading was not recorded for this check.");
     fireEvent.click(screen.getByRole("button", { name: "Actual size" }));
     expect(screen.getByRole("button", { name: "Actual size" })).toHaveAttribute("aria-pressed", "true");
     fireEvent.keyDown(document, { key: "Escape" });
@@ -167,6 +168,27 @@ describe("recorded DOCX source navigation", () => {
     expect(screen.getByText("Image will load when visible.")).toBeInTheDocument();
     expect(load).not.toHaveBeenCalled();
     load.mockRestore();
+  });
+
+  it("qualifies required-format images without inventing a manuscript check in the card or expansion", async () => {
+    vi.spyOn(URL, "createObjectURL").mockReturnValue("blob:format-source");
+    vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => {});
+    const load = vi.fn().mockRejectedValueOnce(new Error("Controlled image read failure"))
+      .mockResolvedValue(new Blob(["png"], { type: "image/png" }));
+    render(<DocxPane {...props} documentKind="required_format" loadImage={load}
+      imageBasePath="/rubrics/15/document/images"
+      images={[{ image_index: 0, paragraph: 1, available: true, source_alt_text: "Original format illustration",
+        width_px: 8, height_px: 8, unavailable_reason: null }]} />);
+    const retry = await screen.findByRole("button", { name: "Retry image 1" });
+    expect(screen.getByText("This image could not be loaded. The surrounding format remains available.")).toBeVisible();
+    fireEvent.click(retry);
+    fireEvent.click(await screen.findByRole("button", { name: "Expand image 1" }));
+    expect(screen.getByRole("dialog", { name: "Source image 1" })).toHaveTextContent("Display does not verify the contents.");
+    expect(screen.getByText("Image contents are not assessed by this source view.")).toBeInTheDocument();
+    expect(screen.queryByText(/Image reading was not recorded for this check/)).not.toBeInTheDocument();
+    expect(load).toHaveBeenCalledTimes(2);
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
 
   it("uses actual visibility when Review is selected but both desktop panels are visible", async () => {

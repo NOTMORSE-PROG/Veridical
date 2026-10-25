@@ -15,12 +15,13 @@ const UNAVAILABLE: Record<string, string> = {
   source_not_recorded: "This saved extraction has no verified image source. The original file is unchanged.",
 };
 
-function SourceImage({ image, basePath, sourceQuery, loadImage = api.getBlob, isVisible }: {
+function SourceImage({ image, basePath, sourceQuery, loadImage = api.getBlob, isVisible, readingOnly = false }: {
   image: DocumentImageOut;
   basePath?: string;
   sourceQuery?: string;
   loadImage?: (path: string) => Promise<Blob>;
   isVisible: boolean;
+  readingOnly?: boolean;
 }) {
   const holder = useRef<HTMLElement>(null);
   const [inView, setInView] = useState(false);
@@ -81,14 +82,14 @@ function SourceImage({ image, basePath, sourceQuery, loadImage = api.getBlob, is
         <span>Image contents are not assessed by this source view.</span>
       </figcaption>
       {!available ? <p>{UNAVAILABLE[image.unavailable_reason ?? "source_not_recorded"] ?? "This source image is unavailable."}</p>
-        : failed ? <div role="status"><p>This image could not be loaded. The surrounding manuscript remains available.</p>
+        : failed ? <div role="status"><p>This image could not be loaded. The surrounding {readingOnly ? "format" : "manuscript"} remains available.</p>
           <Button variant="secondary" onClick={() => setAttempt((value) => value + 1)}>Retry image {number}</Button></div>
           : url ? <>
             <img src={url} alt={alt} width={image.width_px ?? undefined} height={image.height_px ?? undefined}
               onError={() => setFailed(true)} />
             <Button variant="secondary" onClick={() => { setActualSize(false); setExpanded(true); }}>Expand image {number}</Button>
           </> : <p role="status">{inView ? "Loading source image." : "Image will load when visible."}</p>}
-      {url && !failed && <FigureReadingDetails reading={image.figure_reading} />}
+      {url && !failed && !readingOnly && <FigureReadingDetails reading={image.figure_reading} />}
       {expanded && url && !failed && <ModalBackdrop>
         <Modal title={`Source image ${number}`} size="lg" onClose={() => setExpanded(false)}>
           <p>Original embedded image at extracted paragraph {image.paragraph + 1}. Word cropping and rotation are not reproduced. Display does not verify the contents.</p>
@@ -100,20 +101,21 @@ function SourceImage({ image, basePath, sourceQuery, loadImage = api.getBlob, is
             <img src={url} alt={alt} width={image.width_px ?? undefined} height={image.height_px ?? undefined}
               className={actualSize ? "is-actual-size" : ""} />
           </div>
-          <FigureReadingDetails reading={image.figure_reading} />
+          {!readingOnly && <FigureReadingDetails reading={image.figure_reading} />}
         </Modal>
       </ModalBackdrop>}
     </figure>
   );
 }
 
-export function DocxSourceMedia({ tables, images, imageBasePath, sourceQuery, loadImage, isVisible }: {
+export function DocxSourceMedia({ tables, images, imageBasePath, sourceQuery, loadImage, isVisible, readingOnly = false }: {
   tables: DocumentTableOut[];
   images: DocumentImageOut[];
   imageBasePath?: string;
   sourceQuery?: string;
   loadImage?: (path: string) => Promise<Blob>;
   isVisible: boolean;
+  readingOnly?: boolean;
 }) {
   return <>
     {tables.map((table, index) => {
@@ -145,6 +147,6 @@ export function DocxSourceMedia({ tables, images, imageBasePath, sourceQuery, lo
       );
     })}
     {images.map((image) => <SourceImage key={`${imageBasePath}/${image.image_index}?${sourceQuery ?? ""}`}
-      image={image} basePath={imageBasePath} sourceQuery={sourceQuery} loadImage={loadImage} isVisible={isVisible} />)}
+      image={image} basePath={imageBasePath} sourceQuery={sourceQuery} loadImage={loadImage} isVisible={isVisible} readingOnly={readingOnly} />)}
   </>;
 }
