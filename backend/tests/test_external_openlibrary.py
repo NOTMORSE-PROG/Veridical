@@ -76,4 +76,4 @@ async def test_identifying_user_agent_sent():
 
     async with _client(handler) as client:
         await openlibrary.lookup_isbn(client, "9780134685991", settings=get_settings())
-    assert "mailto:" in seen["ua"]
+    assert seen["ua"] == "VERIDICAL/1.0"

@@ -587,8 +587,14 @@ class Settings(BaseSettings):
     # (V-028's own pending action item) for a higher ceiling, no code change.
     semantic_scholar_api_key: str | None = None
     semantic_scholar_rps: float = 1.0
-    # Open Library: 3 rps with an identifying User-Agent (RESEARCH.md §2).
-    openlibrary_rps: float = 3.0
+    # Open Library: configured ceiling, with conservative unidentified use
+    # unless an operator opts in with a nonplaceholder contact address.
+    openlibrary_rps: float = Field(default=3.0, gt=0, allow_inf_nan=False)
+    openlibrary_unidentified_rps: float = Field(default=1.0, gt=0, allow_inf_nan=False)
+    openlibrary_identified_requests: bool = False
+    openlibrary_placeholder_contact_domains: list[str] = [
+        "example.com", "example.net", "example.org", "invalid", "localhost", "test"
+    ]
     # Google Books: no key required for low-volume use. Current documented
     # daily quotas conflict across Google's own pages (RESEARCH.md §2) — this
     # is a LOCAL budget this app enforces on itself, not a number trusted

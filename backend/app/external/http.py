@@ -25,10 +25,39 @@ async def _default_sleep(seconds: float) -> None:
 
 
 def build_http_client(settings: Settings) -> httpx.AsyncClient:
-    """One client shared across every provider call in a request/stage —
-    `follow_redirects=True` is required (Open Library's `/isbn/{isbn}.json`
-    302s to the real edition record, confirmed live)."""
+    """One client shared across provider calls in a request/stage.
+
+    Ordinary providers retain automatic redirects. Governed book lookups
+    override that default and admit each HTTPX-generated redirect explicitly.
+    """
     return httpx.AsyncClient(timeout=settings.external_http_timeout_seconds, follow_redirects=True)
+
+
+async def _get_with_paced_redirects(
+    client: httpx.AsyncClient,
+    url: str,
+    *,
+    governor: RateGovernor,
+    params: dict[str, str] | None,
+    headers: dict[str, str] | None,
+) -> httpx.Response:
+    """Reuse HTTPX redirect requests while admitting every physical send."""
+    await governor.acquire()
+    response = await client.get(url, params=params, headers=headers, follow_redirects=False)
+    for _ in range(client.max_redirects):
+        request = response.next_request
+        if request is None:
+            return response
+        await response.aclose()
+        await governor.acquire()
+        # next_request already applies HTTPX's credential/cookie rules. Do not
+        # reapply the client's default auth to a request stripped on redirect.
+        response = await client.send(request, follow_redirects=False, auth=None)
+    if response.next_request is not None:
+        request = response.next_request
+        await response.aclose()
+        raise httpx.TooManyRedirects("Exceeded maximum allowed redirects.", request=request)
+    return response
 
 
 async def get_json(
@@ -42,6 +71,7 @@ async def get_json(
     params: dict[str, str] | None = None,
     headers: dict[str, str] | None = None,
     sleep: SleepFn | None = None,
+    pace_redirects: bool = False,
 ) -> dict | None:
     """Returns the parsed JSON body, or None for a 404 (a clean "doesn't
     exist" answer, not a failure). Raises `ApiDownError` after exhausting
@@ -49,9 +79,14 @@ async def get_json(
     sleep = sleep or _default_sleep
     last_exc: Exception | None = None
     for attempt in range(max_retries + 1):
-        await governor.acquire()
         try:
-            response = await client.get(url, params=params, headers=headers)
+            if pace_redirects:
+                response = await _get_with_paced_redirects(
+                    client, url, governor=governor, params=params, headers=headers
+                )
+            else:
+                await governor.acquire()
+                response = await client.get(url, params=params, headers=headers)
         except httpx.RequestError as exc:
             last_exc = exc
         else:
