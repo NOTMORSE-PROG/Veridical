@@ -36,6 +36,7 @@ from app.groups.assignment import (
     AssignmentReceipt,
     AssignmentRequest,
     assignment_values,
+    confirmation_recorded,
     current_receipt,
 )
 from app.groups.service import (
@@ -1062,7 +1063,12 @@ async def get_manuscript_group(
     return ManuscriptGroupOut(
         manuscript_id=manuscript.id,
         confirmation="recorded"
-        if current_receipt(manuscript.group_confirmation, manuscript.group_id)
+        if confirmation_recorded(
+            manuscript.group_confirmation,
+            manuscript.group_id,
+            manuscript_id=manuscript.id,
+            instructor_id=instructor_id,
+        )
         else "not_recorded",
         group=CurrentGroupOut(
             id=group.id,

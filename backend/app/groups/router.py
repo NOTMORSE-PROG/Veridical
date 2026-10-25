@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.auth.dependencies import get_current_instructor
 from app.db import get_session
 from app.groups.schemas import GroupCollisionOut, GroupOut, ProgramOut
+from app.groups.selection import SavedGroupOut, get_saved_group
 from app.groups.service import find_rule3_collision, list_groups, list_programs
 from app.models.instructor import Instructor
 
@@ -58,3 +59,12 @@ async def check_group_collision_route(
     if collision is None:
         return GroupCollisionOut(collision=False)
     return GroupCollisionOut(collision=True, existing_group_name=collision.name)
+
+
+@router.get("/groups/{group_id}", response_model=SavedGroupOut)
+async def get_saved_group_route(
+    group_id: int,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    instructor: Annotated[Instructor, Depends(get_current_instructor)],
+) -> SavedGroupOut:
+    return await get_saved_group(session, group_id, instructor.id)

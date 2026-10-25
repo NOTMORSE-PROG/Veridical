@@ -15,6 +15,7 @@ from app import messages
 from app.auth.dependencies import get_current_instructor, get_upload_instructor
 from app.config import get_settings
 from app.db import get_session
+from app.groups.selection import SelectGroupRequest, SelectGroupResponse, select_saved_group
 from app.groups.service import DEFAULT_GROUP_LABEL, program_name_for
 from app.ingest.schemas import (
     ConfirmGroupRequest,
@@ -158,8 +159,7 @@ async def confirm_manuscript_group_route(
     instructor: Annotated[Instructor, Depends(get_current_instructor)],
 ) -> ConfirmGroupResponse:
     """V-063 (AC2/AC4): applies a confirmed (or instructor-edited, or
-    fully instructor-typed) group proposal -- the ONLY place a proposal
-    ever changes a manuscript's group."""
+    fully instructor-typed) group proposal, separate from saved identity selection."""
     group, outcome = await confirm_manuscript_group(
         session,
         manuscript_id,
@@ -180,6 +180,16 @@ async def confirm_manuscript_group_route(
         matched=outcome == "matched",
         outcome=outcome,
     )
+
+
+@router.post("/manuscripts/{manuscript_id}/group-selection", response_model=SelectGroupResponse)
+async def select_saved_group_route(
+    manuscript_id: int,
+    body: SelectGroupRequest,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    instructor: Annotated[Instructor, Depends(get_current_instructor)],
+) -> SelectGroupResponse:
+    return await select_saved_group(session, manuscript_id, instructor.id, body)
 
 
 @router.get("/manuscripts", response_model=PaginatedManuscripts)
