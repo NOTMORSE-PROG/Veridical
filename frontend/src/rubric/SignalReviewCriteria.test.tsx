@@ -44,7 +44,7 @@ const RUBRIC: Rubric = {
 function renderPage() {
   return renderWithProviders(<SignalReviewCriteriaPage />, {
     route: "/rubric/5/review",
-    path: "/rubric/:rubricId/review",
+    path: "/rubric/:rubricId/review", authInstructorId: 1,
   });
 }
 
@@ -187,7 +187,7 @@ describe("SignalReviewCriteriaPage", () => {
   it("invalid save-and-leave closes the dialog, focuses errors, and keeps dirty edits", async () => {
     const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => new Response(JSON.stringify(RUBRIC), { status: 200 }));
     vi.stubGlobal("fetch", fetchMock);
-    renderWithProviders(<><SignalReviewCriteriaPage /><VersionNavigationControl /></>, { route: "/rubric/5/review", path: "/rubric/:rubricId/review" });
+    renderWithProviders(<><SignalReviewCriteriaPage /><VersionNavigationControl /></>, { route: "/rubric/5/review", path: "/rubric/:rubricId/review", authInstructorId: 1 });
     fireEvent.change(await screen.findByLabelText("Criterion 1 text"), { target: { value: "" } });
     fireEvent.click(screen.getByRole("button", { name: "Open next version" }));
     fireEvent.click(await screen.findByRole("button", { name: "Save draft and leave" }));
@@ -206,7 +206,7 @@ describe("SignalReviewCriteriaPage", () => {
       return new Response(JSON.stringify(String(input).endsWith("/6") ? next : RUBRIC), { status: 200 });
     });
     vi.stubGlobal("fetch", fetchMock);
-    renderWithProviders(<><SignalReviewCriteriaPage /><VersionNavigationControl /></>, { route: "/rubric/5/review", path: "/rubric/:rubricId/review" });
+    renderWithProviders(<><SignalReviewCriteriaPage /><VersionNavigationControl /></>, { route: "/rubric/5/review", path: "/rubric/:rubricId/review", authInstructorId: 1 });
     fireEvent.change(await screen.findByLabelText("Criterion 1 text"), { target: { value: "Retain this corrected criterion" } });
     fireEvent.click(screen.getByRole("button", { name: "Open next version" }));
     fireEvent.click(await screen.findByRole("button", { name: "Save draft and leave" }));
@@ -264,7 +264,7 @@ describe("SignalReviewCriteriaPage", () => {
       String(input).endsWith("/6") ? replacement : { ...RUBRIC, can_edit_criteria: false },
     ), { status: 200 })));
     renderWithProviders(<><SignalReviewCriteriaPage /><VersionNavigationControl /></>, {
-      route: "/rubric/5/review", path: "/rubric/:rubricId/review",
+      route: "/rubric/5/review", path: "/rubric/:rubricId/review", authInstructorId: 1,
     });
     expect(await screen.findByText("Includes a complete abstract")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Open next version" }));

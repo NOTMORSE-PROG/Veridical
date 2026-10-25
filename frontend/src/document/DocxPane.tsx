@@ -52,6 +52,9 @@ export function DocxPane({
   onPlaceRequestedParagraph,
   requestedParagraphAttempt,
   scrollInParent = false,
+  documentKind = "manuscript",
+  sourceQuery,
+  loadImage,
 }: {
   paragraphs: DocumentParagraphOut[] | undefined;
   paragraphsPending: boolean;
@@ -83,7 +86,12 @@ export function DocxPane({
   onPlaceRequestedParagraph?: (element: HTMLElement) => void;
   requestedParagraphAttempt?: number;
   scrollInParent?: boolean;
+  documentKind?: "manuscript" | "required_format";
+  sourceQuery?: string;
+  loadImage?: (path: string) => Promise<Blob>;
 }) {
+  const formatDocument = documentKind === "required_format";
+  const documentLabel = formatDocument ? "Original format" : "Full manuscript";
   const detailsId = useId();
   const [detailsOpen, setDetailsOpen] = useState(false);
   const comparisonMarkers = regions.some((region) => flags.some((flag) => flag.id === region.flag_id && isOptionalComparisonLead(flag)));
@@ -176,7 +184,7 @@ export function DocxPane({
     <div className="signal-document-source">
       <div className="signal-document-toolbar">
         <div className="signal-document-toolbar__identity">
-          <strong>Full manuscript</strong>
+          <strong>{documentLabel}</strong>
           <span>Reconstructed DOCX. Layout may differ.{comparisonMarkers && " · L: unscored comparison"}</span>
         </div>
         <div className="signal-document-toolbar__controls"><button type="button" aria-expanded={detailsOpen} aria-controls={detailsId} onClick={() => setDetailsOpen((value) => !value)}>Source view details</button></div>
@@ -197,18 +205,18 @@ export function DocxPane({
           })}
         </div>
       )}
-      <div role={scrollInParent ? undefined : "region"} tabIndex={scrollInParent ? undefined : 0} aria-label={scrollInParent ? undefined : "Full manuscript, scrollable"} className="signal-document-scroll signal-document-scroll--docx">
-        <SourceViewDetails id={detailsId} open={detailsOpen} format="docx" comparisonMarkers={comparisonMarkers} />
-        <article ref={paperRef} className="signal-document-docx-paper" aria-label="Reconstructed manuscript document">
+      <div role={scrollInParent ? undefined : "region"} tabIndex={scrollInParent ? undefined : 0} aria-label={scrollInParent ? undefined : `${documentLabel}, scrollable`} className="signal-document-scroll signal-document-scroll--docx">
+        <SourceViewDetails id={detailsId} open={detailsOpen} format="docx" comparisonMarkers={comparisonMarkers} freshFormatView={formatDocument} />
+        <article ref={paperRef} className="signal-document-docx-paper" aria-label={formatDocument ? "Required format reading view" : "Reconstructed manuscript document"}>
           <header className="signal-document-docx-paper__header">
-            <span>Reconstructed manuscript</span>
+            <span>{formatDocument ? "DOCX reading view. Layout may differ." : "Reconstructed manuscript"}</span>
             <span>{paragraphs ? `${paragraphs.length} paragraphs · ${tables.length} tables · ${images.length} drawing occurrences` : "Extracting text"}</span>
             {paragraphs && <span>{nativeMathInventoryLabel(nativeMath)} · Main document body</span>}
           </header>
           <div className="signal-document-docx-paper__body">
         {paragraphsError && (
           <p role="alert" className="p-4 text-sm text-status-attention-text">
-            This manuscript's text couldn't be loaded.{" "}
+            {formatDocument ? "The format reading view could not be opened." : "This manuscript's text couldn't be loaded."}{" "}
             <button type="button" onClick={onRetry} className="font-medium underline">
               Try again
             </button>
@@ -217,7 +225,7 @@ export function DocxPane({
         )}
         {paragraphsPending && !paragraphsError && (
           <p role="status" aria-live="polite" aria-busy="true" className="p-4 text-sm text-ink-secondary">
-            <SpinnerIcon /> Loading manuscript text.
+            <SpinnerIcon /> {formatDocument ? "Loading original format." : "Loading manuscript text."}
           </p>
         )}
         {!paragraphsPending && !paragraphsError && paragraphs && bodyPositions.length === 0 && (
@@ -228,7 +236,7 @@ export function DocxPane({
         {omittedImageOccurrences > 0 && <p role="status" className="signal-document-reconstruction-note">
           {omittedImageOccurrences} additional drawing occurrences exceed the source-view limit and are not displayed or assessed here.
         </p>}
-        {!paragraphsPending && !paragraphsError && <NativeMathInventoryNote source={nativeMath} />}
+        {!paragraphsPending && !paragraphsError && <NativeMathInventoryNote source={nativeMath} readingOnly={formatDocument} />}
         {nativeMath?.containers.some((container) => container.paragraph === null) &&
           <p className="signal-document-reconstruction-note">Native Word equations were recorded, but their reconstructed source locations are unavailable. Check the original DOCX for their formulas and layout.</p>}
         {selectedParagraphMissing && (
@@ -390,7 +398,7 @@ export function DocxPane({
                   {flagsById.has(flagId) ? sourceRecordPresentation(flagsById.get(flagId)!, findingNumbers.get(flagId) ?? 1, comparisonLeads).label : `Finding ${findingNumbers.get(flagId) ?? 1}`} · source location only
                 </button>)}
               </div>}
-              <DocxSourceMedia tables={sourceTables} images={sourceImages} imageBasePath={imageBasePath} isVisible={isVisible} />
+              <DocxSourceMedia tables={sourceTables} images={sourceImages} imageBasePath={imageBasePath} sourceQuery={sourceQuery} loadImage={loadImage} isVisible={isVisible} />
             </section>;
           })}
           </div>

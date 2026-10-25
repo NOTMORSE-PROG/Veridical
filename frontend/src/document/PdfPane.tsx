@@ -74,6 +74,7 @@ function ContinuousPdfPage({
   onSelectFlag,
   onVisibility,
   registerPage,
+  documentNoun,
 }: {
   pdf: PDFDocumentProxy;
   metric: PageMetric;
@@ -88,6 +89,7 @@ function ContinuousPdfPage({
   onSelectFlag: (flagId: number) => void;
   onVisibility: (page: number, ratio: number) => void;
   registerPage: (page: number, element: HTMLElement | null) => void;
+  documentNoun: string;
 }) {
   const pageRef = useRef<HTMLElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -261,7 +263,7 @@ function ContinuousPdfPage({
     >
       {isNear ? (
         <>
-          <canvas ref={canvasRef} role="img" aria-label={`Rendered page ${metric.pageNumber} of the manuscript`} />
+          <canvas ref={canvasRef} role="img" aria-label={`Rendered page ${metric.pageNumber} of the ${documentNoun}`} />
           <div ref={textLayerRef} className="signal-document-pdf-text-layer" aria-hidden="true" />
           <div className="signal-document-pdf-evidence-layer">
             {highlights.map((highlight) => {
@@ -337,6 +339,8 @@ export function PdfPane({
   onReadText,
   onObservedPage,
   onPlaceRequestedPage,
+  documentKind = "manuscript",
+  loadFile,
 }: {
   fileUrl: string;
   regions: FlagRegionOut[];
@@ -350,10 +354,15 @@ export function PdfPane({
   onReadText?: () => void;
   onObservedPage?: (page: number) => void;
   onPlaceRequestedPage?: (page: number, element: HTMLElement) => void;
+  documentKind?: "manuscript" | "required_format";
+  loadFile?: () => Promise<Uint8Array>;
 }) {
+  const formatDocument = documentKind === "required_format";
+  const documentLabel = formatDocument ? "Original format" : "Full manuscript";
   const [pdf, setPdf] = useState<PDFDocumentProxy | null>(null);
   const [metrics, setMetrics] = useState<PageMetric[]>([]);
   const [loadError, setLoadError] = useState(false);
+  const [loadAttempt, setLoadAttempt] = useState(0);
   const [currentPage, setCurrentPage] = useState(1);
   const [pageInput, setPageInput] = useState("1");
   const [zoom, setZoom] = useState(1);
@@ -376,8 +385,12 @@ export function PdfPane({
     pageVisibility.current.clear();
     setCurrentPage(1);
     setPageInput("1");
-    const task = pdfjsLib.getDocument({ url: fileUrl, withCredentials: true });
-    task.promise.then(async (document) => {
+    let task: ReturnType<typeof pdfjsLib.getDocument> | undefined;
+    async function openDocument() {
+      const options = loadFile ? { data: await loadFile() } : { url: fileUrl, withCredentials: true };
+      if (cancelled) return;
+      task = pdfjsLib.getDocument(options);
+      const document = await task.promise;
       if (cancelled) return;
       setPdf(document);
       const pageMetrics = await Promise.all(
@@ -388,14 +401,15 @@ export function PdfPane({
         }),
       );
       if (!cancelled) setMetrics(pageMetrics);
-    }).catch(() => {
+    }
+    openDocument().catch(() => {
       if (!cancelled) setLoadError(true);
     });
     return () => {
       cancelled = true;
-      task.destroy();
+      task?.destroy();
     };
-  }, [fileUrl]);
+  }, [fileUrl, loadAttempt, loadFile]);
 
   useEffect(() => setPageInput(String(currentPage)), [currentPage]);
 
@@ -481,7 +495,7 @@ export function PdfPane({
     <div className="signal-document-source">
       <div className="signal-document-toolbar">
         <div className="signal-document-toolbar__identity">
-          <strong>Full manuscript</strong>
+          <strong>{documentLabel}</strong>
           <span>Original PDF · {pagesLabel}{comparisonMarkers && " · L: unscored comparison"}</span>
         </div>
         <div className="signal-document-toolbar__controls" role="group" aria-label="PDF page and zoom controls">
@@ -527,17 +541,18 @@ export function PdfPane({
           })}
         </div>
       )}
-      <div ref={scrollRef} role="region" tabIndex={0} aria-label="Full manuscript, scrollable" className="signal-document-scroll signal-document-scroll--pdf" style={{ overflowAnchor: "none" }}>
-        <SourceViewDetails id={detailsId} open={detailsOpen} format="pdf" comparisonMarkers={comparisonMarkers} />
+      <div ref={scrollRef} role="region" tabIndex={0} aria-label={`${documentLabel}, scrollable`} className="signal-document-scroll signal-document-scroll--pdf" style={{ overflowAnchor: "none" }}>
+        <SourceViewDetails id={detailsId} open={detailsOpen} format="pdf" comparisonMarkers={comparisonMarkers} freshFormatView={formatDocument} />
         {loadError ? (
           <section className="signal-document-paper-state" role="alert">
             <p className="signal-section-kicker">PDF display unavailable</p>
             <h2>The PDF could not be displayed</h2>
-            <p>This source view failed to load. Any recorded review that loaded remains available on the right.</p>
+            <p>{formatDocument ? "The original PDF could not be displayed. Your prepared criteria remain available. You can download the original file instead." : "This source view failed to load. Any recorded review that loaded remains available on the right."}</p>
+            <button type="button" onClick={() => setLoadAttempt((attempt) => attempt + 1)}>Try again</button>
           </section>
         ) : !pdf || metrics.length === 0 ? (
           <section className="signal-document-pdf-skeleton" role="status" aria-live="polite" aria-busy="true">
-            <span><SpinnerIcon /> Loading full manuscript.</span>
+            <span><SpinnerIcon /> {formatDocument ? "Loading original format." : "Loading full manuscript."}</span>
             <i /><i /><i />
           </section>
         ) : (
@@ -558,6 +573,7 @@ export function PdfPane({
                 onSelectFlag={onSelectFlag}
                 onVisibility={updateVisibility}
                 registerPage={registerPage}
+                documentNoun={formatDocument ? "required format" : "manuscript"}
               />
             ))}
           </div>

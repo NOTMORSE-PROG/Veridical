@@ -222,6 +222,7 @@ export function ManageRubricPage() {
           <ActionLink to={`/rubric/${displayVersion.id}/review`} variant={activeVersion ? "secondary" : "brand"}>
             {activeVersion ? "View criteria" : "Review and activate"}
           </ActionLink>
+          <ActionLink to={`/rubric/${displayVersion.id}/review?source=original`} variant="secondary">View original format</ActionLink>
           {activeVersion && <Button variant="secondary" onClick={() => setRerunOpen(true)}>Re-run manuscripts</Button>}
         </div>
       </section>
@@ -253,6 +254,7 @@ export function ManageRubricPage() {
               </div>
               <div className="signal-version-history__actions">
                 <Link to={`/rubric/${version.id}/review`}>{version.is_active ? "View" : "Review"}</Link>
+                <Link to={`/rubric/${version.id}/review?source=original`}>View original format</Link>
                 {!version.is_active && <button type="button" disabled={activate.isPending} onClick={() => activateVersion(version)}>Activate</button>}
                 {!version.is_active && (version.report_count > 0
                   ? <span>Reports pinned</span>

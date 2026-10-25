@@ -251,4 +251,15 @@ describe("PdfPane page visibility", () => {
     expect(root.scrollTo).toHaveBeenCalledTimes(1);
     expect(screen.getByRole("spinbutton")).toHaveValue(2);
   });
+
+  it("retries a failed original-format PDF without changing document identity", async () => {
+    mocks.getDocument.mockImplementationOnce(() => ({ promise: Promise.reject(new Error("Temporary source read failure")), destroy: vi.fn() }));
+    render(<PdfPane {...props} fileUrl="short.pdf" documentKind="required_format" />);
+    expect(await screen.findByRole("alert")).toHaveTextContent("Your prepared criteria remain available");
+    fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+    expect(await screen.findByLabelText("Page 2 of 2")).toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "Original format, scrollable" })).toBeInTheDocument();
+    expect(screen.getByRole("img", { name: "Rendered page 1 of the required format" })).toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
 });

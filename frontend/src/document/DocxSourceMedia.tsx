@@ -15,9 +15,11 @@ const UNAVAILABLE: Record<string, string> = {
   source_not_recorded: "This saved extraction has no verified image source. The original file is unchanged.",
 };
 
-function SourceImage({ image, basePath, isVisible }: {
+function SourceImage({ image, basePath, sourceQuery, loadImage = api.getBlob, isVisible }: {
   image: DocumentImageOut;
   basePath?: string;
+  sourceQuery?: string;
+  loadImage?: (path: string) => Promise<Blob>;
   isVisible: boolean;
 }) {
   const holder = useRef<HTMLElement>(null);
@@ -54,7 +56,7 @@ function SourceImage({ image, basePath, isVisible }: {
     let objectUrl: string | null = null;
     setFailed(false);
     setUrl(null);
-    api.getBlob(`${basePath}/${image.image_index}`).then((blob) => {
+    loadImage(`${basePath}/${image.image_index}${sourceQuery ? `?${sourceQuery}` : ""}`).then((blob) => {
       if (disposed) return;
       if (blob.type !== "image/png" && blob.type !== "image/jpeg") {
         setFailed(true);
@@ -69,7 +71,7 @@ function SourceImage({ image, basePath, isVisible }: {
       disposed = true;
       if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
-  }, [inView, available, basePath, image.image_index, attempt]);
+  }, [inView, available, basePath, sourceQuery, loadImage, image.image_index, attempt]);
 
   const alt = image.source_alt_text || `Original embedded image ${number}`;
   return (
@@ -105,10 +107,12 @@ function SourceImage({ image, basePath, isVisible }: {
   );
 }
 
-export function DocxSourceMedia({ tables, images, imageBasePath, isVisible }: {
+export function DocxSourceMedia({ tables, images, imageBasePath, sourceQuery, loadImage, isVisible }: {
   tables: DocumentTableOut[];
   images: DocumentImageOut[];
   imageBasePath?: string;
+  sourceQuery?: string;
+  loadImage?: (path: string) => Promise<Blob>;
   isVisible: boolean;
 }) {
   return <>
@@ -140,7 +144,7 @@ export function DocxSourceMedia({ tables, images, imageBasePath, isVisible }: {
       </div>
       );
     })}
-    {images.map((image) => <SourceImage key={`${imageBasePath}/${image.image_index}`}
-      image={image} basePath={imageBasePath} isVisible={isVisible} />)}
+    {images.map((image) => <SourceImage key={`${imageBasePath}/${image.image_index}?${sourceQuery ?? ""}`}
+      image={image} basePath={imageBasePath} sourceQuery={sourceQuery} loadImage={loadImage} isVisible={isVisible} />)}
   </>;
 }

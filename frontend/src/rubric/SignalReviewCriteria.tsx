@@ -9,6 +9,7 @@ import { Button } from "../ui/Button";
 import { Dialog } from "../ui/Dialog";
 import { type CriterionEdit, useRubric, useSaveCriteria } from "./useRubric";
 import { UploadRubricModal } from "./UploadRubricModal";
+import { FormatReviewWorkbench } from "./FormatReviewWorkbench";
 
 interface CriterionRow {
   key: string;
@@ -55,12 +56,13 @@ function toEdits(rows: CriterionRow[]): CriterionEdit[] {
   }));
 }
 
-function CriteriaHeader({ headingRef, title, count, readOnly = false, familyId }: {
+function CriteriaHeader({ headingRef, title, count, readOnly = false, familyId, version }: {
   headingRef: React.RefObject<HTMLHeadingElement | null>;
   title?: string;
   count?: number;
   readOnly?: boolean;
   familyId?: string;
+  version?: number;
 }) {
   return (
     <header className="signal-route-header signal-criteria-header">
@@ -68,7 +70,7 @@ function CriteriaHeader({ headingRef, title, count, readOnly = false, familyId }
         <nav aria-label="Breadcrumb"><Link to={familyId ? `/rubric?family=${encodeURIComponent(familyId)}` : "/rubric"}>Rubric Studio</Link><span aria-hidden="true">/</span><span>Criteria review</span></nav>
         <p className="signal-eyebrow">Prepare · Human review gate</p>
         <h1 ref={headingRef} tabIndex={-1}>{readOnly ? "View criteria" : "Review prepared criteria"}</h1>
-        {title && <p className="signal-route-header__intro">{title}{count !== undefined ? ` · ${count} ${count === 1 ? "criterion" : "criteria"}` : ""}</p>}
+        {title && <p className="signal-route-header__intro">{title}{version !== undefined ? ` · Version ${version}` : ""}{count !== undefined ? ` · ${count} ${count === 1 ? "criterion" : "criteria"}` : ""}</p>}
       </div>
     </header>
   );
@@ -335,7 +337,9 @@ function CriteriaEditor({ id }: { id: number }) {
 
   return (
     <div className="signal-route signal-page-flow signal-criteria-review">
-      <CriteriaHeader headingRef={headingRef} title={rubric.title} count={currentRows.length} readOnly={readOnly} familyId={rubric.rubric_family_id} />
+      <CriteriaHeader headingRef={headingRef} title={rubric.title} count={currentRows.length} readOnly={readOnly} familyId={rubric.rubric_family_id} version={rubric.version} />
+      <p>{readOnly ? "Inspect this version’s criteria beside its uploaded format." : "Compare the prepared criteria with your uploaded format. Correct missing or extra requirements before confirming."}</p>
+      <FormatReviewWorkbench rubric={rubric} onUploadNewVersion={() => setUploadOpen(true)}>
       <div className="signal-section-flow signal-criteria-guidance">
         {readOnly
           ? <Alert title="Read-only version" tone="info">
@@ -345,11 +349,11 @@ function CriteriaEditor({ id }: { id: number }) {
               <p>Upload a new version to make corrections. Existing reports keep their original criteria.</p>
               <Button variant="secondary" onClick={() => setUploadOpen(true)}>Upload new version</Button>
             </Alert>
-          : <Alert title="Review before anything runs" tone="info">Correct the prepared criteria, evidence, type, and relative importance. Nothing checks a manuscript until you confirm.</Alert>}
-        <section className="signal-copy-flow" aria-labelledby="criterion-type-heading">
-          <h2 id="criterion-type-heading">How criterion types work</h2>
+          : null}
+        <details className="signal-copy-flow">
+          <summary>How criterion types work</summary>
           <p id="criterion-type-guidance">Choose Structural for checks based on document structure or presence, Semantic for checks that require interpreting the content, and Not from the document for requirements that need other evidence, such as a presentation or printed copy.</p>
-        </section>
+        </details>
         {rubric.parse_status === "needs_review" && (
           <Alert title="Needs manual completion" tone="warning" role="status">
             <p>{readOnly
@@ -403,6 +407,7 @@ function CriteriaEditor({ id }: { id: number }) {
         {saveError && <Alert title="Could not save these criteria" tone="error" role="alert">{saveError}</Alert>}
         {rubric.is_active && <Alert title="This format is active" tone="success">New checks use this version.</Alert>}
       </div>
+      </FormatReviewWorkbench>
       {blocker.state === "blocked" && (
         <Dialog
           title="Leave without saving your changes?"

@@ -333,6 +333,8 @@
   --signal-prose-width: 72ch;
   --signal-form-width: 30rem;
   --signal-workbench-width: 90rem;
+  --signal-format-source-min: 22rem;
+  --signal-format-criteria-min: 28rem;
   --signal-spine-width: 5.5rem;
   --signal-spine-width-tablet: 4.5rem;
   --signal-spine-width-fluid: clamp(var(--signal-spine-width-tablet), 7vw, var(--signal-spine-width));
