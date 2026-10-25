@@ -150,6 +150,37 @@ describe("UploadRubricModal", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent("The file could not be read.");
   });
 
+  it.each([
+    ["unrecognized", "VERIDICAL could not recognize this file as a supported document. Choose a document in one of these formats: .docx, .pdf."],
+    ["unreadable", "The file could not be read as a document. It may be corrupted or incomplete. Please re-export and upload it again."],
+  ])("keeps the %s-file advice focused and allows a corrected selection", async (_kind, message) => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({
+      error: { code: "file_malformed", message },
+    }), { status: 422 }));
+    vi.stubGlobal("fetch", fetchMock);
+    await renderWithUploadProviders(<UploadRubricModal onClose={() => {}} />);
+    const input = screen.getByLabelText("Choose file") as HTMLInputElement;
+    const original = new File(["unrecognized content"], "selected-file.pdf");
+    fireEvent.change(input, { target: { files: [original] } });
+    fireEvent.click(screen.getByRole("button", { name: "Continue to review" }));
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent(message);
+    await waitFor(() => expect(alert).toHaveFocus());
+    expect(input).toHaveAttribute("aria-invalid", "true");
+    expect(input.getAttribute("aria-describedby")?.split(" ")).toContain(alert.id);
+    expect(input.files?.[0]).toBe(original);
+    expect(screen.queryByRole("region", { name: "Unconfirmed upload results" })).not.toBeInTheDocument();
+
+    const corrected = new File(["replacement document"], "replacement.docx");
+    fireEvent.change(input, { target: { files: [corrected] } });
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(input).not.toHaveAttribute("aria-invalid");
+    fireEvent.click(screen.getByRole("button", { name: "Continue to review" }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    const [, request] = fetchMock.mock.calls[1] as unknown as [string, RequestInit];
+    expect((request.body as FormData).get("file")).toBe(corrected);
+  });
+
   it("BUG-028: moves focus to the error message on a failed upload, instead of stranding it at <body>", async () => {
     vi.stubGlobal(
       "fetch",

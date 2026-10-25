@@ -19,6 +19,11 @@ ticket for the full account of why this docstring was corrected instead.
 
 UNSUPPORTED_FILE_TYPE = "Unsupported file type '{suffix}'. Supported types: {supported}."
 
+FILE_UNRECOGNIZED = (
+    "VERIDICAL could not recognize this file as a supported document. "
+    "Choose a document in one of these formats: {supported}."
+)
+
 EVALUATION_PLAN_UNAVAILABLE = (
     "This check's saved evaluation plan could not be read. Completed results are retained. "
     "Start a new check to evaluate the manuscript."

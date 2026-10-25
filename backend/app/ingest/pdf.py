@@ -32,12 +32,23 @@ from app.messages import FILE_ENCRYPTED, FILE_UNREADABLE, PDF_TOO_MANY_PAGES
 _BOLD_FLAG = 16  # PyMuPDF span flag bit for bold fonts
 
 
+def _open_document(path: str) -> pymupdf.Document:
+    """Translate a failed native open after releasing its exception context.
+
+    A failed filename constructor can retain a file stream in its traceback.
+    Chaining that traceback into the upload error keeps the source open while
+    the caller tries to remove the rejected file, which Windows refuses.
+    """
+    try:
+        return pymupdf.open(path)
+    except (pymupdf.FileDataError, pymupdf.FileNotFoundError, RuntimeError, ValueError):
+        pass
+    raise FileMalformedError(FILE_UNREADABLE)
+
+
 def extract_document(path: str, settings: Settings) -> ExtractionResult:
     patterns = load_patterns(settings.ingest_patterns_file)
-    try:
-        doc = pymupdf.open(path)
-    except (pymupdf.FileDataError, pymupdf.FileNotFoundError, RuntimeError, ValueError) as exc:
-        raise FileMalformedError(FILE_UNREADABLE) from exc
+    doc = _open_document(path)
     try:
         if doc.needs_pass:
             raise FileMalformedError(FILE_ENCRYPTED)

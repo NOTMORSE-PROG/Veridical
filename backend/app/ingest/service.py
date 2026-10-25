@@ -125,11 +125,12 @@ def detect_format(file_path: Path, settings: Settings | None = None) -> str:
                 if any(name.startswith("word/") for name in zf.namelist()):
                     return ".docx"
         except zipfile.BadZipFile:
-            pass
-        raise FileMalformedError(messages.FILE_UNREADABLE)
+            raise FileMalformedError(messages.FILE_UNREADABLE) from None
     if head.startswith(_OLE_MAGIC):
         return ".doc"  # legacy Word: recognized, then rejected by name
-    raise FileMalformedError(messages.FILE_UNREADABLE)
+    raise FileMalformedError(
+        messages.FILE_UNRECOGNIZED.format(supported=", ".join(sorted(EXTRACTORS)))
+    )
 
 
 async def save_upload(chunks: AsyncIterator[bytes], dest: Path, settings: Settings) -> Path:

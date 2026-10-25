@@ -3,6 +3,7 @@
 """
 
 import os
+from unittest.mock import AsyncMock
 
 import pytest
 from fastapi.testclient import TestClient
@@ -125,6 +126,43 @@ def _rubric_pdf(tmp_path):
     b.new_page().line("REQUIRED FORMAT CHECKLIST", bold=True)
     b.line("The manuscript must include an abstract.")
     return b.save(tmp_path / "rubric.pdf")
+
+
+@pytest.mark.parametrize(
+    ("filename", "payload", "unrecognized"),
+    [
+        ("picture.png", b"\x89PNG\r\n\x1a\nimage signature", True),
+        ("picture.jpg", b"\xff\xd8\xff\xe0image signature", True),
+        ("picture.pdf", b"\xff\xd8\xff\xe0image signature", True),
+        ("unknown.docx", b"unrecognized content", True),
+        ("damaged.pdf", b"%PDF-1.7\ntruncated", False),
+        ("damaged.docx", b"PK\x03\x04truncated", False),
+    ],
+    ids=["png", "jpeg", "renamed-image", "unknown", "unreadable-pdf", "unreadable-zip"],
+)
+def test_upload_recovery_advice_and_failed_draft_cleanup(
+    client, monkeypatch, filename, payload, unrecognized
+):
+    from app import messages
+    from app.rubric import service
+
+    decompose = AsyncMock(side_effect=AssertionError("Rejected bytes must not reach grading"))
+    monkeypatch.setattr(service, "attempt_decomposition", decompose)
+    response = client.post(
+        "/rubrics", files={"file": (filename, payload, "application/octet-stream")}
+    )
+    assert response.status_code == 422, response.text
+    expected = (
+        "VERIDICAL could not recognize this file as a supported document. "
+        "Choose a document in one of these formats: .docx, .pdf."
+        if unrecognized
+        else messages.FILE_UNREADABLE
+    )
+    assert response.json() == {"error": {"code": "file_malformed", "message": expected}}
+    decompose.assert_not_awaited()
+    families = client.get("/rubric-families")
+    assert families.status_code == 200 and families.json() == []
+    assert not list((get_settings().data_dir / "rubric_uploads").iterdir())
 
 
 def test_post_rubrics_returns_persisted_criteria(client, tmp_path):
@@ -298,6 +336,53 @@ def test_reupload_with_family_id_creates_v2_over_http(client, tmp_path):
     v1_reloaded = client.get(f"/rubrics/{v1['id']}").json()
     assert v1_reloaded["version"] == 1
     assert v1_reloaded["is_latest_version"] is False  # superseded by v2
+
+
+@pytest.mark.parametrize("payload", [b"unrecognized image content", b"%PDF-1.7\ntruncated"])
+def test_rejected_version_preserves_active_family_criteria_and_source(
+    client, tmp_path, monkeypatch, payload
+):
+    import hashlib
+
+    import docx
+
+    from app.rubric import service
+
+    path = tmp_path / "required-format.docx"
+    document = docx.Document()
+    document.add_heading("REQUIRED FORMAT CHECKLIST", level=1)
+    document.add_paragraph("The manuscript must include an abstract.")
+    document.save(path)
+    uploaded = client.post(
+        "/rubrics", files={"file": (path.name, path.read_bytes(), "application/octet-stream")}
+    )
+    assert uploaded.status_code == 200, uploaded.text
+    initial = uploaded.json()
+    _confirm(client, initial["id"], initial["criteria"])
+    before = client.get(f"/rubrics/{initial['id']}").json()
+    assert before["is_active"] and before["is_latest_version"]
+    versions_url = f"/rubric-families/{initial['rubric_family_id']}/versions"
+    versions_before = client.get(versions_url).json()
+    upload_dir = get_settings().data_dir / "rubric_uploads"
+    source_before = {
+        p.name: hashlib.sha256(p.read_bytes()).hexdigest() for p in upload_dir.iterdir()
+    }
+    assert len(source_before) == 1
+    decompose = AsyncMock(side_effect=AssertionError("Rejected bytes must not reach grading"))
+    monkeypatch.setattr(service, "attempt_decomposition", decompose)
+    rejected = client.post(
+        "/rubrics",
+        params={"family_id": initial["rubric_family_id"]},
+        files={"file": ("replacement.pdf", payload, "application/octet-stream")},
+    )
+    assert rejected.status_code == 422, rejected.text
+    assert rejected.json()["error"]["code"] == "file_malformed"
+    decompose.assert_not_awaited()
+    assert client.get(f"/rubrics/{initial['id']}").json() == before
+    assert client.get(versions_url).json() == versions_before
+    assert {
+        p.name: hashlib.sha256(p.read_bytes()).hexdigest() for p in upload_dir.iterdir()
+    } == source_before
 
 
 def test_activate_switches_which_version_is_active(client, tmp_path):
