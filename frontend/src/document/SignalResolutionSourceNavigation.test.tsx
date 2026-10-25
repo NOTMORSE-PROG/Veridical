@@ -10,7 +10,7 @@ import { clearRouteReturnFocus } from "../routing/useRouteFocus";
 import { CriterionReviewLayout } from "../report/CriterionReviewScope";
 import type { CriterionSourceCoverage, ResultRowCommon } from "../api/types";
 
-vi.mock("./PdfPane", () => ({ PdfPane: () => <div>PDF source</div> }));
+vi.mock("./PdfPane", () => ({ PdfPane: ({ onReadText }: { onReadText?: () => void }) => <div>PDF source<button onClick={onReadText}>Read text</button></div> }));
 vi.mock("./ReuseExplorePanel", () => ({ ReuseExplorePanel: () => null }));
 
 const ORIGIN = "/report/5/document?view=decision&pane=review&filter=all&sentinel=kept";
@@ -55,22 +55,27 @@ it("retires a saved destination when explicitly returning to unresolved criteria
   expect(control.fetch.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(0);
 });
 
-async function setup({ origin = ORIGIN, open = true, drafts: makeDrafts = true, saved = false, instructor = true, full = false, coverage = undefined as CriterionSourceCoverage | undefined } = {}) {
+async function setup({ origin = ORIGIN, open = true, drafts: makeDrafts = true, saved = false, instructor = true, full = false, pdf = false, coverage = undefined as CriterionSourceCoverage | undefined } = {}) {
   vi.spyOn(document, "hasFocus").mockReturnValue(true);
   const scroll = vi.spyOn(Element.prototype, "scrollIntoView").mockImplementation(() => {});
   let release!: (body: typeof PARAGRAPHS) => void;
   const held = new Promise<typeof PARAGRAPHS>((resolve) => { release = resolve; });
-  const pendingItems = ITEMS.map(item => ({ ...item, assessment_revision: 0 }));
+  const pendingItems = ITEMS.map(item => ({ ...item, assessment_revision: 0, evidence: pdf ? [{ quote: item.evidence[0].quote, anchor: "page 3" }] : item.evidence }));
   const pendingRows = pendingItems.map(item => ({ ...SAVED, criterion_id: item.criterion_id, check_result_id: item.check_result_id,
     text: item.criterion_text, outcome: "escalated", resolution: null, source_coverage: coverage }));
   let pendingReply: (() => Promise<Response>) | undefined;
   const normal = stubFetchByPath({
-    "/check-runs/5/document": { manuscript_id: 10, source_format: "docx", available: true, original_filename: "source.docx", page_count: null, regions: [] },
+    "/check-runs/5/document": { manuscript_id: 10, source_format: pdf ? "pdf" : "docx", available: true, original_filename: pdf ? "source.pdf" : "source.docx", page_count: pdf ? 6 : null, regions: [] },
     "/check-runs/5/share": null,
     "/check-runs/5/report": { ...REPORT, results: saved ? [{ ...SAVED, source_coverage: coverage, resolution: instructor ? SAVED.resolution : null }] : coverage ? pendingRows : [] }, "/check-runs/5/flags": [], "/check-runs/5/escalated": pendingItems,
     "/check-runs/5/document/reuse-matches": { matches: [], passage_archive_size_n: 0 },
   });
   const fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    if (String(input).includes("/document/page-text")) {
+      const page = Number(new URL(String(input), "http://localhost").searchParams.get("page"));
+      return new Response(JSON.stringify({ check_run_id: 5, manuscript_id: 10, page, page_count: 6,
+        state: "available", reason: null, blocks: [{ text: `Saved source text page ${page}`, is_furniture: false }], saved_block_count: 1, omitted_block_count: 0 }));
+    }
     if (String(input).endsWith("/escalated") && pendingReply) return pendingReply();
     if (String(input).includes("/document/paragraphs")) return new Response(JSON.stringify(await held), { status: 200 });
     return normal(input, init);
@@ -94,7 +99,7 @@ async function setup({ origin = ORIGIN, open = true, drafts: makeDrafts = true, 
   if (open) {
     action.focus();
     fireEvent.click(action);
-    await waitFor(() => expect(router.state.location.search).toContain("anchor=paragraph+2"));
+    await waitFor(() => expect(router.state.location.search).toContain(pdf ? "anchor=page+3" : "anchor=paragraph+2"));
   }
   return { client, router, scroll, release, drafts, action, fetch, setPendingReply: (reply: () => Promise<Response>) => { pendingReply = reply; } };
 }
@@ -416,6 +421,28 @@ it.each([{ ctrlKey: true }, { metaKey: true }, { shiftKey: true }, { button: 1 }
   try { fireEvent.click(control.action, modifiers); }
   finally { document.removeEventListener("click", preventNativeNavigation); }
   expect(control.router.state.location).toBe(before);
+  expect(screen.getByDisplayValue("First private draft")).toBeVisible();
+  expect(control.fetch.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(0);
+  await act(async () => { control.release(PARAGRAPHS); });
+});
+
+it.each(["explicit Return", "Back", "pane switch"])("full-report source retains return focus after actual Page text query changes through %s", async mode => {
+  const control = await setup({ origin: "/report/5?sentinel=kept", full: true, pdf: true });
+  const read = await screen.findByRole("button", { name: "Read text" }); read.focus(); fireEvent.click(read);
+  await screen.findByText("Saved source text page 3");
+  expect(control.router.state.location.search).toContain("source=page_text");
+  const next = screen.getByRole("button", { name: "Next page" }); next.focus(); fireEvent.click(next);
+  await screen.findByText("Saved source text page 4");
+  if (mode === "pane switch") {
+    const review = screen.getByRole("tab", { name: /^Review\./ }); review.focus(); fireEvent.click(review);
+    const manuscript = screen.getByRole("tab", { name: "Manuscript" }); manuscript.focus(); fireEvent.click(manuscript);
+  }
+  if (mode !== "Back") {
+    const back = screen.getByRole("link", { name: /Return to criterion review/ }); back.focus(); fireEvent.click(back);
+  } else await act(async () => { await control.router.navigate(-1); await control.router.navigate(-1); await control.router.navigate(-1); });
+  await waitFor(() => expect(document.getElementById("signal-resolution-source-5-1-0")).toHaveFocus());
+  expect(control.router.state.location.pathname).toBe("/report/5");
+  expect(control.router.state.location.search).toBe("?sentinel=kept");
   expect(screen.getByDisplayValue("First private draft")).toBeVisible();
   expect(control.fetch.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(0);
   await act(async () => { control.release(PARAGRAPHS); });

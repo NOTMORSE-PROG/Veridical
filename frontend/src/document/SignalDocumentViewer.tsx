@@ -797,7 +797,9 @@ export function SignalDocumentViewerPage() {
   }
 
   function selectPane(pane: "manuscript" | "review", moveFocus = false) {
-    update((next) => { if (pane === "review") next.set("pane", "review"); else next.delete("pane"); }, true);
+    const next = new URLSearchParams(searchParams);
+    if (pane === "review") next.set("pane", "review"); else next.delete("pane");
+    setSearchParams(next, { replace: true, state: location.state });
     if (moveFocus) (pane === "manuscript" ? manuscriptTabRef : reviewTabRef).current?.focus();
   }
 

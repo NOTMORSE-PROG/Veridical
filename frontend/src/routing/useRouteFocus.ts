@@ -19,6 +19,7 @@ export interface RouteReturnFocusRegistration {
   elementId: string;
   fallbackElementId?: string | readonly string[];
   scrollBlock?: ScrollLogicalPosition;
+  retainOnSearchChange?: boolean;
 }
 
 let hasNavigatedOnce = false;
@@ -252,6 +253,12 @@ export function useRouteFocus(
     }
 
     const pending = pendingReturnFocus;
+    // A manuscript's reading mode/page can change without leaving its source
+    // task. Retain only this already-owned origin; never revive a cleared or
+    // replaced registration, or extend it to another route.
+    if (returnFocus?.retainOnSearchChange && pending
+      && pending.returnPath === returnFocus.returnPath && pending.elementId === returnFocus.elementId
+      && pending.destinationPath.split("?")[0] === location.pathname) pending.destinationPath = fullPath;
     if (pending && fullPath === pending.destinationPath && navigationType !== "POP") {
       pending.armed = true;
     } else if (pending && pending.armed && fullPath === pending.returnPath) {

@@ -15,13 +15,13 @@ export function criterionSourceReturn(state: unknown, run: number) {
   if (pending) {
     const action = pendingCriterionSourceAction(elementId, run);
     if (!action || !("kind" in value) || value.kind !== "pending" || !("checkResultId" in value) || value.checkResultId !== action.checkResultId) return;
-    return { kind: "pending" as const, returnPath, elementId, checkResultId: action.checkResultId, state: returnState,
+    return { kind: "pending" as const, returnPath, elementId, checkResultId: action.checkResultId, state: returnState, retainOnSearchChange: true,
       fallbackElementId: [`signal-resolution-heading-${action.checkResultId}`, "escalated-heading", "readiness-report-heading"] };
   }
   const action = elementId.match(/^signal-saved-source-(\d+)-(\d+)-(\d+)$/);
   const criterionId = action && Number(action[2]);
   if (!action || Number(action[1]) !== run || !Number.isSafeInteger(criterionId) || !criterionId || criterionId < 0 || !Number.isSafeInteger(Number(action[3]))) return;
-  return { kind: "saved" as const, returnPath, elementId, criterionId, state: returnState, fallbackElementId: criterionRecordId(run, criterionId) };
+  return { kind: "saved" as const, returnPath, elementId, criterionId, state: returnState, retainOnSearchChange: true, fallbackElementId: criterionRecordId(run, criterionId) };
 }
 
 export function pendingCriterionSourceAction(elementId: string | undefined, run: number) {
