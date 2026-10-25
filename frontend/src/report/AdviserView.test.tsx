@@ -82,6 +82,20 @@ function shared(overrides: Partial<SharedReportOut> = {}): SharedReportOut {
   return { report: BASE_REPORT, flags: [], ...overrides };
 }
 
+describe("shared statistical applicability", () => {
+  it.each([
+    ["completed", "Completion recorded."],
+    ["not_applicable", "Not applicable."],
+    ["incomplete", "Not fully assessed."],
+  ] as const)("shows safe %s status alongside the existing shared warning", async (state, label) => {
+    const payload = shared({ report: { ...BASE_REPORT, statistical_check_scope: { state }, historical_native_math_unverified: true } });
+    vi.stubGlobal("fetch", stubFetchByPath({ "/shared/scope-control/report": payload }));
+    renderWithProviders(<AdviserViewPage />, { route: "/shared/scope-control", path: "/shared/:token" });
+    expect(await screen.findByText(`Statistical checks: ${label}`)).toBeVisible();
+    expect(screen.getAllByText("Saved native Word coverage is unverified")[0]).toBeVisible();
+  });
+});
+
 function publicCountPayload(outcomes: PublicCriterionResultOut["outcome"][]): SharedReportOut {
   return { report: {
     check_run_id: 5, manuscript_group_label: "Synthetic shared-count control", manuscript_original_filename: null,

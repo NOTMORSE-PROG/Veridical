@@ -66,6 +66,7 @@ from app.report.schemas import (
 )
 from app.report.source_coverage import project_source_coverage
 from app.report.source_inventory import NativeSourceNote, group_native_source_notes
+from app.report.statistical_scope import statistical_scope_copy
 from app.report.text import Paragraph, clusters, draw_right_text, register_fonts, text_width
 
 
@@ -1458,6 +1459,9 @@ def build_report_pdf(data: ReportExportData) -> bytes:
     other_flag_count = sum(not _is_optional_comparison_lead(flag) for flag in data.flags)
     lead_count = len(data.flags) - other_flag_count
     flag_intro = [Paragraph("Integrity review", styles["h2"])]
+    scope_label, scope_detail = statistical_scope_copy(report.statistical_check_scope)
+    flag_intro.append(Paragraph(escape(scope_label), styles["body"]))
+    flag_intro.append(Paragraph(escape(scope_detail), styles["body"]))
     flag_intro.append(
         Paragraph(
             f"Other integrity records: {other_flag_count}. "

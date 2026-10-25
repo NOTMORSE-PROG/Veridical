@@ -2605,6 +2605,11 @@
     color: var(--color-signal-ink-secondary);
   }
 
+  .signal-statistical-scope strong {
+    color: var(--color-signal-ink);
+    font-weight: var(--signal-weight-semibold);
+  }
+
   .signal-review-section__support {
     padding: var(--signal-space-2) var(--signal-space-6);
   }

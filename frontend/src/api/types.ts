@@ -447,6 +447,12 @@ export interface ReportCommon {
   /** V-077: what the originality check compared against; null when the run
    * has no originality result. */
   originality_scope?: OriginalityScope | null;
+  statistical_check_scope?: StatisticalCheckScopeOut | null;
+}
+
+/** Saved processing/applicability only; findings and coverage remain separate. */
+export interface StatisticalCheckScopeOut {
+  state: "completed" | "not_applicable" | "incomplete" | "not_recorded";
 }
 
 // V-069 AC2: the rubric's own RATING formula, transcribed -- never merged

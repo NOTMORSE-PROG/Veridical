@@ -18,6 +18,7 @@ import type {
   FlagSummaryOut,
   OriginalityScope as OriginalityScopeValue,
   ResultRowCommon,
+  StatisticalCheckScopeOut,
 } from "../api/types";
 import { useMe } from "../auth/useAuth";
 import {
@@ -36,6 +37,7 @@ import { systemFindingCopy } from "../domain/systemFindingCopy";
 import { rememberRouteReturnFocus } from "../routing/useRouteFocus";
 import { ActionLink } from "../ui/ActionLink";
 import { OriginalityScope } from "./OriginalityScope";
+import { StatisticalCheckScope } from "./StatisticalCheckScope";
 import { originalityUnassessed } from "./originalityScopeState";
 import { Alert } from "../ui/Alert";
 import { Button } from "../ui/Button";
@@ -836,10 +838,12 @@ export function SignalFlagsPanel({
   checkRunId,
   unresolvedHighFlagCount,
   originalityScope,
+  statisticalScope,
 }: {
   checkRunId: number;
   unresolvedHighFlagCount: number;
   originalityScope?: OriginalityScopeValue | null;
+  statisticalScope?: StatisticalCheckScopeOut | null;
 }) {
   const flagsQuery = useFlags(checkRunId);
   const flags = recoverableReadError(flagsQuery.error) ? flagsQuery.data : undefined;
@@ -861,6 +865,7 @@ export function SignalFlagsPanel({
     <section id="integrity-signals" tabIndex={-1} className="signal-review-section" aria-labelledby="flags-heading">
       <div className="signal-review-section__heading"><div><p className="signal-section-kicker">Integrity record</p><h2 id="flags-heading" tabIndex={-1}>Integrity signals</h2></div>{usableFlags && !onlyOptional && <span>{flagsLastLoaded ? "Last loaded: " : ""}{openFindingCount} {hasOptional ? "other open" : "open"} finding{openFindingCount === 1 ? "" : "s"}</span>}</div>
       {!onlyOptional && <p className="signal-review-section__intro">These are possible inconsistencies, not accusations. Open a signal to inspect its excerpt, source anchor, and available instructor action.</p>}
+      <StatisticalCheckScope scope={statisticalScope} />
       <OriginalityScope scope={originalityScope} showAddAction />
       {otherFlags && otherFlags.length > 0
         ? (
@@ -883,10 +888,12 @@ export function SignalPublicFlags({
   flags,
   originalityScope,
   checkRunId,
+  statisticalScope,
 }: {
   flags: FlagSummaryOut[];
   originalityScope?: OriginalityScopeValue | null;
   checkRunId: number;
+  statisticalScope?: StatisticalCheckScopeOut | null;
 }) {
   const otherFlags = flags.filter((flag) => !isOptionalComparisonLead(flag));
   const optional = comparisonLeadCollection(checkRunId, { data: flags, fetchStatus: "idle", isSuccess: true, isError: false });
@@ -897,6 +904,7 @@ export function SignalPublicFlags({
     <section id="integrity-signals" tabIndex={-1} className="signal-review-section" aria-labelledby="flags-heading">
       <div className="signal-review-section__heading"><div><p className="signal-section-kicker">Integrity record</p><h2 id="flags-heading">Possible inconsistencies</h2></div>{!onlyOptional && <span>{findingCount} {hasOptional ? "other " : ""}finding{findingCount === 1 ? "" : "s"}</span>}</div>
       {!onlyOptional && <p className="signal-review-section__intro">These are possible inconsistencies, not accusations. This shared view shows the bounded evidence the instructor chose to share; it does not expose the private Audit trail.</p>}
+      <StatisticalCheckScope scope={statisticalScope} />
       <OriginalityScope scope={originalityScope} />
       {otherFlags.length
         ? <SignalFlagList flags={otherFlags} showActions={false} initialView="all" />

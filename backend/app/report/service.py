@@ -95,6 +95,7 @@ from app.report.scoring import (
 )
 from app.report.source_coverage import project_source_coverage
 from app.report.source_files import manuscript_source_file, open_source_pdf, readable_source_file
+from app.report.statistical_scope import statistical_check_scope
 from app.report.weight_importance import WeightImportance, weight_importance
 from app.storage.access import read_source
 
@@ -737,12 +738,17 @@ async def report_out_for_check_run(
             )
         )
     ).all()
-    forensics_row = await session.scalar(
-        select(CheckResult).where(
-            CheckResult.check_run_id == check_run_id,
-            CheckResult.kind == CheckKind.statistical_forensics,
-        )
+    forensics_rows = list(
+        (
+            await session.scalars(
+                select(CheckResult).where(
+                    CheckResult.check_run_id == check_run_id,
+                    CheckResult.kind == CheckKind.statistical_forensics,
+                )
+            )
+        ).all()
     )
+    forensics_row = forensics_rows[0] if forensics_rows else None
     return ReportOut(
         historical_native_math_unverified=(
             check_run.status == CheckRunStatus.done
@@ -793,6 +799,7 @@ async def report_out_for_check_run(
             else None
         ),
         integrity_check_status=integrity_check_status,
+        statistical_check_scope=statistical_check_scope([row.outcome for row in forensics_rows]),
         originality_scope=originality_scope,
         levelled_rating=levelled_rating,
     )

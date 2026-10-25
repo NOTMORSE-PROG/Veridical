@@ -166,7 +166,7 @@ export function SignalReportPage() {
 
           <SignalEscalatedPanel checkRunId={report.check_run_id} assessmentContextExternal />
           <FigureReadingsSummary readings={report.figure_readings} checkRunId={report.check_run_id} />
-          <SignalFlagsPanel checkRunId={report.check_run_id} unresolvedHighFlagCount={report.unresolved_high_flag_count} originalityScope={report.originality_scope} />
+          <SignalFlagsPanel checkRunId={report.check_run_id} unresolvedHighFlagCount={report.unresolved_high_flag_count} originalityScope={report.originality_scope} statisticalScope={report.statistical_check_scope} />
           <SignalCriteriaResults results={report.results.filter((row) => row.outcome !== "escalated")} checkRunId={report.check_run_id} />
           {(report.previous_status || limits.length > 0) && (
             <div className="signal-group-flow signal-report-notices">

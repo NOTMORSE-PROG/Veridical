@@ -10,6 +10,7 @@ from app.ingest.schemas import FigureReading
 from app.library.passage_indexing import LibraryPassageIndexingSummary
 from app.report.rule_facts import RuleFacts
 from app.report.source_coverage import CriterionSourceCoverageOut
+from app.report.statistical_scope import StatisticalCheckScopeOut
 
 
 class EvidenceItem(BaseModel):
@@ -295,6 +296,9 @@ class ReportOut(BaseModel):
     # fabricated empty state, the same convention `rubric_parse_issues`
     # already follows.
     integrity_check_status: list[IntegrityCheckStatusOut] = []
+    statistical_check_scope: StatisticalCheckScopeOut = Field(
+        default_factory=StatisticalCheckScopeOut
+    )
     # V-069 AC2/AC3: `None` whenever no criterion in this rubric is
     # levelled — a pass/fail rubric's report gains no new visible field.
     levelled_rating: LevelledRatingOut | None = None
@@ -390,6 +394,9 @@ class PublicReportOut(BaseModel):
     # identifies no one, and without it an adviser could read "no reuse
     # found" over an empty Library as a clean result.
     originality_scope: OriginalityScopeOut | None = None
+    statistical_check_scope: StatisticalCheckScopeOut = Field(
+        default_factory=StatisticalCheckScopeOut
+    )
     # Coverage fact only: no private rationale, raw detail, or source identity.
     assessment_incomplete: bool = False
     historical_citation_title_unverified: bool = False

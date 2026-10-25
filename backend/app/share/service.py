@@ -195,6 +195,7 @@ def _to_public_report(report: ReportOut) -> PublicReportOut:
         # treatment as the instructor's own report view.
         levelled_rating=report.levelled_rating,
         originality_scope=report.originality_scope,
+        statistical_check_scope=report.statistical_check_scope,
         assessment_incomplete=bool(report.integrity_check_status),
         historical_citation_title_unverified=report.historical_citation_title_unverified,
         historical_native_math_unverified=report.historical_native_math_unverified,

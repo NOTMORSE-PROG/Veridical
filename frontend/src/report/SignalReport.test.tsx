@@ -87,6 +87,21 @@ function stubReport(report: ReportOut = BASE_REPORT, escalated: EscalatedItemOut
 }
 
 describe("SignalReportPage", () => {
+  it.each([
+    ["completed", "Completion recorded.", false],
+    ["completed", "Completion recorded.", true],
+    ["not_applicable", "Not applicable.", false],
+  ] as const)("shows saved statistical scope independently of findings (%s, %s, concern=%s)", async (state, label, hasConcern) => {
+    const flag = { ...FLAG, check_kind: "statistical_forensics", problem_kind: "p_value_decision_error", evidence_excerpt: "t(28) = 2.45, p = .500" };
+    stubReport({ ...BASE_REPORT, statistical_check_scope: { state }, historical_native_math_unverified: true }, [], hasConcern ? [flag] : []);
+    renderWithProviders(<SignalReportPage />, { route: "/report/5", path: "/report/:checkRunId" });
+    expect(await screen.findByText(`Statistical checks: ${label}`)).toBeVisible();
+    expect(screen.getAllByText("Saved native Word coverage is unverified")[0]).toBeVisible();
+    if (hasConcern) {
+      expect(await screen.findByText("1 open finding")).toBeVisible();
+      expect(await screen.findByRole("link", { name: /Review evidence/ })).toBeVisible();
+    }
+  });
   it.each(["review-criteria", "criteria-results-heading", "coverage-statement-heading"])("preserves a workspace section intent while its destination report is slow: %s", async target => {
     const path = "/report/5?criterion_record=all";
     let release!: (value: Response) => void;
