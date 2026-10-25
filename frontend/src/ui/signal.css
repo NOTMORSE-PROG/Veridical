@@ -3948,6 +3948,13 @@
     color-scheme: only light;
     line-height: 1;
     text-align: initial;
+    letter-spacing: normal;
+    word-spacing: normal;
+    text-size-adjust: none;
+    forced-color-adjust: none;
+    --min-font-size: 1;
+    --text-scale-factor: calc(var(--total-scale-factor) * var(--min-font-size));
+    --min-font-size-inv: calc(1 / var(--min-font-size));
   }
 
   .signal-document-pdf-text-layer :is(span, br) {
@@ -3958,6 +3965,18 @@
     white-space: pre;
     user-select: text;
   }
+
+  /* PDF.js supplies these glyph metrics; interface type would misplace selection. */
+  .signal-document-pdf-text-layer > :not(.markedContent),
+  .signal-document-pdf-text-layer .markedContent span:not(.markedContent) {
+    --font-height: 0;
+    --scale-x: 1;
+    --rotate: 0deg;
+    font-size: calc(var(--text-scale-factor) * var(--font-height));
+    transform: rotate(var(--rotate)) scaleX(var(--scale-x)) scale(var(--min-font-size-inv));
+  }
+
+  .signal-document-pdf-text-layer .markedContent { display: contents; }
 
   .signal-document-pdf-text-layer ::selection {
     background: color-mix(in srgb, var(--color-signal-focus) 32%, transparent);
