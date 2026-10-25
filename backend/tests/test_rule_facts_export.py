@@ -59,8 +59,7 @@ def test_legacy_heading_scope_qualifies_saved_band_or_earlier_record_without_reg
     text = _text(build_report_pdf(data))
     assert (
         "The saved record establishes a heading lookup; "
-        "coverage of the complete requirement is not established."
-        in text
+        "coverage of the complete requirement is not established." in text
     )
     if instructor_recorded:
         assert "Earlier rule record." in text

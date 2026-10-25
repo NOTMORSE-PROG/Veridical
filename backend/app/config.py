@@ -593,7 +593,12 @@ class Settings(BaseSettings):
     openlibrary_unidentified_rps: float = Field(default=1.0, gt=0, allow_inf_nan=False)
     openlibrary_identified_requests: bool = False
     openlibrary_placeholder_contact_domains: list[str] = [
-        "example.com", "example.net", "example.org", "invalid", "localhost", "test"
+        "example.com",
+        "example.net",
+        "example.org",
+        "invalid",
+        "localhost",
+        "test",
     ]
     # Google Books: no key required for low-volume use. Current documented
     # daily quotas conflict across Google's own pages (RESEARCH.md §2) — this

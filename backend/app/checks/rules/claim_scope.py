@@ -45,7 +45,11 @@ def allowed_named_section_rules(criterion, target: str | None) -> frozenset[str]
     if is_presence_claim(criterion, target):
         return frozenset({"required_section_present"})
     text = " ".join(full_text(criterion).split())
-    return frozenset(rule_id for rule_id, key in (
-        ("reference_count_min_max", "reference_count_patterns"),
-        ("citation_style_sniff", "citation_patterns"),
-    ) if any(pattern.fullmatch(text) for pattern in grammar[key]))
+    return frozenset(
+        rule_id
+        for rule_id, key in (
+            ("reference_count_min_max", "reference_count_patterns"),
+            ("citation_style_sniff", "citation_patterns"),
+        )
+        if any(pattern.fullmatch(text) for pattern in grammar[key])
+    )

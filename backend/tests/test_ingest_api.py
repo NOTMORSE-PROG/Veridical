@@ -473,11 +473,31 @@ def test_windows_style_path_in_filename_is_stripped_on_linux(client):
 
 @live
 def test_malformed_upload_is_a_422_not_a_500(client):
+    """The legacy malformed.pdf fixture is plain text, not a recognized PDF."""
     r = _upload(client, "malformed.pdf")
     assert r.status_code == 422
     err = r.json()["error"]
     assert err["code"] == "file_malformed"
-    assert "re-export" in err["message"]  # user-fixable wording, no stack trace
+    assert err["message"] == (
+        "VERIDICAL could not recognize this file as a supported document. "
+        "Choose a document in one of these formats: .docx, .pdf."
+    )
+
+
+@live
+@pytest.mark.parametrize("payload", [b"%PDF-1.7\ntruncated", b"PK\x03\x04truncated"])
+def test_recognized_damaged_upload_retains_unreadable_recovery(client, payload):
+    r = _upload(client, "malformed.pdf", data=payload)
+    assert r.status_code == 422
+    assert r.json() == {
+        "error": {
+            "code": "file_malformed",
+            "message": (
+                "The file could not be read as a document. It may be corrupted or "
+                "incomplete. Please re-export and upload it again."
+            ),
+        }
+    }
 
 
 @live
