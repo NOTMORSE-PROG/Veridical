@@ -22,7 +22,7 @@ from app.ingest.schemas import (
     TableBlock,
     TextBlock,
 )
-from app.models.enums import ResultOutcome
+from app.models.enums import CheckKind, ResultOutcome
 from tests.native_math_fixtures import record_empty_native_inventory
 from tests.test_checks_structural_rules import FakeCitation, FakeCriterion, _ctx
 
@@ -188,7 +188,12 @@ def test_located_rich_content_proven_outside_empty_docx_scope_is_not_a_global_ve
 
 
 @pytest.mark.parametrize(
-    "text", ["At least 1 reference", "No more than 10 references", "Use APA style"]
+    "text",
+    [
+        "At least 1 reference",
+        "No more than 10 references",
+        "APA year-in-parentheses pattern in references meets the configured threshold",
+    ],
 )
 async def test_actual_context_route_and_structural_result_withhold_unmeasured_grade(
     monkeypatch, text
@@ -217,6 +222,14 @@ async def test_actual_context_route_and_structural_result_withhold_unmeasured_gr
     assert "actual_count" not in result.detail
     assert result.detail["reference_inventory"]["count"] is None
     assert result.detail["reason"]
+
+
+def test_generic_apa_compliance_still_requires_semantic_review():
+    decision = route_criterion(
+        FakeCriterion("Use APA style"), criterion_id=1, raw_type="structural"
+    )
+    assert decision.kind == CheckKind.semantic
+    assert decision.rule_id is None
 
 
 def test_direct_caller_without_inventory_does_not_gain_authority_from_nonempty_rows():

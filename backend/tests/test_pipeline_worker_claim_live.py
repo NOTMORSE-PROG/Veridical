@@ -18,6 +18,7 @@ import pytest
 from sqlalchemy import func, select, text
 
 import app.pipeline.machine as pipeline_machine
+from app.checks.router import apply_routing
 from app.config import get_settings
 from app.llm.fake import FakeLLMClient
 from app.models.enums import CheckRunStatus
@@ -644,6 +645,8 @@ async def test_run_check_run_stops_cleanly_when_heartbeat_reports_claim_lost(
         await session.commit()
         check_run_id = check_run.id
 
+        await apply_routing(session, check_run_id, [])
+
     async def stub_semantic_stage(*args):
         # The real `_run_semantic_stage` calls `cancellation_boundary()`
         # (and therefore `heartbeat()`) once per batch -- this stub calls
@@ -653,16 +656,24 @@ async def test_run_check_run_stops_cleanly_when_heartbeat_reports_claim_lost(
 
     monkeypatch.setattr(pipeline_machine, "_run_semantic_stage", stub_semantic_stage)
 
+    heartbeat_calls = 0
+
     async def lost_heartbeat() -> None:
+        nonlocal heartbeat_calls
+        heartbeat_calls += 1
         raise ClaimLost
 
     async with session_factory() as session:
         check_run = await session.get(CheckRun, check_run_id)
         # Must not raise -- ClaimLost is internal control flow, not a real
         # failure, and `run_check_run` owns catching it.
-        await run_check_run(
-            session, check_run, get_settings(), llm=FakeLLMClient(), heartbeat=lost_heartbeat
+        assert (
+            await run_check_run(
+                session, check_run, get_settings(), llm=FakeLLMClient(), heartbeat=lost_heartbeat
+            )
+            is False
         )
+    assert heartbeat_calls == 1
 
     async with session_factory() as session:
         row = await session.scalar(select(CheckRun).where(CheckRun.id == check_run_id))
