@@ -11,7 +11,7 @@ const SCOPE_COPY = {
   ],
   incomplete: [
     "Statistical checks: Not fully assessed.",
-    "Some or all supported statistical content remains unassessed. Unassessed content is not treated as passed.",
+    "The saved statistical assessment is incomplete. Unassessed content is not treated as passed.",
   ],
   not_recorded: [
     "Statistical checks: Not recorded.",
