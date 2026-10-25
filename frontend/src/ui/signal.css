@@ -2236,6 +2236,18 @@
     color: var(--color-signal-link);
   }
 
+  .signal-criteria-review.signal-page-flow {
+    padding-block: var(--signal-space-5);
+    gap: var(--signal-space-4);
+  }
+
+  .signal-criteria-review .signal-criteria-header { margin-block-end: 0; }
+  .signal-criteria-review .signal-criteria-header > div { display: grid; gap: var(--signal-space-2); }
+  .signal-criteria-review .signal-criteria-header :is(nav, h1, p) { margin-block: 0; }
+  .signal-criteria-review .signal-criteria-header h1 { font-size: var(--signal-type-section); }
+  .signal-format-editor-scroll .signal-criteria-guidance { gap: var(--signal-space-3); }
+  .signal-format-editor-scroll .signal-criteria-list { margin-block-start: var(--signal-space-4); }
+
   .signal-criteria-review > .signal-alert + .signal-alert,
   .signal-criteria-review > .signal-alert + .signal-error-summary {
     margin-block-start: var(--signal-space-4);

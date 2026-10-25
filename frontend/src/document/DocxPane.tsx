@@ -206,13 +206,15 @@ export function DocxPane({
         </div>
       )}
       <div role={scrollInParent ? undefined : "region"} tabIndex={scrollInParent ? undefined : 0} aria-label={scrollInParent ? undefined : `${documentLabel}, scrollable`} className="signal-document-scroll signal-document-scroll--docx">
-        <SourceViewDetails id={detailsId} open={detailsOpen} format="docx" comparisonMarkers={comparisonMarkers} freshFormatView={formatDocument} />
+        <SourceViewDetails id={detailsId} open={detailsOpen} format="docx" comparisonMarkers={comparisonMarkers} freshFormatView={formatDocument}>
+          {formatDocument && !paragraphsError && paragraphs && <p>{paragraphs.length} paragraphs · {tables.length} tables · {images.length} drawing occurrences. {nativeMathInventoryLabel(nativeMath)} · Main document body.</p>}
+        </SourceViewDetails>
         <article ref={paperRef} className="signal-document-docx-paper" aria-label={formatDocument ? "Required format reading view" : "Reconstructed manuscript document"}>
-          <header className="signal-document-docx-paper__header">
-            <span>{formatDocument ? "DOCX reading view. Layout may differ." : "Reconstructed manuscript"}</span>
+          {!formatDocument && <header className="signal-document-docx-paper__header">
+            <span>Reconstructed manuscript</span>
             <span>{paragraphsError ? "Reading view unavailable" : paragraphs ? `${paragraphs.length} paragraphs · ${tables.length} tables · ${images.length} drawing occurrences` : "Loading reading view"}</span>
             {paragraphs && <span>{nativeMathInventoryLabel(nativeMath)} · Main document body</span>}
-          </header>
+          </header>}
           <div className="signal-document-docx-paper__body">
         {paragraphsError && (
           <p role="alert" className="p-4 text-sm text-status-attention-text">

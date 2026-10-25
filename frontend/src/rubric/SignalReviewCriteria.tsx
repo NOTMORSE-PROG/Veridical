@@ -56,21 +56,22 @@ function toEdits(rows: CriterionRow[]): CriterionEdit[] {
   }));
 }
 
-function CriteriaHeader({ headingRef, title, count, readOnly = false, familyId, version }: {
+function CriteriaHeader({ headingRef, title, count, readOnly = false, familyId, version, instruction }: {
   headingRef: React.RefObject<HTMLHeadingElement | null>;
   title?: string;
   count?: number;
   readOnly?: boolean;
   familyId?: string;
   version?: number;
+  instruction?: string;
 }) {
   return (
     <header className="signal-route-header signal-criteria-header">
       <div>
         <nav aria-label="Breadcrumb"><Link to={familyId ? `/rubric?family=${encodeURIComponent(familyId)}` : "/rubric"}>Rubric Studio</Link><span aria-hidden="true">/</span><span>Criteria review</span></nav>
-        <p className="signal-eyebrow">Prepare · Human review gate</p>
         <h1 ref={headingRef} tabIndex={-1}>{readOnly ? "View criteria" : "Review prepared criteria"}</h1>
         {title && <p className="signal-route-header__intro">{title}{version !== undefined ? ` · Version ${version}` : ""}{count !== undefined ? ` · ${count} ${count === 1 ? "criterion" : "criteria"}` : ""}</p>}
+        {instruction && <p>{instruction}</p>}
       </div>
     </header>
   );
@@ -337,8 +338,8 @@ function CriteriaEditor({ id }: { id: number }) {
 
   return (
     <div className="signal-route signal-page-flow signal-criteria-review">
-      <CriteriaHeader headingRef={headingRef} title={rubric.title} count={currentRows.length} readOnly={readOnly} familyId={rubric.rubric_family_id} version={rubric.version} />
-      <p>{readOnly ? "Inspect this version’s criteria beside its uploaded format." : "Compare the prepared criteria with your uploaded format. Correct missing or extra requirements before confirming."}</p>
+      <CriteriaHeader headingRef={headingRef} title={rubric.title} count={currentRows.length} readOnly={readOnly} familyId={rubric.rubric_family_id} version={rubric.version}
+        instruction={readOnly ? "Inspect this version’s criteria beside its uploaded format." : "Compare the prepared criteria with your uploaded format. Correct missing or extra requirements before confirming."} />
       <FormatReviewWorkbench rubric={rubric} onUploadNewVersion={() => setUploadOpen(true)}>
       <div className="signal-section-flow signal-criteria-guidance">
         {readOnly

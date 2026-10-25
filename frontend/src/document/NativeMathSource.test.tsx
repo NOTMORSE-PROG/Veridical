@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import type { NativeMathSourceOut } from "../api/types";
 import { DocxPane } from "./DocxPane";
@@ -18,6 +18,24 @@ const native: NativeMathSourceOut = {
 };
 
 describe("native Word source gaps", () => {
+  it("keeps format inventory in details while consequential equation gaps remain in the reading flow", () => {
+    const { rerender, container } = render(<DocxPane {...props} documentKind="required_format"
+      nativeMath={{ ...native, occurrence_count: 0, containers: [] }} />);
+    expect(container.querySelector(".signal-document-docx-paper__header")).toBeNull();
+    const details = document.getElementById(screen.getByRole("button", { name: "Source view details" }).getAttribute("aria-controls")!)!;
+    expect(within(details).getByText(/2 paragraphs.*0 tables.*0 drawing occurrences.*0 native Word equation occurrences/)).not.toBeVisible();
+    expect(screen.queryByText(/Their presence and count are unknown/)).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Source view details" }));
+    expect(details).toBeVisible();
+    expect(within(details).getByText(/0 native Word equation occurrences.*Main document body/)).toBeVisible();
+    rerender(<DocxPane {...props} documentKind="required_format" nativeMath={native} />);
+    expect(screen.getByText(/Native Word equation formulas are not displayed in this reading view/)).toBeVisible();
+    expect(screen.getByText(/Native Word equation not displayed/)).toBeVisible();
+    rerender(<DocxPane {...props} documentKind="required_format"
+      nativeMath={{ ...native, state: "unavailable", occurrence_count: null, containers: [] }} />);
+    expect(screen.getByText(/Their presence and count are unknown/)).toBeVisible();
+    expect(within(details).queryByText(/0 native Word equation occurrences/)).not.toBeInTheDocument();
+  });
   it("keeps a math-only source container at its ordinal, navigates there and separates ordinary fragments", () => {
     const place = vi.fn();
     const { container } = render(<DocxPane {...props} nativeMath={native} requestedParagraph={1} onPlaceRequestedParagraph={place} />);
