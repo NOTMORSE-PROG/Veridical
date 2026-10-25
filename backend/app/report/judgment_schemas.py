@@ -99,6 +99,26 @@ class OriginalJudgmentAssessment(PrivateJudgmentModel):
     original_score: float | None = None
     original_level: CriterionLevelOut | None = None
 
+    @field_validator("original_score", mode="before")
+    @classmethod
+    def original_numeric_score(cls, value):
+        if value is not None and (type(value) not in (int, float) or not isfinite(value)):
+            raise ValueError("An original score must be a finite number or null.")
+        return value
+
+    @field_validator("original_level", mode="before")
+    @classmethod
+    def original_named_level(cls, value):
+        from app.report.judgment_snapshot import stored_level
+
+        if value is None:
+            return None
+        raw = value.model_dump() if isinstance(value, CriterionLevelOut) else value
+        level = stored_level({"level": raw})
+        if level is None:
+            raise ValueError("The original named grade is malformed.")
+        return level
+
 
 class JudgmentContextOut(PrivateJudgmentModel):
     check_run_id: int
@@ -108,15 +128,15 @@ class JudgmentContextOut(PrivateJudgmentModel):
     assessment_revision: int = Field(strict=True, ge=0)
     decision: Literal["approved", "returned", "rejected"] | None
     can_revise: bool
+    can_record: bool = False
     unavailable_reason: str | None
     current: JudgmentSnapshot | None
     choices: JudgmentChoices
     original_assessment: OriginalJudgmentAssessment
 
 
-class JudgmentRevisionIn(PrivateJudgmentModel):
+class JudgmentRecordIn(PrivateJudgmentModel):
     expected_revision: int = Field(strict=True, ge=0)
-    expected_judgment_revision: int = Field(strict=True, ge=0)
     resolution: RevisionResolution
     level: int | None = Field(default=None, strict=True)
     reason: str
@@ -137,25 +157,53 @@ class JudgmentRevisionIn(PrivateJudgmentModel):
         return stripped
 
     @model_validator(mode="after")
-    def validate_level(self) -> "JudgmentRevisionIn":
+    def validate_level(self) -> "JudgmentRecordIn":
         if (self.resolution == "mark_level") != (self.level is not None):
             raise ValueError("a level is required only for a named-level judgment")
         return self
 
 
+class JudgmentRevisionIn(JudgmentRecordIn):
+    expected_judgment_revision: int = Field(strict=True, ge=0)
+
+
 class JudgmentHistoryEntry(PrivateJudgmentModel):
-    schema_version: Literal[1]
+    schema_version: Literal[1, 2]
     entry_id: int
     check_run_id: int
     criterion_id: int
     check_result_id: int
-    action: Literal["initial_resolution", "judgment_revised"]
+    action: Literal["initial_resolution", "judgment_revised", "judgment_recorded"]
     assessment_revision_before: int = Field(strict=True, ge=0)
     assessment_revision_after: int = Field(strict=True, ge=0)
     before: JudgmentSnapshot | None
     after: JudgmentSnapshot
     performed_by: int = Field(strict=True, gt=0)
     performed_at: datetime
+    original_assessment: OriginalJudgmentAssessment | None = None
+
+    @model_validator(mode="after")
+    def versioned_action(self) -> "JudgmentHistoryEntry":
+        if self.schema_version == 2:
+            if self.action != "judgment_recorded" or self.original_assessment is None:
+                raise ValueError("The initial judgment event lacks its original assessment.")
+            from app.checks.levels import outcome_and_score
+
+            original = self.original_assessment
+            _, full, _ = outcome_and_score(None, "pass")
+            _, empty, _ = outcome_and_score(None, "fail")
+            if (
+                original.kind not in ("structural", "semantic")
+                or original.original_outcome not in ("passed", "failed")
+                or original.original_score is None
+                or not isfinite(original.original_score)
+                or not empty <= original.original_score <= full
+                or (original.original_outcome == "failed" and original.original_score != empty)
+            ):
+                raise ValueError("The initial judgment event has no valid settled assessment.")
+        elif self.action == "judgment_recorded" or self.original_assessment is not None:
+            raise ValueError("The saved event does not match its history schema.")
+        return self
 
 
 class JudgmentHistoryOut(PrivateJudgmentModel):
@@ -174,3 +222,7 @@ class JudgmentRevisionOut(PrivateJudgmentModel):
     context: JudgmentContextOut
     entry: JudgmentHistoryEntry
     report: ReportOut
+
+
+class JudgmentRecordOut(JudgmentRevisionOut):
+    """Acknowledgment of an initial judgment, with no prior manual snapshot."""

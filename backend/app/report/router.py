@@ -16,10 +16,17 @@ from app.report.export import build_report_pdf
 from app.report.judgment_schemas import (
     JudgmentContextOut,
     JudgmentHistoryOut,
+    JudgmentRecordIn,
+    JudgmentRecordOut,
     JudgmentRevisionIn,
     JudgmentRevisionOut,
 )
-from app.report.judgments import get_judgment_context, get_judgment_history, revise_judgment
+from app.report.judgments import (
+    get_judgment_context,
+    get_judgment_history,
+    record_judgment,
+    revise_judgment,
+)
 from app.report.page_text import PdfPageTextOut, get_manuscript_page_text
 from app.report.schemas import (
     DecisionIn,
@@ -108,6 +115,23 @@ async def judgment_revision_route(
 ) -> JudgmentRevisionOut:
     response.headers["Cache-Control"] = "no-store"
     out = await revise_judgment(session, check_run_id, criterion_id, instructor.id, body)
+    return out.model_copy(update={"report": await attach_report_figures(session, out.report)})
+
+
+@router.post(
+    "/check-runs/{check_run_id}/criteria/{criterion_id}/judgment/records",
+    response_model=JudgmentRecordOut,
+)
+async def judgment_record_route(
+    check_run_id: int,
+    criterion_id: int,
+    body: JudgmentRecordIn,
+    response: Response,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    instructor: Annotated[Instructor, Depends(get_current_instructor)],
+) -> JudgmentRecordOut:
+    response.headers["Cache-Control"] = "no-store"
+    out = await record_judgment(session, check_run_id, criterion_id, instructor.id, body)
     return out.model_copy(update={"report": await attach_report_figures(session, out.report)})
 
 

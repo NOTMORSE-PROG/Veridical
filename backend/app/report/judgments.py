@@ -13,7 +13,7 @@ from app.checks.escalation import select_resolution
 from app.config import get_settings
 from app.errors import ConflictError, NotFoundError
 from app.models.audit import AuditLog
-from app.models.enums import CheckRunStatus
+from app.models.enums import CheckKind, CheckRunStatus, CriterionType, ResultOutcome
 from app.models.manuscript import Manuscript
 from app.models.rubric import Criterion
 from app.models.run import CheckResult, CheckRun, ReadinessReport
@@ -23,6 +23,8 @@ from app.report.judgment_schemas import (
     JudgmentContextOut,
     JudgmentHistoryEntry,
     JudgmentHistoryOut,
+    JudgmentRecordIn,
+    JudgmentRecordOut,
     JudgmentRevisionIn,
     JudgmentRevisionOut,
     OriginalJudgmentAssessment,
@@ -118,13 +120,28 @@ def _original(
     support = detail.get("support_check")
     support = support if isinstance(support, dict) else {}
     original = detail.get("original_result")
-    original = original if isinstance(original, dict) else {}
+    original = (
+        original
+        if isinstance(original, dict)
+        else (
+            {
+                "outcome": result.outcome.value,
+                "score": float(result.score),
+                "level": detail.get("level"),
+            }
+            if criterion is not None and _recordable(result, criterion)
+            else {}
+        )
+    )
     # No current manual level is relabelled as the original AI grade.
     from app.report.judgment_snapshot import stored_level
 
     return OriginalJudgmentAssessment(
         rule_scope_unconfirmed=project_rule_scope_unconfirmed(
-            detail, criterion=criterion, kind=result.kind.value, outcome=result.outcome.value
+            detail,
+            criterion=criterion,
+            kind=result.kind.value,
+            outcome=original.get("outcome", result.outcome.value),
         )
         if criterion is not None
         else False,
@@ -133,7 +150,7 @@ def _original(
             detail,
             criterion_type=criterion.type.value,
             kind=result.kind.value,
-            outcome=result.outcome.value,
+            outcome=original.get("outcome", result.outcome.value),
         )
         if criterion is not None
         else None,
@@ -161,12 +178,39 @@ def _original(
     )
 
 
+def _recordable(result: CheckResult, criterion: Criterion) -> bool:
+    """D-034 initial authority never repairs ambiguous or prior manual records."""
+    if (
+        criterion.type == CriterionType.not_assessable
+        or result.kind not in (CheckKind.structural, CheckKind.semantic)
+        or result.outcome not in (ResultOutcome.passed, ResultOutcome.failed)
+        or result.judgment_revision is not None
+        or not isinstance(result.detail, dict)
+        or any(
+            key in result.detail
+            for key in ("resolution", "original_result", "judgment_history_incomplete")
+        )
+        or result.score is None
+    ):
+        return False
+    from app.checks.levels import outcome_and_score
+
+    _, full, _ = outcome_and_score(None, "pass")
+    _, empty, _ = outcome_and_score(None, "fail")
+    score = float(result.score)
+    return (
+        isfinite(score)
+        and empty <= score <= full
+        and (result.outcome != ResultOutcome.failed or score == empty)
+    )
+
+
 def _context(run_id: int, report: ReadinessReport, result: CheckResult, criterion: Criterion):
     current = snapshot_judgment(result)
     choices = _choices(criterion)
     unavailable = (
         "judgment_unavailable"
-        if current is None
+        if current is None and not _recordable(result, criterion)
         else "report_decided"
         if report.decision is not None
         else "scale_unavailable"
@@ -180,7 +224,8 @@ def _context(run_id: int, report: ReadinessReport, result: CheckResult, criterio
         criterion_text=criterion.text,
         assessment_revision=report.assessment_revision,
         decision=report.decision,
-        can_revise=unavailable is None,
+        can_revise=unavailable is None and current is not None,
+        can_record=unavailable is None and current is None,
         unavailable_reason=unavailable,
         current=current,
         choices=choices,
@@ -215,9 +260,10 @@ def history_entry(event: AuditLog) -> JudgmentHistoryEntry:
         or out.after.recorded_at != out.performed_at
     ):
         raise ValueError("The saved judgment event does not match its recorded attribution.")
-    if out.action == "initial_resolution":
+    if out.action in ("initial_resolution", "judgment_recorded"):
         valid = (
-            event.event_type == "escalation_resolved"
+            event.event_type
+            == ("judgment_recorded" if out.action == "judgment_recorded" else "escalation_resolved")
             and out.before is None
             and out.after.judgment_revision == 1
         )
@@ -229,6 +275,82 @@ def history_entry(event: AuditLog) -> JudgmentHistoryEntry:
         )
     if not valid or out.assessment_revision_after != out.assessment_revision_before + 1:
         raise ValueError("The saved judgment event has inconsistent version information.")
+    return out
+
+
+async def record_judgment(
+    session: AsyncSession, run_id: int, criterion_id: int, actor_id: int, body: JudgmentRecordIn
+) -> JudgmentRecordOut:
+    from app.report.service import aggregate_and_score, get_report
+
+    async with assessment_write(session, run_id, actor_id, body.expected_revision) as report:
+        result, criterion = await _bound_result(session, run_id, criterion_id)
+        if not _recordable(result, criterion):
+            raise ConflictError(
+                "This criterion is not available for an initial instructor judgment. "
+                "Reload the assessment."
+            )
+        if _choices(criterion).kind == "unavailable":
+            raise ConflictError("The saved criterion scale could not be read.")
+        original = _original(result, criterion)
+        choice = select_resolution(
+            criterion, result.detail, body.resolution, level=body.level, allow_accept_majority=False
+        )
+        detail = deepcopy(result.detail)
+        detail["original_result"] = {
+            "outcome": result.outcome.value,
+            "score": float(result.score),
+            "level": deepcopy(detail.get("level")),
+        }
+        if choice.level is None:
+            detail.pop("level", None)
+        else:
+            detail["level"] = choice.level
+        performed_at = await session.scalar(select(func.clock_timestamp()))
+        detail["resolution"] = {
+            "type": body.resolution,
+            "reason": body.reason,
+            "by_instructor_id": actor_id,
+            "at": performed_at.isoformat(),
+            "ai_majority_verdict": original.ai_majority_verdict,
+        }
+        detail["judgment_history_incomplete"] = False
+        result.detail = detail
+        result.outcome, result.score = choice.outcome, choice.score
+        result.judgment_revision = 1
+        await session.flush([result])
+        await session.refresh(result, ["score"])
+        after = snapshot_judgment(result)
+        if after is None:
+            raise ConflictError("The instructor judgment could not be recorded consistently.")
+        event = AuditLog(
+            event_type="judgment_recorded",
+            check_run_id=run_id,
+            created_at=performed_at,
+            payload={
+                "judgment": {
+                    "schema_version": 2,
+                    "check_run_id": run_id,
+                    "criterion_id": criterion_id,
+                    "check_result_id": result.id,
+                    "action": "judgment_recorded",
+                    "assessment_revision_before": body.expected_revision,
+                    "assessment_revision_after": report.assessment_revision,
+                    "before": None,
+                    "after": after.model_dump(mode="json"),
+                    "performed_by": actor_id,
+                    "original_assessment": original.model_dump(mode="json"),
+                }
+            },
+        )
+        session.add(event)
+        await session.flush([event])
+        entry = history_entry(event)
+        await aggregate_and_score(session, run_id, commit=False)
+        current_report = await get_report(session, run_id, actor_id)
+        out = JudgmentRecordOut(
+            context=_context(run_id, report, result, criterion), entry=entry, report=current_report
+        )
     return out
 
 
@@ -345,7 +467,9 @@ async def get_judgment_history(
             raise ConflictError("This judgment or assessment changed. Reload judgment history.")
         query = select(AuditLog).where(
             AuditLog.check_run_id == run_id,
-            AuditLog.event_type.in_(("escalation_resolved", "judgment_revised")),
+            AuditLog.event_type.in_(
+                ("escalation_resolved", "judgment_revised", "judgment_recorded")
+            ),
             or_(
                 AuditLog.payload["judgment"]["check_result_id"].astext == str(result.id),
                 AuditLog.payload["check_result_id"].astext == str(result.id),
