@@ -17,6 +17,8 @@ import { CHECK_KIND_SHORT_LABEL } from "../domain/checkKind";
 import { COMPARISON_LEAD_COPY, comparisonLeadIdentity, isOptionalComparisonLead, sourceRecordPresentation, type ComparisonLeadSnapshot } from "../domain/comparisonLeadIdentity";
 import { truncateAtWord } from "../format/text";
 import { regionPrecision } from "./regionCopy";
+import { usePdfReadingPosition } from "./usePdfReadingPosition";
+import { visiblePdfPage } from "./pdfReadingPosition";
 import { claimFocusContinuation, type FocusContinuation } from "../routing/focusContinuation";
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
@@ -359,6 +361,11 @@ export function PdfPane({
   const pageRefs = useRef<Map<number, HTMLElement>>(new Map());
   const pageVisibility = useRef<Map<number, number>>(new Map());
   const flagsById = useMemo(() => new Map(flags.map((flag) => [flag.id, flag])), [flags]);
+  const publishPage = useCallback((page: number) => {
+    setCurrentPage(page);
+    onObservedPage?.(page);
+  }, [onObservedPage]);
+  const reading = usePdfReadingPosition(scrollRef, pageRefs, fileUrl, zoom, metrics.length, publishPage);
 
   useEffect(() => {
     let cancelled = false;
@@ -401,6 +408,8 @@ export function PdfPane({
   }, []);
 
   const updateVisibility = useCallback((page: number, ratio: number) => {
+    const actualPage = scrollRef.current && visiblePdfPage(scrollRef.current, pageRefs.current);
+    if (actualPage) { publishPage(actualPage); return; }
     pageVisibility.current.set(page, ratio);
     let mostVisiblePage = page;
     let mostVisibleRatio = -1;
@@ -411,7 +420,7 @@ export function PdfPane({
       }
     }
     if (mostVisibleRatio > 0) { setCurrentPage(mostVisiblePage); onObservedPage?.(mostVisiblePage); }
-  }, [onObservedPage]);
+  }, [onObservedPage, publishPage]);
 
   const scrollToPage = useCallback((page: number, behavior: ScrollBehavior = "smooth") => {
     const total = pdf?.numPages ?? metrics.length;
@@ -436,15 +445,19 @@ export function PdfPane({
   useEffect(() => {
     if (requestedPage === null || metrics.length === 0) return;
     if (!Number.isSafeInteger(requestedPage) || requestedPage < 1 || requestedPage > metrics.length) return;
+    reading.retire();
+    const intent = reading.intent.current;
     const frame = requestAnimationFrame(() => {
+      if (reading.intent.current !== intent) return;
       scrollToPage(requestedPage, "auto");
       const element = pageRefs.current.get(requestedPage);
       if (element) onPlaceRequestedPage?.(requestedPage, element);
     });
     return () => cancelAnimationFrame(frame);
-  }, [metrics.length, requestedPage, scrollToPage, onPlaceRequestedPage]);
+  }, [metrics.length, requestedPage, scrollToPage, onPlaceRequestedPage, reading.retire, reading.intent]);
 
   function commitPageInput() {
+    reading.retire();
     const page = Number(pageInput);
     if (Number.isFinite(page)) scrollToPage(page);
     else setPageInput(String(currentPage));
@@ -456,6 +469,10 @@ export function PdfPane({
   const scopeRegions = regions.filter((region) => region.kind !== "page_bbox");
   const pagesLabel = pdf ? `${pdf.numPages} ${pdf.numPages === 1 ? "page" : "pages"}` : "Loading pages";
   const zoomStyle = { inlineSize: `${zoom * 100}%` } as CSSProperties;
+  function changeZoom(value: number) {
+    reading.prepareZoom();
+    setZoom(value);
+  }
 
   return (
     <div className="signal-document-source">
@@ -467,9 +484,9 @@ export function PdfPane({
         <div className="signal-document-toolbar__controls" role="group" aria-label="PDF page and zoom controls">
           {onReadText && <button type="button" aria-label="Read extracted text from the current PDF page" onClick={onReadText}>Read text</button>}
           <button type="button" aria-expanded={detailsOpen} aria-controls={detailsId} onClick={() => setDetailsOpen((value) => !value)}>Source view details</button>
-          <button type="button" onClick={() => setZoom((value) => Math.max(PDF_ZOOM_MIN, Number((value - PDF_ZOOM_STEP).toFixed(1))))} disabled={zoom <= PDF_ZOOM_MIN}>Zoom out</button>
-          <button type="button" onClick={() => setZoom(1)} disabled={zoom === 1}>Fit width</button>
-          <button type="button" onClick={() => setZoom((value) => Math.min(PDF_ZOOM_MAX, Number((value + PDF_ZOOM_STEP).toFixed(1))))} disabled={zoom >= PDF_ZOOM_MAX}>Zoom in</button>
+          <button type="button" onClick={() => changeZoom(Math.max(PDF_ZOOM_MIN, Number((zoom - PDF_ZOOM_STEP).toFixed(1))))} disabled={zoom <= PDF_ZOOM_MIN}>Zoom out</button>
+          <button type="button" onClick={() => changeZoom(1)} disabled={zoom === 1}>Fit width</button>
+          <button type="button" onClick={() => changeZoom(Math.min(PDF_ZOOM_MAX, Number((zoom + PDF_ZOOM_STEP).toFixed(1))))} disabled={zoom >= PDF_ZOOM_MAX}>Zoom in</button>
           <label>
             <span>Go to page</span>
             <input
@@ -507,7 +524,7 @@ export function PdfPane({
           })}
         </div>
       )}
-      <div ref={scrollRef} role="region" tabIndex={0} aria-label="Full manuscript, scrollable" className="signal-document-scroll signal-document-scroll--pdf">
+      <div ref={scrollRef} role="region" tabIndex={0} aria-label="Full manuscript, scrollable" className="signal-document-scroll signal-document-scroll--pdf" style={{ overflowAnchor: "none" }}>
         <SourceViewDetails id={detailsId} open={detailsOpen} format="pdf" comparisonMarkers={comparisonMarkers} />
         {loadError ? (
           <section className="signal-document-paper-state" role="alert">

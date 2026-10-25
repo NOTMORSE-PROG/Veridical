@@ -33,6 +33,45 @@ function observer(page: number, near = false) {
   return found;
 }
 
+class ResizeStub {
+  static instances: ResizeStub[] = [];
+  target?: Element;
+  readonly callback: ResizeObserverCallback;
+  constructor(callback: ResizeObserverCallback) { this.callback = callback; ResizeStub.instances.push(this); }
+  observe(target: Element) { this.target = target; }
+  disconnect() { this.target = undefined; }
+  emit() { this.callback([], this as unknown as ResizeObserver); }
+}
+
+function installGeometry(root: HTMLElement) {
+  let width = 600;
+  Object.defineProperty(root, "clientWidth", { configurable: true, get: () => width });
+  Object.defineProperty(root, "clientHeight", { configurable: true, value: 500 });
+  vi.spyOn(root, "getBoundingClientRect").mockImplementation(() => ({
+    top: 100, left: 50, right: 50 + width, bottom: 600, height: 500, width,
+  }) as DOMRect);
+  const pages = Array.from(root.querySelectorAll<HTMLElement>("[data-page]"));
+  for (const [index, page] of pages.entries()) {
+    vi.spyOn(page, "getBoundingClientRect").mockImplementation(() => {
+      const zoom = Number.parseFloat(page.parentElement!.style.inlineSize) / 100;
+      // Different page heights and fixed gaps prevent an absolute scroll-ratio
+      // shortcut from satisfying the source-point contract.
+      const heights = pages.map((_, i) => (i === 1 ? 400 : 800) * width / 600 * zoom);
+      const top = 100 + 20 + heights.slice(0, index).reduce((sum, h) => sum + h, 0) + index * 20 - root.scrollTop;
+      const left = 50 - root.scrollLeft;
+      return { top, bottom: top + heights[index], left, right: left + width * zoom, width: width * zoom, height: heights[index] } as DOMRect;
+    });
+  }
+  root.scrollTo = vi.fn((value?: ScrollToOptions | number, y?: number) => {
+    const options = typeof value === "number" ? { left: value, top: y } : value ?? {};
+    root.scrollTop = Math.max(0, options.top ?? root.scrollTop);
+    root.scrollLeft = Math.max(0, options.left ?? root.scrollLeft);
+  });
+  const resize = ResizeStub.instances.find((entry) => entry.target === root)!;
+  act(() => resize.emit());
+  return { pages, resize: (next: number) => { width = next; act(() => resize.emit()); }, notify: () => act(() => resize.emit()) };
+}
+
 const props = {
   regions: [], flags: [], selectedFlagId: null, onSelectFlag: vi.fn(), requestedPage: null,
 };
@@ -41,6 +80,8 @@ describe("PdfPane page visibility", () => {
   beforeEach(() => {
     ObserverStub.instances = [];
     vi.stubGlobal("IntersectionObserver", ObserverStub);
+    ResizeStub.instances = [];
+    vi.stubGlobal("ResizeObserver", ResizeStub);
     mocks.getDocument.mockImplementation(({ url }: { url: string }) => ({
       promise: Promise.resolve({
         numPages: url === "short.pdf" ? 2 : 29,
@@ -125,5 +166,89 @@ describe("PdfPane page visibility", () => {
     fireEvent.change(screen.getByRole("spinbutton"), { target: { value: "29" } });
     fireEvent.click(screen.getByRole("button", { name: "Go to entered page" }));
     expect(root.scrollTo).toHaveBeenCalledWith({ top: 2400, behavior: "smooth" });
+  });
+
+  it("keeps page 3 and its source point through zoom rather than showing the preceding blank tail", async () => {
+    render(<PdfPane {...props} fileUrl="long.pdf" />);
+    await screen.findByLabelText("Page 29 of 29");
+    const root = screen.getByRole("region", { name: "Full manuscript, scrollable" });
+    const geometry = installGeometry(root);
+    fireEvent.change(screen.getByRole("spinbutton"), { target: { value: "3" } });
+    fireEvent.click(screen.getByRole("button", { name: "Go to entered page" }));
+    expect(geometry.pages[2].getBoundingClientRect().top).toBe(100);
+    const zoom = screen.getByRole("button", { name: "Zoom in" });
+    zoom.focus();
+    fireEvent.click(zoom);
+    expect(geometry.pages[2].getBoundingClientRect().top).toBeCloseTo(100);
+    expect(screen.getByRole("spinbutton")).toHaveValue(3);
+    expect(zoom).toHaveFocus();
+    // A queued observer entry from the old layout cannot overwrite live geometry.
+    act(() => observer(2).emit([1]));
+    expect(screen.getByRole("spinbutton")).toHaveValue(3);
+  });
+
+  it("preserves within-page and horizontal reading points through zoom, fit and resize", async () => {
+    render(<PdfPane {...props} fileUrl="long.pdf" />);
+    await screen.findByLabelText("Page 29 of 29");
+    const root = screen.getByRole("region", { name: "Full manuscript, scrollable" });
+    const geometry = installGeometry(root);
+    root.scrollTop = 1260 + 400;
+    fireEvent.scroll(root);
+    fireEvent.click(screen.getByRole("button", { name: "Zoom in" }));
+    expect(geometry.pages[2].getBoundingClientRect().top + geometry.pages[2].getBoundingClientRect().height / 2).toBeCloseTo(100);
+    root.scrollLeft = 90;
+    fireEvent.scroll(root);
+    fireEvent.click(screen.getByRole("button", { name: "Zoom in" }));
+    expect(root.scrollLeft).toBeCloseTo(105);
+    fireEvent.click(screen.getByRole("button", { name: "Zoom out" }));
+    expect(root.scrollLeft).toBeCloseTo(90);
+    fireEvent.click(screen.getByRole("button", { name: "Fit width" }));
+    expect(root.scrollTop).toBeCloseTo(1660);
+    geometry.resize(450);
+    expect(geometry.pages[2].getBoundingClientRect().top + geometry.pages[2].getBoundingClientRect().height / 2).toBeCloseTo(100);
+    geometry.resize(750);
+    expect(geometry.pages[2].getBoundingClientRect().top + geometry.pages[2].getBoundingClientRect().height / 2).toBeCloseTo(100);
+  });
+
+  it("lets a new reading intent replace the stable resize anchor and never replays a late render", async () => {
+    render(<PdfPane {...props} fileUrl="long.pdf" />);
+    await screen.findByLabelText("Page 29 of 29");
+    const root = screen.getByRole("region", { name: "Full manuscript, scrollable" });
+    const geometry = installGeometry(root);
+    root.scrollTop = 1660;
+    fireEvent.scroll(root);
+    fireEvent.wheel(root);
+    root.scrollTop = 2200;
+    fireEvent.scroll(root);
+    geometry.resize(450);
+    const position = root.scrollTop;
+    fireEvent.click(screen.getByRole("button", { name: "Zoom in" }));
+    fireEvent.change(screen.getByRole("spinbutton"), { target: { value: "1" } });
+    fireEvent.click(screen.getByRole("button", { name: "Go to entered page" }));
+    geometry.notify();
+    act(() => observer(29, true).emit([1]));
+    expect(root.scrollTop).toBe(20);
+    expect(screen.getByRole("spinbutton")).toHaveValue(1);
+    expect(position).toBeGreaterThan(0);
+  });
+
+  it("retires queued source-page placement when newer wheel or page-Go intent occurs", async () => {
+    const frames: FrameRequestCallback[] = [];
+    vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => { frames.push(callback); return frames.length; });
+    vi.stubGlobal("cancelAnimationFrame", vi.fn());
+    const { rerender } = render(<PdfPane {...props} fileUrl="long.pdf" />);
+    await screen.findByLabelText("Page 29 of 29");
+    const root = screen.getByRole("region", { name: "Full manuscript, scrollable" });
+    installGeometry(root);
+    rerender(<PdfPane {...props} fileUrl="long.pdf" requestedPage={3} />);
+    fireEvent.wheel(root);
+    act(() => frames.splice(0).forEach((callback) => callback(0)));
+    expect(root.scrollTo).not.toHaveBeenCalled();
+    rerender(<PdfPane {...props} fileUrl="long.pdf" requestedPage={4} />);
+    fireEvent.change(screen.getByRole("spinbutton"), { target: { value: "2" } });
+    fireEvent.click(screen.getByRole("button", { name: "Go to entered page" }));
+    act(() => frames.splice(0).forEach((callback) => callback(0)));
+    expect(root.scrollTo).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole("spinbutton")).toHaveValue(2);
   });
 });
