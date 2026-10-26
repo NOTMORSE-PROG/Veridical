@@ -775,7 +775,7 @@ export function SignalCriteriaResults({ results, checkRunId, publicView = false 
 }) {
   return (
     <section className="signal-review-section" aria-labelledby="criteria-results-heading">
-      <div className="signal-review-section__heading"><div><p className="signal-section-kicker">Criterion record</p><h2 id="criteria-results-heading" tabIndex={-1}>All assessed criteria</h2></div><span>{results.length} total</span></div>
+      <div className="signal-review-section__heading"><div><p className="signal-section-kicker">Criterion record</p><h2 id="criteria-results-heading" tabIndex={-1}>{publicView ? "All criteria" : "All assessed criteria"}</h2></div><span>{results.length} total</span></div>
       <p className="signal-review-section__intro">Each row shows the recorded outcome and the evidence available for checking it. Importance is shown as a band, never as a judgment percentage.</p>
       {results.length ? <ol className="signal-result-list">{results.map((row, index) => {
         const outcome = row.level && (row.outcome === "passed" || row.outcome === "failed")

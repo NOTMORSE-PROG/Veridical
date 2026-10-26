@@ -430,3 +430,11 @@ it("shows a recorded rubric level without claiming that Developing meets the cri
   expect(screen.getByText("Developing")).toBeInTheDocument();
   expect(screen.queryByText("Meets criterion")).not.toBeInTheDocument();
 });
+
+
+it("keeps unresolved shared criteria visible without claiming they were assessed", () => {
+  renderWithProviders(<SignalCriteriaResults checkRunId={1} publicView results={sampleReport.results} />);
+  expect(screen.getByRole("heading", { name: "All criteria" })).toBeInTheDocument();
+  expect(screen.queryByRole("heading", { name: "All assessed criteria" })).not.toBeInTheDocument();
+  expect(screen.getAllByText("Needs review")).toHaveLength(4);
+});
