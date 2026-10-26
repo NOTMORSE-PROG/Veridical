@@ -10,6 +10,7 @@ import { Button } from "../ui/Button";
 import { CoverageStatement } from "../ui/CoverageStatement";
 import { ReadinessBand } from "../ui/ReadinessBand";
 import { SignalDecisionPanel } from "./SignalDecisionPanel";
+import { ReviewProgress } from "./ReviewProgress";
 import { SignalCriteriaResults, SignalEscalatedPanel, SignalFlagsPanel } from "./SignalReviewSections";
 import { SignalShareDialog } from "./SignalShareDialog";
 import { coverageItems } from "./reportCoverage";
@@ -116,12 +117,14 @@ export function SignalReportPage() {
             </dl>
           </section>
 
+          <ReviewProgress report={report} />
           <div className="signal-section-flow signal-report-orientation">
             <nav className="signal-report-jumps" aria-label="Report review order"><a href="#review-criteria" onClick={focusReportJumpTarget}><span>1</span>Resolve criteria</a><a href="#integrity-signals" onClick={focusReportJumpTarget}><span>2</span>Inspect signals</a><a href="#criteria-results-heading" onClick={focusReportJumpTarget}><span>3</span>Read criterion record</a><a href="#final-decision" onClick={focusReportJumpTarget}><span>4</span>Make decision</a></nav>
 
             <div className="signal-attached-flow signal-report-tools">
               <div className="signal-report-actions signal-control-cluster">
                 <ActionLink to={`/report/${report.check_run_id}/document`} variant="secondary">Open manuscript</ActionLink>
+                <ActionLink to={`/checks/${report.check_run_id}`} variant="secondary">View check progress</ActionLink>
                 <ActionLink to={`/audit?check_run_id=${report.check_run_id}`} variant="secondary">View Audit</ActionLink>
                 <Button variant="secondary" busy={exportPdf.isPending} onClick={exportReport}>{exportPdf.isPending ? "Preparing PDF" : "Export PDF"}</Button>
                 <Button variant="secondary" onClick={() => setShareOpen(true)}>{shareLink ? "Manage active share link" : "Share report"}</Button>

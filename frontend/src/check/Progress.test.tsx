@@ -2,6 +2,7 @@ import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { renderWithProviders, stubFetchByPath } from "../test/renderWithProviders";
 import { CheckProgressPage } from "./Progress";
+import { sampleRun } from "../demo/workspaceFixture";
 
 const RUNNING = {
   id: 5,
@@ -95,6 +96,16 @@ const FAILED_UNEXPECTED = {
 };
 
 describe("CheckProgressPage", () => {
+  it("shows completed source preparation and explicitly skipped model grading without phantom pending stages", async () => {
+    vi.stubGlobal("fetch", stubFetchByPath({ "/check-runs/5": { ...sampleRun, id: 5 } }));
+    renderWithProviders(<CheckProgressPage />, { route: "/checks/5", path: "/checks/:checkRunId" });
+    await screen.findByText("Model grading");
+    expect(screen.getByText("Source evidence bindings")).toBeInTheDocument();
+    expect(screen.getByText("Skipped")).toBeInTheDocument();
+    expect(screen.queryByText("Not started yet")).not.toBeInTheDocument();
+    expect(screen.queryByText("AI grading")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Reload source records" })).toBeInTheDocument();
+  });
   afterEach(() => vi.unstubAllGlobals());
 
   it("renders the 5 V2 stages with the currently-running one highlighted", async () => {

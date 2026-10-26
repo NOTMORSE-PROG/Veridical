@@ -13,6 +13,7 @@ import { systemFindingCopy } from "../domain/systemFindingCopy";
 import { useFlag } from "../flags/useFlag";
 import { SignalDecisionPanel } from "../report/SignalDecisionPanel";
 import { SignalCriteriaResults, SignalEscalatedPanel } from "../report/SignalReviewSections";
+import { ReviewProgress } from "../report/ReviewProgress";
 import { coverageItems } from "../report/reportCoverage";
 import {
   useExcludedReuseMatches,
@@ -270,7 +271,8 @@ function ReadinessDecision({ checkRunId, report, pending, error, onRetry, onBack
   return (
     <div className="signal-document-analysis">
       <Button variant="quiet" onClick={onBack}>Back to review queue</Button>
-      <SignalEscalatedPanel checkRunId={report.check_run_id} />
+      <ReviewProgress report={report} compact />
+      <SignalEscalatedPanel checkRunId={report.check_run_id} focused />
       <section className="signal-document-analysis__summary" aria-labelledby="analysis-heading">
         <div className="signal-document-inspector__heading"><p className="signal-section-kicker">After the evidence</p><h2 id="analysis-heading">Readiness and decision</h2><p>Use this summary after reviewing the evidence. The instructor records the final decision.</p></div>
         <div className="signal-document-analysis__readiness">

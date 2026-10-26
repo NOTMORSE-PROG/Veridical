@@ -490,7 +490,7 @@ function SignalFlagList({
 }
 
 function voteSummary(item: EscalatedItemOut): string {
-  if (item.review_basis === "document_review") return "Source observations are recorded below. Choose the rubric level using your own judgment.";
+  if (item.review_basis === "document_review") return "Read the source notes, then record a rubric level.";
   if (item.review_reason === "not_graded") return "The AI did not grade this criterion.";
   if (item.review_reason === "injection_suspected") return "AI passes agreed, but that agreement cannot be trusted here.";
   if (item.votes.length === 0) return "No AI votes were recorded.";
@@ -509,10 +509,11 @@ function resolutionLabel(item: EscalatedItemOut, resolution: EscalationResolutio
   return item.levels?.find((entry) => entry.level === level)?.name ?? "Selected rubric level";
 }
 
-function SignalResolutionCard({ item, checkRunId, onResolved }: {
+function SignalResolutionCard({ item, checkRunId, onResolved, onEditingChange }: {
   item: EscalatedItemOut;
   checkRunId: number;
   onResolved: (message: string) => void;
+  onEditingChange?: (editing: boolean) => void;
 }) {
   const [pending, setPending] = useState<{ resolution: EscalationResolution; level?: number }>();
   const [reason, setReason] = useState("");
@@ -523,12 +524,14 @@ function SignalResolutionCard({ item, checkRunId, onResolved }: {
   const criterionHeadingRef = useRef<HTMLHeadingElement>(null);
 
   function choose(resolution: EscalationResolution, level?: number) {
+    onEditingChange?.(true);
     setPending({ resolution, level });
     setReason("");
     setAttempted(false);
   }
 
   function cancel() {
+    onEditingChange?.(false);
     setPending(undefined);
     // BUG-145 (UX review review): Confirm already moves focus to the
     // section heading on success; Cancel dropped focus to <body> instead
@@ -550,6 +553,7 @@ function SignalResolutionCard({ item, checkRunId, onResolved }: {
       },
       {
         onSuccess: (out) => {
+          onEditingChange?.(false);
           const result = out.report.results.find((row) => row.criterion_id === item.criterion_id);
           const resultLabel = result?.level?.name
             ?? (out.outcome === "not_applicable" ? "excluded because another document is needed" : OUTCOME_COPY[out.outcome as ResultRowCommon["outcome"]]?.label ?? out.outcome);
@@ -645,12 +649,16 @@ function SignalResolutionCard({ item, checkRunId, onResolved }: {
   );
 }
 
-export function SignalEscalatedPanel({ checkRunId }: { checkRunId: number }) {
+export function SignalEscalatedPanel({ checkRunId, focused = false }: { checkRunId: number; focused?: boolean }) {
   const { data: items, isPending, isError, refetch } = useEscalatedItems(checkRunId);
   const [announcement, setAnnouncement] = useState("");
+  const [activeId, setActiveId] = useState<number>();
+  const [editing, setEditing] = useState(false);
   const headingRef = useRef<HTMLHeadingElement>(null);
   const announcementRef = useRef<HTMLParagraphElement>(null);
   const hasItems = Boolean(items?.length);
+  const activeIndex = Math.max(0, items?.findIndex(item => item.check_result_id === activeId) ?? 0);
+  const visibleItems = focused ? items?.slice(activeIndex, activeIndex + 1) : items;
 
   useEffect(() => {
     if (!hasItems && announcement) announcementRef.current?.focus();
@@ -661,11 +669,12 @@ export function SignalEscalatedPanel({ checkRunId }: { checkRunId: number }) {
 
   return (
     <section id="review-criteria" tabIndex={-1} data-tour="escalated-panel" className="signal-review-section signal-review-section--attention" aria-labelledby="escalated-heading">
-      <div className="signal-review-section__heading"><div><p className="signal-section-kicker">First review task</p><h2 id="escalated-heading" ref={headingRef} tabIndex={-1}>Criteria needing your judgment</h2></div><span>{items?.length ?? 0} unresolved</span></div>
-      <p className="signal-review-section__intro">VERIDICAL did not settle these items. Review the evidence and record your own reasoned resolution; the final decision remains unavailable until they are resolved.</p>
+      <div className="signal-review-section__heading"><div><p className="signal-section-kicker">Rubric review</p><h2 id="escalated-heading" ref={headingRef} tabIndex={-1}>Criteria needing your judgment</h2></div><span>{items?.length ?? 0} unresolved</span></div>
+      <p className="signal-review-section__intro">Choose a rubric level, give your reason, and confirm to save. Each saved judgment brings the report closer to the final decision.</p>
       <p ref={announcementRef} tabIndex={-1} aria-live="polite" className="signal-live-region">{announcement}</p>
+      {focused && hasItems && <nav className="signal-criterion-navigation" aria-label="Unresolved criteria"><Button variant="quiet" aria-label="Previous criterion" disabled={editing || activeIndex === 0} onClick={() => { setActiveId(items![activeIndex - 1].check_result_id); headingRef.current?.focus(); }}>Previous</Button><span>{editing ? "Save or cancel to continue" : `${activeIndex + 1} of ${items?.length} remaining`}</span><Button variant="quiet" aria-label="Next criterion" disabled={editing || activeIndex === (items?.length ?? 0) - 1} onClick={() => { setActiveId(items![activeIndex + 1].check_result_id); headingRef.current?.focus(); }}>Next</Button></nav>}
       {hasItems
-        ? <div className="signal-resolution-list">{items?.map((item) => <SignalResolutionCard key={item.check_result_id} item={item} checkRunId={checkRunId} onResolved={(message) => { setAnnouncement(message); headingRef.current?.focus(); }} />)}</div>
+        ? <div className="signal-resolution-list">{visibleItems?.map((item) => <SignalResolutionCard key={item.check_result_id} item={item} checkRunId={checkRunId} onEditingChange={focused ? setEditing : undefined} onResolved={(message) => { if (focused) setActiveId(items?.[activeIndex + 1]?.check_result_id ?? items?.[Math.max(0, activeIndex - 1)]?.check_result_id); setAnnouncement(message); headingRef.current?.focus(); }} />)}</div>
         : <Alert title="No unresolved criteria" tone="success">Every criterion has a recorded outcome. Continue to the integrity signals.</Alert>}
     </section>
   );

@@ -98,6 +98,22 @@ function reportWith(overrides: Record<string, unknown>) {
 describe("SignalEscalatedPanel / SignalResolutionCard", () => {
   afterEach(() => vi.unstubAllGlobals());
 
+  it("shows one readable criterion in focused mode and protects an unsaved judgment during navigation", async () => {
+    vi.stubGlobal("fetch", stubFetchByPath({ "/check-runs/5/escalated": [REAL_MAJORITY, LEVELLED_ITEM] }));
+    renderWithProviders(<SignalEscalatedPanel checkRunId={5} focused />);
+    await screen.findByRole("heading", { name: REAL_MAJORITY.criterion_text });
+    expect(screen.queryByRole("heading", { name: LEVELLED_ITEM.criterion_text })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Next criterion" }));
+    expect(screen.getByRole("heading", { name: LEVELLED_ITEM.criterion_text })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Proficient" }));
+    expect(screen.getByRole("button", { name: "Previous criterion" })).toBeDisabled();
+    fireEvent.change(screen.getByLabelText("Reason (required)"), { target: { value: "My unsaved review reason." } });
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(screen.getByRole("button", { name: "Previous criterion" })).toBeEnabled();
+    fireEvent.click(screen.getByRole("button", { name: "Previous criterion" }));
+    expect(screen.getByRole("heading", { name: REAL_MAJORITY.criterion_text })).toBeInTheDocument();
+  });
+
   it("BUG-045/BUG-131: an injection-suspected item's vote summary never shows a bare agreement fraction, and renders the matched evidence", async () => {
     vi.stubGlobal("fetch", stubFetchByPath({ "/check-runs/5/escalated": [INJECTION_SUSPECTED] }));
     renderWithProviders(<SignalEscalatedPanel checkRunId={5} />);

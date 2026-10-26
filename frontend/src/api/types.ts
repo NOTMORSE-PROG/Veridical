@@ -247,6 +247,7 @@ export interface StageStatus {
 }
 
 export interface CheckRun {
+  execution_basis?: "prepared_document_review";
   id: number;
   manuscript_id: number;
   rubric_id: number;

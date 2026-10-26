@@ -1,13 +1,13 @@
 /// <reference types="node" />
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { readFileSync } from "node:fs";
-import { createHash } from "node:crypto";
+import { createHash, webcrypto } from "node:crypto";
 import { resolve } from "node:path";
 import { installWorkspaceSample } from "./workspaceApi";
 import { companionSource, reviewTasks, sampleCriteria, sampleFlags, sampleReport, WORKSPACE_SAMPLE } from "./workspaceFixture";
 
 const originalFetch = window.fetch;
-afterEach(() => { window.fetch = originalFetch; sessionStorage.clear(); localStorage.clear(); vi.restoreAllMocks(); });
+afterEach(() => { window.fetch = originalFetch; sessionStorage.clear(); localStorage.clear(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 function start() { sessionStorage.clear(); localStorage.clear(); const network = vi.fn(() => Promise.reject(new Error("Unexpected live request"))); window.fetch = network; installWorkspaceSample(); return network; }
 const call = async (path: string, method = "GET", body?: unknown) => { const response = await window.fetch(`/api${path}`, { method, body: body === undefined ? undefined : JSON.stringify(body) }); return { response, data: await response.json() }; };
 const resolveAll = async (reason = "Instructor judgment after reading the original pages.") => {
@@ -15,6 +15,42 @@ const resolveAll = async (reason = "Instructor judgment after reading the origin
 };
 
 describe("real-interface sample API boundary", () => {
+  it("prepares real source assets, exposes running progress and retains saved judgments", async () => {
+    sessionStorage.clear(); localStorage.clear();
+    vi.stubGlobal("crypto", webcrypto);
+    let releaseOriginal!: () => void;
+    const sourceGate = new Promise<void>(resolveGate => { releaseOriginal = resolveGate; });
+    const network = vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input).endsWith(".pdf")) await sourceGate;
+      return new Response(readFileSync(resolve(`public${String(input)}`)));
+    });
+    window.fetch = network;
+    installWorkspaceSample();
+    await call("/check-runs/1/escalated/101/resolve", "POST", { resolution: "mark_level", level: 2, reason: "Scope distinctions require substantial clarification." });
+    expect((await call("/check-runs", "POST", { manuscript_id: 1, rubric_id: 1 })).data.status).toBe("ingesting");
+    expect((await call("/stats")).data.checking_count).toBe(1);
+    expect((await call("/manuscripts?queue=checking")).data.items).toHaveLength(1);
+    expect((await call("/manuscripts?queue=needs_review")).data.items).toHaveLength(0);
+    releaseOriginal();
+    await vi.waitFor(async () => expect((await call("/check-runs/1")).data.status).toBe("done"));
+    expect((await call("/check-runs/1/report")).data.pending_review_count).toBe(3);
+    expect((await call("/stats")).data.checking_count).toBe(0);
+    expect((await call("/check-runs/1")).data.stage_status.stages.semantic.status).toBe("skipped");
+    expect(network).toHaveBeenCalledTimes(2);
+  });
+
+  it("cancels source loading and ignores a late original response", async () => {
+    sessionStorage.clear(); localStorage.clear();
+    let releaseOriginal!: () => void;
+    const gate = new Promise<void>(resolveGate => { releaseOriginal = resolveGate; });
+    window.fetch = vi.fn(async () => { await gate; return new Response("late response"); });
+    installWorkspaceSample();
+    await call("/check-runs", "POST", { manuscript_id: 1, rubric_id: 1 });
+    expect((await call("/check-runs/1/cancel", "POST", {})).data.status).toBe("cancelled");
+    releaseOriginal();
+    await vi.waitFor(async () => expect((await call("/check-runs/1")).data.status).toBe("cancelled"));
+    expect((await call("/check-runs/1/report")).data.pending_review_count).toBe(4);
+  });
   it("preserves the complete licensed source and binds excerpts to original pages", () => {
     const bytes = readFileSync(resolve("public/sample-assets/stock-inventory-capstone.pdf"));
     expect(createHash("sha256").update(bytes).digest("hex")).toBe(WORKSPACE_SAMPLE.sha256);

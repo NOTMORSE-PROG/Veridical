@@ -1,7 +1,9 @@
 import type { AuditLogDetail, FlagOut, ReportOut, ShareLinkOut } from "../api/types";
 import { companionSource, sampleCriteria, sampleEscalatedItems, sampleFlags, sampleInstructor, sampleLibrary, sampleManuscript, sampleReport, sampleRubric, sampleRun, WORKSPACE_SAMPLE } from "./workspaceFixture";
+import { prepareWorkspaceSource } from "./workspacePreparation";
 
 type SampleState = {
+  run: typeof sampleRun;
   report: ReportOut;
   flags: FlagOut[];
   rubric: typeof sampleRubric;
@@ -11,7 +13,7 @@ type SampleState = {
   fileAvailable: boolean;
   events: AuditLogDetail[];
 };
-const fresh = (): SampleState => ({ report: structuredClone(sampleReport), flags: structuredClone(sampleFlags), rubric: structuredClone(sampleRubric), manuscript: structuredClone(sampleManuscript), library: structuredClone(sampleLibrary), share: null, fileAvailable: true, events: [] });
+const fresh = (): SampleState => ({ run: structuredClone(sampleRun), report: structuredClone(sampleReport), flags: structuredClone(sampleFlags), rubric: structuredClone(sampleRubric), manuscript: structuredClone(sampleManuscript), library: structuredClone(sampleLibrary), share: null, fileAvailable: true, events: [] });
 const json = (value: unknown, status = 200) => new Response(JSON.stringify(value), { status, headers: { "Content-Type": "application/json" } });
 const failure = (message: string, status = 422) => json({ error: { code: status === 409 ? "conflict" : status === 410 ? "gone" : "sample_operation", message } }, status);
 const textValue = (value: unknown) => typeof value === "string" ? value : "";
@@ -21,7 +23,7 @@ export function installWorkspaceSample() {
   let state = fresh();
   try {
     const stored = JSON.parse(sessionStorage.getItem(WORKSPACE_SAMPLE.storageKey) ?? "null");
-    if (stored?.version === 1 && stored.state?.report?.manuscript_id === 1 && Array.isArray(stored.state?.flags) && Array.isArray(stored.state?.events) && Array.isArray(stored.state?.library) && Array.isArray(stored.state?.rubric?.criteria)) state = stored.state as SampleState;
+    if (stored?.version === 1 && stored.state?.report?.manuscript_id === 1 && Array.isArray(stored.state?.flags) && Array.isArray(stored.state?.events) && Array.isArray(stored.state?.library) && Array.isArray(stored.state?.rubric?.criteria)) state = { ...fresh(), ...stored.state, run: stored.state.run ?? structuredClone(sampleRun) } as SampleState;
   } catch { /* An unavailable or invalid sample cache starts a clean sample. */ }
   function persist() { try { sessionStorage.setItem(WORKSPACE_SAMPLE.storageKey, JSON.stringify({ version: 1, state })); if (state.share) localStorage.setItem(`${WORKSPACE_SAMPLE.storageKey}:share:${state.share.token}`, JSON.stringify({ ...publicSnapshot(), expires_at: state.share.expires_at })); } catch { /* This visit still works when browser storage is disabled. */ } }
   function audit(event_type: string, payload: Record<string, unknown>) {
@@ -31,6 +33,43 @@ export function installWorkspaceSample() {
     audit("ingest_complete", { original_filename: WORKSPACE_SAMPLE.filename, page_count: WORKSPACE_SAMPLE.pageCount, source: WORKSPACE_SAMPLE.source, sha256: WORKSPACE_SAMPLE.sha256, note: "Unchanged publicly licensed source. Prepared review records; no live AI analysis." });
     audit("statistical_forensics", { outcome: "not_applicable", note: "This software implementation report does not supply a conventional inferential-statistics result for this prepared example. Numeric source code is not treated as a statistical test." });
     audit("document_review", { status: "needs_review", sample: true, llm_mode: "manual", note: "Full-document review: narrative, source code, figures, screenshots, references and component summary checked. Rubric levels remain for instructor judgment." });
+  }
+
+  let preparationController: AbortController | undefined;
+  const isPreparing = () => !["done", "failed", "cancelled"].includes(state.run.status);
+  function startSourcePreparation() {
+    if (preparationController && isPreparing()) return;
+    const controller = new AbortController();
+    preparationController = controller;
+    state.run = { ...structuredClone(sampleRun), status: "ingesting", started_at: new Date().toISOString(), finished_at: null, stage_status: { stages: { semantic: structuredClone(sampleRun.stage_status!.stages!.semantic) } } };
+    state.manuscript.latest_check_run_status = "ingesting";
+    audit("source_preparation_started", { note: "Loading the published original and checking page/excerpt bindings. Existing instructor judgments are retained. No model grading runs." });
+    persist();
+    void prepareWorkspaceSource(originalFetch, controller.signal, (key, note) => {
+      if (controller !== preparationController || controller.signal.aborted) return;
+      const stages = state.run.stage_status!.stages!;
+      for (const entry of Object.values(stages)) if (entry.status === "running") entry.status = "done";
+      stages[key] = { status: "running", note };
+      state.run.status = key;
+      state.manuscript.latest_check_run_status = key;
+      persist();
+    }).then(receipt => {
+      if (controller !== preparationController || controller.signal.aborted) return;
+      for (const entry of Object.values(state.run.stage_status!.stages!)) if (entry.status === "running") entry.status = "done";
+      state.run.status = "done";
+      state.run.finished_at = new Date().toISOString();
+      state.manuscript.latest_check_run_status = "done";
+      audit("source_preparation_complete", receipt);
+      persist();
+    }).catch((error: unknown) => {
+      if (controller !== preparationController || controller.signal.aborted) return;
+      state.run.status = "failed";
+      state.run.finished_at = new Date().toISOString();
+      state.run.stage_status!.failed = { code: "source_preparation_failed", message: error instanceof Error ? error.message : "The prepared source could not be verified." };
+      state.manuscript.latest_check_run_status = "failed";
+      audit("source_preparation_failed", { message: state.run.stage_status!.failed.message });
+      persist();
+    });
   }
 
   function recalculate() {
@@ -97,11 +136,11 @@ export function installWorkspaceSample() {
     if (path === "/quota") return json({ mode: "fake", key_source: "shared", quota_day: "2026-10-26", calls_used: 0, daily_limit: 0, calls_remaining: 0, cache_hits_today: 0, cache_hit_rate: 0, reset_at: "2026-10-27T00:00:00Z", rpm_limit: 0, models: [] });
     if (path === "/programs") return json([{ id: 1, name: "Software Engineering" }, { id: 2, name: "Information Systems" }]);
     if (path === "/groups/collision-check") return json({ collision: false, existing_group_name: null });
-    if (path === "/stats") return json({ manuscripts_checked: 1, ready_count: state.report.status === "ready" ? 1 : 0, conditionally_ready_count: state.report.status === "conditionally_ready" ? 1 : 0, not_ready_count: state.report.status === "not_ready" ? 1 : 0, needs_review_count: state.report.status === "needs_review" ? 1 : 0, escalations_awaiting_review: state.report.pending_review_count, escalation_rate: null, escalation_budget: 0, system_underperforming: false, decided_count: state.report.decision ? 1 : 0, ready_to_decide_count: !state.report.pending_review_count && !state.report.decision ? 1 : 0, needs_attention_count: state.report.pending_review_count ? 1 : 0, checking_count: 0 });
+    if (path === "/stats") return json({ manuscripts_checked: 1, ready_count: state.report.status === "ready" ? 1 : 0, conditionally_ready_count: state.report.status === "conditionally_ready" ? 1 : 0, not_ready_count: state.report.status === "not_ready" ? 1 : 0, needs_review_count: state.report.status === "needs_review" ? 1 : 0, escalations_awaiting_review: state.report.pending_review_count, escalation_rate: null, escalation_budget: 0, system_underperforming: false, decided_count: !isPreparing() && state.report.decision ? 1 : 0, ready_to_decide_count: !isPreparing() && !state.report.pending_review_count && !state.report.decision ? 1 : 0, needs_attention_count: !isPreparing() && state.report.pending_review_count && !state.report.decision ? 1 : 0, checking_count: isPreparing() ? 1 : 0 });
     if (path === "/manuscripts") {
       const queue = url.searchParams.get("queue"), query = (url.searchParams.get("q") ?? "").toLowerCase();
       let items = [state.manuscript];
-      if (queue === "checking" || queue === "not_checked" || queue === "complete" && !state.report.decision || queue === "needs_review" && (!state.report.pending_review_count || state.report.decision) || queue === "ready_to_decide" && (state.report.pending_review_count || state.report.decision)) items = [];
+      if (queue === "not_checked" || queue === "checking" && !isPreparing() || queue && queue !== "checking" && isPreparing() || queue === "complete" && !state.report.decision || queue === "needs_review" && (!state.report.pending_review_count || state.report.decision) || queue === "ready_to_decide" && (state.report.pending_review_count || state.report.decision)) items = [];
       return paged(items.filter(item => `${item.group_label} ${item.original_filename}`.toLowerCase().includes(query)));
     }
     const proposal = { title: { value: WORKSPACE_SAMPLE.title, anchor: "page 1" }, short_name: { value: "Stock & Inventory", anchor: "page 1" }, members: WORKSPACE_SAMPLE.authors.map(value => ({ value, anchor: "page 1" })), program: { value: "Software Engineering", anchor: "page 3" }, adviser: { value: "Md. Sakib Ali Mazumder", anchor: "page 1" }, extraction_failed: false };
@@ -109,7 +148,7 @@ export function installWorkspaceSample() {
       const file = init?.body instanceof FormData ? init.body.get("file") : null;
       if (!(file instanceof File)) return failure("Choose a manuscript file.");
       const digest = Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", await file.arrayBuffer())), value => value.toString(16).padStart(2, "0")).join("");
-      if (digest !== WORKSPACE_SAMPLE.sha256) return failure("This sample uses the published 109-page manuscript. Download Original PDF in the sample bar to practice this upload. A different manuscript needs the real workspace for its own analysis.");
+      if (digest !== WORKSPACE_SAMPLE.sha256) return failure("This workspace uses the published 109-page manuscript. Download the original PDF from Source and review details to practice this upload. A different manuscript needs the account workspace for its own analysis.");
       if (path === "/rubrics") { state.rubric.title = url.searchParams.get("title") || sampleRubric.title; audit("rubric_uploaded", { filename: file.name, note: "Loaded prepared rubric from this original document's page 1; no AI parser ran." }); return write(state.rubric); }
       if (path === "/library/entries") return json({ outcome: "exact_duplicate", item: null, duplicate_of: { manuscript_id: 201, label: WORKSPACE_SAMPLE.title, original_filename: WORKSPACE_SAMPLE.filename, added_at: WORKSPACE_SAMPLE.preparedAt }, message: "This exact published manuscript is already in the sample Library. Open the existing record." });
       audit("ingest_complete", { filename: file.name, sha256: digest, duplicate: true, sample: true });
@@ -125,8 +164,9 @@ export function installWorkspaceSample() {
     if (/^\/rubrics\/\d+\/activate$/.test(path)) return write(state.rubric);
     if (path === "/settings") return json({ thresholds: { ...sampleReport.thresholds, escalation_agreement_threshold: .7, editable: false }, prompt_versions: [], api_key: { byok_available: false, has_own_api_key: false } });
     if (path === "/check-runs/rerun-estimate") return json({ items: [{ manuscript_id: 1, estimated_calls: 0 }], total_estimated_calls: 0, manuscripts_with_no_estimate: 0 });
-    if (path === "/check-runs" && method === "POST") { audit("sample_check_replayed", { note: "Reloaded the prepared record; zero model calls. Not a new analysis." }); return write({ ...sampleRun, id: state.report.check_run_id }); }
-    if (/^\/check-runs\/\d+$/.test(path)) return json({ ...sampleRun, manuscript_group_label: state.manuscript.group_label });
+    if (path === "/check-runs" && method === "POST") { startSourcePreparation(); return write(state.run); }
+    if (/^\/check-runs\/\d+\/cancel$/.test(path) && method === "POST") { if (isPreparing()) { preparationController?.abort(); state.run.status = "cancelled"; state.run.cancel_requested_at = new Date().toISOString(); state.run.finished_at = state.run.cancel_requested_at; state.manuscript.latest_check_run_status = "cancelled"; audit("source_preparation_cancelled", { note: "Original manuscript and prior instructor judgments retained." }); } return write(state.run); }
+    if (/^\/check-runs\/\d+$/.test(path)) return json({ ...state.run, manuscript_group_label: state.manuscript.group_label });
     if (/\/document\/file$/.test(path)) {
       if (!state.fileAvailable && path.startsWith("/check-runs/")) return failure("The original file was removed from this browser record.", 404);
       const source = path.startsWith(`/library/${companionSource.id}/`) ? companionSource : WORKSPACE_SAMPLE;
@@ -186,5 +226,6 @@ export function installWorkspaceSample() {
     // Never fall through to a live account or analysis service from sample mode.
     return failure("This operation is not connected in the sample workspace. Your real account and files have not changed.");
   };
+  if (isPreparing()) startSourcePreparation();
   persist();
 }

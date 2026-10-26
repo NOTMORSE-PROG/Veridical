@@ -4,6 +4,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router";
 import { ApiError } from "../api/client";
+import { isWorkspaceSample } from "../demo/workspaceFixture";
 import { Modal, ModalBackdrop } from "../components/Modal";
 import { formatManuscriptOption, manuscriptIdentity } from "../domain/manuscriptLabel";
 import { isRubricEligibleForProgram } from "../domain/rubricEligibility";
@@ -280,6 +281,7 @@ export function NewCheckModal({
         }
       >
         <div className="signal-group-flow">
+          {isWorkspaceSample() && <p className="signal-field-hint">This prepares the published manuscript's source review: it verifies the original file, page index and evidence excerpts. Your saved judgments are retained. No model grading is run.</p>}
           {currentProblems.length > 0 && (
             <div
               ref={summaryRef}

@@ -435,7 +435,8 @@
   --signal-check-stage-grid-phone: var(--signal-criterion-number-size) minmax(0, 1fr);
   --signal-report-hero-grid: minmax(0, 1.5fr) minmax(18rem, 0.5fr);
   --signal-report-jump-grid: repeat(4, minmax(0, 1fr));
-  --signal-resolution-card-grid: minmax(0, 1.35fr) minmax(18rem, 0.65fr);
+  --signal-resolution-card-grid: repeat(auto-fit, minmax(min(100%, 22rem), 1fr));
+  --signal-review-progress-grid: repeat(auto-fit, minmax(min(100%, 14rem), 1fr));
   --signal-report-branch-width: 5rem;
   --signal-report-branch-offset: 1.5rem;
   --signal-report-jump-number-size: 1.75rem;

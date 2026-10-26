@@ -85,7 +85,9 @@ export function useCreateCheckRun() {
   return useMutation({
     mutationFn: (body: { manuscript_id: number; rubric_id: number }) =>
       api.post<CheckRun>("/check-runs", body),
-    onSuccess: () => {
+    onSuccess: (run) => {
+      queryClient.setQueryData(["check-run", run.id], run);
+      queryClient.invalidateQueries({ queryKey: ["stats"] });
       queryClient.invalidateQueries({ queryKey: ["check-runs"] });
       // V-041 (design review finding): ManuscriptsTable reads
       // latest_check_run_status from the /manuscripts list, not

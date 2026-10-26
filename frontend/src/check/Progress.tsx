@@ -9,7 +9,7 @@ import { Alert } from "../ui/Alert";
 import { Button } from "../ui/Button";
 import { Dialog } from "../ui/Dialog";
 import { ProcessStatus } from "../ui/ProcessStatus";
-import { useCancelCheckRun, useCheckRun } from "./useCheckRun";
+import { useCancelCheckRun, useCheckRun, useCreateCheckRun } from "./useCheckRun";
 
 const STAGE_ORDER = [
   { key: "ingesting", label: "Ingestion" },
@@ -17,6 +17,14 @@ const STAGE_ORDER = [
   { key: "semantic", label: "AI grading" },
   { key: "integrity", label: "Integrity checks" },
   { key: "aggregating", label: "Readiness report" },
+] as const;
+
+const PREPARED_STAGE_ORDER = [
+  { key: "ingesting", label: "Original document" },
+  { key: "structural", label: "Page index" },
+  { key: "semantic", label: "Model grading" },
+  { key: "integrity", label: "Source evidence bindings" },
+  { key: "aggregating", label: "Review record" },
 ] as const;
 
 const STAGE_LABEL: Record<string, string> = Object.fromEntries(
@@ -75,10 +83,10 @@ function toStage(run: CheckRun, key: string, label: string): SignalStage {
   const entry = run.stage_status?.stages?.[key];
   const blocked = run.stage_status?.blocked;
   if (run.status === key && blocked) return { id: key, label, state: "blocked", tagText: "Paused", detail: blockedDetail(blocked) };
-  if (run.status === key) return { id: key, label, state: "running", tagText: "In progress" };
+  if (run.status === key) return { id: key, label, state: "running", tagText: "In progress", detail: typeof entry?.note === "string" ? entry.note : undefined };
   if (entry?.status === "skipped") return { id: key, label, state: "skipped", tagText: "Skipped", detail: typeof entry.note === "string" ? entry.note : undefined };
   if (entry?.status === "done" && (entry.degraded_count ?? 0) > 0) return { id: key, label, state: "attention", tagText: "Needs review", detail: degradedDetail(entry) };
-  if (entry?.status === "done") return { id: key, label, state: "done", tagText: "Done" };
+  if (entry?.status === "done") return { id: key, label, state: "done", tagText: "Done", detail: typeof entry.note === "string" ? entry.note : undefined };
   return { id: key, label, state: "pending", tagText: "Not started yet" };
 }
 
@@ -104,8 +112,11 @@ export function CheckProgressPage() {
   const id = Number(checkRunId);
   const { data: run, isPending, isError, refetch } = useCheckRun(id);
   const cancel = useCancelCheckRun(id);
+  const reload = useCreateCheckRun();
   const [showCancel, setShowCancel] = useState(false);
   const headingRef = useRef<HTMLHeadingElement>(null);
+  const prepared = run?.execution_basis === "prepared_document_review";
+  const stageOrder = prepared ? PREPARED_STAGE_ORDER : STAGE_ORDER;
   useRouteFocus("Check progress - VERIDICAL", headingRef);
 
   const prevStatusRef = useRef<CheckRunStatus | undefined>(undefined);
@@ -116,7 +127,7 @@ export function CheckProgressPage() {
     if (run.status === "done") setAnnouncement("Check complete. Your manuscript review is ready.");
     else if (run.status === "failed") setAnnouncement("This check has failed. See the message below.");
     else if (run.status === "cancelled") setAnnouncement("This check was cancelled.");
-    else setAnnouncement(`Now running: ${STAGE_LABEL[run.status] ?? run.status}.`);
+    else setAnnouncement(`Now running: ${(run.execution_basis === "prepared_document_review" ? PREPARED_STAGE_ORDER.find(stage => stage.key === run.status)?.label : STAGE_LABEL[run.status]) ?? run.status}.`);
     // BUG-086: deliberately narrowed to the one primitive field this
     // effect actually needs to react to -- `run.status` (read again above
     // for the label) is the same value, listing the whole `run` object
@@ -133,9 +144,9 @@ export function CheckProgressPage() {
       <header className="signal-route-header signal-check-progress__header">
         <div>
           <nav aria-label="Breadcrumb"><Link to="/dashboard?queue=checking">Review Desk</Link><span aria-hidden="true">/</span><span>Check progress</span></nav>
-          <p className="signal-eyebrow">Check · Live pipeline</p>
+          <p className="signal-eyebrow">{prepared ? "Check · Source preparation" : "Check · Live pipeline"}</p>
           <h1 ref={headingRef} tabIndex={-1}>Check progress</h1>
-          <p className="signal-route-header__intro">Follow each stage. You can leave this page while the check continues.</p>
+          <p className="signal-route-header__intro">{prepared ? "Load the published manuscript and verify its source records. Model grading is not run in this prepared review; existing instructor judgments are retained." : "Follow each stage. You can leave this page while the check continues."}</p>
         </div>
         {run && <ProcessStatus status={run.status} />}
       </header>
@@ -160,7 +171,7 @@ export function CheckProgressPage() {
           <section className="signal-check-pipeline" aria-labelledby="pipeline-heading">
             <div className="signal-section-heading"><div><p className="signal-section-kicker">Pipeline</p><h2 id="pipeline-heading">What VERIDICAL is doing</h2></div><p>Completed work remains traceable even if this run stops.</p></div>
             <ol className="signal-check-track">
-              {STAGE_ORDER.map(({ key, label }) => toStage(run, key, label)).map((stage) => (
+              {stageOrder.map(({ key, label }) => toStage(run, key, label)).map((stage) => (
                 <li key={stage.id} className={`signal-check-stage signal-check-stage--${stage.state}`} aria-current={stage.state === "running" || stage.state === "blocked" ? "step" : undefined}>
                   <span className="signal-check-stage__mark" aria-hidden="true">{STAGE_MARKS[stage.state]}</span>
                   <div><h3>{stage.label}</h3>{stage.detail && <p>{stage.detail}</p>}</div>
@@ -172,14 +183,16 @@ export function CheckProgressPage() {
 
           {run.status === "failed" && run.stage_status?.failed && <Alert title="This check stopped" tone="error" role="alert">{FAILURE_MESSAGES[run.stage_status.failed.code] ?? run.stage_status.failed.message}</Alert>}
 
-          {run.status === "cancelled" && <Alert title="Check cancelled" tone="info" role="status">No readiness report was produced. The partial run remains in Audit for traceability.</Alert>}
+          {run.status === "cancelled" && <Alert title="Check cancelled" tone="info" role="status">{prepared ? "Source preparation stopped. The original manuscript and your previous judgments are retained." : "No readiness report was produced. The partial run remains in Audit for traceability."}</Alert>}
 
           {cancel.error && <Alert title="Could not cancel this check" tone="error" role="alert">{cancel.error instanceof Error ? cancel.error.message : "Try again."}</Alert>}
+          {reload.error && <Alert title="Could not reload the source records" tone="error" role="alert">{reload.error instanceof Error ? reload.error.message : "Try again."}</Alert>}
 
           {run.status === "done" && <section className="signal-check-complete" aria-labelledby="check-complete-heading"><div><p className="signal-section-kicker">Next: Review</p><h2 id="check-complete-heading">Your manuscript review is ready</h2><p>Read the manuscript beside VERIDICAL's recorded criteria and integrity signals before you make a final decision.</p></div><ActionLink to={`/report/${run.id}/document`} variant="brand">Open manuscript review</ActionLink></section>}
 
           <div className="signal-check-actions">
             <ActionLink to="/dashboard?queue=checking" variant="quiet">Back to Review Desk</ActionLink>
+            {prepared && !ACTIVE_STATUSES.has(run.status) && <Button variant="secondary" busy={reload.isPending} onClick={() => reload.mutate({ manuscript_id: run.manuscript_id, rubric_id: run.rubric_id })}>Reload source records</Button>}
             {ACTIVE_STATUSES.has(run.status) && <Button variant="danger" disabled={Boolean(run.cancel_requested_at)} onClick={() => setShowCancel(true)}>{run.cancel_requested_at ? "Cancellation requested" : "Cancel check"}</Button>}
           </div>
 
@@ -189,7 +202,7 @@ export function CheckProgressPage() {
               onClose={() => setShowCancel(false)}
               actions={<><Button variant="secondary" disabled={cancel.isPending} onClick={() => setShowCancel(false)}>Keep checking</Button><Button variant="danger" busy={cancel.isPending} onClick={() => cancel.mutate(undefined, { onSuccess: () => setShowCancel(false) })}>Cancel check</Button></>}
             >
-              <div className="signal-dialog-copy"><p>VERIDICAL will stop after the current safe step. It will not create a readiness report.</p><p>Intermediate results and the audit trail are kept; no manuscript file is deleted.</p></div>
+              <div className="signal-dialog-copy"><p>{prepared ? "Stop loading and verifying the source records. Your previous judgments and decisions stay in place." : "VERIDICAL will stop after the current safe step. It will not create a readiness report."}</p><p>Intermediate results and the audit trail are kept; no manuscript file is deleted.</p></div>
             </Dialog>
           )}
         </>

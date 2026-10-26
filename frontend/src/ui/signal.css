@@ -2584,6 +2584,126 @@
     padding: var(--signal-space-6);
   }
 
+  .signal-resolution-card__context,
+  .signal-resolution-options {
+    min-inline-size: 0;
+  }
+
+  .signal-review-progress {
+    display: grid;
+    gap: var(--signal-space-4);
+    padding: var(--signal-space-5);
+    border: var(--signal-border-hairline) solid var(--color-signal-border);
+    border-radius: var(--signal-radius-panel);
+    background: var(--color-signal-surface);
+  }
+
+  .signal-review-progress__heading,
+  .signal-criterion-navigation {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--signal-space-2) var(--signal-space-4);
+  }
+
+  .signal-review-progress h2 {
+    margin: 0;
+    font-family: var(--font-signal-display);
+    font-size: var(--signal-type-body-lg);
+  }
+
+  .signal-review-progress__heading > span,
+  .signal-criterion-navigation > span {
+    color: var(--color-signal-ink-secondary);
+    font-size: var(--signal-type-meta);
+    font-weight: var(--signal-weight-semibold);
+  }
+
+  .signal-review-progress progress {
+    display: block;
+    inline-size: 100%;
+    block-size: var(--signal-space-2);
+    accent-color: var(--color-signal-brand);
+  }
+
+  .signal-review-progress ol {
+    display: grid;
+    grid-template-columns: var(--signal-review-progress-grid);
+    gap: var(--signal-space-4);
+    padding: 0;
+    margin: 0;
+    list-style: none;
+  }
+
+  .signal-review-progress li {
+    display: flex;
+    align-items: flex-start;
+    gap: var(--signal-space-3);
+    color: var(--color-signal-ink-secondary);
+  }
+
+  .signal-review-progress li > span {
+    display: grid;
+    place-items: center;
+    flex-shrink: 0;
+    inline-size: var(--signal-space-6);
+    block-size: var(--signal-space-6);
+    border: var(--signal-border-hairline) solid var(--color-signal-border);
+    border-radius: var(--signal-radius-pill);
+  }
+
+  .signal-review-progress li.is-current > span,
+  .signal-review-progress li.is-complete > span {
+    background: var(--color-signal-foundation);
+    color: var(--color-signal-surface);
+  }
+
+  .signal-review-progress li.is-current {
+    color: var(--color-signal-ink);
+  }
+
+  .signal-review-progress li p {
+    margin: var(--signal-space-1) 0 0;
+    font-size: var(--signal-type-meta);
+  }
+
+  .signal-review-progress > a {
+    justify-self: start;
+    font-weight: var(--signal-weight-semibold);
+  }
+
+  .signal-criterion-navigation {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    border-block-start: var(--signal-border-hairline) solid var(--color-signal-border);
+    padding: var(--signal-space-3) var(--signal-space-4);
+  }
+
+  .signal-criterion-navigation > span {
+    text-align: center;
+  }
+
+  .signal-review-progress--compact {
+    gap: var(--signal-space-3);
+    padding: var(--signal-space-4);
+  }
+
+  .signal-review-progress--compact ol {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: var(--signal-space-2);
+  }
+
+  .signal-review-progress--compact li {
+    display: grid;
+    gap: var(--signal-space-2);
+    font-size: var(--signal-type-meta);
+  }
+
+  .signal-review-progress--compact li p {
+    display: none;
+  }
+
   .signal-resolution-card h3,
   .signal-flag-row h3,
   .signal-result-card h3 {
@@ -3622,6 +3742,17 @@
   .signal-document-analysis {
     display: grid;
     gap: var(--signal-space-4);
+    padding: var(--signal-space-4);
+  }
+
+  .signal-document-analysis .signal-resolution-card {
+    grid-template-columns: minmax(0, 1fr);
+    gap: var(--signal-space-4);
+    padding: var(--signal-space-4);
+  }
+
+  .signal-document-analysis .signal-review-section__heading,
+  .signal-document-analysis .signal-review-section__intro {
     padding: var(--signal-space-4);
   }
 
