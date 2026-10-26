@@ -1,3 +1,5 @@
+# HISTORICAL ONLY: retired by owner scope D-030 (2026-10-13).
+# Outside .github/workflows; never a current scheduled or manual gate.
 name: Production mobile browser verification
 
 on:

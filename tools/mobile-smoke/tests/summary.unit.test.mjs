@@ -3,7 +3,7 @@ import test from "node:test";
 
 import { buildBoundedSummary } from "../write-summary.mjs";
 
-test("bounded result summary uses the executed viewport configuration", () => {
+test("historical result formatter preserves the recorded viewport configuration", () => {
   const summary = buildBoundedSummary(
     "0123456789abcdef0123456789abcdef01234567",
     [

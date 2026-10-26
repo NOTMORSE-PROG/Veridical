@@ -1,7 +1,5 @@
-import { appendFileSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 
-import { loadSmokeConfig } from "./lib/runtime.mjs";
 
 export function buildBoundedSummary(sourceSha, viewports) {
   if (!/^[0-9a-f]{40}$/i.test(sourceSha)) {
@@ -17,7 +15,7 @@ export function buildBoundedSummary(sourceSha, viewports) {
 
   const viewportClaim = viewports.map(({ width, height }) => `${width}x${height}`).join(" and ");
   return [
-    "## Production mobile browser verification",
+    "## Historical production mobile browser verification (retired)",
     "",
     `- Source revision: \`${sourceSha}\``,
     "- Production frontend: byte-equivalent before and after the journey",
@@ -29,17 +27,8 @@ export function buildBoundedSummary(sourceSha, viewports) {
   ].join("\n");
 }
 
-export function main(environment = process.env) {
-  const summaryPath = environment.GITHUB_STEP_SUMMARY;
-  const sourceSha = environment.SOURCE_SHA;
-  if (!summaryPath || !sourceSha) {
-    throw new Error("summary runtime configuration is missing");
-  }
-
-  const config = loadSmokeConfig();
-  appendFileSync(summaryPath, buildBoundedSummary(sourceSha, config.viewports), {
-    encoding: "utf8"
-  });
+export function main() {
+  throw new Error("D-030: Production mobile verification is retired. Desktop keyboard, native zoom and resizable-window checks remain required.");
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {

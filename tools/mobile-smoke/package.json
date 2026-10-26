@@ -8,8 +8,8 @@
   },
   "scripts": {
     "test": "node --test tests/*.unit.test.mjs",
-    "test:production": "playwright test",
-    "verify:deployment": "node verify-deployment.mjs"
+    "test:production": "node retired-production.mjs",
+    "verify:deployment": "node retired-production.mjs"
   },
   "devDependencies": {
     "@playwright/test": "1.63.0"

@@ -1,80 +1,47 @@
-# Production mobile-browser verification
+# Archived mobile-browser verification — retired
 
-This package checks one bounded instructor review journey against the deployed
-VERIDICAL frontend in touch-enabled Chromium at `390x844` and `320x480`.
-It is browser emulation, not evidence from a physical phone, Safari, Firefox,
-iOS, Android, a mobile network, or mobile assistive technology.
+**Owner scope decision D-030 (2026-10-13) supersedes this campaign.**
+VERIDICAL targets desktop/laptop browsers. Phone/tablet compatibility and
+touch-emulation acceptance are not current product or release requirements.
+Desktop keyboard access, visible focus, contrast, native browser zoom and
+resizable-window usability remain required; see [the current scope override](../../FEATURES.md).
 
-## Required configuration
+This package retains historical policy code and offline unit controls. It does
+not establish current desktop acceptance, physical-device behavior or human UAT.
+The former production workflow is preserved in
+[`archive/production-mobile.yml`](archive/production-mobile.yml), outside
+GitHub's `.github/workflows/` discovery directory. It is not scheduled or manually
+dispatchable as an active workflow.
 
-Supply these values only at runtime:
+## Supported offline checks
 
-| Name | Purpose |
-|---|---|
-| `PROD_SMOKE_EMAIL` | Dedicated synthetic instructor account |
-| `PROD_SMOKE_PASSWORD` | Random password for that account |
-| `PROD_SMOKE_CHECK_RUN_ID` | Purpose-seeded synthetic DOCX check run |
-| `PROD_SMOKE_FLAG_ID` | One non-originality finding owned by that run |
-| `PROD_SMOKE_RUBRIC_FAMILY_ID` | Exact synthetic required-format family UUID |
-| `PROD_SMOKE_DIST_DIR` | Exact checked-out frontend build directory |
-| `MOBILE_SMOKE_OUTPUT_DIR` | Disposable scratch directory outside the repository |
-
-The canonical frontend and API origins are pinned as non-secret deployment
-data in `smoke.config.json`. `PROD_WEB_URL` and `PROD_API_URL` are deliberately
-not inputs to this package, including when present in the environment. Moving
-either production endpoint requires a reviewed configuration commit; a local
-V-076 run always targets the checked-in production origins and cannot be
-redirected to an arbitrary staging host.
-
-The account must contain only publication-safe synthetic data, have onboarding
-already dismissed, and have no personal Gemini key. The configured finding is
-still denied until the run's own flag summary proves that its ID matches and
-its kind belongs to `safeFindingKinds` in `smoke.config.json`.
-Static requests are authorized only when their paths occur in that local build
-manifest; the required-format versions request is authorized only for the
-configured synthetic family UUID.
-
-Never point this job at a normal instructor account. The Library, shared-report,
-raw-download, export, settings, upload, grading, decision, resolution,
-onboarding, and unknown routes are deliberately blocked. Eager share-token and
-cross-corpus reuse reads are fulfilled locally with inert schema-valid values
-and are excluded from the test claim. Any WebSocket attempt is closed locally
-and fails the run.
-
-## Local policy checks
+From this directory:
 
 ```sh
-npm ci --ignore-scripts
 npm test
-npm run test:production -- --list
 ```
 
-The authenticated production run is:
+These tests exercise archived request-policy, deployment-fingerprint and
+sanitized-reporting logic using local fixtures and mocked transports, plus the
+retirement guards. They do not authenticate, start a browser or contact
+production. They are archival controls, not a mobile acceptance gate.
 
-```sh
-npm run test:production
-```
+## Retired execution paths
 
-Do not enable traces, screenshots, video, HTML/blob/JSON/JUnit reports, HAR,
-storage state, or artifact uploads. The custom reporter intentionally emits
-only fixed stage and outcome codes.
+`npm run test:production` and `npm run verify:deployment` reject execution with a
+fixed retirement error. The Playwright configuration rejects direct loading
+before reading environment/configuration or collecting tests. The historical
+production spec, warmup and deployment-verification CLI entry points also reject
+execution; an alternate Playwright configuration cannot reactivate the spec.
+The summary CLI cannot append a new successful production result.
 
-Target edges may differ from the integer visual viewport by at most the
-configured one CSS pixel to absorb browser subpixel scroll rounding. Minimum
-size, visibility, enabled state, and unobscured center hit-testing remain
-required.
+No credential, environment variable, flag or opt-in bypass enables this retired
+campaign. Do not supply production credentials or use it as a current gate.
+Original executable source and operating notes are preserved as non-executable
+text under `archive/`; they describe historical procedures, not current setup
+instructions. Policy/helper exports remain for offline unit controls; importing
+them into a new caller does not authorize a production run.
 
-## Deployment-byte check
-
-Build `frontend/dist` from the exact checked-out revision with
-`VITE_API_BASE_URL` unset, then run from the repository root:
-
-```sh
-node tools/mobile-smoke/verify-deployment.mjs frontend/dist
-```
-
-This compares every generated file byte-for-byte with the production edge and
-prints only the source revision, file count, and aggregate manifest digest. It
-does not prove a Vercel control-plane deployment record, the backend source
-revision, or every CDN edge. The workflow runs it immediately before and after
-the authenticated journey.
+Current acceptance should exercise the actual desktop/laptop application with
+keyboard/focus, native browser zoom and resized windows. It must report local,
+deployed, simulated and human-study evidence separately.

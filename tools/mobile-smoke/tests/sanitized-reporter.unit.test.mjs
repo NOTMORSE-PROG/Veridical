@@ -99,8 +99,8 @@ test("does not combine unterminated worker output across test boundaries", async
   assert.equal(output, "V076 TEST PASSED\n");
 });
 
-test("keeps the reporter stage allowlist in parity with the production journey", () => {
-  const source = readFileSync(new URL("./production-mobile.spec.mjs", import.meta.url), "utf8");
+test("preserves reporter stage parity with the archived production journey", () => {
+  const source = readFileSync(new URL("../archive/tests-production-mobile.spec.mjs.txt", import.meta.url), "utf8");
   const emitted = new Set(
     [...source.matchAll(/runStage\(\s*"([A-Z_]+)"/g)].map((match) => match[1]),
   );

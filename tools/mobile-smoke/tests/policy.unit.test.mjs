@@ -14,7 +14,7 @@ const flagId = 7;
 const rubricFamilyId = "123e4567-e89b-42d3-a456-426614174000";
 const staticPaths = new Set(["/assets/app-123.js", "/favicon.svg", "/tip-logo.png"]);
 
-test("the acceptance viewports remain the required ordered pair", () => {
+test("the archived fixture preserves its historical ordered viewport pair", () => {
   assert.deepEqual(config.viewports, [
     { label: "390x844", width: 390, height: 844 },
     { label: "320x480", width: 320, height: 480 }

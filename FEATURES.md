@@ -1,5 +1,14 @@
 # VERIDICAL — Finalized Feature Specification
 
+> **Current platform scope — desktop/laptop only (D-030, owner decision, 2026-10-13).**
+> This override applies to every current and future feature, screen and acceptance
+> requirement in this specification. Phone/tablet compatibility, device emulation
+> and mobile QA are outside the required product scope. Desktop keyboard access,
+> visible focus, contrast, native browser zoom and resizable-window usability
+> remain required. Responsive layout rules may support those desktop needs.
+> Earlier mobile or touch-emulation requirements and results below are historical;
+> they do not define a current release gate or establish desktop acceptance.
+
 > **Purpose of this document:** Finalize the feature set, user flows, tech stack, and testing strategy for VERIDICAL before development starts. It is based on the capstone proposal (`VERIDICAL-DOCUMENTATION.pdf`, Chapters 1–3) plus feasibility research done in July 2026. Items that changed from the proposal are marked and justified so Chapter 3 tables can be updated to match.
 >
 > **Priority legend (NOT build status):** 🟢 **Core** (must ship) · 🟡 **Should-have** (ship if time allows) · ⚪ **Optional** (nice-to-have) · 🔵 **Proposed** (pending adviser approval — not committed)
@@ -311,7 +320,13 @@ the current release. This software-release scope decision does not waive any
 independent adviser or institutional methodology requirement for the capstone
 manuscript.
 
-### 7.5 Production responsive-browser verification
+### 7.5 Historical production responsive-browser evidence — retired gate
+
+This section preserves the dated 2026-09-25 observation. D-030 superseded the
+mobile gate on 2026-10-13. Its scheduled workflow and production entry points are
+retired; the archived campaign is not a current acceptance requirement. Current
+verification targets desktop/laptop keyboard, native zoom and window usability.
+
 - On 2026-09-25, the checked-in production-safe gate passed the named instructor review journey at `320×480` and `390×844` using touch-enabled Chromium emulation against the exact production frontend build. This is same-team Repeatable evidence for that bounded journey.
 - This result does not establish behavior on physical iOS or Android hardware, Safari or Firefox, browser chrome, virtual keyboards, native file pickers or cameras, device safe areas, mobile-network conditions, or mobile assistive technologies.
 - The production account and data used by this gate must be synthetic. Share-token and cross-corpus reuse reads are privacy-neutralized and excluded from the tested claim.
