@@ -10,6 +10,7 @@ import pytest
 from sqlalchemy import select, text
 
 from app.errors import ConflictError, NotFoundError
+from app.models.audit import AuditLog
 from app.models.enums import CheckKind, CheckRunStatus, ReadinessStatus, ResultOutcome
 from app.models.instructor import Instructor
 from app.models.manuscript import Manuscript
@@ -127,6 +128,51 @@ async def _seed_escalated_run(
     await session.commit()
     await aggregate_and_score(session, check_run.id)
     return instructor, check_run, check_result
+
+
+@pytest.mark.parametrize(
+    "resolution,comment,expected_score",
+    [("mark_pass", "", 100), ("mark_fail", "   ", 0), ("mark_pass", " OK ", 100)],
+)
+async def test_ordinary_grades_save_optional_comments_and_audit(
+    session_factory, resolution, comment, expected_score
+):
+    async with session_factory() as session:
+        instructor, run, result = await _seed_escalated_run(session)
+        out = await resolve_escalation_for_run(
+            session, run.id, result.id, instructor.id, resolution, comment
+        )
+        assert out.score == expected_score
+        assert out.report.pending_review_count == 0
+        row = out.report.results[0]
+        assert row.resolution is not None
+        assert row.resolution.reason == comment.strip()
+        assert row.resolution.type == resolution
+        audit = await session.scalar(
+            select(AuditLog).where(AuditLog.event_type == "escalation_resolved")
+        )
+        assert audit.payload["reason"] == comment.strip()
+        assert audit.payload["resolution"] == resolution
+        assert audit.payload["instructor_id"] == instructor.id
+
+
+@pytest.mark.parametrize("resolution", ["needs_document", "accept_majority"])
+async def test_required_reason_rejection_has_no_resolution_or_audit(session_factory, resolution):
+    async with session_factory() as session:
+        instructor, run, result = await _seed_escalated_run(session)
+        with pytest.raises(ConflictError, match="at least"):
+            await resolve_escalation_for_run(
+                session, run.id, result.id, instructor.id, resolution, ""
+            )
+        await session.refresh(result)
+        assert result.outcome == ResultOutcome.escalated
+        assert "resolution" not in result.detail
+        assert (
+            await session.scalar(
+                select(AuditLog).where(AuditLog.event_type == "escalation_resolved")
+            )
+            is None
+        )
 
 
 async def test_escalated_item_excluded_from_score_until_resolved(session_factory):

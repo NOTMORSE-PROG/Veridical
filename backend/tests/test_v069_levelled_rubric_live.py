@@ -191,6 +191,21 @@ async def test_mark_level_resolves_to_the_chosen_rung_and_updates_score_live(ses
         assert panel == []
 
 
+@pytest.mark.parametrize("comment", ["", " OK "])
+async def test_mark_level_needs_only_a_valid_rubric_grade(session_factory, comment):
+    async with session_factory() as session:
+        instructor, run, result, _, _ = await _seed_levelled_run(session)
+        out = await resolve_escalation_for_run(
+            session, run.id, result.id, instructor.id, "mark_level", comment, level=3
+        )
+        assert out.score == 75.0
+        assert out.report.composite_score == 87.5
+        assert out.report.pending_review_count == 0
+        row = next(row for row in out.report.results if row.level is not None)
+        assert row.level.name == "Proficient"
+        assert row.resolution.reason == comment.strip()
+
+
 async def test_mark_level_with_an_unknown_ordinal_is_rejected(session_factory):
     async with session_factory() as session:
         instructor, check_run, escalated_result, _, _ = await _seed_levelled_run(session)

@@ -153,13 +153,13 @@ describe("SignalReportPage", () => {
     // (the original bug: the options vanishing read exactly like success).
     expect(screen.getByRole("heading", { name: "Mark as meets criterion", level: 4 })).toBeInTheDocument();
     expect(screen.getByText("Step 2 of 2: nothing is saved yet")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Confirm resolution" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Save grade" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Cancel" })).toBeInTheDocument();
     // Nothing was submitted by choosing -- the resolve mutation only fires on Confirm.
     expect(screen.getByText("1 unresolved")).toBeInTheDocument();
 
     // The pending state must be announced to assistive tech even though
-    // autoFocus moves keyboard/AT focus straight into the reason textarea
+    // keyboard/AT focus moves to the selected-grade heading
     // on the same render (UX review finding: without this, a screen-reader
     // user never hears "nothing is saved yet" at all). A live region is
     // announced from its CONTENT, not its accessible name (which stays

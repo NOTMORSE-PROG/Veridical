@@ -6,7 +6,13 @@ import json
 from datetime import UTC, datetime
 from pathlib import Path
 
-from app.report.export import _format_date, _source_caption, build_report_pdf
+from app.report.export import (
+    _criterion_flowable,
+    _format_date,
+    _source_caption,
+    _styles,
+    build_report_pdf,
+)
 from app.report.schemas import CriterionResultOut, ReportExportData, ReportOut, ResolutionOut
 
 _FIXTURE = (
@@ -17,6 +23,18 @@ _FIXTURE = (
 )
 
 _RESOLUTION = ResolutionOut(type="mark_pass", reason="Verified manually.", ai_majority_verdict=None)
+
+
+def test_optional_comment_empty_keeps_instructor_resolution_in_export_flowables():
+    """Build paragraphs only: no PDF file is authored by this regression test."""
+    row = _row({"type": "semantic", "kind": "semantic", "has_resolution": True})
+    row.resolution = ResolutionOut(type="mark_pass", reason="", ai_majority_verdict=None)
+    row.reasoning = "SUPERSEDED-AI-REASON"
+    paragraphs = _criterion_flowable(row, _styles("Helvetica"))
+    text = " ".join(part.getPlainText() for part in paragraphs)
+    assert "Marked Pass." in text
+    assert "Resolved by instructor" in text
+    assert "SUPERSEDED-AI-REASON" not in text
 
 
 def _row(case: dict) -> CriterionResultOut:

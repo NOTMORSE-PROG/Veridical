@@ -564,7 +564,7 @@ async def test_resolve_escalation_enforces_the_length_floor_even_bypassing_the_r
         )
         with pytest.raises(ConflictError, match="at least 10 characters"):
             await resolve_escalation_for_run(
-                session, check_run.id, escalated_result_id, instructor.id, "mark_pass", "ok"
+                session, check_run.id, escalated_result_id, instructor.id, "needs_document", "ok"
             )
 
 

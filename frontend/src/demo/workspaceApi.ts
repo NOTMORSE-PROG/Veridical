@@ -2,6 +2,7 @@ import type { AuditLogDetail, FlagOut, ReportOut, ShareLinkOut } from "../api/ty
 import { companionSource, sampleCriteria, sampleEscalatedItems, sampleFlags, sampleInstructor, sampleLibrary, sampleManuscript, sampleReport, sampleRubric, sampleRun, WORKSPACE_SAMPLE } from "./workspaceFixture";
 import { prepareWorkspaceSource } from "./workspacePreparation";
 import { evidenceByImageId, evidenceFor, evidenceSourceHash, publicEvidenceImages, sourceEvidence } from "./sourceEvidence";
+import { RESOLUTION_REASON_MIN_LENGTH } from "../config/ui";
 
 type SampleState = {
   run: typeof sampleRun;
@@ -244,8 +245,10 @@ export function installWorkspaceSample() {
     if (/^\/check-runs\/\d+\/flags$/.test(path)) return json(state.flags.map(flag => ({ ...flag, problem_kind: flag.ai_verdict_summary })));
     if (/^\/check-runs\/\d+\/escalated$/.test(path)) return json(sampleEscalatedItems.filter(item => state.report.results.some(row => row.criterion_id === item.criterion_id && row.outcome === "escalated")));
     if (/\/escalated\/\d+\/resolve$/.test(path) && method === "POST") {
-      if (!textValue(body.reason).trim()) return failure("Enter your reason.");
+      if (body.reason !== undefined && typeof body.reason !== "string") return failure("The instructor comment must be text.");
+      const comment = textValue(body.reason).trim();
       if (!["mark_level", "mark_pass", "mark_fail", "needs_document"].includes(textValue(body.resolution))) return failure("Choose a supported instructor resolution.");
+      if (body.resolution === "needs_document" && comment.length < RESOLUTION_REASON_MIN_LENGTH) return failure(`Enter a reason of at least ${RESOLUTION_REASON_MIN_LENGTH} characters.`);
       const resultId = Number(path.match(/escalated\/(\d+)/)?.[1]);
       const task = sampleEscalatedItems.find(item => item.check_result_id === resultId);
       if (!task) return failure("This criterion does not exist.", 404);
@@ -256,8 +259,8 @@ export function installWorkspaceSample() {
       row.outcome = body.resolution === "needs_document" ? "not_applicable" : body.resolution === "mark_fail" ? "failed" : "passed";
       row.score = row.outcome === "not_applicable" ? null : level ? level.points / criterion.weight * 100 : row.outcome === "passed" ? 100 : 0;
       row.level = level ? { name: level.name, ordinal: level.level, points: level.points, max_points: criterion.weight } : null;
-      row.resolution = { type: body.resolution as NonNullable<typeof row.resolution>["type"], reason: textValue(body.reason), ai_majority_verdict: null };
-      row.basis = "manual"; state.report.decision = null; recalculate(); audit("escalation_resolved", { criterion_id: row.criterion_id, resolution: body.resolution, reason: body.reason, level: body.level }); return write({ check_result_id: resultId, outcome: row.outcome, score: row.score, report: state.report });
+      row.resolution = { type: body.resolution as NonNullable<typeof row.resolution>["type"], reason: comment, ai_majority_verdict: null };
+      row.basis = "manual"; state.report.decision = null; recalculate(); audit("escalation_resolved", { criterion_id: row.criterion_id, resolution: body.resolution, reason: comment, level: body.level }); return write({ check_result_id: resultId, outcome: row.outcome, score: row.score, report: state.report });
     }
     if (/^\/check-runs\/\d+\/decision$/.test(path) && method === "POST") { if (state.report.pending_review_count) return failure("Resolve the outstanding criteria first.", 409); if (!["approved", "returned", "rejected"].includes(textValue(body.decision))) return failure("Choose an instructor decision."); state.report.decision = body.decision as ReportOut["decision"]; state.report.decision_note = textValue(body.note) || null; state.report.decided_at = new Date().toISOString(); recalculate(); audit("decision_recorded", { decision: body.decision, note: body.note }); return write(state.report); }
     if (/^\/check-runs\/\d+\/reopen$/.test(path) && method === "POST") { if (!textValue(body.reason).trim()) return failure("A reason is required."); audit("decision_reopened", { previous_decision: state.report.decision, reason: body.reason }); state.report.decision = null; state.report.decision_note = null; state.report.decided_at = null; recalculate(); return write(state.report); }

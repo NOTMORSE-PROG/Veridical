@@ -72,6 +72,11 @@ describe("resultDisplay", () => {
 });
 
 describe("sourceCaption", () => {
+  it("retains instructor authority when a grade has no optional comment", () => {
+    expect(sourceCaption(row({ basis: "llm", kind: "semantic", resolution: {
+      type: "mark_pass", reason: "", ai_majority_verdict: "fail",
+    } }))).toBe("Resolved by instructor");
+  });
   it("identifies a document review without suggesting model grading", () => {
     expect(sourceCaption(row({ basis: "document_review", kind: "semantic" }))).toBe("Document review");
   });

@@ -3,7 +3,7 @@
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from app.config import get_settings
 
@@ -367,29 +367,26 @@ class ResolveEscalationIn(BaseModel):
     # "mark_level" (V-069 AC4): the resolution vocabulary for a levelled
     # criterion — requires `level` below.
     resolution: Literal["accept_majority", "mark_pass", "mark_fail", "needs_document", "mark_level"]
-    # Router validates presence (CODING.md §1) so the service's own check
-    # is defense-in-depth, not the primary gate.
-    reason: str = Field(min_length=1)
+    # Ordinary grades may omit comments; retain a string in reports/audit.
+    reason: str = ""
     # V-069 AC4: required (and only meaningful) when resolution is
     # "mark_level" — the level's own ordinal, matched against the
     # criterion's own scale server-side (never trusted as a name/points
     # pair the client could get wrong).
     level: int | None = None
 
-    # BUG-096: `min_length=1` let a single character ("x") satisfy a field
-    # labelled "Reason (required)" -- accepted, then published verbatim to
-    # the report, the exported PDF, and the public share link. A real
-    # floor (`resolution_reason_min_length`, config.py, not hardcoded here
-    # per rule 7) is crude but honest about what "required" was supposed
-    # to mean.
     @field_validator("reason")
     @classmethod
-    def _reason_meets_the_minimum(cls, value: str) -> str:
-        stripped = value.strip()
-        minimum = get_settings().resolution_reason_min_length
-        if len(stripped) < minimum:
-            raise ValueError(f"reason must be at least {minimum} characters")
-        return stripped
+    def _normalize_comment(cls, value: str) -> str:
+        return value.strip()
+
+    @model_validator(mode="after")
+    def _exception_reason_meets_the_minimum(self) -> "ResolveEscalationIn":
+        if self.resolution in {"needs_document", "accept_majority"}:
+            minimum = get_settings().resolution_reason_min_length
+            if len(self.reason) < minimum:
+                raise ValueError(f"reason must be at least {minimum} characters")
+        return self
 
 
 class ResolveEscalationOut(BaseModel):

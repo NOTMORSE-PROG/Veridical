@@ -215,22 +215,22 @@ async def resolve_escalation(
     reflect the human decision, which is what `aggregate_and_score`
     actually counts.
     """
-    # Reason presence/length is primarily enforced by the router's request
-    # schema (`ResolveEscalationIn`'s `field_validator`, CODING.md §1:
-    # routers validate); this is a defensive second check for any other
-    # caller of this service function. backend review finding (BUG-096
-    # review): this used to check presence only, so a caller that bypassed
-    # the schema would still let a one-character reason through -- the
-    # exact defect BUG-096 fixed at the schema layer, reopened one layer
-    # down.
+    # Match the action-dependent schema for direct service callers too.
+    # Ordinary grades may omit comments; exceptional resolutions need reasons.
     settings = settings or get_settings()
-    if not reason or len(reason.strip()) < settings.resolution_reason_min_length:
-        raise ConflictError(
-            f"A reason of at least {settings.resolution_reason_min_length} characters is "
-            "required to resolve an escalated item."
-        )
     if resolution not in _VALID_RESOLUTIONS:
         raise ConflictError(f"Unknown resolution {resolution!r}.")
+    if not isinstance(reason, str):
+        raise ConflictError("The instructor comment must be text.")
+    reason = reason.strip()
+    if (
+        resolution in {RESOLUTION_NEEDS_DOCUMENT, RESOLUTION_ACCEPT_MAJORITY}
+        and len(reason) < settings.resolution_reason_min_length
+    ):
+        raise ConflictError(
+            f"A reason of at least {settings.resolution_reason_min_length} characters is "
+            "required for this resolution."
+        )
 
     result = await session.get(CheckResult, check_result_id)
     if result is None or result.check_run_id != check_run_id:

@@ -15,6 +15,30 @@ const resolveAll = async (reason = "Instructor judgment after reading the origin
 };
 
 describe("real-interface sample API boundary", () => {
+  it.each([undefined, "", "   ", " OK "])("saves an ordinary grade with optional comment %s and preserves it on reload", async reason => {
+    const network = start();
+    const saved = await call("/check-runs/1/escalated/101/resolve", "POST", { resolution: "mark_level", level: 3, ...(reason === undefined ? {} : { reason }) });
+    expect(saved.response.status).toBe(200);
+    expect(saved.data.report.pending_review_count).toBe(3);
+    expect(saved.data.report.results[0].resolution).toMatchObject({ type: "mark_level", reason: reason?.trim() ?? "" });
+    window.fetch = network;
+    installWorkspaceSample();
+    const report = (await call("/check-runs/1/report")).data;
+    expect(report.results[0].resolution.reason).toBe(reason?.trim() ?? "");
+    expect(report.results[0].level.ordinal).toBe(3);
+    expect((await call("/check-runs/1/escalated")).data).toHaveLength(3);
+    const share = (await call("/check-runs/1/share", "POST", { expires_at: null })).data;
+    const publicRow = (await call(`/shared/${share.token}/report`)).data.report.results[0];
+    expect(publicRow.resolved).toBe(true);
+    expect(publicRow).not.toHaveProperty("resolution");
+  });
+
+  it.each([undefined, "", "   ", "OK"])("still requires a substantive exclusion reason: %s", async reason => {
+    start();
+    expect((await call("/check-runs/1/escalated/101/resolve", "POST", { resolution: "needs_document", reason })).response.status).toBe(422);
+    expect((await call("/check-runs/1/report")).data.pending_review_count).toBe(4);
+    expect((await call("/check-runs/1/report")).data.results[0].resolution).toBeNull();
+  });
   it("separately allowlists shared images and denies wrong IDs, selectors, corrupted bytes and revoked access", async () => {
     vi.stubGlobal("crypto", webcrypto);
     const network = start();

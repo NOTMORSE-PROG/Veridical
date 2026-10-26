@@ -99,6 +99,37 @@ function reportWith(overrides: Record<string, unknown>) {
 describe("SignalEscalatedPanel / SignalResolutionCard", () => {
   afterEach(() => vi.unstubAllGlobals());
 
+  it.each([
+    [LEVELLED_ITEM, "Proficient", "mark_level", 3],
+    [REAL_MAJORITY, "Meets criterion", "mark_pass", undefined],
+    [REAL_MAJORITY, "Does not meet", "mark_fail", undefined],
+  ] as const)("saves an ordinary grade without a comment: %s / %s", async (item, choice, resolution, level) => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input).includes("/resolve") && init?.method === "POST") {
+        return new Response(JSON.stringify({ detail: "Save failed; try again." }), { status: 409 });
+      }
+      return new Response(JSON.stringify([item]), { status: 200 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    renderWithProviders(<SignalEscalatedPanel checkRunId={5} />);
+    fireEvent.click(await screen.findByRole("button", { name: choice }));
+    const comment = screen.getByRole("textbox", { name: "Comment (optional)" });
+    expect(comment).not.toHaveFocus();
+    expect(screen.getByRole("heading", { level: 4 })).toHaveFocus();
+    expect(fetchMock.mock.calls.some(([, init]) => init?.method === "POST")).toBe(false);
+    fireEvent.click(screen.getByRole("button", { name: "Save grade" }));
+    await screen.findByText("Could not save this resolution");
+    const post = fetchMock.mock.calls.find(([, init]) => init?.method === "POST");
+    expect(JSON.parse(post![1]!.body as string)).toEqual({ resolution, reason: "", ...(level ? { level } : {}) });
+    expect(comment).toHaveValue("");
+    // A failed save retains both the chosen grade and an optional draft.
+    fireEvent.change(comment, { target: { value: "OK" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save grade" }));
+    await waitFor(() => expect(fetchMock.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(2));
+    expect(comment).toHaveValue("OK");
+    expect(screen.getByRole("heading", { level: 4 })).toBeInTheDocument();
+  });
+
   it("shows one readable criterion in focused mode and protects an unsaved judgment during navigation", async () => {
     vi.stubGlobal("fetch", stubFetchByPath({ "/check-runs/5/escalated": [REAL_MAJORITY, LEVELLED_ITEM] }));
     renderWithProviders(<SignalEscalatedPanel checkRunId={5} focused />);
@@ -108,7 +139,7 @@ describe("SignalEscalatedPanel / SignalResolutionCard", () => {
     expect(screen.getByRole("heading", { name: LEVELLED_ITEM.criterion_text })).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Proficient" }));
     expect(screen.getByRole("button", { name: "Previous criterion" })).toBeDisabled();
-    fireEvent.change(screen.getByLabelText("Reason (required)"), { target: { value: "My unsaved review reason." } });
+    fireEvent.change(screen.getByLabelText("Comment (optional)"), { target: { value: "My unsaved review reason." } });
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
     expect(screen.getByRole("button", { name: "Previous criterion" })).toBeEnabled();
     fireEvent.click(screen.getByRole("button", { name: "Previous criterion" }));
@@ -313,10 +344,10 @@ describe("SignalEscalatedPanel / SignalResolutionCard", () => {
     // "resolution pending" sentence -- an instructor picking among four
     // levels needs to see WHICH one is about to be confirmed.
     expect(await screen.findByRole("heading", { name: "Proficient", level: 4 })).toBeInTheDocument();
-    fireEvent.change(screen.getByRole("textbox", { name: "Reason (required)" }), {
+    fireEvent.change(screen.getByRole("textbox", { name: "Comment (optional)" }), {
       target: { value: "Read it myself: previews structure but isn't engaging." },
     });
-    fireEvent.click(screen.getByRole("button", { name: "Confirm resolution" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save grade" }));
 
     await waitFor(() =>
       expect(fetchMock).toHaveBeenCalledWith(
@@ -429,6 +460,15 @@ it("shows a recorded rubric level without claiming that Developing meets the cri
   expect(screen.getByText("Rubric level recorded")).toBeInTheDocument();
   expect(screen.getByText("Developing")).toBeInTheDocument();
   expect(screen.queryByText("Meets criterion")).not.toBeInTheDocument();
+});
+
+it("identifies an instructor grade even when its optional comment is empty", () => {
+  renderWithProviders(<SignalCriteriaResults checkRunId={1} results={[{
+    ...sampleReport.results[0], outcome: "passed",
+    resolution: { type: "mark_level", reason: "", ai_majority_verdict: null },
+  }]} />);
+  expect(screen.getByText("Grade recorded by instructor.")).toBeInTheDocument();
+  expect(screen.queryByText("Instructor resolution:")).not.toBeInTheDocument();
 });
 
 

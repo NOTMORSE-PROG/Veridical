@@ -159,6 +159,52 @@ def test_get_report_returns_the_full_shape(logged_in_with_a_done_run):
     assert body["rubric_is_current"] is True
 
 
+def test_ordinary_grade_http_request_can_omit_comment(logged_in_with_a_done_run, api_scratch_url):
+    import asyncio
+
+    from sqlalchemy import select
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
+    from app.db import sqlalchemy_url
+    from app.models.enums import ResultOutcome
+    from app.models.run import CheckResult
+    from app.report.service import aggregate_and_score
+
+    client, run_id = logged_in_with_a_done_run
+
+    async def make_pending():
+        engine = create_async_engine(sqlalchemy_url(api_scratch_url))
+        try:
+            async with async_sessionmaker(engine, expire_on_commit=False)() as session:
+                row = await session.scalar(
+                    select(CheckResult).where(CheckResult.check_run_id == run_id)
+                )
+                row.outcome = ResultOutcome.escalated
+                row.score = None
+                row.detail = {
+                    "basis": "llm",
+                    "verdict": "pass",
+                    "agreement": 0.5,
+                    "votes": ["pass", "fail"],
+                    "reasoning": "Prior model explanation remains historical.",
+                }
+                await session.commit()
+                await aggregate_and_score(session, run_id)
+                return row.id
+        finally:
+            await engine.dispose()
+
+    result_id = asyncio.run(make_pending())
+    response = client.post(
+        f"/check-runs/{run_id}/escalated/{result_id}/resolve", json={"resolution": "mark_pass"}
+    )
+    assert response.status_code == 200
+    report = response.json()["report"]
+    assert report["pending_review_count"] == 0
+    assert report["results"][0]["resolution"]["reason"] == ""
+    assert report["results"][0]["resolution"]["type"] == "mark_pass"
+
+
 def test_decision_route_requires_auth(client):
     resp = client.post("/check-runs/1/decision", json={"decision": "approved"})
     assert resp.status_code == 401
