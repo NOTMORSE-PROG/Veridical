@@ -14,7 +14,7 @@ import { systemFindingCopy } from "../domain/systemFindingCopy";
 import { useFlag } from "../flags/useFlag";
 import { FlagReviewActions } from "../flags/FlagDetail";
 import { isWorkspaceSample } from "../demo/workspaceFixture";
-import { criterionSource, evidenceById, evidenceFor, evidenceRegion } from "../demo/sourceEvidence";
+import { criterionSource, evidenceById, evidenceFor, evidenceRegion, flagSourcePagePair } from "../demo/sourceEvidence";
 import { SavedSourceEvidence, SourcePageComparison } from "./SavedSourceEvidence";
 import { useReviewWorkspaceCapacity } from "./useReviewWorkspaceCapacity";
 import { SignalDecisionPanel } from "../report/SignalDecisionPanel";
@@ -208,7 +208,7 @@ function SelectedFinding({ checkRunId, finding, total, locationFlagId, region, p
         <div><dt>Check</dt><dd>{kindMeta.eyebrow}</dd></div>
         <div><dt>How exact is this location?</dt><dd>{precision.label}</dd></div>
         <div><dt>Selected source location</dt><dd>{region?.page ? `PDF page ${region.page}` : instructorAnchor(flag.page_anchor)}</dd></div>
-        <div><dt>Evidence type</dt><dd>{flag.source_evidence?.some(entry => entry.role === "statement_b") ? "Saved manuscript statements A and B" : comparative ? flag.passage_pair ? "Recorded passage comparison" : "Comparison without a stored pair" : "Single-location check"}</dd></div>
+        <div><dt>Evidence type</dt><dd>{flag.source_evidence?.some(entry => entry.role === "statement_b") ? "Saved manuscript statements A and B" : (flag.source_evidence?.length ?? 0) > 1 ? "Saved manuscript evidence" : comparative ? flag.passage_pair ? "Recorded passage comparison" : "Comparison without a stored pair" : "Single-location check"}</dd></div>
       </dl>
       <p className="signal-document-precision-note"><strong>{precision.label}.</strong> {precision.helper}</p>
       {finding.flags.length > 1 && (
@@ -485,7 +485,7 @@ export function SignalDocumentViewerPage() {
     setSourceSelection(previous => ({ run: id, kind: "criterion", subjectId: criterionId, entry: region && saved ? saved : undefined, region, attempt: (previous?.attempt ?? 0) + 1 }));
   }
   const activeSource = sourceSelection?.run === id && (isDecision ? sourceSelection.kind === "criterion" : sourceSelection.kind === "flag" && sourceSelection.subjectId === selectedLocationId) ? sourceSelection : undefined;
-  const pairSources = isWorkspaceSample() && viewer?.available && activeSource?.entry && activeSource.region && activeSource.kind === "flag" && selectedFinding?.representative.check_kind === "internal_agreement" ? evidenceFor("flag", activeSource.subjectId).filter(entry => (entry.role === "statement_a" || entry.role === "statement_b") && evidenceRegion(entry, { run: id, manuscript: viewer.manuscript_id, sourceHash: viewer.source_sha256, kind: "flag", subjectId: activeSource.subjectId, role: entry.role, index: entry.evidence_index, quote: entry.quote, anchor: entry.anchor }, activeSource.subjectId)) : [];
+  const pairSources = isWorkspaceSample() && viewer?.available && activeSource?.entry && activeSource.region && activeSource.kind === "flag" ? flagSourcePagePair(evidenceFor("flag", activeSource.subjectId), { run: id, manuscript: viewer.manuscript_id, sourceHash: viewer.source_sha256, flagId: activeSource.subjectId }) : [];
   const wideComparison = capacity.split && pairSources.length === 2 && !showFullSource;
   useEffect(() => setShowFullSource(false), [selectedLocationId]);
   const expandedMatch = excludedMatchesQuery.data?.matches.find((match) => match.id === expandedMatchId) ?? null;

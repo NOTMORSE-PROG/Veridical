@@ -28,6 +28,19 @@ export function criterionSource(criterionId: number, evidence: EvidenceItem) {
   return evidenceFor("criterion", criterionId).find(entry => entry.quote === evidence.quote && entry.anchor === evidence.anchor);
 }
 
+export function flagSourcePagePair(candidates: readonly BoundSourceEvidence[], context: { run: number; manuscript: number; sourceHash: string | undefined; flagId: number }): BoundSourceEvidence[] {
+  if (candidates.length !== 2 || new Set(candidates.map(entry => entry.evidence_id)).size !== 2) return [];
+  const pair: BoundSourceEvidence[] = [];
+  for (const entry of candidates) {
+    const saved = evidenceById(entry.evidence_id);
+    if (!saved || !saved.image_id || !saved.image_sha256 || saved.page === null || saved.page < 1 || !["page_bbox", "page_only"].includes(saved.precision)) return [];
+    if (entry.page !== saved.page || entry.image_id !== saved.image_id || entry.image_sha256 !== saved.image_sha256) return [];
+    if (!evidenceRegion(entry, { run: context.run, manuscript: context.manuscript, sourceHash: context.sourceHash, kind: "flag", subjectId: context.flagId, role: entry.role, index: entry.evidence_index, quote: entry.quote, anchor: entry.anchor }, context.flagId)) return [];
+    pair.push(saved);
+  }
+  return pair;
+}
+
 export function publicEvidenceImages(): PublicEvidenceImageOut[] {
   return sourceEvidence.filter(entry => entry.public_sample === true && entry.source_sha256 === evidenceSourceHash && entry.check_run_id === manifest.check_run_id && entry.manuscript_id === manifest.manuscript_id).map(entry => ({ evidence_id: entry.evidence_id, image_id: entry.image_id, image_sha256: entry.image_sha256, image_width: entry.image_width, image_height: entry.image_height, quote: entry.quote, anchor: entry.anchor, page: entry.page, label: `${entry.subject.kind === "criterion" ? "Criterion" : "Finding"} ${entry.subject.id}: ${entry.label}`, precision: entry.precision, precision_note: entry.precision_note }));
 }

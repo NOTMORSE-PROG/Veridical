@@ -27,8 +27,8 @@ export function SavedSourceEvidence({ entries, onSelect, presentedEvidenceIds = 
 }
 
 export function SourcePageComparison({ entries, selectedId, onReadFull }: { entries: BoundSourceEvidence[]; selectedId?: string; onReadFull: () => void }) {
-  return <section className="signal-source-page-comparison" aria-label="Original comparison pages">
-    <div className="signal-source-page-comparison__toolbar"><strong>Original manuscript pages</strong><Button variant="secondary" onClick={onReadFull}>Read full manuscript</Button></div>
+  return <section className="signal-source-page-comparison" aria-label="Original evidence pages">
+    <div className="signal-source-page-comparison__toolbar"><strong>Original evidence pages</strong><Button variant="secondary" onClick={onReadFull}>Read full manuscript</Button></div>
     <div className="signal-source-page-comparison__pages">{entries.map(entry => <figure key={entry.evidence_id} data-selected={selectedId === entry.evidence_id}>
       <figcaption><strong>{entry.label}</strong><span>PDF page {entry.page} · {entry.precision === "page_bbox" ? "Exact quotation boxed" : "Page only; no exact mark"}</span></figcaption>
       {entry.image_id ? <img src={`/sample-assets/evidence/${entry.image_id}.png`} alt={`Original manuscript PDF page ${entry.page}; ${entry.label}. ${entry.precision_note}`} /> : <p>Source page image unavailable.</p>}

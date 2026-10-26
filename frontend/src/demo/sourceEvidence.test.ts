@@ -3,10 +3,30 @@ import { describe, expect, it } from "vitest";
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { criterionSource, evidenceFor, evidenceRegion, publicEvidenceImages, sourceEvidence } from "./sourceEvidence";
+import { criterionSource, evidenceFor, evidenceRegion, flagSourcePagePair, publicEvidenceImages, sourceEvidence } from "./sourceEvidence";
 import { criterionAnchorRegion } from "../document/criterionAnchor";
 
 describe("complete public source bindings", () => {
+  it("pairs the saved claim and reference context without inventing an external citation", () => {
+    const entries = evidenceFor("flag", 4);
+    const context = { run: 1, manuscript: 1, sourceHash: entries[0].source_sha256, flagId: 4 };
+    expect(flagSourcePagePair(entries, context).map(entry => [entry.role, entry.page, entry.label])).toEqual([
+      ["single", 7, "Unidentified supporting-study claim"],
+      ["context", 109, "Reference section as published"],
+    ]);
+    for (const change of [{ run: 2 }, { manuscript: 202 }, { sourceHash: "changed" }, { flagId: 1 }]) expect(flagSourcePagePair(entries, { ...context, ...change })).toEqual([]);
+    for (const change of [{ page: 1 }, { image_id: "invented" }, { image_sha256: "changed" }, { quote: "prefix" }, { role: "statement_b" }]) expect(flagSourcePagePair([{ ...entries[0], ...change }, entries[1]], context)).toEqual([]);
+    expect(flagSourcePagePair(entries.slice(0, 1), context)).toEqual([]);
+    expect(flagSourcePagePair([...entries, entries[0]], context)).toEqual([]);
+    expect(flagSourcePagePair([entries[0], entries[0]], context)).toEqual([]);
+  });
+
+  it("retains the original statement pair and separate saved boxes on one page", () => {
+    for (const flagId of [1, 3]) {
+      const entries = evidenceFor("flag", flagId);
+      expect(flagSourcePagePair(entries, { run: 1, manuscript: 1, sourceHash: entries[0].source_sha256, flagId })).toEqual(entries);
+    }
+  });
   it("retains each criterion/statement, exact geometry qualifications and content-addressed images", () => {
     expect(sourceEvidence).toHaveLength(18);
     expect(sourceEvidence.filter(entry => entry.precision === "page_bbox")).toHaveLength(17);
