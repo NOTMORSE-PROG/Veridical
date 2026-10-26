@@ -35,8 +35,23 @@ from app.llm.router import router as llm_router
 from app.ml.embeddings import get_embedding_model
 from app.pipeline.router import router as pipeline_router
 from app.pipeline.worker import worker_loop
+from app.report.router import (
+    get_manuscript_docx_image_route,
+    get_manuscript_file_route,
+    get_manuscript_page_text_route,
+    get_manuscript_paragraphs_route,
+    get_manuscript_viewer_route,
+    list_reuse_passage_matches_route,
+)
 from app.report.router import router as report_router
 from app.rubric.router import router as rubric_router
+from app.rubric.router import (
+    rubric_document_route,
+    rubric_image_route,
+    rubric_original_route,
+    rubric_paragraphs_route,
+    rubric_pdf_route,
+)
 from app.settings.router import router as settings_router
 from app.share.router import (
     PUBLIC_SHARE_PATH_PREFIX,
@@ -48,6 +63,22 @@ from app.share.router import (
 )
 
 _ALEMBIC_INI = Path(__file__).resolve().parent.parent / "alembic.ini"
+_PRIVATE_DOCUMENT_CACHE_CONTROL = "private, no-store"
+_PRIVATE_DOCUMENT_ENDPOINTS = frozenset(
+    {
+        get_manuscript_viewer_route,
+        list_reuse_passage_matches_route,
+        get_manuscript_paragraphs_route,
+        get_manuscript_page_text_route,
+        get_manuscript_docx_image_route,
+        get_manuscript_file_route,
+        rubric_document_route,
+        rubric_paragraphs_route,
+        rubric_pdf_route,
+        rubric_original_route,
+        rubric_image_route,
+    }
+)
 
 
 def _upgrade_to_head() -> None:
@@ -197,7 +228,7 @@ if _cors_origins:
 async def add_public_share_response_headers(
     request: Request, call_next: RequestResponseEndpoint
 ) -> Response:
-    """Prevent caching of Library files and indexing of bearer-token reports.
+    """Prevent source-document caching and indexing of bearer-token reports.
 
     Starlette's user middleware wraps its handled-exception middleware, so
     this applies after successful routing and the global VeridicalError
@@ -220,8 +251,10 @@ async def add_public_share_response_headers(
     if is_public_share:
         for name, value in PUBLIC_SHARE_RESPONSE_HEADERS:
             response.headers[name] = value
-    if is_library:
-        response.headers["Cache-Control"] = "private, no-store"
+    # Routing populates endpoint before dependencies or validation can fail.
+    # Inspect it after call_next so handled errors use the source policy too.
+    if is_library or request.scope.get("endpoint") in _PRIVATE_DOCUMENT_ENDPOINTS:
+        response.headers["Cache-Control"] = _PRIVATE_DOCUMENT_CACHE_CONTROL
     return response
 
 
