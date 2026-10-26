@@ -14,12 +14,13 @@ export function SharedReportContent({ data, token }: { data: SharedReportOut; to
   const { report, flags } = data;
   const evidence = associateSharedEvidence(data.evidence_images ?? [], report, flags);
   const chosen = report.results.find(row => String(row.criterion_id) === params.get("criterion")) ?? report.results[0];
+  const chosenId = chosen?.criterion_id;
   const focusRequested = useRef(false);
   useEffect(() => {
     if (!focusRequested.current) return;
-    document.getElementById(section === "findings" ? "flags-heading" : chosen ? "shared-selected-grade" : "shared-grades-heading")?.focus();
+    document.getElementById(section === "findings" ? "flags-heading" : chosenId !== undefined ? "shared-selected-grade" : "shared-grades-heading")?.focus();
     focusRequested.current = false;
-  }, [section, chosen?.criterion_id]);
+  }, [section, chosenId]);
   function select(key: string, value: string) {
     focusRequested.current = true;
     const next = new URLSearchParams(params); next.set(key, value); setParams(next);
