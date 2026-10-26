@@ -153,7 +153,7 @@ describe("optional comparison workspace navigation", () => {
     expect(document.getElementById("manuscript-panel")).toBe(source);
     expect(fetch.mock.calls.every(([, init]) => !init?.method || init.method === "GET")).toBe(true);
   });
-  it("places View review after its narrow pane commits, without relying on an early animation frame", async () => {
+  it("returns through the review tab without a duplicate selection strip or early-frame focus transfer", async () => {
     vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockImplementation(function (this: HTMLElement) {
       return this.classList.contains("signal-document-workbench") ? 700 : 0;
     });
@@ -170,8 +170,12 @@ describe("optional comparison workspace navigation", () => {
     fireEvent.click(screen.getByRole("tab", { name: "Manuscript" }));
     await waitFor(() => expect(screen.getByRole("tab", { name: "Manuscript" })).toHaveAttribute("aria-selected", "true"));
     vi.spyOn(window, "requestAnimationFrame").mockImplementation((callback) => { callback(performance.now()); return 0; });
-    const action = screen.getByRole("button", { name: "View review" }); action.focus(); fireEvent.click(action);
-    await waitFor(() => expect(screen.getByRole("heading", { name: "High passage similarity" })).toHaveFocus());
+    expect(document.querySelector(".signal-document-selection-strip")).toBeNull();
+    expect(screen.queryByRole("button", { name: "View review" })).not.toBeInTheDocument();
+    const action = screen.getByRole("tab", { name: /^Review\./ }); action.focus(); fireEvent.click(action);
+    await waitFor(() => expect(action).toHaveAttribute("aria-selected", "true"));
+    expect(action).toHaveFocus();
+    expect(screen.getByRole("heading", { name: "High passage similarity" })).toBeVisible();
     expect(screen.getByText("Comparison lead 31 of 31. Record #69.")).toBeVisible();
   });
   it("starts comparison-only review with the actual evidence index and no empty queue scaffolding", async () => {

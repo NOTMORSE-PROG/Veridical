@@ -117,8 +117,7 @@ export function SignalReportPage() {
           <p role="status" aria-live="polite" className={missingSourceAction ? undefined : "sr-only"}>{missingSourceAction ? "The original source action is no longer available. Review the current report below." : ""}</p>
           <ReportAssessmentContext notices={reportAssessmentNotices(report, "report")} />
           <section className="signal-report-hero" aria-labelledby="readiness-band-heading" aria-describedby={readFailed ? "report-read-failure" : undefined}>
-            <div className="signal-report-hero__branch" aria-hidden="true"><i /><i /><i /></div>
-            <div><p className="signal-section-kicker">{readFailed ? "Last loaded readiness band" : scopeUnconfirmed ? "Saved readiness band" : "VERIDICAL readiness band"}</p><h2 id="readiness-band-heading">{report.status === "ready" ? "Ready" : report.status === "conditionally_ready" ? "Conditionally Ready" : report.status === "not_ready" ? "Not Ready" : "Needs Review"}</h2><p>{report.reason ?? "This band is derived from the recorded criterion outcomes and integrity signals. Review the evidence below before deciding."}</p><RuleScopeSummary rows={report.results} checkRunId={id} /></div>
+            <div className="signal-report-hero__summary"><p className="signal-section-kicker">{readFailed ? "Last loaded readiness band" : scopeUnconfirmed ? "Saved readiness band" : "VERIDICAL readiness band"}</p><h2 id="readiness-band-heading">{report.status === "ready" ? "Ready" : report.status === "conditionally_ready" ? "Conditionally Ready" : report.status === "not_ready" ? "Not Ready" : "Needs Review"}</h2><p>{report.reason ?? "This band is derived from the recorded criterion outcomes and integrity signals. Review the evidence below before deciding."}</p><RuleScopeSummary rows={report.results} checkRunId={id} /></div>
             <dl>
               <div><dt>Unresolved criteria</dt><dd>{report.pending_review_count}</dd></div>
               <div>
@@ -128,7 +127,7 @@ export function SignalReportPage() {
                     <Link
                       to={{ pathname: location.pathname, search: highFindingsSearch.toString(), hash: "integrity-signals" }}
                       onClick={(event) => focusReportJumpTarget(event, { scrollIntoView: true })}
-                      className="signal-report-hero__kpi-link signal-on-dark"
+                      className="signal-report-hero__kpi-link"
                       aria-label={`Open high-severity findings counted for readiness: ${report.unresolved_high_flag_count}. Show the High severity filter, including review leads that are not scored.`}
                     >
                       {report.unresolved_high_flag_count}
@@ -139,8 +138,8 @@ export function SignalReportPage() {
               </div>
               <div><dt>Instructor decision</dt><dd>{report.decision ? "Recorded" : "Not recorded"}</dd></div>
             </dl>
-            <div className="signal-control-cluster signal-report-task-actions"><Link className="signal-on-dark" to={jumpTo(taskTarget)} onClick={focusReportJumpTarget}>{taskLabel}</Link>
-              {limits.length > 0 && <Link className="signal-on-dark" to={jumpTo("coverage-statement-heading")} onClick={focusReportJumpTarget}>{limits.length} assessment {limits.length === 1 ? "limit" : "limits"}</Link>}
+            <div className="signal-control-cluster signal-report-task-actions"><Link to={jumpTo(taskTarget)} onClick={focusReportJumpTarget}>{taskLabel}</Link>
+              {limits.length > 0 && <Link to={jumpTo("coverage-statement-heading")} onClick={focusReportJumpTarget}>{limits.length} assessment {limits.length === 1 ? "limit" : "limits"}</Link>}
             </div>
           </section>
 

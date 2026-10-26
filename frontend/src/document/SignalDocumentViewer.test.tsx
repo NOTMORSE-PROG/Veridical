@@ -105,6 +105,25 @@ function stubViewer(viewer: ManuscriptViewerOut = VIEWER, report: ReportOut = RE
 }
 
 describe("SignalDocumentViewerPage", () => {
+  it("keeps the selected record qualification associated outside the bounded reading workspace", async () => {
+    vi.stubGlobal("fetch", stubFetchByPath({
+      "/check-runs/5/document": VIEWER, "/check-runs/5/report": REPORT,
+      "/check-runs/5/escalated": [], "/check-runs/5/flags": [SUMMARY],
+      "/check-runs/5/document/reuse-matches": { passage_archive_size_n: 8, matches: [] },
+      "/flags/7": { ...FLAG, llm_mode: "fake" },
+    }));
+    renderWithProviders(<SignalDocumentViewerPage />, { route: "/report/5/document?finding=7", path: "/report/:checkRunId/document" });
+    await screen.findByText("Test-mode AI responses");
+    const frame = screen.getByRole("region", { name: "Manuscript and review" });
+    await waitFor(() => expect(frame).toHaveAttribute("aria-describedby"));
+    const qualification = document.getElementById(frame.getAttribute("aria-describedby")!)!;
+    expect(qualification).toHaveTextContent(/fixtures instead of real AI grading/);
+    expect(frame).not.toContainElement(qualification);
+    expect(qualification.nextElementSibling).toBe(frame);
+    expect(document.querySelectorAll(".signal-flag-mode")).toHaveLength(1);
+    expect(document.querySelector(".signal-document-selection-strip")).toBeNull();
+  });
+
   it("keeps an edited pending criterion draft through text, current PDF and selected PDF return", async () => {
     const row: CriterionResultOut = {
       criterion_id: 1, check_result_id: 41, text: "Pending evidence judgment", type: "semantic", kind: "semantic",

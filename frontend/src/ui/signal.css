@@ -2485,56 +2485,54 @@
   }
 
   .signal-report-hero {
-    position: relative;
-    display: grid;
-    grid-template-columns: minmax(0, 1fr);
+    display: flex;
+    flex-wrap: wrap;
     gap: var(--signal-space-5);
-    overflow: hidden;
-    border-block-start: var(--signal-border-brand) solid var(--color-signal-brand);
+    border: var(--signal-border-hairline) solid var(--color-signal-border);
     border-radius: var(--signal-radius-panel);
-    background: var(--color-signal-foundation);
-    color: var(--color-signal-surface);
+    background: var(--color-signal-surface);
+    color: var(--color-signal-ink);
     padding: var(--signal-space-5);
-    box-shadow: var(--signal-shadow-raised);
+  }
+
+  .signal-report-hero__summary {
+    flex: 2 1 var(--signal-flag-evidence-basis);
+    min-inline-size: min(100%, var(--signal-flag-evidence-basis));
   }
 
   .signal-report-hero h2 {
     max-width: var(--signal-prose-width);
     margin: var(--signal-space-2) 0;
-    color: var(--color-signal-brand);
+    color: var(--color-signal-ink);
     font-family: var(--font-signal-display);
     font-size: var(--signal-type-page);
     letter-spacing: var(--signal-tracking-display);
     line-height: var(--signal-line-page);
   }
 
-  .signal-report-hero p:not(.signal-section-kicker) {
+  .signal-report-hero p {
     max-width: var(--signal-prose-width);
     margin: 0;
-    color: var(--color-signal-surface-muted);
+    color: var(--color-signal-ink-secondary);
   }
 
-  .signal-report-hero .signal-section-kicker {
-    color: var(--color-signal-brand);
-  }
+  .signal-report-hero .signal-rule-scope { margin-block-start: var(--signal-space-3); }
 
   .signal-report-hero dl {
+    flex: 1 1 var(--signal-flag-summary-basis);
+    min-inline-size: min(100%, var(--signal-flag-summary-basis));
     display: grid;
-    grid-template-columns: var(--signal-report-facts-grid);
+    grid-template-columns: minmax(0, 1fr);
     gap: var(--signal-space-3);
-    align-self: center;
+    align-self: start;
     margin: 0;
   }
 
-  .signal-report-hero dl > div {
-    border-inline-start: var(--signal-border-emphasis) solid var(--color-signal-track-on-dark);
-    padding-inline-start: var(--signal-space-4);
-  }
+  .signal-report-hero dl > div { min-inline-size: 0; }
 
   .signal-report-hero dt {
-    color: var(--color-signal-surface-muted);
+    color: var(--color-signal-ink-secondary);
     font-size: var(--signal-type-meta);
-    text-transform: uppercase;
   }
 
   .signal-report-hero dd {
@@ -2544,44 +2542,19 @@
     font-weight: var(--signal-weight-bold);
   }
 
-  /* BUG-167: the hero's own "Open high-severity signals" KPI, made an
-     actual jump-to-filtered-list link instead of an inert number. */
+  .signal-report-hero a { color: var(--color-signal-link); }
+  .signal-report-hero a:hover { color: var(--color-signal-link-hover); }
+
   .signal-report-hero__kpi-link {
     display: inline-flex;
     align-items: center;
     gap: var(--signal-space-1);
     min-height: var(--signal-control-height);
-    color: var(--color-signal-brand);
     text-decoration: underline;
     text-underline-offset: var(--signal-link-underline-offset);
   }
 
-  .signal-report-hero__kpi-link:hover {
-    color: var(--color-signal-brand-hover);
-  }
-
-  .signal-report-hero__branch {
-    position: absolute;
-    inset-block-start: var(--signal-report-branch-offset);
-    inset-inline-end: var(--signal-report-branch-offset);
-    display: grid;
-    width: var(--signal-report-branch-width);
-    gap: var(--signal-space-2);
-    opacity: var(--signal-rail-opacity);
-  }
-
-  .signal-report-hero__branch i {
-    height: var(--signal-stage-rail-width);
-    background: var(--color-signal-brand);
-  }
-
-  .signal-report-hero__branch i:nth-child(2) {
-    width: var(--signal-empty-illustration-size);
-  }
-
-  .signal-report-hero__branch i:nth-child(3) {
-    width: var(--signal-mark-size);
-  }
+  .signal-report-task-actions { flex-basis: 100%; }
 
   .signal-report-jumps {
     display: grid;
@@ -3653,10 +3626,6 @@
     padding-inline: 0;
   }
 
-  .signal-document-workbench > .signal-flag-mode {
-    flex: none;
-    border-block-end: var(--signal-border-hairline) solid var(--color-signal-border);
-  }
 
   .signal-flag-summary .signal-reasoning {
     display: grid;
@@ -3925,16 +3894,14 @@
 
   .signal-document-workbench {
     position: relative;
-    min-height: 0;
-    height: calc(
+    block-size: max(var(--signal-review-workbench-min-block-size), calc(
       100dvh - var(--signal-workspace-bar-height) - var(--signal-workspace-header-height) -
         var(--signal-space-8)
-    );
+    ));
     display: flex;
     flex-direction: column;
     overflow: hidden;
     border: var(--signal-border-hairline) solid var(--color-signal-border);
-    border-block-start: var(--signal-border-brand) solid var(--color-signal-brand);
     border-radius: var(--signal-radius-panel) var(--signal-radius-panel) 0 0;
     background: var(--color-signal-surface);
     box-shadow: var(--signal-shadow-raised);
@@ -4844,40 +4811,6 @@
   .signal-document-inspector__heading > p:last-child {
     margin: 0;
     color: var(--color-signal-ink-secondary);
-  }
-
-  .signal-document-selection-strip {
-    position: relative;
-    z-index: var(--signal-z-sticky);
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    justify-content: space-between;
-    gap: var(--signal-space-3);
-    border-block-end: var(--signal-border-hairline) solid var(--color-signal-border);
-    padding: var(--signal-space-3) var(--signal-space-4);
-    background: var(--color-signal-surface);
-    color: var(--color-signal-ink);
-  }
-
-  .signal-document-selection-strip > div {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: var(--signal-space-2);
-  }
-
-  .signal-document-selection-strip > div:last-child {
-    gap: var(--signal-space-1);
-  }
-
-  .signal-document-selection-strip span {
-    color: var(--color-signal-ink-secondary);
-    font-size: var(--signal-type-label);
-  }
-
-  .signal-document-selection-strip .signal-button--quiet {
-    color: var(--color-signal-ink);
   }
 
   .signal-document-review-queue {
@@ -6919,29 +6852,6 @@
       margin-inline-start: auto;
     }
 
-    .signal-document-selection-strip {
-      display: grid;
-      grid-template-columns: minmax(0, 1fr);
-      gap: var(--signal-space-2);
-      padding: var(--signal-space-2) var(--signal-space-3);
-    }
-
-    .signal-document-selection-strip > div:first-child {
-      justify-content: space-between;
-    }
-
-    .signal-document-selection-strip > div:last-child {
-      display: grid;
-      grid-template-columns: repeat(2, minmax(0, 1fr));
-      gap: var(--signal-space-2);
-    }
-
-    .signal-document-selection-strip .signal-button {
-      min-height: var(--signal-control-height);
-      padding: var(--signal-space-2) var(--signal-space-3);
-      font-size: var(--signal-type-label);
-    }
-
     .signal-document-reconstruction-note {
       padding-inline: var(--signal-paper-gutter-phone);
     }
@@ -7831,16 +7741,45 @@
     list-style: none;
   }
 
-  .signal-stored-file {
+  .signal-stored-files.signal-page-flow,
+  .signal-stored-files__records {
     display: grid;
+    gap: var(--signal-rhythm-related);
+  }
+
+  .signal-stored-files .signal-route-header__intro + .signal-route-header__intro {
+    margin-block-start: var(--signal-space-2);
+  }
+
+  .signal-stored-file {
+    display: flex;
+    flex-wrap: wrap;
     gap: var(--signal-space-4);
     border: var(--signal-border-hairline) solid var(--color-signal-border);
-    border-inline-start: var(--signal-border-brand) solid var(--color-signal-brand);
     border-radius: var(--signal-radius-panel);
     padding: var(--signal-space-5);
     background: var(--color-signal-surface);
-    box-shadow: var(--signal-shadow-raised);
   }
+
+  .signal-stored-file__identity {
+    flex: 1 1 var(--signal-flag-summary-basis);
+    min-inline-size: min(100%, var(--signal-flag-summary-basis));
+    overflow-wrap: anywhere;
+  }
+
+  .signal-stored-file__details {
+    flex: 2 1 var(--signal-flag-evidence-basis);
+    min-inline-size: min(100%, var(--signal-flag-evidence-basis));
+  }
+
+  .signal-stored-file__details .signal-library-metadata {
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, var(--signal-stored-fact-min)), 1fr));
+    border: 0;
+    padding: 0;
+  }
+
+  .signal-stored-file__note,
+  .signal-stored-file__actions { flex-basis: 100%; }
 
   .signal-stored-file__identity h2 {
     margin: 0;

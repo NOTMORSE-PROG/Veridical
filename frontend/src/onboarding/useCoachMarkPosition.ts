@@ -82,15 +82,15 @@ function computePosition(el: HTMLElement): CoachMarkPosition {
   };
 }
 
-// Reads the app's own header-height tokens rather than a hardcoded
-// number (charter rule 7) -- computed once per call since these are
-// CSS custom properties, not JS constants.
-function headerHeightPx(): number {
-  const raw = getComputedStyle(document.documentElement).getPropertyValue(
-    window.innerWidth >= 768 ? "--header-height" : "--header-height-mobile",
-  );
-  const rem = parseFloat(raw);
-  return Number.isFinite(rem) ? rem * 16 : 64;
+function headerBoundary(header: HTMLElement | null): number {
+  const rect = header?.getBoundingClientRect();
+  if (rect && rect.height > 0 && Number.isFinite(rect.bottom)) return rect.bottom;
+  const style = getComputedStyle(document.documentElement);
+  const raw = style.getPropertyValue("--signal-header-height").trim();
+  const value = parseFloat(raw);
+  const rootSize = parseFloat(style.fontSize);
+  const resolved = raw.endsWith("rem") ? value * rootSize : raw.endsWith("px") ? value : NaN;
+  return Number.isFinite(resolved) ? resolved : 0;
 }
 
 export function useCoachMarkPosition(el: HTMLElement | null): CoachMarkPosition | null {
@@ -103,6 +103,7 @@ export function useCoachMarkPosition(el: HTMLElement | null): CoachMarkPosition 
     }
 
     let cancelled = false;
+    const header = document.querySelector<HTMLElement>(".signal-workspace-header");
 
     function recompute() {
       if (!el || cancelled) return;
@@ -111,7 +112,7 @@ export function useCoachMarkPosition(el: HTMLElement | null): CoachMarkPosition 
       // the sticky header, scroll it into view before measuring for
       // real, so the coach mark never has to describe an element the
       // header is currently covering.
-      if (rect.top < headerHeightPx() + GAP) {
+      if (!header?.contains(el) && rect.top < headerBoundary(header) + GAP) {
         el.scrollIntoView({ block: "center", behavior: "auto" });
       }
       setPosition(computePosition(el));
@@ -121,6 +122,7 @@ export function useCoachMarkPosition(el: HTMLElement | null): CoachMarkPosition 
 
     const resizeObserver = new ResizeObserver(recompute);
     resizeObserver.observe(el);
+    if (header) resizeObserver.observe(header);
     window.addEventListener("resize", recompute);
     document.addEventListener("scroll", recompute, { passive: true, capture: true });
 

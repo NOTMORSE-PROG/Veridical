@@ -84,7 +84,7 @@ function StoredFileRow({ item, onDelete }: { item: StoredFileOut; onDelete: () =
         <h2 id={headingId(item)} tabIndex={-1}>{fileName(item)}</h2>
         <p>Group {item.group_label}</p>
       </div>
-      <dl className="signal-library-metadata">
+      <div className="signal-stored-file__details"><dl className="signal-library-metadata">
         <div>
           <dt>Uploaded</dt>
           <dd>{formatDate(item.created_at)}</dd>
@@ -105,8 +105,8 @@ function StoredFileRow({ item, onDelete }: { item: StoredFileOut; onDelete: () =
             )}
           </dd>
         </div>
-      </dl>
-      <div role="status" aria-live="polite" aria-busy={availability.isPending}>
+      </dl></div>
+      <div className="sr-only" role="status" aria-live="polite" aria-busy={availability.isPending}>
         {recorded && !availability.isIdle && `${fileName(item)}: ${fileState}.`}
       </div>
       {item.dismissed_at && (
@@ -238,16 +238,20 @@ export function StoredFilesPage() {
           <h1 ref={headingRef} tabIndex={-1}>Stored files</h1>
           <p className="signal-route-header__intro">
             Review the manuscript files uploaded through the Review Desk, including failed uploads removed from its queues.
+          </p>
+          <p className="signal-route-header__intro">
             Deleting a stored file removes the upload and its extracted text; reports, decisions and the audit
             history stay. Manuscripts in the <Link to="/library">Library</Link> are managed there.
-            {" "}Use Check file availability to look for a stored copy. This checks storage, not whether the
+          </p>
+          <p className="signal-route-header__intro">
+            Use Check file availability to look for a stored copy. This checks storage, not whether the
             document opens correctly or contains the expected content.
           </p>
         </div>
       </header>
 
-      <div className="signal-section-flow">
-        <div role="status" aria-live="polite">
+      <div className="signal-stored-files__records">
+        <div className={deleted ? undefined : "sr-only"} role="status" aria-live="polite">
           {deleted && (
             <Alert tone="success" title={`The stored file for “${fileName(deleted)}” was deleted.`}>
               Its reports, your decisions and the audit history are kept.

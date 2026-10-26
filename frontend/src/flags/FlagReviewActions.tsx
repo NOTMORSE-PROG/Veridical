@@ -24,9 +24,9 @@ let nextAuthenticatedLifetime = 0;
 type AnnotationScope = { actor: number | undefined; values: Map<string, string>; stop?: () => void };
 const annotationDrafts = new WeakMap<object, AnnotationScope>();
 
-export function FindingModeDisclosure({ mode, registry = false }: { mode: FlagOut["llm_mode"]; registry?: boolean }) {
+export function FindingModeDisclosure({ mode, registry = false, id }: { mode: FlagOut["llm_mode"]; registry?: boolean; id?: string }) {
   if (mode === "real") return null;
-  return <div className="signal-flag-mode">
+  return <div id={id} className="signal-flag-mode">
     <strong>{registry && mode === "fake" ? "Check recorded in a test-mode run"
       : mode === "fake" ? TEST_AI_DISCLOSURE.title : "AI mode could not be verified"}</strong>
     <p>{registry && mode === "fake"
