@@ -77,7 +77,7 @@ function WorkflowContent({ report, manuscriptLabel, onEvidenceSelected, onOpenEv
     {editing && <p role="status">Save or cancel this grade before changing steps.</p>}
     <div ref={content} className="signal-review-stage">
       {step.key === "criteria" && <><SignalEscalatedPanel checkRunId={report.check_run_id} focused onEditingChange={changeEditing} onEvidenceSelected={onEvidenceSelected} onOpenEvidence={openEvidence} />{report.pending_review_count === 0 && <p>All grades saved. Continue to findings.</p>}</>}
-      {step.key === "findings" && <SignalFlagsPanel checkRunId={report.check_run_id} unresolvedHighFlagCount={report.unresolved_high_flag_count} originalityScope={report.originality_scope} />}
+      {step.key === "findings" && <SignalFlagsPanel checkRunId={report.check_run_id} unresolvedHighFlagCount={report.unresolved_high_flag_count} originalityScope={report.originality_scope} report={report} />}
       {step.key === "record" && <SignalCriteriaResults results={report.results.filter(row => row.outcome !== "escalated")} checkRunId={report.check_run_id} />}
       {step.key === "decision" && <SignalDecisionPanel report={report} manuscriptLabel={manuscriptLabel} onReviewCriteria={() => select("criteria")} />}
     </div>

@@ -452,6 +452,7 @@
   --signal-settings-rule-min: 24rem;
   --signal-review-source-min: 32rem;
   --signal-review-controls-min: 20rem;
+  --signal-integrity-module-min: 12rem;
   --signal-review-pair-controls-min: 26rem;
   --signal-review-source-gap: 1.5rem;
   --signal-review-single-capacity: calc(var(--signal-review-source-min) + var(--signal-review-controls-min) + var(--signal-review-source-gap));

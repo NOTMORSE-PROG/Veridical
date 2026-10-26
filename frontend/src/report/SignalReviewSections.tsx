@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import { useLocation, useSearchParams } from "react-router";
+import { useLocation, useNavigate, useSearchParams } from "react-router";
 import type {
   EscalatedItemOut,
   EscalationResolution,
@@ -7,6 +7,7 @@ import type {
   OriginalityScope as OriginalityScopeValue,
   ResultRowCommon,
   EvidenceItem,
+  ReportOut,
 } from "../api/types";
 import { useMe } from "../auth/useAuth";
 import { criterionAnchorRegion } from "../document/criterionAnchor";
@@ -20,11 +21,11 @@ import { useViewedFlagIds } from "../domain/flagViewed";
 import { problemLabel } from "../domain/problemLabel";
 import { systemFindingCopy } from "../domain/systemFindingCopy";
 import { ActionLink } from "../ui/ActionLink";
-import { OriginalityScope } from "./OriginalityScope";
-import { originalityUnassessed } from "./originalityScopeState";
 import { Alert } from "../ui/Alert";
 import { Button } from "../ui/Button";
 import { clusterFlagFindings, type FlagFindingCluster } from "./flagClusters";
+import { IntegrityModuleNavigation, IntegrityModuleSummary } from "./IntegrityModules";
+import { CHECK_MODULE_PARAM, integrityModuleCounts, integrityModuleLabel, selectedIntegrityModule } from "./integrityModuleState";
 import { useEscalatedItems, useFlags, useResolveEscalation } from "./useReport";
 
 const OUTCOME_COPY: Record<ResultRowCommon["outcome"], { label: string; tone: string }> = {
@@ -342,6 +343,8 @@ function SignalFlagList({
   initialView,
   trackViewed = false,
   viewedIds = EMPTY_VIEWED,
+  report,
+  originalityScope,
 }: {
   flags: FlagSummaryOut[];
   showActions: boolean;
@@ -352,8 +355,29 @@ function SignalFlagList({
   // an external reader.
   trackViewed?: boolean;
   viewedIds?: ReadonlySet<number>;
+  report?: ReportOut;
+  originalityScope?: OriginalityScopeValue | null;
 }) {
-  const [searchParams, setSearchParams] = useSearchParams();
+  const [searchParams] = useSearchParams();
+  const navigate = useNavigate();
+  const location = useLocation();
+  const moduleFocus = useRef(false);
+  const requestedView = readFlagView(searchParams, initialView);
+  const module = selectedIntegrityModule(searchParams.get(CHECK_MODULE_PARAM), flags, ["high", "med", "low"].includes(requestedView) ? requestedView : undefined);
+  const moduleFlags = flags.filter(flag => flag.check_kind === module);
+  const moduleInitialView = initialView === "all" ? "all" : defaultFlagView(Number(initialView === "high" && moduleFlags.some(flag => !flag.overridden && flag.severity === "high")), moduleFlags);
+  function setSearchParams(next: URLSearchParams, options: { replace: boolean }) {
+    navigate({ pathname: location.pathname, search: `?${next}`, hash: location.hash }, options);
+  }
+  useEffect(() => {
+    if (searchParams.get(CHECK_MODULE_PARAM) === module) return;
+    const next = new URLSearchParams(searchParams);
+    next.set(CHECK_MODULE_PARAM, module);
+    navigate({ pathname: location.pathname, search: `?${next}`, hash: location.hash }, { replace: true });
+  }, [module, searchParams, navigate, location.pathname, location.hash]);
+  useEffect(() => {
+    if (moduleFocus.current) { document.getElementById("integrity-module-heading")?.focus(); moduleFocus.current = false; }
+  }, [module]);
   // BUG-167 (design review finding, live-reproduced before it could break
   // the hero-KPI link below): a `useState` mirror initialized ONCE from
   // `searchParams` goes stale the moment the URL changes any other way
@@ -362,10 +386,12 @@ function SignalFlagList({
   // already said otherwise. `openClusters` two lines down never had this
   // bug because it was already derived fresh from `searchParams` on every
   // render, no local-state mirror -- `view`/`visibleCount` now match it.
-  const view = readFlagView(searchParams, initialView);
+  const view = readFlagView(searchParams, moduleInitialView);
   const visibleCount = readVisibleCount(searchParams, FLAG_LIST_INITIAL_COUNT);
   const [focusClusterKey, setFocusClusterKey] = useState<string>();
-  const canonicalClusters = clusterFlagFindings(flags);
+  const allClusters = clusterFlagFindings(flags);
+  const modules = integrityModuleCounts(allClusters.map(cluster => ({ kind: cluster.flags[0].check_kind, open: cluster.flags.some(flag => !flag.overridden) })));
+  const canonicalClusters = allClusters.filter(cluster => cluster.flags[0].check_kind === module);
   const filtered = clustersForView(canonicalClusters, view);
   const visible = filtered.slice(0, visibleCount);
   const remaining = Math.max(0, filtered.length - visible.length);
@@ -381,7 +407,7 @@ function SignalFlagList({
 
   function selectView(next: FlagView) {
     const nextParams = new URLSearchParams(searchParams);
-    if (next === initialView) nextParams.delete(FLAG_VIEW_PARAM);
+    if (next === moduleInitialView) nextParams.delete(FLAG_VIEW_PARAM);
     else nextParams.set(FLAG_VIEW_PARAM, next);
     nextParams.delete(VISIBLE_COUNT_PARAM);
     setSearchParams(nextParams, { replace: true });
@@ -409,7 +435,18 @@ function SignalFlagList({
 
   return (
     <>
+      <IntegrityModuleNavigation modules={modules} selected={module} onSelect={kind => {
+        if (kind === module) return;
+        moduleFocus.current = true;
+        const next = new URLSearchParams(searchParams);
+        next.set(CHECK_MODULE_PARAM, kind);
+        next.delete(VISIBLE_COUNT_PARAM);
+        setSearchParams(next, { replace: false });
+      }} />
+      <section className="signal-integrity-module-content" aria-labelledby="integrity-module-heading">
+      <IntegrityModuleSummary kind={module} report={report} originalityScope={originalityScope} showAddAction={showActions} />
       <div className="signal-flag-tools">
+        <p className="signal-field-hint">Filters and counts below apply to {integrityModuleLabel(module)}.</p>
         <div role="group" aria-label="Filter integrity signals" className="signal-flag-filters">
           {FLAG_VIEWS.map((item) => {
             const count = clustersForView(canonicalClusters, item.id).length;
@@ -427,21 +464,21 @@ function SignalFlagList({
             );
           })}
         </div>
-        {view === initialView && initialView === "high" && (
+        {view === moduleInitialView && moduleInitialView === "high" && (
           <p className="signal-field-hint">
-            High severity is shown first. An unresolved high-severity signal makes a report Not Ready by itself. Select Open or All to see every signal.
+            High severity is shown first for this check. An unresolved high-severity signal makes a report Not Ready by itself. Select Open or All to see every finding in this check.
           </p>
         )}
-        {view === initialView && initialView === "med" && (
+        {view === moduleInitialView && moduleInitialView === "med" && (
           <p className="signal-field-hint">
-            Medium severity is shown first: no unresolved high-severity signals remain, and medium is the highest severity left to review. Select Open or All to see every signal.
+            Medium severity is shown first for this check. Select Open or All to see every saved finding in this check.
           </p>
         )}
         <p role="status" aria-live="polite">
           Showing {visible.length} of {filtered.length} {viewLabel} finding{filtered.length === 1 ? "" : "s"} across {locationCount} location{locationCount === 1 ? "" : "s"}.
         </p>
         {trackViewed && filtered.length > 0 && (() => {
-          const openClustersAll = clusterFlagFindings(flags.filter((flag) => !flag.overridden));
+          const openClustersAll = clusterFlagFindings(moduleFlags.filter((flag) => !flag.overridden));
           const openTotal = openClustersAll.length;
           const openViewed = openClustersAll.filter((cluster) =>
             cluster.flags.some((flag) => viewedIds.has(flag.id))
@@ -477,7 +514,7 @@ function SignalFlagList({
           ))}
         </ul>
       ) : (
-        <Alert title={`No ${viewLabel} signals`} tone="info">Choose another filter to review the remaining integrity record.</Alert>
+        <Alert title={`No ${viewLabel} signals`} tone="info">{moduleFlags.length ? "Choose another filter to review the remaining findings in this check." : "No findings were saved for this check. This does not establish that it completed or passed."}</Alert>
       )}
 
       {remaining > 0 && (
@@ -487,6 +524,7 @@ function SignalFlagList({
           </Button>
         </div>
       )}
+      </section>
     </>
   );
 }
@@ -739,10 +777,12 @@ export function SignalFlagsPanel({
   checkRunId,
   unresolvedHighFlagCount,
   originalityScope,
+  report,
 }: {
   checkRunId: number;
   unresolvedHighFlagCount: number;
   originalityScope?: OriginalityScopeValue | null;
+  report?: ReportOut;
 }) {
   const { data: flags, isPending, isError, refetch } = useFlags(checkRunId);
   const { data: me } = useMe();
@@ -757,20 +797,17 @@ export function SignalFlagsPanel({
 
   return (
     <section id="integrity-signals" tabIndex={-1} className="signal-review-section" aria-labelledby="flags-heading">
-      <div className="signal-review-section__heading"><div><p className="signal-section-kicker">Second review task</p><h2 id="flags-heading" tabIndex={-1}>Integrity signals</h2></div><span>{openFindingCount} open finding{openFindingCount === 1 ? "" : "s"}</span></div>
+      <div className="signal-review-section__heading"><div><p className="signal-section-kicker">Second review task</p><h2 id="flags-heading" tabIndex={-1}>Integrity signals</h2></div><span><span>{openFindingCount} open finding{openFindingCount === 1 ? "" : "s"}</span><small> across all checks</small></span></div>
       <p className="signal-review-section__intro">These are possible inconsistencies, not accusations. Open a signal to inspect its excerpt, source anchor, and available instructor action.</p>
-      <OriginalityScope scope={originalityScope} showAddAction />
-      {flags?.length
-        ? (
           <SignalFlagList
-            flags={flags}
+            flags={flags ?? []}
             showActions
             initialView={initialView}
             trackViewed
             viewedIds={viewedIds}
+            report={report}
+            originalityScope={originalityScope}
           />
-        )
-        : <Alert title="No integrity signals" tone={originalityUnassessed(originalityScope) ? "info" : "success"}>This run produced no checkable integrity signals.</Alert>}
     </section>
   );
 }
@@ -787,10 +824,7 @@ export function SignalPublicFlags({
     <section id="integrity-signals" tabIndex={-1} className="signal-review-section" aria-labelledby="flags-heading">
       <div className="signal-review-section__heading"><div><p className="signal-section-kicker">Integrity record</p><h2 id="flags-heading">Possible inconsistencies</h2></div><span>{findingCount} finding{findingCount === 1 ? "" : "s"}</span></div>
       <p className="signal-review-section__intro">These are possible inconsistencies, not accusations. This shared view shows the bounded evidence the instructor chose to share; it does not expose the private Audit trail.</p>
-      <OriginalityScope scope={originalityScope} />
-      {flags.length
-        ? <SignalFlagList flags={flags} showActions={false} initialView="all" />
-        : <Alert title="No integrity signals" tone={originalityUnassessed(originalityScope) ? "info" : "success"}>This run produced no shared integrity signals.</Alert>}
+      <SignalFlagList flags={flags} showActions={false} initialView="all" originalityScope={originalityScope} />
     </section>
   );
 }

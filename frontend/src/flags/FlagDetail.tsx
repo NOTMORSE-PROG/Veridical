@@ -129,7 +129,7 @@ function ModeDisclosure({ mode }: { mode: FlagOut["llm_mode"] }) {
   );
 }
 
-function AnnotationPanel({ flag, guarded = false }: { flag: FlagOut; guarded?: boolean }) {
+function AnnotationPanel({ flag, guarded = false, onEditingChange }: { flag: FlagOut; guarded?: boolean; onEditingChange?: (editing: boolean) => void }) {
   const [value, setValue] = useState(flag.annotation ?? "");
   const [attempted, setAttempted] = useState(false);
   const [saved, setSaved] = useState(false);
@@ -139,6 +139,8 @@ function AnnotationPanel({ flag, guarded = false }: { flag: FlagOut; guarded?: b
   const invalid = attempted && value.trim().length === 0;
 
   useEffect(() => setValue(flag.annotation ?? ""), [flag.annotation]);
+  const dirty = value !== (flag.annotation ?? "") || annotate.isPending;
+  useEffect(() => { onEditingChange?.(dirty); return () => onEditingChange?.(false); }, [dirty, onEditingChange]);
 
   function save() {
     setAttempted(true);
@@ -222,13 +224,15 @@ function OverrideDialog({ flag, onClose, guarded = false }: { flag: FlagOut; onC
   );
 }
 
-function ResolutionControl({ flag, guarded = false }: { flag: FlagOut; guarded?: boolean }) {
+function ResolutionControl({ flag, guarded = false, onEditingChange }: { flag: FlagOut; guarded?: boolean; onEditingChange?: (editing: boolean) => void }) {
   const [overrideOpen, setOverrideOpen] = useState(false);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const overrideTriggerRef = useRef<HTMLButtonElement>(null);
   const dismissHelpId = useId();
   const sourceHelpId = useId();
   const confirmSourceEligible = flag.check_kind === "citation_integrity" && flag.ai_verdict_summary === "unverifiable_not_found";
+  const editing = !flag.overridden && (overrideOpen || confirmOpen);
+  useEffect(() => { onEditingChange?.(editing); return () => onEditingChange?.(false); }, [editing, onEditingChange]);
 
   function closeOverride() {
     setOverrideOpen(false);
@@ -269,7 +273,15 @@ function ResolutionControl({ flag, guarded = false }: { flag: FlagOut; guarded?:
   );
 }
 
-export function FlagReviewActions({ flag, checkRunId, flagId }: { flag: FlagOut; checkRunId: number; flagId: number }) {
+function ReviewActionContent({ flag, onEditingChange }: { flag: FlagOut; onEditingChange?: (editing: boolean) => void }) {
+  const [noteEditing, setNoteEditing] = useState(false);
+  const [resolutionEditing, setResolutionEditing] = useState(false);
+  const editing = noteEditing || resolutionEditing;
+  useEffect(() => { onEditingChange?.(editing); return () => onEditingChange?.(false); }, [editing, onEditingChange]);
+  return <div className="signal-flag-review-actions"><ResolutionControl flag={flag} guarded onEditingChange={setResolutionEditing} /><AnnotationPanel flag={flag} guarded onEditingChange={setNoteEditing} /></div>;
+}
+
+export function FlagReviewActions({ flag, checkRunId, flagId, onEditingChange }: { flag: FlagOut; checkRunId: number; flagId: number; onEditingChange?: (editing: boolean) => void }) {
   const me = useMe();
   const client = useQueryClient();
   const query = client.getQueryCache().find({ queryKey: ME_QUERY_KEY, exact: true });
@@ -277,7 +289,7 @@ export function FlagReviewActions({ flag, checkRunId, flagId }: { flag: FlagOut;
   if (generation.current.query !== query) generation.current = { query, value: generation.current.value + 1 };
   if (flag.id !== flagId || flag.check_run_id !== checkRunId) return <Alert title="This finding does not match the selected review" tone="error">Reopen the review queue before recording an action.</Alert>;
   if (!me.isSuccess || !me.data || me.isError) return <p role="status">Confirm your instructor session before recording an action.</p>;
-  return <div key={`${generation.current.value}:${me.data.id}:${flag.check_run_id}:${flag.id}`} className="signal-flag-review-actions"><ResolutionControl flag={flag} guarded /><AnnotationPanel flag={flag} guarded /></div>;
+  return <ReviewActionContent key={`${generation.current.value}:${me.data.id}:${flag.check_run_id}:${flag.id}`} flag={flag} onEditingChange={onEditingChange} />;
 }
 
 export function FlagDetailPage() {

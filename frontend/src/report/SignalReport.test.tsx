@@ -87,6 +87,50 @@ function stubReport(report: ReportOut = BASE_REPORT, escalated: EscalatedItemOut
 }
 
 describe("SignalReportPage", () => {
+  it("keeps four module choices and scopes findings, filters and originality context to the selected check", async () => {
+    stubReport({ ...BASE_REPORT, llm_mode: "manual", unresolved_high_flag_count: 1, originality_scope: { compared_count: 0, corpus: "library" } }, [], [
+      FLAG, { ...FLAG, id: 8, check_kind: "citation_integrity", severity: "med", evidence_excerpt: "Citation-only source passage." },
+      { ...FLAG, id: 9, check_kind: "originality_reuse", severity: "low", evidence_excerpt: "Reuse-only source passage." },
+    ]);
+    renderWithProviders(<SignalReportPage />, { route: "/report/5?review_step=findings&flags_view=all", path: "/report/:checkRunId" });
+    const modules = await screen.findByRole("navigation", { name: "Manuscript check modules" });
+    expect(within(modules).getAllByRole("button")).toHaveLength(4);
+    fireEvent.click(within(modules).getByRole("button", { name: /^Citation integrity/ }));
+    await waitFor(() => expect(screen.getByRole("heading", { name: "Citation integrity" })).toHaveFocus());
+    expect(screen.getByText(/Citation-only source passage/)).toBeInTheDocument();
+    expect(screen.queryByText(/Reuse-only source passage/)).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "All: 1 finding" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("link", { name: "Review evidence" })).toHaveAttribute("href", "/flags/8");
+    fireEvent.click(within(modules).getByRole("button", { name: /^Statistical forensics/ }));
+    expect(screen.getByText(/No findings were saved for this check/)).toBeInTheDocument();
+    expect(screen.queryByText("Not applicable")).not.toBeInTheDocument();
+    expect(screen.queryByText("Originality had nothing to compare against")).not.toBeInTheDocument();
+    fireEvent.click(within(modules).getByRole("button", { name: /^Originality and reuse/ }));
+    expect(screen.getByText("Originality had nothing to compare against")).toBeInTheDocument();
+    expect(screen.getByText(/Reuse-only source passage/)).toBeInTheDocument();
+    expect(screen.queryByText(/Citation-only source passage/)).not.toBeInTheDocument();
+  });
+
+  it("keeps findings with an unexpected check kind reachable without assigning them to a known module", async () => {
+    stubReport(BASE_REPORT, [], [{ ...FLAG, check_kind: "future_check", evidence_excerpt: "Future check evidence." }]);
+    renderWithProviders(<SignalReportPage />, { route: "/report/5?review_step=findings&check_module=citation_integrity", path: "/report/:checkRunId" });
+    const modules = await screen.findByRole("navigation", { name: "Manuscript check modules" });
+    expect(within(modules).getAllByRole("button")).toHaveLength(5);
+    fireEvent.click(within(modules).getByRole("button", { name: /^Future check/ }));
+    expect(screen.getByText(/Future check evidence/)).toBeInTheDocument();
+  });
+
+  it("keeps recorded service limits with their check rather than implying other checks share them", async () => {
+    stubReport({ ...BASE_REPORT, integrity_check_status: [{ check_kind: "internal_agreement", outcome: "quota_exhausted", n_skipped_quota: 2, n_skipped_api_down: 0, n_skipped_parse_failure: 0 }] }, [], [FLAG, { ...FLAG, id: 8, check_kind: "citation_integrity" }]);
+    renderWithProviders(<SignalReportPage />, { route: "/report/5?review_step=findings", path: "/report/:checkRunId" });
+    await screen.findByRole("navigation", { name: "Manuscript check modules" });
+    const summary = document.querySelector<HTMLElement>(".signal-integrity-module-summary")!;
+    expect(within(summary).getByText("2 items skipped because daily AI capacity was spent.")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /^Citation integrity/ }));
+    expect(within(summary).queryByText(/daily AI capacity/)).not.toBeInTheDocument();
+    expect(within(summary).queryByText("Recorded check limits")).not.toBeInTheDocument();
+  });
+
   it("does not count an ungraded service-limited criterion as a recorded grade", async () => {
     stubReport({ ...BASE_REPORT, pending_review_count: 1, results: [{ ...BASE_REPORT.results[0], outcome: "quota_exhausted", score: null }] }, [{ ...ESCALATED, criterion_id: 1, review_reason: "not_graded" }]);
     renderWithProviders(<SignalReportPage />, { route: "/report/5", path: "/report/:checkRunId" });

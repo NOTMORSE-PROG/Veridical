@@ -6729,6 +6729,18 @@
   .signal-document-workbench[data-desktop-split="false"] .signal-document-inspector[data-active="true"] { display: block; }
   .signal-document-analysis .signal-review-section--attention { border-inline-start: var(--signal-border-hairline) solid var(--color-signal-border); }
   .signal-review-workflow { display: grid; gap: var(--signal-space-5); min-width: 0; }
+  .signal-integrity-modules { display: grid; gap: var(--signal-space-3); padding: var(--signal-space-4); min-inline-size: 0; }
+  .signal-integrity-modules > p { margin: 0; }
+  .signal-integrity-modules > div { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, var(--signal-integrity-module-min)), 1fr)); gap: var(--signal-space-3); }
+  .signal-document-inspector .signal-integrity-modules > div { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .signal-integrity-modules button { display: grid; align-content: start; gap: var(--signal-space-2); padding: var(--signal-space-3); border: var(--signal-border-hairline) solid var(--color-signal-border); border-radius: var(--signal-radius-control); background: var(--color-signal-surface); color: var(--color-signal-ink); text-align: start; font: inherit; cursor: pointer; }
+  .signal-integrity-modules button[aria-pressed="true"] { border-color: var(--color-signal-ink); background: var(--color-signal-surface-muted); }
+  .signal-integrity-modules button:disabled { cursor: default; color: var(--color-signal-ink-secondary); }
+  .signal-integrity-modules button span { font-size: var(--signal-type-meta); }
+  .signal-integrity-module-summary { display: grid; gap: var(--signal-space-2); padding: var(--signal-space-4); border-block-end: var(--signal-border-hairline) solid var(--color-signal-border); min-inline-size: 0; }
+  .signal-integrity-module-summary :is(h3, p) { margin: 0; }
+  .signal-integrity-module-summary h3 { font-family: var(--font-signal-display); font-size: var(--signal-type-body-lg); }
+  .signal-integrity-module-limits { display: grid; gap: var(--signal-space-2); }
   .signal-review-workflow .signal-report-jumps [aria-current="step"] { background: var(--color-signal-surface-muted); box-shadow: inset 0 calc(-1 * var(--signal-border-brand)) var(--color-signal-brand); }
   .signal-report-jumps button:disabled { cursor: default; color: var(--color-signal-ink-secondary); }
   .signal-criterion-source-dialog { display: grid; gap: var(--signal-space-3); min-width: 0; }

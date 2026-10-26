@@ -238,6 +238,18 @@ when an evidence location cannot be verified. Evidence arrows change the display
 quotation without opening the reader or moving its current page. Open the reader
 only from an explicit source link; location labels that cannot be placed remain plain text.
 
+**Check categories (owner, 2026-10-27):** Keep Internal agreement, Citation
+integrity, Statistical forensics, and Originality and reuse available to select.
+Show one selected check's findings, evidence, explanation and instructor actions
+at a time, consistently in the report and manuscript workspace. Keep existing
+finding identities and global numbers; finding navigation stays within the
+selected check. Label module, filter and global count scopes separately.
+Empty modules remain selectable. Finding counts never imply a completed or
+passed check; show only saved execution limits or comparison scope. Preserve
+the prepared sample's explicit Not applicable and Not run states. Module
+changes must not discard unfinished notes or actions, change grades, or turn
+viewing evidence into a recorded instructor judgment.
+
 **Plain language (owner, 2026-10-26):** Use simple words in instructor controls
 and explain the effect of an action before it is saved. Finding actions use
 "Private note" and "Dismiss finding" rather than "Annotation" and "Override".

@@ -1,12 +1,12 @@
 import { fireEvent, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { FlagOut, FlagSummaryOut, ManuscriptViewerOut, ReportOut } from "../api/types";
+import type { FlagOut, FlagSummaryOut, FlagRegionOut, ManuscriptViewerOut, ReportOut } from "../api/types";
 import { renderWithProviders, stubFetchByPath } from "../test/renderWithProviders";
 import { SignalDocumentViewerPage } from "./SignalDocumentViewer";
 
 vi.mock("./PdfPane", () => ({
-  PdfPane: ({ requestedPage, selectedFlagId, fileUrl }: { requestedPage: number | null; selectedFlagId: number | null; fileUrl: string }) => (
-    <div data-testid="pdf-pane" data-page={requestedPage ?? ""} data-selection={selectedFlagId ?? ""} data-file={fileUrl}>PDF source</div>
+  PdfPane: ({ requestedPage, selectedFlagId, fileUrl, regions }: { requestedPage: number | null; selectedFlagId: number | null; fileUrl: string; regions: FlagRegionOut[] }) => (
+    <div data-testid="pdf-pane" data-page={requestedPage ?? ""} data-selection={selectedFlagId ?? ""} data-file={fileUrl} data-regions={regions.map(region => region.flag_id).join(",")}>PDF source</div>
   ),
 }));
 vi.mock("./DocxPane", () => ({ DocxPane: () => <div>DOCX source</div> }));
@@ -102,6 +102,44 @@ function stubViewer(viewer: ManuscriptViewerOut = VIEWER) {
 
 describe("SignalDocumentViewerPage", () => {
   afterEach(() => vi.unstubAllGlobals());
+
+  it("honors a direct finding over a conflicting module, keeps global numbers, and navigates only within its check", async () => {
+    const summaries = [SUMMARY, { ...SUMMARY, id: 8, check_kind: "citation_integrity" }, { ...SUMMARY, id: 9, evidence_excerpt: "A second internal comparison." }];
+    vi.stubGlobal("fetch", stubFetchByPath({
+      "/auth/session": { instructor: { id: 1, email: "review@example.test", display_name: "Reviewer", onboarding_dismissed_at: null } },
+      "/check-runs/5/document": VIEWER, "/check-runs/5/report": REPORT, "/check-runs/5/flags": summaries,
+      "/flags/7": FLAG, "/flags/9": { ...FLAG, id: 9, evidence_excerpt: summaries[2].evidence_excerpt },
+    }));
+    renderWithProviders(<SignalDocumentViewerPage />, { route: "/report/5/document?finding=7&filter=resolved&check_module=citation_integrity", path: "/report/:checkRunId/document" });
+    await screen.findByText("Finding 1 of 3");
+    expect(screen.getByRole("button", { name: /^Internal agreement/ })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByText(/This finding is outside the current filter/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Next finding" }));
+    await screen.findByText("Finding 3 of 3");
+    expect(screen.getByText("2 of 2 in Internal agreement")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Next finding" })).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: "Previous finding" }));
+    await screen.findByText("Finding 1 of 3");
+  });
+
+  it("does not discard an unfinished private note or open action through the new module controls", async () => {
+    stubViewer();
+    renderWithProviders(<SignalDocumentViewerPage />, { route: "/report/5/document?finding=7", path: "/report/:checkRunId/document" });
+    const note = await screen.findByRole("textbox", { name: "Your note" });
+    fireEvent.change(note, { target: { value: "Keep this unsaved note." } });
+    await waitFor(() => expect(screen.getByRole("button", { name: /^Citation integrity/ })).toBeDisabled());
+    expect(note).toHaveValue("Keep this unsaved note.");
+    fireEvent.click(screen.getByRole("button", { name: "Dismiss finding" }));
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(screen.getByRole("button", { name: /^Citation integrity/ })).toBeDisabled();
+    expect(note).toHaveValue("Keep this unsaved note.");
+    fireEvent.change(note, { target: { value: "" } });
+    await waitFor(() => expect(screen.getByRole("button", { name: /^Citation integrity/ })).toBeEnabled());
+    fireEvent.click(screen.getByRole("button", { name: "Dismiss finding" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: /^Citation integrity/ })).toBeDisabled());
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: /^Citation integrity/ })).toBeEnabled());
+  });
 
   it("rejects an invalid route id without issuing a malformed request", async () => {
     const fetch = vi.fn();
@@ -209,7 +247,7 @@ describe("SignalDocumentViewerPage", () => {
     expect(screen.queryByText(/Compare the passages and decide/)).not.toBeInTheDocument();
   });
 
-  it("moves to the previous and next stable finding without returning to the report", async () => {
+  it("changes checks explicitly without changing stable finding numbers", async () => {
     const secondSummary: FlagSummaryOut = {
       ...SUMMARY,
       id: 8,
@@ -247,10 +285,16 @@ describe("SignalDocumentViewerPage", () => {
     renderWithProviders(<SignalDocumentViewerPage />, { route: "/report/5/document?view=finding&finding=7&location=7", path: "/report/:checkRunId/document" });
 
     expect(await screen.findByRole("heading", { name: "Possible internal contradiction" })).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Next finding" }));
+    expect(screen.queryByRole("button", { name: "Next finding" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /^Citation integrity/ }));
+    expect(screen.getByTestId("pdf-pane")).toHaveAttribute("data-regions", "8");
+    fireEvent.click(await screen.findByRole("button", { name: /Finding 2/ }));
     expect(await screen.findByRole("heading", { name: "Possible citation issue" })).toBeInTheDocument();
     expect(screen.getByTestId("pdf-pane")).toHaveAttribute("data-selection", "8");
-    fireEvent.click(screen.getByRole("button", { name: "Previous finding" }));
+    expect(screen.queryByRole("button", { name: "Previous finding" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /^Internal agreement/ }));
+    expect(screen.getByTestId("pdf-pane")).toHaveAttribute("data-regions", "7");
+    fireEvent.click(await screen.findByRole("button", { name: /Finding 1/ }));
     expect(await screen.findByRole("heading", { name: "Possible internal contradiction" })).toBeInTheDocument();
     expect(screen.getByTestId("pdf-pane")).toHaveAttribute("data-selection", "7");
   });
@@ -323,7 +367,7 @@ describe("SignalDocumentViewerPage", () => {
     renderWithProviders(<SignalDocumentViewerPage />, { route: "/report/5/document?pane=analysis", path: "/report/:checkRunId/document" });
 
     expect(await screen.findByRole("heading", { name: "Review queue" })).toBeInTheDocument();
-    expect(screen.getByText("No integrity findings were recorded")).toBeInTheDocument();
+    expect(screen.getByText("No findings recorded for this check")).toBeInTheDocument();
     expect(screen.queryByText(REPORT.reason as string)).not.toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: "Final defense-readiness decision" })).not.toBeInTheDocument();
     expect(screen.getByRole("tab", { name: "Review" })).toHaveAttribute("aria-selected", "true");
@@ -396,7 +440,7 @@ describe("SignalDocumentViewerPage", () => {
     }));
     renderWithProviders(<SignalDocumentViewerPage />, { route: "/report/5/document?pane=review", path: "/report/:checkRunId/document" });
 
-    expect(await screen.findByText("1 finding. 0 resolved.")).toBeInTheDocument();
+    expect(await screen.findByText("1 finding in Originality and reuse. 0 resolved.")).toBeInTheDocument();
     expect(screen.getByText("3 recorded locations or scopes")).toBeInTheDocument();
     const row = screen.getByRole("button", { name: /Finding 1.*High passage similarity/s });
     fireEvent.click(row);

@@ -19,6 +19,8 @@ import { SavedSourceEvidence, SourcePageComparison } from "./SavedSourceEvidence
 import { useReviewWorkspaceCapacity } from "./useReviewWorkspaceCapacity";
 import { ReportReviewWorkflow } from "../report/ReportReviewWorkflow";
 import { coverageItems } from "../report/reportCoverage";
+import { IntegrityModuleNavigation, IntegrityModuleSummary } from "../report/IntegrityModules";
+import { CHECK_MODULE_PARAM, integrityModuleCounts, integrityModuleLabel, selectedIntegrityModule } from "../report/integrityModuleState";
 import {
   useExcludedReuseMatches,
   useFlags,
@@ -69,13 +71,14 @@ function regionForFinding(finding: ReviewFinding, regions: FlagRegionOut[]): Fla
     ?? null;
 }
 
-function ReviewQueue({ findings, regions, report, pending, error, filter, invalidSelection, onFilter, onSelect, onExplore, onDecision }: {
+function ReviewQueue({ findings, regions, report, pending, error, filter, module, invalidSelection, onFilter, onSelect, onExplore, onDecision }: {
   findings: ReviewFinding[];
   regions: FlagRegionOut[];
   report: ReportOut;
   pending: boolean;
   error: boolean;
   filter: ReviewFilter;
+  module: string;
   invalidSelection: boolean;
   onFilter: (filter: ReviewFilter) => void;
   onSelect: (id: number) => void;
@@ -85,31 +88,32 @@ function ReviewQueue({ findings, regions, report, pending, error, filter, invali
   if (pending) return <div role="status" aria-live="polite" aria-busy="true" className="signal-desk-loading"><span>Loading review findings.</span><i /><i /></div>;
   if (error) return <Alert title="Review findings could not be loaded" tone="error" role="alert">VERIDICAL could not load this review queue. Return to the Review Desk and reopen the manuscript to try again.</Alert>;
 
-  const open = findings.filter((finding) => !finding.isResolved);
-  const resolved = findings.filter((finding) => finding.isResolved);
-  const visible = filter === "open" ? open : filter === "resolved" ? resolved : findings;
+  const moduleFindings = findings.filter(finding => finding.representative.check_kind === module);
+  const open = moduleFindings.filter((finding) => !finding.isResolved);
+  const resolved = moduleFindings.filter((finding) => finding.isResolved);
+  const visible = filter === "open" ? open : filter === "resolved" ? resolved : moduleFindings;
 
   return (
     <div className="signal-document-review-queue">
       <div className="signal-document-inspector__heading">
         <p className="signal-section-kicker">Your review tasks</p>
         <h2>Review queue</h2>
-        <p>{findings.length} {findings.length === 1 ? "finding" : "findings"}. {resolved.length} resolved.</p>
+        <p>{moduleFindings.length} {moduleFindings.length === 1 ? "finding" : "findings"} in {integrityModuleLabel(module)}. {resolved.length} resolved.</p>
       </div>
       {invalidSelection && <Alert title="That finding is no longer available" tone="warning" role="status">The review queue is open.</Alert>}
-      {findings.length > 0 && (
+      {moduleFindings.length > 0 && (
         <div className="signal-document-review-filters" role="group" aria-label="Filter review findings">
           {(["open", "resolved", "all"] as const).map((value) => {
-            const count = value === "open" ? open.length : value === "resolved" ? resolved.length : findings.length;
+            const count = value === "open" ? open.length : value === "resolved" ? resolved.length : moduleFindings.length;
             const label = value[0].toUpperCase() + value.slice(1);
             return <button key={value} type="button" aria-pressed={filter === value} onClick={() => onFilter(value)}>{label} {count}</button>;
           })}
         </div>
       )}
-      {findings.length === 0 ? (
-        <Alert title="No integrity findings were recorded" tone="info">This run recorded no integrity findings. This does not replace criteria review. Continue with any criteria that need your judgment.</Alert>
+      {moduleFindings.length === 0 ? (
+        <Alert title="No findings recorded for this check" tone="info">An empty finding list does not establish that this check completed or passed. Review the recorded scope above.</Alert>
       ) : visible.length === 0 && filter === "open" ? (
-        <Alert title="No open integrity findings" tone="info"><p>Every recorded integrity finding has an instructor resolution. You can review resolved findings or continue to readiness and decision.</p><Button variant="secondary" onClick={() => onFilter("resolved")}>Show resolved findings</Button></Alert>
+        <Alert title="No open findings in this check" tone="info"><p>Every recorded finding in this check has an instructor resolution. You can review its resolved findings or continue to readiness and decision.</p><Button variant="secondary" onClick={() => onFilter("resolved")}>Show resolved findings</Button></Alert>
       ) : (
         <ol className="signal-document-review-list">
           {visible.map((finding) => {
@@ -135,14 +139,14 @@ function ReviewQueue({ findings, regions, report, pending, error, filter, invali
           <Button variant="secondary" onClick={onDecision}>Review criteria</Button>
         </section>
       )}
-      <Button variant="quiet" onClick={onExplore}>Other passage matches not included in readiness</Button>
+      {module === "originality_reuse" && <Button variant="quiet" onClick={onExplore}>Other passage matches not included in readiness</Button>}
       <section className="signal-document-readiness-card" aria-labelledby="readiness-card-heading">
         <p className="signal-section-kicker">After the evidence</p>
         <h3 id="readiness-card-heading">Readiness and decision</h3>
         <dl>
           <div><dt>System readiness</dt><dd><ReadinessBand status={report.status} /></dd></div>
           <div><dt>Criteria needing judgment</dt><dd>{report.pending_review_count}</dd></div>
-          <div><dt>Open integrity findings</dt><dd>{open.length}</dd></div>
+          <div><dt>Open integrity findings, all checks</dt><dd>{findings.filter(finding => !finding.isResolved).length}</dd></div>
           <div><dt>Instructor decision</dt><dd>{report.decision ? DECISION_LABEL[report.decision] : "Not recorded"}</dd></div>
         </dl>
         <div className="signal-document-readiness-card__actions"><Button variant="secondary" onClick={onDecision}>Review readiness and decision</Button><ActionLink to={`/report/${report.check_run_id}`} variant="quiet">Open full readiness report</ActionLink></div>
@@ -151,10 +155,14 @@ function ReviewQueue({ findings, regions, report, pending, error, filter, invali
   );
 }
 
-function SelectedFinding({ checkRunId, finding, total, locationFlagId, region, previous, next, onBack, onPrevious, onNext, onLocation, onExplore, onSourceEvidence, sourceContextKey, presentedEvidenceIds }: {
+function SelectedFinding({ checkRunId, finding, total, modulePosition, moduleTotal, outsideFilter, onEditingChange, locationFlagId, region, previous, next, onBack, onPrevious, onNext, onLocation, onExplore, onSourceEvidence, sourceContextKey, presentedEvidenceIds }: {
   checkRunId: number;
   finding: ReviewFinding;
   total: number;
+  modulePosition: number;
+  moduleTotal: number;
+  outsideFilter: boolean;
+  onEditingChange: (editing: boolean) => void;
   locationFlagId: number;
   region: FlagRegionOut | null;
   previous: ReviewFinding | null;
@@ -198,6 +206,8 @@ function SelectedFinding({ checkRunId, finding, total, locationFlagId, region, p
       <Button variant="quiet" onClick={onBack}>Back to review queue</Button>
       <header className="signal-document-selected__header">
         <p className="signal-section-kicker">Finding {finding.number} of {total}</p>
+        <p className="signal-field-hint">{modulePosition} of {moduleTotal} in {integrityModuleLabel(finding.representative.check_kind)}</p>
+        {outsideFilter && <p className="signal-field-hint">This finding is outside the current filter. Navigation stays within this check.</p>}
         <h2 id="selected-finding-heading" tabIndex={-1}>{title}</h2>
         <div className="signal-document-selected__states"><span className={`signal-severity signal-severity--${finding.severity}`}>{severityLabel(finding.severity)}</span><span className="signal-resolution-state">{finding.isResolved ? "Resolved" : "Open"}</span></div>
         {(previous || next) && <div className="signal-document-finding-nav" role="group" aria-label="Move between review findings"><Button variant="quiet" disabled={!previous} onClick={onPrevious}>Previous finding</Button><Button variant="quiet" disabled={!next} onClick={onNext}>Next finding</Button></div>}
@@ -241,7 +251,7 @@ function SelectedFinding({ checkRunId, finding, total, locationFlagId, region, p
       <section aria-labelledby="verify-heading" className="signal-document-detail-section signal-document-detail-section--verify"><h3 id="verify-heading">What the instructor should verify</h3><p>{verificationPrompt}</p></section>
       <section className="signal-document-recorded-reasoning"><h3>Recorded reasoning</h3>{reasoningText ? <p>{systemFindingCopy(reasoningText, flag.ai_verdict_summary, "reasoning")}</p> : <p>No additional recorded reasoning is available.</p>}</section>
       {flag.check_kind === "citation_integrity" && !flag.citation_source_key && <p className="signal-field-hint">No citation identity was saved for this claim. Inspect the claim and the manuscript reference section; no DOI or provider lookup is represented here.</p>}
-      <FlagReviewActions key={`${flag.check_run_id}:${flag.id}`} flag={flag} checkRunId={checkRunId} flagId={locationFlagId} />
+      <FlagReviewActions key={`${flag.check_run_id}:${flag.id}`} flag={flag} checkRunId={checkRunId} flagId={locationFlagId} onEditingChange={onEditingChange} />
     </article>
   );
 }
@@ -277,7 +287,7 @@ function ReadinessDecision({ checkRunId, report, pending, error, onRetry, onBack
   );
 }
 
-function ReviewHome({ checkRunId, report, reportPending, reportError, onReportRetry, findings, regions, flagsPending, flagsError, filter, invalidSelection, onFilter, onSelect, onExplore, onDecision }: {
+function ReviewHome({ checkRunId, report, reportPending, reportError, onReportRetry, findings, regions, flagsPending, flagsError, filter, module, invalidSelection, onFilter, onSelect, onExplore, onDecision }: {
   checkRunId: number;
   report: ReportOut | undefined;
   reportPending: boolean;
@@ -288,6 +298,7 @@ function ReviewHome({ checkRunId, report, reportPending, reportError, onReportRe
   flagsPending: boolean;
   flagsError: boolean;
   filter: ReviewFilter;
+  module: string;
   invalidSelection: boolean;
   onFilter: (filter: ReviewFilter) => void;
   onSelect: (id: number) => void;
@@ -296,7 +307,7 @@ function ReviewHome({ checkRunId, report, reportPending, reportError, onReportRe
 }) {
   if (reportPending) return <div role="status" aria-live="polite" aria-busy="true" className="signal-desk-loading"><span>Loading review queue.</span><i /><i /></div>;
   if (!report) return <ReportUnavailable checkRunId={checkRunId} error={reportError} onRetry={onReportRetry} />;
-  return <ReviewQueue findings={findings} regions={regions} report={report} pending={flagsPending} error={flagsError} filter={filter} invalidSelection={invalidSelection} onFilter={onFilter} onSelect={onSelect} onExplore={onExplore} onDecision={onDecision} />;
+  return <ReviewQueue findings={findings} regions={regions} report={report} pending={flagsPending} error={flagsError} filter={filter} module={module} invalidSelection={invalidSelection} onFilter={onFilter} onSelect={onSelect} onExplore={onExplore} onDecision={onDecision} />;
 }
 
 export function SignalDocumentViewerPage() {
@@ -335,6 +346,8 @@ export function SignalDocumentViewerPage() {
   });
   const [sourceSelection, setSourceSelection] = useState<{ run: number; kind: "flag" | "criterion"; subjectId: number; entry?: BoundSourceEvidence; region: FlagRegionOut | null; attempt: number }>();
   const [showFullSource, setShowFullSource] = useState(false);
+  const [moduleLocked, setModuleLocked] = useState(false);
+  const moduleFocus = useRef(false);
   useRouteFocus("Manuscript review - VERIDICAL", headingRef);
 
   const viewerQuery = useManuscriptViewer(id);
@@ -347,6 +360,17 @@ export function SignalDocumentViewerPage() {
   const findings = useMemo(() => buildReviewFindings(flagsQuery.data ?? []), [flagsQuery.data]);
   const numbersByFlagId = useMemo(() => findingNumberByFlagId(findings), [findings]);
   const selectedFinding = findingForFlag(findings, requestedFlagId);
+  const module = selectedFinding?.representative.check_kind ?? selectedIntegrityModule(searchParams.get(CHECK_MODULE_PARAM), flagsQuery.data ?? []);
+  const moduleCounts = integrityModuleCounts(findings.map(finding => ({ kind: finding.representative.check_kind, open: !finding.isResolved })));
+  const moduleFindings = findings.filter(finding => finding.representative.check_kind === module);
+  useEffect(() => {
+    if (!flagsQuery.isSuccess || isDecision || isExploring || searchParams.get(CHECK_MODULE_PARAM) === module) return;
+    const next = new URLSearchParams(searchParams); next.set(CHECK_MODULE_PARAM, module);
+    setSearchParams(next, { replace: true });
+  }, [flagsQuery.isSuccess, isDecision, isExploring, module, searchParams, setSearchParams]);
+  useEffect(() => {
+    if (moduleFocus.current) { document.getElementById("integrity-module-heading")?.focus(); moduleFocus.current = false; }
+  }, [module]);
   const rawLocation = searchParams.get("location");
   const parsedLocation = rawLocation ? Number(rawLocation) : null;
   const selectedLocationId = selectedFinding
@@ -357,8 +381,8 @@ export function SignalDocumentViewerPage() {
         : selectedFinding.representative.id
     : null;
   const invalidSelection = rawSelection !== null && !flagsQuery.isPending && (requestedFlagId === null || !selectedFinding);
-  const filteredFindings = findings.filter((finding) => filter === "all" || (filter === "resolved" ? finding.isResolved : !finding.isResolved));
-  const navigationFindings = selectedFinding && filteredFindings.some((finding) => finding.key === selectedFinding.key) ? filteredFindings : findings;
+  const filteredFindings = moduleFindings.filter((finding) => filter === "all" || (filter === "resolved" ? finding.isResolved : !finding.isResolved));
+  const navigationFindings = selectedFinding && filteredFindings.some((finding) => finding.key === selectedFinding.key) ? filteredFindings : moduleFindings;
   const selectedNavigationIndex = selectedFinding ? navigationFindings.findIndex((finding) => finding.key === selectedFinding.key) : -1;
   const previousFinding = selectedNavigationIndex > 0 ? navigationFindings[selectedNavigationIndex - 1] : null;
   const nextFinding = selectedNavigationIndex >= 0 && selectedNavigationIndex < navigationFindings.length - 1 ? navigationFindings[selectedNavigationIndex + 1] : null;
@@ -378,6 +402,7 @@ export function SignalDocumentViewerPage() {
       next.set("view", "finding");
       next.set("finding", String(finding.representative.id));
       next.set("location", String(flagId));
+      next.set(CHECK_MODULE_PARAM, finding.representative.check_kind);
       next.delete("flag");
       next.delete("anchor");
       next.delete("panel");
@@ -397,6 +422,18 @@ export function SignalDocumentViewerPage() {
       next.delete("anchor");
       next.delete("panel");
       next.delete("match");
+    });
+  }
+
+  function changeModule(kind: string) {
+    if (moduleLocked || kind === module) return;
+    moduleFocus.current = true;
+    restoreQueueRef.current = false;
+    update(next => {
+      next.set(CHECK_MODULE_PARAM, kind);
+      next.set("view", "queue");
+      next.set("pane", "review");
+      for (const key of ["finding", "flag", "location", "anchor", "panel", "match"]) next.delete(key);
     });
   }
 
@@ -493,7 +530,7 @@ export function SignalDocumentViewerPage() {
       ? viewer?.regions.find((region) => region.flag_id === selectedLocationId) ?? null
       : anchorRegion;
   const requestedPage = selectedRegion?.page ?? null;
-  const browseRegions = representativeRegions(findings, viewer?.regions ?? []);
+  const browseRegions = representativeRegions(isDecision || isExploring ? findings : moduleFindings, viewer?.regions ?? []);
   const visibleRegions = activeSource && !selectedRegion ? [] : selectedRegion?.flag_id === CRITERION_ANCHOR_REGION_ID
     ? [...browseRegions, selectedRegion]
     : isExploring && expandedMatch
@@ -531,10 +568,16 @@ export function SignalDocumentViewerPage() {
                           : <div className="signal-document-source"><div className="signal-document-toolbar"><div className="signal-document-toolbar__identity"><strong>Full manuscript</strong><span>{viewer.original_filename ?? "Unsupported source"}</span></div></div><div className="signal-document-scroll"><section className="signal-document-paper-state"><Alert title="This manuscript format cannot be displayed here" tone="warning"><p>Use the recorded excerpts and anchors in Review, or open the full readiness report.</p><ActionLink to={`/report/${id}`} variant="secondary">Open full readiness report</ActionLink></Alert></section></div></div>}
               </div>
               <aside ref={inspectorRef} id="review-panel" role="tabpanel" aria-labelledby="review-tab" data-active={activeTab === "review"} className="signal-document-inspector">
+                {!isDecision && !isExploring && flagsQuery.isSuccess && <>
+                  <IntegrityModuleNavigation modules={moduleCounts} selected={module} onSelect={changeModule} disabled={moduleLocked} />
+                </>}
+                <div role={!isDecision && !isExploring && flagsQuery.isSuccess ? "region" : undefined} aria-labelledby={!isDecision && !isExploring && flagsQuery.isSuccess ? "integrity-module-heading" : undefined}>
+                {!isDecision && !isExploring && flagsQuery.isSuccess && <IntegrityModuleSummary kind={module} report={reportQuery.data} originalityScope={reportQuery.data?.originality_scope} showAddAction />}
                 {isExploring && isWorkspaceSample() ? <section className="signal-document-selected"><Button variant="quiet" onClick={showQueue}>Back to review queue</Button><h2>Originality comparison was not run</h2><p>This prepared review has no saved similarity search or passage pair. The independent Library article is available for reading; it is not a demonstrated match. An empty prepared response is not a completed search with zero matches.</p></section> : isExploring ? <ReuseExplorePanel flags={flagsQuery.data} onSelectFlag={selectFinding} onBack={showQueue} includeReferenceList={includeReferenceList} includeBlockQuote={includeBlockQuote} onToggleReferenceList={(value) => setToggle("ref", value)} onToggleBlockQuote={(value) => setToggle("quote", value)} excludedMatchesQuery={excludedMatchesQuery} expandedMatchId={expandedMatchId} onExpandMatch={setMatch} />
                   : isDecision ? <ReadinessDecision checkRunId={id} report={reportQuery.data} pending={reportQuery.isPending || (isWorkspaceSample() && viewerQuery.isPending)} error={reportQuery.error} onRetry={() => reportQuery.refetch()} onBack={showQueue} onEvidenceSelected={chooseCriterionEvidence} onOpenEvidence={() => { if (!sourceCapacity.split) selectPane("manuscript"); }} />
-                    : selectedFinding && selectedLocationId ? <SelectedFinding checkRunId={id} finding={selectedFinding} total={findings.length} locationFlagId={selectedLocationId} region={selectedRegion} previous={previousFinding} next={nextFinding} onBack={showQueue} onPrevious={() => previousFinding && selectFinding(previousFinding.representative.id, true)} onNext={() => nextFinding && selectFinding(nextFinding.representative.id, true)} onLocation={selectFinding} onExplore={openExplore} onSourceEvidence={chooseSource} presentedEvidenceIds={wideComparison && sourceCapacity.split ? pairSources.filter(entry => entry.image_id).map(entry => entry.evidence_id) : []} sourceContextKey={`${id}:${viewer?.manuscript_id ?? "loading"}:${viewer?.source_sha256 ?? "unknown"}`} />
-                      : <ReviewHome checkRunId={id} report={reportQuery.data} reportPending={reportQuery.isPending} reportError={reportQuery.error} onReportRetry={() => reportQuery.refetch()} findings={findings} regions={viewer?.regions ?? []} flagsPending={flagsQuery.isPending} flagsError={flagsQuery.isError} filter={filter} invalidSelection={invalidSelection} onFilter={setFilter} onSelect={selectFinding} onExplore={openExplore} onDecision={openDecision} />}
+                    : selectedFinding && selectedLocationId ? <SelectedFinding checkRunId={id} finding={selectedFinding} total={findings.length} modulePosition={moduleFindings.findIndex(finding => finding.key === selectedFinding.key) + 1} moduleTotal={moduleFindings.length} outsideFilter={!filteredFindings.some(finding => finding.key === selectedFinding.key)} onEditingChange={setModuleLocked} locationFlagId={selectedLocationId} region={selectedRegion} previous={previousFinding} next={nextFinding} onBack={showQueue} onPrevious={() => previousFinding && selectFinding(previousFinding.representative.id, true)} onNext={() => nextFinding && selectFinding(nextFinding.representative.id, true)} onLocation={selectFinding} onExplore={openExplore} onSourceEvidence={chooseSource} presentedEvidenceIds={wideComparison && sourceCapacity.split ? pairSources.filter(entry => entry.image_id).map(entry => entry.evidence_id) : []} sourceContextKey={`${id}:${viewer?.manuscript_id ?? "loading"}:${viewer?.source_sha256 ?? "unknown"}`} />
+                      : <ReviewHome checkRunId={id} report={reportQuery.data} reportPending={reportQuery.isPending} reportError={reportQuery.error} onReportRetry={() => reportQuery.refetch()} findings={findings} regions={viewer?.regions ?? []} flagsPending={flagsQuery.isPending} flagsError={flagsQuery.isError} filter={filter} module={module} invalidSelection={invalidSelection} onFilter={setFilter} onSelect={selectFinding} onExplore={openExplore} onDecision={openDecision} />}
+                </div>
               </aside>
             </div>
           </section>
