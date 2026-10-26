@@ -6830,7 +6830,8 @@
   .signal-exclusion-help { flex-basis: 100%; margin-block-start: var(--signal-space-3); }
   .signal-exclusion-help summary,
   .signal-criterion-evidence summary { cursor: pointer; font-weight: var(--signal-weight-semibold); }
-  .signal-criterion-evidence details button { border: 0; background: transparent; font: inherit; text-align: start; text-decoration: underline; cursor: pointer; padding: var(--signal-space-2); }
+  .signal-criterion-evidence details button { border: 0; background: transparent; color: var(--color-signal-link); font: inherit; text-align: start; text-decoration: underline; cursor: pointer; padding: var(--signal-space-2); }
+  .signal-criterion-evidence details button:hover { color: var(--color-signal-link-hover); }
   .signal-document-recorded-reasoning { padding: var(--signal-space-4); }
   .signal-document-docx-paper [data-source-selected="true"] { outline: var(--signal-border-emphasis) solid var(--signal-evidence-location-border); }
   .signal-check-progress { width: 100%; max-inline-size: none; max-width: none; }
