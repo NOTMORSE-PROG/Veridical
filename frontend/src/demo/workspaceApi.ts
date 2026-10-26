@@ -1,7 +1,7 @@
 import type { AuditLogDetail, FlagOut, ReportOut, ShareLinkOut } from "../api/types";
 import { companionSource, sampleCriteria, sampleEscalatedItems, sampleFlags, sampleInstructor, sampleLibrary, sampleManuscript, sampleReport, sampleRubric, sampleRun, WORKSPACE_SAMPLE } from "./workspaceFixture";
 import { prepareWorkspaceSource } from "./workspacePreparation";
-import { evidenceByImageId, evidenceFor, evidenceSourceHash, publicEvidenceImages, sourceEvidence } from "./sourceEvidence";
+import { evidenceByImageId, evidenceFor, evidenceSourceHash, publicEvidenceImages } from "./sourceEvidence";
 import { RESOLUTION_REASON_MIN_LENGTH } from "../config/ui";
 
 type SampleState = {
@@ -133,50 +133,13 @@ export function installWorkspaceSample() {
   }
 
   async function reportPdf() {
-    const { jsPDF } = await import("jspdf");
-    const pdf = new jsPDF({ unit: "mm", format: "a4", compress: true });
-    const margin = 18, width = 174, bottom = 276, spacing = 5;
-    let y = 20;
-    const write = (value: string, heading = false) => {
-      if (heading && y > bottom - 44) { pdf.addPage(); y = 20; }
-      pdf.setFont("helvetica", heading ? "bold" : "normal"); pdf.setFontSize(heading ? 14 : 10);
-      const lines: string[] = pdf.splitTextToSize(value.replace(/[^\x20-\x7E\n]/g, " "), width);
-      for (const line of lines) { if (y > bottom) { pdf.addPage(); y = 20; } pdf.text(line, margin, y); y += heading ? 7 : spacing; }
-      y += spacing;
-    };
-    write("VERIDICAL - Manuscript review", true);
-    write("Review basis: full-document reading with page-bound observations. The instructor records the rubric levels and final decision.");
-    write("Model grading skipped. Statistical forensics is not applicable to this implementation report. Originality comparison was not run; no similarity judgment is recorded.");
-    write(WORKSPACE_SAMPLE.title, true); write(WORKSPACE_SAMPLE.attribution);
-    write(`Source: ${WORKSPACE_SAMPLE.pageCount} pages. Unchanged original SHA-256: ${WORKSPACE_SAMPLE.sha256}`);
-    write(`Readiness: ${state.report.status}. Instructor decision: ${state.report.decision ?? "Not recorded"}.`);
-    if (state.report.decision_note) write(`Decision note: ${state.report.decision_note}`);
-    write("Criterion record", true);
-    for (const result of state.report.results) { write(`${result.text}: ${result.level?.name ?? result.outcome}`, true); write(result.resolution?.reason ?? result.reasoning ?? result.reason ?? "Needs instructor review."); for (const evidence of result.evidence) write(`${evidence.anchor}: ${evidence.quote}`); }
-    write("Source observations", true);
-    for (const flag of state.flags) { write(`${flag.check_kind} - ${flag.severity}${flag.overridden ? " - explained by instructor" : ""}`, true); write(`${flag.page_anchor}: ${flag.evidence_excerpt}`); write(flag.ai_reasoning ?? ""); for (const entry of evidenceFor("flag", flag.id)) write(`${entry.label}, ${entry.anchor}: ${entry.quote}`); if (flag.override_reason) write(`Instructor reason: ${flag.override_reason}`); if (flag.annotation) write(`Private instructor note: ${flag.annotation}`); }
-    if (state.fileAvailable) {
-      for (const entry of sourceEvidence) {
-        if (entry.check_run_id !== state.report.check_run_id || entry.source_sha256 !== evidenceSourceHash || !entry.image_id) throw new Error("A source image is not bound to this report.");
-        const source = await originalFetch(`/sample-assets/evidence/${entry.image_id}.png`, { credentials: "omit" });
-        if (!source.ok) throw new Error("A manuscript evidence image could not be loaded.");
-        pdf.addPage(); y = 17;
-        pdf.setFont("helvetica", "bold"); pdf.setFontSize(10);
-        const title: string[] = pdf.splitTextToSize(`${entry.subject.kind === "criterion" ? "Criterion" : "Finding"} ${entry.subject.id}: ${entry.label}`, width);
-        for (const line of title) { pdf.text(line, margin, y); y += 5; }
-        pdf.setFont("helvetica", "normal"); pdf.setFontSize(8);
-        pdf.text(`${WORKSPACE_SAMPLE.filename} | PDF page ${entry.page} | ${entry.precision === "page_bbox" ? "Exact quotation marked" : "Page only; no exact mark"}`, margin, y); y += 5;
-        const imageBuffer = await source.arrayBuffer();
-        if (await sha256(imageBuffer) !== entry.image_sha256) throw new Error("The source image checksum does not match its evidence record.");
-        const bytes = new Uint8Array(imageBuffer);
-        const dimensions = pdf.getImageProperties(bytes);
-        const imageHeight = Math.min(bottom - y, width * dimensions.height / dimensions.width);
-        const imageWidth = imageHeight * dimensions.width / dimensions.height;
-        pdf.addImage(bytes, "PNG", (210 - imageWidth) / 2, y, imageWidth, imageHeight, undefined, "FAST");
-      }
-    } else write("Manuscript page images are unavailable because the original file was removed from this browser record.");
-    for (let index = 1; index <= pdf.getNumberOfPages(); index++) { pdf.setPage(index); pdf.setFontSize(8); pdf.text(`Document review - page ${index} of ${pdf.getNumberOfPages()}`, margin, 289); }
-    return new Response(pdf.output("blob"), { headers: { "Content-Type": "application/pdf" } });
+    const { buildWorkspacePdf } = await import("./workspacePdf");
+    // Freeze one export snapshot before asynchronous source-image reads.
+    const report = structuredClone(state.report);
+    const flags = structuredClone(state.flags);
+    const fileAvailable = state.fileAvailable;
+    const blob = await buildWorkspacePdf({ report, flags, fileAvailable, fetchAsset: originalFetch });
+    return new Response(blob, { headers: { "Content-Type": "application/pdf" } });
   }
 
   window.fetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {

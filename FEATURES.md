@@ -256,6 +256,18 @@ and explain the effect of an action before it is saved. Finding actions use
 A note does not change results. Dismissal retains the evidence and the instructor's
 reason. The prepared sample must describe its own scoring limits accurately.
 
+**Readable PDF reports (owner, 2026-10-27):** Start the instructor export with
+the manuscript title, recorded members/authors and the saved instructor decision.
+If no decision exists, say so; keep system readiness separate from that decision.
+Use simple headings and named grade/status bands. Keep each criterion or finding's
+explanation, quotations, original source-page images and teacher actions together,
+with labelled continuation pages. Preserve every saved evidence association and
+its exact or page-only precision. Provide linked contents, section bookmarks and
+clear report-versus-manuscript page numbers. Private instructor details stay in
+the instructor copy; public sharing keeps its separate allowlist. The prepared
+sample retains skipped AI grading, inapplicable statistics and no originality
+comparison. Bookmarks and selectable text do not establish a tagged PDF.
+
 **Exact-passage appearance (owner, 2026-10-26):** Use thin square red outlines
 around the saved PDF text-line rectangles, with transparent interiors. Preserve
 their source geometry; do not enlarge them into selection blocks or cover text
