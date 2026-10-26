@@ -20,6 +20,7 @@ interface Props {
   report: ReportOut; manuscriptLabel: string;
   onEvidenceSelected?: (criterionId: number, evidence: EvidenceItem, index: number) => void;
   onOpenEvidence?: (criterionId: number, evidence: EvidenceItem, index: number) => void;
+  onEditingChange?: (editing: boolean) => void;
 }
 
 export function ReportReviewWorkflow(props: Props) {
@@ -29,12 +30,13 @@ export function ReportReviewWorkflow(props: Props) {
   return <WorkflowContent key={`${props.report.check_run_id}:${actor.data?.id ?? "pending"}`} {...props} />;
 }
 
-function WorkflowContent({ report, manuscriptLabel, onEvidenceSelected, onOpenEvidence }: Props) {
+function WorkflowContent({ report, manuscriptLabel, onEvidenceSelected, onOpenEvidence, onEditingChange }: Props) {
   const location = useLocation();
   const navigate = useNavigate();
   const [editing, setEditing] = useState(false);
   const [source, setSource] = useState<CriterionEvidenceSelection>();
-  const changeEditing = useCallback((value: boolean) => { setEditing(value); if (!value) setSource(undefined); }, []);
+  const changeEditing = useCallback((value: boolean) => { setEditing(value); onEditingChange?.(value); if (!value) setSource(undefined); }, [onEditingChange]);
+  useEffect(() => () => onEditingChange?.(false), [onEditingChange]);
   const params = new URLSearchParams(location.search);
   const requested = STEPS.find(step => step.key === params.get("review_step"))
     ?? STEPS.find(step => `#${step.target}` === location.hash) ?? STEPS[0];

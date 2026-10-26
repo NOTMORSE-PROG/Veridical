@@ -53,7 +53,6 @@ function ToggleRow({
 export function ReuseExplorePanel({
   flags,
   onSelectFlag,
-  onBack,
   includeReferenceList,
   includeBlockQuote,
   onToggleReferenceList,
@@ -64,7 +63,6 @@ export function ReuseExplorePanel({
 }: {
   flags: FlagSummaryOut[] | undefined;
   onSelectFlag: (flagId: number) => void;
-  onBack: () => void;
   includeReferenceList: boolean;
   includeBlockQuote: boolean;
   onToggleReferenceList: (value: boolean) => void;
@@ -95,9 +93,6 @@ export function ReuseExplorePanel({
   return (
     <div className="flex flex-col">
       <div className="flex flex-col gap-2 border-b border-border px-3.5 py-3">
-        <button type="button" onClick={onBack} className="w-fit text-sm font-medium text-link underline hover:text-link-hover">
-          ← All flags
-        </button>
         <p className="text-xs font-semibold tracking-header text-ink-tertiary uppercase">
           Originality and reuse
         </p>

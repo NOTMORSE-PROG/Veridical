@@ -98,7 +98,7 @@ function ReviewQueue({ findings, regions, report, pending, error, filter, module
     <div className="signal-document-review-queue">
       <div className="signal-document-inspector__heading">
         <p className="signal-section-kicker">Your review tasks</p>
-        <h2>Review queue</h2>
+        <h2 id="review-queue-heading" tabIndex={-1}>Review queue</h2>
         <p>{moduleFindings.length} {moduleFindings.length === 1 ? "finding" : "findings"} in {integrityModuleLabel(module)}. {resolved.length} resolved.</p>
       </div>
       {invalidSelection && <Alert title="That finding is no longer available" tone="warning" role="status">The review queue is open.</Alert>}
@@ -156,7 +156,7 @@ function ReviewQueue({ findings, regions, report, pending, error, filter, module
   );
 }
 
-function SelectedFinding({ checkRunId, finding, total, modulePosition, moduleTotal, outsideFilter, onEditingChange, locationFlagId, region, previous, next, onBack, onPrevious, onNext, onLocation, onExplore, onSourceEvidence, sourceContextKey, presentedEvidenceIds }: {
+function SelectedFinding({ checkRunId, finding, total, modulePosition, moduleTotal, outsideFilter, onEditingChange, locationFlagId, region, previous, next, onPrevious, onNext, onLocation, onExplore, onSourceEvidence, sourceContextKey, presentedEvidenceIds }: {
   checkRunId: number;
   finding: ReviewFinding;
   total: number;
@@ -168,7 +168,6 @@ function SelectedFinding({ checkRunId, finding, total, modulePosition, moduleTot
   region: FlagRegionOut | null;
   previous: ReviewFinding | null;
   next: ReviewFinding | null;
-  onBack: () => void;
   onPrevious: () => void;
   onNext: () => void;
   onLocation: (flagId: number) => void;
@@ -187,8 +186,8 @@ function SelectedFinding({ checkRunId, finding, total, modulePosition, moduleTot
     // oxlint-disable-next-line react-hooks/exhaustive-deps
   }, [flag?.id, flag?.check_run_id, checkRunId, locationFlagId, sourceContextKey]);
   if (isPending) return <div role="status" aria-live="polite" aria-busy="true" className="signal-desk-loading"><span>Loading Finding {finding.number}.</span><i /><i /></div>;
-  if (isError || !flag) return <Alert title="Finding details could not be loaded" tone="error" role="alert"><p>The manuscript and review queue are still available. Try loading this finding again.</p><Button variant="secondary" onClick={() => refetch()}>Try again</Button><Button variant="quiet" onClick={onBack}>Back to review queue</Button></Alert>;
-  if (flag.id !== locationFlagId || flag.check_run_id !== checkRunId) return <Alert title="The finding reply does not match this review" tone="error"><Button variant="quiet" onClick={onBack}>Back to review queue</Button></Alert>;
+  if (isError || !flag) return <Alert title="Finding details could not be loaded" tone="error" role="alert"><p>The manuscript and review queue are still available. Try loading this finding again.</p><Button variant="secondary" onClick={() => refetch()}>Try again</Button></Alert>;
+  if (flag.id !== locationFlagId || flag.check_run_id !== checkRunId) return <Alert title="The finding reply does not match this review" tone="error">Use the back button above to return to the review queue.</Alert>;
 
   const { showsManuscriptQuote, reasoningText, showsManuscriptEvidence, isResubmission } = evidenceDisplayState(flag);
   const precision = regionPrecision(region);
@@ -204,7 +203,7 @@ function SelectedFinding({ checkRunId, finding, total, modulePosition, moduleTot
 
   return (
     <article className="signal-document-selected" aria-labelledby="selected-finding-heading">
-      <Button variant="quiet" onClick={onBack}>Back to review queue</Button>
+
       <header className="signal-document-selected__header">
         <p className="signal-section-kicker">Finding {finding.number} of {total}</p>
         <p className="signal-field-hint">{modulePosition} of {moduleTotal} in {integrityModuleLabel(finding.representative.check_kind)}</p>
@@ -262,7 +261,7 @@ function ReportUnavailable({ checkRunId, error, onRetry }: { checkRunId: number;
   return <Alert title="Could not load review details" tone="error" role="alert"><p>VERIDICAL could not load the recorded review. The source pane loads separately and may also need to be retried.</p><Button variant="secondary" onClick={onRetry}>Try review again</Button><ActionLink to="/dashboard?queue=needs_review" variant="quiet">Return to Review Desk</ActionLink></Alert>;
 }
 
-function ReadinessDecision({ checkRunId, report, pending, error, onRetry, onBack, onEvidenceSelected, onOpenEvidence }: { onEvidenceSelected: (criterionId: number, evidence: EvidenceItem, index: number) => void; onOpenEvidence: () => void; checkRunId: number; report: ReportOut | undefined; pending: boolean; error: unknown; onRetry: () => void; onBack: () => void }) {
+function ReadinessDecision({ checkRunId, report, pending, error, onRetry, onEditingChange, onEvidenceSelected, onOpenEvidence }: { onEvidenceSelected: (criterionId: number, evidence: EvidenceItem, index: number) => void; onOpenEvidence: () => void; checkRunId: number; report: ReportOut | undefined; pending: boolean; error: unknown; onRetry: () => void; onEditingChange: (editing: boolean) => void }) {
   if (pending) return <div role="status" aria-live="polite" aria-busy="true" className="signal-desk-loading"><span>Loading readiness and decision.</span><i /><i /></div>;
   if (!report) return <ReportUnavailable checkRunId={checkRunId} error={error} onRetry={onRetry} />;
 
@@ -270,7 +269,7 @@ function ReadinessDecision({ checkRunId, report, pending, error, onRetry, onBack
   const coverage = coverageItems(report);
   return (
     <div className="signal-document-analysis">
-      <Button variant="quiet" onClick={onBack}>Back to review queue</Button>
+
       <section className="signal-document-analysis__summary" aria-labelledby="analysis-heading">
         <div className="signal-document-inspector__heading"><p className="signal-section-kicker">After the evidence</p><h2 id="analysis-heading">Readiness and decision</h2><p>Use this summary after reviewing the evidence. The instructor records the final decision.</p></div>
         <div className="signal-document-analysis__readiness">
@@ -283,7 +282,7 @@ function ReadinessDecision({ checkRunId, report, pending, error, onRetry, onBack
       {report.llm_mode !== "real" && report.llm_mode !== "manual" && <Alert title={report.llm_mode === "fake" ? "Test-mode AI results" : "AI mode could not be verified"} tone="warning">{report.llm_mode === "fake" ? "This review was produced with fixture responses, not real AI grading. Do not treat it as a finding about the manuscript." : "This run predates reliable AI-mode tracking. Treat AI-derived outcomes cautiously."}</Alert>}
       {coverage.length > 0 && <CoverageStatement state="partial" headingId="workspace-coverage-heading" heading="Not every check finished" intro="Nothing skipped here is presented as passed. Each item below names what did not finish and how to close it." items={coverage} />}
       <PreparedAiReviewNotice results={report.results} />
-      <ReportReviewWorkflow report={report} manuscriptLabel={identity.primary} onEvidenceSelected={onEvidenceSelected} onOpenEvidence={onOpenEvidence} />
+      <ReportReviewWorkflow report={report} manuscriptLabel={identity.primary} onEvidenceSelected={onEvidenceSelected} onOpenEvidence={onOpenEvidence} onEditingChange={onEditingChange} />
       <div className="signal-document-analysis__footer"><ActionLink to={`/report/${report.check_run_id}`} variant="secondary">Open full readiness report</ActionLink></div>
     </div>
   );
@@ -414,6 +413,7 @@ export function SignalDocumentViewerPage() {
   }
 
   function showQueue() {
+    if (moduleLocked) return;
     restoreQueueRef.current = true;
     update((next) => {
       next.set("view", "queue");
@@ -440,13 +440,14 @@ export function SignalDocumentViewerPage() {
   }
 
   useEffect(() => {
-    if (!restoreQueueRef.current || selectedFinding || isDecision || isExploring || flagsQuery.isPending) return;
+    if (!restoreQueueRef.current || selectedFinding || isDecision || isExploring || flagsQuery.isPending || reportQuery.isPending) return;
     restoreQueueRef.current = false;
     requestAnimationFrame(() => {
       if (inspectorRef.current) inspectorRef.current.scrollTop = queueScrollRef.current;
-      if (queueFocusRef.current !== null) document.getElementById(`review-finding-${queueFocusRef.current}`)?.focus();
+      const priorItem = queueFocusRef.current !== null ? document.getElementById(`review-finding-${queueFocusRef.current}`) : null;
+      (priorItem ?? document.getElementById("review-queue-heading") ?? document.getElementById("integrity-module-heading") ?? headingRef.current)?.focus();
     });
-  }, [selectedFinding, isDecision, isExploring, flagsQuery.isPending]);
+  }, [selectedFinding, isDecision, isExploring, flagsQuery.isPending, reportQuery.isPending]);
 
   function openExplore() {
     update((next) => {
@@ -552,6 +553,8 @@ export function SignalDocumentViewerPage() {
 
       {!validId ? <Alert title="This manuscript address is invalid" tone="error" role="alert"><ActionLink to="/dashboard?queue=needs_review" variant="secondary">Return to Review Desk</ActionLink></Alert>
         : (
+          <div className="signal-document-workspace">
+            {(rawSelection !== null || view === "finding" || isDecision || isExploring) && <nav className="signal-document-back" aria-label="Review navigation"><Button variant="quiet" disabled={moduleLocked} aria-describedby={moduleLocked ? "review-back-help" : undefined} onClick={showQueue}><span aria-hidden="true">←</span> Back to review queue</Button>{moduleLocked && <p id="review-back-help" className="signal-field-hint">Save or cancel before returning to the queue.</p>}</nav>}
           <section ref={capacity.frame} className="signal-document-workbench" data-comparison={wideComparison} data-desktop-split={sourceCapacity.split} aria-label="Manuscript and review" data-source-available={viewer?.available === false ? "false" : "true"}>
             <span className="signal-review-measure" aria-hidden="true"><span ref={capacity.threshold} className="signal-review-capacity" /><span ref={sourceCapacity.threshold} className="signal-review-capacity signal-review-capacity--single" /></span>
             <div role="tablist" aria-label="Manuscript review view" className="signal-document-tabs">
@@ -575,14 +578,15 @@ export function SignalDocumentViewerPage() {
                 </>}
                 <div role={!isDecision && !isExploring && flagsQuery.isSuccess ? "region" : undefined} aria-labelledby={!isDecision && !isExploring && flagsQuery.isSuccess ? "integrity-module-heading" : undefined}>
                 {!isDecision && !isExploring && flagsQuery.isSuccess && <IntegrityModuleSummary kind={module} report={reportQuery.data} originalityScope={reportQuery.data?.originality_scope} showAddAction />}
-                {isExploring && isWorkspaceSample() ? <section className="signal-document-selected"><Button variant="quiet" onClick={showQueue}>Back to review queue</Button><h2>Originality comparison was not run</h2><p>This prepared review has no saved similarity search or passage pair. The independent Library article is available for reading; it is not a demonstrated match. An empty prepared response is not a completed search with zero matches.</p></section> : isExploring ? <ReuseExplorePanel flags={flagsQuery.data} onSelectFlag={selectFinding} onBack={showQueue} includeReferenceList={includeReferenceList} includeBlockQuote={includeBlockQuote} onToggleReferenceList={(value) => setToggle("ref", value)} onToggleBlockQuote={(value) => setToggle("quote", value)} excludedMatchesQuery={excludedMatchesQuery} expandedMatchId={expandedMatchId} onExpandMatch={setMatch} />
-                  : isDecision ? <ReadinessDecision checkRunId={id} report={reportQuery.data} pending={reportQuery.isPending || (isWorkspaceSample() && viewerQuery.isPending)} error={reportQuery.error} onRetry={() => reportQuery.refetch()} onBack={showQueue} onEvidenceSelected={chooseCriterionEvidence} onOpenEvidence={() => { if (!sourceCapacity.split) selectPane("manuscript"); }} />
-                    : selectedFinding && selectedLocationId ? <SelectedFinding checkRunId={id} finding={selectedFinding} total={findings.length} modulePosition={moduleFindings.findIndex(finding => finding.key === selectedFinding.key) + 1} moduleTotal={moduleFindings.length} outsideFilter={!filteredFindings.some(finding => finding.key === selectedFinding.key)} onEditingChange={setModuleLocked} locationFlagId={selectedLocationId} region={selectedRegion} previous={previousFinding} next={nextFinding} onBack={showQueue} onPrevious={() => previousFinding && selectFinding(previousFinding.representative.id, true)} onNext={() => nextFinding && selectFinding(nextFinding.representative.id, true)} onLocation={selectFinding} onExplore={openExplore} onSourceEvidence={chooseSource} presentedEvidenceIds={wideComparison && sourceCapacity.split ? pairSources.filter(entry => entry.image_id).map(entry => entry.evidence_id) : []} sourceContextKey={`${id}:${viewer?.manuscript_id ?? "loading"}:${viewer?.source_sha256 ?? "unknown"}`} />
+                {isExploring && isWorkspaceSample() ? <section className="signal-document-selected"><h2>Originality comparison was not run</h2><p>This prepared review has no saved similarity search or passage pair. The independent Library article is available for reading; it is not a demonstrated match. An empty prepared response is not a completed search with zero matches.</p></section> : isExploring ? <ReuseExplorePanel flags={flagsQuery.data} onSelectFlag={selectFinding} includeReferenceList={includeReferenceList} includeBlockQuote={includeBlockQuote} onToggleReferenceList={(value) => setToggle("ref", value)} onToggleBlockQuote={(value) => setToggle("quote", value)} excludedMatchesQuery={excludedMatchesQuery} expandedMatchId={expandedMatchId} onExpandMatch={setMatch} />
+                  : isDecision ? <ReadinessDecision checkRunId={id} report={reportQuery.data} pending={reportQuery.isPending || (isWorkspaceSample() && viewerQuery.isPending)} error={reportQuery.error} onRetry={() => reportQuery.refetch()} onEditingChange={setModuleLocked} onEvidenceSelected={chooseCriterionEvidence} onOpenEvidence={() => { if (!sourceCapacity.split) selectPane("manuscript"); }} />
+                    : selectedFinding && selectedLocationId ? <SelectedFinding checkRunId={id} finding={selectedFinding} total={findings.length} modulePosition={moduleFindings.findIndex(finding => finding.key === selectedFinding.key) + 1} moduleTotal={moduleFindings.length} outsideFilter={!filteredFindings.some(finding => finding.key === selectedFinding.key)} onEditingChange={setModuleLocked} locationFlagId={selectedLocationId} region={selectedRegion} previous={previousFinding} next={nextFinding} onPrevious={() => previousFinding && selectFinding(previousFinding.representative.id, true)} onNext={() => nextFinding && selectFinding(nextFinding.representative.id, true)} onLocation={selectFinding} onExplore={openExplore} onSourceEvidence={chooseSource} presentedEvidenceIds={wideComparison && sourceCapacity.split ? pairSources.filter(entry => entry.image_id).map(entry => entry.evidence_id) : []} sourceContextKey={`${id}:${viewer?.manuscript_id ?? "loading"}:${viewer?.source_sha256 ?? "unknown"}`} />
                       : <ReviewHome checkRunId={id} report={reportQuery.data} reportPending={reportQuery.isPending} reportError={reportQuery.error} onReportRetry={() => reportQuery.refetch()} findings={findings} regions={viewer?.regions ?? []} flagsPending={flagsQuery.isPending} flagsError={flagsQuery.isError} filter={filter} module={module} invalidSelection={invalidSelection} onFilter={setFilter} onSelect={selectFinding} onExplore={openExplore} onDecision={openDecision} />}
                 </div>
               </aside>
             </div>
           </section>
+          </div>
         )}
     </div>
   );
