@@ -545,6 +545,9 @@ function SignalResolutionCard({ item, checkRunId, onResolved, onEditingChange, o
   }, [item.check_result_id]);
   function selectEvidence(index: number) {
     setEvidenceIndex(index);
+  }
+  function openEvidence(index: number) {
+    selectEvidence(index);
     evidenceSelection.current?.(item.criterion_id, evidence[index], index);
     onOpenEvidence?.(item.criterion_id, evidence[index], index);
   }
@@ -621,13 +624,15 @@ function SignalResolutionCard({ item, checkRunId, onResolved, onEditingChange, o
         <div><p className="signal-section-kicker">Criterion requiring judgment</p><h3 ref={criterionHeadingRef} tabIndex={-1}>{item.criterion_text}</h3></div>
         <p id={voteId} className="signal-resolution-card__vote">{voteSummary(item)}</p>
         {evidence.length > 0 && <section className="signal-criterion-evidence" aria-label={`Evidence for ${item.criterion_text}`}>
-          {onOpenEvidence && <p className="signal-field-hint">Choose an evidence entry to open its manuscript passage. Your unsaved grade and comment stay here.</p>}
-          <div className="signal-evidence-navigation"><Button variant="quiet" disabled={evidenceIndex === 0} onClick={() => selectEvidence(evidenceIndex - 1)}>Previous evidence</Button><span>Evidence {evidenceIndex + 1} of {evidence.length}</span><Button variant="quiet" disabled={evidenceIndex >= evidence.length - 1} onClick={() => selectEvidence(evidenceIndex + 1)}>Next evidence</Button></div>
-          <blockquote><span>“{evidence[evidenceIndex].quote}”</span><cite>{evidence[evidenceIndex].anchor}</cite></blockquote>
+          <div className="signal-criterion-evidence__heading"><h4>Evidence from the manuscript</h4><span>Evidence {evidenceIndex + 1} of {evidence.length}</span></div>
+          <blockquote><span>“{evidence[evidenceIndex].quote}”</span></blockquote>
+          <cite>{onOpenEvidence && criterionAnchorRegion(evidence[evidenceIndex].anchor) ? <button className="signal-evidence-source-link" type="button" aria-label={`Open ${evidence[evidenceIndex].anchor} in manuscript`} onClick={() => openEvidence(evidenceIndex)}>{evidence[evidenceIndex].anchor}: Open manuscript</button> : evidence[evidenceIndex].anchor}</cite>
+          <div className="signal-evidence-navigation"><Button variant="quiet" disabled={evidenceIndex === 0} onClick={() => selectEvidence(evidenceIndex - 1)}>Previous evidence</Button><Button variant="quiet" disabled={evidenceIndex >= evidence.length - 1} onClick={() => selectEvidence(evidenceIndex + 1)}>Next evidence</Button></div>
+          <p className="signal-field-hint">Previous and Next change the text shown here.{onOpenEvidence ? " Page links open the manuscript. Your unsaved grade and comment stay here." : ""}</p>
           {!criterionAnchorRegion(evidence[evidenceIndex].anchor) && <p className="signal-field-hint">This saved anchor cannot be placed. Keep this entry in review and inspect the manuscript manually.</p>}
-          <details><summary>All saved evidence</summary><ol>{evidence.map((entry, index) => <li key={`${index}:${entry.anchor}`}><button type="button" onClick={() => selectEvidence(index)}>{entry.anchor}: {entry.quote}</button></li>)}</ol></details>
+          <details><summary>All saved evidence</summary><ol>{evidence.map((entry, index) => <li key={`${index}:${entry.anchor}`}><p>{entry.quote}</p><cite>{onOpenEvidence && criterionAnchorRegion(entry.anchor) ? <button className="signal-evidence-source-link" type="button" aria-label={`Open ${entry.anchor} in manuscript`} onClick={() => openEvidence(index)}>{entry.anchor}: Open manuscript</button> : entry.anchor}</cite>{!criterionAnchorRegion(entry.anchor) && <p className="signal-field-hint">This saved location cannot be placed. Inspect the manuscript manually.</p>}</li>)}</ol></details>
         </section>}
-        {item.reason && <p id={reasonId}>{item.reason}</p>}
+        {item.reason && <section className="signal-resolution-context-note"><h4>What to check</h4><p id={reasonId}>{item.reason}</p></section>}
         {item.injection_suspected && item.injection_matched_snippet && (
           <blockquote id={injectionId} className="signal-unverified-evidence"><strong>Text addressed at an automated grader</strong><span>“{item.injection_matched_snippet}”</span></blockquote>
         )}
@@ -636,6 +641,8 @@ function SignalResolutionCard({ item, checkRunId, onResolved, onEditingChange, o
         )}
       </div>
 
+      <div className="signal-resolution-card__judgment">
+      <h4>Your grade</h4>
       {/* BUG-145 (UX review review, round 2): this region must be mounted
           BEFORE it has content, not created already-populated in the same
           render as `pending` becoming truthy -- a live region announced
@@ -648,7 +655,7 @@ function SignalResolutionCard({ item, checkRunId, onResolved, onEditingChange, o
         {pending && (
           <>
             <p className="signal-section-kicker">Step 2 of 2: nothing is saved yet</p>
-            <h4 ref={pendingHeadingRef} tabIndex={-1}>{resolutionLabel(item, pending.resolution, pending.level)}</h4>
+            <h5 ref={pendingHeadingRef} tabIndex={-1}>{resolutionLabel(item, pending.resolution, pending.level)}</h5>
           </>
         )}
       </div>
@@ -678,6 +685,7 @@ function SignalResolutionCard({ item, checkRunId, onResolved, onEditingChange, o
           <div><Button variant="secondary" disabled={resolve.isPending} onClick={cancel}>Cancel</Button><Button variant="brand" busy={resolve.isPending} onClick={confirm}>{ordinaryGrade ? "Save grade" : "Confirm resolution"}</Button></div>
         </div>
       )}
+      </div>
     </article>
   );
 }

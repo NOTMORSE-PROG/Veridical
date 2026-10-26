@@ -222,7 +222,7 @@ Combines everything into one explainable output (Objective 4, Fig. 3.12).
 
 ### Flow C — Flag review & final decision 🟢
 1. Open a report → summary header: status, composite score, flag counts by severity, **escalated-items count**
-2. Review criteria one at a time and save each judgment. Selecting saved criterion evidence opens the original manuscript while the unsaved grade/comment stays in the form
+2. Review criteria one at a time and save each judgment. Previous/Next evidence change only the displayed text; explicit page links open the original manuscript while the unsaved grade/comment stays in the form
 3. Review findings with the existing filters and source evidence; add a private note or dismiss a finding you disagree with and record why
 4. Read the saved criterion outcomes before the decision
 5. Set final decision: **Approve for defense / Return for revision / Reject**
@@ -234,8 +234,9 @@ or cancelled before changing sections. Opening a section does not complete its
 review or change readiness. Findings remain independently accessible when there
 is no unsaved grade; the existing pending-criteria decision gate still applies.
 The full report's manuscript reader retains the original source and fails closed
-when an evidence location cannot be verified. This is a local sample candidate;
-publication is tracked separately.
+when an evidence location cannot be verified. Evidence arrows change the displayed
+quotation without opening the reader or moving its current page. Open the reader
+only from an explicit source link; location labels that cannot be placed remain plain text.
 
 **Plain language (owner, 2026-10-26):** Use simple words in instructor controls
 and explain the effect of an action before it is saved. Finding actions use

@@ -9,7 +9,7 @@
 // full submission flows (including the actual mutation payload), the
 // mark_level path, the injection_suspected path, and focus survival
 // when the last escalated item resolves.
-import { fireEvent, screen, waitFor } from "@testing-library/react";
+import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { useQueryClient } from "@tanstack/react-query";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { EscalatedItemOut } from "../api/types";
@@ -100,6 +100,36 @@ function reportWith(overrides: Record<string, unknown>) {
 describe("SignalEscalatedPanel / SignalResolutionCard", () => {
   afterEach(() => vi.unstubAllGlobals());
 
+  it("browses evidence without opening its source and preserves the grade draft until an explicit page link", async () => {
+    const evidence = [
+      { quote: "The first saved passage.", anchor: "page 3" },
+      { quote: "The second saved passage.", anchor: "page 4" },
+      { quote: "A saved passage without a placeable location.", anchor: "unplaced section" },
+    ];
+    const selected = vi.fn(), opened = vi.fn();
+    vi.stubGlobal("fetch", stubFetchByPath({ "/check-runs/5/escalated": [{ ...LEVELLED_ITEM, evidence }] }));
+    renderWithProviders(<SignalEscalatedPanel checkRunId={5} onEvidenceSelected={selected} onOpenEvidence={opened} />);
+    const panel = await screen.findByRole("region", { name: `Evidence for ${LEVELLED_ITEM.criterion_text}` });
+    await waitFor(() => expect(selected).toHaveBeenCalled());
+    fireEvent.click(screen.getByRole("button", { name: "Proficient" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Comment (optional)" }), { target: { value: "Keep my unfinished grade." } });
+    fireEvent.click(within(panel).getByRole("button", { name: "Next evidence" }));
+    expect(within(panel).getByText("Evidence 2 of 3")).toBeInTheDocument();
+    expect(within(panel).getByText(`“${evidence[1].quote}”`)).toBeInTheDocument();
+    expect(selected).toHaveBeenCalledTimes(1);
+    expect(opened).not.toHaveBeenCalled();
+    fireEvent.click(within(panel).getByRole("button", { name: "Next evidence" }));
+    expect(within(panel).queryByRole("button", { name: "Open unplaced section in manuscript" })).not.toBeInTheDocument();
+    expect(opened).not.toHaveBeenCalled();
+    fireEvent.click(within(panel).getByRole("button", { name: "Previous evidence" }));
+    expect(opened).not.toHaveBeenCalled();
+    fireEvent.click(within(panel.querySelector("cite")!).getByRole("button", { name: "Open page 4 in manuscript" }));
+    expect(selected).toHaveBeenLastCalledWith(LEVELLED_ITEM.criterion_id, evidence[1], 1);
+    expect(opened).toHaveBeenCalledExactlyOnceWith(LEVELLED_ITEM.criterion_id, evidence[1], 1);
+    expect(screen.getByRole("textbox", { name: "Comment (optional)" })).toHaveValue("Keep my unfinished grade.");
+    expect(screen.getByRole("heading", { name: "Proficient" })).toBeInTheDocument();
+  });
+
   it.each(["removed", "error"])("preserves an unchanged draft and handles refreshed criteria that are %s", async outcome => {
     let mode = "same";
     const editing = vi.fn();
@@ -146,7 +176,7 @@ describe("SignalEscalatedPanel / SignalResolutionCard", () => {
     fireEvent.click(await screen.findByRole("button", { name: choice }));
     const comment = screen.getByRole("textbox", { name: "Comment (optional)" });
     expect(comment).not.toHaveFocus();
-    expect(screen.getByRole("heading", { level: 4 })).toHaveFocus();
+    expect(screen.getByRole("heading", { level: 5 })).toHaveFocus();
     expect(fetchMock.mock.calls.some(([, init]) => init?.method === "POST")).toBe(false);
     fireEvent.click(screen.getByRole("button", { name: "Save grade" }));
     await screen.findByText("Could not save this resolution");
@@ -158,7 +188,7 @@ describe("SignalEscalatedPanel / SignalResolutionCard", () => {
     fireEvent.click(screen.getByRole("button", { name: "Save grade" }));
     await waitFor(() => expect(fetchMock.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(2));
     expect(comment).toHaveValue("OK");
-    expect(screen.getByRole("heading", { level: 4 })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 5 })).toBeInTheDocument();
   });
 
   it("shows one readable criterion in focused mode and protects an unsaved judgment during navigation", async () => {
@@ -374,7 +404,7 @@ describe("SignalEscalatedPanel / SignalResolutionCard", () => {
     // Step-2 pending state names the specific level chosen, not a generic
     // "resolution pending" sentence -- an instructor picking among four
     // levels needs to see WHICH one is about to be confirmed.
-    expect(await screen.findByRole("heading", { name: "Proficient", level: 4 })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "Proficient", level: 5 })).toBeInTheDocument();
     fireEvent.change(screen.getByRole("textbox", { name: "Comment (optional)" }), {
       target: { value: "Read it myself: previews structure but isn't engaging." },
     });

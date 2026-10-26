@@ -111,7 +111,7 @@ describe("SignalReportPage", () => {
     fireEvent.change(screen.getByRole("textbox", { name: "Comment (optional)" }), { target: { value: "PRIVATE-DRAFT-1768" } });
     expect(screen.getByRole("button", { name: /2.*Review findings/ })).toBeDisabled();
     fireEvent.click(screen.getByText("All saved evidence"));
-    const source = screen.getByRole("button", { name: `page 3: ${evidence.quote}` });
+    const source = within(screen.getByText("All saved evidence").closest("details")!).getByRole("button", { name: "Open page 3 in manuscript" });
     source.focus();
     fireEvent.click(source);
     await screen.findByRole("dialog", { name: "Original manuscript passage" });
@@ -199,7 +199,7 @@ describe("SignalReportPage", () => {
     // page states plainly that nothing is saved yet, so the two-step
     // choose-then-confirm flow can't be mistaken for a completed action
     // (the original bug: the options vanishing read exactly like success).
-    expect(screen.getByRole("heading", { name: "Mark as meets criterion", level: 4 })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Mark as meets criterion", level: 5 })).toBeInTheDocument();
     expect(screen.getByText("Step 2 of 2: nothing is saved yet")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Save grade" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Cancel" })).toBeInTheDocument();
