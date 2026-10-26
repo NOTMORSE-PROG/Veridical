@@ -6,7 +6,7 @@ const rect = (top: number, height: number) => ({ top, bottom: top + height, left
 
 afterEach(() => {
   document.body.replaceChildren();
-  document.documentElement.style.removeProperty("--signal-header-height");
+  document.documentElement.style.removeProperty("--signal-workspace-header-height");
   document.documentElement.style.removeProperty("font-size");
   vi.unstubAllGlobals();
 });
@@ -50,7 +50,7 @@ describe("desktop coach-mark header clearance", () => {
   });
 
   it("resolves the one desktop token against the actual root font size", () => {
-    document.documentElement.style.setProperty("--signal-header-height", "5rem");
+    document.documentElement.style.setProperty("--signal-workspace-header-height", "5rem");
     document.documentElement.style.fontSize = "20px";
     const anchor = document.createElement("button");
     anchor.getBoundingClientRect = () => rect(105, 40);

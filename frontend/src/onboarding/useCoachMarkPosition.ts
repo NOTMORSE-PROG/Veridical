@@ -86,7 +86,7 @@ function headerBoundary(header: HTMLElement | null): number {
   const rect = header?.getBoundingClientRect();
   if (rect && rect.height > 0 && Number.isFinite(rect.bottom)) return rect.bottom;
   const style = getComputedStyle(document.documentElement);
-  const raw = style.getPropertyValue("--signal-header-height").trim();
+  const raw = style.getPropertyValue("--signal-workspace-header-height").trim();
   const value = parseFloat(raw);
   const rootSize = parseFloat(style.fontSize);
   const resolved = raw.endsWith("rem") ? value * rootSize : raw.endsWith("px") ? value : NaN;
