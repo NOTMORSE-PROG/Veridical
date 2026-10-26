@@ -56,6 +56,10 @@ def confirmation_recorded(
     value: object, group_id: int | None, *, manuscript_id: int, instructor_id: int
 ) -> bool:
     """A historical confirmation is distinct from current group facts."""
-    return current_receipt(value, group_id) is not None or current_selection_receipt(
-        value, group_id, manuscript_id=manuscript_id, instructor_id=instructor_id
-    ) is not None
+    return (
+        current_receipt(value, group_id) is not None
+        or current_selection_receipt(
+            value, group_id, manuscript_id=manuscript_id, instructor_id=instructor_id
+        )
+        is not None
+    )
