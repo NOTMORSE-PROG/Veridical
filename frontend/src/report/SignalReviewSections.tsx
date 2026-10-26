@@ -28,7 +28,7 @@ import {
   RESOLUTION_REASON_MIN_LENGTH,
 } from "../config/ui";
 import { isManuscriptQuote } from "../domain/evidenceDisplay";
-import { CRITERION_EXCLUSION_COPY, CRITERION_REVIEW_COPY, REVIEW_DRAFT_COPY, criterionReviewNotices } from "../domain/criterionReview";
+import { CRITERION_EXCLUSION_COPY, CRITERION_REVIEW_COPY, REVIEW_DRAFT_COPY, criterionReviewNotices, resolutionRequiresReason } from "../domain/criterionReview";
 import { isOptionalComparisonLead } from "../domain/comparisonLeadIdentity";
 import { useViewedFlagIds } from "../domain/flagViewed";
 import { problemLabel } from "../domain/problemLabel";
@@ -53,6 +53,9 @@ import { ComparisonLeadList } from "./ComparisonLeadList";
 import { comparisonLeadCollection } from "./comparisonLeadCollection";
 import { resultDisplay } from "./ResultsTable";
 import { useExplicitActionFocus } from "../routing/useExplicitActionFocus";
+import { criterionReviewSearch, selectedCriterionId, SELECTED_CRITERION_PARAM } from "./criterionReviewNavigation";
+import { useEvidenceManifest } from "./useEvidenceSource";
+import type { OpenEvidenceSource } from "./evidenceTypes";
 
 const OUTCOME_COPY: Record<ResultRowCommon["outcome"], { label: string; tone: string }> = {
   passed: { label: "Meets criterion", tone: "meets" },
@@ -544,12 +547,13 @@ function DiscardReviewDraft({ checkRunId, id }: { checkRunId: number; id: number
 export type CriterionSourceTarget = (anchor: string, actionId: string) => string;
 export type CriterionSourceOpen = (anchor: string, actionId: string) => void;
 
-function SignalResolutionCard({ item, checkRunId, sharedReasonId, sourceTarget, onOpenSource, currentItems }: {
+function SignalResolutionCard({ item, checkRunId, sharedReasonId, sourceTarget, onOpenSource, onOpenEvidenceSource, currentItems }: {
   item: EscalatedItemOut;
   checkRunId: number;
   sharedReasonId?: string;
   sourceTarget?: CriterionSourceTarget;
   onOpenSource?: CriterionSourceOpen;
+  onOpenEvidenceSource?: OpenEvidenceSource;
   currentItems: boolean;
 }) {
   const location = useLocation();
@@ -558,6 +562,9 @@ function SignalResolutionCard({ item, checkRunId, sharedReasonId, sourceTarget, 
     ? pendingAssessmentRow(review.assessment, item, checkRunId) : undefined;
   const assessment = canonical ? criterionAssessmentDetails(canonical, false) : undefined;
   const currentAssessment = review.assessmentCurrent?.() ? review.assessment : undefined;
+  const manifestQuery = useEvidenceManifest(checkRunId, currentAssessment?.assessment_revision, Boolean(onOpenEvidenceSource));
+  const manifest = currentAssessment && manifestQuery.isSuccess && manifestQuery.fetchStatus === "idle"
+    && manifestQuery.data.assessment_revision === currentAssessment.assessment_revision ? manifestQuery.data : undefined;
   const reportHasLimits = currentAssessment && coverageItems(currentAssessment).length > 0;
   const pendingSource = (anchor: string, actionId: string) => {
     const fullReport = !onOpenSource && location.pathname === `/report/${checkRunId}`;
@@ -567,9 +574,11 @@ function SignalResolutionCard({ item, checkRunId, sharedReasonId, sourceTarget, 
       clearPdfReading(params);
       params.set("view", "decision"); params.set("pane", "manuscript"); params.set("anchor", anchor);
     }
+    const selectedWorkspace = !onOpenSource && location.pathname === `/report/${checkRunId}/document`;
+    if (selectedWorkspace) { params.set("pane", "manuscript"); params.set("anchor", anchor); }
     const target = sourceTarget?.(anchor, actionId) ?? reviewDeskDestination(fullReport
       ? `/report/${checkRunId}/document?${params}`
-      : `/report/${checkRunId}/document?anchor=${encodeURIComponent(anchor)}`, location);
+      : selectedWorkspace ? `/report/${checkRunId}/document?${params}` : `/report/${checkRunId}/document?anchor=${encodeURIComponent(anchor)}`, location);
     const state = fullReport ? {
       ...(location.state && typeof location.state === "object" && !Array.isArray(location.state)
         ? Object.fromEntries(Object.entries(location.state).filter(([key]) => key !== "criterionRecordReturn" && key !== "pendingCriterionReturn")) : {}),
@@ -587,16 +596,20 @@ function SignalResolutionCard({ item, checkRunId, sharedReasonId, sourceTarget, 
     }}>Open in manuscript: {instructorAnchor(anchor)}</ActionLink>;
   };
   const pending = review.drafts.get(item.check_result_id);
+  const requiresReason = pending ? resolutionRequiresReason(pending.resolution) : false;
+  const ordinaryGrade = Boolean(pending && !requiresReason);
   const reason = pending?.reason ?? "";
   const attempted = pending?.attempted ?? false;
   const saving = pending?.saving ?? false;
   const draftCurrent = pending ? review.isDraftCurrent(pending) : false;
   const [detailsOpen, setDetailsOpen] = useState(false);
-  const reasonInvalid = attempted && reason.trim().length < RESOLUTION_REASON_MIN_LENGTH;
+  const reasonInvalid = attempted && requiresReason && reason.trim().length < RESOLUTION_REASON_MIN_LENGTH;
   const reasonErrorId = `signal-resolution-reason-${item.check_result_id}`;
   const criterionHeadingRef = useRef<HTMLHeadingElement>(null);
   const reasonRef = useRef<HTMLTextAreaElement>(null);
-  const followAction = useExplicitActionFocus(() => reasonRef.current ?? criterionHeadingRef.current);
+  const pendingHeadingRef = useRef<HTMLHeadingElement>(null);
+  const followAction = useExplicitActionFocus(() => ordinaryGrade ? pendingHeadingRef.current : reasonRef.current ?? criterionHeadingRef.current);
+  const followChoice = useExplicitActionFocus(() => ordinaryGrade ? pendingHeadingRef.current : reasonRef.current);
   const requestedReasonFocus = useRef(false);
   useEffect(() => {
     if (pending && requestedReasonFocus.current) {
@@ -605,9 +618,8 @@ function SignalResolutionCard({ item, checkRunId, sharedReasonId, sourceTarget, 
     }
   }, [pending]);
 
-  function choose(resolution: EscalationResolution, level?: number) {
-    requestedReasonFocus.current = true;
-    review.choose(item, resolution, level);
+  function choose(trigger: HTMLElement, resolution: EscalationResolution, level?: number) {
+    followChoice(trigger, () => review.choose(item, resolution, level));
   }
 
   function cancel(trigger: HTMLElement) {
@@ -616,7 +628,7 @@ function SignalResolutionCard({ item, checkRunId, sharedReasonId, sourceTarget, 
   }
 
   function confirm() {
-    requestedReasonFocus.current = draftCurrent && !saving && reason.trim().length < RESOLUTION_REASON_MIN_LENGTH;
+    requestedReasonFocus.current = draftCurrent && !saving && requiresReason && reason.trim().length < RESOLUTION_REASON_MIN_LENGTH;
     const submittedResolution = pending?.resolution;
     review.confirm(item.check_result_id, (out) => {
       if (submittedResolution === "needs_document") return CRITERION_EXCLUSION_COPY.success;
@@ -683,6 +695,14 @@ function SignalResolutionCard({ item, checkRunId, sharedReasonId, sourceTarget, 
         {item.evidence?.map((entry, index) => {
           const actionId = `signal-resolution-source-${checkRunId}-${item.check_result_id}-${index}`;
           const { target, state } = pendingSource(entry.anchor, actionId);
+          const recorded = manifest?.references.find(ref => ref.criterion_id === item.criterion_id
+            && ref.role === "criterion_evidence" && ref.index === index && ref.quote === entry.quote && ref.anchor === entry.anchor);
+          if (onOpenEvidenceSource) return <div className="signal-attached-flow" key={`${entry.anchor}-${index}`}>
+            <blockquote>“{entry.quote}”</blockquote><p>{entry.anchor.trim() ? instructorAnchor(entry.anchor) : RECORDED_GRADE_BASIS.missingLocation}</p>
+            <Button id={actionId} variant="quiet" disabled={!recorded || !manifest} onClick={() => {
+              if (recorded && manifest) onOpenEvidenceSource({ snapshotId: manifest.snapshot_id, reference: recorded, actionId });
+            }}>Show recorded location</Button>
+          </div>;
           return <div className="signal-attached-flow" key={`${entry.anchor}-${index}`}><blockquote>“{entry.quote}”</blockquote>{entry.anchor.trim() ? <><p>{instructorAnchor(entry.anchor)}</p><ActionLink id={actionId} variant="quiet" state={state} to={target} aria-label={`Open in manuscript: ${instructorAnchor(entry.anchor)}. ${item.criterion_text}`} onClick={(event) => {
             if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
             if (onOpenSource) {
@@ -691,6 +711,8 @@ function SignalResolutionCard({ item, checkRunId, sharedReasonId, sourceTarget, 
             } else rememberRouteReturnFocus(location.pathname + location.search, target, actionId, { fallbackElementId: [`signal-resolution-heading-${item.check_result_id}`, "escalated-heading", "readiness-report-heading"] });
           }}>Open in manuscript: {instructorAnchor(entry.anchor)}</ActionLink></> : <p>{RECORDED_GRADE_BASIS.missingLocation}</p>}</div>;
         })}
+        {onOpenEvidenceSource && manifestQuery.isFetching && <p role="status">Loading recorded source links.</p>}
+        {onOpenEvidenceSource && manifestQuery.isError && <p role="status">Recorded source links could not be verified. <Button variant="quiet" onClick={() => { void manifestQuery.refetch(); }}>Retry source links</Button></p>}
         {!item.evidence?.length && !assessment?.ruleFacts && <p>{RECORDED_GRADE_BASIS.missingExcerpt}</p>}
         {item.reasoning?.trim() ? <div className="signal-copy-flow"><strong>{assessment?.explanationLabel ?? "Recorded explanation:"}</strong><p>{item.reasoning}</p></div>
           : !assessment?.ruleFacts && (assessment?.source === "ai" || !item.reason?.trim()) && <p>{assessment?.missingExplanation ?? "No explanation is available in this assessment record."}</p>}
@@ -708,15 +730,15 @@ function SignalResolutionCard({ item, checkRunId, sharedReasonId, sourceTarget, 
         </div>
       </div>
 
-      {/* Mount the status region before its content changes. Explicit choice
-          focuses the reason field; restoring a draft must not steal focus. */}
+      {/* Keep the status region mounted. Only an explicit choice may continue
+          focus to its selected heading or required reason. */}
       <div className="signal-resolution-form__pending" role="status" aria-live="polite">
         {pending && (
           <>
             <p className="signal-field-hint">{REVIEW_DRAFT_COPY.retention}</p>
             <p className="signal-section-kicker">{saving ? "Step 2 of 2: saving judgment" : pending.uncertainRevision !== undefined ? "Step 2 of 2: save outcome unconfirmed" : "Step 2 of 2: nothing is saved yet"}</p>
             {pending.uncertainRevision !== undefined && <p>Saving could not be confirmed. Your choice and reason are kept. You cannot discard them or leave this review yet. Review the current criterion before trying again.</p>}
-            <h4>{resolutionLabel(item, pending.resolution, pending.level)}</h4>
+            <h4 ref={pendingHeadingRef} tabIndex={-1}>{resolutionLabel(item, pending.resolution, pending.level)}</h4>
             {!draftCurrent && !saving && <div className="signal-copy-flow">
               <strong>{review.decision ? "Recorded decision: review is read-only" : "Current review required"}</strong>
               {review.decision ? <><p>Reopen the decision before reviewing this draft.</p>
@@ -746,9 +768,9 @@ function SignalResolutionCard({ item, checkRunId, sharedReasonId, sourceTarget, 
           {!review.canChoose && <p>Reload the current report, or reopen its recorded decision, before making a judgment.</p>}
           {pending?.needsChoice && <p>Your previous choice is no longer supported. Choose a current option; your unsaved reason is kept.</p>}
           {item.levels && item.levels.length > 0
-            ? item.levels.map((level) => <Button key={level.level} variant="secondary" disabled={!review.canChoose} aria-describedby={`${describedBy} ${levelDescriptionId(level.level)}`} onClick={() => choose("mark_level", level.level)}>{level.name}</Button>)
-            : <><Button variant="secondary" disabled={!review.canChoose} aria-describedby={describedBy} onClick={() => choose("mark_pass")}>Meets criterion</Button><Button variant="secondary" disabled={!review.canChoose} aria-describedby={describedBy} onClick={() => choose("mark_fail")}>Does not meet</Button></>}
-          <div className="signal-copy-flow"><Button variant="quiet" disabled={!review.canChoose} aria-describedby={`${describedBy} ${exclusionHintId}`} onClick={() => choose("needs_document")}>{CRITERION_EXCLUSION_COPY.action}</Button><p id={exclusionHintId} className="signal-field-hint">{CRITERION_EXCLUSION_COPY.hint} <span>{CRITERION_EXCLUSION_COPY.wait}</span></p></div>
+            ? item.levels.map((level) => <Button key={level.level} variant="secondary" disabled={!review.canChoose} aria-describedby={`${describedBy} ${levelDescriptionId(level.level)}`} onClick={event => choose(event.currentTarget, "mark_level", level.level)}>{level.name}</Button>)
+            : <><Button variant="secondary" disabled={!review.canChoose} aria-describedby={describedBy} onClick={event => choose(event.currentTarget, "mark_pass")}>Meets criterion</Button><Button variant="secondary" disabled={!review.canChoose} aria-describedby={describedBy} onClick={event => choose(event.currentTarget, "mark_fail")}>Does not meet</Button></>}
+          <div className="signal-copy-flow"><Button variant="quiet" disabled={!review.canChoose} aria-describedby={`${describedBy} ${exclusionHintId}`} onClick={event => choose(event.currentTarget, "needs_document")}>{CRITERION_EXCLUSION_COPY.action}</Button><p id={exclusionHintId} className="signal-field-hint">{CRITERION_EXCLUSION_COPY.hint} <span>{CRITERION_EXCLUSION_COPY.wait}</span></p></div>
           {/* BUG-170: `verdict_unrecognized` means accepting this verdict
               is guaranteed to 409 server-side (the passes agreed on a
               string that still doesn't name any of this criterion's own
@@ -757,26 +779,31 @@ function SignalResolutionCard({ item, checkRunId, sharedReasonId, sourceTarget, 
               recognise" incoherence this ticket named. `item.reason`
               already explains why, so removing the button loses no
               information. */}
-          {item.ai_majority_verdict !== null && !item.verdict_unrecognized && !reviewNotices.some((notice) => notice.kind === "support") && <Button disabled={!review.canChoose} variant={reviewNotices.some((notice) => notice.kind === "source_instructions") ? "quiet" : "secondary"} aria-describedby={describedBy} onClick={() => choose("accept_majority")}>Accept AI suggestion: {item.ai_majority_verdict}</Button>}
+          {item.ai_majority_verdict !== null && !item.verdict_unrecognized && !reviewNotices.some((notice) => notice.kind === "support") && <Button disabled={!review.canChoose} variant={reviewNotices.some((notice) => notice.kind === "source_instructions") ? "quiet" : "secondary"} aria-describedby={describedBy} onClick={event => choose(event.currentTarget, "accept_majority")}>Accept AI suggestion: {item.ai_majority_verdict}</Button>}
         </div>
       ) : (
         <div className="signal-resolution-form">
           {excluding && <div className="signal-copy-flow"><p id={exclusionConsequenceId}>{CRITERION_EXCLUSION_COPY.consequence}</p><p>{CRITERION_EXCLUSION_COPY.cancel}</p></div>}
           {selectedLevel && <div className="signal-copy-flow"><p><strong>Selected level: {selectedLevel.name}</strong></p><p>{selectedLevel.descriptor || "Description not recorded for this level."}</p></div>}
-          <label><span>{excluding ? CRITERION_EXCLUSION_COPY.reason : "Reason (required)"}</span><textarea ref={reasonRef} disabled={saving} readOnly={!draftCurrent} rows={3} value={reason} aria-invalid={reasonInvalid || undefined} aria-describedby={[excluding ? exclusionConsequenceId : null, reasonInvalid ? reasonErrorId : null].filter(Boolean).join(" ") || undefined} onChange={(event) => review.changeReason(item.check_result_id, event.target.value)} /></label>
-          <p className="signal-field-hint">This reason appears in the instructor report and export.</p>
+          <label><span>{excluding ? CRITERION_EXCLUSION_COPY.reason : ordinaryGrade ? "Comment (optional)" : "Reason (required)"}</span><textarea ref={reasonRef} disabled={saving} readOnly={!draftCurrent} rows={ordinaryGrade ? 2 : 3} required={requiresReason} value={reason} aria-invalid={reasonInvalid || undefined} aria-describedby={[excluding ? exclusionConsequenceId : null, reasonInvalid ? reasonErrorId : null].filter(Boolean).join(" ") || undefined} onChange={(event) => review.changeReason(item.check_result_id, event.target.value)} /></label>
+          <p className="signal-field-hint">{ordinaryGrade ? "Any comment is kept with your instructor judgment and export." : "This reason appears in the instructor report and export."}</p>
           {reasonInvalid && <p id={reasonErrorId} role="alert" className="signal-field-error">{reason.trim() ? `Enter at least ${RESOLUTION_REASON_MIN_LENGTH} characters.` : "Enter a reason before confirming."}</p>}
           {saving && <p role="status">{REVIEW_DRAFT_COPY.saving}</p>}
           {Boolean(pending.error) && <Alert title="Saving could not be confirmed" tone="error" role="alert">Your entered reason is kept. Review the current criterion before trying again.</Alert>}
           <ActionAssessmentContext id={actionContextId} notices={review.assessmentNotices ?? []} />
-          <div>{draftCurrent && <Button variant="secondary" disabled={saving || pending?.uncertainRevision !== undefined} onClick={event => cancel(event.currentTarget)}>Cancel</Button>}<Button data-criterion-confirm variant="brand" disabled={saving || !draftCurrent} aria-describedby={`${describedBy}${excluding ? ` ${exclusionConsequenceId}` : ""}`} busy={saving} onClick={confirm}>{excluding ? CRITERION_EXCLUSION_COPY.confirm : "Confirm resolution"}</Button></div>
+          <div>{draftCurrent && <Button variant="secondary" disabled={saving || pending?.uncertainRevision !== undefined} onClick={event => cancel(event.currentTarget)}>Cancel</Button>}<Button data-criterion-confirm variant="brand" disabled={saving || !draftCurrent} aria-describedby={`${describedBy}${excluding ? ` ${exclusionConsequenceId}` : ""}`} busy={saving} onClick={confirm}>{excluding ? CRITERION_EXCLUSION_COPY.confirm : ordinaryGrade ? "Save grade" : "Confirm resolution"}</Button></div>
         </div>
       )}
     </article>
   );
 }
 
-export function SignalEscalatedPanel({ checkRunId, sourceTarget, onOpenSource, assessmentContextExternal = false }: { checkRunId: number; sourceTarget?: CriterionSourceTarget; onOpenSource?: CriterionSourceOpen; assessmentContextExternal?: boolean }) {
+export function SignalEscalatedPanel({ checkRunId, sourceTarget, onOpenSource, onOpenEvidenceSource, assessmentContextExternal = false }: { checkRunId: number; sourceTarget?: CriterionSourceTarget; onOpenSource?: CriterionSourceOpen; onOpenEvidenceSource?: OpenEvidenceSource; assessmentContextExternal?: boolean }) {
+  const location = useLocation();
+  const [params, setParams] = useSearchParams();
+  const selectedRaw = location.pathname.endsWith("/document") ? params.get(SELECTED_CRITERION_PARAM) : null;
+  const selectedId = selectedCriterionId(selectedRaw);
+  const selectedView = selectedRaw !== null;
   const { data, isPending, isError, error, fetchStatus, refetch } = useEscalatedItems(checkRunId);
   const accessUnavailable = !recoverableReadError(error);
   const loadedItems = accessUnavailable ? undefined : data;
@@ -789,6 +816,20 @@ export function SignalEscalatedPanel({ checkRunId, sourceTarget, onOpenSource, a
   const headingRef = useRef<HTMLHeadingElement>(null);
   const announcementRef = useRef<HTMLParagraphElement>(null);
   const hasItems = Boolean(items?.length);
+  const selectedItem = items?.find(item => item.criterion_id === selectedId);
+  const selectedRecord = selectedId === null ? undefined : review.confirmed.get(selectedId)
+    ?? review.assessment?.results.find(row => row.criterion_id === selectedId && row.outcome !== "escalated");
+  const selectedIndex = items?.findIndex(item => item.criterion_id === selectedId) ?? -1;
+  const followSelection = useExplicitActionFocus(() => document.getElementById(
+    selectedItem ? `signal-resolution-heading-${selectedItem.check_result_id}` : "escalated-heading"));
+  const reviewLink = (criterionId?: number) => reviewDeskDestination(
+    `/report/${checkRunId}/document?${criterionReviewSearch(location.search, criterionId)}`, location);
+  const select = (event: React.MouseEvent<HTMLAnchorElement>, criterionId?: number) => {
+    if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+    if (!location.pathname.endsWith("/document")) return;
+    event.preventDefault();
+    followSelection(event.currentTarget, () => setParams(criterionReviewSearch(location.search, criterionId), { state: location.state }));
+  };
   // Share only identical recorded reasons, never inferred causes or
   // item-specific evidence. A single item keeps its reason in its card.
   const sharedReason = items && items.length > 1 && items[0].reason?.trim()
@@ -809,12 +850,17 @@ export function SignalEscalatedPanel({ checkRunId, sourceTarget, onOpenSource, a
     <section id="review-criteria" tabIndex={-1} data-tour="escalated-panel" className="signal-review-section signal-review-section--attention" aria-labelledby="escalated-heading">
       <div className="signal-review-section__heading"><div>{review.decision && <p className="signal-section-kicker">Preserved assessment</p>}<h2 id="escalated-heading" ref={headingRef} tabIndex={-1}>{review.decision === "returned" ? "Unresolved at time of return" : review.decision ? "Unresolved at time of decision" : "Criteria needing your judgment"}</h2></div><span>{fetchStatus === "fetching" ? loadedItems ? "Updating review list" : "Loading review list" : isError ? loadedItems ? "Review list needs refreshing" : "Review list unavailable" : awaitingList ? "Review list needs refreshing" : `${items?.length ?? 0} unresolved`}</span></div>
       {review.decision ? <p id={`signal-review-instructions-${checkRunId}`} className="signal-review-section__intro">These criteria were unresolved when the decision was recorded. Their outcomes, evidence and assessment limits are preserved. Reopen the decision before making further judgments.</p>
-        : <p id={`signal-review-instructions-${checkRunId}`} className="signal-review-section__intro">Read the criterion and manuscript, choose a grade, then give your reason. <span>{RECORDED_GRADE_BASIS.qualification}</span></p>}
+        : <p id={`signal-review-instructions-${checkRunId}`} className="signal-review-section__intro">{selectedView ? "Read this criterion beside the manuscript, choose a grade, then save. Comments are optional for ordinary grades." : "Open a criterion to review its recorded passages beside the manuscript and record your judgment."} <span>{RECORDED_GRADE_BASIS.qualification}</span></p>}
       {!assessmentContextExternal && <ReportAssessmentContext notices={review.assessmentNotices ?? []} />}
       <p ref={announcementRef} tabIndex={-1} aria-live="polite" className="signal-live-region">{announcement}</p>
       {!accessUnavailable && <SavedJudgmentAccess checkRunId={checkRunId} hideEmpty />}
+      {selectedView && <nav aria-label="Criterion review" className="signal-criterion-navigation">
+        <ActionLink variant="quiet" state={location.state} to={reviewLink()} onClick={event => select(event)}>Back to criteria</ActionLink>
+        {selectedIndex > 0 && <ActionLink variant="secondary" state={location.state} to={reviewLink(items![selectedIndex - 1].criterion_id)} onClick={event => select(event, items![selectedIndex - 1].criterion_id)}>Previous criterion</ActionLink>}
+        {items && selectedIndex >= 0 && selectedIndex < items.length - 1 && <ActionLink variant="secondary" state={location.state} to={reviewLink(items[selectedIndex + 1].criterion_id)} onClick={event => select(event, items[selectedIndex + 1].criterion_id)}>Next criterion</ActionLink>}
+      </nav>}
       {!accessUnavailable && [...review.drafts].filter(([id, draft]) => draft.currentResolved && !draft.saving
-        && !items?.some(item => item.check_result_id === id)).map(([id, draft]) => <article key={`retained-${id}`} className="signal-resolution-card">
+        && !items?.some(item => item.check_result_id === id) && selectedView && draft.criterionId === selectedId).map(([id, draft]) => <article key={`retained-${id}`} className="signal-resolution-card">
         <h3 id={`signal-resolution-heading-${id}`} tabIndex={-1}>Retained entry: {draft.criterionText}</h3>
         <p>This criterion is no longer in the unresolved list. Your earlier choice and reason are kept here. Review the recorded judgment before continuing.</p>
         <blockquote>{draft.reason || "No reason entered."}</blockquote>
@@ -826,10 +872,22 @@ export function SignalEscalatedPanel({ checkRunId, sourceTarget, onOpenSource, a
       {isError && <Alert title={loadedItems ? "Could not update criteria needing review" : "Could not load criteria needing review"} tone="warning"><p>{loadedItems ? "Showing the last loaded review items. Retry the list to check which criteria still need attention." : "Retry the review list to check which criteria still need attention."}</p><Button variant="secondary" aria-disabled={fetchStatus === "fetching" || undefined} onClick={() => { if (fetchStatus !== "fetching") void refetch(); }}>Retry review items</Button></Alert>}
       {fetchStatus === "fetching" && !isPending && <p role="status">Updating criteria needing review.</p>}
       {awaitingList && !isError && <Alert title="Your judgment is saved" tone="info">Refresh the review list to confirm whether other criteria still need attention. <Button variant="quiet" onClick={() => { void refetch(); }}>Refresh review items</Button></Alert>}
-      {sharedReason && <Alert title="Shared review reason" tone="warning"><p id={sharedReasonId}>{sharedReason}</p></Alert>}
-      {hasItems
-        ? <div className="signal-resolution-list">{items?.map((item) => <SignalResolutionCard key={`${checkRunId}-${item.check_result_id}`} item={item} checkRunId={checkRunId} sourceTarget={sourceTarget} onOpenSource={onOpenSource} sharedReasonId={sharedReason ? sharedReasonId : undefined} currentItems={!isPending && !isError && fetchStatus === "idle"} />)}</div>
-        : !awaitingList && !isPending && !isError && fetchStatus === "idle" && <Alert title="No unresolved criteria" tone="success">Every criterion has a recorded outcome. Continue to the integrity signals.</Alert>}
+      {!selectedView && sharedReason && <Alert title="Shared review reason" tone="warning"><p id={sharedReasonId}>{sharedReason}</p></Alert>}
+      {selectedView ? selectedItem && !accessUnavailable
+        ? <SignalResolutionCard key={`${checkRunId}-${selectedItem.check_result_id}`} item={selectedItem} checkRunId={checkRunId} sourceTarget={sourceTarget} onOpenSource={onOpenSource} onOpenEvidenceSource={onOpenEvidenceSource} currentItems={!isPending && !isError && fetchStatus === "idle"} />
+        : !isPending && fetchStatus === "idle" && !isError && <div className="signal-attached-flow" role="status">
+          <h3 tabIndex={-1}>{selectedRecord ? selectedRecord.text : "Criterion not available"}</h3>
+          <p>{selectedRecord ? "This criterion is no longer unresolved. Review its recorded outcome before making another judgment." : "That criterion is not in this report’s unresolved review list. Choose a criterion from the list."}</p>
+          {selectedRecord && <Button variant="secondary" onClick={event => review.viewSaved(selectedRecord.criterion_id, event.currentTarget)}>Review recorded judgment</Button>}
+        </div>
+        : <>
+          {hasItems && <div className="signal-criterion-list">{items?.map(item => <article key={item.check_result_id} className="signal-criterion-list__row">
+            <div><h3>{item.criterion_text}</h3><p>{review.drafts.has(item.check_result_id) ? "Unsaved entry kept" : "Needs your judgment"}</p><p>{item.evidence?.length ? `${item.evidence.length} recorded source ${item.evidence.length === 1 ? "passage" : "passages"}` : "No source passage recorded"}</p></div>
+            <ActionLink id={`signal-criterion-open-${checkRunId}-${item.check_result_id}`} state={location.state} variant="secondary" to={reviewLink(item.criterion_id)} onClick={event => select(event, item.criterion_id)} aria-label={`Review criterion: ${item.criterion_text}`}>Review criterion</ActionLink>
+          </article>)}</div>}
+          {!accessUnavailable && [...review.drafts].filter(([id, draft]) => draft.currentResolved && !items?.some(item => item.check_result_id === id)).map(([id, draft]) => <article key={`retained-link-${id}`} className="signal-criterion-list__row"><div><h3>{draft.criterionText}</h3><p>Retained entry: current judgment needs review</p></div><ActionLink variant="secondary" to={reviewLink(draft.criterionId)} onClick={event => select(event, draft.criterionId)}>Review retained entry</ActionLink></article>)}
+          {!hasItems && !awaitingList && !isPending && !isError && fetchStatus === "idle" && <Alert title="No unresolved criteria" tone="success">Every criterion has a recorded outcome. Continue to the integrity signals.</Alert>}
+        </>}
       </div>
     </section>
   );

@@ -15,7 +15,7 @@ function record(patch: Partial<EscalatedItemOut> = {}): EscalatedItemOut {
 
 async function show(item: EscalatedItemOut) {
   vi.stubGlobal("fetch", stubFetchByPath({ "/check-runs/5/escalated": [item] }));
-  renderWithProviders(<SignalEscalatedPanel checkRunId={5} />);
+  renderWithProviders(<SignalEscalatedPanel checkRunId={5} />, { route: `/report/5/document?view=decision&pane=review&criterion=${item.criterion_id}` });
   await screen.findByRole("heading", { name: item.criterion_text });
 }
 

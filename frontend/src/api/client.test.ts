@@ -4,6 +4,32 @@ import { api } from "./client";
 describe("api client", () => {
   afterEach(() => vi.unstubAllGlobals());
 
+  it.each([null, "b".repeat(64)])("withholds source bytes without the requested identity header (%s)", async identity => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("PDF bytes", {
+      headers: { "Content-Type": "application/pdf", ...(identity ? { "X-Evidence-Source-Identity": identity } : {}) },
+    })));
+    await expect(api.getSourceBytes("/source", "a".repeat(64))).rejects.toMatchObject({ status: 409, code: "conflict" });
+  });
+
+  it("delivers bound PDF bytes with cancellation and credentials", async () => {
+    const identity = "a".repeat(64);
+    const fetch = vi.fn().mockResolvedValue(new Response(new Uint8Array([1, 2, 3]), {
+      headers: { "Content-Type": "application/pdf", "X-Evidence-Source-Identity": identity },
+    }));
+    vi.stubGlobal("fetch", fetch);
+    const controller = new AbortController();
+    await expect(api.getSourceBytes("/source", identity, { signal: controller.signal })).resolves.toEqual(new Uint8Array([1, 2, 3]));
+    expect(fetch.mock.calls[0][1]).toMatchObject({ signal: controller.signal, credentials: "include" });
+  });
+
+  it("rejects other media types even with the expected source image identity", async () => {
+    const identity = "a".repeat(64);
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("untrusted body", {
+      headers: { "Content-Type": "text/html", "X-Evidence-Source-Identity": identity },
+    })));
+    await expect(api.getSourceImage("/source-image", identity)).rejects.toMatchObject({ status: 409, code: "conflict" });
+  });
+
   it("parses a successful JSON response", async () => {
     vi.stubGlobal(
       "fetch",

@@ -11,7 +11,7 @@ import { ME_QUERY_KEY, useMe } from "../auth/useAuth";
 import { RESOLUTION_REASON_MIN_LENGTH } from "../config/ui";
 import { useEscalatedItems, useReport, useResolveEscalation } from "./useReport";
 import { isAssessmentRevision } from "./assessmentRevision";
-import { criterionReviewNotices } from "../domain/criterionReview";
+import { criterionReviewNotices, resolutionRequiresReason } from "../domain/criterionReview";
 import { ReviewContext, type ReviewCompletion, type ReviewDraft, type ReviewScope } from "./criterionReviewContext";
 import { claimFocusContinuation, type FocusContinuation } from "../routing/focusContinuation";
 import { confirmedJudgment, criterionRecordId, revealCriterionRecord, SAVED_CRITERION_PARAM } from "./savedJudgment";
@@ -135,12 +135,13 @@ export function CriterionReviewProvider({ checkRunId, instructorId, children }: 
       && isAssessmentRevision(draft.reviewedRevision) && draft.reviewedRevision === assessment?.assessment_revision,
     viewSaved(criterionId, trigger) {
       if (!isCurrent()) return;
-      const target = document.getElementById("criteria-results-heading");
+      const target = document.getElementById("criteria-results-heading") ?? document.getElementById("escalated-heading");
       const owned = document.hasFocus() && document.activeElement === trigger;
       if (target && owned) { revealCriterionRecord(target); target.focus(); }
       setSavedNavigation((previous) => ({ version: (previous?.version ?? 0) + 1, criterionId,
         owner: target && owned && document.activeElement === target ? target : null }));
       const next = new URLSearchParams(location.search);
+      next.delete("criterion");
       next.set(SAVED_CRITERION_PARAM, criterionId === undefined ? "all" : String(criterionId));
       if (location.pathname.endsWith("/document")) { next.set("view", "decision"); next.set("pane", "review"); }
       void navigate({ pathname: location.pathname, search: next.toString(),
@@ -168,7 +169,7 @@ export function CriterionReviewProvider({ checkRunId, instructorId, children }: 
     confirm(id, message) {
       const draft = records.current.get(id);
       if (!isCurrent() || !draft || draft.saving || !isDraftCurrent(draft)) return;
-      if (draft.reason.trim().length < RESOLUTION_REASON_MIN_LENGTH) {
+      if (resolutionRequiresReason(draft.resolution) && draft.reason.trim().length < RESOLUTION_REASON_MIN_LENGTH) {
         update(id, (current) => ({ ...current, attempted: true }));
         return;
       }

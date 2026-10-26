@@ -27,6 +27,7 @@ type SourceProps = Pick<ComponentProps<typeof PdfSourceReader>, "regions" | "fla
   onPlaceRequestedParagraph?: ComponentProps<typeof DocxPane>["onPlaceRequestedParagraph"];
   requestedParagraphAttempt?: number;
   scrollInParent?: boolean;
+  recordedReader?: ReactNode;
 };
 
 function SourceState({ children, filename }: { children: ReactNode; filename?: string | null }) {
@@ -36,11 +37,12 @@ function SourceState({ children, filename }: { children: ReactNode; filename?: s
   </div>;
 }
 
-export function ManuscriptSourcePane({ run, actor, visible, viewerQuery, paragraphsQuery, requestedParagraph = null, onPlaceRequestedParagraph, requestedParagraphAttempt, scrollInParent = false, ...selection }: SourceProps) {
+export function ManuscriptSourcePane({ run, actor, visible, viewerQuery, paragraphsQuery, requestedParagraph = null, onPlaceRequestedParagraph, requestedParagraphAttempt, scrollInParent = false, recordedReader, ...selection }: SourceProps) {
   const viewer = viewerQuery.data;
   if (viewerQuery.isPending) return <SourceState><section role="status" aria-live="polite" aria-busy="true" className="signal-document-pdf-skeleton"><span>Loading full manuscript.</span><i /><i /><i /></section></SourceState>;
   if (viewerQuery.isError || !viewer) return <SourceState><Alert title="The manuscript could not be loaded" tone="error" role="alert"><p>VERIDICAL could not load the stored source view. The Review pane loads separately and may also need to be retried.</p><Button variant="secondary" onClick={() => { void viewerQuery.refetch(); }}>Try source again</Button></Alert></SourceState>;
   if (!viewer.available) return <SourceState filename={viewer.original_filename}><div className="signal-document-unavailable"><h2>Source manuscript unavailable</h2><p>{viewer.purged_at ? `The stored source file was deleted on ${localDate(viewer.purged_at)} and can no longer be opened.` : viewer.unavailable_reason}</p><p>You can still review the recorded evidence and readiness details, but VERIDICAL cannot show the full manuscript.</p><ActionLink to={`/report/${run}`} variant="secondary">Open full readiness report</ActionLink></div></SourceState>;
+  if (recordedReader) return recordedReader;
   if (viewer.source_format === "pdf") return <PdfSourceReader key={`${actor ?? "unknown"}:${run}`} run={run} manuscript={viewer.manuscript_id} actor={actor} visible={visible} fileUrl={`${BASE_URL}/check-runs/${run}/document/file`} {...selection} />;
   if (viewer.source_format === "docx") return <DocxPane key={run} paragraphs={paragraphsQuery.data?.paragraphs} tables={paragraphsQuery.data?.tables} images={paragraphsQuery.data?.images} omittedImageOccurrences={paragraphsQuery.data?.omitted_image_occurrences} nativeMath={paragraphsQuery.data?.native_math} imageBasePath={`/check-runs/${run}/document/images`} paragraphsPending={paragraphsQuery.isPending} paragraphsError={paragraphsQuery.isError} onRetry={() => { void paragraphsQuery.refetch(); }} regions={selection.regions} flags={selection.flags} selectedFlagId={selection.selectedFlagId} onSelectFlag={selection.onSelectFlag} isVisible={visible} focusSelection={selection.focusSelection} findingNumbers={selection.findingNumbers} comparisonLeads={selection.comparisonLeads} requestedParagraph={requestedParagraph} onPlaceRequestedParagraph={onPlaceRequestedParagraph} requestedParagraphAttempt={requestedParagraphAttempt} scrollInParent={scrollInParent} />;
   return <SourceState filename={viewer.original_filename}><Alert title="This manuscript format cannot be displayed here" tone="warning"><p>Review the saved evidence and source locations, or open the full readiness report.</p><ActionLink to={`/report/${run}`} variant="secondary">Open full readiness report</ActionLink></Alert></SourceState>;

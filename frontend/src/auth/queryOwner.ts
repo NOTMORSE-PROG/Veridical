@@ -2,11 +2,20 @@ import { useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { useMemo, useSyncExternalStore } from "react";
 import { ME_QUERY_KEY } from "./useAuth";
 
+const lifetimes = new WeakMap<object, number>();
+let lastLifetime = 0;
+
+function authLifetime(query: object | undefined) {
+  if (query === undefined) return undefined;
+  if (!lifetimes.has(query)) lifetimes.set(query, ++lastLifetime);
+  return lifetimes.get(query)!;
+}
+
 /** A new authentication query is a new lifetime, even for the same instructor. */
 export function captureAuthOwner(client: QueryClient) {
   const authQuery = client.getQueryCache().find({ queryKey: ME_QUERY_KEY, exact: true });
   const actorId = client.getQueryData<{ id: number } | null>(ME_QUERY_KEY)?.id;
-  return { authQuery, actorId, isCurrent: () => authQuery !== undefined && actorId !== undefined
+  return { authQuery, actorId, lifetime: authLifetime(authQuery), isCurrent: () => authQuery !== undefined && actorId !== undefined
     && client.getQueryCache().find({ queryKey: ME_QUERY_KEY, exact: true }) === authQuery
     && client.getQueryData<{ id: number } | null>(ME_QUERY_KEY)?.id === actorId };
 }

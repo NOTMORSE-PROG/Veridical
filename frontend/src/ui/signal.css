@@ -7932,3 +7932,58 @@
     white-space: normal;
   }
 }
+
+@layer components {
+  /* F8/4h/4w: a desktop review list opens one criterion beside its source. */
+  .signal-criterion-list {
+    display: grid;
+    min-inline-size: 0;
+  }
+  .signal-criterion-list__row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: var(--signal-space-4);
+    align-items: center;
+    padding: var(--signal-space-4);
+    border-block-end: var(--signal-border-hairline) solid var(--color-signal-border);
+  }
+  .signal-criterion-list__row > div {
+    min-inline-size: 0;
+    overflow-wrap: anywhere;
+  }
+  .signal-criterion-list__row h3 {
+    margin: 0;
+    font-size: var(--signal-type-body);
+  }
+  .signal-criterion-list__row p {
+    margin: var(--signal-space-1) 0 0;
+    color: var(--color-signal-ink-secondary);
+  }
+  .signal-criterion-navigation {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--signal-space-3);
+    padding: var(--signal-space-4);
+  }
+  .signal-recorded-reader {
+    display: flex;
+    flex-direction: column;
+    min-block-size: 0;
+    block-size: 100%;
+  }
+  .signal-recorded-reader > .signal-document-source {
+    flex: 1;
+    min-block-size: 0;
+  }
+  .signal-recorded-reader__context {
+    padding: var(--signal-space-3) var(--signal-space-4);
+    border-block-end: var(--signal-border-hairline) solid var(--color-signal-border);
+  }
+  .signal-recorded-source-mark {
+    position: absolute;
+    pointer-events: none;
+    background: var(--signal-evidence-selected-surface);
+    outline: var(--signal-border-hairline) solid var(--signal-evidence-location-border);
+  }
+}

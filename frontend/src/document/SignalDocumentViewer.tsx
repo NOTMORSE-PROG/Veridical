@@ -45,7 +45,7 @@ import {
   useManuscriptViewer,
   useReport,
 } from "../report/useReport";
-import { clearRouteReturnFocus, rememberRouteReturnFocus, useRouteFocus } from "../routing/useRouteFocus";
+import { clearRouteReturnFocus, pendingRouteReturnElement, rememberRouteReturnFocus, useRouteFocus } from "../routing/useRouteFocus";
 import { criterionRecordId, revealCriterionRecord, SAVED_CRITERION_PARAM } from "../report/savedJudgment";
 import { claimFocusContinuation, type FocusContinuation } from "../routing/focusContinuation";
 import { ActionLink } from "../ui/ActionLink";
@@ -66,6 +66,8 @@ import {
   type ReviewFinding,
 } from "./reviewFindings";
 import { ReuseExplorePanel } from "./ReuseExplorePanel";
+import { RecordedEvidenceReader } from "./RecordedEvidenceReader";
+import type { EvidenceSourceRequest, OpenEvidenceSource } from "../report/evidenceTypes";
 
 type ReviewFilter = "open" | "resolved" | "all";
 
@@ -348,7 +350,9 @@ function ReportUnavailable({ checkRunId, error, onRetry }: { checkRunId: number;
   return <Alert title="Could not load review details" tone="error" role="alert"><p>VERIDICAL could not load the recorded review. The source pane loads separately and may also need to be retried.</p><Button variant="secondary" onClick={onRetry}>Try review again</Button><ReviewDeskReturnLink variant="quiet">Return to Review Desk</ReviewDeskReturnLink></Alert>;
 }
 
-function ReadinessDecision({ checkRunId, report: loadedReport, pending, error, retrying, onRetry, onBack, sourceTarget, onOpenSource }: { checkRunId: number; report: ReportOut | undefined; pending: boolean; retrying: boolean; error: unknown; onRetry: () => void; onBack: () => void; sourceTarget: CriterionSourceTarget; onOpenSource: CriterionSourceOpen }) {
+function ReadinessDecision({ checkRunId, report: loadedReport, pending, error, retrying, onRetry, onBack, sourceTarget, onOpenSource, onOpenEvidenceSource, returnNotice }: { checkRunId: number; report: ReportOut | undefined; pending: boolean; retrying: boolean; error: unknown; onRetry: () => void; onBack: () => void; sourceTarget: CriterionSourceTarget; onOpenSource: CriterionSourceOpen; onOpenEvidenceSource: OpenEvidenceSource; returnNotice?: string }) {
+  const [params] = useSearchParams();
+  const selectedCriterion = params.has("criterion");
   const report = usableReport(loadedReport, checkRunId, error);
   const readFailed = Boolean(report && error);
   if (pending && !report) return <div role="status" aria-live="polite" aria-busy="true" className="signal-desk-loading"><span>Loading readiness and decision.</span><i /><i /></div>;
@@ -359,9 +363,11 @@ function ReadinessDecision({ checkRunId, report: loadedReport, pending, error, r
   const criterionRecords = report.results.filter((row) => row.outcome !== "escalated");
   return (
     <div className="signal-document-analysis">
-      <Button variant="quiet" onClick={onBack}>Back to review queue</Button>
+      {!selectedCriterion && <Button variant="quiet" onClick={onBack}>Back to review queue</Button>}
       {readFailed && <ReportReadNotice retrying={retrying} onRetry={onRetry} />}
-      <SignalEscalatedPanel checkRunId={report.check_run_id} sourceTarget={sourceTarget} onOpenSource={onOpenSource} />
+      {returnNotice && <p role="status" className="signal-document-precision-note">{returnNotice}</p>}
+      <SignalEscalatedPanel checkRunId={report.check_run_id} sourceTarget={sourceTarget} onOpenSource={onOpenSource} onOpenEvidenceSource={onOpenEvidenceSource} />
+      {!selectedCriterion && <>
       <details className="signal-document-analysis__criteria"><summary>Recorded criterion results, {criterionRecords.length} {criterionRecords.length === 1 ? "entry" : "entries"}</summary><SignalCriteriaResults results={criterionRecords} checkRunId={report.check_run_id} sourceTarget={sourceTarget} onOpenSource={onOpenSource} /></details>
       <section className="signal-document-analysis__summary" aria-labelledby="analysis-heading" aria-describedby={readFailed ? "report-read-failure" : undefined}>
         <div className="signal-document-inspector__heading"><p className="signal-section-kicker">After the evidence</p><h2 id="analysis-heading" tabIndex={-1}>Readiness and decision</h2><p>Use this summary after reviewing the evidence. The instructor records the final decision.</p></div>
@@ -378,6 +384,7 @@ function ReadinessDecision({ checkRunId, report: loadedReport, pending, error, r
       <FigureReadingsSummary readings={report.figure_readings} checkRunId={checkRunId} />
       <SignalDecisionPanel report={report} manuscriptLabel={identity.primary} readFailed={readFailed} retrying={retrying} onRetry={onRetry} />
       <div className="signal-document-analysis__footer"><ActionLink to={`/report/${report.check_run_id}`} variant="secondary">Open full readiness report</ActionLink></div>
+      </>}
     </div>
   );
 }
@@ -441,10 +448,17 @@ export function SignalDocumentViewerPage() {
   const sourceAttemptSequence = useRef(0);
   const [, setSourceRevealAttempt] = useState(0);
   const criterionInspectionRun = useRef<number | null>(null);
-  const [criterionSource, setCriterionSource] = useState<{ attempt: number; run: number; anchor: string; origin: string; from: string; destination: string; actionId: string; recordCriterionId?: number; recordIsInstructor?: boolean }>();
+  const [criterionSource, setCriterionSource] = useState<{ attempt: number; run: number; anchor: string; origin: string; from: string; destination: string; actionId: string; ownedReturn: boolean; recordCriterionId?: number; recordIsInstructor?: boolean }>();
+  const [recordedSource, setRecordedSource] = useState<{ run: number; actor: number; revision: number; request: EvidenceSourceRequest; attempt: number }>();
+  const [criterionReturnNotice, setCriterionReturnNotice] = useState<{ run: number; search: string; message: string }>();
   const sourcePlacement = useRef<{ run: number; origin: string; destination: string; adopted: boolean; allowed: boolean } | undefined>(undefined);
   const liveSourceScope = useRef({ run: id, query: searchParams.toString() });
-  const returnSourceFocus = useRef<{ from: string; search: string; actionId: string; owner: Element | null; recordCriterionId?: number } | undefined>(undefined);
+  const returnSourceFocus = useRef<{ from: string; search: string; actionId: string; ownership: FocusContinuation; recordCriterionId?: number } | undefined>(undefined);
+  const retireCriterionReturn = useCallback(() => {
+    returnSourceFocus.current?.ownership.dispose();
+    returnSourceFocus.current = undefined;
+  }, []);
+  useEffect(() => () => retireCriterionReturn(), [retireCriterionReturn]);
   const reportOrigin = useMemo(() => criterionSourceReturn(location.state, id), [location.state, id]);
 
   const viewerQuery = useManuscriptViewer(id);
@@ -455,7 +469,17 @@ export function SignalDocumentViewerPage() {
   const pendingOriginText = pendingOriginRows.length === 1 ? pendingOriginRows[0].criterion_text : undefined;
   const flagsQuery = useFlags(id);
   const flags = recoverableReadError(flagsQuery.error) ? flagsQuery.data : undefined;
-  useRouteFocus("Manuscript review - VERIDICAL", headingRef, reportOrigin, { prefix: "comparison-lead-", pending: flagsQuery.isPending || flagsQuery.fetchStatus !== "idle" });
+  const pendingReturnId = pendingRouteReturnElement(location.pathname + location.search);
+  const returningToPendingCriterion = pendingReturnId?.startsWith("signal-resolution-");
+  const localSourceReturn = useMemo(() => criterionSource?.run === id && criterionSource.ownedReturn ? {
+    returnPath: `/report/${id}/document?${criterionSource.from}`,
+    elementId: criterionSource.actionId,
+    fallbackElementId: criterionSource.recordCriterionId === undefined ? "escalated-heading" : criterionRecordId(id, criterionSource.recordCriterionId),
+    retainOnSearchChange: true,
+  } : undefined, [criterionSource, id]);
+  useRouteFocus("Manuscript review - VERIDICAL", headingRef, reportOrigin ?? localSourceReturn, returningToPendingCriterion
+    ? { prefix: "signal-resolution-", pending: pendingReviewQuery.isPending || pendingReviewQuery.fetchStatus !== "idle" || pendingReviewQuery.isError }
+    : { prefix: "comparison-lead-", pending: flagsQuery.isPending || flagsQuery.fetchStatus !== "idle" });
   const { data: me } = useMe();
   const viewedIds = useViewedFlagIds(me?.id);
   const excludedMatchesQuery = useExcludedReuseMatches(id, { includeReferenceList, includeBlockQuote });
@@ -566,13 +590,14 @@ export function SignalDocumentViewerPage() {
     clearRouteReturnFocus(`signal-resolution-source-${id}-`);
     clearRouteReturnFocus(`signal-resolution-coverage-${id}-`);
     if (sourcePlacement.current) sourcePlacement.current.allowed = false;
-    returnSourceFocus.current = undefined;
+    retireCriterionReturn();
     criterionInspectionRun.current = null;
     setCriterionSource(undefined);
     leadContinuation.current?.ownership.dispose();
     leadContinuation.current = undefined;
     const next = new URLSearchParams(searchParams);
     next.delete(SAVED_CRITERION_PARAM);
+    next.delete("criterion");
     clearPdfReading(next);
     change?.(next);
     return next;
@@ -591,6 +616,8 @@ export function SignalDocumentViewerPage() {
   }
 
   function openCriterionSource(anchor: string, actionId: string) {
+    setCriterionReturnNotice(undefined);
+    setRecordedSource(undefined);
     const action = document.getElementById(actionId);
     const owned = action?.isConnected === true && document.activeElement === action && document.hasFocus();
     const target = new URL(criterionSourceTarget(anchor), window.location.origin);
@@ -610,7 +637,7 @@ export function SignalDocumentViewerPage() {
         { fallbackElementId: recordCriterionId === undefined ? "escalated-heading" : criterionRecordId(id, recordCriterionId) });
     }
     criterionInspectionRun.current = id;
-    setCriterionSource({ attempt: ++sourceAttemptSequence.current, run: id, anchor, origin, from: searchParams.toString(), destination, actionId, recordCriterionId, recordIsInstructor: Boolean(record?.resolution) });
+    setCriterionSource({ attempt: ++sourceAttemptSequence.current, run: id, anchor, origin, from: searchParams.toString(), destination, actionId, ownedReturn: owned, recordCriterionId, recordIsInstructor: Boolean(record?.resolution) });
     if (owned) {
       sourcePanelRef.current?.focus();
       if (document.activeElement !== sourcePanelRef.current) manuscriptTabRef.current?.focus();
@@ -621,14 +648,22 @@ export function SignalDocumentViewerPage() {
     setSearchParams(new URLSearchParams(destination), { state: reportOrigin ? reportOrigin.state : location.state });
   }
 
+  function openRecordedCriterionSource(request: EvidenceSourceRequest) {
+    const revision = reportQuery.data?.assessment_revision;
+    if (!me || typeof revision !== "number" || reportQuery.isError || reportQuery.fetchStatus !== "idle"
+      || request.reference.criterion_id !== Number(searchParams.get("criterion"))) return;
+    openCriterionSource(request.reference.anchor ?? "", request.actionId);
+    setRecordedSource({ run: id, actor: me.id, revision, request, attempt: sourceAttemptSequence.current });
+  }
+
   const sourceQuery = searchParams.toString();
   liveSourceScope.current = { run: id, query: sourceQuery };
   useEffect(() => {
     criterionInspectionRun.current = null;
     if (sourcePlacement.current) sourcePlacement.current.allowed = false;
-    returnSourceFocus.current = undefined;
+    retireCriterionReturn();
     sourceFocusOwner.current = null;
-  }, [id]);
+  }, [id, retireCriterionReturn]);
   useEffect(() => {
     const ownTransition = criterionSource && sameSourceTask(sourceQuery, criterionSource.from) && !sourcePlacement.current?.adopted;
     if (criterionSource && (criterionSource.run !== id || (!ownTransition && !sameSourceTask(sourceQuery, criterionSource.destination) && !sameSourceTask(sourceQuery, criterionSource.origin)))) setCriterionSource(undefined);
@@ -641,7 +676,7 @@ export function SignalDocumentViewerPage() {
       return;
     }
     if (attempt.destination === sourceQuery) attempt.adopted = true;
-    const retire = () => { attempt.allowed = false; returnSourceFocus.current = undefined; };
+    const retire = () => { attempt.allowed = false; retireCriterionReturn(); };
     const focus = (event: FocusEvent) => { if (event.target !== sourceFocusOwner.current) retire(); };
     window.addEventListener("blur", retire);
     window.addEventListener("keydown", retire);
@@ -655,10 +690,16 @@ export function SignalDocumentViewerPage() {
       window.removeEventListener("wheel", retire);
       document.removeEventListener("focusin", focus);
     };
-  }, [id, sourceQuery, criterionSource?.attempt]);
+  }, [id, sourceQuery, criterionSource?.attempt, retireCriterionReturn]);
 
   useEffect(() => () => { if (sourcePlacement.current) sourcePlacement.current.allowed = false; }, []);
 
+  const canPlaceRecordedSource = useCallback(() => {
+    const attempt = sourcePlacement.current;
+    return Boolean(attempt?.allowed && attempt.run === liveSourceScope.current.run
+      && attempt.destination === liveSourceScope.current.query && document.hasFocus()
+      && document.activeElement === sourceFocusOwner.current);
+  }, []);
   const placeCriterionSource = useCallback((element: HTMLElement) => {
     const attempt = sourcePlacement.current;
     if (!attempt?.allowed || attempt.run !== liveSourceScope.current.run || attempt.destination !== liveSourceScope.current.query || !document.hasFocus() || document.activeElement !== sourceFocusOwner.current) return;
@@ -671,10 +712,11 @@ export function SignalDocumentViewerPage() {
     if (!criterionSource || criterionSource.run !== id) return;
     const owned = event.currentTarget.isConnected && document.activeElement === event.currentTarget && document.hasFocus();
     if (sourcePlacement.current) sourcePlacement.current.allowed = false;
+    retireCriterionReturn();
     if (owned) {
       inspectorRef.current?.focus();
       if (document.activeElement !== inspectorRef.current) reviewTabRef.current?.focus();
-      returnSourceFocus.current = { from: sourceQuery, search: criterionSource.origin, actionId: criterionSource.actionId, owner: document.activeElement, recordCriterionId: criterionSource.recordCriterionId };
+      returnSourceFocus.current = { from: sourceQuery, search: criterionSource.origin, actionId: criterionSource.actionId, ownership: claimFocusContinuation(), recordCriterionId: criterionSource.recordCriterionId };
     }
     setSearchParams(new URLSearchParams(criterionSource.origin), { state: location.state });
     setCriterionSource(undefined);
@@ -684,20 +726,28 @@ export function SignalDocumentViewerPage() {
     const requested = returnSourceFocus.current;
     if (!requested) return;
     if (requested.search !== sourceQuery) {
-      if (requested.from !== sourceQuery) returnSourceFocus.current = undefined;
+      if (requested.from !== sourceQuery) retireCriterionReturn();
       return;
     }
+    if (!requested.ownership.owns()) { retireCriterionReturn(); return; }
+    const waiting = requested.recordCriterionId === undefined
+      ? pendingReviewQuery.isPending || pendingReviewQuery.fetchStatus !== "idle" || pendingReviewQuery.isError
+      : reportQuery.isPending || reportQuery.fetchStatus !== "idle" || reportQuery.isError;
+    if (waiting) return;
     returnSourceFocus.current = undefined;
-    if (!document.hasFocus() || document.activeElement !== requested.owner) return;
     const action = document.getElementById(requested.actionId);
     if (requested.recordCriterionId !== undefined) {
       const target = action ?? document.getElementById(criterionRecordId(id, requested.recordCriterionId)) ?? document.getElementById("criteria-results-heading");
-      if (target) { revealCriterionRecord(target); target.focus(); }
+      if (target) { revealCriterionRecord(target); requested.ownership.focus(target); }
+      else requested.ownership.dispose();
       return;
     }
     const resultId = requested.actionId.split("-").at(-2);
-    (action ?? document.getElementById(`signal-resolution-heading-${resultId}`) ?? document.getElementById("escalated-heading"))?.focus();
-  });
+    if (!action) setCriterionReturnNotice({ run: id, search: sourceQuery,
+      message: "The original source action is no longer available. Review the current criterion below." });
+    requested.ownership.focus(action ?? document.getElementById(`signal-resolution-heading-${resultId}`) ?? document.getElementById("escalated-heading"));
+  }, [sourceQuery, id, pendingReviewQuery.data, pendingReviewQuery.isPending, pendingReviewQuery.fetchStatus,
+    pendingReviewQuery.isError, reportQuery.data, reportQuery.isPending, reportQuery.fetchStatus, reportQuery.isError, retireCriterionReturn]);
 
   function selectFinding(flagId: number, replace = false) {
     const finding = findingForFlag(findings, flagId);
@@ -896,6 +946,8 @@ export function SignalDocumentViewerPage() {
         : browseRegions;
   const selectedRegionId = recordedAnchor ? null : selectedRegion?.flag_id ?? null;
   const sourcePhysicallyVisible = !fullWidthReading && (!singlePaneLayout || activeTab === "manuscript");
+  const recordedReaderActive = isDecision && recordedSource?.run === id && recordedSource.actor === me?.id
+    && (!recordedAnchor || recordedAnchor === recordedSource.request.reference.anchor);
   const sourceReveal = useSelectedSourceReveal({ runId: id, search: searchParams.toString(),
     requestedId: !isExploring && !isDecision && !recordedAnchor ? requestedFlagId : null,
     resolvedId: viewer?.available && viewer.source_format === "docx" && selectedDetail?.settled
@@ -933,10 +985,15 @@ export function SignalDocumentViewerPage() {
                   <ActionLink to={`${reportOrigin.returnPath}#${reportOrigin.elementId}`} state={reportOrigin.state} variant="secondary" aria-label={pendingOriginText ? `Return to criterion review: ${pendingOriginText}` : undefined}>Return to criterion review</ActionLink>
                 </div> : reportOrigin && <ActionLink to={`${reportOrigin.returnPath}#${reportOrigin.elementId}`} state={reportOrigin.state} variant="secondary">{reportQuery.data?.results.find((row) => row.criterion_id === reportOrigin.criterionId)?.resolution ? "Return to saved judgment" : "Return to criterion record"}</ActionLink>}
                 {!reportOrigin && criterionSource?.run === id && isDecision && sameSourceTask(sourceQuery, criterionSource.destination) && <Button variant="secondary" onClick={returnToCriterion}>{criterionSource.recordCriterionId === undefined ? "Return to criterion review" : criterionSource.recordIsInstructor ? "Return to saved judgment" : "Return to criterion record"}</Button>}
-                {recordedAnchor && anchorRegion && <div className="signal-document-reconstruction-note" role="status"><strong>Source location: {instructorAnchor(recordedAnchor)}</strong><p>This opens the recorded page or extracted paragraph, not an exact passage highlight. Extracted paragraphs are source positions, not printed Word page numbers.</p></div>}
-                {recordedAnchor && anchorSourceLoaded && !anchorRegion && <Alert title="The recorded criterion anchor could not be placed" tone="warning">Review the recorded excerpt in Review and inspect the manuscript manually.</Alert>}
+                {!recordedReaderActive && recordedAnchor && anchorRegion && <div className="signal-document-reconstruction-note" role="status"><strong>Source location: {instructorAnchor(recordedAnchor)}</strong><p>This opens the recorded page or extracted paragraph, not an exact passage highlight. Extracted paragraphs are source positions, not printed Word page numbers.</p></div>}
+                {!recordedReaderActive && recordedAnchor && anchorSourceLoaded && !anchorRegion && <Alert title="The recorded criterion anchor could not be placed" tone="warning">Review the recorded excerpt in Review and inspect the manuscript manually.</Alert>}
                 {rawSelection && requestedFlagId === null && <Alert title="The selected finding address is invalid" tone="warning">Showing the review queue instead.</Alert>}
                 <ManuscriptSourcePane run={id} actor={me?.id} visible={sourcePhysicallyVisible} viewerQuery={viewerQuery} paragraphsQuery={paragraphsQuery}
+                  recordedReader={recordedReaderActive && recordedSource ? <RecordedEvidenceReader
+                    key={`${id}:${me?.id}`} run={id} request={recordedSource.request} attempt={recordedSource.attempt}
+                    current={!reportQuery.isError && reportQuery.fetchStatus === "idle" && recordedSource.revision === reportQuery.data?.assessment_revision
+                      && recordedSource.request.reference.criterion_id === Number(searchParams.get("criterion"))}
+                    visible={sourcePhysicallyVisible} onPlaced={placeCriterionSource} canPlace={canPlaceRecordedSource} onManual={() => setRecordedSource(undefined)} /> : undefined}
                   regions={visibleRegions} flags={flags ?? []} selectedFlagId={selectedRegionId} onSelectFlag={selectFinding} requestedPage={requestedPage}
                   findingNumbers={numbersByFlagId} comparisonLeads={optional.snapshot} focusSelection={false}
                   requestedParagraph={anchorRegion?.paragraph ?? null} onPlaceRequestedParagraph={criterionInspectionRun.current === id && isDecision ? placeCriterionSource : undefined}
@@ -944,7 +1001,8 @@ export function SignalDocumentViewerPage() {
               </div>
               <aside ref={inspectorRef} tabIndex={-1} id="review-panel" role="tabpanel" aria-labelledby="review-tab" data-active={activeTab === "review"} className="signal-document-inspector">
                 {isExploring ? <ReuseExplorePanel flags={flags} flagsFetching={flagsQuery.isFetching} flagsError={flagsQuery.isError} flagsSucceeded={flagsQuery.isSuccess} onRetryFlags={() => flagsQuery.refetch()} onSelectFlag={selectFinding} onBack={showQueue} includeReferenceList={includeReferenceList} includeBlockQuote={includeBlockQuote} onToggleReferenceList={(value) => setToggle("ref", value)} onToggleBlockQuote={(value) => setToggle("quote", value)} excludedMatchesQuery={excludedMatchesQuery} expandedMatchId={expandedMatchId} onExpandMatch={setMatch} />
-                  : isDecision ? <ReadinessDecision checkRunId={id} report={reportQuery.data} pending={reportQuery.isPending} error={reportQuery.error} retrying={reportQuery.fetchStatus === "fetching"} onRetry={() => reportQuery.refetch()} onBack={showQueue} sourceTarget={criterionSourceTarget} onOpenSource={openCriterionSource} />
+                  : isDecision ? <ReadinessDecision checkRunId={id} report={reportQuery.data} pending={reportQuery.isPending} error={reportQuery.error} retrying={reportQuery.fetchStatus === "fetching"} onRetry={() => reportQuery.refetch()} onBack={showQueue} sourceTarget={criterionSourceTarget} onOpenSource={openCriterionSource} onOpenEvidenceSource={openRecordedCriterionSource}
+                    returnNotice={criterionReturnNotice?.run === id && criterionReturnNotice.search === sourceQuery ? criterionReturnNotice.message : undefined} />
                     : selectedFinding && selectedLocationId ? <SelectedFinding onRevealSource={selectedRegion?.kind === "paragraph_only" ? revealRecordedLocation : undefined} activeStatement={statementTarget?.run === id && statementTarget.flag === selectedLocationId ? statementTarget.role : undefined} onRecordReady={setSelectedRecord} onStatementSource={showStatementSource} fullWidth={fullWidthReading} singlePane={singlePaneLayout} onReadingChange={changeReading} finding={selectedFinding} total={otherFindings.length} locationFlagId={selectedLocationId} region={selectedRegion} sourceAvailability={sourceAvailability} sourceAnchor={recordedAnchor} previous={previousFinding} next={nextFinding} collection={optional} outsideFilter={selectedComparison && selectedNavigationIndex < 0 && optional.snapshot !== undefined} filterPosition={selectedNavigationIndex + 1} filterTotal={navigationFindings.length} onAll={() => update((next) => { next.delete("lead_view"); next.delete("lead_visible"); next.delete("lead_return"); next.set("lead_page", String(Math.floor((optional.snapshot?.records.findIndex((record) => record.id === selectedLocationId) ?? 0) / COMPARISON_LEAD_PAGE_SIZE) + 1)); }, true)} onBack={showQueue} onPrevious={() => previousFinding && selectFinding(previousFinding.representative.id, true)} onNext={() => nextFinding && selectFinding(nextFinding.representative.id, true)} onLocation={selectFinding} onExplore={openExplore} />
                       : <ReviewHome checkRunId={id} report={reportQuery.data} reportPending={reportQuery.isPending} reportRetrying={reportQuery.fetchStatus === "fetching"} reportError={reportQuery.error} onReportRetry={() => reportQuery.refetch()} findings={otherFindings} regions={viewer?.regions ?? []} sourceAvailability={sourceAvailability} collection={optional} viewedIds={viewedIds} onFlagsRetry={() => { void flagsQuery.refetch(); }} filter={filter} invalidSelection={invalidSelection} onFilter={setFilter} onSelect={selectFinding} onExplore={openExplore} onDecision={openDecision} />}
               </aside>

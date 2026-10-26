@@ -65,7 +65,7 @@ function setup() {
     return new Response(JSON.stringify({ instructor: { id: 1 } }));
   });
   vi.stubGlobal("fetch", fetch);
-  const rendered = renderWithReviewProviders(<Review />, { route: "/report/5" });
+  const rendered = renderWithReviewProviders(<Review />, { route: "/report/5/document?view=decision&pane=review&criterion=101" });
   return { ...rendered, fetch, posts, reports,
     hold() { holdReport = true; },
     release(success = true, stale = false) { holdReport = false; failReport = !success; staleReport = stale; reports.splice(0).forEach((finish) => finish(reportResponse())); },
@@ -78,10 +78,16 @@ function setup() {
 }
 
 async function confirm(id: number, exclusion = false) {
+  if (!document.getElementById(`signal-resolution-heading-${id}`)) {
+    const back = screen.queryByRole("link", { name: "Back to criteria" });
+    if (back) fireEvent.click(back);
+    fireEvent.click(await screen.findByRole("link", { name: `Review criterion: Custom requirement ${id}` }));
+    await waitFor(() => expect(document.getElementById(`signal-resolution-heading-${id}`)).not.toBeNull());
+  }
   const card = (await screen.findByRole("heading", { name: `Custom requirement ${id}` })).closest("article")!;
   fireEvent.click(within(card).getByRole("button", { name: exclusion ? "Exclude: needs another document" : "Meets criterion" }));
   fireEvent.change(within(card).getByRole("textbox"), { target: { value: `Private reason for requirement ${id}.` } });
-  const button = within(card).getByRole("button", { name: exclusion ? "Confirm exclusion" : "Confirm resolution" });
+  const button = within(card).getByRole("button", { name: exclusion ? "Confirm exclusion" : "Save grade" });
   button.focus(); fireEvent.click(button);
   return button;
 }
@@ -148,6 +154,7 @@ describe("saved judgment retrieval", () => {
     expect(screen.getByText("Review list needs refreshing")).toBeVisible();
     expect(screen.queryByText("No unresolved criteria")).not.toBeInTheDocument();
     control.recoverReviewList(); fireEvent.click(screen.getByRole("button", { name: "Retry review items" }));
+    fireEvent.click(screen.getByRole("link", { name: "Back to criteria" }));
     await screen.findByText("No unresolved criteria");
     expect(viewA.isConnected).toBe(true); expect(viewA).toHaveFocus();
   });
@@ -202,10 +209,12 @@ describe("saved judgment retrieval", () => {
     await act(async () => { control.posts[0].finish(); });
     await screen.findByRole("heading", { name: "Judgment saved" });
     expect(document.getElementById("signal-resolution-heading-1")).toBeNull();
-    expect(document.getElementById("signal-resolution-heading-2")).not.toBeNull();
+    expect(document.getElementById("signal-resolution-heading-2")).toBeNull();
     expect(screen.getByText("Review list needs refreshing")).toBeVisible();
     control.restoreReviewList(); fireEvent.click(screen.getByRole("button", { name: "Refresh review items" }));
     await screen.findByText("1 unresolved");
+    fireEvent.click(screen.getByRole("link", { name: "Back to criteria" }));
+    expect(await screen.findByRole("link", { name: "Review criterion: Custom requirement 2" })).toBeVisible();
     expect(control.fetch.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(1);
   });
 

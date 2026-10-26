@@ -1,7 +1,10 @@
-import type { EscalatedItemOut } from "../api/types";
+import type { EscalatedItemOut, EscalationResolution } from "../api/types";
+
+export const resolutionRequiresReason = (resolution: EscalationResolution) =>
+  resolution === "needs_document" || resolution === "accept_majority";
 
 export const REVIEW_DRAFT_COPY = {
-  retention: "Your choice and reason stay available while you move between this report and its manuscript. Confirming saves them.",
+  retention: "Your unsaved choice and any notes stay available while you review this report and its manuscript.",
   saving: "Saving this resolution. You can inspect the manuscript while it finishes.",
 } as const;
 

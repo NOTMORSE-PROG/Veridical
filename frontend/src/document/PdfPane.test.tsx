@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { PdfPane } from "./PdfPane";
 import type { FlagSummaryOut } from "../api/types";
 import { comparisonLeadSnapshot } from "../domain/comparisonLeadIdentity";
+import { useLayoutEffect, useRef } from "react";
 
 const mocks = vi.hoisted(() => ({ getDocument: vi.fn() }));
 vi.mock("pdfjs-dist", () => ({ GlobalWorkerOptions: {}, getDocument: mocks.getDocument }));
@@ -153,6 +154,32 @@ describe("PdfPane page visibility", () => {
     act(() => observer(1).emit([0.5]));
     await waitFor(() => expect(screen.getByRole("spinbutton")).toHaveValue(1));
     expect(screen.getByText("Page 1 of 2", { selector: "output" })).toBeInTheDocument();
+  });
+
+  it.each([true, false])("hides source A before passive effects while source B waits (URL change=%s)", async changeUrl => {
+    const observations: number[] = [];
+    const loadA = async () => new Uint8Array([1]);
+    let releaseB!: (data: Uint8Array) => void;
+    const loadB = () => new Promise<Uint8Array>(resolve => { releaseB = resolve; });
+    function Probe({ stage }: { stage: "A" | "B" }) {
+      const root = useRef<HTMLDivElement>(null);
+      useLayoutEffect(() => {
+        if (stage === "B") observations.push(root.current!.querySelectorAll("[data-page]").length);
+      }, [stage]);
+      return <div ref={root}><PdfPane {...props} fileUrl={changeUrl ? `${stage}.pdf` : "bound.pdf"}
+        loadFile={stage === "A" ? loadA : loadB}
+        recordedEvidence={{ reference_id: stage.repeat(64), state: "text_layer_match", page: 1,
+          paragraph: null, boxes: [[1, 2, 4, 7]], reason: null }} /></div>;
+    }
+    const { rerender } = render(<Probe stage="A" />);
+    await screen.findByLabelText("Page 29 of 29");
+    rerender(<Probe stage="B" />);
+    expect(observations).toEqual([0]);
+    expect(screen.queryByLabelText("Page 29 of 29")).not.toBeInTheDocument();
+    expect(document.querySelector('[data-reference-id="' + "B".repeat(64) + '"]')).toBeNull();
+    await act(async () => releaseB(new Uint8Array([2])));
+    expect(await screen.findByLabelText("Page 29 of 29")).toBeInTheDocument();
+    expect(mocks.getDocument).toHaveBeenCalledWith({ data: new Uint8Array([2]) });
   });
 
   it("scrolls the registered source page within the pane", async () => {

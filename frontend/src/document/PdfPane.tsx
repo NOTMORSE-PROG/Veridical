@@ -19,6 +19,8 @@ import { truncateAtWord } from "../format/text";
 import { usePdfReadingPosition } from "./usePdfReadingPosition";
 import { visiblePdfPage } from "./pdfReadingPosition";
 import { claimFocusContinuation, type FocusContinuation } from "../routing/focusContinuation";
+import type { EvidencePlacement } from "../report/evidenceTypes";
+import { evidenceOverlayRects } from "./evidenceOverlay";
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
   "pdfjs-dist/build/pdf.worker.min.mjs",
@@ -46,6 +48,7 @@ interface HighlightRegion {
 }
 
 const EMPTY_FINDING_NUMBERS: ReadonlyMap<number, number> = new Map();
+const EMPTY_PAGE_METRICS: PageMetric[] = [];
 const PDF_ZOOM_MIN = 0.8;
 const PDF_ZOOM_MAX = 1.8;
 const PDF_ZOOM_STEP = 0.2;
@@ -74,6 +77,7 @@ function ContinuousPdfPage({
   onVisibility,
   registerPage,
   documentNoun,
+  recordedEvidence,
 }: {
   pdf: PDFDocumentProxy;
   metric: PageMetric;
@@ -89,6 +93,7 @@ function ContinuousPdfPage({
   onVisibility: (page: number, ratio: number) => void;
   registerPage: (page: number, element: HTMLElement | null) => void;
   documentNoun: string;
+  recordedEvidence?: EvidencePlacement;
 }) {
   const pageRef = useRef<HTMLElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -251,6 +256,8 @@ function ContinuousPdfPage({
     ? flagsById.get(hoveredFlagId)
     : null;
   const aspectStyle = { aspectRatio: `${metric.width} / ${metric.height}` } as CSSProperties;
+  const recordedRects = viewport ? evidenceOverlayRects(recordedEvidence, metric.pageNumber,
+    (x, y) => viewport.convertToViewportPoint(x, y)) : [];
 
   return (
     <section
@@ -268,6 +275,9 @@ function ContinuousPdfPage({
           <canvas ref={canvasRef} role="img" aria-label={`Rendered page ${metric.pageNumber} of the ${documentNoun}`} />
           <div ref={textLayerRef} className="signal-document-pdf-text-layer" aria-hidden="true" />
           <div className="signal-document-pdf-evidence-layer">
+            {recordedRects.map((rect, index) => <span key={`${recordedEvidence!.reference_id}-${index}`}
+              aria-hidden="true" data-reference-id={recordedEvidence!.reference_id}
+              className="signal-recorded-source-mark" style={rect} />)}
             {highlights.map((highlight) => {
               const flag = flagsById.get(highlight.flagId);
               return highlight.rects.map((rect, index) => {
@@ -344,6 +354,8 @@ export function PdfPane({
   onPlaceRequestedPage,
   documentKind = "manuscript",
   loadFile,
+  recordedEvidence,
+  canPlaceRequestedPage,
 }: {
   fileUrl: string;
   regions: FlagRegionOut[];
@@ -360,11 +372,17 @@ export function PdfPane({
   onPlaceRequestedPage?: (page: number, element: HTMLElement) => void;
   documentKind?: "manuscript" | "required_format";
   loadFile?: () => Promise<Uint8Array>;
+  recordedEvidence?: EvidencePlacement;
+  canPlaceRequestedPage?: () => boolean;
 }) {
   const formatDocument = documentKind === "required_format";
   const documentLabel = formatDocument ? "Original format" : "Full manuscript";
-  const [pdf, setPdf] = useState<PDFDocumentProxy | null>(null);
-  const [metrics, setMetrics] = useState<PageMetric[]>([]);
+  const [loadedPdf, setPdf] = useState<PDFDocumentProxy | null>(null);
+  const [loadedMetrics, setMetrics] = useState<PageMetric[]>([]);
+  const [loadedSource, setLoadedSource] = useState<{ url: string; loader: typeof loadFile }>();
+  const sourceCurrent = loadedSource?.url === fileUrl && loadedSource.loader === loadFile;
+  const pdf = sourceCurrent ? loadedPdf : null;
+  const metrics = sourceCurrent ? loadedMetrics : EMPTY_PAGE_METRICS;
   const [loadError, setLoadError] = useState(false);
   const [loadAttempt, setLoadAttempt] = useState(0);
   const [currentPage, setCurrentPage] = useState(1);
@@ -406,6 +424,7 @@ export function PdfPane({
       if (!cancelled) {
         setPdf(document);
         setMetrics(pageMetrics);
+        setLoadedSource({ url: fileUrl, loader: loadFile });
       }
     }
     openDocument().catch(() => {
@@ -465,16 +484,18 @@ export function PdfPane({
   useEffect(() => {
     if (requestedPage === null || metrics.length === 0) return;
     if (!Number.isSafeInteger(requestedPage) || requestedPage < 1 || requestedPage > metrics.length) return;
+    if (canPlaceRequestedPage && !canPlaceRequestedPage()) return;
     reading.retire();
     const intent = reading.intent.current;
     const frame = requestAnimationFrame(() => {
       if (reading.intent.current !== intent) return;
+      if (canPlaceRequestedPage && !canPlaceRequestedPage()) return;
       scrollToPage(requestedPage, "auto");
       const element = pageRefs.current.get(requestedPage);
       if (element) onPlaceRequestedPage?.(requestedPage, element);
     });
     return () => cancelAnimationFrame(frame);
-  }, [metrics.length, requestedPage, requestedPageAttempt, scrollToPage, onPlaceRequestedPage, reading.retire, reading.intent]);
+  }, [metrics.length, requestedPage, requestedPageAttempt, scrollToPage, onPlaceRequestedPage, canPlaceRequestedPage, reading.retire, reading.intent]);
 
   function commitPageInput() {
     reading.retire();
@@ -565,6 +586,7 @@ export function PdfPane({
                 onVisibility={updateVisibility}
                 registerPage={registerPage}
                 documentNoun={formatDocument ? "required format" : "manuscript"}
+                recordedEvidence={loadFile ? recordedEvidence : undefined}
               />
             ))}
           </div>

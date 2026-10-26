@@ -29,7 +29,7 @@ export function sameSourceTask(left: string, right: string) {
   function normalized(value: string) {
     const params = new URLSearchParams(value);
     clearPdfReading(params);
-    if (params.get("pane") === "manuscript") params.delete("pane");
+    if (["manuscript", "review", "analysis"].includes(params.get("pane") ?? "")) params.delete("pane");
     params.sort();
     return params.toString();
   }

@@ -57,8 +57,8 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 // the JSON envelope every other endpoint uses -- a separate path that
 // still shares the same session-cookie/error-envelope handling as
 // `request()`, not a second ad-hoc fetch call.
-async function requestBlob(path: string): Promise<Blob> {
-  const res = await fetch(`${BASE_URL}${path}`, { credentials: "include" });
+async function requestBlob(path: string, options?: Pick<RequestInit, "signal">): Promise<Blob> {
+  const res = await fetch(`${BASE_URL}${path}`, { ...options, credentials: "include" });
   if (!res.ok) {
     const body = (await res.json().catch(() => null)) as
       | { error?: { code?: string; message?: string } }
@@ -72,9 +72,26 @@ async function requestBlob(path: string): Promise<Blob> {
   return res.blob();
 }
 
+async function requestBoundSource(path: string, sourceIdentity: string, contentTypes: readonly string[], options?: Pick<RequestInit, "signal">) {
+  const res = await fetch(`${BASE_URL}${path}`, { ...options, credentials: "include" });
+  if (!res.ok) {
+    const body = await res.json().catch(() => null) as { error?: { code?: string; message?: string } } | null;
+    throw new ApiError(res.status, body?.error?.code ?? "internal", body?.error?.message ?? `Request failed (${res.status}).`);
+  }
+  if (res.headers.get("X-Evidence-Source-Identity") !== sourceIdentity
+    || !contentTypes.includes(res.headers.get("Content-Type")?.split(";")[0].trim() ?? "")) {
+    throw new ApiError(409, "conflict", "This source copy could not be linked to the selected evidence. Reload its location.");
+  }
+  return res;
+}
+
 export const api = {
   get: <T>(path: string, options?: Pick<RequestInit, "signal">): Promise<T> => request<T>(path, options),
-  getBlob: (path: string): Promise<Blob> => requestBlob(path),
+  getBlob: (path: string, options?: Pick<RequestInit, "signal">): Promise<Blob> => requestBlob(path, options),
+  getSourceBytes: async (path: string, identity: string, options?: Pick<RequestInit, "signal">) =>
+    new Uint8Array(await (await requestBoundSource(path, identity, ["application/pdf"], options)).arrayBuffer()),
+  getSourceImage: async (path: string, identity: string, options?: Pick<RequestInit, "signal">) =>
+    (await requestBoundSource(path, identity, ["image/png", "image/jpeg"], options)).blob(),
   post: <T>(path: string, body?: unknown, headers?: Record<string, string>): Promise<T> =>
     request<T>(path, {
       method: "POST",

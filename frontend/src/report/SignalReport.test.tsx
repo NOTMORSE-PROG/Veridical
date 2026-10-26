@@ -5,6 +5,26 @@ import type { EscalatedItemOut, FlagSummaryOut, ReportOut } from "../api/types";
 import { renderWithReviewProviders as renderWithProviders, stubFetchByPath } from "../test/renderWithProviders";
 import { SignalReportPage } from "./SignalReport";
 import { pendingRouteReturnElement, rememberRouteReturnFocus } from "../routing/useRouteFocus";
+import { useLocation } from "react-router";
+import { SignalDocumentViewerPage } from "../document/SignalDocumentViewer";
+
+vi.mock("../document/PdfPane", () => ({ PdfPane: () => <div>PDF reader outside this report-flow control</div> }));
+
+function ReviewRouteFamily() {
+  const location = useLocation();
+  return location.pathname.endsWith("/document") ? <SignalDocumentViewerPage /> : <SignalReportPage />;
+}
+
+async function enterSelectedCriterion() {
+  const link = await screen.findByRole("link", { name: `Review criterion: ${ESCALATED.criterion_text}` });
+  link.focus(); fireEvent.click(link);
+  await screen.findByRole("heading", { name: ESCALATED.criterion_text, level: 3 });
+}
+
+async function renderCriterionFromReport() {
+  renderWithProviders(<ReviewRouteFamily />, { route: "/report/5", path: "/report/:checkRunId/*" });
+  await enterSelectedCriterion();
+}
 
 const BASE_REPORT: ReportOut = {
   assessment_revision: 0,
@@ -83,6 +103,8 @@ function stubReport(report: ReportOut = BASE_REPORT, escalated: EscalatedItemOut
     "/check-runs/5/escalated": escalated,
     "/check-runs/5/flags": flags,
     "/check-runs/5/share": null,
+    "/check-runs/5/document": { manuscript_id: 5, source_format: "pdf", available: false, original_filename: "source.pdf", purged_at: null, unavailable_reason: "No source fixture in this report-flow control", regions: [] },
+    "/check-runs/5/document/reuse-matches": { matches: [], passage_archive_size_n: 0 },
   }));
 }
 
@@ -229,7 +251,7 @@ describe("SignalReportPage", () => {
 
   it("makes a chosen-but-unconfirmed resolution legible as a pending step, not a done one (BUG-145)", async () => {
     stubReport(BASE_REPORT, [ESCALATED]);
-    renderWithProviders(<SignalReportPage />, { route: "/report/5", path: "/report/:checkRunId" });
+    await renderCriterionFromReport();
 
     fireEvent.click(await screen.findByRole("button", { name: "Meets criterion" }));
 
@@ -239,7 +261,7 @@ describe("SignalReportPage", () => {
     // (the original bug: the options vanishing read exactly like success).
     expect(screen.getByRole("heading", { name: "Mark as meets criterion", level: 4 })).toBeInTheDocument();
     expect(screen.getByText("Step 2 of 2: nothing is saved yet")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Confirm resolution" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Save grade" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Cancel" })).toBeInTheDocument();
     // Nothing was submitted by choosing -- the resolve mutation only fires on Confirm.
     expect(screen.getByText("1 unresolved")).toBeInTheDocument();
@@ -259,7 +281,7 @@ describe("SignalReportPage", () => {
   it("returns focus to the criterion heading on Cancel, not to <body> (BUG-145)", async () => {
     vi.spyOn(document, "hasFocus").mockReturnValue(true);
     stubReport(BASE_REPORT, [ESCALATED]);
-    renderWithProviders(<SignalReportPage />, { route: "/report/5", path: "/report/:checkRunId" });
+    await renderCriterionFromReport();
 
     fireEvent.click(await screen.findByRole("button", { name: "Meets criterion" }));
     const cancel = screen.getByRole("button", { name: "Cancel" });
@@ -285,7 +307,7 @@ describe("SignalReportPage", () => {
     // review. The unresolved state and recorded reason are in the described-by set,
     // resolving to real elements containing the real context text.
     stubReport(BASE_REPORT, [ESCALATED]);
-    renderWithProviders(<SignalReportPage />, { route: "/report/5", path: "/report/:checkRunId" });
+    await renderCriterionFromReport();
 
     const button = await screen.findByRole("button", { name: "Meets criterion" });
     const describedByIds = button.getAttribute("aria-describedby")?.split(" ") ?? [];
@@ -326,7 +348,7 @@ describe("SignalReportPage", () => {
       reason: "The grading response used an unrecognized verdict ('Good') for this criterion's own scale.",
     };
     stubReport(BASE_REPORT, [unrecognized]);
-    renderWithProviders(<SignalReportPage />, { route: "/report/5", path: "/report/:checkRunId" });
+    await renderCriterionFromReport();
 
     await screen.findByRole("heading", { name: "Criteria needing your judgment" });
     expect(screen.getByText(unrecognized.reason!)).toBeInTheDocument();
@@ -348,7 +370,7 @@ describe("SignalReportPage", () => {
       reason: "Two of three grading passes agreed.",
     };
     stubReport(BASE_REPORT, [recognized]);
-    renderWithProviders(<SignalReportPage />, { route: "/report/5", path: "/report/:checkRunId" });
+    await renderCriterionFromReport();
 
     await screen.findByRole("heading", { name: "Criteria needing your judgment" });
     expect(screen.getByRole("button", { name: "Accept AI suggestion: pass" })).toBeInTheDocument();
@@ -961,7 +983,7 @@ describe("SignalReportPage", () => {
 });
 
 // Exercise the real route, including its report-read gate and mounted dialogs.
-function readFailurePage(initial: ReportOut = BASE_REPORT, escalated: EscalatedItemOut[] = []) {
+function readFailurePage(initial: ReportOut = BASE_REPORT, escalated: EscalatedItemOut[] = [], family = false) {
   let current = initial;
   let failure = 0;
   let hold = false;
@@ -989,7 +1011,7 @@ function readFailurePage(initial: ReportOut = BASE_REPORT, escalated: EscalatedI
       "/check-runs/5/share": null, "/check-runs/5/flags": [] })(input, init);
   });
   vi.stubGlobal("fetch", fetch);
-  renderWithProviders(<><QueryAccess /><SignalReportPage /></>, { route: "/report/5", path: "/report/:checkRunId" });
+  renderWithProviders(<><QueryAccess />{family ? <ReviewRouteFamily /> : <SignalReportPage />}</>, { route: "/report/5", path: "/report/:checkRunId/*" });
   return { fail(status = 503) { failure = status; }, fresh(report = current) { failure = 0; current = report; },
     hold() { hold = true; }, release() { hold = false; release?.(); }, posts: () => postCount,
     refresh: () => client.invalidateQueries({ queryKey: ["report", 5], exact: true }) };
@@ -1001,12 +1023,14 @@ describe("full report background-read continuity", () => {
     vi.spyOn(document, "hasFocus").mockReturnValue(true);
     const pending = { ...BASE_REPORT, pending_review_count: 1, results: [...BASE_REPORT.results,
       { ...BASE_REPORT.results[0], criterion_id: 2, text: ESCALATED.criterion_text, outcome: "escalated" as const, score: null }] };
-    const c = readFailurePage(pending, [ESCALATED]);
+    const c = readFailurePage(pending, [ESCALATED], true);
+    await enterSelectedCriterion();
     const card = (await screen.findByRole("heading", { name: ESCALATED.criterion_text })).closest("article")!;
     fireEvent.click(within(card).getByRole("button", { name: "Meets criterion" }));
     fireEvent.change(within(card).getByRole("textbox"), { target: { value: "A checkable instructor reason for this criterion." } });
-    c.fail(); fireEvent.click(within(card).getByRole("button", { name: "Confirm resolution" }));
+    c.fail(); fireEvent.click(within(card).getByRole("button", { name: "Save grade" }));
     expect(await screen.findByRole("heading", { name: "Judgment saved" })).toBeVisible();
+    fireEvent.click(screen.getByRole("link", { name: "Open full readiness report" }));
     await screen.findByText("Could not update this report");
     expect(screen.getByText("Last loaded readiness band")).toBeVisible();
     const view = screen.getByRole("button", { name: `View saved judgment: ${ESCALATED.criterion_text}` });
@@ -1087,7 +1111,7 @@ describe("assessment context before instructor judgment", () => {
   it.each([true, false])("keeps test provenance and conditioned support context before actions (support=%s)", async flagged => {
     vi.spyOn(document, "hasFocus").mockReturnValue(true);
     stubReport({ ...BASE_REPORT, llm_mode: "fake", historical_semantic_support_unverified: flagged }, [ESCALATED]);
-    renderWithProviders(<SignalReportPage />, { route: "/report/5?criterion_record=2", path: "/report/:checkRunId" });
+    await renderCriterionFromReport();
     const action = await screen.findByRole("button", { name: "Meets criterion" });
     const context = screen.getByRole("complementary", { name: "Assessment context" });
     expect(context.compareDocumentPosition(action) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
@@ -1099,7 +1123,7 @@ describe("assessment context before instructor judgment", () => {
     const ids = action.getAttribute("aria-describedby")!.split(/\s+/);
     expect(ids.every(id => document.getElementById(id))).toBe(true);
     fireEvent.click(action);
-    expect(screen.getByRole("button", { name: "Confirm resolution" })).toHaveAccessibleDescription(/Test AI responses. Not a real AI assessment/);
+    expect(screen.getByRole("button", { name: "Save grade" })).toHaveAccessibleDescription(/Test AI responses. Not a real AI assessment/);
     const cancel = screen.getByRole("button", { name: "Cancel" });
     cancel.focus(); fireEvent.click(cancel);
     expect(screen.getByRole("heading", { name: ESCALATED.criterion_text })).toHaveFocus();

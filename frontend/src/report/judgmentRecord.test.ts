@@ -112,6 +112,16 @@ describe("Initial judgment acknowledgment and history", () => {
 });
 
 describe("Judgment version and fact boundaries", () => {
+  it.each(["mark_pass", "mark_fail", "mark_level"] as const)("recognizes blank ordinary %s comments without inventing a reason", resolution => {
+    const blank: JudgmentSnapshot = { ...current, resolution_type: resolution, reason: "",
+      outcome: resolution === "mark_fail" ? "failed" : "passed",
+      score: resolution === "mark_fail" ? 0 : 100,
+      level: resolution === "mark_level" ? { ordinal: 1, name: "Custom top level", points: 1, max_points: 1 } : null };
+    expect(snapshotValid(blank)).toBe(true);
+    expect(blank.reason).toBe("");
+    expect(snapshotValid({ ...blank, resolution_type: "accept_majority" })).toBe(false);
+    expect(snapshotValid({ ...blank, resolution_type: "needs_document", outcome: "not_applicable", score: null, level: null })).toBe(false);
+  });
   it("lets newer current judgments supersede an old acknowledgment while preserving its immutable value", () => {
     const saved = row(1); const newer = row(2, "A later recorded reason");
     expect(atLeastSavedJudgment(newer, saved)).toBe(true);

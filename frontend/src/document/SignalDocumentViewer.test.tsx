@@ -133,6 +133,11 @@ describe("SignalDocumentViewerPage", () => {
     };
     const baseFetch = stubFetchByPath({
       "/check-runs/5/document": VIEWER, "/check-runs/5/report": { ...REPORT, pending_review_count: 1, results: [row] },
+      "/check-runs/5/evidence": { snapshot_id: "f".repeat(64), assessment_revision: 0, llm_mode: "real", references: [
+        { reference_id: "c".repeat(64), criterion_id: 1, flag_id: null, role: "criterion_evidence", index: 0,
+          quote: "Recorded paragraph.", anchor: "page 4", source_scope: "own_manuscript", source_state: "not_checked" } ] },
+      [`/check-runs/5/evidence/${"c".repeat(64)}/location`]: { snapshot_id: "f".repeat(64), source_identity: "d".repeat(64), source_format: "pdf",
+        placement: { reference_id: "c".repeat(64), state: "page_only", page: 4, paragraph: null, boxes: [], reason: null }, caption: "Page shown without a passage mark." },
       "/check-runs/5/escalated": [{ check_result_id: 41, criterion_id: 1, criterion_text: row.text,
         weight: 1, agreement: null, votes: [null, null], ai_majority_verdict: null, reason: "Needs instructor judgment.",
         review_reason: "low_confidence", unverified_evidence: null, reasoning: row.reasoning, evidence: row.evidence }],
@@ -149,13 +154,15 @@ describe("SignalDocumentViewerPage", () => {
       return baseFetch(input, init);
     });
     vi.stubGlobal("fetch", fetch);
-    renderWithProviders(<SignalDocumentViewerPage />, { route: "/report/5/document?view=decision&pane=review", path: "/report/:checkRunId/document" });
+    renderWithProviders(<SignalDocumentViewerPage />, { route: "/report/5/document?view=decision&pane=review&criterion=1", path: "/report/:checkRunId/document" });
     fireEvent.click(await screen.findByRole("button", { name: "Meets criterion" }));
-    const reason = await screen.findByRole("textbox", { name: "Reason (required)" });
+    const reason = await screen.findByRole("textbox", { name: "Comment (optional)" });
     const entered = "  Unsaved instructor judgment\nwith exact whitespace.  ";
     fireEvent.change(reason, { target: { value: entered } });
-    const open = screen.getByRole("link", { name: "Open in manuscript: page 4. Pending evidence judgment" });
+    const open = screen.getByRole("button", { name: "Show recorded location" });
+    await waitFor(() => expect(open).toBeEnabled());
     open.focus(); fireEvent.click(open);
+    const manual = screen.getByRole("button", { name: "Continue in full manuscript" }); manual.focus(); fireEvent.click(manual);
     const read = screen.getByRole("button", { name: "Read text" }); read.focus(); fireEvent.click(read);
     await screen.findByText("Reading saved page 4.");
     fireEvent.click(screen.getByRole("button", { name: "Next" }));
@@ -167,8 +174,8 @@ describe("SignalDocumentViewerPage", () => {
     fireEvent.click(screen.getByRole("button", { name: "Return to selected PDF p. 4" }));
     expect(screen.getByTestId("pdf-pane")).toHaveAttribute("data-page", "4");
     const back = screen.getByRole("button", { name: "Return to criterion review" }); back.focus(); fireEvent.click(back);
-    expect(screen.getByRole("textbox", { name: "Reason (required)" })).toHaveValue(entered);
-    expect(screen.getByRole("link", { name: "Open in manuscript: page 4. Pending evidence judgment" })).toHaveFocus();
+    expect(screen.getByRole("textbox", { name: "Comment (optional)" })).toHaveValue(entered);
+    expect(screen.getByRole("button", { name: "Show recorded location" })).toHaveFocus();
     expect(fetch.mock.calls.every(([, init]) => !init?.method || init.method === "GET")).toBe(true);
   });
   it.each(["", "&finding=7", "&finding=7&anchor=page%209"])("keeps criterion source context neutral with stale selection %s", async stale => {

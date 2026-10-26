@@ -2,6 +2,7 @@ import type { JudgmentContext, JudgmentHistoryEntry, JudgmentRecordInput, Judgme
 import type { CriterionResultOut, ReportOut, ResultRowCommon } from "../api/types";
 import { CRITERION_SCORE_DECIMAL_PLACES, CRITERION_SCORE_UNITS } from "../config/ui";
 import { CRITERION_EXCLUSION_COPY } from "../domain/criterionReview";
+import { resolutionRequiresReason } from "../domain/criterionReview";
 import { isAssessmentRevision } from "./assessmentRevision";
 
 export function judgmentVersion(row: ResultRowCommon): number | undefined {
@@ -21,7 +22,8 @@ export function judgmentLabel(value: Pick<JudgmentSnapshot, "resolution_type" | 
 
 export function snapshotValid(value: JudgmentSnapshot | null): value is JudgmentSnapshot {
   if (!value || !isAssessmentRevision(value.judgment_revision) || typeof value.reason !== "string"
-    || !value.reason.trim() || !["recorded", "legacy_partial"].includes(value.provenance)) return false;
+    || (resolutionRequiresReason(value.resolution_type) && !value.reason.trim())
+    || !["recorded", "legacy_partial"].includes(value.provenance)) return false;
   const { none, full } = CRITERION_SCORE_UNITS;
   if (value.score !== null && (typeof value.score !== "number" || !Number.isFinite(value.score)
     || value.score < none || value.score > full)) return false;

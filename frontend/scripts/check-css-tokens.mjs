@@ -525,7 +525,7 @@ const negativeControls = [
     tokenSource,
     `${rhythmSource}\n.signal-settings-nav { inset-block-start: 0; }`,
   )],
-  ["mobile sticky overflow container", () => validateRhythmContract(
+  ["desktop window horizontal-overflow guard", () => validateRhythmContract(
     tokenSource,
     `${rhythmSource}\n.signal-workspace-main { overflow-x: hidden; }`,
   )],

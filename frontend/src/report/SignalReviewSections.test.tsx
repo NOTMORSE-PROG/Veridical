@@ -143,6 +143,22 @@ function stubFetchByPath(handlers: Record<string, unknown>) {
   return baseStubFetchByPath({ "/check-runs/5/report": reportWith({ assessment_revision: 0 }), ...handlers });
 }
 
+function renderSelected(criterionId = REAL_MAJORITY.criterion_id) {
+  return renderWithProviders(<SignalEscalatedPanel checkRunId={5} />, {
+    route: `/report/5/document?view=decision&pane=review&criterion=${criterionId}`,
+  });
+}
+
+function expectSelectedSource(link: HTMLElement, criterionId: number, anchor: string) {
+  const target = new URL(link.getAttribute("href")!, "http://localhost");
+  expect(target.origin).toBe("http://localhost");
+  expect(target.pathname).toBe("/report/5/document");
+  expect(target.searchParams.get("criterion")).toBe(String(criterionId));
+  expect(target.searchParams.get("view")).toBe("decision");
+  expect(target.searchParams.get("pane")).toBe("manuscript");
+  expect(target.searchParams.get("anchor")).toBe(anchor);
+}
+
 describe("SignalEscalatedPanel / SignalResolutionCard", () => {
   it("shows the actual explanation and all located basis before choices and describes confirmation", async () => {
     const item = { ...REAL_MAJORITY, reasoning: "Saved representative explanation", evidence: [
@@ -150,13 +166,13 @@ describe("SignalEscalatedPanel / SignalResolutionCard", () => {
       { quote: "Unplaced source excerpt", anchor: "" },
     ] };
     vi.stubGlobal("fetch", stubFetchByPath({ "/check-runs/5/escalated": [item] }));
-    renderWithProviders(<SignalEscalatedPanel checkRunId={5} />);
+    renderSelected(REAL_MAJORITY.criterion_id);
     const explanation = await screen.findByText("Saved representative explanation");
     const choice = screen.getByRole("button", { name: "Accept AI suggestion: pass" });
     expect(explanation.compareDocumentPosition(choice) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(screen.getByRole("link", { name: /Open in manuscript: Extracted paragraph 58/ })).toBeVisible();
     expect(screen.getByText("No manuscript location is available for this excerpt.")).toBeVisible();
-    expect(screen.getAllByRole("link")).toHaveLength(1);
+    expect(screen.getAllByRole("link", { name: /Open in manuscript/ })).toHaveLength(1);
     fireEvent.click(choice);
     expect(screen.getByRole("button", { name: "Confirm resolution" })).toHaveAccessibleDescription(/A recorded location does not establish support for a grade/);
     expect(screen.getByText("This reason appears in the instructor report and export.")).toBeVisible();
@@ -165,7 +181,7 @@ describe("SignalEscalatedPanel / SignalResolutionCard", () => {
 
   it.each([null, " \n\t "])("keeps missing explanation neutral without a current canonical method (%s)", async (reasoning) => {
     vi.stubGlobal("fetch", stubFetchByPath({ "/check-runs/5/escalated": [{ ...REAL_MAJORITY, reasoning }] }));
-    renderWithProviders(<SignalEscalatedPanel checkRunId={5} />);
+    renderSelected(REAL_MAJORITY.criterion_id);
     expect(await screen.findByText("No explanation is available in this assessment record.")).toBeVisible();
     expect(screen.getByText("No located excerpt is available for this review item.")).toBeVisible();
   });
@@ -177,7 +193,7 @@ describe("SignalEscalatedPanel / SignalResolutionCard", () => {
       type: "structural", kind: "structural", basis: null,
       rule_facts: { rule_id: "required_section_present", target: "glossary", matched_title: null } };
     vi.stubGlobal("fetch", stubFetchByPath({ "/check-runs/5/escalated": [item], "/check-runs/5/report": reportWith({ assessment_revision: 4, results: [row] }) }));
-    renderWithProviders(<SignalEscalatedPanel checkRunId={5} />);
+    renderSelected(REAL_MAJORITY.criterion_id);
     await screen.findByRole("button", { name: "Meets criterion" });
     if (matching) {
       expect(await screen.findByText('The saved heading lookup searched for "glossary".')).toBeVisible();
@@ -198,7 +214,7 @@ describe("SignalEscalatedPanel / SignalResolutionCard", () => {
         n_native_equations_unlocated: 0, native_math_excluded_paragraphs: [7],
         native_math_coverage_items: [{ paragraph: 7, kind: "paragraph", n_occurrences: 1 }] } };
     vi.stubGlobal("fetch", stubFetchByPath({ "/check-runs/5/escalated": [item], "/check-runs/5/report": reportWith({ assessment_revision: 4, results: [row] }) }));
-    renderWithProviders(<SignalEscalatedPanel checkRunId={5} />);
+    renderSelected(REAL_MAJORITY.criterion_id);
     const choice = await screen.findByRole("button", { name: "Accept AI suggestion: pass" });
     if (matching) {
       const limitation = await screen.findByText("Source content omitted.");
@@ -206,7 +222,7 @@ describe("SignalEscalatedPanel / SignalResolutionCard", () => {
       expect(limitation.compareDocumentPosition(choice) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
       const scope = screen.getByText("Source scope and locations");
       fireEvent.click(scope);
-      expect(screen.getByRole("link", { name: "Open in manuscript: Extracted paragraph 8" })).toHaveAttribute("href", "/report/5/document?anchor=paragraph%207");
+      expectSelectedSource(screen.getByRole("link", { name: "Open in manuscript: Extracted paragraph 8" }), item.criterion_id, "paragraph 7");
     } else {
       expect(screen.queryByText("Source content omitted.")).not.toBeInTheDocument();
       expect(screen.queryByText("Source scope and locations")).not.toBeInTheDocument();
@@ -217,7 +233,7 @@ describe("SignalEscalatedPanel / SignalResolutionCard", () => {
     const item = { ...REAL_MAJORITY, assessment_revision: 4, reasoning: "Actual retained AI explanation" };
     const row = { ...savedRow(item, ""), check_result_id: item.check_result_id, outcome: "escalated", resolution: null };
     vi.stubGlobal("fetch", stubFetchByPath({ "/check-runs/5/escalated": [item], "/check-runs/5/report": reportWith({ assessment_revision: 4, results: [row] }) }));
-    renderWithProviders(<SignalEscalatedPanel checkRunId={5} />);
+    renderSelected(REAL_MAJORITY.criterion_id);
     expect(await screen.findByText("Recorded AI explanation:")).toBeVisible();
     expect(screen.getByText(item.reasoning)).toBeVisible();
   });
@@ -248,12 +264,12 @@ describe("SignalEscalatedPanel / SignalResolutionCard", () => {
       evidence: [{ quote: "A located reference entry.", anchor: "page 3" }],
     };
     vi.stubGlobal("fetch", stubFetchByPath({ "/check-runs/5/escalated": [item] }));
-    renderWithProviders(<SignalEscalatedPanel checkRunId={5} />);
+    renderSelected(LEVELLED_ITEM.criterion_id);
     expect(await screen.findByText("No grade accepted")).toBeInTheDocument();
     expect(screen.queryByText(/Split vote:/)).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /Accept AI suggestion/ })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Exemplary" })).toBeEnabled();
-    expect(screen.getByRole("link", { name: /Open in manuscript: page 3\./ })).toHaveAttribute("href", "/report/5/document?anchor=page%203");
+    expectSelectedSource(screen.getByRole("link", { name: /Open in manuscript: page 3\./ }), item.criterion_id, "page 3");
     if (status === "incomplete") expect(screen.getByText(/separate evidence review did not finish/)).toBeInTheDocument();
   });
   afterEach(() => vi.unstubAllGlobals());
@@ -264,29 +280,38 @@ describe("SignalEscalatedPanel / SignalResolutionCard", () => {
       ...item, reason, votes: [], ai_majority_verdict: null,
     }));
     vi.stubGlobal("fetch", stubFetchByPath({ "/check-runs/5/escalated": items }));
-    renderWithProviders(<SignalEscalatedPanel checkRunId={5} />);
+    renderWithProviders(<SignalEscalatedPanel checkRunId={5} />, { route: "/report/5/document?view=decision&pane=review" });
     expect(await screen.findAllByText(reason)).toHaveLength(1);
     expect(screen.queryByText("No AI assessment was recorded.")).not.toBeInTheDocument();
-    for (const button of screen.getAllByRole("article").flatMap((card) => within(card).getAllByRole("button")).filter((button) => !button.hasAttribute("aria-expanded"))) {
-      expect(button.getAttribute("aria-describedby")?.split(" "))
-        .toContain("signal-shared-review-reason-5");
+    expect(screen.queryByRole("button", { name: "Meets criterion" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("link", { name: `Review criterion: ${REAL_MAJORITY.criterion_text}` }));
+    for (const label of ["Meets criterion", "Does not meet"]) {
+      expect(await screen.findByRole("button", { name: label })).toHaveAccessibleDescription(new RegExp(reason));
     }
+    fireEvent.click(screen.getByRole("link", { name: "Next criterion" }));
+    expect(await screen.findByRole("button", { name: "Exemplary" })).toHaveAccessibleDescription(new RegExp(reason));
+    expect(screen.getByRole("button", { name: "Beginner" })).toHaveAccessibleDescription(new RegExp(reason));
     expect(screen.queryByRole("button", { name: /Accept AI suggestion/ })).not.toBeInTheDocument();
   });
 
   it("keeps different reasons and item-specific warnings separate", async () => {
     const other = { ...LEVELLED_ITEM, reason: "The method has conflicting descriptions." };
     vi.stubGlobal("fetch", stubFetchByPath({ "/check-runs/5/escalated": [INJECTION_SUSPECTED, other] }));
-    renderWithProviders(<SignalEscalatedPanel checkRunId={5} />);
-    expect(await screen.findByText(other.reason)).toBeInTheDocument();
-    expect(screen.getByText(INJECTION_SUSPECTED.reason!)).toBeInTheDocument();
+    renderSelected(INJECTION_SUSPECTED.criterion_id);
+    expect(await screen.findByText(INJECTION_SUSPECTED.reason!)).toBeInTheDocument();
+    expect(screen.queryByText(other.reason)).not.toBeInTheDocument();
     expect(screen.getByText("Text addressed at an automated grader")).toBeInTheDocument();
     expect(screen.queryByText("Shared review reason")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("link", { name: "Next criterion" }));
+    expect(await screen.findByText(other.reason)).toBeInTheDocument();
+    expect(screen.queryByText(INJECTION_SUSPECTED.reason!)).not.toBeInTheDocument();
+    expect(screen.queryByText("Text addressed at an automated grader")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Exemplary" })).toHaveAccessibleDescription(new RegExp(other.reason));
   });
 
   it("BUG-045/BUG-131: an instruction warning never implies agreement and retains the matched evidence", async () => {
     vi.stubGlobal("fetch", stubFetchByPath({ "/check-runs/5/escalated": [INJECTION_SUSPECTED] }));
-    renderWithProviders(<SignalEscalatedPanel checkRunId={5} />);
+    renderSelected(INJECTION_SUSPECTED.criterion_id);
 
     // The vote itself DID show perfect agreement (2/2, both "pass") -- if
     // this regressed to the generic vote-fraction copy, that exact bare
@@ -305,7 +330,7 @@ describe("SignalEscalatedPanel / SignalResolutionCard", () => {
 
   it("de-emphasizes the Accept-AI option for an injection-suspected item (quiet variant, not the ordinary secondary treatment)", async () => {
     vi.stubGlobal("fetch", stubFetchByPath({ "/check-runs/5/escalated": [INJECTION_SUSPECTED] }));
-    renderWithProviders(<SignalEscalatedPanel checkRunId={5} />);
+    renderSelected(INJECTION_SUSPECTED.criterion_id);
 
     const acceptButton = await screen.findByRole("button", { name: "Accept AI suggestion: pass" });
     expect(acceptButton.className).toContain("signal-button--quiet");
@@ -314,7 +339,7 @@ describe("SignalEscalatedPanel / SignalResolutionCard", () => {
 
   it("an ordinary low_confidence item's Accept-AI option keeps the normal secondary treatment", async () => {
     vi.stubGlobal("fetch", stubFetchByPath({ "/check-runs/5/escalated": [REAL_MAJORITY] }));
-    renderWithProviders(<SignalEscalatedPanel checkRunId={5} />);
+    renderSelected(REAL_MAJORITY.criterion_id);
 
     const acceptButton = await screen.findByRole("button", { name: "Accept AI suggestion: pass" });
     expect(acceptButton.className).toContain("signal-button--secondary");
@@ -340,7 +365,7 @@ describe("SignalEscalatedPanel / SignalResolutionCard", () => {
       return new Response("{}", { status: 200 });
     });
     vi.stubGlobal("fetch", fetchMock);
-    renderWithProviders(<SignalEscalatedPanel checkRunId={5} />);
+    renderSelected(REAL_MAJORITY.criterion_id);
 
     fireEvent.click(await screen.findByRole("button", { name: "Accept AI suggestion: pass" }));
     fireEvent.change(screen.getByRole("textbox", { name: "Reason (required)" }), {
@@ -387,7 +412,7 @@ describe("SignalEscalatedPanel / SignalResolutionCard", () => {
       return new Response("{}", { status: 200 });
     });
     vi.stubGlobal("fetch", fetchMock);
-    renderWithProviders(<SignalEscalatedPanel checkRunId={5} />);
+    renderSelected(REAL_MAJORITY.criterion_id);
 
     const exclusion = await screen.findByRole("button", { name: "Exclude: needs another document" });
     expect(exclusion).toHaveAccessibleDescription(/stays ungraded.*Saving resolves this review item/);
@@ -417,12 +442,12 @@ describe("SignalEscalatedPanel / SignalResolutionCard", () => {
     vi.spyOn(document, "hasFocus").mockReturnValue(true);
     const fetch = stubFetchByPath({ "/check-runs/5/escalated": [REAL_MAJORITY] });
     vi.stubGlobal("fetch", fetch);
-    renderWithProviders(<SignalEscalatedPanel checkRunId={5} />);
+    renderSelected(REAL_MAJORITY.criterion_id);
     const exclude = await screen.findByRole("button", { name: "Exclude: needs another document" });
     expect(screen.getByText("To wait for more evidence, leave the criterion unresolved.")).toBeVisible();
     expect(exclude).toHaveAccessibleDescription(/stays ungraded.*Saving resolves this review item/);
     expect(screen.getByRole("button", { name: "Meets criterion" })).not.toHaveAccessibleDescription(/Saving resolves this review item/);
-    fireEvent.click(exclude);
+    exclude.focus(); fireEvent.click(exclude);
     const reason = screen.getByRole("textbox", { name: "Reason for exclusion (required)" });
     expect(reason).toHaveFocus();
     expect(reason).toHaveAccessibleDescription(/stays ungraded.*Other review requirements still apply/);
@@ -455,7 +480,7 @@ describe("SignalEscalatedPanel / SignalResolutionCard", () => {
       const fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => init?.method === "POST"
         ? new Response(JSON.stringify(response), { status: 200 }) : fallback(input, init));
       vi.stubGlobal("fetch", fetch);
-      renderWithProviders(<SignalEscalatedPanel checkRunId={5} />);
+      renderSelected(REAL_MAJORITY.criterion_id);
       fireEvent.click(await screen.findByRole("button", { name: "Exclude: needs another document" }));
       const reason = screen.getByRole("textbox", { name: "Reason for exclusion (required)" });
       const exact = "  A separate demonstration is required.  ";
@@ -476,7 +501,7 @@ describe("SignalEscalatedPanel / SignalResolutionCard", () => {
       ? new Response(JSON.stringify({ error: { code: "unavailable", message: "Temporary local failure" } }), { status: 503 })
       : fallback(input, init));
     vi.stubGlobal("fetch", fetch);
-    renderWithProviders(<SignalEscalatedPanel checkRunId={5} />);
+    renderSelected(REAL_MAJORITY.criterion_id);
     fireEvent.click(await screen.findByRole("button", { name: "Exclude: needs another document" }));
     const reason = screen.getByRole("textbox", { name: "Reason for exclusion (required)" });
     const exact = "  A separate demonstration is required.\nKeep this reason intact.  ";
@@ -492,7 +517,7 @@ describe("SignalEscalatedPanel / SignalResolutionCard", () => {
 
   it("returns focus to the invalid reason after the instructor activates Confirm", async () => {
     vi.stubGlobal("fetch", stubFetchByPath({ "/check-runs/5/escalated": [REAL_MAJORITY] }));
-    renderWithProviders(<SignalEscalatedPanel checkRunId={5} />);
+    renderSelected(REAL_MAJORITY.criterion_id);
 
     fireEvent.click(await screen.findByRole("button", { name: "Accept AI suggestion: pass" }));
     const confirmButton = screen.getByRole("button", { name: "Confirm resolution" });
@@ -509,7 +534,7 @@ describe("SignalEscalatedPanel / SignalResolutionCard", () => {
 
   it("rejects a too-short reason instead of publishing it verbatim", async () => {
     vi.stubGlobal("fetch", stubFetchByPath({ "/check-runs/5/escalated": [REAL_MAJORITY] }));
-    renderWithProviders(<SignalEscalatedPanel checkRunId={5} />);
+    renderSelected(REAL_MAJORITY.criterion_id);
 
     fireEvent.click(await screen.findByRole("button", { name: "Accept AI suggestion: pass" }));
     const reasonInput = screen.getByRole("textbox", { name: "Reason (required)" });
@@ -522,7 +547,7 @@ describe("SignalEscalatedPanel / SignalResolutionCard", () => {
 
   it("V-069 AC4: a levelled criterion offers its own level names instead of Pass/Fail", async () => {
     vi.stubGlobal("fetch", stubFetchByPath({ "/check-runs/5/escalated": [LEVELLED_ITEM] }));
-    renderWithProviders(<SignalEscalatedPanel checkRunId={5} />);
+    renderSelected(LEVELLED_ITEM.criterion_id);
 
     expect(await screen.findByRole("button", { name: "Beginner" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Acceptable" })).toBeInTheDocument();
@@ -535,7 +560,7 @@ describe("SignalEscalatedPanel / SignalResolutionCard", () => {
   it("shows stored level descriptions before choosing and beside the unsaved selection", async () => {
     const fetchMock = stubFetchByPath({ "/check-runs/5/escalated": [LEVELLED_ITEM] });
     vi.stubGlobal("fetch", fetchMock);
-    renderWithProviders(<SignalEscalatedPanel checkRunId={5} />);
+    renderSelected(LEVELLED_ITEM.criterion_id);
     const choice = await screen.findByRole("button", { name: "Proficient" });
     expect(choice.getAttribute("aria-describedby")?.split(" ")).toContain("signal-resolution-level-6-3");
     const disclosure = screen.getByText("View level descriptions (4)").closest("details")!;
@@ -545,7 +570,7 @@ describe("SignalEscalatedPanel / SignalResolutionCard", () => {
     expect(screen.getByText("Selected level: Proficient")).toBeInTheDocument();
     expect(screen.getAllByText("states and previews")).toHaveLength(2);
     expect(disclosure).toHaveAttribute("open");
-    expect(screen.getByRole("textbox", { name: "Reason (required)" })).toHaveValue("");
+    expect(screen.getByRole("textbox", { name: "Comment (optional)" })).toHaveValue("");
     expect(fetchMock.mock.calls.some(([, init]) => (init as RequestInit | undefined)?.method === "POST")).toBe(false);
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
     expect(screen.queryByText("Selected level: Proficient")).not.toBeInTheDocument();
@@ -583,17 +608,17 @@ describe("SignalEscalatedPanel / SignalResolutionCard", () => {
       return new Response("{}", { status: 200 });
     });
     vi.stubGlobal("fetch", fetchMock);
-    renderWithProviders(<SignalEscalatedPanel checkRunId={5} />);
+    renderSelected(LEVELLED_ITEM.criterion_id);
 
     fireEvent.click(await screen.findByRole("button", { name: "Proficient" }));
     // Step-2 pending state names the specific level chosen, not a generic
     // "resolution pending" sentence -- an instructor picking among four
     // levels needs to see WHICH one is about to be confirmed.
     expect(await screen.findByRole("heading", { name: "Proficient", level: 4 })).toBeInTheDocument();
-    fireEvent.change(screen.getByRole("textbox", { name: "Reason (required)" }), {
+    fireEvent.change(screen.getByRole("textbox", { name: "Comment (optional)" }), {
       target: { value: "Read it myself: previews structure but isn't engaging." },
     });
-    fireEvent.click(screen.getByRole("button", { name: "Confirm resolution" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save grade" }));
 
     await waitFor(() =>
       expect(fetchMock).toHaveBeenCalledWith(
@@ -643,7 +668,7 @@ describe("SignalEscalatedPanel / SignalResolutionCard", () => {
       return new Response("{}", { status: 200 });
     });
     vi.stubGlobal("fetch", fetchMock);
-    renderWithProviders(<SignalEscalatedPanel checkRunId={5} />);
+    renderSelected(REAL_MAJORITY.criterion_id);
 
     fireEvent.click(await screen.findByRole("button", { name: "Accept AI suggestion: pass" }));
     fireEvent.change(screen.getByRole("textbox", { name: "Reason (required)" }), {
@@ -684,7 +709,7 @@ describe("SignalEscalatedPanel / SignalResolutionCard", () => {
       return new Response("{}", { status: 200 });
     });
     vi.stubGlobal("fetch", fetchMock);
-    renderWithProviders(<SignalEscalatedPanel checkRunId={5} />);
+    renderSelected(REAL_MAJORITY.criterion_id);
 
     fireEvent.click(await screen.findByRole("button", { name: "Accept AI suggestion: pass" }));
     fireEvent.change(screen.getByRole("textbox", { name: "Reason (required)" }), {
@@ -702,7 +727,9 @@ describe("SignalEscalatedPanel / SignalResolutionCard", () => {
     // unmounts), but the empty-state success message has replaced the
     // resolution list below it.
     expect(screen.getByRole("heading", { name: "Criteria needing your judgment" })).toBeInTheDocument();
-    expect(screen.getByText("No unresolved criteria")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Meets criterion" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("link", { name: "Back to criteria" }));
+    expect(await screen.findByText("No unresolved criteria")).toBeInTheDocument();
   });
 });
 
@@ -711,7 +738,7 @@ describe("cancel focus ownership", () => {
   it("does not place focus from a background document after removing the local draft", async () => {
     vi.spyOn(document, "hasFocus").mockReturnValue(false);
     vi.stubGlobal("fetch", stubFetchByPath({ "/check-runs/5/escalated": [REAL_MAJORITY] }));
-    renderWithProviders(<SignalEscalatedPanel checkRunId={5} />);
+    renderSelected(REAL_MAJORITY.criterion_id);
     fireEvent.click(await screen.findByRole("button", { name: "Meets criterion" }));
     const cancel = screen.getByRole("button", { name: "Cancel" }); cancel.focus(); fireEvent.click(cancel);
     expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
