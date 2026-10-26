@@ -14,6 +14,12 @@
   "paragraph_only": "Recorded paragraph location in the extracted source. Compare the saved excerpt with this text; Word page layout is not reproduced.",
   "scope_first_page": "This entry concerns a broader recorded source scope. Only its starting page is shown, without a passage mark.",
   "docx": "This manuscript was submitted as DOCX. Word page layout is not available for this source.",
+  "reader_unavailable": {
+    "assessment_revision_unverified": "The saved assessment revision is unknown. Inspect the manuscript manually; a recorded source mark cannot be placed.",
+    "source_identity_unverified": "The saved original source identity is unavailable. Inspect the manuscript manually; a recorded source mark cannot be placed.",
+    "bounded_excerpt_only": "Only the saved comparison excerpt is available here. The other manuscript is not opened.",
+    "location_unavailable": "The recorded source location could not be placed. Read the saved excerpt and inspect the manuscript manually."
+  },
   "unavailable": {
     "assessment_revision_unverified": "The saved assessment revision is unknown; no source image is attached.",
     "source_identity_unverified": "The original source identity was not recorded; no source image is attached.",

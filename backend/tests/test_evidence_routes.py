@@ -57,6 +57,7 @@ READER_ROUTES = (
     f"/check-runs/7/evidence/{IDENTITY}/location?snapshot_id={IDENTITY}",
     f"/check-runs/7/evidence/source-file?source_identity={IDENTITY}",
     f"/check-runs/7/evidence/source-document?source_identity={IDENTITY}",
+    f"/check-runs/7/evidence/source-images/0?source_identity={IDENTITY}",
 )
 
 
@@ -72,6 +73,9 @@ def test_private_bound_reader_route_authority_and_cache(client, monkeypatch, pat
             raise NotFoundError("Unavailable source.")
         if failure == "stale":
             raise ConflictError("Source changed.")
+        if "source-images" in path:
+            assert args[3:5] == (IDENTITY, 0)
+            return b"verified image bytes", "image/png"
         if "/location?" in path:
             assert args[3:5] == (IDENTITY, IDENTITY)
             return EvidenceLocationOut(
@@ -101,6 +105,7 @@ def test_private_bound_reader_route_authority_and_cache(client, monkeypatch, pat
 
     monkeypatch.setattr("app.report.router.get_private_evidence_location", result)
     monkeypatch.setattr("app.report.router.get_private_evidence_reader_source", result)
+    monkeypatch.setattr("app.report.router.get_private_evidence_source_image", result)
     if failure == "signed_out":
         app.dependency_overrides[get_current_instructor] = signed_out
     response = client.get(path)
@@ -116,6 +121,10 @@ def test_private_bound_reader_route_authority_and_cache(client, monkeypatch, pat
         assert response.headers["x-evidence-source-identity"] == IDENTITY
         assert response.headers["content-type"] == "application/pdf"
         assert response.headers["x-content-type-options"] == "nosniff"
+    elif failure is None and "source-images" in path:
+        assert response.content == b"verified image bytes"
+        assert response.headers["x-evidence-source-identity"] == IDENTITY
+        assert response.headers["content-type"] == "image/png"
     elif failure is None:
         assert "source_sha256" not in response.text and "pdf_bytes" not in response.text
 
@@ -127,6 +136,7 @@ def test_bound_reader_malformed_identity_never_reads_source(client, monkeypatch,
 
     monkeypatch.setattr("app.report.router.get_private_evidence_location", forbidden)
     monkeypatch.setattr("app.report.router.get_private_evidence_reader_source", forbidden)
+    monkeypatch.setattr("app.report.router.get_private_evidence_source_image", forbidden)
     response = client.get(path.replace(IDENTITY, "invalid"))
     assert response.status_code == 422
     assert_policy(response, False)

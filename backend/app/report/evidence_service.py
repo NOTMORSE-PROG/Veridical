@@ -19,7 +19,7 @@ from app.ingest.schemas import SectionTree
 from app.models.manuscript import Manuscript
 from app.models.run import CheckResult, CheckRun, Flag
 from app.models.share import ShareLink
-from app.report.evidence_captions import placement_caption
+from app.report.evidence_captions import placement_caption, reader_location_caption
 from app.report.evidence_images import (
     EvidenceSourceFile,
     evidence_image_admission,
@@ -38,6 +38,7 @@ from app.report.evidence_source import (
     BoundEvidenceSource,
     locate_bound_evidence,
     prepare_bound_evidence_source,
+    read_bound_docx_image,
 )
 from app.report.schemas import DocumentParagraphsOut, ReportOut
 from app.storage.access import read_source
@@ -379,7 +380,7 @@ async def get_private_evidence_location(
             source_identity=bound.source_identity if bound is not None else None,
             source_format=bound.source_format if bound is not None else None,
             placement=placement,
-            caption=placement_caption(placement.state, placement.reason),
+            caption=reader_location_caption(placement.state, placement.reason),
         )
 
 
@@ -395,12 +396,46 @@ async def get_private_evidence_reader_source(
     The requested content identity must match current owned, hash-bound source
     bytes/projection. It is not a bearer credential or an assessment judgment.
     """
+    return await _private_reader_content(
+        session, check_run_id, instructor_id, source_identity, settings, lambda bound: bound
+    )
+
+
+async def get_private_evidence_source_image(
+    session: AsyncSession,
+    check_run_id: int,
+    instructor_id: int,
+    source_identity: str,
+    image_index: int,
+    settings: Settings,
+) -> tuple[bytes, str]:
+    return await _private_reader_content(
+        session,
+        check_run_id,
+        instructor_id,
+        source_identity,
+        settings,
+        lambda bound: read_bound_docx_image(bound, image_index, settings),
+    )
+
+
+async def _private_reader_content(
+    session, check_run_id, instructor_id, source_identity, settings, consume
+):
     authority = dict(check_run_id=check_run_id, instructor_id=instructor_id)
     run = await authorize_evidence_run(session, **authority)
     with evidence_image_admission(settings):
         manuscript = await session.get(Manuscript, run.manuscript_id)
-        bound = await _read_bound_reader_source(
-            session, run, manuscript, lambda: manuscript.content_hash, settings
+
+        def read(bound, tree):
+            if source_identity != bound.source_identity:
+                raise ConflictError(
+                    "This source copy changed. Review its current evidence location."
+                )
+            return bound, consume(bound)
+
+        bound, content = await _read_bound_reader_source(
+            session, run, manuscript, lambda: manuscript.content_hash, settings, consume=read
         )
         current_run = await authorize_evidence_run(session, **authority)
         if (
@@ -408,4 +443,4 @@ async def get_private_evidence_reader_source(
             or source_identity != bound.source_identity
         ):
             raise ConflictError("This source copy changed. Review its current evidence location.")
-        return bound
+        return content

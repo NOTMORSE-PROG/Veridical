@@ -24,3 +24,11 @@ def placement_caption(state, reason):
     if state == "paragraph_only":
         return _COPY["paragraph_only"]
     return PLACEMENT_UNAVAILABLE.get(reason, PLACEMENT_UNAVAILABLE["location_unavailable"])
+
+
+def reader_location_caption(state, reason):
+    if state == "unavailable":
+        return _COPY["reader_unavailable"].get(
+            reason, _COPY["reader_unavailable"]["location_unavailable"]
+        )
+    return placement_caption(state, reason)

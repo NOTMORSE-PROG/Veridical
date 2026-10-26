@@ -170,11 +170,40 @@ async def test_bound_reader_identity_is_checked_without_requiring_old_grade_epoc
             Settings(_env_file=None),
         )
         assert out.pdf_bytes == b"pinned PDF bytes"
-    assert calls == ["authorize", "bound-source", "authorize"]
+    assert calls == (
+        ["authorize", "bound-source", "authorize"]
+        if identity == "d" * 64
+        else ["authorize", "bound-source"]
+    )
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("stage", ["prepare", "locate"])
+@pytest.mark.parametrize("identity", ["d" * 64, "e" * 64])
+async def test_bound_image_rejects_wrong_reader_before_consuming_extraction(monkeypatch, identity):
+    calls = install_bound_stubs(monkeypatch, assessment())
+
+    def image(bound, index, settings):
+        calls.append("image")
+        assert bound.source_identity == identity and index == 0
+        return b"verified source image", "image/png"
+
+    monkeypatch.setattr(service, "read_bound_docx_image", image)
+    if identity == "d" * 64:
+        out = await service.get_private_evidence_source_image(
+            StubSession(), 7, 9, identity, 0, Settings(_env_file=None)
+        )
+        assert out == (b"verified source image", "image/png")
+        assert calls == ["authorize", "bound-source", "image", "authorize"]
+    else:
+        with pytest.raises(ConflictError):
+            await service.get_private_evidence_source_image(
+                StubSession(), 7, 9, identity, 0, Settings(_env_file=None)
+            )
+        assert calls == ["authorize", "bound-source"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("stage", ["prepare", "locate", "image"])
 async def test_bound_source_service_drains_both_native_stages_on_repeated_cancel(
     monkeypatch, stage
 ):
@@ -182,7 +211,13 @@ async def test_bound_source_service_drains_both_native_stages_on_repeated_cancel
     calls = install_bound_stubs(monkeypatch, current)
     settings = Settings(_env_file=None, evidence_source_slots=1)
     entered, release = threading.Event(), threading.Event()
-    target = "prepare_bound_evidence_source" if stage == "prepare" else "locate_bound_evidence"
+    if stage == "image":
+        monkeypatch.setattr(service, "read_bound_docx_image", lambda *args: (b"image", "image/png"))
+    target = {
+        "prepare": "prepare_bound_evidence_source",
+        "locate": "locate_bound_evidence",
+        "image": "read_bound_docx_image",
+    }[stage]
     original = getattr(service, target)
 
     def blocked(*args):
@@ -193,7 +228,9 @@ async def test_bound_source_service_drains_both_native_stages_on_repeated_cancel
     monkeypatch.setattr(service, target, blocked)
     session = StubSession()
     task = asyncio.create_task(
-        service.get_private_evidence_location(
+        service.get_private_evidence_source_image(session, 7, 9, "d" * 64, 0, settings)
+        if stage == "image"
+        else service.get_private_evidence_location(
             session,
             7,
             9,

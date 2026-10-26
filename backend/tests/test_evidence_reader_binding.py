@@ -1,6 +1,7 @@
 """Private reader identity controls. Stubbed storage, no PDF authoring or SQL."""
 
 import hashlib
+from dataclasses import replace
 from types import SimpleNamespace as Row
 
 import pytest
@@ -11,6 +12,7 @@ from app.ingest.schemas import ExtractionResult, SectionTree, TextBlock
 from app.report import evidence_source as source
 from app.report.evidence_images import EvidenceSourceFile
 from app.report.evidence_references import build_evidence_reference_snapshot
+from app.report.schemas import DocumentImageOut
 
 TREE = SectionTree(source="none", nodes=[])
 RAW = b"retained DOCX bytes; format detection is stubbed in these storage controls"
@@ -139,3 +141,37 @@ def test_source_location_is_paragraph_only_and_checks_exact_owner_copy(monkeypat
     for ref in [reference(digest="a" * 64), reference(audience="public")]:
         with pytest.raises(ConflictError, match="different source"):
             source.locate_bound_evidence(current, ref, TREE, Settings(_env_file=None))
+
+
+def test_bound_image_uses_the_same_retained_extraction_after_store_replacement(
+    monkeypatch, tmp_path
+):
+    _, saved = install_storage(monkeypatch, tmp_path)
+    current = bound()
+    current = replace(
+        current,
+        document=current.document.model_copy(
+            update={
+                "images": [
+                    DocumentImageOut(image_index=0, paragraph=2, available=True),
+                ]
+            }
+        ),
+    )
+    saved.write_bytes(b"replacement extraction must not be reloaded")
+    calls = []
+
+    def read(path, extraction, index, digest, settings):
+        calls.append(extraction)
+        assert extraction is current.extraction and path == current.docx_path
+        assert index == 0 and digest == current.source_sha256
+        return b"image control", "image/png"
+
+    monkeypatch.setattr(source, "read_docx_image", read)
+    assert source.read_bound_docx_image(current, 0, Settings(_env_file=None)) == (
+        b"image control",
+        "image/png",
+    )
+    assert calls == [current.extraction]
+    with pytest.raises(source.NotFoundError):
+        source.read_bound_docx_image(current, 1, Settings(_env_file=None))

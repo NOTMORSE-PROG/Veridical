@@ -22,6 +22,7 @@ from app.report.evidence_service import (
     get_evidence_page,
     get_private_evidence_location,
     get_private_evidence_reader_source,
+    get_private_evidence_source_image,
 )
 from app.report.export import build_report_pdf
 from app.report.judgment_schemas import (
@@ -167,6 +168,31 @@ async def get_evidence_source_document_route(
 
         raise ConflictError("This source is not DOCX. Open its original PDF pages.")
     return EvidenceDocumentOut(source_identity=source.source_identity, document=source.document)
+
+
+@router.get("/check-runs/{check_run_id}/evidence/source-images/{image_index}")
+async def get_evidence_source_image_route(
+    check_run_id: int,
+    image_index: Annotated[int, Path(ge=0)],
+    source_identity: Annotated[str, Query(pattern=r"^[a-f0-9]{64}$")],
+    session: Annotated[AsyncSession, Depends(get_session)],
+    instructor: Annotated[Instructor, Depends(get_current_instructor)],
+) -> Response:
+    settings = get_settings()
+    enforce_action_rate_limit(settings, "evidence_source", instructor.id)
+    enforce_action_rate_limit(settings, "docx_source_image", instructor.id)
+    content, content_type = await get_private_evidence_source_image(
+        session, check_run_id, instructor.id, source_identity, image_index, settings
+    )
+    return Response(
+        content,
+        media_type=content_type,
+        headers={
+            "X-Evidence-Source-Identity": source_identity,
+            "X-Content-Type-Options": "nosniff",
+            "Referrer-Policy": "no-referrer",
+        },
+    )
 
 
 @router.get(

@@ -8,11 +8,13 @@ import hashlib
 import json
 import re
 from dataclasses import dataclass
+from pathlib import Path
 
 from pydantic import ValidationError
 
 from app.config import Settings
-from app.errors import ConflictError
+from app.errors import ConflictError, NotFoundError
+from app.ingest.docx_source import read_docx_image
 from app.ingest.regions import recover_region
 from app.ingest.schemas import ExtractionResult, SectionTree
 from app.ingest.service import raw_store_path
@@ -34,6 +36,8 @@ class BoundEvidenceSource:
     source_sha256: str
     pdf_bytes: bytes | None = None
     document: DocumentParagraphsOut | None = None
+    docx_path: Path | None = None
+    extraction: ExtractionResult | None = None
 
 
 def _source_identity(run_id, manuscript_id, source_format, digest, document):
@@ -112,7 +116,31 @@ def prepare_bound_evidence_source(
             "The saved source text could not be read for evidence navigation."
         ) from None
     return BoundEvidenceSource(
-        check_run_id, manuscript_id, source_format, identity, expected_sha256, document=document
+        check_run_id,
+        manuscript_id,
+        source_format,
+        identity,
+        expected_sha256,
+        document=document,
+        docx_path=path,
+        extraction=extraction,
+    )
+
+
+def read_bound_docx_image(source: BoundEvidenceSource, image_index: int, settings: Settings):
+    if (
+        source.source_format != "docx"
+        or source.document is None
+        or source.docx_path is None
+        or source.extraction is None
+    ):
+        raise ConflictError("This source copy is not an extracted DOCX document.")
+    if not any(
+        image.image_index == image_index and image.available for image in source.document.images
+    ):
+        raise NotFoundError("No available image at this recorded source location.")
+    return read_docx_image(
+        source.docx_path, source.extraction, image_index, source.source_sha256, settings
     )
 
 
