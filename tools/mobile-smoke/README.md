@@ -1,4 +1,14 @@
-# Production mobile-browser verification
+# Retired production mobile-browser verification
+
+Mobile and tablet support were removed from the product scope. This directory
+is retained as historical verification material. Its production command and
+Playwright configuration refuse to run, and the scheduled workflow has been
+removed. The old instructions below describe the earlier evidence only; they
+are not current setup instructions or acceptance requirements.
+
+Use desktop/laptop review checks, including keyboard access, focus, contrast,
+browser zoom and resized desktop windows. Offline policy unit tests in this
+directory remain available to inspect the historical safeguards.
 
 This package checks one bounded instructor review journey against the deployed
 VERIDICAL frontend in touch-enabled Chromium at `390x844` and `320x480`.

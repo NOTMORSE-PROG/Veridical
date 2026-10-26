@@ -20,6 +20,13 @@
 
 VERIDICAL is an AI-assisted quality and integrity assurance platform that checks a CS/IT capstone manuscript against **whatever required format the Capstone Instructor uploads**, and additionally checks the paper itself for four kinds of honest mistakes: intent/outcome mismatches, citation problems, statistical inconsistencies, and reuse of manuscripts in VERIDICAL's Library.
 
+**Supported platform (scope updated 2026-10-13):** desktop/laptop browsers,
+across all current and future features. Phone/tablet compatibility and
+mobile-specific layouts or verification are not product or release requirements.
+Desktop keyboard access, zoom, window resizing and readable manuscript/evidence
+views remain in scope. Historical mobile-emulation results do not imply current
+mobile support.
+
 The output is a **Readiness Report** with one of three statuses:
 
 | Status | Meaning |
@@ -323,6 +330,12 @@ independent adviser or institutional methodology requirement for the capstone
 manuscript.
 
 ### 7.5 Production responsive-browser verification
+
+**Historical evidence only:** mobile verification was retired from current
+acceptance requirements. The former scheduled workflow has been removed, and
+the archived production journey refuses execution. Desktop/laptop keyboard,
+focus, contrast, zoom and resizable-window checks remain current requirements.
+
 - On 2026-09-25, the checked-in production-safe gate passed the named instructor review journey at `320×480` and `390×844` using touch-enabled Chromium emulation against the exact production frontend build. This is same-team Repeatable evidence for that bounded journey.
 - This result does not establish behavior on physical iOS or Android hardware, Safari or Firefox, browser chrome, virtual keyboards, native file pickers or cameras, device safe areas, mobile-network conditions, or mobile assistive technologies.
 - The production account and data used by this gate must be synthetic. Share-token and cross-corpus reuse reads are privacy-neutralized and excluded from the tested claim.
