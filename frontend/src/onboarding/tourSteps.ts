@@ -17,9 +17,8 @@
 export interface TourStep {
   id: string;
   routeMatch: (pathname: string) => boolean;
-  /** Tried in order; the first selector with a real, non-zero-size
-   * match wins (handles this app's existing desktop/mobile dual-render
-   * pattern, e.g. AppShell's separate desktop/mobile replay buttons). */
+  /** Tried in order; the first selector with a visible, non-zero-size
+   * anchor wins. Missing controls are skipped rather than guessed. */
   anchorSelectors: string[];
   title: string;
   body: string;
@@ -65,7 +64,7 @@ export const TOUR_STEPS: readonly TourStep[] = [
   {
     id: "replay",
     routeMatch: () => true,
-    anchorSelectors: ['[data-tour="replay-tour-desktop"]', '[data-tour="replay-tour-mobile"]'],
+    anchorSelectors: ['[data-tour="replay-tour-desktop"]'],
     title: "Come back anytime",
     body: "Replay this tour anytime from this button.",
   },

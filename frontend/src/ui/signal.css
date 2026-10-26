@@ -1150,11 +1150,15 @@
 
   .signal-record {
     min-width: 0;
-    display: grid;
-    grid-template-columns: var(--signal-record-grid);
+    display: flex;
+    flex-wrap: wrap;
     gap: var(--signal-space-5);
     padding: var(--signal-space-5) var(--signal-space-6);
   }
+
+  .signal-record > div { min-inline-size: 0; flex: 1 1 var(--signal-record-detail-min); }
+  .signal-record > .signal-record__identity { flex: 2 1 var(--signal-record-identity-min); }
+  .signal-record > .signal-record__actions { flex-basis: var(--signal-record-action-min); }
 
   .signal-record + .signal-record {
     border-block-start: var(--signal-border-hairline) solid var(--color-signal-border);
@@ -4058,8 +4062,15 @@
     padding-inline-start: 0;
   }
 
-  .signal-document-selected .passage-pair__columns {
-    flex-direction: column;
+  .passage-pair__columns {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--signal-space-3);
+  }
+
+  .passage-pair__columns > * {
+    flex: 1 1 var(--signal-passage-column-min);
+    min-inline-size: 0;
   }
 
   .signal-document-selected__header h2 {
@@ -4290,7 +4301,6 @@
   .signal-settings-nav {
     position: static;
     z-index: var(--signal-z-raised);
-    inset-block-start: var(--signal-workspace-header-height);
     display: flex;
     flex-wrap: wrap;
     gap: var(--signal-space-2);
@@ -5797,10 +5807,6 @@
       padding-inline: var(--signal-space-4);
     }
 
-    .signal-document-header nav[aria-label="Breadcrumb"] {
-      display: none;
-    }
-
     .signal-document-header h1 {
       margin-block-start: 0;
       font-size: var(--signal-type-subhead);
@@ -5808,10 +5814,6 @@
 
 
     .signal-document-workbench {
-      height: calc(
-        100dvh - var(--signal-phone-header-height) - var(--signal-workspace-header-compact-height) -
-          var(--signal-space-4)
-      );
       border-inline: 0;
       border-radius: 0;
     }
@@ -6360,13 +6362,13 @@
     }
   }
 
-  /* V-073 corrected destination shell. Global navigation names places, not
-     workflow progress, and collapses before it can crowd evidence content. */
+  /* V-073 destination shell: one navigation tree wraps with its desktop
+     workspace, preserving all destinations during resizing and zoom. */
   .signal-app {
     min-height: var(--signal-viewport-min-height);
     display: grid;
     grid-template-columns: minmax(0, 1fr);
-    grid-template-rows: var(--signal-workspace-header-height) minmax(0, 1fr);
+    grid-template-rows: auto minmax(0, 1fr);
     grid-template-areas:
       "header"
       "main";
@@ -6374,7 +6376,8 @@
 
   .signal-workspace-header {
     grid-area: header;
-    position: sticky;
+    position: relative;
+    min-height: var(--signal-workspace-header-height);
     inset-block-start: 0;
     z-index: var(--signal-z-navigation);
     min-width: 0;
@@ -6385,9 +6388,11 @@
   }
 
   .signal-workspace-header__inner {
-    min-height: 100%;
+    min-height: var(--signal-workspace-header-height);
     display: flex;
-    align-items: stretch;
+    flex-wrap: wrap;
+    align-items: center;
+    padding-block: var(--signal-space-2);
     gap: var(--signal-space-5);
     padding-inline: var(--signal-page-gutter-fluid);
   }
@@ -6398,14 +6403,15 @@
   }
 
   .signal-primary-navigation {
+    flex: 1 1 auto;
     min-width: 0;
     align-self: stretch;
   }
 
-  .signal-primary-navigation ul,
-  .signal-mobile-navigation ul {
+  .signal-primary-navigation ul {
     height: 100%;
     display: flex;
+    flex-wrap: wrap;
     align-items: stretch;
     gap: var(--signal-space-1);
     margin: 0;
@@ -6443,6 +6449,7 @@
 
   .signal-workspace-header__utilities {
     display: flex;
+    flex-wrap: wrap;
     align-items: center;
     gap: var(--signal-space-3);
     margin-inline-start: auto;
@@ -6479,184 +6486,6 @@
 
   .signal-route {
     padding: var(--signal-workspace-padding);
-  }
-
-  .signal-mobile-menu {
-    display: none;
-  }
-
-  @media (max-width: 1023px) {
-    .signal-app {
-      grid-template-rows: var(--signal-workspace-header-compact-height) minmax(0, 1fr);
-    }
-
-    .signal-workspace-header__inner {
-      align-items: center;
-      gap: var(--signal-space-3);
-      padding-inline: var(--signal-space-5);
-    }
-
-    .signal-settings-nav {
-      inset-block-start: var(--signal-workspace-header-compact-height);
-    }
-
-    .signal-settings-section > h2 {
-      scroll-margin-block-start: calc(var(--signal-workspace-header-compact-height) + var(--signal-space-20));
-    }
-
-    .signal-primary-navigation,
-    .signal-workspace-header__utilities {
-      display: none;
-    }
-
-    .signal-mobile-menu {
-      display: block;
-      margin-inline-start: auto;
-    }
-
-    .signal-mobile-menu__trigger {
-      min-width: var(--signal-control-height-coarse);
-      min-height: var(--signal-control-height-coarse);
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      gap: var(--signal-space-2);
-      border: var(--signal-border-hairline) solid var(--color-signal-border-on-dark);
-      border-radius: var(--signal-radius-control);
-      padding-inline: var(--signal-space-3);
-      background: transparent;
-      color: var(--color-signal-surface);
-      font: var(--signal-weight-semibold) var(--signal-type-label) /
-        var(--signal-line-control) var(--font-signal-interface);
-      cursor: pointer;
-    }
-
-    .signal-mobile-menu__trigger:hover,
-    .signal-mobile-menu__trigger[aria-expanded="true"] {
-      background: var(--color-signal-border-on-dark);
-    }
-
-    .signal-mobile-menu__icon {
-      width: var(--signal-space-4);
-      display: grid;
-      gap: var(--signal-space-1);
-    }
-
-    .signal-mobile-menu__icon i {
-      height: var(--signal-border-emphasis);
-      display: block;
-      border-radius: var(--signal-radius-pill);
-      background: currentColor;
-    }
-
-    .signal-mobile-menu__panel {
-      position: fixed;
-      inset-block-start: var(--signal-workspace-header-compact-height);
-      inset-inline: 0;
-      z-index: var(--signal-z-drawer);
-      max-height: calc(100dvh - var(--signal-workspace-header-compact-height));
-      overflow-y: auto;
-      overscroll-behavior: contain;
-      border-block-start: var(--signal-border-hairline) solid var(--color-signal-border-on-dark);
-      border-block-end: var(--signal-border-emphasis) solid var(--color-signal-brand);
-      padding: var(--signal-space-5);
-      background: var(--color-signal-foundation);
-      box-shadow: var(--signal-shadow-floating);
-    }
-
-    .signal-mobile-navigation ul {
-      display: grid;
-      gap: var(--signal-space-2);
-    }
-
-    .signal-mobile-navigation a {
-      min-height: var(--signal-control-height-coarse);
-      display: grid;
-      gap: var(--signal-space-1);
-      border-inline-start: var(--signal-border-emphasis) solid transparent;
-      border-radius: var(--signal-radius-control);
-      padding: var(--signal-space-3) var(--signal-space-4);
-      color: var(--color-signal-surface);
-      text-decoration: none;
-    }
-
-    .signal-mobile-navigation a:hover,
-    .signal-mobile-navigation a[aria-current="page"] {
-      border-inline-start-color: var(--color-signal-brand);
-      background: var(--color-signal-border-on-dark);
-    }
-
-    .signal-mobile-navigation a > span {
-      font-family: var(--font-signal-display);
-      font-weight: var(--signal-weight-semibold);
-    }
-
-    .signal-mobile-navigation small {
-      color: var(--color-signal-surface-muted);
-      font-size: var(--signal-type-meta);
-      line-height: var(--signal-line-meta);
-    }
-
-    .signal-mobile-menu__capacity,
-    .signal-mobile-menu__account {
-      margin-block-start: var(--signal-space-5);
-      border-block-start: var(--signal-border-hairline) solid var(--color-signal-border-on-dark);
-      padding-block-start: var(--signal-space-5);
-    }
-
-    .signal-mobile-menu__capacity .signal-capacity {
-      color: var(--color-signal-surface-muted);
-    }
-
-    .signal-mobile-menu__capacity .signal-capacity strong {
-      color: var(--color-signal-brand);
-    }
-
-    .signal-mobile-menu__account {
-      display: grid;
-      gap: var(--signal-space-2);
-    }
-
-    .signal-mobile-menu__account p {
-      margin: 0 0 var(--signal-space-2);
-      color: var(--color-signal-surface-muted);
-      font-size: var(--signal-type-label);
-    }
-
-    .signal-mobile-menu__account .signal-account-action {
-      color: var(--color-signal-surface);
-    }
-
-    .signal-mobile-menu__account .signal-account-action:hover {
-      background: var(--color-signal-border-on-dark);
-    }
-
-    .signal-workspace-main {
-      min-height: calc(var(--signal-viewport-min-height) - var(--signal-workspace-header-compact-height));
-      scroll-margin-block-start: var(--signal-workspace-header-compact-height);
-      padding-block-end: 0;
-    }
-
-    .signal-desk {
-      overflow: hidden;
-    }
-
-    .signal-record-list {
-      overflow: visible;
-    }
-
-    .signal-record {
-      min-width: 0;
-      grid-template-columns: minmax(0, 1fr);
-      gap: var(--signal-space-5);
-    }
-
-    .signal-record__state,
-    .signal-record__assessment,
-    .signal-record__actions {
-      border-block-start: var(--signal-border-hairline) solid var(--color-signal-border);
-      padding-block-start: var(--signal-space-4);
-    }
   }
 
   @media (max-width: 767px) {
@@ -6706,9 +6535,6 @@
       white-space: nowrap;
     }
 
-    .signal-mobile-menu__panel {
-      padding: var(--signal-space-5) var(--signal-space-4) var(--signal-space-8);
-    }
   }
 
   @media (pointer: coarse) {
@@ -6865,11 +6691,9 @@
   .signal-settings-section p, .signal-settings-section li, .signal-settings-section dd { overflow-wrap: anywhere; }
   .signal-settings-rule-grid { display: flex; flex-wrap: wrap; gap: var(--signal-space-6); align-items: flex-start; }
   .signal-settings-rule-grid > * { flex: 1 1 calc((100% - var(--signal-space-6)) / 2); min-inline-size: min(100%, var(--signal-settings-rule-min)); }
-  .signal-settings-model-cards { display: flex; }
-  .signal-settings-model-table { display: none; }
-  .signal-settings-model-capacity { display: block; inline-size: var(--signal-settings-model-table-min); }
-  .signal-settings-models[data-model-table="true"] .signal-settings-model-cards { display: none; }
-  .signal-settings-models[data-model-table="true"] .signal-settings-model-table { display: block; }
+  .signal-settings-table-scroll, .signal-audit-table-scroll { min-inline-size: 0; max-inline-size: 100%; overflow-x: auto; }
+  .signal-settings-model-table { min-inline-size: var(--signal-settings-model-table-min); }
+  .signal-audit-table { min-inline-size: var(--signal-audit-table-min); }
   .signal-document-workbench[data-desktop-split="false"] .signal-document-tabs { display: flex; min-height: var(--signal-document-toolbar-height); }
   .signal-document-workbench[data-desktop-split="false"] .signal-document-grid { display: block; }
   .signal-document-workbench[data-desktop-split="false"] .signal-document-pane,

@@ -240,7 +240,7 @@ describe("SettingsPage", () => {
     expect(
       screen.getByText("Running in test mode. These numbers are simulated, not real API usage."),
     ).toBeInTheDocument();
-    expect(screen.getAllByText("gemini-3.5-flash").length).toBe(2); // mobile card + desktop grid
+    expect(screen.getAllByText("gemini-3.5-flash").length).toBe(1);
   });
 
   it("BUG-084: the desktop quota grid's ARIA rows have a real table ancestor, and every row has one cell per column header", async () => {

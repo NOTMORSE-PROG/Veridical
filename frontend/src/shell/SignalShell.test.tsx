@@ -1,4 +1,4 @@
-import { fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { renderWithProviders, stubFetchByPath } from "../test/renderWithProviders";
 import { SignalShell } from "./SignalShell";
@@ -36,69 +36,21 @@ describe("SignalShell destination navigation", () => {
     expect(screen.queryByRole("navigation", { name: "Work stages" })).not.toBeInTheDocument();
   });
 
-  it("opens one mobile menu with the same destinations and useful descriptions", async () => {
+  it("uses one primary navigation without an alternate device menu", async () => {
     renderShell();
-    const trigger = await screen.findByRole("button", { name: "Menu" });
-    expect(trigger).toHaveAttribute("aria-expanded", "false");
+    await screen.findByRole("navigation", { name: "Primary navigation" });
+    expect(screen.getAllByRole("navigation")).toHaveLength(1);
+    expect(screen.queryByRole("button", { name: "Menu" })).not.toBeInTheDocument();
+  });
 
-    fireEvent.click(trigger);
-
-    expect(trigger).toHaveAttribute("aria-expanded", "true");
-    const navigation = screen.getByRole("navigation", { name: "Mobile navigation" });
-    expect(within(navigation).getByRole("link", { name: /Review Desk/ })).toBeInTheDocument();
-    expect(within(navigation).getByText("Manuscripts and work that need attention")).toBeInTheDocument();
-    expect(within(navigation).getByRole("link", { name: /Library/ })).toHaveAttribute("aria-current", "page");
-    expect(screen.getByText(/Signed in as/)).toBeInTheDocument();
+  it("keeps account actions accessible and restores focus on Escape", async () => {
+    renderShell();
+    const account = await screen.findByRole("button", { name: /Account/ });
+    fireEvent.click(account);
     expect(screen.getByRole("button", { name: "Sign out" })).toBeInTheDocument();
-  });
-
-  it("closes the mobile menu after navigation and marks the new destination", async () => {
-    renderShell();
-    const trigger = await screen.findByRole("button", { name: "Menu" });
-    fireEvent.click(trigger);
-    fireEvent.click(
-      within(screen.getByRole("navigation", { name: "Mobile navigation" })).getByRole("link", {
-        name: /Audit/,
-      }),
-    );
-
-    await waitFor(() => expect(trigger).toHaveAttribute("aria-expanded", "false"));
-    expect(screen.queryByRole("navigation", { name: "Mobile navigation" })).not.toBeInTheDocument();
-    expect(
-      within(screen.getByRole("navigation", { name: "Primary navigation" })).getByRole("link", {
-        name: "Audit",
-      }),
-    ).toHaveAttribute("aria-current", "page");
-  });
-
-  it("closes the mobile menu on Escape and restores focus to its trigger", async () => {
-    renderShell();
-    const trigger = await screen.findByRole("button", { name: "Menu" });
-    fireEvent.click(trigger);
-    within(screen.getByRole("navigation", { name: "Mobile navigation" }))
-      .getByRole("link", { name: /Library/ })
-      .focus();
-
+    screen.getByRole("button", { name: "Replay introduction" }).focus();
     fireEvent.keyDown(document, { key: "Escape" });
-
-    expect(trigger).toHaveAttribute("aria-expanded", "false");
-    expect(trigger).toHaveFocus();
-  });
-
-  it("BUG-210 (WCAG 2.4.11): closes when focus tabs past its last item, instead of leaving a focused control hidden underneath the still-open panel", async () => {
-    renderShell();
-    const trigger = await screen.findByRole("button", { name: "Menu" });
-    fireEvent.click(trigger);
-    const signOut = screen.getByRole("button", { name: "Sign out" });
-    const pageContent = screen.getByText("Route content");
-
-    // Simulates what a real forward Tab past the panel's last focusable
-    // item does: focus lands on the underlying page while the panel is
-    // still mounted -- same mechanism BUG-102 fixed once already in the
-    // predecessor AppShell (see AppShell.test.tsx's identical test).
-    fireEvent.blur(signOut, { relatedTarget: pageContent });
-
-    expect(trigger).toHaveAttribute("aria-expanded", "false");
+    expect(account).toHaveFocus();
     expect(screen.queryByRole("button", { name: "Sign out" })).not.toBeInTheDocument();
   });
 });

@@ -25,7 +25,6 @@ import { useRouteFocus } from "../routing/useRouteFocus";
 import { PASSWORD_MIN_LENGTH } from "../config/ui";
 import { useDeleteApiKey, useSetApiKey, useSettings } from "./useSettings";
 import { isWorkspaceSample } from "../demo/workspaceFixture";
-import { useReviewWorkspaceCapacity } from "../document/useReviewWorkspaceCapacity";
 
 function SectionCard({
   headingId,
@@ -524,33 +523,9 @@ function ModelRow({ model }: { model: ModelQuotaStatus }) {
 }
 
 function QuotaModels({ models }: { models: ModelQuotaStatus[] }) {
-  const capacity = useReviewWorkspaceCapacity();
-  return (
-    <div ref={element => { capacity.frame.current = element; }} data-model-table={capacity.split} className="signal-settings-models mt-4">
-          <span className="signal-review-measure" aria-hidden="true"><span ref={capacity.threshold} className="signal-settings-model-capacity" /></span>
-          <ul className="signal-settings-model-cards flex-col gap-2">
-            {models.map((model) => (
-              <li key={model.model} className="rounded-lg border border-border p-3 text-sm">
-                <div className="flex items-center justify-between gap-2">
-                  <span className="min-w-0 truncate font-medium text-ink" title={model.model}>
-                    {model.model}
-                  </span>
-                  {model.exhausted && <StatusPill tone="attention">Exhausted</StatusPill>}
-                </div>
-                <p className="mt-1 text-xs text-ink-tertiary">
-                  {model.calls_used} / {model.daily_limit} used · {model.calls_remaining} left ·{" "}
-                  {model.cache_hits_today} cache hits · {model.vision ? "vision" : "no vision"}
-                </p>
-              </li>
-            ))}
-          </ul>
-          {/* BUG-084: `role="row"`/`role="columnheader"` below require a
-              `table`/`grid`/`treegrid` ancestor per ARIA 1.2, or they're
-              orphaned -- unannounced as a table, inert to a screen reader.
-              This wrapper had none; the three other grids in this codebase
-              that get this right (AuditLog.tsx, ResultsTable.tsx) all use
-              exactly this flat `table > row > columnheader/cell` shape. */}
-          <div role="table" className="signal-settings-model-table overflow-hidden rounded-lg border border-border">
+  return <div className="signal-settings-models mt-4">
+    <div className="signal-settings-table-scroll" role="region" aria-label="Model capacity details" tabIndex={0}>
+<div role="table" className="signal-settings-model-table rounded-lg border border-border">
             <div
               role="row"
               className={`grid ${quotaGridCols} gap-3 border-b border-border bg-status-neutral-bg px-3 py-2 text-xs font-semibold tracking-header text-ink-tertiary uppercase`}
@@ -572,8 +547,8 @@ function QuotaModels({ models }: { models: ModelQuotaStatus[] }) {
               </div>
             ))}
           </div>
-        </div>
-  );
+    </div>
+  </div>;
 }
 
 function QuotaSection() {

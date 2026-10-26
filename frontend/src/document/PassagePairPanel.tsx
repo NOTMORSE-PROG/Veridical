@@ -92,7 +92,7 @@ export function PassagePairPanel({
           ? "Highlighted wording appears in both recorded passages. Unhighlighted wording still matters to the comparison."
           : "No stable exact phrase was found to highlight. The stored match may reflect broader textual similarity, so compare both passages manually."}
       </p>
-      <div className="passage-pair__columns flex flex-col gap-3 xl:flex-row">
+      <div className="passage-pair__columns">
         <PassageBlock
           label={ownAnchor ? `Your manuscript · ${ownAnchor}` : "Your manuscript"}
           before={pair.own_context_before}

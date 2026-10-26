@@ -82,15 +82,12 @@ function computePosition(el: HTMLElement): CoachMarkPosition {
   };
 }
 
-// Reads the app's own header-height tokens rather than a hardcoded
-// number (charter rule 7) -- computed once per call since these are
-// CSS custom properties, not JS constants.
-function headerHeightPx(): number {
-  const raw = getComputedStyle(document.documentElement).getPropertyValue(
-    window.innerWidth >= 768 ? "--header-height" : "--header-height-mobile",
-  );
-  const rem = parseFloat(raw);
-  return Number.isFinite(rem) ? rem * 16 : 64;
+// Only a fixed or sticky header can occlude a scrolled anchor. Measure its
+// actual rendered bounds so wrapping and native browser zoom stay accurate.
+function occludingHeaderBottom(): number {
+  const header = document.querySelector<HTMLElement>(".signal-workspace-header");
+  if (!header || !["fixed", "sticky"].includes(getComputedStyle(header).position)) return 0;
+  return Math.max(0, header.getBoundingClientRect().bottom);
 }
 
 export function useCoachMarkPosition(el: HTMLElement | null): CoachMarkPosition | null {
@@ -111,7 +108,7 @@ export function useCoachMarkPosition(el: HTMLElement | null): CoachMarkPosition 
       // the sticky header, scroll it into view before measuring for
       // real, so the coach mark never has to describe an element the
       // header is currently covering.
-      if (rect.top < headerHeightPx() + GAP) {
+      if (rect.top < occludingHeaderBottom() + GAP) {
         el.scrollIntoView({ block: "center", behavior: "auto" });
       }
       setPosition(computePosition(el));

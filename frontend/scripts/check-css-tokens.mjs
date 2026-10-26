@@ -242,22 +242,22 @@ function validateRhythmContract(candidateTokens, candidateRhythm) {
     }
   }
 
-  const settingsNavOffsets = rulePropertyValues(
+  const settingsNavPositions = rulePropertyValues(
     candidateRhythm,
     ".signal-settings-nav",
-    "inset-block-start",
+    "position",
   );
-  const expectedSettingsNavOffsets = [
-    "var(--signal-workspace-header-height)",
-    "var(--signal-workspace-header-compact-height)",
-  ];
   if (
-    settingsNavOffsets.length !== expectedSettingsNavOffsets.length
-    || settingsNavOffsets.some((value, index) => value !== expectedSettingsNavOffsets[index])
+    settingsNavPositions.length === 0
+    || settingsNavPositions.some((value) => value !== "static")
   ) {
     violations.push(
-      `.signal-settings-nav offsets must clear the desktop then compact workspace headers; found ${settingsNavOffsets.join(" then ") || "missing"}`,
+      ".signal-settings-nav must remain in normal document flow for desktop window resizing and zoom",
     );
+  }
+
+  if (rulePropertyValues(candidateRhythm, ".signal-primary-navigation", "display").includes("none")) {
+    violations.push("desktop navigation must remain available at every window width");
   }
 
   const workspaceHorizontalOverflow = rulePropertyValues(
@@ -522,9 +522,13 @@ const negativeControls = [
   )],
   ["settings navigation header collision", () => validateRhythmContract(
     tokenSource,
-    `${rhythmSource}\n.signal-settings-nav { inset-block-start: 0; }`,
+    `${rhythmSource}\n.signal-settings-nav { position: sticky; }`,
   )],
-  ["mobile sticky overflow container", () => validateRhythmContract(
+  ["hidden desktop navigation", () => validateRhythmContract(
+    tokenSource,
+    `${rhythmSource}\n.signal-primary-navigation { display: none; }`,
+  )],
+  ["desktop zoom scroll container", () => validateRhythmContract(
     tokenSource,
     `${rhythmSource}\n.signal-workspace-main { overflow-x: hidden; }`,
   )],

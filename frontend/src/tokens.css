@@ -404,6 +404,9 @@
   --signal-stage-marker-size: 0.65rem;
   --signal-workspace-padding: clamp(2rem, 4vw, 4.5rem);
   --signal-record-grid: minmax(0, 1.4fr) minmax(0, 0.7fr) minmax(0, 0.7fr) minmax(0, 0.9fr);
+  --signal-record-identity-min: 20rem;
+  --signal-record-detail-min: 12rem;
+  --signal-record-action-min: 16rem;
   --signal-queue-tab-min-width: 9rem;
   --signal-empty-illustration-size: 4.5rem;
   --signal-filter-field-min-width: 12rem;
@@ -440,6 +443,8 @@
   --signal-library-add-column-min: 27rem;
   --signal-settings-column-min: 28rem;
   --signal-settings-model-table-min: 48rem;
+  --signal-audit-table-min: 40rem;
+  --signal-passage-column-min: 24rem;
   --signal-settings-form-max: 40rem;
   --signal-settings-rule-min: 24rem;
   --signal-review-source-min: 32rem;
