@@ -1,3 +1,4 @@
+import { PreparedAiReviewNotice } from "../report/PreparedAiReviewNotice";
 import { type KeyboardEvent, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useParams, useSearchParams } from "react-router";
 import { criterionAnchorRegion } from "./criterionAnchor";
@@ -281,6 +282,7 @@ function ReadinessDecision({ checkRunId, report, pending, error, onRetry, onBack
       </section>
       {report.llm_mode !== "real" && report.llm_mode !== "manual" && <Alert title={report.llm_mode === "fake" ? "Test-mode AI results" : "AI mode could not be verified"} tone="warning">{report.llm_mode === "fake" ? "This review was produced with fixture responses, not real AI grading. Do not treat it as a finding about the manuscript." : "This run predates reliable AI-mode tracking. Treat AI-derived outcomes cautiously."}</Alert>}
       {coverage.length > 0 && <CoverageStatement state="partial" headingId="workspace-coverage-heading" heading="Not every check finished" intro="Nothing skipped here is presented as passed. Each item below names what did not finish and how to close it." items={coverage} />}
+      <PreparedAiReviewNotice results={report.results} />
       <ReportReviewWorkflow report={report} manuscriptLabel={identity.primary} onEvidenceSelected={onEvidenceSelected} onOpenEvidence={onOpenEvidence} />
       <div className="signal-document-analysis__footer"><ActionLink to={`/report/${report.check_run_id}`} variant="secondary">Open full readiness report</ActionLink></div>
     </div>

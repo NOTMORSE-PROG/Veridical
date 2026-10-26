@@ -10,6 +10,7 @@ import type {
   ReportOut,
 } from "../api/types";
 import { useMe } from "../auth/useAuth";
+import { AI_REVIEW_BASIS } from "../demo/preparedAiReview";
 import { criterionAnchorRegion } from "../document/criterionAnchor";
 import {
   FLAG_LIST_BATCH_COUNT,
@@ -530,6 +531,7 @@ function SignalFlagList({
 }
 
 function voteSummary(item: EscalatedItemOut): string {
+  if (item.review_basis === AI_REVIEW_BASIS) return `AI review complete. Recorded grade: ${item.review_grade}. Confirm or change the grade after checking the evidence.`;
   if (item.review_basis === "document_review") return "Read the source notes, then record a rubric level.";
   if (item.review_reason === "not_graded") return "The AI did not grade this criterion.";
   if (item.review_reason === "injection_suspected") return "AI passes agreed, but that agreement cannot be trusted here.";
@@ -659,7 +661,7 @@ function SignalResolutionCard({ item, checkRunId, onResolved, onEditingChange, o
   return (
     <article className="signal-resolution-card">
       <div className="signal-resolution-card__context">
-        <div><p className="signal-section-kicker">Criterion requiring judgment</p><h3 ref={criterionHeadingRef} tabIndex={-1}>{item.criterion_text}</h3></div>
+        <div><p className="signal-section-kicker">{item.review_basis === AI_REVIEW_BASIS ? "Recorded AI grade" : "Criterion requiring judgment"}</p><h3 ref={criterionHeadingRef} tabIndex={-1}>{item.criterion_text}</h3></div>
         <p id={voteId} className="signal-resolution-card__vote">{voteSummary(item)}</p>
         {evidence.length > 0 && <section className="signal-criterion-evidence" aria-label={`Evidence for ${item.criterion_text}`}>
           <div className="signal-criterion-evidence__heading"><h4>Evidence from the manuscript</h4><span>Evidence {evidenceIndex + 1} of {evidence.length}</span></div>
@@ -737,6 +739,8 @@ export function SignalEscalatedPanel({ checkRunId, focused = false, onEvidenceSe
   const headingRef = useRef<HTMLHeadingElement>(null);
   const announcementRef = useRef<HTMLParagraphElement>(null);
   const hasItems = Boolean(items?.length);
+  const aiGradeCount = items?.filter(item => item.review_basis === AI_REVIEW_BASIS).length ?? 0;
+  const ungradedCount = (items?.length ?? 0) - aiGradeCount;
   const activeIndex = Math.max(0, items?.findIndex(item => item.check_result_id === activeId) ?? 0);
   const visibleItems = focused ? items?.slice(activeIndex, activeIndex + 1) : items;
 
@@ -761,11 +765,11 @@ export function SignalEscalatedPanel({ checkRunId, focused = false, onEvidenceSe
 
   return (
     <section id="review-criteria" tabIndex={-1} data-tour="escalated-panel" className="signal-review-section signal-review-section--attention" aria-labelledby="escalated-heading">
-      <div className="signal-review-section__heading"><div><p className="signal-section-kicker">Rubric review</p><h2 id="escalated-heading" ref={headingRef} tabIndex={-1}>Criteria needing your judgment</h2></div><span>{items?.length ?? 0} unresolved</span></div>
-      <p className="signal-review-section__intro">Choose a grade, add a comment if useful, then save. Exclusions and accepting an AI suggestion still require a reason. Each saved judgment brings the report closer to the final decision.</p>
+      <div className="signal-review-section__heading"><div><p className="signal-section-kicker">Rubric review</p><h2 id="escalated-heading" ref={headingRef} tabIndex={-1}>{aiGradeCount ? "Review recorded AI grades" : "Criteria needing your judgment"}</h2></div><span>{aiGradeCount ? `${aiGradeCount} AI grades ready for review; ${ungradedCount} ungraded` : `${ungradedCount} unresolved`}</span></div>
+      <p className="signal-review-section__intro">{aiGradeCount ? "These AI grades are already recorded and included in readiness. You can keep them, or choose a level and save your own grade. Opening evidence or cancelling does not change a grade." : "Choose a grade, add a comment if useful, then save. Exclusions and accepting an AI suggestion still require a reason. Each saved judgment brings the report closer to the final decision."}</p>
       {isError && <Alert title="Could not refresh these criteria" tone="error" role="alert">Your unsaved grade is still here. <Button variant="secondary" onClick={() => refetch()}>Try again</Button></Alert>}
       <p ref={announcementRef} tabIndex={-1} aria-live="polite" className="signal-live-region">{announcement}</p>
-      {focused && hasItems && <nav className="signal-criterion-navigation" aria-label="Unresolved criteria"><Button variant="quiet" aria-label="Previous criterion" disabled={editing || activeIndex === 0} onClick={() => { setActiveId(items![activeIndex - 1].check_result_id); headingRef.current?.focus(); }}>Previous</Button><span>{editing ? "Save or cancel to continue" : `${activeIndex + 1} of ${items?.length} remaining`}</span><Button variant="quiet" aria-label="Next criterion" disabled={editing || activeIndex === (items?.length ?? 0) - 1} onClick={() => { setActiveId(items![activeIndex + 1].check_result_id); headingRef.current?.focus(); }}>Next</Button></nav>}
+      {focused && hasItems && <nav className="signal-criterion-navigation" aria-label={aiGradeCount ? "Review recorded grades" : "Unresolved criteria"}><Button variant="quiet" aria-label="Previous criterion" disabled={editing || activeIndex === 0} onClick={() => { setActiveId(items![activeIndex - 1].check_result_id); headingRef.current?.focus(); }}>Previous</Button><span>{editing ? "Save or cancel to continue" : `${activeIndex + 1} of ${items?.length} ${aiGradeCount ? "available" : "remaining"}`}</span><Button variant="quiet" aria-label="Next criterion" disabled={editing || activeIndex === (items?.length ?? 0) - 1} onClick={() => { setActiveId(items![activeIndex + 1].check_result_id); headingRef.current?.focus(); }}>Next</Button></nav>}
       {hasItems
         ? <div className="signal-resolution-list">{visibleItems?.map((item) => <SignalResolutionCard key={item.check_result_id} item={item} checkRunId={checkRunId} onEvidenceSelected={onEvidenceSelected} onOpenEvidence={onOpenEvidence} onEditingChange={value => { if (focused) { setEditing(value); setEditedId(value ? item.check_result_id : undefined); } onEditingChange?.(value); }} onResolved={(message) => { if (focused) setActiveId(items?.[activeIndex + 1]?.check_result_id ?? items?.[Math.max(0, activeIndex - 1)]?.check_result_id); setAnnouncement(message); headingRef.current?.focus(); }} />)}</div>
         : <Alert title="No unresolved criteria" tone="success">Every criterion has a recorded outcome. Continue to the integrity signals.</Alert>}
@@ -842,7 +846,7 @@ export function SignalCriteriaResults({ results, checkRunId, publicView = false 
         const outcome = row.level && (row.outcome === "passed" || row.outcome === "failed")
           ? { label: "Rubric level recorded", tone: "neutral" }
           : OUTCOME_COPY[row.outcome];
-        return <li key={row.criterion_id} className="signal-result-card"><div className="signal-result-card__top"><span className="signal-result-card__number">{index + 1}</span><span className={`signal-outcome signal-outcome--${outcome.tone}`}>{outcome.label}</span><span className={`signal-importance signal-importance--${row.weight_importance === "med" ? "medium" : row.weight_importance}`}>{row.weight_importance === "med" ? "Medium" : `${row.weight_importance.slice(0, 1).toUpperCase()}${row.weight_importance.slice(1)}`} importance</span></div><h3>{row.text}</h3>{row.level && <p className="signal-level-result"><strong>Recorded level:</strong> {row.level.name}</p>}{row.resolution && <p className="signal-resolution-note"><strong>{row.resolution.type === "needs_document" ? "Excluded by instructor." : "Grade recorded by instructor."}</strong>{row.resolution.reason && <> {row.resolution.reason}</>}</p>}{/* BUG-065: this summary repeats verbatim once per row -- a screen-reader
+        return <li key={row.criterion_id} className="signal-result-card"><div className="signal-result-card__top"><span className="signal-result-card__number">{index + 1}</span><span className={`signal-outcome signal-outcome--${outcome.tone}`}>{outcome.label}</span><span className={`signal-importance signal-importance--${row.weight_importance === "med" ? "medium" : row.weight_importance}`}>{row.weight_importance === "med" ? "Medium" : `${row.weight_importance.slice(0, 1).toUpperCase()}${row.weight_importance.slice(1)}`} importance</span></div><h3>{row.text}</h3>{row.level && <p className="signal-level-result"><strong>Recorded level:</strong> {row.level.name}</p>}{row.basis === AI_REVIEW_BASIS && <p className="signal-resolution-note"><strong>AI review complete.</strong> Review prepared in this session.</p>}{row.resolution && <p className="signal-resolution-note"><strong>{row.resolution.type === "needs_document" ? "Excluded by instructor." : "Grade recorded by instructor."}</strong>{row.resolution.reason && <> {row.resolution.reason}</>}</p>}{/* BUG-065: this summary repeats verbatim once per row -- a screen-reader
                 links/buttons list can't tell them apart without a per-criterion
                 accessible name, same fix already applied to the flag "Review
                 evidence" links and the escalation resolve-button groups. */}

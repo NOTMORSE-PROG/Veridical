@@ -575,7 +575,8 @@ export interface PaginatedAuditLog {
 
 export interface EscalatedItemOut {
   evidence?: EvidenceItem[];
-  review_basis?: "document_review";
+  review_basis?: "document_review" | "prepared_ai_review";
+  review_grade?: string;
   check_result_id: number;
   criterion_id: number;
   criterion_text: string;

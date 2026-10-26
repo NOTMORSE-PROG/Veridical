@@ -112,6 +112,7 @@ export function CheckProgressPage() {
   const [showCancel, setShowCancel] = useState(false);
   const headingRef = useRef<HTMLHeadingElement>(null);
   const prepared = run?.execution_basis === "prepared_document_review";
+  const preparedReviewComplete = prepared && run?.stage_status?.stages?.semantic?.status === "done";
   const stageOrder = prepared ? PREPARED_STAGE_ORDER : STAGE_ORDER;
   useRouteFocus("Check progress - VERIDICAL", headingRef);
 
@@ -142,7 +143,7 @@ export function CheckProgressPage() {
           <nav aria-label="Breadcrumb"><Link to="/dashboard?queue=checking">Review Desk</Link><span aria-hidden="true">/</span><span>Check progress</span></nav>
           <p className="signal-eyebrow">{prepared ? "Check · Source preparation" : "Check · Live pipeline"}</p>
           <h1 ref={headingRef} tabIndex={-1}>Check progress</h1>
-          <p className="signal-route-header__intro">{prepared ? "Load the published manuscript and verify its source records. Model grading is not run in this prepared review; existing instructor judgments are retained." : "Follow each stage. You can leave this page while the check continues."}</p>
+          <p className="signal-route-header__intro">{prepared ? preparedReviewComplete ? "AI review complete. The grades were prepared in this session. Reloading checks the source records and retains the saved grades; it does not call the app's automated grading service." : "Load the published manuscript and verify its source records. The app's automated grading service is not run here; existing instructor judgments are retained." : "Follow each stage. You can leave this page while the check continues."}</p>
         </div>
         {run && <ProcessStatus status={run.status} />}
       </header>
@@ -165,7 +166,7 @@ export function CheckProgressPage() {
           <section className="signal-check-pipeline" aria-labelledby="pipeline-heading">
             <div className="signal-section-heading"><div><p className="signal-section-kicker">Pipeline</p><h2 id="pipeline-heading">What VERIDICAL is doing</h2></div><p>Completed work remains traceable even if this run stops.</p></div>
             <ol className="signal-check-track">
-              {stageOrder.map(({ key, label }) => toStage(run, key, label)).map((stage) => (
+              {stageOrder.map(({ key, label }) => toStage(run, key, preparedReviewComplete && key === "semantic" ? "AI review prepared in this session" : label)).map((stage) => (
                 <li key={stage.id} className={`signal-check-stage signal-check-stage--${stage.state}`} aria-current={stage.state === "running" || stage.state === "blocked" ? "step" : undefined}>
                   <span className="signal-check-stage__mark" aria-hidden="true">{STAGE_MARKS[stage.state]}</span>
                   <div><h3>{stage.label}</h3>{stage.detail && <p>{stage.detail}</p>}</div>

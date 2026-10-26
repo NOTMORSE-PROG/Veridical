@@ -1,8 +1,9 @@
-import type { AuditLogDetail, FlagOut, ReportOut, ShareLinkOut } from "../api/types";
+import type { AuditLogDetail, EscalatedItemOut, FlagOut, ReportOut, ShareLinkOut } from "../api/types";
 import { companionSource, sampleCriteria, sampleEscalatedItems, sampleFlags, sampleInstructor, sampleLibrary, sampleManuscript, sampleReport, sampleRubric, sampleRun, WORKSPACE_SAMPLE } from "./workspaceFixture";
 import { prepareWorkspaceSource } from "./workspacePreparation";
 import { evidenceByImageId, evidenceFor, evidenceSourceHash, publicEvidenceImages } from "./sourceEvidence";
 import { RESOLUTION_REASON_MIN_LENGTH } from "../config/ui";
+import { AI_REVIEW_BASIS, AI_REVIEW_CONFIRMED_BASIS, applyPreparedAiReview, hasPreparedAiGrades, preparedAiReviewReceipt } from "./preparedAiReview";
 
 type SampleState = {
   run: typeof sampleRun;
@@ -14,6 +15,7 @@ type SampleState = {
   share: ShareLinkOut | null;
   fileAvailable: boolean;
   events: AuditLogDetail[];
+  aiReviewVersion?: string;
 };
 const fresh = (): SampleState => ({ run: structuredClone(sampleRun), report: structuredClone(sampleReport), flags: structuredClone(sampleFlags), rubric: structuredClone(sampleRubric), manuscript: structuredClone(sampleManuscript), library: structuredClone(sampleLibrary), share: null, fileAvailable: true, events: [] });
 const json = (value: unknown, status = 200) => new Response(JSON.stringify(value), { status, headers: { "Content-Type": "application/json" } });
@@ -24,12 +26,16 @@ const sha256 = async (bytes: ArrayBuffer) => Array.from(new Uint8Array(await cry
 export function installWorkspaceSample() {
   const originalFetch = window.fetch.bind(window);
   let state = fresh();
+  let seedAllowed = true;
   try {
     const stored = JSON.parse(sessionStorage.getItem(WORKSPACE_SAMPLE.storageKey) ?? "null");
-    if (stored?.version === 1 && stored.state?.report?.manuscript_id === 1 && Array.isArray(stored.state?.flags) && Array.isArray(stored.state?.events) && Array.isArray(stored.state?.library) && Array.isArray(stored.state?.rubric?.criteria)) state = { ...fresh(), ...stored.state, run: stored.state.run ?? structuredClone(sampleRun) } as SampleState;
+    if (stored?.version === 1 && stored.state?.report?.manuscript_id === 1 && Array.isArray(stored.state?.flags) && Array.isArray(stored.state?.events) && Array.isArray(stored.state?.library) && Array.isArray(stored.state?.rubric?.criteria)) {
+      seedAllowed = !!stored.state.run;
+      state = { ...fresh(), ...stored.state, run: stored.state.run ?? structuredClone(sampleRun) } as SampleState;
+    }
   } catch { /* An unavailable or invalid sample cache starts a clean sample. */ }
-  // Add newly bound public evidence without losing existing practice judgments.
-  state.report.results = state.report.results.map(row => ({ ...row, evidence: sampleReport.results.find(current => current.criterion_id === row.criterion_id)?.evidence ?? row.evidence }));
+  const reviewSeeded = seedAllowed && applyPreparedAiReview(state);
+  // Refresh image bindings while retaining saved criterion evidence and grades.
   state.flags = state.flags.map(flag => ({ ...flag, source_evidence: evidenceFor("flag", flag.id) }));
   function persist() { try { sessionStorage.setItem(WORKSPACE_SAMPLE.storageKey, JSON.stringify({ version: 1, state })); if (state.share) localStorage.setItem(`${WORKSPACE_SAMPLE.storageKey}:share:${state.share.token}`, JSON.stringify({ ...publicSnapshot(), expires_at: state.share.expires_at })); } catch { /* This visit still works when browser storage is disabled. */ } }
   function audit(event_type: string, payload: Record<string, unknown>) {
@@ -47,7 +53,8 @@ export function installWorkspaceSample() {
     if (preparationController && isPreparing()) return;
     const controller = new AbortController();
     preparationController = controller;
-    state.run = { ...structuredClone(sampleRun), status: "ingesting", started_at: new Date().toISOString(), finished_at: null, stage_status: { stages: { semantic: structuredClone(sampleRun.stage_status!.stages!.semantic) } } };
+    const savedReviewStage = structuredClone(state.run.stage_status!.stages!.semantic);
+    state.run = { ...structuredClone(sampleRun), status: "ingesting", started_at: new Date().toISOString(), finished_at: null, stage_status: { stages: { semantic: savedReviewStage } } };
     state.manuscript.latest_check_run_status = "ingesting";
     audit("source_preparation_started", { note: "Loading the published original and checking page/excerpt bindings. Existing instructor judgments are retained. No model grading runs." });
     persist();
@@ -86,10 +93,19 @@ export function installWorkspaceSample() {
     const composite = !pending && totalWeight ? assessed.reduce((total, row) => total + (row.score ?? 0) * row.weight, 0) / totalWeight : null;
     state.report.composite_score = composite;
     state.report.status = pending || composite === null ? "needs_review" : composite >= state.report.thresholds.ready_min_score ? "ready" : composite < state.report.thresholds.not_ready_max_score ? "not_ready" : "conditionally_ready";
-    state.report.reason = pending ? sampleReport.reason : "The readiness band follows the instructor's recorded rubric judgments. Read the source observations about implementation scope, component totals and supporting literature before recording a defense decision.";
+    state.report.reason = pending ? sampleReport.reason : hasPreparedAiGrades(state.report)
+      ? "This band comes from the completed AI-review grades and any saved teacher changes. Clarify completed work versus future plans, add test results and research references, reconcile component totals, and proofread before the teacher's final decision."
+      : "The readiness band follows the instructor's recorded rubric judgments. Read the source observations about implementation scope, component totals and supporting literature before recording a defense decision.";
     state.manuscript.escalations_awaiting_review = pending;
     state.manuscript.latest_readiness = state.report.status;
     state.manuscript.latest_decision = state.report.decision;
+  }
+
+  if (reviewSeeded) {
+    recalculate();
+    state.run.stage_status = { ...state.run.stage_status, stages: { ...state.run.stage_status?.stages, semantic: { status: "done", note: "AI review complete. Four rubric grades were prepared in this session. The app's automated grading service was not run." } } };
+    audit("ai_review_prepared", preparedAiReviewReceipt);
+    persist();
   }
 
   function projectPublicReport(report: ReportOut) {
@@ -206,8 +222,13 @@ export function installWorkspaceSample() {
     if (/\/report\/export\.pdf$/.test(path)) return reportPdf();
     if (/^\/check-runs\/\d+\/report$/.test(path)) return json(state.report);
     if (/^\/check-runs\/\d+\/flags$/.test(path)) return json(state.flags.map(flag => ({ ...flag, problem_kind: flag.ai_verdict_summary })));
-    if (/^\/check-runs\/\d+\/escalated$/.test(path)) return json(sampleEscalatedItems.filter(item => state.report.results.some(row => row.criterion_id === item.criterion_id && row.outcome === "escalated")));
+    if (/^\/check-runs\/\d+\/escalated$/.test(path)) return json(state.report.decision ? [] : sampleEscalatedItems.flatMap<EscalatedItemOut>(item => {
+      const row = state.report.results.find(result => result.criterion_id === item.criterion_id);
+      if (row?.outcome === "escalated") return [item];
+      return row?.basis === AI_REVIEW_BASIS ? [{ ...item, review_basis: AI_REVIEW_BASIS, reason: row.reasoning, review_grade: row.level?.name }] : [];
+    }));
     if (/\/escalated\/\d+\/resolve$/.test(path) && method === "POST") {
+      if (state.report.decision) return failure("Reopen the decision before changing a grade.", 409);
       if (body.reason !== undefined && typeof body.reason !== "string") return failure("The instructor comment must be text.");
       const comment = textValue(body.reason).trim();
       if (!["mark_level", "mark_pass", "mark_fail", "needs_document"].includes(textValue(body.resolution))) return failure("Choose a supported instructor resolution.");
@@ -219,11 +240,13 @@ export function installWorkspaceSample() {
       const criterion = sampleCriteria.find(item => item.id === task.criterion_id)!;
       const level = criterion.levels?.find(item => item.level === body.level);
       if (body.resolution === "mark_level" && !level) return failure("Choose one of this criterion's rubric levels.");
+      const followsAiReview = row.basis === AI_REVIEW_BASIS || row.basis === AI_REVIEW_CONFIRMED_BASIS;
+      if (row.basis === AI_REVIEW_BASIS && row.reasoning) row.reasoning = `Earlier AI review (before the teacher's saved grade): ${row.reasoning}`;
       row.outcome = body.resolution === "needs_document" ? "not_applicable" : body.resolution === "mark_fail" ? "failed" : "passed";
       row.score = row.outcome === "not_applicable" ? null : level ? level.points / criterion.weight * 100 : row.outcome === "passed" ? 100 : 0;
       row.level = level ? { name: level.name, ordinal: level.level, points: level.points, max_points: criterion.weight } : null;
       row.resolution = { type: body.resolution as NonNullable<typeof row.resolution>["type"], reason: comment, ai_majority_verdict: null };
-      row.basis = "manual"; state.report.decision = null; recalculate(); audit("escalation_resolved", { criterion_id: row.criterion_id, resolution: body.resolution, reason: comment, level: body.level }); return write({ check_result_id: resultId, outcome: row.outcome, score: row.score, report: state.report });
+      row.basis = followsAiReview ? AI_REVIEW_CONFIRMED_BASIS : "manual"; state.report.decision = null; recalculate(); audit("escalation_resolved", { criterion_id: row.criterion_id, resolution: body.resolution, reason: comment, level: body.level }); return write({ check_result_id: resultId, outcome: row.outcome, score: row.score, report: state.report });
     }
     if (/^\/check-runs\/\d+\/decision$/.test(path) && method === "POST") { if (state.report.pending_review_count) return failure("Resolve the outstanding criteria first.", 409); if (!["approved", "returned", "rejected"].includes(textValue(body.decision))) return failure("Choose an instructor decision."); state.report.decision = body.decision as ReportOut["decision"]; state.report.decision_note = textValue(body.note) || null; state.report.decided_at = new Date().toISOString(); recalculate(); audit("decision_recorded", { decision: body.decision, note: body.note }); return write(state.report); }
     if (/^\/check-runs\/\d+\/reopen$/.test(path) && method === "POST") { if (!textValue(body.reason).trim()) return failure("A reason is required."); audit("decision_reopened", { previous_decision: state.report.decision, reason: body.reason }); state.report.decision = null; state.report.decision_note = null; state.report.decided_at = null; recalculate(); return write(state.report); }

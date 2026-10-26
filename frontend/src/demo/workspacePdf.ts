@@ -8,6 +8,7 @@ import { integrityModuleLabel } from "../report/integrityModuleState";
 import { evidenceFor, evidenceSourceHash, flagSourcePagePair } from "./sourceEvidence";
 import { sampleFlags, sampleReport, WORKSPACE_SAMPLE } from "./workspaceFixture";
 import { PLAIN_CRITERION_REASONS, PLAIN_FINDING_REASONS } from "./workspacePdfCopy";
+import { AI_REVIEW_BASIS, AI_REVIEW_DESCRIPTION, hasPreparedAiGrades } from "./preparedAiReview";
 
 // Print dimensions are separate from the browser layout. Keep text readable
 // instead of scaling the entire interface into a page-sized screenshot.
@@ -31,6 +32,12 @@ export function pdfGrade(row: CriterionResultOut): string {
 
 export function pdfFindingState(flag: FlagOut): string {
   return flag.confirmed_citation_source ? "Source confirmed by teacher" : flag.overridden ? "Dismissed by teacher" : "Open - needs teacher review";
+}
+
+export function pdfCoverSummary(report: Pick<ReportOut, "decision" | "status" | "results">) {
+  if (report.decision) return { label: "INSTRUCTOR DECISION", value: DECISION_LABEL[report.decision] };
+  if (hasPreparedAiGrades(report)) return { label: "READINESS RESULT", value: READINESS_LABEL[report.status] };
+  return { label: "INSTRUCTOR DECISION", value: "No decision recorded" };
 }
 
 export async function buildWorkspacePdf({ report, flags, fileAvailable, fetchAsset }: PdfInput): Promise<Blob> {
@@ -126,20 +133,22 @@ export async function buildWorkspacePdf({ report, flags, fileAvailable, fetchAss
   label("Members / manuscript authors");
   write(WORKSPACE_SAMPLE.authors.join("  /  "), { size: 11, after: 7 });
   font(20, true);
-  const verdict = report.decision ? DECISION_LABEL[report.decision] : "No decision recorded";
+  const showReviewResult = !report.decision && hasPreparedAiGrades(report);
+  const summary = pdfCoverSummary(report);
+  const verdict = summary.value;
   const verdictLines: string[] = pdf.splitTextToSize(verdict, PRINT.width - 12);
   const cardHeight = 19 + verdictLines.length * 9;
   pdf.setFillColor(PRINT.paper); pdf.setDrawColor(PRINT.border); pdf.roundedRect(PRINT.margin, y - 3, PRINT.width, cardHeight, 2, 2, "FD");
-  font(10, true); pdf.text("INSTRUCTOR DECISION", PRINT.margin + 6, y + 4);
+  font(10, true); pdf.text(summary.label, PRINT.margin + 6, y + 4);
   font(20, true, report.decision === "approved" ? PRINT.success : report.decision === "rejected" ? PRINT.danger : PRINT.ink);
   pdf.text(verdictLines, PRINT.margin + 6, y + 14); y += cardHeight + 4;
   if (report.decided_at) write(`Decision saved: ${new Date(report.decided_at).toISOString().replace("T", " ").slice(0, 16)} UTC`, { size: 9, color: PRINT.muted });
-  write(`System readiness: ${READINESS_LABEL[report.status]}`, { bold: true });
+  write(showReviewResult ? "Instructor decision: No decision recorded" : `System readiness: ${READINESS_LABEL[report.status]}`, { bold: true });
   write(report.decision ? "The decision above was recorded by the teacher. The readiness band is a separate summary of the saved grades." : "The teacher has not made a final decision. The readiness band does not approve or reject a defense.");
   const ungraded = report.results.filter(row => !["passed", "failed", "not_applicable"].includes(row.outcome)).length;
   const pending = report.pending_review_count ?? ungraded;
   write(`${pending} of ${report.results.length} criteria still need teacher review. ${flags.filter(flag => !flag.overridden).length} of ${flags.length} findings remain open.`, { bold: true });
-  note("About this review", "Prepared document review. AI grading was not run. The teacher records the grades and final decision. Statistical forensics does not apply to this software report. Originality comparison was not run.");
+  note("About this review", hasPreparedAiGrades(report) ? `AI review complete. ${AI_REVIEW_DESCRIPTION} Statistical forensics does not apply to this software report. Originality comparison was not run.` : "Prepared document review. The app's automated grading service was not run. The teacher records the grades and final decision. Statistical forensics does not apply to this software report. Originality comparison was not run.");
   write("Published source: Hamja, Anjum and Maruf (2025). CC BY 4.0. The original manuscript is unchanged.", { size: 9, color: PRINT.muted });
   write("Use the linked contents or PDF bookmarks to jump to a grade, check or source detail.", { size: 10, color: PRINT.blue });
   if (report.decision_note) { context = "Instructor decision note"; note("Teacher's decision note", report.decision_note); }
@@ -149,7 +158,7 @@ export async function buildWorkspacePdf({ report, flags, fileAvailable, fetchAss
   // Reserve the contents page; exact destinations are filled after pagination.
 
   start("grades", "Grades at a glance");
-  write("These are the teacher's saved rubric grades. Findings are review prompts; they are not a second set of grades.");
+  write(hasPreparedAiGrades(report) ? "These are the saved AI-review grades and any later teacher changes. Findings are review prompts, not a second set of grades." : "These are the teacher's saved rubric grades. Findings are review prompts; they are not a second set of grades.");
   for (const row of report.results) {
     ensure(22);
     const top = y;
@@ -159,7 +168,7 @@ export async function buildWorkspacePdf({ report, flags, fileAvailable, fetchAss
   for (const [index, row] of report.results.entries()) {
     start(`criterion-${row.criterion_id}`, `Grade ${index + 1}: ${row.text}`, "grades");
     context = `${row.text} / ${pdfGrade(row)}`;
-    write(`Teacher's grade: ${pdfGrade(row)}`, { bold: true });
+    write(`${row.basis === AI_REVIEW_BASIS ? "AI-review grade" : "Teacher's grade"}: ${pdfGrade(row)}`, { bold: true });
     if (row.outcome === "not_applicable") write("This criterion is ungraded and left out of the readiness calculation.");
     const savedReason = row.reasoning || row.reason;
     const preparedReason = sampleReport.results.find(candidate => candidate.criterion_id === row.criterion_id)?.reasoning;
@@ -213,7 +222,7 @@ export async function buildWorkspacePdf({ report, flags, fileAvailable, fetchAss
   pdf.textWithLink("Open the published manuscript", PRINT.margin, y, { url: WORKSPACE_SAMPLE.source }); y += 10;
   note("Licence", WORKSPACE_SAMPLE.license);
   note("Original file checksum (SHA-256)", WORKSPACE_SAMPLE.sha256);
-  note("How this report was prepared", "This is an instructor copy of prepared source observations and the grades and actions saved in this browser. AI grading was skipped. Source images show the unchanged published manuscript, with exact saved quotations boxed only where their positions were verified.");
+  note("How this report was prepared", `${hasPreparedAiGrades(report) ? AI_REVIEW_DESCRIPTION : "The app's automated grading service was not run."} This instructor copy contains the saved grades, source observations and teacher actions. Source images show the unchanged published manuscript, with exact saved quotations boxed only where their positions were verified.`);
   note("Private details", "This instructor PDF can include private comments, reasons and notes. The read-only shared report uses a separate set of permitted fields.");
   write("The PDF has selectable text, page links and bookmarks. It is not a tagged PDF. Use the app report if you need its accessible reading controls.");
 

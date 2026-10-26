@@ -31,5 +31,5 @@ function SharedEvidenceImage({ token, evidence }: { token: string; evidence: Pub
 }
 
 export function SharedEvidenceImages({ token, images }: { token: string; images: PublicEvidenceImageOut[] }) {
-  return <section className="signal-shared-evidence" aria-labelledby="shared-evidence-heading"><h2 id="shared-evidence-heading">Original manuscript evidence</h2><p>These images retain their original PDF page numbers and source qualifications. Prepared document review; model grading was skipped.</p><div>{images.map(entry => <SharedEvidenceImage key={entry.evidence_id} token={token} evidence={entry} />)}</div></section>;
+  return <section className="signal-shared-evidence" aria-labelledby="shared-evidence-heading"><h2 id="shared-evidence-heading">Original manuscript evidence</h2><p>These images retain their original PDF page numbers and source qualifications. The report identifies how its review and grades were prepared.</p><div>{images.map(entry => <SharedEvidenceImage key={entry.evidence_id} token={token} evidence={entry} />)}</div></section>;
 }

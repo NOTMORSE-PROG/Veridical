@@ -554,7 +554,7 @@ function QuotaModels({ models }: { models: ModelQuotaStatus[] }) {
 function QuotaSection() {
   const { data: quota, isPending, isError, refetch } = useQuota();
 
-  if (isWorkspaceSample()) return <SectionCard headingId="quota-heading" title="AI capacity"><h3>Model grading skipped</h3><p>This prepared source review does not call a model API. Live usage, reset time and cache figures are not available in this workspace.</p></SectionCard>;
+  if (isWorkspaceSample()) return <SectionCard headingId="quota-heading" title="AI capacity"><h3>Review prepared in this session</h3><p>This prepared source review does not call a model API. Live usage, reset time and cache figures are not available in this workspace.</p></SectionCard>;
 
   if (isPending) {
     return (

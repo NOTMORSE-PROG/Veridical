@@ -265,8 +265,17 @@ with labelled continuation pages. Preserve every saved evidence association and
 its exact or page-only precision. Provide linked contents, section bookmarks and
 clear report-versus-manuscript page numbers. Private instructor details stay in
 the instructor copy; public sharing keeps its separate allowlist. The prepared
-sample retains skipped AI grading, inapplicable statistics and no originality
+sample retains accurate grading provenance, inapplicable statistics and no originality
 comparison. Bookmarks and selectable text do not establish a tagged PDF.
+
+**Completed presentation case (owner, 2026-10-27):** The published sample may
+contain a completed AI assessment prepared outside the app's automated grading
+service. Identify it as an AI review prepared in this session; do not invent a
+provider call or teacher resolution. Store source-grounded levels and explanations,
+derive readiness through the existing weights, and leave the final teacher decision
+open. Load it only into a matching untouched case; preserve existing teacher work.
+Teacher changes retain the earlier AI explanation as history with clear attribution.
+The completed case does not establish that the automated service or human UAT passed.
 
 **Exact-passage appearance (owner, 2026-10-26):** Use thin square red outlines
 around the saved PDF text-line rectangles, with transparent interiors. Preserve

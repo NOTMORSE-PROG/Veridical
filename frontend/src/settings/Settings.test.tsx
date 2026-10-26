@@ -78,7 +78,7 @@ describe("SettingsPage", () => {
     vi.stubGlobal("fetch", fetch);
     renderWithProviders(<SettingsPage />);
     expect(await screen.findByText("Prof Cruz")).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "Model grading skipped" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Review prepared in this session" })).toBeInTheDocument();
     expect(screen.getByText(/Personal API keys are not connected/)).toBeInTheDocument();
     expect(screen.queryByText(/AI calls used today|100% left|Until then/)).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Change password" })).toBeDisabled();

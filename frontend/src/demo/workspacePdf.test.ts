@@ -1,12 +1,21 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { webcrypto } from "node:crypto";
-import { buildWorkspacePdf, pdfFindingState, pdfGrade } from "./workspacePdf";
+import { buildWorkspacePdf, pdfCoverSummary, pdfFindingState, pdfGrade } from "./workspacePdf";
+import { AI_REVIEW_CONFIRMED_BASIS } from "./preparedAiReview";
 import { sampleFlags, sampleReport } from "./workspaceFixture";
 
 const inputs = () => ({ report: structuredClone(sampleReport), flags: structuredClone(sampleFlags), fileAvailable: false, fetchAsset: vi.fn<typeof fetch>() });
 afterEach(() => vi.unstubAllGlobals());
 
 describe("instructor PDF record and source boundaries", () => {
+  it("attributes the current aggregate to readiness after the teacher changes all AI grades", () => {
+    const report = structuredClone(sampleReport);
+    report.status = "ready";
+    for (const row of report.results) row.basis = AI_REVIEW_CONFIRMED_BASIS;
+    expect(pdfCoverSummary(report)).toEqual({ label: "READINESS RESULT", value: "Ready" });
+    report.decision = "returned";
+    expect(pdfCoverSummary(report)).toEqual({ label: "INSTRUCTOR DECISION", value: "Returned for revision" });
+  });
   it.each(["escalated", "unverifiable", "quota_exhausted", "api_down"] as const)("never presents a retained level as a grade for %s", outcome => {
     expect(pdfGrade({ ...sampleReport.results[0], outcome, level: { name: "Above Average", ordinal: 4, points: 2, max_points: 2 } })).toBe("Not graded");
   });

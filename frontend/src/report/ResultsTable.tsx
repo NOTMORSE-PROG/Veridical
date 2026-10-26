@@ -1,3 +1,4 @@
+import { AI_REVIEW_BASIS } from "../demo/preparedAiReview";
 // Extracted out of Report.tsx (V-040) so the public adviser view
 // (AdviserView.tsx) can render the exact same criteria table an
 // instructor sees, read-only, from the same source of truth -- one
@@ -145,6 +146,7 @@ export function sourceCaption(row: ResultRowCommon): string {
   // actually resolved by hand, showing the AI's own SUPERSEDED evidence
   // as final. `resolved` is the non-private half of the same fact.
   if (row.resolution || row.resolved) return "Resolved by instructor";
+  if (row.basis === AI_REVIEW_BASIS) return "AI review prepared in this session";
   if (row.basis === "document_review") return "Document review";
   // BUG-092/UX review finding (2026-08-24): a `not_assessable` criterion
   // is routed straight to a terminal `not_applicable` result and is,

@@ -304,7 +304,7 @@ def prepare():
                 page,
                 tuple(tuple(box) for box in boxes),
                 llm_disclosure=(
-                    "Prepared document review. Model grading skipped.",
+                    "AI review prepared in this session.",
                     "caution",
                 ),
                 settings=settings,

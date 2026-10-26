@@ -1,3 +1,4 @@
+import { PreparedAiReviewNotice } from "./PreparedAiReviewNotice";
 // Screen 4l — public, read-only adviser view (F8.7). This is deliberately
 // outside the authenticated workspace and exposes only the public contract.
 import { type ReactNode, useEffect, useRef } from "react";
@@ -75,6 +76,7 @@ export function AdviserViewPage() {
         {(report.llm_mode !== "real" && report.llm_mode !== "manual") && <Alert title={report.llm_mode === "fake" ? "Test-mode AI results" : "AI mode could not be verified"} tone="warning">{report.llm_mode === "fake" ? "Fixture responses produced this report. Do not treat AI-derived content as findings about the manuscript." : "This run predates reliable AI-mode tracking. Treat AI-derived outcomes cautiously."}</Alert>}
         {report.rubric_needs_review && <Alert title="The required format had parser uncertainty" tone="warning"><p>The instructor activated it despite the warning.</p>{report.rubric_parse_issues?.length ? <ul>{report.rubric_parse_issues.map((issue) => <li key={issue}>{issue}</li>)}</ul> : null}</Alert>}
 
+        <PreparedAiReviewNotice results={report.results} />
         <SignalPublicFlags flags={flags} originalityScope={report.originality_scope} />
         <SignalCriteriaResults results={report.results} checkRunId={report.check_run_id} publicView />
         {data.evidence_images && data.evidence_images.length > 0 && <SharedEvidenceImages token={token ?? ""} images={data.evidence_images} />}

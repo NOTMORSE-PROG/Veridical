@@ -4,11 +4,17 @@ import { readFileSync } from "node:fs";
 import { createHash, webcrypto } from "node:crypto";
 import { resolve } from "node:path";
 import { installWorkspaceSample } from "./workspaceApi";
-import { companionSource, reviewTasks, sampleCriteria, sampleFlags, sampleReport, WORKSPACE_SAMPLE } from "./workspaceFixture";
+import { companionSource, reviewTasks, sampleCriteria, sampleFlags, sampleReport, sampleRubric, sampleManuscript, sampleLibrary, sampleRun, WORKSPACE_SAMPLE } from "./workspaceFixture";
 
+import { AI_REVIEW_VERSION } from "./preparedAiReview";
 const originalFetch = window.fetch;
+// Manual-grading endpoint tests retain their initialized, ungraded workflow.
+// Fresh-storage completed-AI cases are tested separately below.
+function seedUngradedCase() {
+  sessionStorage.setItem(WORKSPACE_SAMPLE.storageKey, JSON.stringify({version: 1, state: {run: sampleRun, report: sampleReport, flags: sampleFlags, rubric: sampleRubric, manuscript: sampleManuscript, library: sampleLibrary, share: null, fileAvailable: true, events: [], aiReviewVersion: AI_REVIEW_VERSION}}));
+}
 afterEach(() => { window.fetch = originalFetch; sessionStorage.clear(); localStorage.clear(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
-function start() { sessionStorage.clear(); localStorage.clear(); const network = vi.fn<typeof fetch>(async () => { throw new Error("Unexpected live request"); }); window.fetch = network; installWorkspaceSample(); return network; }
+function start() { sessionStorage.clear(); localStorage.clear(); seedUngradedCase(); const network = vi.fn<typeof fetch>(async () => { throw new Error("Unexpected live request"); }); window.fetch = network; installWorkspaceSample(); return network; }
 const call = async (path: string, method = "GET", body?: unknown) => { const response = await window.fetch(`/api${path}`, { method, body: body === undefined ? undefined : JSON.stringify(body) }); return { response, data: await response.json() }; };
 const resolveAll = async (reason = "Instructor judgment after reading the original pages.") => {
   for (const criterion of sampleCriteria) await call(`/check-runs/1/escalated/${100 + criterion.id}/resolve`, "POST", { resolution: "mark_level", level: 3, reason });
@@ -77,7 +83,7 @@ describe("real-interface sample API boundary", () => {
     expect((await call(`/shared/${share.token}/report`)).response.status).toBe(200);
   });
   it("prepares real source assets, exposes running progress and retains saved judgments", async () => {
-    sessionStorage.clear(); localStorage.clear();
+    sessionStorage.clear(); localStorage.clear(); seedUngradedCase();
     vi.stubGlobal("crypto", webcrypto);
     let releaseOriginal!: () => void;
     const sourceGate = new Promise<void>(resolveGate => { releaseOriginal = resolveGate; });
@@ -101,7 +107,7 @@ describe("real-interface sample API boundary", () => {
   });
 
   it("cancels source loading and ignores a late original response", async () => {
-    sessionStorage.clear(); localStorage.clear();
+    sessionStorage.clear(); localStorage.clear(); seedUngradedCase();
     let releaseOriginal!: () => void;
     const gate = new Promise<void>(resolveGate => { releaseOriginal = resolveGate; });
     window.fetch = vi.fn(async () => { await gate; return new Response("late response"); });

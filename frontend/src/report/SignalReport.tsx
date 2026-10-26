@@ -1,3 +1,5 @@
+import { hasPreparedAiGrades } from "../demo/preparedAiReview";
+import { PreparedAiReviewNotice } from "./PreparedAiReviewNotice";
 import { type MouseEvent, useEffect, useRef, useState } from "react";
 import { Link, useParams } from "react-router";
 import { ApiError } from "../api/client";
@@ -115,7 +117,8 @@ export function SignalReportPage() {
             </dl>
           </section>
 
-          {report.llm_mode === "manual" && <p className="signal-field-hint">Prepared document review. Model grading was skipped; rubric judgments and the final decision remain with the instructor.</p>}
+          {report.llm_mode === "manual" && !hasPreparedAiGrades(report) && <p className="signal-field-hint">Prepared document review. Model grading was skipped; rubric judgments and the final decision remain with the instructor.</p>}
+          <PreparedAiReviewNotice results={report.results} />
           {report.llm_mode === "manual" && <p className="signal-field-hint">Statistical forensics: not applicable to this software implementation report. Originality comparison: not run; no similarity judgment is recorded.</p>}
           <div className="signal-section-flow signal-report-orientation">
 
