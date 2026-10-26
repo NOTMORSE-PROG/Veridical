@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { FlagSummaryOut } from "../api/types";
 import { stubFetchByPath } from "../test/renderWithProviders";
 import { FlagDetailPage } from "./FlagDetail";
+vi.mock("../document/ManuscriptSourcePane", () => ({ OwnedManuscriptSourcePane: ({ anchor }: { anchor?: string | null }) => <div data-testid="owned-source" data-anchor={anchor ?? ""}>Owned source</div> }));
 
 const leads: FlagSummaryOut[] = Array.from({ length: 31 }, (_, index) => ({
   id: index + 39, check_kind: "originality_reuse", affects_readiness: false,

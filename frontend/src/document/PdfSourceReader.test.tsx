@@ -37,6 +37,20 @@ beforeEach(() => {
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
 describe("Page text source and explicit focus context", () => {
+  it("keeps controlled source presentation local to the finding route", async () => {
+    function LocalReader() {
+      const location = useLocation();
+      const [params, change] = useState(() => new URLSearchParams());
+      return <><p data-testid="local-route">{location.pathname}{location.search}</p><PdfSourceReader run={5} manuscript={10} actor={1} visible fileUrl="/source" regions={[]} flags={[]} selectedFlagId={null} onSelectFlag={() => undefined} requestedPage={4} presentation={{ params, change }} /></>;
+    }
+    renderWithProviders(<LocalReader />, { route: "/flags/7?return=kept" });
+    fireEvent.click(screen.getByRole("button", { name: "Read text" }));
+    await screen.findByText(/Saved source page 4/);
+    expect(screen.getByTestId("local-route")).toHaveTextContent("/flags/7?return=kept");
+    fireEvent.click(screen.getAllByRole("button", { name: "View original PDF p. 4" })[0]);
+    expect(screen.getByTestId("original-page")).toHaveTextContent("Original page 4");
+    expect(screen.getByTestId("local-route")).toHaveTextContent("/flags/7?return=kept");
+  });
   it("uses observed PDF page separately from selected page and returns to current original", async () => {
     render();
     fireEvent.click(screen.getByRole("button", { name: "Observe PDF page 3" }));

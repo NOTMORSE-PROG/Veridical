@@ -12,7 +12,6 @@ import { NativeMathPieces, NativeMathInventoryNote, nativeMathInventoryLabel } f
 import { SeverityTag, type Severity } from "../components/SeverityTag";
 import { CHECK_KIND_SHORT_LABEL } from "../domain/checkKind";
 import { truncateAtWord } from "../format/text";
-import { regionPrecision } from "./regionCopy";
 import { DocxSourceMedia } from "./DocxSourceMedia";
 import { COMPARISON_LEAD_COPY, comparisonLeadIdentity, isOptionalComparisonLead, sourceRecordPresentation, type ComparisonLeadSnapshot } from "../domain/comparisonLeadIdentity";
 import { claimFocusContinuation, type FocusContinuation } from "../routing/focusContinuation";
@@ -98,14 +97,27 @@ export function DocxPane({
   const [hoveredFlagId, setHoveredFlagId] = useState<number | null>(null);
   const highlightRefs = useRef<Map<number, HTMLButtonElement>>(new Map());
   const pendingSelectionFocus = useRef<FocusContinuation | null>(null);
+  const observedSelection = useRef<number | null | undefined>(undefined);
   const paperRef = useRef<HTMLElement>(null);
+  const paragraphPlacement = useRef<{ pending: boolean; ownership: FocusContinuation } | null>(null);
 
   useEffect(() => {
-    if (requestedParagraph === null || !Number.isSafeInteger(requestedParagraph) || !isVisible) return;
+    paragraphPlacement.current?.ownership.dispose();
+    paragraphPlacement.current = requestedParagraph !== null && Number.isSafeInteger(requestedParagraph)
+      ? { pending: true, ownership: claimFocusContinuation() } : null;
+    return () => { paragraphPlacement.current?.ownership.dispose(); paragraphPlacement.current = null; };
+  }, [requestedParagraph, requestedParagraphAttempt]);
+
+  useEffect(() => {
+    const placement = paragraphPlacement.current;
+    if (!placement?.pending || requestedParagraph === null || !isVisible) return;
     const target = paperRef.current?.querySelector<HTMLElement>(`[data-source-paragraph="${requestedParagraph}"]`);
     if (!target) return;
-    if (onPlaceRequestedParagraph) onPlaceRequestedParagraph(target);
-    else target.focus();
+    placement.pending = false;
+    if (onPlaceRequestedParagraph) {
+      placement.ownership.dispose();
+      onPlaceRequestedParagraph(target);
+    } else placement.ownership.focus(target);
   }, [requestedParagraph, paragraphs, tables, images, nativeMath, isVisible, onPlaceRequestedParagraph, requestedParagraphAttempt]);
 
   const flagsById = new Map(flags.map((f) => [f.id, f]));
@@ -135,7 +147,9 @@ export function DocxPane({
 
   useEffect(() => {
     pendingSelectionFocus.current?.dispose();
-    pendingSelectionFocus.current = selectedFlagId !== null && isVisible && focusSelection ? claimFocusContinuation() : null;
+    const changed = observedSelection.current !== selectedFlagId;
+    observedSelection.current = selectedFlagId;
+    pendingSelectionFocus.current = changed && selectedFlagId !== null && isVisible && focusSelection ? claimFocusContinuation() : null;
     return () => { pendingSelectionFocus.current?.dispose(); pendingSelectionFocus.current = null; };
   }, [selectedFlagId, isVisible, focusSelection]);
 
@@ -158,7 +172,6 @@ export function DocxPane({
   const popoverFlag = hoveredFlagId !== null && hoveredFlagId !== selectedFlagId
     ? flagsById.get(hoveredFlagId)
     : null;
-  const scopeRegions = regions.filter((region) => region.kind !== "paragraph_only");
 
   // A selected flag whose region is `paragraph_only` but whose paragraph
   // index isn't in the fetched list at all -- e.g. the parser skipped an
@@ -189,22 +202,7 @@ export function DocxPane({
         </div>
         <div className="signal-document-toolbar__controls"><button type="button" aria-expanded={detailsOpen} aria-controls={detailsId} onClick={() => setDetailsOpen((value) => !value)}>Source view details</button></div>
       </div>
-      {scopeRegions.length > 0 && (
-        <div className="signal-document-scope-markers" role="group" aria-label="Findings without an exact paragraph location">
-          {scopeRegions.map((region) => {
-            const flag = flagsById.get(region.flag_id);
-            const number = findingNumbers.get(region.flag_id) ?? 1;
-            const identity = flag ? sourceRecordPresentation(flag, number, comparisonLeads) : { label: `Finding ${number}`, marker: String(number) };
-            const precision = regionPrecision(region);
-            return (
-              <button key={region.flag_id} type="button" aria-pressed={region.flag_id === selectedFlagId} onClick={() => onSelectFlag(region.flag_id)}>
-                <span aria-hidden="true">{identity.marker}</span>
-                <span>{identity.label} · {precision.label}{flag ? ` · ${CHECK_KIND_SHORT_LABEL[flag.check_kind] ?? flag.check_kind}` : ""}</span>
-              </button>
-            );
-          })}
-        </div>
-      )}
+
       <div role={scrollInParent ? undefined : "region"} tabIndex={scrollInParent ? undefined : 0} aria-label={scrollInParent ? undefined : `${documentLabel}, scrollable`} className="signal-document-scroll signal-document-scroll--docx">
         <SourceViewDetails id={detailsId} open={detailsOpen} format="docx" comparisonMarkers={comparisonMarkers} freshFormatView={formatDocument}>
           {formatDocument && !paragraphsError && paragraphs && <p>{paragraphs.length} paragraphs · {tables.length} tables · {images.length} drawing occurrences. {nativeMathInventoryLabel(nativeMath)} · Main document body.</p>}

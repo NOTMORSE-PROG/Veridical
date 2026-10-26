@@ -36,7 +36,7 @@ describe("flag mutation response lifetime", () => {
       if (change === "changed instructor") client.setQueryData(ME_QUERY_KEY, { id: 2 });
       client.setQueryData(["report", 5], { check_run_id: 5, reason: "Current account report" });
       const out = { id: change === "wrong flag" ? 8 : 7, check_run_id: change === "wrong run" ? 6 : 5,
-        assessment_revision: 1, overridden: true, confirmed_citation_source: true, override_reason: "Reason retained for this action", annotation: "Old response private annotation", report: { assessment_revision: 1, check_run_id: change === "wrong report" ? 6 : 5, reason: "Old private report" } };
+        assessment_revision: 1, overridden: true, confirmed_citation_source: true, override_reason: "Reason retained for this action", annotation: name === "annotation" ? "Reason retained for this action" : "Old response private annotation", report: { assessment_revision: 1, check_run_id: change === "wrong report" ? 6 : 5, reason: "Old private report" } };
       await act(async () => { release(new Response(JSON.stringify(out), { status: 200 })); });
       await screen.findByRole("button", { name: "Completed" });
       const accepted = change === "current" || name === "annotation" && change === "wrong report";

@@ -333,6 +333,11 @@
   --signal-prose-width: 72ch;
   --signal-form-width: 30rem;
   --signal-workbench-width: 90rem;
+  --signal-flag-summary-basis: 20rem;
+  --signal-flag-evidence-basis: 32rem;
+  --signal-flag-passage-basis: 20rem;
+  --signal-review-source-min: 32rem;
+  --signal-review-inspector-min: 20rem;
   --signal-format-source-min: 22rem;
   --signal-format-criteria-min: 28rem;
   --signal-spine-width: 5.5rem;

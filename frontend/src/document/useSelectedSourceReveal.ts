@@ -67,9 +67,7 @@ export function useSelectedSourceReveal({ runId, search, requestedId, resolvedId
     pending.allowed = false;
     const bounds = root.getBoundingClientRect();
     const target = marker.getBoundingClientRect();
-    if (target.top < bounds.top + root.clientTop || target.bottom > bounds.bottom) {
-      root.scrollTo({ top: root.scrollTop + target.top - bounds.top - root.clientTop, behavior: "auto" });
-    }
+    root.scrollTo({ top: root.scrollTop + target.top - bounds.top - root.clientTop, behavior: "auto" });
   });
   return { arm, adopt };
 }

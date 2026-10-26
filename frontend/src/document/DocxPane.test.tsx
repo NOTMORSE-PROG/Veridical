@@ -1,5 +1,5 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { api } from "../api/client";
 import { DocxPane } from "./DocxPane";
 import type { FlagSummaryOut } from "../api/types";
@@ -12,6 +12,7 @@ const props = {
 };
 
 describe("recorded DOCX source navigation", () => {
+  beforeEach(() => { vi.spyOn(document, "hasFocus").mockReturnValue(true); });
   it("shows a failed reading state without continuing to announce extraction", () => {
     render(<DocxPane {...props} paragraphs={undefined} paragraphsError paragraphsPending={false} />);
     expect(screen.getByText("Reading view unavailable")).toBeInTheDocument();
@@ -56,6 +57,19 @@ describe("recorded DOCX source navigation", () => {
     expect(onSelectFlag).toHaveBeenCalledWith(41);
   });
 
+  it("does not turn many whole-document records into a duplicate strip above the manuscript", () => {
+    const onSelectFlag = vi.fn();
+    const scoped = leads.map((flag) => ({ ...flag, is_passage_level: false, page_anchor: "whole manuscript" }));
+    render(<DocxPane {...props} flags={scoped}
+      regions={scoped.map((flag) => ({ ...region(flag.id), kind: "whole_document" as const, paragraph: null }))}
+      comparisonLeads={comparisonLeadSnapshot(21, scoped)} onSelectFlag={onSelectFlag} />);
+    expect(screen.getByText("Source paragraph")).toBeInTheDocument();
+    expect(screen.queryByRole("group", { name: "Findings without an exact paragraph location" })).not.toBeInTheDocument();
+    expect(document.querySelector(".signal-document-scope-markers")).toBeNull();
+    expect(screen.queryByRole("button", { name: /Comparison lead 3 of 31/ })).not.toBeInTheDocument();
+    expect(onSelectFlag).not.toHaveBeenCalled();
+  });
+
   it("uses the exact record ID without inventing an ordinal when collection context is absent", () => {
     render(<DocxPane {...props} flags={[leads[2]]} regions={[region(41)]} />);
     const control = screen.getByRole("button", { name: /Record #41:.*Comparison lead: not scored/ });
@@ -98,6 +112,18 @@ describe("recorded DOCX source navigation", () => {
     expect(screen.getByRole("button", { name: "Later action" })).toHaveFocus();
   });
 
+  it("does not refocus an unchanged finding when the manuscript pane is shown again", () => {
+    vi.spyOn(document, "hasFocus").mockReturnValue(true);
+    const content = (visible: boolean) => <><button>Manuscript tab</button><DocxPane {...props}
+      flags={[leads[2]]} regions={[region(41)]} selectedFlagId={41} isVisible={visible} focusSelection={visible} /></>;
+    const { rerender } = render(content(true));
+    expect(screen.getByRole("button", { name: /Record #41:/ })).toHaveFocus();
+    rerender(content(false));
+    screen.getByRole("button", { name: "Manuscript tab" }).focus();
+    rerender(content(true));
+    expect(screen.getByRole("button", { name: "Manuscript tab" })).toHaveFocus();
+  });
+
   it.each([[0, "Source heading"], [2, "Source paragraph"]] as const)("focuses paragraph %s without inventing a finding", async (paragraph, text) => {
     render(<DocxPane {...props} requestedParagraph={paragraph} />);
     await waitFor(() => expect(screen.getByText(text)).toHaveFocus());
@@ -109,6 +135,29 @@ describe("recorded DOCX source navigation", () => {
     expect(screen.getByText(/Loading manuscript text/)).toBeInTheDocument();
     rerender(<DocxPane {...props} requestedParagraph={2} />);
     await waitFor(() => expect(screen.getByText("Source paragraph")).toHaveFocus());
+  });
+
+  it.each(["focus", "wheel"])("retires a delayed paragraph request after newer %s intent", (intent) => {
+    const content = (loaded: boolean) => <><button>Later action</button><DocxPane {...props}
+      requestedParagraph={2} paragraphs={loaded ? props.paragraphs : undefined} paragraphsPending={!loaded} /></>;
+    const { rerender } = render(content(false));
+    if (intent === "focus") screen.getByRole("button", { name: "Later action" }).focus();
+    else window.dispatchEvent(new Event("wheel"));
+    rerender(content(true));
+    expect(screen.getByText("Source paragraph")).not.toHaveFocus();
+  });
+
+  it("places a coarse request once, retains tab focus on return and permits an explicit retry", () => {
+    const content = (visible: boolean, attempt: number) => <><button>Manuscript tab</button><DocxPane {...props}
+      requestedParagraph={2} requestedParagraphAttempt={attempt} isVisible={visible} paragraphs={[...props.paragraphs]} /></>;
+    const { rerender } = render(content(true, 1));
+    expect(screen.getByText("Source paragraph")).toHaveFocus();
+    rerender(content(false, 1));
+    const tab = screen.getByRole("button", { name: "Manuscript tab" }); tab.focus();
+    rerender(content(true, 1));
+    expect(tab).toHaveFocus();
+    rerender(content(true, 2));
+    expect(screen.getByText("Source paragraph")).toHaveFocus();
   });
 
   it("places native tables between their original body neighbors and focuses the table location", async () => {

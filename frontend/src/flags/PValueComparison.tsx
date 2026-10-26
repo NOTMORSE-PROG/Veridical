@@ -5,7 +5,7 @@ import { systemFindingCopy } from "../domain/systemFindingCopy";
 /** Saved values only: the browser neither recomputes nor parses explanation text. */
 export function PValueComparison({ flag }: { flag: FlagOut }) {
   if (flag.check_kind !== "statistical_forensics" || !isPValueFinding(flag.ai_verdict_summary)) return null;
-  return <div className="signal-reasoning">
+  return <div className="signal-reasoning signal-p-value-comparison">
     <h3>Recorded p-value comparison</h3>
     {flag.p_value_comparison ? <dl className="signal-document-finding-facts">
       <div><dt>Reported in manuscript</dt><dd>{flag.p_value_comparison.reported}</dd></div>

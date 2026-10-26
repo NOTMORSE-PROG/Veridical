@@ -28,8 +28,17 @@ export function useAnnotateFlag(flagId: number) {
   const queryClient = useQueryClient();
   return useMutation({
     onMutate: () => flagMutationOwner(queryClient, flagId),
-    mutationFn: (annotation: string) =>
-      api.post<FlagOut>(`/flags/${flagId}/annotate`, { annotation }),
+    mutationFn: async (annotation: string) => {
+      const expectedRun = queryClient.getQueryData<FlagOut>(["flag", flagId])?.check_run_id;
+      if (!Number.isSafeInteger(expectedRun) || (expectedRun ?? 0) <= 0) {
+        throw new ApiError(409, "conflict", "Reload this finding before saving an annotation.");
+      }
+      const out = await api.post<FlagOut>(`/flags/${flagId}/annotate`, { annotation });
+      if (!out || out.id !== flagId || out.check_run_id !== expectedRun || out.annotation !== annotation) {
+        throw new ApiError(502, "invalid_response", "The response did not confirm this annotation. Your unsaved note is kept.");
+      }
+      return out;
+    },
     onSuccess: (out, _input, owner) => {
       if (owner?.accepts(out)) queryClient.setQueryData<FlagOut>(["flag", flagId], current => keepNewerAssessment(current, out));
     },

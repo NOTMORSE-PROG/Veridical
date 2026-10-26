@@ -305,8 +305,8 @@ describe("SignalDocumentViewerPage", () => {
       "/flags/7": { ...FLAG, affects_readiness: false, agreement_pair: { intent_text: "To build a login module.", intent_anchor: "page 1", outcome_text: "The login module was not implemented.", outcome_anchor: "page 2" } },
     }));
     renderWithProviders(<SignalDocumentViewerPage />, { route: "/report/5/document?finding=7", path: "/report/:checkRunId/document" });
-    expect(await screen.findByText("Statement selected as a result")).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Open result location: page 2. Finding 1" })).toHaveAttribute("href", "/report/5/document?finding=7&anchor=page%202");
+    expect(await screen.findByText("Statement B. Selected as a result")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Show statement B in manuscript" })).toBeInTheDocument();
     expect(screen.getByText("This review lead does not change readiness.")).toBeInTheDocument();
     expect(screen.queryByText("Single-location check")).not.toBeInTheDocument();
     expect(screen.queryByText(/A second passage does not apply/)).not.toBeInTheDocument();
@@ -345,7 +345,8 @@ describe("SignalDocumentViewerPage", () => {
     expect(await screen.findByTestId("pdf-pane")).toHaveAttribute("data-page", "9");
     expect(screen.getByTestId("pdf-pane")).toHaveAttribute("data-selection", "");
     expect(screen.getByTestId("pdf-pane")).toHaveAttribute("data-regions", "0");
-    expect(await screen.findByText("Finding 1 selected")).toBeInTheDocument();
+    expect(await screen.findByText("Finding 1 of 1")).toBeInTheDocument();
+    expect(document.querySelector(".signal-document-selection-strip")).toBeNull();
   });
 
   it("keeps unsupported recorded anchor recovery visible without inventing a page", async () => {
@@ -356,12 +357,13 @@ describe("SignalDocumentViewerPage", () => {
     expect(await screen.findByTestId("pdf-pane")).toHaveAttribute("data-page", "");
   });
 
-  it("shows selected bounded evidence, places its page, and links to the full instructor action record", async () => {
+  it("shows selected bounded evidence and instructor actions beside its source page", async () => {
     stubViewer();
     renderWithProviders(<SignalDocumentViewerPage />, { route: "/report/5/document?flag=7", path: "/report/:checkRunId/document" });
     expect(await screen.findByText(/abstract and findings list different participant totals/i)).toBeInTheDocument();
     expect(screen.getByTestId("pdf-pane")).toHaveAttribute("data-page", "12");
-    expect(screen.getByRole("link", { name: "Review instructor actions for this location" })).toHaveAttribute("href", "/flags/7");
+    expect(screen.getByRole("button", { name: "Override" })).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Review instructor actions for this location" })).not.toBeInTheDocument();
     expect(screen.queryByText(/% textual similarity/)).not.toBeInTheDocument();
   });
 
@@ -560,7 +562,7 @@ describe("SignalDocumentViewerPage", () => {
     expect(screen.queryByRole("button", { name: "Previous finding" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Next finding" })).not.toBeInTheDocument();
     expect(screen.queryByText("\u00b60")).not.toBeInTheDocument();
-    expect(screen.getAllByText("Extracted paragraph 1").length).toBeGreaterThan(0);
+    expect((await screen.findAllByText("Extracted paragraph 1")).length).toBeGreaterThan(0);
   });
 
   it("keeps readiness, criteria, signals, and decision work beside the manuscript", async () => {
@@ -596,6 +598,14 @@ describe("SignalDocumentViewerPage", () => {
     fireEvent.click(analysisTab);
     expect(analysisTab).toHaveAttribute("aria-selected", "true");
     fireEvent.keyDown(analysisTab, { key: "Home" });
+    expect(manuscriptTab).toHaveAttribute("aria-selected", "false");
+    expect(analysisTab).toHaveAttribute("aria-selected", "true");
+    expect(manuscriptTab).toHaveFocus();
+    fireEvent.keyDown(manuscriptTab, { key: "ArrowRight" });
+    expect(analysisTab).toHaveFocus();
+    fireEvent.keyDown(analysisTab, { key: "ArrowRight" });
+    expect(manuscriptTab).toHaveFocus();
+    fireEvent.click(manuscriptTab);
     expect(manuscriptTab).toHaveAttribute("aria-selected", "true");
     expect(manuscriptTab).toHaveFocus();
   });
@@ -649,9 +659,9 @@ describe("SignalDocumentViewerPage", () => {
     const row = screen.getByRole("button", { name: /Finding 1.*High passage similarity/s });
     fireEvent.click(row);
 
-    expect(await screen.findByText("Finding 1 selected")).toBeInTheDocument();
+    expect(document.querySelector(".signal-document-selection-strip")).toBeNull();
     expect(await screen.findByRole("heading", { name: "High passage similarity" })).toBeInTheDocument();
-    expect(screen.getByText("Location 3 of 3. These records are presented as one finding; none of the stored data was removed.")).toBeInTheDocument();
+    expect(await screen.findByText("Location 3 of 3. These records are presented as one finding; none of the stored data was removed.")).toBeInTheDocument();
     expect(screen.getByText(/Shaded wording appears in both stored passages/)).toBeInTheDocument();
     const comparison = screen.getByText("Passage comparison", { selector: "h3" });
     const reasoning = screen.getByText("Recorded reasoning and technical details");

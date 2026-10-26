@@ -16,7 +16,6 @@ import { SeverityTag, type Severity } from "../components/SeverityTag";
 import { CHECK_KIND_SHORT_LABEL } from "../domain/checkKind";
 import { COMPARISON_LEAD_COPY, comparisonLeadIdentity, isOptionalComparisonLead, sourceRecordPresentation, type ComparisonLeadSnapshot } from "../domain/comparisonLeadIdentity";
 import { truncateAtWord } from "../format/text";
-import { regionPrecision } from "./regionCopy";
 import { usePdfReadingPosition } from "./usePdfReadingPosition";
 import { visiblePdfPage } from "./pdfReadingPosition";
 import { claimFocusContinuation, type FocusContinuation } from "../routing/focusContinuation";
@@ -96,6 +95,7 @@ function ContinuousPdfPage({
   const textLayerRef = useRef<HTMLDivElement>(null);
   const markerRefs = useRef<Map<number, HTMLButtonElement>>(new Map());
   const pendingSelectionFocus = useRef<FocusContinuation | null>(null);
+  const observedSelection = useRef<number | null | undefined>(undefined);
   const hasSelectedMarker = regions.some((region) => region.flag_id === selectedFlagId
     && region.kind === "page_bbox" && region.page === metric.pageNumber && region.bbox);
   const renderTaskRef = useRef<RenderTask | null>(null);
@@ -199,7 +199,9 @@ function ContinuousPdfPage({
 
   useEffect(() => {
     pendingSelectionFocus.current?.dispose();
-    pendingSelectionFocus.current = focusSelection && selectedFlagId !== null
+    const changed = observedSelection.current !== selectedFlagId;
+    observedSelection.current = selectedFlagId;
+    pendingSelectionFocus.current = changed && focusSelection && selectedFlagId !== null
       ? claimFocusContinuation() : null;
     return () => { pendingSelectionFocus.current?.dispose(); pendingSelectionFocus.current = null; };
   }, [focusSelection, selectedFlagId]);
@@ -333,6 +335,7 @@ export function PdfPane({
   selectedFlagId,
   onSelectFlag,
   requestedPage,
+  requestedPageAttempt,
   findingNumbers = EMPTY_FINDING_NUMBERS,
   comparisonLeads,
   focusSelection = true,
@@ -348,6 +351,7 @@ export function PdfPane({
   selectedFlagId: number | null;
   onSelectFlag: (flagId: number) => void;
   requestedPage: number | null;
+  requestedPageAttempt?: number;
   findingNumbers?: ReadonlyMap<number, number>;
   comparisonLeads?: ComparisonLeadSnapshot;
   focusSelection?: boolean;
@@ -470,7 +474,7 @@ export function PdfPane({
       if (element) onPlaceRequestedPage?.(requestedPage, element);
     });
     return () => cancelAnimationFrame(frame);
-  }, [metrics.length, requestedPage, scrollToPage, onPlaceRequestedPage, reading.retire, reading.intent]);
+  }, [metrics.length, requestedPage, requestedPageAttempt, scrollToPage, onPlaceRequestedPage, reading.retire, reading.intent]);
 
   function commitPageInput() {
     reading.retire();
@@ -482,7 +486,6 @@ export function PdfPane({
   const detailsId = useId();
   const [detailsOpen, setDetailsOpen] = useState(false);
   const comparisonMarkers = regions.some((region) => flags.some((flag) => flag.id === region.flag_id && isOptionalComparisonLead(flag)));
-  const scopeRegions = regions.filter((region) => region.kind !== "page_bbox");
   const pagesLabel = loadError ? "Preview unavailable" : pdf ? `${pdf.numPages} ${pdf.numPages === 1 ? "page" : "pages"}` : "Loading pages";
   const zoomStyle = {
     inlineSize: `${zoom * 100}%`,
@@ -528,22 +531,7 @@ export function PdfPane({
         </div>
       </div>
       {pdf && requestedPage !== null && (!Number.isSafeInteger(requestedPage) || requestedPage < 1 || requestedPage > pdf.numPages) && <p role="alert" className="signal-document-reconstruction-note">The recorded page is not available in this PDF. Inspect the manuscript manually; no replacement page was selected.</p>}
-      {scopeRegions.length > 0 && (
-        <div className="signal-document-scope-markers" role="group" aria-label="Findings without an exact passage location">
-          {scopeRegions.map((region) => {
-            const flag = flagsById.get(region.flag_id);
-            const number = findingNumbers.get(region.flag_id) ?? 1;
-            const identity = flag ? sourceRecordPresentation(flag, number, comparisonLeads) : { label: `Finding ${number}`, marker: String(number) };
-            const precision = regionPrecision(region);
-            return (
-              <button key={region.flag_id} type="button" aria-pressed={region.flag_id === selectedFlagId} onClick={() => onSelectFlag(region.flag_id)}>
-                <span aria-hidden="true">{identity.marker}</span>
-                <span>{identity.label} · {precision.label}{flag ? ` · ${CHECK_KIND_SHORT_LABEL[flag.check_kind] ?? flag.check_kind}` : ""}</span>
-              </button>
-            );
-          })}
-        </div>
-      )}
+
       <div ref={scrollRef} role="region" tabIndex={0} aria-label={`${documentLabel}, scrollable`} className="signal-document-scroll signal-document-scroll--pdf" style={{ overflowAnchor: "none" }}>
         <SourceViewDetails id={detailsId} open={detailsOpen} format="pdf" comparisonMarkers={comparisonMarkers} freshFormatView={formatDocument} />
         {loadError ? (

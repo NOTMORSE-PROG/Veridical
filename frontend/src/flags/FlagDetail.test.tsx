@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ConfirmCitationSourceOut, FlagOut, ReportOut } from "../api/types";
 import { renderWithProviders, stubFetchByPath as baseStubFetchByPath } from "../test/renderWithProviders";
 import { FlagDetailPage } from "./FlagDetail";
+vi.mock("../document/ManuscriptSourcePane", () => ({ OwnedManuscriptSourcePane: ({ anchor }: { anchor?: string | null }) => <div data-testid="owned-source" data-anchor={anchor ?? ""}>Owned source</div> }));
 import { CITATION_COMPARISON } from "../test/citationComparisonFixture";
 
 const FLAG = {
@@ -35,7 +36,7 @@ const FLAG = {
 };
 
 function stubFetchByPath(handlers: Record<string, unknown>) {
-  return baseStubFetchByPath({ "/check-runs/20/report": { ...REPORT, check_run_id: 20 },
+  return baseStubFetchByPath({ "/auth/me": { id: 1 }, "/check-runs/20/report": { ...REPORT, check_run_id: 20 },
     "/check-runs/44/report": REPORT, ...handlers });
 }
 
@@ -111,9 +112,10 @@ describe("FlagDetailPage", () => {
   it("renders the same stored agreement pair as the manuscript viewer", async () => {
     vi.stubGlobal("fetch", stubFetchByPath({ "/flags/5": { ...FLAG, check_kind: "internal_agreement", agreement_pair: { intent_text: "To build a login module.", intent_anchor: "page 1", outcome_text: "The login module was not implemented.", outcome_anchor: "page 2" }, affects_readiness: false } }));
     renderWithProviders(<FlagDetailPage />, { route: "/flags/5", path: "/flags/:flagId" });
-    expect(await screen.findByText("Statement selected as an objective")).toBeInTheDocument();
-    expect(screen.getByText("Statement selected as a result")).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Open result location: page 2" })).toHaveAttribute("href", "/report/20/document?finding=5&anchor=page%202");
+    expect(await screen.findByText("Statement A. Selected as an objective")).toBeInTheDocument();
+    expect(screen.getByText("Statement B. Selected as a result")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Show statement B in manuscript" }));
+    expect(screen.getByTestId("owned-source")).toHaveAttribute("data-anchor", "page 2");
   });
 
   it("shows evidence and a neutral method when the stored method is unknown", async () => {
@@ -125,7 +127,8 @@ describe("FlagDetailPage", () => {
     expect(screen.getByText("Not supported")).toBeInTheDocument();
     expect(screen.getByText("High severity")).toBeInTheDocument();
     expect(screen.queryByText("Agreement 100%")).not.toBeInTheDocument();
-    expect(screen.getByText(/Review the recorded evidence and source/)).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "What the instructor should verify" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Show recorded location" })).toBeInTheDocument();
   });
 
   it("maps an internal agreement kind to instructor-facing problem copy", async () => {
@@ -292,7 +295,7 @@ describe("FlagDetailPage", () => {
     expect(screen.getByText(/severity was lowered because no matching passage could be shown/)).toBeInTheDocument();
   });
 
-  it("BUG (overflow) regression guard: the evidence blockquote and AI-verdict chip both cap/wrap instead of overflowing on a long real string", async () => {
+  it("keeps the evidence quote and recorded verdict in their wrapping reading containers", async () => {
     const longFlag = {
       ...FLAG,
       evidence_excerpt: "a".repeat(10) + "https://doi.org/10.1234/" + "b".repeat(120),
@@ -304,7 +307,7 @@ describe("FlagDetailPage", () => {
     const blockquote = document.querySelector("blockquote");
     expect(blockquote?.className).toContain("signal-evidence-quote");
     const verdictRecord = screen.getByText(/An unusually long verdict/).closest("p");
-    expect(verdictRecord?.className).toContain("signal-ai-suggestion");
+    expect(verdictRecord?.className).toContain("signal-flag-verdict");
   });
 
   it("BUG-049: discloses a test-mode (fake-LLM) run so its finding is never mistaken for real", async () => {

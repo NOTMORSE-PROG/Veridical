@@ -1,10 +1,13 @@
 import { reviewDeskDestination } from "../routing/reviewDeskReturn";
 import { WorkflowLink as Link } from "../routing/WorkflowLink";
 import { ReviewDeskReturnLink } from "../routing/ReviewDeskReturnLink";
-import { useEffect, useId, useRef, useState } from "react";
-import { useLocation, useParams } from "react-router";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useLocation, useNavigate, useParams } from "react-router";
 import { ApiError } from "../api/client";
-import { TEST_AI_DISCLOSURE } from "../domain/aiModeDisclosure";
+import { FindingModeDisclosure, FlagReviewActions } from "./FlagReviewActions";
+import { OwnedManuscriptSourcePane } from "../document/ManuscriptSourcePane";
+import { useReviewWorkspaceCapacity } from "../document/useReviewWorkspaceCapacity";
+import { claimFocusContinuation, type FocusContinuation } from "../routing/focusContinuation";
 import type { FlagOut } from "../api/types";
 import { useMe } from "../auth/useAuth";
 import { PassagePairPanel } from "../document/PassagePairPanel";
@@ -22,21 +25,12 @@ import { rememberRouteReturnFocus, useRouteFocus } from "../routing/useRouteFocu
 import { ActionLink } from "../ui/ActionLink";
 import { Alert } from "../ui/Alert";
 import { Button } from "../ui/Button";
-import { Dialog } from "../ui/Dialog";
-import { ConfirmCitationSourceModal } from "./ConfirmCitationSourceModal";
 import { PValueComparison } from "./PValueComparison";
-import { AgreementComparison } from "./AgreementComparison";
+import { AgreementComparison, type AgreementStatementRole } from "./AgreementComparison";
 import { CitationComparison } from "./CitationComparison";
 import { CitationHistoryWarning } from "./CitationHistoryWarning";
-import { useAnnotateFlag, useFlag, useOverrideFlag } from "./useFlag";
-import { useFlagActionReview } from "./useFlagActionReview";
-import { FlagActionCurrentReview } from "./FlagActionCurrentReview";
+import { useFlag } from "./useFlag";
 import { recoverableReadError } from "../report/reportReadState";
-import { useExplicitActionFocus } from "../routing/useExplicitActionFocus";
-import { isAssessmentRevision } from "../report/assessmentRevision";
-import { keepNewerAssessment } from "../report/assessmentRevision";
-import { useQueryClient } from "@tanstack/react-query";
-import { useFindingCompletion, useFindingCompletionOwner } from "./useFindingCompletion";
 
 const SEVERITY_LABEL: Record<FlagOut["severity"], string> = {
   high: "High severity",
@@ -69,31 +63,38 @@ function EvidenceSection({
   flag,
   sourcePath,
   sourceLinkId,
+  expanded,
+  onExpand,
+  onSource,
+  activeRole,
 }: {
   flag: FlagOut;
   sourcePath: string;
   sourceLinkId: string;
+  expanded: boolean;
+  onExpand: (next: boolean) => void;
+  onSource: (anchor?: string | null, role?: AgreementStatementRole) => void;
+  activeRole?: AgreementStatementRole;
 }) {
   const sourceLocation = useLocation();
-  const { showsManuscriptQuote, reasoningText, showsManuscriptEvidence, isResubmission } = evidenceDisplayState(flag);
+  const { showsManuscriptQuote, showsManuscriptEvidence, isResubmission } = evidenceDisplayState(flag);
   const headingId = showsManuscriptEvidence ? "evidence-heading" : "system-record-heading";
 
   return (
-    <section className="signal-evidence-section" aria-labelledby={headingId}>
+    <section className="signal-evidence-section signal-flag-evidence" aria-labelledby={headingId}>
       <div className="signal-section-heading">
         <div>
-          <p className="signal-section-kicker">{showsManuscriptEvidence ? "Checkable record" : "System record"}</p>
           <h2 id={headingId}>{showsManuscriptEvidence ? "Evidence from the manuscript" : "No manuscript excerpt is available"}</h2>
         </div>
+        {expanded ? <Button variant="secondary" onClick={() => onExpand(false)}>Return to manuscript</Button>
+          : (flag.agreement_pair || flag.passage_pair) && <Button variant="secondary" onClick={() => onExpand(true)}>{flag.agreement_pair ? "Compare statements" : "Compare passages"}</Button>}
       </div>
       {showsManuscriptQuote && flag.check_kind !== "internal_agreement" && (
         <blockquote className="signal-evidence-quote"><span>“{systemFindingCopy(flag.evidence_excerpt, flag.ai_verdict_summary, "evidence")}”</span><cite>{instructorAnchor(flag.page_anchor)}</cite></blockquote>
       )}
       <PValueComparison flag={flag} />
-      <AgreementComparison flag={flag} />
+      <AgreementComparison flag={flag} onSource={onSource} activeRole={activeRole} />
       <CitationComparison flag={flag} />
-      {reasoningText && (!isPValueFinding(flag.ai_verdict_summary) || flag.p_value_comparison) && <div className="signal-reasoning"><h3>{flag.citation_metadata_review_warning ? "Original recorded explanation" : "Recorded reasoning"}</h3><p>{systemFindingCopy(reasoningText, flag.ai_verdict_summary, "reasoning")}</p></div>}
-      <div className="signal-reasoning"><h3>What the instructor should verify</h3><p>{findingVerificationPrompt(flag.check_kind, flag.ai_verdict_summary, !!flag.passage_pair, !!flag.citation_metadata_comparison)}</p></div>
       {/* BUG-154: the API has always returned a complete
           passage_pair for a matched flag (own/matched excerpt +
           context both sides, similarity, level) -- this page fetched
@@ -128,216 +129,24 @@ function EvidenceSection({
           Open Library record #{flag.matched_ref}
         </ActionLink>
       )}
-      <ActionLink
-        id={sourceLinkId}
-        to={sourcePath}
-        variant="brand"
-        onClick={() => rememberRouteReturnFocus(sourceLocation.pathname + sourceLocation.search, sourcePath, sourceLinkId)}
-      >
-        View this location in the manuscript
-      </ActionLink>
+      <Button id={sourceLinkId} variant="quiet" onClick={() => onSource()}>Show recorded location</Button>
+      <ActionLink id={`flag-review-queue-${flag.id}`} to={sourcePath} variant="quiet" onClick={() => rememberRouteReturnFocus(sourceLocation.pathname + sourceLocation.search, sourcePath, `flag-review-queue-${flag.id}`)}>Open review queue</ActionLink>
     </section>
   );
 }
 
-function ModeDisclosure({ mode, registry = false }: { mode: FlagOut["llm_mode"]; registry?: boolean }) {
-  if (mode === "real") return null;
-  if (registry && mode === "fake") return <Alert title="Check recorded in a test-mode run" tone="warning">This record belongs to a test-mode run. Do not treat its saved provider values as evidence of a fresh external lookup.</Alert>;
-  return mode === "fake" ? (
-    <Alert title={TEST_AI_DISCLOSURE.title} tone="warning">
-      {TEST_AI_DISCLOSURE.body}
-    </Alert>
-  ) : (
-    <Alert title="AI mode could not be verified" tone="warning">
-      This finding predates reliable AI-mode tracking. Check the evidence directly before acting on it.
-    </Alert>
-  );
-}
-
-function AnnotationPanel({ flag }: { flag: FlagOut }) {
-  const [value, setValue] = useState(flag.annotation ?? "");
-  const [attempted, setAttempted] = useState(false);
-  const [saved, setSaved] = useState(false);
-  const annotate = useAnnotateFlag(flag.id);
-  const errorId = useId();
-  const invalid = attempted && value.trim().length === 0;
-
-  useEffect(() => setValue(flag.annotation ?? ""), [flag.annotation]);
-
-  function save() {
-    setAttempted(true);
-    setSaved(false);
-    if (!value.trim()) return;
-    annotate.mutate(value.trim(), { onSuccess: () => setSaved(true) });
-  }
-
-  return (
-    <section className="signal-evidence-section signal-annotation-panel" aria-labelledby="annotation-heading">
-      <div className="signal-section-heading">
-        <div><p className="signal-section-kicker">Private workspace</p><h2 id="annotation-heading">Instructor annotation</h2></div>
-      </div>
-      <p>Your note stays private to this instructor account and is not included in a shared report.</p>
-      <label className="signal-evidence-field">
-        <span>Annotation</span>
-        <textarea
-          rows={4}
-          value={value}
-          aria-invalid={invalid || undefined}
-          aria-describedby={invalid ? errorId : undefined}
-          disabled={annotate.isPending}
-          onChange={(event) => {
-            setValue(event.target.value);
-            setSaved(false);
-            if (attempted) setAttempted(false);
-          }}
-        />
-      </label>
-      {invalid && <p id={errorId} role="alert" className="signal-field-error">Enter a note before saving.</p>}
-      {annotate.isError && <Alert title="Could not save this annotation" tone="error" role="alert">{annotate.error instanceof ApiError ? annotate.error.message : "Try again."}</Alert>}
-      <div className="signal-evidence-actions">
-        <Button variant="secondary" busy={annotate.isPending} onClick={save}>{annotate.isPending ? "Saving annotation" : "Save annotation"}</Button>
-        {saved && !annotate.isPending && <span role="status" aria-live="polite" className="signal-save-state">Annotation saved.</span>}
-      </div>
-    </section>
-  );
-}
-
-function OverrideDialog({ flag, onClose, onAccepted, continuationIsCurrent, fallbackFocusRef }: { flag: FlagOut; onClose: () => void; onAccepted: (flag: FlagOut) => boolean; continuationIsCurrent: () => boolean; fallbackFocusRef: React.RefObject<HTMLHeadingElement | null> }) {
-  const [reason, setReason] = useState("");
-  const [attempted, setAttempted] = useState(false);
-  const override = useOverrideFlag(flag.id);
-  const review = useFlagActionReview(flag, "override");
-  const reasonRef = useRef<HTMLTextAreaElement>(null);
-  const followAction = useExplicitActionFocus(() => reasonRef.current);
-  const errorId = useId();
-  const invalid = attempted && reason.trim().length === 0;
-  const completion = useFindingCompletion();
-  const [accepted, setAccepted] = useState(false);
-
-  function confirm() {
-    setAttempted(true);
-    if (accepted || !review.isCurrent() || !reason.trim() || !review.canSubmit || !isAssessmentRevision(review.expectedRevision)) return;
-    completion.begin(reasonRef.current);
-    override.mutate({ reason: reason.trim(), expected_revision: review.expectedRevision }, {
-      onSuccess: out => {
-        if (review.isCurrent() && onAccepted(out)) { completion.accept(); setAccepted(true); }
-        else review.freeze();
-      },
-      onError: review.freeze,
-    });
-  }
-
-  return (
-    <Dialog
-      title="Override this finding?"
-      fallbackFocusRef={fallbackFocusRef}
-      returnFocusTarget={() => completion.returnTarget(fallbackFocusRef.current)}
-      shouldRestoreFocus={() => completion.shouldRestore(continuationIsCurrent)}
-      initialFocusTitle
-      onClose={override.isPending || accepted ? undefined : onClose}
-      actions={<><Button variant="secondary" disabled={override.isPending || accepted} onClick={onClose}>Cancel</Button><Button variant="brand" disabled={!review.canSubmit || accepted} busy={override.isPending} onClick={confirm}>Confirm override</Button></>}
-    >
-      <div className="signal-resolution-dialog" aria-busy={override.isPending}>
-        <p>The original possible inconsistency remains in the evidence record. Your reason is recorded in Audit and the readiness band is recalculated.</p>
-        <FlagActionCurrentReview review={review} busy={override.isPending} onRebind={trigger => followAction(trigger, review.rebind)} />
-        <label className="signal-evidence-field">
-          <span>Reason (required)</span>
-          <textarea
-            ref={reasonRef}
-            rows={4}
-            value={reason}
-            disabled={override.isPending}
-            aria-invalid={invalid || undefined}
-            aria-describedby={invalid ? errorId : undefined}
-            onChange={(event) => {
-              setReason(event.target.value);
-              review.reasonChanged();
-              if (attempted) setAttempted(false);
-            }}
-          />
-        </label>
-        {invalid && <p id={errorId} role="alert" className="signal-field-error">Enter a reason before confirming.</p>}
-        {override.isError && <Alert title="Saving could not be confirmed" tone="error" role="alert">Your entered reason is kept. Review the current assessment before trying again.</Alert>}
-      </div>
-    </Dialog>
-  );
-}
-
-function ResolutionControl({ flag: observedFlag }: { flag: FlagOut }) {
-  const client = useQueryClient();
-  const location = useLocation();
-  const isCurrent = useFindingCompletionOwner(`${location.key}:${observedFlag.check_run_id}:${observedFlag.id}:resolution`);
-  const [receipt, setReceipt] = useState<FlagOut>();
-  const flag = receipt && isCurrent() ? keepNewerAssessment(observedFlag, receipt) : observedFlag;
-  useEffect(() => {
-    if (receipt && isAssessmentRevision(observedFlag.assessment_revision)
-      && isAssessmentRevision(receipt.assessment_revision)
-      && observedFlag.assessment_revision >= receipt.assessment_revision) setReceipt(undefined);
-  }, [observedFlag.assessment_revision, receipt]);
-  const [overrideOpen, setOverrideOpen] = useState(false);
-  const [confirmOpen, setConfirmOpen] = useState(false);
-  const overrideTriggerRef = useRef<HTMLButtonElement>(null);
-  const headingRef = useRef<HTMLHeadingElement>(null);
-  const confirmSourceEligible = flag.check_kind === "citation_integrity" && flag.ai_verdict_summary === "unverifiable_not_found";
-
-  function closeOverride() {
-    setOverrideOpen(false);
-  }
-
-  function accept(out: FlagOut) {
-    const current = client.getQueryData<FlagOut>(["flag", observedFlag.id]);
-    const report = client.getQueryData<{ assessment_revision: number | null }>(["report", observedFlag.check_run_id]);
-    if (!isCurrent() || out.id !== observedFlag.id || out.check_run_id !== observedFlag.check_run_id
-      || !out.overridden || !isAssessmentRevision(out.assessment_revision)
-      || (current && keepNewerAssessment(current, out) !== out)
-      || (report && isAssessmentRevision(report.assessment_revision) && report.assessment_revision > out.assessment_revision)) return false;
-    setReceipt(out);
-    setOverrideOpen(false);
-    setConfirmOpen(false);
-    return true;
-  }
-
-  const terminal = flag.overridden;
-  const optional = flag.affects_readiness === false;
-  const headingId = terminal ? "resolution-heading" : "resolution-options-heading";
-  const content = <section className={terminal ? "signal-resolution-record" : optional ? "signal-evidence-section" : "signal-evidence-section signal-resolution-options"} aria-labelledby={headingId}>
-    <div className={terminal ? undefined : "signal-section-heading"}><div>
-      {!optional || terminal ? <p className="signal-section-kicker">{terminal ? "Instructor resolution" : "Instructor action"}</p> : null}
-      <h2 ref={headingRef} tabIndex={-1} id={headingId}>{terminal ? flag.confirmed_citation_source ? "Source confirmed" : "Finding overridden" : optional ? "Review lead: not scored" : "Resolve only after checking the evidence"}</h2>
-    </div></div>
-    {terminal ? <>
-        <p>{flag.confirmed_citation_source ? `You confirmed the source after checking it: ${flag.override_reason}.` : `You overrode this possible inconsistency: ${flag.override_reason}.`}</p>
-        {flag.confirmed_citation_source && <p>Your confirmation applies only to this exact reference in your account, not to another reference or instructor. It does not establish support for a manuscript claim.</p>}
-        <p>{isOptionalComparisonLead(flag) ? "The original comparison record remains above. This lead does not affect readiness." : "The original finding remains above, and the readiness band has been recalculated."}</p>
-        <ActionLink to={`/report/${flag.check_run_id}`} variant="secondary">View updated report</ActionLink>
-      </>
-    : optional ? <>
-        <p>This comparison does not change readiness. You can inspect the evidence without writing a comment or recording an override.</p>
-      </>
-    : <>
-      <p>{flag.ai_verdict_summary ? "This finding remains open unless you record a reasoned override." : "VERIDICAL did not reach a determination, so this finding does not affect readiness unless you affirm it."}</p>
-      {confirmSourceEligible && (flag.citation_source_key ? (
-        <div className="signal-confirm-source-option">
-          <h3>Verified the source yourself?</h3>
-          <p>This resolves this finding. Later checks may reuse your confirmation only for this exact reference and source key in your account.</p>
-          {flag.citation_source_key.kind === "title" && <Alert title="Title matches are less precise" tone="warning">Double-check that this is the source cited in the manuscript before confirming it.</Alert>}
-          <Button variant="secondary" onClick={() => setConfirmOpen(true)}>Confirm this source</Button>
-        </div>
-      ) : (
-        <Alert title="No source record can be confirmed" tone="info">VERIDICAL could not identify a DOI, ISBN, or title. If you verified the citation independently, override only this finding and explain why.</Alert>
-      ))}
-      <div className="signal-evidence-actions"><Button ref={overrideTriggerRef} variant="secondary" onClick={() => setOverrideOpen(true)}>Override</Button></div>
-    </>}
-  </section>;
-  return <>{content}
-    {overrideOpen && <OverrideDialog key={`${flag.check_run_id}:${flag.id}:override`} flag={flag} fallbackFocusRef={headingRef} continuationIsCurrent={isCurrent} onAccepted={accept} onClose={closeOverride} />}
-    {confirmOpen && <ConfirmCitationSourceModal key={`${flag.check_run_id}:${flag.id}:confirm-source`} flag={flag} fallbackFocusRef={headingRef} continuationIsCurrent={isCurrent} onAccepted={accept} onClose={() => setConfirmOpen(false)} />}
+function FindingReasoning({ flag }: { flag: FlagOut }) {
+  const { reasoningText } = evidenceDisplayState(flag);
+  return <>
+    {reasoningText && (!isPValueFinding(flag.ai_verdict_summary) || flag.p_value_comparison) && <div className="signal-reasoning"><h3>{flag.citation_metadata_review_warning ? "Original recorded explanation" : "Recorded reasoning"}</h3><p>{systemFindingCopy(reasoningText, flag.ai_verdict_summary, "reasoning")}</p></div>}
+    <div className="signal-reasoning"><h3>What the instructor should verify</h3><p>{findingVerificationPrompt(flag.check_kind, flag.ai_verdict_summary, !!flag.passage_pair, !!flag.citation_metadata_comparison)}</p></div>
   </>;
 }
 
 export function FlagDetailPage() {
   const { flagId } = useParams<{ flagId: string }>();
   const routeLocation = useLocation();
+  const navigate = useNavigate();
   const id = Number(flagId);
   const validId = Number.isInteger(id) && id > 0;
   const { data, isPending, isError, error, refetch } = useFlag(id);
@@ -348,6 +157,31 @@ export function FlagDetailPage() {
   const leadIdentity = flag && optionalComparison ? comparisonLeadIdentity(flag, leadContext?.snapshot) : undefined;
   const headingRef = useRef<HTMLHeadingElement>(null);
   const resolutionRef = useRef<HTMLDivElement>(null);
+  const sourceRef = useRef<HTMLElement>(null);
+  const reviewRef = useRef<HTMLDivElement>(null);
+  const tabsRef = useRef<HTMLDivElement>(null);
+  const sourceFocus = useRef<FocusContinuation | null>(null);
+  const [pane, setPane] = useState<"manuscript" | "review">("review");
+  const [expandedFor, setExpandedFor] = useState<number | null>(null);
+  const expanded = expandedFor === id;
+  function setExpanded(next: boolean) { setExpandedFor(next ? id : null); }
+  const [sourceCommand, setSourceCommand] = useState<{ flag: number; anchor: string | null | undefined; role?: AgreementStatementRole; attempt: number }>();
+  const workspace = useReviewWorkspaceCapacity(active => {
+    if (sourceRef.current?.contains(active)) setPane("manuscript");
+    else if (reviewRef.current?.contains(active)) setPane("review");
+  });
+  useLayoutEffect(() => {
+    if (workspace.split && tabsRef.current?.contains(document.activeElement)) {
+      (pane === "manuscript" ? sourceRef.current : reviewRef.current)?.focus({ preventScroll: true });
+    }
+  }, [workspace.split, pane]);
+  useLayoutEffect(() => {
+    if (!sourceFocus.current || expanded || (!workspace.split && pane !== "manuscript")) return;
+    sourceFocus.current.focus(sourceRef.current);
+    sourceFocus.current.dispose();
+    sourceFocus.current = null;
+  }, [expanded, workspace.split, pane, sourceCommand]);
+  useEffect(() => () => sourceFocus.current?.dispose(), []);
   const previousResolved = useRef<boolean | null>(null);
   const [announcement, setAnnouncement] = useState("");
   const returnFocus = (routeLocation.state as { routeReturnFocus?: { returnPath: string; elementId: string } } | null)?.routeReturnFocus;
@@ -385,15 +219,22 @@ export function FlagDetailPage() {
   }, [flag]);
 
   const meta = flag ? checkKindMeta(flag.check_kind) : null;
-  const sourcePath = flag ? reviewDeskDestination(`/report/${flag.check_run_id}/document?flag=${flag.id}`, routeLocation) : "";
+  const sourcePath = flag ? reviewDeskDestination(`/report/${flag.check_run_id}/document?view=queue&pane=review`, routeLocation) : "";
   const sourceLinkId = flag ? `flag-source-link-${flag.id}` : "";
+  function showSource(anchor?: string | null, role?: AgreementStatementRole) {
+    if (!flag) return;
+    sourceFocus.current?.dispose();
+    sourceFocus.current = claimFocusContinuation();
+    setExpanded(false);
+    setPane("manuscript");
+    setSourceCommand(previous => ({ flag: flag.id, anchor, role, attempt: (previous?.attempt ?? 0) + 1 }));
+  }
 
   return (
     <div className="signal-route signal-page-flow signal-flag-detail">
       <header className="signal-route-header signal-flag-header">
         <div>
           <nav aria-label="Breadcrumb"><ReviewDeskReturnLink>Review Desk</ReviewDeskReturnLink><span aria-hidden="true">/</span>{flag && <><Link to={returnFocus?.returnPath ?? `/report/${flag.check_run_id}`}>{flag.manuscript_group_label}</Link><span aria-hidden="true">/</span></>}<span>Evidence</span></nav>
-          <p className="signal-eyebrow">{optionalComparison ? "Review · Optional comparison lead" : "Review · Possible inconsistency"}</p>
           <h1 ref={headingRef} tabIndex={-1}>{meta?.title ?? "Evidence detail"}</h1>
           {flag?.criterion_text && <p className="signal-route-header__intro">Related criterion: {flag.criterion_text}</p>}
         </div>
@@ -410,26 +251,38 @@ export function FlagDetailPage() {
         <>
           {isError && <Alert title="Could not update this evidence" tone="warning"><p>Showing the last loaded finding. Your entered reason is kept. Review the current assessment before confirming an action.</p><Button variant="secondary" onClick={() => { void refetch(); }}>Retry evidence</Button></Alert>}
           <p aria-live="polite" className="signal-live-region">{announcement}</p>
-          {(!isCitationMetadataFinding(flag) || flag.llm_mode === "fake") && <ModeDisclosure mode={flag.llm_mode} registry={isCitationMetadataFinding(flag)} />}
-          {flag.first_upload_context && <Alert title="Limited first-upload comparison context" tone="info">This signal was created while there were few manuscripts to compare against. The severity was not changed by that limitation.</Alert>}
-
-          <section className="signal-evidence-hero" aria-labelledby="finding-heading">
-            <div className="signal-evidence-hero__meta"><span>{meta?.eyebrow ?? humanize(flag.check_kind)}</span><span>{leadIdentity ? `${leadContext?.lastLoaded ? "Last loaded: " : ""}${leadIdentity.label}` : `Signal #${flag.id}`}</span></div>
-            <h2 id="finding-heading">{optionalComparison ? "Recorded comparison lead" : "Recorded system finding"}</h2>
-            {optionalComparison && <p>{COMPARISON_LEAD_COPY.intro}</p>}
-            <p className="signal-ai-suggestion"><strong>{findingMethodLabel(flag)}</strong><span>{humanizedVerdict(flag)}</span></p>
-            <p>{findingMethodLabel(flag) === "AI suggestion"
-              ? "Repeated AI consistency is intentionally not shown as a percentage. The excerpt and source location below are the evidence to check."
-              : isCitationMetadataFinding(flag) && !flag.citation_metadata_comparison
-                ? "Review the original reference and recorded explanation. Verify the source independently or run a new check before recording an instructor action."
-                : "Review the recorded evidence and source before recording an instructor action."}</p>
+          <section ref={workspace.frame} className="signal-flag-workbench" aria-label="Manuscript and finding review" data-layout={workspace.split ? "split" : "single"} data-reading={expanded ? "full" : undefined}>
+            <span ref={workspace.threshold} className="signal-review-workspace-threshold" aria-hidden="true" />
+            {(!isCitationMetadataFinding(flag) || flag.llm_mode === "fake") && <FindingModeDisclosure mode={flag.llm_mode} registry={isCitationMetadataFinding(flag)} />}
+            <div ref={tabsRef} className="signal-flag-tabs signal-document-tabs" role="tablist" aria-label="Evidence workspace views" hidden={workspace.split || expanded}>
+              {(["manuscript", "review"] as const).map(view => <button key={view} id={`flag-${id}-${view}-tab`} type="button" role="tab" aria-selected={pane === view} aria-controls={`flag-${id}-${view}-panel`} tabIndex={pane === view ? 0 : -1} onClick={() => setPane(view)} onKeyDown={event => {
+                if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
+                event.preventDefault();
+                const next = event.key === "Home" ? "manuscript" : event.key === "End" ? "review" : view === "manuscript" ? "review" : "manuscript";
+                setPane(next);
+                document.getElementById(`flag-${id}-${next}-tab`)?.focus();
+              }}>{view === "manuscript" ? "Manuscript" : "Review"}</button>)}
+            </div>
+            <section ref={sourceRef} id={`flag-${id}-manuscript-panel`} tabIndex={-1} role={workspace.split ? "region" : "tabpanel"} aria-label="Source manuscript" className="signal-flag-source" data-active={pane === "manuscript"}>
+              <OwnedManuscriptSourcePane key={`${me?.id}:${flag.check_run_id}:${flag.id}`} flag={flag}
+                anchor={sourceCommand?.flag === flag.id ? sourceCommand.anchor : undefined} attempt={sourceCommand?.flag === flag.id ? sourceCommand.attempt : undefined}
+                selectedStatement={sourceCommand?.flag === flag.id ? sourceCommand.role : undefined}
+                visible={!expanded && (workspace.split || pane === "manuscript")}
+                onSelectFlag={selected => { if (selected !== flag.id) navigate(reviewDeskDestination(`/flags/${selected}`, routeLocation)); }} />
+            </section>
+            <div ref={reviewRef} id={`flag-${id}-review-panel`} tabIndex={-1} role={workspace.split ? "region" : "tabpanel"} aria-label="Finding review" className="signal-flag-review" data-active={pane === "review"}>
+              <section className="signal-flag-record" aria-label="Recorded finding">
+                <p className="signal-flag-record-identity">{leadIdentity ? `${leadContext?.lastLoaded ? "Last loaded: " : ""}${leadIdentity.label}` : `Record #${flag.id}`}</p>
+                {optionalComparison && <p>{COMPARISON_LEAD_COPY.intro}</p>}
+                <div className="signal-flag-recorded-finding"><h2>{findingMethodLabel(flag)}</h2><p className="signal-flag-verdict">{humanizedVerdict(flag)}</p></div>
+              </section>
+              <EvidenceSection flag={flag} sourcePath={sourcePath} sourceLinkId={sourceLinkId} expanded={expanded} onExpand={setExpanded} onSource={showSource} activeRole={sourceCommand?.flag === flag.id ? sourceCommand.role : undefined} />
+              <section className="signal-flag-summary" aria-label="Reasoning and verification"><FindingReasoning flag={flag} /></section>
+              <CitationHistoryWarning flag={flag} />
+              {flag.first_upload_context && <Alert title="Limited first-upload comparison context" tone="info">This signal was created while there were few manuscripts to compare against. The severity was not changed by that limitation.</Alert>}
+              <div ref={resolutionRef} tabIndex={-1}><FlagReviewActions key={`${flag.check_run_id}:${flag.id}`} flag={flag} /></div>
+            </div>
           </section>
-
-          <CitationHistoryWarning flag={flag} />
-          <EvidenceSection flag={flag} sourcePath={sourcePath} sourceLinkId={sourceLinkId} />
-
-          <div ref={resolutionRef} tabIndex={-1}><ResolutionControl key={`${routeLocation.key}:${flag.check_run_id}:${flag.id}`} flag={flag} /></div>
-          <AnnotationPanel flag={flag} />
         </>
       )}
     </div>

@@ -95,7 +95,7 @@ describe("PdfPane page visibility", () => {
     vi.unstubAllGlobals();
   });
 
-  it("keeps optional page-scope controls tied to complete-collection identities", async () => {
+  it("does not duplicate the review queue with page-scope finding chips", async () => {
     const leads: FlagSummaryOut[] = Array.from({ length: 31 }, (_, index) => ({
       id: index + 39, check_kind: "originality_reuse", affects_readiness: false,
       severity: "high", criterion_text: null, evidence_excerpt: "Saved passage",
@@ -107,11 +107,11 @@ describe("PdfPane page visibility", () => {
       comparisonLeads={comparisonLeadSnapshot(21, leads)} onSelectFlag={onSelectFlag}
       regions={[{ flag_id: 41, kind: "page_only", page: 1, end_page: null, bbox: null,
         all_bboxes: [], paragraph: null, index: null }]} />);
-    const control = await screen.findByRole("button", { name: /Comparison lead 3 of 31\. Record #41/ });
-    expect(control).toHaveTextContent("L3");
-    expect(control).not.toHaveAccessibleName(/High severity|Finding 1/);
-    fireEvent.click(control);
-    expect(onSelectFlag).toHaveBeenCalledWith(41);
+    await screen.findByLabelText("Page 2 of 2");
+    expect(screen.queryByRole("group", { name: "Findings without an exact passage location" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Comparison lead 3 of 31\. Record #41/ })).not.toBeInTheDocument();
+    expect(document.querySelector(".signal-document-scope-markers")).toBeNull();
+    expect(onSelectFlag).not.toHaveBeenCalled();
   });
 
   it("does not clamp an unavailable recorded source page to the last page", async () => {

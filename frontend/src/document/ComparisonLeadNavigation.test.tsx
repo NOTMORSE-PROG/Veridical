@@ -1,4 +1,4 @@
-import { act, fireEvent, screen, waitFor } from "@testing-library/react";
+﻿import { act, fireEvent, screen, waitFor } from "@testing-library/react";
 import { useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { FlagOut, FlagSummaryOut } from "../api/types";
@@ -76,11 +76,12 @@ describe("optional comparison workspace navigation", () => {
     fireEvent.click(screen.getByText("Recorded reasoning and technical details"));
     expect(screen.getByText("Check method")).toBeVisible();
     expect(screen.getByText("Actual stored reasoning")).toBeVisible();
-    expect(screen.getByRole("link", { name: "Review instructor actions for this location" })).toHaveAttribute("href", "/flags/41");
+    expect(screen.getByRole("heading", { name: "Finding overridden" })).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Review instructor actions for this location" })).not.toBeInTheDocument();
   });
   it.each([401, 403, 404, 503])("does not claim a selected record disappeared after a failed collection read (%s)", async status => {
     const c = setup("&view=finding&finding=41", false, REPORT, true);
-    await screen.findByRole("button", { name: "Review in full width" });
+    await screen.findByRole("button", { name: "Compare passages" });
     const base = c.fetch.getMockImplementation()!;
     c.fetch.mockImplementation(async (input, init) => new URL(String(input), "http://localhost").pathname === "/check-runs/5/flags"
       ? new Response(JSON.stringify({ error: { code: "controlled", message: "Controlled failed collection read" } }), { status }) : base(input, init));
@@ -93,13 +94,13 @@ describe("optional comparison workspace navigation", () => {
   });
   it("reports absence only after a successful collection read omits the selected record", async () => {
     const c = setup("&view=finding&finding=41", false, REPORT, true);
-    await screen.findByRole("button", { name: "Review in full width" });
+    await screen.findByRole("button", { name: "Compare passages" });
     await act(async () => { c.client.setQueryData(["report", 5, "flags"], RECORDS.filter(record => record.id !== 41)); });
     expect(await screen.findByText("That finding is no longer available")).toBeVisible();
   });
   it("withholds an older absence claim while the collection is being refreshed", async () => {
     const c = setup("&view=finding&finding=41", false, REPORT, true);
-    await screen.findByRole("button", { name: "Review in full width" });
+    await screen.findByRole("button", { name: "Compare passages" });
     await act(async () => { c.client.setQueryData(["report", 5, "flags"], RECORDS.filter(record => record.id !== 41)); });
     await screen.findByText("That finding is no longer available");
     let release!: (response: Response) => void;
@@ -110,7 +111,7 @@ describe("optional comparison workspace navigation", () => {
     act(() => { refresh = c.client.invalidateQueries({ queryKey: ["report", 5, "flags"], exact: true }); });
     await waitFor(() => expect(screen.queryByText("That finding is no longer available")).not.toBeInTheDocument());
     await act(async () => { release(new Response(JSON.stringify(RECORDS), { status: 200 })); await refresh; });
-    expect(await screen.findByRole("button", { name: "Review in full width" })).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "Compare passages" })).toBeInTheDocument();
     expect(screen.queryByText("That finding is no longer available")).not.toBeInTheDocument();
   });
   it("keeps evidence focus when a retained comparison-list Retry disappears after recovery", async () => {
@@ -119,7 +120,7 @@ describe("optional comparison workspace navigation", () => {
     let fail = false;
     c.fetch.mockImplementation(async (input, init) => new URL(String(input), "http://localhost").pathname === "/check-runs/5/flags" && fail
       ? new Response(JSON.stringify({ error: { code: "internal", message: "Controlled unavailable read" } }), { status: 503 }) : base(input, init));
-    const expand = await screen.findByRole("button", { name: "Review in full width" });
+    const expand = await screen.findByRole("button", { name: "Compare passages" });
     const inspector = document.getElementById("review-panel")!; inspector.scrollTo = vi.fn();
     expand.focus(); fireEvent.click(expand);
     await waitFor(() => expect(screen.getByRole("heading", { name: "Evidence to compare or check" })).toHaveFocus());
@@ -133,7 +134,7 @@ describe("optional comparison workspace navigation", () => {
   });
   it("expands at the actual evidence and returns to its exact action without replacing the source or article", async () => {
     const { fetch } = setup("&view=finding&finding=41", false, REPORT, true);
-    const expand = await screen.findByRole("button", { name: "Review in full width" });
+    const expand = await screen.findByRole("button", { name: "Compare passages" });
     const article = document.querySelector(".signal-document-selected")!;
     const source = document.getElementById("manuscript-panel")!;
     const inspector = document.getElementById("review-panel")!;
@@ -146,14 +147,19 @@ describe("optional comparison workspace navigation", () => {
     expect(document.querySelector(".signal-document-selected")).toBe(article);
     expect(document.getElementById("manuscript-panel")).toBe(source);
     for (const text of ["Attributed to Author A (2022).", "Author B (2023) adds context.", "Attributed to Author C (2020).", "Author D (2021) follows."]) expect(screen.getByText(text)).toBeVisible();
-    fireEvent.click(screen.getByRole("button", { name: "Return to split review" }));
-    await waitFor(() => expect(screen.getByRole("button", { name: "Review in full width" })).toHaveFocus());
+    fireEvent.click(screen.getByRole("button", { name: "Return to manuscript" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Compare passages" })).toHaveFocus());
     expect(document.querySelector(".signal-document-selected")).toBe(article);
     expect(document.getElementById("manuscript-panel")).toBe(source);
     expect(fetch.mock.calls.every(([, init]) => !init?.method || init.method === "GET")).toBe(true);
   });
   it("places View review after its narrow pane commits, without relying on an early animation frame", async () => {
-    vi.stubGlobal("matchMedia", vi.fn(() => ({ matches: true, addEventListener: vi.fn(), removeEventListener: vi.fn() })));
+    vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockImplementation(function (this: HTMLElement) {
+      return this.classList.contains("signal-document-workbench") ? 700 : 0;
+    });
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
+      return { width: this.classList.contains("signal-review-workspace-threshold") ? 856 : 0 } as DOMRect;
+    });
     const realFocus = HTMLElement.prototype.focus;
     vi.spyOn(HTMLElement.prototype, "focus").mockImplementation(function (this: HTMLElement, options) {
       if (this.closest("[data-active='false']")) return;
@@ -198,7 +204,8 @@ describe("optional comparison workspace navigation", () => {
     await screen.findByText("Actual stored reasoning");
     fireEvent.click(screen.getByText("Recorded reasoning and technical details"));
     expect(await screen.findByText("Actual stored reasoning")).toBeVisible();
-    expect(screen.getByRole("link", { name: "Review instructor actions for this location" })).toHaveAttribute("href", "/flags/41");
+    expect(screen.getByRole("heading", { name: "Finding overridden" })).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Review instructor actions for this location" })).not.toBeInTheDocument();
     expect(screen.queryByText("Finding 1 of 31")).not.toBeInTheDocument();
   });
   it("retains an exact selected record outside its filter rather than selecting an arbitrary neighbor", async () => {

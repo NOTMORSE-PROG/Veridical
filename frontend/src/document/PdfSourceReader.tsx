@@ -5,10 +5,12 @@ import { PdfPageTextPane } from "./PdfPageTextPane";
 import { PdfPane } from "./PdfPane";
 import { clearPdfReading, positivePage } from "./usePdfPageText";
 
-export function PdfSourceReader({ run, manuscript, actor, visible, ...pdfProps }: ComponentProps<typeof PdfPane> & {
+export function PdfSourceReader({ run, manuscript, actor, visible, presentation, ...pdfProps }: ComponentProps<typeof PdfPane> & {
   run: number; manuscript: number; actor: number | undefined; visible: boolean;
+  presentation?: { params: URLSearchParams; change: (next: URLSearchParams) => void };
 }) {
-  const [params, setParams] = useSearchParams();
+  const [routeParams, setParams] = useSearchParams();
+  const params = presentation?.params ?? routeParams;
   const location = useLocation();
   const textMode = params.get("source") === "page_text";
   const textPage = positivePage(params.get("text_page"));
@@ -52,7 +54,8 @@ export function PdfSourceReader({ run, manuscript, actor, visible, ...pdfProps }
     } else if (page !== null) next.set("page", String(page));
     intendedSearch.current = next.toString();
     if (mode === "text") setTextAttempt((attempt) => attempt + 1);
-    setParams(next, { state: location.state });
+    if (presentation) presentation.change(next);
+    else setParams(next, { state: location.state });
   }
   return textMode ? <PdfPageTextPane run={run} manuscript={manuscript} actor={actor} page={textPage} visible={visible}
     selectedPage={pdfProps.requestedPage} exactSelection={pdfProps.regions.some((region) => region.flag_id === pdfProps.selectedFlagId && region.kind === "page_bbox")}
