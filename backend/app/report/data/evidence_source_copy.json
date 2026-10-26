@@ -11,6 +11,7 @@
   },
   "text_layer_match": "Text-layer match on the recorded page. This mark locates the saved excerpt in the PDF’s text layer. Compare it with the page image; placement does not verify the claim or establish that the text is visible as printed.",
   "page_only": "Page shown without a passage mark. Compare the saved excerpt with the page image.",
+  "paragraph_only": "Recorded paragraph location in the extracted source. Compare the saved excerpt with this text; Word page layout is not reproduced.",
   "scope_first_page": "This entry concerns a broader recorded source scope. Only its starting page is shown, without a passage mark.",
   "docx": "This manuscript was submitted as DOCX. Word page layout is not available for this source.",
   "unavailable": {

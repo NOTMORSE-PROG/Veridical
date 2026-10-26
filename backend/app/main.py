@@ -37,8 +37,11 @@ from app.pipeline.router import router as pipeline_router
 from app.pipeline.worker import worker_loop
 from app.report.router import (
     export_report_pdf_route,
+    get_evidence_location_route,
     get_evidence_manifest_route,
     get_evidence_page_route,
+    get_evidence_source_document_route,
+    get_evidence_source_file_route,
     get_manuscript_docx_image_route,
     get_manuscript_file_route,
     get_manuscript_page_text_route,
@@ -71,6 +74,9 @@ _PRIVATE_DOCUMENT_ENDPOINTS = frozenset(
     {
         get_evidence_manifest_route,
         get_evidence_page_route,
+        get_evidence_location_route,
+        get_evidence_source_file_route,
+        get_evidence_source_document_route,
         get_manuscript_viewer_route,
         list_reuse_passage_matches_route,
         get_manuscript_paragraphs_route,
@@ -222,6 +228,7 @@ if _cors_origins:
         allow_origins=_cors_origins,
         allow_methods=["*"],
         allow_headers=["*"],
+        expose_headers=["X-Evidence-Source-Identity"],
         # The session cookie (V-014) rides on `credentials: "include"` —
         # browsers refuse the response without this, found live testing
         # V-014's sign-in flow (V-048's CORS setup predates any

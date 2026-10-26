@@ -10,7 +10,8 @@ from app.db import get_session
 from app.errors import ConflictError, GoneError, NotFoundError, UnauthenticatedError
 from app.main import app
 from app.report.evidence_placement import EvidencePlacementOut
-from app.report.evidence_service import EvidenceManifestOut, EvidencePageOut
+from app.report.evidence_service import EvidenceLocationOut, EvidenceManifestOut, EvidencePageOut
+from app.report.evidence_source import BoundEvidenceSource
 
 IDENTITY = "a" * 64
 ROUTES = (
@@ -50,6 +51,85 @@ def assert_policy(response, public):
     assert response.headers["cache-control"] == ("no-store" if public else "private, no-store")
     if public:
         assert response.headers["x-robots-tag"] == "noindex, nofollow"
+
+
+READER_ROUTES = (
+    f"/check-runs/7/evidence/{IDENTITY}/location?snapshot_id={IDENTITY}",
+    f"/check-runs/7/evidence/source-file?source_identity={IDENTITY}",
+    f"/check-runs/7/evidence/source-document?source_identity={IDENTITY}",
+)
+
+
+@pytest.mark.parametrize("path", READER_ROUTES)
+@pytest.mark.parametrize("failure", [None, "foreign", "stale", "signed_out"])
+def test_private_bound_reader_route_authority_and_cache(client, monkeypatch, path, failure):
+    received = []
+
+    async def result(*args):
+        received.append(args)
+        assert args[1:3] == (7, 9)
+        if failure == "foreign":
+            raise NotFoundError("Unavailable source.")
+        if failure == "stale":
+            raise ConflictError("Source changed.")
+        if "/location?" in path:
+            assert args[3:5] == (IDENTITY, IDENTITY)
+            return EvidenceLocationOut(
+                snapshot_id=IDENTITY,
+                source_identity=IDENTITY,
+                source_format="pdf",
+                placement=EvidencePlacementOut(reference_id=IDENTITY, state="page_only", page=2),
+                caption="Recorded source page; passage unmarked.",
+            )
+        assert args[3] == IDENTITY
+        from app.report.schemas import DocumentParagraphsOut
+
+        return BoundEvidenceSource(
+            7,
+            8,
+            "docx" if "source-document" in path else "pdf",
+            IDENTITY,
+            "b" * 64,
+            pdf_bytes=b"exact pinned response bytes" if "source-file" in path else None,
+            document=DocumentParagraphsOut(paragraphs=[], tables=[], images=[])
+            if "source-document" in path
+            else None,
+        )
+
+    async def signed_out():
+        raise UnauthenticatedError("Sign in.")
+
+    monkeypatch.setattr("app.report.router.get_private_evidence_location", result)
+    monkeypatch.setattr("app.report.router.get_private_evidence_reader_source", result)
+    if failure == "signed_out":
+        app.dependency_overrides[get_current_instructor] = signed_out
+    response = client.get(path)
+    assert (
+        response.status_code
+        == {None: 200, "foreign": 404, "stale": 409, "signed_out": 401}[failure]
+    )
+    assert_policy(response, False)
+    if failure == "signed_out":
+        assert received == []
+    elif failure is None and "source-file" in path:
+        assert response.content == b"exact pinned response bytes"
+        assert response.headers["x-evidence-source-identity"] == IDENTITY
+        assert response.headers["content-type"] == "application/pdf"
+        assert response.headers["x-content-type-options"] == "nosniff"
+    elif failure is None:
+        assert "source_sha256" not in response.text and "pdf_bytes" not in response.text
+
+
+@pytest.mark.parametrize("path", READER_ROUTES)
+def test_bound_reader_malformed_identity_never_reads_source(client, monkeypatch, path):
+    async def forbidden(*args):
+        pytest.fail("No source read for malformed identity")
+
+    monkeypatch.setattr("app.report.router.get_private_evidence_location", forbidden)
+    monkeypatch.setattr("app.report.router.get_private_evidence_reader_source", forbidden)
+    response = client.get(path.replace(IDENTITY, "invalid"))
+    assert response.status_code == 422
+    assert_policy(response, False)
 
 
 @pytest.mark.parametrize("path,target,public,page", ROUTES)

@@ -14,6 +14,7 @@ from app.report import evidence_service as service
 from app.report.evidence_images import evidence_image_admission
 from app.report.evidence_placement import EvidencePlacementOut, ReferencePageImage
 from app.report.evidence_references import build_evidence_reference_snapshot
+from app.report.evidence_source import BoundEvidenceSource
 from app.storage.access import read_source
 
 
@@ -48,6 +49,8 @@ class StubSession:
 
     async def get(self, model, identity):
         return Row(
+            id=identity,
+            content_hash="b" * 64,
             file_ref="PRIVATE_STORAGE_KEY",
             purged_at=None,
             section_tree={"source": "none", "nodes": []},
@@ -55,6 +58,167 @@ class StubSession:
 
     async def refresh(self, value, **kwargs):
         self.refreshes.append(kwargs)
+
+
+def install_bound_stubs(monkeypatch, current, **changes):
+    calls = install_snapshot_stubs(monkeypatch, current, **changes)
+
+    def prepared(file, run_id, manuscript_id, digest, tree, settings):
+        calls.append("bound-source")
+        assert digest == "b" * 64
+        return BoundEvidenceSource(
+            run_id, manuscript_id, "pdf", "d" * 64, digest, pdf_bytes=b"pinned PDF bytes"
+        )
+
+    def located(bound, reference, tree, settings):
+        calls.append("bound-location")
+        assert bound.source_identity == "d" * 64
+        return EvidencePlacementOut(reference_id=reference.reference_id, state="page_only", page=2)
+
+    monkeypatch.setattr(service, "prepare_bound_evidence_source", prepared)
+    monkeypatch.setattr(service, "locate_bound_evidence", located)
+    return calls
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("wrong", ["snapshot", "reference"])
+async def test_bound_location_rejects_stale_or_foreign_reference_before_source(monkeypatch, wrong):
+    current = assessment()
+    calls = install_bound_stubs(monkeypatch, current)
+    with pytest.raises(ConflictError if wrong == "snapshot" else NotFoundError):
+        await service.get_private_evidence_location(
+            StubSession(),
+            7,
+            9,
+            "c" * 64 if wrong == "reference" else current.references.references[0].reference_id,
+            "c" * 64 if wrong == "snapshot" else current.snapshot_id,
+            Settings(_env_file=None),
+        )
+    assert calls == ["authorize", "snapshot"]
+
+
+@pytest.mark.asyncio
+async def test_bound_location_returns_only_fresh_location_and_content_identity(monkeypatch):
+    current = assessment()
+    calls = install_bound_stubs(monkeypatch, current)
+    session = StubSession()
+    out = await service.get_private_evidence_location(
+        session,
+        7,
+        9,
+        current.references.references[0].reference_id,
+        current.snapshot_id,
+        Settings(_env_file=None),
+    )
+    assert out.source_identity == "d" * 64 and out.source_format == "pdf"
+    assert out.snapshot_id == current.snapshot_id and out.placement.page == 2
+    assert "b" * 64 not in out.model_dump_json() and "pdf_bytes" not in out.model_dump_json()
+    assert session.refreshes == [{"with_for_update": {"read": True}}]
+    assert calls == [
+        "authorize",
+        "snapshot",
+        "bound-source",
+        "bound-location",
+        "authorize",
+        "snapshot",
+    ]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("change", ["authority", "assessment"])
+async def test_bound_location_withheld_after_authority_or_assessment_change(monkeypatch, change):
+    current = assessment()
+    calls = install_bound_stubs(
+        monkeypatch,
+        current,
+        deny_after=change == "authority",
+        after=assessment(identity="c" * 64) if change == "assessment" else None,
+    )
+    with pytest.raises(GoneError if change == "authority" else ConflictError):
+        await service.get_private_evidence_location(
+            StubSession(),
+            7,
+            9,
+            current.references.references[0].reference_id,
+            current.snapshot_id,
+            Settings(_env_file=None),
+        )
+    assert "bound-location" in calls
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("identity", ["d" * 64, "e" * 64])
+async def test_bound_reader_identity_is_checked_without_requiring_old_grade_epoch(
+    monkeypatch, identity
+):
+    calls = install_bound_stubs(monkeypatch, assessment())
+    if identity != "d" * 64:
+        with pytest.raises(ConflictError, match="source copy changed"):
+            await service.get_private_evidence_reader_source(
+                StubSession(),
+                7,
+                9,
+                identity,
+                Settings(_env_file=None),
+            )
+    else:
+        out = await service.get_private_evidence_reader_source(
+            StubSession(),
+            7,
+            9,
+            identity,
+            Settings(_env_file=None),
+        )
+        assert out.pdf_bytes == b"pinned PDF bytes"
+    assert calls == ["authorize", "bound-source", "authorize"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("stage", ["prepare", "locate"])
+async def test_bound_source_service_drains_both_native_stages_on_repeated_cancel(
+    monkeypatch, stage
+):
+    current = assessment()
+    calls = install_bound_stubs(monkeypatch, current)
+    settings = Settings(_env_file=None, evidence_source_slots=1)
+    entered, release = threading.Event(), threading.Event()
+    target = "prepare_bound_evidence_source" if stage == "prepare" else "locate_bound_evidence"
+    original = getattr(service, target)
+
+    def blocked(*args):
+        entered.set()
+        assert release.wait(timeout=5)
+        return original(*args)
+
+    monkeypatch.setattr(service, target, blocked)
+    session = StubSession()
+    task = asyncio.create_task(
+        service.get_private_evidence_location(
+            session,
+            7,
+            9,
+            current.references.references[0].reference_id,
+            current.snapshot_id,
+            settings,
+        )
+    )
+    try:
+        assert await asyncio.to_thread(entered.wait, 5)
+        task.cancel()
+        await asyncio.sleep(0)
+        task.cancel()
+        await asyncio.sleep(0)
+        assert not task.done()
+        assert session.refreshes == [{"with_for_update": {"read": True}}]
+        with pytest.raises(RateLimitedError), evidence_image_admission(settings):
+            pass
+    finally:
+        release.set()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+    assert calls.count("authorize") == 1
+    with evidence_image_admission(settings):
+        pass
 
 
 @pytest.mark.asyncio

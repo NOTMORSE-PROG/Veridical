@@ -4,11 +4,12 @@ import asyncio
 import base64
 import hashlib
 import json
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -33,7 +34,12 @@ from app.report.evidence_references import (
     build_evidence_reference_snapshot,
     public_evidence_reference,
 )
-from app.report.schemas import ReportOut
+from app.report.evidence_source import (
+    BoundEvidenceSource,
+    locate_bound_evidence,
+    prepare_bound_evidence_source,
+)
+from app.report.schemas import DocumentParagraphsOut, ReportOut
 from app.storage.access import read_source
 
 
@@ -53,6 +59,23 @@ class EvidencePageOut(BaseModel):
     placement: EvidencePlacementOut
     image_data_url: str | None
     caption: str
+
+
+class EvidenceLocationOut(BaseModel):
+    model_config = ConfigDict(frozen=True, strict=True, extra="forbid")
+
+    snapshot_id: str
+    source_identity: str | None
+    source_format: Literal["pdf", "docx"] | None
+    placement: EvidencePlacementOut
+    caption: str
+
+
+class EvidenceDocumentOut(BaseModel):
+    model_config = ConfigDict(frozen=True, strict=True, extra="forbid")
+
+    source_identity: str
+    document: DocumentParagraphsOut
 
 
 @dataclass(frozen=True)
@@ -274,3 +297,115 @@ async def _admitted_evidence_page(session, run, reference_id, snapshot_id, setti
             else None
         ),
     )
+
+
+async def _read_bound_reader_source(
+    session: AsyncSession,
+    run: CheckRun,
+    manuscript: Manuscript,
+    expected_sha256: Callable[[], str | None],
+    settings: Settings,
+    *,
+    consume=None,
+):
+    async def reader():
+        source_file = EvidenceSourceFile(manuscript.file_ref, manuscript.purged_at)
+        try:
+            tree = SectionTree.model_validate(
+                manuscript.section_tree or {"source": "none", "nodes": []}
+            )
+        except ValidationError:
+            raise ConflictError("The saved source structure could not be read.") from None
+        digest = expected_sha256()
+        run_id, manuscript_id = run.id, manuscript.id
+
+        def work():
+            bound = prepare_bound_evidence_source(
+                source_file, run_id, manuscript_id, digest, tree, settings
+            )
+            return consume(bound, tree) if consume is not None else bound
+
+        return await asyncio.to_thread(work)
+
+    return await read_source(session, manuscript, reader)
+
+
+async def get_private_evidence_location(
+    session: AsyncSession,
+    check_run_id: int,
+    instructor_id: int,
+    reference_id: str,
+    snapshot_id: str,
+    settings: Settings,
+) -> EvidenceLocationOut:
+    authority = dict(check_run_id=check_run_id, instructor_id=instructor_id)
+    run = await authorize_evidence_run(session, **authority)
+    with evidence_image_admission(settings):
+        assessment = await recorded_evidence_assessment(session, run, "private", settings)
+        if snapshot_id != assessment.snapshot_id:
+            raise ConflictError("This assessment changed. Reload its evidence before continuing.")
+        reference = next(
+            (ref for ref in assessment.references.references if ref.reference_id == reference_id),
+            None,
+        )
+        if reference is None:
+            raise NotFoundError("This evidence record doesn't exist.")
+        bound = None
+        if reference.source_state != "not_checked":
+            placement = EvidencePlacementOut(
+                reference_id=reference.reference_id,
+                state="unavailable",
+                reason=reference.source_state,
+            )
+        else:
+            manuscript = await session.get(Manuscript, run.manuscript_id)
+            bound, placement = await _read_bound_reader_source(
+                session,
+                run,
+                manuscript,
+                lambda: assessment.references.source_sha256,
+                settings,
+                consume=lambda source, tree: (
+                    source,
+                    locate_bound_evidence(source, reference, tree, settings),
+                ),
+            )
+        current_run = await authorize_evidence_run(session, **authority)
+        current = await recorded_evidence_assessment(session, current_run, "private", settings)
+        if current.snapshot_id != assessment.snapshot_id:
+            raise ConflictError("This assessment changed. Reload its evidence before continuing.")
+        return EvidenceLocationOut(
+            snapshot_id=assessment.snapshot_id,
+            source_identity=bound.source_identity if bound is not None else None,
+            source_format=bound.source_format if bound is not None else None,
+            placement=placement,
+            caption=placement_caption(placement.state, placement.reason),
+        )
+
+
+async def get_private_evidence_reader_source(
+    session: AsyncSession,
+    check_run_id: int,
+    instructor_id: int,
+    source_identity: str,
+    settings: Settings,
+) -> BoundEvidenceSource:
+    """Read source content, independently of a later instructor grade revision.
+
+    The requested content identity must match current owned, hash-bound source
+    bytes/projection. It is not a bearer credential or an assessment judgment.
+    """
+    authority = dict(check_run_id=check_run_id, instructor_id=instructor_id)
+    run = await authorize_evidence_run(session, **authority)
+    with evidence_image_admission(settings):
+        manuscript = await session.get(Manuscript, run.manuscript_id)
+        bound = await _read_bound_reader_source(
+            session, run, manuscript, lambda: manuscript.content_hash, settings
+        )
+        current_run = await authorize_evidence_run(session, **authority)
+        if (
+            current_run.manuscript_id != bound.manuscript_id
+            or source_identity != bound.source_identity
+        ):
+            raise ConflictError("This source copy changed. Review its current evidence location.")
+        return bound

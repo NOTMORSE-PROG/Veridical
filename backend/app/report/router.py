@@ -14,10 +14,14 @@ from app.models.instructor import Instructor
 from app.ratelimit import enforce_action_rate_limit
 from app.report.evidence_images import evidence_image_admission
 from app.report.evidence_service import (
+    EvidenceDocumentOut,
+    EvidenceLocationOut,
     EvidenceManifestOut,
     EvidencePageOut,
     get_evidence_manifest,
     get_evidence_page,
+    get_private_evidence_location,
+    get_private_evidence_reader_source,
 )
 from app.report.export import build_report_pdf
 from app.report.judgment_schemas import (
@@ -88,7 +92,7 @@ async def get_evidence_page_route(
     instructor: Annotated[Instructor, Depends(get_current_instructor)],
 ) -> EvidencePageOut:
     settings = get_settings()
-    enforce_action_rate_limit(settings, "evidence_source_image", instructor.id)
+    enforce_action_rate_limit(settings, "evidence_source", instructor.id)
     return await get_evidence_page(
         session,
         reference_id,
@@ -97,6 +101,72 @@ async def get_evidence_page_route(
         check_run_id=check_run_id,
         instructor_id=instructor.id,
     )
+
+
+@router.get(
+    "/check-runs/{check_run_id}/evidence/{reference_id}/location",
+    response_model=EvidenceLocationOut,
+)
+async def get_evidence_location_route(
+    check_run_id: int,
+    reference_id: Annotated[str, Path(pattern=r"^[a-f0-9]{64}$")],
+    snapshot_id: Annotated[str, Query(pattern=r"^[a-f0-9]{64}$")],
+    session: Annotated[AsyncSession, Depends(get_session)],
+    instructor: Annotated[Instructor, Depends(get_current_instructor)],
+) -> EvidenceLocationOut:
+    settings = get_settings()
+    enforce_action_rate_limit(settings, "evidence_source", instructor.id)
+    return await get_private_evidence_location(
+        session, check_run_id, instructor.id, reference_id, snapshot_id, settings
+    )
+
+
+@router.get("/check-runs/{check_run_id}/evidence/source-file")
+async def get_evidence_source_file_route(
+    check_run_id: int,
+    source_identity: Annotated[str, Query(pattern=r"^[a-f0-9]{64}$")],
+    session: Annotated[AsyncSession, Depends(get_session)],
+    instructor: Annotated[Instructor, Depends(get_current_instructor)],
+) -> Response:
+    settings = get_settings()
+    enforce_action_rate_limit(settings, "evidence_source", instructor.id)
+    source = await get_private_evidence_reader_source(
+        session, check_run_id, instructor.id, source_identity, settings
+    )
+    if source.source_format != "pdf" or source.pdf_bytes is None:
+        from app.errors import ConflictError
+
+        raise ConflictError("This source is not a PDF. Open its extracted manuscript text.")
+    return Response(
+        source.pdf_bytes,
+        media_type="application/pdf",
+        headers={
+            "X-Evidence-Source-Identity": source.source_identity,
+            "X-Content-Type-Options": "nosniff",
+            "Referrer-Policy": "no-referrer",
+        },
+    )
+
+
+@router.get(
+    "/check-runs/{check_run_id}/evidence/source-document", response_model=EvidenceDocumentOut
+)
+async def get_evidence_source_document_route(
+    check_run_id: int,
+    source_identity: Annotated[str, Query(pattern=r"^[a-f0-9]{64}$")],
+    session: Annotated[AsyncSession, Depends(get_session)],
+    instructor: Annotated[Instructor, Depends(get_current_instructor)],
+) -> EvidenceDocumentOut:
+    settings = get_settings()
+    enforce_action_rate_limit(settings, "evidence_source", instructor.id)
+    source = await get_private_evidence_reader_source(
+        session, check_run_id, instructor.id, source_identity, settings
+    )
+    if source.source_format != "docx" or source.document is None:
+        from app.errors import ConflictError
+
+        raise ConflictError("This source is not DOCX. Open its original PDF pages.")
+    return EvidenceDocumentOut(source_identity=source.source_identity, document=source.document)
 
 
 @router.get(

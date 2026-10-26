@@ -22,6 +22,8 @@ def _max_attempts_for(settings: Settings, scope: str) -> int:
         return settings.storage_probe_rate_limit_max_attempts
     if scope == "pdf_page_text":
         return settings.pdf_page_text_rate_limit_max_attempts
+    if scope == "evidence_source":
+        return settings.evidence_source_rate_limit_max_attempts
     return settings.action_rate_limit_max_attempts
 
 

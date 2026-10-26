@@ -125,6 +125,30 @@ def pinned(data, settings=None):
     )
 
 
+def test_private_reader_returns_exact_pinned_source_bytes_and_owned_placement(sources, monkeypatch):
+    from app.report import evidence_source
+    from app.report.evidence_images import EvidenceSourceFile
+
+    path, data = sources["text"]
+    monkeypatch.setattr(evidence_source, "manuscript_source_file", lambda *args: (path, "pdf"))
+    settings = Settings(_env_file=None)
+    value = evidence_source.prepare_bound_evidence_source(
+        EvidenceSourceFile("private-key", None),
+        7,
+        8,
+        hashlib.sha256(data).hexdigest(),
+        TREE,
+        settings,
+    )
+    assert value.pdf_bytes == data and value.document is None
+    assert len(value.source_identity) == 64
+    placement = evidence_source.locate_bound_evidence(
+        value, reference(data, UNIQUE), TREE, settings
+    )
+    assert placement.state == "text_layer_match" and placement.page == 1 and placement.boxes
+    assert path.read_bytes() == data
+
+
 def test_unique_full_quote_gets_only_qualified_text_layer_location(sources):
     _, data = sources["text"]
     with pinned(data) as source:

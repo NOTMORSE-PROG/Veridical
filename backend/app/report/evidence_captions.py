@@ -21,4 +21,6 @@ def placement_caption(state, reason):
         return SCOPE_FIRST_PAGE_CAPTION
     if state == "page_only":
         return PAGE_ONLY_CAPTION
+    if state == "paragraph_only":
+        return _COPY["paragraph_only"]
     return PLACEMENT_UNAVAILABLE.get(reason, PLACEMENT_UNAVAILABLE["location_unavailable"])

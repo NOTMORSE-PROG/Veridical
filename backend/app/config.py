@@ -87,6 +87,8 @@ class Settings(BaseSettings):
     evidence_source_max_rendered_bytes: int = Field(default=16_777_216, gt=0)
     # Charge raster reservations even when a later byte cap withholds the image.
     evidence_source_max_rendered_pixels: int = Field(default=48_000_000, gt=0)
+    evidence_source_max_extraction_bytes: int = Field(default=33_554_432, gt=0)
+    evidence_source_rate_limit_max_attempts: int = Field(default=120, gt=0)
     pdf_page_text_raw_max_bytes: int = Field(default=33554432, gt=0)
     pdf_page_text_max_blocks: int = Field(default=256, gt=0)
     pdf_page_text_max_chars: int = Field(default=40000, gt=0)
