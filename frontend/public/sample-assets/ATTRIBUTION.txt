@@ -1,0 +1,14 @@
+Stock & Inventory Management System
+A Software Development Capstone Project Report in Software Engineering
+Md Amir Hamja, Nafisha Anjum, Sabbir Wahed Maruf (2025)
+Daffodil International University
+Source: https://zenodo.org/records/17101449
+DOI: https://doi.org/10.5281/zenodo.17101449
+License: Creative Commons Attribution 4.0 International (CC BY 4.0)
+https://creativecommons.org/licenses/by/4.0/
+
+The complete 109-page original PDF is redistributed unchanged. The reader and download use the same original bytes. No source content, figures, authorship, or metadata has been altered.
+SHA-256 ef662fb9cb5619945c69183a8576f3f945109adc51bff408a6cd6fc21626c5fd
+MD5 045014e699b081cadbb912fc921545c8 (matches the repository's published checksum)
+
+VERIDICAL's prepared review records are separate educational examples, not the authors' course grade, an accusation, or a live analysis. The F7 reading-copy example uses two catalog entries of the SAME published source; it is not a comparison with an independent author's work.

@@ -14,6 +14,7 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createBrowserRouter, createRoutesFromElements, Route, RouterProvider } from "react-router";
 import { AuditLogPage } from "./audit/AuditLog";
+import { isWorkspaceSample, WORKSPACE_SAMPLE } from "./demo/workspaceFixture";
 import { RequireAuth } from "./auth/RequireAuth";
 import { CheckProgressPage } from "./check/Progress";
 import { SignalDocumentViewerPage } from "./document/SignalDocumentViewer";
@@ -76,6 +77,7 @@ const router = createBrowserRouter(
       </Route>
     ,
   ),
+  { basename: isWorkspaceSample() ? WORKSPACE_SAMPLE.prefix : undefined },
 );
 
 export default function App() {

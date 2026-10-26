@@ -6,6 +6,7 @@ import { SIGNAL_NAVIGATION } from "../config/signalRoutes";
 import { CoachMark } from "../onboarding/CoachMark";
 import { TourProvider, useTour } from "../onboarding/TourContext";
 import { SignalMark, SignalWordmark } from "../ui/SignalMark";
+import { isWorkspaceSample } from "../demo/workspaceFixture";
 
 function initials(name: string): string {
   return name
@@ -18,6 +19,7 @@ function initials(name: string): string {
 
 function CapacityStatement({ compact = false }: { compact?: boolean }) {
   const { data: quota, isPending, isError } = useQuota();
+  if (isWorkspaceSample()) return <span className="signal-capacity">Prepared sample · no live calls</span>;
   if (isPending) {
     return <span className="signal-capacity" role="status">Checking capacity…</span>;
   }

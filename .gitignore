@@ -12,6 +12,8 @@ design/
 # ...except the synthetic ingestion fixtures — they ARE the CI gate
 # (V-008; real manuscripts stay uncommittable, D-007).
 !backend/tests/fixtures/ingest/*.pdf
+# Publicly licensed demonstration source, with attribution and a pinned checksum.
+!frontend/public/sample-assets/stock-inventory-capstone.pdf
 
 # ── Secrets / environment ────────────────────────────────────────
 .env

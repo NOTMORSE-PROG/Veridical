@@ -4,6 +4,7 @@ import { Alert } from "../ui/Alert";
 import { Button } from "../ui/Button";
 import { Dialog } from "../ui/Dialog";
 import { useCreateShareLink, useRevokeShareLink, useShareLink } from "./useShare";
+import { isWorkspaceSample, WORKSPACE_SAMPLE } from "../demo/workspaceFixture";
 
 type ExpirySelection = "current" | (typeof SHARE_EXPIRY_OPTIONS)[number]["value"];
 
@@ -47,7 +48,7 @@ export function SignalShareDialog({ checkRunId, manuscriptLabel, onClose }: {
     if (confirming) confirmRef.current?.focus();
   }, [confirming]);
 
-  const shareUrl = link ? `${window.location.origin}/shared/${link.token}` : "";
+  const shareUrl = link ? `${window.location.origin}${isWorkspaceSample() ? WORKSPACE_SAMPLE.prefix : ""}/shared/${link.token}` : "";
   const error = create.error ?? revoke.error;
   const selectedOption = selection === "current" ? undefined : SHARE_EXPIRY_OPTIONS.find((entry) => entry.value === selection);
 

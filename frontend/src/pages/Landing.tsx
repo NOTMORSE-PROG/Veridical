@@ -97,6 +97,7 @@ function ServiceUnavailable({ retry }: { retry: () => void }) {
           <Button type="button" variant="secondary" onClick={retry}>
             Try again
           </Button>
+          <ActionLink to="/demo" variant="secondary">Explore interactive sample</ActionLink>
         </div>
       </main>
     </div>
@@ -136,6 +137,9 @@ function LandingPage() {
           <div className="signal-hero__actions">
             <ActionLink to="/signin" variant="brand">
               Sign in as instructor
+            </ActionLink>
+            <ActionLink to="/demo" variant="secondary">
+              Explore interactive sample
             </ActionLink>
             <p className="signal-hero__account-note">
               Accounts are issued by your program administrator.
