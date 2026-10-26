@@ -7,12 +7,19 @@ design.
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Path, Query, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.dependencies import get_current_instructor
+from app.config import get_settings
 from app.db import get_session
 from app.models.instructor import Instructor
+from app.report.evidence_service import (
+    EvidenceManifestOut,
+    EvidencePageOut,
+    get_evidence_manifest,
+    get_evidence_page,
+)
 from app.share.schemas import CreateShareLinkIn, SharedReportOut, ShareLinkOut
 from app.share.service import (
     create_share_link,
@@ -66,3 +73,27 @@ async def get_shared_report_route(
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> SharedReportOut:
     return await get_shared_report(session, token)
+
+
+@router.get("/shared/{token}/evidence", response_model=EvidenceManifestOut)
+async def get_shared_evidence_manifest_route(
+    token: str,
+    response: Response,
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> EvidenceManifestOut:
+    response.headers["Referrer-Policy"] = "no-referrer"
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    return await get_evidence_manifest(session, get_settings(), token=token)
+
+
+@router.get("/shared/{token}/evidence/{reference_id}/page", response_model=EvidencePageOut)
+async def get_shared_evidence_page_route(
+    token: str,
+    reference_id: Annotated[str, Path(pattern=r"^[a-f0-9]{64}$")],
+    snapshot_id: Annotated[str, Query(pattern=r"^[a-f0-9]{64}$")],
+    response: Response,
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> EvidencePageOut:
+    response.headers["Referrer-Policy"] = "no-referrer"
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    return await get_evidence_page(session, reference_id, snapshot_id, get_settings(), token=token)

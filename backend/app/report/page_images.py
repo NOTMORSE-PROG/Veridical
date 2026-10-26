@@ -144,6 +144,7 @@ def _render_page_png(
     *,
     llm_disclosure: tuple[str, str] | None,
     settings: Settings,
+    box_coordinates: Literal["legacy_region", "pdf_points"] = "legacy_region",
 ) -> bytes:
     """Render the visible source unchanged, with an optional external notice.
 
@@ -170,7 +171,12 @@ def _render_page_png(
         for bbox in merged:
             # Recovered coordinates are unrotated. Map into the same visible
             # viewport as get_pixmap, then clip each border through set_rect.
-            rect = _to_mupdf_rect(bbox, page.rect.height) * transform
+            native = (
+                pymupdf.Rect(bbox) * page.transformation_matrix
+                if box_coordinates == "pdf_points"
+                else _to_mupdf_rect(bbox, page.rect.height)
+            )
+            rect = native * transform
             border = (rect + (-stroke / 2, -stroke / 2, stroke / 2, stroke / 2)).irect
             for edge in (
                 (border.x0, border.y0, border.x1, border.y0 + stroke),

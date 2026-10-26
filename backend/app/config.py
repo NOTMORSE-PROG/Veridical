@@ -81,6 +81,10 @@ class Settings(BaseSettings):
     # Optional local-cache PDF reading aid; these bound Python read/output work,
     # not native PDF decoding memory or execution time.
     pdf_page_text_slots: int = Field(default=1, gt=0)
+    evidence_source_slots: int = Field(default=1, gt=0)
+    evidence_source_max_highlight_boxes: int = Field(default=128, gt=0)
+    evidence_source_max_rendered_bytes: int = Field(default=16_777_216, gt=0)
+    evidence_source_max_rendered_pixels: int = Field(default=48_000_000, gt=0)
     pdf_page_text_raw_max_bytes: int = Field(default=33554432, gt=0)
     pdf_page_text_max_blocks: int = Field(default=256, gt=0)
     pdf_page_text_max_chars: int = Field(default=40000, gt=0)

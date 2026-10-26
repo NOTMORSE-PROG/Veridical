@@ -37,6 +37,8 @@ from app.pipeline.router import router as pipeline_router
 from app.pipeline.worker import worker_loop
 from app.report.router import (
     export_report_pdf_route,
+    get_evidence_manifest_route,
+    get_evidence_page_route,
     get_manuscript_docx_image_route,
     get_manuscript_file_route,
     get_manuscript_page_text_route,
@@ -67,6 +69,8 @@ _ALEMBIC_INI = Path(__file__).resolve().parent.parent / "alembic.ini"
 _PRIVATE_DOCUMENT_CACHE_CONTROL = "private, no-store"
 _PRIVATE_DOCUMENT_ENDPOINTS = frozenset(
     {
+        get_evidence_manifest_route,
+        get_evidence_page_route,
         get_manuscript_viewer_route,
         list_reuse_passage_matches_route,
         get_manuscript_paragraphs_route,

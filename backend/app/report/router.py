@@ -12,6 +12,12 @@ from app.config import get_settings
 from app.db import get_session
 from app.models.instructor import Instructor
 from app.ratelimit import enforce_action_rate_limit
+from app.report.evidence_service import (
+    EvidenceManifestOut,
+    EvidencePageOut,
+    get_evidence_manifest,
+    get_evidence_page,
+)
 from app.report.export import build_report_pdf
 from app.report.judgment_schemas import (
     JudgmentContextOut,
@@ -57,6 +63,39 @@ from app.report.service import (
 )
 
 router = APIRouter(tags=["report"])
+
+
+@router.get("/check-runs/{check_run_id}/evidence", response_model=EvidenceManifestOut)
+async def get_evidence_manifest_route(
+    check_run_id: int,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    instructor: Annotated[Instructor, Depends(get_current_instructor)],
+) -> EvidenceManifestOut:
+    return await get_evidence_manifest(
+        session, get_settings(), check_run_id=check_run_id, instructor_id=instructor.id
+    )
+
+
+@router.get(
+    "/check-runs/{check_run_id}/evidence/{reference_id}/page", response_model=EvidencePageOut
+)
+async def get_evidence_page_route(
+    check_run_id: int,
+    reference_id: Annotated[str, Path(pattern=r"^[a-f0-9]{64}$")],
+    snapshot_id: Annotated[str, Query(pattern=r"^[a-f0-9]{64}$")],
+    session: Annotated[AsyncSession, Depends(get_session)],
+    instructor: Annotated[Instructor, Depends(get_current_instructor)],
+) -> EvidencePageOut:
+    settings = get_settings()
+    enforce_action_rate_limit(settings, "evidence_source_image", instructor.id)
+    return await get_evidence_page(
+        session,
+        reference_id,
+        snapshot_id,
+        settings,
+        check_run_id=check_run_id,
+        instructor_id=instructor.id,
+    )
 
 
 @router.get(

@@ -38,11 +38,10 @@ def manuscript_source_file(manuscript: Manuscript, settings: Settings) -> tuple[
     raise ConflictError("This manuscript's source file format isn't supported for viewing.")
 
 
-def open_source_pdf(path: Path) -> pymupdf.Document:
-    """Successful native open alone also accepts non-PDF document formats."""
+def _validated_source_pdf(open_document) -> pymupdf.Document:
     doc = None
     try:
-        doc = pymupdf.open(path)
+        doc = open_document()
         if not doc.is_pdf or doc.needs_pass or doc.page_count < 1:
             raise ValueError("Source is not a readable PDF")
         return doc
@@ -52,6 +51,16 @@ def open_source_pdf(path: Path) -> pymupdf.Document:
     # Native constructor tracebacks can retain an open stream. Leave the
     # handler before raising so the domain error does not keep that context.
     raise ConflictError("This manuscript's source file could not be opened as a PDF.") from None
+
+
+def open_source_pdf(path: Path) -> pymupdf.Document:
+    """Successful native open alone also accepts non-PDF document formats."""
+    return _validated_source_pdf(lambda: pymupdf.open(path))
+
+
+def open_source_pdf_bytes(data: bytes) -> pymupdf.Document:
+    """The same native validation/cleanup over an already pinned byte snapshot."""
+    return _validated_source_pdf(lambda: pymupdf.open(stream=data, filetype="pdf"))
 
 
 def readable_source_file(manuscript: Manuscript, settings: Settings) -> tuple[Path, SourceFormat]:
