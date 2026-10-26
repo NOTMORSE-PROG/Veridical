@@ -67,7 +67,7 @@ def test_legacy_missing_optional_attribution_and_rung_is_not_fabricated(resoluti
         {"detail": {"resolution": True}},
         {"detail": {"resolution": {"type": "invented", "reason": "actual reason"}}},
         {"detail": {"resolution": {"type": "mark_pass", "reason": 42}}},
-        {"detail": {"resolution": {"type": "mark_pass", "reason": "\t\u2003\n"}}},
+        {"detail": {"resolution": {"type": "accept_majority", "reason": "\t\u2003\n"}}},
         {"outcome": ResultOutcome.escalated},
         {"score": Decimal("50")},
         {"score": Decimal("NaN")},
@@ -82,6 +82,43 @@ def test_malformed_or_nonmanual_rows_do_not_gain_authority(change):
 def test_unversioned_manual_is_not_silently_given_a_current_token():
     assert manual_resolution(result(judgment_revision=None)) is not None
     assert snapshot_judgment(result(judgment_revision=None)) is None
+
+
+@pytest.mark.parametrize(
+    "resolution,score,outcome",
+    [
+        ("mark_pass", "100", ResultOutcome.passed),
+        ("mark_fail", "0", ResultOutcome.failed),
+        ("mark_level", "50", ResultOutcome.passed),
+    ],
+)
+@pytest.mark.parametrize("comment", ["", "\t\u2003\n", "short"])
+def test_optional_ordinary_comment_preserves_recorded_grade_and_audit_snapshot(
+    resolution, score, outcome, comment
+):
+    row = result(resolution, score, outcome, judgment_revision=1)
+    row.detail["resolution"].update(
+        reason=comment, by_instructor_id=7, at="2026-10-26T01:00:00+00:00"
+    )
+    if resolution == "mark_level":
+        row.detail["level"] = {"ordinal": 2, "name": "Custom level", "points": 1, "max_points": 2}
+    snapshot = snapshot_judgment(row)
+    assert manual_resolution(row) is not None and snapshot is not None
+    assert snapshot.reason == comment and snapshot.provenance == "recorded"
+    assert snapshot.model_dump(mode="json")["reason"] == comment
+
+
+@pytest.mark.parametrize(
+    "resolution,score,outcome",
+    [
+        ("accept_majority", "100", ResultOutcome.passed),
+        ("needs_document", None, ResultOutcome.not_applicable),
+    ],
+)
+def test_exceptional_empty_reason_never_gains_a_recognized_judgment(resolution, score, outcome):
+    row = result(resolution, score, outcome)
+    row.detail["resolution"]["reason"] = ""
+    assert manual_resolution(row) is None and snapshot_judgment(row) is None
 
 
 def test_accept_verb_equivalence_does_not_collapse_partial_or_distinct_named_levels():
@@ -175,7 +212,7 @@ def test_configuration_rejects_impossible_limits():
         {"score": None},
         {"outcome": "failed"},
         {"resolution_type": "needs_document"},
-        {"reason": "\t\u2003\n"},
+        {"reason": None},
         {"actor_id": None},
         {"recorded_at": "2026-10-23T01:00:00"},
         {"level": {"name": "Grade", "ordinal": False, "points": 1, "max_points": 3}},

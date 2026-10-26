@@ -58,9 +58,10 @@ class JudgmentSnapshot(PrivateJudgmentModel):
 
         # Reuse the persisted manual-grade contract; historical JSON is not
         # trusted merely because it carries a schema-version label.
-        if not self.reason.strip() or not manual_grade_consistent(
-            self.resolution_type, self.outcome, self.score
-        ):
+        if (
+            self.resolution_type in {"needs_document", "accept_majority"}
+            and not self.reason.strip()
+        ) or not manual_grade_consistent(self.resolution_type, self.outcome, self.score):
             raise ValueError("The recorded judgment has inconsistent grade facts.")
         if self.recorded_at is not None and self.recorded_at.utcoffset() is None:
             raise ValueError("A recorded timestamp must identify its time zone.")

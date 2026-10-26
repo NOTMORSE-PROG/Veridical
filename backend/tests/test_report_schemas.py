@@ -1,7 +1,4 @@
-"""Pure Pydantic-schema-level tests for `app.report.schemas` -- no DB, no
-live server. BUG-096: the resolution-reason minimum length lives here.
-BUG-105: the identical fix for the reopen reason.
-"""
+"""Pending grade comments are optional; exception and reopen reasons stay required."""
 
 import pytest
 from pydantic import ValidationError
@@ -10,17 +7,16 @@ from app.config import Settings
 from app.report.schemas import ReopenIn, ResolveEscalationIn
 
 
-def test_a_one_character_reason_is_rejected():
-    """The exact first-time-user review-reproduced failure: "x" used to satisfy
-    `min_length=1` and was then published verbatim to the report, the
-    exported PDF, and the public share link as "Marked Pass. x"."""
+@pytest.mark.parametrize("resolution", ["needs_document", "accept_majority"])
+def test_an_exception_one_character_reason_is_rejected(resolution):
     with pytest.raises(ValidationError, match="at least"):
-        ResolveEscalationIn(expected_revision=0, resolution="mark_pass", reason="x")
+        ResolveEscalationIn(expected_revision=0, resolution=resolution, reason="x")
 
 
-def test_a_reason_of_only_whitespace_is_rejected():
+@pytest.mark.parametrize("resolution", ["needs_document", "accept_majority"])
+def test_an_exception_reason_of_only_whitespace_is_rejected(resolution):
     with pytest.raises(ValidationError, match="at least"):
-        ResolveEscalationIn(expected_revision=0, resolution="mark_pass", reason="          ")
+        ResolveEscalationIn(expected_revision=0, resolution=resolution, reason="          ")
 
 
 def test_a_real_reason_is_accepted_and_stripped():
@@ -30,16 +26,43 @@ def test_a_real_reason_is_accepted_and_stripped():
     assert parsed.reason == "Verified in Chapter 2."
 
 
-def test_a_reason_exactly_at_the_minimum_is_accepted():
+@pytest.mark.parametrize("resolution", ["needs_document", "accept_majority"])
+def test_an_exception_reason_exactly_at_the_minimum_is_accepted(resolution):
     minimum = Settings().resolution_reason_min_length
-    parsed = ResolveEscalationIn(expected_revision=0, resolution="mark_pass", reason="x" * minimum)
+    parsed = ResolveEscalationIn(expected_revision=0, resolution=resolution, reason="x" * minimum)
     assert len(parsed.reason) == minimum
 
 
-def test_a_reason_one_character_short_of_the_minimum_is_rejected():
+@pytest.mark.parametrize("resolution", ["needs_document", "accept_majority"])
+def test_an_exception_reason_one_character_short_of_the_minimum_is_rejected(resolution):
     minimum = Settings().resolution_reason_min_length
     with pytest.raises(ValidationError, match="at least"):
-        ResolveEscalationIn(expected_revision=0, resolution="mark_pass", reason="x" * (minimum - 1))
+        ResolveEscalationIn(expected_revision=0, resolution=resolution, reason="x" * (minimum - 1))
+
+
+@pytest.mark.parametrize("resolution", ["mark_pass", "mark_fail", "mark_level"])
+@pytest.mark.parametrize("comment", ["", "  ", "x", "  Brief note  "])
+def test_ordinary_grade_comments_are_optional_and_normalized(resolution, comment):
+    parsed = ResolveEscalationIn(expected_revision=0, resolution=resolution, reason=comment)
+    assert parsed.reason == comment.strip()
+
+
+@pytest.mark.parametrize("resolution", ["mark_pass", "mark_fail", "mark_level"])
+def test_ordinary_grade_can_omit_the_comment_field(resolution):
+    parsed = ResolveEscalationIn(expected_revision=0, resolution=resolution)
+    assert parsed.reason == ""
+
+
+@pytest.mark.parametrize("resolution", ["needs_document", "accept_majority"])
+def test_exception_cannot_omit_its_reason(resolution):
+    with pytest.raises(ValidationError, match="at least"):
+        ResolveEscalationIn(expected_revision=0, resolution=resolution)
+
+
+@pytest.mark.parametrize("value", [None, 123])
+def test_optional_comment_remains_a_text_field(value):
+    with pytest.raises(ValidationError):
+        ResolveEscalationIn(expected_revision=0, resolution="mark_pass", reason=value)
 
 
 def test_default_minimum_matches_the_frontend_hardcoded_copy():

@@ -17,7 +17,7 @@ MANUAL_RESOLUTIONS = frozenset(
 
 
 def manual_resolution(result: Any) -> dict[str, Any] | None:
-    """Core recognition mirrors migration0040; callers establish run/rubric binding."""
+    """Recognize persisted grades; callers establish run/rubric and history binding."""
     if result.criterion_id is None or result.kind not in (CheckKind.semantic, CheckKind.structural):
         return None
     if not isinstance(result.detail, dict):
@@ -29,7 +29,7 @@ def manual_resolution(result: Any) -> dict[str, Any] | None:
     if (
         resolution not in MANUAL_RESOLUTIONS
         or not isinstance(value.get("reason"), str)
-        or not value["reason"].strip()
+        or (resolution in {"needs_document", "accept_majority"} and not value["reason"].strip())
     ):
         return None
     score = float(result.score) if result.score is not None else None
