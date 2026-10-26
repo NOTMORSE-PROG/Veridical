@@ -437,6 +437,7 @@
   --signal-report-jump-grid: repeat(4, minmax(0, 1fr));
   --signal-resolution-card-grid: repeat(auto-fit, minmax(min(100%, 22rem), 1fr));
   --signal-review-progress-grid: repeat(auto-fit, minmax(min(100%, 14rem), 1fr));
+  --signal-library-add-column-min: 27rem;
   --signal-settings-column-min: 28rem;
   --signal-settings-model-table-min: 48rem;
   --signal-settings-form-max: 40rem;

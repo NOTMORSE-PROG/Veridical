@@ -919,7 +919,7 @@
   }
 
   .signal-route {
-    width: min(100%, var(--signal-workbench-width));
+    width: 100%;
     min-height: 100%;
     margin-inline: auto;
     padding: var(--signal-workspace-padding);
@@ -2216,7 +2216,7 @@
   }
 
   .signal-report {
-    max-width: var(--signal-workbench-width);
+    max-width: none;
   }
 
   .signal-report-header {
@@ -4377,7 +4377,7 @@
   .signal-library,
   .signal-library-detail,
   .signal-library-compare {
-    max-width: var(--signal-workbench-width);
+    max-width: none;
   }
 
   .signal-library-header,
@@ -4489,11 +4489,38 @@
     gap: var(--signal-space-2) var(--signal-space-3);
   }
 
-  .signal-library-add__form,
-  .signal-library-batch,
   .signal-library-editor {
     display: grid;
     max-width: var(--signal-prose-width);
+    gap: var(--signal-space-5);
+  }
+
+  .signal-library-add__form {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-start;
+    gap: var(--signal-space-6);
+    min-inline-size: 0;
+  }
+
+  .signal-library-add__column {
+    display: grid;
+    flex: 1 1 calc((100% - var(--signal-space-6)) / 2);
+    min-inline-size: min(100%, var(--signal-library-add-column-min));
+    gap: var(--signal-space-5);
+  }
+
+  .signal-library-add__form > .signal-form__actions {
+    flex: 1 1 100%;
+  }
+
+  .signal-library-add__form .signal-field-hint {
+    max-inline-size: var(--signal-prose-width);
+  }
+
+  .signal-library-batch {
+    display: grid;
+    min-inline-size: 0;
     gap: var(--signal-space-5);
   }
 
@@ -5282,7 +5309,7 @@
   }
 
   .signal-audit {
-    max-width: var(--signal-content-width);
+    max-width: none;
   }
 
   .signal-audit-context {
@@ -5357,7 +5384,7 @@
 
   .signal-shared-main {
     width: 100%;
-    max-width: var(--signal-workbench-width);
+    max-width: none;
     flex: 1;
     align-self: center;
     padding: var(--signal-workspace-padding);

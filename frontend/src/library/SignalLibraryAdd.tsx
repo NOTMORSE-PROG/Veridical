@@ -438,132 +438,136 @@ export function SignalLibraryAddPage() {
             submit();
           }}
         >
-          <div className="signal-field">
-            <span className="signal-library-add__label" id={`${fileInputId}-label`}>Manuscript files</span>
-            <p id={filesHintId} className="signal-field-hint">
-              PDF or DOCX. Choose one or more files; each becomes its own Library record. VERIDICAL reads the
-              text only, so a scanned copy without selectable text cannot be added.
-            </p>
-            <div className="signal-library-dropzone" data-invalid={filesError ? true : undefined}>
-              <input
-                id={fileInputId}
-                type="file"
-                multiple
-                accept={ACCEPT}
-                className="sr-only"
-                aria-labelledby={`${fileInputId}-label`}
-                aria-describedby={filesError ? `${filesHintId} ${filesErrorId}` : filesHintId}
-                aria-invalid={filesError ? true : undefined}
-                onChange={(event) => {
-                  chooseFiles(event.target.files);
-                  event.target.value = "";
-                }}
-              />
-              <label htmlFor={fileInputId} className="signal-button signal-button--secondary">
-                Choose files
-              </label>
-              <span>{files.length ? plural(files.length, "file chosen", "files chosen") : "No files chosen yet."}</span>
-            </div>
-            {filesError && (
-              <p id={filesErrorId} className="signal-field__error" role="alert">{filesError}</p>
-            )}
-            {typeErrors.map((name) => (
-              <p key={name} className="signal-field__error">
-                “{name}” is not a PDF or DOCX file, so it was not added to the list.
+          <div className="signal-library-add__column">
+            <div className="signal-field">
+              <span className="signal-library-add__label" id={`${fileInputId}-label`}>Manuscript files</span>
+              <p id={filesHintId} className="signal-field-hint">
+                PDF or DOCX. Choose one or more files; each becomes its own Library record. VERIDICAL reads the
+                text only, so a scanned copy without selectable text cannot be added.
               </p>
-            ))}
-            {files.length > 0 && (
-              <ul className="signal-library-chosen" aria-label="Chosen files">
-                {files.map((file) => (
-                  <li key={fileKey(file)}>
-                    <span className="signal-library-filename">{file.name}</span>
-                    <span>{formatSize(file.size)}</span>
-                    <Button
-                      type="button"
-                      variant="quiet"
-                      aria-label={`Remove ${file.name}`}
-                      onClick={() => removeFile(fileKey(file))}
-                    >
-                      Remove
-                    </Button>
-                  </li>
-                ))}
-              </ul>
+              <div className="signal-library-dropzone" data-invalid={filesError ? true : undefined}>
+                <input
+                  id={fileInputId}
+                  type="file"
+                  multiple
+                  accept={ACCEPT}
+                  className="sr-only"
+                  aria-labelledby={`${fileInputId}-label`}
+                  aria-describedby={filesError ? `${filesHintId} ${filesErrorId}` : filesHintId}
+                  aria-invalid={filesError ? true : undefined}
+                  onChange={(event) => {
+                    chooseFiles(event.target.files);
+                    event.target.value = "";
+                  }}
+                />
+                <label htmlFor={fileInputId} className="signal-button signal-button--secondary">
+                  Choose files
+                </label>
+                <span>{files.length ? plural(files.length, "file chosen", "files chosen") : "No files chosen yet."}</span>
+              </div>
+              {filesError && (
+                <p id={filesErrorId} className="signal-field__error" role="alert">{filesError}</p>
+              )}
+              {typeErrors.map((name) => (
+                <p key={name} className="signal-field__error">
+                  “{name}” is not a PDF or DOCX file, so it was not added to the list.
+                </p>
+              ))}
+              {files.length > 0 && (
+                <ul className="signal-library-chosen" aria-label="Chosen files">
+                  {files.map((file) => (
+                    <li key={fileKey(file)}>
+                      <span className="signal-library-filename">{file.name}</span>
+                      <span>{formatSize(file.size)}</span>
+                      <Button
+                        type="button"
+                        variant="quiet"
+                        aria-label={`Remove ${file.name}`}
+                        onClick={() => removeFile(fileKey(file))}
+                      >
+                        Remove
+                      </Button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+
+            {singleFile ? (
+              <fieldset className="signal-library-add__fieldset">
+                <legend>Details for this file (optional)</legend>
+                <p className="signal-field-hint">
+                  Leave blank to use what VERIDICAL reads from the title page. You can edit these later. Other
+                  instructors cannot see these record fields, but they can read the manuscript.
+                </p>
+                <div className="signal-field">
+                  <label htmlFor={titleId}>Title</label>
+                  <input id={titleId} maxLength={500} value={title} onChange={(event) => setTitle(event.target.value)} />
+                </div>
+                <div className="signal-field">
+                  <label htmlFor={teamId}>Team name</label>
+                  <input id={teamId} maxLength={200} value={teamName} onChange={(event) => setTeamName(event.target.value)} />
+                </div>
+                <AuthorFields authors={authors} onChange={setAuthors} />
+              </fieldset>
+            ) : (
+              detailsFilled && files.length > 1 && (
+                <p role="status" className="signal-field-hint">
+                  Title, team, and author details apply to one file only, so they are set aside. They return if
+                  you go back to one file.
+                </p>
+              )
             )}
           </div>
 
-          <fieldset className="signal-library-add__fieldset">
-            <legend>Details for every file</legend>
-            <label className="signal-library-filter" htmlFor={programId}>
-              <span>Program (optional)</span>
-              <select id={programId} value={program} onChange={(event) => setProgram(event.target.value)}>
-                <option value="">Not set</option>
-                {(programs.data ?? []).map((p) => (
-                  <option key={p.id} value={p.name}>{p.name}</option>
-                ))}
-              </select>
-            </label>
-            <div className="signal-field">
-              <label htmlFor={yearId}>School year (optional)</label>
-              <p id={yearHintId} className="signal-field-hint">For example, 2025-2026.</p>
-              <input
-                id={yearId}
-                maxLength={20}
-                value={schoolYear}
-                aria-describedby={yearError ? `${yearHintId} ${yearErrorId}` : yearHintId}
-                aria-invalid={yearError ? true : undefined}
-                onChange={(event) => {
-                  setSchoolYear(event.target.value);
-                  setYearError(null);
-                }}
-              />
-              {yearError && <p id={yearErrorId} className="signal-field__error" role="alert">{yearError}</p>}
-            </div>
-          </fieldset>
-
-          {singleFile ? (
+          <div className="signal-library-add__column">
             <fieldset className="signal-library-add__fieldset">
-              <legend>Details for this file (optional)</legend>
-              <p className="signal-field-hint">
-                Leave blank to use what VERIDICAL reads from the title page. You can edit these later. Other
-                instructors cannot see these record fields, but they can read the manuscript.
-              </p>
+              <legend>Details for every file</legend>
+              <label className="signal-library-filter" htmlFor={programId}>
+                <span>Program (optional)</span>
+                <select id={programId} value={program} onChange={(event) => setProgram(event.target.value)}>
+                  <option value="">Not set</option>
+                  {(programs.data ?? []).map((p) => (
+                    <option key={p.id} value={p.name}>{p.name}</option>
+                  ))}
+                </select>
+              </label>
               <div className="signal-field">
-                <label htmlFor={titleId}>Title</label>
-                <input id={titleId} maxLength={500} value={title} onChange={(event) => setTitle(event.target.value)} />
+                <label htmlFor={yearId}>School year (optional)</label>
+                <p id={yearHintId} className="signal-field-hint">For example, 2025-2026.</p>
+                <input
+                  id={yearId}
+                  maxLength={20}
+                  value={schoolYear}
+                  aria-describedby={yearError ? `${yearHintId} ${yearErrorId}` : yearHintId}
+                  aria-invalid={yearError ? true : undefined}
+                  onChange={(event) => {
+                    setSchoolYear(event.target.value);
+                    setYearError(null);
+                  }}
+                />
+                {yearError && <p id={yearErrorId} className="signal-field__error" role="alert">{yearError}</p>}
               </div>
-              <div className="signal-field">
-                <label htmlFor={teamId}>Team name</label>
-                <input id={teamId} maxLength={200} value={teamName} onChange={(event) => setTeamName(event.target.value)} />
-              </div>
-              <AuthorFields authors={authors} onChange={setAuthors} />
             </fieldset>
-          ) : (
-            detailsFilled && files.length > 1 && (
-              <p role="status" className="signal-field-hint">
-                Title, team, and author details apply to one file only, so they are set aside. They return if
-                you go back to one file.
-              </p>
-            )
-          )}
 
-          <section className="signal-library-disclosure" aria-labelledby="library-add-disclosure">
-            <h2 id="library-add-disclosure">Who can see what you add</h2>
-            <ol>
-              <li>Instructors at your school can have their checks compared against it.</li>
-              <li>
-                Signed-in instructors can read the full manuscript after it joins the Library. Its title, team,
-                authors, and file name are hidden in record fields; program, school year and date added are visible.
-              </li>
-              <li>The full manuscript may contain names, its title, and other identifying details.</li>
-              <li>Only you can edit or remove your record. Anonymous visitors cannot open Library manuscripts.</li>
-              <li>Add only manuscripts your program allows you to share with other instructors here.</li>
-              <li>
-                The duplicate check when you add a file looks only at your own records. Matches with other
-                instructors' records appear when a manuscript is checked.
-              </li>
-            </ol>
-          </section>
+            <section className="signal-library-disclosure" aria-labelledby="library-add-disclosure">
+              <h2 id="library-add-disclosure">Who can see what you add</h2>
+              <ol>
+                <li>Instructors at your school can have their checks compared against it.</li>
+                <li>
+                  Signed-in instructors can read the full manuscript after it joins the Library. Its title, team,
+                  authors, and file name are hidden in record fields; program, school year and date added are visible.
+                </li>
+                <li>The full manuscript may contain names, its title, and other identifying details.</li>
+                <li>Only you can edit or remove your record. Anonymous visitors cannot open Library manuscripts.</li>
+                <li>Add only manuscripts your program allows you to share with other instructors here.</li>
+                <li>
+                  The duplicate check when you add a file looks only at your own records. Matches with other
+                  instructors' records appear when a manuscript is checked.
+                </li>
+              </ol>
+            </section>
+          </div>
 
           <div className="signal-form__actions">
             <Button type="submit" variant="brand">
