@@ -6704,6 +6704,33 @@
   .signal-shared-evidence > div { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, var(--signal-review-source-min)), 1fr)); gap: var(--signal-space-6); }
   .signal-shared-evidence-image { margin: 0; padding: var(--signal-space-3); border: var(--signal-border-hairline) solid var(--color-signal-border); border-radius: var(--signal-radius-panel); }
   .signal-shared-evidence-image blockquote { margin-block-end: var(--signal-space-4); }
+  .signal-shared-grade-choices {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, var(--signal-review-controls-min)), 1fr));
+    gap: var(--signal-space-3);
+    padding: var(--signal-space-5);
+  }
+  .signal-shared-grade-choices button {
+    display: grid; gap: var(--signal-space-2); text-align: start;
+    padding: var(--signal-space-4); border: var(--signal-border-hairline) solid var(--color-signal-border);
+    border-radius: var(--signal-radius-control); background: var(--color-signal-surface); color: var(--color-signal-ink);
+  }
+  .signal-shared-grade-choices button[aria-pressed="true"] { background: var(--color-signal-review-bg); border-color: var(--color-signal-ink); }
+  .signal-shared-selected-grade { padding: var(--signal-space-5); }
+  .signal-shared-packet { display: flex; flex-wrap: wrap; gap: var(--signal-space-6); align-items: flex-start; margin-block-start: var(--signal-space-5); }
+  .signal-shared-packet__explanation { flex: 1 1 var(--signal-review-controls-min); min-inline-size: 0; }
+  .signal-shared-packet__explanation p { max-inline-size: var(--signal-prose-width); line-height: var(--signal-line-body); }
+  .signal-shared-source { flex: 2 1 var(--signal-review-source-min); min-inline-size: 0; }
+  .signal-shared-source-pair { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, var(--signal-review-source-min)), 1fr)); gap: var(--signal-space-4); }
+  .signal-shared-source .signal-shared-evidence-image { padding: var(--signal-space-4); }
+  .signal-shared-enlarged-image { display: block; inline-size: 100%; block-size: auto; }
+  .signal-shared-evidence-image .signal-evidence-source-link,
+  .signal-share-dialog .signal-evidence-source-link { display: inline-block; margin-block: var(--signal-space-3); color: var(--color-signal-link); text-decoration: underline; text-underline-offset: var(--signal-link-underline-offset); }
+  .signal-shared-additional { padding: var(--signal-space-5); border: var(--signal-border-hairline) solid var(--color-signal-border); border-radius: var(--signal-radius-panel); }
+  .signal-shared-verdict { grid-template-columns: repeat(auto-fit, minmax(min(100%, var(--signal-review-controls-min)), 1fr)); background: var(--color-signal-surface); color: var(--color-signal-ink); border: var(--signal-border-hairline) solid var(--color-signal-border); }
+  .signal-shared-verdict h2, .signal-shared-verdict .signal-section-kicker { color: var(--color-signal-ink); }
+  .signal-shared-verdict p:not(.signal-section-kicker), .signal-shared-verdict dt { color: var(--color-signal-ink-secondary); }
+  .signal-shared-verdict dl > div { border-inline-start: 0; padding-inline-start: 0; }
 }
 
 @layer components {

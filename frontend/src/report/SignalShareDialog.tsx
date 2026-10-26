@@ -63,20 +63,21 @@ export function SignalShareDialog({ checkRunId, manuscriptLabel, onClose }: {
   }
 
   return (
-    <Dialog title="Share this report" onClose={create.isPending || revoke.isPending ? undefined : onClose}>
+    <Dialog title={isWorkspaceSample() ? "Preview this report" : "Share this report"} onClose={create.isPending || revoke.isPending ? undefined : onClose}>
       <div className="signal-share-dialog">
         <p aria-live="polite" className="signal-live-region">{announcement}</p>
-        {isWorkspaceSample() ? <Alert title="Read-only preview in this browser" tone="info">This prepared review link opens in another tab of this browser. It is not available to recipients on another browser or device. The preview includes the current report and public manuscript evidence; private notes and grading comments are not included. You can expire or revoke the link here.</Alert> : <><p>Anyone with the link can view {manuscriptLabel}'s readiness band, criterion outcomes, integrity signals, evidence, and any decision note as they currently stand.</p><Alert title="Treat this link as semi-confidential" tone="warning">No sign-in is required, and a recipient can forward it. The link is read-only and gives no access to your Review Desk, Audit, settings, or other reports. You can revoke it here.</Alert></>}
+        {isWorkspaceSample() ? <Alert title="Preview in this browser only" tone="info">This preview opens in another tab of this browser. It does not work for someone using another browser or device. It shows the report and shared manuscript evidence. Private notes and grading comments are not included. You can expire or revoke this link here.</Alert> : <><p>Anyone with the link can view {manuscriptLabel}'s readiness band, criterion outcomes, integrity signals, evidence, and any decision note as they currently stand.</p><Alert title="Treat this link as semi-confidential" tone="warning">No sign-in is required, and a recipient can forward it. The link is read-only and gives no access to your Review Desk, Audit, settings, or other reports. You can revoke it here.</Alert></>}
 
         {isPending ? <div role="status" aria-busy="true" className="signal-desk-loading"><span>Checking for an active link…</span><i /><i /></div> : !link ? (
           <div className="signal-share-dialog__form">
             <label><span>Link expires</span><select value={selection} onChange={(event) => setSelection(event.target.value as ExpirySelection)}>{SHARE_EXPIRY_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></label>
-            <Button variant="brand" busy={create.isPending} onClick={() => create.mutate({ expires_at: expiresAt(selection, null) })}>Create read-only link</Button>
+            <Button variant="brand" busy={create.isPending} onClick={() => create.mutate({ expires_at: expiresAt(selection, null) })}>{isWorkspaceSample() ? "Create preview link" : "Create read-only link"}</Button>
           </div>
         ) : (
           <div className="signal-share-dialog__active">
-            <div className="signal-share-dialog__url"><input ref={urlRef} readOnly aria-label="Report share link" value={shareUrl} onFocus={(event) => event.currentTarget.select()} /><Button variant="brand" onClick={copy}>{copyState === "copied" ? "Copied" : "Copy link"}</Button></div>
+            <div className="signal-share-dialog__url"><input ref={urlRef} readOnly aria-label="Report share link" value={shareUrl} onFocus={(event) => event.currentTarget.select()} /><Button variant="brand" onClick={copy}>{copyState === "copied" ? "Copied" : isWorkspaceSample() ? "Copy preview link" : "Copy link"}</Button></div>
             {copyState === "failed" && <Alert title="Could not copy automatically" tone="error" role="alert">Select the link above and copy it manually.</Alert>}
+            <p><a className="signal-evidence-source-link" href={shareUrl} target="_blank" rel="noopener noreferrer">{isWorkspaceSample() ? "Open preview" : "Open shared report"}</a></p>
             <p className="signal-field-hint">Created {dateFormatter.format(new Date(link.created_at))}. {link.expires_at ? `Expires ${dateFormatter.format(new Date(link.expires_at))}.` : "No expiry set."}</p>
             <label><span>Replacement link expiry</span><select value={selection} onChange={(event) => setSelection(event.target.value as ExpirySelection)}><option value="current">Keep current expiry</option>{SHARE_EXPIRY_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></label>
             {selection !== "current" && <Alert title="Not applied yet" tone="info" role="status">Regenerating will issue a new link with {selectedOption?.label.toLowerCase()}. The current link will stop working immediately.</Alert>}

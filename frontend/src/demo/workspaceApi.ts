@@ -4,6 +4,7 @@ import { prepareWorkspaceSource } from "./workspacePreparation";
 import { evidenceByImageId, evidenceFor, evidenceSourceHash, publicEvidenceImages } from "./sourceEvidence";
 import { RESOLUTION_REASON_MIN_LENGTH } from "../config/ui";
 import { AI_REVIEW_BASIS, AI_REVIEW_CONFIRMED_BASIS, applyPreparedAiReview, hasPreparedAiGrades, preparedAiReviewReceipt } from "./preparedAiReview";
+import { PLAIN_FINDING_REASONS } from "./workspacePdfCopy";
 
 type SampleState = {
   run: typeof sampleRun;
@@ -111,6 +112,7 @@ export function installWorkspaceSample() {
   function projectPublicReport(report: ReportOut) {
     return {
       check_run_id: report.check_run_id, manuscript_group_label: report.manuscript_group_label,
+      manuscript_authors: report.check_run_id === sampleReport.check_run_id && report.manuscript_original_filename === WORKSPACE_SAMPLE.filename ? [...WORKSPACE_SAMPLE.authors] : null,
       manuscript_original_filename: report.manuscript_original_filename, rubric_title: report.rubric_title,
       status: report.status, composite_score: report.composite_score,
       thresholds: { ready_min_score: report.thresholds.ready_min_score, not_ready_max_score: report.thresholds.not_ready_max_score },
@@ -131,7 +133,9 @@ export function installWorkspaceSample() {
     return flags.map(flag => ({ id: flag.id, check_kind: flag.check_kind, severity: flag.severity,
       criterion_text: flag.criterion_text, evidence_excerpt: flag.evidence_excerpt, page_anchor: flag.page_anchor,
       overridden: flag.overridden, is_passage_level: flag.is_passage_level, first_upload_context: flag.first_upload_context,
-      confirmed_citation_source: flag.confirmed_citation_source, problem_kind: flag.ai_verdict_summary ?? flag.problem_kind ?? null, matched_ref: flag.matched_ref }));
+      confirmed_citation_source: flag.confirmed_citation_source,
+      review_explanation: sampleFlags.some(prepared => prepared.id === flag.id && prepared.check_kind === flag.check_kind && prepared.evidence_excerpt === flag.evidence_excerpt && prepared.page_anchor === flag.page_anchor && prepared.ai_verdict_summary === (flag.ai_verdict_summary ?? flag.problem_kind)) ? PLAIN_FINDING_REASONS[flag.id] ?? null : null,
+      problem_kind: flag.ai_verdict_summary ?? flag.problem_kind ?? null, matched_ref: flag.matched_ref }));
   }
   function publicSnapshot() {
     return { report: projectPublicReport(state.report), flags: publicFlags(state.flags), evidence_images: state.fileAvailable ? publicEvidenceImages() : [] };

@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { type ReactNode, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useLocation, useNavigate, useSearchParams } from "react-router";
 import type {
   EscalatedItemOut,
@@ -169,7 +169,9 @@ function SignalFindingCard({
   showResolutionSummary,
   viewedIds,
   onToggle,
+  renderEvidence,
 }: {
+  renderEvidence?: (flag: FlagSummaryOut) => ReactNode;
   cluster: FlagFindingCluster;
   expanded: boolean;
   showActions: boolean;
@@ -215,6 +217,7 @@ function SignalFindingCard({
           ? <blockquote>“{systemFindingCopy(first.evidence_excerpt, first.problem_kind, "evidence")}”</blockquote>
           : <p className="signal-flag-finding-context">{systemFindingCopy(first.evidence_excerpt, first.problem_kind, "evidence")}</p>}
         <p>{first.page_anchor}</p>
+        {renderEvidence?.(first)}
         {first.first_upload_context && <p className="signal-field-hint">First-upload context: the comparison archive was limited when this signal was created.</p>}
         {showActions && (
           <ActionLink
@@ -319,6 +322,7 @@ function SignalFindingCard({
                 {flag.overridden && <span className="signal-resolution-state">Resolved by instructor</span>}
                 {flag.confirmed_citation_source && <span className="signal-resolution-state">Source confirmed</span>}
               </div>
+              {renderEvidence?.(flag)}
               {showActions && (
                 <ActionLink
                   id={`signal-flag-review-${flag.id}`}
@@ -346,7 +350,9 @@ function SignalFlagList({
   viewedIds = EMPTY_VIEWED,
   report,
   originalityScope,
+  renderEvidence,
 }: {
+  renderEvidence?: (flag: FlagSummaryOut) => ReactNode;
   flags: FlagSummaryOut[];
   showActions: boolean;
   initialView: FlagView;
@@ -511,6 +517,7 @@ function SignalFlagList({
               showResolutionSummary={view === "all"}
               viewedIds={viewedIds}
               onToggle={() => toggleCluster(cluster.key)}
+              renderEvidence={renderEvidence}
             />
           ))}
         </ul>
@@ -819,16 +826,18 @@ export function SignalFlagsPanel({
 export function SignalPublicFlags({
   flags,
   originalityScope,
+  renderEvidence,
 }: {
+  renderEvidence?: (flag: FlagSummaryOut) => ReactNode;
   flags: FlagSummaryOut[];
   originalityScope?: OriginalityScopeValue | null;
 }) {
   const findingCount = clusterFlagFindings(flags).length;
   return (
     <section id="integrity-signals" tabIndex={-1} className="signal-review-section" aria-labelledby="flags-heading">
-      <div className="signal-review-section__heading"><div><p className="signal-section-kicker">Integrity record</p><h2 id="flags-heading">Possible inconsistencies</h2></div><span>{findingCount} finding{findingCount === 1 ? "" : "s"}</span></div>
+      <div className="signal-review-section__heading"><div><p className="signal-section-kicker">Integrity record</p><h2 id="flags-heading" tabIndex={-1}>Possible inconsistencies</h2></div><span>{findingCount} finding{findingCount === 1 ? "" : "s"}</span></div>
       <p className="signal-review-section__intro">These are possible inconsistencies, not accusations. This shared view shows the bounded evidence the instructor chose to share; it does not expose the private Audit trail.</p>
-      <SignalFlagList flags={flags} showActions={false} initialView="all" originalityScope={originalityScope} />
+      <SignalFlagList flags={flags} showActions={false} initialView="all" originalityScope={originalityScope} renderEvidence={renderEvidence} />
     </section>
   );
 }

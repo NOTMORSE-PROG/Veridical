@@ -1,4 +1,4 @@
-import { screen, waitFor } from "@testing-library/react";
+import { fireEvent, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { FlagSummaryOut, ReportOut, SharedReportOut } from "../api/types";
 import { renderWithProviders, stubFetchByPath } from "../test/renderWithProviders";
@@ -94,6 +94,20 @@ describe("AdviserViewPage", () => {
     return renderWithProviders(<AdviserViewPage />, { route: "/shared/tok123", path: "/shared/:token" });
   }
 
+  it("keeps private teacher fields hidden even if a response includes them", async () => {
+    const result = { ...BASE_REPORT.results[0], reasoning: "Public source explanation", resolved: true,
+      resolution: { type: "mark_level" as const, reason: "PRIVATE grading comment", ai_majority_verdict: null },
+      annotation: "PRIVATE note" };
+    vi.stubGlobal("fetch", stubFetchByPath({ "/shared/tok123/report": shared({ report: {
+      ...BASE_REPORT, results: [result],
+    } }) }));
+    render();
+    expect(await screen.findByText("Public source explanation")).toBeInTheDocument();
+    expect(screen.queryByText(/PRIVATE/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Members \/ authors:/)).not.toBeInTheDocument();
+    expect(screen.getByTitle("Medium importance")).toBeInTheDocument();
+  });
+
   it("shows a loading state, then the report", async () => {
     vi.stubGlobal("fetch", stubFetchByPath({ "/shared/tok123/report": shared() }));
     render();
@@ -184,28 +198,23 @@ describe("AdviserViewPage", () => {
     expect(screen.queryByText(/26\.67/)).not.toBeInTheDocument();
   });
 
-  it("renders the full, unfiltered results table -- pending criteria show as Awaiting review, not hidden", async () => {
-    // Mobile card + desktop grid both render in the DOM simultaneously
-    // (jsdom applies no media queries) -- same convention as every other
-    // dual-layout test in this app: text present in both is expected
-    // TWICE, not once.
+  it("keeps every criterion selectable, including ungraded criteria", async () => {
     vi.stubGlobal("fetch", stubFetchByPath({ "/shared/tok123/report": shared() }));
     render();
-
-    expect((await screen.findAllByText("Has an abstract")).length).toBe(1);
-    // design review P1: the escalated criterion must be VISIBLE, not
-    // silently dropped the way Report.tsx's own filtered subset would.
-    expect(screen.getAllByText("States the research problem").length).toBe(1);
-    expect(screen.getByText("Needs review")).toBeInTheDocument();
-    // Rendered as part of a combined caption ("AI-graded · The instructor
-    // has not resolved this criterion yet."), not its own isolated node.
+    await screen.findByRole("navigation", { name: "Choose a criterion" });
+    const choice = screen.getByRole("button", { name: /States the research problem/ });
+    expect(choice).toHaveTextContent("Needs review");
+    fireEvent.click(choice);
+    expect(screen.getByRole("heading", { name: "States the research problem" })).toBeInTheDocument();
+    expect(screen.getByText("Recorded grade: Needs review")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Has an abstract/ })).toBeInTheDocument();
   });
 
   it("shows the pending-review sentence in the explainer when items are still unresolved", async () => {
     vi.stubGlobal("fetch", stubFetchByPath({ "/shared/tok123/report": shared() }));
     render();
     expect(
-      await screen.findByText("Items still awaiting instructor review"),
+      await screen.findByText("Criteria awaiting a teacher’s grade"),
     ).toBeInTheDocument();
   });
 
@@ -215,6 +224,8 @@ describe("AdviserViewPage", () => {
       stubFetchByPath({ "/shared/tok123/report": shared({ flags: [SAMPLE_FLAG] }) }),
     );
     render();
+    await screen.findByRole("button", { name: "Findings" });
+    fireEvent.click(screen.getByRole("button", { name: "Findings" }));
     await screen.findByText(/95% accuracy/);
     expect(screen.queryByRole("link", { name: /Review evidence|View details/ })).not.toBeInTheDocument();
   });

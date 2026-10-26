@@ -277,6 +277,17 @@ open. Load it only into a matching untouched case; preserve existing teacher wor
 Teacher changes retain the earlier AI explanation as history with clear attribution.
 The completed case does not establish that the automated service or human UAT passed.
 
+**Readable shared report (owner, 2026-10-27):** Put the manuscript title and known
+members/authors first, then readiness and the separately recorded teacher decision.
+Show one selected grade or check module at a time. Keep each public explanation,
+quotation and associated original page image together; evidence arrows change the
+inline page, while an explicit source link opens its larger image. Retain unassigned
+legacy evidence separately without guessing its identity. Private teacher comments,
+notes and dismissal reasons stay excluded. The prepared sample supplies typed image
+associations, known authors and fixed public finding explanations; ordinary server
+reports without those optional fields keep safe fallbacks. Sample links are explicitly
+same-browser read-only previews, not externally usable adviser links.
+
 **Exact-passage appearance (owner, 2026-10-26):** Use thin square red outlines
 around the saved PDF text-line rectangles, with transparent interiors. Preserve
 their source geometry; do not enlarge them into selection blocks or cover text

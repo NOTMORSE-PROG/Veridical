@@ -7,6 +7,7 @@ import { installWorkspaceSample } from "./workspaceApi";
 import { companionSource, reviewTasks, sampleCriteria, sampleFlags, sampleReport, sampleRubric, sampleManuscript, sampleLibrary, sampleRun, WORKSPACE_SAMPLE } from "./workspaceFixture";
 
 import { AI_REVIEW_VERSION } from "./preparedAiReview";
+import { PLAIN_FINDING_REASONS } from "./workspacePdfCopy";
 const originalFetch = window.fetch;
 // Manual-grading endpoint tests retain their initialized, ungraded workflow.
 // Fresh-storage completed-AI cases are tested separately below.
@@ -21,6 +22,26 @@ const resolveAll = async (reason = "Instructor judgment after reading the origin
 };
 
 describe("real-interface sample API boundary", () => {
+  it("shares typed source associations and only known public author/explanation data", async () => {
+    const network = start();
+    const saved = JSON.parse(sessionStorage.getItem(WORKSPACE_SAMPLE.storageKey)!);
+    Object.assign(saved.state.flags[0], { ai_reasoning: "PRIVATE-AI-TEXT", review_explanation: "PRIVATE-EXPLANATION", annotation: "PRIVATE-NOTE", override_reason: "PRIVATE-REASON" });
+    sessionStorage.setItem(WORKSPACE_SAMPLE.storageKey, JSON.stringify(saved)); window.fetch = network; installWorkspaceSample();
+    const share = (await call("/check-runs/1/share", "POST", { expires_at: null })).data;
+    const shared = (await call(`/shared/${share.token}/report`)).data;
+    expect(shared.report.manuscript_authors).toEqual([...WORKSPACE_SAMPLE.authors]);
+    expect(shared.flags[0].review_explanation).toBe(PLAIN_FINDING_REASONS[1]);
+    expect(shared.evidence_images[0].subject).toEqual({ kind: "criterion", id: 1 });
+    expect(JSON.stringify(shared)).not.toContain("PRIVATE-");
+    const changed = JSON.parse(sessionStorage.getItem(WORKSPACE_SAMPLE.storageKey)!);
+    changed.state.flags[0].page_anchor = "page 999";
+    changed.state.report.manuscript_original_filename = "Another-source.pdf";
+    sessionStorage.setItem(WORKSPACE_SAMPLE.storageKey, JSON.stringify(changed)); window.fetch = network; installWorkspaceSample();
+    const replacement = (await call("/check-runs/1/share", "POST", { expires_at: null })).data;
+    const next = (await call(`/shared/${replacement.token}/report`)).data;
+    expect(next.flags[0].review_explanation).toBeNull();
+    expect(next.report.manuscript_authors).toBeNull();
+  });
   it.each([undefined, "", "   ", " OK "])("saves an ordinary grade with optional comment %s and preserves it on reload", async reason => {
     const network = start();
     const saved = await call("/check-runs/1/escalated/101/resolve", "POST", { resolution: "mark_level", level: 3, ...(reason === undefined ? {} : { reason }) });

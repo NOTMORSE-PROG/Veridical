@@ -293,6 +293,7 @@ export interface BoundSourceEvidence extends EvidenceItem {
 }
 
 export interface PublicEvidenceImageOut extends EvidenceItem {
+  subject?: { kind: "criterion" | "flag"; id: number } | null;
   evidence_id: string;
   image_id: string | null;
   image_sha256: string | null;
@@ -509,6 +510,7 @@ export interface ReportOut extends ReportCommon {
  * payload. Deliberately does NOT extend `ReportOut` -- see
  * `ReportCommon`'s own comment for which fields were cut and why. */
 export interface PublicReportOut extends ReportCommon {
+  manuscript_authors?: string[] | null;
   check_run_id: number;
   manuscript_group_label: string;
   manuscript_original_filename: string | null;
@@ -737,6 +739,7 @@ export interface ConfirmCitationSourceOut extends FlagOut {
  * for why: a summary row's job is "enough to decide whether to click,"
  * not "enough to skip clicking"). */
 export interface FlagSummaryOut {
+  review_explanation?: string | null;
   id: number;
   check_kind: string;
   severity: "high" | "med" | "low";
