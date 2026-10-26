@@ -361,6 +361,8 @@
   --signal-evidence-marker-surface: var(--color-signal-brand);
   --signal-evidence-marker-ink: var(--color-signal-foundation-deep);
   --signal-evidence-location-border: var(--color-signal-foundation);
+  /* Matches the existing source-page PNG's measured RGB(179, 38, 30). */
+  --signal-evidence-exact-line: var(--color-danger);
   --signal-evidence-focus: var(--color-signal-focus);
   --signal-workspace-bar-height: 5rem;
   --signal-workspace-header-height: 5rem;

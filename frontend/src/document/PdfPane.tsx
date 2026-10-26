@@ -207,8 +207,8 @@ function ContinuousPdfPage({
         return {
           left: Math.min(vx0, vx1),
           top: Math.min(vy0, vy1),
-          width: Math.max(Math.abs(vx1 - vx0), 24),
-          height: Math.max(Math.abs(vy1 - vy0), 24),
+          width: Math.abs(vx1 - vx0),
+          height: Math.abs(vy1 - vy0),
         };
       });
       return [{
@@ -280,7 +280,6 @@ function ContinuousPdfPage({
                     onBlur={() => setHoveredFlagId((id) => id === highlight.flagId ? null : id)}
                     onClick={() => onSelectFlag(highlight.flagId)}
                   >
-                    <span className="signal-document-marker" aria-hidden="true">{highlight.flagId < 0 ? "Evidence" : highlight.findingNumber}</span>
                   </button>
                 );
               });

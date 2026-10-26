@@ -243,6 +243,13 @@ and explain the effect of an action before it is saved. Finding actions use
 A note does not change results. Dismissal retains the evidence and the instructor's
 reason. The prepared sample must describe its own scoring limits accurately.
 
+**Exact-passage appearance (owner, 2026-10-26):** Use thin square red outlines
+around the saved PDF text-line rectangles, with transparent interiors. Preserve
+their source geometry; do not enlarge them into selection blocks or cover text
+with badges. Selected and hovered passages keep the same outline treatment;
+keyboard focus remains visible separately. Page-only and paragraph-only
+locations must not imitate verified exact text-line boxes.
+
 ### Flow D — Student submission 🟡 *(approved plan; not yet implemented)*
 After V7 is implemented and its role-isolation checks pass, the planned flow is:
 1. A student will log in → see their group's submission page only

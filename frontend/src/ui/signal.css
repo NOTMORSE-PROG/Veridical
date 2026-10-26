@@ -3570,16 +3570,22 @@
 
   .signal-document-evidence-region {
     position: absolute;
-    border: var(--signal-border-emphasis) solid var(--signal-evidence-location-border);
-    border-radius: var(--signal-radius-compact);
-    background: var(--signal-evidence-location-surface);
+    box-sizing: border-box;
+    min-width: 0;
+    min-height: 0;
+    padding: 0;
+    border: var(--signal-border-hairline) solid var(--signal-evidence-exact-line);
+    border-radius: 0;
+    background: transparent;
+    box-shadow: none;
     pointer-events: auto;
     cursor: pointer;
   }
 
+  .signal-document-evidence-region:hover,
   .signal-document-evidence-region.is-selected {
-    background: var(--signal-evidence-selected-surface);
-    box-shadow: 0 0 0 var(--signal-review-selected-ring-width) var(--signal-evidence-location-border);
+    background: transparent;
+    box-shadow: none;
   }
 
   .signal-document-evidence-region--continuation {

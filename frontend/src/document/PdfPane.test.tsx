@@ -1,6 +1,7 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import { PdfPane } from "./PdfPane";
+import type { FlagRegionOut } from "../api/types";
 
 const pdfMock = vi.hoisted(() => ({ getDocument: vi.fn() }));
 vi.mock("pdfjs-dist", () => ({
@@ -34,7 +35,8 @@ it("retires an interrupted page request when a mounted reader loads another docu
   const page = { rotate: 0, getViewport: () => ({ width: 600, height: 800, convertToViewportPoint: (x: number, y: number) => [x, y] }), render: () => ({ promise: Promise.resolve(), cancel: vi.fn() }), getTextContent: async () => ({}), cleanup: vi.fn() };
   const document = () => ({ numPages: 2, getPage: async () => page });
   pdfMock.getDocument.mockImplementation(({ url }: { url: string }) => ({ promise: new Promise(resolve => ready.set(url, resolve)), destroy: vi.fn() }));
-  const props = { regions: [], flags: [], selectedFlagId: null, onSelectFlag: vi.fn(), isVisible: true };
+  const regions: FlagRegionOut[] = [{ flag_id: 7, kind: "page_bbox", page: 2, end_page: null, paragraph: null, index: null, bbox: [10, 20, 210, 28], all_bboxes: [[10, 20, 210, 28], [10, 30, 100, 38]] }];
+  const props = { regions, flags: [], selectedFlagId: 7, onSelectFlag: vi.fn(), isVisible: true };
   const view = render(<PdfPane {...props} fileUrl="/source-a.pdf" requestedPage={2} />);
   await act(async () => { ready.get("/source-a.pdf")!(document()); });
   await waitFor(() => expect(view.container.querySelectorAll("[data-page]")).toHaveLength(2));
@@ -52,4 +54,9 @@ it("retires an interrupted page request when a mounted reader loads another docu
   // behind A's cancelled request. The mocked viewport currently contains page2.
   fireEvent.scroll(screen.getByRole("region", { name: "Full manuscript, scrollable" }));
   expect(screen.getByText("Page 2 of 2")).toBeInTheDocument();
+  // Text-line marks use the supplied 8px geometry, not an inflated 24px box.
+  const mark = await screen.findByRole("button", { name: /Finding 1 on page 2\. Exact passage/ });
+  expect(mark).toHaveStyle({ width: "200px", height: "8px", left: "10px", top: "20px" });
+  expect(view.container.querySelector(".signal-document-evidence-region--continuation")).toHaveStyle({ width: "90px", height: "8px", top: "30px" });
+  expect(mark.querySelector(".signal-document-marker")).toBeNull();
 });
