@@ -6,8 +6,10 @@ import type {
   FlagSummaryOut,
   OriginalityScope as OriginalityScopeValue,
   ResultRowCommon,
+  EvidenceItem,
 } from "../api/types";
 import { useMe } from "../auth/useAuth";
+import { criterionAnchorRegion } from "../document/criterionAnchor";
 import {
   FLAG_LIST_BATCH_COUNT,
   FLAG_LIST_INITIAL_COUNT,
@@ -509,11 +511,12 @@ function resolutionLabel(item: EscalatedItemOut, resolution: EscalationResolutio
   return item.levels?.find((entry) => entry.level === level)?.name ?? "Selected rubric level";
 }
 
-function SignalResolutionCard({ item, checkRunId, onResolved, onEditingChange }: {
+function SignalResolutionCard({ item, checkRunId, onResolved, onEditingChange, onEvidenceSelected }: {
   item: EscalatedItemOut;
   checkRunId: number;
   onResolved: (message: string) => void;
   onEditingChange?: (editing: boolean) => void;
+  onEvidenceSelected?: (criterionId: number, evidence: EvidenceItem, index: number) => void;
 }) {
   const [pending, setPending] = useState<{ resolution: EscalationResolution; level?: number }>();
   const [reason, setReason] = useState("");
@@ -522,6 +525,21 @@ function SignalResolutionCard({ item, checkRunId, onResolved, onEditingChange }:
   const reasonInvalid = attempted && reason.trim().length < RESOLUTION_REASON_MIN_LENGTH;
   const reasonErrorId = `signal-resolution-reason-${item.check_result_id}`;
   const criterionHeadingRef = useRef<HTMLHeadingElement>(null);
+  const evidence = item.evidence ?? [];
+  const [evidenceIndex, setEvidenceIndex] = useState(() => Math.max(0, evidence.findIndex(entry => criterionAnchorRegion(entry.anchor) !== null)));
+  const evidenceSelection = useRef(onEvidenceSelected);
+  evidenceSelection.current = onEvidenceSelected;
+  useEffect(() => {
+    const initial = item.evidence?.findIndex(entry => criterionAnchorRegion(entry.anchor) !== null) ?? -1;
+    if (initial >= 0) evidenceSelection.current?.(item.criterion_id, item.evidence![initial], initial);
+    // Select once per criterion entry. Evidence browsing and form renders must
+    // not reset a manuscript page the instructor has deliberately browsed.
+    // oxlint-disable-next-line react-hooks/exhaustive-deps
+  }, [item.check_result_id]);
+  function selectEvidence(index: number) {
+    setEvidenceIndex(index);
+    evidenceSelection.current?.(item.criterion_id, evidence[index], index);
+  }
 
   function choose(resolution: EscalationResolution, level?: number) {
     onEditingChange?.(true);
@@ -594,6 +612,12 @@ function SignalResolutionCard({ item, checkRunId, onResolved, onEditingChange }:
       <div className="signal-resolution-card__context">
         <div><p className="signal-section-kicker">Criterion requiring judgment</p><h3 ref={criterionHeadingRef} tabIndex={-1}>{item.criterion_text}</h3></div>
         <p id={voteId} className="signal-resolution-card__vote">{voteSummary(item)}</p>
+        {evidence.length > 0 && <section className="signal-criterion-evidence" aria-label={`Evidence for ${item.criterion_text}`}>
+          <div className="signal-evidence-navigation"><Button variant="quiet" disabled={evidenceIndex === 0} onClick={() => selectEvidence(evidenceIndex - 1)}>Previous evidence</Button><span>Evidence {evidenceIndex + 1} of {evidence.length}</span><Button variant="quiet" disabled={evidenceIndex >= evidence.length - 1} onClick={() => selectEvidence(evidenceIndex + 1)}>Next evidence</Button></div>
+          <blockquote><span>“{evidence[evidenceIndex].quote}”</span><cite>{evidence[evidenceIndex].anchor}</cite></blockquote>
+          {!criterionAnchorRegion(evidence[evidenceIndex].anchor) && <p className="signal-field-hint">This saved anchor cannot be placed. Keep this entry in review and inspect the manuscript manually.</p>}
+          <details><summary>All saved evidence</summary><ol>{evidence.map((entry, index) => <li key={`${index}:${entry.anchor}`}><button type="button" onClick={() => selectEvidence(index)}>{entry.anchor}: {entry.quote}</button></li>)}</ol></details>
+        </section>}
         {item.reason && <p id={reasonId}>{item.reason}</p>}
         {item.injection_suspected && item.injection_matched_snippet && (
           <blockquote id={injectionId} className="signal-unverified-evidence"><strong>Text addressed at an automated grader</strong><span>“{item.injection_matched_snippet}”</span></blockquote>
@@ -625,7 +649,7 @@ function SignalResolutionCard({ item, checkRunId, onResolved, onEditingChange }:
           {item.levels && item.levels.length > 0
             ? item.levels.map((level) => <Button key={level.level} variant="secondary" aria-describedby={describedBy} onClick={() => choose("mark_level", level.level)}>{level.name}</Button>)
             : <><Button variant="secondary" aria-describedby={describedBy} onClick={() => choose("mark_pass")}>Meets criterion</Button><Button variant="secondary" aria-describedby={describedBy} onClick={() => choose("mark_fail")}>Does not meet</Button></>}
-          <Button variant="quiet" aria-describedby={describedBy} onClick={() => choose("needs_document")}>Needs another document</Button>
+          <details className="signal-exclusion-help"><summary>Cannot judge from this manuscript?</summary><p>If this criterion genuinely requires a different document, you can exclude it from this readiness calculation. It will remain ungraded. To wait for more evidence, leave it unresolved instead.</p><Button variant="quiet" aria-describedby={describedBy} onClick={() => choose("needs_document")}>Exclude: needs another document</Button></details>
           {/* BUG-170: `verdict_unrecognized` means accepting this verdict
               is guaranteed to 409 server-side (the passes agreed on a
               string that still doesn't name any of this criterion's own
@@ -638,8 +662,8 @@ function SignalResolutionCard({ item, checkRunId, onResolved, onEditingChange }:
         </div>
       ) : (
         <div className="signal-resolution-form">
-          <label><span>Reason (required)</span><textarea autoFocus rows={3} value={reason} aria-invalid={reasonInvalid || undefined} aria-describedby={reasonInvalid ? reasonErrorId : undefined} onChange={(event) => { setReason(event.target.value); if (attempted) setAttempted(false); }} /></label>
-          <p className="signal-field-hint">This reason appears in the report, export, and any active share link.</p>
+          <label htmlFor={`signal-resolution-input-${item.check_result_id}`}>Reason (required)</label><textarea id={`signal-resolution-input-${item.check_result_id}`} autoFocus rows={3} value={reason} aria-invalid={reasonInvalid || undefined} aria-describedby={reasonInvalid ? reasonErrorId : undefined} onChange={(event) => { setReason(event.target.value); if (attempted) setAttempted(false); }} />
+          <p className="signal-field-hint">{pending.resolution === "needs_document" ? "This criterion will be ungraded and excluded from the readiness calculation. " : ""}This reason is saved in your instructor report and PDF export. It is not included in a shared report.</p>
           {reasonInvalid && <p id={reasonErrorId} role="alert" className="signal-field-error">{reason.trim() ? `Enter at least ${RESOLUTION_REASON_MIN_LENGTH} characters.` : "Enter a reason before confirming."}</p>}
           {resolve.error && <Alert title="Could not save this resolution" tone="error" role="alert">{resolve.error instanceof Error ? resolve.error.message : "Try again."}</Alert>}
           <div><Button variant="secondary" disabled={resolve.isPending} onClick={cancel}>Cancel</Button><Button variant="brand" busy={resolve.isPending} onClick={confirm}>Confirm resolution</Button></div>
@@ -649,7 +673,7 @@ function SignalResolutionCard({ item, checkRunId, onResolved, onEditingChange }:
   );
 }
 
-export function SignalEscalatedPanel({ checkRunId, focused = false }: { checkRunId: number; focused?: boolean }) {
+export function SignalEscalatedPanel({ checkRunId, focused = false, onEvidenceSelected }: { checkRunId: number; focused?: boolean; onEvidenceSelected?: (criterionId: number, evidence: EvidenceItem, index: number) => void }) {
   const { data: items, isPending, isError, refetch } = useEscalatedItems(checkRunId);
   const [announcement, setAnnouncement] = useState("");
   const [activeId, setActiveId] = useState<number>();
@@ -659,6 +683,10 @@ export function SignalEscalatedPanel({ checkRunId, focused = false }: { checkRun
   const hasItems = Boolean(items?.length);
   const activeIndex = Math.max(0, items?.findIndex(item => item.check_result_id === activeId) ?? 0);
   const visibleItems = focused ? items?.slice(activeIndex, activeIndex + 1) : items;
+
+  useEffect(() => {
+    if (focused && hasItems) headingRef.current?.focus();
+  }, [focused, hasItems, checkRunId]);
 
   useEffect(() => {
     if (!hasItems && announcement) announcementRef.current?.focus();
@@ -674,7 +702,7 @@ export function SignalEscalatedPanel({ checkRunId, focused = false }: { checkRun
       <p ref={announcementRef} tabIndex={-1} aria-live="polite" className="signal-live-region">{announcement}</p>
       {focused && hasItems && <nav className="signal-criterion-navigation" aria-label="Unresolved criteria"><Button variant="quiet" aria-label="Previous criterion" disabled={editing || activeIndex === 0} onClick={() => { setActiveId(items![activeIndex - 1].check_result_id); headingRef.current?.focus(); }}>Previous</Button><span>{editing ? "Save or cancel to continue" : `${activeIndex + 1} of ${items?.length} remaining`}</span><Button variant="quiet" aria-label="Next criterion" disabled={editing || activeIndex === (items?.length ?? 0) - 1} onClick={() => { setActiveId(items![activeIndex + 1].check_result_id); headingRef.current?.focus(); }}>Next</Button></nav>}
       {hasItems
-        ? <div className="signal-resolution-list">{visibleItems?.map((item) => <SignalResolutionCard key={item.check_result_id} item={item} checkRunId={checkRunId} onEditingChange={focused ? setEditing : undefined} onResolved={(message) => { if (focused) setActiveId(items?.[activeIndex + 1]?.check_result_id ?? items?.[Math.max(0, activeIndex - 1)]?.check_result_id); setAnnouncement(message); headingRef.current?.focus(); }} />)}</div>
+        ? <div className="signal-resolution-list">{visibleItems?.map((item) => <SignalResolutionCard key={item.check_result_id} item={item} checkRunId={checkRunId} onEvidenceSelected={onEvidenceSelected} onEditingChange={focused ? setEditing : undefined} onResolved={(message) => { if (focused) setActiveId(items?.[activeIndex + 1]?.check_result_id ?? items?.[Math.max(0, activeIndex - 1)]?.check_result_id); setAnnouncement(message); headingRef.current?.focus(); }} />)}</div>
         : <Alert title="No unresolved criteria" tone="success">Every criterion has a recorded outcome. Continue to the integrity signals.</Alert>}
     </section>
   );
@@ -750,7 +778,9 @@ export function SignalCriteriaResults({ results, checkRunId, publicView = false 
       <div className="signal-review-section__heading"><div><p className="signal-section-kicker">Criterion record</p><h2 id="criteria-results-heading" tabIndex={-1}>All assessed criteria</h2></div><span>{results.length} total</span></div>
       <p className="signal-review-section__intro">Each row shows the recorded outcome and the evidence available for checking it. Importance is shown as a band, never as a judgment percentage.</p>
       {results.length ? <ol className="signal-result-list">{results.map((row, index) => {
-        const outcome = OUTCOME_COPY[row.outcome];
+        const outcome = row.level && (row.outcome === "passed" || row.outcome === "failed")
+          ? { label: "Rubric level recorded", tone: "neutral" }
+          : OUTCOME_COPY[row.outcome];
         return <li key={row.criterion_id} className="signal-result-card"><div className="signal-result-card__top"><span className="signal-result-card__number">{index + 1}</span><span className={`signal-outcome signal-outcome--${outcome.tone}`}>{outcome.label}</span><span className={`signal-importance signal-importance--${row.weight_importance === "med" ? "medium" : row.weight_importance}`}>{row.weight_importance === "med" ? "Medium" : `${row.weight_importance.slice(0, 1).toUpperCase()}${row.weight_importance.slice(1)}`} importance</span></div><h3>{row.text}</h3>{row.level && <p className="signal-level-result"><strong>Recorded level:</strong> {row.level.name}</p>}{row.resolution && <p className="signal-resolution-note"><strong>Instructor resolution:</strong> {row.resolution.reason}</p>}{/* BUG-065: this summary repeats verbatim once per row -- a screen-reader
                 links/buttons list can't tell them apart without a per-criterion
                 accessible name, same fix already applied to the flag "Review

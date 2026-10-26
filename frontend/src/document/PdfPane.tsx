@@ -14,7 +14,6 @@ import { SeverityTag, type Severity } from "../components/SeverityTag";
 import { CHECK_KIND_SHORT_LABEL } from "../domain/checkKind";
 import { severityLabel } from "../domain/severity";
 import { truncateAtWord } from "../format/text";
-import { regionPrecision } from "./regionCopy";
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
   "pdfjs-dist/build/pdf.worker.min.mjs",
@@ -67,6 +66,7 @@ function ContinuousPdfPage({
   onSelectFlag,
   onVisibility,
   registerPage,
+  focusSelection,
 }: {
   pdf: PDFDocumentProxy;
   metric: PageMetric;
@@ -79,6 +79,7 @@ function ContinuousPdfPage({
   onSelectFlag: (flagId: number) => void;
   onVisibility: (page: number, ratio: number) => void;
   registerPage: (page: number, element: HTMLElement | null) => void;
+  focusSelection: boolean;
 }) {
   const pageRef = useRef<HTMLElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -178,9 +179,9 @@ function ContinuousPdfPage({
   }, [displayWidth, isNear, metric.pageNumber, pdf]);
 
   useEffect(() => {
-    if (selectedFlagId === null || !isNear) return;
+    if (!focusSelection || selectedFlagId === null || selectedFlagId < 0 || !isNear) return;
     markerRefs.current.get(selectedFlagId)?.focus({ preventScroll: false });
-  }, [isNear, selectedFlagId, viewport]);
+  }, [focusSelection, isNear, selectedFlagId, viewport]);
 
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
@@ -266,7 +267,7 @@ function ContinuousPdfPage({
                     style={position}
                     aria-label={flag
                       ? `Finding ${highlight.findingNumber}: ${CHECK_KIND_SHORT_LABEL[flag.check_kind] ?? flag.check_kind}. ${severityLabel(flag.severity)}. Page ${metric.pageNumber}. Exact passage.${highlight.selected ? " Selected." : ""}`
-                      : `Finding ${highlight.findingNumber} on page ${metric.pageNumber}. Exact passage.${highlight.selected ? " Selected." : ""}`}
+                      : `${highlight.flagId < 0 ? "Criterion evidence" : `Finding ${highlight.findingNumber}`} on page ${metric.pageNumber}. Exact passage.${highlight.selected ? " Selected." : ""}`}
                     aria-pressed={highlight.selected}
                     aria-describedby={popoverFlag?.id === highlight.flagId ? `region-popover-${highlight.flagId}` : undefined}
                     onMouseEnter={() => setHoveredFlagId(highlight.flagId)}
@@ -275,7 +276,7 @@ function ContinuousPdfPage({
                     onBlur={() => setHoveredFlagId((id) => id === highlight.flagId ? null : id)}
                     onClick={() => onSelectFlag(highlight.flagId)}
                   >
-                    <span className="signal-document-marker" aria-hidden="true">{highlight.findingNumber}</span>
+                    <span className="signal-document-marker" aria-hidden="true">{highlight.flagId < 0 ? "Evidence" : highlight.findingNumber}</span>
                   </button>
                 );
               });
@@ -303,6 +304,8 @@ export function PdfPane({
   onSelectFlag,
   requestedPage,
   findingNumbers = EMPTY_FINDING_NUMBERS,
+  requestedPageAttempt,
+  focusSelection = true,
 }: {
   fileUrl: string;
   regions: FlagRegionOut[];
@@ -311,6 +314,8 @@ export function PdfPane({
   onSelectFlag: (flagId: number) => void;
   requestedPage: number | null;
   findingNumbers?: ReadonlyMap<number, number>;
+  requestedPageAttempt?: number;
+  focusSelection?: boolean;
 }) {
   const [pdf, setPdf] = useState<PDFDocumentProxy | null>(null);
   const [metrics, setMetrics] = useState<PageMetric[]>([]);
@@ -320,7 +325,6 @@ export function PdfPane({
   const [zoom, setZoom] = useState(1);
   const scrollRef = useRef<HTMLDivElement>(null);
   const pageRefs = useRef<Map<number, HTMLElement>>(new Map());
-  const pageVisibility = useRef<Map<number, number>>(new Map());
   const flagsById = useMemo(() => new Map(flags.map((flag) => [flag.id, flag])), [flags]);
 
   useEffect(() => {
@@ -356,17 +360,22 @@ export function PdfPane({
     else pageRefs.current.delete(page);
   }, []);
 
-  const updateVisibility = useCallback((page: number, ratio: number) => {
-    pageVisibility.current.set(page, ratio);
-    let mostVisiblePage = page;
-    let mostVisibleRatio = -1;
-    for (const [candidatePage, candidateRatio] of pageVisibility.current) {
-      if (candidateRatio > mostVisibleRatio) {
-        mostVisiblePage = candidatePage;
-        mostVisibleRatio = candidateRatio;
+  const updateVisibility = useCallback(() => {
+    const root = scrollRef.current?.getBoundingClientRect();
+    if (!root) return;
+    let mostVisiblePage = 0;
+    let mostVisibleHeight = 0;
+    for (const [page, element] of pageRefs.current) {
+      const bounds = element.getBoundingClientRect();
+      const visibleHeight = Math.max(0, Math.min(bounds.bottom, root.bottom) - Math.max(bounds.top, root.top));
+      if (visibleHeight > mostVisibleHeight) {
+        mostVisiblePage = page;
+        mostVisibleHeight = visibleHeight;
       }
     }
-    if (mostVisibleRatio > 0) setCurrentPage(mostVisiblePage);
+    // IntersectionObserver thresholds alone retain stale ratios while a
+    // smooth page jump ends between thresholds. Measure the current scroll.
+    if (mostVisiblePage) setCurrentPage(mostVisiblePage);
   }, []);
 
   const scrollToPage = useCallback((page: number, behavior: ScrollBehavior = "smooth") => {
@@ -392,7 +401,7 @@ export function PdfPane({
   useEffect(() => {
     if (requestedPage === null || metrics.length === 0) return;
     requestAnimationFrame(() => scrollToPage(requestedPage, "auto"));
-  }, [metrics.length, requestedPage, scrollToPage]);
+  }, [metrics.length, requestedPage, requestedPageAttempt, scrollToPage]);
 
   function commitPageInput() {
     const page = Number(pageInput);
@@ -400,7 +409,6 @@ export function PdfPane({
     else setPageInput(String(currentPage));
   }
 
-  const scopeRegions = regions.filter((region) => region.kind !== "page_bbox");
   const pagesLabel = pdf ? `${pdf.numPages} ${pdf.numPages === 1 ? "page" : "pages"}` : "Loading pages";
   const zoomStyle = { inlineSize: `${zoom * 100}%` } as CSSProperties;
 
@@ -435,22 +443,7 @@ export function PdfPane({
           <output aria-live="polite">Page {currentPage} of {pdf?.numPages ?? "…"}</output>
         </div>
       </div>
-      {scopeRegions.length > 0 && (
-        <div className="signal-document-scope-markers" role="group" aria-label="Findings without an exact passage location">
-          {scopeRegions.map((region) => {
-            const flag = flagsById.get(region.flag_id);
-            const number = findingNumbers.get(region.flag_id) ?? 1;
-            const precision = regionPrecision(region);
-            return (
-              <button key={region.flag_id} type="button" aria-pressed={region.flag_id === selectedFlagId} onClick={() => onSelectFlag(region.flag_id)}>
-                <span aria-hidden="true">{number}</span>
-                <span>Finding {number} · {precision.label}{flag ? ` · ${CHECK_KIND_SHORT_LABEL[flag.check_kind] ?? flag.check_kind}` : ""}</span>
-              </button>
-            );
-          })}
-        </div>
-      )}
-      <div ref={scrollRef} role="region" tabIndex={0} aria-label="Full manuscript, scrollable" className="signal-document-scroll signal-document-scroll--pdf">
+      <div ref={scrollRef} onScroll={updateVisibility} role="region" tabIndex={0} aria-label="Full manuscript, scrollable" className="signal-document-scroll signal-document-scroll--pdf">
         {loadError ? (
           <section className="signal-document-paper-state" role="alert">
             <p className="signal-section-kicker">PDF display unavailable</p>
@@ -478,6 +471,7 @@ export function PdfPane({
                 onSelectFlag={onSelectFlag}
                 onVisibility={updateVisibility}
                 registerPage={registerPage}
+                focusSelection={focusSelection}
               />
             ))}
           </div>

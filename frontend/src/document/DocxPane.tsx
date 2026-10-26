@@ -11,7 +11,6 @@ import { SeverityTag, type Severity } from "../components/SeverityTag";
 import { CHECK_KIND_SHORT_LABEL } from "../domain/checkKind";
 import { severityLabel } from "../domain/severity";
 import { truncateAtWord } from "../format/text";
-import { regionPrecision } from "./regionCopy";
 
 function SpinnerIcon() {
   return (
@@ -34,6 +33,8 @@ export function DocxPane({
   selectedFlagId,
   onSelectFlag,
   isVisible,
+  requestedParagraph,
+  requestedParagraphAttempt,
   findingNumbers = EMPTY_FINDING_NUMBERS,
 }: {
   paragraphs: DocumentParagraphOut[] | undefined;
@@ -54,8 +55,15 @@ export function DocxPane({
   // Passed down so the effect can retry once the pane genuinely becomes
   // visible, not just once per selection.
   isVisible: boolean;
+  requestedParagraph?: number | null;
+  requestedParagraphAttempt?: number;
   findingNumbers?: ReadonlyMap<number, number>;
 }) {
+  const sourceRoot = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (requestedParagraph === null || requestedParagraph === undefined || !isVisible) return;
+    sourceRoot.current?.querySelector(`[data-paragraph="${requestedParagraph}"]`)?.scrollIntoView({ block: "center", behavior: "auto" });
+  }, [requestedParagraph, requestedParagraphAttempt, paragraphs, isVisible]);
   const [hoveredFlagId, setHoveredFlagId] = useState<number | null>(null);
   const highlightRefs = useRef<Map<number, HTMLButtonElement>>(new Map());
 
@@ -101,7 +109,6 @@ export function DocxPane({
   const popoverFlag = hoveredFlagId !== null && hoveredFlagId !== selectedFlagId
     ? flagsById.get(hoveredFlagId)
     : null;
-  const scopeRegions = regions.filter((region) => region.kind !== "paragraph_only");
 
   // A selected flag whose region is `paragraph_only` but whose paragraph
   // index isn't in the fetched list at all -- e.g. the parser skipped an
@@ -128,22 +135,7 @@ export function DocxPane({
           may differ from the uploaded file.
         </p>
       </div>
-      {scopeRegions.length > 0 && (
-        <div className="signal-document-scope-markers" role="group" aria-label="Findings without an exact paragraph location">
-          {scopeRegions.map((region) => {
-            const flag = flagsById.get(region.flag_id);
-            const number = findingNumbers.get(region.flag_id) ?? 1;
-            const precision = regionPrecision(region);
-            return (
-              <button key={region.flag_id} type="button" aria-pressed={region.flag_id === selectedFlagId} onClick={() => onSelectFlag(region.flag_id)}>
-                <span aria-hidden="true">{number}</span>
-                <span>Finding {number} · {precision.label}{flag ? ` · ${CHECK_KIND_SHORT_LABEL[flag.check_kind] ?? flag.check_kind}` : ""}</span>
-              </button>
-            );
-          })}
-        </div>
-      )}
-      <div role="region" tabIndex={0} aria-label="Full manuscript, scrollable" className="signal-document-scroll signal-document-scroll--docx">
+      <div ref={sourceRoot} role="region" tabIndex={0} aria-label="Full manuscript, scrollable" className="signal-document-scroll signal-document-scroll--docx">
         <article className="signal-document-docx-paper" aria-label="Reconstructed manuscript text">
           <header className="signal-document-docx-paper__header">
             <span>Reconstructed manuscript</span>
@@ -198,11 +190,11 @@ export function DocxPane({
 
             if (!primaryFlag) {
               return HeadingTag ? (
-                <HeadingTag key={p.paragraph} className="mt-3 mb-1.5 text-md font-semibold text-ink">
+                <HeadingTag key={p.paragraph} data-paragraph={p.paragraph} data-source-selected={p.paragraph === requestedParagraph} className="mt-3 mb-1.5 text-md font-semibold text-ink">
                   {p.text}
                 </HeadingTag>
               ) : (
-                <p key={p.paragraph} className="mb-2 text-sm text-ink">
+                <p key={p.paragraph} data-paragraph={p.paragraph} data-source-selected={p.paragraph === requestedParagraph} className="mb-2 text-sm text-ink">
                   {p.text}
                 </p>
               );
@@ -244,11 +236,11 @@ export function DocxPane({
                 </button>
               );
               return HeadingTag ? (
-                <HeadingTag key={p.paragraph} className="mt-3 mb-1.5">
+                <HeadingTag key={p.paragraph} data-paragraph={p.paragraph} data-source-selected={p.paragraph === requestedParagraph} className="mt-3 mb-1.5">
                   {highlightButton}
                 </HeadingTag>
               ) : (
-                <div key={p.paragraph} className="mb-2">
+                <div key={p.paragraph} data-paragraph={p.paragraph} data-source-selected={p.paragraph === requestedParagraph} className="mb-2">
                   {highlightButton}
                 </div>
               );
@@ -288,11 +280,11 @@ export function DocxPane({
             );
 
             return HeadingTag ? (
-              <HeadingTag key={p.paragraph} className="mt-3 mb-1.5">
+              <HeadingTag key={p.paragraph} data-paragraph={p.paragraph} data-source-selected={p.paragraph === requestedParagraph} className="mt-3 mb-1.5">
                 {multiFlagBlock}
               </HeadingTag>
             ) : (
-              <div key={p.paragraph} className="mb-2">
+              <div key={p.paragraph} data-paragraph={p.paragraph} data-source-selected={p.paragraph === requestedParagraph} className="mb-2">
                 {multiFlagBlock}
               </div>
             );

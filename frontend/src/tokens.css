@@ -437,6 +437,12 @@
   --signal-report-jump-grid: repeat(4, minmax(0, 1fr));
   --signal-resolution-card-grid: repeat(auto-fit, minmax(min(100%, 22rem), 1fr));
   --signal-review-progress-grid: repeat(auto-fit, minmax(min(100%, 14rem), 1fr));
+  --signal-review-source-min: 32rem;
+  --signal-review-controls-min: 20rem;
+  --signal-review-pair-controls-min: 26rem;
+  --signal-review-source-gap: 1.5rem;
+  --signal-review-single-capacity: calc(var(--signal-review-source-min) + var(--signal-review-controls-min) + var(--signal-review-source-gap));
+  --signal-review-pair-capacity: calc(var(--signal-review-source-min) * 2 + var(--signal-review-pair-controls-min) + var(--signal-review-source-gap) * 2);
   --signal-report-branch-width: 5rem;
   --signal-report-branch-offset: 1.5rem;
   --signal-report-jump-number-size: 1.75rem;

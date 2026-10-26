@@ -269,6 +269,41 @@ export interface EvidenceItem {
   anchor: string;
 }
 
+/** An immutable, complete-source binding, separate for each saved location. */
+export interface BoundSourceEvidence extends EvidenceItem {
+  evidence_id: string;
+  check_run_id: number;
+  manuscript_id: number;
+  source_sha256: string;
+  subject: { kind: "flag" | "criterion"; id: number };
+  role: string;
+  evidence_index: number;
+  quote_sha256: string;
+  label: string;
+  precision: "page_bbox" | "page_only" | "paragraph_only" | "unavailable";
+  precision_note: string;
+  page: number | null;
+  paragraph: number | null;
+  boxes: [number, number, number, number][];
+  image_id: string | null;
+  image_sha256: string | null;
+  image_width?: number;
+  image_height?: number;
+  public_sample?: boolean;
+}
+
+export interface PublicEvidenceImageOut extends EvidenceItem {
+  evidence_id: string;
+  image_id: string | null;
+  image_sha256: string | null;
+  image_width?: number;
+  image_height?: number;
+  page: number | null;
+  label: string;
+  precision: BoundSourceEvidence["precision"];
+  precision_note: string;
+}
+
 /** Present only when an instructor resolved this criterion out of the
  * escalation panel — the report must show this distinctly, never as an
  * ordinary AI-graded row (V-055 review). */
@@ -539,6 +574,7 @@ export interface PaginatedAuditLog {
 }
 
 export interface EscalatedItemOut {
+  evidence?: EvidenceItem[];
   review_basis?: "document_review";
   check_result_id: number;
   criterion_id: number;
@@ -635,6 +671,7 @@ export interface CitationSourceKeyOut {
 }
 
 export interface FlagOut {
+  source_evidence?: BoundSourceEvidence[];
   id: number;
   check_result_id: number;
   check_run_id: number;
@@ -752,6 +789,7 @@ export interface FlagRegionOut {
 }
 
 export interface ManuscriptViewerOut {
+  source_sha256?: string;
   manuscript_id: number;
   original_filename: string | null;
   source_format: "pdf" | "docx" | "unknown";
@@ -1000,6 +1038,7 @@ export interface ShareLinkOut {
 // field that route's data actually carried) -- now PublicReportOut, an
 // independently-typed, deliberately smaller shape.
 export interface SharedReportOut {
+  evidence_images?: PublicEvidenceImageOut[];
   report: PublicReportOut;
   flags: FlagSummaryOut[];
 }

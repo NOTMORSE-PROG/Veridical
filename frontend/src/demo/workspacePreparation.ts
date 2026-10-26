@@ -1,4 +1,6 @@
-import { reviewTasks, sampleFlags, WORKSPACE_SAMPLE } from "./workspaceFixture";
+import { WORKSPACE_SAMPLE } from "./workspaceFixture";
+
+import { sourceEvidence } from "./sourceEvidence";
 
 type SourceStage = "ingesting" | "structural" | "integrity" | "aggregating";
 
@@ -21,10 +23,10 @@ export async function prepareWorkspaceSource(fetchSource: typeof fetch, signal: 
   if (!Array.isArray(pages) || pages.length !== WORKSPACE_SAMPLE.pageCount || !pages.every((page, index) => page?.page === index + 1 && typeof page.text === "string")) throw new Error("The manuscript page index is incomplete.");
 
   stage("integrity", "Binding the recorded observations and rubric excerpts to their original pages.");
-  const excerpts = [...sampleFlags.map(flag => ({ page: Number(flag.page_anchor.match(/\d+/)?.[0]), quote: flag.evidence_excerpt })), ...reviewTasks];
+  const excerpts = sourceEvidence;
   for (const excerpt of excerpts) {
     signal.throwIfAborted();
-    if (!pages[excerpt.page - 1]?.text.replace(/\s+/g, " ").includes(excerpt.quote.replace(/\s+/g, " "))) throw new Error("A review excerpt could not be matched to its original page.");
+    if (!pages[(excerpt.page ?? 0) - 1]?.text.replace(/\s+/g, " ").includes(excerpt.quote.replace(/\s+/g, " "))) throw new Error("A review excerpt could not be matched to its original page.");
   }
   stage("aggregating", "Source records verified. Keeping instructor judgments and decisions intact.");
   return { pageCount: pages.length, excerptsBound: excerpts.length, sha256: digest };

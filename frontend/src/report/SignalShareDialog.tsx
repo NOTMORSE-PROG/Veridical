@@ -66,8 +66,7 @@ export function SignalShareDialog({ checkRunId, manuscriptLabel, onClose }: {
     <Dialog title="Share this report" onClose={create.isPending || revoke.isPending ? undefined : onClose}>
       <div className="signal-share-dialog">
         <p aria-live="polite" className="signal-live-region">{announcement}</p>
-        <p>Anyone with the link can view {manuscriptLabel}'s readiness band, criterion outcomes, integrity signals, evidence, and any decision note as they currently stand.</p>
-        <Alert title="Treat this link as semi-confidential" tone="warning">No sign-in is required, and a recipient can forward it. The link is read-only and gives no access to your Review Desk, Audit, settings, or other reports. You can revoke it here.</Alert>
+        {isWorkspaceSample() ? <Alert title="Read-only preview in this browser" tone="info">This prepared review link opens in another tab of this browser. It is not available to recipients on another browser or device. The preview includes the current report and public manuscript evidence; private annotations and criterion reasons are omitted. You can expire or revoke the link here.</Alert> : <><p>Anyone with the link can view {manuscriptLabel}'s readiness band, criterion outcomes, integrity signals, evidence, and any decision note as they currently stand.</p><Alert title="Treat this link as semi-confidential" tone="warning">No sign-in is required, and a recipient can forward it. The link is read-only and gives no access to your Review Desk, Audit, settings, or other reports. You can revoke it here.</Alert></>}
 
         {isPending ? <div role="status" aria-busy="true" className="signal-desk-loading"><span>Checking for an active link…</span><i /><i /></div> : !link ? (
           <div className="signal-share-dialog__form">

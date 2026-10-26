@@ -2,7 +2,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Link, useParams } from "react-router";
 import type { CheckRun, CheckRunStatus } from "../api/types";
-import { formatManuscriptOption, manuscriptIdentity } from "../domain/manuscriptLabel";
+import { manuscriptIdentity } from "../domain/manuscriptLabel";
 import { useRouteFocus } from "../routing/useRouteFocus";
 import { ActionLink } from "../ui/ActionLink";
 import { Alert } from "../ui/Alert";
@@ -96,15 +96,11 @@ const STAGE_MARKS: Record<StageState, string> = {
   done: "✓",
   pending: "·",
   running: "→",
-  skipped: "Not run",
+  skipped: "-",
 };
 
 function manuscriptLabel(run: CheckRun): string {
-  if (!run.manuscript_group_label) return `Manuscript #${run.manuscript_id}`;
-  return formatManuscriptOption(
-    manuscriptIdentity(run.manuscript_group_label, run.manuscript_original_filename),
-    run.manuscript_uploaded_at ? formatDateTime(run.manuscript_uploaded_at) : "an earlier date",
-  );
+  return manuscriptIdentity(run.manuscript_group_label ?? `Manuscript #${run.manuscript_id}`, run.manuscript_original_filename).primary;
 }
 
 export function CheckProgressPage() {
@@ -159,15 +155,13 @@ export function CheckProgressPage() {
         <Alert title="Could not load this check's progress" tone="error" role="alert"><Button variant="secondary" onClick={() => refetch()}>Try again</Button></Alert>
       ) : (
         <>
-          <section className="signal-check-identity" aria-labelledby="check-manuscript-heading">
-            <div><p className="signal-section-kicker">Manuscript</p><h2 id="check-manuscript-heading">{manuscriptLabel(run)}</h2></div>
-            <dl><div><dt>Required format</dt><dd>{run.rubric_title ?? "Active format"}</dd></div><div><dt>Run</dt><dd>#{run.id}</dd></div></dl>
-          </section>
+
 
           {run.status === "queued" && <Alert title="Waiting to start" tone="info" role="status">Queue position {run.queue_position}. VERIDICAL will start this check when an execution slot is available.</Alert>}
 
           {run.cancel_requested_at && run.status !== "cancelled" && <Alert title="Stopping after the current safe step" tone="warning" role="status">Your cancellation request is recorded. Intermediate work and the audit trail will be kept.</Alert>}
 
+          <div className="signal-check-layout">
           <section className="signal-check-pipeline" aria-labelledby="pipeline-heading">
             <div className="signal-section-heading"><div><p className="signal-section-kicker">Pipeline</p><h2 id="pipeline-heading">What VERIDICAL is doing</h2></div><p>Completed work remains traceable even if this run stops.</p></div>
             <ol className="signal-check-track">
@@ -180,6 +174,11 @@ export function CheckProgressPage() {
               ))}
             </ol>
           </section>
+          <section className="signal-check-identity" aria-labelledby="check-manuscript-heading">
+            <div><p className="signal-section-kicker">Manuscript</p><h2 id="check-manuscript-heading">{manuscriptLabel(run)}</h2><p className="signal-check-filename">{run.manuscript_original_filename ?? "Filename unavailable"}</p></div>
+            <dl><div><dt>Uploaded</dt><dd>{run.manuscript_uploaded_at ? formatDateTime(run.manuscript_uploaded_at) : "Earlier upload"}</dd></div><div><dt>Required format</dt><dd>{run.rubric_title ?? "Active format"}</dd></div><div><dt>Run</dt><dd>#{run.id}</dd></div></dl>
+          </section>
+          </div>
 
           {run.status === "failed" && run.stage_status?.failed && <Alert title="This check stopped" tone="error" role="alert">{FAILURE_MESSAGES[run.stage_status.failed.code] ?? run.stage_status.failed.message}</Alert>}
 

@@ -6836,3 +6836,66 @@
     translate: 0;
   }
 }
+
+@layer components {
+  .signal-document-viewer { width: 100%; }
+  .signal-document-selected__header { border-inline-start: 0; padding-inline-start: 0; }
+  .signal-review-capacity { position: absolute; visibility: hidden; pointer-events: none; block-size: 0; inline-size: var(--signal-review-pair-capacity); }
+  .signal-review-capacity--single { inline-size: var(--signal-review-single-capacity); }
+  .signal-document-header > div:first-child { border-inline-start: 0; padding-inline-start: 0; }
+  .signal-document-workbench[data-desktop-split="true"] .signal-document-tabs { display: none; }
+  .signal-document-workbench[data-desktop-split="true"] .signal-document-grid { display: grid; gap: var(--signal-review-source-gap); grid-template-columns: minmax(var(--signal-review-source-min), 3fr) minmax(var(--signal-review-controls-min), 2fr); }
+  .signal-document-workbench[data-desktop-split="true"] .signal-document-pane,
+  .signal-document-workbench[data-desktop-split="true"] .signal-document-inspector { display: flex; }
+  .signal-document-workbench[data-desktop-split="true"] .signal-document-inspector { display: block; }
+  .signal-document-workbench[data-comparison="true"] .signal-document-grid { grid-template-columns: minmax(0, 1fr) var(--signal-review-pair-controls-min); }
+  .signal-source-page-comparison { min-inline-size: 0; min-block-size: 0; display: flex; flex-direction: column; flex: 1; }
+  .signal-source-page-comparison__toolbar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--signal-space-3); padding: var(--signal-space-3); }
+  .signal-source-page-comparison__pages { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--signal-review-source-gap); padding: var(--signal-space-4); overflow: auto; min-block-size: 0; align-items: start; }
+  .signal-source-page-comparison figure { margin: 0; min-inline-size: 0; border: var(--signal-border-hairline) solid var(--color-signal-border); background: var(--color-signal-surface); }
+  .signal-source-page-comparison figure[data-selected="true"] { outline: var(--signal-border-emphasis) solid var(--color-signal-brand); }
+  .signal-source-page-comparison figcaption,
+  .signal-shared-evidence-image figcaption { display: grid; gap: var(--signal-space-2); padding: var(--signal-space-3); font-size: var(--signal-type-meta); }
+  .signal-source-page-comparison img,
+  .signal-shared-evidence-image img { display: block; inline-size: 100%; block-size: auto; }
+  .signal-saved-source-evidence,
+  .signal-saved-source-evidence article,
+  .signal-flag-review-actions,
+  .signal-criterion-evidence { display: grid; gap: var(--signal-space-3); min-inline-size: 0; }
+  .signal-saved-source-evidence article { border-block-start: var(--signal-border-hairline) solid var(--color-signal-border); padding-block: var(--signal-space-3); }
+  .signal-saved-source-evidence blockquote,
+  .signal-criterion-evidence blockquote,
+  .signal-shared-evidence-image blockquote { margin: 0; display: grid; gap: var(--signal-space-2); }
+  .signal-saved-source-evidence cite,
+  .signal-criterion-evidence cite,
+  .signal-shared-evidence-image cite { font-size: var(--signal-type-meta); color: var(--color-signal-ink-secondary); }
+  .signal-saved-source-evidence h4 { margin: 0; }
+  .signal-evidence-navigation { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--signal-space-2); font-size: var(--signal-type-meta); }
+  .signal-exclusion-help { flex-basis: 100%; margin-block-start: var(--signal-space-3); }
+  .signal-exclusion-help summary,
+  .signal-criterion-evidence summary { cursor: pointer; font-weight: var(--signal-weight-semibold); }
+  .signal-criterion-evidence details button { border: 0; background: transparent; font: inherit; text-align: start; text-decoration: underline; cursor: pointer; padding: var(--signal-space-2); }
+  .signal-document-recorded-reasoning { padding: var(--signal-space-4); }
+  .signal-document-docx-paper [data-source-selected="true"] { outline: var(--signal-border-emphasis) solid var(--signal-evidence-location-border); }
+  .signal-check-progress { width: 100%; max-inline-size: none; max-width: none; }
+  .signal-check-layout { display: flex; flex-wrap: wrap; gap: var(--signal-space-6); align-items: flex-start; }
+  .signal-check-layout > .signal-check-pipeline { flex: 1 1 var(--signal-review-source-min); min-inline-size: min(100%, var(--signal-review-source-min)); }
+  .signal-check-layout > .signal-check-identity { flex: 1 1 var(--signal-review-controls-min); min-inline-size: min(100%, var(--signal-review-controls-min)); }
+  .signal-check-layout .signal-check-identity { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--signal-space-4); border: var(--signal-border-hairline) solid var(--color-signal-border); padding: var(--signal-space-5); background: var(--color-signal-surface); color: var(--color-signal-ink); box-shadow: none; }
+  .signal-check-layout .signal-check-identity h2 { font-size: var(--signal-type-body-lg); overflow-wrap: anywhere; }
+  .signal-check-filename { font-size: var(--signal-type-meta); color: var(--color-signal-ink-secondary); overflow-wrap: anywhere; }
+  .signal-check-layout .signal-check-identity dl { display: grid; gap: var(--signal-space-4); }
+  .signal-check-layout .signal-check-identity dl > div { border-inline-start: 0; padding-inline-start: 0; min-inline-size: 0; }
+  .signal-check-layout .signal-check-identity dt,
+  .signal-check-layout .signal-check-identity .signal-section-kicker { color: var(--color-signal-ink-secondary); }
+  .signal-check-layout .signal-check-identity dd { overflow-wrap: anywhere; }
+  .signal-check-complete { border: var(--signal-border-hairline) solid var(--color-signal-border); background: var(--color-signal-surface); padding: var(--signal-space-4); color: var(--color-signal-ink); }
+  .signal-check-complete h2 { font-size: var(--signal-type-body-lg); }
+  .signal-shared-evidence > div { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, var(--signal-review-source-min)), 1fr)); gap: var(--signal-space-6); }
+  .signal-shared-evidence-image { margin: 0; padding: var(--signal-space-3); border: var(--signal-border-hairline) solid var(--color-signal-border); border-radius: var(--signal-radius-panel); }
+  .signal-shared-evidence-image blockquote { margin-block-end: var(--signal-space-4); }
+}
+
+@layer components {
+.signal-review-measure { position: absolute; inline-size: 0; block-size: 0; overflow: hidden; pointer-events: none; }
+}

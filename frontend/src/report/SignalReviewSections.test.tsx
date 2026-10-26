@@ -13,7 +13,8 @@ import { fireEvent, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { EscalatedItemOut } from "../api/types";
 import { renderWithProviders, stubFetchByPath } from "../test/renderWithProviders";
-import { SignalEscalatedPanel } from "./SignalReviewSections";
+import { SignalCriteriaResults, SignalEscalatedPanel } from "./SignalReviewSections";
+import { sampleReport } from "../demo/workspaceFixture";
 
 const REAL_MAJORITY: EscalatedItemOut = {
   check_result_id: 4,
@@ -212,7 +213,8 @@ describe("SignalEscalatedPanel / SignalResolutionCard", () => {
     vi.stubGlobal("fetch", fetchMock);
     renderWithProviders(<SignalEscalatedPanel checkRunId={5} />);
 
-    fireEvent.click(await screen.findByRole("button", { name: "Needs another document" }));
+    fireEvent.click(await screen.findByText("Cannot judge from this manuscript?"));
+    fireEvent.click(screen.getByRole("button", { name: "Exclude: needs another document" }));
     fireEvent.change(screen.getByRole("textbox", { name: "Reason (required)" }), {
       target: { value: "Cannot judge this without opening the manuscript myself." },
     });
@@ -419,4 +421,12 @@ describe("SignalEscalatedPanel / SignalResolutionCard", () => {
     expect(screen.getByRole("heading", { name: "Criteria needing your judgment" })).toBeInTheDocument();
     expect(screen.getByText("No unresolved criteria")).toBeInTheDocument();
   });
+});
+
+
+it("shows a recorded rubric level without claiming that Developing meets the criterion", () => {
+  renderWithProviders(<SignalCriteriaResults checkRunId={1} results={[{ ...sampleReport.results[0], outcome: "passed", level: { ordinal: 2, name: "Developing", points: 1, max_points: 2 } }]} />);
+  expect(screen.getByText("Rubric level recorded")).toBeInTheDocument();
+  expect(screen.getByText("Developing")).toBeInTheDocument();
+  expect(screen.queryByText("Meets criterion")).not.toBeInTheDocument();
 });

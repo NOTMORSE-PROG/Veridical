@@ -1,6 +1,7 @@
 import type { AuditLogDetail, FlagOut, ReportOut, ShareLinkOut } from "../api/types";
 import { companionSource, sampleCriteria, sampleEscalatedItems, sampleFlags, sampleInstructor, sampleLibrary, sampleManuscript, sampleReport, sampleRubric, sampleRun, WORKSPACE_SAMPLE } from "./workspaceFixture";
 import { prepareWorkspaceSource } from "./workspacePreparation";
+import { evidenceByImageId, evidenceFor, evidenceSourceHash, publicEvidenceImages, sourceEvidence } from "./sourceEvidence";
 
 type SampleState = {
   run: typeof sampleRun;
@@ -17,6 +18,7 @@ const fresh = (): SampleState => ({ run: structuredClone(sampleRun), report: str
 const json = (value: unknown, status = 200) => new Response(JSON.stringify(value), { status, headers: { "Content-Type": "application/json" } });
 const failure = (message: string, status = 422) => json({ error: { code: status === 409 ? "conflict" : status === 410 ? "gone" : "sample_operation", message } }, status);
 const textValue = (value: unknown) => typeof value === "string" ? value : "";
+const sha256 = async (bytes: ArrayBuffer) => Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", bytes)), value => value.toString(16).padStart(2, "0")).join("");
 
 export function installWorkspaceSample() {
   const originalFetch = window.fetch.bind(window);
@@ -25,6 +27,9 @@ export function installWorkspaceSample() {
     const stored = JSON.parse(sessionStorage.getItem(WORKSPACE_SAMPLE.storageKey) ?? "null");
     if (stored?.version === 1 && stored.state?.report?.manuscript_id === 1 && Array.isArray(stored.state?.flags) && Array.isArray(stored.state?.events) && Array.isArray(stored.state?.library) && Array.isArray(stored.state?.rubric?.criteria)) state = { ...fresh(), ...stored.state, run: stored.state.run ?? structuredClone(sampleRun) } as SampleState;
   } catch { /* An unavailable or invalid sample cache starts a clean sample. */ }
+  // Add newly bound public evidence without losing existing practice judgments.
+  state.report.results = state.report.results.map(row => ({ ...row, evidence: sampleReport.results.find(current => current.criterion_id === row.criterion_id)?.evidence ?? row.evidence }));
+  state.flags = state.flags.map(flag => ({ ...flag, source_evidence: evidenceFor("flag", flag.id) }));
   function persist() { try { sessionStorage.setItem(WORKSPACE_SAMPLE.storageKey, JSON.stringify({ version: 1, state })); if (state.share) localStorage.setItem(`${WORKSPACE_SAMPLE.storageKey}:share:${state.share.token}`, JSON.stringify({ ...publicSnapshot(), expires_at: state.share.expires_at })); } catch { /* This visit still works when browser storage is disabled. */ } }
   function audit(event_type: string, payload: Record<string, unknown>) {
     state.events.unshift({ id: state.events.length + 1, event_type, check_run_id: state.report.check_run_id, manuscript_group_label: state.manuscript.group_label, manuscript_original_filename: WORKSPACE_SAMPLE.filename, prompt_type: null, prompt_version: null, agreement_score: null, llm_execution_mode: null, input_hash: null, created_at: new Date().toISOString(), payload: { sample: true, ...payload } });
@@ -86,15 +91,49 @@ export function installWorkspaceSample() {
     state.manuscript.latest_decision = state.report.decision;
   }
 
+  function projectPublicReport(report: ReportOut) {
+    return {
+      check_run_id: report.check_run_id, manuscript_group_label: report.manuscript_group_label,
+      manuscript_original_filename: report.manuscript_original_filename, rubric_title: report.rubric_title,
+      status: report.status, composite_score: report.composite_score,
+      thresholds: { ready_min_score: report.thresholds.ready_min_score, not_ready_max_score: report.thresholds.not_ready_max_score },
+      reason: report.reason, flag_deduction: report.flag_deduction, unresolved_high_flag_count: report.unresolved_high_flag_count,
+      decision: report.decision, decided_at: report.decided_at, decision_note: report.decision_note,
+      rubric_is_current: report.rubric_is_current, llm_mode: report.llm_mode,
+      rubric_needs_review: report.rubric_needs_review, rubric_parse_issues: report.rubric_parse_issues,
+      originality_scope: report.originality_scope,
+      results: report.results.map(row => ({ criterion_id: row.criterion_id, text: row.text, type: row.type,
+        weight: row.weight, weight_importance: row.weight_importance, kind: row.kind, outcome: row.outcome,
+        score: row.score, basis: row.basis, anchor: row.anchor, reasoning: row.reasoning, reason: row.reason,
+        evidence: row.evidence.map(item => ({ quote: item.quote, anchor: item.anchor })),
+        level: row.level ? { name: row.level.name, ordinal: row.level.ordinal, points: row.level.points, max_points: row.level.max_points } : null,
+        resolved: !!row.resolution || row.resolved === true }))
+    };
+  }
+  function publicFlags(flags: (FlagOut & { problem_kind?: string | null })[]) {
+    return flags.map(flag => ({ id: flag.id, check_kind: flag.check_kind, severity: flag.severity,
+      criterion_text: flag.criterion_text, evidence_excerpt: flag.evidence_excerpt, page_anchor: flag.page_anchor,
+      overridden: flag.overridden, is_passage_level: flag.is_passage_level, first_upload_context: flag.first_upload_context,
+      confirmed_citation_source: flag.confirmed_citation_source, problem_kind: flag.ai_verdict_summary ?? flag.problem_kind ?? null, matched_ref: flag.matched_ref }));
+  }
   function publicSnapshot() {
-    const { pending_review_count: _pending, manuscript_id: _manuscript, previous_status: _status, previous_composite_score: _score, integrity_check_status: _integrity, ...report } = state.report;
-    void _pending; void _manuscript; void _status; void _score; void _integrity;
-    return { report: { ...report, results: report.results.map(row => { const { resolution, ...publicRow } = row; return { ...publicRow, resolved: !!resolution }; }) }, flags: state.flags.map(flag => ({ id: flag.id, check_kind: flag.check_kind, severity: flag.severity, criterion_text: flag.criterion_text, evidence_excerpt: flag.evidence_excerpt, page_anchor: flag.page_anchor, overridden: flag.overridden, is_passage_level: flag.is_passage_level, first_upload_context: flag.first_upload_context, confirmed_citation_source: flag.confirmed_citation_source, problem_kind: null, matched_ref: flag.matched_ref })) };
+    return { report: projectPublicReport(state.report), flags: publicFlags(state.flags), evidence_images: state.fileAvailable ? publicEvidenceImages() : [] };
+  }
+  function readShared(token: string) {
+    if (!/^sample-[0-9a-f-]{36}$/.test(token)) return null;
+    const saved = JSON.parse(localStorage.getItem(`${WORKSPACE_SAMPLE.storageKey}:share:${token}`) ?? "null");
+    if (!saved || saved.report?.check_run_id !== 1 || !Array.isArray(saved.report?.results) || !Array.isArray(saved.flags)) return null;
+    if (saved.expires_at !== null && saved.expires_at !== undefined) {
+      const expiry = typeof saved.expires_at === "string" ? Date.parse(saved.expires_at) : NaN;
+      if (!Number.isFinite(expiry) || expiry <= Date.now()) return null;
+    }
+    const allowedIds = new Set(Array.isArray(saved.evidence_images) ? saved.evidence_images.map((item: { evidence_id?: unknown }) => item.evidence_id) : []);
+    return { report: projectPublicReport(saved.report), flags: publicFlags(saved.flags), evidence_images: publicEvidenceImages().filter(item => allowedIds.has(item.evidence_id)) };
   }
 
   async function reportPdf() {
     const { jsPDF } = await import("jspdf");
-    const pdf = new jsPDF({ unit: "mm", format: "a4" });
+    const pdf = new jsPDF({ unit: "mm", format: "a4", compress: true });
     const margin = 18, width = 174, bottom = 276, spacing = 5;
     let y = 20;
     const write = (value: string, heading = false) => {
@@ -106,6 +145,7 @@ export function installWorkspaceSample() {
     };
     write("VERIDICAL - Manuscript review", true);
     write("Review basis: full-document reading with page-bound observations. The instructor records the rubric levels and final decision.");
+    write("Model grading skipped. Statistical forensics is not applicable to this implementation report. Originality comparison was not run; no similarity judgment is recorded.");
     write(WORKSPACE_SAMPLE.title, true); write(WORKSPACE_SAMPLE.attribution);
     write(`Source: ${WORKSPACE_SAMPLE.pageCount} pages. Unchanged original SHA-256: ${WORKSPACE_SAMPLE.sha256}`);
     write(`Readiness: ${state.report.status}. Instructor decision: ${state.report.decision ?? "Not recorded"}.`);
@@ -113,7 +153,27 @@ export function installWorkspaceSample() {
     write("Criterion record", true);
     for (const result of state.report.results) { write(`${result.text}: ${result.level?.name ?? result.outcome}`, true); write(result.resolution?.reason ?? result.reasoning ?? result.reason ?? "Needs instructor review."); for (const evidence of result.evidence) write(`${evidence.anchor}: ${evidence.quote}`); }
     write("Source observations", true);
-    for (const flag of state.flags) { write(`${flag.check_kind} - ${flag.severity}${flag.overridden ? " - explained by instructor" : ""}`, true); write(`${flag.page_anchor}: ${flag.evidence_excerpt}`); write(flag.ai_reasoning ?? ""); if (flag.override_reason) write(`Instructor reason: ${flag.override_reason}`); }
+    for (const flag of state.flags) { write(`${flag.check_kind} - ${flag.severity}${flag.overridden ? " - explained by instructor" : ""}`, true); write(`${flag.page_anchor}: ${flag.evidence_excerpt}`); write(flag.ai_reasoning ?? ""); for (const entry of evidenceFor("flag", flag.id)) write(`${entry.label}, ${entry.anchor}: ${entry.quote}`); if (flag.override_reason) write(`Instructor reason: ${flag.override_reason}`); if (flag.annotation) write(`Private instructor annotation: ${flag.annotation}`); }
+    if (state.fileAvailable) {
+      for (const entry of sourceEvidence) {
+        if (entry.check_run_id !== state.report.check_run_id || entry.source_sha256 !== evidenceSourceHash || !entry.image_id) throw new Error("A source image is not bound to this report.");
+        const source = await originalFetch(`/sample-assets/evidence/${entry.image_id}.png`, { credentials: "omit" });
+        if (!source.ok) throw new Error("A manuscript evidence image could not be loaded.");
+        pdf.addPage(); y = 17;
+        pdf.setFont("helvetica", "bold"); pdf.setFontSize(10);
+        const title: string[] = pdf.splitTextToSize(`${entry.subject.kind === "criterion" ? "Criterion" : "Finding"} ${entry.subject.id}: ${entry.label}`, width);
+        for (const line of title) { pdf.text(line, margin, y); y += 5; }
+        pdf.setFont("helvetica", "normal"); pdf.setFontSize(8);
+        pdf.text(`${WORKSPACE_SAMPLE.filename} | PDF page ${entry.page} | ${entry.precision === "page_bbox" ? "Exact quotation marked" : "Page only; no exact mark"}`, margin, y); y += 5;
+        const imageBuffer = await source.arrayBuffer();
+        if (await sha256(imageBuffer) !== entry.image_sha256) throw new Error("The source image checksum does not match its evidence record.");
+        const bytes = new Uint8Array(imageBuffer);
+        const dimensions = pdf.getImageProperties(bytes);
+        const imageHeight = Math.min(bottom - y, width * dimensions.height / dimensions.width);
+        const imageWidth = imageHeight * dimensions.width / dimensions.height;
+        pdf.addImage(bytes, "PNG", (210 - imageWidth) / 2, y, imageWidth, imageHeight, undefined, "FAST");
+      }
+    } else write("Manuscript page images are unavailable because the original file was removed from this browser record.");
     for (let index = 1; index <= pdf.getNumberOfPages(); index++) { pdf.setPage(index); pdf.setFontSize(8); pdf.text(`Document review - page ${index} of ${pdf.getNumberOfPages()}`, margin, 289); }
     return new Response(pdf.output("blob"), { headers: { "Content-Type": "application/pdf" } });
   }
@@ -176,7 +236,7 @@ export function installWorkspaceSample() {
     if (/\/document$/.test(path)) {
       const libraryId = path.startsWith("/library/") ? Number(path.split("/")[2]) : null;
       const source = libraryId === companionSource.id ? companionSource : WORKSPACE_SAMPLE;
-      return json({ manuscript_id: libraryId ?? 1, original_filename: source === companionSource ? companionSource.filename : WORKSPACE_SAMPLE.filename, source_format: "pdf", available: state.fileAvailable || libraryId !== null, unavailable_reason: state.fileAvailable ? null : "purged", purged_at: state.fileAvailable ? null : new Date().toISOString(), page_count: source.pageCount, regions: libraryId !== null ? [] : state.flags.map(flag => ({ flag_id: flag.id, kind: "page_only", page: Number(flag.page_anchor.match(/\d+/)?.[0] ?? 1), end_page: null, bbox: null, all_bboxes: [], paragraph: null, index: null })) });
+      return json({ manuscript_id: libraryId ?? 1, original_filename: source === companionSource ? companionSource.filename : WORKSPACE_SAMPLE.filename, source_format: "pdf", available: state.fileAvailable || libraryId !== null, unavailable_reason: state.fileAvailable ? null : "purged", purged_at: state.fileAvailable ? null : new Date().toISOString(), source_sha256: source === WORKSPACE_SAMPLE ? evidenceSourceHash : companionSource.sha256, page_count: source.pageCount, regions: libraryId !== null ? [] : state.flags.map(flag => { const entry = evidenceFor("flag", flag.id)[0]; return { flag_id: flag.id, kind: entry?.precision ?? "page_only", page: entry?.page ?? Number(flag.page_anchor.match(/\d+/)?.[0] ?? 1), end_page: null, bbox: entry?.boxes[0] ?? null, all_bboxes: entry?.boxes ?? [], paragraph: null, index: null }; }) });
     }
     if (/\/document\/reuse-matches$/.test(path)) return json({ passage_archive_size_n: state.library.length, matches: [] });
     if (/\/report\/export\.pdf$/.test(path)) return reportPdf();
@@ -207,6 +267,7 @@ export function installWorkspaceSample() {
       try {
         if (method === "DELETE") { if (state.share) localStorage.removeItem(`${WORKSPACE_SAMPLE.storageKey}:share:${state.share.token}`); state.share = null; return write({ ok: true }); }
         if (method === "POST") {
+          if (body.expires_at !== undefined && body.expires_at !== null && (typeof body.expires_at !== "string" || !Number.isFinite(Date.parse(body.expires_at)) || Date.parse(body.expires_at) <= Date.now())) return failure("Choose a valid future expiry or no expiry.");
           if (state.share) localStorage.removeItem(`${WORKSPACE_SAMPLE.storageKey}:share:${state.share.token}`);
           state.share = { token: `sample-${crypto.randomUUID()}`, check_run_id: 1, created_at: new Date().toISOString(), expires_at: textValue(body.expires_at) || null };
           localStorage.setItem(`${WORKSPACE_SAMPLE.storageKey}:share:${state.share.token}`, JSON.stringify({ ...publicSnapshot(), expires_at: state.share.expires_at }));
@@ -215,9 +276,25 @@ export function installWorkspaceSample() {
         return json(state.share);
       } catch { return failure("This browser cannot store a local sample share. No public report was published."); }
     }
-    if (/^\/shared\/[^/]+\/report$/.test(path)) {
-      try { const token = path.split("/")[2]; const shared = JSON.parse(localStorage.getItem(`${WORKSPACE_SAMPLE.storageKey}:share:${token}`) ?? "null"); if (!shared || shared.expires_at && new Date(shared.expires_at).getTime() <= Date.now()) return failure("This local sample share has expired or was revoked. Sample links work only in the browser where they were created.", 410); return json(shared); } catch { return failure("The local sample report could not be opened.", 410); }
+    const sharedImage = path.match(/^\/shared\/([^/]+)\/evidence-images\/(e-[a-f0-9]{24})$/);
+    if (sharedImage) {
+      try {
+        const shared = readShared(sharedImage[1]);
+        if (!shared) return failure("This local sample share has expired or was revoked.", 410);
+        if (url.searchParams.size || !shared.evidence_images.some(item => item.image_id === sharedImage[2])) return failure("This image is not part of the shared report.", 404);
+        const entry = evidenceByImageId(sharedImage[2]);
+        if (!entry || entry.check_run_id !== shared.report.check_run_id || entry.source_sha256 !== evidenceSourceHash) return failure("This source image is unavailable.", 404);
+        const response = await originalFetch(`/sample-assets/evidence/${entry.image_id}.png`, { credentials: "omit", signal: init?.signal });
+        if (!response.ok) return failure("This source image could not be loaded.", 404);
+        const bytes = await response.arrayBuffer();
+        if (await sha256(bytes) !== entry.image_sha256) return failure("The source image checksum does not match.", 422);
+        return new Response(bytes, { headers: { "Content-Type": "image/png", "Cache-Control": "no-store" } });
+      } catch { return failure("This shared image is unavailable.", 410); }
     }
+    if (/^\/shared\/[^/]+\/report$/.test(path)) {
+      try { const shared = readShared(path.split("/")[2]); return shared ? json(shared) : failure("This local sample share has expired or was revoked. It opens only in the browser where it was created.", 410); } catch { return failure("The local sample report could not be opened.", 410); }
+    }
+
     if (path === "/library") { const query = (url.searchParams.get("search") ?? "").toLowerCase(); return paged(url.searchParams.get("scope") === "pending" ? [] : state.library.filter(item => `${item.title} ${item.authors.join(" ")}`.toLowerCase().includes(query) && (!url.searchParams.get("program") || item.program === url.searchParams.get("program")))); }
     const libraryMatch = path.match(/^\/library\/(\d+)(?:\/(remove|decision|excerpt))?$/);
     if (libraryMatch) { const item = state.library.find(entry => entry.manuscript_id === Number(libraryMatch[1])); if (!item) return failure("The sample Library record is unavailable.", 404); if (method === "PATCH") { item.title = textValue(body.title) || item.title; item.team_name = textValue(body.team_name) || item.team_name; if (Array.isArray(body.authors)) item.authors = body.authors.filter((value): value is string => typeof value === "string"); audit("library_updated", { manuscript_id: item.manuscript_id }); return write(item); } if (libraryMatch[2] === "remove") { state.library = state.library.filter(entry => entry.manuscript_id !== item.manuscript_id); audit("library_removed", { manuscript_id: item.manuscript_id }); return write({ manuscript_id: item.manuscript_id, status: "removed", added_at: item.added_at, removed_at: new Date().toISOString(), file_deleted: true }); } if (libraryMatch[2] === "excerpt") return json({ manuscript_id: item.manuscript_id, chapters: [{ chapter_index: 0, title: item.manuscript_id === companionSource.id ? "Abstract - page 2" : "Abstract - page 5", excerpt: item.manuscript_id === companionSource.id ? "This capstone is centered around the development of an efficient electronic property inventory system tailored for school assets" : "This project develops a robust, console-based application using", context_before: null, context_after: null }], total_chapters: 1, limitations: "Original published work. Read the complete document for context; no similarity finding is inferred from this excerpt.", purged_at: null }); return json(item); }

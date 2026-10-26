@@ -23,12 +23,13 @@ const KEY_LABEL: Record<CitationSourceKeyOut["kind"], string> = {
 interface ConfirmCitationSourceModalProps {
   flag: FlagOut;
   onClose: () => void;
+  guarded?: boolean;
 }
 
-export function ConfirmCitationSourceModal({ flag, onClose }: ConfirmCitationSourceModalProps) {
+export function ConfirmCitationSourceModal({ flag, onClose, guarded = false }: ConfirmCitationSourceModalProps) {
   const [reason, setReason] = useState("");
   const [attempted, setAttempted] = useState(false);
-  const confirm = useConfirmCitationSource(flag.id);
+  const confirm = useConfirmCitationSource(flag.id, guarded ? flag.check_run_id : undefined);
   const errorRef = useRef<HTMLParagraphElement>(null);
   const reasonId = useId();
   const reasonErrId = useId();

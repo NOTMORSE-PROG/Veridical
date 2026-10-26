@@ -1,8 +1,10 @@
 import { useEffect, useId, useRef, useState } from "react";
-import { Link, useLocation, useParams } from "react-router";
+import { useQueryClient } from "@tanstack/react-query";
+import { Link, Navigate, useLocation, useParams } from "react-router";
+import { isWorkspaceSample } from "../demo/workspaceFixture";
 import { ApiError } from "../api/client";
 import type { FlagOut } from "../api/types";
-import { useMe } from "../auth/useAuth";
+import { ME_QUERY_KEY, useMe } from "../auth/useAuth";
 import { PassagePairPanel } from "../document/PassagePairPanel";
 import { checkKindMeta, humanize } from "../domain/checkKind";
 import { evidenceDisplayState } from "../domain/evidenceDisplay";
@@ -127,11 +129,11 @@ function ModeDisclosure({ mode }: { mode: FlagOut["llm_mode"] }) {
   );
 }
 
-function AnnotationPanel({ flag }: { flag: FlagOut }) {
+function AnnotationPanel({ flag, guarded = false }: { flag: FlagOut; guarded?: boolean }) {
   const [value, setValue] = useState(flag.annotation ?? "");
   const [attempted, setAttempted] = useState(false);
   const [saved, setSaved] = useState(false);
-  const annotate = useAnnotateFlag(flag.id);
+  const annotate = useAnnotateFlag(flag.id, guarded ? flag.check_run_id : undefined);
   const errorId = useId();
   const invalid = attempted && value.trim().length === 0;
 
@@ -175,10 +177,10 @@ function AnnotationPanel({ flag }: { flag: FlagOut }) {
   );
 }
 
-function OverrideDialog({ flag, onClose }: { flag: FlagOut; onClose: () => void }) {
+function OverrideDialog({ flag, onClose, guarded = false }: { flag: FlagOut; onClose: () => void; guarded?: boolean }) {
   const [reason, setReason] = useState("");
   const [attempted, setAttempted] = useState(false);
-  const override = useOverrideFlag(flag.id);
+  const override = useOverrideFlag(flag.id, guarded ? flag.check_run_id : undefined);
   const errorId = useId();
   const invalid = attempted && reason.trim().length === 0;
 
@@ -218,7 +220,7 @@ function OverrideDialog({ flag, onClose }: { flag: FlagOut; onClose: () => void 
   );
 }
 
-function ResolutionControl({ flag }: { flag: FlagOut }) {
+function ResolutionControl({ flag, guarded = false }: { flag: FlagOut; guarded?: boolean }) {
   const [overrideOpen, setOverrideOpen] = useState(false);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const overrideTriggerRef = useRef<HTMLButtonElement>(null);
@@ -256,10 +258,21 @@ function ResolutionControl({ flag }: { flag: FlagOut }) {
         <Alert title="No source record can be confirmed" tone="info">VERIDICAL could not identify a DOI, ISBN, or title. If you verified the citation independently, override only this finding and explain why.</Alert>
       ))}
       <div className="signal-evidence-actions"><Button ref={overrideTriggerRef} variant="secondary" onClick={() => setOverrideOpen(true)}>Override</Button></div>
-      {overrideOpen && <OverrideDialog flag={flag} onClose={closeOverride} />}
-      {confirmOpen && <ConfirmCitationSourceModal flag={flag} onClose={() => setConfirmOpen(false)} />}
+      {overrideOpen && <OverrideDialog flag={flag} guarded={guarded} onClose={closeOverride} />}
+      {confirmOpen && <ConfirmCitationSourceModal flag={flag} guarded={guarded} onClose={() => setConfirmOpen(false)} />}
     </section>
   );
+}
+
+export function FlagReviewActions({ flag, checkRunId, flagId }: { flag: FlagOut; checkRunId: number; flagId: number }) {
+  const me = useMe();
+  const client = useQueryClient();
+  const query = client.getQueryCache().find({ queryKey: ME_QUERY_KEY, exact: true });
+  const generation = useRef({ query, value: 0 });
+  if (generation.current.query !== query) generation.current = { query, value: generation.current.value + 1 };
+  if (flag.id !== flagId || flag.check_run_id !== checkRunId) return <Alert title="This finding does not match the selected review" tone="error">Reopen the review queue before recording an action.</Alert>;
+  if (!me.isSuccess || !me.data || me.isError) return <p role="status">Confirm your instructor session before recording an action.</p>;
+  return <div key={`${generation.current.value}:${me.data.id}:${flag.check_run_id}:${flag.id}`} className="signal-flag-review-actions"><ResolutionControl flag={flag} guarded /><AnnotationPanel flag={flag} guarded /></div>;
 }
 
 export function FlagDetailPage() {
@@ -332,6 +345,7 @@ export function FlagDetailPage() {
       ) : (
         <>
           <p aria-live="polite" className="signal-live-region">{announcement}</p>
+          {isWorkspaceSample() && <Navigate to={`/report/${flag.check_run_id}/document?finding=${flag.id}&view=finding`} replace />}
           <ModeDisclosure mode={flag.llm_mode} />
           {flag.first_upload_context && <Alert title="Limited first-upload comparison context" tone="info">This signal was created while there were few manuscripts to compare against. The severity was not changed by that limitation.</Alert>}
 

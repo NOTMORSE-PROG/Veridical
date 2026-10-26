@@ -90,6 +90,7 @@ const REPORT: ReportOut = {
 
 function stubViewer(viewer: ManuscriptViewerOut = VIEWER) {
   vi.stubGlobal("fetch", stubFetchByPath({
+    "/auth/session": { instructor: { id: 1, email: "review@example.test", display_name: "Reviewer", onboarding_dismissed_at: null } },
     "/check-runs/5/document": viewer,
     "/check-runs/5/report": REPORT,
     "/check-runs/5/escalated": [],
@@ -123,7 +124,8 @@ describe("SignalDocumentViewerPage", () => {
     renderWithProviders(<SignalDocumentViewerPage />, { route: "/report/5/document?flag=7", path: "/report/:checkRunId/document" });
     expect(await screen.findByText(/abstract and findings list different participant totals/i)).toBeInTheDocument();
     expect(screen.getByTestId("pdf-pane")).toHaveAttribute("data-page", "12");
-    expect(screen.getByRole("link", { name: "Review instructor actions for this location" })).toHaveAttribute("href", "/flags/7");
+    expect(await screen.findByRole("button", { name: "Override" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Save annotation" })).toBeInTheDocument();
     expect(screen.queryByText(/% textual similarity/)).not.toBeInTheDocument();
   });
 
@@ -166,8 +168,8 @@ describe("SignalDocumentViewerPage", () => {
 
     expect((await screen.findAllByText(/possible shared content or reuse/)).length).toBeGreaterThan(0);
     expect(document.querySelector("blockquote")).not.toBeInTheDocument();
-    expect(screen.getByText("Recorded reasoning and technical details")).toBeInTheDocument();
-    expect(document.querySelector("details.signal-document-recorded-reasoning")).not.toHaveAttribute("open");
+    expect(screen.getByRole("heading", { name: "Recorded reasoning" })).toBeInTheDocument();
+    expect(document.querySelector("section.signal-document-recorded-reasoning")).toBeInTheDocument();
   });
 
   it("BUG-170: shows an honest explanation, not a mislabeled quote, for a resubmission flag with no passage to compare", async () => {
@@ -199,7 +201,7 @@ describe("SignalDocumentViewerPage", () => {
     // #4" tail rather than the shared phrase.
     expect((await screen.findAllByText(/archived manuscript #4/)).length).toBeGreaterThan(0);
     expect(document.querySelector("blockquote")).not.toBeInTheDocument();
-    expect(screen.getByText("Recorded reasoning and technical details")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Recorded reasoning" })).toBeInTheDocument();
     expect(screen.getByText("No passage pair is available")).toBeInTheDocument();
     expect(screen.getByText(/then decide whether the possible overlap has a legitimate source/)).toBeInTheDocument();
     expect(screen.queryByText(/Compare the passages and decide/)).not.toBeInTheDocument();
@@ -391,15 +393,16 @@ describe("SignalDocumentViewerPage", () => {
     const row = screen.getByRole("button", { name: /Finding 1.*High passage similarity/s });
     fireEvent.click(row);
 
-    expect(await screen.findByText("Finding 1 selected")).toBeInTheDocument();
+    expect(await screen.findByText("Finding 1 of 1")).toBeInTheDocument();
+    expect(document.querySelector(".signal-document-selection-strip")).not.toBeInTheDocument();
     expect(await screen.findByRole("heading", { name: "High passage similarity" })).toBeInTheDocument();
     expect(screen.getByText("Location 3 of 3. These records are presented as one finding; none of the stored data was removed.")).toBeInTheDocument();
     expect(screen.getByText(/Yellow marks the selected manuscript location/)).toBeInTheDocument();
     const comparison = screen.getByText("Passage comparison", { selector: "h3" });
-    const reasoning = screen.getByText("Recorded reasoning and technical details");
+    const reasoning = screen.getByRole("heading", { name: "Recorded reasoning" });
     expect(comparison.compareDocumentPosition(reasoning) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(document.querySelectorAll("mark.reuse-shared-wording").length).toBeGreaterThanOrEqual(2);
-    expect(document.querySelector("details.signal-document-recorded-reasoning")).not.toHaveAttribute("open");
+    expect(document.querySelector("section.signal-document-recorded-reasoning")).toBeInTheDocument();
     expect(screen.getByTestId("pdf-pane")).toHaveAttribute("data-selection", "111");
 
     fireEvent.click(screen.getByRole("button", { name: "Back to review queue" }));

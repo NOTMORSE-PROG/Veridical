@@ -23,3 +23,5 @@ https://creativecommons.org/licenses/by/4.0/
 The complete 19-page original PDF is redistributed unchanged as an independent Library reading record. No similarity finding is asserted between the two documents.
 SHA-256 496b6c3be6685e6fe5fa0ed446b11a37f088e9a54a1dde9ed3c40d7cddad4f28
 MD5 62c5cae71d3323a068595aa0aea32921 (matches the repository's published checksum)
+
+Selected source-page PNGs are derived from the unchanged Stock & Inventory Management System PDF under the same CC BY 4.0 attribution. VERIDICAL adds red passage-border marks only where a complete unique native quotation supports them, and appends a prepared-review/model-skipped notice below the source pixels. Page-only records carry no exact passage mark. The evidence manifest records original PDF pages, full quotations, precision, source hash and each PNG hash. These review marks and captions are separate from the published authors' work; they are not the authors' judgments.

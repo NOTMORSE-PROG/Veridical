@@ -1,0 +1,693 @@
+{
+  "schema_version": 1,
+  "source_sha256": "ef662fb9cb5619945c69183a8576f3f945109adc51bff408a6cd6fc21626c5fd",
+  "check_run_id": 1,
+  "manuscript_id": 1,
+  "normalization": "Whitespace collapse only; complete unique native glyph occurrence.",
+  "renderer_sha256": "0404cfcee2efa21e92ba435f2ebbb65aa3643ff881b62b206625d23bb5296df0",
+  "entries": [
+    {
+      "subject": {
+        "kind": "criterion",
+        "id": 1
+      },
+      "page": 109,
+      "quote": "efficient database integration",
+      "anchor": "page 109",
+      "label": "Conclusion claim",
+      "role": "criterion_evidence",
+      "check_run_id": 1,
+      "manuscript_id": 1,
+      "source_sha256": "ef662fb9cb5619945c69183a8576f3f945109adc51bff408a6cd6fc21626c5fd",
+      "evidence_index": 0,
+      "paragraph": null,
+      "quote_sha256": "71e3f9ba339ee9b244d8f6a8b9a542bac5f0e72c3e8736ed12e2cc6303b6404e",
+      "evidence_id": "e-ab77d53032edca7dc7f41005",
+      "precision": "page_bbox",
+      "boxes": [
+        [
+          347.20782470703125,
+          436.1173400878906,
+          509.0186462402344,
+          451.6596374511719
+        ]
+      ],
+      "precision_note": "Complete quotation uniquely bound to original native glyphs.",
+      "image_id": "e-1a9a1fc3e6acc3e15287e728",
+      "image_sha256": "1a9a1fc3e6acc3e15287e7286daac15030713a61ddd8a4c525d99d942403698c",
+      "image_path": "/sample-assets/evidence/e-1a9a1fc3e6acc3e15287e728.png",
+      "public_sample": true,
+      "image_width": 1275,
+      "image_height": 1738
+    },
+    {
+      "subject": {
+        "kind": "criterion",
+        "id": 1
+      },
+      "page": 5,
+      "quote": "This project develops a robust, console-based application using the C programming language that facilitates efficient tracking, monitoring, and management of stock levels, customer orders, supplier relationships, and financial transactions.",
+      "anchor": "page 5",
+      "label": "Abstract: implemented console system",
+      "role": "criterion_evidence",
+      "check_run_id": 1,
+      "manuscript_id": 1,
+      "source_sha256": "ef662fb9cb5619945c69183a8576f3f945109adc51bff408a6cd6fc21626c5fd",
+      "evidence_index": 1,
+      "paragraph": null,
+      "quote_sha256": "afa02994d77cc1ecb389cbc6cca5c3b2d25cf6a2c04f41038ee701a74a319365",
+      "evidence_id": "e-9d2fdb279f554c64fd1d5364",
+      "precision": "page_bbox",
+      "boxes": [
+        [
+          177.43966674804688,
+          587.9473419189453,
+          536.3092651367188,
+          603.4896240234375
+        ],
+        [
+          54.0,
+          570.6673736572266,
+          535.9369506835938,
+          586.2096557617188
+        ],
+        [
+          54.0,
+          553.2673492431641,
+          535.974609375,
+          568.8096313476562
+        ],
+        [
+          54.0,
+          535.8373413085938,
+          124.39656829833984,
+          551.379638671875
+        ]
+      ],
+      "precision_note": "Complete quotation uniquely bound to original native glyphs.",
+      "image_id": "e-dcb50f39f2471401318a90f9",
+      "image_sha256": "dcb50f39f2471401318a90f91370790f2ed1ae757396f52504b761c4b5c4ecb4",
+      "image_path": "/sample-assets/evidence/e-dcb50f39f2471401318a90f9.png",
+      "public_sample": true,
+      "image_width": 1275,
+      "image_height": 1738
+    },
+    {
+      "subject": {
+        "kind": "criterion",
+        "id": 1
+      },
+      "page": 29,
+      "quote": "File-Based Storage: No database integration limiting data integrity and concurrent access.",
+      "anchor": "page 29",
+      "label": "Limitations: no database",
+      "role": "criterion_evidence",
+      "check_run_id": 1,
+      "manuscript_id": 1,
+      "source_sha256": "ef662fb9cb5619945c69183a8576f3f945109adc51bff408a6cd6fc21626c5fd",
+      "evidence_index": 2,
+      "paragraph": null,
+      "quote_sha256": "f51431d5c4a4df98a161570adfe076d4d509499c71c4017532a0a43297ceb376",
+      "evidence_id": "e-a1ffb226be4d97452de1675e",
+      "precision": "page_bbox",
+      "boxes": [
+        [
+          108.0199966430664,
+          420.6373596191406,
+          509.8119201660156,
+          436.1796569824219
+        ],
+        [
+          108.0199966430664,
+          404.5573425292969,
+          210.79998779296875,
+          420.0996398925781
+        ]
+      ],
+      "precision_note": "Complete quotation uniquely bound to original native glyphs.",
+      "image_id": "e-983a44265b58168df42ace1d",
+      "image_sha256": "983a44265b58168df42ace1d53df80441d13e4cc41e02f41a5dedd2738e15b3d",
+      "image_path": "/sample-assets/evidence/e-983a44265b58168df42ace1d.png",
+      "public_sample": true,
+      "image_width": 1275,
+      "image_height": 1738
+    },
+    {
+      "subject": {
+        "kind": "criterion",
+        "id": 1
+      },
+      "page": 37,
+      "quote": "FILE *file = fopen(\"items.txt\", \"w\");",
+      "anchor": "page 37",
+      "label": "Source listing: text-file persistence",
+      "role": "criterion_evidence",
+      "check_run_id": 1,
+      "manuscript_id": 1,
+      "source_sha256": "ef662fb9cb5619945c69183a8576f3f945109adc51bff408a6cd6fc21626c5fd",
+      "evidence_index": 3,
+      "paragraph": null,
+      "quote_sha256": "777a2d33f3da05f96a0037fb58e599d07047c540d0b95dbbc3683a782528ea71",
+      "evidence_id": "e-2b244302e84490dbe493623b",
+      "precision": "page_bbox",
+      "boxes": [
+        [
+          85.94400024414062,
+          236.8973388671875,
+          293.2305603027344,
+          252.43963623046875
+        ]
+      ],
+      "precision_note": "Complete quotation uniquely bound to original native glyphs.",
+      "image_id": "e-b74c51326d6632073b4c3a56",
+      "image_sha256": "b74c51326d6632073b4c3a566c3feba602fa5ff8f5cc6711da6635035310ee29",
+      "image_path": "/sample-assets/evidence/e-b74c51326d6632073b4c3a56.png",
+      "public_sample": true,
+      "image_width": 1275,
+      "image_height": 1738
+    },
+    {
+      "subject": {
+        "kind": "criterion",
+        "id": 1
+      },
+      "page": 103,
+      "quote": "Relational Database Implementation: The most critical enhancement would involve migrating from file-based storage to a robust relational database management system (MySQL, PostgreSQL, or SQLite).",
+      "anchor": "page 103",
+      "label": "Future scope: database migration",
+      "role": "criterion_evidence",
+      "check_run_id": 1,
+      "manuscript_id": 1,
+      "source_sha256": "ef662fb9cb5619945c69183a8576f3f945109adc51bff408a6cd6fc21626c5fd",
+      "evidence_index": 4,
+      "paragraph": null,
+      "quote_sha256": "f1a73b0fc0dfda034d06f451dec00a90c94f6c6533fbe6a60886902b21ae7107",
+      "evidence_id": "e-09c048ee3be886750a67effc",
+      "precision": "page_bbox",
+      "boxes": [
+        [
+          54.0,
+          357.3773498535156,
+          536.9410400390625,
+          372.9196472167969
+        ],
+        [
+          54.0,
+          341.1773376464844,
+          587.2640991210938,
+          356.7196350097656
+        ],
+        [
+          54.0,
+          325.09735107421875,
+          193.26275634765625,
+          340.6396484375
+        ]
+      ],
+      "precision_note": "Complete quotation uniquely bound to original native glyphs.",
+      "image_id": "e-19f3f71f2d7698e9e119f036",
+      "image_sha256": "19f3f71f2d7698e9e119f03631c7d7bf2308718e7c4290525fd9f98636b107fc",
+      "image_path": "/sample-assets/evidence/e-19f3f71f2d7698e9e119f036.png",
+      "public_sample": true,
+      "image_width": 1275,
+      "image_height": 1738
+    },
+    {
+      "subject": {
+        "kind": "criterion",
+        "id": 2
+      },
+      "page": 23,
+      "quote": "User Testing: Real users (admin & staff) will test the full workflow",
+      "anchor": "page 23",
+      "label": "Evaluation: planned user testing",
+      "role": "criterion_evidence",
+      "check_run_id": 1,
+      "manuscript_id": 1,
+      "source_sha256": "ef662fb9cb5619945c69183a8576f3f945109adc51bff408a6cd6fc21626c5fd",
+      "evidence_index": 0,
+      "paragraph": null,
+      "quote_sha256": "b5f1d0532fcd867b003aafe9aaa95dc3e3437c575368912c376f9ecce855ec4c",
+      "evidence_id": "e-95572fe8d4eb53e8e6604337",
+      "precision": "page_bbox",
+      "boxes": [
+        [
+          72.02400207519531,
+          334.6973571777344,
+          453.4404296875,
+          350.2396545410156
+        ]
+      ],
+      "precision_note": "Complete quotation uniquely bound to original native glyphs.",
+      "image_id": "e-a295de9cdb98af415bd0f0ce",
+      "image_sha256": "a295de9cdb98af415bd0f0ce9873ceffd765f4b254da801f3dbf1ea9453e2f2c",
+      "image_path": "/sample-assets/evidence/e-a295de9cdb98af415bd0f0ce.png",
+      "public_sample": true,
+      "image_width": 1275,
+      "image_height": 1738
+    },
+    {
+      "subject": {
+        "kind": "criterion",
+        "id": 2
+      },
+      "page": 32,
+      "quote": "Total Components: 32",
+      "anchor": "page 32",
+      "label": "Summary: declared component total",
+      "role": "criterion_evidence",
+      "check_run_id": 1,
+      "manuscript_id": 1,
+      "source_sha256": "ef662fb9cb5619945c69183a8576f3f945109adc51bff408a6cd6fc21626c5fd",
+      "evidence_index": 1,
+      "paragraph": null,
+      "quote_sha256": "498d0715e5dd38a9d4dd670b35cc38bec4042553bed19bafccb70b1ce75bae5f",
+      "evidence_id": "e-cf214ac680c45736e4cc9594",
+      "precision": "page_bbox",
+      "boxes": [
+        [
+          108.0199966430664,
+          602.4673614501953,
+          233.14447021484375,
+          618.0096435546875
+        ]
+      ],
+      "precision_note": "Complete quotation uniquely bound to original native glyphs.",
+      "image_id": "e-cdb9327087a5e22bb3e54a26",
+      "image_sha256": "cdb9327087a5e22bb3e54a267b363588190207105f07efc36d09385ac21e2ce0",
+      "image_path": "/sample-assets/evidence/e-cdb9327087a5e22bb3e54a26.png",
+      "public_sample": true,
+      "image_width": 1275,
+      "image_height": 1738
+    },
+    {
+      "subject": {
+        "kind": "criterion",
+        "id": 2
+      },
+      "page": 33,
+      "quote": "Business Rule Validation Partial Basic Fair",
+      "anchor": "page 33",
+      "label": "Summary continuation: component ratings",
+      "role": "criterion_evidence",
+      "check_run_id": 1,
+      "manuscript_id": 1,
+      "source_sha256": "ef662fb9cb5619945c69183a8576f3f945109adc51bff408a6cd6fc21626c5fd",
+      "evidence_index": 2,
+      "paragraph": null,
+      "quote_sha256": "434af78190b9ce6dc7431c9ea7ed8dd4af91b5f3f031d90e54ad4a4081d24e5b",
+      "evidence_id": "e-ddea2397860ba88054333546",
+      "precision": "page_bbox",
+      "boxes": [
+        [
+          77.66400146484375,
+          655.2280120849609,
+          490.7919921875,
+          668.5120086669922
+        ],
+        [
+          272.45001220703125,
+          653.4280242919922,
+          303.7340087890625,
+          666.7120208740234
+        ]
+      ],
+      "precision_note": "Complete quotation uniquely bound to original native glyphs.",
+      "image_id": "e-04336b315f07a45c4482a216",
+      "image_sha256": "04336b315f07a45c4482a216aa01ec085552b5331c87af64cf9fcd829903684b",
+      "image_path": "/sample-assets/evidence/e-04336b315f07a45c4482a216.png",
+      "public_sample": true,
+      "image_width": 1275,
+      "image_height": 1738
+    },
+    {
+      "subject": {
+        "kind": "criterion",
+        "id": 3
+      },
+      "page": 3,
+      "quote": "The result embodied in this project report have not been submitted top any other",
+      "anchor": "page 3",
+      "label": "Declaration: proofreading example",
+      "role": "criterion_evidence",
+      "check_run_id": 1,
+      "manuscript_id": 1,
+      "source_sha256": "ef662fb9cb5619945c69183a8576f3f945109adc51bff408a6cd6fc21626c5fd",
+      "evidence_index": 0,
+      "paragraph": null,
+      "quote_sha256": "90484bafe6a9048dae09391b60b90d70131c9c2c7a955b0ebd35fcd731897500",
+      "evidence_id": "e-826f1cc8babe9d327bf96ec8",
+      "precision": "page_bbox",
+      "boxes": [
+        [
+          54.0,
+          472.71734619140625,
+          529.8973388671875,
+          488.2596435546875
+        ]
+      ],
+      "precision_note": "Complete quotation uniquely bound to original native glyphs.",
+      "image_id": "e-11142a81cc7a9fed82fc5699",
+      "image_sha256": "11142a81cc7a9fed82fc5699b1a0116b67036f149041a89b8d816746dbc0fa45",
+      "image_path": "/sample-assets/evidence/e-11142a81cc7a9fed82fc5699.png",
+      "public_sample": true,
+      "image_width": 1275,
+      "image_height": 1738
+    },
+    {
+      "subject": {
+        "kind": "criterion",
+        "id": 4
+      },
+      "page": 2,
+      "quote": "TABLE OF CONTENT",
+      "anchor": "page 2",
+      "label": "Document organization",
+      "role": "criterion_evidence",
+      "check_run_id": 1,
+      "manuscript_id": 1,
+      "source_sha256": "ef662fb9cb5619945c69183a8576f3f945109adc51bff408a6cd6fc21626c5fd",
+      "evidence_index": 0,
+      "paragraph": null,
+      "quote_sha256": "47224dd6dd40eb9501aa3d27a353789475ae6373dc9d6a6d6fcf1c0df08edc38",
+      "evidence_id": "e-7c765fc547178dc3179ae286",
+      "precision": "page_only",
+      "boxes": [],
+      "precision_note": "Complete quotation has 2 native occurrences; page only.",
+      "image_id": "e-739987b6de090414379056f5",
+      "image_sha256": "739987b6de090414379056f51e519d1cd4b2e28db4031d1801946933181d4965",
+      "image_path": "/sample-assets/evidence/e-739987b6de090414379056f5.png",
+      "public_sample": true,
+      "image_width": 1275,
+      "image_height": 1738
+    },
+    {
+      "subject": {
+        "kind": "flag",
+        "id": 1
+      },
+      "page": 29,
+      "quote": "File-Based Storage: No database integration limiting data integrity and concurrent access.",
+      "anchor": "page 29",
+      "label": "Statement A: implementation limitation",
+      "role": "statement_a",
+      "check_run_id": 1,
+      "manuscript_id": 1,
+      "source_sha256": "ef662fb9cb5619945c69183a8576f3f945109adc51bff408a6cd6fc21626c5fd",
+      "evidence_index": 0,
+      "paragraph": null,
+      "quote_sha256": "f51431d5c4a4df98a161570adfe076d4d509499c71c4017532a0a43297ceb376",
+      "evidence_id": "e-53501da86aacaf8d1ee6f873",
+      "precision": "page_bbox",
+      "boxes": [
+        [
+          108.0199966430664,
+          420.6373596191406,
+          509.8119201660156,
+          436.1796569824219
+        ],
+        [
+          108.0199966430664,
+          404.5573425292969,
+          210.79998779296875,
+          420.0996398925781
+        ]
+      ],
+      "precision_note": "Complete quotation uniquely bound to original native glyphs.",
+      "image_id": "e-983a44265b58168df42ace1d",
+      "image_sha256": "983a44265b58168df42ace1d53df80441d13e4cc41e02f41a5dedd2738e15b3d",
+      "image_path": "/sample-assets/evidence/e-983a44265b58168df42ace1d.png",
+      "public_sample": true,
+      "image_width": 1275,
+      "image_height": 1738
+    },
+    {
+      "subject": {
+        "kind": "flag",
+        "id": 1
+      },
+      "page": 109,
+      "quote": "With secure transaction handling, efficient database integration, and a user-friendly interface, it ensures smooth operations even under high loads.",
+      "anchor": "page 109",
+      "label": "Statement B: conclusion claim",
+      "role": "statement_b",
+      "check_run_id": 1,
+      "manuscript_id": 1,
+      "source_sha256": "ef662fb9cb5619945c69183a8576f3f945109adc51bff408a6cd6fc21626c5fd",
+      "evidence_index": 1,
+      "paragraph": null,
+      "quote_sha256": "e6e6041f7eeed5f162e76f513d224c3eec02c499e5c2964f0de2bec9ec5c9dd6",
+      "evidence_id": "e-f0e7fcde5cdfb6f49dba89cf",
+      "precision": "page_bbox",
+      "boxes": [
+        [
+          156.69921875,
+          436.1173400878906,
+          535.8912353515625,
+          451.6596374511719
+        ],
+        [
+          72.02400207519531,
+          420.037353515625,
+          510.1858215332031,
+          435.57965087890625
+        ]
+      ],
+      "precision_note": "Complete quotation uniquely bound to original native glyphs.",
+      "image_id": "e-c57c76d48a9e01813ecc1c86",
+      "image_sha256": "c57c76d48a9e01813ecc1c86950f2d9e13fd2e527017ff6c640e6c04f9b5fd4a",
+      "image_path": "/sample-assets/evidence/e-c57c76d48a9e01813ecc1c86.png",
+      "public_sample": true,
+      "image_width": 1275,
+      "image_height": 1738
+    },
+    {
+      "subject": {
+        "kind": "flag",
+        "id": 2
+      },
+      "page": 20,
+      "quote": "Develop a web-based inventory system with role-based access control for admin and",
+      "anchor": "page 20",
+      "label": "Statement A: proposed interface",
+      "role": "statement_a",
+      "check_run_id": 1,
+      "manuscript_id": 1,
+      "source_sha256": "ef662fb9cb5619945c69183a8576f3f945109adc51bff408a6cd6fc21626c5fd",
+      "evidence_index": 0,
+      "paragraph": null,
+      "quote_sha256": "1954cca67b5a7aa8d7a3ab508fa7676e23d11518613a24b60a98b550d0037a5a",
+      "evidence_id": "e-10276bcad4832b0cfff0c700",
+      "precision": "page_bbox",
+      "boxes": [
+        [
+          90.02400207519531,
+          569.3473663330078,
+          564.5244750976562,
+          584.8896484375
+        ]
+      ],
+      "precision_note": "Complete quotation uniquely bound to original native glyphs.",
+      "image_id": "e-5e65bf4e31c5cf1f278e34ca",
+      "image_sha256": "5e65bf4e31c5cf1f278e34cac9f6948386f5706fcbf43517cbd9a157a4c983fb",
+      "image_path": "/sample-assets/evidence/e-5e65bf4e31c5cf1f278e34ca.png",
+      "public_sample": true,
+      "image_width": 1275,
+      "image_height": 1738
+    },
+    {
+      "subject": {
+        "kind": "flag",
+        "id": 2
+      },
+      "page": 5,
+      "quote": "This project develops a robust, console-based application using the C programming language that facilitates efficient tracking, monitoring, and management of stock levels, customer orders, supplier relationships, and financial transactions.",
+      "anchor": "page 5",
+      "label": "Statement B: described implementation",
+      "role": "statement_b",
+      "check_run_id": 1,
+      "manuscript_id": 1,
+      "source_sha256": "ef662fb9cb5619945c69183a8576f3f945109adc51bff408a6cd6fc21626c5fd",
+      "evidence_index": 1,
+      "paragraph": null,
+      "quote_sha256": "afa02994d77cc1ecb389cbc6cca5c3b2d25cf6a2c04f41038ee701a74a319365",
+      "evidence_id": "e-f0c99cb2225d55be9838d92d",
+      "precision": "page_bbox",
+      "boxes": [
+        [
+          177.43966674804688,
+          587.9473419189453,
+          536.3092651367188,
+          603.4896240234375
+        ],
+        [
+          54.0,
+          570.6673736572266,
+          535.9369506835938,
+          586.2096557617188
+        ],
+        [
+          54.0,
+          553.2673492431641,
+          535.974609375,
+          568.8096313476562
+        ],
+        [
+          54.0,
+          535.8373413085938,
+          124.39656829833984,
+          551.379638671875
+        ]
+      ],
+      "precision_note": "Complete quotation uniquely bound to original native glyphs.",
+      "image_id": "e-dcb50f39f2471401318a90f9",
+      "image_sha256": "dcb50f39f2471401318a90f91370790f2ed1ae757396f52504b761c4b5c4ecb4",
+      "image_path": "/sample-assets/evidence/e-dcb50f39f2471401318a90f9.png",
+      "public_sample": true,
+      "image_width": 1275,
+      "image_height": 1738
+    },
+    {
+      "subject": {
+        "kind": "flag",
+        "id": 3
+      },
+      "page": 32,
+      "quote": "Total Components: 32",
+      "anchor": "page 32",
+      "label": "Summary total",
+      "role": "statement_a",
+      "check_run_id": 1,
+      "manuscript_id": 1,
+      "source_sha256": "ef662fb9cb5619945c69183a8576f3f945109adc51bff408a6cd6fc21626c5fd",
+      "evidence_index": 0,
+      "paragraph": null,
+      "quote_sha256": "498d0715e5dd38a9d4dd670b35cc38bec4042553bed19bafccb70b1ce75bae5f",
+      "evidence_id": "e-cae3515a0d61c0fc68109396",
+      "precision": "page_bbox",
+      "boxes": [
+        [
+          108.0199966430664,
+          602.4673614501953,
+          233.14447021484375,
+          618.0096435546875
+        ]
+      ],
+      "precision_note": "Complete quotation uniquely bound to original native glyphs.",
+      "image_id": "e-cdb9327087a5e22bb3e54a26",
+      "image_sha256": "cdb9327087a5e22bb3e54a267b363588190207105f07efc36d09385ac21e2ce0",
+      "image_path": "/sample-assets/evidence/e-cdb9327087a5e22bb3e54a26.png",
+      "public_sample": true,
+      "image_width": 1275,
+      "image_height": 1738
+    },
+    {
+      "subject": {
+        "kind": "flag",
+        "id": 3
+      },
+      "page": 33,
+      "quote": "Business Rule Validation Partial Basic Fair",
+      "anchor": "page 33",
+      "label": "Table continuation (count context)",
+      "role": "statement_b",
+      "check_run_id": 1,
+      "manuscript_id": 1,
+      "source_sha256": "ef662fb9cb5619945c69183a8576f3f945109adc51bff408a6cd6fc21626c5fd",
+      "evidence_index": 1,
+      "paragraph": null,
+      "quote_sha256": "434af78190b9ce6dc7431c9ea7ed8dd4af91b5f3f031d90e54ad4a4081d24e5b",
+      "evidence_id": "e-f597b8ae17f2ee28fb880d52",
+      "precision": "page_bbox",
+      "boxes": [
+        [
+          77.66400146484375,
+          655.2280120849609,
+          490.7919921875,
+          668.5120086669922
+        ],
+        [
+          272.45001220703125,
+          653.4280242919922,
+          303.7340087890625,
+          666.7120208740234
+        ]
+      ],
+      "precision_note": "Complete quotation uniquely bound to original native glyphs.",
+      "image_id": "e-04336b315f07a45c4482a216",
+      "image_sha256": "04336b315f07a45c4482a216aa01ec085552b5331c87af64cf9fcd829903684b",
+      "image_path": "/sample-assets/evidence/e-04336b315f07a45c4482a216.png",
+      "public_sample": true,
+      "image_width": 1275,
+      "image_height": 1738
+    },
+    {
+      "subject": {
+        "kind": "flag",
+        "id": 4
+      },
+      "page": 7,
+      "quote": "Research and case studies show that integrating inventory systems with cloud platforms and",
+      "anchor": "page 7",
+      "label": "Unidentified supporting-study claim",
+      "role": "single",
+      "check_run_id": 1,
+      "manuscript_id": 1,
+      "source_sha256": "ef662fb9cb5619945c69183a8576f3f945109adc51bff408a6cd6fc21626c5fd",
+      "evidence_index": 0,
+      "paragraph": null,
+      "quote_sha256": "325084dd927fae24dc024f4adcfb47fc491120a72475437539a2312606feaee8",
+      "evidence_id": "e-06ffe9977da5b6a4a95fcf1a",
+      "precision": "page_bbox",
+      "boxes": [
+        [
+          54.0,
+          578.3473663330078,
+          569.127197265625,
+          593.8896484375
+        ]
+      ],
+      "precision_note": "Complete quotation uniquely bound to original native glyphs.",
+      "image_id": "e-43e7c2fc4d33a8d433a81fb3",
+      "image_sha256": "43e7c2fc4d33a8d433a81fb31bd5687df75629849b1c82f46ff3eddfcb673363",
+      "image_path": "/sample-assets/evidence/e-43e7c2fc4d33a8d433a81fb3.png",
+      "public_sample": true,
+      "image_width": 1275,
+      "image_height": 1738
+    },
+    {
+      "subject": {
+        "kind": "flag",
+        "id": 4
+      },
+      "page": 109,
+      "quote": "The proper guidelines from Our instructor Md. Sakib Ali Mazumder sir.",
+      "anchor": "page 109",
+      "label": "Reference section as published",
+      "role": "context",
+      "check_run_id": 1,
+      "manuscript_id": 1,
+      "source_sha256": "ef662fb9cb5619945c69183a8576f3f945109adc51bff408a6cd6fc21626c5fd",
+      "evidence_index": 1,
+      "paragraph": null,
+      "quote_sha256": "98701710caa943a6aa79ca0d0d120735a3d800cb16d68b89c85d26c82a305b69",
+      "evidence_id": "e-8cc548e003a62c7697371049",
+      "precision": "page_bbox",
+      "boxes": [
+        [
+          85.46399688720703,
+          617.8273468017578,
+          489.96551513671875,
+          633.36962890625
+        ]
+      ],
+      "precision_note": "Complete quotation uniquely bound to original native glyphs.",
+      "image_id": "e-34b1830c9c9fbf65ae03095a",
+      "image_sha256": "34b1830c9c9fbf65ae03095aa09d2bff420d51fd09dda3f96693e07d684c5a93",
+      "image_path": "/sample-assets/evidence/e-34b1830c9c9fbf65ae03095a.png",
+      "public_sample": true,
+      "image_width": 1275,
+      "image_height": 1738
+    }
+  ]
+}

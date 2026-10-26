@@ -11,6 +11,7 @@ import { ReadinessBand } from "../ui/ReadinessBand";
 import { SignalMark, SignalWordmark } from "../ui/SignalMark";
 import { SignalCriteriaResults, SignalPublicFlags } from "./SignalReviewSections";
 import { useSharedReport } from "./useShare";
+import { SharedEvidenceImages } from "./SharedEvidenceImages";
 
 function useNoindexMeta() {
   useEffect(() => {
@@ -76,6 +77,7 @@ export function AdviserViewPage() {
 
         <SignalPublicFlags flags={flags} originalityScope={report.originality_scope} />
         <SignalCriteriaResults results={report.results} checkRunId={report.check_run_id} publicView />
+        {data.evidence_images && data.evidence_images.length > 0 && <SharedEvidenceImages token={token ?? ""} images={data.evidence_images} />}
 
         <section className="signal-shared-decision" aria-labelledby="shared-decision-heading"><div><p className="signal-section-kicker">Instructor authority</p><h2 id="shared-decision-heading">Final decision</h2></div>{report.decision ? <><span className={`signal-decision signal-decision--${report.decision}`}>{DECISION_LABEL[report.decision]}</span><p>Recorded by the instructor. VERIDICAL did not make this decision.</p>{report.decision_note && <blockquote><strong>Decision note</strong><span>{report.decision_note}</span></blockquote>}</> : <Alert title="No final instructor decision has been recorded" tone="info">The readiness band above is an aid for review, not an approval or block.</Alert>}</section>
       </div>

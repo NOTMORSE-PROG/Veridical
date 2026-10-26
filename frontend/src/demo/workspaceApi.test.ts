@@ -8,13 +8,50 @@ import { companionSource, reviewTasks, sampleCriteria, sampleFlags, sampleReport
 
 const originalFetch = window.fetch;
 afterEach(() => { window.fetch = originalFetch; sessionStorage.clear(); localStorage.clear(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
-function start() { sessionStorage.clear(); localStorage.clear(); const network = vi.fn(() => Promise.reject(new Error("Unexpected live request"))); window.fetch = network; installWorkspaceSample(); return network; }
+function start() { sessionStorage.clear(); localStorage.clear(); const network = vi.fn<typeof fetch>(async () => { throw new Error("Unexpected live request"); }); window.fetch = network; installWorkspaceSample(); return network; }
 const call = async (path: string, method = "GET", body?: unknown) => { const response = await window.fetch(`/api${path}`, { method, body: body === undefined ? undefined : JSON.stringify(body) }); return { response, data: await response.json() }; };
 const resolveAll = async (reason = "Instructor judgment after reading the original pages.") => {
   for (const criterion of sampleCriteria) await call(`/check-runs/1/escalated/${100 + criterion.id}/resolve`, "POST", { resolution: "mark_level", level: 3, reason });
 };
 
 describe("real-interface sample API boundary", () => {
+  it("separately allowlists shared images and denies wrong IDs, selectors, corrupted bytes and revoked access", async () => {
+    vi.stubGlobal("crypto", webcrypto);
+    const network = start();
+    network.mockImplementation(async input => new Response(readFileSync(resolve(`public${String(input)}`))));
+    const share = (await call("/check-runs/1/share", "POST", { expires_at: null })).data;
+    const shared = (await call(`/shared/${share.token}/report`)).data;
+    expect(shared.evidence_images).toHaveLength(18);
+    const image = shared.evidence_images[0];
+    const imagePath = `/shared/${share.token}/evidence-images/${image.image_id}`;
+    const response = await window.fetch(`/api${imagePath}`);
+    expect(response.status).toBe(200);
+    expect(createHash("sha256").update(new Uint8Array(await response.arrayBuffer())).digest("hex")).toBe(image.image_sha256);
+    expect((await call(`${imagePath}?page=202`)).response.status).toBe(404);
+    expect((await call(`/shared/${share.token}/evidence-images/e-000000000000000000000000`)).response.status).toBe(404);
+    network.mockImplementation(async () => new Response("corrupted image"));
+    expect((await call(imagePath)).response.status).toBe(422);
+    await call("/check-runs/1/share", "DELETE");
+    expect((await call(imagePath)).response.status).toBe(410);
+  });
+
+  it("rejects malformed expiry and prevents unknown future private fields entering a share", async () => {
+    const network = start();
+    expect((await call("/check-runs/1/share", "POST", { expires_at: "not-a-date" })).response.status).toBe(422);
+    const saved = JSON.parse(sessionStorage.getItem(WORKSPACE_SAMPLE.storageKey)!);
+    saved.state.report.future_private = "PRIVATE-FUTURE-REPORT";
+    saved.state.report.results[0].future_private = "PRIVATE-FUTURE-CRITERION";
+    saved.state.flags[0].annotation = "PRIVATE-ANNOTATION";
+    sessionStorage.setItem(WORKSPACE_SAMPLE.storageKey, JSON.stringify(saved));
+    window.fetch = network;
+    installWorkspaceSample();
+    const share = (await call("/check-runs/1/share", "POST", { expires_at: null })).data;
+    const shared = await call(`/shared/${share.token}/report`);
+    expect(JSON.stringify(shared.data)).not.toContain("PRIVATE-");
+    expect(shared.data.flags[0].problem_kind).toBe("implementation_scope_mismatch");
+    expect((await call("/check-runs/1/share", "POST", { expires_at: 123 })).response.status).toBe(422);
+    expect((await call(`/shared/${share.token}/report`)).response.status).toBe(200);
+  });
   it("prepares real source assets, exposes running progress and retains saved judgments", async () => {
     sessionStorage.clear(); localStorage.clear();
     vi.stubGlobal("crypto", webcrypto);

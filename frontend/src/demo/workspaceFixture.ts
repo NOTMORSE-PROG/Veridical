@@ -1,4 +1,5 @@
 import type { CheckRun, Criterion, EscalatedItemOut, FlagOut, LibraryItemOut, ManuscriptListItem, ReportOut, Rubric } from "../api/types";
+import { evidenceFor } from "./sourceEvidence";
 
 export const WORKSPACE_SAMPLE = {
   prefix: "/demo",
@@ -47,24 +48,25 @@ export const sampleReport: ReportOut = {
   flag_deduction: 0, unresolved_high_flag_count: 0, decision: null, decided_at: null, decision_note: null, rubric_is_current: true, llm_mode: "manual", rubric_needs_review: false, rubric_parse_issues: null, pending_review_count: 4, previous_status: null, previous_composite_score: null, integrity_check_status: [], originality_scope: null,
   results: sampleCriteria.map(criterion => {
     const task = reviewTasks.find(item => item.criterionId === criterion.id)!;
-    return { criterion_id: criterion.id, text: criterion.text, type: criterion.type, weight: criterion.weight, weight_importance: criterion.weight === 4 ? "high" : "med", kind: criterion.type, outcome: "escalated", score: null, basis: "document_review", anchor: `page ${task.page}`, reasoning: task.reason, reason: task.reason, evidence: [{ quote: task.quote, anchor: `page ${task.page}` }], resolution: null, level: null };
+    return { criterion_id: criterion.id, text: criterion.text, type: criterion.type, weight: criterion.weight, weight_importance: criterion.weight === 4 ? "high" : "med", kind: criterion.type, outcome: "escalated", score: null, basis: "document_review", anchor: `page ${task.page}`, reasoning: task.reason, reason: task.reason, evidence: evidenceFor("criterion", criterion.id).map(entry => ({ quote: entry.quote, anchor: entry.anchor })), resolution: null, level: null };
   }),
 };
 
 export const sampleEscalatedItems: EscalatedItemOut[] = sampleCriteria.map(criterion => ({
   review_basis: "document_review",
+  evidence: evidenceFor("criterion", criterion.id).map(entry => ({ quote: entry.quote, anchor: entry.anchor })),
   check_result_id: 100 + criterion.id, criterion_id: criterion.id, criterion_text: criterion.text, weight: criterion.weight, agreement: null, votes: [], ai_majority_verdict: null,
   reason: reviewTasks.find(item => item.criterionId === criterion.id)!.reason, review_reason: "not_graded", unverified_evidence: null, levels: criterion.levels,
 }));
 export const sampleEscalated = sampleEscalatedItems[1];
 
 const flagBase = { check_result_id: 201, check_run_id: 1, manuscript_group_label: WORKSPACE_SAMPLE.title, criterion_text: null, confidence: null, annotation: null, overridden: false, override_reason: null, ai_verdict_summary: "document_review", llm_mode: "manual" as const, is_passage_level: false, passage_pair: null, first_upload_context: false, evidence_unavailable: false, citation_source_key: null, confirmed_citation_source: false };
-export const sampleFlags: FlagOut[] = [
+export const sampleFlags: FlagOut[] = ([
   { ...flagBase, id: 1, check_kind: "internal_agreement", severity: "med", evidence_excerpt: "efficient database integration", page_anchor: "page 109", ai_verdict_summary: "implementation_scope_mismatch", ai_reasoning: "The conclusion on p.109 describes database integration as delivered. In contrast, the limitations on p.29 explicitly state 'No database integration', the source code on pp.37-50 uses fopen/fprintf to save text files, and p.103 proposes database migration as future work. Ask the authors to align the conclusion with the completed implementation. This is a documentation inconsistency, not a claim about misconduct." },
   { ...flagBase, id: 2, check_kind: "internal_agreement", severity: "low", evidence_excerpt: "Develop a web-based inventory system with role-based access control for admin and", page_anchor: "page 20", ai_verdict_summary: "implementation_scope_mismatch", ai_reasoning: "The methodology on p.20 describes a web-based system. The abstract on p.5, the C listing on pp.33-80 and the console screenshots in the user manual support a Windows console implementation. A web interface is explicitly future work on pp.103-104. Clarify whether p.20 describes the original plan, and distinguish that plan from the delivered prototype." },
   { ...flagBase, id: 3, check_kind: "internal_agreement", severity: "med", evidence_excerpt: "Total Components: 32", page_anchor: "page 32", ai_verdict_summary: "component_count_mismatch", ai_reasoning: "The summary says 32 components, 29 complete and 3 partial. The displayed table contains 23 rows on p.32 and 11 more on p.33: 34 rows, comprising 31 Complete and 3 Partial. Header text and summary bullets are excluded from that count. The printed 90.6% is consistent with 29/32; the issue is which component set the summary describes. Ask the authors to identify exclusions or reconcile the list and totals." },
   { ...flagBase, id: 4, check_kind: "citation_integrity", severity: "med", evidence_excerpt: "Research and case studies show that integrating inventory systems with cloud platforms and", page_anchor: "page 7", ai_verdict_summary: "source_support_missing", ai_reasoning: "The literature review makes this research claim on p.7 without identifying a study in the accompanying sentence. The REFERENCE section on p.109 contains an acknowledgement of instructor guidance rather than bibliographic records. Request the sources supporting the literature claims and their complete entries. No publication has been labelled fake, and no external database lookup is being claimed." },
-];
+] satisfies FlagOut[]).map(flag => ({ ...flag, source_evidence: evidenceFor("flag", flag.id) }));
 
 export const companionSource = {
   id: 202, title: "e-AIMSS: Electronic Asset Inventory and Management System in School", authors: ["Antonio C. Ahmad"], year: "2023", program: "Information Systems", filename: "e-AIMSS-Ahmad-2023.pdf", pdfAsset: "/sample-assets/e-aimss.pdf", pageCount: 19,

@@ -118,6 +118,8 @@ export function SignalReportPage() {
           </section>
 
           <ReviewProgress report={report} />
+          {report.llm_mode === "manual" && <p className="signal-field-hint">Prepared document review. Model grading was skipped; rubric judgments and the final decision remain with the instructor.</p>}
+          {report.llm_mode === "manual" && <p className="signal-field-hint">Statistical forensics: not applicable to this software implementation report. Originality comparison: not run; no similarity judgment is recorded.</p>}
           <div className="signal-section-flow signal-report-orientation">
             <nav className="signal-report-jumps" aria-label="Report review order"><a href="#review-criteria" onClick={focusReportJumpTarget}><span>1</span>Resolve criteria</a><a href="#integrity-signals" onClick={focusReportJumpTarget}><span>2</span>Inspect signals</a><a href="#criteria-results-heading" onClick={focusReportJumpTarget}><span>3</span>Read criterion record</a><a href="#final-decision" onClick={focusReportJumpTarget}><span>4</span>Make decision</a></nav>
 
