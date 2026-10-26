@@ -162,7 +162,7 @@ export function ReuseExplorePanel({
               <div className="flex flex-wrap items-center gap-1.5">
                 <AnchorPill anchor={flag.page_anchor} />
                 <SeverityTag severity={flag.severity as Severity} />
-                {flag.overridden && <StatusPill tone="neutral">Overridden</StatusPill>}
+                {flag.overridden && <StatusPill tone="neutral">Dismissed</StatusPill>}
               </div>
             </button>
           ))

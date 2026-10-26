@@ -149,11 +149,11 @@ function AnnotationPanel({ flag, guarded = false }: { flag: FlagOut; guarded?: b
   return (
     <section className="signal-evidence-section signal-annotation-panel" aria-labelledby="annotation-heading">
       <div className="signal-section-heading">
-        <div><p className="signal-section-kicker">Private workspace</p><h2 id="annotation-heading">Instructor annotation</h2></div>
+        <div><p className="signal-section-kicker">Private workspace</p><h2 id="annotation-heading">Private note</h2></div>
       </div>
-      <p>Your note stays private to this instructor account and is not included in a shared report.</p>
+      <p>Keep a note for your own review. It does not change the result and is not included in shared reports.</p>
       <label className="signal-evidence-field">
-        <span>Annotation</span>
+        <span>Your note</span>
         <textarea
           rows={4}
           value={value}
@@ -168,10 +168,10 @@ function AnnotationPanel({ flag, guarded = false }: { flag: FlagOut; guarded?: b
         />
       </label>
       {invalid && <p id={errorId} role="alert" className="signal-field-error">Enter a note before saving.</p>}
-      {annotate.isError && <Alert title="Could not save this annotation" tone="error" role="alert">{annotate.error instanceof ApiError ? annotate.error.message : "Try again."}</Alert>}
+      {annotate.isError && <Alert title="Could not save your note" tone="error" role="alert">{annotate.error instanceof ApiError ? annotate.error.message : "Try again."}</Alert>}
       <div className="signal-evidence-actions">
-        <Button variant="secondary" busy={annotate.isPending} onClick={save}>{annotate.isPending ? "Saving annotation" : "Save annotation"}</Button>
-        {saved && !annotate.isPending && <span role="status" aria-live="polite" className="signal-save-state">Annotation saved.</span>}
+        <Button variant="secondary" busy={annotate.isPending} onClick={save}>{annotate.isPending ? "Saving note" : "Save note"}</Button>
+        {saved && !annotate.isPending && <span role="status" aria-live="polite" className="signal-save-state">Note saved.</span>}
       </div>
     </section>
   );
@@ -192,14 +192,14 @@ function OverrideDialog({ flag, onClose, guarded = false }: { flag: FlagOut; onC
 
   return (
     <Dialog
-      title="Override this finding?"
+      title="Dismiss this finding?"
       onClose={override.isPending ? undefined : onClose}
-      actions={<><Button variant="secondary" disabled={override.isPending} onClick={onClose}>Cancel</Button><Button variant="brand" busy={override.isPending} onClick={confirm}>Confirm override</Button></>}
+      actions={<><Button variant="secondary" disabled={override.isPending} onClick={onClose}>Cancel</Button><Button variant="brand" busy={override.isPending} onClick={confirm}>Yes, dismiss finding</Button></>}
     >
-      <div className="signal-resolution-dialog" aria-busy={override.isPending}>
-        <p>The original possible inconsistency remains in the evidence record. Your reason is recorded in Audit and the readiness band is recalculated.</p>
+      <div className="signal-resolution-dialog" data-workspace-origin="review" aria-busy={override.isPending}>
+        <p>{isWorkspaceSample() ? "This saves your decision in this sample. The original evidence and your reason stay in the review record. No score deduction is applied in this sample." : "This finding will no longer count against readiness. The original evidence and your reason will stay in the review record."}</p>
         <label className="signal-evidence-field">
-          <span>Reason (required)</span>
+          <span>Why are you dismissing this finding? (required)</span>
           <textarea
             autoFocus
             rows={4}
@@ -213,8 +213,8 @@ function OverrideDialog({ flag, onClose, guarded = false }: { flag: FlagOut; onC
             }}
           />
         </label>
-        {invalid && <p id={errorId} role="alert" className="signal-field-error">Enter a reason before confirming.</p>}
-        {override.isError && <Alert title="Could not override this finding" tone="error" role="alert">{override.error instanceof ApiError ? override.error.message : "Try again."}</Alert>}
+        {invalid && <p id={errorId} role="alert" className="signal-field-error">Enter a reason before dismissing this finding.</p>}
+        {override.isError && <Alert title="Could not dismiss this finding" tone="error" role="alert">{override.error instanceof ApiError ? override.error.message : "Try again."}</Alert>}
       </div>
     </Dialog>
   );
@@ -234,19 +234,19 @@ function ResolutionControl({ flag, guarded = false }: { flag: FlagOut; guarded?:
   if (flag.overridden) {
     return (
       <section className="signal-resolution-record" aria-labelledby="resolution-heading">
-        <div><p className="signal-section-kicker">Instructor resolution</p><h2 id="resolution-heading">{flag.confirmed_citation_source ? "Source confirmed" : "Finding overridden"}</h2></div>
-        <p>{flag.confirmed_citation_source ? `You confirmed the source after checking it: ${flag.override_reason}.` : `You overrode this possible inconsistency: ${flag.override_reason}.`}</p>
-        {flag.confirmed_citation_source && <p>The verified-source record also applies when the same DOI, ISBN, or title appears in another manuscript. This action currently has no in-product undo.</p>}
-        <p>The original finding remains above, and the readiness band has been recalculated.</p>
-        <ActionLink to={`/report/${flag.check_run_id}`} variant="secondary">View updated report</ActionLink>
+        <div><p className="signal-section-kicker">Your decision</p><h2 id="resolution-heading">{flag.confirmed_citation_source ? "Source confirmed" : "Finding dismissed"}</h2></div>
+        <p>{flag.confirmed_citation_source ? `You confirmed the source after checking it: ${flag.override_reason}.` : `You dismissed this finding. Reason: ${flag.override_reason}`}</p>
+        {flag.confirmed_citation_source && <p>The verified-source record also applies when the same DOI, ISBN, or title appears in another manuscript. You cannot undo source confirmation in this app.</p>}
+        <p>{isWorkspaceSample() ? "The original evidence stays in this sample. No score deduction is applied in this sample." : "The original evidence stays above. This finding no longer counts against readiness."}</p>
+        <ActionLink to={`/report/${flag.check_run_id}`} variant="secondary">View report</ActionLink>
       </section>
     );
   }
 
   return (
     <section className="signal-evidence-section signal-resolution-options" aria-labelledby="resolution-options-heading">
-      <div className="signal-section-heading"><div><p className="signal-section-kicker">Instructor action</p><h2 id="resolution-options-heading">Resolve only after checking the evidence</h2></div></div>
-      <p>{flag.ai_verdict_summary ? "This finding remains open unless you record a reasoned override." : "VERIDICAL did not reach a determination, so this finding does not affect readiness unless you affirm it."}</p>
+      <div className="signal-section-heading"><div><p className="signal-section-kicker">Instructor action</p><h2 id="resolution-options-heading">Review the evidence before deciding</h2></div></div>
+      <p>{flag.ai_verdict_summary ? "If you think this finding is wrong, dismiss it and explain why. The original evidence stays in the review record." : "VERIDICAL did not reach a conclusion. Review the evidence before deciding whether to dismiss this finding."}</p>
       {confirmSourceEligible && (flag.citation_source_key ? (
         <div className="signal-confirm-source-option">
           <h3>Verified the source yourself?</h3>
@@ -255,9 +255,9 @@ function ResolutionControl({ flag, guarded = false }: { flag: FlagOut; guarded?:
           <Button variant="secondary" onClick={() => setConfirmOpen(true)}>Confirm this source</Button>
         </div>
       ) : (
-        <Alert title="No source record can be confirmed" tone="info">VERIDICAL could not identify a DOI, ISBN, or title. If you verified the citation independently, override only this finding and explain why.</Alert>
+        <Alert title="No source record can be confirmed" tone="info">VERIDICAL could not identify a DOI, ISBN, or title. If you verified the citation independently, dismiss only this finding and explain why.</Alert>
       ))}
-      <div className="signal-evidence-actions"><Button ref={overrideTriggerRef} variant="secondary" onClick={() => setOverrideOpen(true)}>Override</Button></div>
+      <div className="signal-evidence-actions"><Button ref={overrideTriggerRef} variant="secondary" onClick={() => setOverrideOpen(true)}>Dismiss finding</Button></div>
       {overrideOpen && <OverrideDialog flag={flag} guarded={guarded} onClose={closeOverride} />}
       {confirmOpen && <ConfirmCitationSourceModal flag={flag} guarded={guarded} onClose={() => setConfirmOpen(false)} />}
     </section>
@@ -314,7 +314,7 @@ export function FlagDetailPage() {
       return;
     }
     if (flag.overridden && previousResolved.current === false) {
-      setAnnouncement(flag.confirmed_citation_source ? "Source confirmed. The readiness band was recalculated." : "Finding overridden. The readiness band was recalculated.");
+      setAnnouncement(flag.confirmed_citation_source ? "Source confirmed. The readiness band was recalculated." : isWorkspaceSample() ? "Finding dismissed. Your decision was saved." : "Finding dismissed. The readiness band was recalculated.");
       resolutionRef.current?.focus();
     }
     previousResolved.current = flag.overridden;
@@ -333,7 +333,7 @@ export function FlagDetailPage() {
           <h1 ref={headingRef} tabIndex={-1}>{meta?.title ?? "Evidence detail"}</h1>
           {flag?.criterion_text && <p className="signal-route-header__intro">Related criterion: {flag.criterion_text}</p>}
         </div>
-        {flag && <div className="signal-flag-status"><span className={`signal-severity signal-severity--${flag.severity}`}>{SEVERITY_LABEL[flag.severity]}</span>{flag.overridden && <span className="signal-resolution-state">{flag.confirmed_citation_source ? "Source confirmed" : "Overridden"}</span>}</div>}
+        {flag && <div className="signal-flag-status"><span className={`signal-severity signal-severity--${flag.severity}`}>{SEVERITY_LABEL[flag.severity]}</span>{flag.overridden && <span className="signal-resolution-state">{flag.confirmed_citation_source ? "Source confirmed" : "Dismissed"}</span>}</div>}
       </header>
 
       {!validId ? (

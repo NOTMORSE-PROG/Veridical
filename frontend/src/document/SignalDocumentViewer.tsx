@@ -332,7 +332,11 @@ export function SignalDocumentViewerPage() {
   const restoreQueueRef = useRef(false);
   const capacity = useReviewWorkspaceCapacity();
   const sourceCapacity = useReviewWorkspaceCapacity(active => {
-    if (active?.closest("#review-panel")) selectPane("review");
+    // Review action dialogs render in a portal. Their explicit origin marker
+    // keeps Review visible on collapse without moving focus out of the dialog.
+    // Global dialogs such as the welcome tour do not establish a review origin.
+    const reviewDialog = active?.closest('[role="dialog"]')?.querySelector('[data-workspace-origin="review"]');
+    if (active?.closest("#review-panel") || reviewDialog) selectPane("review");
     else if (active?.closest("#manuscript-panel")) selectPane("manuscript");
   });
   const [sourceSelection, setSourceSelection] = useState<{ run: number; kind: "flag" | "criterion"; subjectId: number; entry?: BoundSourceEvidence; region: FlagRegionOut | null; attempt: number }>();

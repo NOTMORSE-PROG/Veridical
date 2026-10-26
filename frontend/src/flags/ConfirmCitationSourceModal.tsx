@@ -81,7 +81,7 @@ export function ConfirmCitationSourceModal({ flag, onClose, guarded = false }: C
           </>
         }
       >
-        <div className="signal-group-flow" aria-busy={confirm.isPending}>
+        <div className="signal-group-flow" data-workspace-origin="review" aria-busy={confirm.isPending}>
           <div className="flex flex-col gap-1">
             <span className="text-xs font-semibold tracking-header text-ink-tertiary uppercase">
               Source
@@ -109,7 +109,7 @@ export function ConfirmCitationSourceModal({ flag, onClose, guarded = false }: C
             )}
           </div>
           <p className="text-sm text-ink-secondary">
-            Confirming this resolves this flag on this report, the same as an override.
+            Confirming this source closes this finding on this report.
             VERIDICAL's readiness band recalculates immediately.
           </p>
           <p className="text-sm text-ink-secondary">

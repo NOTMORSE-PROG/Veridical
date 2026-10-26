@@ -278,8 +278,8 @@ describe("FlagDetailPage", () => {
     renderWithProviders(<FlagDetailPage />, { route: "/flags/5", path: "/flags/:flagId" });
     await screen.findByText(/Wang, S\./);
     expect(screen.queryByRole("button", { name: /Accept AI verdict/ })).not.toBeInTheDocument();
-    expect(screen.getByText("This finding remains open unless you record a reasoned override.")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Override" })).not.toBeDisabled();
+    expect(screen.getByText("If you think this finding is wrong, dismiss it and explain why. The original evidence stays in the review record.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Dismiss finding" })).not.toBeDisabled();
   });
 
   it("BUG-053: never claims a finding stands as reported when no AI verdict actually exists", async () => {
@@ -290,11 +290,11 @@ describe("FlagDetailPage", () => {
     renderWithProviders(<FlagDetailPage />, { route: "/flags/5", path: "/flags/:flagId" });
     await screen.findByText(/Wang, S\./);
     expect(
-      screen.queryByText("This finding remains open unless you record a reasoned override."),
+      screen.queryByText("If you think this finding is wrong, dismiss it and explain why. The original evidence stays in the review record."),
     ).not.toBeInTheDocument();
     expect(
       screen.getByText(
-        "VERIDICAL did not reach a determination, so this finding does not affect readiness unless you affirm it.",
+        "VERIDICAL did not reach a conclusion. Review the evidence before deciding whether to dismiss this finding.",
       ),
     ).toBeInTheDocument();
   });
@@ -303,13 +303,13 @@ describe("FlagDetailPage", () => {
     vi.stubGlobal("fetch", stubFetchByPath({ "/flags/5": FLAG }));
     renderWithProviders(<FlagDetailPage />, { route: "/flags/5", path: "/flags/:flagId" });
     await screen.findByText(/Wang, S\./);
-    fireEvent.click(screen.getByRole("button", { name: "Override" }));
-    const confirm = await screen.findByRole("button", { name: "Confirm override" });
+    fireEvent.click(screen.getByRole("button", { name: "Dismiss finding" }));
+    const confirm = await screen.findByRole("button", { name: "Yes, dismiss finding" });
     expect(confirm).not.toBeDisabled();
     fireEvent.click(confirm);
 
-    expect(await screen.findByText("Enter a reason before confirming.")).toBeInTheDocument();
-    expect(screen.getByRole("textbox", { name: "Reason (required)" })).toHaveAttribute(
+    expect(await screen.findByText("Enter a reason before dismissing this finding.")).toBeInTheDocument();
+    expect(screen.getByRole("textbox", { name: "Why are you dismissing this finding? (required)" })).toHaveAttribute(
       "aria-invalid",
       "true",
     );
@@ -328,19 +328,19 @@ describe("FlagDetailPage", () => {
     );
     renderWithProviders(<FlagDetailPage />, { route: "/flags/5", path: "/flags/:flagId" });
     await screen.findByText(/Wang, S\./);
-    fireEvent.click(screen.getByRole("button", { name: "Override" }));
-    fireEvent.change(await screen.findByRole("textbox", { name: "Reason (required)" }), {
+    fireEvent.click(screen.getByRole("button", { name: "Dismiss finding" }));
+    fireEvent.change(await screen.findByRole("textbox", { name: "Why are you dismissing this finding? (required)" }), {
       target: { value: "Checked myself, not actually retracted." },
     });
-    fireEvent.click(screen.getByRole("button", { name: "Confirm override" }));
+    fireEvent.click(screen.getByRole("button", { name: "Yes, dismiss finding" }));
 
-    const banner = await screen.findByText(/You overrode this possible inconsistency/);
+    const banner = await screen.findByText(/You dismissed this finding. Reason:/);
     expect(banner).toBeInTheDocument();
     expect(screen.getByText(/Checked myself, not actually retracted\./)).toBeInTheDocument();
     // Original AI finding still shown, never destroyed (ticket AC):
     expect(screen.getAllByText(/Not supported/).length).toBeGreaterThan(0);
     expect(
-      screen.getByRole("link", { name: "View updated report" }),
+      screen.getByRole("link", { name: "View report" }),
     ).toHaveAttribute("href", "/report/20");
     // BUG (focus dropped to <body> after submit) regression guard:
     // focus must land on the terminal banner, not get stranded.
@@ -358,7 +358,7 @@ describe("FlagDetailPage", () => {
     await screen.findByText(/Wang, S\./);
 
     expect(screen.getByText("High severity")).toBeInTheDocument();
-    expect(screen.getByText("Overridden")).toBeInTheDocument();
+    expect(screen.getByText("Dismissed")).toBeInTheDocument();
   });
 
   it("no Overridden pill in the header for a live, unresolved flag", async () => {
@@ -367,17 +367,17 @@ describe("FlagDetailPage", () => {
     await screen.findByText(/Wang, S\./);
 
     expect(screen.getByText("High severity")).toBeInTheDocument();
-    expect(screen.queryByText("Overridden")).not.toBeInTheDocument();
+    expect(screen.queryByText("Dismissed")).not.toBeInTheDocument();
   });
 
   it("BUG (focus/announcement) regression guard: Cancel returns focus to the Override button, not <body>", async () => {
     vi.stubGlobal("fetch", stubFetchByPath({ "/flags/5": FLAG }));
     renderWithProviders(<FlagDetailPage />, { route: "/flags/5", path: "/flags/:flagId" });
     await screen.findByText(/Wang, S\./);
-    const overrideButton = screen.getByRole("button", { name: "Override" });
+    const overrideButton = screen.getByRole("button", { name: "Dismiss finding" });
     fireEvent.click(overrideButton);
     fireEvent.click(await screen.findByRole("button", { name: "Cancel" }));
-    expect(await screen.findByRole("button", { name: "Override" })).toHaveFocus();
+    expect(await screen.findByRole("button", { name: "Dismiss finding" })).toHaveFocus();
   });
 
   it("saves an annotation, validated on click, with a real status confirmation", async () => {
@@ -388,10 +388,10 @@ describe("FlagDetailPage", () => {
     );
     renderWithProviders(<FlagDetailPage />, { route: "/flags/5", path: "/flags/:flagId" });
     await screen.findByText(/Wang, S\./);
-    const box = screen.getByRole("textbox", { name: /Annotation/i });
+    const box = screen.getByRole("textbox", { name: /Your note/i });
     fireEvent.change(box, { target: { value: "Confirmed with the adviser." } });
-    fireEvent.click(screen.getByRole("button", { name: "Save annotation" }));
-    const status = await screen.findByText("Annotation saved.");
+    fireEvent.click(screen.getByRole("button", { name: "Save note" }));
+    const status = await screen.findByText("Note saved.");
     expect(status).toHaveAttribute("role", "status");
   });
 
@@ -399,7 +399,7 @@ describe("FlagDetailPage", () => {
     vi.stubGlobal("fetch", stubFetchByPath({ "/flags/5": FLAG }));
     renderWithProviders(<FlagDetailPage />, { route: "/flags/5", path: "/flags/:flagId" });
     await screen.findByText(/Wang, S\./);
-    fireEvent.click(screen.getByRole("button", { name: "Save annotation" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save note" }));
     expect(await screen.findByText("Enter a note before saving.")).toBeInTheDocument();
   });
 
@@ -513,7 +513,7 @@ describe("FlagDetail — BUG-078 confirm-source", () => {
     expect(await screen.findByText("Verified the source yourself?")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Confirm this source" })).toBeInTheDocument();
     // Override stays available alongside source confirmation.
-    expect(screen.getByRole("button", { name: "Override" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Dismiss finding" })).toBeInTheDocument();
   });
 
   it("shows the nothing-to-confirm explanation, no button, when there's no key", async () => {
@@ -522,7 +522,7 @@ describe("FlagDetail — BUG-078 confirm-source", () => {
     expect(screen.getByText(/could not identify a DOI, ISBN, or title/)).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Confirm this source" })).not.toBeInTheDocument();
     // Override still offered as the fallback path the copy names.
-    expect(screen.getByRole("button", { name: "Override" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Dismiss finding" })).toBeInTheDocument();
   });
 
   it("never shows the section for a non-citation-integrity flag", async () => {
@@ -533,13 +533,13 @@ describe("FlagDetail — BUG-078 confirm-source", () => {
         citation_source_key: null,
       }),
     );
-    await screen.findByRole("button", { name: "Override" });
+    await screen.findByRole("button", { name: "Dismiss finding" });
     expect(screen.queryByText("Verified the source yourself?")).not.toBeInTheDocument();
   });
 
   it("never shows the section for a citation flag with a different verdict (e.g. retracted)", async () => {
     renderFlag(makeFlag({ ai_verdict_summary: "retracted_source", citation_source_key: null }));
-    await screen.findByRole("button", { name: "Override" });
+    await screen.findByRole("button", { name: "Dismiss finding" });
     expect(screen.queryByText("Verified the source yourself?")).not.toBeInTheDocument();
   });
 
@@ -609,7 +609,7 @@ describe("FlagDetail — BUG-078 confirm-source", () => {
       screen.getByText(/verified-source record also applies/),
     ).toBeInTheDocument();
     // The ordinary-override sentence must never appear on this path.
-    expect(screen.queryByText(/You overrode this possible inconsistency/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/You dismissed this finding. Reason:/)).not.toBeInTheDocument();
     expect(
       screen.getByText(
         "Source confirmed. The readiness band was recalculated.",
@@ -627,7 +627,7 @@ describe("FlagDetail — BUG-078 confirm-source", () => {
         override_reason: "Not actually retracted.",
       }),
     );
-    expect(await screen.findByText(/You overrode this possible inconsistency/)).toBeInTheDocument();
+    expect(await screen.findByText(/You dismissed this finding. Reason:/)).toBeInTheDocument();
     expect(screen.queryByText(/You confirmed the source after checking it/)).not.toBeInTheDocument();
   });
 });

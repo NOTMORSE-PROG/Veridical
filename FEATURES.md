@@ -224,9 +224,15 @@ Combines everything into one explainable output (Objective 4, Fig. 3.12).
 1. Open a report → summary header: status, composite score, flag counts by severity, **escalated-items count**
 2. Escalated items shown first ("AI wasn't sure") → instructor resolves each (accept AI suggestion / mark pass / mark fail)
 3. Filter flags by check type, severity, confidence; click a flag → evidence excerpt with page anchor
-4. Annotate any flag; override any AI verdict (override reasons logged)
+4. Add a private note to a finding; dismiss a finding you disagree with and record why
 5. Set final decision: **Approve for defense / Return for revision / Reject**
 6. Export PDF or copy read-only share link for the group's adviser
+
+**Plain language (owner, 2026-10-26):** Use simple words in instructor controls
+and explain the effect of an action before it is saved. Finding actions use
+"Private note" and "Dismiss finding" rather than "Annotation" and "Override".
+A note does not change results. Dismissal retains the evidence and the instructor's
+reason. The prepared sample must describe its own scoring limits accurately.
 
 ### Flow D — Student submission 🟡 *(approved plan; not yet implemented)*
 After V7 is implemented and its role-isolation checks pass, the planned flow is:

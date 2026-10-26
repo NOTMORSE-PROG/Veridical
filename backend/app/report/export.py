@@ -791,7 +791,9 @@ def build_report_pdf(data: ReportExportData) -> bytes:
                 )
                 caption_text = f"Anchor: {escape(f.page_anchor)} · {escape(severity_label)}"
                 if f.overridden:
-                    caption_text += " · Overridden"
+                    caption_text += (
+                        " · Source confirmed" if f.confirmed_citation_source else " · Dismissed"
+                    )
                 header = Paragraph(caption_text, caption_style)
                 excerpt = Paragraph(escape(f.evidence_excerpt), styles["body"])
                 # design review finding, 2026-08-25 (measured against a

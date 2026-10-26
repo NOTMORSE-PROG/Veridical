@@ -28,7 +28,7 @@ const FILTERS: ReadonlyArray<{ label: string; eventType?: string; eventTypePrefi
   { label: "AI calls", eventTypePrefix: "llm_" },
   { label: "Routing", eventType: "criterion_routing" },
   { label: "Escalations", eventType: "escalation_resolved" },
-  { label: "Overrides", eventTypePrefix: "flag_" },
+  { label: "Finding actions", eventTypePrefix: "flag_" },
 ];
 
 const EVENT_LABELS: Record<string, string> = {
@@ -37,8 +37,8 @@ const EVENT_LABELS: Record<string, string> = {
   llm_call_failed: "AI call failed",
   criterion_routing: "Criterion routing",
   escalation_resolved: "Escalation resolved",
-  flag_overridden: "Flag overridden",
-  flag_annotated: "Flag annotated",
+  flag_overridden: "Finding dismissed",
+  flag_annotated: "Private note saved",
   rubric_parse_attempt: "Rubric parse attempt",
   llm_model_exhausted: "AI model exhausted, failed over",
   report_decided: "Decision recorded",
@@ -71,8 +71,8 @@ const EVENT_EXPLANATIONS: Record<string, string> = {
   llm_call_failed: "An AI-assisted review step did not complete. The record preserves the failure context without treating it as an assessment.",
   criterion_routing: "VERIDICAL recorded whether a criterion could be checked by a deterministic rule or needed AI-assisted review.",
   escalation_resolved: "You resolved a criterion that VERIDICAL had left for instructor judgment.",
-  flag_overridden: "You changed how a system finding should affect the readiness review.",
-  flag_annotated: "You added instructor context to a system finding.",
+  flag_overridden: "You dismissed a finding and recorded your reason.",
+  flag_annotated: "You saved a private note about a finding.",
   rubric_parse_attempt: "VERIDICAL recorded an attempt to prepare review criteria from the uploaded required format.",
   llm_model_exhausted: "The configured AI service choices were unavailable, so the affected work was not treated as assessed.",
   report_decided: "You recorded the final instructor outcome for this readiness review.",

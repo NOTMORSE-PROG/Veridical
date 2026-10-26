@@ -40,7 +40,7 @@ export function useAnnotateFlag(flagId: number, expectedRun?: number) {
       const out = await api.post<FlagOut>(`/flags/${flagId}/annotate`, { annotation });
       checkActor();
       requireActionReply(out, flagId, expectedRun);
-      if (expectedRun !== undefined && out.annotation !== annotation) throw new Error("The annotation reply did not confirm your submitted note.");
+      if (expectedRun !== undefined && out.annotation !== annotation) throw new Error("The saved reply did not match your note. Reopen this finding to check it.");
       return out;
     },
     onSuccess: (out) => { checkActor(); queryClient.setQueryData(["flag", flagId], out); },
@@ -56,7 +56,7 @@ export function useOverrideFlag(flagId: number, expectedRun?: number) {
       const out = await api.post<OverrideFlagOut>(`/flags/${flagId}/override`, { reason });
       checkActor();
       requireActionReply(out, flagId, expectedRun);
-      if (expectedRun !== undefined && (!out.overridden || out.override_reason !== reason || out.report.check_run_id !== expectedRun)) throw new Error("The override reply did not confirm this action.");
+      if (expectedRun !== undefined && (!out.overridden || out.override_reason !== reason || out.report.check_run_id !== expectedRun)) throw new Error("The saved reply did not confirm that this finding was dismissed. Reopen it to check.");
       return out;
     },
     onSuccess: (out) => {

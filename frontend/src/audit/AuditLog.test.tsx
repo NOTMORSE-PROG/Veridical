@@ -61,7 +61,7 @@ describe("AuditLogPage", () => {
     };
     vi.stubGlobal("fetch", stubFetchByPath({ "/audit": overridden }));
     renderWithProviders(<AuditLogPage />, { route: "/audit", path: "/audit" });
-    expect((await screen.findAllByText("Flag overridden")).length).toBe(1);
+    expect((await screen.findAllByText("Finding dismissed")).length).toBe(1);
     expect(screen.queryAllByText("flag_overridden")).toHaveLength(0);
   });
 
@@ -144,7 +144,7 @@ describe("AuditLogPage", () => {
       }),
     );
     renderWithProviders(<AuditLogPage />, { route: "/audit", path: "/audit" });
-    await screen.findAllByText("Flag overridden");
+    await screen.findAllByText("Finding dismissed");
     expect(screen.queryByText(/grading passes|0\.91/)).not.toBeInTheDocument();
 
     fireEvent.click(screen.getAllByRole("button", { name: "Detail" })[0]);

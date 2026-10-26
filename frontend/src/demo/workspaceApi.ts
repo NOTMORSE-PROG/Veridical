@@ -154,7 +154,7 @@ export function installWorkspaceSample() {
     write("Criterion record", true);
     for (const result of state.report.results) { write(`${result.text}: ${result.level?.name ?? result.outcome}`, true); write(result.resolution?.reason ?? result.reasoning ?? result.reason ?? "Needs instructor review."); for (const evidence of result.evidence) write(`${evidence.anchor}: ${evidence.quote}`); }
     write("Source observations", true);
-    for (const flag of state.flags) { write(`${flag.check_kind} - ${flag.severity}${flag.overridden ? " - explained by instructor" : ""}`, true); write(`${flag.page_anchor}: ${flag.evidence_excerpt}`); write(flag.ai_reasoning ?? ""); for (const entry of evidenceFor("flag", flag.id)) write(`${entry.label}, ${entry.anchor}: ${entry.quote}`); if (flag.override_reason) write(`Instructor reason: ${flag.override_reason}`); if (flag.annotation) write(`Private instructor annotation: ${flag.annotation}`); }
+    for (const flag of state.flags) { write(`${flag.check_kind} - ${flag.severity}${flag.overridden ? " - explained by instructor" : ""}`, true); write(`${flag.page_anchor}: ${flag.evidence_excerpt}`); write(flag.ai_reasoning ?? ""); for (const entry of evidenceFor("flag", flag.id)) write(`${entry.label}, ${entry.anchor}: ${entry.quote}`); if (flag.override_reason) write(`Instructor reason: ${flag.override_reason}`); if (flag.annotation) write(`Private instructor note: ${flag.annotation}`); }
     if (state.fileAvailable) {
       for (const entry of sourceEvidence) {
         if (entry.check_run_id !== state.report.check_run_id || entry.source_sha256 !== evidenceSourceHash || !entry.image_id) throw new Error("A source image is not bound to this report.");
@@ -274,7 +274,7 @@ export function installWorkspaceSample() {
           if (state.share) localStorage.removeItem(`${WORKSPACE_SAMPLE.storageKey}:share:${state.share.token}`);
           state.share = { token: `sample-${crypto.randomUUID()}`, check_run_id: 1, created_at: new Date().toISOString(), expires_at: textValue(body.expires_at) || null };
           localStorage.setItem(`${WORKSPACE_SAMPLE.storageKey}:share:${state.share.token}`, JSON.stringify({ ...publicSnapshot(), expires_at: state.share.expires_at }));
-          audit("share_created", { note: "Read-only snapshot in this browser's local storage, not a public server capability. Private criterion reasons and annotations are omitted." }); persist();
+          audit("share_created", { note: "Read-only snapshot in this browser's local storage, not a public server capability. Private grading comments and notes are not included." }); persist();
         }
         return json(state.share);
       } catch { return failure("This browser cannot store a local sample share. No public report was published."); }

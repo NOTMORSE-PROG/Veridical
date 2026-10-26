@@ -47,7 +47,7 @@ function DecisionDialog({ decision, report, manuscriptLabel, onClose }: {
       onClose={decide.isPending ? undefined : onClose}
       actions={<><Button variant="secondary" disabled={decide.isPending} onClick={onClose}>Cancel</Button><Button variant={decision === "rejected" ? "danger" : "brand"} busy={decide.isPending} onClick={submit}>{copy.confirm}</Button></>}
     >
-      <div className="signal-decision-dialog" aria-busy={decide.isPending}>
+      <div className="signal-decision-dialog" data-workspace-origin="review" aria-busy={decide.isPending}>
         <div className="signal-decision-dialog__band"><span>VERIDICAL readiness band</span><ReadinessBand status={report.status} /></div>
         <p>This records {manuscriptLabel} as {copy.phrase}. The report becomes read-only until an explicit, reasoned reopen.</p>
         <label><span>{reasonRequired ? "Reason (required)" : "Note (optional)"}</span><textarea rows={4} maxLength={INSTRUCTOR_NOTE_MAX_LENGTH} disabled={decide.isPending} value={note} aria-invalid={invalid || undefined} aria-describedby={invalid ? "signal-decision-reason-error" : "signal-decision-note-hint"} onChange={(event) => { setNote(event.target.value); if (attempted) setAttempted(false); }} /></label>
@@ -78,7 +78,7 @@ function ReopenDialog({ report, onClose }: { report: ReportOut; onClose: () => v
       onClose={reopen.isPending ? undefined : onClose}
       actions={<><Button variant="secondary" disabled={reopen.isPending} onClick={onClose}>Keep decision</Button><Button variant="brand" busy={reopen.isPending} onClick={submit}>Reopen decision</Button></>}
     >
-      <div className="signal-decision-dialog"><p>The current “{report.decision ? DECISION_LABEL[report.decision] : "decision"}” record stays in Audit. Reopening returns this report to the instructor decision gate.</p><label><span>Reason (required)</span><textarea autoFocus rows={4} maxLength={INSTRUCTOR_NOTE_MAX_LENGTH} disabled={reopen.isPending} value={reason} aria-invalid={invalid || undefined} aria-describedby={invalid ? "signal-reopen-error" : undefined} onChange={(event) => { setReason(event.target.value); if (attempted) setAttempted(false); }} /></label>{invalid && <p id="signal-reopen-error" role="alert" className="signal-field-error">{reason.trim() ? `Enter at least ${RESOLUTION_REASON_MIN_LENGTH} characters.` : "Enter a reason before reopening."}</p>}{Boolean(reopen.error) && <Alert title="Could not reopen this decision" tone="error" role="alert">{reopen.error instanceof Error ? reopen.error.message : "Try again."}</Alert>}</div>
+      <div className="signal-decision-dialog" data-workspace-origin="review"><p>The current “{report.decision ? DECISION_LABEL[report.decision] : "decision"}” record stays in Audit. Reopening returns this report to the instructor decision gate.</p><label><span>Reason (required)</span><textarea autoFocus rows={4} maxLength={INSTRUCTOR_NOTE_MAX_LENGTH} disabled={reopen.isPending} value={reason} aria-invalid={invalid || undefined} aria-describedby={invalid ? "signal-reopen-error" : undefined} onChange={(event) => { setReason(event.target.value); if (attempted) setAttempted(false); }} /></label>{invalid && <p id="signal-reopen-error" role="alert" className="signal-field-error">{reason.trim() ? `Enter at least ${RESOLUTION_REASON_MIN_LENGTH} characters.` : "Enter a reason before reopening."}</p>}{Boolean(reopen.error) && <Alert title="Could not reopen this decision" tone="error" role="alert">{reopen.error instanceof Error ? reopen.error.message : "Try again."}</Alert>}</div>
     </Dialog>
   );
 }

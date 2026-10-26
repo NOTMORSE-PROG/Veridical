@@ -124,8 +124,8 @@ describe("SignalDocumentViewerPage", () => {
     renderWithProviders(<SignalDocumentViewerPage />, { route: "/report/5/document?flag=7", path: "/report/:checkRunId/document" });
     expect(await screen.findByText(/abstract and findings list different participant totals/i)).toBeInTheDocument();
     expect(screen.getByTestId("pdf-pane")).toHaveAttribute("data-page", "12");
-    expect(await screen.findByRole("button", { name: "Override" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Save annotation" })).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "Dismiss finding" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Save note" })).toBeInTheDocument();
     expect(screen.queryByText(/% textual similarity/)).not.toBeInTheDocument();
   });
 
