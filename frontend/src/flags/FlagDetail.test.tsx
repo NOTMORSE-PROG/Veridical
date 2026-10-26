@@ -85,7 +85,7 @@ describe("FlagDetailPage", () => {
     renderWithProviders(<FlagDetailPage />, { route: "/flags/5", path: "/flags/:flagId" });
     expect(await screen.findByText("Registry check result")).toBeInTheDocument();
     expect(screen.queryByText("AI suggestion")).not.toBeInTheDocument();
-    expect(screen.queryByText("AI mode could not be verified")).not.toBeInTheDocument();
+    expect(screen.queryByText("AI response mode could not be verified")).not.toBeInTheDocument();
     if (comparison) {
       const table = screen.getByRole("table", { name: "Recorded citation metadata comparison" });
       expect(within(table).getByText("Cited study title")).toBeInTheDocument();
@@ -106,7 +106,7 @@ describe("FlagDetailPage", () => {
     vi.stubGlobal("fetch", stubFetchByPath({ "/flags/5": { ...FLAG, check_kind: "semantic", llm_mode: "unknown" } }));
     renderWithProviders(<FlagDetailPage />, { route: "/flags/5", path: "/flags/:flagId" });
     expect(await screen.findByText("AI suggestion")).toBeInTheDocument();
-    expect(screen.getByText("AI mode could not be verified")).toBeInTheDocument();
+    expect(screen.getByText("AI response mode could not be verified")).toBeInTheDocument();
   });
 
   it("renders the same stored agreement pair as the manuscript viewer", async () => {
@@ -326,7 +326,7 @@ describe("FlagDetailPage", () => {
   it("BUG-049 (backend review finding): discloses an unknown-mode flag distinctly from real", async () => {
     vi.stubGlobal("fetch", stubFetchByPath({ "/flags/5": { ...FLAG, llm_mode: "unknown" } }));
     renderWithProviders(<FlagDetailPage />, { route: "/flags/5", path: "/flags/:flagId" });
-    expect(await screen.findByText("AI mode could not be verified")).toBeInTheDocument();
+    expect(await screen.findByText("AI response mode could not be verified")).toBeInTheDocument();
     expect(screen.queryByText("Test-mode AI responses")).not.toBeInTheDocument();
   });
 

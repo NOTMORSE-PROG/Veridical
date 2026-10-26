@@ -4,7 +4,7 @@ import { useLocation } from "react-router";
 import { useQueryClient } from "@tanstack/react-query";
 import { ApiError } from "../api/client";
 import type { FlagOut } from "../api/types";
-import { TEST_AI_DISCLOSURE } from "../domain/aiModeDisclosure";
+import { TEST_AI_DISCLOSURE, UNKNOWN_AI_DISCLOSURE } from "../domain/aiModeDisclosure";
 import { isOptionalComparisonLead } from "../domain/comparisonLeadIdentity";
 import { isAssessmentRevision, keepNewerAssessment } from "../report/assessmentRevision";
 import { ActionLink } from "../ui/ActionLink";
@@ -28,11 +28,11 @@ export function FindingModeDisclosure({ mode, registry = false, id }: { mode: Fl
   if (mode === "real") return null;
   return <div id={id} className="signal-flag-mode">
     <strong>{registry && mode === "fake" ? "Check recorded in a test-mode run"
-      : mode === "fake" ? TEST_AI_DISCLOSURE.title : "AI mode could not be verified"}</strong>
+      : mode === "fake" ? TEST_AI_DISCLOSURE.title : UNKNOWN_AI_DISCLOSURE.title}</strong>
     <p>{registry && mode === "fake"
       ? "This record belongs to a test-mode run. Do not treat its saved provider values as evidence of a fresh external lookup."
       : mode === "fake" ? TEST_AI_DISCLOSURE.body
-        : "This finding predates reliable AI-mode tracking. Check the evidence directly before acting on it."}</p>
+        : registry ? UNKNOWN_AI_DISCLOSURE.registry : UNKNOWN_AI_DISCLOSURE.finding}</p>
   </div>;
 }
 

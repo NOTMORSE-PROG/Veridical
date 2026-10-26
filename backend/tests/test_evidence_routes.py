@@ -65,6 +65,7 @@ def test_reading_routes_keep_allowlisted_payload_and_authority(
                 snapshot_id=IDENTITY,
                 placement=EvidencePlacementOut(reference_id=IDENTITY, state="page_only", page=2),
                 image_data_url=None,
+                caption="Page shown without a passage mark.",
             )
         return EvidenceManifestOut(
             snapshot_id=IDENTITY, assessment_revision=3, llm_mode="real", references=()

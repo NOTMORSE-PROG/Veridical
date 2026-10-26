@@ -673,7 +673,8 @@ def test_export_discloses_unknown_llm_mode_distinctly_from_real(logged_in_with_a
 
     doc = fitz.open(stream=resp.content, filetype="pdf")
     full_text = "\n".join(page.get_text() for page in doc)
-    assert "AI mode unknown" in full_text
+    assert "AI response mode could not be verified" in full_text
+    assert "predates AI-mode tracking" not in full_text
     assert "can't be confirmed" in full_text
     assert "Test-mode run" not in full_text
 
@@ -795,6 +796,7 @@ def test_export_embeds_a_real_rendered_page_for_a_page_anchored_flag(
     a real embedded raster image on a page that also carries this flag's
     own anchor caption, not just a bigger byte count."""
     import asyncio
+    import hashlib
 
     from sqlalchemy import text
     from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
@@ -831,6 +833,7 @@ def test_export_embeds_a_real_rendered_page_for_a_page_anchored_flag(
                     instructor_id=instructor.id,
                     group_label="G-PageImg",
                     file_ref=str(pdf_path),
+                    content_hash=hashlib.sha256(pdf_path.read_bytes()).hexdigest(),
                 )
                 rubric = Rubric(
                     instructor_id=instructor.id, title="Format", source_file="r.pdf", is_active=True
@@ -889,6 +892,12 @@ def test_export_embeds_a_real_rendered_page_for_a_page_anchored_flag(
     assert "Rendered from the submitted PDF, page 1" in full_text
     total_images = sum(len(page.get_images()) for page in exported)
     assert total_images >= 1, "no raster image was embedded in the exported PDF"
+    image_text = [" ".join(page.get_text().split()) for page in exported if page.get_images()]
+    assert any("Text-layer match on the recorded page." in text for text in image_text)
+    assert any(
+        "Before a student can defend their capstone the format must be checked." in text
+        for text in image_text
+    )
 
 
 def test_export_states_an_explicit_reason_for_a_docx_manuscript(client, api_scratch_url, tmp_path):

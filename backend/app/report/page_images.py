@@ -32,6 +32,7 @@ from app.ingest.schemas import SectionTree
 from app.report.export import _LLM_MODE_DISCLOSURE, _PRINT_LAYOUT, _TONE_COLORS
 from app.report.page_image_disclosure import (
     PageImageUnavailable,
+    _fit_band,
     append_disclosure,
     check_pixel_budget,
     disclosure_layout,
@@ -138,6 +139,29 @@ def _region_render(region: AnchorRegion) -> _RegionRender | None:
     return None
 
 
+def planned_page_image_pixels(page, *, llm_disclosure, settings, print_content_width=None):
+    """Preflight the complete raster, including its detached mode notice."""
+    rect = (
+        page.rect
+        * pymupdf.Matrix(settings.export_page_image_dpi / 72, settings.export_page_image_dpi / 72)
+    ).irect
+    height = rect.height
+    check_pixel_budget(rect.width, height, settings)
+    if llm_disclosure is not None:
+        band = _fit_band(
+            rect.width,
+            rect.height,
+            llm_disclosure[0],
+            print_content_width
+            if print_content_width is not None
+            else A4[0] - 2 * _PRINT_LAYOUT["side_margin"],
+            settings,
+        )
+        height += band.height_px
+    check_pixel_budget(rect.width, height, settings)
+    return rect.width * height
+
+
 def _render_page_png(
     page: pymupdf.Page,
     boxes: tuple[Bbox, ...],
@@ -145,6 +169,7 @@ def _render_page_png(
     llm_disclosure: tuple[str, str] | None,
     settings: Settings,
     box_coordinates: Literal["legacy_region", "pdf_points"] = "legacy_region",
+    print_content_width: float | None = None,
 ) -> bytes:
     """Render the visible source unchanged, with an optional external notice.
 
@@ -152,11 +177,12 @@ def _render_page_png(
     is rasterized with its own layer/annotation state, then marks are drawn
     directly on those pixels. No page copy can lose document-level visibility.
     """
-    raster_rect = (
-        page.rect
-        * pymupdf.Matrix(settings.export_page_image_dpi / 72, settings.export_page_image_dpi / 72)
-    ).irect
-    check_pixel_budget(raster_rect.width, raster_rect.height, settings)
+    planned_page_image_pixels(
+        page,
+        llm_disclosure=llm_disclosure,
+        settings=settings,
+        print_content_width=print_content_width,
+    )
     source = page.get_pixmap(
         dpi=settings.export_page_image_dpi, colorspace=pymupdf.csRGB, alpha=False, annots=True
     )
@@ -194,7 +220,11 @@ def _render_page_png(
         text,
         (fg.red, fg.green, fg.blue),
         (bg.red, bg.green, bg.blue),
-        content_width=A4[0] - 2 * _PRINT_LAYOUT["side_margin"],
+        content_width=(
+            print_content_width
+            if print_content_width is not None
+            else A4[0] - 2 * _PRINT_LAYOUT["side_margin"]
+        ),
         settings=settings,
     )
 

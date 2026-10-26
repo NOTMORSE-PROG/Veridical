@@ -51,7 +51,7 @@ const EVENT_LABELS: Record<string, string> = {
   flag_overridden: "Flag overridden",
   flag_annotated: "Flag annotated",
   rubric_parse_attempt: "Rubric parse attempt",
-  llm_model_exhausted: "AI model exhausted, failed over",
+  llm_model_exhausted: "Model limit reached",
   report_decided: "Decision recorded",
   report_reopened: "Decision reopened",
   manuscript_purged: "Stored file deleted",
@@ -77,7 +77,7 @@ const PROMPT_LABELS: Record<string, string> = {
 };
 
 const EVENT_EXPLANATIONS: Record<string, string> = {
-  llm_call: "VERIDICAL completed an AI-assisted review step and preserved the exact inputs and response for reproducibility.",
+  llm_call: "VERIDICAL completed an automated review step. Open the details to inspect the information that was saved.",
   llm_cache_hit: "VERIDICAL reused a matching stored AI response instead of spending another service call.",
   llm_call_failed: "An AI-assisted review step did not complete. The record preserves the failure context without treating it as an assessment.",
   criterion_routing: "VERIDICAL recorded whether a criterion could be checked by a deterministic rule or needed AI-assisted review.",
@@ -88,7 +88,7 @@ const EVENT_EXPLANATIONS: Record<string, string> = {
   flag_overridden: "An instructor changed how a system finding should affect the readiness review.",
   flag_annotated: "An instructor added context to a system finding.",
   rubric_parse_attempt: "VERIDICAL recorded an attempt to prepare review criteria from the uploaded required format.",
-  llm_model_exhausted: "The configured AI service choices were unavailable, so the affected work was not treated as assessed.",
+  llm_model_exhausted: "A review attempt reached a recorded model or service limit. Check later entries and the report for what happened next.",
   report_decided: "An instructor recorded the final outcome for this readiness review.",
   report_reopened: "An instructor reopened a previously recorded outcome for further review.",
   manuscript_purged: "An instructor deleted the uploaded file and its extracted text. The manuscript cannot be used as a source in future originality checks. Saved reports, decisions, comparison evidence and audit history are kept.",
@@ -104,28 +104,8 @@ const EVENT_EXPLANATIONS: Record<string, string> = {
   library_orphan_corpus_rows_removed: "An operator cleanup removed comparison data that belonged to no Library record.",
 };
 
-// BUG-219: mode-specific label/explanation replacements for the `llm_*`
-// events above. backend review finding (P1): the ticket's own written
-// Regression-test criterion says a fixture or unknown-mode record must
-// NEVER contain the phrases "AI call" or "AI-assisted" — an earlier draft
-// left the bold row LABEL unconditional (relying on the adjacent tag alone)
-// and left "AI-assisted" inside the fake/unknown explanation sentences
-// themselves. Fixed properly rather than just documented as a divergence:
-// both maps below now carry `fake`/`unknown` overlays that avoid both
-// phrases outright, so a fixture/unknown row's label AND explanation are
-// independently honest, not just tag-dependent. `real` rows are
-// deliberately UNCHANGED (kept in the base maps below, not duplicated here)
-// — "AI call"/"AI-assisted" is exactly correct there, matching the
-// ticket's own "a confirmed real-model record retains the real-AI label."
-//
-// `llm_model_exhausted` needed no explanation change (its real/base text
-// already said "AI service choices," never the two forbidden phrases) and
-// gets no `fake` entries in either map: `FakeLLMClient` (app/llm/fake.py)
-// only ever writes `event_type: "llm_call"` rows — it has no retry/cache/
-// failure simulation at all — so a fake-mode `llm_cache_hit`/
-// `llm_call_failed`/`llm_model_exhausted` row cannot exist going forward,
-// only a genuinely unrecorded legacy one can (confirmed by reading
-// `app/llm/fake.py` and `app/llm/queue.py`, not assumed).
+// Mode-specific summaries describe the recorded event, not a final run outcome.
+// Missing mode does not establish record age or a complete replay package.
 const EVENT_LABELS_BY_MODE: Partial<Record<string, Partial<Record<LLMMode, string>>>> = {
   llm_call: { fake: "Test-mode call", unknown: "Automated review step" },
   llm_cache_hit: { fake: "Test-mode call (cached)", unknown: "Automated review step (cached)" },
@@ -134,22 +114,22 @@ const EVENT_LABELS_BY_MODE: Partial<Record<string, Partial<Record<LLMMode, strin
 
 const EVENT_EXPLANATIONS_BY_MODE: Partial<Record<string, Partial<Record<LLMMode, string>>>> = {
   llm_call: {
-    real: "VERIDICAL completed an AI-assisted review step using a real external AI model and preserved the exact inputs and response for reproducibility.",
-    fake: "VERIDICAL completed a test-mode review step using its own fixture responses, not a real external AI model, and preserved the exact inputs and response for reproducibility. Test mode is VERIDICAL's documented zero-budget default for development and demo use, so seeing it here does not indicate a problem.",
-    unknown: "VERIDICAL completed an automated review step and preserved the exact inputs and response for reproducibility. This entry predates VERIDICAL's AI-mode tracking, so whether it used a real or test-mode AI model was never recorded and cannot be recovered now.",
+    real: "This entry records a completed AI-assisted review step using a real external AI model. Open the details to inspect the information that was saved.",
+    fake: "This entry records a completed test-mode review step using simulated fixture responses. Do not treat the simulated result as a real AI assessment. Open the details to inspect the information that was saved.",
+    unknown: "This entry records a completed automated review step. It does not establish whether the responses came from a real external model or simulated fixtures. Open the details to inspect the information that was saved.",
   },
   llm_cache_hit: {
     real: "VERIDICAL reused a matching stored response from a real external AI model instead of spending another service call.",
     fake: "VERIDICAL reused a matching stored response from its test-mode AI fixture instead of spending another service call. The reused response is simulated, not a real model's output, consistent with VERIDICAL's zero-budget test-mode default.",
-    unknown: "VERIDICAL reused a matching stored AI response instead of spending another service call. This entry predates VERIDICAL's AI-mode tracking, so whether the reused response came from a real or test-mode AI model was never recorded and cannot be recovered now.",
+    unknown: "This entry records reuse of a stored response. It does not establish whether that response came from a real external model or a simulated fixture. No new generation is recorded by this event.",
   },
   llm_call_failed: {
     real: "An AI-assisted review step using a real external AI model did not complete. The record preserves the failure context without treating it as an assessment.",
     fake: "An automated test-mode review step using VERIDICAL's own fixture responses did not complete. The record preserves the failure context without treating it as an assessment. A failure in test mode does not indicate a problem with a real AI service.",
-    unknown: "An automated review step did not complete. The record preserves the failure context without treating it as an assessment. This entry predates VERIDICAL's AI-mode tracking, so whether it used a real or test-mode AI model was never recorded and cannot be recovered now.",
+    unknown: "This entry records an automated review attempt that did not complete. Its AI response mode could not be verified. Check later entries and the report for the recorded assessment outcome.",
   },
   llm_model_exhausted: {
-    unknown: "The configured AI service choices were unavailable, so the affected work was not treated as assessed. This entry predates VERIDICAL's AI-mode tracking, so whether real or test-mode AI choices were involved was never recorded and cannot be recovered now.",
+    unknown: "A review attempt reached a recorded model or service limit. This entry does not establish the AI response mode or the check’s final outcome. Check later entries and the report for what happened next.",
   },
 };
 

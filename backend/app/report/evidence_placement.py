@@ -23,7 +23,7 @@ from app.ingest.schemas import SectionTree
 from app.report.evidence_references import EvidenceSourceReference
 from app.report.export import _LLM_MODE_DISCLOSURE
 from app.report.page_image_disclosure import PageImageUnavailable, disclosure_layout
-from app.report.page_images import _render_page_png
+from app.report.page_images import _render_page_png, planned_page_image_pixels
 from app.report.source_files import open_source_pdf_bytes
 
 Bbox = tuple[float, float, float, float]
@@ -64,6 +64,8 @@ class ReferencePageImage:
 
     placement: EvidencePlacementOut
     image_png: bytes | None
+    # Conservative reservation, retained even if the encoded image is withheld.
+    charged_pixels: int = 0
 
 
 @dataclass(frozen=True)
@@ -203,6 +205,7 @@ def render_pdf_evidence(
     settings: Settings,
     *,
     llm_mode: str,
+    print_content_width: float | None = None,
 ) -> ReferencePageImage:
     """Reuse the native rasterizer with this reference's own admitted marks only.
 
@@ -219,6 +222,7 @@ def render_pdf_evidence(
         if notice is not None
         else None
     )
+    rendered_pixels = 0
     try:
         render_settings = settings.model_copy(
             update={
@@ -228,12 +232,19 @@ def render_pdf_evidence(
                 )
             }
         )
+        rendered_pixels = planned_page_image_pixels(
+            source.document[placement.page - 1],
+            llm_disclosure=disclosure,
+            settings=render_settings,
+            print_content_width=print_content_width,
+        )
         image = _render_page_png(
             source.document[placement.page - 1],
             placement.boxes if placement.state == "text_layer_match" else (),
             llm_disclosure=disclosure,
             settings=render_settings,
             box_coordinates="pdf_points",
+            print_content_width=print_content_width,
         )
     except PageImageUnavailable:
         return ReferencePageImage(
@@ -241,6 +252,7 @@ def render_pdf_evidence(
                 reference_id=reference.reference_id, state="unavailable", reason="resource_limit"
             ),
             None,
+            rendered_pixels,
         )
     # Apply response/batch caps as well as the rasterizer's per-page cap. PNG
     # IHDR contains the final dimensions, including any detached mode notice.
@@ -254,5 +266,6 @@ def render_pdf_evidence(
                 reference_id=reference.reference_id, state="unavailable", reason="resource_limit"
             ),
             None,
+            max(rendered_pixels, width * height),
         )
-    return ReferencePageImage(placement, image)
+    return ReferencePageImage(placement, image, max(rendered_pixels, width * height))

@@ -66,6 +66,7 @@ from app.report.schemas import (
 )
 from app.report.source_coverage import project_source_coverage
 from app.report.source_inventory import NativeSourceNote, group_native_source_notes
+from app.report.source_print import source_evidence_flowables
 from app.report.statistical_scope import statistical_scope_copy
 from app.report.text import Paragraph, clusters, draw_right_text, register_fonts, text_width
 
@@ -110,6 +111,9 @@ _DRAFT_GRAY = colors.HexColor("#8992a6")
 # wrapped disclosures increase the body reservation instead of overlapping it.
 _PRINT_LAYOUT = {
     "side_margin": 54,
+    "top_margin": 98,
+    "source_entry_gap": 8,
+    "image_caption_gap": 2,
     "bottom_margin": 84,
     "footer_bottom": 16,
     "footer_row_gap": 1,
@@ -329,12 +333,8 @@ NEEDS_REVIEW_OUTCOMES = tuple(_NEEDS_REVIEW_OUTCOMES_ENUM)
 # the badge (near the title) and the footer line on every page -- a
 # hand-duplicated string in two places is exactly the kind of drift this
 # project's honest-wording discipline exists to prevent. `real` needs no
-# disclosure at all; `unknown` (a run that predates migration 0024's
-# `llm_mode` column) gets its own honest, distinct wording -- not a
-# confident "this is fake" claim, and not silence either, which would
-# recreate the exact non-disclosure this ticket exists to close for
-# every pre-migration run (backend review finding, live-reproduced
-# against report/29 -- the ticket's own reproduction case).
+# disclosure at all; `unknown` means the record does not establish response
+# provenance. Missing mode metadata alone does not establish the run's age.
 _LLM_MODE_DISCLOSURE = {
     "fake": (
         "Test-mode AI responses. This run is recorded in test AI mode. "
@@ -344,8 +344,9 @@ _LLM_MODE_DISCLOSURE = {
         "danger",
     ),
     "unknown": (
-        "AI mode unknown: this run predates AI-mode tracking, so whether it used real "
-        "or simulated AI results can't be confirmed.",
+        "AI response mode could not be verified. This record does not establish whether "
+        "responses came from a real external model or simulated fixtures. "
+        "Check the recorded evidence directly before relying on AI-derived results.",
         "caution",
     ),
 }
@@ -651,7 +652,7 @@ def _pending_review_reason(outcome: str) -> str:
 
 
 def _pending_semantic_basis_flowables(
-    row: CriterionResultOut, styles: dict[str, ParagraphStyle]
+    row: CriterionResultOut, styles: dict[str, ParagraphStyle], *, include_evidence=True
 ) -> list:
     if row.kind != "semantic" or row.basis != "llm" or row.outcome != "escalated":
         return []
@@ -665,7 +666,7 @@ def _pending_semantic_basis_flowables(
         parts.append(Paragraph(escape(row.reasoning), styles["body"]))
     else:
         parts.append(Paragraph(escape(labels["missing_explanation"]), styles["body"]))
-    if row.evidence:
+    if row.evidence and include_evidence:
         parts.append(Paragraph("Recorded passages and locations", styles["body_bold"]))
         for entry in row.evidence:
             parts.append(Paragraph(escape(entry.quote), styles["body"]))
@@ -675,7 +676,7 @@ def _pending_semantic_basis_flowables(
                 else labels["missing_location"]
             )
             parts.append(Paragraph(escape(location), styles["caption"]))
-    else:
+    elif not row.evidence:
         parts.append(Paragraph(escape(labels["missing_excerpt"]), styles["body"]))
     for part in parts:
         if part.style is styles["body_bold"]:
@@ -748,7 +749,9 @@ def _rule_facts_flowables(row: CriterionResultOut, styles: dict[str, ParagraphSt
     return parts
 
 
-def _criterion_flowable(row: CriterionResultOut, styles: dict[str, ParagraphStyle]) -> list:
+def _criterion_flowable(
+    row: CriterionResultOut, styles: dict[str, ParagraphStyle], *, include_evidence=True
+) -> list:
     title = f"Criterion #{row.criterion_id}: {row.text}" if row.resolution else row.text
     parts = [Paragraph(escape(title), styles["cell_bold"])]
     if not row.resolution:
@@ -784,7 +787,7 @@ def _criterion_flowable(row: CriterionResultOut, styles: dict[str, ParagraphStyl
                 )
             )
         parts.extend(_criterion_source_flowables(row, styles))
-    elif row.evidence:
+    elif row.evidence and include_evidence:
         parts.append(Paragraph(escape(row.evidence[0].quote), styles["cell"]))
         parts.append(
             Paragraph(
@@ -869,17 +872,10 @@ def _page_evidence_flowables(
     ]
 
 
-def build_report_pdf(data: ReportExportData) -> bytes:
-    font = _register_fonts()
-    styles = _styles(font)
-    report = data.report
-    is_draft = report.decision is None
-    pending = [r for r in report.results if r.outcome in NEEDS_REVIEW_OUTCOMES and not r.resolution]
-    export_dpi = get_settings().export_page_image_dpi
-    generated_at = _format_date(datetime.now(UTC), with_time=True)
+def _report_footer_parts(report, styles, font, generated_at):
+    content_width = A4[0] - 2 * _PRINT_LAYOUT["side_margin"]
     footer_llm_disclosure = _LLM_MODE_DISCLOSURE.get(report.llm_mode)
-    side_margin = _PRINT_LAYOUT["side_margin"]
-    content_width = A4[0] - 2 * side_margin
+    is_draft = report.decision is None
     footer_style = ParagraphStyle("footer", parent=styles["caption"], alignment=1)
     footer_mode_style = ParagraphStyle(
         "footer_mode",
@@ -917,11 +913,55 @@ def build_report_pdf(data: ReportExportData) -> bytes:
         timestamp_y + timestamp_height + _PRINT_LAYOUT["footer_body_gap"],
     )
 
+    return footer_rows, footer_style, footer_timestamp, timestamp_y, bottom_margin
+
+
+def source_image_print_width():
+    return Frame(0, 0, A4[0] - 2 * _PRINT_LAYOUT["side_margin"], A4[1])._aW
+
+
+def source_image_settings_for(report, settings):
+    from app.report.source_print import source_image_height
+
+    font = _register_fonts()
+    styles = _styles(font)
+    generated_at = _format_date(datetime.now(UTC), with_time=True)
+    *_, bottom_margin = _report_footer_parts(report, styles, font, generated_at)
+    frame = Frame(
+        0,
+        0,
+        A4[0] - 2 * _PRINT_LAYOUT["side_margin"],
+        A4[1] - _PRINT_LAYOUT["top_margin"] - bottom_margin,
+    )
+
+    def measured(reference):
+        height = source_image_height(
+            reference, frame._aW, frame._aH, styles, _PRINT_LAYOUT, settings
+        )
+        return settings.model_copy(update={"export_page_image_max_height": height})
+
+    return measured
+
+
+def build_report_pdf(data: ReportExportData) -> bytes:
+    font = _register_fonts()
+    styles = _styles(font)
+    report = data.report
+    is_draft = report.decision is None
+    pending = [r for r in report.results if r.outcome in NEEDS_REVIEW_OUTCOMES and not r.resolution]
+    export_dpi = get_settings().export_page_image_dpi
+    generated_at = _format_date(datetime.now(UTC), with_time=True)
+    side_margin = _PRINT_LAYOUT["side_margin"]
+    content_width = A4[0] - 2 * side_margin
+    footer_rows, footer_style, footer_timestamp, timestamp_y, bottom_margin = _report_footer_parts(
+        report, styles, font, generated_at
+    )
+
     buf = BytesIO()
     doc = SimpleDocTemplate(
         buf,
         pagesize=A4,
-        topMargin=98,
+        topMargin=_PRINT_LAYOUT["top_margin"],
         bottomMargin=bottom_margin,
         leftMargin=side_margin,
         rightMargin=side_margin,
@@ -930,6 +970,29 @@ def build_report_pdf(data: ReportExportData) -> bytes:
         subject="Capstone manuscript readiness report",
     )
     content_width = doc.width
+    source_frame = Frame(0, 0, doc.width, doc.height)
+    source_width = source_frame._aW
+
+    def source_blocks(entries):
+        return [
+            part
+            for entry in entries
+            for part in source_evidence_flowables(
+                entry,
+                source_width,
+                styles,
+                export_dpi,
+                _PRINT_LAYOUT,
+                frame_height=source_frame._aH,
+            )
+        ]
+
+    def criterion_sources(row):
+        return [
+            entry
+            for entry in (data.source_evidence or ())
+            if entry.criterion_id == row.criterion_id
+        ]
 
     flow: list = []
 
@@ -1155,6 +1218,20 @@ def build_report_pdf(data: ReportExportData) -> bytes:
         )
     flow.append(Spacer(1, 10))
 
+    if data.source_evidence:
+        included = sum(entry.image.image_png is not None for entry in data.source_evidence)
+        without_image = len(data.source_evidence) - included
+        flow.append(
+            Paragraph(
+                f"{included} source image{'s' if included != 1 else ''} included. "
+                f"{without_image} recorded evidence "
+                f"{'entry is' if without_image == 1 else 'entries are'} shown "
+                "without an image; see their individual notes.",
+                styles["caption"],
+            )
+        )
+        flow.append(Spacer(1, _PRINT_LAYOUT["source_entry_gap"]))
+
     # 3. Pending escalations. BUG-081: this used to be gated on `is_draft`,
     # so a criterion still escalated at decide time (blocked in the normal
     # flow by `decide_report`'s own gate, `service.py`, but not something
@@ -1207,7 +1284,10 @@ def build_report_pdf(data: ReportExportData) -> bytes:
                     [
                         *block,
                         *_rule_facts_flowables(row, styles),
-                        *_pending_semantic_basis_flowables(row, styles),
+                        *_pending_semantic_basis_flowables(
+                            row, styles, include_evidence=data.source_evidence is None
+                        ),
+                        *source_blocks(criterion_sources(row)),
                     ],
                     header=[
                         Paragraph(
@@ -1543,6 +1623,9 @@ def build_report_pdf(data: ReportExportData) -> bytes:
             )
             for group_index, f in enumerate(group):
                 detail = data.flag_details.get(f.id, FlagExportDetailOut())
+                common_entries = [
+                    entry for entry in (data.source_evidence or ()) if entry.flag_id == f.id
+                ]
                 record_identity = identities[f.id]
                 issue = _issue_title(detail.issue or f.problem_kind)
                 severity_label = {
@@ -1617,7 +1700,10 @@ def build_report_pdf(data: ReportExportData) -> bytes:
                     styles["body"].leading * _PRINT_LAYOUT["minimum_evidence_lines"],
                 )
                 flow.append(CondPageBreak(start_height))
-                finding = [*start_items, excerpt]
+                finding = [*start_items]
+                if not any(entry.quote for entry in common_entries):
+                    finding.append(excerpt)
+                finding.extend(source_blocks(common_entries))
                 if detail.citation_metadata_review_warning:
                     finding.extend(
                         [
@@ -1641,6 +1727,11 @@ def build_report_pdf(data: ReportExportData) -> bytes:
                         )
                     )
                 for comparison in detail.comparisons:
+                    if any(
+                        entry.quote == comparison.text and entry.anchor == comparison.anchor
+                        for entry in common_entries
+                    ):
+                        continue
                     finding.append(
                         Paragraph(
                             f"<b>{escape(comparison.label)}:</b> {escape(comparison.text)}",
@@ -1697,8 +1788,10 @@ def build_report_pdf(data: ReportExportData) -> bytes:
                             styles["body"],
                         )
                     )
-                page_image = data.page_images.get(f.id)
-                if page_image is None or page_image.reason_code != "docx_layout":
+                page_image = data.page_images.get(f.id) if data.source_evidence is None else None
+                if data.source_evidence is None and (
+                    page_image is None or page_image.reason_code != "docx_layout"
+                ):
                     finding.extend(
                         _page_evidence_flowables(page_image, content_width, styles, export_dpi)
                     )
@@ -1710,7 +1803,9 @@ def build_report_pdf(data: ReportExportData) -> bytes:
                         header=[
                             Paragraph(
                                 escape(
-                                    f"{record_identity} (continued) - "
+                                    f"{record_identity} (continued)"
+                                    if data.source_evidence is not None
+                                    else f"{record_identity} (continued) - "
                                     f"Source location: {_display_anchor(f.page_anchor)}"
                                 ),
                                 styles["caption_bold"],
@@ -1730,7 +1825,22 @@ def build_report_pdf(data: ReportExportData) -> bytes:
         for row in resolved:
             flow.append(
                 PTOContainer(
-                    _criterion_flowable(row, styles),
+                    [
+                        *_criterion_flowable(
+                            row, styles, include_evidence=data.source_evidence is None
+                        ),
+                        *(
+                            [
+                                Paragraph(
+                                    "Recorded source passages from the system assessment",
+                                    styles["body_bold"],
+                                )
+                            ]
+                            if criterion_sources(row)
+                            else []
+                        ),
+                        *source_blocks(criterion_sources(row)),
+                    ],
                     header=[
                         Paragraph(
                             escape(f"Criterion #{row.criterion_id} (continued)"),
@@ -1776,6 +1886,36 @@ def build_report_pdf(data: ReportExportData) -> bytes:
         rows = [header]
         for row in remaining:
             label, tone = _result_display(row)
+            entries = criterion_sources(row)
+            if entries:
+                if len(rows) > 1:
+                    flow.append(criteria_table(rows))
+                    rows = [header]
+                identity = Paragraph(
+                    escape(
+                        f"Criterion #{row.criterion_id}: {label}. "
+                        f"{_format_weight_importance(row.weight_importance, long=True)}."
+                    ),
+                    styles["body_bold"],
+                )
+                identity.keepWithNext = True
+                flow.append(
+                    PTOContainer(
+                        [
+                            identity,
+                            *_criterion_flowable(row, styles, include_evidence=False),
+                            *source_blocks(entries),
+                        ],
+                        header=[
+                            Paragraph(
+                                escape(f"Criterion #{row.criterion_id} (continued)"),
+                                styles["caption_bold"],
+                            )
+                        ],
+                    )
+                )
+                flow.append(Spacer(1, _PRINT_LAYOUT["source_entry_gap"]))
+                continue
             result_style = styles["cell_bold"] if tone in ("danger",) else styles["cell"]
             importance_ink = {"high": _INK, "med": _INK_SECONDARY, "low": _INK_TERTIARY}.get(
                 row.weight_importance, _INK_SECONDARY

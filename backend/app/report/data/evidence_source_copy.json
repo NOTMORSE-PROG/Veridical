@@ -1,0 +1,27 @@
+{
+  "roles": {
+    "criterion_evidence": "Recorded source passage",
+    "criterion_scope": "Recorded source scope",
+    "agreement_intent": "Recorded statement A",
+    "agreement_outcome": "Recorded statement B",
+    "finding_excerpt": "Recorded source passage",
+    "finding_scope": "Recorded source scope",
+    "reuse_own": "This manuscript",
+    "reuse_match": "Saved comparison excerpt"
+  },
+  "text_layer_match": "Text-layer match on the recorded page. This mark locates the saved excerpt in the PDF’s text layer. Compare it with the page image; placement does not verify the claim or establish that the text is visible as printed.",
+  "page_only": "Page shown without a passage mark. Compare the saved excerpt with the page image.",
+  "scope_first_page": "This entry concerns a broader recorded source scope. Only its starting page is shown, without a passage mark.",
+  "docx": "This manuscript was submitted as DOCX. Word page layout is not available for this source.",
+  "unavailable": {
+    "assessment_revision_unverified": "The saved assessment revision is unknown; no source image is attached.",
+    "source_identity_unverified": "The original source identity was not recorded; no source image is attached.",
+    "bounded_excerpt_only": "Only the saved comparison excerpt is included; the other manuscript’s original page is not shared.",
+    "source_changed": "The original source no longer matches the saved evidence; no source image is attached.",
+    "source_mutated": "The source could not be kept unchanged while reading; no source image is attached.",
+    "location_unavailable": "The recorded source location could not be shown as a PDF page.",
+    "resource_limit": "Source image omitted because this request’s configured image limit was reached. The saved excerpt and location remain shown.",
+    "public_page_annotations": "This source page contains PDF annotations, links or form fields and is withheld from public sharing.",
+    "public_page_inspection_unavailable": "This source page could not be inspected for public sharing and is withheld."
+  }
+}

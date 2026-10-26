@@ -18,6 +18,7 @@ from app.ingest.schemas import SectionTree
 from app.models.manuscript import Manuscript
 from app.models.run import CheckResult, CheckRun, Flag
 from app.models.share import ShareLink
+from app.report.evidence_captions import placement_caption
 from app.report.evidence_images import (
     EvidenceSourceFile,
     evidence_image_admission,
@@ -51,6 +52,7 @@ class EvidencePageOut(BaseModel):
     snapshot_id: str
     placement: EvidencePlacementOut
     image_data_url: str | None
+    caption: str
 
 
 @dataclass(frozen=True)
@@ -265,6 +267,7 @@ async def _admitted_evidence_page(session, run, reference_id, snapshot_id, setti
     return EvidencePageOut(
         snapshot_id=assessment.snapshot_id,
         placement=image.placement,
+        caption=placement_caption(image.placement.state, image.placement.reason),
         image_data_url=(
             "data:image/png;base64," + base64.b64encode(image.image_png).decode("ascii")
             if image.image_png is not None

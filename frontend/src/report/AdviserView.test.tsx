@@ -277,7 +277,7 @@ describe("AdviserViewPage", () => {
       }),
     );
     render();
-    expect(await screen.findByText("AI mode could not be verified")).toBeInTheDocument();
+    expect(await screen.findByText("AI response mode could not be verified")).toBeInTheDocument();
     expect(screen.queryByText("Test-mode AI responses")).not.toBeInTheDocument();
   });
 

@@ -5,7 +5,8 @@
   "background_opacity": 0.92,
   "highlight_stroke_pt": 1.4,
   "summaries": {
-    "fake": "Test-mode AI responses. Not real AI grading."
+    "fake": "Test-mode AI responses. Not real AI grading.",
+    "unknown": "AI response mode unverified. Real or simulated responses could not be established. Check the recorded evidence."
   },
   "unavailable": {
     "pixel_limit": "Page image unavailable: rendering this source with its disclosure would exceed the configured image size limit.",

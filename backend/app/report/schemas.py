@@ -787,6 +787,21 @@ class UnassessedReferenceOut(BaseModel):
     lookup_attempted: bool
 
 
+class SourceEvidencePrintOut(BaseModel):
+    """One saved evidence role and its own source image; export only."""
+
+    reference_id: str
+    criterion_id: int | None
+    flag_id: int | None
+    role: str
+    index: int
+    quote: str
+    anchor: str | None
+    placement_state: Literal["text_layer_match", "page_only", "paragraph_only", "unavailable"]
+    image: PageEvidenceImageOut
+    max_print_height: float | None = Field(default=None, gt=0)
+
+
 class ReportExportData(BaseModel):
     """V-039: everything the PDF export needs, gathered once. `flags`
     mirrors the report's own flags panel (BUG-033) exactly -- the export
@@ -807,3 +822,5 @@ class ReportExportData(BaseModel):
     flag_details: dict[int, FlagExportDetailOut] = Field(default_factory=dict)
     unassessed_references: list[UnassessedReferenceOut] = Field(default_factory=list)
     source_format: Literal["pdf", "docx", "unknown"] = "unknown"
+    # None is legacy payload absence; [] is an authoritative empty collection.
+    source_evidence: list[SourceEvidencePrintOut] | None = None

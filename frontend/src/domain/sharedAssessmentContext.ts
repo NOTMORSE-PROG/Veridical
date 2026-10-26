@@ -1,4 +1,5 @@
 import type { PublicReportOut } from "../api/types";
+import { UNKNOWN_AI_DISCLOSURE } from "./aiModeDisclosure";
 
 /** F8.7, screen 4l: context derived only from the public report contract. */
 export function sharedAssessmentNotices(report: PublicReportOut) {
@@ -6,7 +7,7 @@ export function sharedAssessmentNotices(report: PublicReportOut) {
   const prefix = `shared-context-${report.check_run_id}`;
   if (report.llm_mode !== "real") notices.push(report.llm_mode === "fake"
     ? { id: `${prefix}-mode`, title: "Test-mode AI responses", text: "These fixture responses are not a real manuscript assessment." }
-    : { id: `${prefix}-mode`, title: "AI mode could not be verified", text: "Treat AI-derived outcomes cautiously." });
+    : { id: `${prefix}-mode`, title: UNKNOWN_AI_DISCLOSURE.title, text: UNKNOWN_AI_DISCLOSURE.body });
   if (report.rubric_needs_review) notices.push({ id: `${prefix}-format`, title: "Required format review", text: "The instructor activated this format with unresolved parser uncertainty. Its criteria may not fully reflect the source document." });
   if (report.assessment_incomplete) notices.push({ id: `${prefix}-limits`, title: "Assessment limits", text: "Some integrity checks were not fully assessed. Unchecked content is not treated as passed." });
   if (report.semantic_support_unverified) notices.push({ id: `${prefix}-support`, title: "AI evidence support needs review", text: "Evidence checks are not confirmed for every AI criterion result. Review each result's available explanation and evidence before relying on AI content." });

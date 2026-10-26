@@ -377,7 +377,7 @@ describe("AuditLogPage", () => {
     fireEvent.click(screen.getAllByRole("button", { name: "Detail" })[0]);
     expect(await screen.findByText(`Audit entry #42`)).toBeInTheDocument();
     expect(await screen.findByRole("heading", { name: "What this records" })).toBeInTheDocument();
-    expect(screen.getByText(/completed an AI-assisted review step/)).toBeInTheDocument();
+    expect(screen.getByText(/completed an automated review step/)).toBeInTheDocument();
     const technical = screen.getByText("Technical record for reproducibility").closest("details");
     expect(technical).not.toHaveAttribute("open");
     expect(await screen.findByText(/agreement_score:\s*0\.667/)).toBeInTheDocument();
@@ -563,7 +563,7 @@ describe("AuditLogPage", () => {
     vi.stubGlobal("fetch", stubFetchByPath({ "/audit": rare }));
     renderWithProviders(<AuditLogPage />, { route: "/audit", path: "/audit" });
     expect((await screen.findAllByText("Rubric parse attempt")).length).toBe(1);
-    expect(screen.getAllByText("AI model exhausted, failed over").length).toBe(1);
+    expect(screen.getAllByText("Model limit reached").length).toBe(1);
     expect(screen.queryAllByText("rubric_parse_attempt")).toHaveLength(0);
     expect(screen.queryAllByText("llm_model_exhausted")).toHaveLength(0);
   });
@@ -675,8 +675,9 @@ describe("AuditLogPage", () => {
     );
     renderWithProviders(<AuditLogPage />, { route: "/audit", path: "/audit" });
     fireEvent.click((await screen.findAllByRole("button", { name: "Detail" }))[0]);
-    expect(await screen.findByText(/using its own fixture responses, not a real external AI model/)).toBeInTheDocument();
-    expect(screen.getByText(/zero-budget default for development and demo use/)).toBeInTheDocument();
+    expect(await screen.findByText(/using simulated fixture responses/)).toBeInTheDocument();
+    expect(screen.getByText(/Do not treat the simulated result as a real AI assessment/)).toBeInTheDocument();
+    expect(screen.queryByText(/preserved the exact inputs and response for reproducibility/)).not.toBeInTheDocument();
   });
 
   it("BUG-219 (backend review P1): a fixture or unknown-mode row's label and explanation never contain the literal phrases 'AI call' or 'AI-assisted' -- a real-mode row still does, per the ticket's own regression-test text", async () => {
@@ -736,7 +737,7 @@ describe("AuditLogPage", () => {
     renderWithProviders(<AuditLogPage />, { route: "/audit", path: "/audit" });
     fireEvent.click((await screen.findAllByRole("button", { name: "Detail" }))[0]);
     expect(
-      await screen.findByText(/predates VERIDICAL's AI-mode tracking, so whether it used a real or test-mode AI model was never recorded/),
+      await screen.findByText(/This entry records a completed automated review step. It does not establish whether the responses came from a real external model or simulated fixtures/),
     ).toBeInTheDocument();
   });
 

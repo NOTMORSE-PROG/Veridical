@@ -1504,6 +1504,7 @@ async def get_report_export_data(
     # the SAME persisted flag detail as the evidence screen, then an export-only
     # allowlist. In particular private annotations never reach ReportExportData.
     from app.flags.service import _to_flag_out
+    from app.report.evidence_references import build_evidence_reference_snapshot
     from app.report.export_data import flag_export_detail, unassessed_references
 
     detail_rows = (
@@ -1513,14 +1514,42 @@ async def get_report_export_data(
             .where(CheckResult.check_run_id == check_run_id)
         )
     ).all()
+    full_flags = [
+        await _to_flag_out(
+            session,
+            flag,
+            result,
+            manuscript,
+            check_run,
+            assessment_revision=report.assessment_revision,
+        )
+        for flag, result in detail_rows
+    ]
     flag_details = {
         flag.id: flag_export_detail(
-            await _to_flag_out(session, flag, result, manuscript, check_run),
+            projected,
             recorded_detail=flag.detail or result.detail or {},
             recorded_excerpt=flag.evidence_excerpt,
         )
-        for flag, result in detail_rows
+        for (flag, result), projected in zip(detail_rows, full_flags, strict=True)
     }
+    membership = tuple(
+        (
+            await session.scalars(
+                select(Flag.id)
+                .join(CheckResult, CheckResult.id == Flag.check_result_id)
+                .where(CheckResult.check_run_id == check_run_id)
+                .order_by(Flag.id)
+            )
+        ).all()
+    )
+    evidence_snapshot = build_evidence_reference_snapshot(
+        report,
+        full_flags,
+        expected_flag_ids=membership,
+        source_sha256=manuscript.content_hash,
+        audience="private",
+    )
     citation_check = await session.scalar(
         select(CheckResult).where(
             CheckResult.check_run_id == check_run_id,
@@ -1534,12 +1563,30 @@ async def get_report_export_data(
     # owns its read transaction; release assessment locks before source rendering.
     await session.commit()
     report = await attach_report_figures(session, report, settings)
-    page_images = await read_source(
+    from app.report.evidence_images import EvidenceSourceFile, build_recorded_evidence_images
+    from app.report.export import source_image_print_width, source_image_settings_for
+
+    async def render_evidence():
+        source = EvidenceSourceFile(manuscript.file_ref, manuscript.purged_at)
+        tree = SectionTree.model_validate(
+            manuscript.section_tree or {"source": "none", "nodes": []}
+        )
+        return await asyncio.to_thread(
+            lambda: build_recorded_evidence_images(
+                source,
+                evidence_snapshot,
+                tree,
+                settings,
+                llm_mode=report.llm_mode,
+                settings_for_reference=source_image_settings_for(report, settings),
+                print_content_width=source_image_print_width(),
+            )
+        )
+
+    source_evidence = await read_source(
         session,
         manuscript,
-        lambda: asyncio.to_thread(
-            render_flag_page_images_for, manuscript, flags, report.llm_mode, settings
-        ),
+        render_evidence,
         allow_purged=True,
     )
 
@@ -1547,7 +1594,8 @@ async def get_report_export_data(
         report=report,
         flags=flags,
         archive_size_n=archive_size_n,
-        page_images=page_images,
+        page_images={},
+        source_evidence=source_evidence,
         flag_details=flag_details,
         unassessed_references=reference_limits,
         source_format=await read_source(

@@ -233,8 +233,8 @@ describe("SignalDocumentViewerPage", () => {
       expect(screen.queryByText(/This review was produced with fixture responses/)).not.toBeInTheDocument();
     } else {
       expect(screen.queryByText("Test-mode AI responses")).not.toBeInTheDocument();
-      if (mode === "unknown") expect(screen.getByText("This run predates reliable AI-mode tracking. Treat AI-derived outcomes cautiously.")).toBeVisible();
-      else expect(screen.queryByText("AI mode could not be verified")).not.toBeInTheDocument();
+      if (mode === "unknown") expect(screen.getByText("This record does not establish whether responses came from a real external model or simulated fixtures. Check the recorded evidence directly before relying on AI-derived results.")).toBeVisible();
+      else expect(screen.queryByText("AI response mode could not be verified")).not.toBeInTheDocument();
     }
   });
   it("shows current historical title guidance before preserved comparison evidence", async () => {
