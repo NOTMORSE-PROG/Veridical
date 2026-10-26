@@ -3,7 +3,7 @@ import { ActionAssessmentContext } from "./ReportAssessmentContext";
 import { useLayoutEffect, useRef, useState } from "react";
 import type { JudgmentSnapshot } from "../api/judgments";
 import { INSTRUCTOR_NOTE_MAX_LENGTH } from "../config/ui";
-import { CRITERION_EXCLUSION_COPY } from "../domain/criterionReview";
+import { CRITERION_EXCLUSION_COPY, recordedInstructorComment } from "../domain/criterionReview";
 import { useFindingCompletion } from "../flags/useFindingCompletion";
 import { claimFocusContinuation, type FocusContinuation } from "../routing/focusContinuation";
 import { useExplicitActionFocus } from "../routing/useExplicitActionFocus";
@@ -20,7 +20,7 @@ function Snapshot({ value, attributionOnly = false }: { value: JudgmentSnapshot;
   return <div className="signal-attached-flow">
     {!attributionOnly && <><p><strong>{judgmentLabel(value)}</strong></p>
       {value.resolution_type === "needs_document" && <p>{CRITERION_EXCLUSION_COPY.noGrade}</p>}
-      <p><strong>Instructor reason:</strong> {value.reason}</p></>}
+      <p><strong>Instructor reason:</strong> {recordedInstructorComment(value.resolution_type, value.reason) ?? "No instructor reason is available in this record."}</p></>}
     <p className="signal-field-hint">{value.actor_id === null ? "Instructor attribution unavailable." : `Recorded by instructor #${value.actor_id}.`}
       {value.recorded_at === null ? " Original save time unavailable." : <> <time dateTime={value.recorded_at}>{new Date(value.recorded_at).toLocaleString()}</time></>}</p>
     {value.provenance === "legacy_partial" && <p className="signal-field-hint">Earlier saved judgment. Some original record details are unavailable.</p>}
@@ -149,7 +149,7 @@ export function RecordedJudgmentTools({ checkRunId, criterionId, criterionText, 
         </fieldset>
         <div className="signal-field signal-evidence-field"><label htmlFor={`${id}-reason`}>{recording ? "Reason for your judgment (required)" : "New reason for revision (required)"}</label>
           <p id={`${id}-hint`} className="signal-field-hint">{recording ? "Explain your source-based judgment. The automated assessment is retained separately from your judgment." : "Explain the judgment you are recording now. The previous judgment and reason will remain in your private judgment history."}</p>
-          <textarea id={`${id}-reason`} ref={reasonRef} value={draft.reason} disabled={!writable} maxLength={INSTRUCTOR_NOTE_MAX_LENGTH}
+          <textarea id={`${id}-reason`} ref={reasonRef} value={draft.reason} required disabled={!writable} maxLength={INSTRUCTOR_NOTE_MAX_LENGTH}
             aria-describedby={`${editorContextDescription ? `${editorContextDescription} ` : ""}${id}-hint${draft.error && draft.uncertainRevision === undefined ? ` ${id}-error` : ""}`}
             aria-invalid={draft.attempted && Boolean(draft.error) && draft.uncertainRevision === undefined}
             onChange={event => scope.change(criterionId, { reason: event.target.value })} />

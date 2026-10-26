@@ -3,6 +3,12 @@ import type { EscalatedItemOut, EscalationResolution } from "../api/types";
 export const resolutionRequiresReason = (resolution: EscalationResolution) =>
   resolution === "needs_document" || resolution === "accept_majority";
 
+export function recordedInstructorComment(resolution: unknown, comment: unknown): string | undefined {
+  if (typeof comment !== "string") return;
+  if (comment.trim()) return comment;
+  if (["mark_pass", "mark_fail", "mark_level"].includes(resolution as string)) return "No comment recorded.";
+}
+
 export const REVIEW_DRAFT_COPY = {
   retention: "Your unsaved choice and any notes stay available while you review this report and its manuscript.",
   saving: "Saving this resolution. You can inspect the manuscript while it finishes.",

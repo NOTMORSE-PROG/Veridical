@@ -185,6 +185,8 @@ class JudgmentHistoryEntry(PrivateJudgmentModel):
 
     @model_validator(mode="after")
     def versioned_action(self) -> "JudgmentHistoryEntry":
+        if self.action != "initial_resolution" and not self.after.reason.strip():
+            raise ValueError("A recorded judgment or revision requires its new instructor reason.")
         if self.schema_version == 2:
             if self.action != "judgment_recorded" or self.original_assessment is None:
                 raise ValueError("The initial judgment event lacks its original assessment.")

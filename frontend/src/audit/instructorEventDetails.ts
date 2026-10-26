@@ -1,5 +1,5 @@
 // F8.5/F8.10, screen 4s: describe the stored entry, never today's report.
-import { CRITERION_EXCLUSION_COPY } from "../domain/criterionReview";
+import { CRITERION_EXCLUSION_COPY, recordedInstructorComment } from "../domain/criterionReview";
 import { DECISION_LABEL } from "../domain/decisionTone";
 import { READINESS_LABEL } from "../domain/readinessTone";
 import type { AuditLogDetail, CriterionLevel } from "../api/types";
@@ -109,7 +109,7 @@ function snapshot(raw: unknown): JudgmentSnapshot | undefined {
     || typeof value.resolution_type !== "string" || !["mark_pass", "mark_fail", "mark_level", "needs_document", "accept_majority"].includes(value.resolution_type)
     || typeof value.outcome !== "string" || !["passed", "failed", "not_applicable"].includes(value.outcome)
     || !(value.score === null || typeof value.score === "number" && Number.isFinite(value.score))
-    || typeof value.reason !== "string" || !value.reason.trim()
+    || typeof value.reason !== "string"
     || !(value.actor_id === null || recordedId(value.actor_id))
     || !(value.recorded_at === null || typeof value.recorded_at === "string" && timestampIdentity(value.recorded_at) !== undefined)
     || !["recorded", "legacy_partial"].includes(value.provenance as string)) return;
@@ -152,7 +152,7 @@ function revision(raw: unknown, entry: EntryBinding | undefined) {
     || !Number.isSafeInteger(body.assessment_revision_after)) return;
   const before = snapshot(body.before);
   const after = snapshot(body.after);
-  if (!before || !after || after.provenance !== "recorded" || after.actor_id !== body.performed_by
+  if (!before || !after || !after.reason.trim() || after.provenance !== "recorded" || after.actor_id !== body.performed_by
     || after.judgment_revision !== before.judgment_revision + 1
     || timestampIdentity(after.recorded_at) !== timestampIdentity(entry.created_at)
     || timestampIdentity(entry.created_at) === undefined) return;
@@ -173,7 +173,7 @@ function initialJudgment(raw: unknown, entry: EntryBinding | undefined) {
     || !Number.isSafeInteger(body.assessment_revision_after)) return;
   const after = snapshot(body.after);
   const original = record(body.original_assessment);
-  if (!after || after.provenance !== "recorded" || after.actor_id !== body.performed_by
+  if (!after || !after.reason.trim() || after.provenance !== "recorded" || after.actor_id !== body.performed_by
     || after.resolution_type === "accept_majority" || !recordedLevelScoreConsistent(after)
     || after.judgment_revision !== 1
     || timestampIdentity(after.recorded_at) !== timestampIdentity(entry.created_at)
@@ -267,7 +267,7 @@ export function instructorEventDetails(event: string, rawPayload: unknown, entry
         { role: "primary", label: "Previous recorded judgment", value: saved ? judgmentLabel(saved.before) : "Unavailable in this entry." },
         { role: "primary", label: "Revised judgment", value: saved ? judgmentLabel(saved.after) : "Unavailable in this entry." },
         { role: "reason", label: "Revision reason", value: saved?.after.reason ?? "Unavailable in this entry." },
-        { role: "reason", label: "Previous instructor reason", value: saved?.before.reason ?? "Unavailable in this entry." },
+        { role: "reason", label: "Previous instructor reason", value: saved ? recordedInstructorComment(saved.before.resolution_type, saved.before.reason) ?? "Unavailable in this entry." : "Unavailable in this entry." },
         { role: "secondary", label: "Recorded result identifier", value: saved ? `#${saved.resultId}` : "Unavailable in this entry." },
       ],
       notice: saved ? "This entry records a revision at that time. The current report may contain later judgments or decisions."
@@ -314,7 +314,7 @@ export function instructorEventDetails(event: string, rawPayload: unknown, entry
   const fields: InstructorEventDetails["fields"] = [
     { role: "primary", label: "Criterion", value: recordedId(payload.criterion_id) ? `Criterion #${payload.criterion_id}` : "Unavailable in this entry." },
     { role: "primary", label: "Recorded judgment", value: judgment },
-    { role: "reason", label: "Instructor reason", value: reason(payload, "reason") },
+    { role: "reason", label: "Instructor reason", value: Object.hasOwn(payload, "reason") ? recordedInstructorComment(payload.resolution, payload.reason) ?? "Unavailable in this entry." : "Unavailable in this entry." },
   ];
   if (recordedId(payload.check_result_id)) fields.push({ role: "secondary", label: "Recorded result identifier", value: `#${payload.check_result_id}` });
   if (payload.resolution === "accept_majority") {

@@ -164,6 +164,39 @@ def test_initial_history_distinguishes_automated_assessment_from_null_manual_bef
     assert record.original_assessment.original_outcome == "passed"
 
 
+@pytest.mark.parametrize("action", ["initial_resolution", "judgment_recorded", "judgment_revised"])
+@pytest.mark.parametrize("comment", ["", " \t\n"])
+def test_only_ordinary_initial_resolution_can_have_no_new_history_reason(action, comment):
+    row = event()
+    body = row.payload["judgment"]
+    if action != "judgment_recorded":
+        body.update(schema_version=1, action=action)
+        body.pop("original_assessment")
+        row.event_type = "escalation_resolved" if action == "initial_resolution" else action
+    if action == "judgment_revised":
+        body["before"] = deepcopy(body["after"])
+        body["after"]["judgment_revision"] = 2
+    body["after"]["reason"] = comment
+    if action == "initial_resolution":
+        assert history_entry(row).after.reason == comment
+    else:
+        with pytest.raises((ValueError, ValidationError)):
+            history_entry(row)
+
+
+def test_revision_retains_a_blank_ordinary_initial_comment_as_its_before_snapshot():
+    row = event()
+    body = row.payload["judgment"]
+    body.update(schema_version=1, action="judgment_revised")
+    body.pop("original_assessment")
+    row.event_type = "judgment_revised"
+    body["before"] = {**body["after"], "reason": ""}
+    body["after"]["judgment_revision"] = 2
+    saved = history_entry(row)
+    assert saved.before.reason == ""
+    assert saved.after.reason == "I checked this requirement independently."
+
+
 @pytest.mark.parametrize(
     "change",
     [

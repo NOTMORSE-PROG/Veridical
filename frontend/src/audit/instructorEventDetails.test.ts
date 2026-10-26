@@ -123,6 +123,29 @@ describe("initial instructor action audit", () => {
 });
 
 describe("stored instructor action presentation", () => {
+  it("retains a blank ordinary initial comment before a separately reasoned revision", () => {
+    const payload = revisionPayload();
+    payload.judgment.before.reason = "";
+    const result = instructorEventDetails("judgment_revised", payload, REVISION_ENTRY)!;
+    expect(recordedActor(payload, 5, REVISION_ENTRY)).toBe("You");
+    expect(result.fields).toContainEqual({ role: "reason", label: "Previous instructor reason", value: "No comment recorded." });
+    expect(result.fields).toContainEqual({ role: "reason", label: "Revision reason", value: payload.judgment.after.reason });
+  });
+
+  it.each(["mark_pass", "mark_fail", "mark_level", "needs_document", "accept_majority"])("distinguishes empty ordinary initial %s comments from missing required reasons", resolution => {
+    const result = instructorEventDetails("escalation_resolved", { resolution, reason: "" })!;
+    expect(result.fields.find(field => field.label === "Instructor reason")?.value).toBe(
+      ["mark_pass", "mark_fail", "mark_level"].includes(resolution) ? "No comment recorded." : "Unavailable in this entry.");
+    expect(instructorEventDetails("escalation_resolved", { resolution })!.fields.find(field => field.label === "Instructor reason")?.value).toBe("Unavailable in this entry.");
+    for (const reason of [null, undefined, 42, {}]) expect(instructorEventDetails("escalation_resolved", { resolution, reason })!.fields.find(field => field.label === "Instructor reason")?.value).toBe("Unavailable in this entry.");
+  });
+
+  it("does not relax the new reason required to override a settled automated judgment", () => {
+    const payload = initialPayload();
+    (payload.judgment.after as Record<string, unknown>).reason = "";
+    expect(recordedActor(payload, 5, INITIAL_ENTRY)).toBe("Instructor attribution unavailable");
+    expect(instructorEventDetails("judgment_recorded", payload, INITIAL_ENTRY)!.fields.every(field => field.value === "Unavailable in this entry.")).toBe(true);
+  });
   it("BUG-463: reads the bound performer and full before/after reasons without assuming a grade change", () => {
     const payload = revisionPayload();
     const before = structuredClone(payload);

@@ -108,7 +108,7 @@ export function recordedLevelScoreConsistent(value: JudgmentSnapshot): boolean {
 
 export function recordAcknowledged(out: JudgmentRevisionOutput, run: number, criterion: number,
   submitted: JudgmentRecordInput, bound: JudgmentContext, actor: number): boolean {
-  if (!out || !contextMatches(out.context, run, criterion) || !snapshotValid(out.context.current)
+  if (!out || !submitted.reason.trim() || !contextMatches(out.context, run, criterion) || !snapshotValid(out.context.current)
     || bound.current !== null || !bound.can_record || !originalAssessmentValid(bound.original_assessment)
     || out.context.check_result_id !== bound.check_result_id || out.context.criterion_text !== bound.criterion_text
     || originalAssessmentKey(out.context.choices) !== originalAssessmentKey(bound.choices)
@@ -143,7 +143,7 @@ export function recordAcknowledged(out: JudgmentRevisionOutput, run: number, cri
 
 export function revisionAcknowledged(out: JudgmentRevisionOutput, run: number, criterion: number,
   submitted: JudgmentRevisionInput, before: JudgmentSnapshot, actor: number, expectedResult: number): boolean {
-  if (!out || !contextMatches(out.context, run, criterion) || !snapshotValid(out.context.current)
+  if (!out || !submitted.reason.trim() || !contextMatches(out.context, run, criterion) || !snapshotValid(out.context.current)
     || out.context.check_result_id !== expectedResult
     || out.context.assessment_revision !== submitted.expected_revision + 1
     || out.context.current.judgment_revision !== submitted.expected_judgment_revision + 1
@@ -207,6 +207,7 @@ export function historyEntryMatches(entry: JudgmentHistoryEntry, context: Judgme
     && entry.assessment_revision_after === entry.assessment_revision_before + 1
     && entry.assessment_revision_after <= context.assessment_revision
     && snapshotValid(entry.after) && entry.after.provenance === "recorded"
+    && (entry.action === "initial_resolution" || Boolean(entry.after.reason.trim()))
     && entry.after.actor_id === entry.performed_by && entry.after.recorded_at === entry.performed_at
     && entry.after.judgment_revision <= (context.current?.judgment_revision ?? -1)
     && (entry.action === "initial_resolution" || entry.action === "judgment_recorded" ? entry.before === null && entry.after.judgment_revision === 1

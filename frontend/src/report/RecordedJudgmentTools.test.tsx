@@ -33,10 +33,11 @@ function Fixture({ captureClient }: { captureClient: (client: QueryClient) => vo
     <button onClick={() => review.revisions.open(101, "current")}>Change captured revision draft</button>
   </>;
 }
-function setup(options: { levelled?: boolean; legacy?: boolean; actualAuthRoute?: boolean } = {}) {
+function setup(options: { levelled?: boolean; legacy?: boolean; actualAuthRoute?: boolean; blankComment?: boolean } = {}) {
   vi.spyOn(document, "hasFocus").mockReturnValue(true);
   let epoch = 1;
   let current = structuredClone(initial);
+  if (options.blankComment) current.reason = "";
   if (options.levelled) current = { ...current, resolution_type: "mark_level", score: 0,
     level: { ordinal: 0, name: "No evidence", points: 0, max_points: 3 } };
   if (options.legacy) current = { ...current, judgment_revision: 0, resolution_type: "mark_level", score: 33.33,
@@ -149,6 +150,15 @@ function review(reason = NEW_REASON) {
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
 describe("Explicit saved-judgment revision", () => {
+  it("shows an omitted ordinary initial comment in the preview while requiring the new revision reason", async () => {
+    const control = setup({ blankComment: true });
+    const reason = await openRevision();
+    expect(reason).toBeRequired();
+    review();
+    const dialog = screen.getByRole("dialog", { name: "Save revised judgment?" });
+    expect(within(dialog).getByText("No comment recorded.")).toBeVisible();
+    expect(control.posts).toEqual([]);
+  });
   it.each([1, 2, null].flatMap(nextId => [200, 401].map(status => ({ nextId, status }))))(
     "retires a delayed revision POST after auth replacement $nextId with response $status", async ({ nextId, status }) => {
       const control = setup({ actualAuthRoute: true }); await openRevision(); review(); control.holdRevision(status);

@@ -112,6 +112,23 @@ describe("Initial judgment acknowledgment and history", () => {
 });
 
 describe("Judgment version and fact boundaries", () => {
+  it("keeps blank initial comments but requires a new reason for settled judgments and revisions", () => {
+    const { out, submitted, bound } = firstJudgment();
+    out.entry.after.reason = "";
+    out.context.current!.reason = "";
+    submitted.reason = "";
+    out.report.results[0].resolution!.reason = "";
+    expect(recordAcknowledged(out, 5, 101, submitted, bound, 1)).toBe(false);
+    expect(historyEntryMatches(out.entry, out.context)).toBe(false);
+    const initial: JudgmentHistoryEntry = { ...out.entry, schema_version: 1, action: "initial_resolution", original_assessment: undefined };
+    expect(historyEntryMatches(initial, out.context)).toBe(true);
+    const after = { ...out.entry.after, judgment_revision: 2, reason: "A new reason for this revision." };
+    const revised: JudgmentHistoryEntry = { ...initial, action: "judgment_revised", before: initial.after, after };
+    out.context.current = after;
+    expect(historyEntryMatches(revised, out.context)).toBe(true);
+    revised.after = { ...after, reason: "" };
+    expect(historyEntryMatches(revised, out.context)).toBe(false);
+  });
   it.each(["mark_pass", "mark_fail", "mark_level"] as const)("recognizes blank ordinary %s comments without inventing a reason", resolution => {
     const blank: JudgmentSnapshot = { ...current, resolution_type: resolution, reason: "",
       outcome: resolution === "mark_fail" ? "failed" : "passed",

@@ -20,7 +20,7 @@ describe("Signal criterion judgment presentation", () => {
       level: null, resolution: { type: "mark_level", reason: "", ai_majority_verdict: "Exemplary" },
     })]} />);
     expect(screen.getAllByText("Recorded grade unavailable")).toHaveLength(2);
-    expect(screen.getByText("No instructor reason is available in this record.")).toBeVisible();
+    expect(screen.getByText("No comment recorded.")).toBeVisible();
     expect(screen.queryByText("Meets criterion")).not.toBeInTheDocument();
     expect(screen.queryByText("Exemplary")).not.toBeInTheDocument();
   });
