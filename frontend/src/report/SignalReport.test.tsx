@@ -260,7 +260,7 @@ describe("SignalReportPage", () => {
     // choose-then-confirm flow can't be mistaken for a completed action
     // (the original bug: the options vanishing read exactly like success).
     expect(screen.getByRole("heading", { name: "Mark as meets criterion", level: 4 })).toBeInTheDocument();
-    expect(screen.getByText("Step 2 of 2: nothing is saved yet")).toBeInTheDocument();
+    expect(screen.getByText("Unsaved grade. Your choice and comment are kept while you review this report.")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Save grade" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Cancel" })).toBeInTheDocument();
     // Nothing was submitted by choosing -- the resolve mutation only fires on Confirm.
@@ -273,8 +273,8 @@ describe("SignalReportPage", () => {
     // announced from its CONTENT, not its accessible name (which stays
     // empty with no aria-label), so this checks the role exists and wraps
     // the pending copy, not a computed name.
-    const status = screen.getByText("Step 2 of 2: nothing is saved yet").closest<HTMLElement>('[role="status"]')!;
-    expect(within(status).getByText("Step 2 of 2: nothing is saved yet")).toBeInTheDocument();
+    const status = screen.getByText("Unsaved grade. Your choice and comment are kept while you review this report.").closest<HTMLElement>('[role="status"]')!;
+    expect(within(status).getByText("Unsaved grade. Your choice and comment are kept while you review this report.")).toBeInTheDocument();
     expect(within(status).getByText("Mark as meets criterion")).toBeInTheDocument();
   });
 
@@ -1113,12 +1113,12 @@ describe("assessment context before instructor judgment", () => {
     stubReport({ ...BASE_REPORT, llm_mode: "fake", historical_semantic_support_unverified: flagged }, [ESCALATED]);
     await renderCriterionFromReport();
     const action = await screen.findByRole("button", { name: "Meets criterion" });
-    const context = screen.getByRole("complementary", { name: "Assessment context" });
+    const context = action.closest("article")!.querySelector(".signal-action-assessment-context")!;
     expect(context.compareDocumentPosition(action) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(action).toHaveAccessibleDescription(/Test AI responses. Not a real AI assessment/);
     if (flagged) expect(action).toHaveAccessibleDescription(/AI evidence checks are not all confirmed/);
     else expect(action).not.toHaveAccessibleDescription(/Evidence checks/);
-    expect(screen.getAllByText("Test-mode AI responses")).toHaveLength(1);
+    expect(screen.queryByRole("complementary", { name: "Assessment context" })).not.toBeInTheDocument();
     expect(action.closest("article")!.querySelector(".signal-action-assessment-context")).toBeVisible();
     const ids = action.getAttribute("aria-describedby")!.split(/\s+/);
     expect(ids.every(id => document.getElementById(id))).toBe(true);

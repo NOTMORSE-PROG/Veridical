@@ -34,9 +34,17 @@ describe("instructor assessment interpretation", () => {
 
   it("states missing explanation and located evidence even without a tentative majority", async () => {
     await show(record({ votes: [null, null], reasoning: " \n\t " }));
-    expect(screen.getByText("No explanation is available in this assessment record.")).toBeVisible();
-    expect(screen.getByText("No located excerpt is available for this review item.")).toBeVisible();
+    expect(screen.getByText("No located source passage or assessment explanation is available. Review the manuscript before grading.")).toBeVisible();
     expect(screen.queryByText(/No valid verdict|No AI assessment was recorded/)).not.toBeInTheDocument();
+  });
+
+  it("retains unverified text and visible source qualification without claiming no text was recorded", async () => {
+    await show(record({ reasoning: null, evidence: [], unverified_evidence: ["A retained but unverified source claim."] }));
+    expect(screen.getByText(/A retained but unverified source claim/)).toBeVisible();
+    expect(screen.getByText("No located source passage or assessment explanation is available. Review the manuscript before grading.")).toBeVisible();
+    const choice = screen.getByRole("button", { name: "Meets criterion" });
+    expect(choice).toHaveAccessibleDescription(/A recorded location does not establish support for a grade/);
+    expect(screen.getByText("A recorded location does not establish support for a grade.")).toBeVisible();
   });
 
   it("keeps independent source and grade limitations visible when support is also incomplete", async () => {

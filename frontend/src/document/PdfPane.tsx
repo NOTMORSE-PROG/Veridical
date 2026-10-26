@@ -525,11 +525,16 @@ export function PdfPane({
           <span>Original PDF · {pagesLabel}{comparisonMarkers && " · L: unscored comparison"}</span>
         </div>
         <div className="signal-document-toolbar__controls" role="group" aria-label="PDF page and zoom controls">
+          <div className="signal-document-toolbar__group" role="group" aria-label="PDF reading controls">
           {onReadText && <button type="button" aria-label="Read extracted text from the current PDF page" onClick={onReadText}>Read text</button>}
           <button type="button" aria-expanded={detailsOpen} aria-controls={detailsId} onClick={() => setDetailsOpen((value) => !value)}>Source view details</button>
+          </div>
+          <div className="signal-document-toolbar__group" role="group" aria-label="PDF zoom controls">
           <button type="button" onClick={() => changeZoom(Math.max(PDF_ZOOM_MIN, Number((zoom - PDF_ZOOM_STEP).toFixed(1))))} disabled={!pdf || zoom <= PDF_ZOOM_MIN}>Zoom out</button>
           <button type="button" onClick={() => changeZoom(1)} disabled={!pdf || zoom === 1}>Fit width</button>
           <button type="button" onClick={() => changeZoom(Math.min(PDF_ZOOM_MAX, Number((zoom + PDF_ZOOM_STEP).toFixed(1))))} disabled={!pdf || zoom >= PDF_ZOOM_MAX}>Zoom in</button>
+          </div>
+          <div className="signal-document-toolbar__group" role="group" aria-label="PDF page controls">
           <label>
             <span>Go to page</span>
             <input
@@ -549,6 +554,7 @@ export function PdfPane({
           </label>
           <button type="button" aria-label="Go to entered page" onClick={commitPageInput} disabled={!pdf || !pageInput.trim()}>Go</button>
           <output aria-live="polite">{pdf ? `Page ${currentPage} of ${pdf.numPages}` : loadError ? "Page navigation unavailable" : "Loading page navigation"}</output>
+          </div>
         </div>
       </div>
       {pdf && requestedPage !== null && (!Number.isSafeInteger(requestedPage) || requestedPage < 1 || requestedPage > pdf.numPages) && <p role="alert" className="signal-document-reconstruction-note">The recorded page is not available in this PDF. Inspect the manuscript manually; no replacement page was selected.</p>}

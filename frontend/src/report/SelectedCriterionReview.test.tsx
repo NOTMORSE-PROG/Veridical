@@ -74,9 +74,14 @@ describe("one selected desktop criterion", () => {
 
   it("saves an ordinary grade without a comment and keeps the selected identity", async () => {
     const { requests } = setup("view=decision&pane=review&criterion=13");
-    fireEvent.click(await screen.findByRole("button", { name: "Meets criterion" }));
+    const choice = await screen.findByRole("button", { name: "Meets criterion" });
+    expect(choice).toHaveAccessibleDescription(/A recorded location does not establish support for a grade/);
+    fireEvent.click(choice);
     expect(screen.getByRole("textbox", { name: "Comment (optional)" })).not.toBeRequired();
-    fireEvent.click(screen.getByRole("button", { name: "Save grade" }));
+    const save = screen.getByRole("button", { name: "Save grade" });
+    expect(save).toHaveAccessibleDescription(/A recorded location does not establish support for a grade/);
+    for (const id of save.getAttribute("aria-describedby")!.split(/\s+/)) expect(document.getElementById(id)).not.toBeNull();
+    fireEvent.click(save);
     expect(await screen.findByRole("heading", { name: "Judgment saved" })).toBeVisible();
     expect(requests).toEqual([{ resolution: "mark_pass", reason: "", expected_revision: 1 }]);
     expect(screen.queryByRole("button", { name: "Meets criterion" })).not.toBeInTheDocument();

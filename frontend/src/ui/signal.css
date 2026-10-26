@@ -3499,6 +3499,7 @@
   }
 
   .signal-document-viewer .signal-document-toolbar__identity span,
+  .signal-document-viewer .signal-document-toolbar__controls label,
   .signal-document-viewer .signal-document-toolbar__controls output {
     color: var(--color-signal-ink-secondary);
   }
@@ -3541,7 +3542,10 @@
   }
 
   .signal-document-workbench[data-layout="split"] .signal-document-toolbar__controls {
-    flex-shrink: 0;
+    flex-shrink: 1;
+    min-inline-size: 0;
+    max-inline-size: 100%;
+    justify-content: flex-start;
   }
 
   .signal-document-selected .signal-document-detail-section blockquote {
@@ -4274,6 +4278,15 @@
     flex-wrap: wrap;
     align-items: center;
     justify-content: flex-end;
+    gap: var(--signal-space-2);
+  }
+
+  .signal-document-toolbar__group {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    min-inline-size: 0;
+    max-inline-size: 100%;
     gap: var(--signal-space-2);
   }
 
@@ -7963,8 +7976,23 @@
     display: flex;
     flex-wrap: wrap;
     align-items: center;
-    gap: var(--signal-space-3);
-    padding: var(--signal-space-4);
+    gap: var(--signal-space-2);
+    padding: var(--signal-space-3);
+  }
+  .signal-selected-criterion {
+    border: 0;
+    border-radius: 0;
+    box-shadow: none;
+  }
+  .signal-selected-criterion .signal-resolution-card {
+    border-block-start: 0;
+  }
+  .signal-selected-criterion .signal-resolution-options {
+    gap: var(--signal-space-2);
+  }
+  .signal-selected-criterion .signal-resolution-options > .signal-field-hint,
+  .signal-selected-criterion .signal-resolution-options > .signal-copy-flow {
+    flex-basis: 100%;
   }
   .signal-recorded-reader {
     display: flex;

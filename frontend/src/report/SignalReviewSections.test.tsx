@@ -182,8 +182,7 @@ describe("SignalEscalatedPanel / SignalResolutionCard", () => {
   it.each([null, " \n\t "])("keeps missing explanation neutral without a current canonical method (%s)", async (reasoning) => {
     vi.stubGlobal("fetch", stubFetchByPath({ "/check-runs/5/escalated": [{ ...REAL_MAJORITY, reasoning }] }));
     renderSelected(REAL_MAJORITY.criterion_id);
-    expect(await screen.findByText("No explanation is available in this assessment record.")).toBeVisible();
-    expect(screen.getByText("No located excerpt is available for this review item.")).toBeVisible();
+    expect(await screen.findByText("No located source passage or assessment explanation is available. Review the manuscript before grading.")).toBeVisible();
   });
 
   it.each([true, false])("shows pending structural facts only with matching current assessment epochs (%s)", async matching => {
