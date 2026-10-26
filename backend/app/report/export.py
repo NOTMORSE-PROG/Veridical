@@ -633,7 +633,7 @@ def _source_caption(row: CriterionResultOut) -> str:
     decided by a rule says "Rule-checked" here even when the rubric calls
     it semantic."""
     if row.resolution:
-        return "Instructor judgment"
+        return "Resolved by instructor"
     # BUG-092/UX review finding (2026-08-24): same fix as the frontend's
     # `sourceCaption` (`ResultsTable.tsx`) -- a `not_assessable` criterion
     # is deliberately never AI-graded, but its `kind` is a
