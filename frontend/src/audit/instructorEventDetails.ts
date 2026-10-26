@@ -6,8 +6,9 @@ import type { AuditLogDetail, CriterionLevel } from "../api/types";
 import type { JudgmentContext, JudgmentSnapshot } from "../api/judgments";
 import { judgmentLabel, originalAssessmentValid, originalJudgmentLabel, recordedLevelScoreConsistent, snapshotValid } from "../report/judgmentRecord";
 import { auditEventOrigin } from "./eventOrigin";
+import { validateSelectionOutcome, type GroupSelectionInput, type SavedGroup } from "../api/groupAssignmentOutcome";
 
-type EntryBinding = Pick<AuditLogDetail, "event_type" | "check_run_id" | "created_at">;
+type EntryBinding = Pick<AuditLogDetail, "event_type" | "check_run_id" | "created_at" | "manuscript_id" | "group_selection">;
 
 export interface RecordedPendingItem {
   criterionId: number;
@@ -184,10 +185,41 @@ function initialJudgment(raw: unknown, entry: EntryBinding | undefined) {
     original: original as unknown as JudgmentContext["original_assessment"] };
 }
 
+function selectedGroup(raw: unknown, entry?: EntryBinding) {
+  const payload = record(raw);
+  const receipt = record(payload?.selection);
+  const before = record(payload?.before);
+  const validated = record(entry?.group_selection);
+  const validatedReceipt = record(validated?.selection);
+  const validatedBefore = record(validated?.before);
+  if (!entry || entry.event_type !== "manuscript_group_selected" || entry.check_run_id !== null
+    || !recordedId(entry.manuscript_id) || payload?.schema_version !== 1
+    || payload.manuscript_id !== entry.manuscript_id || !recordedId(payload.instructor_id)
+    || !validated || validated.schema_version !== 1 || validated.manuscript_id !== entry.manuscript_id
+    || validated.instructor_id !== payload.instructor_id || !validatedReceipt || !validatedBefore
+    || !receipt || !before || !Object.hasOwn(before, "group_id")
+    || !(before.group_id === null || recordedId(before.group_id))
+    || typeof before.group_label !== "string" || !before.group_label.trim()
+    || before.group_id !== validatedBefore.group_id || before.group_label !== validatedBefore.group_label
+    || !record(receipt.request) || !record(receipt.effective)
+    || !record(validatedReceipt.request) || !record(validatedReceipt.effective)) return;
+  try {
+    // The server recomputes the historical snapshot checksum. Bind that
+    // projection to the raw entry too; no current group/report lookup is used.
+    const projection = validateSelectionOutcome({ action: "select_saved_group", manuscript_id: entry.manuscript_id, outcome: "selected", receipt: validatedReceipt },
+      entry.manuscript_id, payload.instructor_id, validatedReceipt.request as unknown as GroupSelectionInput, validatedReceipt.effective as unknown as SavedGroup);
+    const saved = validateSelectionOutcome({ action: "select_saved_group", manuscript_id: entry.manuscript_id, outcome: "selected", receipt },
+      entry.manuscript_id, payload.instructor_id, projection.receipt.request, projection.receipt.effective);
+    if (saved.receipt.request.expected_group_id !== before.group_id) return;
+    return { actor: payload.instructor_id, group: saved.receipt.effective, before };
+  } catch { return; }
+}
+
 export function recordedActor(payload: unknown, readerId: unknown, entry?: EntryBinding): string {
   const legacy = record(payload);
   const actor = entry?.event_type === "judgment_recorded" ? initialJudgment(payload, entry)?.actor
     : entry?.event_type === "judgment_revised" ? revision(payload, entry)?.actor
+    : entry?.event_type === "manuscript_group_selected" ? selectedGroup(payload, entry)?.actor
     : (!entry || auditEventOrigin(entry.event_type) === "instructor") && legacy && Object.hasOwn(legacy, "instructor_id") ? legacy.instructor_id : undefined;
   return recordedId(actor) ? recordedId(readerId) && actor === readerId ? "You" : `Instructor #${actor}`
     : "Instructor attribution unavailable";
@@ -195,6 +227,22 @@ export function recordedActor(payload: unknown, readerId: unknown, entry?: Entry
 
 export function instructorEventDetails(event: string, rawPayload: unknown, entry?: EntryBinding): InstructorEventDetails | undefined {
   const payload = record(rawPayload) ?? {};
+  if (event === "manuscript_group_selected") {
+    const saved = selectedGroup(rawPayload, entry);
+    const unavailable = "Unavailable in this entry.";
+    return {
+      heading: "Saved group assigned",
+      fields: [
+        { role: "primary", label: "Recorded saved group", value: saved ? `${saved.group.name} · Group #${saved.group.id}` : unavailable },
+        { role: "primary", label: "Saved program", value: saved ? saved.group.program ?? "Not set" : unavailable },
+        { role: "primary", label: "Saved group members", value: saved ? saved.group.member_names.join("\n") || "No members recorded." : unavailable },
+        { role: "secondary", label: "Saved title", value: saved ? saved.group.title ?? "Not recorded" : unavailable },
+        { role: "secondary", label: "Previous assignment", value: saved ? saved.before.group_id === null ? "No group assigned" : `${saved.before.group_label} · Group #${saved.before.group_id}` : unavailable },
+      ],
+      notice: saved ? "This entry records the saved group chosen at that time. Later assignments or group-record changes may differ."
+        : "Some recorded assignment details could not be summarized. The stored record is available below.",
+    };
+  }
   if (event === "judgment_recorded") {
     const saved = initialJudgment(rawPayload, entry);
     return {

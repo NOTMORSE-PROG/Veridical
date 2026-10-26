@@ -13,8 +13,8 @@
 // here: typing a label created a real group, which the group-proposal
 // dialog below then silently reassigned the manuscript away from moments
 // later, leaving the first one an orphaned, empty group with no notice to
-// the instructor. The group-proposal dialog is now the ONLY place a real
-// group gets set from this screen; ingest always starts at the
+// the instructor. Assignment happens after upload through reviewed details or
+// an explicitly selected saved group; ingest starts at the
 // "Ungrouped" default (`resolve_or_create_group`'s own fallback).
 import { useEffect, useId, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
@@ -23,26 +23,10 @@ import { isKnownUploadRejection, isUploadFileError, StaleUploadContextError } fr
 import { useUploadScope } from "../auth/useUploadScope";
 import { UploadAttemptNotice, UploadSessionNotice } from "../components/UploadAttemptNotice";
 import { Modal, ModalBackdrop } from "../components/Modal";
-import type { ConfirmGroupResponse, TitlePageProposal } from "../api/types";
+import type { GroupAssignmentOutput } from "../api/groupAssignmentOutcome";
 import { Button } from "../ui/Button";
-import { GroupProposalFields } from "./GroupProposalFields";
+import { GroupAssignmentFields } from "./GroupAssignmentFields";
 import { useIngestManuscript } from "./useCheckRun";
-
-// V-063: a proposal with nothing usable (no title, no short name, no
-// members, no program, no adviser) and no extraction failure to disclose
-// either just has nothing worth interrupting the success screen for --
-// the plain "Upload another"/"Start a check" footer stays as it was
-// before this ticket.
-function hasProposalWorthShowing(proposal: TitlePageProposal): boolean {
-  return (
-    proposal.extraction_failed ||
-    proposal.title !== null ||
-    proposal.short_name !== null ||
-    proposal.members.length > 0 ||
-    proposal.program !== null ||
-    proposal.adviser !== null
-  );
-}
 
 function formatUploadDate(value: string): string {
   return new Date(value).toLocaleString(undefined, {
@@ -219,14 +203,11 @@ export function UploadManuscriptModal({ onClose, onUploadSuccess }: UploadManusc
     summary?.vision_status === "unavailable" &&
     summary.images + summary.tables + summary.equations > 0;
 
-  // V-063: right after a successful upload, if the title page had
-  // anything worth confirming, the group-proposal form takes over the
-  // footer through its action outlet, instead of the plain post-upload
-  // footer below.
-  const showGroupProposal =
-    summary !== undefined && !groupResolved && hasProposalWorthShowing(summary.group_proposal);
+  // Assignment remains available even when no identity was extracted.
+  const [assignmentBusy, setAssignmentBusy] = useState(false);
+  const showGroupProposal = summary !== undefined && !groupResolved;
 
-  function handleGroupProposalDone(_result: ConfirmGroupResponse | null) {
+  function handleGroupProposalDone(_result: GroupAssignmentOutput | null) {
     setGroupResolved(true);
   }
 
@@ -251,7 +232,7 @@ export function UploadManuscriptModal({ onClose, onUploadSuccess }: UploadManusc
         title="Upload manuscript"
         size="lg"
         className="signal-upload-sheet"
-        onClose={ingest.isPending ? undefined : handleClose}
+        onClose={ingest.isPending || assignmentBusy ? undefined : handleClose}
         footer={
           scopeStatus !== "ready" ? null : summary ? (
             showGroupProposal ? <div ref={setActionsTarget} /> : (
@@ -330,7 +311,7 @@ export function UploadManuscriptModal({ onClose, onUploadSuccess }: UploadManusc
                 ) : null}
                 {showGroupProposal && (
                   <div className="flex flex-col items-start gap-2 sm:flex-row">
-                    <Button type="button" variant="secondary" onClick={() => setGroupResolved(true)}>
+                      <Button type="button" variant="secondary" disabled={assignmentBusy} onClick={() => setGroupResolved(true)}>
                       Skip group details and continue
                     </Button>
                   </div>
@@ -365,9 +346,10 @@ export function UploadManuscriptModal({ onClose, onUploadSuccess }: UploadManusc
               </section>
             )}
             {showGroupProposal && (
-              <GroupProposalFields
+              <GroupAssignmentFields
                 manuscriptId={summary.manuscript_id}
-                proposal={summary.group_proposal}
+                initialProposal={summary.group_proposal}
+                onBusyChange={setAssignmentBusy}
                 onDone={handleGroupProposalDone}
                 actionsTarget={actionsTarget}
               />

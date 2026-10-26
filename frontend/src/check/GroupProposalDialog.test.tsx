@@ -10,11 +10,18 @@ const saved = { manuscript_id: 7, confirmation: "not_recorded", group: {
 const source = { title: { value: "Source title", anchor: "p. 1" }, short_name: { value: "Source team", anchor: "p. 1" },
   members: [], program: null, adviser: null, extraction_failed: false };
 function setup() {
-  const fetch = stubFetchByPath({ "/programs": [], "/manuscripts/7/group": saved, "/manuscripts/7/group-proposal": source });
+  const fetch = stubFetchByPath({ "/auth/session": { instructor: { id: 4 } }, "/programs": [], "/manuscripts/7/group": saved, "/manuscripts/7/group-proposal": source });
   vi.stubGlobal("fetch", fetch);
   const onClose = vi.fn();
-  renderWithProviders(<GroupProposalDialog manuscriptId={7} onClose={onClose} onDone={() => {}} />);
+  renderWithProviders(<GroupProposalDialog manuscriptId={7} onClose={onClose} onDone={() => {}} />, { authInstructorId: 4 });
   return { fetch, onClose };
+}
+
+async function startManualChange() {
+  fireEvent.click(await screen.findByRole("button", { name: "Change group assignment" }));
+  const intent = await screen.findByRole("radio", { name: "Review or enter group details" });
+  await waitFor(() => expect(intent).toBeEnabled());
+  fireEvent.click(intent);
 }
 
 describe("GroupProposalDialog", () => {
@@ -29,7 +36,7 @@ describe("GroupProposalDialog", () => {
   });
   it("opens an explicit current-record change form with unchanged confirmation disabled", async () => {
     setup();
-    fireEvent.click(await screen.findByRole("button", { name: "Change group assignment" }));
+    await startManualChange();
     expect(screen.getByLabelText("Group name")).toHaveValue("Saved memberless group");
     expect(screen.getByRole("button", { name: "Confirm assignment" })).toBeDisabled();
     expect(screen.queryByText(/Not found on the title page/)).not.toBeInTheDocument();
@@ -40,17 +47,17 @@ describe("GroupProposalDialog", () => {
   });
   it("keeps source proposal available through an explicit action after Skip", async () => {
     setup();
-    fireEvent.click(await screen.findByRole("button", { name: "Change group assignment" }));
+    await startManualChange();
     fireEvent.click(screen.getByRole("button", { name: "Review title-page proposal" }));
-    expect(await screen.findByLabelText("Group name")).toHaveValue("Source team");
-    expect(screen.getByRole("dialog")).toHaveAccessibleName("Review proposed group");
-    fireEvent.click(screen.getByRole("button", { name: "Skip for now" }));
+    await waitFor(() => expect(screen.getByRole("textbox", { name: "Group name" })).toHaveValue("Source team"));
+    expect(screen.getByRole("dialog")).toHaveAccessibleName("Change group assignment");
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
     expect(screen.getByText("Saved memberless group")).toBeInTheDocument();
   });
   it("reports saved-record failure without silently falling back to source extraction", async () => {
     const fetch = vi.fn(async (_url: RequestInfo | URL) => new Response("not found", { status: 404 }));
     vi.stubGlobal("fetch", fetch);
-    renderWithProviders(<GroupProposalDialog manuscriptId={7} onClose={() => {}} onDone={() => {}} />);
+    renderWithProviders(<GroupProposalDialog manuscriptId={7} onClose={() => {}} onDone={() => {}} />, { authInstructorId: 4 });
     expect(await screen.findByRole("alert")).toHaveTextContent("Could not load saved group details.");
     expect(fetch.mock.calls.every(([url]) => !String(url).includes("group-proposal"))).toBe(true);
   });
@@ -59,6 +66,7 @@ describe("GroupProposalDialog", () => {
     let reads = 0;
     vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const path = new URL(String(input), "http://localhost").pathname;
+      if (path === "/auth/session") return Response.json({ instructor: { id: 4 } });
       if (path === "/programs") return Response.json([]);
       if (path === "/manuscripts/7/group" && init?.method === "PATCH") {
         assigned = true;
@@ -70,12 +78,12 @@ describe("GroupProposalDialog", () => {
       }
       return Response.json({});
     }));
-    renderWithProviders(<GroupProposalDialog manuscriptId={7} onClose={() => {}} onDone={() => {}} />);
-    fireEvent.click(await screen.findByRole("button", { name: "Change group assignment" }));
+    renderWithProviders(<GroupProposalDialog manuscriptId={7} onClose={() => {}} onDone={() => {}} />, { authInstructorId: 4 });
+    await startManualChange();
     fireEvent.change(screen.getByLabelText("Group name"), { target: { value: "New assignment" } });
     fireEvent.click(screen.getByRole("button", { name: "Confirm assignment" }));
     await waitFor(() => expect(reads).toBeGreaterThanOrEqual(2));
-    expect(screen.getByRole("status")).toHaveTextContent("Created a new group: New assignment.");
+    expect(await screen.findByRole("status")).toHaveTextContent("Created a new group: New assignment");
     expect(screen.getByRole("button", { name: "Done" })).toBeInTheDocument();
   });
   it("keeps the edit's expected ID when a background refresh observes a different assignment", async () => {
@@ -84,6 +92,7 @@ describe("GroupProposalDialog", () => {
     let submitted: { expected_group_id: number } | undefined;
     vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const path = new URL(String(input), "http://localhost").pathname;
+      if (path === "/auth/session") return Response.json({ instructor: { id: 4 } });
       if (path === "/programs") return Response.json([]);
       if (path === "/manuscripts/7/group" && init?.method === "PATCH") {
         submitted = JSON.parse(String(init.body));
@@ -95,8 +104,8 @@ describe("GroupProposalDialog", () => {
       }
       return Response.json({});
     }));
-    renderWithProviders(<GroupProposalDialog manuscriptId={7} onClose={() => {}} onDone={() => {}} />);
-    fireEvent.click(await screen.findByRole("button", { name: "Change group assignment" }));
+    renderWithProviders(<GroupProposalDialog manuscriptId={7} onClose={() => {}} onDone={() => {}} />, { authInstructorId: 4 });
+    await startManualChange();
     fireEvent.change(screen.getByLabelText("Group name"), { target: { value: "My intended change" } });
     externalChange = true;
     await act(async () => { focusManager.setFocused(false); focusManager.setFocused(true); });

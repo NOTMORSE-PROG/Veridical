@@ -1,12 +1,9 @@
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { renderWithUploadProviders } from "../test/renderWithUploadProviders";
+import { renderWithUploadProviders as renderUpload } from "../test/renderWithUploadProviders";
 import { UploadManuscriptModal } from "./UploadManuscriptModal";
 
-// V-063: an "empty" proposal (nothing usable found, no extraction
-// failure) -- most of this file's existing tests care about the
-// pre-existing upload flow, not the group-proposal form, so they use
-// this shape to keep the plain "Upload another"/"Start a check" footer.
+// No extracted identity: assignment is still available, explicitly skippable.
 const EMPTY_PROPOSAL = {
   title: null,
   short_name: null,
@@ -38,6 +35,28 @@ function chooseFile() {
   const file = new File(["dummy"], "thesis.pdf", { type: "application/pdf" });
   const input = document.querySelector('input[type="file"]') as HTMLInputElement;
   fireEvent.change(input, { target: { files: [file] } });
+}
+
+async function renderWithUploadProviders(ui: Parameters<typeof renderUpload>[0]) {
+  const uploadFetch = globalThis.fetch;
+  vi.stubGlobal("fetch", (input: RequestInfo | URL, init?: RequestInit) => {
+    const path = new URL(String(input), "http://localhost").pathname;
+    if (path === "/manuscripts/42/group" && init?.method !== "PATCH") return Promise.resolve(Response.json({
+      manuscript_id: 42, group: { id: 3, name: "Ungrouped", member_names: [], program_id: null, program: null, title: null }, confirmation: "not_recorded",
+    }));
+    if (path === "/programs") return Promise.resolve(Response.json([]));
+    return uploadFetch(input, init);
+  });
+  return renderUpload(ui);
+}
+async function skipAssignment() {
+  fireEvent.click(await screen.findByRole("button", { name: "Skip for now" }));
+  await screen.findByRole("button", { name: "Start a check with this manuscript" });
+}
+async function chooseManualAssignment() {
+  const intent = await screen.findByRole("radio", { name: "Review or enter group details" });
+  await waitFor(() => expect(intent).toBeEnabled());
+  fireEvent.click(intent);
 }
 
 describe("UploadManuscriptModal", () => {
@@ -112,6 +131,7 @@ describe("UploadManuscriptModal", () => {
     fireEvent.click(screen.getByRole("button", { name: "Upload manuscript" }));
 
     expect(await screen.findByText("12 pages parsed. 5 reference records extracted.")).toBeInTheDocument();
+    await skipAssignment();
     fireEvent.click(screen.getByRole("button", { name: "Start a check with this manuscript" }));
     await waitFor(() => expect(onUploadSuccess).toHaveBeenCalledWith(42));
   });
@@ -153,6 +173,7 @@ describe("UploadManuscriptModal", () => {
     chooseFile();
     fireEvent.click(screen.getByRole("button", { name: "Upload manuscript" }));
     await screen.findByRole("heading", { name: "Upload complete" });
+    await skipAssignment();
     fireEvent.click(screen.getByRole("button", { name: "Upload another" }));
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
     expect(onClose).toHaveBeenCalledExactlyOnceWith(42);
@@ -196,6 +217,7 @@ describe("UploadManuscriptModal", () => {
     if (anchorKind !== "paragraph") expect(screen.queryByText(/Word document processed/)).not.toBeInTheDocument();
     const heading = screen.getByRole("heading", { name: "Upload complete" });
     await waitFor(() => expect(document.activeElement).toBe(heading));
+    await skipAssignment();
     fireEvent.click(screen.getByRole("button", { name: "Start a check with this manuscript" }));
     await waitFor(() => expect(onUploadSuccess).toHaveBeenCalledWith(42));
   });
@@ -242,6 +264,7 @@ describe("UploadManuscriptModal", () => {
     // V-077 (D-028): a dashboard upload is never a Library record.
     expect(screen.queryByText(/Library record/)).not.toBeInTheDocument();
     expect(screen.queryByRole("link", { name: /Library/ })).not.toBeInTheDocument();
+    await skipAssignment();
     expect(screen.getByRole("button", { name: "Start a check with this manuscript" })).toBeInTheDocument();
   });
 
@@ -269,6 +292,7 @@ describe("UploadManuscriptModal", () => {
 
     expect(await screen.findByRole("heading", { name: "You uploaded this file before" })).toBeInTheDocument();
     expect(screen.getByText(/earlier copy's stored file was removed/)).toBeInTheDocument();
+    await skipAssignment();
     expect(screen.getByRole("button", { name: "Start a check with this manuscript" })).toBeInTheDocument();
   });
 
@@ -398,6 +422,7 @@ describe("UploadManuscriptModal", () => {
     fireEvent.click(screen.getByRole("button", { name: "Upload manuscript" }));
 
     await screen.findByRole("heading", { name: "Upload complete" });
+    await chooseManualAssignment();
     expect(screen.getByLabelText("Group name")).toHaveValue("VERIDICAL");
     expect(screen.getByDisplayValue("Juan Dela Cruz")).toBeInTheDocument();
     const footer = document.querySelector(".signal-task-sheet__footer") as HTMLElement;
@@ -440,7 +465,8 @@ describe("UploadManuscriptModal", () => {
     fireEvent.click(screen.getByRole("button", { name: "Upload manuscript" }));
 
     await screen.findByRole("heading", { name: "Upload complete" });
-    expect(await screen.findByText(/Couldn't read the title page/)).toBeInTheDocument();
+    await chooseManualAssignment();
+    expect(await screen.findByText(/Group details could not be extracted/)).toBeInTheDocument();
     expect(screen.getByLabelText("Group name")).toHaveValue("");
   });
 
@@ -461,7 +487,7 @@ describe("UploadManuscriptModal", () => {
       if (url.endsWith("/programs")) return new Response(JSON.stringify([]), { status: 200 });
       if (init?.method === "PATCH") {
         return new Response(
-          JSON.stringify({ group_id: 9, group_label: "VERIDICAL", program: null, matched: false }),
+          JSON.stringify({ group_id: 9, group_label: "VERIDICAL", program: null, title: "AI-Powered Capstone Advisor", matched: false, outcome: "created" }),
           { status: 200 },
         );
       }
@@ -473,6 +499,7 @@ describe("UploadManuscriptModal", () => {
     fireEvent.click(screen.getByRole("button", { name: "Upload manuscript" }));
 
     await screen.findByRole("heading", { name: "Upload complete" });
+    await chooseManualAssignment();
     fireEvent.click(screen.getByRole("button", { name: "Confirm assignment" }));
 
     expect(await screen.findByText(/Created a new group/)).toBeInTheDocument();
@@ -493,6 +520,7 @@ describe("UploadManuscriptModal", () => {
     chooseFile();
     fireEvent.click(screen.getByRole("button", { name: "Upload manuscript" }));
     await screen.findByRole("heading", { name: "Upload complete" });
+    await skipAssignment();
     fireEvent.click(screen.getByRole("button", { name: "Upload another" }));
     expect(screen.getByLabelText("Choose file")).toBeInTheDocument();
     expect(screen.getByText("No file chosen yet.")).toBeInTheDocument();

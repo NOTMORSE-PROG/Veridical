@@ -1,8 +1,21 @@
 import { fireEvent, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { renderWithProviders, stubFetchByPath } from "../test/renderWithProviders";
-import { GroupProposalFields } from "./GroupProposalFields";
+import { renderWithProviders as renderProviders, stubFetchByPath } from "../test/renderWithProviders";
+import type { ComponentProps } from "react";
+import { GroupProposalFields as ProposalFields } from "./GroupProposalFields";
+import { useConfirmGroup } from "./useCheckRun";
 import type { TitlePageProposal } from "../api/types";
+
+function renderWithProviders(ui: Parameters<typeof renderProviders>[0]) {
+  return renderProviders(ui, { authInstructorId: 4 });
+}
+
+// These field-level controls use the legacy proposal mutation as their seam;
+// the shared assignment form tests exercise its auth/unknown-result boundary.
+function GroupProposalFields(props: Omit<ComponentProps<typeof ProposalFields>, "confirm" | "expectedGroupId"> & { expectedGroupId?: number | null }) {
+  const confirm = useConfirmGroup(props.manuscriptId);
+  return <ProposalFields {...props} confirm={confirm} expectedGroupId={props.expectedGroupId ?? null} />;
+}
 
 const FULL_PROPOSAL: TitlePageProposal = {
   title: { value: "AI-Powered Capstone Advisor", anchor: "p. 1" },
@@ -86,7 +99,7 @@ describe("GroupProposalFields", () => {
     renderWithProviders(
       <GroupProposalFields manuscriptId={1} proposal={EMPTY_PROPOSAL} onDone={() => {}} />,
     );
-    expect(screen.getByText(/Couldn't read the title page/)).toBeInTheDocument();
+    expect(screen.getByText(/Group details could not be extracted/)).toBeInTheDocument();
     expect(screen.getByLabelText("Group name")).toHaveValue("");
     expect(screen.getByText("Not found on the title page. Enter it yourself.")).toBeInTheDocument();
   });
@@ -152,6 +165,7 @@ describe("GroupProposalFields", () => {
       member_names: ["Juan Dela Cruz", "Maria Santos"],
       program_id: null,
       title: "AI-Powered Capstone Advisor",
+      expected_group_id: null,
     });
     expect(onDone).not.toHaveBeenCalled();
 

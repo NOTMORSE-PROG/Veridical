@@ -1,5 +1,56 @@
 import { describe, expect, it } from "vitest";
 import { instructorEventDetails, recordedActor } from "./instructorEventDetails";
+import { auditEventOrigin } from "./eventOrigin";
+
+const SELECTION_ENTRY = { event_type: "manuscript_group_selected", manuscript_id: 9, check_run_id: null, created_at: "2026-10-26T02:00:00Z", group_selection: selectionPayload() };
+function selectionPayload() {
+  return { schema_version: 1, instructor_id: 4, manuscript_id: 9,
+    before: { group_id: 3, group_label: "Ungrouped" },
+    selection: { version: 2, manuscript_id: 9, instructor_id: 4, assigned_group_id: 7,
+      request: { saved_group_id: 7, fingerprint: "a".repeat(64), expected_group_id: 3 },
+      effective: { id: 7, name: "Saved Practice team", member_names: ["Maria", "Ana"], program_id: 1, program: "IT", title: "Recorded title", fingerprint: "a".repeat(64) } },
+  };
+}
+describe("explicit saved assignment history", () => {
+  it("shows exact stored facts and origin without claiming automated matching or current state", () => {
+    const payload = selectionPayload();
+    const before = structuredClone(payload);
+    const detail = instructorEventDetails(SELECTION_ENTRY.event_type, payload, SELECTION_ENTRY)!;
+    expect(auditEventOrigin(SELECTION_ENTRY.event_type)).toBe("instructor");
+    expect(recordedActor(payload, 4, SELECTION_ENTRY)).toBe("You");
+    expect(detail.fields).toContainEqual({ label: "Recorded saved group", value: "Saved Practice team · Group #7", role: "primary" });
+    expect(detail.fields).toContainEqual({ label: "Saved group members", value: "Maria\nAna", role: "primary" });
+    expect(detail.fields).toContainEqual({ label: "Previous assignment", value: "Ungrouped · Group #3", role: "secondary" });
+    expect(detail.notice).toContain("at that time");
+    expect(JSON.stringify(detail)).not.toContain("matched");
+    expect(payload).toEqual(before);
+  });
+  it.each([
+    { manuscript_id: 10 }, { schema_version: 2 }, { instructor_id: 5 }, { before: null },
+    { before: { group_id: null, group_label: "Ungrouped" } },
+    { selection: { ...selectionPayload().selection, assigned_group_id: 8 } },
+    { selection: { ...selectionPayload().selection, effective: { ...selectionPayload().selection.effective, fingerprint: "b".repeat(64) } } },
+  ])("withholds derived facts and actor for unbound receipt %j", change => {
+    const payload = { ...selectionPayload(), ...change };
+    const detail = instructorEventDetails(SELECTION_ENTRY.event_type, payload, SELECTION_ENTRY)!;
+    expect(detail.fields.every(field => field.value === "Unavailable in this entry.")).toBe(true);
+    expect(recordedActor(payload, 4, SELECTION_ENTRY)).toBe("Instructor attribution unavailable");
+  });
+  it("requires authoritative direct manuscript metadata and a direct event", () => {
+    for (const entry of [{ ...SELECTION_ENTRY, manuscript_id: undefined }, { ...SELECTION_ENTRY, manuscript_id: 10 }, { ...SELECTION_ENTRY, check_run_id: 2 }, { ...SELECTION_ENTRY, group_selection: null }, { ...SELECTION_ENTRY, group_selection: undefined }]) {
+      const detail = instructorEventDetails(SELECTION_ENTRY.event_type, selectionPayload(), entry)!;
+      expect(detail.fields.every(field => field.value === "Unavailable in this entry.")).toBe(true);
+    }
+  });
+  it("withholds changed stored facts when the validated historical projection retains the original checksum", () => {
+    const payload = selectionPayload();
+    payload.selection.effective.name = "UNSUPPORTED changed team";
+    payload.selection.effective.member_names = ["UNSUPPORTED private member"];
+    const detail = instructorEventDetails(SELECTION_ENTRY.event_type, payload, SELECTION_ENTRY)!;
+    expect(detail.fields.every(field => field.value === "Unavailable in this entry.")).toBe(true);
+    expect(recordedActor(payload, 4, SELECTION_ENTRY)).toBe("Instructor attribution unavailable");
+  });
+});
 
 const REVISION_ENTRY = { event_type: "judgment_revised", check_run_id: 25, created_at: "2026-10-24T03:10:34.869928Z" };
 function revisionPayload() {

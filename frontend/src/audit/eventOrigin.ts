@@ -5,6 +5,7 @@ const INSTRUCTOR_EVENTS: ReadonlySet<string> = new Set([
   "flag_overridden", "flag_annotated", "escalation_resolved", "judgment_revised", "judgment_recorded",
   "report_decided", "report_reopened", "manuscript_purged", "check_run_cancel_requested",
   "citation_source_confirmed", "manuscript_ingestion_failure_dismissed", "library_entry_edited",
+  "manuscript_group_selected",
 ]);
 const AUTOMATED_EVENTS: ReadonlySet<string> = new Set([
   "llm_call", "llm_cache_hit", "llm_call_failed", "llm_model_exhausted", "llm_transport_attempt",

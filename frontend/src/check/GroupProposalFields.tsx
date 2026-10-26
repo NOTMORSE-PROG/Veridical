@@ -10,7 +10,15 @@ import { ApiError } from "../api/client";
 import { AnchorPill } from "../components/AnchorPill";
 import { useGroupCollisionCheck, usePrograms } from "../dashboard/useDashboard";
 import type { ConfirmGroupResponse, CurrentGroup, TitlePageProposal } from "../api/types";
-import { useConfirmGroup } from "./useCheckRun";
+import type { GroupProposalInput } from "../api/groupAssignmentOutcome";
+
+export interface GroupProposalController {
+  isPending: boolean;
+  isSuccess: boolean;
+  data?: ConfirmGroupResponse;
+  error?: unknown;
+  mutate: (body: GroupProposalInput) => void;
+}
 
 function RemoveIcon() {
   return (
@@ -58,7 +66,7 @@ let memberFieldSeq = 0;
 
 /** V-080: the form keeps its handlers while a task sheet can place its one
  * action set in a footer outside the scrolling content. */
-function ProposalActions({ target, children }: { target?: HTMLElement | null; children: ReactNode }) {
+export function ProposalActions({ target, children }: { target?: HTMLElement | null; children: ReactNode }) {
   const actions = <div className="signal-group-proposal__actions">{children}</div>;
   return target ? createPortal(actions, target) : actions;
 }
@@ -68,12 +76,16 @@ function newMemberField(value: string, anchor: string | null): MemberField {
 }
 
 export function GroupProposalFields({
-  manuscriptId,
   proposal,
   onDone,
   actionsTarget,
   currentGroup,
   expectedGroupId,
+  confirm,
+  active = true,
+  onUseSaved,
+  manualEntry = false,
+  cancelLabel,
 }: {
   manuscriptId: number;
   proposal: TitlePageProposal;
@@ -81,9 +93,13 @@ export function GroupProposalFields({
   onDone: (result: ConfirmGroupResponse | null) => void;
   actionsTarget?: HTMLElement | null;
   currentGroup?: CurrentGroup;
-  expectedGroupId?: number | null;
+  expectedGroupId: number | null;
+  confirm: GroupProposalController;
+  active?: boolean;
+  onUseSaved?: () => void;
+  manualEntry?: boolean;
+  cancelLabel?: string;
 }) {
-  const confirm = useConfirmGroup(manuscriptId);
   const { data: programs } = usePrograms();
   const programFieldId = useId();
 
@@ -208,7 +224,7 @@ export function GroupProposalFields({
 
   function handleConfirm() {
     setAttempted(true);
-    if (confirm.isPending || unchanged) return;
+    if (!active || confirm.isPending || unchanged) return;
     const trimmedName = groupName.trim();
     if (trimmedName === "") {
       groupNameRef.current?.focus();
@@ -227,7 +243,7 @@ export function GroupProposalFields({
       // whatever VERIDICAL extracted is exactly what's sent -- null when
       // nothing was found, same as every other unfound proposal field.
       title: currentGroup ? currentGroup.title : proposal.title?.value ?? null,
-      ...(expectedGroupId !== undefined ? { expected_group_id: expectedGroupId } : {}),
+      expected_group_id: expectedGroupId,
     });
   }
 
@@ -241,7 +257,7 @@ export function GroupProposalFields({
   if (confirm.isSuccess && confirm.data) {
     const result = confirm.data;
     return (
-      <div className="flex flex-col gap-3">
+      <div hidden={!active} inert={!active} className={active ? "flex flex-col gap-3" : "hidden"}>
         <div
           ref={bannerRef}
           tabIndex={-1}
@@ -272,7 +288,7 @@ export function GroupProposalFields({
           <div><dt className="font-bold">Saved program</dt><dd>{result.program ?? "Not set"}</dd></div>
           <div><dt className="font-bold">Saved title</dt><dd className="break-words">{result.title ?? "Not recorded"}</dd></div>
         </dl>
-        <ProposalActions target={actionsTarget}>
+        {active && <ProposalActions target={actionsTarget}>
           <button
             type="button"
             onClick={() => onDone(result)}
@@ -280,22 +296,23 @@ export function GroupProposalFields({
           >
             Done
           </button>
-        </ProposalActions>
+        </ProposalActions>}
       </div>
     );
   }
 
   return (
-    <div className="signal-group-proposal">
+    <div hidden={!active} inert={!active} className={active ? "signal-group-proposal" : "hidden"}>
       {currentGroup ? (
         <p className="text-sm text-ink-secondary">
           These fields start from the current group record. Changing them can assign this manuscript
           to another group or create a separate group. Other manuscripts are not edited here.
         </p>
+      ) : manualEntry ? (
+        <p className="text-sm text-ink-secondary">Enter the group details for this manuscript.</p>
       ) : proposal.extraction_failed ? (
         <p role="status" className="rounded-md bg-status-caution-bg px-3 py-2 text-sm text-status-caution-text">
-          Couldn't read the title page. This can happen with a scanned image with no extractable
-          text. Enter the group details yourself.
+          Group details could not be extracted. Enter them here, or use a saved group.
         </p>
       ) : (
         <p className="text-sm text-ink-secondary">
@@ -450,6 +467,7 @@ export function GroupProposalFields({
           these members match its records. Confirming will create this as a separate, new group.
           If this is actually the same team, check the member names for a typo or a naming
           difference before confirming.
+          {onUseSaved && <> <button type="button" disabled={confirm.isPending} onClick={onUseSaved} className="font-bold underline">Use a saved group</button></>}
         </p>
       )}
 
@@ -471,14 +489,14 @@ export function GroupProposalFields({
         </p>
       )}
 
-      <ProposalActions target={actionsTarget}>
+      {active && <ProposalActions target={actionsTarget}>
         <button
           type="button"
           disabled={confirm.isPending}
           onClick={() => onDone(null)}
           className="flex h-11 items-center justify-center rounded-md border border-border-input bg-panel px-4 text-sm font-bold text-ink hover:bg-status-neutral-bg disabled:opacity-45"
         >
-          {currentGroup ? "Cancel" : "Skip for now"}
+          {cancelLabel ?? (currentGroup ? "Cancel" : "Skip for now")}
         </button>
         <button
           type="button"
@@ -489,7 +507,7 @@ export function GroupProposalFields({
         >
           {confirm.isPending ? "Confirming." : "Confirm assignment"}
         </button>
-      </ProposalActions>
+      </ProposalActions>}
     </div>
   );
 }

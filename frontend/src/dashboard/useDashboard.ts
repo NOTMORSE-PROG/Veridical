@@ -3,6 +3,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { api } from "../api/client";
 import type { GroupCollisionOut, PaginatedManuscripts, ProgramOut } from "../api/types";
+import { groupOwnerCurrent, ownedGroupQueryKey, readOwnedGroup, useGroupQueryOwner } from "../check/groupQueryOwner";
 
 export interface DashboardStats {
   manuscripts_checked: number;
@@ -68,16 +69,17 @@ export function usePrograms() {
 // setTimeout pattern `RerunModal.tsx` already uses) -- this hook just
 // gates on there being something real to check.
 export function useGroupCollisionCheck(shortName: string, memberNames: string[], excludeGroupId?: number) {
+  const owner = useGroupQueryOwner();
   const trimmed = shortName.trim();
   const realMembers = memberNames.map((m) => m.trim()).filter((m) => m.length > 0);
   return useQuery({
-    queryKey: ["group-collision", trimmed, [...realMembers].sort(), excludeGroupId],
+    queryKey: ownedGroupQueryKey("group-collision", owner, trimmed, [...realMembers].sort(), excludeGroupId),
     queryFn: () => {
       const params = new URLSearchParams({ short_name: trimmed });
       for (const name of realMembers) params.append("member_names", name);
       if (excludeGroupId !== undefined) params.set("exclude_group_id", String(excludeGroupId));
-      return api.get<GroupCollisionOut>(`/groups/collision-check?${params.toString()}`);
+      return readOwnedGroup(owner, () => api.get<GroupCollisionOut>(`/groups/collision-check?${params.toString()}`));
     },
-    enabled: trimmed.length > 0 && realMembers.length > 0,
+    enabled: trimmed.length > 0 && realMembers.length > 0 && groupOwnerCurrent(owner),
   });
 }

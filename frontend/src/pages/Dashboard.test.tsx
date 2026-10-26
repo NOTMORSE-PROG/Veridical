@@ -1036,7 +1036,10 @@ describe("DashboardPage", () => {
       expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
       return;
     }
-    fireEvent.click(screen.getByRole("button", { name: "Start a check with this manuscript" }));
+    // Assignment is offered even for an empty title-page proposal. Skipping
+    // keeps the saved upload and continues this handoff without assigning it.
+    fireEvent.click(await screen.findByRole("button", { name: "Skip for now" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Start a check with this manuscript" }));
 
     // Lands in New Check with the just-uploaded manuscript preselected,
     // no manual re-pick required (Flow B as one continuous task).

@@ -5,6 +5,8 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api/client";
 import { verifyUploadFailure, type UploadAttemptScope } from "../auth/useUploadScope";
 import { StaleUploadContextError, UnconfirmedUploadError, validateIngestReceipt } from "../api/uploadOutcome";
+import { validateManuscriptGroup } from "../api/groupAssignmentOutcome";
+import { groupOwnerCurrent, ownedGroupQueryKey, readOwnedGroup, useGroupQueryOwner } from "./groupQueryOwner";
 import type {
   CheckRun,
   ConfirmGroupResponse,
@@ -74,17 +76,20 @@ export function useIngestManuscript() {
 // lets the "Set group" entry point (dashboard) reopen it any time later,
 // so dismissing the confirm dialog is never a dead end.
 export function useGroupProposal(manuscriptId: number | undefined, enabled = true) {
+  const owner = useGroupQueryOwner();
   return useQuery({
-    queryKey: ["group-proposal", manuscriptId],
-    queryFn: () => api.get<TitlePageProposal>(`/manuscripts/${manuscriptId}/group-proposal`),
-    enabled: enabled && manuscriptId !== undefined,
+    queryKey: ownedGroupQueryKey("group-proposal", owner, manuscriptId),
+    queryFn: () => readOwnedGroup(owner, () => api.get<TitlePageProposal>(`/manuscripts/${manuscriptId}/group-proposal`)),
+    enabled: enabled && manuscriptId !== undefined && groupOwnerCurrent(owner),
   });
 }
 
 export function useManuscriptGroup(manuscriptId: number) {
+  const owner = useGroupQueryOwner();
   return useQuery({
-    queryKey: ["manuscript-group", manuscriptId],
-    queryFn: () => api.get<ManuscriptGroup>(`/manuscripts/${manuscriptId}/group`),
+    queryKey: ownedGroupQueryKey("manuscript-group", owner, manuscriptId),
+    queryFn: () => readOwnedGroup(owner, async () => validateManuscriptGroup(await api.get<ManuscriptGroup>(`/manuscripts/${manuscriptId}/group`), manuscriptId)),
+    enabled: groupOwnerCurrent(owner),
   });
 }
 

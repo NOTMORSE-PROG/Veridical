@@ -592,6 +592,8 @@ export interface AuditLogSummary {
   id: number;
   event_type: string;
   check_run_id: number | null;
+  /** Direct manuscript attribution, when recorded independently of a check run. */
+  manuscript_id?: number | null;
   manuscript_group_label: string | null;
   prompt_type: string | null;
   prompt_version: string | null;
@@ -606,6 +608,8 @@ export interface AuditLogSummary {
 }
 
 export interface AuditLogDetail extends AuditLogSummary {
+  /** Server-validated historical selection; raw payload remains separate. */
+  group_selection?: Record<string, unknown> | null;
   // Only on the detail view, not AuditLogSummary's list rows -- the list
   // stays deliberately light at volume (BUG-022).
   manuscript_original_filename: string | null;
