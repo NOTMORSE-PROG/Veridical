@@ -10,6 +10,7 @@ from pydantic import (
     Field,
     PositiveInt,
     ValidationError,
+    field_validator,
     model_validator,
 )
 from sqlalchemy import select
@@ -67,6 +68,13 @@ class SelectionReceipt(BaseModel):
     request: SelectGroupRequest
     effective: SavedGroupOut
 
+    @field_validator("version", mode="before")
+    @classmethod
+    def strict_version(cls, value: object) -> object:
+        if type(value) is not int:
+            raise ValueError("Selection receipt version must be an integer.")
+        return value
+
     @model_validator(mode="after")
     def bound_snapshot(self) -> "SelectionReceipt":
         facts = SavedGroupFacts.model_validate(self.effective.model_dump(exclude={"fingerprint"}))
@@ -86,6 +94,47 @@ class SelectGroupResponse(BaseModel):
     manuscript_id: PositiveInt
     outcome: Literal["selected", "unchanged"]
     receipt: SelectionReceipt
+
+
+class PriorAssignment(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    group_id: PositiveInt | None
+    group_label: str = Field(min_length=1)
+
+
+class SelectionAuditEvent(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    schema_version: Literal[1]
+    instructor_id: PositiveInt
+    manuscript_id: PositiveInt
+    before: PriorAssignment
+    selection: SelectionReceipt
+
+    @model_validator(mode="after")
+    def bound_action(self) -> "SelectionAuditEvent":
+        if (
+            self.instructor_id != self.selection.instructor_id
+            or self.manuscript_id != self.selection.manuscript_id
+            or self.before.group_id != self.selection.request.expected_group_id
+        ):
+            raise ValueError("Selection audit does not bind its prior assignment and actor.")
+        return self
+
+
+def selection_audit_event(
+    value: object, *, manuscript_id: int, instructor_id: int
+) -> SelectionAuditEvent | None:
+    if not isinstance(value, dict) or type(value.get("schema_version")) is not int:
+        return None
+    try:
+        event = SelectionAuditEvent.model_validate(value)
+    except ValidationError:
+        return None
+    if event.manuscript_id != manuscript_id or event.instructor_id != instructor_id:
+        return None
+    return event
 
 
 def current_selection_receipt(

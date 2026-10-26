@@ -12,6 +12,8 @@ from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from alembic import command
+from app.audit.router import router as audit_router
+from app.audit.service import get_audit_log_detail
 from app.auth.router import router as auth_router
 from app.auth.security import hash_password
 from app.config import get_settings
@@ -125,6 +127,28 @@ async def test_explicit_saved_identity_assigns_without_mutating_facts_and_replay
         assert audits[0].event_type == "manuscript_group_selected"
         assert audits[0].payload["before"] == {"group_id": initial, "group_label": "Initial"}
         assert audits[0].payload["selection"] == response.receipt.model_dump(mode="json")
+        detail = await get_audit_log_detail(session, owner, audits[0].id)
+        assert detail.group_selection == audits[0].payload
+        # Later reassignment does not rewrite the historical selected facts.
+        manuscript = await session.get(Manuscript, manuscript_id)
+        manuscript.group_id, manuscript.group_label = initial, "Initial"
+        await session.commit()
+        historical = await get_audit_log_detail(session, owner, audits[0].id)
+        assert historical.group_selection == detail.group_selection
+        with pytest.raises(NotFoundError):
+            await get_audit_log_detail(session, ids[1], audits[0].id)
+        corrupt = deepcopy(audits[0].payload)
+        corrupt["selection"]["effective"]["member_names"] = ["Unsupported stored member"]
+        bad_entry = AuditLog(
+            event_type="manuscript_group_selected",
+            manuscript_id=manuscript_id,
+            check_run_id=None,
+            payload=corrupt,
+        )
+        session.add(bad_entry)
+        await session.commit()
+        refused = await get_audit_log_detail(session, owner, bad_entry.id)
+        assert refused.group_selection is None and refused.payload == corrupt
 
 
 async def test_unassigned_and_already_current_without_receipt_record_explicit_confirmation(setup):
@@ -328,6 +352,7 @@ async def test_normal_cookie_routes_validate_identity_and_owner_without_an_auth_
     app.include_router(auth_router)
     app.include_router(groups_router)
     app.include_router(ingest_router)
+    app.include_router(audit_router)
 
     @app.exception_handler(VeridicalError)
     async def error_handler(request: Request, exc: VeridicalError):
@@ -361,9 +386,7 @@ async def test_normal_cookie_routes_validate_identity_and_owner_without_an_auth_
         ).status_code == 422
         denied = {**body.model_dump(), "saved_group_id": foreign}
         assert (await client.post(path, json=denied)).status_code == 404
-        stale_details = await client.post(
-            path, json={**body.model_dump(), "fingerprint": "0" * 64}
-        )
+        stale_details = await client.post(path, json={**body.model_dump(), "fingerprint": "0" * 64})
         assert stale_details.status_code == 409
         assert stale_details.json()["error"]["code"] == "saved_group_changed"
         stale_assignment = await client.post(
@@ -374,6 +397,20 @@ async def test_normal_cookie_routes_validate_identity_and_owner_without_an_auth_
         saved_response = await client.post(path, json=body.model_dump())
         assert saved_response.status_code == 200, saved_response.text
         assert saved_response.json()["receipt"]["instructor_id"] == owner
+        audit_page = await client.get("/audit")
+        assert audit_page.status_code == 200
+        assigned = [
+            row
+            for row in audit_page.json()["items"]
+            if row["event_type"] == "manuscript_group_selected"
+        ]
+        assert len(assigned) == 1
+        audit_detail = await client.get(f"/audit/{assigned[0]['id']}")
+        assert audit_detail.status_code == 200
+        assert audit_detail.json()["manuscript_id"] == manuscript_id
+        assert (
+            audit_detail.json()["group_selection"]["selection"] == saved_response.json()["receipt"]
+        )
         assert (await client.get(f"/manuscripts/{manuscript_id}/group")).json()["confirmation"] == (
             "recorded"
         )

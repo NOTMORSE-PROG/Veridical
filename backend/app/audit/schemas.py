@@ -38,6 +38,9 @@ class AuditLogSummary(BaseModel):
 
 
 class AuditLogDetail(AuditLogSummary):
+    # Historical saved-group facts are projected only after receipt validation;
+    # the original payload remains available separately for inspection.
+    group_selection: dict[str, Any] | None = None
     # BUG-022: only on the detail view, not the list rows (the list stays
     # deliberately light at volume, ticket AC: "10K rows, 4s stays
     # responsive") — group_label defaults to "Ungrouped" and can't

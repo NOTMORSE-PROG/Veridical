@@ -126,11 +126,26 @@ async def get_audit_log_detail(
         raise NotFoundError(f"No audit log entry {audit_id}.")
     entry, group_label, original_filename = row
     summary = _summary(entry, group_label)
+    group_selection = None
+    if (
+        entry.event_type == "manuscript_group_selected"
+        and entry.check_run_id is None
+        and entry.manuscript_id is not None
+    ):
+        # Selection writes use the audit helper too; import after module setup.
+        from app.groups.selection import selection_audit_event
+
+        validated = selection_audit_event(
+            entry.payload, manuscript_id=entry.manuscript_id, instructor_id=instructor_id
+        )
+        if validated is not None:
+            group_selection = validated.model_dump(mode="json")
     return AuditLogDetail(
         **summary.model_dump(),
         manuscript_original_filename=original_filename,
         input_hash=entry.input_hash,
         payload=entry.payload or {},
+        group_selection=group_selection,
     )
 
 
