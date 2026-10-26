@@ -40,6 +40,13 @@ export const PROBLEM_LABEL: Partial<Record<string, string>> = {
   reuse_same_instructor_resubmission: "Possible resubmission of your own Library record",
 };
 
+// Source-reading observations are separate from the backend check vocabulary.
+const DOCUMENT_REVIEW_LABEL: Partial<Record<string, string>> = {
+  implementation_scope_mismatch: "Delivered and proposed scope need clarification",
+  component_count_mismatch: "Summary totals and listed components differ",
+  source_support_missing: "Supporting sources need identification",
+};
+
 export function problemLabel(kind: string | null | undefined): string | null {
-  return kind ? (PROBLEM_LABEL[kind] ?? null) : null;
+  return kind ? (PROBLEM_LABEL[kind] ?? DOCUMENT_REVIEW_LABEL[kind] ?? null) : null;
 }

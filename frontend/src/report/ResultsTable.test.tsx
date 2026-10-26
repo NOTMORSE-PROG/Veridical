@@ -72,6 +72,9 @@ describe("resultDisplay", () => {
 });
 
 describe("sourceCaption", () => {
+  it("identifies a document review without suggesting model grading", () => {
+    expect(sourceCaption(row({ basis: "document_review", kind: "semantic" }))).toBe("Document review");
+  });
   it("an instructor-facing row with a real `resolution` reads as resolved (unchanged)", () => {
     expect(
       sourceCaption(

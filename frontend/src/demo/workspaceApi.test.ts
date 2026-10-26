@@ -4,12 +4,15 @@ import { readFileSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { resolve } from "node:path";
 import { installWorkspaceSample } from "./workspaceApi";
-import { sampleFlags, sampleReport, WORKSPACE_SAMPLE } from "./workspaceFixture";
+import { companionSource, reviewTasks, sampleCriteria, sampleFlags, sampleReport, WORKSPACE_SAMPLE } from "./workspaceFixture";
 
 const originalFetch = window.fetch;
 afterEach(() => { window.fetch = originalFetch; sessionStorage.clear(); localStorage.clear(); vi.restoreAllMocks(); });
 function start() { sessionStorage.clear(); localStorage.clear(); const network = vi.fn(() => Promise.reject(new Error("Unexpected live request"))); window.fetch = network; installWorkspaceSample(); return network; }
 const call = async (path: string, method = "GET", body?: unknown) => { const response = await window.fetch(`/api${path}`, { method, body: body === undefined ? undefined : JSON.stringify(body) }); return { response, data: await response.json() }; };
+const resolveAll = async (reason = "Instructor judgment after reading the original pages.") => {
+  for (const criterion of sampleCriteria) await call(`/check-runs/1/escalated/${100 + criterion.id}/resolve`, "POST", { resolution: "mark_level", level: 3, reason });
+};
 
 describe("real-interface sample API boundary", () => {
   it("preserves the complete licensed source and binds excerpts to original pages", () => {
@@ -19,14 +22,21 @@ describe("real-interface sample API boundary", () => {
     const pages = JSON.parse(readFileSync(resolve("public/sample-assets/manuscript-text.json"), "utf8")) as { page: number; text: string }[];
     expect(pages).toHaveLength(109);
     for (const flag of sampleFlags) { const page = Number(flag.page_anchor.match(/\d+/)![0]); expect(pages[page - 1].text.replace(/\s+/g, " ")).toContain(flag.evidence_excerpt.replace(/\s+/g, " ")); }
+    for (const task of reviewTasks) expect(pages[task.page - 1].text.replace(/\s+/g, " ")).toContain(task.quote.replace(/\s+/g, " "));
+    const companionBytes = readFileSync(resolve("public/sample-assets/e-aimss.pdf"));
+    expect(createHash("sha256").update(companionBytes).digest("hex")).toBe(companionSource.sha256);
+    expect(companionSource.sha256).not.toBe(WORKSPACE_SAMPLE.sha256);
+    expect(sampleFlags.some(flag => flag.check_kind === "originality_reuse")).toBe(false);
   });
 
   it("serves actual application DTOs without calling a live backend and denies unknown operations", async () => {
     const network = start();
-    expect((await call("/auth/session")).data.instructor.display_name).toBe("Sample Instructor");
+    expect((await call("/auth/session")).data.instructor.display_name).toBe("Capstone Instructor");
     expect((await call("/manuscripts?queue=needs_review")).data.items).toHaveLength(1);
-    expect((await call("/check-runs/1/report")).data.llm_mode).toBe("fake");
-    expect((await call("/check-runs/1/escalated")).data).toHaveLength(1);
+    expect((await call("/check-runs/1/report")).data.llm_mode).toBe("manual");
+    expect((await call("/check-runs/1/report")).data.results.every((row: { score: number | null; level: unknown }) => row.score === null && row.level === null)).toBe(true);
+    expect((await call("/check-runs/1/escalated")).data).toHaveLength(4);
+    expect((await call("/library/202/document")).data).toMatchObject({ page_count: 19, original_filename: companionSource.filename, regions: [] });
     const unknown = await call("/never-forward-to-production", "POST", { action: "delete" });
     expect(unknown.response.status).toBe(422);
     expect(network).not.toHaveBeenCalled();
@@ -35,7 +45,10 @@ describe("real-interface sample API boundary", () => {
   it("records reasoned judgments, instructor decisions, reopening, and a retained audit trail", async () => {
     start();
     expect((await call("/check-runs/1/decision", "POST", { decision: "approved" })).response.status).toBe(409);
-    expect((await call("/check-runs/1/escalated/102/resolve", "POST", { resolution: "mark_level", level: 3, reason: "The report distinguishes its implementation limitations." })).data.report.pending_review_count).toBe(0);
+    expect((await call("/check-runs/1/escalated/102/resolve", "POST", { resolution: "mark_level", level: 3, reason: "The report distinguishes its implementation limitations." })).data.report.pending_review_count).toBe(3);
+    expect((await call("/check-runs/1/decision", "POST", { decision: "approved" })).response.status).toBe(409);
+    await resolveAll();
+    expect((await call("/check-runs/1/report")).data).toMatchObject({ pending_review_count: 0, composite_score: 75, status: "conditionally_ready" });
     expect((await call("/check-runs/1/decision", "POST", { decision: "returned", note: "Clarify planned versus completed work." })).data.decision).toBe("returned");
     expect((await call("/check-runs/1/reopen", "POST", { reason: "Review the revision." })).data.decision).toBeNull();
     expect((await call("/audit")).data.items.some((event: { event_type: string }) => event.event_type === "decision_recorded")).toBe(true);
@@ -43,7 +56,7 @@ describe("real-interface sample API boundary", () => {
 
   it("shares a same-browser read-only snapshot without private reasons and revokes it", async () => {
     start();
-    await call("/check-runs/1/escalated/102/resolve", "POST", { resolution: "mark_pass", reason: "PRIVATE-CRITERION-REASON" });
+    await resolveAll("PRIVATE-CRITERION-REASON");
     await call("/flags/1/annotate", "POST", { annotation: "PRIVATE-ANNOTATION" });
     const share = (await call("/check-runs/1/share", "POST", { expires_at: null })).data;
     const shared = await call(`/shared/${share.token}/report`);
@@ -54,6 +67,12 @@ describe("real-interface sample API boundary", () => {
     expect((await call(`/shared/${share.token}/report`)).data.report.decision_note).toBe("PUBLIC-DECISION-NOTE");
     await call("/check-runs/1/share", "DELETE");
     expect((await call(`/shared/${share.token}/report`)).response.status).toBe(410);
+  });
+
+  it("rejects an invalid rubric level without grading the criterion", async () => {
+    start();
+    expect((await call("/check-runs/1/escalated/101/resolve", "POST", { resolution: "mark_level", level: 99, reason: "A judgment needs a valid course level." })).response.status).toBe(422);
+    expect((await call("/check-runs/1/report")).data).toMatchObject({ pending_review_count: 4, composite_score: null });
   });
 
   it("leaves the prepared result independent of edits to the format", async () => {

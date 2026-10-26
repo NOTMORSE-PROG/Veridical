@@ -490,6 +490,7 @@ function SignalFlagList({
 }
 
 function voteSummary(item: EscalatedItemOut): string {
+  if (item.review_basis === "document_review") return "Source observations are recorded below. Choose the rubric level using your own judgment.";
   if (item.review_reason === "not_graded") return "The AI did not grade this criterion.";
   if (item.review_reason === "injection_suspected") return "AI passes agreed, but that agreement cannot be trusted here.";
   if (item.votes.length === 0) return "No AI votes were recorded.";

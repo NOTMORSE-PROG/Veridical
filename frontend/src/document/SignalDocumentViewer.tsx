@@ -281,7 +281,7 @@ function ReadinessDecision({ checkRunId, report, pending, error, onRetry, onBack
           <ActionLink to={`/report/${report.check_run_id}`} variant="secondary">Open full readiness report</ActionLink>
         </div>
       </section>
-      {report.llm_mode !== "real" && <Alert title={report.llm_mode === "fake" ? "Test-mode AI results" : "AI mode could not be verified"} tone="warning">{report.llm_mode === "fake" ? "This review was produced with fixture responses, not real AI grading. Do not treat it as a finding about the manuscript." : "This run predates reliable AI-mode tracking. Treat AI-derived outcomes cautiously."}</Alert>}
+      {report.llm_mode !== "real" && report.llm_mode !== "manual" && <Alert title={report.llm_mode === "fake" ? "Test-mode AI results" : "AI mode could not be verified"} tone="warning">{report.llm_mode === "fake" ? "This review was produced with fixture responses, not real AI grading. Do not treat it as a finding about the manuscript." : "This run predates reliable AI-mode tracking. Treat AI-derived outcomes cautiously."}</Alert>}
       {coverage.length > 0 && <CoverageStatement state="partial" headingId="workspace-coverage-heading" heading="Not every check finished" intro="Nothing skipped here is presented as passed. Each item below names what did not finish and how to close it." items={coverage} />}
       <details className="signal-document-analysis__criteria"><summary>Criterion record, {assessed.length} assessed</summary><SignalCriteriaResults results={assessed} checkRunId={report.check_run_id} /></details>
       <SignalDecisionPanel report={report} manuscriptLabel={identity.primary} />

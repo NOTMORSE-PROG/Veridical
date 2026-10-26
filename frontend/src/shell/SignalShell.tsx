@@ -19,7 +19,7 @@ function initials(name: string): string {
 
 function CapacityStatement({ compact = false }: { compact?: boolean }) {
   const { data: quota, isPending, isError } = useQuota();
-  if (isWorkspaceSample()) return <span className="signal-capacity">Prepared sample · no live calls</span>;
+  if (isWorkspaceSample()) return <span className="signal-capacity">Document review</span>;
   if (isPending) {
     return <span className="signal-capacity" role="status">Checking capacity…</span>;
   }

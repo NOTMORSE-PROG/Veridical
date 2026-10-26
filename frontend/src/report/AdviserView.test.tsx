@@ -118,6 +118,14 @@ describe("AdviserViewPage", () => {
     expect(screen.queryByText("Test-mode AI results")).not.toBeInTheDocument();
   });
 
+  it("keeps a source-reviewed report free of model-result notices", async () => {
+    vi.stubGlobal("fetch", stubFetchByPath({ "/shared/tok123/report": shared({ report: { ...BASE_REPORT, llm_mode: "manual" } }) }));
+    render();
+    await screen.findAllByText("Conditionally Ready");
+    expect(screen.queryByText("Test-mode AI results")).not.toBeInTheDocument();
+    expect(screen.queryByText("AI mode could not be verified")).not.toBeInTheDocument();
+  });
+
   it("BUG-049 (backend review finding): discloses an unknown-mode run to the adviser, distinctly from real", async () => {
     vi.stubGlobal(
       "fetch",

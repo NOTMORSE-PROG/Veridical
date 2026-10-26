@@ -11,4 +11,15 @@ The complete 109-page original PDF is redistributed unchanged. The reader and do
 SHA-256 ef662fb9cb5619945c69183a8576f3f945109adc51bff408a6cd6fc21626c5fd
 MD5 045014e699b081cadbb912fc921545c8 (matches the repository's published checksum)
 
-VERIDICAL's prepared review records are separate educational examples, not the authors' course grade, an accusation, or a live analysis. The F7 reading-copy example uses two catalog entries of the SAME published source; it is not a comparison with an independent author's work.
+VERIDICAL's source observations are separate from the published work. They follow a reading of the narrative, source listing, diagrams, screenshots and tables. Rubric grades are left for the instructor. No model analysis, external citation verification or similarity judgment is represented by these observations.
+
+e-AIMSS (Electronic Asset Inventory and Management System in School) for Resource Optimization and Organizational Productivity
+Antonio C. Ahmad (2023)
+International Journal of Multidisciplinary Educational Research and Innovation, 1(3), 121-139
+Source: https://zenodo.org/records/8326056
+DOI: https://doi.org/10.5281/zenodo.8326056
+License: Creative Commons Attribution 4.0 International (CC BY 4.0)
+https://creativecommons.org/licenses/by/4.0/
+The complete 19-page original PDF is redistributed unchanged as an independent Library reading record. No similarity finding is asserted between the two documents.
+SHA-256 496b6c3be6685e6fe5fa0ed446b11a37f088e9a54a1dde9ed3c40d7cddad4f28
+MD5 62c5cae71d3323a068595aa0aea32921 (matches the repository's published checksum)

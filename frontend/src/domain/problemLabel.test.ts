@@ -46,6 +46,11 @@ const EXPECTED_REACHABLE_KINDS = [
 ];
 
 describe("problemLabel", () => {
+  it("names document-reading observations without extending the backend check contract", () => {
+    expect(problemLabel("implementation_scope_mismatch")).toBe("Delivered and proposed scope need clarification");
+    expect(problemLabel("component_count_mismatch")).toBe("Summary totals and listed components differ");
+    expect(problemLabel("source_support_missing")).toBe("Supporting sources need identification");
+  });
   it.each(EXPECTED_REACHABLE_KINDS)("has a real label for %s", (kind) => {
     expect(problemLabel(kind)).not.toBeNull();
     expect(problemLabel(kind)).not.toBe("");

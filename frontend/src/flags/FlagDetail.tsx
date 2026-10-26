@@ -115,7 +115,7 @@ function EvidenceSection({
 }
 
 function ModeDisclosure({ mode }: { mode: FlagOut["llm_mode"] }) {
-  if (mode === "real") return null;
+  if (mode === "real" || mode === "manual") return null;
   return mode === "fake" ? (
     <Alert title="Test-mode AI result" tone="warning">
       This finding came from fixture responses, not real AI grading. Do not treat it as a finding about the manuscript.
@@ -337,9 +337,9 @@ export function FlagDetailPage() {
 
           <section className="signal-evidence-hero" aria-labelledby="finding-heading">
             <div className="signal-evidence-hero__meta"><span>{meta?.eyebrow ?? humanize(flag.check_kind)}</span><span>Signal #{flag.id}</span></div>
-            <h2 id="finding-heading">Recorded system finding</h2>
-            <p className="signal-ai-suggestion"><strong>AI suggestion</strong><span>{humanizedVerdict(flag)}</span></p>
-            <p>Repeated AI consistency is intentionally not shown as a percentage. The excerpt and source location below are the evidence to check.</p>
+            <h2 id="finding-heading">{flag.llm_mode === "manual" ? "Recorded source observation" : "Recorded system finding"}</h2>
+            <p className="signal-ai-suggestion"><strong>{flag.llm_mode === "manual" ? "Document review" : "AI suggestion"}</strong><span>{humanizedVerdict(flag)}</span></p>
+            <p>{flag.llm_mode === "manual" ? "Check this observation against the excerpt and original pages before recording your judgment." : "Repeated AI consistency is intentionally not shown as a percentage. The excerpt and source location below are the evidence to check."}</p>
           </section>
 
           <EvidenceSection flag={flag} sourcePath={sourcePath} sourceLinkId={sourceLinkId} />

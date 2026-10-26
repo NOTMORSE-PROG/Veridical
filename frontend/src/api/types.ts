@@ -362,7 +362,9 @@ export type PublicCriterionResultOut = ResultRowCommon;
 // inventing a second one for the same fact — previously duplicated inline
 // on ReportCommon.llm_mode and FlagOut.llm_mode; extracted here so a third
 // copy (AuditLogSummary.llm_execution_mode, below) doesn't make it three.
-export type LLMMode = "fake" | "real" | "unknown";
+export type LLMMode = "fake" | "real" | "unknown" | "manual";
+// "manual" is a source-reviewed record without model output. It must never
+// relabel fake or unknown model responses as assessed evidence.
 
 export interface ReportCommon {
   status: "ready" | "conditionally_ready" | "not_ready" | "needs_review";
@@ -536,6 +538,7 @@ export interface PaginatedAuditLog {
 }
 
 export interface EscalatedItemOut {
+  review_basis?: "document_review";
   check_result_id: number;
   criterion_id: number;
   criterion_text: string;

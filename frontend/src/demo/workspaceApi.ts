@@ -1,5 +1,5 @@
 import type { AuditLogDetail, FlagOut, ReportOut, ShareLinkOut } from "../api/types";
-import { sampleCriteria, sampleEscalated, sampleFlags, sampleInstructor, sampleLibrary, sampleManuscript, sampleReport, sampleRubric, sampleRun, WORKSPACE_SAMPLE } from "./workspaceFixture";
+import { companionSource, sampleCriteria, sampleEscalatedItems, sampleFlags, sampleInstructor, sampleLibrary, sampleManuscript, sampleReport, sampleRubric, sampleRun, WORKSPACE_SAMPLE } from "./workspaceFixture";
 
 type SampleState = {
   report: ReportOut;
@@ -30,14 +30,18 @@ export function installWorkspaceSample() {
   if (!state.events.length) {
     audit("ingest_complete", { original_filename: WORKSPACE_SAMPLE.filename, page_count: WORKSPACE_SAMPLE.pageCount, source: WORKSPACE_SAMPLE.source, sha256: WORKSPACE_SAMPLE.sha256, note: "Unchanged publicly licensed source. Prepared review records; no live AI analysis." });
     audit("statistical_forensics", { outcome: "not_applicable", note: "This software implementation report does not supply a conventional inferential-statistics result for this prepared example. Numeric source code is not treated as a statistical test." });
-    audit("report_generated", { status: "needs_review", sample: true, llm_mode: "fake", note: "Prepared review example, not an author grade or an accuracy result." });
+    audit("document_review", { status: "needs_review", sample: true, llm_mode: "manual", note: "Full-document review: narrative, source code, figures, screenshots, references and component summary checked. Rubric levels remain for instructor judgment." });
   }
 
   function recalculate() {
     const pending = state.report.results.filter(row => row.outcome === "escalated").length;
     state.report.pending_review_count = pending;
-    state.report.status = pending ? "needs_review" : "conditionally_ready";
-    state.report.reason = pending ? sampleReport.reason : "All practice criterion judgments have been recorded. Prepared source-review prompts still require instructor consideration. This is a sample workflow band, not an engine evaluation of the authors.";
+    const assessed = state.report.results.filter(row => row.outcome !== "not_applicable" && row.score !== null);
+    const totalWeight = assessed.reduce((total, row) => total + row.weight, 0);
+    const composite = !pending && totalWeight ? assessed.reduce((total, row) => total + (row.score ?? 0) * row.weight, 0) / totalWeight : null;
+    state.report.composite_score = composite;
+    state.report.status = pending || composite === null ? "needs_review" : composite >= state.report.thresholds.ready_min_score ? "ready" : composite < state.report.thresholds.not_ready_max_score ? "not_ready" : "conditionally_ready";
+    state.report.reason = pending ? sampleReport.reason : "The readiness band follows the instructor's recorded rubric judgments. Read the source observations about implementation scope, component totals and supporting literature before recording a defense decision.";
     state.manuscript.escalations_awaiting_review = pending;
     state.manuscript.latest_readiness = state.report.status;
     state.manuscript.latest_decision = state.report.decision;
@@ -61,17 +65,17 @@ export function installWorkspaceSample() {
       for (const line of lines) { if (y > bottom) { pdf.addPage(); y = 20; } pdf.text(line, margin, y); y += heading ? 7 : spacing; }
       y += spacing;
     };
-    write("VERIDICAL - Sample workspace report", true);
-    write("Prepared review data on a real published manuscript. No live AI analysis ran. Practice actions are local to this browser tab.");
+    write("VERIDICAL - Manuscript review", true);
+    write("Review basis: full-document reading with page-bound observations. The instructor records the rubric levels and final decision.");
     write(WORKSPACE_SAMPLE.title, true); write(WORKSPACE_SAMPLE.attribution);
     write(`Source: ${WORKSPACE_SAMPLE.pageCount} pages. Unchanged original SHA-256: ${WORKSPACE_SAMPLE.sha256}`);
-    write(`Sample readiness: ${state.report.status}. Instructor practice decision: ${state.report.decision ?? "Not recorded"}.`);
+    write(`Readiness: ${state.report.status}. Instructor decision: ${state.report.decision ?? "Not recorded"}.`);
     if (state.report.decision_note) write(`Decision note: ${state.report.decision_note}`);
     write("Criterion record", true);
     for (const result of state.report.results) { write(`${result.text}: ${result.level?.name ?? result.outcome}`, true); write(result.resolution?.reason ?? result.reasoning ?? result.reason ?? "Needs instructor review."); for (const evidence of result.evidence) write(`${evidence.anchor}: ${evidence.quote}`); }
-    write("Source-based review prompts", true);
+    write("Source observations", true);
     for (const flag of state.flags) { write(`${flag.check_kind} - ${flag.severity}${flag.overridden ? " - explained by instructor" : ""}`, true); write(`${flag.page_anchor}: ${flag.evidence_excerpt}`); write(flag.ai_reasoning ?? ""); if (flag.override_reason) write(`Instructor reason: ${flag.override_reason}`); }
-    for (let index = 1; index <= pdf.getNumberOfPages(); index++) { pdf.setPage(index); pdf.setFontSize(8); pdf.text(`Prepared sample - page ${index} of ${pdf.getNumberOfPages()}`, margin, 289); }
+    for (let index = 1; index <= pdf.getNumberOfPages(); index++) { pdf.setPage(index); pdf.setFontSize(8); pdf.text(`Document review - page ${index} of ${pdf.getNumberOfPages()}`, margin, 289); }
     return new Response(pdf.output("blob"), { headers: { "Content-Type": "application/pdf" } });
   }
 
@@ -91,9 +95,9 @@ export function installWorkspaceSample() {
     if (path === "/auth/logout") return json({ ok: true });
     if (path === "/auth/password" || path === "/settings/api-key") return failure("Account passwords and API keys are not changed in the sample workspace. Open the real workspace for account settings.");
     if (path === "/quota") return json({ mode: "fake", key_source: "shared", quota_day: "2026-10-26", calls_used: 0, daily_limit: 0, calls_remaining: 0, cache_hits_today: 0, cache_hit_rate: 0, reset_at: "2026-10-27T00:00:00Z", rpm_limit: 0, models: [] });
-    if (path === "/programs") return json([{ id: 1, name: "Software Engineering" }]);
+    if (path === "/programs") return json([{ id: 1, name: "Software Engineering" }, { id: 2, name: "Information Systems" }]);
     if (path === "/groups/collision-check") return json({ collision: false, existing_group_name: null });
-    if (path === "/stats") return json({ manuscripts_checked: 1, ready_count: 0, conditionally_ready_count: state.report.pending_review_count ? 0 : 1, not_ready_count: 0, needs_review_count: state.report.pending_review_count ? 1 : 0, escalations_awaiting_review: state.report.pending_review_count, escalation_rate: null, escalation_budget: 0, system_underperforming: false, decided_count: state.report.decision ? 1 : 0, ready_to_decide_count: !state.report.pending_review_count && !state.report.decision ? 1 : 0, needs_attention_count: state.report.pending_review_count ? 1 : 0, checking_count: 0 });
+    if (path === "/stats") return json({ manuscripts_checked: 1, ready_count: state.report.status === "ready" ? 1 : 0, conditionally_ready_count: state.report.status === "conditionally_ready" ? 1 : 0, not_ready_count: state.report.status === "not_ready" ? 1 : 0, needs_review_count: state.report.status === "needs_review" ? 1 : 0, escalations_awaiting_review: state.report.pending_review_count, escalation_rate: null, escalation_budget: 0, system_underperforming: false, decided_count: state.report.decision ? 1 : 0, ready_to_decide_count: !state.report.pending_review_count && !state.report.decision ? 1 : 0, needs_attention_count: state.report.pending_review_count ? 1 : 0, checking_count: 0 });
     if (path === "/manuscripts") {
       const queue = url.searchParams.get("queue"), query = (url.searchParams.get("q") ?? "").toLowerCase();
       let items = [state.manuscript];
@@ -123,24 +127,39 @@ export function installWorkspaceSample() {
     if (path === "/check-runs/rerun-estimate") return json({ items: [{ manuscript_id: 1, estimated_calls: 0 }], total_estimated_calls: 0, manuscripts_with_no_estimate: 0 });
     if (path === "/check-runs" && method === "POST") { audit("sample_check_replayed", { note: "Reloaded the prepared record; zero model calls. Not a new analysis." }); return write({ ...sampleRun, id: state.report.check_run_id }); }
     if (/^\/check-runs\/\d+$/.test(path)) return json({ ...sampleRun, manuscript_group_label: state.manuscript.group_label });
-    if (/\/document\/file$/.test(path)) { if (!state.fileAvailable && path.startsWith("/check-runs/")) return failure("The sample original was removed. Reset the sample to restore it.", 404); const response = await originalFetch(WORKSPACE_SAMPLE.pdfAsset, { credentials: "omit" }); return new Response(response.body, { headers: { "Content-Type": "application/pdf", "Content-Length": response.headers.get("Content-Length") ?? "" } }); }
-    if (/\/document$/.test(path)) return json({ manuscript_id: path.startsWith("/library/") ? Number(path.split("/")[2]) : 1, original_filename: WORKSPACE_SAMPLE.filename, source_format: "pdf", available: state.fileAvailable || path.startsWith("/library/"), unavailable_reason: state.fileAvailable ? null : "purged", purged_at: state.fileAvailable ? null : new Date().toISOString(), page_count: WORKSPACE_SAMPLE.pageCount, regions: state.flags.map(flag => ({ flag_id: flag.id, kind: "page_only", page: Number(flag.page_anchor.match(/\d+/)?.[0] ?? 1), end_page: null, bbox: null, all_bboxes: [], paragraph: null, index: null })) });
+    if (/\/document\/file$/.test(path)) {
+      if (!state.fileAvailable && path.startsWith("/check-runs/")) return failure("The original file was removed from this browser record.", 404);
+      const source = path.startsWith(`/library/${companionSource.id}/`) ? companionSource : WORKSPACE_SAMPLE;
+      const response = await originalFetch(source.pdfAsset, { credentials: "omit" });
+      return new Response(response.body, { headers: { "Content-Type": "application/pdf", "Content-Length": response.headers.get("Content-Length") ?? "" } });
+    }
+    if (/\/document$/.test(path)) {
+      const libraryId = path.startsWith("/library/") ? Number(path.split("/")[2]) : null;
+      const source = libraryId === companionSource.id ? companionSource : WORKSPACE_SAMPLE;
+      return json({ manuscript_id: libraryId ?? 1, original_filename: source === companionSource ? companionSource.filename : WORKSPACE_SAMPLE.filename, source_format: "pdf", available: state.fileAvailable || libraryId !== null, unavailable_reason: state.fileAvailable ? null : "purged", purged_at: state.fileAvailable ? null : new Date().toISOString(), page_count: source.pageCount, regions: libraryId !== null ? [] : state.flags.map(flag => ({ flag_id: flag.id, kind: "page_only", page: Number(flag.page_anchor.match(/\d+/)?.[0] ?? 1), end_page: null, bbox: null, all_bboxes: [], paragraph: null, index: null })) });
+    }
     if (/\/document\/reuse-matches$/.test(path)) return json({ passage_archive_size_n: state.library.length, matches: [] });
     if (/\/report\/export\.pdf$/.test(path)) return reportPdf();
     if (/^\/check-runs\/\d+\/report$/.test(path)) return json(state.report);
-    if (/^\/check-runs\/\d+\/flags$/.test(path)) return json(state.flags.map(flag => ({ ...flag, problem_kind: flag.check_kind === "originality_reuse" ? "exact_duplicate" : null })));
-    if (/^\/check-runs\/\d+\/escalated$/.test(path)) return json(state.report.pending_review_count ? [sampleEscalated] : []);
+    if (/^\/check-runs\/\d+\/flags$/.test(path)) return json(state.flags.map(flag => ({ ...flag, problem_kind: flag.ai_verdict_summary })));
+    if (/^\/check-runs\/\d+\/escalated$/.test(path)) return json(sampleEscalatedItems.filter(item => state.report.results.some(row => row.criterion_id === item.criterion_id && row.outcome === "escalated")));
     if (/\/escalated\/\d+\/resolve$/.test(path) && method === "POST") {
       if (!textValue(body.reason).trim()) return failure("Enter your reason.");
-      const row = state.report.results.find(result => result.criterion_id === 2)!;
-      const level = sampleCriteria[1].levels?.find(item => item.level === body.level);
+      if (!["mark_level", "mark_pass", "mark_fail", "needs_document"].includes(textValue(body.resolution))) return failure("Choose a supported instructor resolution.");
+      const resultId = Number(path.match(/escalated\/(\d+)/)?.[1]);
+      const task = sampleEscalatedItems.find(item => item.check_result_id === resultId);
+      if (!task) return failure("This criterion does not exist.", 404);
+      const row = state.report.results.find(result => result.criterion_id === task.criterion_id)!;
+      const criterion = sampleCriteria.find(item => item.id === task.criterion_id)!;
+      const level = criterion.levels?.find(item => item.level === body.level);
+      if (body.resolution === "mark_level" && !level) return failure("Choose one of this criterion's rubric levels.");
       row.outcome = body.resolution === "needs_document" ? "not_applicable" : body.resolution === "mark_fail" ? "failed" : "passed";
-      row.score = row.outcome === "not_applicable" ? null : level ? level.points * 25 : row.outcome === "passed" ? 100 : 0;
-      row.level = level ? { name: level.name, ordinal: level.level, points: level.points, max_points: 4 } : null;
+      row.score = row.outcome === "not_applicable" ? null : level ? level.points / criterion.weight * 100 : row.outcome === "passed" ? 100 : 0;
+      row.level = level ? { name: level.name, ordinal: level.level, points: level.points, max_points: criterion.weight } : null;
       row.resolution = { type: body.resolution as NonNullable<typeof row.resolution>["type"], reason: textValue(body.reason), ai_majority_verdict: null };
-      row.basis = "manual"; state.report.decision = null; recalculate(); audit("escalation_resolved", { criterion_id: 2, resolution: body.resolution, reason: body.reason, level: body.level }); return write({ check_result_id: 102, outcome: row.outcome, score: row.score, report: state.report });
+      row.basis = "manual"; state.report.decision = null; recalculate(); audit("escalation_resolved", { criterion_id: row.criterion_id, resolution: body.resolution, reason: body.reason, level: body.level }); return write({ check_result_id: resultId, outcome: row.outcome, score: row.score, report: state.report });
     }
-    if (/^\/check-runs\/\d+\/decision$/.test(path) && method === "POST") { if (state.report.pending_review_count) return failure("Resolve the outstanding criterion first.", 409); if (!["approved", "returned", "rejected"].includes(textValue(body.decision))) return failure("Choose an instructor decision."); state.report.decision = body.decision as ReportOut["decision"]; state.report.decision_note = textValue(body.note) || null; state.report.decided_at = new Date().toISOString(); recalculate(); audit("decision_recorded", { decision: body.decision, note: body.note }); return write(state.report); }
+    if (/^\/check-runs\/\d+\/decision$/.test(path) && method === "POST") { if (state.report.pending_review_count) return failure("Resolve the outstanding criteria first.", 409); if (!["approved", "returned", "rejected"].includes(textValue(body.decision))) return failure("Choose an instructor decision."); state.report.decision = body.decision as ReportOut["decision"]; state.report.decision_note = textValue(body.note) || null; state.report.decided_at = new Date().toISOString(); recalculate(); audit("decision_recorded", { decision: body.decision, note: body.note }); return write(state.report); }
     if (/^\/check-runs\/\d+\/reopen$/.test(path) && method === "POST") { if (!textValue(body.reason).trim()) return failure("A reason is required."); audit("decision_reopened", { previous_decision: state.report.decision, reason: body.reason }); state.report.decision = null; state.report.decision_note = null; state.report.decided_at = null; recalculate(); return write(state.report); }
     const flagMatch = path.match(/^\/flags\/(\d+)(?:\/(annotate|override|confirm-source))?$/);
     if (flagMatch) { const flag = state.flags.find(item => item.id === Number(flagMatch[1])); if (!flag) return failure("This sample finding does not exist.", 404); if (method !== "GET") { if (flagMatch[2] === "annotate") flag.annotation = textValue(body.annotation); else { if (!textValue(body.reason).trim()) return failure("Enter your reason."); flag.overridden = true; flag.override_reason = textValue(body.reason); } audit(flagMatch[2] === "annotate" ? "flag_annotated" : "flag_overridden", { flag_id: flag.id, ...body }); persist(); } return json(flagMatch[2] === "override" || flagMatch[2] === "confirm-source" ? { ...flag, report: state.report } : flag); }
@@ -159,9 +178,9 @@ export function installWorkspaceSample() {
     if (/^\/shared\/[^/]+\/report$/.test(path)) {
       try { const token = path.split("/")[2]; const shared = JSON.parse(localStorage.getItem(`${WORKSPACE_SAMPLE.storageKey}:share:${token}`) ?? "null"); if (!shared || shared.expires_at && new Date(shared.expires_at).getTime() <= Date.now()) return failure("This local sample share has expired or was revoked. Sample links work only in the browser where they were created.", 410); return json(shared); } catch { return failure("The local sample report could not be opened.", 410); }
     }
-    if (path === "/library") { const query = (url.searchParams.get("search") ?? "").toLowerCase(); return paged(url.searchParams.get("scope") === "pending" ? [] : state.library.filter(item => `${item.title} ${item.authors.join(" ")}`.toLowerCase().includes(query))); }
+    if (path === "/library") { const query = (url.searchParams.get("search") ?? "").toLowerCase(); return paged(url.searchParams.get("scope") === "pending" ? [] : state.library.filter(item => `${item.title} ${item.authors.join(" ")}`.toLowerCase().includes(query) && (!url.searchParams.get("program") || item.program === url.searchParams.get("program")))); }
     const libraryMatch = path.match(/^\/library\/(\d+)(?:\/(remove|decision|excerpt))?$/);
-    if (libraryMatch) { const item = state.library.find(entry => entry.manuscript_id === Number(libraryMatch[1])); if (!item) return failure("The sample Library record is unavailable.", 404); if (method === "PATCH") { item.title = textValue(body.title) || item.title; item.team_name = textValue(body.team_name) || item.team_name; if (Array.isArray(body.authors)) item.authors = body.authors.filter((value): value is string => typeof value === "string"); audit("library_updated", { manuscript_id: item.manuscript_id }); return write(item); } if (libraryMatch[2] === "remove") { state.library = state.library.filter(entry => entry.manuscript_id !== item.manuscript_id); audit("library_removed", { manuscript_id: item.manuscript_id }); return write({ manuscript_id: item.manuscript_id, status: "removed", added_at: item.added_at, removed_at: new Date().toISOString(), file_deleted: true }); } if (libraryMatch[2] === "excerpt") return json({ manuscript_id: item.manuscript_id, chapters: [{ chapter_index: 0, title: "Abstract - page 5", excerpt: sampleFlags[3].evidence_excerpt, context_before: null, context_after: null }], total_chapters: 1, limitations: "Same publicly licensed source; not an independent work.", purged_at: null }); return json(item); }
+    if (libraryMatch) { const item = state.library.find(entry => entry.manuscript_id === Number(libraryMatch[1])); if (!item) return failure("The sample Library record is unavailable.", 404); if (method === "PATCH") { item.title = textValue(body.title) || item.title; item.team_name = textValue(body.team_name) || item.team_name; if (Array.isArray(body.authors)) item.authors = body.authors.filter((value): value is string => typeof value === "string"); audit("library_updated", { manuscript_id: item.manuscript_id }); return write(item); } if (libraryMatch[2] === "remove") { state.library = state.library.filter(entry => entry.manuscript_id !== item.manuscript_id); audit("library_removed", { manuscript_id: item.manuscript_id }); return write({ manuscript_id: item.manuscript_id, status: "removed", added_at: item.added_at, removed_at: new Date().toISOString(), file_deleted: true }); } if (libraryMatch[2] === "excerpt") return json({ manuscript_id: item.manuscript_id, chapters: [{ chapter_index: 0, title: item.manuscript_id === companionSource.id ? "Abstract - page 2" : "Abstract - page 5", excerpt: item.manuscript_id === companionSource.id ? "This capstone is centered around the development of an efficient electronic property inventory system tailored for school assets" : "This project develops a robust, console-based application using", context_before: null, context_after: null }], total_chapters: 1, limitations: "Original published work. Read the complete document for context; no similarity finding is inferred from this excerpt.", purged_at: null }); return json(item); }
     if (path === "/audit") { const type = url.searchParams.get("event_type"); return paged(type ? state.events.filter(event => event.event_type === type) : state.events); }
     if (/^\/audit\/\d+$/.test(path)) return json(state.events.find(event => event.id === Number(path.split("/")[2])) ?? state.events[0]);
     // Never fall through to a live account or analysis service from sample mode.

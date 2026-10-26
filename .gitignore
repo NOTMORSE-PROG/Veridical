@@ -14,6 +14,7 @@ design/
 !backend/tests/fixtures/ingest/*.pdf
 # Publicly licensed demonstration source, with attribution and a pinned checksum.
 !frontend/public/sample-assets/stock-inventory-capstone.pdf
+!frontend/public/sample-assets/e-aimss.pdf
 
 # ── Secrets / environment ────────────────────────────────────────
 .env

@@ -145,6 +145,7 @@ export function sourceCaption(row: ResultRowCommon): string {
   // actually resolved by hand, showing the AI's own SUPERSEDED evidence
   // as final. `resolved` is the non-private half of the same fact.
   if (row.resolution || row.resolved) return "Resolved by instructor";
+  if (row.basis === "document_review") return "Document review";
   // BUG-092/UX review finding (2026-08-24): a `not_assessable` criterion
   // is routed straight to a terminal `not_applicable` result and is,
   // deliberately, NEVER AI-graded (`router.py`'s own docstring) -- but

@@ -6,6 +6,7 @@ import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { Link, useBlocker, useNavigate, useParams } from "react-router";
 import { ApiError, BASE_URL } from "../api/client";
 import type { LibraryItemOut } from "../api/types";
+import { WorkspaceSourceDetails } from "../demo/WorkspaceSourceDetails";
 import { usePrograms } from "../dashboard/useDashboard";
 import { useLibraryRouteFocus } from "./useLibraryRouteFocus";
 import { ActionLink } from "../ui/ActionLink";
@@ -476,6 +477,7 @@ export function SignalLibraryDetailPage() {
                 className="signal-library-record"
               >
                 {item.is_own ? <OwnDetails item={item} /> : <ForeignDetails item={item} />}
+                <WorkspaceSourceDetails libraryId={item.manuscript_id} />
               </aside>
             </div>
           </section>

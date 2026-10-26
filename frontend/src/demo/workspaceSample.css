@@ -1,7 +1,5 @@
-.workspace-sample-bar { background: var(--color-signal-foundation); color: var(--color-signal-surface); padding: var(--signal-space-3) var(--signal-space-5); display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--signal-space-2) var(--signal-space-5); border-bottom: var(--signal-border-emphasis) solid var(--color-signal-brand); }
-.workspace-sample-bar > div { display: flex; flex-wrap: wrap; align-items: center; gap: var(--signal-space-3); }
-.workspace-sample-bar strong { color: var(--color-signal-brand); }
-.workspace-sample-bar span, .workspace-sample-bar a, .workspace-sample-bar button { font-size: var(--signal-type-label); }
-.workspace-sample-bar a, .workspace-sample-bar button { color: var(--color-signal-surface); text-decoration: underline; text-underline-offset: var(--signal-space-1); }
-.workspace-sample-bar button { cursor: pointer; background: transparent; border: none; }
-.workspace-sample-bar p { flex-basis: 100%; font-size: var(--signal-type-meta); margin: 0; }
+.workspace-source-details { font-size: var(--signal-type-meta); }
+.workspace-source-details summary { cursor: pointer; font-weight: var(--signal-weight-bold); }
+.workspace-source-details p { margin-block: var(--signal-space-2); overflow-wrap: anywhere; }
+.workspace-source-details a, .workspace-source-details button { color: inherit; text-decoration: underline; text-underline-offset: var(--signal-space-1); }
+.workspace-source-details button { cursor: pointer; background: transparent; border: none; font: inherit; padding: 0; }

@@ -237,6 +237,15 @@ describe("FlagDetailPage", () => {
     expect(screen.queryByText("Test-mode AI result")).not.toBeInTheDocument();
   });
 
+  it("labels source-reviewed observations without suggesting AI output", async () => {
+    vi.stubGlobal("fetch", stubFetchByPath({ "/flags/5": { ...FLAG, llm_mode: "manual" } }));
+    renderWithProviders(<FlagDetailPage />, { route: "/flags/5", path: "/flags/:flagId" });
+    expect(await screen.findByText("Recorded source observation")).toBeInTheDocument();
+    expect(screen.queryByText("AI suggestion")).not.toBeInTheDocument();
+    expect(screen.queryByText("Test-mode AI result")).not.toBeInTheDocument();
+    expect(screen.queryByText("AI mode could not be verified")).not.toBeInTheDocument();
+  });
+
   it("BUG-049 (backend review finding): discloses an unknown-mode flag distinctly from real", async () => {
     vi.stubGlobal("fetch", stubFetchByPath({ "/flags/5": { ...FLAG, llm_mode: "unknown" } }));
     renderWithProviders(<FlagDetailPage />, { route: "/flags/5", path: "/flags/:flagId" });

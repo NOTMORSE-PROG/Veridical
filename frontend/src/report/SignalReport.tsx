@@ -2,6 +2,7 @@ import { type MouseEvent, useEffect, useRef, useState } from "react";
 import { Link, useParams } from "react-router";
 import { ApiError } from "../api/client";
 import { manuscriptIdentity } from "../domain/manuscriptLabel";
+import { WorkspaceSourceDetails } from "../demo/WorkspaceSourceDetails";
 import { useRouteFocus } from "../routing/useRouteFocus";
 import { ActionLink } from "../ui/ActionLink";
 import { Alert } from "../ui/Alert";
@@ -65,7 +66,7 @@ export function SignalReportPage() {
   const identity = report ? manuscriptIdentity(report.manuscript_group_label, report.manuscript_original_filename) : undefined;
   const hasReportNotices = report && (
     report.previous_status
-    || report.llm_mode !== "real"
+    || (report.llm_mode !== "real" && report.llm_mode !== "manual")
     || report.rubric_needs_review
     || (report.integrity_check_status ?? []).length > 0
   );
@@ -126,6 +127,7 @@ export function SignalReportPage() {
                 <Button variant="secondary" onClick={() => setShareOpen(true)}>{shareLink ? "Manage active share link" : "Share report"}</Button>
               </div>
               <p className="signal-field-hint">Downloaded PDFs are not optimized for screen readers. Use this on-screen report for accessible review.</p>
+              <WorkspaceSourceDetails />
               {exportPdf.isError && <div ref={exportErrorRef} tabIndex={-1}><Alert title="Could not export this report" tone="error" role="alert">{exportPdf.error instanceof ApiError ? exportPdf.error.message : "Try again."}</Alert></div>}
             </div>
           </div>
@@ -134,7 +136,7 @@ export function SignalReportPage() {
             <div className="signal-group-flow signal-report-notices">
               {report.previous_status && <section className="signal-report-history" aria-label="Previous check comparison"><span>Previous run</span><ReadinessBand status={report.previous_status} /><span aria-hidden="true">→</span><span>Current run</span><ReadinessBand status={report.status} /><p>Bands come from separate historical runs. Open Audit for the underlying reproducible values.</p></section>}
 
-              {report.llm_mode !== "real" && <Alert title={report.llm_mode === "fake" ? "Test-mode AI results" : "AI mode could not be verified"} tone="warning">{report.llm_mode === "fake" ? "This report was produced with fixture responses, not real AI grading. Do not treat it as a finding about the manuscript." : "This run predates reliable AI-mode tracking. Treat AI-derived outcomes cautiously."}</Alert>}
+              {(report.llm_mode !== "real" && report.llm_mode !== "manual") && <Alert title={report.llm_mode === "fake" ? "Test-mode AI results" : "AI mode could not be verified"} tone="warning">{report.llm_mode === "fake" ? "This report was produced with fixture responses, not real AI grading. Do not treat it as a finding about the manuscript." : "This run predates reliable AI-mode tracking. Treat AI-derived outcomes cautiously."}</Alert>}
 
               <CoverageStatement
                 state="partial"
