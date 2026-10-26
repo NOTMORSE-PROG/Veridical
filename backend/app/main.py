@@ -36,6 +36,7 @@ from app.ml.embeddings import get_embedding_model
 from app.pipeline.router import router as pipeline_router
 from app.pipeline.worker import worker_loop
 from app.report.router import (
+    export_report_pdf_route,
     get_manuscript_docx_image_route,
     get_manuscript_file_route,
     get_manuscript_page_text_route,
@@ -79,6 +80,7 @@ _PRIVATE_DOCUMENT_ENDPOINTS = frozenset(
         rubric_image_route,
     }
 )
+_PRIVATE_EXPORT_ENDPOINTS = frozenset({export_report_pdf_route})
 
 
 def _upgrade_to_head() -> None:
@@ -228,7 +230,7 @@ if _cors_origins:
 async def add_public_share_response_headers(
     request: Request, call_next: RequestResponseEndpoint
 ) -> Response:
-    """Prevent source-document caching and indexing of bearer-token reports.
+    """Prevent private-document caching and indexing of bearer-token reports.
 
     Starlette's user middleware wraps its handled-exception middleware, so
     this applies after successful routing and the global VeridicalError
@@ -252,8 +254,13 @@ async def add_public_share_response_headers(
         for name, value in PUBLIC_SHARE_RESPONSE_HEADERS:
             response.headers[name] = value
     # Routing populates endpoint before dependencies or validation can fail.
-    # Inspect it after call_next so handled errors use the source policy too.
-    if is_library or request.scope.get("endpoint") in _PRIVATE_DOCUMENT_ENDPOINTS:
+    # Inspect it after call_next so handled errors use the private policy too.
+    endpoint = request.scope.get("endpoint")
+    if (
+        is_library
+        or endpoint in _PRIVATE_DOCUMENT_ENDPOINTS
+        or endpoint in _PRIVATE_EXPORT_ENDPOINTS
+    ):
         response.headers["Cache-Control"] = _PRIVATE_DOCUMENT_CACHE_CONTROL
     return response
 
