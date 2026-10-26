@@ -50,6 +50,8 @@ describe("real-interface sample API boundary", () => {
     expect(shared.response.status).toBe(200);
     expect(JSON.stringify(shared.data)).not.toContain("PRIVATE-CRITERION-REASON");
     expect(JSON.stringify(shared.data)).not.toContain("PRIVATE-ANNOTATION");
+    await call("/check-runs/1/decision", "POST", { decision: "returned", note: "PUBLIC-DECISION-NOTE" });
+    expect((await call(`/shared/${share.token}/report`)).data.report.decision_note).toBe("PUBLIC-DECISION-NOTE");
     await call("/check-runs/1/share", "DELETE");
     expect((await call(`/shared/${share.token}/report`)).response.status).toBe(410);
   });

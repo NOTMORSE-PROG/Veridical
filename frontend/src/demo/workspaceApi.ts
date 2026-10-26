@@ -23,7 +23,7 @@ export function installWorkspaceSample() {
     const stored = JSON.parse(sessionStorage.getItem(WORKSPACE_SAMPLE.storageKey) ?? "null");
     if (stored?.version === 1 && stored.state?.report?.manuscript_id === 1 && Array.isArray(stored.state?.flags) && Array.isArray(stored.state?.events) && Array.isArray(stored.state?.library) && Array.isArray(stored.state?.rubric?.criteria)) state = stored.state as SampleState;
   } catch { /* An unavailable or invalid sample cache starts a clean sample. */ }
-  function persist() { try { sessionStorage.setItem(WORKSPACE_SAMPLE.storageKey, JSON.stringify({ version: 1, state })); } catch { /* This visit still works when browser storage is disabled. */ } }
+  function persist() { try { sessionStorage.setItem(WORKSPACE_SAMPLE.storageKey, JSON.stringify({ version: 1, state })); if (state.share) localStorage.setItem(`${WORKSPACE_SAMPLE.storageKey}:share:${state.share.token}`, JSON.stringify({ ...publicSnapshot(), expires_at: state.share.expires_at })); } catch { /* This visit still works when browser storage is disabled. */ } }
   function audit(event_type: string, payload: Record<string, unknown>) {
     state.events.unshift({ id: state.events.length + 1, event_type, check_run_id: state.report.check_run_id, manuscript_group_label: state.manuscript.group_label, manuscript_original_filename: WORKSPACE_SAMPLE.filename, prompt_type: null, prompt_version: null, agreement_score: null, llm_execution_mode: null, input_hash: null, created_at: new Date().toISOString(), payload: { sample: true, ...payload } });
   }
@@ -55,7 +55,7 @@ export function installWorkspaceSample() {
     const margin = 18, width = 174, bottom = 276, spacing = 5;
     let y = 20;
     const write = (value: string, heading = false) => {
-      if (heading && y > bottom - 24) { pdf.addPage(); y = 20; }
+      if (heading && y > bottom - 44) { pdf.addPage(); y = 20; }
       pdf.setFont("helvetica", heading ? "bold" : "normal"); pdf.setFontSize(heading ? 14 : 10);
       const lines: string[] = pdf.splitTextToSize(value.replace(/[^\x20-\x7E\n]/g, " "), width);
       for (const line of lines) { if (y > bottom) { pdf.addPage(); y = 20; } pdf.text(line, margin, y); y += heading ? 7 : spacing; }
