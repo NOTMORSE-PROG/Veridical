@@ -305,6 +305,7 @@ describe("FlagDetailPage", () => {
     await screen.findByText(/Wang, S\./);
     fireEvent.click(screen.getByRole("button", { name: "Dismiss finding" }));
     const confirm = await screen.findByRole("button", { name: "Yes, dismiss finding" });
+    expect(confirm).toHaveAccessibleDescription("This finding will no longer count against readiness. The original evidence and your reason will stay in the review record.");
     expect(confirm).not.toBeDisabled();
     fireEvent.click(confirm);
 
@@ -375,6 +376,7 @@ describe("FlagDetailPage", () => {
     renderWithProviders(<FlagDetailPage />, { route: "/flags/5", path: "/flags/:flagId" });
     await screen.findByText(/Wang, S\./);
     const overrideButton = screen.getByRole("button", { name: "Dismiss finding" });
+    expect(overrideButton).toHaveAccessibleDescription("Opens a form for your reason. Nothing is dismissed until you confirm.");
     fireEvent.click(overrideButton);
     fireEvent.click(await screen.findByRole("button", { name: "Cancel" }));
     expect(await screen.findByRole("button", { name: "Dismiss finding" })).toHaveFocus();
@@ -389,6 +391,7 @@ describe("FlagDetailPage", () => {
     renderWithProviders(<FlagDetailPage />, { route: "/flags/5", path: "/flags/:flagId" });
     await screen.findByText(/Wang, S\./);
     const box = screen.getByRole("textbox", { name: /Your note/i });
+    expect(screen.getByRole("button", { name: "Save note" })).toHaveAccessibleDescription("Saves your note without changing the result. It is not included in shared reports.");
     fireEvent.change(box, { target: { value: "Confirmed with the adviser." } });
     fireEvent.click(screen.getByRole("button", { name: "Save note" }));
     const status = await screen.findByText("Note saved.");

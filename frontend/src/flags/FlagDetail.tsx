@@ -135,6 +135,7 @@ function AnnotationPanel({ flag, guarded = false }: { flag: FlagOut; guarded?: b
   const [saved, setSaved] = useState(false);
   const annotate = useAnnotateFlag(flag.id, guarded ? flag.check_run_id : undefined);
   const errorId = useId();
+  const noteHelpId = useId();
   const invalid = attempted && value.trim().length === 0;
 
   useEffect(() => setValue(flag.annotation ?? ""), [flag.annotation]);
@@ -151,7 +152,6 @@ function AnnotationPanel({ flag, guarded = false }: { flag: FlagOut; guarded?: b
       <div className="signal-section-heading">
         <div><p className="signal-section-kicker">Private workspace</p><h2 id="annotation-heading">Private note</h2></div>
       </div>
-      <p>Keep a note for your own review. It does not change the result and is not included in shared reports.</p>
       <label className="signal-evidence-field">
         <span>Your note</span>
         <textarea
@@ -170,9 +170,10 @@ function AnnotationPanel({ flag, guarded = false }: { flag: FlagOut; guarded?: b
       {invalid && <p id={errorId} role="alert" className="signal-field-error">Enter a note before saving.</p>}
       {annotate.isError && <Alert title="Could not save your note" tone="error" role="alert">{annotate.error instanceof ApiError ? annotate.error.message : "Try again."}</Alert>}
       <div className="signal-evidence-actions">
-        <Button variant="secondary" busy={annotate.isPending} onClick={save}>{annotate.isPending ? "Saving note" : "Save note"}</Button>
+        <Button variant="secondary" aria-describedby={noteHelpId} busy={annotate.isPending} onClick={save}>{annotate.isPending ? "Saving note" : "Save note"}</Button>
         {saved && !annotate.isPending && <span role="status" aria-live="polite" className="signal-save-state">Note saved.</span>}
       </div>
+      <p id={noteHelpId} className="signal-field-hint">Saves your note without changing the result. It is not included in shared reports.</p>
     </section>
   );
 }
@@ -182,6 +183,7 @@ function OverrideDialog({ flag, onClose, guarded = false }: { flag: FlagOut; onC
   const [attempted, setAttempted] = useState(false);
   const override = useOverrideFlag(flag.id, guarded ? flag.check_run_id : undefined);
   const errorId = useId();
+  const effectHelpId = useId();
   const invalid = attempted && reason.trim().length === 0;
 
   function confirm() {
@@ -194,10 +196,10 @@ function OverrideDialog({ flag, onClose, guarded = false }: { flag: FlagOut; onC
     <Dialog
       title="Dismiss this finding?"
       onClose={override.isPending ? undefined : onClose}
-      actions={<><Button variant="secondary" disabled={override.isPending} onClick={onClose}>Cancel</Button><Button variant="brand" busy={override.isPending} onClick={confirm}>Yes, dismiss finding</Button></>}
+      actions={<><Button variant="secondary" disabled={override.isPending} onClick={onClose}>Cancel</Button><Button variant="brand" aria-describedby={effectHelpId} busy={override.isPending} onClick={confirm}>Yes, dismiss finding</Button></>}
     >
       <div className="signal-resolution-dialog" data-workspace-origin="review" aria-busy={override.isPending}>
-        <p>{isWorkspaceSample() ? "This saves your decision in this sample. The original evidence and your reason stay in the review record. No score deduction is applied in this sample." : "This finding will no longer count against readiness. The original evidence and your reason will stay in the review record."}</p>
+        <p id={effectHelpId}>{isWorkspaceSample() ? "This saves your decision in this sample. The original evidence and your reason stay in the review record. No score deduction is applied in this sample." : "This finding will no longer count against readiness. The original evidence and your reason will stay in the review record."}</p>
         <label className="signal-evidence-field">
           <span>Why are you dismissing this finding? (required)</span>
           <textarea
@@ -224,6 +226,8 @@ function ResolutionControl({ flag, guarded = false }: { flag: FlagOut; guarded?:
   const [overrideOpen, setOverrideOpen] = useState(false);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const overrideTriggerRef = useRef<HTMLButtonElement>(null);
+  const dismissHelpId = useId();
+  const sourceHelpId = useId();
   const confirmSourceEligible = flag.check_kind === "citation_integrity" && flag.ai_verdict_summary === "unverifiable_not_found";
 
   function closeOverride() {
@@ -250,14 +254,15 @@ function ResolutionControl({ flag, guarded = false }: { flag: FlagOut; guarded?:
       {confirmSourceEligible && (flag.citation_source_key ? (
         <div className="signal-confirm-source-option">
           <h3>Verified the source yourself?</h3>
-          <p>Confirming the source resolves this flag and updates the shared source record for any manuscript citing the same DOI, ISBN, or title.</p>
+          <p id={sourceHelpId}>Opens a form to record where you checked this source. Confirming it closes this finding and marks the same source as verified for other manuscripts citing its DOI, ISBN, or title. You cannot undo source confirmation in this app.</p>
           {flag.citation_source_key.kind === "title" && <Alert title="Title matches are less precise" tone="warning">Double-check that it is the same source before confirming it across VERIDICAL.</Alert>}
-          <Button variant="secondary" onClick={() => setConfirmOpen(true)}>Confirm this source</Button>
+          <Button variant="secondary" aria-describedby={sourceHelpId} onClick={() => setConfirmOpen(true)}>Confirm this source</Button>
         </div>
       ) : (
         <Alert title="No source record can be confirmed" tone="info">VERIDICAL could not identify a DOI, ISBN, or title. If you verified the citation independently, dismiss only this finding and explain why.</Alert>
       ))}
-      <div className="signal-evidence-actions"><Button ref={overrideTriggerRef} variant="secondary" onClick={() => setOverrideOpen(true)}>Dismiss finding</Button></div>
+      <div className="signal-evidence-actions"><Button ref={overrideTriggerRef} variant="secondary" aria-describedby={dismissHelpId} onClick={() => setOverrideOpen(true)}>Dismiss finding</Button></div>
+      <p id={dismissHelpId} className="signal-field-hint">Opens a form for your reason. Nothing is dismissed until you confirm.</p>
       {overrideOpen && <OverrideDialog flag={flag} guarded={guarded} onClose={closeOverride} />}
       {confirmOpen && <ConfirmCitationSourceModal flag={flag} guarded={guarded} onClose={() => setConfirmOpen(false)} />}
     </section>
