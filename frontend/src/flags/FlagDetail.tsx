@@ -28,6 +28,7 @@ import { Button } from "../ui/Button";
 import { PValueComparison } from "./PValueComparison";
 import { AgreementComparison, type AgreementStatementRole } from "./AgreementComparison";
 import { CitationComparison } from "./CitationComparison";
+import { CitationSourceLinks } from "./CitationSourceLinks";
 import { CitationHistoryWarning } from "./CitationHistoryWarning";
 import { useFlag } from "./useFlag";
 import { recoverableReadError } from "../report/reportReadState";
@@ -95,6 +96,7 @@ function EvidenceSection({
       <PValueComparison flag={flag} />
       <AgreementComparison flag={flag} onSource={onSource} activeRole={activeRole} />
       <CitationComparison flag={flag} />
+      <CitationSourceLinks flag={flag} />
       {/* BUG-154: the API has always returned a complete
           passage_pair for a matched flag (own/matched excerpt +
           context both sides, similarity, level) -- this page fetched

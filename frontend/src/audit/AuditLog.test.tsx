@@ -9,10 +9,7 @@ function renderWithProviders(...args: Parameters<typeof renderAppWithProviders>)
   return renderAppWithProviders(args[0], { authInstructorId: 1, ...args[1] });
 }
 
-// Mobile card + desktop table both render in the DOM simultaneously (CSS
-// `sm:hidden`/`hidden sm:block` — jsdom applies no media queries), so every
-// query here expects TWO matches, not one (same convention as
-// dashboard/ManuscriptsTable.test.tsx and rubric/Manage.test.tsx).
+// One semantic desktop table exposes each saved event once.
 
 const PAGE = {
   items: [
@@ -116,7 +113,7 @@ describe("AuditLogPage", () => {
       vi.stubGlobal("fetch", stubFetchByPath({ "/audit": { ...PAGE, items } }));
       renderWithProviders(<AuditLogPage />, { route: "/audit" });
       await screen.findByRole("table");
-      expect(screen.getAllByRole("button", { name: "Detail" })).toHaveLength(4);
+      expect(screen.getAllByRole("button", { name: "Detail" })).toHaveLength(2);
       expect(screen.queryByText("Automated:")).not.toBeInTheDocument();
       expect(screen.queryByText("Grouped entries")).not.toBeInTheDocument();
     },
@@ -261,8 +258,8 @@ describe("AuditLogPage", () => {
   it("lists audit events with their labels", async () => {
     vi.stubGlobal("fetch", stubFetchByPath({ "/audit": PAGE }));
     renderWithProviders(<AuditLogPage />, { route: "/audit", path: "/audit" });
-    expect((await screen.findAllByText("AI call")).length).toBe(2);
-    expect(screen.getAllByText("Criterion judgment recorded").length).toBe(2);
+    expect((await screen.findAllByText("AI call")).length).toBe(1);
+    expect(screen.getAllByText("Criterion judgment recorded").length).toBe(1);
   });
 
   it("V-078: names stored-file deletion consistently and explains retained history", async () => {
@@ -272,7 +269,7 @@ describe("AuditLogPage", () => {
       "/audit/42": { ...row, input_hash: null, payload: { manuscript_id: 9 } },
     }));
     renderWithProviders(<AuditLogPage />, { route: "/audit", path: "/audit" });
-    expect((await screen.findAllByText("Stored file deleted")).length).toBe(2);
+    expect((await screen.findAllByText("Stored file deleted")).length).toBe(1);
     fireEvent.click(screen.getAllByRole("button", { name: "Detail" })[0]);
     expect(await screen.findByText(/An instructor deleted the uploaded file and its extracted text/))
       .toHaveTextContent("Saved reports, decisions, comparison evidence and audit history are kept.");
@@ -329,7 +326,7 @@ describe("AuditLogPage", () => {
     };
     vi.stubGlobal("fetch", stubFetchByPath({ "/audit": overridden }));
     renderWithProviders(<AuditLogPage />, { route: "/audit", path: "/audit" });
-    expect((await screen.findAllByText("Flag overridden")).length).toBe(2);
+    expect((await screen.findAllByText("Flag overridden")).length).toBe(1);
     expect(screen.queryAllByText("flag_overridden")).toHaveLength(0);
   });
 
@@ -366,7 +363,7 @@ describe("AuditLogPage", () => {
       stubFetchByPath({ "/audit": { items: [], total: 0, page: 1, page_size: 25 } }),
     );
     renderWithProviders(<AuditLogPage />, { route: "/audit", path: "/audit" });
-    expect((await screen.findAllByText("No audit events match this filter.")).length).toBe(2);
+    expect((await screen.findAllByText("No audit events match this filter.")).length).toBe(1);
     expect(await screen.findByText("No audit events match this filter.", { selector: '[role="status"]' })).toBeInTheDocument();
   });
 
@@ -492,7 +489,7 @@ describe("AuditLogPage", () => {
     vi.stubGlobal("fetch", stubFetchByPath({ "/audit": { ...PAGE, items } }));
     renderWithProviders(<AuditLogPage />, { route: "/audit" });
     await screen.findByRole("table");
-    expect(screen.getAllByRole("button", { name: "Detail" })).toHaveLength(4);
+    expect(screen.getAllByRole("button", { name: "Detail" })).toHaveLength(2);
     expect(screen.queryByText("Grouped entries")).not.toBeInTheDocument();
   });
 
@@ -501,7 +498,7 @@ describe("AuditLogPage", () => {
     vi.stubGlobal("fetch", stubFetchByPath({ "/audit": { ...PAGE, items: [row], total: 1 }, "/audit/42": { ...row, payload: { instructor_id: 1 } } }));
     renderWithProviders(<AuditLogPage />, { route: "/audit?detail=42" });
     expect(await screen.findByText("Not established by this entry.")).toBeVisible();
-    expect(screen.getAllByText(/Origin unavailable/)).toHaveLength(2);
+    expect(screen.getAllByText(/Origin unavailable/)).toHaveLength(1);
     expect(screen.queryByText("You")).not.toBeInTheDocument();
     expect(screen.queryByText("Automated:")).not.toBeInTheDocument();
   });
@@ -513,13 +510,15 @@ describe("AuditLogPage", () => {
     expect(document.title).toBe("Audit log - VERIDICAL");
   });
 
-  it("the mobile and desktop list regions resolve a real aria-labelledby target (UX review finding: the id didn't exist)", async () => {
+  it("the single desktop audit table resolves its accessible heading", async () => {
     vi.stubGlobal("fetch", stubFetchByPath({ "/audit": PAGE }));
     renderWithProviders(<AuditLogPage />, { route: "/audit", path: "/audit" });
     await screen.findAllByText("AI call");
     const heading = document.getElementById("audit-log-heading");
     expect(heading).not.toBeNull();
     expect(heading?.textContent).toBe("Audit");
+    expect(screen.getAllByRole("table")).toHaveLength(1);
+    expect(screen.getByRole("table")).toHaveAttribute("aria-labelledby", "audit-log-heading");
   });
 
   it("BUG (UX review finding): the Detail modal shows a real error and retry, never stays stuck on 'Loading' forever", async () => {
@@ -563,8 +562,8 @@ describe("AuditLogPage", () => {
     };
     vi.stubGlobal("fetch", stubFetchByPath({ "/audit": rare }));
     renderWithProviders(<AuditLogPage />, { route: "/audit", path: "/audit" });
-    expect((await screen.findAllByText("Rubric parse attempt")).length).toBe(2);
-    expect(screen.getAllByText("AI model exhausted, failed over").length).toBe(2);
+    expect((await screen.findAllByText("Rubric parse attempt")).length).toBe(1);
+    expect(screen.getAllByText("AI model exhausted, failed over").length).toBe(1);
     expect(screen.queryAllByText("rubric_parse_attempt")).toHaveLength(0);
     expect(screen.queryAllByText("llm_model_exhausted")).toHaveLength(0);
   });
@@ -585,11 +584,11 @@ describe("AuditLogPage", () => {
     vi.stubGlobal("fetch", stubFetchByPath({ "/audit": workflowEvents }));
     renderWithProviders(<AuditLogPage />, { route: "/audit", path: "/audit" });
 
-    expect((await screen.findAllByText("Citation source confirmed")).length).toBe(2);
-    expect(screen.getAllByText("Check cancellation requested").length).toBe(2);
-    expect(screen.getAllByText("Check cancelled").length).toBe(2);
-    expect(screen.getAllByText("Failed upload removed from Review Desk").length).toBe(2);
-    expect(screen.getAllByText("Future review event").length).toBe(2);
+    expect((await screen.findAllByText("Citation source confirmed")).length).toBe(1);
+    expect(screen.getAllByText("Check cancellation requested").length).toBe(1);
+    expect(screen.getAllByText("Check cancelled").length).toBe(1);
+    expect(screen.getAllByText("Failed upload removed from Review Desk").length).toBe(1);
+    expect(screen.getAllByText("Future review event").length).toBe(1);
     expect(screen.queryByText(/citation_source_confirmed|future_review_event/)).not.toBeInTheDocument();
   });
 
@@ -614,7 +613,7 @@ describe("AuditLogPage", () => {
 
     // Shared expand state -- toggling the desktop control expands both.
     fireEvent.click(screen.getByRole("button", { name: "Show all" }));
-    expect(await screen.findAllByRole("button", { name: "Detail" })).toHaveLength(6); // 3 rows x (mobile + desktop)
+    expect(await screen.findAllByRole("button", { name: "Detail" })).toHaveLength(3);
   });
 
   it("BUG-219: never collapses a fake-mode row and a real-mode row into one group, even when adjacent with the same event_type and manuscript", async () => {
@@ -631,7 +630,7 @@ describe("AuditLogPage", () => {
     renderWithProviders(<AuditLogPage />, { route: "/audit", path: "/audit" });
     // Two ungrouped single rows, each with its own Detail button -- never
     // one "2 x ..." summary that would have to pick just one mode to state.
-    expect((await screen.findAllByRole("button", { name: "Detail" })).length).toBe(4); // 2 rows x (mobile + desktop)
+    expect((await screen.findAllByRole("button", { name: "Detail" })).length).toBe(2);
     expect(screen.queryByRole("button", { name: "Show all" })).not.toBeInTheDocument();
   });
 
@@ -648,13 +647,13 @@ describe("AuditLogPage", () => {
     };
     vi.stubGlobal("fetch", stubFetchByPath({ "/audit": threeModes }));
     renderWithProviders(<AuditLogPage />, { route: "/audit", path: "/audit" });
-    expect((await screen.findAllByText("Test mode")).length).toBe(2); // mobile + desktop
-    expect(screen.getAllByText("Mode unknown").length).toBe(2);
+    expect((await screen.findAllByText("Test mode")).length).toBe(1);
+    expect(screen.getAllByText("Mode unknown").length).toBe(1);
     // "AI call" itself renders 3x2 = 6 times (once per row per view) --
     // asserting there are only 4 mode tags total is what proves the third
     // (real-mode) row got none, without needing a query that can express
     // "absent on exactly one of three rows."
-    expect(screen.queryAllByText("Test mode").length + screen.queryAllByText("Mode unknown").length).toBe(4);
+    expect(screen.queryAllByText("Test mode").length + screen.queryAllByText("Mode unknown").length).toBe(2);
   });
 
   it("BUG-219: a non-LLM event never carries a mode tag, even defensively (the frontend's own gate, not just trust in the backend's)", async () => {
@@ -704,9 +703,9 @@ describe("AuditLogPage", () => {
     await screen.findAllByText("Test mode");
 
     // List: the bold label itself, not just the adjacent tag.
-    expect(screen.getAllByText("Test-mode call").length).toBe(2); // mobile + desktop
-    expect(screen.getAllByText("Automated review step").length).toBe(2);
-    expect(screen.getAllByText("AI call").length).toBe(2); // the real-mode row only
+    expect(screen.getAllByText("Test-mode call").length).toBe(1);
+    expect(screen.getAllByText("Automated review step").length).toBe(1);
+    expect(screen.getAllByText("AI call").length).toBe(1); // the real-mode row only
 
     const detailButtons = screen.getAllByRole("button", { name: "Detail" });
     for (const [index, mode] of [

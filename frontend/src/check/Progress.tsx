@@ -3,7 +3,7 @@ import { ReviewDeskReturnLink } from "../routing/ReviewDeskReturnLink";
 import { useEffect, useRef, useState } from "react";
 import { useParams } from "react-router";
 import type { CheckRun, CheckRunStatus } from "../api/types";
-import { formatManuscriptOption, manuscriptIdentity } from "../domain/manuscriptLabel";
+import { manuscriptIdentity } from "../domain/manuscriptLabel";
 import { useRouteFocus } from "../routing/useRouteFocus";
 import { ActionLink } from "../ui/ActionLink";
 import { Alert } from "../ui/Alert";
@@ -123,15 +123,11 @@ const STAGE_MARKS: Record<StageState, string> = {
   done: "✓",
   pending: "·",
   running: "→",
-  skipped: "Not run",
+  skipped: "-",
 };
 
 function manuscriptLabel(run: CheckRun): string {
-  if (!run.manuscript_group_label) return `Manuscript #${run.manuscript_id}`;
-  return formatManuscriptOption(
-    manuscriptIdentity(run.manuscript_group_label, run.manuscript_original_filename),
-    run.manuscript_uploaded_at ? formatDateTime(run.manuscript_uploaded_at) : "an earlier date",
-  );
+  return manuscriptIdentity(run.manuscript_group_label ?? `Manuscript #${run.manuscript_id}`, run.manuscript_original_filename).primary;
 }
 
 export function CheckProgressPage() {
@@ -160,7 +156,7 @@ export function CheckProgressPage() {
       <header className="signal-route-header signal-check-progress__header">
         <div>
           <nav aria-label="Breadcrumb"><ReviewDeskReturnLink fallback="/dashboard?queue=checking">Review Desk</ReviewDeskReturnLink><span aria-hidden="true">/</span><span>Check progress</span></nav>
-          <p className="signal-eyebrow">Check · Live pipeline</p>
+          <p className="signal-eyebrow">Manuscript check</p>
           <h1 ref={headingRef} tabIndex={-1}>Check progress</h1>
           <p className="signal-route-header__intro">Follow the recorded stages. Leaving this page does not cancel the check.</p>
         </div>
@@ -177,10 +173,7 @@ export function CheckProgressPage() {
         <Alert title="Could not load this check's progress" tone="error" role="alert"><Button variant="secondary" onClick={() => refetch()}>Try again</Button></Alert>
       ) : (
         <>
-          <section className="signal-check-identity" aria-labelledby="check-manuscript-heading">
-            <div><p className="signal-section-kicker">Manuscript</p><h2 id="check-manuscript-heading">{manuscriptLabel(run)}</h2></div>
-            <dl><div><dt>Required format</dt><dd>{run.rubric_title ?? "Active format"}</dd></div><div><dt>Run</dt><dd>#{run.id}</dd></div></dl>
-          </section>
+
 
           {summary?.kind === "queued" && <Alert title="Waiting to start" tone="info">Your check is saved and waiting to start. Checks share capacity across instructors, so start order can change. A start time is not available. You can leave this page and return later.</Alert>}
 
@@ -188,8 +181,9 @@ export function CheckProgressPage() {
 
           {summary?.kind === "blocked" && run.status === "queued" && <Alert title={summary.title} tone="warning">{summary.detail}</Alert>}
 
+          <div className="signal-check-layout">
           <section className="signal-check-pipeline" aria-labelledby="pipeline-heading">
-            <div className="signal-section-heading"><div><p className="signal-section-kicker">Pipeline</p><h2 id="pipeline-heading">What VERIDICAL is doing</h2></div><p>Completed work remains traceable even if this run stops.</p></div>
+            <div className="signal-section-heading"><div><p className="signal-section-kicker">Check stages</p><h2 id="pipeline-heading">Recorded progress</h2></div><p>Completed work remains traceable even if this run stops.</p></div>
             <ol className="signal-check-track">
               {STAGE_ORDER.map(({ key, label }) => toStage(run, key, label, summary!)).map((stage) => (
                 <li key={stage.id} className={`signal-check-stage signal-check-stage--${stage.state}`} aria-current={stage.state === "running" || stage.state === "blocked" ? "step" : undefined}>
@@ -200,6 +194,14 @@ export function CheckProgressPage() {
               ))}
             </ol>
           </section>
+          <div className="signal-check-context">
+          <section className="signal-check-identity" aria-labelledby="check-manuscript-heading">
+            <div><p className="signal-section-kicker">Manuscript</p><h2 id="check-manuscript-heading">{manuscriptLabel(run)}</h2><p className="signal-check-filename">{run.manuscript_original_filename ?? "Filename unavailable"}</p></div>
+            <dl><div><dt>Uploaded</dt><dd>{run.manuscript_uploaded_at ? formatDateTime(run.manuscript_uploaded_at) : "Earlier upload"}</dd></div><div><dt>Required format</dt><dd>{run.rubric_title ?? "Active format"}</dd></div><div><dt>Run</dt><dd>#{run.id}</dd></div></dl>
+          </section>
+          {run.status === "done" && <section className="signal-check-complete" aria-labelledby="check-complete-heading"><div><p className="signal-section-kicker">Next: Review</p><h2 id="check-complete-heading">Review available</h2><p>Read the manuscript beside VERIDICAL's recorded criteria and integrity signals before you make a final decision.</p></div><ActionLink to={`/report/${run.id}/document`} variant="brand">Open manuscript review</ActionLink></section>}
+          </div>
+          </div>
 
           {run.status === "failed" && run.stage_status?.failed && <Alert title="This check stopped" tone="error">{FAILURE_MESSAGES[run.stage_status.failed.code] ?? run.stage_status.failed.message}</Alert>}
 
@@ -207,7 +209,7 @@ export function CheckProgressPage() {
 
           {!showCancel && cancellationError}
 
-          {run.status === "done" && <section className="signal-check-complete" aria-labelledby="check-complete-heading"><div><p className="signal-section-kicker">Next: Review</p><h2 id="check-complete-heading">Your manuscript review is ready</h2><p>Read the manuscript beside VERIDICAL's recorded criteria and integrity signals before you make a final decision.</p></div><ActionLink to={`/report/${run.id}/document`} variant="brand">Open manuscript review</ActionLink></section>}
+
 
           <div className="signal-check-actions">
             <ReviewDeskReturnLink fallback="/dashboard?queue=checking" variant="quiet">Back to Review Desk</ReviewDeskReturnLink>

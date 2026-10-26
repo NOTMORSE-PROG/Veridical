@@ -54,11 +54,11 @@ describe("resolveTourStep", () => {
     expect(resolved).toBeNull();
   });
 
-  it("tries anchorSelectors in order and uses the first real match (desktop/mobile dual-render)", () => {
-    mountAnchor("replay-tour-mobile"); // desktop selector absent, mobile present
+  it("falls back to the visible desktop Account control when the replay action is closed", () => {
+    mountAnchor("replay-tour-account");
     const resolved = resolveTourStep(4, "/dashboard");
     expect(resolved?.step.id).toBe("replay");
-    expect(resolved?.el.getAttribute("data-tour")).toBe("replay-tour-mobile");
+    expect(resolved?.el.getAttribute("data-tour")).toBe("replay-tour-account");
   });
 
   it("ignores a matching selector with a zero-size rect (present in DOM but not actually rendered)", () => {

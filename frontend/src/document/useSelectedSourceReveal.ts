@@ -2,6 +2,7 @@
 import { useCallback, useLayoutEffect, useRef, type RefObject } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { ME_QUERY_KEY } from "../auth/useAuth";
+import { recordSourceReadingPlacement } from "./useDocxReadingPosition";
 
 export function useSelectedSourceReveal({ runId, search, requestedId, resolvedId, visible, source }: {
   runId: number; search: string; requestedId: number | null; resolvedId: number | null;
@@ -68,6 +69,7 @@ export function useSelectedSourceReveal({ runId, search, requestedId, resolvedId
     const bounds = root.getBoundingClientRect();
     const target = marker.getBoundingClientRect();
     root.scrollTo({ top: root.scrollTop + target.top - bounds.top - root.clientTop, behavior: "auto" });
+    recordSourceReadingPlacement(root);
   });
   return { arm, adopt };
 }

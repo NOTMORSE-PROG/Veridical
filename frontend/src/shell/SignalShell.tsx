@@ -30,34 +30,19 @@ function CapacityStatement() {
   </span>;
 }
 
-function WorkspaceNavigation({
-  label,
-  mobile = false,
-  onNavigate,
-}: {
-  label: string;
-  mobile?: boolean;
-  onNavigate?: () => void;
-}) {
+function WorkspaceModeIndicator() {
+  const { data: quota } = useQuota();
+  return quota?.mode === "fake" ? <span className="signal-workspace-mode" role="status">Test mode</span> : null;
+}
+
+function WorkspaceNavigation({ label }: { label: string }) {
   const location = useLocation();
-  return (
-    <nav aria-label={label} className={mobile ? "signal-mobile-navigation" : "signal-primary-navigation"}>
-      <ul>
-        {SIGNAL_NAVIGATION.map((item) => (
-          <li key={item.label}>
-            <Link
-              to={item.to}
-              aria-current={item.matches(location.pathname) ? "page" : undefined}
-              onClick={onNavigate}
-            >
-              <span>{item.label}</span>
-              {mobile && <small>{item.description}</small>}
-            </Link>
-          </li>
-        ))}
-      </ul>
-    </nav>
-  );
+  return <nav aria-label={label} className="signal-primary-navigation"><ul>
+    {SIGNAL_NAVIGATION.map(item => <li key={item.label}>
+      <Link to={item.to} aria-current={item.matches(location.pathname) ? "page" : undefined}
+        onFocus={event => event.currentTarget.scrollIntoView?.({ block: "nearest", inline: "nearest" })}><span>{item.label}</span></Link>
+    </li>)}
+  </ul></nav>;
 }
 
 function ReplayTourControl({ onDone }: { onDone?: () => void }) {
@@ -132,81 +117,6 @@ function AccountDisclosure() {
   );
 }
 
-function MobileWorkspaceMenu() {
-  const { data: me } = useMe();
-  const logout = useLogout();
-  const tour = useTour();
-  const location = useLocation();
-  const [open, setOpen] = useState(false);
-  const triggerRef = useRef<HTMLButtonElement>(null);
-
-  useEffect(() => setOpen(false), [location.pathname, location.search]);
-
-  useEffect(() => {
-    if (!open) return;
-    function onKeyDown(event: KeyboardEvent) {
-      if (event.key === "Escape") {
-        setOpen(false);
-        triggerRef.current?.focus();
-      }
-    }
-    document.addEventListener("keydown", onKeyDown);
-    return () => document.removeEventListener("keydown", onKeyDown);
-  }, [open]);
-
-  // BUG-210: tabbing past the panel's last focusable item used to leave
-  // focus on the page underneath while the panel stayed open and visually
-  // covered it (WCAG 2.4.11) -- same defect BUG-102 fixed once already in
-  // the predecessor AppShell, reused here via the identical blur-to-outside
-  // pattern AccountDisclosure (above) already uses for its own panel.
-  function handleBlur(event: FocusEvent<HTMLDivElement>) {
-    const next = event.relatedTarget as Node | null;
-    if (next && (event.currentTarget.contains(next) || next === triggerRef.current)) return;
-    setOpen(false);
-  }
-
-  return (
-    <div className="signal-mobile-menu" onBlur={handleBlur}>
-      <button
-        ref={triggerRef}
-        type="button"
-        className="signal-mobile-menu__trigger"
-        aria-expanded={open}
-        aria-controls="signal-mobile-menu-panel"
-        data-tour="replay-tour-menu"
-        onClick={() => setOpen((value) => !value)}
-      >
-        <span aria-hidden="true" className="signal-mobile-menu__icon"><i /><i /><i /></span>
-        <span>Menu</span>
-      </button>
-      {open && (
-        <div id="signal-mobile-menu-panel" className="signal-mobile-menu__panel">
-          <WorkspaceNavigation label="Mobile navigation" mobile onNavigate={() => setOpen(false)} />
-          <div className="signal-mobile-menu__capacity"><CapacityStatement /></div>
-          {me && (
-            <div className="signal-mobile-menu__account">
-              <p>Signed in as <strong>{me.display_name}</strong></p>
-              <button
-                type="button"
-                className="signal-account-action"
-                onClick={() => {
-                  tour.replay();
-                  setOpen(false);
-                }}
-              >
-                Replay introduction
-              </button>
-              <button type="button" className="signal-account-action" onClick={() => logout.mutate()}>
-                Sign out
-              </button>
-            </div>
-          )}
-        </div>
-      )}
-    </div>
-  );
-}
-
 export function SignalShell({ children }: { children?: ReactNode }) {
   return (
     <TourProvider>
@@ -221,10 +131,9 @@ export function SignalShell({ children }: { children?: ReactNode }) {
             </Link>
             <WorkspaceNavigation label="Primary navigation" />
             <div className="signal-workspace-header__utilities">
-              <CapacityStatement />
+              <WorkspaceModeIndicator />
               <AccountDisclosure />
             </div>
-            <MobileWorkspaceMenu />
           </div>
         </header>
 

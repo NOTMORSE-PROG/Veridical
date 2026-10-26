@@ -249,14 +249,13 @@ function validateRhythmContract(candidateTokens, candidateRhythm) {
   );
   const expectedSettingsNavOffsets = [
     "var(--signal-workspace-header-height)",
-    "var(--signal-workspace-header-compact-height)",
   ];
   if (
     settingsNavOffsets.length !== expectedSettingsNavOffsets.length
     || settingsNavOffsets.some((value, index) => value !== expectedSettingsNavOffsets[index])
   ) {
     violations.push(
-      `.signal-settings-nav offsets must clear the desktop then compact workspace headers; found ${settingsNavOffsets.join(" then ") || "missing"}`,
+      `.signal-settings-nav offsets must clear the desktop workspace header; found ${settingsNavOffsets.join(" then ") || "missing"}`,
     );
   }
 

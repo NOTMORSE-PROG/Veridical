@@ -71,7 +71,7 @@ export const TOUR_STEPS: readonly TourStep[] = [
     routeMatch: () => true,
     // Menu items disappear after replay. Persistent menu triggers provide
     // a visible fallback on routes without a format/check anchor.
-    anchorSelectors: ['[data-tour="replay-tour-desktop"]', '[data-tour="replay-tour-mobile"]', '[data-tour="replay-tour-account"]', '[data-tour="replay-tour-menu"]'],
+    anchorSelectors: ['[data-tour="replay-tour-desktop"]', '[data-tour="replay-tour-account"]'],
     title: "Come back anytime",
     body: "Use Replay introduction in your account controls whenever you need a reminder.",
   },

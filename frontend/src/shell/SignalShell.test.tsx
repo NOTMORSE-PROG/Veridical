@@ -34,6 +34,7 @@ describe("SignalShell destination navigation", () => {
       "/quota": { mode: "live", key_state, calls_remaining },
     }));
     renderWithProviders(<SignalShell><p>Route content</p></SignalShell>);
+    fireEvent.click(await screen.findByRole("button", { name: "Account" }));
     expect((await screen.findAllByText(text as string)).length).toBeGreaterThan(0);
     expect(screen.queryByText(/17 remaining/)).not.toBeInTheDocument();
   });
@@ -44,6 +45,7 @@ describe("SignalShell destination navigation", () => {
       "/quota": { mode: state === "fake" ? "fake" : "live", calls_remaining: state === "fake" ? 300 : null },
     }));
     renderWithProviders(<SignalShell><p>Route content</p></SignalShell>);
+    fireEvent.click(await screen.findByRole("button", { name: "Account" }));
     await screen.findAllByText(state === "fake" ? "Test mode" : "AI setup status unknown");
     expect(screen.queryByText(/300 remaining/)).not.toBeInTheDocument();
     expect(screen.queryByText(/calls left/)).not.toBeInTheDocument();
@@ -69,7 +71,7 @@ describe("SignalShell destination navigation", () => {
     expect(fetch.mock.calls.every(([, init]) => !init?.method || init.method === "GET")).toBe(true);
   });
 
-  it.each(["Account", "Menu"])("V-081: replay from Settings survives closing its %s menu", async (triggerName) => {
+  it.each(["Account"])("V-081: replay from Settings survives closing its %s menu", async (triggerName) => {
     const me = { id: 1, email: "instructor@demo.local", display_name: "Instructor", onboarding_dismissed_at: "2026-01-01T00:00:00Z" };
     const fetchMock = stubFetchByPath({
       "/auth/session": { instructor: me },
@@ -102,68 +104,46 @@ describe("SignalShell destination navigation", () => {
     expect(screen.queryByRole("navigation", { name: "Work stages" })).not.toBeInTheDocument();
   });
 
-  it("opens one mobile menu with the same destinations and useful descriptions", async () => {
+  it("keeps one desktop navigation and Account without a mobile menu", async () => {
     renderShell();
-    const trigger = await screen.findByRole("button", { name: "Menu" });
-    expect(trigger).toHaveAttribute("aria-expanded", "false");
-
-    fireEvent.click(trigger);
-
-    expect(trigger).toHaveAttribute("aria-expanded", "true");
-    const navigation = screen.getByRole("navigation", { name: "Mobile navigation" });
-    expect(within(navigation).getByRole("link", { name: /Review Desk/ })).toBeInTheDocument();
-    expect(within(navigation).getByText("Manuscripts and work that need attention")).toBeInTheDocument();
-    expect(within(navigation).getByRole("link", { name: /Library/ })).toHaveAttribute("aria-current", "page");
-    expect(screen.getByText(/Signed in as/)).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Sign out" })).toBeInTheDocument();
-  });
-
-  it("closes the mobile menu after navigation and marks the new destination", async () => {
-    renderShell();
-    const trigger = await screen.findByRole("button", { name: "Menu" });
-    fireEvent.click(trigger);
-    fireEvent.click(
-      within(screen.getByRole("navigation", { name: "Mobile navigation" })).getByRole("link", {
-        name: /Audit/,
-      }),
-    );
-
-    await waitFor(() => expect(trigger).toHaveAttribute("aria-expanded", "false"));
+    expect(await screen.findByRole("button", { name: "Account" })).toBeInTheDocument();
+    expect(screen.getAllByRole("navigation", { name: "Primary navigation" })).toHaveLength(1);
+    expect(screen.queryByRole("button", { name: "Menu" })).not.toBeInTheDocument();
     expect(screen.queryByRole("navigation", { name: "Mobile navigation" })).not.toBeInTheDocument();
-    expect(
-      within(screen.getByRole("navigation", { name: "Primary navigation" })).getByRole("link", {
-        name: "Audit",
-      }),
-    ).toHaveAttribute("aria-current", "page");
   });
 
-  it("closes the mobile menu on Escape and restores focus to its trigger", async () => {
+  it("marks the destination after using the desktop navigation", async () => {
     renderShell();
-    const trigger = await screen.findByRole("button", { name: "Menu" });
-    fireEvent.click(trigger);
-    within(screen.getByRole("navigation", { name: "Mobile navigation" }))
-      .getByRole("link", { name: /Library/ })
-      .focus();
+    const navigation = await screen.findByRole("navigation", { name: "Primary navigation" });
+    fireEvent.click(within(navigation).getByRole("link", { name: "Audit" }));
+    await waitFor(() => expect(within(navigation).getByRole("link", { name: "Audit" })).toHaveAttribute("aria-current", "page"));
+  });
 
+  it("reveals the full desktop destination label when keyboard focus enters an overflowing navigation", async () => {
+    renderShell();
+    const navigation = await screen.findByRole("navigation", { name: "Primary navigation" });
+    const destination = within(navigation).getByRole("link", { name: "Settings" });
+    const reveal = vi.fn(); Object.defineProperty(destination, "scrollIntoView", { configurable: true, value: reveal });
+    destination.focus();
+    expect(reveal).toHaveBeenCalledWith({ block: "nearest", inline: "nearest" });
+    expect(destination).toHaveFocus();
+  });
+
+  it("closes Account on Escape and restores keyboard focus", async () => {
+    renderShell();
+    const trigger = await screen.findByRole("button", { name: "Account" });
+    trigger.focus(); fireEvent.click(trigger);
+    screen.getByRole("button", { name: "Sign out" }).focus();
     fireEvent.keyDown(document, { key: "Escape" });
-
     expect(trigger).toHaveAttribute("aria-expanded", "false");
     expect(trigger).toHaveFocus();
   });
 
-  it("BUG-210 (WCAG 2.4.11): closes when focus tabs past its last item, instead of leaving a focused control hidden underneath the still-open panel", async () => {
+  it("closes Account when keyboard focus leaves its final action", async () => {
     renderShell();
-    const trigger = await screen.findByRole("button", { name: "Menu" });
+    const trigger = await screen.findByRole("button", { name: "Account" });
     fireEvent.click(trigger);
-    const signOut = screen.getByRole("button", { name: "Sign out" });
-    const pageContent = screen.getByText("Route content");
-
-    // Simulates what a real forward Tab past the panel's last focusable
-    // item does: focus lands on the underlying page while the panel is
-    // still mounted -- same mechanism BUG-102 fixed once already in the
-    // predecessor AppShell (see AppShell.test.tsx's identical test).
-    fireEvent.blur(signOut, { relatedTarget: pageContent });
-
+    fireEvent.blur(screen.getByRole("button", { name: "Sign out" }), { relatedTarget: screen.getByText("Route content") });
     expect(trigger).toHaveAttribute("aria-expanded", "false");
     expect(screen.queryByRole("button", { name: "Sign out" })).not.toBeInTheDocument();
   });

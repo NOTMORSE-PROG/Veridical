@@ -641,80 +641,10 @@ function OwnedAuditLogPage({ owner }: { owner: AuditOwner }) {
 
       {!isLoading && !isError && (
         <>
-          {/* Mobile: card-per-row (grouped rows collapse to one card). */}
-          <ul aria-labelledby="audit-log-heading" className="flex flex-col gap-2 sm:hidden">
-            {data &&
-              groupConsecutive(data.items).map((entry) => {
-                if (entry.kind === "single") {
-                  const row = entry.row;
-                  return (
-                    <li key={row.id} className="rounded-lg border border-border bg-panel p-3">
-                      <div className="flex items-start justify-between gap-2">
-                        <span className="text-xs text-ink-tertiary">Entry #{row.id}<br />{formatEventTime(row.created_at)}</span>
-                        <button
-                          type="button"
-                          onClick={() => setParam("detail", String(row.id))}
-                          className="inline-flex min-h-11 items-center rounded-md border border-border-input px-3 text-sm font-medium text-link hover:bg-status-neutral-bg"
-                        >
-                          Detail
-                        </button>
-                      </div>
-                      <div className="mt-1.5 text-sm text-ink">
-                        <EventContent row={row} />
-                      </div>
-                    </li>
-                  );
-                }
-                const firstId = entry.rows[0].id;
-                const expanded = expandedGroups.has(firstId);
-                return (
-                  <li key={firstId} className="rounded-lg border border-border bg-panel p-3">
-                    <button
-                      type="button"
-                      aria-expanded={expanded}
-                      onClick={() => toggleGroup(firstId)}
-                      className="flex min-h-11 w-full items-center justify-between gap-2 text-left text-sm text-ink"
-                    >
-                      <span>
-                        <b>{entry.rows.length}</b> x {entry.label} events
-                        {entry.groupLabel && <span className="text-ink-tertiary"> · {entry.groupLabel}</span>}
-                        <ExecutionModeTag mode={entry.executionMode} />
-                      </span>
-                      <span aria-hidden="true" className="flex-none text-ink-tertiary">
-                        {expanded ? "−" : "+"}
-                      </span>
-                    </button>
-                    {expanded && (
-                      <ul className="mt-2 flex flex-col gap-2 border-t border-border pt-2">
-                        {entry.rows.map((row) => (
-                          <li key={row.id} className="flex items-start justify-between gap-2">
-                            <span className="text-xs text-ink-tertiary">Entry #{row.id}<br />{formatEventTime(row.created_at)}</span>
-                            <button
-                              type="button"
-                              onClick={() => setParam("detail", String(row.id))}
-                              className="inline-flex min-h-11 items-center rounded-md border border-border-input px-3 text-sm font-medium text-link hover:bg-status-neutral-bg"
-                            >
-                              Detail
-                            </button>
-                          </li>
-                        ))}
-                      </ul>
-                    )}
-                  </li>
-                );
-              })}
-            {data && data.items.length === 0 && (
-              <li className="rounded-lg border border-border bg-panel p-4 text-sm text-ink-tertiary">
-                No audit events match this filter.
-              </li>
-            )}
-          </ul>
-
-          {/* Desktop: the grid table. */}
           <div
             role="table"
             aria-labelledby="audit-log-heading"
-            className="hidden overflow-hidden rounded-lg border border-border sm:block"
+            className="overflow-auto rounded-lg border border-border"
           >
             <div
               role="row"
@@ -811,9 +741,9 @@ function OwnedAuditLogPage({ owner }: { owner: AuditOwner }) {
                 );
               })}
             {data && data.items.length === 0 && (
-              <p role="cell" className="px-4 py-3 text-sm text-ink-tertiary">
+              <div role="row"><p role="cell" aria-colspan={3} className="px-4 py-3 text-sm text-ink-tertiary">
                 No audit events match this filter.
-              </p>
+              </p></div>
             )}
           </div>
         </>

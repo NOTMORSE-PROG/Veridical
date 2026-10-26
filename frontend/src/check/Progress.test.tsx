@@ -109,7 +109,7 @@ describe("CheckProgressPage", () => {
     expect(screen.getByText("AI grading").closest("li")).toHaveClass("signal-check-stage--running");
     expect(screen.getByText("Integrity checks")).toBeInTheDocument();
     expect(screen.getByText("Readiness report")).toBeInTheDocument();
-    expect(screen.getByText(/G-11, uploaded/)).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "G-11" })).toBeInTheDocument();
   });
 
   it("BUG-022: shows the manuscript's original filename, not just its (possibly default) group_label", async () => {
@@ -123,7 +123,7 @@ describe("CheckProgressPage", () => {
       route: "/checks/5",
       path: "/checks/:checkRunId",
     });
-    expect(await screen.findByText(/Chapter1-3_FinalDefense\.pdf, uploaded/)).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "Chapter1-3_FinalDefense.pdf" })).toBeInTheDocument();
     expect(screen.queryByText(/^Ungrouped,/)).not.toBeInTheDocument();
   });
 

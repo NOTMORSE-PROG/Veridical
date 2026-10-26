@@ -726,6 +726,11 @@ export interface CitationSourceKeyOut {
 
 export interface FlagOut {
   assessment_revision: number | null;
+  citation_source_locator?: {
+    basis: "saved_reference";
+    order_index: number;
+    links: { kind: "doi_as_cited" | "url_as_cited"; url: string }[];
+  } | null;
   citation_metadata_review_warning?: "quoted_title_projection_unverified" | null;
   citation_metadata_comparison?: {
     schema_version: string;

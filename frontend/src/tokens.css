@@ -336,6 +336,7 @@
   --signal-flag-summary-basis: 20rem;
   --signal-flag-evidence-basis: 32rem;
   --signal-flag-passage-basis: 20rem;
+  --signal-settings-column-min: 24rem;
   --signal-review-source-min: 32rem;
   --signal-review-inspector-min: 20rem;
   --signal-format-source-min: 22rem;

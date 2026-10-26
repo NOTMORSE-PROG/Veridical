@@ -1,7 +1,7 @@
 import { useCallback, useLayoutEffect, useRef, useState } from "react";
 
 /** Measure the same token-sized tracks that the source/review layout uses. */
-export function useReviewWorkspaceCapacity(onCollapse?: (active: Element | null) => void) {
+export function useReviewWorkspaceCapacity(onCollapse?: (active: Element | null) => void, onExpand?: (active: Element | null) => void) {
   const [frameElement, setFrameElement] = useState<HTMLElement | null>(null);
   const frame = useCallback((element: HTMLElement | null) => { setFrameElement(element); }, []);
   const threshold = useRef<HTMLSpanElement>(null);
@@ -9,6 +9,8 @@ export function useReviewWorkspaceCapacity(onCollapse?: (active: Element | null)
   const measured = useRef<boolean | null>(null);
   const collapse = useRef(onCollapse);
   collapse.current = onCollapse;
+  const expand = useRef(onExpand);
+  expand.current = onExpand;
   useLayoutEffect(() => {
     const element = frameElement;
     if (!element) return;
@@ -18,6 +20,7 @@ export function useReviewWorkspaceCapacity(onCollapse?: (active: Element | null)
       if (minimum <= 0 || available <= 0) return;
       const next = available >= minimum;
       if (measured.current !== false && !next) collapse.current?.(document.activeElement);
+      if (measured.current === false && next) expand.current?.(document.activeElement);
       measured.current = next;
       setSplit(next);
     };

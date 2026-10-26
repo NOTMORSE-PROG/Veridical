@@ -28,6 +28,7 @@ import { useFlag } from "../flags/useFlag";
 import { PValueComparison } from "../flags/PValueComparison";
 import { AgreementComparison, type AgreementStatementRole } from "../flags/AgreementComparison";
 import { CitationComparison } from "../flags/CitationComparison";
+import { CitationSourceLinks } from "../flags/CitationSourceLinks";
 import { CitationHistoryWarning } from "../flags/CitationHistoryWarning";
 import { findingMethodLabel, isCitationMetadataFinding } from "../domain/findingMethod";
 import { SignalDecisionPanel } from "../report/SignalDecisionPanel";
@@ -309,6 +310,7 @@ function SelectedFindingEvidence({ finding, flag, locationFlagId, region, source
         <PValueComparison flag={flag} />
         <AgreementComparison flag={flag} findingNumber={finding.number} onSource={onStatementSource} activeRole={activeStatement} />
         <CitationComparison flag={flag} />
+        <CitationSourceLinks flag={flag} />
         {flag.ai_verdict_summary === "orphan_in_text_citation" ? <p className="signal-field-hint">The saved check did not link this citation to a reference-list entry. A matching entry is not available for side-by-side comparison.</p> : !citationMetadata && !comparative && !pValueFinding && flag.check_kind !== "internal_agreement" && <p className="signal-field-hint">This check evaluates one manuscript location. A second passage does not apply.</p>}
       </section>}
       {!wholeComparisonWithoutPair && <p className="signal-document-precision-note"><strong>{precision.label}</strong>. {precision.helper} Recorded location: <span>{instructorAnchor(sourceAnchor ?? flag.page_anchor)}</span>.</p>}
@@ -431,6 +433,7 @@ export function SignalDocumentViewerPage() {
   const sourceFocusOwner = useRef<HTMLElement | null>(null);
   const reviewTabRef = useRef<HTMLButtonElement>(null);
   const inspectorRef = useRef<HTMLElement>(null);
+  const capacityFocus = useRef<{ run: number; actor: number | undefined; search: string; pane: "manuscript" | "review"; ownership: FocusContinuation } | undefined>(undefined);
   const queueScrollRef = useRef(0);
   const queueFocusRef = useRef<number | null>(null);
   const restoreQueueRef = useRef(false);
@@ -463,9 +466,24 @@ export function SignalDocumentViewerPage() {
   const workspace = useReviewWorkspaceCapacity(active => {
     if (sourcePanelRef.current?.contains(active)) selectPane("manuscript");
     else if (inspectorRef.current?.contains(active)) selectPane("review");
+  }, active => {
+    const pane = active === manuscriptTabRef.current ? "manuscript" : active === reviewTabRef.current ? "review" : null;
+    if (!pane || !document.hasFocus()) return;
+    capacityFocus.current?.ownership.dispose();
+    headingRef.current?.focus({ preventScroll: true });
+    capacityFocus.current = { run: id, actor: me?.id, search: location.search, pane, ownership: claimFocusContinuation() };
   });
+  useLayoutEffect(() => {
+    const pending = capacityFocus.current;
+    if (!pending) return;
+    capacityFocus.current = undefined;
+    if (!workspace.split || pending.run !== id || pending.actor !== me?.id || pending.search !== location.search) {
+      pending.ownership.dispose(); return;
+    }
+    pending.ownership.focus(pending.pane === "manuscript" ? sourcePanelRef.current : inspectorRef.current, { preventScroll: true });
+  }, [workspace.split, id, me?.id, location.search]);
+  useEffect(() => () => capacityFocus.current?.ownership.dispose(), []);
   const singlePaneLayout = !workspace.split;
-  const docxScrollInPane = isDocx && singlePaneLayout;
   const paragraphsQuery = useManuscriptParagraphs(id, isDocx);
   const anchorRegion = parsedAnchorRegion && viewer?.available && (
     parsedAnchorRegion.page !== null
@@ -906,7 +924,7 @@ export function SignalDocumentViewerPage() {
               <button ref={reviewTabRef} id="review-tab" type="button" role="tab" aria-controls="review-panel" aria-label={reviewContext} aria-selected={activeTab === "review"} tabIndex={activeTab === "review" ? 0 : -1} onKeyDown={tabKey} onClick={() => selectPane("review")}>Review</button>
             </div>
             <div className="signal-document-grid">
-              <div ref={sourcePanelRef} tabIndex={docxScrollInPane ? 0 : -1} id="manuscript-panel" role="tabpanel" aria-labelledby="manuscript-tab" data-active={activeTab === "manuscript"} data-source-format={viewer?.source_format} className="signal-document-pane">
+              <div ref={sourcePanelRef} tabIndex={-1} id="manuscript-panel" role="tabpanel" aria-labelledby="manuscript-tab" data-active={activeTab === "manuscript"} data-source-format={viewer?.source_format} className="signal-document-pane">
                 {viewer?.available && viewer.source_format !== "pdf" && searchParams.get("source") === "page_text" && <p className="signal-document-reconstruction-note" role="status">Page text is available only for PDF sources. Showing the available source view.</p>}
                 {reportOrigin?.kind === "pending" ? <div className="signal-document-source-context">
                   <p><strong>Source opened from criterion review</strong>{pendingOriginText && <>: {pendingOriginText}</>}</p>
@@ -923,7 +941,7 @@ export function SignalDocumentViewerPage() {
                   regions={visibleRegions} flags={flags ?? []} selectedFlagId={selectedRegionId} onSelectFlag={selectFinding} requestedPage={requestedPage}
                   findingNumbers={numbersByFlagId} comparisonLeads={optional.snapshot} focusSelection={false}
                   requestedParagraph={anchorRegion?.paragraph ?? null} onPlaceRequestedParagraph={criterionInspectionRun.current === id && isDecision ? placeCriterionSource : undefined}
-                  requestedParagraphAttempt={criterionSource?.attempt} scrollInParent={docxScrollInPane} />
+                  requestedParagraphAttempt={criterionSource?.attempt} scrollInParent={false} />
               </div>
               <aside ref={inspectorRef} tabIndex={-1} id="review-panel" role="tabpanel" aria-labelledby="review-tab" data-active={activeTab === "review"} className="signal-document-inspector">
                 {isExploring ? <ReuseExplorePanel flags={flags} flagsFetching={flagsQuery.isFetching} flagsError={flagsQuery.isError} flagsSucceeded={flagsQuery.isSuccess} onRetryFlags={() => flagsQuery.refetch()} onSelectFlag={selectFinding} onBack={showQueue} includeReferenceList={includeReferenceList} includeBlockQuote={includeBlockQuote} onToggleReferenceList={(value) => setToggle("ref", value)} onToggleBlockQuote={(value) => setToggle("quote", value)} excludedMatchesQuery={excludedMatchesQuery} expandedMatchId={expandedMatchId} onExpandMatch={setMatch} />

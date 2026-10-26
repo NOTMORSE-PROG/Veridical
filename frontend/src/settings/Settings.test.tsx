@@ -194,7 +194,7 @@ describe("SettingsPage", () => {
     const section = screen.getByRole("region", { name: "Local AI budget" });
     expect(section.querySelector('div[aria-hidden="true"]')).toBeNull();
     expect(within(section).queryByText(key_state === "unavailable" ? "AI setup unavailable" : "AI setup status unknown")).not.toBeInTheDocument();
-    expect(within(section).getAllByText("Below limit")).toHaveLength(2);
+    expect(within(section).getAllByText("Below limit")).toHaveLength(1);
     expect(within(section).queryByText("Configured")).not.toBeInTheDocument();
     expect(within(section).queryByText("Unavailable for routing today")).not.toBeInTheDocument();
   });
@@ -386,7 +386,7 @@ describe("SettingsPage", () => {
     expect(
       screen.getByText("Test mode is active. These budget figures do not represent live provider usage."),
     ).toBeInTheDocument();
-    expect(screen.getAllByText("gemini-3.5-flash").length).toBe(2); // mobile card + desktop grid
+    expect(screen.getAllByText("gemini-3.5-flash")).toHaveLength(1);
   });
 
   it("BUG-084: the desktop quota grid's ARIA rows have a real table ancestor, and every row has one cell per column header", async () => {

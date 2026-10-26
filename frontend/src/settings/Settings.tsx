@@ -33,16 +33,18 @@ function SectionCard({
   title,
   children,
   budget = false,
+  wide = false,
 }: {
   headingId: string;
   title: string;
   children: ReactNode;
   budget?: boolean;
+  wide?: boolean;
 }) {
   return (
     <section
       aria-labelledby={headingId}
-      className={cx("signal-settings-section rounded-lg border border-border bg-panel p-4 shadow-sm sm:p-5", budget && "signal-settings-section--budget")}
+      className={cx("signal-settings-section rounded-lg border border-border bg-panel p-4 shadow-sm sm:p-5", budget && "signal-settings-section--budget", wide && "signal-settings-section--wide")}
     >
       <h2 id={headingId} tabIndex={-1} className="text-md mb-3 font-bold text-ink">
         {title}
@@ -67,8 +69,8 @@ function ProfileSection() {
   const { data: me } = useMe();
   if (!me) return null;
   return (
-    <SectionCard headingId="profile-heading" title="Profile">
-      <dl className="flex flex-col gap-2 text-sm">
+    <SectionCard headingId="profile-heading" title="Profile" wide>
+      <dl className="signal-settings-profile-facts text-sm">
         <div>
           <dt className="text-ink-tertiary">Display name</dt>
           <dd className="text-ink">{me.display_name}</dd>
@@ -538,7 +540,7 @@ function ModelCapacityTable({ models }: { models: ModelQuotaStatus[] }) {
   }, [models]);
 
   return (
-    <div className="hidden lg:block">
+    <div>
       <div
         ref={scrollRef}
         role="region"
@@ -570,7 +572,7 @@ function QuotaSection() {
 
   if (isPending) {
     return (
-      <SectionCard headingId="quota-heading" title="Local AI budget" budget>
+      <SectionCard headingId="quota-heading" title="Local AI budget" budget wide>
         <div role="status" aria-live="polite" aria-busy="true" className="text-sm text-ink-tertiary">
           Loading local AI budget...
         </div>
@@ -579,7 +581,7 @@ function QuotaSection() {
   }
   if (isError || !quota) {
     return (
-      <SectionCard headingId="quota-heading" title="Local AI budget" budget>
+      <SectionCard headingId="quota-heading" title="Local AI budget" budget wide>
         <div
           role="alert"
           className="rounded-md border border-status-attention-text/25 bg-status-attention-bg p-3 text-sm text-status-attention-text"
@@ -600,7 +602,7 @@ function QuotaSection() {
     ? "configured" : quota.key_state === "unavailable" ? "unavailable" : "unknown";
 
   return (
-    <SectionCard headingId="quota-heading" title="Local AI budget" budget>
+    <SectionCard headingId="quota-heading" title="Local AI budget" budget wide>
       <div className="signal-settings-budget-copy flex flex-col gap-2">
         {quota.mode === "live" && (
           <StatusPill tone={quota.key_source === "own" ? "success" : "neutral"}>
@@ -645,24 +647,7 @@ function QuotaSection() {
 
       {quota.models && quota.models.length > 0 && (
         <div className="mt-4">
-          <ul className="flex flex-col gap-2 lg:hidden">
-            {quota.models.map((model) => (
-              <li key={model.model} className="rounded-lg border border-border p-3 text-sm">
-                <div className="flex items-center justify-between gap-2">
-                  <span className="min-w-0 wrap-anywhere font-medium text-ink">
-                    {model.model}
-                  </span>
-                  <ModelLocalBudgetPill model={model} />
-                </div>
-                <dl className="signal-settings-model-metrics">
-                  <div><dt>Recorded budget / Configured limit</dt><dd>{model.recorded_budget_debits ?? model.calls_used} / {model.daily_limit}</dd></div>
-                  <div><dt>Local budget remaining</dt><dd>{model.calls_remaining}</dd></div>
-                  <div><dt>Cached responses reused</dt><dd>{model.cache_hits_today}</dd></div>
-                  <div><dt>Image requests enabled</dt><dd>{model.vision ? "Yes" : "No"}</dd></div>
-                </dl>
-              </li>
-            ))}
-          </ul>
+
           <ModelCapacityTable models={quota.models} />
           {quota.models.filter((model) => (model.historical_budget_debits ?? 0) > 0).map((model) => <p key={model.model} className="signal-settings-budget-copy mt-2 text-sm text-ink-secondary wrap-anywhere">
             Requested model {model.model} includes {model.historical_budget_debits} recorded budget debits from earlier identifiers: {model.budget_aliases?.join(", ")}. The remaining local budget includes a conservative reservation for earlier model records. A reservation is a local safety measure, not a count of additional API requests.
@@ -688,7 +673,7 @@ function TransparencySection() {
 
   if (isLoading) {
     return (
-      <SectionCard headingId="transparency-heading" title="Review rules and technical record">
+      <SectionCard headingId="transparency-heading" title="Review rules and technical record" wide>
         <div role="status" aria-live="polite" aria-busy="true" className="text-sm text-ink-tertiary">
           Loading scoring configuration…
         </div>
@@ -697,7 +682,7 @@ function TransparencySection() {
   }
   if (isError || !data) {
     return (
-      <SectionCard headingId="transparency-heading" title="Review rules and technical record">
+      <SectionCard headingId="transparency-heading" title="Review rules and technical record" wide>
         <div
           role="alert"
           className="rounded-md border border-status-attention-text/25 bg-status-attention-bg p-3 text-sm text-status-attention-text"
@@ -714,7 +699,7 @@ function TransparencySection() {
 
   const { thresholds, prompt_versions } = data;
   return (
-    <SectionCard headingId="transparency-heading" title="Review rules and technical record">
+    <SectionCard headingId="transparency-heading" title="Review rules and technical record" wide>
       <div className="flex flex-col gap-4 text-sm">
         <div>
           <h3 className="font-semibold text-ink">Readiness bands</h3>

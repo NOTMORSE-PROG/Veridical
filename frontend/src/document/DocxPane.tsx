@@ -15,6 +15,7 @@ import { truncateAtWord } from "../format/text";
 import { DocxSourceMedia } from "./DocxSourceMedia";
 import { COMPARISON_LEAD_COPY, comparisonLeadIdentity, isOptionalComparisonLead, sourceRecordPresentation, type ComparisonLeadSnapshot } from "../domain/comparisonLeadIdentity";
 import { claimFocusContinuation, type FocusContinuation } from "../routing/focusContinuation";
+import { recordSourceReadingPlacement, useDocxReadingPosition } from "./useDocxReadingPosition";
 
 function SpinnerIcon() {
   return (
@@ -99,6 +100,8 @@ export function DocxPane({
   const pendingSelectionFocus = useRef<FocusContinuation | null>(null);
   const observedSelection = useRef<number | null | undefined>(undefined);
   const paperRef = useRef<HTMLElement>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  useDocxReadingPosition(scrollRef, isVisible, !scrollInParent);
   const paragraphPlacement = useRef<{ pending: boolean; ownership: FocusContinuation } | null>(null);
 
   useEffect(() => {
@@ -118,6 +121,7 @@ export function DocxPane({
       placement.ownership.dispose();
       onPlaceRequestedParagraph(target);
     } else placement.ownership.focus(target);
+    if (scrollRef.current) recordSourceReadingPlacement(scrollRef.current);
   }, [requestedParagraph, paragraphs, tables, images, nativeMath, isVisible, onPlaceRequestedParagraph, requestedParagraphAttempt]);
 
   const flagsById = new Map(flags.map((f) => [f.id, f]));
@@ -203,7 +207,7 @@ export function DocxPane({
         <div className="signal-document-toolbar__controls"><button type="button" aria-expanded={detailsOpen} aria-controls={detailsId} onClick={() => setDetailsOpen((value) => !value)}>Source view details</button></div>
       </div>
 
-      <div role={scrollInParent ? undefined : "region"} tabIndex={scrollInParent ? undefined : 0} aria-label={scrollInParent ? undefined : `${documentLabel}, scrollable`} className="signal-document-scroll signal-document-scroll--docx">
+      <div ref={scrollRef} data-reading-position={scrollInParent ? undefined : "managed"} role={scrollInParent ? undefined : "region"} tabIndex={scrollInParent ? undefined : 0} aria-label={scrollInParent ? undefined : `${documentLabel}, scrollable`} className="signal-document-scroll signal-document-scroll--docx">
         <SourceViewDetails id={detailsId} open={detailsOpen} format="docx" comparisonMarkers={comparisonMarkers} freshFormatView={formatDocument}>
           {formatDocument && !paragraphsError && paragraphs && <p>{paragraphs.length} paragraphs · {tables.length} tables · {images.length} drawing occurrences. {nativeMathInventoryLabel(nativeMath)} · Main document body.</p>}
         </SourceViewDetails>
