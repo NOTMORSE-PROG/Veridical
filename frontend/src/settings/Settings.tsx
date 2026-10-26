@@ -24,6 +24,8 @@ import { quotaRemaining } from "../domain/quotaTone";
 import { useRouteFocus } from "../routing/useRouteFocus";
 import { PASSWORD_MIN_LENGTH } from "../config/ui";
 import { useDeleteApiKey, useSetApiKey, useSettings } from "./useSettings";
+import { isWorkspaceSample } from "../demo/workspaceFixture";
+import { useReviewWorkspaceCapacity } from "../document/useReviewWorkspaceCapacity";
 
 function SectionCard({
   headingId,
@@ -81,6 +83,7 @@ function ProfileSection() {
 }
 
 function PasswordSection() {
+  const prepared = isWorkspaceSample();
   const change = useChangePassword();
   const [current, setCurrent] = useState("");
   const [next, setNext] = useState("");
@@ -108,6 +111,7 @@ function PasswordSection() {
 
   function handleSubmit(event: FormEvent) {
     event.preventDefault();
+    if (prepared) return;
     setAttempted(true);
     setSuccess(false);
     // UX review finding (P1): only the current-password branch used to
@@ -153,6 +157,7 @@ function PasswordSection() {
 
   return (
     <SectionCard headingId="password-heading" title="Change password">
+      {prepared && <p className="signal-field-hint">Account access changes are not connected in this prepared workspace.</p>}
       <p role="status" aria-live="polite" className="sr-only">
         {success ? "Password changed." : ""}
       </p>
@@ -162,6 +167,7 @@ function PasswordSection() {
           <input
             ref={currentRef}
             type="password"
+            disabled={prepared}
             autoComplete="current-password"
             value={current}
             onChange={(e) => {
@@ -187,6 +193,7 @@ function PasswordSection() {
           <input
             ref={nextRef}
             type="password"
+            disabled={prepared}
             autoComplete="new-password"
             value={next}
             onChange={(e) => {
@@ -212,6 +219,7 @@ function PasswordSection() {
           <input
             ref={confirmRef}
             type="password"
+            disabled={prepared}
             autoComplete="new-password"
             value={confirm}
             onChange={(e) => {
@@ -244,7 +252,7 @@ function PasswordSection() {
 
         <button
           type="submit"
-          disabled={change.isPending}
+          disabled={prepared || change.isPending}
           aria-busy={change.isPending ? "true" : undefined}
           className="flex h-11 items-center justify-center self-start rounded-md bg-action px-4 text-sm font-bold text-on-action hover:bg-action-hover disabled:opacity-60"
         >
@@ -289,6 +297,8 @@ function ApiKeySection() {
     }
     prevHasOwnKey.current = has;
   }, [data?.api_key.has_own_api_key]);
+
+  if (isWorkspaceSample()) return <SectionCard headingId="api-key-heading" title="Personal Gemini key"><p>Personal API keys are not connected in this prepared workspace. No key is needed to inspect the published manuscript review.</p></SectionCard>;
 
   if (isPending) {
     return (
@@ -513,8 +523,63 @@ function ModelRow({ model }: { model: ModelQuotaStatus }) {
   );
 }
 
+function QuotaModels({ models }: { models: ModelQuotaStatus[] }) {
+  const capacity = useReviewWorkspaceCapacity();
+  return (
+    <div ref={element => { capacity.frame.current = element; }} data-model-table={capacity.split} className="signal-settings-models mt-4">
+          <span className="signal-review-measure" aria-hidden="true"><span ref={capacity.threshold} className="signal-settings-model-capacity" /></span>
+          <ul className="signal-settings-model-cards flex-col gap-2">
+            {models.map((model) => (
+              <li key={model.model} className="rounded-lg border border-border p-3 text-sm">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="min-w-0 truncate font-medium text-ink" title={model.model}>
+                    {model.model}
+                  </span>
+                  {model.exhausted && <StatusPill tone="attention">Exhausted</StatusPill>}
+                </div>
+                <p className="mt-1 text-xs text-ink-tertiary">
+                  {model.calls_used} / {model.daily_limit} used · {model.calls_remaining} left ·{" "}
+                  {model.cache_hits_today} cache hits · {model.vision ? "vision" : "no vision"}
+                </p>
+              </li>
+            ))}
+          </ul>
+          {/* BUG-084: `role="row"`/`role="columnheader"` below require a
+              `table`/`grid`/`treegrid` ancestor per ARIA 1.2, or they're
+              orphaned -- unannounced as a table, inert to a screen reader.
+              This wrapper had none; the three other grids in this codebase
+              that get this right (AuditLog.tsx, ResultsTable.tsx) all use
+              exactly this flat `table > row > columnheader/cell` shape. */}
+          <div role="table" className="signal-settings-model-table overflow-hidden rounded-lg border border-border">
+            <div
+              role="row"
+              className={`grid ${quotaGridCols} gap-3 border-b border-border bg-status-neutral-bg px-3 py-2 text-xs font-semibold tracking-header text-ink-tertiary uppercase`}
+            >
+              <span role="columnheader">Model</span>
+              <span role="columnheader">Used / Limit</span>
+              <span role="columnheader">Remaining</span>
+              <span role="columnheader">Cache hits</span>
+              <span role="columnheader">Vision</span>
+              <span role="columnheader">Status</span>
+            </div>
+            {models.map((model) => (
+              <div
+                key={model.model}
+                role="row"
+                className={`grid ${quotaGridCols} items-center gap-3 border-t border-border px-3 py-2.5 text-sm`}
+              >
+                <ModelRow model={model} />
+              </div>
+            ))}
+          </div>
+        </div>
+  );
+}
+
 function QuotaSection() {
   const { data: quota, isPending, isError, refetch } = useQuota();
+
+  if (isWorkspaceSample()) return <SectionCard headingId="quota-heading" title="AI capacity"><h3>Model grading skipped</h3><p>This prepared source review does not call a model API. Live usage, reset time and cache figures are not available in this workspace.</p></SectionCard>;
 
   if (isPending) {
     return (
@@ -579,54 +644,7 @@ function QuotaSection() {
         </p>
       </div>
 
-      {quota.models && quota.models.length > 0 && (
-        <div className="mt-4">
-          <ul className="flex flex-col gap-2 lg:hidden">
-            {quota.models.map((model) => (
-              <li key={model.model} className="rounded-lg border border-border p-3 text-sm">
-                <div className="flex items-center justify-between gap-2">
-                  <span className="min-w-0 truncate font-medium text-ink" title={model.model}>
-                    {model.model}
-                  </span>
-                  {model.exhausted && <StatusPill tone="attention">Exhausted</StatusPill>}
-                </div>
-                <p className="mt-1 text-xs text-ink-tertiary">
-                  {model.calls_used} / {model.daily_limit} used · {model.calls_remaining} left ·{" "}
-                  {model.cache_hits_today} cache hits · {model.vision ? "vision" : "no vision"}
-                </p>
-              </li>
-            ))}
-          </ul>
-          {/* BUG-084: `role="row"`/`role="columnheader"` below require a
-              `table`/`grid`/`treegrid` ancestor per ARIA 1.2, or they're
-              orphaned -- unannounced as a table, inert to a screen reader.
-              This wrapper had none; the three other grids in this codebase
-              that get this right (AuditLog.tsx, ResultsTable.tsx) all use
-              exactly this flat `table > row > columnheader/cell` shape. */}
-          <div role="table" className="hidden overflow-hidden rounded-lg border border-border lg:block">
-            <div
-              role="row"
-              className={`grid ${quotaGridCols} gap-3 border-b border-border bg-status-neutral-bg px-3 py-2 text-xs font-semibold tracking-header text-ink-tertiary uppercase`}
-            >
-              <span role="columnheader">Model</span>
-              <span role="columnheader">Used / Limit</span>
-              <span role="columnheader">Remaining</span>
-              <span role="columnheader">Cache hits</span>
-              <span role="columnheader">Vision</span>
-              <span role="columnheader">Status</span>
-            </div>
-            {quota.models.map((model) => (
-              <div
-                key={model.model}
-                role="row"
-                className={`grid ${quotaGridCols} items-center gap-3 border-t border-border px-3 py-2.5 text-sm`}
-              >
-                <ModelRow model={model} />
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
+      {quota.models && quota.models.length > 0 && <QuotaModels models={quota.models} />}
     </SectionCard>
   );
 }
@@ -663,7 +681,7 @@ function TransparencySection() {
   const { thresholds, prompt_versions } = data;
   return (
     <SectionCard headingId="transparency-heading" title="Review rules and technical record">
-      <div className="flex flex-col gap-4 text-sm">
+      <div className="signal-settings-rule-grid text-sm">
         <div>
           <h3 className="font-semibold text-ink">Readiness bands</h3>
           <ul className="mt-1 list-disc pl-5 text-ink-secondary">
@@ -701,15 +719,13 @@ function TransparencySection() {
         </details>
 
         <div>
-          <h3 className="font-semibold text-ink">AI models and prompts in use</h3>
+          <h3 className="font-semibold text-ink">{isWorkspaceSample() ? "Model execution record" : "AI models and prompts in use"}</h3>
           <p className="mt-1 text-xs text-ink-tertiary">
-            Read from your account's most recent AI calls, not a fixed list. If a model or prompt
-            changes, this updates automatically.
+            {isWorkspaceSample() ? "No model or prompt was run for this prepared source review." : "Read from your account's most recent AI calls, not a fixed list. If a model or prompt changes, this updates automatically."}
           </p>
           {prompt_versions.length === 0 ? (
             <p className="mt-2 text-ink-secondary">
-              No AI grading calls have been recorded yet. This fills in automatically once
-              VERIDICAL grades a manuscript.
+              {isWorkspaceSample() ? "Rubric levels and the final decision are recorded by the instructor." : "No AI grading calls have been recorded yet. This fills in automatically once VERIDICAL grades a manuscript."}
             </p>
           ) : (
             <ul className="mt-2 flex flex-col gap-2">
@@ -741,12 +757,10 @@ export function SettingsPage() {
         <div><p className="signal-eyebrow">Workspace utility</p><h1 ref={headingRef} tabIndex={-1}>Workspace settings</h1><p className="signal-route-header__intro">Manage account access, AI capacity, review rules, and technical records.</p></div>
       </header>
       <nav aria-label="Settings sections" className="signal-settings-nav"><a href="#profile-heading" onClick={focusSettingsSection}>Account</a><a href="#api-key-heading" onClick={focusSettingsSection}>Personal key</a><a href="#quota-heading" onClick={focusSettingsSection}>AI capacity</a><a href="#transparency-heading" onClick={focusSettingsSection}>Review rules</a></nav>
-      <div className="signal-settings-stack signal-page-flow">
-        <ProfileSection />
-        <PasswordSection />
-        <ApiKeySection />
-        <QuotaSection />
-        <TransparencySection />
+      <div className="signal-settings-layout">
+        <div className="signal-settings-column"><ProfileSection /><PasswordSection /></div>
+        <div className="signal-settings-column"><ApiKeySection /><QuotaSection /></div>
+        <div className="signal-settings-rules"><TransparencySection /></div>
       </div>
     </div>
   );

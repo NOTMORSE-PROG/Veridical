@@ -3,6 +3,12 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Instructor, QuotaStatus, SettingsOut } from "../api/types";
 import { renderWithProviders, stubFetchByPath } from "../test/renderWithProviders";
 import { SettingsPage } from "./Settings";
+import { isWorkspaceSample } from "../demo/workspaceFixture";
+
+vi.mock("../demo/workspaceFixture", async original => ({
+  ...await original<typeof import("../demo/workspaceFixture")>(),
+  isWorkspaceSample: vi.fn(() => false),
+}));
 
 const ME: Instructor = {
   id: 1,
@@ -64,7 +70,22 @@ function baseHandlers(overrides: Record<string, unknown> = {}) {
 }
 
 describe("SettingsPage", () => {
-  afterEach(() => vi.unstubAllGlobals());
+  afterEach(() => { vi.unstubAllGlobals(); vi.mocked(isWorkspaceSample).mockReturnValue(false); });
+
+  it("keeps prepared Settings truthful and disconnected from account/key mutations", async () => {
+    vi.mocked(isWorkspaceSample).mockReturnValue(true);
+    const fetch = stubFetchByPath(baseHandlers());
+    vi.stubGlobal("fetch", fetch);
+    renderWithProviders(<SettingsPage />);
+    expect(await screen.findByText("Prof Cruz")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Model grading skipped" })).toBeInTheDocument();
+    expect(screen.getByText(/Personal API keys are not connected/)).toBeInTheDocument();
+    expect(screen.queryByText(/AI calls used today|100% left|Until then/)).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Change password" })).toBeDisabled();
+    expect(screen.getByLabelText("Current password")).toBeDisabled();
+    expect(screen.queryByRole("button", { name: "Save key" })).not.toBeInTheDocument();
+    expect(fetch.mock.calls.every(call => [undefined, "GET"].includes((call as unknown as [unknown, RequestInit?])[1]?.method))).toBe(true);
+  });
 
   it("shows the profile as read-only with an explicit non-editable disclosure", async () => {
     vi.stubGlobal("fetch", stubFetchByPath(baseHandlers()));
