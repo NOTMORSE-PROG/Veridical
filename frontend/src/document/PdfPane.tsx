@@ -1,6 +1,7 @@
 import {
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -306,6 +307,7 @@ export function PdfPane({
   findingNumbers = EMPTY_FINDING_NUMBERS,
   requestedPageAttempt,
   focusSelection = true,
+  isVisible = true,
 }: {
   fileUrl: string;
   regions: FlagRegionOut[];
@@ -316,6 +318,7 @@ export function PdfPane({
   findingNumbers?: ReadonlyMap<number, number>;
   requestedPageAttempt?: number;
   focusSelection?: boolean;
+  isVisible?: boolean;
 }) {
   const [pdf, setPdf] = useState<PDFDocumentProxy | null>(null);
   const [metrics, setMetrics] = useState<PageMetric[]>([]);
@@ -325,6 +328,11 @@ export function PdfPane({
   const [zoom, setZoom] = useState(1);
   const scrollRef = useRef<HTMLDivElement>(null);
   const pageRefs = useRef<Map<number, HTMLElement>>(new Map());
+  const appliedPageRequest = useRef<string | null>(null);
+  const sourceVisible = useRef(isVisible);
+  sourceVisible.current = isVisible;
+  const wasVisible = useRef(isVisible);
+  const lastVisiblePage = useRef(1);
   const flagsById = useMemo(() => new Map(flags.map((flag) => [flag.id, flag])), [flags]);
 
   useEffect(() => {
@@ -361,6 +369,7 @@ export function PdfPane({
   }, []);
 
   const updateVisibility = useCallback(() => {
+    if (!sourceVisible.current) return;
     const root = scrollRef.current?.getBoundingClientRect();
     if (!root) return;
     let mostVisiblePage = 0;
@@ -375,7 +384,7 @@ export function PdfPane({
     }
     // IntersectionObserver thresholds alone retain stale ratios while a
     // smooth page jump ends between thresholds. Measure the current scroll.
-    if (mostVisiblePage) setCurrentPage(mostVisiblePage);
+    if (mostVisiblePage) { lastVisiblePage.current = mostVisiblePage; setCurrentPage(mostVisiblePage); }
   }, []);
 
   const scrollToPage = useCallback((page: number, behavior: ScrollBehavior = "smooth") => {
@@ -395,17 +404,28 @@ export function PdfPane({
       });
     }
     setCurrentPage(target);
+    lastVisiblePage.current = target;
     setPageInput(String(target));
   }, [metrics.length, pdf?.numPages]);
 
-  useEffect(() => {
-    if (requestedPage === null || metrics.length === 0) return;
-    requestAnimationFrame(() => scrollToPage(requestedPage, "auto"));
-  }, [metrics.length, requestedPage, requestedPageAttempt, scrollToPage]);
+  useLayoutEffect(() => {
+    const request = `${fileUrl}:${requestedPage}:${requestedPageAttempt ?? "initial"}`;
+    const showingAgain = isVisible && !wasVisible.current;
+    wasVisible.current = isVisible;
+    if (!isVisible || metrics.length === 0) return;
+    const pending = requestedPage !== null && appliedPageRequest.current !== request;
+    if (!pending && !showingAgain) return;
+    const target = pending ? requestedPage! : lastVisiblePage.current;
+    const frame = requestAnimationFrame(() => {
+      scrollToPage(target, "auto");
+      if (pending) appliedPageRequest.current = request;
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [fileUrl, isVisible, metrics.length, requestedPage, requestedPageAttempt, scrollToPage]);
 
   function commitPageInput() {
     const page = Number(pageInput);
-    if (Number.isFinite(page)) scrollToPage(page);
+    if (Number.isFinite(page)) scrollToPage(page, "auto");
     else setPageInput(String(currentPage));
   }
 
