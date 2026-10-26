@@ -2,7 +2,7 @@
 
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, HttpUrl, field_validator
+from pydantic import BaseModel, ConfigDict, Field, HttpUrl, field_validator, model_validator
 
 from app.checks.citations.history_review import CitationMetadataReviewWarning
 from app.report.schemas import ReportOut
@@ -46,6 +46,32 @@ class CitationSourceKeyOut(BaseModel):
 
     kind: str  # "doi" | "isbn" | "title"
     value: str
+
+
+class CitationSourceLinkOut(BaseModel):
+    kind: Literal["doi_as_cited", "url_as_cited", "doi_recorded_lookup"]
+    url: HttpUrl
+
+
+class CitationSourceLocatorOut(BaseModel):
+    basis: Literal["saved_reference", "recorded_source_key"]
+    order_index: int | None = Field(strict=True, ge=0)
+    links: list[CitationSourceLinkOut] = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def coherent_basis(self):
+        if self.basis == "recorded_source_key":
+            if self.order_index is not None or any(
+                link.kind != "doi_recorded_lookup" for link in self.links
+            ):
+                raise ValueError(
+                    "A recorded lookup has no inferred reference index or as-cited links"
+                )
+        elif self.order_index is None or any(
+            link.kind == "doi_recorded_lookup" for link in self.links
+        ):
+            raise ValueError("An as-cited reference needs its saved index and as-cited links")
+        return self
 
 
 class PValueComparisonOut(BaseModel):
@@ -119,6 +145,7 @@ class FlagOut(BaseModel):
     p_value_comparison: PValueComparisonOut | None = None
     agreement_pair: AgreementPairOut | None = None
     citation_metadata_comparison: CitationMetadataComparisonOut | None = None
+    citation_source_locator: CitationSourceLocatorOut | None = None
     citation_metadata_review_warning: CitationMetadataReviewWarning | None = None
     # BUG-049: "fake" (fixture data — e.g. a vision-pass table that was
     # never in the manuscript), "real", or "unknown" (predates migration

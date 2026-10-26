@@ -17,18 +17,24 @@ export function CitationSourceLinks({ flag }: { flag: Finding }) {
   const heading = useId();
   const saved = flag.citation_source_locator;
   if (flag.check_kind !== "citation_integrity" || isCitationMetadataFinding(flag)
-    || !saved || saved.basis !== "saved_reference" || !Number.isSafeInteger(saved.order_index) || saved.order_index < 0) return null;
+    || !saved) return null;
+  const lookup = saved.basis === "recorded_source_key";
+  if (lookup ? saved.order_index !== null || saved.links.some(link => link.kind !== "doi_recorded_lookup")
+    : saved.basis !== "saved_reference" || !Number.isSafeInteger(saved.order_index) || saved.order_index < 0
+      || saved.links.some(link => link.kind !== "doi_as_cited" && link.kind !== "url_as_cited")) return null;
   const links = saved.links.flatMap(link => {
     const url = navigableUrl(link.url);
-    return url && (link.kind === "doi_as_cited" || link.kind === "url_as_cited") ? [{ ...link, url }] : [];
+    return url ? [{ ...link, url }] : [];
   });
   if (!links.length) return null;
   return <section className="signal-reasoning signal-citation-source-links" aria-labelledby={heading}>
-    <h3 id={heading}>Source links from this reference</h3>
+    <h3 id={heading}>{lookup ? "Saved source lookup" : "Source links from this reference"}</h3>
     <ul>{links.map(link => <li key={`${link.kind}:${link.url}`}>
-      <strong>{link.kind === "doi_as_cited" ? "DOI as cited" : "URL as cited"}</strong>
+      <strong>{link.kind === "doi_recorded_lookup" ? "DOI used in the saved lookup" : link.kind === "doi_as_cited" ? "DOI as cited" : "URL as cited"}</strong>
       <a href={link.url} target="_blank" rel="noopener noreferrer">{link.url} <span>(opens in a new tab)</span></a>
     </li>)}</ul>
-    <p className="signal-field-hint">Saved with this reference. Opening a link does not confirm the source or its support for a claim.</p>
+    <p className="signal-field-hint">{lookup
+      ? "This identifier was used in the recorded lookup. Opening its current external destination does not update the saved result or confirm the source."
+      : "Saved with this reference. Opening a link does not confirm the source or its support for a claim."}</p>
   </section>;
 }

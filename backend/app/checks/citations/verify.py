@@ -40,6 +40,7 @@ from app.checks.citations.numbered import (
     explicit_reference_label,
 )
 from app.checks.citations.projection import SOURCE_FIELDS, project_quoted_metadata
+from app.checks.citations.source_locator import with_reference_locator
 from app.checks.citations.support import (
     ClaimSupportInput,
     ClaimSupportResult,
@@ -724,8 +725,13 @@ async def run_citation_integrity_check(
         (location.index, location.raw_text): location
         for location in reference_entry_locations(extraction, patterns)
     }
+    references_by_index = {citation.order_index: citation for citation in citations}
     flag_drafts = [
-        _with_reference_anchor(draft, draft.detail.get("order_index"), locations)
+        _with_reference_anchor(
+            with_reference_locator(draft, references_by_index.get(draft.detail.get("order_index"))),
+            draft.detail.get("order_index"),
+            locations,
+        )
         if draft.detail.get("kind") == "uncited_reference"
         else draft
         for draft in flag_drafts
@@ -836,6 +842,7 @@ async def run_citation_integrity_check(
         )
         draft = _verdict_flag_draft(citation, verdict)
         if draft is not None:
+            draft = with_reference_locator(draft, citation)
             if citation.order_index in source_projections:
                 draft = replace(
                     draft,
@@ -912,7 +919,12 @@ async def run_citation_integrity_check(
             item["eligible"] and item["unassessed_reason"] == reason for item in claim_occurrences
         )
         for reason in (
-            "limit", "quota", "api_down", "parse_failure", "ai_not_configured", "ai_key_rejected"
+            "limit",
+            "quota",
+            "api_down",
+            "parse_failure",
+            "ai_not_configured",
+            "ai_key_rejected",
         )
     }
 

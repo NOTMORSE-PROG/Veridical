@@ -33,4 +33,15 @@ describe("saved citation source navigation", () => {
     render(<CitationSourceLinks flag={{ ...flag, check_kind: "internal_agreement" }} />);
     expect(screen.queryByRole("link")).not.toBeInTheDocument();
   });
+  it("distinguishes a recorded lookup from a DOI printed in the reference", () => {
+    render(<CitationSourceLinks flag={{ ...flag, ai_verdict_summary: "unverifiable_not_found", citation_source_locator: {
+      basis: "recorded_source_key", order_index: null,
+      links: [{ kind: "doi_recorded_lookup", url: "https://doi.org/10.1234%2Fexample" }],
+    } }} />);
+    expect(screen.getByRole("heading", { name: "Saved source lookup" })).toBeVisible();
+    expect(screen.getByText("DOI used in the saved lookup")).toBeVisible();
+    expect(screen.queryByText("DOI as cited")).not.toBeInTheDocument();
+    expect(screen.getByText(/does not update the saved result/)).toBeVisible();
+    expect(screen.queryByRole("button")).not.toBeInTheDocument();
+  });
 });

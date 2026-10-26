@@ -18,6 +18,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.checks.citations.history_review import citation_metadata_review_warning
+from app.checks.citations.source_locator import citation_source_locator
 from app.checks.reuse.embed import split_context
 from app.config import get_settings
 from app.errors import ConflictError, NotFoundError
@@ -266,6 +267,9 @@ async def _to_flag_out(
         p_value_comparison=_p_value_comparison(result.kind.value, detail),
         agreement_pair=_agreement_pair(result.kind.value, detail),
         citation_metadata_comparison=_citation_metadata_comparison(result.kind.value, detail),
+        citation_source_locator=citation_source_locator(
+            result.kind.value, flag.evidence_excerpt, flag.detail
+        ),
         citation_metadata_review_warning=citation_metadata_review_warning(
             result.kind.value, flag.evidence_excerpt, detail
         ),

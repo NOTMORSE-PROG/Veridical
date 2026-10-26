@@ -12,7 +12,7 @@ _TRAILING_PUNCT = ".,;:)"
 _URL_STORAGE_CHARS = Citation.__table__.c.url.type.length
 
 
-def _supported(uri: str) -> bool:
+def supported_reference_url(uri: str) -> bool:
     if len(uri) > _URL_STORAGE_CHARS:
         return False
     if any(char.isspace() or ord(char) < 32 or ord(char) == 127 for char in uri):
@@ -43,7 +43,7 @@ def text_url(raw: str) -> str | None:
     if re.match(r"[^\S\r\n]*[\r\n]+\s*\S", suffix):
         return None
     uri = match.group().rstrip(_TRAILING_PUNCT)
-    return uri if _supported(uri) else None
+    return uri if supported_reference_url(uri) else None
 
 
 def _contains(block: TextBlock, link: UriLink, tolerance: float) -> bool:
@@ -97,7 +97,7 @@ def reference_urls(
         if len(destinations) != 1:
             continue
         uri = next(iter(destinations))
-        if not _supported(uri):
+        if not supported_reference_url(uri):
             continue
         ordered = sorted(candidates, key=lambda item: (item.page, item.bbox[1], item.bbox[0]))
         visible = "".join(re.sub(r"\s+", "", link.text) for link in ordered)

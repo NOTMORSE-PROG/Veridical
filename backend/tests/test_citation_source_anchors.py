@@ -1,5 +1,7 @@
 """F5 source-anchor integration controls; provider responses are explicit stubs."""
 
+import hashlib
+
 import pytest
 
 from app.checks.citations.extract import CitationFlagDraft
@@ -60,6 +62,13 @@ async def test_uncited_reference_uses_exact_entry_anchor_not_reference_heading(
     assert flags[0].page_anchor == expected
     assert flags[0].evidence_excerpt == citations[1].raw_text
     assert flags[0].detail["order_index"] == 1
+    locator = flags[0].detail["citation_source_locator"]
+    assert locator["schema_version"] == "citation-source-v1"
+    assert locator["order_index"] == 1
+    assert (
+        locator["reference_text_sha256"]
+        == hashlib.sha256(citations[1].raw_text.encode()).hexdigest()
+    )
     assert extraction.model_dump_json() == before
 
 
