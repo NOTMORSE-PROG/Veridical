@@ -1,5 +1,6 @@
 """F8 print projections of persisted evidence, without private annotations."""
 
+from app.findings.policy import is_reuse_summary
 from app.flags.schemas import FlagOut
 from app.report.schemas import ExportComparisonOut, FlagExportDetailOut, UnassessedReferenceOut
 
@@ -10,13 +11,7 @@ def flag_export_detail(
     detail = recorded_detail or {}
     kind = detail.get("kind")
     reuse = flag.check_kind == "originality_reuse"
-    evidence_is_summary = reuse and kind in (
-        "reuse_exact_duplicate",
-        "reuse_high_similarity",
-        "reuse_exact_duplicate_chapter",
-        "reuse_high_similarity_chapter",
-        "reuse_same_instructor_resubmission",
-    )
+    evidence_is_summary = reuse and is_reuse_summary(kind)
     reasoning = flag.ai_reasoning
     current_guidance = None
     recorded_explanation_withheld = False

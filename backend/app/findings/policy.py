@@ -32,15 +32,20 @@ def reuse_reason(detail: dict[str, Any]) -> str:
     )
 
 
-def reuse_excerpt(detail: dict[str, Any], recorded_excerpt: str) -> str:
-    """Replace only known generated summaries, never a passage or unknown legacy quote."""
-    if detail.get("kind") in {
+def is_reuse_summary(kind: str | None) -> bool:
+    """Producer-defined generated summaries, not a passage-presence heuristic."""
+    return isinstance(kind, str) and kind in {
         "reuse_exact_duplicate",
         "reuse_high_similarity",
         "reuse_exact_duplicate_chapter",
         "reuse_high_similarity_chapter",
         "reuse_same_instructor_resubmission",
-    }:
+    }
+
+
+def reuse_excerpt(detail: dict[str, Any], recorded_excerpt: str) -> str:
+    """Replace only known generated summaries, never a passage or unknown legacy quote."""
+    if is_reuse_summary(detail.get("kind")):
         return reuse_reason(detail)
     return recorded_excerpt
 
