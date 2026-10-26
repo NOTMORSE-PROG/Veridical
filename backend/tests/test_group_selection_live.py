@@ -331,7 +331,10 @@ async def test_normal_cookie_routes_validate_identity_and_owner_without_an_auth_
 
     @app.exception_handler(VeridicalError)
     async def error_handler(request: Request, exc: VeridicalError):
-        return JSONResponse(status_code=HTTP_STATUS[exc.code], content={"detail": str(exc)})
+        return JSONResponse(
+            status_code=HTTP_STATUS[exc.code],
+            content={"error": {"code": exc.code, "message": str(exc)}},
+        )
 
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=app), base_url="http://testserver"
@@ -358,6 +361,16 @@ async def test_normal_cookie_routes_validate_identity_and_owner_without_an_auth_
         ).status_code == 422
         denied = {**body.model_dump(), "saved_group_id": foreign}
         assert (await client.post(path, json=denied)).status_code == 404
+        stale_details = await client.post(
+            path, json={**body.model_dump(), "fingerprint": "0" * 64}
+        )
+        assert stale_details.status_code == 409
+        assert stale_details.json()["error"]["code"] == "saved_group_changed"
+        stale_assignment = await client.post(
+            path, json={**body.model_dump(), "expected_group_id": None}
+        )
+        assert stale_assignment.status_code == 409
+        assert stale_assignment.json()["error"]["code"] == "group_assignment_changed"
         saved_response = await client.post(path, json=body.model_dump())
         assert saved_response.status_code == 200, saved_response.text
         assert saved_response.json()["receipt"]["instructor_id"] == owner

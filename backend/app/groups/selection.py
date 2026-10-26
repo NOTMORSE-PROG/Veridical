@@ -16,7 +16,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.audit.service import write_audit_event
-from app.errors import ConflictError, NotFoundError
+from app.errors import GroupAssignmentChangedError, NotFoundError, SavedGroupChangedError
 from app.models.enums import ManuscriptOrigin
 from app.models.group import Group, GroupMember, Program
 from app.models.manuscript import Manuscript
@@ -178,7 +178,7 @@ async def select_saved_group(
         raise NotFoundError(f"No saved group with id {request.saved_group_id}.")
     snapshot = await _saved_snapshot(session, group, lock=True)
     if snapshot.fingerprint != request.fingerprint:
-        raise ConflictError(
+        raise SavedGroupChangedError(
             "This saved group's details changed. "
             "Refresh its details and review them before assigning."
         )
@@ -194,7 +194,7 @@ async def select_saved_group(
             manuscript_id=manuscript_id, outcome="unchanged", receipt=previous
         )
     if manuscript.group_id != request.expected_group_id:
-        raise ConflictError(
+        raise GroupAssignmentChangedError(
             "This manuscript's group assignment changed. "
             "Check the saved assignment before choosing a group again."
         )

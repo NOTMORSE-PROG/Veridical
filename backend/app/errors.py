@@ -83,6 +83,18 @@ class GoneError(VeridicalError):
     code = "gone"
 
 
+class SavedGroupChangedError(ConflictError):
+    """The selected saved record changed; its displayed facts need fresh review."""
+
+    code = "saved_group_changed"
+
+
+class GroupAssignmentChangedError(ConflictError):
+    """The manuscript now has a different assignment; review that assignment."""
+
+    code = "group_assignment_changed"
+
+
 class InvalidApiKeyError(VeridicalError):
     """V-052: an instructor-pasted Gemini API key failed a real validation
     probe — user-fixable (wrong/revoked key, typo), never a generic 500."""
@@ -158,6 +170,8 @@ HTTP_STATUS: dict[str, int] = {
     "unauthenticated": 401,
     "not_found": 404,
     "conflict": 409,
+    "saved_group_changed": 409,
+    "group_assignment_changed": 409,
     "gone": 410,
     "rate_limited": 429,
     "document_preparation_busy": 503,
