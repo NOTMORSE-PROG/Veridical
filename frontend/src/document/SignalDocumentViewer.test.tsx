@@ -138,6 +138,7 @@ describe("SignalDocumentViewerPage", () => {
     // real evidence still exists just below the (now-honest) reasoning.
     vi.stubGlobal("fetch", stubFetchByPath({
       "/check-runs/5/document": VIEWER,
+      "/auth/session": { instructor: { id: 1, email: "review@test.local", display_name: "Reviewer", onboarding_dismissed_at: null } },
       "/check-runs/5/report": REPORT,
       "/check-runs/5/escalated": [],
       "/check-runs/5/flags": [SUMMARY],
@@ -175,6 +176,7 @@ describe("SignalDocumentViewerPage", () => {
   it("BUG-170: shows an honest explanation, not a mislabeled quote, for a resubmission flag with no passage to compare", async () => {
     vi.stubGlobal("fetch", stubFetchByPath({
       "/check-runs/5/document": VIEWER,
+      "/auth/session": { instructor: { id: 1, email: "review@test.local", display_name: "Reviewer", onboarding_dismissed_at: null } },
       "/check-runs/5/report": REPORT,
       "/check-runs/5/escalated": [],
       "/check-runs/5/flags": [SUMMARY],
@@ -234,6 +236,7 @@ describe("SignalDocumentViewerPage", () => {
           { flag_id: 8, kind: "page_only", page: 18, end_page: null, bbox: null, all_bboxes: [], paragraph: null, index: null },
         ],
       },
+      "/auth/session": { instructor: { id: 1, email: "review@test.local", display_name: "Reviewer", onboarding_dismissed_at: null } },
       "/check-runs/5/report": REPORT,
       "/check-runs/5/escalated": [],
       "/check-runs/5/flags": [SUMMARY, secondSummary],
@@ -292,6 +295,7 @@ describe("SignalDocumentViewerPage", () => {
         regions: [{ flag_id: 7, kind: "paragraph_only", page: null, end_page: null, bbox: null, all_bboxes: [], paragraph: 0, index: null }],
       },
       "/check-runs/5/document/paragraphs": { paragraphs: [{ paragraph: 0, text: "Methodology", heading_level: 1 }] },
+      "/auth/session": { instructor: { id: 1, email: "review@test.local", display_name: "Reviewer", onboarding_dismissed_at: null } },
       "/check-runs/5/report": REPORT,
       "/check-runs/5/escalated": [],
       "/check-runs/5/flags": [paragraphSummary],
@@ -310,6 +314,7 @@ describe("SignalDocumentViewerPage", () => {
   it("keeps readiness, criteria, signals, and decision work beside the manuscript", async () => {
     vi.stubGlobal("fetch", stubFetchByPath({
       "/check-runs/5/document": VIEWER,
+      "/auth/session": { instructor: { id: 1, email: "review@test.local", display_name: "Reviewer", onboarding_dismissed_at: null } },
       "/check-runs/5/report": REPORT,
       "/check-runs/5/escalated": [],
       "/check-runs/5/flags": [],
@@ -324,6 +329,8 @@ describe("SignalDocumentViewerPage", () => {
     expect(screen.getByRole("tab", { name: "Review" })).toHaveAttribute("aria-selected", "true");
     fireEvent.click(screen.getByRole("button", { name: "Review readiness and decision" }));
     expect(await screen.findByText(REPORT.reason as string)).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Final defense-readiness decision" })).not.toBeInTheDocument();
+    fireEvent.click(await screen.findByRole("button", { name: /4.*Make decision/ }));
     expect(screen.getByRole("heading", { name: "Final defense-readiness decision" })).toBeInTheDocument();
     for (const link of screen.getAllByRole("link", { name: "Open full readiness report" })) {
       expect(link).toHaveAttribute("href", "/report/5");
@@ -380,6 +387,7 @@ describe("SignalDocumentViewerPage", () => {
           { flag_id: 111, kind: "page_bbox", page: 12, end_page: null, bbox: [10, 10, 80, 30], all_bboxes: [[10, 10, 80, 30]], paragraph: null, index: null },
         ],
       },
+      "/auth/session": { instructor: { id: 1, email: "review@test.local", display_name: "Reviewer", onboarding_dismissed_at: null } },
       "/check-runs/5/report": REPORT,
       "/check-runs/5/escalated": [],
       "/check-runs/5/flags": reuseSummaries,

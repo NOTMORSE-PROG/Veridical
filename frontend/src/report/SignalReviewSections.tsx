@@ -511,12 +511,13 @@ function resolutionLabel(item: EscalatedItemOut, resolution: EscalationResolutio
   return item.levels?.find((entry) => entry.level === level)?.name ?? "Selected rubric level";
 }
 
-function SignalResolutionCard({ item, checkRunId, onResolved, onEditingChange, onEvidenceSelected }: {
+function SignalResolutionCard({ item, checkRunId, onResolved, onEditingChange, onEvidenceSelected, onOpenEvidence }: {
   item: EscalatedItemOut;
   checkRunId: number;
   onResolved: (message: string) => void;
   onEditingChange?: (editing: boolean) => void;
   onEvidenceSelected?: (criterionId: number, evidence: EvidenceItem, index: number) => void;
+  onOpenEvidence?: (criterionId: number, evidence: EvidenceItem, index: number) => void;
 }) {
   const [pending, setPending] = useState<{ resolution: EscalationResolution; level?: number }>();
   const [reason, setReason] = useState("");
@@ -545,6 +546,7 @@ function SignalResolutionCard({ item, checkRunId, onResolved, onEditingChange, o
   function selectEvidence(index: number) {
     setEvidenceIndex(index);
     evidenceSelection.current?.(item.criterion_id, evidence[index], index);
+    onOpenEvidence?.(item.criterion_id, evidence[index], index);
   }
 
   function choose(resolution: EscalationResolution, level?: number) {
@@ -619,6 +621,7 @@ function SignalResolutionCard({ item, checkRunId, onResolved, onEditingChange, o
         <div><p className="signal-section-kicker">Criterion requiring judgment</p><h3 ref={criterionHeadingRef} tabIndex={-1}>{item.criterion_text}</h3></div>
         <p id={voteId} className="signal-resolution-card__vote">{voteSummary(item)}</p>
         {evidence.length > 0 && <section className="signal-criterion-evidence" aria-label={`Evidence for ${item.criterion_text}`}>
+          {onOpenEvidence && <p className="signal-field-hint">Choose an evidence entry to open its manuscript passage. Your unsaved grade and comment stay here.</p>}
           <div className="signal-evidence-navigation"><Button variant="quiet" disabled={evidenceIndex === 0} onClick={() => selectEvidence(evidenceIndex - 1)}>Previous evidence</Button><span>Evidence {evidenceIndex + 1} of {evidence.length}</span><Button variant="quiet" disabled={evidenceIndex >= evidence.length - 1} onClick={() => selectEvidence(evidenceIndex + 1)}>Next evidence</Button></div>
           <blockquote><span>“{evidence[evidenceIndex].quote}”</span><cite>{evidence[evidenceIndex].anchor}</cite></blockquote>
           {!criterionAnchorRegion(evidence[evidenceIndex].anchor) && <p className="signal-field-hint">This saved anchor cannot be placed. Keep this entry in review and inspect the manuscript manually.</p>}
@@ -679,16 +682,25 @@ function SignalResolutionCard({ item, checkRunId, onResolved, onEditingChange, o
   );
 }
 
-export function SignalEscalatedPanel({ checkRunId, focused = false, onEvidenceSelected }: { checkRunId: number; focused?: boolean; onEvidenceSelected?: (criterionId: number, evidence: EvidenceItem, index: number) => void }) {
+export function SignalEscalatedPanel({ checkRunId, focused = false, onEvidenceSelected, onOpenEvidence, onEditingChange }: { checkRunId: number; focused?: boolean; onEvidenceSelected?: (criterionId: number, evidence: EvidenceItem, index: number) => void; onOpenEvidence?: (criterionId: number, evidence: EvidenceItem, index: number) => void; onEditingChange?: (editing: boolean) => void }) {
   const { data: items, isPending, isError, refetch } = useEscalatedItems(checkRunId);
   const [announcement, setAnnouncement] = useState("");
   const [activeId, setActiveId] = useState<number>();
   const [editing, setEditing] = useState(false);
+  const [editedId, setEditedId] = useState<number>();
   const headingRef = useRef<HTMLHeadingElement>(null);
   const announcementRef = useRef<HTMLParagraphElement>(null);
   const hasItems = Boolean(items?.length);
   const activeIndex = Math.max(0, items?.findIndex(item => item.check_result_id === activeId) ?? 0);
   const visibleItems = focused ? items?.slice(activeIndex, activeIndex + 1) : items;
+
+  useEffect(() => {
+    if (editing && editedId !== undefined && items && !items.some(item => item.check_result_id === editedId)) {
+      setEditing(false); setEditedId(undefined); onEditingChange?.(false);
+      setAnnouncement("This criterion was updated elsewhere. Your unsaved grade was not submitted. Review the latest record before continuing.");
+      headingRef.current?.focus();
+    }
+  }, [editing, editedId, items, onEditingChange]);
 
   useEffect(() => {
     if (focused && hasItems) headingRef.current?.focus();
@@ -699,16 +711,17 @@ export function SignalEscalatedPanel({ checkRunId, focused = false, onEvidenceSe
   }, [announcement, hasItems]);
 
   if (isPending) return <div role="status" aria-busy="true" className="signal-desk-loading"><span>Loading criteria that need review…</span><i /><i /></div>;
-  if (isError) return <Alert title="Could not load criteria needing review" tone="error" role="alert"><Button variant="secondary" onClick={() => refetch()}>Try again</Button></Alert>;
+  if (isError && !items) return <Alert title="Could not load criteria needing review" tone="error" role="alert"><Button variant="secondary" onClick={() => refetch()}>Try again</Button></Alert>;
 
   return (
     <section id="review-criteria" tabIndex={-1} data-tour="escalated-panel" className="signal-review-section signal-review-section--attention" aria-labelledby="escalated-heading">
       <div className="signal-review-section__heading"><div><p className="signal-section-kicker">Rubric review</p><h2 id="escalated-heading" ref={headingRef} tabIndex={-1}>Criteria needing your judgment</h2></div><span>{items?.length ?? 0} unresolved</span></div>
       <p className="signal-review-section__intro">Choose a grade, add a comment if useful, then save. Exclusions and accepting an AI suggestion still require a reason. Each saved judgment brings the report closer to the final decision.</p>
+      {isError && <Alert title="Could not refresh these criteria" tone="error" role="alert">Your unsaved grade is still here. <Button variant="secondary" onClick={() => refetch()}>Try again</Button></Alert>}
       <p ref={announcementRef} tabIndex={-1} aria-live="polite" className="signal-live-region">{announcement}</p>
       {focused && hasItems && <nav className="signal-criterion-navigation" aria-label="Unresolved criteria"><Button variant="quiet" aria-label="Previous criterion" disabled={editing || activeIndex === 0} onClick={() => { setActiveId(items![activeIndex - 1].check_result_id); headingRef.current?.focus(); }}>Previous</Button><span>{editing ? "Save or cancel to continue" : `${activeIndex + 1} of ${items?.length} remaining`}</span><Button variant="quiet" aria-label="Next criterion" disabled={editing || activeIndex === (items?.length ?? 0) - 1} onClick={() => { setActiveId(items![activeIndex + 1].check_result_id); headingRef.current?.focus(); }}>Next</Button></nav>}
       {hasItems
-        ? <div className="signal-resolution-list">{visibleItems?.map((item) => <SignalResolutionCard key={item.check_result_id} item={item} checkRunId={checkRunId} onEvidenceSelected={onEvidenceSelected} onEditingChange={focused ? setEditing : undefined} onResolved={(message) => { if (focused) setActiveId(items?.[activeIndex + 1]?.check_result_id ?? items?.[Math.max(0, activeIndex - 1)]?.check_result_id); setAnnouncement(message); headingRef.current?.focus(); }} />)}</div>
+        ? <div className="signal-resolution-list">{visibleItems?.map((item) => <SignalResolutionCard key={item.check_result_id} item={item} checkRunId={checkRunId} onEvidenceSelected={onEvidenceSelected} onOpenEvidence={onOpenEvidence} onEditingChange={value => { if (focused) { setEditing(value); setEditedId(value ? item.check_result_id : undefined); } onEditingChange?.(value); }} onResolved={(message) => { if (focused) setActiveId(items?.[activeIndex + 1]?.check_result_id ?? items?.[Math.max(0, activeIndex - 1)]?.check_result_id); setAnnouncement(message); headingRef.current?.focus(); }} />)}</div>
         : <Alert title="No unresolved criteria" tone="success">Every criterion has a recorded outcome. Continue to the integrity signals.</Alert>}
     </section>
   );

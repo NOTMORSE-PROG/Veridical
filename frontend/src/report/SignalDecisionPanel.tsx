@@ -83,7 +83,7 @@ function ReopenDialog({ report, onClose }: { report: ReportOut; onClose: () => v
   );
 }
 
-export function SignalDecisionPanel({ report, manuscriptLabel }: { report: ReportOut; manuscriptLabel: string }) {
+export function SignalDecisionPanel({ report, manuscriptLabel, onReviewCriteria }: { report: ReportOut; manuscriptLabel: string; onReviewCriteria?: () => void }) {
   const [openDecision, setOpenDecision] = useState<Decision>();
   const [reopen, setReopen] = useState(false);
   const headingRef = useRef<HTMLHeadingElement>(null);
@@ -104,7 +104,7 @@ export function SignalDecisionPanel({ report, manuscriptLabel }: { report: Repor
       {report.decision ? (
         <div className="signal-decision-record"><p>Recorded by you{report.decided_at ? ` on ${dateFormatter.format(new Date(report.decided_at))}` : ""}. This is the instructor's decision, not an automated approval or block.</p>{report.decision_note && <blockquote><strong>Decision note</strong><span>{report.decision_note}</span></blockquote>}<Button variant="secondary" onClick={() => setReopen(true)}>Reopen this decision</Button></div>
       ) : (
-        <div className="signal-decision-choice"><p>VERIDICAL provides a readiness band and checkable evidence. You make the final decision after reviewing the full record above.</p>{blocked && <Alert title={`${report.pending_review_count} ${report.pending_review_count === 1 ? "criterion needs" : "criteria need"} your judgment`} tone="warning"><a href="#review-criteria">Resolve {report.pending_review_count === 1 ? "it" : "them"} before deciding.</a></Alert>}<div className="signal-decision-choice__actions"><Button variant="brand" disabled={blocked} onClick={() => setOpenDecision("approved")}>Approve for defense</Button><Button variant="secondary" disabled={blocked} onClick={() => setOpenDecision("returned")}>Return for revision</Button><Button variant="danger" disabled={blocked} onClick={() => setOpenDecision("rejected")}>Reject manuscript</Button></div></div>
+        <div className="signal-decision-choice"><p>VERIDICAL provides a readiness band and checkable evidence. You make the final decision after reviewing the full record above.</p>{blocked && <Alert title={`${report.pending_review_count} ${report.pending_review_count === 1 ? "criterion needs" : "criteria need"} your judgment`} tone="warning"><a href="#review-criteria" onClick={event => { if (onReviewCriteria) { event.preventDefault(); onReviewCriteria(); } }}>Resolve {report.pending_review_count === 1 ? "it" : "them"} before deciding.</a></Alert>}<div className="signal-decision-choice__actions"><Button variant="brand" disabled={blocked} onClick={() => setOpenDecision("approved")}>Approve for defense</Button><Button variant="secondary" disabled={blocked} onClick={() => setOpenDecision("returned")}>Return for revision</Button><Button variant="danger" disabled={blocked} onClick={() => setOpenDecision("rejected")}>Reject manuscript</Button></div></div>
       )}
 
       {openDecision && <DecisionDialog decision={openDecision} report={report} manuscriptLabel={manuscriptLabel} onClose={() => setOpenDecision(undefined)} />}

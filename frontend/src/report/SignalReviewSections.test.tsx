@@ -10,6 +10,7 @@
 // mark_level path, the injection_suspected path, and focus survival
 // when the last escalated item resolves.
 import { fireEvent, screen, waitFor } from "@testing-library/react";
+import { useQueryClient } from "@tanstack/react-query";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { EscalatedItemOut } from "../api/types";
 import { renderWithProviders, stubFetchByPath } from "../test/renderWithProviders";
@@ -98,6 +99,36 @@ function reportWith(overrides: Record<string, unknown>) {
 
 describe("SignalEscalatedPanel / SignalResolutionCard", () => {
   afterEach(() => vi.unstubAllGlobals());
+
+  it.each(["removed", "error"])("preserves an unchanged draft and handles refreshed criteria that are %s", async outcome => {
+    let mode = "same";
+    const editing = vi.fn();
+    const fetchMock = vi.fn(async () => mode === "error" ? new Response("{}", { status: 503 }) : new Response(JSON.stringify(mode === "removed" ? [] : [LEVELLED_ITEM]), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+    function RefreshableReview() {
+      const client = useQueryClient();
+      return <><button onClick={() => client.invalidateQueries({ queryKey: ["report", 5, "escalated"] })}>Refresh review</button><SignalEscalatedPanel checkRunId={5} focused onEditingChange={editing} /></>;
+    }
+    renderWithProviders(<RefreshableReview />);
+    fireEvent.click(await screen.findByRole("button", { name: "Proficient" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Comment (optional)" }), { target: { value: "PRIVATE-REFRESH-DRAFT" } });
+    fireEvent.click(screen.getByRole("button", { name: "Refresh review" }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    expect(screen.getByRole("textbox", { name: "Comment (optional)" })).toHaveValue("PRIVATE-REFRESH-DRAFT");
+    mode = outcome;
+    fireEvent.click(screen.getByRole("button", { name: "Refresh review" }));
+    if (outcome === "removed") {
+      await screen.findByText("No unresolved criteria");
+      expect(editing).toHaveBeenLastCalledWith(false);
+      expect(screen.getByText(/Your unsaved grade was not submitted/)).toBeInTheDocument();
+    } else {
+      await screen.findByText("Could not refresh these criteria");
+      expect(screen.getByRole("textbox", { name: "Comment (optional)" })).toHaveValue("PRIVATE-REFRESH-DRAFT");
+      expect(editing).toHaveBeenLastCalledWith(true);
+      fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+      expect(editing).toHaveBeenLastCalledWith(false);
+    }
+  });
 
   it.each([
     [LEVELLED_ITEM, "Proficient", "mark_level", 3],

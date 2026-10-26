@@ -343,6 +343,7 @@
   --signal-library-workbench-min-height: 45rem;
   --signal-document-toolbar-height: 3.5rem;
   --signal-document-workbench-height: calc(100dvh - var(--signal-workspace-bar-height) - var(--signal-space-8));
+  --signal-criterion-reader-height: min(36rem, 60dvh);
   --signal-paper-max-inline-size: 52rem;
   --signal-paper-gutter: var(--signal-space-5);
   --signal-paper-gutter-phone: var(--signal-space-3);

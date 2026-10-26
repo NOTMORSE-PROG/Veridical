@@ -17,9 +17,7 @@ import { isWorkspaceSample } from "../demo/workspaceFixture";
 import { criterionSource, evidenceById, evidenceFor, evidenceRegion, flagSourcePagePair } from "../demo/sourceEvidence";
 import { SavedSourceEvidence, SourcePageComparison } from "./SavedSourceEvidence";
 import { useReviewWorkspaceCapacity } from "./useReviewWorkspaceCapacity";
-import { SignalDecisionPanel } from "../report/SignalDecisionPanel";
-import { SignalCriteriaResults, SignalEscalatedPanel } from "../report/SignalReviewSections";
-import { ReviewProgress } from "../report/ReviewProgress";
+import { ReportReviewWorkflow } from "../report/ReportReviewWorkflow";
 import { coverageItems } from "../report/reportCoverage";
 import {
   useExcludedReuseMatches,
@@ -253,18 +251,15 @@ function ReportUnavailable({ checkRunId, error, onRetry }: { checkRunId: number;
   return <Alert title="Could not load review details" tone="error" role="alert"><p>VERIDICAL could not load the recorded review. The source pane loads separately and may also need to be retried.</p><Button variant="secondary" onClick={onRetry}>Try review again</Button><ActionLink to="/dashboard?queue=needs_review" variant="quiet">Return to Review Desk</ActionLink></Alert>;
 }
 
-function ReadinessDecision({ checkRunId, report, pending, error, onRetry, onBack, onEvidenceSelected }: { onEvidenceSelected: (criterionId: number, evidence: EvidenceItem, index: number) => void; checkRunId: number; report: ReportOut | undefined; pending: boolean; error: unknown; onRetry: () => void; onBack: () => void }) {
+function ReadinessDecision({ checkRunId, report, pending, error, onRetry, onBack, onEvidenceSelected, onOpenEvidence }: { onEvidenceSelected: (criterionId: number, evidence: EvidenceItem, index: number) => void; onOpenEvidence: () => void; checkRunId: number; report: ReportOut | undefined; pending: boolean; error: unknown; onRetry: () => void; onBack: () => void }) {
   if (pending) return <div role="status" aria-live="polite" aria-busy="true" className="signal-desk-loading"><span>Loading readiness and decision.</span><i /><i /></div>;
   if (!report) return <ReportUnavailable checkRunId={checkRunId} error={error} onRetry={onRetry} />;
 
   const identity = manuscriptIdentity(report.manuscript_group_label, report.manuscript_original_filename);
   const coverage = coverageItems(report);
-  const assessed = report.results.filter((row) => row.outcome !== "escalated");
   return (
     <div className="signal-document-analysis">
       <Button variant="quiet" onClick={onBack}>Back to review queue</Button>
-      <ReviewProgress report={report} compact />
-      <SignalEscalatedPanel checkRunId={report.check_run_id} focused onEvidenceSelected={onEvidenceSelected} />
       <section className="signal-document-analysis__summary" aria-labelledby="analysis-heading">
         <div className="signal-document-inspector__heading"><p className="signal-section-kicker">After the evidence</p><h2 id="analysis-heading">Readiness and decision</h2><p>Use this summary after reviewing the evidence. The instructor records the final decision.</p></div>
         <div className="signal-document-analysis__readiness">
@@ -276,8 +271,7 @@ function ReadinessDecision({ checkRunId, report, pending, error, onRetry, onBack
       </section>
       {report.llm_mode !== "real" && report.llm_mode !== "manual" && <Alert title={report.llm_mode === "fake" ? "Test-mode AI results" : "AI mode could not be verified"} tone="warning">{report.llm_mode === "fake" ? "This review was produced with fixture responses, not real AI grading. Do not treat it as a finding about the manuscript." : "This run predates reliable AI-mode tracking. Treat AI-derived outcomes cautiously."}</Alert>}
       {coverage.length > 0 && <CoverageStatement state="partial" headingId="workspace-coverage-heading" heading="Not every check finished" intro="Nothing skipped here is presented as passed. Each item below names what did not finish and how to close it." items={coverage} />}
-      <details className="signal-document-analysis__criteria"><summary>Criterion record, {assessed.length} assessed</summary><SignalCriteriaResults results={assessed} checkRunId={report.check_run_id} /></details>
-      <SignalDecisionPanel report={report} manuscriptLabel={identity.primary} />
+      <ReportReviewWorkflow report={report} manuscriptLabel={identity.primary} onEvidenceSelected={onEvidenceSelected} onOpenEvidence={onOpenEvidence} />
       <div className="signal-document-analysis__footer"><ActionLink to={`/report/${report.check_run_id}`} variant="secondary">Open full readiness report</ActionLink></div>
     </div>
   );
@@ -538,7 +532,7 @@ export function SignalDocumentViewerPage() {
               </div>
               <aside ref={inspectorRef} id="review-panel" role="tabpanel" aria-labelledby="review-tab" data-active={activeTab === "review"} className="signal-document-inspector">
                 {isExploring && isWorkspaceSample() ? <section className="signal-document-selected"><Button variant="quiet" onClick={showQueue}>Back to review queue</Button><h2>Originality comparison was not run</h2><p>This prepared review has no saved similarity search or passage pair. The independent Library article is available for reading; it is not a demonstrated match. An empty prepared response is not a completed search with zero matches.</p></section> : isExploring ? <ReuseExplorePanel flags={flagsQuery.data} onSelectFlag={selectFinding} onBack={showQueue} includeReferenceList={includeReferenceList} includeBlockQuote={includeBlockQuote} onToggleReferenceList={(value) => setToggle("ref", value)} onToggleBlockQuote={(value) => setToggle("quote", value)} excludedMatchesQuery={excludedMatchesQuery} expandedMatchId={expandedMatchId} onExpandMatch={setMatch} />
-                  : isDecision ? <ReadinessDecision checkRunId={id} report={reportQuery.data} pending={reportQuery.isPending || (isWorkspaceSample() && viewerQuery.isPending)} error={reportQuery.error} onRetry={() => reportQuery.refetch()} onBack={showQueue} onEvidenceSelected={chooseCriterionEvidence} />
+                  : isDecision ? <ReadinessDecision checkRunId={id} report={reportQuery.data} pending={reportQuery.isPending || (isWorkspaceSample() && viewerQuery.isPending)} error={reportQuery.error} onRetry={() => reportQuery.refetch()} onBack={showQueue} onEvidenceSelected={chooseCriterionEvidence} onOpenEvidence={() => { if (!sourceCapacity.split) selectPane("manuscript"); }} />
                     : selectedFinding && selectedLocationId ? <SelectedFinding checkRunId={id} finding={selectedFinding} total={findings.length} locationFlagId={selectedLocationId} region={selectedRegion} previous={previousFinding} next={nextFinding} onBack={showQueue} onPrevious={() => previousFinding && selectFinding(previousFinding.representative.id, true)} onNext={() => nextFinding && selectFinding(nextFinding.representative.id, true)} onLocation={selectFinding} onExplore={openExplore} onSourceEvidence={chooseSource} presentedEvidenceIds={wideComparison && sourceCapacity.split ? pairSources.filter(entry => entry.image_id).map(entry => entry.evidence_id) : []} sourceContextKey={`${id}:${viewer?.manuscript_id ?? "loading"}:${viewer?.source_sha256 ?? "unknown"}`} />
                       : <ReviewHome checkRunId={id} report={reportQuery.data} reportPending={reportQuery.isPending} reportError={reportQuery.error} onReportRetry={() => reportQuery.refetch()} findings={findings} regions={viewer?.regions ?? []} flagsPending={flagsQuery.isPending} flagsError={flagsQuery.isError} filter={filter} invalidSelection={invalidSelection} onFilter={setFilter} onSelect={selectFinding} onExplore={openExplore} onDecision={openDecision} />}
               </aside>

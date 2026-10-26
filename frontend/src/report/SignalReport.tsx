@@ -9,9 +9,7 @@ import { Alert } from "../ui/Alert";
 import { Button } from "../ui/Button";
 import { CoverageStatement } from "../ui/CoverageStatement";
 import { ReadinessBand } from "../ui/ReadinessBand";
-import { SignalDecisionPanel } from "./SignalDecisionPanel";
-import { ReviewProgress } from "./ReviewProgress";
-import { SignalCriteriaResults, SignalEscalatedPanel, SignalFlagsPanel } from "./SignalReviewSections";
+import { ReportReviewWorkflow } from "./ReportReviewWorkflow";
 import { SignalShareDialog } from "./SignalShareDialog";
 import { coverageItems } from "./reportCoverage";
 import { useExportReportPdf, useReport } from "./useReport";
@@ -117,11 +115,10 @@ export function SignalReportPage() {
             </dl>
           </section>
 
-          <ReviewProgress report={report} />
           {report.llm_mode === "manual" && <p className="signal-field-hint">Prepared document review. Model grading was skipped; rubric judgments and the final decision remain with the instructor.</p>}
           {report.llm_mode === "manual" && <p className="signal-field-hint">Statistical forensics: not applicable to this software implementation report. Originality comparison: not run; no similarity judgment is recorded.</p>}
           <div className="signal-section-flow signal-report-orientation">
-            <nav className="signal-report-jumps" aria-label="Report review order"><a href="#review-criteria" onClick={focusReportJumpTarget}><span>1</span>Resolve criteria</a><a href="#integrity-signals" onClick={focusReportJumpTarget}><span>2</span>Inspect signals</a><a href="#criteria-results-heading" onClick={focusReportJumpTarget}><span>3</span>Read criterion record</a><a href="#final-decision" onClick={focusReportJumpTarget}><span>4</span>Make decision</a></nav>
+
 
             <div className="signal-attached-flow signal-report-tools">
               <div className="signal-report-actions signal-control-cluster">
@@ -153,10 +150,7 @@ export function SignalReportPage() {
             </div>
           )}
 
-          <SignalEscalatedPanel checkRunId={report.check_run_id} />
-          <SignalFlagsPanel checkRunId={report.check_run_id} unresolvedHighFlagCount={report.unresolved_high_flag_count} originalityScope={report.originality_scope} />
-          <SignalCriteriaResults results={report.results.filter((row) => row.outcome !== "escalated")} checkRunId={report.check_run_id} />
-          <SignalDecisionPanel report={report} manuscriptLabel={identity?.primary ?? report.manuscript_group_label} />
+          <ReportReviewWorkflow report={report} manuscriptLabel={identity?.primary ?? report.manuscript_group_label} />
         </>
       )}
 

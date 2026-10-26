@@ -222,11 +222,20 @@ Combines everything into one explainable output (Objective 4, Fig. 3.12).
 
 ### Flow C — Flag review & final decision 🟢
 1. Open a report → summary header: status, composite score, flag counts by severity, **escalated-items count**
-2. Escalated items shown first ("AI wasn't sure") → instructor resolves each (accept AI suggestion / mark pass / mark fail)
-3. Filter flags by check type, severity, confidence; click a flag → evidence excerpt with page anchor
-4. Add a private note to a finding; dismiss a finding you disagree with and record why
+2. Review criteria one at a time and save each judgment. Selecting saved criterion evidence opens the original manuscript while the unsaved grade/comment stays in the form
+3. Review findings with the existing filters and source evidence; add a private note or dismiss a finding you disagree with and record why
+4. Read the saved criterion outcomes before the decision
 5. Set final decision: **Approve for defense / Return for revision / Reject**
 6. Export PDF or copy read-only share link for the group's adviser
+
+**Review order (owner, 2026-10-26):** Show one review section at a time, with
+Back/Continue controls and a visible current step. An unsaved grade must be saved
+or cancelled before changing sections. Opening a section does not complete its
+review or change readiness. Findings remain independently accessible when there
+is no unsaved grade; the existing pending-criteria decision gate still applies.
+The full report's manuscript reader retains the original source and fails closed
+when an evidence location cannot be verified. This is a local sample candidate;
+publication is tracked separately.
 
 **Plain language (owner, 2026-10-26):** Use simple words in instructor controls
 and explain the effect of an action before it is saved. Finding actions use

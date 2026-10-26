@@ -4,6 +4,8 @@ import type { EscalatedItemOut, FlagSummaryOut, ReportOut } from "../api/types";
 import { renderWithProviders, stubFetchByPath } from "../test/renderWithProviders";
 import { SignalReportPage } from "./SignalReport";
 
+vi.mock("../document/PdfPane", () => ({ PdfPane: ({ requestedPage }: { requestedPage: number }) => <div data-testid="manuscript-reader" data-page={requestedPage} /> }));
+
 const BASE_REPORT: ReportOut = {
   check_run_id: 5,
   manuscript_id: 5,
@@ -80,10 +82,50 @@ function stubReport(report: ReportOut = BASE_REPORT, escalated: EscalatedItemOut
     "/check-runs/5/escalated": escalated,
     "/check-runs/5/flags": flags,
     "/check-runs/5/share": null,
+    "/auth/session": { instructor: { id: 1, email: "review@test.local", display_name: "Reviewer", onboarding_dismissed_at: null } },
   }));
 }
 
 describe("SignalReportPage", () => {
+  it("does not count an ungraded service-limited criterion as a recorded grade", async () => {
+    stubReport({ ...BASE_REPORT, pending_review_count: 1, results: [{ ...BASE_REPORT.results[0], outcome: "quota_exhausted", score: null }] }, [{ ...ESCALATED, criterion_id: 1, review_reason: "not_graded" }]);
+    renderWithProviders(<SignalReportPage />, { route: "/report/5", path: "/report/:checkRunId" });
+    expect(await screen.findByText("0 of 1 criteria recorded")).toBeInTheDocument();
+  });
+  it("opens an explicit evidence passage without losing the grade draft and displays one section at a time", async () => {
+    const evidence = { quote: "Participant selection is explained here.", anchor: "page 3" };
+    const pendingRow = { ...BASE_REPORT.results[0], criterion_id: ESCALATED.criterion_id, text: ESCALATED.criterion_text, outcome: "escalated" as const, score: null, evidence: [evidence] };
+    const report = { ...BASE_REPORT, pending_review_count: 2, results: [pendingRow, { ...pendingRow, criterion_id: 3, text: "Second criterion" }] };
+    vi.stubGlobal("fetch", stubFetchByPath({
+      "/auth/session": { instructor: { id: 1, email: "review@test.local", display_name: "Reviewer", onboarding_dismissed_at: null } },
+      "/check-runs/5/report": report, "/check-runs/5/escalated": [{ ...ESCALATED, evidence: [evidence] }, { ...ESCALATED, check_result_id: 45, criterion_id: 3, criterion_text: "Second criterion" }],
+      "/check-runs/5/flags": [FLAG], "/check-runs/5/share": null,
+      "/check-runs/5/document": { manuscript_id: 5, available: true, source_format: "pdf", page_count: 10, source_sha256: "source-five", original_filename: "source.pdf", regions: [], unavailable_reason: null, purged_at: null },
+    }));
+    renderWithProviders(<SignalReportPage />, { route: "/report/5", path: "/report/:checkRunId" });
+    await screen.findByRole("heading", { name: ESCALATED.criterion_text });
+    expect(screen.queryByRole("heading", { name: "Second criterion" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: "Integrity signals" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Meets criterion" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Comment (optional)" }), { target: { value: "PRIVATE-DRAFT-1768" } });
+    expect(screen.getByRole("button", { name: /2.*Review findings/ })).toBeDisabled();
+    fireEvent.click(screen.getByText("All saved evidence"));
+    const source = screen.getByRole("button", { name: `page 3: ${evidence.quote}` });
+    source.focus();
+    fireEvent.click(source);
+    await screen.findByRole("dialog", { name: "Original manuscript passage" });
+    expect(await screen.findByTestId("manuscript-reader")).toHaveAttribute("data-page", "3");
+    fireEvent.click(screen.getByRole("button", { name: "Close manuscript" }));
+    expect(screen.getByRole("textbox", { name: "Comment (optional)" })).toHaveValue("PRIVATE-DRAFT-1768");
+    expect(screen.getByRole("heading", { name: "Mark as meets criterion" })).toBeInTheDocument();
+    expect(source).toHaveFocus();
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    fireEvent.click(screen.getByRole("button", { name: "Continue to findings" }));
+    await screen.findByRole("region", { name: "Integrity signals" });
+    expect(screen.queryByRole("heading", { name: ESCALATED.criterion_text })).not.toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Final defense-readiness decision" })).not.toBeInTheDocument();
+  });
   afterEach(() => vi.unstubAllGlobals());
 
   it("leads with a readiness band and identity without presenting the composite as a judgment percentage", async () => {
@@ -94,6 +136,8 @@ describe("SignalReportPage", () => {
     expect(screen.getByText(/Group Syntax/)).toBeInTheDocument();
     expect(screen.getByText(/T\.I\.P\. Capstone Format/)).toBeInTheDocument();
     expect(screen.queryByText("92%")).not.toBeInTheDocument();
+    expect(screen.queryByText("High importance")).not.toBeInTheDocument();
+    fireEvent.click(await screen.findByRole("button", { name: /3.*Read saved grades/ }));
     expect(screen.getByText("High importance")).toBeInTheDocument();
   });
 
@@ -101,8 +145,8 @@ describe("SignalReportPage", () => {
     stubReport(BASE_REPORT, [], [FLAG]);
     renderWithProviders(<SignalReportPage />, { route: "/report/5", path: "/report/:checkRunId" });
 
+    fireEvent.click(await screen.findByRole("button", { name: /2.*Review findings/ }));
     const target = await screen.findByRole("region", { name: "Integrity signals" });
-    fireEvent.click(screen.getByRole("link", { name: /2\s*Inspect signals/ }));
 
     await waitFor(() => expect(target).toHaveFocus());
   });
@@ -136,9 +180,13 @@ describe("SignalReportPage", () => {
     expect(firstTask).toBeInTheDocument();
     expect(screen.getByText(ESCALATED.criterion_text)).toBeInTheDocument();
     expect(screen.getByText("1 unresolved")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Approve for defense" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /4.*Make decision/ }));
     expect(screen.getByRole("button", { name: "Approve for defense" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Return for revision" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Reject manuscript" })).toBeDisabled();
+    fireEvent.click(screen.getByRole("link", { name: "Resolve it before deciding." }));
+    expect(await screen.findByRole("heading", { name: "Criteria needing your judgment" })).toBeInTheDocument();
   });
 
   it("makes a chosen-but-unconfirmed resolution legible as a pending step, not a done one (BUG-145)", async () => {
@@ -165,7 +213,7 @@ describe("SignalReportPage", () => {
     // announced from its CONTENT, not its accessible name (which stays
     // empty with no aria-label), so this checks the role exists and wraps
     // the pending copy, not a computed name.
-    const status = screen.getByRole("status");
+    const status = screen.getByText("Step 2 of 2: nothing is saved yet").closest('[role="status"]') as HTMLElement;
     expect(within(status).getByText("Step 2 of 2: nothing is saved yet")).toBeInTheDocument();
     expect(within(status).getByText("Mark as meets criterion")).toBeInTheDocument();
   });
@@ -275,7 +323,7 @@ describe("SignalReportPage", () => {
       page_anchor: "whole document",
     }];
     stubReport(BASE_REPORT, [], flags);
-    renderWithProviders(<SignalReportPage />, { route: "/report/5", path: "/report/:checkRunId" });
+    renderWithProviders(<SignalReportPage />, { route: "/report/5?review_step=findings", path: "/report/:checkRunId" });
 
     await screen.findByText(/possible shared content or reuse/);
     // Scoped to the flags section specifically -- the report's own
@@ -296,7 +344,7 @@ describe("SignalReportPage", () => {
       page_anchor: "p. 31",
     }];
     stubReport(BASE_REPORT, [], flags);
-    renderWithProviders(<SignalReportPage />, { route: "/report/5", path: "/report/:checkRunId" });
+    renderWithProviders(<SignalReportPage />, { route: "/report/5?review_step=findings", path: "/report/:checkRunId" });
 
     await screen.findByText(/hybrid rule-based and AI approach/);
     const signals = screen.getByRole("region", { name: "Integrity signals" });
@@ -319,7 +367,7 @@ describe("SignalReportPage", () => {
       }],
     };
     stubReport(report, [], [FLAG]);
-    renderWithProviders(<SignalReportPage />, { route: "/report/5", path: "/report/:checkRunId" });
+    renderWithProviders(<SignalReportPage />, { route: "/report/5?review_step=findings", path: "/report/:checkRunId" });
 
     expect(await screen.findByText("Test-mode AI results")).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Not every check finished" })).toBeInTheDocument();
@@ -353,7 +401,7 @@ describe("SignalReportPage", () => {
     // selection (which would otherwise default to "high" here, since
     // these flags include unresolved high-severity ones).
     renderWithProviders(<SignalReportPage />, {
-      route: "/report/5?flags_view=open",
+      route: "/report/5?flags_view=open&review_step=findings",
       path: "/report/:checkRunId",
     });
 
@@ -380,7 +428,7 @@ describe("SignalReportPage", () => {
       page_anchor: `p. ${Math.floor(index / 2) + 1}`,
     }));
     stubReport(BASE_REPORT, [], flags);
-    renderWithProviders(<SignalReportPage />, { route: "/report/5", path: "/report/:checkRunId" });
+    renderWithProviders(<SignalReportPage />, { route: "/report/5?review_step=findings", path: "/report/:checkRunId" });
 
     expect(await screen.findByText("1 open finding")).toBeInTheDocument();
     expect(screen.getByText("Showing 1 of 1 open finding across 12 locations.")).toBeInTheDocument();
@@ -427,7 +475,7 @@ describe("SignalReportPage", () => {
     }));
     stubReport(BASE_REPORT, [], flags);
     renderWithProviders(<SignalReportPage />, {
-      route: "/report/5?flags_view=high&flags_clusters_open=1",
+      route: "/report/5?flags_view=high&flags_clusters_open=1&review_step=findings",
       path: "/report/:checkRunId",
     });
 
@@ -461,7 +509,7 @@ describe("SignalReportPage", () => {
     // this test is about `flags_visible` persistence, not the new
     // default-view selection.
     renderWithProviders(<SignalReportPage />, {
-      route: "/report/5?flags_view=open&flags_visible=12",
+      route: "/report/5?flags_view=open&flags_visible=12&review_step=findings",
       path: "/report/:checkRunId",
     });
 
@@ -480,7 +528,7 @@ describe("SignalReportPage", () => {
       { ...FLAG, id: 2, severity: "high" as const },
     ];
     stubReport({ ...BASE_REPORT, unresolved_high_flag_count: 1 }, [], flags);
-    renderWithProviders(<SignalReportPage />, { route: "/report/5", path: "/report/:checkRunId" });
+    renderWithProviders(<SignalReportPage />, { route: "/report/5?review_step=findings", path: "/report/:checkRunId" });
 
     expect(await screen.findByRole("button", { name: "High: 1 finding" })).toHaveAttribute("aria-pressed", "true");
     expect(screen.getByText(/High severity is shown first/)).toBeInTheDocument();
@@ -496,7 +544,7 @@ describe("SignalReportPage", () => {
     // aggregate (report/scoring.py's own gate) -- deliberately trusted
     // over recomputing from the raw flags array client-side.
     stubReport({ ...BASE_REPORT, unresolved_high_flag_count: 0 }, [], flags);
-    renderWithProviders(<SignalReportPage />, { route: "/report/5", path: "/report/:checkRunId" });
+    renderWithProviders(<SignalReportPage />, { route: "/report/5?review_step=findings", path: "/report/:checkRunId" });
 
     expect(await screen.findByRole("button", { name: "Medium: 1 finding" })).toHaveAttribute("aria-pressed", "true");
     expect(screen.getByText(/Medium severity is shown first/)).toBeInTheDocument();
@@ -505,7 +553,7 @@ describe("SignalReportPage", () => {
   it("defaults to Open (not High/Medium) when neither an unresolved high nor medium signal exists", async () => {
     const flags = [{ ...FLAG, id: 1, severity: "low" as const }];
     stubReport({ ...BASE_REPORT, unresolved_high_flag_count: 0 }, [], flags);
-    renderWithProviders(<SignalReportPage />, { route: "/report/5", path: "/report/:checkRunId" });
+    renderWithProviders(<SignalReportPage />, { route: "/report/5?review_step=findings", path: "/report/:checkRunId" });
 
     expect(await screen.findByRole("button", { name: "Open: 1 finding" })).toHaveAttribute("aria-pressed", "true");
     expect(screen.queryByText(/severity is shown first/)).not.toBeInTheDocument();
@@ -522,7 +570,7 @@ describe("SignalReportPage", () => {
     ];
     stubReport({ ...BASE_REPORT, unresolved_high_flag_count: 1 }, [], flags);
     renderWithProviders(<SignalReportPage />, {
-      route: "/report/5?flags_view=low",
+      route: "/report/5?flags_view=low&review_step=findings",
       path: "/report/:checkRunId",
     });
 
@@ -551,11 +599,12 @@ describe("SignalReportPage", () => {
       stubReport({ ...BASE_REPORT, unresolved_high_flag_count: 1 }, [], [{ ...FLAG, severity: "high" }]);
       renderWithProviders(<SignalReportPage />, { route: "/report/5", path: "/report/:checkRunId" });
 
-      fireEvent.click(await screen.findByRole("link", { name: /Inspect signals/ }));
-      expect(scrollIntoView).not.toHaveBeenCalled();
+      fireEvent.click(await screen.findByRole("button", { name: /2.*Review findings/ }));
+      await screen.findByRole("region", { name: "Integrity signals" });
+      scrollIntoView.mockClear();
 
       fireEvent.click(screen.getByRole("link", { name: /Open high-severity signals: 1\./ }));
-      await waitFor(() => expect(scrollIntoView).toHaveBeenCalledTimes(1));
+      await waitFor(() => expect(scrollIntoView).toHaveBeenCalled());
     } finally {
       HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
     }
@@ -588,8 +637,9 @@ describe("SignalReportPage", () => {
       ],
       "/check-runs/5/share": null,
       "/auth/me": ME_INSTRUCTOR,
+      "/auth/session": { instructor: ME_INSTRUCTOR },
     }));
-    renderWithProviders(<SignalReportPage />, { route: "/report/5", path: "/report/:checkRunId" });
+    renderWithProviders(<SignalReportPage />, { route: "/report/5?review_step=findings", path: "/report/:checkRunId" });
 
     const viewedBadges = await screen.findAllByText("Viewed");
     expect(viewedBadges).toHaveLength(1);
@@ -608,8 +658,9 @@ describe("SignalReportPage", () => {
       "/check-runs/5/flags": [FLAG],
       "/check-runs/5/share": null,
       "/auth/me": ME_INSTRUCTOR,
+      "/auth/session": { instructor: ME_INSTRUCTOR },
     }));
-    renderWithProviders(<SignalReportPage />, { route: "/report/5", path: "/report/:checkRunId" });
+    renderWithProviders(<SignalReportPage />, { route: "/report/5?review_step=findings", path: "/report/:checkRunId" });
 
     await screen.findByText("Showing 1 of 1 open finding across 1 location.");
     expect(screen.queryByText("Viewed")).not.toBeInTheDocument();
@@ -622,7 +673,7 @@ describe("SignalReportPage", () => {
       { ...FLAG, id: 21, check_kind: "citation_integrity", problem_kind: "uncited_reference", evidence_excerpt: sharedExcerpt, page_anchor: "reference list" },
       { ...FLAG, id: 22, check_kind: "citation_integrity", problem_kind: "unverifiable_not_found", evidence_excerpt: sharedExcerpt, page_anchor: "reference #15" },
     ]);
-    renderWithProviders(<SignalReportPage />, { route: "/report/5", path: "/report/:checkRunId" });
+    renderWithProviders(<SignalReportPage />, { route: "/report/5?review_step=findings", path: "/report/:checkRunId" });
 
     expect(await screen.findByText("Reference may not be cited in the manuscript body")).toBeInTheDocument();
     expect(screen.getByText("Source not found in the databases checked")).toBeInTheDocument();
@@ -644,7 +695,7 @@ describe("SignalReportPage", () => {
       ],
     };
     stubReport(report);
-    renderWithProviders(<SignalReportPage />, { route: "/report/5", path: "/report/:checkRunId" });
+    renderWithProviders(<SignalReportPage />, { route: "/report/5?review_step=record", path: "/report/:checkRunId" });
 
     await screen.findByText("Chapter 1 states the research problem");
     // jsdom doesn't compute an implicit ARIA role for a bare <summary>
@@ -673,7 +724,7 @@ describe("SignalReportPage", () => {
         evidence_excerpt: "The methodology section describes a mixed-methods design.",
       },
     ]);
-    renderWithProviders(<SignalReportPage />, { route: "/report/5", path: "/report/:checkRunId" });
+    renderWithProviders(<SignalReportPage />, { route: "/report/5?review_step=findings", path: "/report/:checkRunId" });
 
     const heading = await screen.findByRole("heading", { name: "Objective and result may contradict each other" });
     // The excerpt is still shown, but subordinate to (i.e. not replacing)
@@ -696,7 +747,7 @@ describe("SignalReportPage", () => {
         criterion_text: null,
       },
     ]);
-    renderWithProviders(<SignalReportPage />, { route: "/report/5", path: "/report/:checkRunId" });
+    renderWithProviders(<SignalReportPage />, { route: "/report/5?review_step=findings", path: "/report/:checkRunId" });
 
     await screen.findByText("Showing 2 of 2 open findings across 2 locations.");
     expect(screen.getByRole("heading", { name: "Statement of the problem is coherent and well-supported" })).toBeInTheDocument();
@@ -718,7 +769,7 @@ describe("SignalReportPage", () => {
       // Both flags are medium severity, so BUG-167's own default-view
       // selection lands on "med" here, not "open" -- pinned explicitly so
       // this test is about the evidence link, not that other feature.
-      route: "/report/5?flags_view=open",
+      route: "/report/5?flags_view=open&review_step=findings",
       path: "/report/:checkRunId",
     });
 
@@ -740,7 +791,7 @@ describe("SignalReportPage", () => {
       { ...FLAG, id: 40, severity: "med" as const, check_kind: "internal_agreement", problem_kind: "agreement_partial", matched_ref: null, page_anchor: "p. 3" },
     ];
     stubReport(BASE_REPORT, [], flags);
-    renderWithProviders(<SignalReportPage />, { route: "/report/5?flags_view=open", path: "/report/:checkRunId" });
+    renderWithProviders(<SignalReportPage />, { route: "/report/5?flags_view=open&review_step=findings", path: "/report/:checkRunId" });
 
     await screen.findByText("Showing 1 of 1 open finding across 2 locations.");
     expect(
@@ -751,7 +802,7 @@ describe("SignalReportPage", () => {
 
   it("BUG-169: never adds the summary evidence link to a single-location card (already had one) or the public share view (no actions at all)", async () => {
     stubReport(BASE_REPORT, [], [FLAG]);
-    renderWithProviders(<SignalReportPage />, { route: "/report/5", path: "/report/:checkRunId" });
+    renderWithProviders(<SignalReportPage />, { route: "/report/5?review_step=findings", path: "/report/:checkRunId" });
 
     await screen.findByText("Showing 1 of 1 open finding across 1 location.");
     // Exactly the pre-existing single-location link, no duplicate summary
@@ -778,7 +829,7 @@ describe("SignalReportPage", () => {
       page_anchor: "p. 18",
     };
     stubReport(BASE_REPORT, [], [legacyWholeDocument, quotedPassage]);
-    renderWithProviders(<SignalReportPage />, { route: "/report/5", path: "/report/:checkRunId" });
+    renderWithProviders(<SignalReportPage />, { route: "/report/5?review_step=findings", path: "/report/:checkRunId" });
 
     expect(await screen.findByText(/duplicate or near-duplicate of archived manuscript #34/i)).toBeInTheDocument();
     expect(screen.queryByText(/100\.0% match/)).not.toBeInTheDocument();
@@ -787,7 +838,7 @@ describe("SignalReportPage", () => {
 
   it("requires a reason before an instructor can reject a Ready manuscript", async () => {
     stubReport();
-    renderWithProviders(<SignalReportPage />, { route: "/report/5", path: "/report/:checkRunId" });
+    renderWithProviders(<SignalReportPage />, { route: "/report/5?review_step=decision", path: "/report/:checkRunId" });
 
     fireEvent.click(await screen.findByRole("button", { name: "Reject manuscript" }));
     const dialog = screen.getByRole("dialog", { name: "Reject this manuscript?" });
@@ -811,7 +862,7 @@ describe("SignalReportPage", () => {
   it("survives a rolling deploy response that omits integrity status", async () => {
     const { integrity_check_status: _omitted, ...staleReport } = BASE_REPORT;
     stubReport(staleReport as ReportOut);
-    renderWithProviders(<SignalReportPage />, { route: "/report/5", path: "/report/:checkRunId" });
+    renderWithProviders(<SignalReportPage />, { route: "/report/5?review_step=decision", path: "/report/:checkRunId" });
 
     expect(await screen.findByRole("heading", { name: "Final defense-readiness decision" })).toBeInTheDocument();
   });

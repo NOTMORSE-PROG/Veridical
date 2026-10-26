@@ -68,6 +68,7 @@ function ContinuousPdfPage({
   onVisibility,
   registerPage,
   focusSelection,
+  readingPage,
 }: {
   pdf: PDFDocumentProxy;
   metric: PageMetric;
@@ -81,6 +82,7 @@ function ContinuousPdfPage({
   onVisibility: (page: number, ratio: number) => void;
   registerPage: (page: number, element: HTMLElement | null) => void;
   focusSelection: boolean;
+  readingPage: number;
 }) {
   const pageRef = useRef<HTMLElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -89,6 +91,7 @@ function ContinuousPdfPage({
   const renderTaskRef = useRef<RenderTask | null>(null);
   const textLayerTaskRef = useRef<pdfjsLib.TextLayer | null>(null);
   const [isNear, setIsNear] = useState(metric.pageNumber <= 2);
+  const shouldRender = isNear || metric.pageNumber === readingPage;
   const [displayWidth, setDisplayWidth] = useState(0);
   const [viewport, setViewport] = useState<ReturnType<PDFPageProxy["getViewport"]> | null>(null);
   const [hoveredFlagId, setHoveredFlagId] = useState<number | null>(null);
@@ -124,7 +127,7 @@ function ContinuousPdfPage({
   }, []);
 
   useEffect(() => {
-    if (!isNear || displayWidth <= 0 || !canvasRef.current) return;
+    if (!shouldRender || displayWidth <= 0 || !canvasRef.current) return;
     let cancelled = false;
     let pageProxy: PDFPageProxy | null = null;
     const canvas = canvasRef.current;
@@ -177,7 +180,7 @@ function ContinuousPdfPage({
       textLayerTaskRef.current?.cancel();
       pageProxy?.cleanup();
     };
-  }, [displayWidth, isNear, metric.pageNumber, pdf]);
+  }, [displayWidth, shouldRender, metric.pageNumber, pdf]);
 
   useEffect(() => {
     if (!focusSelection || selectedFlagId === null || selectedFlagId < 0 || !isNear) return;
@@ -232,7 +235,7 @@ function ContinuousPdfPage({
       aria-label={`Page ${metric.pageNumber} of ${totalPages}`}
       data-page={metric.pageNumber}
     >
-      {isNear ? (
+      {shouldRender ? (
         <>
           <canvas ref={canvasRef} role="img" aria-label={`Rendered page ${metric.pageNumber} of the manuscript`} />
           <div ref={textLayerRef} className="signal-document-pdf-text-layer" aria-hidden="true" />
@@ -322,6 +325,7 @@ export function PdfPane({
 }) {
   const [pdf, setPdf] = useState<PDFDocumentProxy | null>(null);
   const [metrics, setMetrics] = useState<PageMetric[]>([]);
+  const [loadedFileUrl, setLoadedFileUrl] = useState<string | null>(null);
   const [loadError, setLoadError] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
   const [pageInput, setPageInput] = useState("1");
@@ -333,10 +337,22 @@ export function PdfPane({
   sourceVisible.current = isVisible;
   const wasVisible = useRef(isVisible);
   const lastVisiblePage = useRef(1);
+  const pageContentWidth = useRef(0);
+  const resizing = useRef(false);
+  const navigationGeneration = useRef(0);
+  const settledPageRequest = useRef<string | null>(null);
+  const activePageRequest = useRef<string | null>(null);
+  activePageRequest.current = requestedPage === null ? null : `${fileUrl}:${requestedPage}:${requestedPageAttempt ?? "initial"}`;
   const flagsById = useMemo(() => new Map(flags.map((flag) => [flag.id, flag])), [flags]);
 
   useEffect(() => {
     let cancelled = false;
+    setLoadedFileUrl(null);
+    appliedPageRequest.current = null;
+    settledPageRequest.current = null;
+    pageContentWidth.current = 0;
+    lastVisiblePage.current = 1;
+    navigationGeneration.current += 1;
     setPdf(null);
     setMetrics([]);
     setLoadError(false);
@@ -351,7 +367,7 @@ export function PdfPane({
           return { pageNumber: index + 1, width: viewport.width, height: viewport.height };
         }),
       );
-      if (!cancelled) setMetrics(pageMetrics);
+      if (!cancelled) { setMetrics(pageMetrics); setLoadedFileUrl(fileUrl); }
     }).catch(() => {
       if (!cancelled) setLoadError(true);
     });
@@ -369,7 +385,12 @@ export function PdfPane({
   }, []);
 
   const updateVisibility = useCallback(() => {
-    if (!sourceVisible.current) return;
+    if (!sourceVisible.current || resizing.current) return;
+    if (activePageRequest.current !== null && settledPageRequest.current !== activePageRequest.current) return;
+    const width = scrollRef.current?.querySelector(".signal-document-pdf-pages")?.getBoundingClientRect().width ?? 0;
+    // A visibility/scroll event may run before ResizeObserver. Do not replace
+    // the reading page with a page inferred from newly resized geometry.
+    if (width > 0 && pageContentWidth.current > 0 && width !== pageContentWidth.current) return;
     const root = scrollRef.current?.getBoundingClientRect();
     if (!root) return;
     let mostVisiblePage = 0;
@@ -388,6 +409,7 @@ export function PdfPane({
   }, []);
 
   const scrollToPage = useCallback((page: number, behavior: ScrollBehavior = "smooth") => {
+    navigationGeneration.current += 1;
     const total = pdf?.numPages ?? metrics.length;
     if (total <= 0) return;
     const target = Math.max(1, Math.min(total, Math.round(page)));
@@ -412,16 +434,51 @@ export function PdfPane({
     const request = `${fileUrl}:${requestedPage}:${requestedPageAttempt ?? "initial"}`;
     const showingAgain = isVisible && !wasVisible.current;
     wasVisible.current = isVisible;
-    if (!isVisible || metrics.length === 0) return;
+    if (!isVisible || metrics.length === 0 || loadedFileUrl !== fileUrl) return;
     const pending = requestedPage !== null && appliedPageRequest.current !== request;
     if (!pending && !showingAgain) return;
     const target = pending ? requestedPage! : lastVisiblePage.current;
+    let settleFrame = 0;
     const frame = requestAnimationFrame(() => {
       scrollToPage(target, "auto");
       if (pending) appliedPageRequest.current = request;
+      const generation = navigationGeneration.current;
+      settleFrame = requestAnimationFrame(() => {
+        if (sourceVisible.current && navigationGeneration.current === generation) scrollToPage(target, "auto");
+        settledPageRequest.current = request;
+      });
     });
-    return () => cancelAnimationFrame(frame);
-  }, [fileUrl, isVisible, metrics.length, requestedPage, requestedPageAttempt, scrollToPage]);
+    return () => { cancelAnimationFrame(frame); cancelAnimationFrame(settleFrame); };
+  }, [fileUrl, loadedFileUrl, isVisible, metrics.length, requestedPage, requestedPageAttempt, scrollToPage]);
+
+  useEffect(() => {
+    const pages = scrollRef.current?.querySelector(".signal-document-pdf-pages");
+    if (!pages || !isVisible || metrics.length === 0 || loadedFileUrl !== fileUrl || typeof ResizeObserver === "undefined") return;
+    let initialized = false;
+    let frame = 0;
+    let releaseFrame = 0;
+    let target: number | null = null;
+    let generation = navigationGeneration.current;
+    const request = `${fileUrl}:${requestedPage}:${requestedPageAttempt ?? "initial"}`;
+    const observer = new ResizeObserver(() => {
+      const width = pages.getBoundingClientRect().width;
+      if (width <= 0) return;
+      const changed = initialized && pageContentWidth.current !== width;
+      pageContentWidth.current = width;
+      initialized = true;
+      if (!changed || !sourceVisible.current || (requestedPage !== null && settledPageRequest.current !== request)) return;
+      if (target === null) { target = lastVisiblePage.current; generation = navigationGeneration.current; }
+      resizing.current = true;
+      cancelAnimationFrame(frame);
+      cancelAnimationFrame(releaseFrame);
+      frame = requestAnimationFrame(() => {
+        if (sourceVisible.current && navigationGeneration.current === generation && target !== null) scrollToPage(target, "auto");
+        releaseFrame = requestAnimationFrame(() => { resizing.current = false; target = null; updateVisibility(); });
+      });
+    });
+    observer.observe(pages);
+    return () => { observer.disconnect(); cancelAnimationFrame(frame); cancelAnimationFrame(releaseFrame); resizing.current = false; };
+  }, [fileUrl, loadedFileUrl, isVisible, metrics.length, requestedPage, requestedPageAttempt, scrollToPage, updateVisibility]);
 
   function commitPageInput() {
     const page = Number(pageInput);
@@ -468,7 +525,7 @@ export function PdfPane({
           <section className="signal-document-paper-state" role="alert">
             <p className="signal-section-kicker">PDF display unavailable</p>
             <h2>The PDF could not be displayed</h2>
-            <p>This source view failed to load. Any recorded review that loaded remains available on the right.</p>
+            <p>This source view failed to load. Any review information that already loaded is still available.</p>
           </section>
         ) : !pdf || metrics.length === 0 ? (
           <section className="signal-document-pdf-skeleton" role="status" aria-live="polite" aria-busy="true">
@@ -492,6 +549,7 @@ export function PdfPane({
                 onVisibility={updateVisibility}
                 registerPage={registerPage}
                 focusSelection={focusSelection}
+                readingPage={currentPage}
               />
             ))}
           </div>

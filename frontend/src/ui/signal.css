@@ -2334,7 +2334,7 @@
     background: var(--color-signal-surface);
   }
 
-  .signal-report-jumps a {
+  .signal-report-jumps :is(a, button) {
     display: flex;
     gap: var(--signal-space-3);
     align-items: center;
@@ -2344,17 +2344,23 @@
     padding: var(--signal-space-4);
     font-weight: var(--signal-weight-semibold);
     text-decoration: none;
+    background: transparent;
+    border-block: 0;
+    border-inline-start: 0;
+    font: inherit;
+    text-align: start;
+    cursor: pointer;
   }
 
-  .signal-report-jumps a:last-child {
+  .signal-report-jumps :is(a, button):last-child {
     border-inline-end: 0;
   }
 
-  .signal-report-jumps a:hover {
+  .signal-report-jumps :is(a, button):hover {
     background: var(--color-signal-surface-muted);
   }
 
-  .signal-report-jumps a span {
+  .signal-report-jumps :is(a, button) span {
     display: inline-grid;
     width: var(--signal-report-jump-number-size);
     height: var(--signal-report-jump-number-size);
@@ -6243,11 +6249,11 @@
       grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
     }
 
-    .signal-report-jumps a:nth-child(2) {
+    .signal-report-jumps :is(a, button):nth-child(2) {
       border-inline-end: 0;
     }
 
-    .signal-report-jumps a:nth-child(n + 3) {
+    .signal-report-jumps :is(a, button):nth-child(n + 3) {
       border-block-start: var(--signal-border-hairline) solid var(--color-signal-border);
     }
 
@@ -6701,4 +6707,10 @@
   .signal-document-workbench[data-desktop-split="false"] .signal-document-pane[data-active="true"] { display: flex; }
   .signal-document-workbench[data-desktop-split="false"] .signal-document-inspector[data-active="true"] { display: block; }
   .signal-document-analysis .signal-review-section--attention { border-inline-start: var(--signal-border-hairline) solid var(--color-signal-border); }
+  .signal-review-workflow { display: grid; gap: var(--signal-space-5); min-width: 0; }
+  .signal-review-workflow .signal-report-jumps [aria-current="step"] { background: var(--color-signal-surface-muted); box-shadow: inset 0 calc(-1 * var(--signal-border-brand)) var(--color-signal-brand); }
+  .signal-report-jumps button:disabled { cursor: default; color: var(--color-signal-ink-secondary); }
+  .signal-criterion-source-dialog { display: grid; gap: var(--signal-space-3); min-width: 0; }
+  .signal-criterion-source-dialog blockquote { margin: 0; padding: var(--signal-space-3); background: var(--color-signal-surface-muted); }
+  .signal-criterion-source-reader { display: flex; flex-direction: column; min-height: var(--signal-control-height); height: var(--signal-criterion-reader-height); overflow: hidden; }
 }
