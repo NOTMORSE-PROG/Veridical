@@ -1,15 +1,28 @@
+import { useLayoutEffect, useRef } from "react";
 import type { BoundSourceEvidence } from "../api/types";
 import { Button } from "../ui/Button";
 
-export function SavedSourceEvidence({ entries, onSelect }: { entries: BoundSourceEvidence[]; onSelect: (entry: BoundSourceEvidence) => void }) {
+function SourceEvidenceEntry({ entry, presented, onSelect }: { entry: BoundSourceEvidence; presented: boolean; onSelect: (entry: BoundSourceEvidence) => void }) {
+  const heading = useRef<HTMLHeadingElement>(null);
+  const actionFocused = useRef(false);
+  useLayoutEffect(() => {
+    if (presented && actionFocused.current) {
+      heading.current?.focus();
+      actionFocused.current = false;
+    }
+  }, [presented]);
+  return <article>
+    <h4 ref={heading} tabIndex={-1}>{entry.label}</h4><blockquote><span>“{entry.quote}”</span><cite>{entry.anchor}</cite></blockquote>
+    <p className="signal-field-hint">{entry.precision === "page_bbox" ? "Exact passage: the complete quotation is bound to the original source." : entry.precision_note}</p>
+    {!presented && <Button variant="secondary" aria-label={entry.role === "statement_a" || entry.role === "statement_b" ? undefined : `Show ${entry.label} in manuscript, ${entry.anchor}`} onFocus={() => { actionFocused.current = true; }} onBlur={() => { actionFocused.current = false; }} onClick={() => onSelect(entry)}>Show {entry.role === "statement_a" ? "statement A" : entry.role === "statement_b" ? "statement B" : "this evidence"} in manuscript</Button>}
+  </article>;
+}
+
+export function SavedSourceEvidence({ entries, onSelect, presentedEvidenceIds = [] }: { entries: BoundSourceEvidence[]; onSelect: (entry: BoundSourceEvidence) => void; presentedEvidenceIds?: readonly string[] }) {
   return <section className="signal-saved-source-evidence" aria-label="Saved source locations">
     <h3>{entries.some(entry => entry.role === "statement_b") ? "Compare the recorded statements" : "Recorded source evidence"}</h3>
     {entries.some(entry => entry.role === "statement_b") && <p>These are saved statements from the manuscript. Their presence does not establish verified objective/result roles.</p>}
-    {entries.map(entry => <article key={entry.evidence_id}>
-      <h4>{entry.label}</h4><blockquote><span>“{entry.quote}”</span><cite>{entry.anchor}</cite></blockquote>
-      <p className="signal-field-hint">{entry.precision === "page_bbox" ? "Exact passage: the complete quotation is bound to the original source." : entry.precision_note}</p>
-      <Button variant="secondary" aria-label={entry.role === "statement_a" || entry.role === "statement_b" ? undefined : `Show ${entry.label} in manuscript, ${entry.anchor}`} onClick={() => onSelect(entry)}>Show {entry.role === "statement_a" ? "statement A" : entry.role === "statement_b" ? "statement B" : "this evidence"} in manuscript</Button>
-    </article>)}
+    {entries.map(entry => <SourceEvidenceEntry key={entry.evidence_id} entry={entry} presented={presentedEvidenceIds.includes(entry.evidence_id)} onSelect={onSelect} />)}
   </section>;
 }
 

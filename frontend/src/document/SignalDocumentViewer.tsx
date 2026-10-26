@@ -153,7 +153,7 @@ function ReviewQueue({ findings, regions, report, pending, error, filter, invali
   );
 }
 
-function SelectedFinding({ checkRunId, finding, total, locationFlagId, region, previous, next, onBack, onPrevious, onNext, onLocation, onExplore, onSourceEvidence, sourceContextKey }: {
+function SelectedFinding({ checkRunId, finding, total, locationFlagId, region, previous, next, onBack, onPrevious, onNext, onLocation, onExplore, onSourceEvidence, sourceContextKey, presentedEvidenceIds }: {
   checkRunId: number;
   finding: ReviewFinding;
   total: number;
@@ -168,6 +168,7 @@ function SelectedFinding({ checkRunId, finding, total, locationFlagId, region, p
   onExplore: () => void;
   onSourceEvidence: (entry: BoundSourceEvidence) => void;
   sourceContextKey: string;
+  presentedEvidenceIds: readonly string[];
 }) {
   const { data: flag, isPending, isError, refetch } = useFlag(locationFlagId);
   const sourceSelection = useRef(onSourceEvidence);
@@ -222,7 +223,7 @@ function SelectedFinding({ checkRunId, finding, total, locationFlagId, region, p
         <p>{title}. This is a possible issue for instructor review, not a final determination.</p>
         {!showsManuscriptQuote && <p><strong>Recorded check summary:</strong> {systemFindingCopy(flag.evidence_excerpt, flag.ai_verdict_summary, "evidence")}</p>}
       </section>}
-      {flag.source_evidence?.length ? <SavedSourceEvidence entries={flag.source_evidence} onSelect={onSourceEvidence} /> : (      <section aria-labelledby="evidence-heading" className="signal-document-detail-section">
+      {flag.source_evidence?.length ? <SavedSourceEvidence entries={flag.source_evidence} onSelect={onSourceEvidence} presentedEvidenceIds={presentedEvidenceIds} /> : (      <section aria-labelledby="evidence-heading" className="signal-document-detail-section">
         <h3 id="evidence-heading">Evidence to compare or check</h3>
         {flag.passage_pair && <p className="signal-field-hint"><strong>Highlight key:</strong> Yellow marks the selected manuscript location. Shaded wording below appears in both stored passages.</p>}
         {flag.passage_pair && <PassagePairPanel pair={flag.passage_pair} ownAnchor={instructorAnchor(flag.page_anchor)} variant="flag" />}
@@ -534,7 +535,7 @@ export function SignalDocumentViewerPage() {
               <aside ref={inspectorRef} id="review-panel" role="tabpanel" aria-labelledby="review-tab" data-active={activeTab === "review"} className="signal-document-inspector">
                 {isExploring && isWorkspaceSample() ? <section className="signal-document-selected"><Button variant="quiet" onClick={showQueue}>Back to review queue</Button><h2>Originality comparison was not run</h2><p>This prepared review has no saved similarity search or passage pair. The independent Library article is available for reading; it is not a demonstrated match. An empty prepared response is not a completed search with zero matches.</p></section> : isExploring ? <ReuseExplorePanel flags={flagsQuery.data} onSelectFlag={selectFinding} onBack={showQueue} includeReferenceList={includeReferenceList} includeBlockQuote={includeBlockQuote} onToggleReferenceList={(value) => setToggle("ref", value)} onToggleBlockQuote={(value) => setToggle("quote", value)} excludedMatchesQuery={excludedMatchesQuery} expandedMatchId={expandedMatchId} onExpandMatch={setMatch} />
                   : isDecision ? <ReadinessDecision checkRunId={id} report={reportQuery.data} pending={reportQuery.isPending || (isWorkspaceSample() && viewerQuery.isPending)} error={reportQuery.error} onRetry={() => reportQuery.refetch()} onBack={showQueue} onEvidenceSelected={chooseCriterionEvidence} />
-                    : selectedFinding && selectedLocationId ? <SelectedFinding checkRunId={id} finding={selectedFinding} total={findings.length} locationFlagId={selectedLocationId} region={selectedRegion} previous={previousFinding} next={nextFinding} onBack={showQueue} onPrevious={() => previousFinding && selectFinding(previousFinding.representative.id, true)} onNext={() => nextFinding && selectFinding(nextFinding.representative.id, true)} onLocation={selectFinding} onExplore={openExplore} onSourceEvidence={chooseSource} sourceContextKey={`${id}:${viewer?.manuscript_id ?? "loading"}:${viewer?.source_sha256 ?? "unknown"}`} />
+                    : selectedFinding && selectedLocationId ? <SelectedFinding checkRunId={id} finding={selectedFinding} total={findings.length} locationFlagId={selectedLocationId} region={selectedRegion} previous={previousFinding} next={nextFinding} onBack={showQueue} onPrevious={() => previousFinding && selectFinding(previousFinding.representative.id, true)} onNext={() => nextFinding && selectFinding(nextFinding.representative.id, true)} onLocation={selectFinding} onExplore={openExplore} onSourceEvidence={chooseSource} presentedEvidenceIds={wideComparison && sourceCapacity.split ? pairSources.filter(entry => entry.image_id).map(entry => entry.evidence_id) : []} sourceContextKey={`${id}:${viewer?.manuscript_id ?? "loading"}:${viewer?.source_sha256 ?? "unknown"}`} />
                       : <ReviewHome checkRunId={id} report={reportQuery.data} reportPending={reportQuery.isPending} reportError={reportQuery.error} onReportRetry={() => reportQuery.refetch()} findings={findings} regions={viewer?.regions ?? []} flagsPending={flagsQuery.isPending} flagsError={flagsQuery.isError} filter={filter} invalidSelection={invalidSelection} onFilter={setFilter} onSelect={selectFinding} onExplore={openExplore} onDecision={openDecision} />}
               </aside>
             </div>
