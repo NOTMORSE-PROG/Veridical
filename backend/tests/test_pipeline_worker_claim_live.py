@@ -92,33 +92,64 @@ async def _seed_check_run(session_factory) -> int:
         return check_run.id
 
 
+@pytest.mark.parametrize("first_driver", ["advance", "poll"])
 async def test_advance_once_and_worker_tick_never_both_enter_the_same_run(
-    session_factory, monkeypatch
+    session_factory, monkeypatch, first_driver
 ):
-    """The actual reproduction shape: driver A is mid-stage (still inside
-    `run_check_run`, simulated by a real `await asyncio.sleep` so the event
-    loop genuinely yields to another coroutine) when driver B arrives."""
+    """The second driver must attempt its claim while the first is held.
+
+    A short sleep does not establish overlap: session setup can outlast it,
+    allowing a legitimate later pickup of the still-queued stubbed run.
+    """
     check_run_id = await _seed_check_run(session_factory)
     settings = get_settings()
 
     entries: list[int] = []
+    entered = asyncio.Event()
+    release = asyncio.Event()
+    active = 0
+    max_active = 0
 
-    async def slow_run_check_run(session, check_run, settings, heartbeat=None):
+    async def held_run_check_run(session, check_run, settings, heartbeat=None):
+        nonlocal active, max_active
         entries.append(check_run.id)
-        # Yields the event loop -- the exact window BUG-144 exploited.
-        await asyncio.sleep(0.05)
+        active += 1
+        max_active = max(max_active, active)
+        entered.set()
+        try:
+            await release.wait()
+        finally:
+            active -= 1
 
-    monkeypatch.setattr(worker, "run_check_run", slow_run_check_run)
+    async def drive(which):
+        if which == "advance":
+            await worker.advance_once(check_run_id, session_factory, settings)
+        else:
+            await worker.worker_tick(session_factory, settings)
 
-    await asyncio.gather(
-        worker.advance_once(check_run_id, session_factory, settings),
-        worker.worker_tick(session_factory, settings),
-    )
+    monkeypatch.setattr(worker, "run_check_run", held_run_check_run)
+    first = asyncio.create_task(drive(first_driver))
+    second = None
+    try:
+        await asyncio.wait_for(entered.wait(), timeout=5)
+        second = asyncio.create_task(drive("poll" if first_driver == "advance" else "advance"))
+        await asyncio.wait_for(asyncio.shield(second), timeout=5)
+        assert entries == [check_run_id]
+        assert active == 1
+        assert max_active == 1
+        release.set()
+        await asyncio.wait_for(asyncio.shield(first), timeout=5)
+    finally:
+        release.set()
+        tasks = [task for task in (first, second) if task is not None]
+        for task in tasks:
+            if not task.done():
+                task.cancel()
+        await asyncio.wait_for(asyncio.gather(*tasks, return_exceptions=True), timeout=5)
 
-    # Without the claim, BOTH drivers would have entered -- this is the
-    # literal assertion that would have failed pre-fix (2 entries, 4 LLM
-    # calls in the ticket's own local reproduction shape).
     assert entries == [check_run_id]
+    assert active == 0
+    assert max_active == 1
 
     async with session_factory() as session:
         row = await session.scalar(select(CheckRun).where(CheckRun.id == check_run_id))
