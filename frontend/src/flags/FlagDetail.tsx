@@ -92,7 +92,7 @@ function EvidenceSection({
         <div>
           <h2 id={headingId}>{showsManuscriptEvidence ? "Evidence from the manuscript" : "No manuscript excerpt is available"}</h2>
         </div>
-        {expanded ? <Button variant="secondary" onClick={() => onExpand(false)}>Return to manuscript</Button>
+        {expanded ? <Button id="comparison-reading-return" variant="secondary" onClick={() => onExpand(false)}>Return to manuscript</Button>
           : (flag.agreement_pair || flag.passage_pair) && <Button variant="secondary" onClick={() => onExpand(true)}>{flag.agreement_pair ? "Compare statements" : "Compare passages"}</Button>}
       </div>
       {showsManuscriptQuote && flag.check_kind !== "internal_agreement" && !flag.passage_pair && (
