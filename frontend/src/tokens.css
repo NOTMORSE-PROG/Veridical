@@ -296,6 +296,7 @@
   --signal-weight-bold: 700;
   --signal-tracking-display: -0.025em;
   --signal-tracking-label: 0.08em;
+  --signal-link-underline-offset: var(--signal-space-1);
 
   --signal-space-0: 0;
   --signal-space-1: 0.25rem;
@@ -330,6 +331,7 @@
   --signal-radius-pill: 999px;
   --signal-control-height: 2.75rem;
   --signal-control-height-coarse: 3rem;
+  --signal-reading-bar-height: var(--signal-control-height-coarse);
   --signal-prose-width: 72ch;
   --signal-form-width: 30rem;
   --signal-workbench-width: 90rem;

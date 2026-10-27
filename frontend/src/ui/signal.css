@@ -1854,7 +1854,7 @@
   }
 
   .signal-task-sheet__footer button[class*="bg-action"]:hover {
-    background: var(--color-signal-brand-strong);
+    background: var(--color-signal-brand-hover);
   }
 
   /* V-080, screen 4e: substantial upload review keeps a visible action
@@ -4883,7 +4883,7 @@
     margin: 0;
     color: var(--color-signal-ink);
     font-family: var(--font-signal-display);
-    font-size: var(--signal-type-subsection);
+    font-size: var(--signal-type-subhead);
     line-height: var(--signal-line-section);
   }
 
@@ -4904,7 +4904,7 @@
   .signal-document-review-filters button,
   .signal-document-locations button {
     min-height: var(--signal-control-height);
-    border: var(--signal-border-hairline) solid var(--color-signal-border-input);
+    border: var(--signal-border-hairline) solid var(--color-signal-border-strong);
     border-radius: var(--signal-radius-control);
     padding-inline: var(--signal-space-3);
     background: var(--color-signal-surface);
@@ -6231,7 +6231,7 @@
   }
 
   .signal-audit {
-    max-width: var(--signal-content-width);
+    max-width: var(--signal-workbench-width);
   }
 
   .signal-audit-entry-facts,

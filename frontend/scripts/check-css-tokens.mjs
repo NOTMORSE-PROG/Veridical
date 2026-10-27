@@ -124,6 +124,7 @@ const REQUIRED_IN_BUILD = [
   "--signal-rhythm-section",
   "--signal-rhythm-section-compact",
   "--signal-rhythm-dialog",
+  "--signal-link-underline-offset",
 ];
 for (const token of REQUIRED_IN_BUILD) {
   if (!builtCss.includes(token)) {
@@ -351,6 +352,13 @@ const TRANSITION_ALL = /\btransition(?:-property)?\s*:\s*all\b/i;
 const ANIMATION_DECLARATION = /\banimation(?:-name)?\s*:/i;
 const TOKENIZED_ANIMATION = /var\(--signal-motion-/;
 const FONT_FAMILY_DECLARATION = /\bfont-family\s*:\s*([^;]+)/i;
+const SIGNAL_TOKEN_DEF_RE = /(--(?:color-|font-)?signal-[a-z0-9-]+)\s*:/g;
+const SIGNAL_TOKEN_REF_RE = /var\(\s*(--(?:color-|font-)?signal-[a-z0-9-]+)/g;
+const DEFINED_SIGNAL_TOKENS = new Set(
+  [...(tokenSource + "\n" + rhythmSource).matchAll(SIGNAL_TOKEN_DEF_RE)].map(
+    (match) => match[1],
+  ),
+);
 // CSS custom properties cannot be used in media-query conditions. Keep the
 // shell thresholds and the Library's document-reading threshold (DESIGN §6,
 // V-079) are sanctioned. Other one-off breakpoints still fail this gate.
@@ -381,13 +389,22 @@ function scanSignalTsx(name, source, target) {
   }
 }
 
-function scanSignalCss(source, target) {
+function scanSignalCss(source, target, definedTokens = DEFINED_SIGNAL_TOKENS) {
   let braceDepth = 0;
   let reducedMotionDepth = null;
 
   for (const [index, line] of source.split(/\r?\n/).entries()) {
     const code = line.trim();
     if (!code || isCommentLine(code)) continue;
+
+    for (const refMatch of line.matchAll(SIGNAL_TOKEN_REF_RE)) {
+      const tokenName = refMatch[1];
+      if (!definedTokens.has(tokenName)) {
+        target.push(
+          `ui/signal.css:${index + 1} undefined token reference ${tokenName} -- declare it in tokens.css`,
+        );
+      }
+    }
 
     const startsReducedMotion = code.startsWith(
       "@media (prefers-reduced-motion: no-preference)",
@@ -511,6 +528,11 @@ const negativeControls = [
   ["unguarded animation", () => {
     const found = [];
     scanSignalCss(".x { animation: pulse 1s infinite; }", found);
+    return found;
+  }],
+  ["undefined Signal CSS token", () => {
+    const found = [];
+    scanSignalCss(".x { text-underline-offset: var(--signal-nonexistent-token); }", found);
     return found;
   }],
   ["later rhythm-token override", () => validateRhythmContract(
