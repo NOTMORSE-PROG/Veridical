@@ -22,6 +22,10 @@ function SpinnerIcon() {
   );
 }
 
+// BUG-298: where a required format is uploaded and activated (the "Required
+// format" destination in config/signalRoutes.ts).
+const REQUIRED_FORMAT_PATH = "/rubric";
+
 const dateFormatter = new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" });
 
 interface Problem {
@@ -32,8 +36,8 @@ interface Problem {
   // button promised an action the control didn't deliver (Tab lands on
   // it, Enter does nothing observable, a false affordance). V-059 gives
   // "no manuscripts" a real destination (`onUploadManuscript`, when the
-  // caller supplies one); "no active rubric" still has none, so it stays
-  // plain text on purpose, not because this field can't hold one.
+  // caller supplies one); BUG-298 gives "no active rubric" one too (the
+  // Required format screen).
   action?: () => void;
 }
 
@@ -195,7 +199,16 @@ export function NewCheckModal({
       problems.push({ id: "manuscript", message: "Choose a manuscript.", action: () => manuscriptSelectRef.current?.focus() });
     }
     if (activeFamilies.length === 0) {
-      problems.push({ id: "no-rubric", message: "No active rubric is available yet." });
+      // BUG-298: the missing format is the FIRST step, so it gets a direct
+      // way forward -- the Required format screen, where it is uploaded.
+      problems.push({
+        id: "no-rubric",
+        message: "No active rubric is available yet.",
+        action: () => {
+          onClose();
+          navigate(REQUIRED_FORMAT_PATH);
+        },
+      });
     } else if (noEligibleRubricForProgram) {
       // AC4: explained, not silently hidden -- names the manuscript's
       // own program so the instructor can see WHY nothing was offered,

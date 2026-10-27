@@ -193,11 +193,25 @@ describe("NewCheckModal", () => {
     expect(screen.getByRole("button", { name: "Start check" })).not.toBeDisabled();
   });
 
-  it("BUG-040: a structural blocker with nowhere to jump to renders as plain text, not a false-affordance button", async () => {
+  it("BUG-298: the missing-format blocker links to the Required format screen and closes the sheet", async () => {
     vi.stubGlobal("fetch", stubFetchByPath({ "/manuscripts": MANUSCRIPTS, "/rubric-families": [] }));
+    const onClose = vi.fn();
+    renderWithProviders(<NewCheckModal onClose={onClose} />);
+    const alert = await screen.findByRole("alert");
+    const action = within(alert).getByRole("button", { name: "No active rubric is available yet." });
+    fireEvent.click(action);
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it("BUG-040: a structural blocker with nowhere to jump to renders as plain text, not a false-affordance button", async () => {
+    // 'No manuscripts' with no upload handoff wired has no destination.
+    vi.stubGlobal(
+      "fetch",
+      stubFetchByPath({ "/manuscripts": { items: [], total: 0, page: 1, page_size: 200 }, "/rubric-families": ONE_ACTIVE_FAMILY }),
+    );
     renderWithProviders(<NewCheckModal onClose={() => {}} />);
     const alert = await screen.findByRole("alert");
-    const item = within(alert).getByText("No active rubric is available yet.");
+    const item = within(alert).getByText("No manuscripts are available to check yet.");
     expect(item.tagName).not.toBe("BUTTON");
   });
 

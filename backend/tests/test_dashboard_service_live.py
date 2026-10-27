@@ -984,3 +984,48 @@ async def test_bug430_complete_count_uses_run_id_despite_transaction_time_invers
         assert stats.decided_count == int(new_decision is not None)
         if page.items:
             assert page.items[0].latest_check_run_id == newer.id
+
+
+async def test_bug351_ready_to_decide_count_drops_dismissed_manuscripts_and_matches_queue(
+    session_factory,
+):
+    """BUG-351: a dismissed manuscript must not raise the action badge.
+
+    The actionable Checked queue excludes dismissed manuscripts, so the
+    dashboard's ready-to-decide count must too, while the historical
+    figures (manuscripts_checked, band counts) keep their documented scope.
+    """
+    from app.ingest.service import list_manuscripts
+
+    async with session_factory() as session:
+        owner = Instructor(email="dismissed-badge@demo.local", display_name="Owner")
+        session.add(owner)
+        await session.commit()
+        kept = await _make_run(
+            session, owner, run_status=CheckRunStatus.done, report_status="ready"
+        )
+        dismissed = await _make_run(
+            session, owner, run_status=CheckRunStatus.done, report_status="ready"
+        )
+
+        before = await get_dashboard_stats(session, owner.id)
+        queue = await list_manuscripts(session, owner.id, status="checked", needs_review=False)
+        assert before.ready_to_decide_count == queue.total == 2
+
+        manuscript = await session.get(Manuscript, dismissed.manuscript_id)
+        manuscript.dismissed_at = datetime.now(UTC)
+        await session.commit()
+
+        after = await get_dashboard_stats(session, owner.id)
+        queue = await list_manuscripts(session, owner.id, status="checked", needs_review=False)
+        assert after.ready_to_decide_count == queue.total == 1
+        assert {row.id for row in queue.items} == {kept.manuscript_id}
+        # Historical scope is unchanged by dismissal.
+        assert after.manuscripts_checked == before.manuscripts_checked == 2
+        assert after.ready_count == before.ready_count == 2
+
+        manuscript.dismissed_at = None
+        await session.commit()
+        restored = await get_dashboard_stats(session, owner.id)
+        queue = await list_manuscripts(session, owner.id, status="checked", needs_review=False)
+        assert restored.ready_to_decide_count == queue.total == 2
