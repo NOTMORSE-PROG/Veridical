@@ -44,7 +44,7 @@ function ShareDialogSession({ checkRunId, manuscriptLabel, onClose, owner, shoul
   const link = query.data;
   const create = useCreateShareLink(checkRunId);
   const revoke = useRevokeShareLink(checkRunId);
-  const [newSelection, setNewSelection] = useState<ExpirySelection>("none");
+  const [newSelection, setNewSelection] = useState<ExpirySelection>("7d");
   const [replacementSelection, setReplacementSelection] = useState<ExpirySelection>("current");
   const [confirming, setConfirming] = useState<{ action: "regenerate" | "revoke"; token: string }>();
   const [copyState, setCopyState] = useState<"idle" | "copied" | "failed">("idle");

@@ -335,7 +335,20 @@ export function useRouteFocus(
     // instance; this ref prevents the replay from looking like a second route.
     if (ranRef.current) return;
     ranRef.current = true;
-    if (hasNavigatedOnce) headingRef.current?.focus();
+    if (hasNavigatedOnce) {
+      if (!location.hash) {
+        if (document.scrollingElement) document.scrollingElement.scrollTop = 0;
+        document.documentElement.scrollTop = 0;
+        document.body.scrollTop = 0;
+        if (
+          typeof window.scrollTo === "function"
+          && (!navigator.userAgent.includes("jsdom") || "mock" in window.scrollTo)
+        ) {
+          window.scrollTo(0, 0);
+        }
+      }
+      headingRef.current?.focus({ preventScroll: true });
+    }
     hasNavigatedOnce = true;
   }, [headingRef, location.pathname, location.search, location.hash, navigationType, returnFocus, title, deferredPrefix, deferredPending]);
 }

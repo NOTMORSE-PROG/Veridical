@@ -266,3 +266,24 @@ async def test_bug_207_pipeline_list_check_runs_breaks_timestamp_ties_by_id_desc
     assert "ORDER BY check_run.created_at DESC, check_run.id DESC" in captured_sql[0]
 
 
+def test_bug_275_report_document_live_isolates_data_dir(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+):
+    """BUG-275: `test_report_document_live` isolates `DATA_DIR` inside `tmp_path`
+    so unlinking `raw_store_path(get_settings(), 1)` never deletes files from
+    the local `backend/data/` directory."""
+    from app.config import get_settings
+    from app.ingest.service import raw_store_path
+    from tests.test_report_document_live import _isolate_data_dir
+
+    gen = _isolate_data_dir.__wrapped__(tmp_path, monkeypatch)
+    next(gen)
+    try:
+        isolated = raw_store_path(get_settings(), 1)
+        assert tmp_path in isolated.parents
+    finally:
+        with pytest.raises(StopIteration):
+            next(gen)
+
+
+

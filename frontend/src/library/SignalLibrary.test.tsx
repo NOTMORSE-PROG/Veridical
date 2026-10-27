@@ -613,5 +613,22 @@ describe("V-077 first-time-user review fixes", () => {
     fireEvent.click(screen.getByRole("button", { name: "Skip this copy" }));
     expect(await screen.findByRole("dialog", { name: "Skip this copy?" })).toBeInTheDocument();
   });
+
+  it("BUG-304: does not ask to choose two records when compare mode is opened on an empty Library", async () => {
+    vi.stubGlobal(
+      "fetch",
+      libraryFetch({ "/library": page([], { corpusTotal: 0 }), "/programs": [] }),
+    );
+    renderWithProviders(<SignalLibraryPage />, {
+      route: "/library?compareFrom=1",
+      path: "/library",
+    });
+
+    expect(await screen.findByText("There are no manuscripts in the Library to compare yet.")).toBeInTheDocument();
+    expect(screen.getByText("Add finished manuscripts to the Library before comparing records.")).toBeInTheDocument();
+    expect(screen.queryByText("Choose two records to compare")).not.toBeInTheDocument();
+    expect(screen.queryByText("Select two records")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Comparison selection")).not.toBeInTheDocument();
+  });
 });
 

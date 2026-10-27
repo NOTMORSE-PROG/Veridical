@@ -41,7 +41,9 @@ it("confirmed revocation changes both access copy and expiry form", async () => 
   fireEvent.click(screen.getByRole("button", { name: "Revoke link" }));
   await screen.findByText("Share link revoked."); await screen.findByText("No active link.");
   expect(screen.queryByText(/This link opens/)).not.toBeInTheDocument();
-  expect(screen.getByRole("combobox", { name: "Link expires" })).toHaveValue("none");
+  const select = screen.getByRole("combobox", { name: "Link expires" }) as HTMLSelectElement;
+  expect(select).toHaveValue("7d");
+  expect(Array.from(select.options).map(opt => opt.value)).toEqual(["7d", "30d", "90d", "none"]);
 });
 it("a failed mutation requires authoritative retry and preserves the expiry draft", async () => {
   const get = vi.fn(async () => null); setup(undefined, get);

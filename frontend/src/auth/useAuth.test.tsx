@@ -81,5 +81,46 @@ describe("authentication cache boundaries", () => {
 
     expect(screen.getByText("Prof. Santos")).toBeInTheDocument();
     expect(screen.getByText("prof.santos@tip.edu.ph")).toBeInTheDocument();
+    expect((await screen.findAllByText("Test mode")).length).toBeGreaterThanOrEqual(1);
+    expect(screen.queryByText(/calls left/i)).not.toBeInTheDocument();
+  });
+
+  it("BUG-415: SignalShell names the daily budget 'Local AI budget' instead of an ambiguous 'calls left'", async () => {
+    const { fireEvent, render, screen } = await import("@testing-library/react");
+    const { MemoryRouter } = await import("react-router");
+    const { SignalShell } = await import("../shell/SignalShell");
+
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+    });
+    queryClient.setQueryData(ME_QUERY_KEY, {
+      id: 8,
+      email: "prof.reyes@tip.edu.ph",
+      display_name: "Prof. Reyes",
+      onboarding_dismissed_at: "2026-01-01T00:00:00Z",
+    });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        new Response(
+          JSON.stringify({ mode: "real", calls_remaining: 17, key_state: "configured" }),
+          { status: 200 },
+        )),
+    );
+
+    render(
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter initialEntries={["/dashboard"]}>
+          <SignalShell>
+            <div>Desk content</div>
+          </SignalShell>
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /Account/i }));
+
+    expect(await screen.findByText("Local AI budget: 17 remaining")).toBeInTheDocument();
+    expect(screen.queryByText(/calls left/i)).not.toBeInTheDocument();
   });
 });

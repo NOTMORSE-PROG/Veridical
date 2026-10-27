@@ -354,3 +354,23 @@ it("BUG-372: anchors .signal-live-region to the viewport origin so it cannot ext
   expect(match?.[1]).toContain("inset-inline-start: 0;");
 });
 
+it("BUG-305: resets scroll to top and prevents heading focus from scrolling headers off-screen on route changes", async () => {
+  const scrollToSpy = vi.spyOn(window, "scrollTo").mockImplementation(() => {});
+  document.documentElement.scrollTop = 420;
+  const router = createMemoryRouter([
+    { path: "/", element: <EvidencePage /> },
+    { path: "/signin", element: <DocumentPage /> },
+  ], { initialEntries: ["/"] });
+  render(<RouterProvider router={router} />);
+
+  await act(async () => {
+    await router.navigate("/signin");
+  });
+
+  expect(document.documentElement.scrollTop).toBe(0);
+  expect(scrollToSpy).toHaveBeenCalledWith(0, 0);
+  expect(screen.getByRole("heading", { name: "Source manuscript" })).toHaveFocus();
+  scrollToSpy.mockRestore();
+});
+
+

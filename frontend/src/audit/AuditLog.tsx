@@ -476,10 +476,12 @@ function OwnedAuditLogPage({ owner }: { owner: AuditOwner }) {
     const scope = checkRunId !== undefined ? ` for check run ${checkRunId}` : "";
     setAnnouncement(
       data.items.length === 0
-        ? `No audit events match this filter${scope}.`
+        ? activeFilter.label === "All" && checkRunId === undefined
+          ? "No system activity or instructor actions have been recorded yet."
+          : `No audit events match this filter${scope}.`
         : `Showing ${data.items.length} of ${data.total} event${data.total === 1 ? "" : "s"}${scope}.`,
     );
-  }, [data, checkRunId]);
+  }, [data, checkRunId, activeFilter.label]);
 
   // Previous/Next disables itself on whichever page edge it lands on
   // (page 1 or the last page) — the browser drops focus to <body> when a
@@ -722,7 +724,9 @@ function OwnedAuditLogPage({ owner }: { owner: AuditOwner }) {
               })}
             {data && data.items.length === 0 && (
               <div role="row"><p role="cell" aria-colspan={3} className="px-4 py-3 text-sm text-ink-tertiary">
-                No audit events match this filter.
+                {activeFilter.label === "All" && checkRunId === undefined
+                  ? "No system activity or instructor actions have been recorded yet."
+                  : "No audit events match this filter."}
               </p></div>
             )}
           </div>

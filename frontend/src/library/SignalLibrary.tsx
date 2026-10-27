@@ -567,16 +567,24 @@ export function SignalLibraryPage() {
         {compareMode && (
           <div className="signal-library-compare-intro">
             <div>
-              <strong>Choose two records to compare</strong>
-              <span>Comparison is a reading aid and does not assign a new similarity score.</span>
+              <strong>
+                {libraryIsEmpty ? "There are no manuscripts in the Library to compare yet." : "Choose two records to compare"}
+              </strong>
+              <span>
+                {libraryIsEmpty
+                  ? "Add finished manuscripts to the Library before comparing records."
+                  : "Comparison is a reading aid and does not assign a new similarity score."}
+              </span>
             </div>
-            <span role="status" aria-live="polite" aria-atomic="true">
-              {selectionStatus(selectionStates)}
-            </span>
+            {!libraryIsEmpty && (
+              <span role="status" aria-live="polite" aria-atomic="true">
+                {selectionStatus(selectionStates)}
+              </span>
+            )}
           </div>
         )}
 
-      {compareMode && (
+      {compareMode && !libraryIsEmpty && (
         <aside className="signal-library-selection" aria-label="Comparison selection">
           <div className="signal-library-selection__summary">
             <strong>

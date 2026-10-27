@@ -65,6 +65,15 @@ def session_factory(scratch_url):
 
 
 @pytest.fixture(autouse=True)
+def _isolate_data_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv("DATA_DIR", str(tmp_path / "data"))
+    monkeypatch.setenv("STORAGE_BACKEND", "local")
+    get_settings.cache_clear()
+    yield
+    get_settings.cache_clear()
+
+
+@pytest.fixture(autouse=True)
 async def _clean_tables(session_factory):
     async with session_factory() as session:
         await session.execute(

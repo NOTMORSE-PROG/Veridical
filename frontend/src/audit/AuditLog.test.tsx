@@ -363,8 +363,8 @@ describe("AuditLogPage", () => {
       stubFetchByPath({ "/audit": { items: [], total: 0, page: 1, page_size: 25 } }),
     );
     renderWithProviders(<AuditLogPage />, { route: "/audit", path: "/audit" });
-    expect((await screen.findAllByText("No audit events match this filter.")).length).toBe(1);
-    expect(await screen.findByText("No audit events match this filter.", { selector: '[role="status"]' })).toBeInTheDocument();
+    expect((await screen.findAllByText("No system activity or instructor actions have been recorded yet.")).length).toBeGreaterThanOrEqual(1);
+    expect(await screen.findByText("No system activity or instructor actions have been recorded yet.", { selector: '[role="status"]' })).toBeInTheDocument();
   });
 
   it("BUG-188: opens with an instructor explanation and keeps exact data in a closed technical disclosure", async () => {
@@ -755,5 +755,19 @@ describe("AuditLogPage", () => {
     expect(screen.getByText(/A database trigger rejects UPDATE and DELETE while enabled/)).toBeInTheDocument();
     expect(screen.getByText(/Privileged database access can bypass or disable this safeguard/)).toBeInTheDocument();
     expect(screen.queryByText(/^This entry is immutable/)).not.toBeInTheDocument();
+  });
+
+  it("BUG-304: states plainly when no audit events exist under All instead of blaming a filter", async () => {
+    const emptyPage = { items: [], total: 0, page: 1, page_size: 25 };
+    vi.stubGlobal("fetch", stubFetchByPath({ "/audit": emptyPage }));
+    renderWithProviders(<AuditLogPage />, { route: "/audit", path: "/audit" });
+
+    expect(
+      (await screen.findAllByText("No system activity or instructor actions have been recorded yet.")).length,
+    ).toBeGreaterThanOrEqual(1);
+    expect(screen.queryByText("No audit events match this filter.")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "AI calls" }));
+    expect((await screen.findAllByText("No audit events match this filter.")).length).toBeGreaterThanOrEqual(1);
   });
 });

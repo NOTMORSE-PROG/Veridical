@@ -280,7 +280,7 @@
   --signal-type-subhead: 1.25rem;
   --signal-type-section: 1.5rem;
   --signal-type-page: clamp(2rem, 2.5vw, 3rem);
-  --signal-type-hero: clamp(3rem, 6vw, 6.5rem);
+  --signal-type-hero: clamp(2.5rem, 4vw, 4.5rem);
   --signal-type-auth-lead: clamp(2.5rem, 4vw, 4.5rem);
   --signal-type-auth-lead-phone: clamp(2rem, 9vw, 3rem);
   --signal-line-meta: 1.35;
@@ -477,12 +477,12 @@
   --signal-project-label-width: 34rem;
   --signal-public-process-min-width: 22rem;
   --signal-public-main-min-height: min(48rem, calc(100vh - 10rem));
-  --signal-hero-padding-block: clamp(3rem, 8vw, 8rem);
-  --signal-hero-padding-inline: clamp(1.5rem, 8vw, 8rem);
+  --signal-hero-padding-block: clamp(2rem, 4vw, 4.5rem);
+  --signal-hero-padding-inline: clamp(1.5rem, 6vw, 6rem);
   --signal-hero-axis-inset: clamp(3rem, 9vw, 9rem);
   --signal-hero-branch-start: 34%;
   --signal-hero-branch-width: clamp(5rem, 18vw, 15rem);
-  --signal-hero-title-measure: 11ch;
+  --signal-hero-title-measure: 16ch;
   --signal-hero-body-measure: 42rem;
   --signal-hero-note-measure: 26rem;
   --signal-process-padding-block: clamp(2.5rem, 6vw, 6rem);

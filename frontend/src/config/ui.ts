@@ -45,8 +45,8 @@ export const COMPARISON_EXCERPT_PREVIEW_LENGTH = 140;
 export const UNSET_PROGRAM_FILTER = "__unset__";
 
 export const SHARE_EXPIRY_OPTIONS = [
-  { value: "none", label: "No expiry", days: null },
   { value: "7d", label: "7 days", days: 7 },
   { value: "30d", label: "30 days", days: 30 },
   { value: "90d", label: "90 days", days: 90 },
+  { value: "none", label: "No expiry", days: null },
 ] as const;
