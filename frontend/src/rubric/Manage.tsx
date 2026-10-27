@@ -76,7 +76,7 @@ function VersionState({ version, latest }: { version: RubricListItem; latest: nu
 export function ManageRubricPage() {
   const headingRef = useRef<HTMLHeadingElement>(null);
   const historyHeadingRef = useRef<HTMLHeadingElement>(null);
-  useRouteFocus("Rubric Studio - VERIDICAL", headingRef);
+  useRouteFocus("Required format - VERIDICAL", headingRef);
 
   const { data: families, isPending, isError, refetch } = useRubricFamilies();
   const defaultFamily = (families ?? []).find((item) => item.is_active) ?? families?.[0];
@@ -133,7 +133,7 @@ export function ManageRubricPage() {
   if (isPending) {
     return (
       <div className="signal-route signal-page-flow signal-rubric-studio">
-        <header className="signal-route-header"><div><p className="signal-eyebrow">Prepare</p><h1 ref={headingRef} tabIndex={-1}>Rubric Studio</h1></div></header>
+        <header className="signal-route-header"><div><p className="signal-eyebrow">Prepare</p><h1 ref={headingRef} tabIndex={-1}>Required format</h1></div></header>
         <div className="signal-desk-loading" role="status" aria-busy="true"><span>Loading required formats…</span><i /><i /></div>
       </div>
     );
@@ -142,7 +142,7 @@ export function ManageRubricPage() {
   if (isError) {
     return (
       <div className="signal-route signal-page-flow signal-rubric-studio">
-        <header className="signal-route-header"><div><p className="signal-eyebrow">Prepare</p><h1 ref={headingRef} tabIndex={-1}>Rubric Studio</h1></div></header>
+        <header className="signal-route-header"><div><p className="signal-eyebrow">Prepare</p><h1 ref={headingRef} tabIndex={-1}>Required format</h1></div></header>
         <Alert title="Could not load required formats" tone="error" role="alert">
           <p>Your formats have not changed.</p><Button variant="secondary" onClick={() => refetch()}>Try again</Button>
         </Alert>
@@ -154,7 +154,7 @@ export function ManageRubricPage() {
     return (
       <div className="signal-route signal-page-flow signal-rubric-studio">
         <header className="signal-route-header">
-          <div><p className="signal-eyebrow">Prepare</p><h1 ref={headingRef} tabIndex={-1}>Rubric Studio</h1><p className="signal-route-header__intro">Prepare the criteria VERIDICAL will use. You review every criterion before any manuscript check.</p></div>
+          <div><p className="signal-eyebrow">Prepare</p><h1 ref={headingRef} tabIndex={-1}>Required format</h1><p className="signal-route-header__intro">Prepare the criteria VERIDICAL will use. You review every criterion before any manuscript check.</p></div>
         </header>
         <section className="signal-first-use" aria-labelledby="no-format-heading">
           <p className="signal-eyebrow">Required format</p><h2 id="no-format-heading">No required format yet</h2>
@@ -176,7 +176,7 @@ export function ManageRubricPage() {
       <header className="signal-route-header">
         <div>
           <p className="signal-eyebrow">Prepare</p>
-          <h1 ref={headingRef} tabIndex={-1}>Rubric Studio</h1>
+          <h1 ref={headingRef} tabIndex={-1}>Required format</h1>
           <p className="signal-route-header__intro">Manage the required format, review prepared criteria, and keep report-producing versions traceable.</p>
         </div>
         <div className="signal-route-actions"><Button variant="brand" onClick={() => setUploadTarget({})}>Upload new format</Button></div>

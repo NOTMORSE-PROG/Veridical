@@ -203,7 +203,7 @@ export function NewCheckModal({
       // way forward -- the Required format screen, where it is uploaded.
       problems.push({
         id: "no-rubric",
-        message: "No active rubric is available yet.",
+        message: "No required format is active yet.",
         action: () => {
           onClose();
           navigate(REQUIRED_FORMAT_PATH);
@@ -215,7 +215,7 @@ export function NewCheckModal({
       // not just that nothing was.
       problems.push({
         id: "no-eligible-rubric",
-        message: `No active rubric is set up for this manuscript's program (${selectedManuscript!.program}). Set a rubric's program on the rubric management screen, or clear this manuscript's program.`,
+        message: `No active required format is set up for this manuscript's program (${selectedManuscript!.program}). Set a required format's program on the Required format screen, or clear this manuscript's program.`,
       });
     } else if (eligibleFamilies.length > 1 && rubricId === "") {
       problems.push({
@@ -401,7 +401,7 @@ export function NewCheckModal({
                     active rubric is still on offer. */}
                 {selectedManuscript && selectedManuscript.program == null && (
                   <p className="text-sm text-ink-tertiary">
-                    This manuscript's program is not set, so every active rubric is offered.
+                    This manuscript's program is not set, so every active required format is offered.
                   </p>
                 )}
               </>

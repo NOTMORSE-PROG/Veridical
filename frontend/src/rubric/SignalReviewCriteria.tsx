@@ -68,7 +68,7 @@ function CriteriaHeader({ headingRef, title, count, readOnly = false, familyId, 
   return (
     <header className="signal-route-header signal-criteria-header">
       <div>
-        <nav aria-label="Breadcrumb"><Link to={familyId ? `/rubric?family=${encodeURIComponent(familyId)}` : "/rubric"}>Rubric Studio</Link><span aria-hidden="true">/</span><span>Criteria review</span></nav>
+        <nav aria-label="Breadcrumb"><Link to={familyId ? `/rubric?family=${encodeURIComponent(familyId)}` : "/rubric"}>Required format</Link><span aria-hidden="true">/</span><span>Criteria review</span></nav>
         <h1 ref={headingRef} tabIndex={-1}>{readOnly ? "View criteria" : "Review prepared criteria"}</h1>
         {title && <p className="signal-route-header__intro">{title}{version !== undefined ? ` · Version ${version}` : ""}{count !== undefined ? ` · ${count} ${count === 1 ? "criterion" : "criteria"}` : ""}</p>}
         {instruction && <p>{instruction}</p>}
@@ -285,7 +285,7 @@ function CriteriaEditor({ id }: { id: number }) {
         {isNotFound ? (
           <Alert title="Format not available" tone="warning" role="alert">
             <p>This format version does not exist or is not available to your account.</p>
-            <Link className="signal-button signal-button--secondary" to="/rubric">Back to Rubric Studio</Link>
+            <Link className="signal-button signal-button--secondary" to="/rubric">Back to Required format</Link>
           </Alert>
         ) : (
           <Alert title="Could not load these criteria" tone="error" role="alert">

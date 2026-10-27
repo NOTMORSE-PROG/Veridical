@@ -185,7 +185,7 @@ describe("NewCheckModal", () => {
     vi.stubGlobal("fetch", stubFetchByPath({ "/manuscripts": MANUSCRIPTS, "/rubric-families": [] }));
     renderWithProviders(<NewCheckModal onClose={() => {}} />);
     const alert = await screen.findByRole("alert");
-    expect(alert).toHaveTextContent("No active rubric is available yet.");
+    expect(alert).toHaveTextContent("No required format is active yet.");
     // Same wording as a later Start-check click would show — one
     // canonical message, not two different claims for the same state.
     expect(alert).not.toHaveTextContent("Confirm one on the rubric review screen first.");
@@ -198,7 +198,7 @@ describe("NewCheckModal", () => {
     const onClose = vi.fn();
     renderWithProviders(<NewCheckModal onClose={onClose} />);
     const alert = await screen.findByRole("alert");
-    const action = within(alert).getByRole("button", { name: "No active rubric is available yet." });
+    const action = within(alert).getByRole("button", { name: "No required format is active yet." });
     fireEvent.click(action);
     expect(onClose).toHaveBeenCalledTimes(1);
   });
@@ -404,7 +404,7 @@ describe("NewCheckModal", () => {
     const select = await screen.findByRole("combobox", { name: /manuscript/i });
     await waitFor(() => expect(select).toHaveValue("1"));
     const alert = await screen.findByRole("alert");
-    expect(alert).toHaveTextContent("No active rubric is set up for this manuscript's program (CS)");
+    expect(alert).toHaveTextContent("No active required format is set up for this manuscript's program (CS)");
   });
 
   it("V-064 AC3: a manuscript with no program set is offered every active rubric, with a non-blocking hint", async () => {
@@ -419,7 +419,7 @@ describe("NewCheckModal", () => {
     const select = await screen.findByRole("combobox", { name: /manuscript/i });
     await waitFor(() => expect(select).toHaveValue("2"));
     expect(
-      await screen.findByText("This manuscript's program is not set, so every active rubric is offered."),
+      await screen.findByText("This manuscript's program is not set, so every active required format is offered."),
     ).toBeInTheDocument();
     expect(screen.getByRole("radio", { name: /CS Format/ })).toBeInTheDocument();
     expect(screen.getByRole("radio", { name: /IT Format/ })).toBeInTheDocument();

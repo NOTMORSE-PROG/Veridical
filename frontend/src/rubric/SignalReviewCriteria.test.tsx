@@ -67,7 +67,7 @@ describe("SignalReviewCriteriaPage", () => {
     expect(screen.getByLabelText("Relative weight, criterion 1")).toHaveValue("40");
     expect(screen.getByText("Levelled criterion · 2 levels")).toBeInTheDocument();
     expect(screen.getAllByText(/importance$/)).toHaveLength(2);
-    expect(screen.getByRole("link", { name: "Rubric Studio" })).toHaveAttribute("href", `/rubric?family=${RUBRIC.rubric_family_id}`);
+    expect(screen.getByRole("link", { name: "Required format" })).toHaveAttribute("href", `/rubric?family=${RUBRIC.rubric_family_id}`);
     expect(screen.getByLabelText("Type, criterion 2")).toHaveAccessibleDescription(/Semantic for checks that require interpreting the content/);
   });
 
@@ -350,7 +350,7 @@ describe("SignalReviewCriteriaPage", () => {
     expect(screen.queryByRole("button", { name: "Undo remove" })).not.toBeInTheDocument();
   });
 
-  it("BUG-339: a 404 response from GET /rubrics/:id shows an honest unavailable state with a Rubric Studio link and no Try again button", async () => {
+  it("BUG-339: a 404 response from GET /rubrics/:id shows an honest unavailable state with a Required format link and no Try again button", async () => {
     const fetchMock = vi.fn(async () => new Response(
       JSON.stringify({ error: { code: "not_found", message: "Rubric not found" } }),
       { status: 404, headers: { "Content-Type": "application/json" } },
@@ -361,7 +361,7 @@ describe("SignalReviewCriteriaPage", () => {
     const alert = await screen.findByRole("alert");
     expect(alert).toHaveTextContent("Format not available");
     expect(alert).toHaveTextContent("This format version does not exist or is not available to your account.");
-    expect(screen.getByRole("link", { name: "Back to Rubric Studio" })).toHaveAttribute("href", "/rubric");
+    expect(screen.getByRole("link", { name: "Back to Required format" })).toHaveAttribute("href", "/rubric");
     expect(screen.queryByRole("button", { name: "Try again" })).not.toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });

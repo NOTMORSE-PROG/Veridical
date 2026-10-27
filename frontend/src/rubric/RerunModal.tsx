@@ -313,7 +313,7 @@ export function RerunModal({ onClose, initialManuscriptIds }: RerunModalProps) {
             </div>
           ) : !displayFormat ? (
             <p className="rounded-md border border-border bg-page px-3 py-2.5 text-sm text-ink-secondary">
-              No active rubric is available right now. Activate a format version before re-running
+              No required format is active right now. Activate a format version before re-running
               manuscripts.
             </p>
           ) : !hasSubmitted && eligible.length === 0 ? (

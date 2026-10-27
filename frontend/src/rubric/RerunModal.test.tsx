@@ -505,7 +505,7 @@ describe("RerunModal", () => {
     renderWithProviders(<RerunModal onClose={() => {}} />);
     expect(
       await screen.findByText(
-        "No active rubric is available right now. Activate a format version before re-running manuscripts.",
+        "No required format is active right now. Activate a format version before re-running manuscripts.",
       ),
     ).toBeInTheDocument();
   });

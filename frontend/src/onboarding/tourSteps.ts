@@ -42,7 +42,7 @@ export const TOUR_STEPS: readonly TourStep[] = [
     routeMatch: (pathname) => pathname === TOUR_HOME_PATH,
     anchorSelectors: ['[data-tour="upload-format-cta"]'],
     title: "Format comes first",
-    body: "Add your program's rubric or format document. You can review the prepared criteria before using it.",
+    body: "Add the required format document your program uses. VERIDICAL prepares the checks from it for you to review before using it; there is no separate evaluation sheet to upload.",
     entryActionLabel: "Open format upload",
     whereHint: "You will find this on the Review Desk.",
   },

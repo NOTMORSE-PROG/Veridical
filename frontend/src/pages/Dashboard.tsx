@@ -149,7 +149,7 @@ function FirstUse({ onUpload }: { onUpload: () => void }) {
       <p className="signal-eyebrow">Prepare · Step 1</p>
       <h2 id="first-use-heading">No required format yet</h2>
       <p>
-        Start with the rubric or format document your program requires. VERIDICAL prepares
+        Start with the required format document your program uses. VERIDICAL prepares
         criteria for your review; nothing checks a manuscript until you confirm them.
       </p>
       <Button variant="brand" data-tour="upload-format-cta" onClick={onUpload}>

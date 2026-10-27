@@ -710,7 +710,7 @@ describe("DashboardPage", () => {
     expect(newCheck).toBeEnabled();
     fireEvent.click(newCheck);
     expect(
-      await screen.findByText("No active rubric is available yet."),
+      await screen.findByText("No required format is active yet."),
     ).toBeInTheDocument();
   });
 
