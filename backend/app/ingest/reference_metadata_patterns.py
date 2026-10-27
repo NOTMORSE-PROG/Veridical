@@ -79,7 +79,9 @@ def load_reference_metadata_patterns(path: Path | None = None) -> ReferenceMetad
         isinstance(token, str) and token.strip() for token in no_dates
     ):
         raise ValueError("No-date tokens must be a list of nonempty strings")
-    alternatives = "|".join(re.escape(token) for token in no_dates)
+    alternatives = "|".join(
+        rf"{re.sub(r'(\\ )+', r'\\s+', re.escape(token))}[a-z]?" for token in no_dates
+    )
     date_source = r"\d{4}[a-z]?" + (rf"|(?i:{alternatives})" if alternatives else "")
     for name in (
         "access_note_prefixes",

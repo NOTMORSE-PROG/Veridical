@@ -68,12 +68,14 @@ _LOOKBACK_STOP = re.compile(r"[.!?;)]")
 # is captured without nesting. A year is checked separately, then each
 # bounded entry is token-parsed without the old nested author expression.
 _PAREN_GROUP = re.compile(r"\(([^()]*)\)")
-_YEAR_IN_GROUP = re.compile(r"\d{4}[a-z]?|n\.?\s*d\.", re.IGNORECASE)
+_YEAR_IN_GROUP = re.compile(r"\d{4}[a-z]?|n\.?\s*d\.[a-z]?", re.IGNORECASE)
 
 # One citation within a parenthetical group (post ';' split): "Author(s),
 # Year" with an optional page/paragraph locator and/or secondary-source tail.
-_PAREN_YEAR = re.compile(r",\s*(?P<year>\d{4}[a-z]?|n\.?\s*d\.)(?=,|\s*$)", re.IGNORECASE)
-_PAREN_EXTRA_YEARS = re.compile(r"(?:,\s*(?:\d{4}[a-z]?|n\.?\s*d\.)(?=,|\s*$))+", re.IGNORECASE)
+_PAREN_YEAR = re.compile(r",\s*(?P<year>\d{4}[a-z]?|n\.?\s*d\.[a-z]?)(?=,|\s*$)", re.IGNORECASE)
+_PAREN_EXTRA_YEARS = re.compile(
+    r"(?:,\s*(?:\d{4}[a-z]?|n\.?\s*d\.[a-z]?)(?=,|\s*$))+", re.IGNORECASE
+)
 _PAREN_ENTRY = _PAREN_YEAR
 _PAREN_TAIL = re.compile(
     r"(?:,\s*(?i:pp?\.?|para\.?|section)\s*[\w\-–]+)?"
@@ -84,7 +86,7 @@ _PAREN_TAIL = re.compile(
 # block can backtrack exponentially on capitalized glossary entries that have
 # no citation year at all. The author is parsed as a same-line token suffix
 # only after a year-shaped citation has been found.
-_NARRATIVE_YEAR = re.compile(r"\((?P<year>\d{4}[a-z]?|n\.?\s*d\.)", re.IGNORECASE)
+_NARRATIVE_YEAR = re.compile(r"\((?P<year>\d{4}[a-z]?|n\.?\s*d\.[a-z]?)", re.IGNORECASE)
 _NARRATIVE = _NARRATIVE_YEAR
 _ET_AL_FINAL = re.compile(r"al\.?,?")
 _INITIALS_TOKEN = re.compile(r"(?:[^\W\d_]\.)+(?:-[^\W\d_]\.)*")
@@ -702,18 +704,24 @@ def _split_corporate_authors(raw: str) -> list[str]:
     e.g. 'Food and Agriculture Organization and World Health Organization' ->
     ['Food and Agriculture Organization', 'World Health Organization'].
     """
-    pattern = re.compile(
-        r"\b(" + "|".join(CORPORATE_AUTHOR_WORDS) + r")\s+(?:and|&)\s+",
-        re.IGNORECASE,
-    )
+    pattern = re.compile(r"\s+(?:and|&)\s+", re.IGNORECASE)
     splits: list[str] = []
     last_end = 0
     for m in pattern.finditer(raw):
-        split_point = m.start(1) + len(m.group(1))
-        segment = raw[last_end:split_point].strip()
-        tail = raw[m.end() :].strip()
-        if _is_corporate_author_name(segment) and _is_corporate_author_name(tail):
-            splits.append(segment)
+        left = raw[last_end : m.start()].strip()
+        right = raw[m.end() :].strip()
+        l_tokens = [w.strip(".,;:()").lower() for w in left.split()]
+        r_tokens = [w.strip(".,;:()").lower() for w in right.split()]
+        l_ok = bool(
+            l_tokens
+            and (l_tokens[0] in CORPORATE_AUTHOR_WORDS or l_tokens[-1] in CORPORATE_AUTHOR_WORDS)
+        )
+        r_ok = bool(
+            r_tokens
+            and (r_tokens[0] in CORPORATE_AUTHOR_WORDS or r_tokens[-1] in CORPORATE_AUTHOR_WORDS)
+        )
+        if l_ok and r_ok:
+            splits.append(left)
             last_end = m.end()
     if splits:
         remaining = raw[last_end:].strip()
