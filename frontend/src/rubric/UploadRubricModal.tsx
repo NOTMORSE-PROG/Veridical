@@ -13,6 +13,7 @@ import { useUploadScope } from "../auth/useUploadScope";
 import { UploadAttemptNotice, UploadSessionNotice } from "../components/UploadAttemptNotice";
 import { cx } from "../components/cx";
 import { Modal, ModalBackdrop } from "../components/Modal";
+import { formatFileSize } from "../domain/fileSize";
 import { useUploadRubric } from "./useRubric";
 
 interface UploadRubricModalProps {
@@ -264,7 +265,7 @@ export function UploadRubricModal({ onClose, familyId, familyLabel }: UploadRubr
                 {file.name}
               </span>
               <span className="flex-none text-ink-tertiary">
-                {(file.size / 1024 / 1024).toFixed(1)} MB
+                {formatFileSize(file.size)}
               </span>
               <button
                 type="button"

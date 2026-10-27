@@ -105,6 +105,8 @@ describe("UploadRubricModal", () => {
     fireEvent.change(input, { target: { files: [file] } });
 
     expect(screen.getByText("rubric.pdf")).toBeInTheDocument();
+    expect(screen.getByText("1 KB")).toBeInTheDocument();
+    expect(screen.queryByText("0.0 MB")).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Remove rubric.pdf" }));
     expect(screen.queryByText("rubric.pdf")).not.toBeInTheDocument();
     expect(document.activeElement).toBe(input);

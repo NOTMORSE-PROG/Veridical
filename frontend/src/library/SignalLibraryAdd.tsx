@@ -16,6 +16,7 @@ import { ActionLink } from "../ui/ActionLink";
 import { Alert } from "../ui/Alert";
 import { Button } from "../ui/Button";
 import { Dialog } from "../ui/Dialog";
+import { formatFileSize } from "../domain/fileSize";
 import { LibraryEntryStatus } from "./LibraryEntryStatus";
 import { passageAdditionAnnouncement, passageIndexingText } from "./passageIndexing";
 import { formatLibraryDate, normalizeSchoolYear } from "./libraryFormat";
@@ -69,8 +70,7 @@ function isAcceptedFile(file: File): boolean {
 }
 
 function formatSize(bytes: number): string {
-  const mb = bytes / (1024 * 1024);
-  return mb >= 1 ? `${mb.toFixed(1)} MB` : `${Math.max(1, Math.round(bytes / 1024))} KB`;
+  return formatFileSize(bytes);
 }
 
 function plural(count: number, one: string, many: string): string {

@@ -24,6 +24,7 @@ import { useUploadScope } from "../auth/useUploadScope";
 import { UploadAttemptNotice, UploadSessionNotice } from "../components/UploadAttemptNotice";
 import { Modal, ModalBackdrop } from "../components/Modal";
 import type { GroupAssignmentOutput } from "../api/groupAssignmentOutcome";
+import { formatFileSize } from "../domain/fileSize";
 import { Button } from "../ui/Button";
 import { GroupAssignmentFields } from "./GroupAssignmentFields";
 import { useIngestManuscript } from "./useCheckRun";
@@ -408,7 +409,7 @@ export function UploadManuscriptModal({ onClose, onUploadSuccess }: UploadManusc
                   {file.name}
                 </span>
                 <span className="flex-none text-ink-tertiary">
-                  {(file.size / 1024 / 1024).toFixed(1)} MB
+                  {formatFileSize(file.size)}
                 </span>
                 <button
                   type="button"
