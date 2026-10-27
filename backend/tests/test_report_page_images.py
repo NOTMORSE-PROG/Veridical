@@ -451,6 +451,10 @@ def test_image_notice_uses_a_scoped_summary_and_retains_full_unknown_caution(
         assert observed == ["Test-mode AI responses. Not real AI grading."]
         assert "Check the recorded evidence directly." in _LLM_MODE_DISCLOSURE["fake"][0]
     elif mode == "unknown":
-        assert observed == [_LLM_MODE_DISCLOSURE["unknown"][0]]
+        assert observed == [
+            "AI response mode unverified. Real or simulated responses could not be established. "
+            "Check the recorded evidence."
+        ]
+        assert "Check the recorded evidence directly" in _LLM_MODE_DISCLOSURE["unknown"][0]
     else:
         assert observed == []

@@ -24,7 +24,7 @@ def test_explicit_no_date_corporate_reference_links_without_inventing_year(text)
     )
     marks = extract_in_text_citations([block(text)])
     matched = cross_match(marks, [reference])
-    assert reference.year is None
+    assert reference.year in (None, "n.d.")
     assert reference.parse_status == CitationParseStatus.parsed
     assert reference.authors == ["Met Office"]
     assert len(marks) == 1 and len(matched.linked) == 1

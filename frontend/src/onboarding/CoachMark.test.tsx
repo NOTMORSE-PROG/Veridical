@@ -1,5 +1,6 @@
 import { fireEvent, screen, waitFor } from "@testing-library/react";
 import { useState } from "react";
+import { useLocation } from "react-router";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { renderWithProviders, stubFetchByPath } from "../test/renderWithProviders";
 import { Modal, ModalBackdrop } from "../components/Modal";
@@ -137,6 +138,10 @@ describe("CoachMark", () => {
       <CoachMark />
     </TourProvider>, { route: "/rubric/1/review" });
     mountFixtureRects();
+    // BUG-091: the tour is sequential -- step 1 renders first (unanchored,
+    // its control lives on the Review Desk), then this screen's step.
+    await screen.findByRole("dialog", { name: "Format comes first" });
+    fireEvent.click(screen.getByRole("button", { name: "Next" }));
     await screen.findByRole("dialog", { name: "Review before you confirm" });
     expect(screen.queryByRole("button", { name: "Open format upload" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Choose manuscript" })).not.toBeInTheDocument();
@@ -158,7 +163,7 @@ describe("CoachMark", () => {
     expect(open).not.toHaveBeenCalled();
   });
 
-  it("Next advances to the next resolvable step", async () => {
+  it("Next advances to the next step, even when its control is on another screen (BUG-091)", async () => {
     vi.stubGlobal("fetch", stubFetchByPath({ "/auth/me": ME_NOT_DISMISSED }));
     renderWithProviders(
       <TourProvider>
@@ -170,9 +175,43 @@ describe("CoachMark", () => {
     mountFixtureRects();
     await screen.findByText("Format comes first");
     fireEvent.click(screen.getByRole("button", { name: "Next" }));
-    // Step 2 (confirm-rubric) has no anchor in this fixture -- resolution
-    // should skip straight to step 3 (new-check), never getting stuck.
+    // Step 2 (confirm-rubric) lives on the format review screen. It is no
+    // longer skipped: it renders unanchored and says where it lives.
+    const dialog = await screen.findByRole("dialog", { name: "Review before you confirm" });
+    expect(dialog).toHaveTextContent("format review screen");
+    expect(screen.getByText(/^Step 2 of 5: Review before you confirm$/)).toBeInTheDocument();
+    expect(screen.getByTestId("coachmark-scrim")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Next" }));
     await waitFor(() => expect(screen.getByRole("dialog")).toHaveTextContent("Run a check when you're ready"));
+    expect(screen.queryByTestId("coachmark-scrim")).not.toBeInTheDocument();
+  });
+
+  it("BUG-091: a day-one account walks all five steps in order under an honest counter", async () => {
+    vi.stubGlobal("fetch", stubFetchByPath({ "/auth/me": ME_NOT_DISMISSED }));
+    renderWithProviders(
+      <TourProvider>
+        <button data-tour="upload-format-cta">Upload required format</button>
+        <button data-tour="new-check-cta">New check</button>
+        <button data-tour="replay-tour-account">Account</button>
+        <CoachMark />
+      </TourProvider>,
+      { route: "/dashboard" },
+    );
+    mountFixtureRects();
+    await screen.findByText("Format comes first");
+    const seen: string[] = [];
+    for (let step = 1; step <= 5; step++) {
+      const announcement = await screen.findByText(new RegExp(`^Step ${step} of 5: `));
+      seen.push(announcement.textContent ?? "");
+      fireEvent.click(screen.getByRole("button", { name: step === 5 ? "Done" : "Next" }));
+    }
+    expect(seen).toEqual([
+      "Step 1 of 5: Format comes first",
+      "Step 2 of 5: Review before you confirm",
+      "Step 3 of 5: Run a check when you're ready",
+      "Step 4 of 5: This is yours to decide",
+      "Step 5 of 5: Come back anytime",
+    ]);
   });
 
   it("Back is hidden on the first resolved step", async () => {
@@ -243,10 +282,10 @@ describe("CoachMark", () => {
     );
   });
 
-  it("skips a step with no anchor on the page and lands on the next one that resolves (AC5)", async () => {
+  it("a step whose control never mounts on its own screen renders unanchored after bounded discovery (AC5)", async () => {
     vi.stubGlobal("fetch", stubFetchByPath({ "/auth/me": ME_NOT_DISMISSED }));
-    // This fixture has no "upload-format-cta" at all -- resolution must
-    // not render a broken pointer at step 1, it must fall through.
+    // This fixture has no "upload-format-cta" at all -- the tour must not
+    // render a broken pointer at step 1, and must not silently skip it.
     renderWithProviders(
       <TourProvider>
         <button data-tour="new-check-cta">New check</button>
@@ -255,8 +294,44 @@ describe("CoachMark", () => {
       { route: "/dashboard" },
     );
     mountFixtureRects();
-    const dialog = await screen.findByRole("dialog");
-    expect(dialog).toHaveTextContent("Run a check when you're ready");
+    const dialog = await screen.findByRole("dialog", {}, { timeout: 7000 });
+    expect(dialog).toHaveTextContent("Format comes first");
+    expect(dialog).toHaveTextContent("You will find this on the Review Desk.");
+    expect(screen.getByTestId("coachmark-scrim")).toBeInTheDocument();
+    // Entry actions need a real control; an unanchored step never offers one.
+    expect(screen.queryByRole("button", { name: "Open format upload" })).not.toBeInTheDocument();
+  }, 10000);
+
+  it("BUG-303: Replay introduction from another screen starts now, on the Review Desk", async () => {
+    vi.stubGlobal("fetch", stubFetchByPath({
+      "/auth/me": ME_DISMISSED,
+      "/auth/onboarding/replay": ME_NOT_DISMISSED,
+    }));
+    function LocationProbe() {
+      return <output data-testid="pathname">{useLocation().pathname}</output>;
+    }
+    function RouteAwareDesk() {
+      const onDesk = useLocation().pathname === "/dashboard";
+      return onDesk ? <DashboardFixture /> : null;
+    }
+    renderWithProviders(
+      <TourProvider>
+        <RouteAwareDesk />
+        <ReplayButtonFixture />
+        <LocationProbe />
+        <CoachMark />
+      </TourProvider>,
+      { route: "/rubric" },
+    );
+    await screen.findByRole("button", { name: "Replay" });
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Replay" }));
+
+    await waitFor(() => expect(screen.getByTestId("pathname")).toHaveTextContent("/dashboard"));
+    mountFixtureRects();
+    const dialog = await screen.findByRole("dialog", { name: "Format comes first" });
+    expect(dialog).not.toHaveTextContent("You will find this on the Review Desk.");
   });
 
   it("Done on the final (replay) step dismisses the tour", async () => {
@@ -267,12 +342,14 @@ describe("CoachMark", () => {
     vi.stubGlobal("fetch", fetchMock);
     renderWithProviders(
       <TourProvider>
-        <button data-tour="replay-tour-desktop">Replay</button>
+        <DashboardFixture />
         <CoachMark />
       </TourProvider>,
       { route: "/dashboard" },
     );
     mountFixtureRects();
+    await screen.findByText("Format comes first");
+    for (let step = 1; step < 5; step++) fireEvent.click(screen.getByRole("button", { name: "Next" }));
     const dialog = await screen.findByRole("dialog");
     expect(dialog).toHaveTextContent("Come back anytime");
     expect(screen.getByRole("button", { name: "Done" })).toBeInTheDocument();
@@ -338,7 +415,7 @@ describe("CoachMark", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Next" }));
     await waitFor(() =>
-      expect(screen.getByRole("dialog")).toHaveTextContent("Run a check when you're ready"),
+      expect(screen.getByRole("dialog")).toHaveTextContent("Review before you confirm"),
     );
 
     fireEvent.click(screen.getByRole("button", { name: "Back" }));
@@ -365,7 +442,7 @@ describe("CoachMark", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Next" }));
     await waitFor(() =>
-      expect(screen.getByText(/^Step \d+ of \d+: Run a check when you're ready$/)).toBeInTheDocument(),
+      expect(screen.getByText(/^Step 2 of 5: Review before you confirm$/)).toBeInTheDocument(),
     );
   });
 });

@@ -113,6 +113,64 @@ class Manuscript(Base, PkCreatedMixin):
     citations: Mapped[list["Citation"]] = relationship(back_populates="manuscript")
     library_entry: Mapped["LibraryEntry | None"] = relationship(back_populates="manuscript")
 
+    @property
+    def file_format(self) -> str:
+        """Derived source format ('docx' or 'pdf') based on filename, file_ref,
+        magic bytes, or section_tree."""
+        from pathlib import Path
+
+        for candidate in (self.original_filename, self.file_ref):
+            if not candidate:
+                continue
+            suffix = Path(candidate.split("?")[0]).suffix.lower()
+            if suffix == ".docx":
+                return "docx"
+            if suffix == ".pdf":
+                return "pdf"
+
+        # If file_ref is accessible on disk, sniff magic bytes directly
+        if self.file_ref:
+            try:
+                p = Path(self.file_ref)
+                if p.is_file():
+                    with p.open("rb") as fh:
+                        head = fh.read(4)
+                        if head.startswith(b"%PDF"):
+                            return "pdf"
+                        if head.startswith(b"PK\x03\x04"):
+                            return "docx"
+            except Exception:
+                pass
+
+        if isinstance(self.section_tree, dict):
+            # SectionTree source strategy: 'styles' is DOCX-specific, 'embedded_toc' is PDF-specific
+            source = self.section_tree.get("source")
+            if source == "styles":
+                return "docx"
+            if source == "embedded_toc":
+                return "pdf"
+
+            # Inspect node anchor types: DOCX nodes use paragraph ordinals,
+            # PDF nodes use page numbers
+            def _find_anchor(nodes: list[Any]) -> str | None:
+                for node in nodes:
+                    if isinstance(node, dict):
+                        if node.get("paragraph") is not None:
+                            return "docx"
+                        if node.get("page") is not None:
+                            return "pdf"
+                        child_fmt = _find_anchor(node.get("children") or [])
+                        if child_fmt:
+                            return child_fmt
+                return None
+
+            detected = _find_anchor(self.section_tree.get("nodes") or [])
+            if detected:
+                return detected
+
+        return "pdf"
+
+
 
 class ManuscriptArchive(Base, PkCreatedMixin):
     """Whole-document embedding archive for the originality/reuse check

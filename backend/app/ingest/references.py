@@ -40,8 +40,10 @@ from app.models.enums import CitationParseStatus
 
 # APA-shape invariants. YEAR is the entry's backbone: "(2024)." with
 # optional letter suffix ("2024a") or month/day detail ("2025, June 28").
-_YEAR = re.compile(r"\((\d{4})[a-z]?(?:,[^)]*)?\)")
-_AUTHOR_YEAR_ENTRY_START = re.compile(r"^[^()\n]+\(\d{4}[a-z]?(?:,[^)]*)?\)\.\s*\S")
+_YEAR = re.compile(r"\((\d{4}|n\.?\s*d\.)[a-z]?(?:,[^)]*)?\)", re.IGNORECASE)
+_AUTHOR_YEAR_ENTRY_START = re.compile(
+    r"^[^()\n]+\((\d{4}|n\.?\s*d\.)[a-z]?(?:,[^)]*)?\)\.\s*\S", re.IGNORECASE
+)
 # Numeric publication metadata is not an APA date, even if the issue has
 # four digits that could be a year. Do not invent a date for an unsupported
 # reference style; keep the original entry available for verification.
@@ -109,7 +111,7 @@ class CitationDraft:
     order_index: int
     raw_text: str
     authors: list[str] | None = None
-    year: int | None = None
+    year: int | str | None = None
     title: str | None = None
     venue: str | None = None
     doi: str | None = None
@@ -543,7 +545,13 @@ def _parse_into(draft: CitationDraft, raw: str, *, legacy_quoted_titles: bool = 
         if draft.parse_status != CitationParseStatus.parsed and first_quote is None:
             _parse_unquoted_numbered_into(draft, raw)
         return  # otherwise no year backbone -> parse_failed, raw preserved
-    draft.year = int(year_m.group(1)[:4]) if year_m.group(1)[:4].isdigit() else None
+    raw_year = year_m.group(1).strip()
+    if raw_year[:4].isdigit():
+        draft.year = int(raw_year[:4])
+    elif "nd" in raw_year.lower().replace(".", "").replace(" ", ""):
+        draft.year = "n.d."
+    else:
+        draft.year = None
 
     # A numbered APA list ("12. Cruz, M. A. (2023)") keeps its label in the
     # raw text; it is not part of the first author's name.

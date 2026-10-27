@@ -79,14 +79,17 @@ describe("SignalShell destination navigation", () => {
       "/quota": { calls_used: 3, calls_remaining: 17, daily_limit: 20 },
     });
     vi.stubGlobal("fetch", fetchMock);
-    renderWithProviders(<SignalShell><p>Route content</p></SignalShell>, { route: "/settings" });
+    renderWithProviders(<SignalShell><p>Route content</p><button type="button" data-tour="upload-format-cta">Upload required format</button></SignalShell>, { route: "/settings" });
     const trigger = await screen.findByRole("button", { name: triggerName });
     trigger.getBoundingClientRect = () => ({ top: 100, left: 100, width: 120, height: 44, bottom: 144, right: 220 }) as DOMRect;
+    screen.getByRole("button", { name: "Upload required format" }).getBoundingClientRect = trigger.getBoundingClientRect;
     fireEvent.click(trigger);
     const replay = screen.getByRole("button", { name: "Replay introduction" });
     replay.getBoundingClientRect = trigger.getBoundingClientRect;
     fireEvent.click(replay);
-    expect(await screen.findByRole("dialog", { name: "Come back anytime" })).toBeInTheDocument();
+    // BUG-303: replay starts the introduction now, at step 1, on the Review
+    // Desk (this harness renders the shell on every path).
+    expect(await screen.findByRole("dialog", { name: "Format comes first" })).toBeInTheDocument();
     expect(trigger).toHaveAttribute("aria-expanded", "false");
     expect(fetchMock.mock.calls.filter(([, init]) => init?.method === "POST").map(([input]) =>
       new URL(input.toString(), "http://localhost").pathname)).toEqual(["/auth/onboarding/replay"]);

@@ -130,7 +130,8 @@ def extract_document(path: str, settings: Settings) -> ExtractionResult:
         item.paragraph for item in native_math.containers if item.kind == "paragraph"
     }
 
-    for index, item in enumerate(document.iter_inner_content()):
+    items = list(document.iter_inner_content())
+    for index, item in enumerate(items):
         # Preserve table-cell drawings and empty image-only paragraphs, anchored
         # to their original body container. This is not a Word page/cell box.
         for drawing in item._element.xpath(".//w:drawing | .//w:pict"):
@@ -139,10 +140,25 @@ def extract_document(path: str, settings: Settings) -> ExtractionResult:
             else:
                 images.append(media.describe(drawing, document.part, index))
         if isinstance(item, Table):
+            caption = None
+            table_caption_pattern = re.compile(r"^\s*Table\s+\d+(?:[\s:.-]|$)", re.IGNORECASE)
+            if index > 0 and isinstance(items[index - 1], Paragraph):
+                prev_text = normalize(items[index - 1].text)
+                if table_caption_pattern.match(prev_text):
+                    caption = prev_text
+            if (
+                caption is None
+                and index + 1 < len(items)
+                and isinstance(items[index + 1], Paragraph)
+            ):
+                next_text = normalize(items[index + 1].text)
+                if table_caption_pattern.match(next_text):
+                    caption = next_text
             tables.append(
                 TableBlock(
                     paragraph=index,
                     rows=[[normalize(cell.text) for cell in row.cells] for row in item.rows],
+                    caption=caption,
                 )
             )
             continue

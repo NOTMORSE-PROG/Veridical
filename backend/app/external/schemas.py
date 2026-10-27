@@ -29,3 +29,8 @@ class VerificationResult:
     abstract: str | None = None
     raw: dict[str, Any] = field(default_factory=dict)
     attempted_providers: list[str] = field(default_factory=list)
+
+
+# Alias for external work record
+ExternalWorkRecord = VerificationResult
+

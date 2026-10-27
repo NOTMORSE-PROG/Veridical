@@ -761,7 +761,7 @@ async def run_citation_integrity_check(
             parsed
             and citation.title
             and citation.authors
-            and citation.year is not None
+            and isinstance(citation.year, int)
             and not identifier_unassessed
         )
         lookup_eligible = (

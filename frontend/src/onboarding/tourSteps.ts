@@ -25,16 +25,26 @@ export interface TourStep {
   body: string;
   /** Only safe dialog-entry steps opt in; never confirmation or evaluation. */
   entryActionLabel?: string;
+  /** BUG-091: shown when this step's control is not on the current screen
+   * (a day-one account has no format review or report yet). The step still
+   * renders -- unanchored, with no spotlight -- and says where the control
+   * lives, so "Step N of 5" never silently skips a step. */
+  whereHint: string;
 }
+
+/** BUG-303: the screen the introduction starts on. Replay from any other
+ * screen visibly navigates here first instead of firing later, elsewhere. */
+export const TOUR_HOME_PATH = "/dashboard";
 
 export const TOUR_STEPS: readonly TourStep[] = [
   {
     id: "upload-format",
-    routeMatch: (pathname) => pathname === "/dashboard",
+    routeMatch: (pathname) => pathname === TOUR_HOME_PATH,
     anchorSelectors: ['[data-tour="upload-format-cta"]'],
     title: "Format comes first",
     body: "Add your program's rubric or format document. You can review the prepared criteria before using it.",
     entryActionLabel: "Open format upload",
+    whereHint: "You will find this on the Review Desk.",
   },
   {
     id: "confirm-rubric",
@@ -42,19 +52,22 @@ export const TOUR_STEPS: readonly TourStep[] = [
     anchorSelectors: ['[data-tour="confirm-rubric-cta"]'],
     title: "Review before you confirm",
     body: "Review and correct anything VERIDICAL got wrong before you confirm. Nothing runs on a manuscript until you do.",
+    whereHint: "This appears on the format review screen after you upload a required format.",
   },
   {
     id: "new-check",
-    routeMatch: (pathname) => pathname === "/dashboard",
+    routeMatch: (pathname) => pathname === TOUR_HOME_PATH,
     anchorSelectors: ['[data-tour="new-check-cta"]'],
     title: "Run a check when you're ready",
     body: "Choose an uploaded manuscript and the active format. Review the setup before starting the check.",
     entryActionLabel: "Choose manuscript",
+    whereHint: "You will find this on the Review Desk.",
   },
   {
     id: "escalation",
     routeMatch: (pathname) => /^\/report\/[^/]+$/.test(pathname),
     anchorSelectors: ['[data-tour="escalated-panel"]'],
+    whereHint: "This appears on a manuscript's report after a check finishes.",
     title: "This is yours to decide",
     // panel review finding: "cannot agree with itself" implied the split-
     // vote case specifically, but the escalation gate's real, dominant
@@ -74,53 +87,22 @@ export const TOUR_STEPS: readonly TourStep[] = [
     anchorSelectors: ['[data-tour="replay-tour-desktop"]', '[data-tour="replay-tour-account"]'],
     title: "Come back anytime",
     body: "Use Replay introduction in your account controls whenever you need a reminder.",
+    whereHint: "Open Account in the top bar to find it.",
   },
 ] as const;
 
-interface ResolvedStep {
-  step: TourStep;
-  index: number;
-  el: HTMLElement;
-}
-
-// The entire "which step renders right now" logic — no per-step
-// branching. Starts scanning at `fromIndex` and moves forward (never
-// backward): a step whose page hasn't been visited yet is skipped, not
-// treated as an error, and the tour never renders a pointer aimed at
-// nothing (V-057 AC5).
-export function resolveTourStep(fromIndex: number, pathname: string): ResolvedStep | null {
-  for (let i = fromIndex; i < TOUR_STEPS.length; i++) {
-    const step = TOUR_STEPS[i];
-    if (!step.routeMatch(pathname)) continue;
-    const el = step.anchorSelectors
+/** Find the live, actually-rendered control a step points at on this
+ * route, or null. Tried in selector order; a zero-size match (present in
+ * the DOM but not laid out) does not count. No per-step branching. */
+export function findTourAnchor(step: TourStep, pathname: string): HTMLElement | null {
+  if (!step.routeMatch(pathname)) return null;
+  return (
+    step.anchorSelectors
       .map((selector) => document.querySelector<HTMLElement>(selector))
       .find((node): node is HTMLElement => {
         if (!node) return false;
         const rect = node.getBoundingClientRect();
         return rect.width > 0 && rect.height > 0;
-      });
-    if (el) return { step, index: i, el };
-  }
-  return null;
-}
-
-/** Resolve the nearest earlier step that is actually available on the
- * current route. A numeric `index - 1` is not sufficient because the tour
- * deliberately interleaves route-specific steps; on the Dashboard that
- * made Back from "new check" skip the rubric-only step and immediately
- * resolve "new check" again. */
-export function resolvePreviousTourStep(beforeIndex: number, pathname: string): ResolvedStep | null {
-  for (let i = Math.min(beforeIndex - 1, TOUR_STEPS.length - 1); i >= 0; i--) {
-    const step = TOUR_STEPS[i];
-    if (!step.routeMatch(pathname)) continue;
-    const el = step.anchorSelectors
-      .map((selector) => document.querySelector<HTMLElement>(selector))
-      .find((node): node is HTMLElement => {
-        if (!node) return false;
-        const rect = node.getBoundingClientRect();
-        return rect.width > 0 && rect.height > 0;
-      });
-    if (el) return { step, index: i, el };
-  }
-  return null;
+      }) ?? null
+  );
 }

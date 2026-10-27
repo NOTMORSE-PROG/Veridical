@@ -31,6 +31,9 @@ def citation_date_key(token):
 
 def reference_date_key(reference):
     if reference.year is not None:
+        cleaned_year = str(reference.year).lower().replace(" ", "")
+        if cleaned_year in ("n.d.", "nd"):
+            return "explicit_no_date"
         return str(reference.year)
     match = date_patterns()["reference"].search(reference.raw_text)
     if match and not match.group(1)[:4].isdigit():

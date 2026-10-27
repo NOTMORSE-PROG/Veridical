@@ -11,30 +11,52 @@
 // that always restarts at step 1 on Replay matches both of the owner's
 // own reference screenshots.
 import { useEffect, useRef, useState } from "react";
-import { useLocation } from "react-router";
+import { useLocation, useNavigate } from "react-router";
 import { useDismissOnboarding, useMe, useReplayOnboarding } from "../auth/useAuth";
-import { resolvePreviousTourStep, resolveTourStep, TOUR_STEPS } from "./tourSteps";
+import { findTourAnchor, TOUR_HOME_PATH, TOUR_STEPS, type TourStep } from "./tourSteps";
 
 const POLL_MS = 400;
 const MAX_POLLS = 12; // ~4.8s -- covers async-loaded anchors (e.g. EscalatedPanel's own query) without polling forever
 
+export interface ResolvedTourStep {
+  step: TourStep;
+  index: number;
+  /** null = this step's control is not on the current screen; the card
+   * renders unanchored and shows the step's `whereHint` (BUG-091). */
+  el: HTMLElement | null;
+}
+
 export function useTour() {
   const { data: me } = useMe();
   const location = useLocation();
+  const navigate = useNavigate();
   const dismiss = useDismissOnboarding();
   const replay = useReplayOnboarding();
 
   const [stepIndex, setStepIndex] = useState(0);
   const [dismissedLocally, setDismissedLocally] = useState(false);
-  // Bumped to force a re-resolve poll (DOM mutation with no route/step
-  // change of its own, e.g. data finishing a fetch).
-  const [pollTick, setPollTick] = useState(0);
-  const pollCountRef = useRef(0);
+  // Bounded anchor discovery, keyed by (step, route, active) so a change
+  // to any of them restarts discovery without a separate reset effect.
+  const [polls, setPolls] = useState({ key: "", count: 0 });
   const pendingEntry = useRef<HTMLElement | null>(null);
 
   const active = Boolean(me) && !me?.onboarding_dismissed_at && !dismissedLocally;
 
-  const resolved = active ? resolveTourStep(stepIndex, location.pathname) : null;
+  // BUG-091: every step renders, in order. The old resolver skipped any
+  // step whose control was not on the current screen, so a day-one
+  // account walked 1 -> 3 -> 5 under an "of 5" counter. A step whose
+  // control belongs to this screen waits (bounded) for it to mount; a step
+  // whose control lives elsewhere -- or never mounted -- renders
+  // unanchored with its whereHint. Still never a pointer aimed at nothing
+  // (V-057 AC5): an unanchored card has no spotlight.
+  const step = active ? (TOUR_STEPS[stepIndex] ?? null) : null;
+  const discoveryKey = `${stepIndex}|${location.pathname}|${active}`;
+  const pollCount = polls.key === discoveryKey ? polls.count : 0;
+  const anchor = step ? findTourAnchor(step, location.pathname) : null;
+  const routeOwnsStep = step !== null && step.routeMatch(location.pathname);
+  const waitingForAnchor = routeOwnsStep && anchor === null && pollCount < MAX_POLLS;
+  const resolved: ResolvedTourStep | null =
+    step && !waitingForAnchor ? { step, index: stepIndex, el: anchor } : null;
 
   useEffect(() => {
     if (active || !pendingEntry.current) return;
@@ -47,25 +69,17 @@ export function useTour() {
     target.click();
   }, [active]);
 
-  // Poll a bounded number of times when the tour is active but nothing
-  // resolves yet on this page -- catches an anchor that mounts after an
-  // async fetch resolves, without a MutationObserver watching the whole
-  // document.
+  // Poll a bounded number of times while this screen's control for the
+  // current step has not mounted yet -- catches an anchor that mounts
+  // after an async fetch resolves, without a MutationObserver watching the
+  // whole document. A route change restarts discovery (new discoveryKey).
   useEffect(() => {
-    pollCountRef.current = 0;
-  }, [stepIndex, location.pathname, active]);
-
-  useEffect(() => {
-    if (!active || resolved) return;
-    if (pollCountRef.current >= MAX_POLLS) return;
+    if (!routeOwnsStep || anchor || pollCount >= MAX_POLLS) return;
     const timer = setTimeout(() => {
-      pollCountRef.current += 1;
-      setPollTick((t) => t + 1);
+      setPolls({ key: discoveryKey, count: pollCount + 1 });
     }, POLL_MS);
     return () => clearTimeout(timer);
-    // A route change restarts discovery even if the previous page had
-    // exhausted its polls and the new page's anchor is still loading.
-  }, [active, resolved, pollTick, location.pathname]);
+  }, [routeOwnsStep, anchor, pollCount, discoveryKey]);
 
   function next() {
     if (!resolved) return;
@@ -73,9 +87,8 @@ export function useTour() {
   }
 
   function back() {
-    if (!resolved) return;
-    const previous = resolvePreviousTourStep(resolved.index, location.pathname);
-    if (previous) setStepIndex(previous.index);
+    if (!resolved || resolved.index === 0) return;
+    setStepIndex(resolved.index - 1);
   }
 
   function dismissTour() {
@@ -87,10 +100,14 @@ export function useTour() {
     setDismissedLocally(false);
     setStepIndex(0);
     replay.mutate();
+    // BUG-303: start now, on the screen that holds the introduction's
+    // controls, instead of silently firing the next time the Review Desk
+    // happens to open.
+    if (location.pathname !== TOUR_HOME_PATH) navigate(TOUR_HOME_PATH);
   }
 
   function enterTask() {
-    if (!resolved?.step.entryActionLabel) return;
+    if (!resolved?.el || !resolved.step.entryActionLabel) return;
     pendingEntry.current = resolved.el;
     dismissTour();
   }

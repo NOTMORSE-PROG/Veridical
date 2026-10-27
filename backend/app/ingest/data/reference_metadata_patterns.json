@@ -7,7 +7,7 @@
   "access_note_prefixes": ["accessed", "retrieved", "last accessed", "visited"],
   "locator_labels": ["URL"],
   "doi_resolver_hosts": ["doi.org", "dx.doi.org"],
-  "no_date_tokens": ["n.d."],
+  "no_date_tokens": ["n.d.", "n. d."],
   "standard_identifier_pattern": "(?<![\\w/])(?P<series>[A-Z]{2,}(?:/[A-Z]{2,})*)\\s+(?P<number>\\d{3,6}(?:[.\\-]\\d+)*)(?::(?P<edition>\\d{4}))?(?![\\w.:\\-])",
   "months": ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December", "Jan", "Feb", "Mar", "Apr", "Jun", "Jul", "Aug", "Sep", "Sept", "Oct", "Nov", "Dec"],
   "name_particles": ["de", "del", "dela", "delos", "los", "las", "van", "von", "der", "den", "ter", "ten", "da", "das", "do", "dos", "di", "du", "la", "le", "y", "bin", "binti", "al", "el"],

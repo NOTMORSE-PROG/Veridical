@@ -25,7 +25,7 @@ from typing import Any, Protocol
 from app.checks.citations.numbered import reference_anchor
 from app.config import Settings, get_settings
 from app.findings.identity import FINDING_GROUP_FIELD, finding_group_fingerprint
-from app.ingest.citation_dates import citation_date_key, date_patterns, reference_date_key
+from app.ingest.citation_dates import date_patterns
 from app.ingest.schemas import TextBlock
 from app.models.enums import FlagSeverity
 
@@ -68,12 +68,13 @@ _LOOKBACK_STOP = re.compile(r"[.!?;)]")
 # is captured without nesting. A year is checked separately, then each
 # bounded entry is token-parsed without the old nested author expression.
 _PAREN_GROUP = re.compile(r"\(([^()]*)\)")
-_YEAR_IN_GROUP = re.compile(r"\d{4}[a-z]?")
+_YEAR_IN_GROUP = re.compile(r"\d{4}[a-z]?|n\.?\s*d\.", re.IGNORECASE)
 
 # One citation within a parenthetical group (post ';' split): "Author(s),
 # Year" with an optional page/paragraph locator and/or secondary-source tail.
-_PAREN_YEAR = re.compile(r",\s*(?P<year>\d{4}[a-z]?)(?=,|\s*$)")
-_PAREN_EXTRA_YEARS = re.compile(r"(?:,\s*\d{4}[a-z]?(?=,|\s*$))+")
+_PAREN_YEAR = re.compile(r",\s*(?P<year>\d{4}[a-z]?|n\.?\s*d\.)(?=,|\s*$)", re.IGNORECASE)
+_PAREN_EXTRA_YEARS = re.compile(r"(?:,\s*(?:\d{4}[a-z]?|n\.?\s*d\.)(?=,|\s*$))+", re.IGNORECASE)
+_PAREN_ENTRY = _PAREN_YEAR
 _PAREN_TAIL = re.compile(
     r"(?:,\s*(?i:pp?\.?|para\.?|section)\s*[\w\-–]+)?"
     r"(?:,\s*(?i:as\s+cited\s+in)\s+[^()]*)?\s*$"
@@ -83,7 +84,8 @@ _PAREN_TAIL = re.compile(
 # block can backtrack exponentially on capitalized glossary entries that have
 # no citation year at all. The author is parsed as a same-line token suffix
 # only after a year-shaped citation has been found.
-_NARRATIVE_YEAR = re.compile(r"\((?P<year>\d{4}[a-z]?)")
+_NARRATIVE_YEAR = re.compile(r"\((?P<year>\d{4}[a-z]?|n\.?\s*d\.)", re.IGNORECASE)
+_NARRATIVE = _NARRATIVE_YEAR
 _ET_AL_FINAL = re.compile(r"al\.?,?")
 _INITIALS_TOKEN = re.compile(r"(?:[^\W\d_]\.)+(?:-[^\W\d_]\.)*")
 # Hyphens include U+2010/U+2011, which publisher metadata and PDFs use in
@@ -407,10 +409,16 @@ def extract_in_text_citations(
                 spans,
                 max_chars=settings.citation_claim_excerpt_max_chars,
             )
+            raw_narrative_y = m.group("year")
+            norm_narrative_y = (
+                "n.d."
+                if "nd" in raw_narrative_y.lower().replace(".", "").replace(" ", "")
+                else raw_narrative_y
+            )
             out.append(
                 InTextCitation(
                     surnames=surnames,
-                    year=m.group("year"),
+                    year=norm_narrative_y,
                     is_narrative=True,
                     is_secondary=is_secondary,
                     raw_text=raw_text,
@@ -454,13 +462,22 @@ def _parenthetical_entry(
             continue
         tail = entry[year_match.end() :]
         extra = _PAREN_EXTRA_YEARS.match(tail)
-        extra_years = tuple(re.findall(r"\d{4}[a-z]?", extra.group(0))) if extra else ()
+        extra_years = (
+            tuple(
+                "n.d." if "nd" in y.lower().replace(".", "").replace(" ", "") else y
+                for y in re.findall(r"\d{4}[a-z]?|n\.?\s*d\.", extra.group(0), re.IGNORECASE)
+            )
+            if extra
+            else ()
+        )
         if extra:
             tail = tail[extra.end() :]
         if not _PAREN_TAIL.fullmatch(tail):
             gaps.add("parenthetical_tail_unreadable")
             return None
-        return _split_authors(author), year_match.group("year"), extra_years
+        raw_y = year_match.group("year")
+        norm_y = "n.d." if "nd" in raw_y.lower().replace(".", "").replace(" ", "") else raw_y
+        return _split_authors(author), norm_y, extra_years
     return None
 
 
@@ -644,11 +661,89 @@ def _narrative_author_span(
     return start, author
 
 
+CORPORATE_AUTHOR_WORDS = frozenset(
+    {
+        "university",
+        "institute",
+        "institution",
+        "department",
+        "council",
+        "commission",
+        "agency",
+        "organization",
+        "organisation",
+        "association",
+        "committee",
+        "office",
+        "laboratory",
+        "team",
+        "ministry",
+        "authority",
+        "center",
+        "centre",
+        "bureau",
+        "board",
+        "foundation",
+        "society",
+        "federation",
+        "corporation",
+        "administration",
+    }
+)
+
+
+def _is_corporate_author_name(name: str) -> bool:
+    tokens = {word.strip(".,;:()").lower() for word in name.split()}
+    return bool(tokens & CORPORATE_AUTHOR_WORDS)
+
+
+def _split_corporate_authors(raw: str) -> list[str]:
+    """Split multiple corporate author names joined by 'and' or '&' without commas,
+    e.g. 'Food and Agriculture Organization and World Health Organization' ->
+    ['Food and Agriculture Organization', 'World Health Organization'].
+    """
+    pattern = re.compile(
+        r"\b(" + "|".join(CORPORATE_AUTHOR_WORDS) + r")\s+(?:and|&)\s+",
+        re.IGNORECASE,
+    )
+    splits: list[str] = []
+    last_end = 0
+    for m in pattern.finditer(raw):
+        split_point = m.start(1) + len(m.group(1))
+        segment = raw[last_end:split_point].strip()
+        tail = raw[m.end() :].strip()
+        if _is_corporate_author_name(segment) and _is_corporate_author_name(tail):
+            splits.append(segment)
+            last_end = m.end()
+    if splits:
+        remaining = raw[last_end:].strip()
+        if remaining:
+            splits.append(remaining)
+        return splits
+    return [raw]
+
+
 def _split_authors(raw: str) -> list[str]:
     raw = _HYPHENATED_NAME_BREAK.sub("-", raw).replace("⁠", "")
     raw = re.sub(r"\bet\s+al\.?", "", raw, flags=re.IGNORECASE).strip().rstrip(",&").strip()
-    parts = re.split(r",\s*&\s*|,\s+and\s+|\s+&\s+|\s+and\s+|,\s*", raw)
-    return [p.strip() for p in parts if p.strip()]
+    if not raw:
+        return []
+    if _is_corporate_author_name(raw) and "," not in raw:
+        return _split_corporate_authors(raw)
+    segments = re.split(r",\s*(?:and|&)\s*|,\s*", raw)
+    out: list[str] = []
+    for segment in segments:
+        segment = segment.strip()
+        if not segment:
+            continue
+        if _is_corporate_author_name(segment):
+            out.extend(_split_corporate_authors(segment))
+        else:
+            for p in re.split(r"\s+and\s+|\s+&\s+", segment):
+                p = p.strip()
+                if p:
+                    out.append(p)
+    return out
 
 
 def _looks_unfinished(text: str) -> bool:
@@ -786,157 +881,12 @@ def _sentence_at(
 
 # --- cross-match ---------------------------------------------------------------
 
-
-def _first_reference_surname(ref: ReferenceLike) -> str | None:
-    """The surname a correctly-formed citation to this reference must name.
-
-    APA and the styles this project targets cite by first author, and an
-    `et al.` form abbreviates everything after them, so a citation that names
-    only a *later* author is a citation-style defect, not a link (BUG-239
-    AC1). Same comma split as `_reference_surnames`, so particles survive:
-    "Dela Cruz, J." gives "dela cruz", not "j".
-    """
-    for author in ref.authors or []:
-        surname = author.split(",", 1)[0].strip() if "," in author else author.strip()
-        if surname:
-            return " ".join(surname.split()).casefold()
-    return None
-
-
-def _reference_surnames(ref: ReferenceLike) -> set[str]:
-    out: set[str] = set()
-    for author in ref.authors or []:
-        surname = author.split(",", 1)[0].strip() if "," in author else author.strip()
-        if surname:
-            out.add(" ".join(surname.split()).casefold())
-    return out
-
-
-def cross_match(in_text: list[InTextCitation], references: list[ReferenceLike]) -> CrossMatchResult:
-    index: dict[str, list[ReferenceLike]] = {}
-    possible_names: dict[str, list[ReferenceLike]] = {}
-    name_limit = get_settings().citation_author_max_tokens
-    for ref in references:
-        for surname in _reference_surnames(ref):
-            index.setdefault(surname, []).append(ref)
-        for author in ref.authors or []:
-            if "," in author:
-                continue  # explicit family-name order has its existing exact match
-            words = author.split()
-            # A natural-order full name or organization does not establish a
-            # family-name boundary. Its suffix is a possible link, never a
-            # positive match or evidence that the reference is missing/unused.
-            for size in range(1, min(len(words), name_limit + 1)):
-                possible_names.setdefault(" ".join(words[-size:]).casefold(), []).append(ref)
-            # A missing comma before trailing initials/credentials does not
-            # establish the family name. Retain the leading name as a POSSIBLE
-            # interpretation; never turn it into an exact match or an absence.
-            leading = list(words)
-            while (
-                len(leading) > 1
-                and leading[-1].isupper()
-                and _INITIALS_TOKEN.fullmatch(leading[-1])
-            ):
-                leading.pop()
-            if len(leading) < len(words):
-                for size in range(1, min(len(leading), name_limit) + 1):
-                    possible_names.setdefault(" ".join(leading[-size:]).casefold(), []).append(ref)
-
-    linked: list[tuple[InTextCitation, list[ReferenceLike]]] = []
-    orphans: list[InTextCitation] = []
-    ambiguous: list[InTextCitation] = []
-    cited_order_indexes: set[int] = set()
-    possibly_cited: set[int] = set()
-
-    for cite in in_text:
-        if cite.is_secondary:
-            continue  # edge case: don't resolve the inner source
-        surnames = list(cite.surnames)
-        candidates: list[ReferenceLike] = []
-        seen_ids: set[int] = set()
-        for surname in surnames:
-            for ref in index.get(" ".join(surname.split()).casefold(), []):
-                if ref.order_index not in seen_ids:
-                    seen_ids.add(ref.order_index)
-                    candidates.append(ref)
-        if not candidates and len(surnames) == 1 and len(surnames[0].split()) > 1:
-            # Leading capitalized prose can be swept into a narrative author
-            # ("Recently Gurmu et al. (2025)"). The longest trailing run of
-            # words that IS a listed author's surname names the citation.
-            words = surnames[0].split()
-            for size in range(len(words) - 1, 0, -1):
-                suffix = " ".join(words[-size:]).casefold()
-                if suffix in index:
-                    surnames = [suffix]
-                    candidates = list(index[suffix])
-                    break
-        year_digits = citation_date_key(cite.year)
-        matches = [c for c in candidates if reference_date_key(c) == year_digits]
-        matched_ids = {ref.order_index for ref in matches}
-        # A narrative prefix can also precede a natural-order name. Recover
-        # only possible suffix matches; never turn an inferred family-name
-        # boundary into a definite source link or an absence finding.
-        possible_keys = {
-            " ".join(words[-size:]).casefold()
-            for surname in cite.surnames
-            if (words := surname.split())
-            for size in range(1, min(len(words), name_limit) + 1)
-        }
-        uncertain_names = {
-            ref.order_index: ref
-            for key in possible_keys
-            for ref in possible_names.get(key, [])
-            if reference_date_key(ref) == year_digits and ref.order_index not in matched_ids
-        }
-        if uncertain_names:
-            ambiguous.append(cite)
-            possibly_cited.update(matched_ids | uncertain_names.keys())
-            continue
-        if len(matches) > 1 and cite.year[-1].isalpha():
-            # Same-author-same-year disambiguation (2024a/b): V-006's parser
-            # strips the letter suffix from the stored `year` int but keeps
-            # it in `raw_text` — use that to narrow down, if it narrows at all.
-            refined = [c for c in matches if cite.year in (c.raw_text or "")]
-            if refined:
-                matches = refined
-        # BUG-239 AC1: a shared coauthor surname plus a matching year is not
-        # a link. `index` holds EVERY author of every reference, so
-        # "(Schneider, 2024)" resolved to a Vladika-first paper, marked it
-        # cited, and handed its claim to support grading -- one candidate, so
-        # the ambiguity guard below never fired. Prefer references the
-        # citation actually names first; if it names none of them, the
-        # candidates are real but the author semantics disagree, which is the
-        # instructor's call and not ours (ground rule 1).
-        cite_surnames = {" ".join(s.split()).casefold() for s in surnames}
-        lead_matches = [c for c in matches if _first_reference_surname(c) in cite_surnames]
-        coauthor_only = bool(matches) and not lead_matches
-        if lead_matches:
-            matches = lead_matches
-        if coauthor_only or len(matches) > 1:
-            # No claim can be assigned to one of these sources honestly.
-            # Do not turn an ambiguous mark into several comparisons. Each
-            # candidate MAY be the source meant, so none of them can be
-            # called unused either (2026-10-07: this replaced withholding
-            # every finding in the paper over one ambiguous mark).
-            ambiguous.append(cite)
-            possibly_cited.update(c.order_index for c in matches)
-        elif matches:
-            cited_order_indexes.update(c.order_index for c in matches)
-            linked.append((cite, matches))
-        else:
-            orphans.append(cite)
-
-    uncited = [r for r in references if r.order_index not in cited_order_indexes]
-    return CrossMatchResult(
-        in_text=in_text,
-        linked=linked,
-        orphans=orphans,
-        uncited=uncited,
-        ambiguous=ambiguous,
-        possibly_cited=[r for r in references if r.order_index in possibly_cited],
-        confidently_uncited=[r for r in uncited if r.order_index not in possibly_cited],
-    )
-
+from app.checks.citations.cross_match import (  # noqa: E402, I001
+    _first_reference_surname as _first_reference_surname,
+    _reference_surnames as _reference_surnames,
+    cross_match as cross_match,
+    get_author_aliases as get_author_aliases,
+)
 
 # --- flag-ready output -----------------------------------------------------------
 

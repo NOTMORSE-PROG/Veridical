@@ -617,7 +617,7 @@ describe("V-077 first-time-user review fixes", () => {
   it("BUG-304: does not ask to choose two records when compare mode is opened on an empty Library", async () => {
     vi.stubGlobal(
       "fetch",
-      libraryFetch({ "/library": page([], { corpusTotal: 0 }), "/programs": [] }),
+      libraryFetch({ "/library": page([]), "/programs": [] }),
     );
     renderWithProviders(<SignalLibraryPage />, {
       route: "/library?compareFrom=1",

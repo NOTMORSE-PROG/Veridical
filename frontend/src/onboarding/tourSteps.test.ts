@@ -1,11 +1,11 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { resolvePreviousTourStep, resolveTourStep, TOUR_STEPS } from "./tourSteps";
+import { findTourAnchor, TOUR_STEPS } from "./tourSteps";
 
 function mountAnchor(dataTour: string) {
   const el = document.createElement("button");
   el.setAttribute("data-tour", dataTour);
   // jsdom doesn't lay out real geometry -- getBoundingClientRect
-  // returns all-zero by default, which resolveTourStep's own
+  // returns all-zero by default, which findTourAnchor's own
   // "width > 0 && height > 0" check would (correctly, for a real
   // browser) treat as "not actually rendered." Stub a real-looking
   // rect so these tests exercise the DOM-presence branch, not the
@@ -16,76 +16,45 @@ function mountAnchor(dataTour: string) {
   return el;
 }
 
-describe("resolveTourStep", () => {
+function stepById(id: string) {
+  const step = TOUR_STEPS.find((candidate) => candidate.id === id);
+  if (!step) throw new Error(`missing tour step ${id}`);
+  return step;
+}
+
+describe("findTourAnchor", () => {
   afterEach(() => {
     document.body.innerHTML = "";
   });
 
-  it("resolves the first step when its anchor exists on the current page", () => {
+  it("finds a step's control when it is rendered on the step's own screen", () => {
+    const el = mountAnchor("upload-format-cta");
+    expect(findTourAnchor(stepById("upload-format"), "/dashboard")).toBe(el);
+  });
+
+  it("returns null on a screen the step does not belong to, even if a matching control exists", () => {
     mountAnchor("upload-format-cta");
-    const resolved = resolveTourStep(0, "/dashboard");
-    expect(resolved?.step.id).toBe("upload-format");
-    expect(resolved?.index).toBe(0);
+    expect(findTourAnchor(stepById("upload-format"), "/rubric")).toBeNull();
   });
 
-  it("skips a step whose route doesn't match the current page", () => {
-    // Step 0 is dashboard-only; on a report page, resolution should
-    // skip straight to the escalation step (index 3) if its anchor
-    // exists, never getting stuck on step 0.
-    mountAnchor("escalated-panel");
-    const resolved = resolveTourStep(0, "/report/9");
-    expect(resolved?.step.id).toBe("escalation");
-  });
-
-  it("skips a step whose anchor is not in the DOM yet (AC5: never a pointer aimed at nothing)", () => {
-    // Nothing mounted for "new-check-cta" -- only the step after it.
-    mountAnchor("replay-tour-desktop");
-    const resolved = resolveTourStep(2, "/dashboard");
-    // Step 2 (new-check) has no anchor; step 4 (replay) matches any
-    // route and its anchor exists -- resolution lands there, not on
-    // a null/broken step 2.
-    expect(resolved?.step.id).toBe("replay");
-  });
-
-  it("returns null when nothing in the remaining steps resolves on this page", () => {
-    // Nothing mounted at all, and starting past the always-matching
-    // replay step.
-    const resolved = resolveTourStep(TOUR_STEPS.length, "/dashboard");
-    expect(resolved).toBeNull();
+  it("returns null when the step's control has not mounted (AC5: never a pointer aimed at nothing)", () => {
+    expect(findTourAnchor(stepById("new-check"), "/dashboard")).toBeNull();
   });
 
   it("falls back to the visible desktop Account control when the replay action is closed", () => {
     mountAnchor("replay-tour-account");
-    const resolved = resolveTourStep(4, "/dashboard");
-    expect(resolved?.step.id).toBe("replay");
-    expect(resolved?.el.getAttribute("data-tour")).toBe("replay-tour-account");
+    expect(findTourAnchor(stepById("replay"), "/dashboard")?.getAttribute("data-tour")).toBe("replay-tour-account");
   });
 
   it("ignores a matching selector with a zero-size rect (present in DOM but not actually rendered)", () => {
     const el = mountAnchor("confirm-rubric-cta");
     el.getBoundingClientRect = () => ({ top: 0, left: 0, width: 0, height: 0, bottom: 0, right: 0 }) as DOMRect;
-    const resolved = resolveTourStep(1, "/rubric/3/review");
-    expect(resolved).toBeNull();
+    expect(findTourAnchor(stepById("confirm-rubric"), "/rubric/3/review")).toBeNull();
   });
 });
 
-describe("resolvePreviousTourStep", () => {
-  afterEach(() => {
-    document.body.innerHTML = "";
-  });
-
-  it("skips route-specific gaps so Back reaches the previous visible Dashboard step", () => {
-    mountAnchor("upload-format-cta");
-    mountAnchor("new-check-cta");
-
-    const resolved = resolvePreviousTourStep(2, "/dashboard");
-
-    expect(resolved?.index).toBe(0);
-    expect(resolved?.step.id).toBe("upload-format");
-  });
-
-  it("returns null when there is no earlier step available on this route", () => {
-    mountAnchor("upload-format-cta");
-    expect(resolvePreviousTourStep(0, "/dashboard")).toBeNull();
+describe("TOUR_STEPS", () => {
+  it("BUG-091: every step says where its control lives, so an unanchored step is still useful", () => {
+    for (const step of TOUR_STEPS) expect(step.whereHint.trim().length).toBeGreaterThan(0);
   });
 });

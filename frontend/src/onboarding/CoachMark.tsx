@@ -4,7 +4,7 @@
 // what's new here is anchored positioning + a spotlight cutout, neither
 // of which Modal.tsx needed. Custom-built, no third-party tour library
 // (charter: zero-budget, custom-everything).
-import { useEffect, useId, useRef } from "react";
+import { type CSSProperties, useEffect, useId, useRef } from "react";
 import { createPortal } from "react-dom";
 import { useInertBackground } from "../components/useInertBackground";
 import { Button } from "../ui/Button";
@@ -63,6 +63,7 @@ function CoachMarkCard({
   anchorEl,
   title,
   body,
+  whereHint,
   stepNumber,
   totalSteps,
   isFirst,
@@ -73,9 +74,12 @@ function CoachMarkCard({
   entryActionLabel,
   onEnterTask,
 }: {
-  anchorEl: HTMLElement;
+  /** null = the step's control is not on this screen (BUG-091): render a
+   * centered card with the step's whereHint and no spotlight. */
+  anchorEl: HTMLElement | null;
   title: string;
   body: string;
+  whereHint: string;
   stepNumber: number;
   totalSteps: number;
   isFirst: boolean;
@@ -87,7 +91,8 @@ function CoachMarkCard({
   onEnterTask: () => void;
 }) {
   useInertBackground();
-  const position = useCoachMarkPosition(anchorEl);
+  const anchoredPosition = useCoachMarkPosition(anchorEl);
+  const ready = anchorEl ? anchoredPosition !== null : true;
   const titleId = useId();
   const bodyId = useId();
   const cardRef = useRef<HTMLDivElement>(null);
@@ -101,13 +106,13 @@ function CoachMarkCard({
   // then would silently no-op. Wait for `position` to actually resolve,
   // then focus exactly once per instance (AC6).
   useEffect(() => {
-    if (!position || hasFocusedRef.current) return;
+    if (!ready || hasFocusedRef.current) return;
     hasFocusedRef.current = true;
     previouslyFocused.current = document.activeElement as HTMLElement | null;
     const card = cardRef.current;
     const [first] = card ? getFocusable(card) : [];
     (first ?? card)?.focus();
-  }, [position]);
+  }, [ready]);
 
   // Return focus on unmount -- a separate effect (not this one's cleanup)
   // since the mount-focus effect above can legitimately re-run its body
@@ -119,7 +124,7 @@ function CoachMarkCard({
       // step's own opener was -- matches Dashboard.tsx's own rule for
       // this exact class of unmount ("focus must move to the next
       // logical heading rather than fall back to <body>").
-      if (anchorEl.isConnected) anchorEl.focus();
+      if (anchorEl?.isConnected) anchorEl.focus();
       else previouslyFocused.current?.focus();
     };
   }, [anchorEl]);
@@ -153,8 +158,24 @@ function CoachMarkCard({
     return () => document.removeEventListener("keydown", onKeyDown, true);
   }, [onDismiss]);
 
-  if (!position) return null;
-  const { anchorRect, cardTop, cardLeft } = position;
+  if (!ready) return null;
+  const cardStyle: CSSProperties = anchoredPosition
+    ? {
+        position: "fixed",
+        top: anchoredPosition.cardTop,
+        left: anchoredPosition.cardLeft,
+        maxHeight: `calc(100dvh - ${anchoredPosition.cardTop}px - var(--signal-space-4))`,
+      }
+    : {
+        // Unanchored (BUG-091): centered in the viewport, no pointer.
+        // inset+auto margins, not a transform: the entry animation's
+        // `both` fill owns `transform` and would undo a translate.
+        position: "fixed",
+        inset: 0,
+        margin: "auto",
+        height: "fit-content",
+        maxHeight: "calc(100dvh - 2 * var(--signal-space-4))",
+      };
 
   return (
     <>
@@ -165,23 +186,38 @@ function CoachMarkCard({
           own module doc for why). Ring reuses --color-action, the same
           near-black token already used for :focus-visible rings
           (tokens.css), not a status hue -- a spotlight is "look here,"
-          not "this is flagged" (DESIGN.md §1.7's overreliance rule). */}
-      <div
-        aria-hidden="true"
-        className="motion-safe:transition-[top,left,width,height] motion-safe:duration-(--motion-duration-base) motion-safe:ease-(--motion-ease-standard)"
-        style={{
-          position: "fixed",
-          top: anchorRect.top - 4,
-          left: anchorRect.left - 4,
-          width: anchorRect.width + 8,
-          height: anchorRect.height + 8,
-          borderRadius: "10px",
-          boxShadow:
-            "0 0 0 4px var(--color-panel), 0 0 0 7px var(--color-action), 0 0 0 9999px var(--color-scrim)",
-          pointerEvents: "none",
-          zIndex: "var(--z-tour-spotlight)",
-        }}
-      />
+          not "this is flagged" (DESIGN.md §1.7's overreliance rule).
+          Unanchored steps get the same scrim with no cutout. */}
+      {anchoredPosition ? (
+        <div
+          aria-hidden="true"
+          className="motion-safe:transition-[top,left,width,height] motion-safe:duration-(--motion-duration-base) motion-safe:ease-(--motion-ease-standard)"
+          style={{
+            position: "fixed",
+            top: anchoredPosition.anchorRect.top - 4,
+            left: anchoredPosition.anchorRect.left - 4,
+            width: anchoredPosition.anchorRect.width + 8,
+            height: anchoredPosition.anchorRect.height + 8,
+            borderRadius: "10px",
+            boxShadow:
+              "0 0 0 4px var(--color-panel), 0 0 0 7px var(--color-action), 0 0 0 9999px var(--color-scrim)",
+            pointerEvents: "none",
+            zIndex: "var(--z-tour-spotlight)",
+          }}
+        />
+      ) : (
+        <div
+          aria-hidden="true"
+          data-testid="coachmark-scrim"
+          style={{
+            position: "fixed",
+            inset: 0,
+            backgroundColor: "var(--color-scrim)",
+            pointerEvents: "none",
+            zIndex: "var(--z-tour-spotlight)",
+          }}
+        />
+      )}
       <div
         ref={cardRef}
         role="dialog"
@@ -190,7 +226,7 @@ function CoachMarkCard({
         aria-describedby={bodyId}
         tabIndex={-1}
         className="motion-safe:animate-coachmark-in flex flex-col gap-3 rounded-lg border border-border bg-panel p-4 shadow-(--elevation-overlay)"
-        style={{ position: "fixed", top: cardTop, left: cardLeft, width: "320px", maxWidth: "calc(100vw - 32px)", maxHeight: `calc(100dvh - ${cardTop}px - var(--signal-space-4))`, overflowY: "auto", zIndex: "var(--z-tour-card)" }}
+        style={{ ...cardStyle, width: "320px", maxWidth: "calc(100vw - 32px)", overflowY: "auto", zIndex: "var(--z-tour-card)" }}
       >
         <div className="flex items-start gap-2">
           <h2 id={titleId} className="flex-1 text-sm font-bold text-ink">
@@ -205,10 +241,11 @@ function CoachMarkCard({
             <CloseIcon />
           </button>
         </div>
-        <p id={bodyId} className="text-sm text-ink-secondary">
-          {body}
-        </p>
-        {entryActionLabel && (
+        <div id={bodyId} className="flex flex-col gap-2">
+          <p className="text-sm text-ink-secondary">{body}</p>
+          {!anchorEl && <p className="text-sm font-bold text-ink">{whereHint}</p>}
+        </div>
+        {entryActionLabel && anchorEl && (
           <Button variant="brand" onClick={onEnterTask} disabled={anchorEl.matches(":disabled")}>
             {entryActionLabel}
           </Button>
@@ -262,6 +299,7 @@ export function CoachMark() {
         anchorEl={tour.resolved.el}
         title={tour.resolved.step.title}
         body={tour.resolved.step.body}
+        whereHint={tour.resolved.step.whereHint}
         stepNumber={tour.stepNumber}
         totalSteps={tour.totalSteps}
         isFirst={tour.isFirst}
