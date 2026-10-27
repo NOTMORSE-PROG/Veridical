@@ -13,9 +13,9 @@ tables, citation style) get first refusal.
 from collections.abc import Iterator
 
 from app.checks.rules import RuleContext, RuleOutcome, RuleSpec, register_rule
-from app.checks.rules.keywords import contains_any, full_text, load_keywords
+from app.checks.rules.keywords import contains_any, current_keywords, full_text, load_keywords
 from app.checks.rules.presence import is_presence_claim, presence_scope_record
-from app.ingest.patterns import load_patterns
+from app.ingest.patterns import HeadingPatterns, load_patterns
 from app.ingest.schemas import SectionNode, SectionTree
 from app.models.enums import ResultOutcome
 
@@ -24,6 +24,13 @@ _HEADING_PATTERNS = load_patterns()
 
 REQUIRED_SECTION_RULE_ID = "required_section_present"
 SECTION_ORDER_RULE_ID = "section_order"
+
+
+def _current_heading_patterns() -> HeadingPatterns:
+    from app.config import get_settings
+
+    configured = get_settings().ingest_patterns_file
+    return load_patterns(configured) if configured is not None else _HEADING_PATTERNS
 
 
 def walk_sections(tree: SectionTree) -> Iterator[SectionNode]:
@@ -43,12 +50,13 @@ def identify_target_section(criterion) -> str | None:
     "chapter N" reference) a criterion's wording is talking about, if any.
     Shared by `required_section_present` (this rule) and V-017's semantic
     context builder — one identification mechanism, not two."""
+    patterns = _current_heading_patterns()
     text = full_text(criterion)
     lowered = text.lower()
-    for synonym in _HEADING_PATTERNS.unnumbered_sections:
+    for synonym in patterns.unnumbered_sections:
         if synonym in lowered:
             return synonym
-    chapter_match = _HEADING_PATTERNS.chapter.search(text)
+    chapter_match = patterns.chapter.search(text)
     if chapter_match:
         return f"chapter {chapter_match.group('num')}".lower()
     return None
@@ -66,8 +74,9 @@ def _title_candidates(target: str) -> frozenset[str]:
     so teaching the app a new reference-section name in one place
     teaches it everywhere (same principle `identify_target_section`'s
     own docstring states for `unnumbered_sections`)."""
-    if target in _HEADING_PATTERNS.reference_titles:
-        return _HEADING_PATTERNS.reference_titles
+    patterns = _current_heading_patterns()
+    if target in patterns.reference_titles:
+        return patterns.reference_titles
     return frozenset({target})
 
 
@@ -160,8 +169,9 @@ def _run_required_section(criterion, ctx: RuleContext) -> RuleOutcome:
 
 def _matches_section_order(criterion) -> bool:
     text = full_text(criterion)
-    return contains_any(text, _KEYWORDS.order_nouns) and contains_any(
-        text, _KEYWORDS.section_reference_nouns
+    kw = current_keywords()
+    return contains_any(text, kw.order_nouns) and contains_any(
+        text, kw.section_reference_nouns
     )
 
 

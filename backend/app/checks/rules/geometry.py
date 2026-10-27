@@ -5,7 +5,7 @@ function, no LLM/network — same as every rule in this package.
 
 from app.checks.rules import RuleContext, RuleOutcome, RuleSpec, register_rule
 from app.checks.rules.bounds import Bound, extract_bound, to_points
-from app.checks.rules.keywords import contains_any, full_text, load_keywords
+from app.checks.rules.keywords import contains_any, current_keywords, full_text, load_keywords
 from app.ingest.schemas import PageGeometry
 from app.models.enums import ResultOutcome
 
@@ -24,7 +24,7 @@ def _geometry_anchor(geo: PageGeometry) -> str:
 
 def _matches(criterion) -> bool:
     text = full_text(criterion)
-    if not contains_any(text, _KEYWORDS.margin_nouns):
+    if not contains_any(text, current_keywords().margin_nouns):
         return False
     bound = extract_bound(text)
     if bound is None or bound.unit is None:

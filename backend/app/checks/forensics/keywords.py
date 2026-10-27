@@ -18,6 +18,10 @@ class ForensicsKeywords:
 
 
 def load_keywords(path: Path | None = None) -> ForensicsKeywords:
+    if path is None:
+        from app.config import get_settings
+
+        path = get_settings().forensics_keywords_file
     raw = json.loads((path or _DEFAULT_FILE).read_text(encoding="utf-8"))
     return ForensicsKeywords(
         n_headers=frozenset(h.casefold() for h in raw["n_headers"]),

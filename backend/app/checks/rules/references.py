@@ -8,7 +8,7 @@ from dataclasses import asdict
 
 from app.checks.rules import RuleContext, RuleOutcome, RuleSpec, register_rule
 from app.checks.rules.bounds import Bound, extract_bound
-from app.checks.rules.keywords import contains_any, full_text, load_keywords
+from app.checks.rules.keywords import contains_any, current_keywords, full_text, load_keywords
 from app.messages import REFERENCE_LIST_UNASSESSABLE
 from app.models.enums import ResultOutcome
 
@@ -36,7 +36,10 @@ _REFERENCE_NOUN_NEARBY = re.compile(
 
 def _matches_reference_count(criterion) -> bool:
     text = full_text(criterion)
-    return contains_any(text, _KEYWORDS.reference_nouns) and extract_bound(text) is not None
+    return (
+        contains_any(text, current_keywords().reference_nouns)
+        and extract_bound(text) is not None
+    )
 
 
 def _within(kind: str, low: float, high: float | None, actual: float) -> bool:
@@ -64,7 +67,7 @@ def _bound_is_about_references(bound: Bound, text: str) -> bool:
     same number in the text (`bound.unit` only ever captures a single
     adjacent word, so "at least 5 major references" needs this fallback
     or it would wrongly read as unrelated too)."""
-    if bound.unit is None or bound.unit in _KEYWORDS.reference_nouns:
+    if bound.unit is None or bound.unit in current_keywords().reference_nouns:
         return True
     nearby = re.search(rf"\b{re.escape(f'{bound.low:g}')}\b(?:\s+\S+){{0,3}}", text)
     return bool(nearby and _REFERENCE_NOUN_NEARBY.search(nearby.group()))
@@ -138,7 +141,7 @@ def _inventory_limit_outcome(ctx: RuleContext) -> RuleOutcome | None:
 
 
 def _matches_citation_style(criterion) -> bool:
-    return contains_any(full_text(criterion), _KEYWORDS.citation_styles)
+    return contains_any(full_text(criterion), current_keywords().citation_styles)
 
 
 def _named_style(criterion) -> str | None:
@@ -153,7 +156,7 @@ def _named_style(criterion) -> str | None:
     between process restarts -- `sorted()` makes the result the same
     every time, independent of hash seed."""
     lowered = full_text(criterion).lower()
-    for style in sorted(_KEYWORDS.citation_styles):
+    for style in sorted(current_keywords().citation_styles):
         if re.search(rf"\b{re.escape(style)}\b", lowered):
             return style
     return None

@@ -24,6 +24,10 @@ class StructuralKeywords:
 
 
 def load_keywords(path: Path | None = None) -> StructuralKeywords:
+    if path is None:
+        from app.config import get_settings
+
+        path = get_settings().structural_keywords_file
     raw = json.loads((path or _DEFAULT_FILE).read_text(encoding="utf-8"))
     return StructuralKeywords(
         citation_styles=frozenset(raw["citation_styles"]),
@@ -36,6 +40,16 @@ def load_keywords(path: Path | None = None) -> StructuralKeywords:
         order_nouns=frozenset(raw["order_nouns"]),
         section_reference_nouns=frozenset(raw["section_reference_nouns"]),
     )
+
+
+_DEFAULT_KEYWORDS = load_keywords(_DEFAULT_FILE)
+
+
+def current_keywords() -> StructuralKeywords:
+    from app.config import get_settings
+
+    configured = get_settings().structural_keywords_file
+    return load_keywords(configured) if configured is not None else _DEFAULT_KEYWORDS
 
 
 def contains_any(text: str, words: frozenset[str]) -> bool:

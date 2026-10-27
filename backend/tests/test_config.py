@@ -192,3 +192,46 @@ def test_content_hash_recovery_batch_maximum_cannot_exceed_process_ceiling():
             content_hash_backfill_max_batch_size="101",
             content_hash_backfill_process_ceiling="100",
         )
+
+
+@pytest.mark.asyncio
+async def test_bug_280_settings_prompt_version_query_breaks_timestamp_ties_by_id_desc():
+    """BUG-280: `get_settings_view` orders `DISTINCT ON (prompt_type)` by
+    `created_at DESC, id DESC` so two audit rows sharing a timestamp pick the
+    newest row deterministically."""
+    from sqlalchemy.dialects import postgresql
+
+    from app.models.instructor import Instructor
+    from app.settings.service import get_settings_view
+
+    captured_sql: list[str] = []
+
+    class FakeScalarResult:
+        def all(self):
+            return []
+
+    class FakeSession:
+        async def scalars(self, stmt):
+            compiled = str(
+                stmt.compile(
+                    dialect=postgresql.dialect(),
+                    compile_kwargs={"literal_binds": True},
+                )
+            )
+            captured_sql.append(compiled)
+            return FakeScalarResult()
+
+    instructor = Instructor(
+        id=42,
+        email="tie@test.local",
+        display_name="Tie",
+        gemini_api_key_encrypted=None,
+    )
+    await get_settings_view(FakeSession(), _bare_settings(), instructor)
+    assert len(captured_sql) == 1
+    expected_order = (
+        "ORDER BY audit_log.payload ->> 'prompt_type', "
+        "audit_log.created_at DESC, audit_log.id DESC"
+    )
+    assert expected_order in captured_sql[0]
+

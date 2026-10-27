@@ -44,6 +44,10 @@ def to_points(value: float, unit: str) -> float | None:
 
 
 def _load_patterns(path: Path | None = None) -> dict[str, re.Pattern[str]]:
+    if path is None:
+        from app.config import get_settings
+
+        path = get_settings().structural_bound_patterns_file
     raw = json.loads((path or _DEFAULT_FILE).read_text(encoding="utf-8"))
     return {
         key: re.compile(pattern, re.IGNORECASE)
@@ -52,11 +56,15 @@ def _load_patterns(path: Path | None = None) -> dict[str, re.Pattern[str]]:
     }
 
 
-_PATTERNS = _load_patterns()
+_PATTERNS = _load_patterns(_DEFAULT_FILE)
 
 
 def extract_bound(text: str, *, patterns: dict[str, re.Pattern[str]] | None = None) -> Bound | None:
-    patterns = patterns or _PATTERNS
+    if patterns is None:
+        from app.config import get_settings
+
+        configured = get_settings().structural_bound_patterns_file
+        patterns = _load_patterns(configured) if configured is not None else _PATTERNS
     for kind in ("range", "min", "max", "exact", "bare"):
         pattern = patterns.get(kind)
         if pattern is None:

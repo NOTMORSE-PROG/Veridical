@@ -747,3 +747,94 @@ def test_real_proposal_pdf_section_presence_and_reference_count_hand_checked():
     assert at_least_15.outcome == ResultOutcome.passed
     at_most_10 = count_spec.run(FakeCriterion(text="No more than 10 references allowed"), ctx)
     assert at_most_10.outcome == ResultOutcome.failed
+
+
+def test_bug_075_configured_data_files_override_keywords_bounds_and_forensics(
+    tmp_path, monkeypatch
+):
+    """BUG-075: `STRUCTURAL_KEYWORDS_FILE`, `STRUCTURAL_BOUND_PATTERNS_FILE`,
+    `INGEST_PATTERNS_FILE`, and `FORENSICS_KEYWORDS_FILE` must all take effect
+    when configured via Settings, rather than being ignored by import-time
+    frozen defaults."""
+    import json
+
+    from app.checks.forensics.extract import extract_descriptive_stats
+    from app.checks.rules.bounds import _DEFAULT_FILE as DEFAULT_BOUNDS_FILE
+    from app.checks.rules.bounds import extract_bound
+    from app.checks.rules.keywords import _DEFAULT_FILE as DEFAULT_KW_FILE
+    from app.ingest.patterns import _DEFAULT_FILE as DEFAULT_INGEST_FILE
+    from app.ingest.schemas import TableBlock
+
+    # 1. Custom structural keywords file adds a custom reference noun "works_cited_entry"
+    kw_data = json.loads(DEFAULT_KW_FILE.read_text(encoding="utf-8"))
+    kw_data["reference_nouns"] = [*kw_data["reference_nouns"], "works_cited_entry"]
+    custom_kw = tmp_path / "custom_structural_keywords.json"
+    custom_kw.write_text(json.dumps(kw_data), encoding="utf-8")
+
+    # 2. Custom bound patterns file adds a custom min phrasing " starting from (?P<num1>\d+) "
+    bounds_data = json.loads(DEFAULT_BOUNDS_FILE.read_text(encoding="utf-8"))
+    bounds_data["min"] = r"\bstarting from\s+(?P<num1>\d+(?:\.\d+)?)\s*(?P<unit>[a-zA-Z_]+)?"
+    custom_bounds = tmp_path / "custom_bounds.json"
+    custom_bounds.write_text(json.dumps(bounds_data), encoding="utf-8")
+
+    # 3. Custom ingest patterns file adds "statement of the problem" to unnumbered_sections
+    ingest_data = json.loads(DEFAULT_INGEST_FILE.read_text(encoding="utf-8"))
+    ingest_data["unnumbered_sections"] = [
+        *ingest_data["unnumbered_sections"],
+        "statement of the problem",
+    ]
+    custom_ingest = tmp_path / "custom_ingest_patterns.json"
+    custom_ingest.write_text(json.dumps(ingest_data), encoding="utf-8")
+
+    # 4. Custom forensics keywords file adds " Arithmetic Avg " to mean_headers
+    custom_forensics = tmp_path / "custom_forensics_keywords.json"
+    custom_forensics.write_text(
+        json.dumps(
+            {
+                "n_headers": ["n"],
+                "mean_headers": ["arithmetic avg"],
+                "sd_headers": ["sd"],
+                "percentage_headers": ["%"],
+                "total_labels": ["total"],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    ref_rule = get_rule(REFERENCE_COUNT_RULE_ID)
+    sec_rule = get_rule(REQUIRED_SECTION_RULE_ID)
+    table = TableBlock(
+        page=1,
+        paragraph=None,
+        caption="Table 1",
+        rows=[["Group", "Arithmetic Avg"], ["A", "4.25"]],
+        source="native",
+        low_confidence=False,
+    )
+
+    # Before setting env vars: none of the custom vocabularies match
+    get_settings.cache_clear()
+    assert not ref_rule.matches(FakeCriterion(text="starting from 10 works_cited_entry"))
+    assert not sec_rule.matches(
+        FakeCriterion(text="The manuscript must include a Statement of the Problem")
+    )
+    assert extract_descriptive_stats([table]) == []
+
+    # After setting env vars: all four custom data files take effect
+    monkeypatch.setenv("STRUCTURAL_KEYWORDS_FILE", str(custom_kw))
+    monkeypatch.setenv("STRUCTURAL_BOUND_PATTERNS_FILE", str(custom_bounds))
+    monkeypatch.setenv("INGEST_PATTERNS_FILE", str(custom_ingest))
+    monkeypatch.setenv("FORENSICS_KEYWORDS_FILE", str(custom_forensics))
+    get_settings.cache_clear()
+    try:
+        bound = extract_bound("starting from 10 works_cited_entry")
+        assert bound is not None and bound.kind == "min" and bound.low == 10.0
+        assert ref_rule.matches(FakeCriterion(text="starting from 10 works_cited_entry"))
+        assert sec_rule.matches(
+            FakeCriterion(text="The manuscript must include a Statement of the Problem")
+        )
+        extracted = extract_descriptive_stats([table])
+        assert len(extracted) == 1
+        assert extracted[0].stat_name == "mean" and extracted[0].value == 4.25
+    finally:
+        get_settings.cache_clear()
