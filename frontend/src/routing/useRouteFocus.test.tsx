@@ -343,3 +343,14 @@ it.each(["settlement", "Tab", "pointer", "wheel", "blur", "other focus"])(
     vi.unstubAllGlobals();
   },
 );
+
+it("BUG-372: anchors .signal-live-region to the viewport origin so it cannot extend document scrollHeight", async () => {
+  const fs = await import("node:fs");
+  const path = await import("node:path");
+  const css = fs.readFileSync(path.resolve(__dirname, "../ui/signal.css"), "utf8");
+  const match = css.match(/\.signal-live-region\s*\{([^}]+)\}/);
+  expect(match?.[1]).toContain("position: fixed;");
+  expect(match?.[1]).toContain("inset-block-start: 0;");
+  expect(match?.[1]).toContain("inset-inline-start: 0;");
+});
+

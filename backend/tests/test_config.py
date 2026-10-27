@@ -235,3 +235,34 @@ async def test_bug_280_settings_prompt_version_query_breaks_timestamp_ties_by_id
     )
     assert expected_order in captured_sql[0]
 
+
+@pytest.mark.asyncio
+async def test_bug_207_pipeline_list_check_runs_breaks_timestamp_ties_by_id_desc():
+    """BUG-207: `list_check_runs` orders by `created_at DESC, id DESC` so runs
+    sharing a timestamp have a deterministic primary-key tie-breaker."""
+    from sqlalchemy.dialects import postgresql
+
+    from app.pipeline.service import list_check_runs
+
+    captured_sql: list[str] = []
+
+    class FakeScalarResult:
+        def all(self):
+            return []
+
+    class FakeSession:
+        async def scalars(self, stmt):
+            compiled = str(
+                stmt.compile(
+                    dialect=postgresql.dialect(),
+                    compile_kwargs={"literal_binds": True},
+                )
+            )
+            captured_sql.append(compiled)
+            return FakeScalarResult()
+
+    await list_check_runs(FakeSession(), instructor_id=7)
+    assert len(captured_sql) == 1
+    assert "ORDER BY check_run.created_at DESC, check_run.id DESC" in captured_sql[0]
+
+

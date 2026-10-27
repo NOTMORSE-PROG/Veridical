@@ -293,7 +293,7 @@ async def list_check_runs(session: AsyncSession, instructor_id: int) -> list[Che
                 select(CheckRun)
                 .join(Manuscript, Manuscript.id == CheckRun.manuscript_id)
                 .where(Manuscript.instructor_id == instructor_id)
-                .order_by(CheckRun.created_at.desc())
+                .order_by(CheckRun.created_at.desc(), CheckRun.id.desc())
             )
         ).all()
     )

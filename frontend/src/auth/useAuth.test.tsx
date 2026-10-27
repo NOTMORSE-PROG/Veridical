@@ -42,4 +42,44 @@ describe("authentication cache boundaries", () => {
       email: "instructor-b@tip.edu.ph",
     });
   });
+
+  it("BUG-414: AccountDisclosure shows both the display name and signed-in email address", async () => {
+    const { fireEvent, render, screen } = await import("@testing-library/react");
+    const { MemoryRouter } = await import("react-router");
+    const { SignalShell } = await import("../shell/SignalShell");
+
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+    });
+    queryClient.setQueryData(ME_QUERY_KEY, {
+      id: 7,
+      email: "prof.santos@tip.edu.ph",
+      display_name: "Prof. Santos",
+      onboarding_dismissed_at: "2026-01-01T00:00:00Z",
+    });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        new Response(
+          JSON.stringify({ mode: "fake", calls_remaining: 500, key_state: "configured" }),
+          { status: 200 },
+        )),
+    );
+
+    render(
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter initialEntries={["/dashboard"]}>
+          <SignalShell>
+            <div>Desk content</div>
+          </SignalShell>
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+
+    const trigger = screen.getByRole("button", { name: /Account/i });
+    fireEvent.click(trigger);
+
+    expect(screen.getByText("Prof. Santos")).toBeInTheDocument();
+    expect(screen.getByText("prof.santos@tip.edu.ph")).toBeInTheDocument();
+  });
 });
