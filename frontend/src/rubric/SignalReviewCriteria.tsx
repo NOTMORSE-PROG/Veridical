@@ -125,10 +125,11 @@ function CriterionCard({
         <label className="signal-criterion-field signal-criterion-field--wide">
           <span>Criterion text</span>
           <textarea
+            id={`criterion-text-${row.key}`}
             rows={2}
             value={row.text}
             disabled={readOnly}
-            aria-label={`Criterion ${index + 1} text`}
+            aria-label={`Criterion text, criterion ${index + 1}`}
             aria-invalid={textError || undefined}
             aria-describedby={textError ? `criterion-text-error-${row.key}` : undefined}
             onChange={(event) => onChange({ text: event.target.value })}
@@ -139,9 +140,10 @@ function CriterionCard({
           <label className="signal-criterion-field">
             <span>Type</span>
             <select
+              id={`criterion-type-${row.key}`}
               value={row.type}
               disabled={readOnly}
-              aria-label={`Criterion ${index + 1} type`}
+              aria-label={`Type, criterion ${index + 1}`}
               aria-describedby="criterion-type-guidance"
               onChange={(event) => onChange({ type: event.target.value as CriterionType })}
             >
@@ -151,21 +153,23 @@ function CriterionCard({
           <label className="signal-criterion-field signal-criterion-field--grow">
             <span>Evidence expected</span>
             <textarea
+              id={`criterion-evidence-${row.key}`}
               rows={2}
               value={row.evidence}
               disabled={readOnly}
-              aria-label={`Criterion ${index + 1} evidence`}
+              aria-label={`Evidence expected, criterion ${index + 1}`}
               onChange={(event) => onChange({ evidence: event.target.value })}
             />
           </label>
           <label className="signal-criterion-field signal-criterion-field--weight">
             <span>Relative weight</span>
             <input
+              id={`criterion-weight-${row.key}`}
               type="text"
               inputMode="decimal"
               value={row.weight}
               disabled={readOnly}
-              aria-label={`Criterion ${index + 1} weight`}
+              aria-label={`Relative weight, criterion ${index + 1}`}
               aria-invalid={weightError || undefined}
               aria-describedby={weightError ? `criterion-weight-error-${row.key}` : undefined}
               onChange={(event) => {
@@ -196,19 +200,39 @@ export function SignalReviewCriteriaPage() {
 }
 
 function CriteriaEditor({ id }: { id: number }) {
-  const { data: rubric, isPending, isError, refetch } = useRubric(id);
+  const { data: rubric, isPending, isError, error, refetch } = useRubric(id);
   const [uploadOpen, setUploadOpen] = useState(false);
   const save = useSaveCriteria(id);
   const [rows, setRows] = useState<CriterionRow[]>();
   const [savedRows, setSavedRows] = useState<CriterionRow[]>();
   const [attempted, setAttempted] = useState<"save" | "confirm">();
-  const [announcement, setAnnouncement] = useState("");
+  const [announcement, setAnnouncement] = useState<{ id: number; text: string } | null>(null);
+  const [removedStack, setRemovedStack] = useState<Array<{ row: CriterionRow; index: number }>>([]);
+  const announcementSeq = useRef(0);
   const headingRef = useRef<HTMLHeadingElement>(null);
   const summaryRef = useRef<HTMLDivElement>(null);
   const addRef = useRef<HTMLButtonElement>(null);
+  const undoRef = useRef<HTMLButtonElement>(null);
+  const pendingFocusRef = useRef<{ type: "undo" } | { type: "criterion"; key: string } | null>(null);
   const resolvingBlocker = useRef(false);
   const focusErrorsAfterDialog = useRef(false);
   useRouteFocus("Review prepared criteria - VERIDICAL", headingRef);
+
+  function announce(text: string) {
+    announcementSeq.current += 1;
+    setAnnouncement({ id: announcementSeq.current, text });
+  }
+
+  useEffect(() => {
+    const target = pendingFocusRef.current;
+    if (!target) return;
+    pendingFocusRef.current = null;
+    if (target.type === "undo") {
+      undoRef.current?.focus();
+    } else if (target.type === "criterion") {
+      document.getElementById(`criterion-text-${target.key}`)?.focus();
+    }
+  }, [rows, removedStack]);
 
   useEffect(() => {
     if (!rubric || rows) return;
@@ -250,11 +274,26 @@ function CriteriaEditor({ id }: { id: number }) {
     }
   }, [blocker.state]);
 
-  if (isPending || (!isError && rubric && !rows)) {
+  if (Number.isFinite(id) && (isPending || (!isError && rubric && !rows))) {
     return <div className="signal-route signal-page-flow"><CriteriaHeader headingRef={headingRef} /><div className="signal-desk-loading" role="status" aria-busy="true"><span>Loading prepared criteria…</span><i /><i /></div></div>;
   }
-  if (isError || !rubric || !rows) {
-    return <div className="signal-route signal-page-flow"><CriteriaHeader headingRef={headingRef} /><Alert title="Could not load these criteria" tone="error" role="alert"><Button variant="secondary" onClick={() => refetch()}>Try again</Button></Alert></div>;
+  if (!Number.isFinite(id) || isError || !rubric || !rows) {
+    const isNotFound = !Number.isFinite(id) || (error instanceof ApiError && error.status === 404);
+    return (
+      <div className="signal-route signal-page-flow">
+        <CriteriaHeader headingRef={headingRef} />
+        {isNotFound ? (
+          <Alert title="Format not available" tone="warning" role="alert">
+            <p>This format version does not exist or is not available to your account.</p>
+            <Link className="signal-button signal-button--secondary" to="/rubric">Back to Rubric Studio</Link>
+          </Alert>
+        ) : (
+          <Alert title="Could not load these criteria" tone="error" role="alert">
+            <Button variant="secondary" onClick={() => refetch()}>Try again</Button>
+          </Alert>
+        )}
+      </div>
+    );
   }
 
   const currentRows = rows;
@@ -265,8 +304,8 @@ function CriteriaEditor({ id }: { id: number }) {
     ? [
       ...(currentRows.length === 0 ? [{ key: "empty", message: "Add at least one criterion.", target: addRef }] : []),
       ...currentRows.flatMap((row, index) => [
-        ...(row.text.trim() === "" ? [{ key: `text-${row.key}`, message: `Criterion ${index + 1} has no text.`, selector: `[aria-label="Criterion ${index + 1} text"]` }] : []),
-        ...(invalidWeight(row.weight) ? [{ key: `weight-${row.key}`, message: `Criterion ${index + 1}'s weight must be greater than zero.`, selector: `[aria-label="Criterion ${index + 1} weight"]` }] : []),
+        ...(row.text.trim() === "" ? [{ key: `text-${row.key}`, message: `Criterion ${index + 1} has no text.`, targetId: `criterion-text-${row.key}` }] : []),
+        ...(invalidWeight(row.weight) ? [{ key: `weight-${row.key}`, message: `Criterion ${index + 1}'s weight must be greater than zero.`, targetId: `criterion-weight-${row.key}` }] : []),
       ]),
     ]
     : [];
@@ -278,22 +317,43 @@ function CriteriaEditor({ id }: { id: number }) {
   function addCriterion() {
     const next: CriterionRow = { key: `new-${++localCriterionId}`, id: null, type: "structural", text: "", evidence: "", weight: 0, levels: null };
     setRows((current) => [...(current ?? []), next]);
-    setAnnouncement(`Criterion added. ${currentRows.length + 1} criteria total.`);
+    announce(`Criterion added. ${currentRows.length + 1} criteria total.`);
   }
 
   function removeCriterion(key: string) {
+    const index = currentRows.findIndex((row) => row.key === key);
+    const removed = index >= 0 ? currentRows[index] : undefined;
     setRows((current) => current?.filter((row) => row.key !== key));
-    setAnnouncement("Criterion removed.");
+    if (removed) {
+      setRemovedStack((prev) => [...prev, { row: removed, index }]);
+    }
+    announce("Criterion removed.");
+    pendingFocusRef.current = { type: "undo" };
+  }
+
+  function undoRemoveCriterion() {
+    const last = removedStack[removedStack.length - 1];
+    if (!last) return;
+    setRemovedStack((prev) => prev.slice(0, -1));
+    setRows((current) => {
+      const list = [...(current ?? [])];
+      const insertAt = Math.min(Math.max(0, last.index), list.length);
+      list.splice(insertAt, 0, last.row);
+      return list;
+    });
+    announce("Criterion restored.");
+    pendingFocusRef.current = { type: "criterion", key: last.row.key };
   }
 
   function distributeWeights() {
     if (!currentRows.length) return;
     const equal = Math.round((100 / currentRows.length) * 1000) / 1000;
     setRows((current) => current?.map((row) => ({ ...row, weight: equal })));
-    setAnnouncement("Relative weights set equally across all criteria.");
+    announce("Relative weights set equally across all criteria.");
   }
 
   function attemptSave(confirm: boolean) {
+    if (save.isPending) return;
     setAttempted(confirm ? "confirm" : "save");
     if (invalidCriteria(currentRows)) {
       queueMicrotask(() => summaryRef.current?.focus());
@@ -302,7 +362,13 @@ function CriteriaEditor({ id }: { id: number }) {
     const submitted = currentRows;
     save.mutate(
       { criteria: toEdits(submitted), confirm },
-      { onSuccess: () => { setSavedRows(submitted); setAnnouncement(confirm ? "Format confirmed and activated." : "Draft saved."); } },
+      {
+        onSuccess: () => {
+          setSavedRows(submitted);
+          setRemovedStack([]);
+          announce(confirm ? "Format confirmed and activated." : "Draft saved.");
+        },
+      },
     );
   }
 
@@ -366,7 +432,7 @@ function CriteriaEditor({ id }: { id: number }) {
         {problems.length > 0 && (
           <div ref={summaryRef} tabIndex={-1} role="alert" className="signal-error-summary signal-criteria-errors">
             <h2>Fix these items before {attempted === "confirm" ? "confirming" : "saving"}</h2>
-            <ul>{problems.map((problem) => <li key={problem.key}><button type="button" onClick={() => { if ("selector" in problem && problem.selector) document.querySelector<HTMLElement>(problem.selector)?.focus(); else addRef.current?.focus(); }}>{problem.message}</button></li>)}</ul>
+            <ul>{problems.map((problem) => <li key={problem.key}><button type="button" onClick={() => { if ("targetId" in problem && problem.targetId) document.getElementById(problem.targetId)?.focus(); else addRef.current?.focus(); }}>{problem.message}</button></li>)}</ul>
           </div>
         )}
       </div>
@@ -388,8 +454,13 @@ function CriteriaEditor({ id }: { id: number }) {
       ) : (
         <div className="signal-desk-empty"><h2>No criteria yet</h2><p>Add at least one criterion before saving.</p></div>
       )}
-      <p className="signal-live-region" aria-live="polite">{announcement}</p>
       <div className="signal-copy-flow signal-criteria-save-region">
+        <div className="signal-criteria-feedback" aria-live="polite" aria-atomic="true">
+          {announcement && <span key={announcement.id}>{announcement.text}</span>}
+          {removedStack.length > 0 && !readOnly && (
+            <Button ref={undoRef} variant="quiet" onClick={undoRemoveCriterion}>Undo remove</Button>
+          )}
+        </div>
         {!readOnly && (
           <div className="signal-save-dock">
             <div>
@@ -399,8 +470,23 @@ function CriteriaEditor({ id }: { id: number }) {
               <p>Saving or confirming requires text and a relative weight greater than zero for every criterion. Evidence expected is optional.</p>
             </div>
             <div>
-              <Button variant="secondary" busy={save.isPending} onClick={() => attemptSave(false)}>Save draft</Button>
-              <Button variant="brand" busy={save.isPending} data-tour="confirm-rubric-cta" onClick={() => attemptSave(true)}>Confirm and activate format</Button>
+              <Button
+                variant="secondary"
+                aria-busy={save.isPending || undefined}
+                aria-disabled={save.isPending || undefined}
+                onClick={() => attemptSave(false)}
+              >
+                Save draft
+              </Button>
+              <Button
+                variant="brand"
+                aria-busy={save.isPending || undefined}
+                aria-disabled={save.isPending || undefined}
+                data-tour="confirm-rubric-cta"
+                onClick={() => attemptSave(true)}
+              >
+                Confirm and activate format
+              </Button>
             </div>
           </div>
         )}

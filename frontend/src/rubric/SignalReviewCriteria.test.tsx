@@ -56,18 +56,19 @@ function VersionNavigationControl() {
 describe("SignalReviewCriteriaPage", () => {
   afterEach(() => vi.unstubAllGlobals());
 
-  it("presents the human review gate as editable, numbered criteria", async () => {
+  it("presents the human review gate as editable, numbered criteria with WCAG 2.5.3 label-in-name accessible names (BUG-338)", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify(RUBRIC), { status: 200 })));
     renderPage();
 
     expect(await screen.findByRole("heading", { name: "Review prepared criteria" })).toBeInTheDocument();
-    expect(await screen.findByLabelText("Criterion 1 text")).toHaveValue("Includes a complete abstract");
-    expect(screen.getByLabelText("Criterion 2 type")).toHaveValue("semantic");
-    expect(screen.getByLabelText("Criterion 2 evidence")).toHaveValue("Results and discussion");
+    expect(await screen.findByLabelText("Criterion text, criterion 1")).toHaveValue("Includes a complete abstract");
+    expect(screen.getByLabelText("Type, criterion 2")).toHaveValue("semantic");
+    expect(screen.getByLabelText("Evidence expected, criterion 2")).toHaveValue("Results and discussion");
+    expect(screen.getByLabelText("Relative weight, criterion 1")).toHaveValue("40");
     expect(screen.getByText("Levelled criterion · 2 levels")).toBeInTheDocument();
     expect(screen.getAllByText(/importance$/)).toHaveLength(2);
     expect(screen.getByRole("link", { name: "Rubric Studio" })).toHaveAttribute("href", `/rubric?family=${RUBRIC.rubric_family_id}`);
-    expect(screen.getByLabelText("Criterion 2 type")).toHaveAccessibleDescription(/Semantic for checks that require interpreting the content/);
+    expect(screen.getByLabelText("Type, criterion 2")).toHaveAccessibleDescription(/Semantic for checks that require interpreting the content/);
   });
 
   it("saves the complete edited set as a draft and preserves level data", async () => {
@@ -78,7 +79,7 @@ describe("SignalReviewCriteriaPage", () => {
     vi.stubGlobal("fetch", fetchMock);
     renderPage();
 
-    const text = await screen.findByLabelText("Criterion 1 text");
+    const text = await screen.findByLabelText("Criterion text, criterion 1");
     fireEvent.change(text, { target: { value: "Includes an abstract within the required length" } });
     fireEvent.click(screen.getByRole("button", { name: "Save draft" }));
 
@@ -107,7 +108,7 @@ describe("SignalReviewCriteriaPage", () => {
     vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify(RUBRIC), { status: 200 })));
     renderPage();
 
-    const text = await screen.findByLabelText("Criterion 1 text");
+    const text = await screen.findByLabelText("Criterion text, criterion 1");
     const original = text.getAttribute("value") ?? "Includes a complete abstract";
 
     const clean = new Event("beforeunload", { cancelable: true });
@@ -132,7 +133,7 @@ describe("SignalReviewCriteriaPage", () => {
     vi.stubGlobal("fetch", fetchMock);
     renderPage();
 
-    const text = await screen.findByLabelText("Criterion 1 text");
+    const text = await screen.findByLabelText("Criterion text, criterion 1");
     fireEvent.change(text, { target: { value: "" } });
     fireEvent.click(screen.getByRole("button", { name: "Confirm and activate format" }));
 
@@ -146,22 +147,22 @@ describe("SignalReviewCriteriaPage", () => {
     const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => new Response(JSON.stringify(RUBRIC), { status: 200 }));
     vi.stubGlobal("fetch", fetchMock);
     renderPage();
-    await screen.findByLabelText("Criterion 1 text");
+    await screen.findByLabelText("Criterion text, criterion 1");
     fireEvent.click(screen.getByRole("button", { name: "Add criterion" }));
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
-    fireEvent.change(screen.getByLabelText("Criterion 3 text"), { target: { value: "   " } });
+    fireEvent.change(screen.getByLabelText("Criterion text, criterion 3"), { target: { value: "   " } });
     fireEvent.click(screen.getByRole("button", { name: action }));
     const summary = await screen.findByRole("alert");
     await waitFor(() => expect(summary).toHaveFocus());
-    expect(screen.getByLabelText("Criterion 3 text")).toHaveAttribute("aria-invalid", "true");
-    expect(screen.getByLabelText("Criterion 3 weight")).toHaveAttribute("aria-invalid", "true");
+    expect(screen.getByLabelText("Criterion text, criterion 3")).toHaveAttribute("aria-invalid", "true");
+    expect(screen.getByLabelText("Relative weight, criterion 3")).toHaveAttribute("aria-invalid", "true");
     expect(fetchMock.mock.calls.filter(([, init]) => init?.method === "PUT")).toHaveLength(0);
     fireEvent.click(within(summary).getByRole("button", { name: "Criterion 3's weight must be greater than zero." }));
-    expect(screen.getByLabelText("Criterion 3 weight")).toHaveFocus();
-    fireEvent.change(screen.getByLabelText("Criterion 3 text"), { target: { value: "New supported requirement" } });
+    expect(screen.getByLabelText("Relative weight, criterion 3")).toHaveFocus();
+    fireEvent.change(screen.getByLabelText("Criterion text, criterion 3"), { target: { value: "New supported requirement" } });
     fireEvent.click(screen.getByRole("button", { name: action }));
     expect(fetchMock.mock.calls.filter(([, init]) => init?.method === "PUT")).toHaveLength(0);
-    fireEvent.change(screen.getByLabelText("Criterion 3 weight"), { target: { value: "10" } });
+    fireEvent.change(screen.getByLabelText("Relative weight, criterion 3"), { target: { value: "10" } });
     fireEvent.click(screen.getByRole("button", { name: action }));
     await waitFor(() => expect(fetchMock.mock.calls.filter(([, init]) => init?.method === "PUT")).toHaveLength(1));
     const body = JSON.parse(fetchMock.mock.calls.find(([, init]) => init?.method === "PUT")![1]!.body as string);
@@ -174,7 +175,7 @@ describe("SignalReviewCriteriaPage", () => {
     const fetchMock = vi.fn(async () => new Response(JSON.stringify(RUBRIC), { status: 200 }));
     vi.stubGlobal("fetch", fetchMock);
     renderPage();
-    await screen.findByLabelText("Criterion 1 text");
+    await screen.findByLabelText("Criterion text, criterion 1");
     fireEvent.click(screen.getByRole("button", { name: "Remove criterion 2" }));
     fireEvent.click(screen.getByRole("button", { name: "Remove criterion 1" }));
     fireEvent.click(screen.getByRole("button", { name: action }));
@@ -188,12 +189,12 @@ describe("SignalReviewCriteriaPage", () => {
     const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => new Response(JSON.stringify(RUBRIC), { status: 200 }));
     vi.stubGlobal("fetch", fetchMock);
     renderWithProviders(<><SignalReviewCriteriaPage /><VersionNavigationControl /></>, { route: "/rubric/5/review", path: "/rubric/:rubricId/review", authInstructorId: 1 });
-    fireEvent.change(await screen.findByLabelText("Criterion 1 text"), { target: { value: "" } });
+    fireEvent.change(await screen.findByLabelText("Criterion text, criterion 1"), { target: { value: "" } });
     fireEvent.click(screen.getByRole("button", { name: "Open next version" }));
     fireEvent.click(await screen.findByRole("button", { name: "Save draft and leave" }));
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
     await waitFor(() => expect(screen.getByRole("alert")).toHaveFocus());
-    expect(screen.getByLabelText("Criterion 1 text")).toHaveValue("");
+    expect(screen.getByLabelText("Criterion text, criterion 1")).toHaveValue("");
     expect(fetchMock.mock.calls.filter(([, init]) => init?.method === "PUT")).toHaveLength(0);
     fireEvent.click(screen.getByRole("button", { name: "Open next version" }));
     expect(await screen.findByRole("dialog")).toBeInTheDocument();
@@ -207,20 +208,20 @@ describe("SignalReviewCriteriaPage", () => {
     });
     vi.stubGlobal("fetch", fetchMock);
     renderWithProviders(<><SignalReviewCriteriaPage /><VersionNavigationControl /></>, { route: "/rubric/5/review", path: "/rubric/:rubricId/review", authInstructorId: 1 });
-    fireEvent.change(await screen.findByLabelText("Criterion 1 text"), { target: { value: "Retain this corrected criterion" } });
+    fireEvent.change(await screen.findByLabelText("Criterion text, criterion 1"), { target: { value: "Retain this corrected criterion" } });
     fireEvent.click(screen.getByRole("button", { name: "Open next version" }));
     fireEvent.click(await screen.findByRole("button", { name: "Save draft and leave" }));
     await waitFor(() => expect(fetchMock.mock.calls.filter(([, init]) => init?.method === "PUT")).toHaveLength(1));
     const body = JSON.parse(fetchMock.mock.calls.find(([, init]) => init?.method === "PUT")![1]!.body as string);
     expect(body.confirm).toBe(false);
     if (status === 200) {
-      await waitFor(() => expect(screen.getByLabelText("Criterion 1 text")).toHaveValue("New version criterion"));
+      await waitFor(() => expect(screen.getByLabelText("Criterion text, criterion 1")).toHaveValue("New version criterion"));
       expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     } else {
       const dialog = await screen.findByRole("dialog");
       const expected = status === 422 ? /One or more criterion values were rejected/ : /Request failed \(503\)/;
       expect(await within(dialog).findByText(expected)).toBeInTheDocument();
-      expect(screen.getByLabelText("Criterion 1 text")).toHaveValue("Retain this corrected criterion");
+      expect(screen.getByLabelText("Criterion text, criterion 1")).toHaveValue("Retain this corrected criterion");
     }
   });
 
@@ -234,7 +235,7 @@ describe("SignalReviewCriteriaPage", () => {
 
     expect(await screen.findByText("Read-only version")).toBeInTheDocument();
     expect(screen.getByText("Includes a complete abstract")).toBeInTheDocument();
-    expect(screen.queryByLabelText("Criterion 1 text")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Criterion text, criterion 1")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Save draft" })).not.toBeInTheDocument();
     expect(screen.getByText(/Reports remain pinned to this history version/)).toBeInTheDocument();
   });
@@ -268,11 +269,100 @@ describe("SignalReviewCriteriaPage", () => {
     });
     expect(await screen.findByText("Includes a complete abstract")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Open next version" }));
-    expect(await screen.findByLabelText("Criterion 1 text")).toHaveValue("Replacement criterion from the new source");
+    expect(await screen.findByLabelText("Criterion text, criterion 1")).toHaveValue("Replacement criterion from the new source");
     expect(screen.getByText("Levelled criterion · 1 levels")).toBeInTheDocument();
     expect(screen.queryByText("Includes a complete abstract")).not.toBeInTheDocument();
     const clean = new Event("beforeunload", { cancelable: true });
     window.dispatchEvent(clean);
     expect(clean.defaultPrevented).toBe(false);
+  });
+
+  it("BUG-316 & BUG-337: keeps focus on Save draft across saves, renders visible confirmation for all actions, and re-announces repeated saves", async () => {
+    let resolveSave!: () => void;
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      if (init?.method === "PUT") {
+        await new Promise<void>((resolve) => { resolveSave = resolve; });
+        return new Response(JSON.stringify(RUBRIC), { status: 200 });
+      }
+      return new Response(JSON.stringify(RUBRIC), { status: 200 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    renderPage();
+
+    await screen.findByLabelText("Criterion text, criterion 1");
+
+    // 1. Add criterion visible confirmation
+    fireEvent.click(screen.getByRole("button", { name: "Add criterion" }));
+    expect(screen.getByText("Criterion added. 3 criteria total.")).toBeInTheDocument();
+
+    // 2. Remove criterion visible confirmation
+    fireEvent.click(screen.getByRole("button", { name: "Remove criterion 3" }));
+    expect(screen.getByText("Criterion removed.")).toBeInTheDocument();
+
+    // 3. Set equal relative weights visible confirmation
+    fireEvent.click(screen.getByRole("button", { name: "Set equal relative weights" }));
+    expect(screen.getByText("Relative weights set equally across all criteria.")).toBeInTheDocument();
+
+    // 4. Save draft keeps keyboard focus while pending and after completion, and re-announces on second save
+    const saveDraftBtn = screen.getByRole("button", { name: "Save draft" });
+    saveDraftBtn.focus();
+    fireEvent.click(saveDraftBtn);
+    await waitFor(() => expect(saveDraftBtn).toHaveAttribute("aria-busy", "true"));
+    expect(saveDraftBtn).toHaveAttribute("aria-disabled", "true");
+    expect(saveDraftBtn).not.toBeDisabled();
+    expect(saveDraftBtn).toHaveFocus();
+
+    await waitFor(() => expect(resolveSave).toBeTypeOf("function"));
+    resolveSave();
+    const firstSavedNode = await screen.findByText("Draft saved.");
+    expect(firstSavedNode.closest(".signal-live-region")).toBeNull();
+    expect(saveDraftBtn).toHaveFocus();
+
+    // Second save re-mounts a fresh node in the live region so assistive technology re-announces
+    resolveSave = undefined as unknown as () => void;
+    fireEvent.click(saveDraftBtn);
+    await waitFor(() => expect(resolveSave).toBeTypeOf("function"));
+    resolveSave();
+    await waitFor(() => {
+      const secondSavedNode = screen.getByText("Draft saved.");
+      expect(secondSavedNode).not.toBe(firstSavedNode);
+    });
+    expect(saveDraftBtn).toHaveFocus();
+  });
+
+  it("BUG-317: removing a criterion offers an Undo remove action that restores all fields at its original position with predictable focus", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify(RUBRIC), { status: 200 })));
+    renderPage();
+
+    await screen.findByLabelText("Criterion text, criterion 1");
+    fireEvent.click(screen.getByRole("button", { name: "Remove criterion 1" }));
+
+    const undoBtn = await screen.findByRole("button", { name: "Undo remove" });
+    await waitFor(() => expect(undoBtn).toHaveFocus());
+    expect(screen.queryByDisplayValue("Includes a complete abstract")).not.toBeInTheDocument();
+
+    fireEvent.click(undoBtn);
+    const restoredText = await screen.findByLabelText("Criterion text, criterion 1");
+    expect(restoredText).toHaveValue("Includes a complete abstract");
+    expect(screen.getByLabelText("Evidence expected, criterion 1")).toHaveValue("Abstract section");
+    expect(screen.getByLabelText("Relative weight, criterion 1")).toHaveValue("40");
+    await waitFor(() => expect(restoredText).toHaveFocus());
+    expect(screen.queryByRole("button", { name: "Undo remove" })).not.toBeInTheDocument();
+  });
+
+  it("BUG-339: a 404 response from GET /rubrics/:id shows an honest unavailable state with a Rubric Studio link and no Try again button", async () => {
+    const fetchMock = vi.fn(async () => new Response(
+      JSON.stringify({ error: { code: "not_found", message: "Rubric not found" } }),
+      { status: 404, headers: { "Content-Type": "application/json" } },
+    ));
+    vi.stubGlobal("fetch", fetchMock);
+    renderPage();
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("Format not available");
+    expect(alert).toHaveTextContent("This format version does not exist or is not available to your account.");
+    expect(screen.getByRole("link", { name: "Back to Rubric Studio" })).toHaveAttribute("href", "/rubric");
+    expect(screen.queryByRole("button", { name: "Try again" })).not.toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 });
