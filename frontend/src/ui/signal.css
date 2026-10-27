@@ -8030,12 +8030,13 @@
   .signal-finding-source-comparison__card {
     flex: 1 1 var(--signal-flag-passage-basis);
     border: var(--signal-border-hairline) solid var(--color-signal-border);
+    border-radius: var(--signal-radius-panel);
     padding: var(--signal-space-4);
     background: var(--color-signal-surface);
     overflow-wrap: anywhere;
   }
-  .signal-finding-source-comparison h4,
-  .signal-finding-source-comparison h5 {
+  .signal-finding-source-comparison h3,
+  .signal-finding-source-comparison h4 {
     margin: 0;
     font-size: var(--signal-type-body-lg);
     line-height: var(--signal-line-section);
@@ -8056,7 +8057,8 @@
   .signal-finding-source-comparison .signal-evidence-quote {
     margin: 0;
     border: 0;
-    padding: 0;
+    padding: var(--signal-space-3);
+    background: transparent;
     white-space: pre-wrap;
   }
 }

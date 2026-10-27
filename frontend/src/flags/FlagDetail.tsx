@@ -242,7 +242,7 @@ export function FlagDetailPage() {
     <div className="signal-route signal-page-flow signal-flag-detail">
       <header className="signal-route-header signal-flag-header">
         <div>
-          <nav aria-label="Breadcrumb"><ReviewDeskReturnLink>Review Desk</ReviewDeskReturnLink><span aria-hidden="true">/</span>{flag && <><Link to={returnFocus?.returnPath ?? `/report/${flag.check_run_id}`}>{flag.manuscript_group_label}</Link><span aria-hidden="true">/</span></>}<span>Evidence</span></nav>
+          <nav aria-label="Breadcrumb" className="signal-breadcrumb"><ReviewDeskReturnLink>Review Desk</ReviewDeskReturnLink><span aria-hidden="true">/</span>{flag && <><Link to={returnFocus?.returnPath ?? `/report/${flag.check_run_id}`}>{flag.manuscript_group_label}</Link><span aria-hidden="true">/</span></>}<span>Evidence</span></nav>
           <h1 ref={headingRef} tabIndex={-1}>{meta?.title ?? "Evidence detail"}</h1>
           {flag?.criterion_text && <p className="signal-route-header__intro">Related criterion: {flag.criterion_text}</p>}
         </div>
@@ -254,10 +254,10 @@ export function FlagDetailPage() {
       ) : isPending ? (
         <div role="status" aria-live="polite" aria-busy="true" className="signal-desk-loading"><span>Loading evidence…</span><i /><i /></div>
       ) : !flag ? (
-        <Alert title="Could not load this evidence" tone="error" role="alert"><p>{error instanceof ApiError ? error.message : "Try again."}</p><Button variant="secondary" onClick={() => refetch()}>Try again</Button></Alert>
+        <Alert title="Could not load this evidence" tone="error" role="alert"><p>{error instanceof ApiError ? error.message : "Try again."}</p><Button variant="secondary" busy={fetchStatus === "fetching"} onClick={() => refetch()}>Try again</Button></Alert>
       ) : (
         <>
-          {isError && <Alert title="Could not update this evidence" tone="warning"><p>Showing the last loaded finding. Your entered reason is kept. Review the current assessment before confirming an action.</p><Button variant="secondary" onClick={() => { void refetch(); }}>Retry evidence</Button></Alert>}
+          {isError && <Alert title="Could not update this evidence" tone="warning"><p>Showing the last loaded finding. Your entered reason is kept. Review the current assessment before confirming an action.</p><Button variant="secondary" busy={fetchStatus === "fetching"} onClick={() => { void refetch(); }}>Retry evidence</Button></Alert>}
           <p aria-live="polite" className="signal-live-region">{announcement}</p>
           <section ref={workspace.frame} className="signal-flag-workbench" aria-label="Manuscript and finding review" data-layout={workspace.split ? "split" : "single"} data-reading={expanded ? "full" : undefined}>
             <span ref={workspace.threshold} className="signal-review-workspace-threshold" aria-hidden="true" />
