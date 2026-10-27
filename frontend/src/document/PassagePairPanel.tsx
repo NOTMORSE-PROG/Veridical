@@ -9,7 +9,7 @@ import type { PassagePairOut } from "../api/types";
 import type { TextRange } from "./sharedPassage";
 import { sharedPassageRanges } from "./sharedPassage";
 
-function HighlightedText({ text, ranges }: { text: string; ranges: TextRange[] }) {
+export function HighlightedText({ text, ranges }: { text: string; ranges: TextRange[] }) {
   if (ranges.length === 0) return <>{text}</>;
   const nodes: ReactNode[] = [];
   let cursor = 0;

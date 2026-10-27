@@ -11,6 +11,7 @@ import { claimFocusContinuation, type FocusContinuation } from "../routing/focus
 import type { FlagOut } from "../api/types";
 import { useMe } from "../auth/useAuth";
 import { PassagePairPanel } from "../document/PassagePairPanel";
+import { FindingSourceComparison } from "../document/FindingSourceComparison";
 import { checkKindMeta, findingVerificationPrompt, humanize, isPValueFinding } from "../domain/checkKind";
 import { evidenceDisplayState } from "../domain/evidenceDisplay";
 import { findingMethodLabel, isCitationMetadataFinding } from "../domain/findingMethod";
@@ -62,6 +63,7 @@ function humanizedVerdict(flag: FlagOut): string {
 // specifically because this logic was first written inline, here only.
 function EvidenceSection({
   flag,
+  current,
   sourcePath,
   sourceLinkId,
   expanded,
@@ -70,6 +72,7 @@ function EvidenceSection({
   activeRole,
 }: {
   flag: FlagOut;
+  current: boolean;
   sourcePath: string;
   sourceLinkId: string;
   expanded: boolean;
@@ -80,6 +83,8 @@ function EvidenceSection({
   const sourceLocation = useLocation();
   const { showsManuscriptQuote, showsManuscriptEvidence, isResubmission } = evidenceDisplayState(flag);
   const headingId = showsManuscriptEvidence ? "evidence-heading" : "system-record-heading";
+  const pairedSources = expanded && ((flag.check_kind === "internal_agreement" && Boolean(flag.agreement_pair))
+    || (flag.check_kind === "originality_reuse" && Boolean(flag.passage_pair)));
 
   return (
     <section className="signal-evidence-section signal-flag-evidence" aria-labelledby={headingId}>
@@ -90,11 +95,12 @@ function EvidenceSection({
         {expanded ? <Button variant="secondary" onClick={() => onExpand(false)}>Return to manuscript</Button>
           : (flag.agreement_pair || flag.passage_pair) && <Button variant="secondary" onClick={() => onExpand(true)}>{flag.agreement_pair ? "Compare statements" : "Compare passages"}</Button>}
       </div>
-      {showsManuscriptQuote && flag.check_kind !== "internal_agreement" && (
+      {showsManuscriptQuote && flag.check_kind !== "internal_agreement" && !flag.passage_pair && (
         <blockquote className="signal-evidence-quote"><span>“{systemFindingCopy(flag.evidence_excerpt, flag.ai_verdict_summary, "evidence")}”</span><cite>{instructorAnchor(flag.page_anchor)}</cite></blockquote>
       )}
       <PValueComparison flag={flag} />
-      <AgreementComparison flag={flag} onSource={onSource} activeRole={activeRole} />
+      {pairedSources && <FindingSourceComparison flag={flag} current={current} onSource={onSource} />}
+      {!pairedSources && <AgreementComparison flag={flag} onSource={onSource} activeRole={activeRole} />}
       <CitationComparison flag={flag} />
       <CitationSourceLinks flag={flag} />
       {/* BUG-154: the API has always returned a complete
@@ -105,7 +111,7 @@ function EvidenceSection({
           document viewer, which was itself broken until BUG-138.
           Same component, same props, same "flag" variant already
           shipped on SignalDocumentViewer.tsx -- no new design here. */}
-      {flag.passage_pair && (
+      {flag.passage_pair && !pairedSources && (
         <PassagePairPanel pair={flag.passage_pair} ownAnchor={instructorAnchor(flag.page_anchor)} wholeManuscript={!flag.is_passage_level} variant="flag" />
       )}
       {/* BUG-170: a reuse flag with no manuscript-sourced content at
@@ -151,7 +157,7 @@ export function FlagDetailPage() {
   const navigate = useNavigate();
   const id = Number(flagId);
   const validId = Number.isInteger(id) && id > 0;
-  const { data, isPending, isError, error, refetch } = useFlag(id);
+  const { data, isPending, isError, error, refetch, fetchStatus } = useFlag(id);
   const flag = data?.id === id && recoverableReadError(error) ? data : undefined;
   const cachedFlags = useCachedReportFlags(flag?.check_run_id);
   const leadContext = flag ? comparisonLeadCollection(flag.check_run_id, cachedFlags) : undefined;
@@ -278,7 +284,7 @@ export function FlagDetailPage() {
                 {optionalComparison && <p>{COMPARISON_LEAD_COPY.intro}</p>}
                 <div className="signal-flag-recorded-finding"><h2>{findingMethodLabel(flag)}</h2><p className="signal-flag-verdict">{humanizedVerdict(flag)}</p></div>
               </section>
-              <EvidenceSection flag={flag} sourcePath={sourcePath} sourceLinkId={sourceLinkId} expanded={expanded} onExpand={setExpanded} onSource={showSource} activeRole={sourceCommand?.flag === flag.id ? sourceCommand.role : undefined} />
+              <EvidenceSection flag={flag} current={!isError && fetchStatus === "idle"} sourcePath={sourcePath} sourceLinkId={sourceLinkId} expanded={expanded} onExpand={setExpanded} onSource={showSource} activeRole={sourceCommand?.flag === flag.id ? sourceCommand.role : undefined} />
               <section className="signal-flag-summary" aria-label="Reasoning and verification"><FindingReasoning flag={flag} /></section>
               <CitationHistoryWarning flag={flag} />
               {flag.first_upload_context && <Alert title="Limited first-upload comparison context" tone="info">This signal was created while there were few manuscripts to compare against. The severity was not changed by that limitation.</Alert>}

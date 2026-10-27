@@ -67,6 +67,7 @@ import {
 } from "./reviewFindings";
 import { ReuseExplorePanel } from "./ReuseExplorePanel";
 import { RecordedEvidenceReader } from "./RecordedEvidenceReader";
+import { FindingSourceComparison } from "./FindingSourceComparison";
 import type { EvidenceSourceRequest, OpenEvidenceSource } from "../report/evidenceTypes";
 
 type ReviewFilter = "open" | "resolved" | "all";
@@ -267,12 +268,13 @@ function SelectedFinding({ finding, total, locationFlagId, region, sourceAvailab
     {detail && query.isError && <Alert title="These details could not be refreshed" tone="warning"><p>Showing the last loaded record. Check its source before drawing a conclusion.</p><Button variant="quiet" onClick={() => { void query.refetch(); }}>Try again</Button></Alert>}
     {query.isPending && !detail ? <div role="status" aria-live="polite" aria-busy={query.fetchStatus === "fetching"} className="signal-desk-loading"><span>{query.fetchStatus === "paused" ? "Waiting to load" : "Loading"} {optional ? "comparison lead record" : `Finding ${finding.number}`}.</span><i /><i /></div>
       : !detail ? <Alert title={optional ? "Comparison lead details could not be loaded" : "Finding details could not be loaded"} tone="error" role="alert"><p>The manuscript and review queue are still available. Try loading this record again.</p><Button variant="secondary" onClick={() => { if (document.hasFocus()) headingRef.current?.focus({ preventScroll: true }); void query.refetch(); }}>Try again</Button></Alert>
-        : <SelectedFindingEvidence finding={finding} flag={detail} locationFlagId={locationFlagId} region={region} sourceAvailability={sourceAvailability} sourceAnchor={sourceAnchor} onLocation={onLocation} onExplore={onExplore} fullWidth={fullWidth} canExpand={pairReady !== null} onExpand={() => onReadingChange(true)} onStatementSource={onStatementSource} activeStatement={activeStatement} />}
+        : <SelectedFindingEvidence finding={finding} flag={detail} current={!query.isError && query.fetchStatus === "idle"} locationFlagId={locationFlagId} region={region} sourceAvailability={sourceAvailability} sourceAnchor={sourceAnchor} onLocation={onLocation} onExplore={onExplore} fullWidth={fullWidth} canExpand={pairReady !== null} onExpand={() => onReadingChange(true)} onStatementSource={onStatementSource} activeStatement={activeStatement} />}
   </article>;
 }
 
-function SelectedFindingEvidence({ finding, flag, locationFlagId, region, sourceAvailability, sourceAnchor, onLocation, onExplore, fullWidth, canExpand, onExpand, onStatementSource, activeStatement }: {
+function SelectedFindingEvidence({ finding, flag, current, locationFlagId, region, sourceAvailability, sourceAnchor, onLocation, onExplore, fullWidth, canExpand, onExpand, onStatementSource, activeStatement }: {
   finding: ReviewFinding; flag: FlagOut; locationFlagId: number; region: FlagRegionOut | null;
+  current: boolean;
   sourceAvailability?: SourceAvailability; sourceAnchor: string | null;
   onLocation: (flagId: number) => void; onExplore: () => void;
   fullWidth: boolean; canExpand: boolean; onExpand: () => void; onStatementSource: (anchor: string | null, role: AgreementStatementRole) => void; activeStatement?: AgreementStatementRole;
@@ -307,10 +309,11 @@ function SelectedFindingEvidence({ finding, flag, locationFlagId, region, source
       {!wholeComparisonWithoutPair && <section aria-labelledby="evidence-heading" className="signal-document-detail-section">
         <h3 id="evidence-heading" tabIndex={-1}>Evidence to compare or check</h3>
         {canExpand && !fullWidth && <Button id={`comparison-reading-expand-${locationFlagId}`} variant="secondary" onClick={onExpand}>{flag.agreement_pair ? "Compare statements" : "Compare passages"}</Button>}
-        {flag.passage_pair && <PassagePairPanel pair={flag.passage_pair} ownAnchor={instructorAnchor(flag.page_anchor)} wholeManuscript={!flag.is_passage_level} variant="flag" placement={fullWidth ? "full-page" : "inspector"} />}
+        {fullWidth && canExpand && <FindingSourceComparison flag={flag} current={current} onSource={onStatementSource} />}
+        {flag.passage_pair && !(fullWidth && canExpand) && <PassagePairPanel pair={flag.passage_pair} ownAnchor={instructorAnchor(flag.page_anchor)} wholeManuscript={!flag.is_passage_level} variant="flag" placement="inspector" />}
         {!flag.passage_pair && showsManuscriptQuote && flag.check_kind !== "internal_agreement" && <blockquote><span>“{systemFindingCopy(flag.evidence_excerpt, flag.ai_verdict_summary, "evidence")}”</span><cite>{instructorAnchor(flag.page_anchor)}</cite></blockquote>}
         <PValueComparison flag={flag} />
-        <AgreementComparison flag={flag} findingNumber={finding.number} onSource={onStatementSource} activeRole={activeStatement} />
+        {!(fullWidth && canExpand) && <AgreementComparison flag={flag} findingNumber={finding.number} onSource={onStatementSource} activeRole={activeStatement} />}
         <CitationComparison flag={flag} />
         <CitationSourceLinks flag={flag} />
         {flag.ai_verdict_summary === "orphan_in_text_citation" ? <p className="signal-field-hint">The saved check did not link this citation to a reference-list entry. A matching entry is not available for side-by-side comparison.</p> : !citationMetadata && !comparative && !pValueFinding && flag.check_kind !== "internal_agreement" && <p className="signal-field-hint">This check evaluates one manuscript location. A second passage does not apply.</p>}

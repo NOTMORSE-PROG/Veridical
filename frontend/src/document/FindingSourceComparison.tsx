@@ -1,0 +1,87 @@
+import { useQueryClient } from "@tanstack/react-query";
+import { useLayoutEffect, useRef, useState } from "react";
+import { Link } from "react-router";
+import type { FlagOut } from "../api/types";
+import { useAuthOwner } from "../auth/queryOwner";
+import { instructorAnchor } from "../domain/sourceAnchor";
+import type { AgreementStatementRole } from "../flags/AgreementComparison";
+import { useEvidenceManifest } from "../report/useEvidenceSource";
+import { findingSourceReference, useFindingSourcePages, type FindingSourceSide } from "../report/useFindingSourcePages";
+import { Button } from "../ui/Button";
+import { HighlightedText } from "./PassagePairPanel";
+import { sharedPassageRanges } from "./sharedPassage";
+
+export function FindingSourceComparison({ flag, current, onSource }: {
+  flag: FlagOut;
+  current: boolean;
+  onSource: (anchor: string | null, role: AgreementStatementRole) => void;
+}) {
+  const client = useQueryClient();
+  const owner = useAuthOwner();
+  const scope = `${owner.lifetime}:${owner.actorId}:${flag.check_run_id}:${flag.id}`;
+  const liveScope = useRef(scope);
+  liveScope.current = scope;
+  const mounted = useRef(false);
+  useLayoutEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
+  const [reloadState, setReloadState] = useState<{ scope: string; attempt: number; pending: boolean }>();
+  const reloading = reloadState?.scope === scope && reloadState.pending;
+  const attempt = reloadState?.scope === scope ? reloadState.attempt : 0;
+  const agreement = flag.check_kind === "internal_agreement" ? flag.agreement_pair : undefined;
+  const reuse = flag.check_kind === "originality_reuse" ? flag.passage_pair : undefined;
+  const sides: FindingSourceSide[] = agreement ? [
+    { role: "agreement_intent", index: 0, quote: agreement.intent_text, anchor: agreement.intent_anchor },
+    { role: "agreement_outcome", index: 1, quote: agreement.outcome_text, anchor: agreement.outcome_anchor },
+  ] : reuse ? [{ role: "reuse_own", index: 0, quote: reuse.own_excerpt, anchor: flag.page_anchor }] : [];
+  const manifestQuery = useEvidenceManifest(flag.check_run_id, flag.assessment_revision, current && !reloading && sides.length > 0);
+  const manifest = current && !reloading && manifestQuery.isSuccess && manifestQuery.fetchStatus === "idle" ? manifestQuery.data : undefined;
+  const pages = useFindingSourcePages(flag.check_run_id, flag.id, flag.assessment_revision, manifest, sides, current && !reloading, attempt);
+  const shared = reuse ? sharedPassageRanges(reuse.own_excerpt, reuse.matched_excerpt) : undefined;
+  const available = current && manifest && pages.isSuccess && pages.fetchStatus === "idle";
+  const retired = !current || reloading || !Number.isSafeInteger(flag.assessment_revision) || manifestQuery.isError || pages.isError;
+  function reload() {
+    if (reloading) return;
+    setReloadState({ scope, attempt, pending: true });
+    const finish = () => {
+      if (mounted.current && owner.isCurrent() && liveScope.current === scope) setReloadState({ scope, attempt: attempt + 1, pending: false });
+    };
+    void Promise.all([
+      client.invalidateQueries({ queryKey: ["flag", flag.id], exact: true }),
+      client.invalidateQueries({ queryKey: ["report", flag.check_run_id] }),
+    ]).then(finish, finish);
+  }
+  if (!agreement && !reuse) return null;
+  return <section className="signal-finding-source-comparison" aria-label={agreement ? "Statements selected for comparison" : "Stored passages for comparison"}>
+    <h4>{agreement ? "Statements selected for comparison" : "Stored passages for comparison"}</h4>
+    {agreement ? <p>These statements were selected for comparison. Their roles as this study's objective and result have not been verified.</p>
+      : <><p>Similar wording does not establish copying, authorship or which document came first. The comparison excerpt is not a complete source document.</p>
+        <p>{shared?.left.length ? "Text shading identifies shared wording between the stored excerpts. Page boxes locate the saved quotation; they do not establish copying." : "No stable exact phrase was found to shade. Compare both passages manually. Page boxes locate the saved quotation."}</p></>}
+    {agreement && flag.affects_readiness === false && <p>This review lead does not change readiness.</p>}
+    {retired && <div role="status"><p>{reloading ? "Reloading the finding and its recorded source references." : "This comparison's current source references are unavailable. Reload the finding before comparing source pages. The saved text below is retained for manual review."}</p><Button variant="secondary" disabled={reloading} onClick={reload}>Reload recorded evidence</Button></div>}
+    <div className="signal-finding-source-comparison__cards">{sides.map((side, index) => {
+      const result = available ? pages.data.find(item => item.role === side.role) : undefined;
+      const role: AgreementStatementRole = agreement ? index === 0 ? "objective" : "result" : "statement";
+      const label = agreement ? index === 0 ? "Statement A. Selected as an objective" : "Statement B. Selected as a result" : "Your manuscript";
+      const ref = findingSourceReference(manifest, flag.id, side);
+      return <article key={`${flag.check_run_id}:${flag.id}:${side.role}`} className="signal-finding-source-comparison__card">
+        <h5>{label}</h5>
+        <p>Recorded location: {side.anchor?.trim() ? instructorAnchor(side.anchor) : "No location recorded"}</p>
+        <blockquote className="signal-evidence-quote">{reuse?.own_context_before && <span>{reuse.own_context_before} </span>}<HighlightedText text={side.quote} ranges={shared?.left ?? []} />{reuse?.own_context_after && <span> {reuse.own_context_after}</span>}</blockquote>
+        <figure>
+          {result?.page?.image_data_url && <img src={result.page.image_data_url} alt={`Recorded source page for ${agreement ? index === 0 ? "statement A" : "statement B" : "your manuscript excerpt"}. Placement qualification follows.`} />}
+          <figcaption>{result?.page ? result.page.caption : retired ? "Source images are cleared until the current finding is reloaded."
+            : manifestQuery.isPending || manifestQuery.isFetching ? "Checking recorded source references."
+              : !ref ? "A current source reference is not available for this saved statement."
+                : pages.isFetching ? "Loading the recorded source page." : "The recorded source page could not be loaded."}</figcaption>
+        </figure>
+        {available && result?.failed && <Button variant="quiet" onClick={() => { void pages.refetch(); }}>Retry source page</Button>}
+        {side.anchor?.trim() && <Button id={`agreement-${flag.id}-${role}-source`} variant="quiet" onClick={() => onSource(side.anchor, role)}>{agreement ? `Show statement ${index === 0 ? "A" : "B"} in manuscript` : "Show excerpt in manuscript"}</Button>}
+      </article>;
+    })}
+      {reuse && <article className="signal-finding-source-comparison__card"><h5>Stored comparison excerpt. Library record #{reuse.matched_ref}</h5>
+        <p>Bounded excerpt, not a complete source document.</p>
+        <blockquote className="signal-evidence-quote">{reuse.matched_context_before && <span>{reuse.matched_context_before} </span>}<HighlightedText text={reuse.matched_excerpt} ranges={shared?.right ?? []} />{reuse.matched_context_after && <span> {reuse.matched_context_after}</span>}</blockquote>
+        <Link to={`/library/${reuse.matched_ref}`}>Open in Library</Link>
+      </article>}
+    </div>
+  </section>;
+}

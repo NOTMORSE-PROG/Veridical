@@ -8014,4 +8014,49 @@
     background: var(--signal-evidence-selected-surface);
     outline: var(--signal-border-hairline) solid var(--signal-evidence-location-border);
   }
+  .signal-finding-source-comparison,
+  .signal-finding-source-comparison__card {
+    display: grid;
+    min-inline-size: 0;
+    gap: var(--signal-space-4);
+  }
+  .signal-finding-source-comparison__cards {
+    display: flex;
+    flex-wrap: wrap;
+    min-inline-size: 0;
+    gap: var(--signal-space-5);
+    align-items: flex-start;
+  }
+  .signal-finding-source-comparison__card {
+    flex: 1 1 var(--signal-flag-passage-basis);
+    border: var(--signal-border-hairline) solid var(--color-signal-border);
+    padding: var(--signal-space-4);
+    background: var(--color-signal-surface);
+    overflow-wrap: anywhere;
+  }
+  .signal-finding-source-comparison h4,
+  .signal-finding-source-comparison h5 {
+    margin: 0;
+    font-size: var(--signal-type-body-lg);
+    line-height: var(--signal-line-section);
+  }
+  .signal-finding-source-comparison figure {
+    display: grid;
+    gap: var(--signal-space-2);
+    margin: 0;
+  }
+  .signal-finding-source-comparison img {
+    display: block;
+    inline-size: 100%;
+    block-size: auto;
+  }
+  .signal-finding-source-comparison figcaption {
+    color: var(--color-signal-ink-secondary);
+  }
+  .signal-finding-source-comparison .signal-evidence-quote {
+    margin: 0;
+    border: 0;
+    padding: 0;
+    white-space: pre-wrap;
+  }
 }
