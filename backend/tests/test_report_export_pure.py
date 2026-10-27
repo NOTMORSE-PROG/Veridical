@@ -201,3 +201,103 @@ def test_export_distinguishes_source_failure_from_absent_content():
     assert "could not be read reliably" in _archive_disclosure(None, "library", "source_unresolved")
     assert "no comparable content" in _archive_disclosure(None, "library", "no_text")
     assert "no Library records" in _archive_disclosure(0, "library", "no_comparison_archive")
+
+
+def test_bug_312_export_pending_review_renders_stored_escalation_reasons():
+    import fitz
+
+    separate_check_reason = (
+        "Both AI passes selected the same outcome, but the separate evidence check "
+        "did not confirm that the quoted passage supports the criterion."
+    )
+    reused_passage_reason = (
+        "Every quoted piece of evidence for this criterion was already used for a "
+        "different criterion in this batch."
+    )
+    split_vote_reason = (
+        "The grading passes disagreed on this criterion (Pass vs. Fail), and the "
+        "tie-break call could not settle it."
+    )
+    results = [
+        CriterionResultOut(
+            check_result_id=101,
+            criterion_id=1,
+            text="Methodology justifies the sampling design",
+            type="semantic",
+            weight=10.0,
+            weight_importance="high",
+            kind="semantic",
+            outcome="escalated",
+            score=None,
+            basis="llm",
+            anchor=None,
+            reasoning=None,
+            reason=separate_check_reason,
+            evidence=[],
+            resolution=None,
+        ),
+        CriterionResultOut(
+            check_result_id=102,
+            criterion_id=2,
+            text="Results discuss statistical limitations",
+            type="semantic",
+            weight=10.0,
+            weight_importance="med",
+            kind="semantic",
+            outcome="escalated",
+            score=None,
+            basis="llm",
+            anchor=None,
+            reasoning=None,
+            reason=reused_passage_reason,
+            evidence=[],
+            resolution=None,
+        ),
+        CriterionResultOut(
+            check_result_id=103,
+            criterion_id=3,
+            text="Conclusion aligns with stated objectives",
+            type="semantic",
+            weight=10.0,
+            weight_importance="low",
+            kind="semantic",
+            outcome="escalated",
+            score=None,
+            basis="llm",
+            anchor=None,
+            reasoning=None,
+            reason=split_vote_reason,
+            evidence=[],
+            resolution=None,
+        ),
+    ]
+    report = ReportOut(
+        check_run_id=1,
+        manuscript_id=1,
+        manuscript_group_label="Test Group",
+        manuscript_original_filename="thesis.pdf",
+        rubric_title="TIP Format v2",
+        status="needs_review",
+        composite_score=None,
+        thresholds={"ready_min_score": 85.0, "not_ready_max_score": 60.0},
+        reason="3 criteria need manual review before a readiness band can be computed.",
+        flag_deduction=0.0,
+        unresolved_high_flag_count=0,
+        llm_mode="real",
+        results=results,
+        decision=None,
+        decided_at=None,
+        decision_note=None,
+        pending_review_count=3,
+        rubric_is_current=True,
+        previous_status=None,
+        previous_composite_score=None,
+    )
+    pdf_bytes = build_report_pdf(ReportExportData(report=report, flags=[], archive_size_n=0))
+    with fitz.open(stream=pdf_bytes, filetype="pdf") as document:
+        text = " ".join(page.get_text().replace("\n", " ") for page in document)
+    assert "AI reached no verdict for this criterion" not in text
+    assert "No grade has been accepted for this criterion." in text
+    assert separate_check_reason in text
+    assert reused_passage_reason in text
+    assert split_vote_reason in text

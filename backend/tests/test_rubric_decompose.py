@@ -192,7 +192,7 @@ async def test_decompose_handles_prose_style_input_with_no_numbering():
 
 
 async def test_raw_text_with_literal_braces_does_not_break_prompt_substitution():
-    """decompose_rubric uses str.replace, not str.format — the prompt file
+    """decompose_rubric uses str.replace, not str.format; the prompt file
     itself is full of literal `{`/`}` in its JSON example, and rubric text
     can legitimately contain braces too (e.g. citation markers)."""
     spy = SpyLLM({"criteria": [{"text": "x", "type": "structural", "weight": 1}]})
@@ -200,3 +200,44 @@ async def test_raw_text_with_literal_braces_does_not_break_prompt_substitution()
     await decompose_rubric(raw_text, spy)
     assert raw_text in spy.prompts[0]
     assert "{rubric_text}" not in spy.prompts[0]
+
+
+async def test_bug_333_decompose_rubric_normalizes_em_and_en_dashes_in_drafted_fields():
+    """BUG-333: neither the fake fixture nor model-returned criterion fields
+    may carry typographic em/en dashes to the instructor review screen."""
+    fixture_criteria = await decompose_rubric("x", FakeLLMClient())
+    for item in fixture_criteria:
+        assert "\u2014" not in item.text and "\u2013" not in item.text
+        if item.evidence_needed:
+            assert "\u2014" not in item.evidence_needed and "\u2013" not in item.evidence_needed
+
+    scripted = {
+        "criteria": [
+            {
+                "text": "Chapter 1 \u2014 states the problem clearly",
+                "type": "semantic",
+                "evidence_needed": "Chapter 1, sections 1.1\u20131.2 \u2014 clarity and depth",
+                "weight": 10,
+                "levels": [
+                    {
+                        "level": 1,
+                        "name": "Beginner",
+                        "descriptor": "Weak statement \u2014 lacks scope",
+                        "points": 1,
+                    },
+                    {
+                        "level": 2,
+                        "name": "Exemplary",
+                        "descriptor": "Clear statement \u2013 well scoped",
+                        "points": 2,
+                    },
+                ],
+            }
+        ]
+    }
+    parsed = await decompose_rubric("x", SpyLLM(scripted))
+    assert parsed[0].text == "Chapter 1: states the problem clearly"
+    assert parsed[0].evidence_needed == "Chapter 1, sections 1.1-1.2: clarity and depth"
+    assert parsed[0].levels is not None
+    assert parsed[0].levels[0].descriptor == "Weak statement: lacks scope"
+    assert parsed[0].levels[1].descriptor == "Clear statement: well scoped"

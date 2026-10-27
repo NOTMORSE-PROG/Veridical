@@ -146,6 +146,8 @@ def test_run_gate_fails_on_low_coverage():
     )
     assert not result.ok
     assert any("source text" in reason for reason in result.reasons)
+    # BUG-228: instructor-facing parse-coverage reason uses qualitative wording, never a percentage.
+    assert all("%" not in reason for reason in result.reasons)
 
 
 async def test_retries_after_malformed_output_then_succeeds():

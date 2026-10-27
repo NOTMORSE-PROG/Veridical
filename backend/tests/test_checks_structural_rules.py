@@ -99,6 +99,8 @@ def test_required_section_present_is_the_last_registered_rule():
         ("between 10 and 20 sources", "range", 10.0, 20.0, "sources"),
         ("exactly 5 tables", "exact", 5.0, None, "tables"),
         ("1 inch margins", "exact", 1.0, None, "inch"),
+        ("1-inch margins", "exact", 1.0, None, "inch"),
+        ("at least 1-inch margins", "min", 1.0, None, "inch"),
     ],
 )
 def test_extract_bound_recognizes_common_phrasings(text, kind, low, high, unit):
@@ -436,6 +438,17 @@ def test_margins_min_bound():
     geo_bad = [PageGeometry(page=1, width=612, height=792, margins=(40.0, 80.0, 80.0, 80.0))]
     assert spec.run(criterion, _ctx(geometry=geo_ok)).outcome == ResultOutcome.passed
     assert spec.run(criterion, _ctx(geometry=geo_bad)).outcome == ResultOutcome.failed
+
+
+def test_bug_409_margins_rule_ignores_font_point_sizes_and_extracts_hyphenated_inch_bounds():
+    spec = get_rule(MARGINS_RULE_ID)
+    font_only = FakeCriterion(text="Use 12-point Times New Roman with consistent margins")
+    assert not spec.matches(font_only)
+
+    combined = FakeCriterion(text="Use 12-point Times New Roman with 1-inch margins on every sheet")
+    assert spec.matches(combined)
+    geo_ok = [PageGeometry(page=1, width=612, height=792, margins=(72.0, 72.0, 72.0, 72.0))]
+    assert spec.run(combined, _ctx(geometry=geo_ok)).outcome == ResultOutcome.passed
 
 
 # --- tables.py: table_formatting_presence ---------------------------------------

@@ -46,17 +46,17 @@ For each individually checkable requirement you find, output one criterion:
   Proficient 3 / Exemplary 4" with different descriptive text under each
   column). When present, "levels" is a list, one entry per rung, in
   ascending order:
-  - "level": the rung's ordinal position (1, 2, 3, ... — the LOWEST rung
+  - "level": the rung's ordinal position (1, 2, 3, ...; the LOWEST rung
     is 1, regardless of what number the source prints next to it).
   - "name": the rung's own name as the source prints it (e.g.
-    "Beginner", "Acceptable", "Developing") — never invent or translate
+    "Beginner", "Acceptable", "Developing"); never invent or translate
     a name the source doesn't use. Give it as whole words: when the
     parser has split a word across lines ("ACCEPTABL" then "E 2"), join
     it ("Acceptable"). The point value belongs in "points", never in the
     name.
   - "descriptor": the full descriptive text for that rung, copied/
     paraphrased from the source (this is where the detailed level text
-    goes — NOT into "evidence_needed").
+    goes, NOT into "evidence_needed").
   - "points": the numeric point value the source assigns that rung (use
     the source's own numbers; if the source only shows ordinal position
     with no separate point value, use the ordinal itself).
@@ -64,7 +64,7 @@ For each individually checkable requirement you find, output one criterion:
   header sits above several rows, each row has all of that header's rungs
   unless the source leaves its cell empty.
   Never force a "levels" scale onto a requirement that is genuinely
-  pass/fail in the source — this field only exists for a requirement the
+  pass/fail in the source; this field only exists for a requirement the
   source ITSELF grades on a named scale. A single document can have some
   criteria with "levels" and some without.
 - "weight": a positive number expressing this criterion's relative
@@ -80,6 +80,9 @@ Rules:
   criteria. One property stated with several values ("margins: 1.5 inch
   left; 1 inch top, right and bottom") stays one criterion. A checklist of
   separate items normally yields about one criterion per item.
+- Use plain punctuation (commas, colons, semicolons, or hyphens for numeric
+  ranges) in "text", "evidence_needed", and "descriptor". Do not use em
+  dashes or en dashes.
 - If a single bullet or sentence mixes an objective/countable rule with a
   quality judgment (e.g. "contains at least 5 references, each critically
   discussed"), split it into two separate criteria, one structural, one

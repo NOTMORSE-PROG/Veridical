@@ -184,6 +184,37 @@ async def test_fake_llm_mode_returns_deterministic_fixture_verdicts():
     assert results[0].detail["evidence"][0]["anchor"] == "page 1"
 
 
+async def test_bug_205_fake_llm_mode_sizes_verdicts_to_batches_over_three_criteria():
+    from app.llm.fake import FakeLLMClient
+
+    tree = SectionTree(source="heuristics", nodes=[])
+    blocks = [
+        TextBlock(
+            page=1,
+            text=f"Distinct source evidence line number {idx} with enough words to verify.",
+            max_font_size=11,
+            bold_ratio=0.0,
+        )
+        for idx in range(1, 6)
+    ]
+    extraction = _extraction(blocks=blocks, tree=tree)
+    criteria = [
+        FakeCriterion(id=idx, text=f"Criterion {idx} requires whole-document coherence")
+        for idx in range(1, 6)
+    ]
+    session = FakeSession()
+    results = await run_semantic_checks(session, 1, criteria, extraction, FakeLLMClient())
+    assert len(results) == 5
+    assert [r.outcome for r in results] == [
+        ResultOutcome.passed,
+        ResultOutcome.passed,
+        ResultOutcome.failed,
+        ResultOutcome.passed,
+        ResultOutcome.passed,
+    ]
+    assert [r.score for r in results] == [100.0, 50.0, 0.0, 100.0, 50.0]
+
+
 async def test_missing_section_criterion_never_calls_the_llm():
     tree = SectionTree(source="heuristics", nodes=[])
     blocks = [TextBlock(page=1, text="Prose.", max_font_size=11, bold_ratio=0.0)]

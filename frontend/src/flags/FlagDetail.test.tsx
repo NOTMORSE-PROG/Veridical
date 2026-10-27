@@ -715,6 +715,27 @@ describe("FlagDetail — BUG-078 confirm-source", () => {
     expect(await screen.findByText(/You overrode this possible inconsistency/)).toBeInTheDocument();
     expect(screen.queryByText(/You confirmed the source after checking it/)).not.toBeInTheDocument();
   });
+
+  it("BUG-129: does not announce a resolution transition or steal focus from the route heading when opening an already-resolved flag", async () => {
+    renderFlag(
+      makeFlag({
+        overridden: true,
+        confirmed_citation_source: false,
+        override_reason: "Already overridden in a prior session.",
+      }),
+    );
+    expect(await screen.findByText(/You overrode this possible inconsistency/)).toBeInTheDocument();
+    const routeHeading = screen.getByRole("heading", { level: 1 });
+    const resolvedHeading = screen.getByRole("heading", { name: "Finding overridden" });
+    expect(routeHeading).toHaveFocus();
+    expect(resolvedHeading).not.toHaveFocus();
+    expect(
+      screen.queryByText("Finding overridden. The readiness band was recalculated."),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByText("Source confirmed. The readiness band was recalculated."),
+    ).not.toBeInTheDocument();
+  });
 });
 
 it.each(["Override", "Confirm this source"].flatMap(action => [503, 403].map(status => ({ action, status }))))(

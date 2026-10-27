@@ -141,6 +141,7 @@ def test_coverage_counts_the_level_descriptors_a_grid_keeps():
         ["GRADE A", "GRADE B", "GRADE C"],
         ["Level I", "Level II", "Level IV"],
         ["Kulang pa", "Sapat", "Mahusay"],
+        ["KULANG PA", "SAPAT NA", "MAHUSAY"],
     ],
 )
 def test_legitimate_wrapped_names_do_not_trigger_unsupported_word_repair(names):

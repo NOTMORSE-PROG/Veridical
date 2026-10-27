@@ -3,8 +3,8 @@
 One Gemini call per rubric parse (D-011: the cheapest LLM use in the
 system, cached by response hash so a re-run costs nothing). This module
 owns the prompt and deterministic schema-level validation only; the
-retry/coverage/review-fallback loop around a failed parse is V-011's job
-— it catches `RubricParseError` from here.
+retry/coverage/review-fallback loop around a failed parse is V-011's job;
+it catches `RubricParseError` from here.
 """
 
 import re
@@ -22,7 +22,7 @@ PROMPT_TYPE = "rubric_decomposition"
 # (BEGINNER 1/ACCEPTABLE 2/PROFICIENT 3/EXEMPLARY 4, or any institution's
 # own scale) is captured as structured data instead of being squashed into
 # "evidence_needed" prose (v1's prompt already told the model never to
-# collapse a scale — v1/v2 just had nowhere structured to put it). BUG-092:
+# collapse a scale; v1/v2 just had nowhere structured to put it). BUG-092:
 # v2 adds a third "not_assessable" type for defense-day/physical
 # requirements no document could ever settle (v1 only knew
 # structural/semantic, so these had nowhere to go but AI grading). BUG-391:
@@ -44,7 +44,7 @@ class RubricParseError(VeridicalError):
 
 
 def raw_text_for_decomposition(blocks: list[TextBlock]) -> str:
-    """Furniture-stripped, reading-order text — the same shredded-table
+    """Furniture-stripped, reading-order text: the same shredded-table
     reality every rubric PDF/DOCX arrives in (V-010 research: no table
     structure survives generic extraction, the prompt must cope, not a
     preprocessing hack)."""
@@ -53,6 +53,17 @@ def raw_text_for_decomposition(blocks: list[TextBlock]) -> str:
 
 
 _NUMBER = re.compile(r"^\d+(?:\.\d+)?$")
+_SPACED_TYPO_DASH_RE = re.compile(r"\s+[\u2013\u2014]\s+")
+_NUMERIC_RANGE_EN_DASH_RE = re.compile(r"(?<=\d)\u2013(?=\d)")
+_REMAINING_TYPO_DASH_RE = re.compile(r"[\u2013\u2014]")
+
+
+def _without_typographic_dashes(value: str) -> str:
+    """BUG-333: normalize em/en dashes in VERIDICAL-drafted criterion fields
+    before they reach the instructor review screen."""
+    value = _SPACED_TYPO_DASH_RE.sub(": ", value)
+    value = _NUMERIC_RANGE_EN_DASH_RE.sub("-", value)
+    return _REMAINING_TYPO_DASH_RE.sub(", ", value)
 
 
 def _name_without_points(name: str, points: float) -> str:
@@ -73,24 +84,40 @@ def _without_point_values(criterion: ParsedCriterion) -> ParsedCriterion:
     rung's point value inside its name. The value is already `points`; it
     leaves the name only when every rung's name still has letters and still
     differs from the others ("Level 1 / Level 2" keeps its numbers)."""
+    updates: dict[str, object] = {
+        "text": _without_typographic_dashes(criterion.text),
+    }
+    if criterion.evidence_needed is not None:
+        updates["evidence_needed"] = _without_typographic_dashes(criterion.evidence_needed)
     if not criterion.levels:
-        return criterion
-    names = [_name_without_points(level.name, level.points) for level in criterion.levels]
-    if names == [level.name for level in criterion.levels]:
-        return criterion
-    distinct = len({name.casefold() for name in names}) == len(names)
-    if not distinct or not all(any(ch.isalpha() for ch in name) for name in names):
-        return criterion
-    levels = [
-        level.model_copy(update={"name": name})
-        for level, name in zip(criterion.levels, names, strict=True)
+        return criterion.model_copy(update=updates)
+    cleaned_levels = [
+        level.model_copy(
+            update={
+                "name": _without_typographic_dashes(level.name),
+                "descriptor": (
+                    _without_typographic_dashes(level.descriptor)
+                    if level.descriptor is not None
+                    else None
+                ),
+            }
+        )
+        for level in criterion.levels
     ]
-    return criterion.model_copy(update={"levels": levels})
+    names = [_name_without_points(level.name, level.points) for level in cleaned_levels]
+    distinct = len({name.casefold() for name in names}) == len(names)
+    if distinct and all(any(ch.isalpha() for ch in name) for name in names):
+        cleaned_levels = [
+            level.model_copy(update={"name": name})
+            for level, name in zip(cleaned_levels, names, strict=True)
+        ]
+    updates["levels"] = cleaned_levels
+    return criterion.model_copy(update=updates)
 
 
 def _normalize_weights(criteria: list[ParsedCriterion]) -> list[ParsedCriterion]:
     """Weights become a percentage split (sum to 100) regardless of the
-    scale the source document or the model used — ENGINEERING §5's
+    scale the source document or the model used; ENGINEERING §5's
     composite score assumes weights are comparable across criteria."""
     total = sum(c.weight for c in criteria)
     for c in criteria:
@@ -103,10 +130,10 @@ async def decompose_rubric(
 ) -> list[ParsedCriterion]:
     """Format-agnostic by construction: the prompt carries no assumption
     about section names, numbering, or scoring style (charter rule 7 at
-    maximum stakes — this is the product's whole thesis).
+    maximum stakes: this is the product's whole thesis).
 
     `feedback`: V-011's retry loop passes the previous attempt's failure
-    reasons here — the prompt text changes, so the response cache (D-011)
+    reasons here; the prompt text changes, so the response cache (D-011)
     correctly treats a retry as a fresh call rather than replaying the
     same bad answer.
     """

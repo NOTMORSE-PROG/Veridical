@@ -1,7 +1,9 @@
 """Margin/spacing rule (F3.2): compares a criterion's stated margin against
 the document's declared page (PDF) or section (DOCX) geometry. Pure
-function, no LLM/network — same as every rule in this package.
+function, no LLM/network: same as every rule in this package.
 """
+
+import re
 
 from app.checks.rules import RuleContext, RuleOutcome, RuleSpec, register_rule
 from app.checks.rules.bounds import Bound, extract_bound, to_points
@@ -10,8 +12,19 @@ from app.ingest.schemas import PageGeometry
 from app.models.enums import ResultOutcome
 
 _KEYWORDS = load_keywords()
+# BUG-409: font-size phrases ("12-point Times New Roman", "12pt font") must not
+# be mistaken for a page-margin bound when a criterion mentions both font size
+# and margins.
+_FONT_POINT_PHRASE_RE = re.compile(
+    r"\b\d+(?:\.\d+)?(?:\s+|-)?(?:points?|pt\s+(?:font|type|typeface|size|times|arial|calibri|courier|georgia|roman))\b",
+    re.IGNORECASE,
+)
 
 RULE_ID = "margins_spacing"
+
+
+def _extract_margin_bound(text: str) -> Bound | None:
+    return extract_bound(_FONT_POINT_PHRASE_RE.sub("", text))
 
 
 def _geometry_anchor(geo: PageGeometry) -> str:
@@ -26,7 +39,7 @@ def _matches(criterion) -> bool:
     text = full_text(criterion)
     if not contains_any(text, current_keywords().margin_nouns):
         return False
-    bound = extract_bound(text)
+    bound = _extract_margin_bound(text)
     if bound is None or bound.unit is None:
         return False
     return to_points(bound.low, bound.unit) is not None
@@ -60,7 +73,7 @@ def _margin_ok(
 
 def _run(criterion, ctx: RuleContext) -> RuleOutcome:
     text = full_text(criterion)
-    bound = extract_bound(text)
+    bound = _extract_margin_bound(text)
     if bound is None or bound.unit is None:
         return RuleOutcome(
             outcome=ResultOutcome.not_applicable,

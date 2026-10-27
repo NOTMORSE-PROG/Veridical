@@ -38,7 +38,22 @@ FIXTURES_DIR = Path(__file__).parent / "fixtures"
 # change, zero new interface surface.
 _SEMANTIC_GRADING_PROMPT_TYPE = "semantic_grading"
 _MANUSCRIPT_TEXT_RE = re.compile(r"<manuscript_text>\n(.*?)\n</manuscript_text>", re.DOTALL)
+_CRITERIA_SECTION_RE = re.compile(
+    r"--- CRITERIA ---\n(.*?)\n\n--- DOCUMENT TEXT", re.DOTALL
+)
+_CRITERION_LINE_RE = re.compile(r"^\d+\.\s+\S", re.MULTILINE)
 _REAL_QUOTE_WORD_COUNT = 8
+
+
+def _criteria_count_from_prompt(prompt: str) -> int | None:
+    """BUG-205: extract the number of criteria requested in a rendered
+    `semantic_grading` prompt so fake-LLM mode returns one verdict per
+    criterion in the batch rather than a static 3-verdict list."""
+    match = _CRITERIA_SECTION_RE.search(prompt)
+    if not match:
+        return None
+    count = len(_CRITERION_LINE_RE.findall(match.group(1)))
+    return count if count > 0 else None
 
 
 def _real_quotes_from_prompt(prompt: str) -> list[str]:
@@ -123,13 +138,22 @@ def _with_real_quotes(response: dict[str, Any], prompt: str) -> dict[str, Any]:
     Without an extractable source candidate, return an empty evidence list.
     Scripted fixture judgments still require the application's evidence checks."""
     quotes = _real_quotes_from_prompt(prompt)
-    if "verdicts" not in response:
+    if "verdicts" not in response or not response["verdicts"]:
         return response
+    templates = response["verdicts"]
+    count = _criteria_count_from_prompt(prompt)
+    target_len = count if count is not None else len(templates)
     return {
         **response,
         "verdicts": [
-            {**v, "evidence_quotes": [quotes[i % len(quotes)]] if quotes else []}
-            for i, v in enumerate(response["verdicts"])
+            {
+                **templates[i % len(templates)],
+                "index": (
+                    i if count is not None else templates[i % len(templates)].get("index", i)
+                ),
+                "evidence_quotes": [quotes[i % len(quotes)]] if quotes else [],
+            }
+            for i in range(target_len)
         ],
     }
 
