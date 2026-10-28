@@ -13,6 +13,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import Settings
 from app.errors import ConflictError, FileMalformedError, RateLimitedError
+from app.ingest.native_table_order import (
+    NativeTableProposal,
+    capture_native_characters,
+    saved_table_witness_valid,
+)
 from app.ingest.normalize import normalize
 from app.ingest.pdf import _BOLD_FLAG, _native_tables_in_source_space
 from app.ingest.reading_order import line_source_id, order_page, propose_regions
@@ -234,12 +239,16 @@ def manuscript_page_text_for(
             return unavailable("reading_order_unresolved")
         if not record.source_inventory_sha256:
             return unavailable("source_binding_unverified")
+        if not saved_table_witness_valid(extraction, record):
+            return unavailable("source_binding_unverified")
         blocks = [block for block in extraction.blocks if block.page == page]
         native_page = doc[page - 1]
         # Independent table presence check: absence in the saved JSON is not
         # enough to authorize flattening a table page.
-        if _native_tables_in_source_space(native_page, page):
-            return unavailable("reading_order_unresolved")
+        native_tables = NativeTableProposal()
+        table_blocks = _native_tables_in_source_space(
+            native_page, page, ordering=native_tables, settings=settings
+        )
         raw_blocks = native_page.get_text(
             "dict", sort=True, flags=(pymupdf.TEXTFLAGS_DICT & ~pymupdf.TEXT_PRESERVE_IMAGES)
         )["blocks"]
@@ -250,11 +259,17 @@ def manuscript_page_text_for(
         if ids is None or len(lines) != record.source_line_count:
             return unavailable("source_binding_unverified")
         proposal = propose_regions(native_page, raw_blocks, lines, settings)
-        _, current = order_page(page, lines, proposal, has_tables=False, settings=settings)
+        if table_blocks:
+            capture_native_characters(native_page, raw_blocks, lines, native_tables, settings)
+            proposal.table_proposal = native_tables
+        _, current = order_page(
+            page, lines, proposal, has_tables=bool(table_blocks), settings=settings
+        )
         if current.status != "ordered":
             return unavailable("reading_order_unresolved")
         if (
             current.source_inventory_sha256 != record.source_inventory_sha256
+            or current.table_order != record.table_order
             or current.ordered_source_line_ids != record.ordered_source_line_ids
             or ids != record.ordered_source_line_ids
         ):

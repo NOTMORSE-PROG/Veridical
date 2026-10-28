@@ -167,6 +167,7 @@ def test_table_uncertainty_does_not_remove_native_table_arithmetic_source():
             (180, 100, "Value"),
             (70, 130, "Count"),
             (180, 130, "3"),
+            (350, 100, "Unordered side prose"),
             (55, 220, "Left prose"),
             (350, 220, "Right prose"),
         ]
@@ -178,7 +179,7 @@ def test_table_uncertainty_does_not_remove_native_table_arithmetic_source():
             page.draw_line((60, y), (280, y))
         result = extract(doc)
     assert result.reading_order[0].status == "unresolved"
-    assert result.reading_order[0].reason == "table_regions_unresolved"
+    assert result.reading_order[0].reason == "native_table_flow_interleaved"
     assert result.tables[0].rows == [["Name", "Value"], ["Count", "3"]]
 
 

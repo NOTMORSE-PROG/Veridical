@@ -6,6 +6,7 @@ CPU-bound and synchronous on purpose — callers run it in a threadpool
 """
 
 import math
+import threading
 from itertools import pairwise
 
 import pymupdf
@@ -14,6 +15,12 @@ from pydantic import ValidationError
 from app.config import Settings
 from app.errors import FileMalformedError, FileTooLargeError
 from app.ingest import sections
+from app.ingest.native_table_order import (
+    NativeTableProposal,
+    admit_native_tables,
+    capture_native_characters,
+    snapshot_native_table,
+)
 from app.ingest.normalize import furniture_key, match_key, normalize
 from app.ingest.patterns import HeadingPatterns, load_patterns
 from app.ingest.reading_order import line_source_id, order_page, propose_regions
@@ -30,6 +37,7 @@ from app.ingest.schemas import (
 from app.messages import FILE_ENCRYPTED, FILE_UNREADABLE, PDF_TOO_MANY_PAGES
 
 _BOLD_FLAG = 16  # PyMuPDF span flag bit for bold fonts
+_NATIVE_TABLE_LOCK = threading.Lock()
 
 
 def _open_document(path: str) -> pymupdf.Document:
@@ -145,7 +153,10 @@ def _extract_open_document(
         # produces (`ingest/docx.py`) -- no header/caption detection here
         # either, matching that precedent exactly rather than introducing
         # a format-specific difference downstream code doesn't expect.
-        tables.extend(_native_tables_in_source_space(page, pno))
+        table_proposal = NativeTableProposal() if ordering_enabled else None
+        tables.extend(
+            _native_tables_in_source_space(page, pno, ordering=table_proposal, settings=settings)
+        )
         page_lines: list[Line] = []
         raw_blocks = page.get_text("dict", sort=True)["blocks"]
         for block_no, block in enumerate(raw_blocks):
@@ -179,6 +190,9 @@ def _extract_open_document(
                 )
         if ordering_enabled:
             order_proposals[pno] = propose_regions(page, raw_blocks, page_lines, settings)
+            if table_proposal and (table_proposal.grids or table_proposal.problem):
+                capture_native_characters(page, raw_blocks, page_lines, table_proposal, settings)
+                order_proposals[pno].table_proposal = table_proposal
         lines_by_page[pno] = page_lines
         page_heights[pno] = page.rect.height
         geometry.append(_page_geometry(page, pno))
@@ -228,7 +242,28 @@ def _extract_open_document(
     )
 
 
-def _native_tables_in_source_space(page: pymupdf.Page, pno: int) -> list[TableBlock]:
+def _native_tables_in_source_space(
+    page: pymupdf.Page,
+    pno: int,
+    *,
+    ordering: NativeTableProposal | None = None,
+    settings: Settings | None = None,
+) -> list[TableBlock]:
+    # PyMuPDF Table.extract reads module-global character state populated by
+    # find_tables. Keep discovery, materialization and restoration indivisible.
+    with _NATIVE_TABLE_LOCK:
+        return _native_tables_in_source_space_locked(
+            page, pno, ordering=ordering, settings=settings
+        )
+
+
+def _native_tables_in_source_space_locked(
+    page: pymupdf.Page,
+    pno: int,
+    *,
+    ordering: NativeTableProposal | None = None,
+    settings: Settings | None = None,
+) -> list[TableBlock]:
     """Materialize native tables in unrotated, crop-relative source coordinates.
 
     Rotated table detection can reset the visible crop. Restore page state even
@@ -238,14 +273,23 @@ def _native_tables_in_source_space(page: pymupdf.Page, pno: int) -> list[TableBl
     try:
         if rotation:
             page.set_rotation(0)
-        return [
-            TableBlock(
-                page=pno,
-                bbox=tuple(table.bbox),
-                rows=[[normalize(cell or "") for cell in row] for row in table.extract()],
+        native = page.find_tables().tables
+        if ordering is not None:
+            ordering.page_bbox = tuple(page.rect)
+            admit_native_tables(native, ordering, settings)
+        output = []
+        for table in native:
+            rows = table.extract()
+            output.append(
+                TableBlock(
+                    page=pno,
+                    bbox=tuple(table.bbox),
+                    rows=[[normalize(cell or "") for cell in row] for row in rows],
+                )
             )
-            for table in page.find_tables().tables
-        ]
+            if ordering is not None:
+                snapshot_native_table(table, rows, ordering, settings)
+        return output
     finally:
         if page.cropbox != crop:
             page.set_cropbox(crop)

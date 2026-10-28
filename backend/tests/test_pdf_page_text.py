@@ -271,5 +271,5 @@ def test_deleting_saved_tables_cannot_authorize_table_flattening(source):
     source = settings, manuscript, extraction
     save(source)
     result = read(source, page)
-    assert result.state == "unavailable" and result.reason == "reading_order_unresolved"
+    assert result.state == "unavailable" and result.reason == "source_binding_unverified"
     assert not result.blocks

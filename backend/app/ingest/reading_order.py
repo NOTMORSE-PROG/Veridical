@@ -17,6 +17,11 @@ from statistics import median
 import pymupdf
 
 from app.config import Settings
+from app.ingest.native_table_order import (
+    NativeTableProposal,
+    TableOrderUnresolved,
+    order_native_tables,
+)
 from app.ingest.normalize import normalize
 from app.ingest.schemas import Line, PageReadingOrder
 
@@ -34,6 +39,7 @@ class Proposal:
     unsupported: set[str]
     inventory_hash: str | None
     problem: str | None = None
+    table_proposal: NativeTableProposal | None = None
 
 
 class UnresolvedOrder(ValueError):
@@ -291,14 +297,34 @@ def order_page(
         return order_parts(parts, leaves=all(not child.children for child in region.children))
 
     problem = proposal.problem
-    if not problem and has_tables:
+    if not problem and has_tables and proposal.table_proposal is None:
         problem = "table_regions_unresolved"
     if not problem and proposal.unsupported.intersection(canonical):
         problem = "unsupported_text_direction"
+    table_witness = None
     if not problem:
         try:
             check_overlap()
-            ids = visit(proposal.root)
+            if has_tables:
+
+                def order_subset(subset):
+                    ordered, record = order_page(
+                        page, subset, proposal, has_tables=False, settings=settings
+                    )
+                    if record.status != "ordered":
+                        raise TableOrderUnresolved(record.reason or "native_table_flow_unresolved")
+                    return [line.source_id for line in ordered]
+
+                ids, table_witness = order_native_tables(
+                    list(body.values()),
+                    proposal.table_proposal,
+                    proposal.inventory_hash,
+                    order_subset,
+                    row_order,
+                    settings,
+                )
+            else:
+                ids = visit(proposal.root)
             if len(ids) != len(body) or set(ids) != set(body):
                 raise UnresolvedOrder("ordered_inventory_mismatch")
             # Preserve marked furniture, outside the substantive flow, without
@@ -316,8 +342,12 @@ def order_page(
                 else:
                     raise UnresolvedOrder("ambiguous_margin_block")
             ordered_lines = headers + [body[sid] for sid in ids] + footers
-        except (UnresolvedOrder, KeyError) as exc:
-            problem = str(exc) if isinstance(exc, UnresolvedOrder) else "source_identity_mismatch"
+        except (UnresolvedOrder, TableOrderUnresolved, KeyError) as exc:
+            problem = (
+                str(exc)
+                if isinstance(exc, (UnresolvedOrder, TableOrderUnresolved))
+                else "source_identity_mismatch"
+            )
     if problem:
         ordered_lines = lines
     return ordered_lines, PageReadingOrder(
@@ -327,4 +357,5 @@ def order_page(
         source_line_count=len(lines),
         source_inventory_sha256=proposal.inventory_hash,
         ordered_source_line_ids=[line.source_id for line in ordered_lines],
+        table_order=table_witness if not problem else None,
     )

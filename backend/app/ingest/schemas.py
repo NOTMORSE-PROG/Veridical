@@ -21,6 +21,7 @@ from typing import Literal
 from pydantic import BaseModel, Field, field_validator
 
 from app.ingest.native_math_models import NativeMathInventory
+from app.ingest.native_table_models import NativeTableOrderWitness
 from app.ingest.recovery_models import RecoveryEnvelope
 
 Bbox = tuple[float, float, float, float]
@@ -445,6 +446,7 @@ class PageReadingOrder(BaseModel):
     # None when a resource limit or invalid source prevented full inventory.
     source_inventory_sha256: str | None
     ordered_source_line_ids: list[str]
+    table_order: NativeTableOrderWitness | None = None
 
 
 class FigureReading(BaseModel):

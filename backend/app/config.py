@@ -98,6 +98,11 @@ class Settings(BaseSettings):
     ingest_reading_order_max_nodes_per_page: int = Field(default=8000, gt=0)
     ingest_reading_order_max_depth: int = Field(default=32, gt=0)
     ingest_reading_order_max_pair_comparisons: int = Field(default=100000, gt=0)
+    # Adapter work limits, not OS bounds on native parsing/table detection.
+    ingest_native_table_order_enabled: bool = True
+    ingest_native_table_max_tables_per_page: int = Field(default=16, gt=0)
+    ingest_native_table_max_cells_per_page: int = Field(default=4096, gt=0)
+    ingest_native_table_max_characters_per_page: int = Field(default=100000, gt=0)
     # Geometry comparisons use unrotated, crop-relative PDF points. Small
     # typographic offsets are allowed within a row, not between text flows.
     ingest_reading_order_geometry_tolerance_pts: float = Field(default=0.01, ge=0)

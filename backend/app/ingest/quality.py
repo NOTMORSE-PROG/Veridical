@@ -1,5 +1,6 @@
 """Persisted source-quality gates shared by ingestion and check services."""
 
+from app.ingest.native_table_order import saved_table_witness_valid
 from app.ingest.schemas import ExtractionResult
 from app.ingest.source_slices import line_inventory_valid
 
@@ -74,6 +75,9 @@ def reading_order_issues(
     issues = []
     for record in records:
         ids = record.ordered_source_line_ids
+        if not saved_table_witness_valid(extraction, record):
+            issues.append({"page": record.page, "reason": "reading_order_table_witness_invalid"})
+            continue
         if record.status == "ordered" and (record.reason or not record.source_inventory_sha256):
             issues.append({"page": record.page, "reason": "reading_order_metadata_inconsistent"})
             continue
