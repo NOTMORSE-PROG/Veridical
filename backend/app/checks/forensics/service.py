@@ -28,6 +28,7 @@ from app.checks.forensics.extract import extract_all_stats
 from app.checks.forensics.notation import text_notation_coverage
 from app.checks.forensics.pcheck import evaluate_p_recalc
 from app.checks.forensics.sanity import evaluate_group_counts, evaluate_percentage_sums
+from app.checks.forensics.sprite import evaluate_sprite
 from app.checks.source_quality import persist_source_limitation
 from app.ingest.analytical_source import analytical_source
 from app.ingest.schemas import ExtractionResult
@@ -43,6 +44,7 @@ class _ForensicsComputation:
     flag_drafts: list[ForensicsFlagDraft]
     skipped_composite_rows: int
     image_coverage: dict
+    reconstruction: dict
 
 
 def _compute_forensics_findings(extraction: ExtractionResult) -> _ForensicsComputation:
@@ -82,8 +84,13 @@ def _compute_forensics_findings(extraction: ExtractionResult) -> _ForensicsCompu
     if coverage.get("coverage_reason"):
         outcome = ResultOutcome.escalated
 
-    grim_grimmer = evaluate_grim_grimmer(stats)
+    reconstruction = evaluate_sprite(extraction)
+    grim_grimmer = evaluate_grim_grimmer(
+        stats, excluded_table_indices=set(reconstruction["single_item_excluded_tables"])
+    )
     if grim_grimmer.skipped_composite_rows:
+        outcome = ResultOutcome.escalated
+    if reconstruction["unassessed_rows"]:
         outcome = ResultOutcome.escalated
     flag_drafts: list[ForensicsFlagDraft] = [
         *grim_grimmer.flags,
@@ -98,6 +105,7 @@ def _compute_forensics_findings(extraction: ExtractionResult) -> _ForensicsCompu
         flag_drafts=flag_drafts,
         skipped_composite_rows=grim_grimmer.skipped_composite_rows,
         image_coverage=coverage,
+        reconstruction=reconstruction,
     )
 
 
@@ -138,6 +146,7 @@ async def run_statistical_forensics_check(
             # other rows of the same table), not the single-item mean
             # the test's own math assumes.
             "n_grim_skipped_likely_composite": computation.skipped_composite_rows,
+            "sprite_reconstruction": computation.reconstruction,
         },
     )
     session.add(result)

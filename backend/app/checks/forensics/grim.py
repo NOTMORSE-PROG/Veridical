@@ -170,6 +170,7 @@ class SpriteResult:
     possible: bool
     distribution: list[float] | None = None
     achieved_sd: float | None = None
+    status: str = "not_found_within_budget"
 
 
 def sprite_check(
@@ -220,7 +221,12 @@ def sprite_check(
         # crash this deterministic check over a manuscript's own (possibly
         # wrong) reported numbers. KeyboardInterrupt/SystemExit still
         # propagate — only pysprite's own exception misuse is swallowed.
-        return SpriteResult(possible=False)
+        return SpriteResult(possible=False, status="library_error")
     if outcome.casefold() != "success":  # pysprite returns "Success"/"Failure" (capitalized)
         return SpriteResult(possible=False)
-    return SpriteResult(possible=True, distribution=list(distribution), achieved_sd=achieved_sd)
+    return SpriteResult(
+        possible=True,
+        distribution=list(distribution),
+        achieved_sd=achieved_sd,
+        status="candidate_found",
+    )

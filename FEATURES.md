@@ -148,7 +148,7 @@ Three layers: exists → not retracted → actually supports the claim (Objectiv
 |---|---|---|---|
 | F6.1 | Extraction of reported statistics (n, means, SDs, test statistics, df, p-values) from text and tables | 🟢 | Extracted with page anchors |
 | F6.2 | **GRIM/GRIMMER** check via [`grim_test`](https://github.com/phoughton/grim_test) / [`pysprite`](https://github.com/QuentinAndre/pysprite) | 🟢 | Impossible mean-given-n ⇒ flag with the arithmetic shown |
-| F6.3 | **SPRITE** distribution reconstruction via `pysprite` | 🟢 | Implausible distributions flagged |
+| F6.3 | **SPRITE** bounded distribution reconstruction via `pysprite` | 🟡 | Admits native-table rows with explicit integer item scale bounds, averaged-item count and sample-SD convention. Independently checks a candidate against the reported mean/SD precision; a compatible candidate is a possible reconstruction, not recovered or authenticated original data. Missing assumptions, unsupported precision or no verified candidate remain unassessed. Bounded search failure is not proof of inconsistency. Pipeline review and full regression seal are in progress. |
 | F6.4 | **p-value recalculation** via [`statcheck_python`](https://github.com/hplisiecki/statcheck_python) | 🟢 | Reported p ≠ recomputed p ⇒ discrepancy flag ("possible rounding error or typo" wording — never "fabrication") |
 | F6.5 | Applicability gate: check runs only when the paper actually reports statistics | 🟢 | Papers without inferential stats marked "N/A", not "passed" |
 | F6.6 | Percentage/total sanity checks (percentages sum ≈100%, counts ≤ n) | 🟡 | Basic arithmetic cross-checks on tables |

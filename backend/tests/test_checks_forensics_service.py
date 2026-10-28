@@ -98,6 +98,53 @@ def _extraction(*, blocks=None, tables=None) -> ExtractionResult:
     )
 
 
+async def test_sprite_runs_in_real_f6_assembly_and_persists_its_audit(session_factory):
+    from app.report.statistical_scope import statistical_check_scope
+
+    check_run_id = await _seed_check_run(session_factory)
+    table = TableBlock(
+        page=1,
+        rows=[
+            [
+                "Measure",
+                "n",
+                "Mean",
+                "SD",
+                "Minimum possible item score",
+                "Maximum possible item score",
+                "Averaged item count",
+                "Item response unit",
+                "SD convention",
+            ],
+            ["Declared synthetic item", "10", "3.00", "0.00", "1", "5", "1", "integer", "sample"],
+        ],
+    )
+    async with session_factory() as session:
+        result = await run_statistical_forensics_check(
+            session, check_run_id, _extraction(tables=[table])
+        )
+        assert result.outcome == ResultOutcome.passed
+        saved = result.detail["sprite_reconstruction"]
+        assert saved["attempted_rows"] == saved["compatible_rows"] == 1
+        assert saved["unassessed_rows"] == 0
+        assert saved["rows"][0]["candidate"]["histogram"] == [
+            {"numerator": 3, "denominator": 1, "count": 10}
+        ]
+        payload = (
+            await session.execute(
+                text(
+                    "SELECT payload FROM audit_log WHERE check_run_id=:run "
+                    "AND event_type='statistical_forensics_check_computed'"
+                ),
+                {"run": check_run_id},
+            )
+        ).scalar_one()
+        assert payload["sprite_reconstruction"] == saved
+        public_scope = statistical_check_scope([result.outcome], [result.detail]).model_dump()
+        assert public_scope["reconstruction"]["compatible_rows"] == 1
+        assert "rows" not in public_scope["reconstruction"]
+
+
 async def test_qualitative_manuscript_with_no_stats_is_not_applicable(session_factory):
     """Ticket AC: 'Qualitative capstone (no stats) → F6 = N/A on the
     report' — N/A is not 'passed' (charter rule 9)."""
@@ -133,7 +180,8 @@ async def test_seeded_grim_impossible_mean_produces_a_real_flag_row(session_fact
     extraction = _extraction(tables=[table])
     async with session_factory() as session:
         result = await run_statistical_forensics_check(session, check_run_id, extraction)
-        assert result.outcome == ResultOutcome.passed
+        assert result.outcome == ResultOutcome.escalated
+        assert result.detail["sprite_reconstruction"]["unassessed_rows"] == 1
         assert result.detail["n_flags"] == 1
 
         flag_query = text("SELECT severity, page_anchor FROM flag WHERE check_result_id = :id")

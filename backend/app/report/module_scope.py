@@ -48,7 +48,15 @@ def integrity_modules(
             if kind == CheckKind.statistical_forensics:
                 scope = statistical_check_scope([row.outcome], [row.detail])
                 if scope.state == "incomplete":
-                    state = "partial" if scope.unassessed_descriptive_rows else "incomplete"
+                    state = (
+                        "partial"
+                        if scope.unassessed_descriptive_rows
+                        or (
+                            scope.reconstruction
+                            and scope.reconstruction.state in {"incomplete", "not_recorded"}
+                        )
+                        else "incomplete"
+                    )
                 elif scope.state == "not_recorded":
                     state = "not_recorded"
             if kind == CheckKind.originality_reuse and (

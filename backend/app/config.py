@@ -667,6 +667,17 @@ class Settings(BaseSettings):
     # Override the packaged table-column-header synonym list without a code
     # change; empty = packaged default (same convention as structural_keywords_file).
     forensics_keywords_file: Path | None = None
+    forensics_sprite_policy_file: Path | None = None
+    forensics_sprite_max_rows: int = Field(default=3, ge=1)
+    forensics_sprite_max_input_rows: int = Field(default=50, ge=1)
+    forensics_sprite_max_receipt_rows: int = Field(default=50, ge=1)
+    forensics_sprite_max_observations: int = Field(default=1000, ge=2)
+    forensics_sprite_max_scale_points: int = Field(default=1000, ge=2)
+    forensics_sprite_max_iterations: int = Field(default=2000, ge=1)
+    forensics_sprite_row_timeout_seconds: float = Field(default=3.0, gt=0, allow_inf_nan=False)
+    forensics_sprite_check_timeout_seconds: float = Field(default=9.0, gt=0, allow_inf_nan=False)
+    forensics_sprite_random_seed: int = Field(default=0, ge=0, le=4294967295)
+    forensics_sprite_init_method: Literal["minvar", "maxvar"] = "minvar"
 
     # --- Internal agreement: intent/outcome extraction (V-034, F4.1/F4.2) ----
     # Override the packaged cue lexicon without a code change; empty = packaged
@@ -978,6 +989,7 @@ class Settings(BaseSettings):
         "structural_bound_patterns_file",
         "llm_model_pool_file",
         "forensics_keywords_file",
+        "forensics_sprite_policy_file",
         mode="before",
     )
     @classmethod

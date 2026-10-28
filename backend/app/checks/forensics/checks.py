@@ -144,7 +144,9 @@ def _likely_composite_tables(
     }
 
 
-def evaluate_grim_grimmer(stats: list[ReportedStat]) -> GrimGrimmerResult:
+def evaluate_grim_grimmer(
+    stats: list[ReportedStat], *, excluded_table_indices: set[int] | None = None
+) -> GrimGrimmerResult:
     flags: list[ForensicsFlagDraft] = []
     grouped = _group_descriptive_stats(stats)
     composite_tables = _likely_composite_tables(grouped)
@@ -156,7 +158,9 @@ def evaluate_grim_grimmer(stats: list[ReportedStat]) -> GrimGrimmerResult:
         if n_stat is None or mean_stat is None:
             continue  # GRIM needs both — no guessing a missing n or mean
 
-        if (anchor, table_index) in composite_tables:
+        if (anchor, table_index) in composite_tables or table_index in (
+            excluded_table_indices or ()
+        ):
             skipped_composite_rows += 1
             continue
 

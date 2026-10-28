@@ -1,0 +1,17 @@
+{
+  "version": "sprite_inputs_v1",
+  "headers": {
+    "n": ["n", "sample size", "number of observations"],
+    "mean": ["mean", "m", "average", "ave", "x̄"],
+    "sd": ["sd", "s.d.", "sample sd", "standard deviation"],
+    "min_val": ["minimum possible item score", "minimum possible score", "scale lower bound"],
+    "max_val": ["maximum possible item score", "maximum possible score", "scale upper bound"],
+    "n_items": ["averaged item count", "number of averaged items", "n_items"],
+    "unit": ["item response unit", "response unit"],
+    "sd_convention": ["sd convention", "standard deviation convention"]
+  },
+  "integer_units": ["integer", "integer item", "integer responses", "integer-valued"],
+  "sample_sd_conventions": ["sample", "sample sd", "sample standard deviation", "n-1", "ddof=1"],
+  "max_sd_precision": 2,
+  "max_numeric_token_chars": 32
+}

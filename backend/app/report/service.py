@@ -92,7 +92,11 @@ from app.report.scoring import (
 )
 from app.report.source_coverage import project_source_coverage
 from app.report.source_files import manuscript_source_file, open_source_pdf, readable_source_file
-from app.report.statistical_scope import statistical_check_scope, unassessed_descriptive_rows
+from app.report.statistical_scope import (
+    statistical_check_scope,
+    statistical_reconstruction_incomplete,
+    unassessed_descriptive_rows,
+)
 from app.report.subject_identity import recorded_check_subject
 from app.report.weight_importance import WeightImportance, weight_importance
 from app.storage.access import read_source
@@ -184,7 +188,10 @@ async def _assessment_incomplete(session: AsyncSession, check_run_id: int) -> bo
         (row.kind == CheckKind.internal_agreement and row.outcome == ResultOutcome.passed)
         or (
             row.kind == CheckKind.statistical_forensics
-            and unassessed_descriptive_rows(row.detail) != 0
+            and (
+                unassessed_descriptive_rows(row.detail) != 0
+                or statistical_reconstruction_incomplete(row.detail)
+            )
         )
         or row.outcome in incomplete
         and (
@@ -618,7 +625,11 @@ async def report_out_for_check_run(
     integrity_rows.extend(
         row
         for row in forensics_rows
-        if unassessed_descriptive_rows(row.detail) != 0 and row.id not in integrity_row_ids
+        if (
+            unassessed_descriptive_rows(row.detail) != 0
+            or statistical_reconstruction_incomplete(row.detail)
+        )
+        and row.id not in integrity_row_ids
     )
     integrity_check_status = [
         IntegrityCheckStatusOut(
@@ -628,7 +639,10 @@ async def report_out_for_check_run(
             and (
                 row.kind == CheckKind.internal_agreement
                 or row.kind == CheckKind.statistical_forensics
-                and unassessed_descriptive_rows(row.detail) != 0
+                and (
+                    unassessed_descriptive_rows(row.detail) != 0
+                    or statistical_reconstruction_incomplete(row.detail)
+                )
             )
             else row.outcome.value,
             n_skipped_quota=_integrity_skip_count(row.kind, detail, "quota"),
