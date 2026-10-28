@@ -128,6 +128,64 @@ def test_upload_pdf_returns_summary(client):
 
 
 @live
+def test_no_date_references_persist_without_losing_source_date_identity(client, api_scratch_url):
+    import asyncio
+    from io import BytesIO
+
+    from docx import Document
+    from sqlalchemy import select
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
+    from app.checks.citations.extract import cross_match, extract_in_text_citations
+    from app.db import sqlalchemy_url
+    from app.ingest.citation_dates import reference_date_key
+    from app.ingest.patterns import load_patterns
+    from app.ingest.references import non_reference_blocks
+    from app.ingest.service import load_raw_store
+    from app.models.citation import Citation
+
+    document = Document()
+    document.add_heading("Introduction", 1)
+    document.add_paragraph("Prior studies describe this result (Smith, n. d.; Cruz, 2024).")
+    document.add_heading("References", 1)
+    no_date = "Smith, J. (n. d.). Source quality study. Journal."
+    document.add_paragraph(no_date)
+    document.add_paragraph("Cruz, M. (2024). Different source. Journal.")
+    output = BytesIO()
+    document.save(output)
+    response = _upload(client, "native.pdf", as_name="no-date.docx", data=output.getvalue())
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["ingest_status"] == "done" and body["citations"] == 2
+
+    async def persisted():
+        engine = create_async_engine(sqlalchemy_url(api_scratch_url))
+        try:
+            async with async_sessionmaker(engine, expire_on_commit=False)() as session:
+                return list(
+                    (
+                        await session.scalars(
+                            select(Citation)
+                            .where(Citation.manuscript_id == body["manuscript_id"])
+                            .order_by(Citation.order_index)
+                        )
+                    ).all()
+                )
+        finally:
+            await engine.dispose()
+
+    references = asyncio.run(persisted())
+    assert references[0].year is None and references[0].raw_text == no_date
+    assert reference_date_key(references[0]) == "explicit_no_date"
+    assert references[1].year == 2024
+    extraction = load_raw_store(get_settings(), body["manuscript_id"])
+    result = cross_match(
+        extract_in_text_citations(non_reference_blocks(extraction, load_patterns())), references
+    )
+    assert len(result.linked) == 2 and not result.orphans and not result.uncited
+
+
+@live
 def test_two_ungrouped_manuscripts_are_distinguishable_by_filename(client):
     """BUG-022: group_label defaults to "Ungrouped" for any manuscript not
     explicitly grouped, so two such uploads were indistinguishable in

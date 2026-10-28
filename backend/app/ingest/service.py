@@ -690,6 +690,7 @@ async def list_manuscripts(
     elif status == ManuscriptQueueStatus.not_checked:
         filters.extend(
             [
+                Manuscript.purged_at.is_(None),
                 Manuscript.ingest_status == IngestStatus.done,
                 latest_run_status.is_(None),
             ]
@@ -898,6 +899,7 @@ async def list_manuscripts(
     items = [
         ManuscriptListItem(
             id=m.id,
+            purged_at=m.purged_at,
             group_label=m.group_label,
             program=_program(m.id),
             original_filename=m.original_filename,

@@ -68,13 +68,13 @@ def test_reference_nd_date_canonical_and_uppercase():
     raw_lower = "World Health Organization. (n.d.). Emergency guidance. WHO."
     draft_lower = parse_reference(raw_lower, 0)
     assert draft_lower.parse_status == CitationParseStatus.parsed
-    assert draft_lower.year == "n.d."
+    assert draft_lower.year is None
     assert draft_lower.authors == ["World Health Organization"]
 
     raw_upper = "World Health Organization. (N.D.). Emergency guidance. WHO."
     draft_upper = parse_reference(raw_upper, 1)
     assert draft_upper.parse_status == CitationParseStatus.parsed
-    assert draft_upper.year == "n.d."
+    assert draft_upper.year is None
 
 
 def test_reference_nd_date_spaced_variation():
@@ -84,7 +84,7 @@ def test_reference_nd_date_spaced_variation():
     assert draft.parse_status == CitationParseStatus.parsed, (
         f"Failed parsing spaced (n. d.): status={draft.parse_status}"
     )
-    assert draft.year == "n.d."
+    assert draft.year is None
     assert draft.authors == ["Smith, J."]
 
 

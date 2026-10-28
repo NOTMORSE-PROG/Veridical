@@ -173,6 +173,7 @@ async def get_dashboard_stats(
             func.count()
             .filter(
                 and_(
+                    Manuscript.purged_at.is_(None),
                     Manuscript.ingest_status == IngestStatus.done,
                     latest_run_status.is_(None),
                 )

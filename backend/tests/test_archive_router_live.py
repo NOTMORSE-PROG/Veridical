@@ -874,6 +874,13 @@ def test_purge_is_visible_in_owner_audit_without_exposing_it_to_another_instruct
     detail = client.get(f"/audit/{rows[0]['id']}")
     assert detail.status_code == 200
     assert detail.json()["payload"]["instructor_id"] == ids["owner_id"]
+    retained = client.get("/manuscripts").json()["items"]
+    assert next(row for row in retained if row["id"] == ids["mine"])["purged_at"] is not None
+    not_checked = client.get(
+        "/manuscripts", params={"status": "not_checked", "page_size": 200}
+    ).json()
+    assert ids["mine"] not in {row["id"] for row in not_checked["items"]}
+    assert client.get("/stats").json()["not_checked_count"] == not_checked["total"]
     client.post("/auth/logout")
     login = client.post("/auth/login", json={"email": "stranger@tip.edu.ph", "password": "other!"})
     assert login.status_code == 200

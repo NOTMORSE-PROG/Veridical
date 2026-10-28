@@ -28,6 +28,7 @@ def _font_configuration():
 def register_fonts() -> str:
     with _REGISTRATION_LOCK:
         try:
+            _font_capabilities.cache_clear()
             configuration = _font_configuration()
             for family in configuration.values():
                 for face in family["faces"].values():
@@ -55,7 +56,26 @@ def clusters(text: str):
         yield cluster
 
 
+@lru_cache
+def _font_capabilities(font_name):
+    return next(
+        (
+            family
+            for family in _font_configuration().values()
+            if any(face["name"] == font_name for face in family["faces"].values())
+        ),
+        {},
+    )
+
+
 def _supports(font_name: str, text: str) -> bool:
+    capability = _font_capabilities(font_name)
+    categories = capability.get("coverage_categories")
+    directions = capability.get("coverage_bidi_classes")
+    if categories and any(unicodedata.category(char)[0] not in categories for char in text):
+        return False
+    if directions and any(unicodedata.bidirectional(char) not in directions for char in text):
+        return False
     font = pdfmetrics.getFont(font_name)
     coverage = getattr(font.face, "charToGlyph", None)
     if coverage is not None:
@@ -90,7 +110,9 @@ def text_runs(text: str, font_name: str):
             if italic
             else "normal"
         )
-    fallback = configuration["fallback"]["faces"][style]["name"]
+    fallbacks = [
+        family["faces"][style]["name"] for key, family in configuration.items() if key != "primary"
+    ]
     selected = None
     run = ""
     for cluster in clusters(text):
@@ -98,11 +120,10 @@ def text_runs(text: str, font_name: str):
         # unshaped renderer visibly misplaces them, so do not deliver that PDF.
         if any(unicodedata.category(character).startswith("M") for character in cluster):
             raise ReportExportUnavailableError()
-        if _supports(font_name, cluster):
-            candidate = font_name
-        elif _supports(fallback, cluster):
-            candidate = fallback
-        else:
+        candidate = next(
+            (face for face in [font_name, *fallbacks] if _supports(face, cluster)), None
+        )
+        if candidate is None:
             raise ReportExportUnavailableError()
         if selected is not None and candidate != selected:
             yield selected, run

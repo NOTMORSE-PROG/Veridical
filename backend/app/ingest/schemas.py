@@ -356,6 +356,7 @@ class ManuscriptListItem(BaseModel):
     """One row of a manuscript picker/list (screens 4e/4f)."""
 
     id: int
+    purged_at: datetime | None = None
     group_label: str
     # BUG-022: group_label defaults to "Ungrouped" and can't distinguish
     # two manuscripts alone; None for rows ingested before this column

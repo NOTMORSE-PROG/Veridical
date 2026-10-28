@@ -111,7 +111,7 @@ class CitationDraft:
     order_index: int
     raw_text: str
     authors: list[str] | None = None
-    year: int | str | None = None
+    year: int | None = None
     title: str | None = None
     venue: str | None = None
     doi: str | None = None
@@ -548,9 +548,9 @@ def _parse_into(draft: CitationDraft, raw: str, *, legacy_quoted_titles: bool = 
     raw_year = year_m.group(1).strip()
     if raw_year[:4].isdigit():
         draft.year = int(raw_year[:4])
-    elif "nd" in raw_year.lower().replace(".", "").replace(" ", ""):
-        draft.year = "n.d."
     else:
+        # Preserve explicit no-date syntax in raw_text; the numeric year is
+        # unknown. reference_date_key recovers the source's date identity.
         draft.year = None
 
     # A numbered APA list ("12. Cruz, M. A. (2023)") keeps its label in the

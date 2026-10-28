@@ -76,7 +76,7 @@ def test_reference_ingest_nd_date_corporate_author():
     raw = "World Health Organization. (n.d.). Mental health in emergencies. WHO. https://who.int/mh"
     draft = parse_reference(raw, 0)
     assert draft.parse_status == CitationParseStatus.parsed
-    assert draft.year == "n.d."
+    assert draft.year is None
     assert draft.authors == ["World Health Organization"]
     assert draft.title == "Mental health in emergencies"
     assert draft.venue == "WHO"
@@ -86,7 +86,7 @@ def test_reference_ingest_nd_date_personal_author():
     raw = "Smith, J., & Doe, A. (n.d.). Machine learning algorithms. Academic Press."
     draft = parse_reference(raw, 1)
     assert draft.parse_status == CitationParseStatus.parsed
-    assert draft.year == "n.d."
+    assert draft.year is None
     assert draft.authors == ["Smith, J.", "Doe, A."]
     assert draft.title == "Machine learning algorithms"
 
@@ -402,7 +402,7 @@ def test_in_text_and_reference_spaced_nd_date():
         "World Health Organization. (n. d.). Pandemic preparedness. Geneva: WHO.",
         0,
     )
-    assert ref.year == "n.d."
+    assert ref.year is None
     assert ref.parse_status == CitationParseStatus.parsed
 
     # Cross-match linking

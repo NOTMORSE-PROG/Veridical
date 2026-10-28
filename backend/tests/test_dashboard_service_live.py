@@ -1083,3 +1083,34 @@ async def test_returned_unresolved_review_leaves_work_queue_until_explicit_reope
         assert stats.complete_queue_count == complete.total == 0
         assert reopened.pending_review_count == pending.items[0].escalations_awaiting_review == 2
         assert reopened.decision is None
+
+
+async def test_deleted_unchecked_source_is_retained_but_not_counted_as_ready(session_factory):
+    from app.ingest.service import list_manuscripts
+
+    async with session_factory() as session:
+        owner = Instructor(email="deleted-queue@example.test", display_name="Owner")
+        session.add(owner)
+        await session.flush()
+        available = Manuscript(
+            instructor_id=owner.id,
+            group_label="Available",
+            file_ref="available.pdf",
+            ingest_status=IngestStatus.done,
+        )
+        deleted = Manuscript(
+            instructor_id=owner.id,
+            group_label="Deleted",
+            file_ref="deleted.pdf",
+            ingest_status=IngestStatus.done,
+            purged_at=datetime.now(UTC),
+        )
+        session.add_all([available, deleted])
+        await session.commit()
+        stats = await get_dashboard_stats(session, owner.id)
+        queue = await list_manuscripts(session, owner.id, status="not_checked")
+        assert stats.not_checked_count == queue.total == 1
+        assert [row.id for row in queue.items] == [available.id]
+        retained = await list_manuscripts(session, owner.id)
+        assert retained.total == 2
+        assert next(row for row in retained.items if row.id == deleted.id).purged_at is not None

@@ -10,7 +10,15 @@ from unittest.mock import patch
 import pytest
 from fastapi.testclient import TestClient
 
-from app.config import get_settings
+from app.config import Settings, get_settings
+
+
+@pytest.fixture(autouse=True)
+def _isolate_lifespan_defaults_from_local_dotenv(monkeypatch):
+    # Test environment/default gating independently of local worker opt-ins.
+    from app import main
+
+    monkeypatch.setattr(main, "get_settings", lambda: Settings(_env_file=None))
 
 
 async def test_preparation_lifespan_closes_if_startup_fails_after_admission_start(monkeypatch):

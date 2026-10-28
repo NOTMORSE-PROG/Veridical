@@ -127,8 +127,12 @@ async def test_create_check_run_rejects_a_purged_manuscript(session_factory):
         session_factory, purged=True
     )
     async with session_factory() as session:
+        before_runs = await session.scalar(select(func.count()).select_from(CheckRun))
+        before_audit = await session.scalar(select(func.count()).select_from(AuditLog))
         with pytest.raises(ConflictError, match="purged"):
             await create_check_run(session, instructor_id, manuscript_id, rubric_id)
+        assert await session.scalar(select(func.count()).select_from(CheckRun)) == before_runs
+        assert await session.scalar(select(func.count()).select_from(AuditLog)) == before_audit
 
 
 async def test_create_check_run_rejects_inactive_rubric(session_factory):

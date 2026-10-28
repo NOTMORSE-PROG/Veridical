@@ -24,7 +24,7 @@
   "native_math_comparison_incomplete": "Some source content or selected Library candidates could not support a verified comparison. Independently supported prose leads remain available; native equations were not compared. This does not establish originality",
   "metadata_comparison_policy_unavailable": "Reference metadata comparison could not run because its comparison policy was unavailable. No lookup or claim-support assessment was made for those DOI references",
   "reference_metadata_policy_unavailable": "Reference metadata could not be parsed because its parsing policy was unavailable. Reference lookups and claim support remain unassessed",
-  "reference_source_projection_unbound": "The saved reference entries could not be matched to the current source inventory. Reference lookups and claim support remain unassessed",
+  "reference_source_projection_unbound": "Reference checks could not establish complete, source-bound coverage of the reference list. Reference lookups and claim support remain unassessed",
   "citation_metadata_comparison_unassessed": "Some reference titles could not be compared reliably because of ambiguous formatting, case or missing metadata. Those comparisons and their claim support remain unassessed",
   "title_hyphenation_unassessed": "Hyphenation differs between the reference title and registry title. The title comparison remains unassessed.",
   "title_case_unassessed": "Title capitalization may change scientific meaning. The title comparison remains unassessed.",

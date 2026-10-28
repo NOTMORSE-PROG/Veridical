@@ -58,6 +58,7 @@ from app.external import openlibrary as openlibrary_client
 from app.external import s2 as s2_client
 from app.external.schemas import VerificationResult
 from app.ingest.analytical_source import analytical_source
+from app.ingest.citation_dates import reference_date_key
 from app.ingest.patterns import HeadingPatterns
 from app.ingest.reference_inventory import (
     reference_row_binding_issues,
@@ -662,7 +663,9 @@ async def run_citation_integrity_check(
     metadata_not_found = 0
     verification_records = []
     usable_metadata = all(
-        c.parse_status == CitationParseStatus.parsed and c.authors and c.year is not None
+        c.parse_status == CitationParseStatus.parsed
+        and c.authors
+        and reference_date_key(c) is not None
         for c in citations
     )
 

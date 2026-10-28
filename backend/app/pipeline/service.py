@@ -340,6 +340,7 @@ async def estimate_rerun_calls(
                     Manuscript.id.in_(manuscript_ids),
                     Manuscript.instructor_id == instructor_id,
                     Manuscript.origin == ManuscriptOrigin.check_upload,
+                    Manuscript.purged_at.is_(None),
                 )
             )
         ).all()

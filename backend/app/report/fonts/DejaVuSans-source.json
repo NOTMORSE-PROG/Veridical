@@ -1,0 +1,40 @@
+{
+  "distribution": "Matplotlib v3.11.1",
+  "files": [
+    {
+      "name": "DejaVuSans.ttf",
+      "status": 200,
+      "matches_local": true,
+      "sha256": "3fdf69cabf06049ea70a00b5919340e2ce1e6d02b0cc3c4b44fb6801bd1e0d22",
+      "url": "https://raw.githubusercontent.com/matplotlib/matplotlib/v3.11.1/lib/matplotlib/mpl-data/fonts/ttf/DejaVuSans.ttf"
+    },
+    {
+      "name": "DejaVuSans-Bold.ttf",
+      "status": 200,
+      "matches_local": true,
+      "sha256": "b184b89e3c1075f22f6b71575b6fc20d4972b3cfd3b23322ca6fd596dcaef167",
+      "url": "https://raw.githubusercontent.com/matplotlib/matplotlib/v3.11.1/lib/matplotlib/mpl-data/fonts/ttf/DejaVuSans-Bold.ttf"
+    },
+    {
+      "name": "DejaVuSans-Oblique.ttf",
+      "status": 200,
+      "matches_local": true,
+      "sha256": "ccdf74b350f11fd3dd5774de50e5e6346a1a5da1f5b7d5fb83590665e97a5213",
+      "url": "https://raw.githubusercontent.com/matplotlib/matplotlib/v3.11.1/lib/matplotlib/mpl-data/fonts/ttf/DejaVuSans-Oblique.ttf"
+    },
+    {
+      "name": "DejaVuSans-BoldOblique.ttf",
+      "status": 200,
+      "matches_local": true,
+      "sha256": "6edf0283160186af451cbee71e7b845f2e4cabf264bb992ce668c83c25465e6f",
+      "url": "https://raw.githubusercontent.com/matplotlib/matplotlib/v3.11.1/lib/matplotlib/mpl-data/fonts/ttf/DejaVuSans-BoldOblique.ttf"
+    },
+    {
+      "name": "LICENSE_DEJAVU",
+      "status": 200,
+      "matches_local": true,
+      "sha256": "d75938dec098f06f0ac3c00853065d94f020be1c3c62ef1dc2975ba15b4d9b0e",
+      "url": "https://raw.githubusercontent.com/matplotlib/matplotlib/v3.11.1/lib/matplotlib/mpl-data/fonts/ttf/LICENSE_DEJAVU"
+    }
+  ]
+}

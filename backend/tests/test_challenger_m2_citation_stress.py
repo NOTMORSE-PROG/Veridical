@@ -76,57 +76,57 @@ def no_database(monkeypatch):
         (
             "Smith, J. (n. d.). Algorithmic foundations. Academic Press.",
             ["Smith, J."],
-            "n.d.",
+            None,
         ),
         (
             "Smith, J. (n.  d.). Algorithmic foundations. Academic Press.",
             ["Smith, J."],
-            "n.d.",
+            None,
         ),
         (
             "Smith, J. (n.   d.). Algorithmic foundations. Academic Press.",
             ["Smith, J."],
-            "n.d.",
+            None,
         ),
         (
             "Smith, J. (N. D.). Algorithmic foundations. Academic Press.",
             ["Smith, J."],
-            "n.d.",
+            None,
         ),
         (
             "Smith, J. (N. d.). Algorithmic foundations. Academic Press.",
             ["Smith, J."],
-            "n.d.",
+            None,
         ),
         (
             "Smith, J. (n. D.). Algorithmic foundations. Academic Press.",
             ["Smith, J."],
-            "n.d.",
+            None,
         ),
         (
             "Smith, J. (n. d.a). Algorithmic foundations. Academic Press.",
             ["Smith, J."],
-            "n.d.",
+            None,
         ),
         (
             "Smith, J. (n. d., May 5). Algorithmic foundations. Academic Press.",
             ["Smith, J."],
-            "n.d.",
+            None,
         ),
         (
             "[1] Smith, J. (n. d.). Algorithmic foundations. Academic Press.",
             ["Smith, J."],
-            "n.d.",
+            None,
         ),
         (
             "1. Smith, J. (n. d.). Algorithmic foundations. Academic Press.",
             ["Smith, J."],
-            "n.d.",
+            None,
         ),
         (
             "World Health Organization. (n. d.). Guidance note. WHO.",
             ["World Health Organization"],
-            "n.d.",
+            None,
         ),
     ],
 )
@@ -136,7 +136,11 @@ def test_reference_spaced_nd_variations_passing(raw_ref, expected_author, expect
     assert draft.parse_status == CitationParseStatus.parsed, (
         f"Failed parsing reference: status={draft.parse_status}, raw={raw_ref}"
     )
+    from app.ingest.citation_dates import reference_date_key
+
     assert draft.year == expected_year
+    assert reference_date_key(draft) == "explicit_no_date"
+    assert draft.raw_text == raw_ref
     assert draft.authors == expected_author
 
 

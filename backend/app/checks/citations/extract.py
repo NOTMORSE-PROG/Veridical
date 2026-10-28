@@ -25,7 +25,7 @@ from typing import Any, Protocol
 from app.checks.citations.numbered import reference_anchor
 from app.config import Settings, get_settings
 from app.findings.identity import FINDING_GROUP_FIELD, finding_group_fingerprint
-from app.ingest.citation_dates import date_patterns
+from app.ingest.citation_dates import date_patterns, reference_date_key
 from app.ingest.reference_metadata_patterns import load_reference_metadata_patterns
 from app.ingest.schemas import TextBlock
 from app.models.enums import FlagSeverity
@@ -984,7 +984,12 @@ def uncited_flags(uncited: list[ReferenceLike]) -> list[CitationFlagDraft]:
             detail={
                 "kind": "uncited_reference",
                 "reason": UNCITED_WORDING.format(
-                    first_author=(ref.authors or ["Unknown"])[0], year=ref.year
+                    first_author=(ref.authors or ["Unknown"])[0],
+                    year=ref.year
+                    if ref.year is not None
+                    else "n.d."
+                    if reference_date_key(ref) == "explicit_no_date"
+                    else "date unavailable",
                 ),
                 "order_index": ref.order_index,
             },

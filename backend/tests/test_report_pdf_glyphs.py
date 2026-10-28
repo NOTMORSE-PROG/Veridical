@@ -51,8 +51,40 @@ def test_fallback_preserves_exact_characters_and_actual_style(markup, fallback):
         assert any(fallback == span["font"] and "α" in span["text"] for span in spans)
 
 
+@pytest.mark.parametrize(
+    "markup,face",
+    [
+        ("{}", "DejaVuSans"),
+        ("<b>{}</b>", "DejaVuSans-Bold"),
+        ("<i>{}</i>", "DejaVuSans-Oblique"),
+        ("<b><i>{}</i></b>", "DejaVuSans-BoldOblique"),
+    ],
+)
+def test_supplemental_source_circle_keeps_exact_text_and_requested_face(markup, face):
+    source = "● Source circle • ordinary bullet α café <source> & text"
+    paragraph = Paragraph(markup.format(escape(source)), _styles(register_fonts())["body"])
+    assert paragraph.getPlainText() == source
+    assert [frag.fontName for frag in paragraph.frags if "●" in frag.text] == [face]
+    stream = BytesIO()
+    SimpleDocTemplate(stream).build([paragraph])
+    with fitz.open(stream=stream.getvalue(), filetype="pdf") as document:
+        assert source in document[0].get_text()
+        spans = [
+            span
+            for block in document[0].get_text("dict")["blocks"]
+            if "lines" in block
+            for line in block["lines"]
+            for span in line["spans"]
+        ]
+        assert any(span["font"] == face and "●" in span["text"] for span in spans)
+
+
+def test_supplemental_family_does_not_replace_existing_plex_coverage():
+    assert list(text_runs("₿", register_fonts())) == [("IBMPlexSans", "₿")]
+
+
 def test_long_unicode_split_keeps_link_anchor_and_complete_source():
-    source = "αβ ≤≥ café <not markup> & text. " * 120
+    source = "● αβ ≤≥ café <not markup> & text. " * 120
     stream = BytesIO()
     style = _styles(register_fonts())["body"]
     flow = [
@@ -71,7 +103,7 @@ def test_long_unicode_split_keeps_link_anchor_and_complete_source():
 
 def test_running_identity_measurement_matches_drawn_fallback():
     font = register_fonts()
-    value = "Research αβ café " * 20
+    value = "Research αβ ● café " * 20
     width = 150
     fitted = _fit_running_identity(value, font, 9, width)
     assert fitted.endswith("...") and text_width(fitted, font, 9) <= width
@@ -91,7 +123,7 @@ def test_running_identity_measurement_matches_drawn_fallback():
         assert max(span["bbox"][2] for span in spans) == pytest.approx(250, abs=0.05)
 
 
-@pytest.mark.parametrize("unsupported", ["\U0010ffff", "cafe\u0301", "\u0301"])
+@pytest.mark.parametrize("unsupported", ["\U0010ffff", "cafe\u0301", "\u0301", "سلام", "עברית"])
 def test_unsupported_character_or_unverified_shaping_never_returns_partial_pdf(unsupported):
     with pytest.raises(ReportExportUnavailableError) as error:
         rendered(report(decision_note=f"Private reason with unsupported {unsupported}."))
