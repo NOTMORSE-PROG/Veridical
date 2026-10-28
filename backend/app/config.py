@@ -917,6 +917,20 @@ class Settings(BaseSettings):
     # archive's embeddings) and Render's paid persistent disk (ground rule 2).
     # `data_dir` stays the local CACHE in both modes -- see `app/storage/`.
     storage_backend: str = "local"
+    # Use a distinct object namespace for every nonproduction database. Empty
+    # preserves the existing production layout; maintenance access is explicit.
+    storage_namespace: str = ""
+    storage_allow_unscoped_access: bool = False
+
+    @field_validator("storage_namespace")
+    @classmethod
+    def validate_storage_namespace(cls, value: str) -> str:
+        if value and (
+            value in (".", "..") or value != value.strip() or any(c in value for c in "/\\:\x00")
+        ):
+            raise ValueError("Storage namespace must be one directory name or empty")
+        return value
+
     # Large manuscript cache fills must not allocate the complete object in RAM.
     storage_download_chunk_bytes: int = Field(default=1_048_576, ge=1, le=8_388_608)
     storage_transfer_chunk_bytes: int = Field(default=8_388_608, ge=5_242_880, le=16_777_216)

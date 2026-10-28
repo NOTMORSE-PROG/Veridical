@@ -112,10 +112,12 @@ class R2Storage:
         secret_access_key: str,
         client_config=None,
         transfer_config=None,
+        namespace: str = "",
     ) -> None:
         import boto3
 
         self._bucket = bucket
+        self._namespace = namespace
         self._transfer_config = transfer_config
         self._client = boto3.client(
             "s3",
@@ -126,17 +128,25 @@ class R2Storage:
             config=client_config,
         )
 
+    def _require_scope(self, key: str) -> None:
+        namespace = getattr(self, "_namespace", "")
+        if namespace and not key.startswith(namespace + "/"):
+            raise ValueError("Storage operation is outside this environment's namespace.")
+
     def put_file(self, local_path: Path, key: str) -> None:
+        self._require_scope(key)
         self._client.upload_file(
             str(local_path), self._bucket, key, Config=getattr(self, "_transfer_config", None)
         )
 
     def upload_stream(self, source: BinaryIO, key: str) -> None:
+        self._require_scope(key)
         self._client.upload_fileobj(
             source, self._bucket, key, Config=getattr(self, "_transfer_config", None)
         )
 
     def get_bytes(self, key: str) -> bytes:
+        self._require_scope(key)
         from botocore.exceptions import ClientError
 
         try:
@@ -155,6 +165,7 @@ class R2Storage:
     def download_to(
         self, key: str, target: BinaryIO, *, chunk_bytes: int, etag: str | None = None
     ) -> None:
+        self._require_scope(key)
         from botocore.exceptions import ClientError
 
         try:
@@ -187,6 +198,7 @@ class R2Storage:
             body.close()
 
     def presign_upload(self, key: str, length: int, ttl: int) -> str:
+        self._require_scope(key)
         return self._client.generate_presigned_url(
             "put_object",
             Params={
@@ -200,9 +212,11 @@ class R2Storage:
         )
 
     def object_metadata(self, key: str) -> dict:
+        self._require_scope(key)
         return self._client.head_object(Bucket=self._bucket, Key=key)
 
     def delete_prefix(self, prefix: str) -> None:
+        self._require_scope(prefix)
         # Callers construct an exact source-specific namespace, never a bucket
         # root or a client-supplied path. Continue from the first page after each
         # deletion so removals cannot invalidate a pagination cursor.
@@ -220,9 +234,11 @@ class R2Storage:
                 self.delete(key)
 
     def delete(self, key: str) -> None:
+        self._require_scope(key)
         self._client.delete_object(Bucket=self._bucket, Key=key)
 
     def exists(self, key: str) -> bool:
+        self._require_scope(key)
         from botocore.exceptions import ClientError
 
         try:
@@ -259,6 +275,12 @@ def get_storage(settings: Settings, *, metadata_probe: bool = False) -> Storage:
                 "R2_SECRET_ACCESS_KEY."
             )
         client_config = None
+        if (
+            settings.veridical_env != "prod"
+            and not settings.storage_namespace
+            and not settings.storage_allow_unscoped_access
+        ):
+            raise RuntimeError("Nonproduction R2 access requires a dedicated STORAGE_NAMESPACE.")
         from boto3.s3.transfer import TransferConfig
 
         transfer_config = TransferConfig(
@@ -281,6 +303,7 @@ def get_storage(settings: Settings, *, metadata_probe: bool = False) -> Storage:
             secret_access_key=settings.r2_secret_access_key,
             client_config=client_config,
             transfer_config=transfer_config,
+            namespace=settings.storage_namespace,
         )
     if settings.storage_backend != "local":
         # backend review finding (BUG-138 review): this used to fall
@@ -304,9 +327,16 @@ def storage_key_for(settings: Settings, path_str: str) -> str:
     honor that convention degrades to "a working, if oddly-namespaced, key"
     instead of a hard failure."""
     try:
-        return Path(path_str).relative_to(settings.data_dir).as_posix()
+        key = Path(path_str).relative_to(settings.data_dir).as_posix()
     except ValueError:
-        return Path(path_str).name
+        key = Path(path_str).name
+    return namespaced_storage_key(settings, key)
+
+
+def namespaced_storage_key(settings: Settings, key: str) -> str:
+    if settings.storage_backend == "r2" and settings.storage_namespace:
+        return f"{settings.storage_namespace}/{key}"
+    return key
 
 
 def ensure_local_file(settings: Settings, storage: Storage, file_ref: str) -> Path:

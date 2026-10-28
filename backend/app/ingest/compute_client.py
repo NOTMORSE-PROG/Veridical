@@ -56,6 +56,7 @@ def extract_remote(
     job = NativeJob(
         job_id=str(uuid4()),
         owner_id=owner_id,
+        storage_namespace=settings.storage_namespace,
         source_key=storage_key_for(settings, path),
         source_sha256=source_sha,
         source_bytes=source.stat().st_size,
@@ -154,6 +155,7 @@ def extract_remote(
                     "owner_id",
                     "source_key",
                     "parser_version",
+                    "storage_namespace",
                     "source_sha256",
                     "policy_sha256",
                 )

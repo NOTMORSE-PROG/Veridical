@@ -26,7 +26,7 @@ from app.models.instructor import Instructor
 from app.models.manuscript import Manuscript
 from app.models.upload_attempt import UploadAttempt
 from app.ratelimit import enforce_action_rate_limit
-from app.storage import R2Storage, get_storage
+from app.storage import R2Storage, get_storage, namespaced_storage_key
 
 router = APIRouter(tags=["ingestion"])
 _relay_gate = threading.BoundedSemaphore(get_settings().direct_upload_relay_transfers)
@@ -186,7 +186,9 @@ async def begin_upload(
             filename=filename,
             source_bytes=body.size,
             upload_transport=settings.direct_upload_transport,
-            staging_key=f"{settings.direct_upload_staging_subdir}/{uuid4()}",
+            staging_key=namespaced_storage_key(
+                settings, f"{settings.direct_upload_staging_subdir}/{uuid4()}"
+            ),
             status="pending",
             expires_at=now + timedelta(seconds=settings.direct_upload_url_ttl_seconds),
         )

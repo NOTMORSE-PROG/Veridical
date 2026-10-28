@@ -85,6 +85,7 @@ def execute_native_job(job: NativeJob, settings: Settings, storage: Storage) -> 
             "source_sha256": job.source_sha256,
             "source_key": job.source_key,
             "parser_version": job.parser_version,
+            "storage_namespace": job.storage_namespace,
             "policy_sha256": job.policy_sha256,
             "extraction": {
                 "key": extraction_key,

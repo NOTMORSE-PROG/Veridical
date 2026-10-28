@@ -36,8 +36,10 @@ def digest(value: bytes) -> str:
     return hashlib.sha256(value).hexdigest()
 
 
-def source_artifact_prefix(settings: Settings, source_key: str) -> str:
-    return f"{settings.native_compute_results_subdir}/{digest(source_key.encode())}/"
+def source_artifact_prefix(settings: Settings, source_key: str, *, namespace=None) -> str:
+    namespace = settings.storage_namespace if namespace is None else namespace
+    base = f"{namespace}/" if namespace else ""
+    return f"{base}{settings.native_compute_results_subdir}/{digest(source_key.encode())}/"
 
 
 def signature(payload: bytes, secret: str) -> str:
@@ -67,6 +69,7 @@ class NativeJob(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
     version: Literal["native-v1"] = "native-v1"
     parser_version: str = Field(default_factory=lambda: package_version("pymupdf"))
+    storage_namespace: str = ""
     job_id: str
     owner_id: int = Field(gt=0)
     source_key: str = Field(min_length=1, max_length=1024)
@@ -99,6 +102,10 @@ class NativeJob(BaseModel):
         return value
 
     def validate_policy(self, settings: Settings) -> Settings:
+        if self.storage_namespace:
+            Settings(_env_file=None, storage_namespace=self.storage_namespace)
+            if not self.source_key.startswith(self.storage_namespace + "/"):
+                raise ValueError("Native source is outside the authorized namespace.")
         if self.parser_version != package_version("pymupdf"):
             raise ValueError("Native parser versions do not match.")
         if (
@@ -116,7 +123,10 @@ class NativeJob(BaseModel):
         return Settings(_env_file=None, **self.policy)
 
     def result_prefix(self, settings: Settings) -> str:
-        return f"{source_artifact_prefix(settings, self.source_key)}{self.job_id}"
+        prefix = source_artifact_prefix(
+            settings, self.source_key, namespace=self.storage_namespace
+        )
+        return f"{prefix}{self.job_id}"
 
 
 def decode_job(payload: bytes, supplied_signature: str, settings: Settings) -> NativeJob:

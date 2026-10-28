@@ -90,7 +90,9 @@ def _source_path_and_key(settings: Settings, file_ref: str) -> tuple[Path, str]:
     candidate = Path(file_ref).resolve()
     if not candidate.is_relative_to(root):
         raise InvalidContentHashSource
-    return candidate, candidate.relative_to(root).as_posix()
+    from app.storage import namespaced_storage_key
+
+    return candidate, namespaced_storage_key(settings, candidate.relative_to(root).as_posix())
 
 
 def _recover_and_hash(

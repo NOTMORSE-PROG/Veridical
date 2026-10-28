@@ -202,7 +202,9 @@ def test_empty_local_cache_is_unknown_without_a_remote_request(tmp_path, monkeyp
 
 def test_probe_client_uses_separate_transport_budget():
     settings = Settings(
+        _env_file=None,
         storage_backend="r2",
+        storage_namespace="probe-transport-test",
         r2_bucket="unit-bucket",
         r2_endpoint_url="https://storage.invalid",
         r2_access_key_id="unit",
