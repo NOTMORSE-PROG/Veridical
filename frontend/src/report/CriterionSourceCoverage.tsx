@@ -8,9 +8,9 @@ export function CriterionSourceCoverage({ value, sourceAction, firstSlot, criter
 }) {
   const state = value.native_math_inventory_state;
   if (state === "not_applicable") return null;
-  if (state === "not_recorded" || state === "unavailable") return <p><strong>{state === "not_recorded" ? "Source coverage not recorded." : "Source coverage unavailable."}</strong>{" "}
-    {state === "not_recorded" ? "The saved assessment has no verified record of equation coverage." : "The saved record of equation coverage could not be verified."}{" "}
-    Equation presence and count are unknown.</p>;
+  if (state === "not_recorded" || state === "unavailable") return <p><strong>{state === "not_recorded" ? "Automatic equation check not recorded." : "Automatic equation check unavailable."}</strong>{" "}
+    {state === "not_recorded" ? "This saved assessment does not confirm whether equations were checked." : "The saved record could not confirm whether equations were checked."}{" "}
+    It is unknown whether the manuscript contains equations or how many.</p>;
   const total = value.n_native_equations_unassessed!;
   if (total === 0) return <p className="signal-field-hint">The saved main-document-body inventory recorded no native Word equations.</p>;
   const unlocated = value.n_native_equations_unlocated!;

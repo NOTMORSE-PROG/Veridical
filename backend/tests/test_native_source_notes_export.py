@@ -170,17 +170,22 @@ def test_different_and_unknown_inventory_notes_preserve_counts_without_summing()
     assert "2 native Word equation occurrences remain unassessed" in text
     assert "3 native Word equation" not in text
     assert (
-        "no verified record of equation coverage" in text
-        and "record of equation coverage could not be verified" in text
+        "This saved assessment does not confirm whether equations were checked" in text
+        and "The saved record could not confirm whether equations were checked" in text
     )
-    assert text.count("Equation presence and count are unknown") == 2
+    assert text.count("It is unknown whether the manuscript contains equations or how many") == 2
     with fitz.open(stream=payload, filetype="pdf") as document:
         for page in document:
             page_text = page.get_text()
             if "Saved source coverage - note 3\n" in page_text:
-                assert "no verified record of equation coverage" in page_text
+                assert (
+                    "This saved assessment does not confirm whether equations were checked"
+                    in page_text
+                )
             if "Saved source coverage - note 4\n" in page_text:
-                assert "record of equation coverage could not be verified" in page_text
+                assert (
+                    "The saved record could not confirm whether equations were checked" in page_text
+                )
     assert data.model_dump_json() == before
 
 
@@ -252,9 +257,9 @@ def test_criterion_input_limit_precedes_automated_basis_and_keeps_manual_attribu
         assert texts.index("Earlier automated assessment input") > next(
             i for i, value in enumerate(texts) if "CURRENT_INSTRUCTOR_REASON" in value
         )
-        assert "Saved automated assessment input" not in whole
+        assert "What was checked automatically" not in whole
     else:
-        assert texts.index("Saved automated assessment input") < texts.index(
+        assert texts.index("What was checked automatically") < texts.index(
             "SAVED_AUTOMATED_EXPLANATION"
         )
     assert row.model_dump_json() == before
@@ -280,10 +285,8 @@ def test_criterion_unknown_input_is_distinct_from_inapplicability(state):
     if state == "not_applicable":
         assert not whole
     else:
-        assert "Equation presence and count are unknown" in whole
-        assert (
-            "no verified record" if state == "not_recorded" else "could not be verified"
-        ) in whole
+        assert "It is unknown whether the manuscript contains equations or how many" in whole
+        assert ("does not confirm" if state == "not_recorded" else "could not confirm") in whole
         assert "0 native" not in whole
 
 
@@ -302,8 +305,8 @@ def test_unversioned_inapplicable_claim_stays_unavailable_in_print():
     whole = " ".join(
         part.getPlainText() for part in _criterion_source_flowables(row, _styles(_register_fonts()))
     )
-    assert "record of equation coverage could not be verified" in whole
-    assert "Equation presence and count are unknown" in whole
+    assert "The saved record could not confirm whether equations were checked" in whole
+    assert "It is unknown whether the manuscript contains equations or how many" in whole
 
 
 def test_old_automatic_result_is_qualified_without_changing_manual_grade_or_saved_values():
@@ -347,4 +350,42 @@ def test_empty_visual_readings_are_omitted_but_nonempty_unassessed_readings_rema
         assert "Saved visual readings" in text
         assert "SAVED_IMAGE_LIMIT" in text and state in text
         assert "0 of 1 image occurrences. 1 remain unassessed" in text
+    assert data.model_dump_json() == before
+
+
+def test_adjacent_unread_figures_share_status_text_without_losing_any_source_identity():
+    from app.ingest.schemas import FigureReading
+
+    data = _data()
+    data.report.figure_readings = [
+        FigureReading(
+            image_index=index,
+            status="unavailable",
+            reason="SAVED_LIMIT_A",
+            source_binding={"locator": {"paragraph": index}},
+        )
+        for index in range(39)
+    ] + [
+        FigureReading(
+            image_index=39,
+            status="needs_review",
+            reason="SAVED_LIMIT_A",
+            source_binding={"locator": {"paragraph": 39}},
+        ),
+        FigureReading(
+            image_index=40,
+            status="unavailable",
+            reason="SAVED_LIMIT_A",
+            source_binding={"locator": {"paragraph": 40}},
+        ),
+    ]
+    before = data.model_dump_json()
+    whole = _text(build_report_pdf(data))
+    assert "No saved visual reading is available for these 39 image entries." in whole
+    assert whole.count("No saved visual reading is available for this image entry.") == 2
+    for index in range(41):
+        assert whole.count(f"Source image {index + 1} - Extracted paragraph {index + 1}") == 1
+    assert whole.count("Recorded status: unavailable. Recorded reason: SAVED_LIMIT_A") == 2
+    assert whole.count("Recorded status: needs_review. Recorded reason: SAVED_LIMIT_A") == 1
+    assert "41 remain unassessed" in whole
     assert data.model_dump_json() == before

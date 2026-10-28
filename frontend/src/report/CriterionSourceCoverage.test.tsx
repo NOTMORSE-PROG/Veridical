@@ -19,7 +19,7 @@ it.each(["not_recorded", "unavailable"] as const)("does not invent a Word source
   show({ ...zero, native_math_coverage_version: null, native_math_inventory_state: state,
     native_math_inventory_scope: null, n_native_equations_unassessed: null,
     n_native_equations_unlocated: null });
-  expect(screen.getByText(/Equation presence and count are unknown/)).toBeVisible();
+  expect(screen.getByText(/It is unknown whether the manuscript contains equations or how many/)).toBeVisible();
   expect(screen.queryByText(/Word/)).not.toBeInTheDocument();
 });
 it("keeps a measured zero quiet and distinct from non-applicable coverage", () => {

@@ -1381,6 +1381,13 @@ def build_report_pdf(data: ReportExportData) -> bytes:
     flow.append(Paragraph("Grades at a glance", styles["h2"]))
     for row in report.results:
         label, _tone = _result_display(row)
+        if row.outcome in NEEDS_REVIEW_OUTCOMES and not row.resolution:
+            label = {
+                "escalated": "Needs review",
+                "unverifiable": "Not assessed: source could not be verified",
+                "api_down": "Not assessed: service unavailable",
+                "quota_exhausted": "Not assessed: AI capacity reached",
+            }.get(row.outcome, label)
         flow.append(
             Paragraph(
                 f'<link href="#criterion-{row.criterion_id}">'
@@ -1702,17 +1709,63 @@ def build_report_pdf(data: ReportExportData) -> bytes:
                 styles["body"],
             )
         )
-        for item in readings:
+
+        def figure_anchor(item):
             location = item.source_binding.get("locator", {})
             if not isinstance(location, dict):
                 location = {}
-            anchor = (
+            return (
                 f"Extracted paragraph {location['paragraph'] + 1}"
                 if type(location.get("paragraph")) is int
                 else f"Page {location['page']}"
                 if type(location.get("page")) is int
                 else "Source location unavailable"
             )
+
+        reading_groups = []
+        for item in readings:
+            if (
+                item.status != "available"
+                and reading_groups
+                and reading_groups[-1][0].status == item.status
+                and reading_groups[-1][0].reason == item.reason
+            ):
+                reading_groups[-1].append(item)
+            else:
+                reading_groups.append([item])
+        for reading_group in reading_groups:
+            item = reading_group[0]
+            anchor = figure_anchor(item)
+            if item.status != "available":
+                flow.append(
+                    Paragraph(
+                        "No saved visual reading is available for "
+                        + (
+                            "this image entry."
+                            if len(reading_group) == 1
+                            else f"these {len(reading_group)} image entries."
+                        ),
+                        styles["body"],
+                    )
+                )
+                flow.append(
+                    Paragraph(
+                        escape(
+                            "; ".join(
+                                f"Source image {value.image_index + 1} - {figure_anchor(value)}"
+                                for value in reading_group
+                            )
+                        ),
+                        styles["body"],
+                    )
+                )
+                flow.append(
+                    Paragraph(
+                        escape(f"Recorded status: {item.status}. Recorded reason: {item.reason}"),
+                        styles["caption"],
+                    )
+                )
+                continue
             flow.append(
                 Paragraph(
                     escape(
