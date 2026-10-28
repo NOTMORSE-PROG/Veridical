@@ -56,6 +56,7 @@ async def test_supported_verdict_produces_no_flag():
 
 async def test_batched_claim_links_bind_global_pair_and_own_saved_reference():
     from types import SimpleNamespace
+
     from app.checks.citations.source_locator import citation_source_locator
 
     pairs = [

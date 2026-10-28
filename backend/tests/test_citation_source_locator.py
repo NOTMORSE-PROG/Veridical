@@ -5,8 +5,11 @@ from types import SimpleNamespace
 
 import pytest
 
-from app.checks.citations.source_locator import citation_source_locator, with_reference_locator
-from app.checks.citations.source_locator import with_claim_reference_locator
+from app.checks.citations.source_locator import (
+    citation_source_locator,
+    with_claim_reference_locator,
+    with_reference_locator,
+)
 from app.config import Settings
 
 

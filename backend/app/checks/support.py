@@ -88,12 +88,16 @@ def _capability_failure(batch, criterion, detail):
     guarded = [
         {"key": key, "capabilities": needed}
         for key, text in obligations.items()
-        if (needed := [
-            capability for capability in (
-                "external_verification_required", "collection_assessment_required"
-            )
-            if any(pattern.search(" ".join(text.split())) for pattern in patterns[capability])
-        ])
+        if (
+            needed := [
+                capability
+                for capability in (
+                    "external_verification_required",
+                    "collection_assessment_required",
+                )
+                if any(pattern.search(" ".join(text.split())) for pattern in patterns[capability])
+            ]
+        )
     ]
     if not guarded:
         return None

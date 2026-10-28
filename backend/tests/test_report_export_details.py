@@ -25,21 +25,35 @@ def test_resolved_record_preserves_original_assessment_and_source_authority(sour
     data = _data(flags=[])
     row = data.report.results[0]
     data.report.results = [row]
-    row.resolution = ResolutionOut(type="mark_pass", reason="TEACHER_COMMENT_MARKER",
-                                   ai_majority_verdict=None)
+    row.resolution = ResolutionOut(
+        type="mark_pass", reason="TEACHER_COMMENT_MARKER", ai_majority_verdict=None
+    )
     row.reasoning = "ORIGINAL_SYSTEM_EXPLANATION_MARKER"
     row.reason = "DISTINCT_SYSTEM_NOTE_MARKER"
-    row.evidence = [EvidenceItem(quote=f"SAVED_COMPLETE_QUOTE_{index}", anchor=f"page {index + 1}")
-                    for index in range(2)]
+    row.evidence = [
+        EvidenceItem(quote=f"SAVED_COMPLETE_QUOTE_{index}", anchor=f"page {index + 1}")
+        for index in range(2)
+    ]
     data.source_evidence = None if source_mode == "legacy" else []
     if source_mode == "bound":
-        data.source_evidence = [SourceEvidencePrintOut(
-            reference_id=str(index) * 64, criterion_id=row.criterion_id, flag_id=None,
-            role="criterion_evidence", index=index, quote=item.quote, anchor=item.anchor,
-            placement_state="unavailable", image=PageEvidenceImageOut(
-                image_png=None, page=None, reason="The original source is unavailable.",
-            ),
-        ) for index, item in enumerate(row.evidence)]
+        data.source_evidence = [
+            SourceEvidencePrintOut(
+                reference_id=str(index) * 64,
+                criterion_id=row.criterion_id,
+                flag_id=None,
+                role="criterion_evidence",
+                index=index,
+                quote=item.quote,
+                anchor=item.anchor,
+                placement_state="unavailable",
+                image=PageEvidenceImageOut(
+                    image_png=None,
+                    page=None,
+                    reason="The original source is unavailable.",
+                ),
+            )
+            for index, item in enumerate(row.evidence)
+        ]
     before = data.model_dump_json()
     with fitz.open(stream=build_report_pdf(data), filetype="pdf") as document:
         text = " ".join(" ".join(page.get_text().split()) for page in document)

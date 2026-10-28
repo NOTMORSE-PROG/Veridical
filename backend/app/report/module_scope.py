@@ -6,8 +6,10 @@ from app.report.schemas import IntegrityModuleOut
 from app.report.statistical_scope import statistical_check_scope
 
 MODULE_KINDS = (
-    CheckKind.internal_agreement, CheckKind.citation_integrity,
-    CheckKind.statistical_forensics, CheckKind.originality_reuse,
+    CheckKind.internal_agreement,
+    CheckKind.citation_integrity,
+    CheckKind.statistical_forensics,
+    CheckKind.originality_reuse,
 )
 
 
@@ -27,15 +29,14 @@ def integrity_modules(
             if (
                 detail.get("coverage_reason") is not None
                 and not isinstance(detail["coverage_reason"], str)
-            ) or (
-                "comparison_ran" in detail and type(detail["comparison_ran"]) is not bool
-            ):
+            ) or ("comparison_ran" in detail and type(detail["comparison_ran"]) is not bool):
                 output.append(IntegrityModuleOut(check_kind=kind.value, state="not_recorded"))
                 continue
             if row.outcome in {ResultOutcome.api_down, ResultOutcome.quota_exhausted}:
                 state = "incomplete"
             elif kind.value in incomplete_kinds or row.outcome in {
-                ResultOutcome.escalated, ResultOutcome.unverifiable,
+                ResultOutcome.escalated,
+                ResultOutcome.unverifiable,
             }:
                 state = "partial"
             elif row.outcome == ResultOutcome.not_applicable:
@@ -52,8 +53,10 @@ def integrity_modules(
                     state = "not_recorded"
             if kind == CheckKind.originality_reuse and (
                 detail.get("comparison_ran") is False
-                or detail.get("coverage_reason") in {
-                    "no_comparison_archive", "source_reading_order_unresolved",
+                or detail.get("coverage_reason")
+                in {
+                    "no_comparison_archive",
+                    "source_reading_order_unresolved",
                 }
             ):
                 state = "incomplete"

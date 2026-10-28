@@ -25,7 +25,8 @@ from app.report.statistical_scope import StatisticalCheckScopeOut, statistical_c
 )
 def test_saved_state_preserves_applicability_and_uncertainty(outcomes, state):
     assert statistical_check_scope(outcomes).model_dump() == {
-        "state": state, "unassessed_descriptive_rows": 0
+        "state": state,
+        "unassessed_descriptive_rows": 0,
     }
 
 

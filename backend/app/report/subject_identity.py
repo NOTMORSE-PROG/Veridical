@@ -77,14 +77,19 @@ async def record_check_subject(
     """Called only during NEW run creation, under the manuscript row lock."""
     assignment = current_receipt(manuscript.group_confirmation, manuscript.group_id)
     selection = current_selection_receipt(
-        manuscript.group_confirmation, manuscript.group_id,
-        manuscript_id=manuscript.id, instructor_id=manuscript.instructor_id,
+        manuscript.group_confirmation,
+        manuscript.group_id,
+        manuscript_id=manuscript.id,
+        instructor_id=manuscript.instructor_id,
     )
     if assignment is None and selection is None:
         return
-    owned_group = await session.scalar(select(Group.id).where(
-        Group.id == manuscript.group_id, Group.instructor_id == manuscript.instructor_id,
-    ))
+    owned_group = await session.scalar(
+        select(Group.id).where(
+            Group.id == manuscript.group_id,
+            Group.instructor_id == manuscript.instructor_id,
+        )
+    )
     if owned_group is None:
         return
     values = {
@@ -106,17 +111,29 @@ async def record_check_subject(
         # Legacy uploads without a recorded source hash have no bound identity.
         return
     await write_audit_event(
-        session, event_type=SUBJECT_EVENT, check_run_id=run.id,
-        manuscript_id=manuscript.id, payload=receipt.model_dump(mode="json"),
+        session,
+        event_type=SUBJECT_EVENT,
+        check_run_id=run.id,
+        manuscript_id=manuscript.id,
+        payload=receipt.model_dump(mode="json"),
     )
 
 
 async def recorded_check_subject(
     session: AsyncSession, run: CheckRun, manuscript: Manuscript
 ) -> ReportSubjectOut:
-    events = list((await session.scalars(select(AuditLog).where(
-        AuditLog.check_run_id == run.id, AuditLog.event_type == SUBJECT_EVENT,
-    ).limit(2))).all())
+    events = list(
+        (
+            await session.scalars(
+                select(AuditLog)
+                .where(
+                    AuditLog.check_run_id == run.id,
+                    AuditLog.event_type == SUBJECT_EVENT,
+                )
+                .limit(2)
+            )
+        ).all()
+    )
     if (
         len(events) != 1
         or events[0].manuscript_id != manuscript.id

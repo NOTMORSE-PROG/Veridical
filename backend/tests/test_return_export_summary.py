@@ -141,7 +141,8 @@ def test_front_summary_link_reaches_the_complete_decision_note(note):
     with rendered(report(decision_note=note)) as document:
         links = [link for link in document[0].get_links() if link["kind"] == fitz.LINK_GOTO]
         summary_links = [
-            link for link in links
+            link
+            for link in links
             if "See decision reason and full decision record."
             in " ".join(document[0].get_textbox(fitz.Rect(link["from"]) + (-2, -2, 2, 2)).split())
         ]

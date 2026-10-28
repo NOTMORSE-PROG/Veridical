@@ -13,18 +13,29 @@ from tests.test_checks_semantic import FakeCriterion
 
 
 def candidate(index, *, quotes=None, verdict="pass"):
-    return {"index": index, "verdict": verdict, "reasoning": f"Recorded explanation {index}",
-            "evidence_quotes": (
-                [f"Unique saved source statement {index}."] if quotes is None else quotes
-            )}
+    return {
+        "index": index,
+        "verdict": verdict,
+        "reasoning": f"Recorded explanation {index}",
+        "evidence_quotes": (
+            [f"Unique saved source statement {index}."] if quotes is None else quotes
+        ),
+    }
 
 
 def fixture():
     criteria = [FakeCriterion(index + 1, f"Custom requirement {index}") for index in range(8)]
-    batch = SemanticBatch("whole document", [TextBlock(
-        page=7, text=" ".join(f"Unique saved source statement {index}." for index in range(8)),
-        max_font_size=11, bold_ratio=0,
-    )])
+    batch = SemanticBatch(
+        "whole document",
+        [
+            TextBlock(
+                page=7,
+                text=" ".join(f"Unique saved source statement {index}." for index in range(8)),
+                max_font_size=11,
+                bold_ratio=0,
+            )
+        ],
+    )
     return batch, criteria
 
 
@@ -46,11 +57,19 @@ async def test_two_invalid_items_repair_only_their_own_pass_and_preserve_six_sib
     initial = [candidate(index, quotes=[] if index in {6, 7} else None) for index in range(8)]
     repaired = candidate(6)
     repaired["index"] = 0
-    llm = Scripted([{"verdicts": initial}, {"verdicts": [repaired]},
-                    {"verdicts": [candidate(0, quotes=[])]}])
-    out = await grade_batch_verdicts(batch, criteria, llm, None, "page",
-                                    consistency_pass="pass_2", prompt_version="v4",
-                                    annotator_stance="INDEPENDENT_REVIEWER_STANCE")
+    llm = Scripted(
+        [{"verdicts": initial}, {"verdicts": [repaired]}, {"verdicts": [candidate(0, quotes=[])]}]
+    )
+    out = await grade_batch_verdicts(
+        batch,
+        criteria,
+        llm,
+        None,
+        "page",
+        consistency_pass="pass_2",
+        prompt_version="v4",
+        annotator_stance="INDEPENDENT_REVIEWER_STANCE",
+    )
     assert len(llm.calls) == 3
     for index in range(6):
         assert out[index + 1].verdict == "pass"
@@ -65,7 +84,9 @@ async def test_two_invalid_items_repair_only_their_own_pass_and_preserve_six_sib
         assert context["consistency_pass"] == "pass_2"
         assert context["grading_response_contract"] == "indexed-item-recovery-v1"
     assert [call[3]["recovery_phase"] for call in llm.calls] == [
-        "batch", "criterion_repair", "criterion_repair",
+        "batch",
+        "criterion_repair",
+        "criterion_repair",
     ]
 
 
@@ -85,8 +106,9 @@ def test_duplicate_invalid_index_is_still_global_and_permuted_unique_indices_are
 
 async def test_uncertainty_is_withholding_and_does_not_spend_an_item_repair():
     batch, criteria = fixture()
-    llm = Scripted([{"verdicts": [candidate(index, quotes=[], verdict="uncertain")
-                                for index in range(8)]}])
+    llm = Scripted(
+        [{"verdicts": [candidate(index, quotes=[], verdict="uncertain") for index in range(8)]}]
+    )
     out = await grade_batch_verdicts(batch, criteria, llm, None, "page")
     assert len(llm.calls) == 1
     assert all(item.verdict is None and item.anchors is None for item in out.values())
@@ -97,8 +119,16 @@ async def test_item_recovery_limit_withholds_remaining_items_without_more_calls(
     batch, criteria = fixture()
     repaired = candidate(6)
     repaired["index"] = 0
-    llm = Scripted([{"verdicts": [candidate(index, quotes=[] if index >= 6 else None)
-                                for index in range(8)]}, {"verdicts": [repaired]}])
+    llm = Scripted(
+        [
+            {
+                "verdicts": [
+                    candidate(index, quotes=[] if index >= 6 else None) for index in range(8)
+                ]
+            },
+            {"verdicts": [repaired]},
+        ]
+    )
     out = await grade_batch_verdicts(batch, criteria, llm, None, "page")
     assert len(llm.calls) == 2
     assert out[7].verdict == "pass"
@@ -109,8 +139,16 @@ async def test_provider_interruption_during_recovery_propagates_without_a_partia
     from app.errors import QuotaExhaustedError
 
     batch, criteria = fixture()
-    llm = Scripted([{"verdicts": [candidate(index, quotes=[] if index == 7 else None)
-                                for index in range(8)]}, QuotaExhaustedError("Controlled quota")])
+    llm = Scripted(
+        [
+            {
+                "verdicts": [
+                    candidate(index, quotes=[] if index == 7 else None) for index in range(8)
+                ]
+            },
+            QuotaExhaustedError("Controlled quota"),
+        ]
+    )
     with pytest.raises(QuotaExhaustedError):
         await grade_batch_verdicts(batch, criteria, llm, None, "page")
     assert len(llm.calls) == 2

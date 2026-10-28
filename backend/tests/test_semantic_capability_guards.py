@@ -97,19 +97,21 @@ async def test_absent_policy_override_and_repeated_quote_cannot_bypass_both_capa
         label="Unrelated collection", context_text=QUOTE, scope_patterns_file=None
     )
     detail = {"verdict": verdict, "evidence": [{"quote": QUOTE}] * 20, "score": 1}
-    support = (
-        await check_support(batch, [(item, detail)], Client("supported"), check_run_id=6)
-    )[73]
+    support = (await check_support(batch, [(item, detail)], Client("supported"), check_run_id=6))[
+        73
+    ]
     outcome, guarded = apply_support(ResultOutcome.passed, detail, support)
     assert outcome == ResultOutcome.escalated
     assert "score" not in guarded and "verdict" not in guarded
     assert guarded["proposed_verdict"] == verdict
     assert len(guarded["evidence"]) == 20
     assert support["missing_capabilities"] == [
-        "collection_assessment_required", "external_verification_required"
+        "collection_assessment_required",
+        "external_verification_required",
     ]
     assert {row["key"] for row in support["guarded_obligations"]} == {
-        "evidence_request", "level_descriptor"
+        "evidence_request",
+        "level_descriptor",
     }
 
 

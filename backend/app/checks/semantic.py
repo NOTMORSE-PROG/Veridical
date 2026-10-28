@@ -544,16 +544,25 @@ async def grade_batch_verdicts(
         if verdict is None or anchors is None:
             if recovered_criteria >= settings.semantic_item_recovery_max_criteria:
                 out[criterion.id] = GradedVerdict(
-                    criterion.id, None, verdict.reasoning if verdict else None,
-                    verdict.evidence_quotes if verdict else None, None,
+                    criterion.id,
+                    None,
+                    verdict.reasoning if verdict else None,
+                    verdict.evidence_quotes if verdict else None,
+                    None,
                     "This criterion remains unassessed because the configured item-recovery "
                     "budget was reached. Review its source before grading.",
                 )
                 continue
             recovered_criteria += 1
             retry = await _grade_single_criterion(
-                criterion, batch, llm, check_run_id, anchor_kind, consistency_pass=consistency_pass,
-                prompt_version=prompt_version, annotator_stance=annotator_stance,
+                criterion,
+                batch,
+                llm,
+                check_run_id,
+                anchor_kind,
+                consistency_pass=consistency_pass,
+                prompt_version=prompt_version,
+                annotator_stance=annotator_stance,
                 recovery_phase="criterion_repair",
             )
             if retry is None:
@@ -583,15 +592,20 @@ async def grade_batch_verdicts(
                         None,
                         None,
                         "This criterion's grading response could not be validated after its "
-                        "item retry." if i in parsed.invalid_indices else
-                        "No verdict was returned for this criterion, even after a retry.",
+                        "item retry."
+                        if i in parsed.invalid_indices
+                        else "No verdict was returned for this criterion, even after a retry.",
                     )
                 continue
             retry_verdict, retry_anchors = retry
             if retry_verdict.verdict == "uncertain":
                 out[criterion.id] = GradedVerdict(
-                    criterion.id, None, retry_verdict.reasoning,
-                    retry_verdict.evidence_quotes, None, retry_verdict.reasoning,
+                    criterion.id,
+                    None,
+                    retry_verdict.reasoning,
+                    retry_verdict.evidence_quotes,
+                    None,
+                    retry_verdict.reasoning,
                 )
                 continue
             if retry_anchors is not None:

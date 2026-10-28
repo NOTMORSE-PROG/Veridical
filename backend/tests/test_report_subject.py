@@ -10,10 +10,17 @@ from app.report.subject_identity import subject_from_receipt
 def bound_subject():
     manuscript = Manuscript(id=7, instructor_id=2, content_hash="a" * 64, group_id=3)
     run = CheckRun(id=11, manuscript_id=7)
-    receipt = dict(version=1, instructor_id=2, manuscript_id=7, check_run_id=11,
-                   group_id=3, source_sha256="a" * 64,
-                   basis="confirmed_assignment_at_check", title="An unrelated study",
-                   member_names=["Ana Cruz", "José Reyes"])
+    receipt = dict(
+        version=1,
+        instructor_id=2,
+        manuscript_id=7,
+        check_run_id=11,
+        group_id=3,
+        source_sha256="a" * 64,
+        basis="confirmed_assignment_at_check",
+        title="An unrelated study",
+        member_names=["Ana Cruz", "José Reyes"],
+    )
     return manuscript, run, receipt
 
 
@@ -27,13 +34,24 @@ def test_recorded_identity_survives_current_group_reassignment_without_enrichmen
     assert set(out.model_dump()) == {"basis", "title", "member_names"}
 
 
-@pytest.mark.parametrize("change", [
-    {"version": True}, {"version": "1"}, {"version": 2},
-    {"instructor_id": 9}, {"manuscript_id": 8}, {"check_run_id": 10},
-    {"source_sha256": "b" * 64}, {"source_sha256": None}, {"group_id": False},
-    {"member_names": "Ana"}, {"member_names": [9]}, {"basis": "inferred"},
-    {"private_note": "must never be exposed"},
-])
+@pytest.mark.parametrize(
+    "change",
+    [
+        {"version": True},
+        {"version": "1"},
+        {"version": 2},
+        {"instructor_id": 9},
+        {"manuscript_id": 8},
+        {"check_run_id": 10},
+        {"source_sha256": "b" * 64},
+        {"source_sha256": None},
+        {"group_id": False},
+        {"member_names": "Ana"},
+        {"member_names": [9]},
+        {"basis": "inferred"},
+        {"private_note": "must never be exposed"},
+    ],
+)
 def test_malformed_or_foreign_receipts_are_unknown(change):
     manuscript, run, receipt = bound_subject()
     receipt.update(change)

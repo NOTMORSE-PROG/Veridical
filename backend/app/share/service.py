@@ -146,36 +146,66 @@ async def _record_public_details(session: AsyncSession, link: ShareLink) -> None
     report = await report_out_for_check_run(session, run)
     manuscript = await session.get(Manuscript, run.manuscript_id)
     details = []
-    rows = (await session.execute(select(Flag, CheckResult).join(
-        CheckResult, CheckResult.id == Flag.check_result_id,
-    ).where(CheckResult.check_run_id == run.id).order_by(Flag.id))).all()
+    rows = (
+        await session.execute(
+            select(Flag, CheckResult)
+            .join(
+                CheckResult,
+                CheckResult.id == Flag.check_result_id,
+            )
+            .where(CheckResult.check_run_id == run.id)
+            .order_by(Flag.id)
+        )
+    ).all()
     for flag, result in rows:
-        private = await _to_flag_out(session, flag, result, manuscript, run,
-                                     assessment_revision=saved.assessment_revision)
-        details.append(PublicFindingDetailOut(
-            id=private.id, ai_verdict_summary=private.ai_verdict_summary,
-            ai_reasoning=private.ai_reasoning, agreement_pair=private.agreement_pair,
-            passage_pair=private.passage_pair, p_value_comparison=private.p_value_comparison,
-            citation_metadata_comparison=private.citation_metadata_comparison,
-            citation_source_locator=private.citation_source_locator,
-            citation_metadata_review_warning=private.citation_metadata_review_warning,
-        ))
+        private = await _to_flag_out(
+            session, flag, result, manuscript, run, assessment_revision=saved.assessment_revision
+        )
+        details.append(
+            PublicFindingDetailOut(
+                id=private.id,
+                ai_verdict_summary=private.ai_verdict_summary,
+                ai_reasoning=private.ai_reasoning,
+                agreement_pair=private.agreement_pair,
+                passage_pair=private.passage_pair,
+                p_value_comparison=private.p_value_comparison,
+                citation_metadata_comparison=private.citation_metadata_comparison,
+                citation_source_locator=private.citation_source_locator,
+                citation_metadata_review_warning=private.citation_metadata_review_warning,
+            )
+        )
     snapshot = PublicShareSnapshot(
-        version=1, check_run_id=run.id, assessment_revision=saved.assessment_revision,
-        token_sha256=hashlib.sha256(link.token.encode()).hexdigest(), subject=report.subject,
-        integrity_modules=report.integrity_modules, finding_details=details,
+        version=1,
+        check_run_id=run.id,
+        assessment_revision=saved.assessment_revision,
+        token_sha256=hashlib.sha256(link.token.encode()).hexdigest(),
+        subject=report.subject,
+        integrity_modules=report.integrity_modules,
+        finding_details=details,
     )
-    await write_audit_event(session, event_type=_SHARE_SNAPSHOT_EVENT, check_run_id=run.id,
-                            payload=snapshot.model_dump(mode="json"))
+    await write_audit_event(
+        session,
+        event_type=_SHARE_SNAPSHOT_EVENT,
+        check_run_id=run.id,
+        payload=snapshot.model_dump(mode="json"),
+    )
 
 
 async def _public_details(session: AsyncSession, link: ShareLink, report: ReportOut):
     digest = hashlib.sha256(link.token.encode()).hexdigest()
-    rows = list((await session.scalars(select(AuditLog).where(
-        AuditLog.check_run_id == link.check_run_id,
-        AuditLog.event_type == _SHARE_SNAPSHOT_EVENT,
-        AuditLog.payload["token_sha256"].astext == digest,
-    ).limit(2))).all())
+    rows = list(
+        (
+            await session.scalars(
+                select(AuditLog)
+                .where(
+                    AuditLog.check_run_id == link.check_run_id,
+                    AuditLog.event_type == _SHARE_SNAPSHOT_EVENT,
+                    AuditLog.payload["token_sha256"].astext == digest,
+                )
+                .limit(2)
+            )
+        ).all()
+    )
     if len(rows) != 1 or rows[0].created_at != link.created_at:
         return None, "not_recorded"
     try:
@@ -307,6 +337,9 @@ async def get_shared_report(session: AsyncSession, token: str) -> SharedReportOu
     current_run = await authorize_evidence_run(session, token=token)
     if current_run.id != check_run.id:
         raise NotFoundError("This link doesn't exist.")
-    return SharedReportOut(report=public, flags=flags,
-                           finding_details=snapshot.finding_details if snapshot else [],
-                           detail_snapshot=state)
+    return SharedReportOut(
+        report=public,
+        flags=flags,
+        finding_details=snapshot.finding_details if snapshot else [],
+        detail_snapshot=state,
+    )

@@ -592,7 +592,8 @@ def test_shared_report_public_schema_is_an_exact_allow_list(
     assert shared["report"]["subject"]["basis"] == "not_recorded"
     assert type(shared["report"]["historical_native_math_unverified"]) is bool
     assert shared["report"]["statistical_check_scope"] == {
-        "state": "not_recorded", "unassessed_descriptive_rows": 0
+        "state": "not_recorded",
+        "unassessed_descriptive_rows": 0,
     }
     assert set(shared["report"]["results"][0].keys()) == {
         "criterion_id",
@@ -627,7 +628,8 @@ def test_shared_report_public_schema_is_an_exact_allow_list(
 
 
 def test_new_link_details_are_allowlisted_and_revision_bound(
-    logged_in_with_a_done_run, api_scratch_url,
+    logged_in_with_a_done_run,
+    api_scratch_url,
 ):
     import asyncio
 
@@ -645,27 +647,47 @@ def test_new_link_details_are_allowlisted_and_revision_bound(
         try:
             async with async_sessionmaker(engine, expire_on_commit=False)() as session:
                 if revision:
-                    await session.execute(update(ReadinessReport).where(
-                        ReadinessReport.check_run_id == run_id,
-                    ).values(assessment_revision=ReadinessReport.assessment_revision + 1))
+                    await session.execute(
+                        update(ReadinessReport)
+                        .where(
+                            ReadinessReport.check_run_id == run_id,
+                        )
+                        .values(assessment_revision=ReadinessReport.assessment_revision + 1)
+                    )
                 else:
-                    result = CheckResult(check_run_id=run_id, criterion_id=None,
-                        kind=CheckKind.internal_agreement, outcome=ResultOutcome.escalated,
-                        score=None, detail={})
+                    result = CheckResult(
+                        check_run_id=run_id,
+                        criterion_id=None,
+                        kind=CheckKind.internal_agreement,
+                        outcome=ResultOutcome.escalated,
+                        score=None,
+                        detail={},
+                    )
                     session.add(result)
                     await session.flush()
-                    session.add(Flag(check_result_id=result.id, severity=FlagSeverity.low,
-                        confidence=None, evidence_excerpt="The saved manuscript statement.",
-                        page_anchor="page 2", overridden=True,
-                        annotation="PRIVATE_ANNOTATION_NEVER_SHARED",
-                        override_reason="PRIVATE_DISMISSAL_NEVER_SHARED",
-                        detail={"kind": "agreement_contradictory",
+                    session.add(
+                        Flag(
+                            check_result_id=result.id,
+                            severity=FlagSeverity.low,
+                            confidence=None,
+                            evidence_excerpt="The saved manuscript statement.",
+                            page_anchor="page 2",
+                            overridden=True,
+                            annotation="PRIVATE_ANNOTATION_NEVER_SHARED",
+                            override_reason="PRIVATE_DISMISSAL_NEVER_SHARED",
+                            detail={
+                                "kind": "agreement_contradictory",
                                 "reasoning": "The recorded system explanation.",
-                                "private_nested": {"comment": "PRIVATE_NESTED_NEVER_SHARED"}}))
+                                "private_nested": {"comment": "PRIVATE_NESTED_NEVER_SHARED"},
+                            },
+                        )
+                    )
                 await session.commit()
-                return await session.scalar(select(ReadinessReport.assessment_revision).where(
-                    ReadinessReport.check_run_id == run_id,
-                ))
+                return await session.scalar(
+                    select(ReadinessReport.assessment_revision).where(
+                        ReadinessReport.check_run_id == run_id,
+                    )
+                )
         finally:
             await engine.dispose()
 
@@ -679,8 +701,14 @@ def test_new_link_details_are_allowlisted_and_revision_bound(
     assert len(body["finding_details"]) == 1
     assert body["finding_details"][0]["ai_reasoning"] == "The recorded system explanation."
     assert set(body["finding_details"][0]) == {
-        "id", "ai_verdict_summary", "ai_reasoning", "agreement_pair", "passage_pair",
-        "p_value_comparison", "citation_metadata_comparison", "citation_source_locator",
+        "id",
+        "ai_verdict_summary",
+        "ai_reasoning",
+        "agreement_pair",
+        "passage_pair",
+        "p_value_comparison",
+        "citation_metadata_comparison",
+        "citation_source_locator",
         "citation_metadata_review_warning",
     }
     assert "PRIVATE_" not in response.text
@@ -695,7 +723,10 @@ def test_new_link_details_are_allowlisted_and_revision_bound(
 
 @pytest.mark.parametrize("action", ["revoke", "expire"])
 def test_public_projection_rechecks_token_after_inflight_database_change(
-    logged_in_with_a_done_run, api_scratch_url, monkeypatch, action,
+    logged_in_with_a_done_run,
+    api_scratch_url,
+    monkeypatch,
+    action,
 ):
     from datetime import UTC, datetime, timedelta
 
@@ -716,9 +747,13 @@ def test_public_projection_rechecks_token_after_inflight_database_change(
         try:
             async with async_sessionmaker(engine)() as other:
                 now = datetime.now(UTC)
-                values = {"revoked_at": now} if action == "revoke" else {
-                    "expires_at": now - timedelta(seconds=1),
-                }
+                values = (
+                    {"revoked_at": now}
+                    if action == "revoke"
+                    else {
+                        "expires_at": now - timedelta(seconds=1),
+                    }
+                )
                 await other.execute(
                     update(ShareLink).where(ShareLink.token == token).values(**values)
                 )

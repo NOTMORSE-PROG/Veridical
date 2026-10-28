@@ -616,14 +616,16 @@ async def report_out_for_check_run(
     )
     integrity_row_ids = {row.id for row in integrity_rows}
     integrity_rows.extend(
-        row for row in forensics_rows
+        row
+        for row in forensics_rows
         if unassessed_descriptive_rows(row.detail) != 0 and row.id not in integrity_row_ids
     )
     integrity_check_status = [
         IntegrityCheckStatusOut(
             check_kind=row.kind.value,
             outcome="escalated"
-            if row.outcome == ResultOutcome.passed and (
+            if row.outcome == ResultOutcome.passed
+            and (
                 row.kind == CheckKind.internal_agreement
                 or row.kind == CheckKind.statistical_forensics
                 and unassessed_descriptive_rows(row.detail) != 0
@@ -639,9 +641,7 @@ async def report_out_for_check_run(
                 if row.kind == CheckKind.internal_agreement
                 else None
             ),
-            n_metadata_skipped_insufficient=detail.get(
-                "n_metadata_skipped_insufficient", 0
-            ),
+            n_metadata_skipped_insufficient=detail.get("n_metadata_skipped_insufficient", 0),
             n_linkage_unassessed=detail.get("n_linkage_unassessed", 0),
             n_source_pages_unassessed=detail.get("n_source_pages_unassessed", 0),
             n_claim_support_unassessed=detail.get("n_claim_support_unassessed", 0),
@@ -660,16 +660,12 @@ async def report_out_for_check_run(
                 "available_text_and_reference_metadata",
             }
             else None,
-            n_reference_metadata_attempted=detail.get(
-                "n_reference_metadata_attempted", 0
-            ),
+            n_reference_metadata_attempted=detail.get("n_reference_metadata_attempted", 0),
             n_metadata_api_down=detail.get("n_metadata_api_down", 0),
             n_images_unassessed=detail.get("n_images_unassessed", 0),
             n_image_occurrences_omitted=detail.get("n_image_occurrences_omitted", 0),
             n_equations_unassessed=detail.get("n_equations_unassessed", 0),
-            n_recovery_figures_unassessed=detail.get(
-                "n_recovery_figures_unassessed", 0
-            ),
+            n_recovery_figures_unassessed=detail.get("n_recovery_figures_unassessed", 0),
             n_recovery_tables_unassessed=detail.get("n_recovery_tables_unassessed", 0),
             image_coverage_items=[
                 {key: item.get(key) for key in ("image_index", "page", "paragraph", "reason")}
@@ -679,9 +675,7 @@ async def report_out_for_check_run(
             n_source_candidates_withheld=detail.get("n_source_candidates_withheld", 0),
             n_native_equations_unassessed=detail.get("n_native_equations_unassessed"),
             n_native_equations_unlocated=detail.get("n_native_equations_unlocated"),
-            native_math_excluded_paragraphs=detail.get(
-                "native_math_excluded_paragraphs", []
-            ),
+            native_math_excluded_paragraphs=detail.get("native_math_excluded_paragraphs", []),
             native_math_coverage_items=[
                 {key: item.get(key) for key in ("paragraph", "kind", "n_occurrences")}
                 for item in detail.get("native_math_coverage_items", [])
@@ -807,10 +801,16 @@ async def report_out_for_check_run(
         check_run_id=check_run_id,
         subject=await recorded_check_subject(session, check_run, manuscript),
         integrity_modules=integrity_modules(
-            list((await session.scalars(select(CheckResult).where(
-                CheckResult.check_run_id == check_run_id,
-                CheckResult.criterion_id.is_(None),
-            ))).all()),
+            list(
+                (
+                    await session.scalars(
+                        select(CheckResult).where(
+                            CheckResult.check_run_id == check_run_id,
+                            CheckResult.criterion_id.is_(None),
+                        )
+                    )
+                ).all()
+            ),
             {status.check_kind for status in integrity_check_status},
         ),
         manuscript_id=check_run.manuscript_id,
