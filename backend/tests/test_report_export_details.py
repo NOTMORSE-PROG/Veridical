@@ -304,8 +304,9 @@ def test_long_pending_requirement_finishes_without_repeating_it_in_continuation_
                 'CRITERION_START <literal> &', 'CRITERION_END',
                 'REASON_START', 'REASON_END', 'EVIDENCE_START', 'EVIDENCE_END',
             ))
-            assert text.count('Requirement text.') == count
-            assert text.count('CRITERION_START') == 1
+            # Once in the overview and once in the criterion; never in continuation headings.
+            assert text.count('Requirement text.') == count * 2
+            assert text.count('CRITERION_START') == 2
             assert f'Criterion #{row.criterion_id} (continued)' in text
         assert data.model_dump_json() == before
         print(json.dumps({'all_content_retained': True, 'input_unchanged': True}))
@@ -380,7 +381,7 @@ def test_long_group_label_does_not_overlap_footer_or_running_header():
                 for span in line["spans"]
                 if span["bbox"][1] > page.rect.height - 90
             ]
-            page_spans = [s for s in spans if s["text"].startswith("Page ")]
+            page_spans = [s for s in spans if s["text"].startswith("Report page ")]
             assert len(page_spans) == 1
             counter = fitz.Rect(page_spans[0]["bbox"])
             for span in spans:
@@ -651,3 +652,97 @@ def test_footer_variants_are_within_page_and_do_not_intersect(llm_mode, decision
             assert ("Test-mode AI responses." in texts) == (llm_mode == "fake")
             assert ("AI response mode could not be verified" in texts) == (llm_mode == "unknown")
             assert "predates AI-mode tracking" not in texts
+
+
+def test_reader_chapters_keep_every_grade_importance_and_actual_report_page_navigation():
+    data = _data(flags=[])
+    data.report.results = data.report.results[:3]
+    with fitz.open(stream=build_report_pdf(data), filetype="pdf") as document:
+        outline = document.get_toc()
+        criteria = [
+            entry for entry in outline if entry[0] == 1 and entry[1] == "Grades at a glance"
+        ]
+        assert len(criteria) == 1 and criteria[0][2] == 3
+        for number, row in enumerate(data.report.results, 1):
+            entry = next(item for item in outline if item[0] == 2 and item[1] == row.text)
+            page_text = " ".join(document[entry[2] - 1].get_text().split())
+            assert f"Grade {number}:" in page_text
+            assert "Recorded system outcome:" in page_text
+            assert {"high": "High", "med": "Medium", "low": "Low"}[
+                row.weight_importance
+            ] + " importance" in page_text
+            assert "What to check" in page_text
+        chapter_pages = [
+            entry[2]
+            for entry in outline
+            if entry[0] == 1
+            and entry[1]
+            in {
+                "Internal agreement",
+                "Citation integrity",
+                "Statistical forensics",
+                "Originality / reuse",
+            }
+        ]
+        assert len(chapter_pages) == 4 and len(set(chapter_pages)) == 4
+        for page_number, page in enumerate(document, 1):
+            assert f"Report page {page_number} of {len(document)}" in page.get_text()
+            assert all(
+                link.get("kind") != 1 or 0 <= link.get("page", -1) < len(document)
+                for link in page.get_links()
+            )
+
+
+def test_source_image_budget_uses_the_same_presentation_font_as_the_report(monkeypatch):
+    from app.config import Settings
+    from app.report import source_print
+    from app.report.export import source_image_print_width, source_image_settings_for
+
+    measured = {}
+
+    def capture(reference, width, height, styles, layout, settings):
+        measured.update(font=styles["body"].fontName, width=width, height=height)
+        return 123
+
+    monkeypatch.setattr(source_print, "source_image_height", capture)
+    settings = Settings(_env_file=None)
+    scoped = source_image_settings_for(_data().report, settings)(object())
+    assert scoped.export_page_image_max_height == 123
+    assert measured["font"] == "Helvetica"
+    assert measured["width"] == source_image_print_width()
+    assert measured["height"] > 123
+
+
+def test_bound_source_image_is_centered_without_changing_its_aspect_or_size():
+    from app.config import get_settings
+    from app.report.schemas import PageEvidenceImageOut, SourceEvidencePrintOut
+    from tests.test_source_print_layout import png
+
+    data = _data(flags=[])
+    data.report.results = data.report.results[:1]
+    data.source_evidence = [
+        SourceEvidencePrintOut(
+            reference_id="a" * 64,
+            criterion_id=data.report.results[0].criterion_id,
+            flag_id=None,
+            role="criterion_evidence",
+            index=0,
+            quote="A complete saved source quotation.",
+            anchor="page 2",
+            placement_state="text_layer_match",
+            max_print_height=500,
+            image=PageEvidenceImageOut(image_png=png(), page=2, reason="Saved source location."),
+        )
+    ]
+    with fitz.open(stream=build_report_pdf(data), filetype="pdf") as document:
+        images = [
+            (page, rect)
+            for page in document
+            for image in page.get_images()
+            for rect in page.get_image_rects(image[0])
+        ]
+        assert len(images) == 1
+        page, rect = images[0]
+        assert abs((rect.x0 + rect.x1) / 2 - page.rect.width / 2) < 0.1
+        assert abs(rect.width / rect.height - 32 / 640) < 0.0001
+        assert abs(rect.height - 640 * 72 / get_settings().export_page_image_dpi) < 0.1

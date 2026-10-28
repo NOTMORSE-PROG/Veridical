@@ -70,6 +70,7 @@ def _atomic_source_group(parts, width):
     group.setStyle(
         TableStyle(
             [
+                ("ALIGN", (0, 0), (-1, -1), "CENTER"),
                 ("LEFTPADDING", (0, 0), (-1, -1), 0),
                 ("RIGHTPADDING", (0, 0), (-1, -1), 0),
                 ("TOPPADDING", (0, 0), (-1, -1), 0),

@@ -135,14 +135,15 @@ def test_composite_score_is_not_the_pdf_headline():
     # ("Ready. The score is 75.0%...") also contains that substring and is
     # a separate, not-yet-ticketed concern (see BUG-133's own ticket: it
     # names only the old oversized span, not that sentence).
-    page = doc[0]
     caption_lines = [
         line
+        for page in doc
         for block in page.get_text("dict")["blocks"]
         for line in block.get("lines", [])
         if any("Composite score:" in span["text"] for span in line["spans"])
     ]
-    assert caption_lines, "the 'Composite score:' caption must appear on the first page"
+    assert "Composite score:" not in doc[0].get_text()
+    assert caption_lines, "the calculation caption remains in its linked supporting section"
     spans = [span for line in caption_lines for span in line["spans"]]
     sizes = [s["size"] for s in spans]
     assert all(size <= 9 for size in sizes), (

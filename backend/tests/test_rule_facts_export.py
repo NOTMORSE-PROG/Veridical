@@ -197,7 +197,7 @@ def test_pending_and_instructor_resolved_facts_retain_their_distinct_relationshi
     assert detail_text.count("PENDING_GLOSSARY") == 1
     assert 'The saved heading lookup searched for "glossary".' in text
     assert "Earlier recorded rule facts" in text
-    assert "Criterion #202: RESOLVED_ABSTRACT" in text
+    assert "Grade 2: RESOLVED_ABSTRACT" in text
     assert 'The saved heading lookup matched "ABSTRACT" for "abstract".' in text
     assert "I reviewed the full manuscript and recorded a different grade." in text
     assert "Not yet resolved" in text

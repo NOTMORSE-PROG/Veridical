@@ -43,10 +43,13 @@ from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfgen.canvas import Canvas
 from reportlab.platypus import (
     CondPageBreak,
+    Flowable,
     Frame,
     HRFlowable,
     Image,
+    IndexingFlowable,
     KeepTogether,
+    PageBreak,
     PTOContainer,
     SimpleDocTemplate,
     Spacer,
@@ -77,26 +80,81 @@ class _NavigableParagraph(Paragraph):
 
     navigation_key = None
     navigation_label = None
+    navigation_level = 0
 
     def split(self, availWidth, availHeight):
         fragments = super().split(availWidth, availHeight)
         if fragments:
             fragments[0].navigation_key = self.navigation_key
             fragments[0].navigation_label = self.navigation_label
+            fragments[0].navigation_level = self.navigation_level
         return fragments
 
     def draw(self):
         if self.navigation_key:
             self.canv.bookmarkHorizontal(self.navigation_key, 0, 0)
-            self.canv.addOutlineEntry(self.navigation_label, self.navigation_key, level=0)
+            self.canv.addOutlineEntry(
+                self.navigation_label, self.navigation_key, level=self.navigation_level
+            )
+            index = getattr(self.canv, "report_index", None)
+            if index is not None:
+                index.current[self.navigation_key] = self.canv.getPageNumber()
         super().draw()
 
 
-def _navigation_heading(text, style, key, label):
+def _navigation_heading(text, style, key, label, level=0):
     paragraph = _NavigableParagraph(text, style)
     paragraph.navigation_key = key
     paragraph.navigation_label = label
+    paragraph.navigation_level = level
     return paragraph
+
+
+class _ReportPageIndex(IndexingFlowable):
+    """ReportLab multiBuild index: destinations and total use the preceding pass."""
+
+    def __init__(self):
+        super().__init__()
+        self.current = {}
+        self.previous = {}
+        self.total = 0
+        self.previous_total = 0
+
+    def beforeBuild(self):
+        self.previous = self.current
+        self.previous_total = self.total
+        self.current = {}
+        self.total = 0
+
+    def isSatisfied(self):
+        return self.current == self.previous and self.total == self.previous_total
+
+    def wrap(self, width, height):
+        return 0, 0
+
+    def draw(self):
+        pass
+
+
+class _ContentsDestination(Flowable):
+    """Inline destination/page label, rebuilt from the preceding layout pass."""
+
+    def __init__(self, index, key, label, style):
+        super().__init__()
+        self.index, self.key, self.label, self.style = index, key, label, style
+
+    def wrap(self, width, height):
+        page = self.index.previous.get(self.key, "")
+        self.paragraph = Paragraph(
+            f'<link color="#005eb8" href="#{self.key}">'
+            f"{escape(self.label)} / report page {page}</link>",
+            self.style,
+        )
+        self.width, self.height = self.paragraph.wrap(width, height)
+        return self.width, self.height
+
+    def draw(self):
+        self.paragraph.drawOn(self.canv, 0, 0)
 
 
 def _is_optional_comparison_lead(flag: FlagSummaryOut) -> bool:
@@ -126,23 +184,28 @@ def _register_fonts() -> str:
     return register_fonts()
 
 
+def _presentation_font() -> str:
+    register_fonts()
+    return "Helvetica"
+
+
 # Direct reuse of tokens.css's own AA-checked hex values (DESIGN.md §1.3)
 # -- never re-derived, so the export can't silently disagree with the app.
-_INK = colors.HexColor("#14161a")
-_INK_SECONDARY = colors.HexColor("#4b5162")
-_INK_TERTIARY = colors.HexColor("#5b6272")
-_RULE = colors.HexColor("#dbdee5")
-_ZEBRA = colors.HexColor("#f7f8fa")
+_INK = colors.HexColor("#242424")
+_INK_SECONDARY = colors.HexColor("#555555")
+_INK_TERTIARY = colors.HexColor("#555555")
+_RULE = colors.HexColor("#c8c5bb")
+_ZEBRA = colors.HexColor("#f4f2eb")
 _DRAFT_GRAY = colors.HexColor("#8992a6")
 
 # Central print-layout values for 4k. Footer height is also measured below;
 # wrapped disclosures increase the body reservation instead of overlapping it.
 _PRINT_LAYOUT = {
-    "side_margin": 54,
-    "top_margin": 98,
+    "side_margin": 18 * 72 / 25.4,
+    "top_margin": 26 * 72 / 25.4,
     "source_entry_gap": 8,
     "image_caption_gap": 2,
-    "bottom_margin": 84,
+    "bottom_margin": 21 * 72 / 25.4,
     "footer_bottom": 16,
     "footer_row_gap": 1,
     "footer_body_gap": 16,
@@ -383,19 +446,21 @@ _LLM_MODE_DISCLOSURE = {
 def _styles(font: str) -> dict[str, ParagraphStyle]:
     bold = f"{font}-Bold"
     return {
-        "title": ParagraphStyle("title", fontName=bold, fontSize=18, leading=22, textColor=_INK),
+        "title": ParagraphStyle(
+            "title", fontName=bold, fontSize=24, leading=29, textColor=_INK, spaceAfter=16
+        ),
         "framing": ParagraphStyle(
-            "framing", fontName=font, fontSize=8, leading=11, textColor=_INK_TERTIARY
+            "framing", fontName=font, fontSize=8, leading=12, textColor=_INK_TERTIARY
         ),
         "meta": ParagraphStyle(
-            "meta", fontName=font, fontSize=10, leading=14, textColor=_INK_SECONDARY
+            "meta", fontName=font, fontSize=10.5, leading=14.6, textColor=_INK_SECONDARY
         ),
-        "verdict": ParagraphStyle("verdict", fontName=bold, fontSize=16, leading=20),
+        "verdict": ParagraphStyle("verdict", fontName=bold, fontSize=20, leading=25),
         "h2": ParagraphStyle(
             "h2",
             fontName=bold,
-            fontSize=13,
-            leading=16,
+            fontSize=17,
+            leading=22,
             textColor=_INK,
             spaceBefore=14,
             spaceAfter=6,
@@ -411,21 +476,21 @@ def _styles(font: str) -> dict[str, ParagraphStyle]:
             spaceAfter=3,
             keepWithNext=True,
         ),
-        "body": ParagraphStyle("body", fontName=font, fontSize=10, leading=14, textColor=_INK),
+        "body": ParagraphStyle("body", fontName=font, fontSize=10.5, leading=14.6, textColor=_INK),
         "body_bold": ParagraphStyle(
-            "body_bold", fontName=bold, fontSize=10, leading=14, textColor=_INK
+            "body_bold", fontName=bold, fontSize=10.5, leading=14.6, textColor=_INK
         ),
         "caption": ParagraphStyle(
-            "caption", fontName=font, fontSize=8, leading=11, textColor=_INK_TERTIARY
+            "caption", fontName=font, fontSize=8, leading=12, textColor=_INK_TERTIARY
         ),
         "caption_bold": ParagraphStyle(
-            "caption_bold", fontName=bold, fontSize=8, leading=11, textColor=_INK_TERTIARY
+            "caption_bold", fontName=bold, fontSize=8, leading=12, textColor=_INK_TERTIARY
         ),
         "caption_italic": ParagraphStyle(
             "caption_italic",
-            fontName=f"{font}-Italic",
+            fontName="Helvetica-Oblique" if font == "Helvetica" else f"{font}-Italic",
             fontSize=8,
-            leading=11,
+            leading=12,
             textColor=_INK_TERTIARY,
         ),
         "cell": ParagraphStyle("cell", fontName=font, fontSize=9, leading=12, textColor=_INK),
@@ -433,7 +498,7 @@ def _styles(font: str) -> dict[str, ParagraphStyle]:
             "cell_bold", fontName=bold, fontSize=9, leading=12, textColor=_INK
         ),
         "cell_caption": ParagraphStyle(
-            "cell_caption", fontName=font, fontSize=8, leading=11, textColor=_INK_TERTIARY
+            "cell_caption", fontName=font, fontSize=8, leading=12, textColor=_INK_TERTIARY
         ),
         "draft_badge": ParagraphStyle(
             "draft_badge", fontName=bold, fontSize=9, leading=12, textColor=_DRAFT_GRAY
@@ -833,7 +898,13 @@ def _criterion_flowable(
                 )
             )
         if include_evidence:
-            for evidence in row.evidence:
+            for evidence_index, evidence in enumerate(row.evidence, 1):
+                parts.append(
+                    Paragraph(
+                        f"Evidence {evidence_index} of {len(row.evidence)}: Saved passage",
+                        styles["body_bold"],
+                    )
+                )
                 parts.append(Paragraph(escape(evidence.quote), styles["cell"]))
                 parts.append(
                     Paragraph(
@@ -946,7 +1017,9 @@ def _report_footer_parts(report, styles, font, generated_at):
         ),
     )
     footer_rows = [
-        Paragraph('<link href="#report-contents">Return to contents</link>', footer_style),
+        Paragraph(
+            '<link color="#005eb8" href="#report-contents">Back to contents</link>', footer_style
+        ),
         Paragraph(
             escape(footer_llm_disclosure[0]) if footer_llm_disclosure else "",
             footer_mode_style,
@@ -984,7 +1057,7 @@ def source_image_print_width():
 def source_image_settings_for(report, settings):
     from app.report.source_print import source_image_height
 
-    font = _register_fonts()
+    font = _presentation_font()
     styles = _styles(font)
     generated_at = _format_date(datetime.now(UTC), with_time=True)
     *_, bottom_margin = _report_footer_parts(report, styles, font, generated_at)
@@ -1005,8 +1078,15 @@ def source_image_settings_for(report, settings):
 
 
 def build_report_pdf(data: ReportExportData) -> bytes:
-    font = _register_fonts()
+    font = _presentation_font()
     styles = _styles(font)
+    criterion_styles = {
+        **styles,
+        "cell": styles["body"],
+        "cell_bold": styles["body_bold"],
+        "cell_caption": styles["caption"],
+    }
+    page_index = _ReportPageIndex()
     report = data.report
     is_draft = report.decision is None
     pending = [r for r in report.results if r.outcome in NEEDS_REVIEW_OUTCOMES and not r.resolution]
@@ -1056,6 +1136,8 @@ def build_report_pdf(data: ReportExportData) -> bytes:
         ]
 
     flow: list = []
+    criterion_sections = {}
+    module_sections = {}
 
     # 1. Title block.
     manuscript_title = report.subject.title or report.manuscript_original_filename
@@ -1067,13 +1149,13 @@ def build_report_pdf(data: ReportExportData) -> bytes:
             "Report overview",
         )
     )
-    flow.append(Paragraph("VERIDICAL Readiness Report", styles["body_bold"]))
+
     if report.subject.basis == "confirmed_assignment_at_check":
         flow.append(
             Paragraph(
-                "Group members recorded when this check began: "
+                "<b>Members / manuscript authors</b><br/>"
                 + escape(", ".join(report.subject.member_names) or "Not recorded"),
-                styles["meta"],
+                styles["body"],
             )
         )
         flow.append(
@@ -1157,6 +1239,7 @@ def build_report_pdf(data: ReportExportData) -> bytes:
         )
     flow.append(Spacer(1, 12))
 
+    summary_start = len(flow)
     # F8.5: show the human decision before the supporting assessment/appendix.
     flow.append(Paragraph("Instructor decision", styles["body_bold"]))
     if report.decision:
@@ -1204,11 +1287,7 @@ def build_report_pdf(data: ReportExportData) -> bytes:
     )
     # 2. System band and subordinate calculation detail.
     flow.append(
-        _tone_badge(
-            READINESS_LABEL.get(report.status, report.status),
-            READINESS_TONE.get(report.status, "neutral"),
-            styles,
-        )
+        Paragraph(escape(READINESS_LABEL.get(report.status, report.status)), styles["body"])
     )
     if is_draft:
         flow.append(Spacer(1, 6))
@@ -1312,6 +1391,7 @@ def build_report_pdf(data: ReportExportData) -> bytes:
                 styles["caption"],
             )
         )
+    calculation_start = len(flow)
     flow.append(
         _navigation_heading(
             "Calculation details", styles["h2"], "calculation-details", "Calculation details"
@@ -1327,58 +1407,50 @@ def build_report_pdf(data: ReportExportData) -> bytes:
     flow.extend(calculation_details)
     flow.append(Spacer(1, 10))
 
-    flow.append(
-        _navigation_heading("Report contents", styles["h2"], "report-contents", "Report contents")
+    calculation_section = flow[calculation_start:]
+    cover = flow[:calculation_start]
+    card_label = (
+        "Instructor decision" if report.decision else "System readiness - no instructor decision"
     )
-    flow.append(
+    card_verdict = (
+        DECISION_LABEL.get(report.decision, report.decision)
+        if report.decision
+        else READINESS_LABEL.get(report.status, report.status)
+    )
+    card = Table(
+        [
+            [Paragraph(card_label, styles["caption_bold"])],
+            [Paragraph(escape(card_verdict), styles["verdict"])],
+        ],
+        colWidths=[source_width],
+        hAlign="LEFT",
+        cornerRadii=[8, 8, 8, 8],
+    )
+    card.setStyle(
+        TableStyle(
+            [
+                ("BACKGROUND", (0, 0), (-1, -1), _ZEBRA),
+                ("BOX", (0, 0), (-1, -1), 0.5, _RULE),
+                ("LEFTPADDING", (0, 0), (-1, -1), 16),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 16),
+                ("TOPPADDING", (0, 0), (-1, -1), 12),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 12),
+            ]
+        )
+    )
+    cover.insert(summary_start, card)
+    cover.insert(summary_start + 1, Spacer(1, 14))
+    flow = [
+        _navigation_heading(
+            "Grades at a glance", styles["h2"], "report-grades", "Grades at a glance"
+        ),
         Paragraph(
-            "Select an item to open its complete record. "
-            "PDF bookmarks provide the same navigation.",
-            styles["caption"],
-        )
-    )
-    flow.append(
-        Paragraph(
-            '<link href="#report-overview">Readiness and instructor decision</link>', styles["body"]
-        )
-    )
-    flow.append(
-        Paragraph('<link href="#calculation-details">Calculation details</link>', styles["body"])
-    )
-
-    def criterion_navigation_label(row):
-        identity = f"Criterion #{row.criterion_id}"
-        named = f"{identity}: {' '.join(row.text.split())}"
-        style = styles["body"]
-        return (
-            named
-            if text_width(named, style.fontName, style.fontSize) <= content_width
-            else identity
-        )
-
-    for row in report.results:
-        flow.append(
-            Paragraph(
-                f'<link href="#criterion-{row.criterion_id}">'
-                f"{escape(criterion_navigation_label(row))}</link>",
-                styles["body"],
-            )
-        )
-    record_identities = _review_record_identities(data.flags)
-    for flag in data.flags:
-        flow.append(
-            Paragraph(
-                f'<link href="#finding-{flag.id}">{escape(record_identities[flag.id])}</link>',
-                styles["body"],
-            )
-        )
-    flow.append(
-        Paragraph(
-            '<link href="#instructor-decision-record">Full decision record</link>', styles["body"]
-        )
-    )
-    flow.append(Spacer(1, _PRINT_LAYOUT["source_entry_gap"]))
-    flow.append(Paragraph("Grades at a glance", styles["h2"]))
+            "Read each recorded grade with its explanation and manuscript evidence. "
+            "Findings are review prompts, not a second set of grades.",
+            styles["body"],
+        ),
+        Spacer(1, 14),
+    ]
     for row in report.results:
         label, _tone = _result_display(row)
         if row.outcome in NEEDS_REVIEW_OUTCOMES and not row.resolution:
@@ -1390,9 +1462,14 @@ def build_report_pdf(data: ReportExportData) -> bytes:
             }.get(row.outcome, label)
         flow.append(
             Paragraph(
-                f'<link href="#criterion-{row.criterion_id}">'
-                f"{escape(criterion_navigation_label(row))}</link>: "
-                f"{escape(label)}. "
+                f'<link href="#criterion-{row.criterion_id}"><b>{escape(row.text)}</b></link>',
+                styles["body"],
+            )
+        )
+        flow.append(
+            Paragraph(
+                f'<link color="#005eb8" href="#criterion-{row.criterion_id}">'
+                f"{escape(label)}</link>. "
                 + (
                     "Instructor judgment recorded."
                     if row.resolution
@@ -1401,8 +1478,11 @@ def build_report_pdf(data: ReportExportData) -> bytes:
                 styles["body"],
             )
         )
+        flow.append(Spacer(1, 20))
     flow.append(Spacer(1, _PRINT_LAYOUT["source_entry_gap"]))
 
+    grade_overview = flow
+    flow = []
     if data.source_evidence:
         included = sum(entry.image.image_png is not None for entry in data.source_evidence)
         without_image = len(data.source_evidence) - included
@@ -1427,6 +1507,7 @@ def build_report_pdf(data: ReportExportData) -> bytes:
     # disappearing from the decided PDF entirely while `EscalatedPanel.tsx`
     # still showed it on screen. Render it either way; only the wording
     # changes with `is_draft`.
+    pending_intro_start = len(flow)
     if pending:
         flow.append(
             Paragraph(
@@ -1442,6 +1523,7 @@ def build_report_pdf(data: ReportExportData) -> bytes:
                 )
             )
         for row in pending:
+            criterion_start = len(flow)
             block = [
                 _navigation_heading(
                     f"Criterion #{row.criterion_id}: {escape(row.text)} "
@@ -1472,7 +1554,7 @@ def build_report_pdf(data: ReportExportData) -> bytes:
                         *block,
                         *_rule_facts_flowables(row, styles),
                         *_pending_semantic_basis_flowables(
-                            row, styles, include_evidence=data.source_evidence is None
+                            row, criterion_styles, include_evidence=data.source_evidence is None
                         ),
                         *source_blocks(criterion_sources(row)),
                     ],
@@ -1485,7 +1567,12 @@ def build_report_pdf(data: ReportExportData) -> bytes:
                 )
             )
             flow.append(Spacer(1, 6))
+            criterion_sections[row.criterion_id] = flow[criterion_start:]
+            del flow[criterion_start:]
         flow.append(Spacer(1, 6))
+
+    pending_intro = flow[pending_intro_start:]
+    del flow[pending_intro_start:]
 
     # 4. Flags.
     if (
@@ -1795,12 +1882,12 @@ def build_report_pdf(data: ReportExportData) -> bytes:
         labels = _semantic_support_labels()
         flow.append(Paragraph(escape(labels["title"]), styles["h2"]))
         flow.append(Paragraph(escape(labels["body"]), styles["body"]))
+    source_details = flow
+    flow = []
     other_flag_count = sum(not _is_optional_comparison_lead(flag) for flag in data.flags)
     lead_count = len(data.flags) - other_flag_count
     flag_intro = [Paragraph("Integrity review", styles["h2"])]
     scope_label, scope_detail = statistical_scope_copy(report.statistical_check_scope)
-    flag_intro.append(Paragraph(escape(scope_label), styles["body"]))
-    flag_intro.append(Paragraph(escape(scope_detail), styles["body"]))
     flag_intro.append(
         Paragraph(
             f"Other integrity records: {other_flag_count}. "
@@ -1846,6 +1933,7 @@ def build_report_pdf(data: ReportExportData) -> bytes:
             by_kind, key=lambda key: (key[1], _CHECK_KIND_ORDER.get(key[0], len(_CHECK_KIND_ORDER)))
         ):
             group = by_kind[(kind, optional)]
+            group_start = len(flow)
             if optional:
                 group = sorted(group, key=lambda flag: flag.id)
             category_heading = Paragraph(
@@ -1855,6 +1943,8 @@ def build_report_pdf(data: ReportExportData) -> bytes:
                 styles["h3"],
             )
             for group_index, f in enumerate(group):
+                if group_index:
+                    flow.append(PageBreak())
                 detail = data.flag_details.get(f.id, FlagExportDetailOut())
                 common_entries = [
                     entry for entry in (data.source_evidence or ()) if entry.flag_id == f.id
@@ -1900,9 +1990,10 @@ def build_report_pdf(data: ReportExportData) -> bytes:
                 )
                 heading = _navigation_heading(
                     escape(f"{record_identity}: {issue}"),
-                    styles["body_bold"],
+                    styles["h3"],
                     f"finding-{f.id}",
                     f"{record_identity}: {issue}",
+                    level=1,
                 )
                 evidence_label = Paragraph(
                     "System comparison summary"
@@ -1930,10 +2021,56 @@ def build_report_pdf(data: ReportExportData) -> bytes:
                     item.keepWithNext = True
                 emitted_sources = source_blocks(common_entries)
                 leading_excerpt = [] if any(entry.quote for entry in common_entries) else [excerpt]
-                finding = [*start_items, *leading_excerpt, *emitted_sources]
+                explanation = []
+                explanation.append(
+                    Paragraph(
+                        (
+                            "<b>Original recorded explanation:</b> "
+                            if detail.citation_metadata_review_warning
+                            else "<b>Recorded reason:</b> "
+                        )
+                        + escape(
+                            detail.reasoning
+                            or (
+                                "The legacy explanation is not reproduced because current "
+                                "comparison policy removes outdated or identifying wording."
+                                if detail.recorded_explanation_withheld
+                                else None
+                            )
+                            or "No separate explanation was saved for this finding."
+                        ),
+                        styles["body"],
+                    )
+                )
+                if detail.current_guidance:
+                    explanation.append(
+                        Paragraph(
+                            "<b>Current comparison guidance:</b> "
+                            + escape(detail.current_guidance),
+                            styles["body"],
+                        )
+                    )
+                if detail.evidence_unavailable:
+                    explanation.append(
+                        Paragraph(
+                            "Supporting comparison evidence was not available for this finding.",
+                            styles["body"],
+                        )
+                    )
+                if f.overridden and detail.override_reason:
+                    explanation.append(
+                        Paragraph(
+                            "<b>Recorded instructor judgment:</b> "
+                            + escape(detail.override_reason),
+                            styles["body"],
+                        )
+                    )
+
+                finding = [*start_items, *explanation, *leading_excerpt, *emitted_sources]
                 grouped_height = None
                 if (
-                    not leading_excerpt
+                    not explanation
+                    and not leading_excerpt
                     and emitted_sources
                     and isinstance(emitted_sources[0], Table)
                 ):
@@ -2036,49 +2173,6 @@ def build_report_pdf(data: ReportExportData) -> bytes:
                                 styles["caption"],
                             )
                         )
-                finding.append(
-                    Paragraph(
-                        (
-                            "<b>Original recorded explanation:</b> "
-                            if detail.citation_metadata_review_warning
-                            else "<b>Recorded reason:</b> "
-                        )
-                        + escape(
-                            detail.reasoning
-                            or (
-                                "The legacy explanation is not reproduced because current "
-                                "comparison policy removes outdated or identifying wording."
-                                if detail.recorded_explanation_withheld
-                                else None
-                            )
-                            or "No separate explanation was saved for this finding."
-                        ),
-                        styles["body"],
-                    )
-                )
-                if detail.current_guidance:
-                    finding.append(
-                        Paragraph(
-                            "<b>Current comparison guidance:</b> "
-                            + escape(detail.current_guidance),
-                            styles["body"],
-                        )
-                    )
-                if detail.evidence_unavailable:
-                    finding.append(
-                        Paragraph(
-                            "Supporting comparison evidence was not available for this finding.",
-                            styles["body"],
-                        )
-                    )
-                if f.overridden and detail.override_reason:
-                    finding.append(
-                        Paragraph(
-                            "<b>Recorded instructor judgment:</b> "
-                            + escape(detail.override_reason),
-                            styles["body"],
-                        )
-                    )
                 page_image = data.page_images.get(f.id) if data.source_evidence is None else None
                 if data.source_evidence is None and (
                     page_image is None or page_image.reason_code != "docx_layout"
@@ -2105,15 +2199,21 @@ def build_report_pdf(data: ReportExportData) -> bytes:
                     )
                 )
                 flow.append(Spacer(1, 8))
+            module_sections.setdefault(kind, []).extend(flow[group_start:])
+            del flow[group_start:]
     flow.append(Spacer(1, 4))
     if not scope_emitted:
         flow.extend(_originality_scope_flowables(data, styles))
+
+    source_details.extend(flow)
+    flow = []
 
     # 5. Recorded judgments, including initial review of settled criteria.
     resolved = [r for r in report.results if r.resolution]
     if resolved:
         flow.append(Paragraph("Instructor Judgments", styles["h2"]))
         for row in resolved:
+            criterion_start = len(flow)
             flow.append(
                 PTOContainer(
                     [
@@ -2141,120 +2241,46 @@ def build_report_pdf(data: ReportExportData) -> bytes:
                 )
             )
             flow.append(Spacer(1, 8))
+            criterion_sections[row.criterion_id] = flow[criterion_start:]
+            del flow[criterion_start:]
 
-    # 6. Criteria results table (excludes pending/resolved rows, already shown above).
-    shown_ids = {r.criterion_id for r in pending} | {r.criterion_id for r in resolved}
-    remaining = [r for r in report.results if r.criterion_id not in shown_ids]
-    flow.append(Paragraph("Criteria Results", styles["h2"]))
-    if remaining:
-        header = [
-            Paragraph("Importance", styles["cell_bold"]),
-            Paragraph("Criterion", styles["cell_bold"]),
-            Paragraph("Result", styles["cell_bold"]),
-        ]
-
-        def criteria_table(rows):
-            table = Table(rows, colWidths=[62, content_width - 62 - 85, 85], repeatRows=1)
-            table_style = [
-                ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#f1f2f5")),
-                ("LINEBELOW", (0, 0), (-1, 0), 0.75, _RULE),
-                ("LINEBELOW", (0, 1), (-1, -1), 0.5, _RULE),
-                ("VALIGN", (0, 0), (-1, -1), "TOP"),
-                ("TOPPADDING", (0, 0), (-1, -1), 5),
-                ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
-                ("LEFTPADDING", (0, 0), (-1, -1), 4),
-                ("RIGHTPADDING", (0, 0), (-1, -1), 4),
-            ]
-            for i in range(1, len(rows)):
-                if i % 2 == 0:
-                    table_style.append(("BACKGROUND", (0, i), (-1, i), _ZEBRA))
-            table.setStyle(TableStyle(table_style))
-            return table
-
-        # Match SimpleDocTemplate's actual default Frame padding. Only an
-        # individually oversized record leaves the compact table layout.
-        print_frame = Frame(0, 0, doc.width, doc.height)
-        rows = [header]
-        for row in remaining:
-            label, tone = _result_display(row)
-            entries = criterion_sources(row)
-            if entries:
-                if len(rows) > 1:
-                    flow.append(criteria_table(rows))
-                    rows = [header]
-                identity = Paragraph(
-                    escape(
-                        f"Criterion #{row.criterion_id}: {label}. "
-                        f"{_format_weight_importance(row.weight_importance, long=True)}."
-                    ),
-                    styles["body_bold"],
-                )
-                identity.keepWithNext = True
-                flow.append(
-                    PTOContainer(
-                        [
-                            identity,
-                            *_criterion_flowable(row, styles, include_evidence=False),
-                            *source_blocks(entries),
-                        ],
-                        header=[
-                            Paragraph(
-                                escape(f"Criterion #{row.criterion_id} (continued)"),
-                                styles["caption_bold"],
-                            )
-                        ],
+    # The same source-readable presentation applies to every saved criterion.
+    for row in report.results:
+        if row.criterion_id in criterion_sections:
+            continue
+        entries = criterion_sources(row)
+        legacy_quotes = []
+        if not entries:
+            for evidence_index, evidence in enumerate(row.evidence, 1):
+                legacy_quotes.append(
+                    Paragraph(
+                        f"Evidence {evidence_index} of {len(row.evidence)}: Saved passage",
+                        styles["body_bold"],
                     )
                 )
-                flow.append(Spacer(1, _PRINT_LAYOUT["source_entry_gap"]))
-                continue
-            result_style = styles["cell_bold"] if tone in ("danger",) else styles["cell"]
-            importance_ink = {"high": _INK, "med": _INK_SECONDARY, "low": _INK_TERTIARY}.get(
-                row.weight_importance, _INK_SECONDARY
-            )
-            importance_style = ParagraphStyle(
-                "importance_cell",
-                parent=styles["cell_bold"] if row.weight_importance == "high" else styles["cell"],
-                textColor=importance_ink,
-            )
-            candidate = [
-                Paragraph(_format_weight_importance(row.weight_importance), importance_style),
-                _criterion_flowable(row, styles),
-                Paragraph(escape(label), result_style),
-            ]
-            measured = criteria_table([header, candidate]).wrap(print_frame._aW, print_frame._aH)[1]
-            if measured <= print_frame._aH:
-                rows.append(candidate)
-                continue
-            if len(rows) > 1:
-                flow.append(criteria_table(rows))
-                rows = [header]
-            identity = Paragraph(
-                escape(
-                    f"Criterion #{row.criterion_id}: {label}. "
-                    f"{_format_weight_importance(row.weight_importance, long=True)}."
-                ),
-                styles["body_bold"],
-            )
-            identity.keepWithNext = True
-            parts = _criterion_flowable(row, styles)
-            parts[0].keepWithNext = True
-            flow.append(
-                PTOContainer(
-                    [identity, *parts],
-                    header=[
+                legacy_quotes.extend(
+                    [
+                        Paragraph(escape(evidence.quote), styles["body"]),
                         Paragraph(
-                            escape(f"Criterion #{row.criterion_id} (continued)"),
-                            styles["caption_bold"],
-                        )
-                    ],
+                            "Anchor: " + escape(_display_anchor(evidence.anchor)), styles["caption"]
+                        ),
+                    ]
                 )
+        criterion_sections[row.criterion_id] = [
+            PTOContainer(
+                [
+                    *_criterion_flowable(row, criterion_styles, include_evidence=False),
+                    *legacy_quotes,
+                    *source_blocks(entries),
+                ],
+                header=[
+                    Paragraph(
+                        escape(f"Criterion #{row.criterion_id} (continued)"), styles["caption_bold"]
+                    )
+                ],
             )
-            flow.append(Spacer(1, 8))
-        if len(rows) > 1:
-            flow.append(criteria_table(rows))
-    else:
-        flow.append(Paragraph("No additional criteria to show.", styles["body"]))
-    flow.append(Spacer(1, 12))
+        ]
+    flow = []
 
     # 7. Final decision.
     decision_start = len(flow)
@@ -2326,14 +2352,166 @@ def build_report_pdf(data: ReportExportData) -> bytes:
     if report.decision and report.decision_note:
         flow[decision_start:] = [KeepTogether(flow[decision_start:])]
 
+    decision_section = flow
+    contents = [
+        _navigation_heading(
+            "Find your way through this report", styles["h2"], "report-contents", "Report contents"
+        ),
+        Paragraph(
+            "Choose a section below. Page numbers in this report are different "
+            "from the manuscript's page numbers.",
+            styles["body"],
+        ),
+        Spacer(1, 18),
+    ]
+    destinations = [
+        ("Grades and supporting evidence", "report-grades"),
+        *[(label, f"module-{kind}") for kind, label in _CHECK_KIND_LABEL.items()],
+        ("Source and review details", "report-source-details"),
+        ("Full instructor decision", "instructor-decision-record"),
+    ]
+    for label, key in destinations:
+        contents.extend(
+            [
+                _ContentsDestination(page_index, key, label, styles["body_bold"]),
+                Spacer(1, 18),
+            ]
+        )
+    flow = [
+        page_index,
+        Paragraph("Manuscript review", styles["caption_bold"]),
+        *cover,
+        PageBreak(),
+        *contents,
+        PageBreak(),
+        *grade_overview,
+    ]
+    pending_intro_emitted = False
+    for number, row in enumerate(report.results, 1):
+        parts = criterion_sections[row.criterion_id]
+
+        # The existing record owns the only criterion destination; present it at the approved scale.
+        def enlarge(parts, row=row, number=number):
+            for part_index, part in reversed(list(enumerate(parts))):
+                if (
+                    isinstance(part, _NavigableParagraph)
+                    and part.navigation_key == f"criterion-{row.criterion_id}"
+                ):
+                    replacement = _navigation_heading(
+                        escape(f"Grade {number}: {row.text}"),
+                        styles["h2"],
+                        part.navigation_key,
+                        part.navigation_label,
+                        level=1,
+                    )
+                    replacement.keepWithNext = part.getKeepWithNext()
+                    if hasattr(part, "_ptoinfo"):
+                        replacement._ptoinfo = part._ptoinfo
+                    parts[part_index] = replacement
+                    status, _tone = _result_display(row)
+                    grade_copy = (
+                        "Instructor-recorded grade: "
+                        if row.resolution
+                        else "Recorded system outcome: "
+                    ) + status
+                    if row.outcome in NEEDS_REVIEW_OUTCOMES and not row.resolution:
+                        grade_copy = "No grade accepted. This criterion needs your review."
+                    grade = Paragraph(
+                        "<b>"
+                        + escape(grade_copy)
+                        + "</b><br/>"
+                        + escape(_format_weight_importance(row.weight_importance, long=True)),
+                        styles["body"],
+                    )
+                    explanation = Paragraph("What to check", styles["body_bold"])
+                    if hasattr(part, "_ptoinfo"):
+                        grade._ptoinfo = part._ptoinfo
+                        explanation._ptoinfo = part._ptoinfo
+                    parts[part_index + 1 : part_index + 1] = [grade, explanation]
+                elif isinstance(part, PTOContainer):
+                    enlarge(part._content, row, number)
+
+        enlarge(parts)
+        intro = pending_intro if row in pending and not pending_intro_emitted else []
+        pending_intro_emitted = pending_intro_emitted or bool(intro)
+        flow.extend([PageBreak(), *intro, *parts])
+    for kind in sorted(
+        _CHECK_KIND_LABEL, key=lambda kind: _CHECK_KIND_ORDER.get(kind, len(_CHECK_KIND_ORDER))
+    ):
+        flow.extend(
+            [
+                PageBreak(),
+                _navigation_heading(
+                    escape(_CHECK_KIND_LABEL[kind]),
+                    styles["h2"],
+                    f"module-{kind}",
+                    _CHECK_KIND_LABEL[kind],
+                ),
+            ]
+        )
+        module = next(
+            (module for module in report.integrity_modules if module.check_kind == kind), None
+        )
+        if module is not None:
+            flow.append(
+                Paragraph(
+                    escape(
+                        "Saved execution state: "
+                        + {
+                            "completed": "Processing completed",
+                            "partial": "Partly assessed",
+                            "incomplete": "Not fully run",
+                            "not_applicable": "Not applicable",
+                            "not_recorded": "Execution not recorded",
+                        }[module.state]
+                        + "."
+                    ),
+                    styles["body"],
+                )
+            )
+        if kind == "statistical_forensics":
+            flow.extend(
+                [
+                    Paragraph(escape(scope_label), styles["body"]),
+                    Paragraph(escape(scope_detail), styles["body"]),
+                ]
+            )
+        flow.extend(
+            module_sections.get(kind)
+            or [
+                Paragraph(
+                    "No findings were recorded in this module. This does not establish "
+                    "that every part of the manuscript was checked or passed.",
+                    styles["body"],
+                )
+            ]
+        )
+    flow.extend(
+        [
+            PageBreak(),
+            _navigation_heading(
+                "Source and review details",
+                styles["h2"],
+                "report-source-details",
+                "Source and review details",
+            ),
+            *source_details,
+            *calculation_section,
+            PageBreak(),
+            *decision_section,
+        ]
+    )
+
     def _on_page(canvas: Canvas, doc_: SimpleDocTemplate) -> None:
         canvas.saveState()
         page_num = canvas.getPageNumber()
+        canvas.report_index = page_index
+        page_index.total = page_num
 
-        if page_num > 1:
+        if page_num >= 1:
             canvas.setFont(font, 8)
             canvas.setFillColor(_INK_TERTIARY)
-            running_title = "VERIDICAL - Readiness Report"
+            running_title = "VERIDICAL / INSTRUCTOR COPY"
             canvas.drawString(side_margin, A4[1] - 40, running_title)
             identity_width = (
                 content_width
@@ -2346,7 +2524,7 @@ def build_report_pdf(data: ReportExportData) -> bytes:
             draw_right_text(canvas, truncated, font, 8, A4[0] - side_margin, A4[1] - 40)
             canvas.setStrokeColor(_RULE)
             canvas.setLineWidth(0.5)
-            canvas.line(54, A4[1] - 48, A4[0] - 54, A4[1] - 48)
+            canvas.line(side_margin, A4[1] - 48, A4[0] - side_margin, A4[1] - 48)
 
         footer_y = _PRINT_LAYOUT["footer_bottom"]
         for row in footer_rows:
@@ -2355,7 +2533,7 @@ def build_report_pdf(data: ReportExportData) -> bytes:
             footer_y += max(height, footer_style.leading) + _PRINT_LAYOUT["footer_row_gap"]
         footer_timestamp.drawOn(canvas, side_margin, timestamp_y)
         page_counter = Paragraph(
-            f"Page {page_num}",
+            f"Report page {page_num} of {page_index.previous_total or page_num}",
             ParagraphStyle("footer_page", parent=styles["caption"], alignment=2),
         )
         page_counter.wrap(content_width / 2, A4[1])
@@ -2374,5 +2552,5 @@ def build_report_pdf(data: ReportExportData) -> bytes:
 
         canvas.restoreState()
 
-    doc.build(flow, onFirstPage=_on_page, onLaterPages=_on_page)
+    doc.multiBuild(flow, onFirstPage=_on_page, onLaterPages=_on_page)
     return buf.getvalue()

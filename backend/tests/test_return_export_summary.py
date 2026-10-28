@@ -73,7 +73,8 @@ def test_return_is_on_the_first_page_before_the_distinct_system_band():
         assert first.index("Returned for revision") < first.index("System readiness")
         assert "1 criterion remains unresolved" in first
         assert "Returning did not grade or exclude them" in first
-        assert "Composite detail: not available" in first
+        assert "Composite detail: not available" not in first
+        assert "Composite detail: not available" in text(document)
         assert "Reopen the report before recording or changing their judgments" in text(document)
 
 
