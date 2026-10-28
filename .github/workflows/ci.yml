@@ -42,9 +42,12 @@ jobs:
       - name: Format check (ruff)
         if: always()
         run: uv run ruff format --check .
-      - name: Tests (pytest)
+      - name: Acceptance classifier negative controls
         if: always()
-        run: uv run pytest -v
+        run: uv run python -m unittest discover -s ../tools -p test_backend_acceptance.py
+      - name: Default pytest and source-correct backend acceptance
+        if: always()
+        run: uv run python ../tools/run_backend_acceptance.py --output-dir ../test-results/backend
         env:
           VERIDICAL_FAKE_LLM: "1"
           DATABASE_URL: postgresql://veridical:veridical@localhost:5432/veridical
@@ -67,6 +70,12 @@ jobs:
           # gitignored (D-007), same convention as `test_ingest_pdf.py`'s
           # existing `demo_pdf_only` marker already counted in the 9 above.
           VERIDICAL_MAX_SKIPS: "10"
+      - name: Retain default pytest failure and acceptance receipts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-default-and-acceptance
+          path: test-results/backend
 
   frontend:
     runs-on: ubuntu-latest

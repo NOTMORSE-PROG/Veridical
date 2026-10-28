@@ -307,7 +307,7 @@ support the documentation review, not this project's current allowance.
 - Ingestion tests against a fixture set: native PDF, DOCX, image-table PDF, malformed file
 
 ### 7.2 AI grading validation (the part the panel will ask about)
-- **Golden dataset:** 10–20 real anonymized capstone excerpts, hand-graded by the Capstone Instructor (binary pass/fail per criterion + a one-line reason). Stored in the repo as JSONL, versioned
+- **Golden dataset:** independently instructor-adjudicated cases, versioned as JSONL with the criterion outcome and a one-line reason. The validation policy requires at least 30–50 representative cases per module before making a 90%+ validation claim. Small provisional sets and regression-test pass counts do not establish that claim; unresolved cases and evaluation errors remain visible in coverage accounting.
 - Every prompt or rubric-handling change re-runs the golden set; agreement with the instructor's grades is the regression metric — a change that drops agreement doesn't ship
 - **Recorded generation settings:** retain each call's requested model ID, temperature and prompt version, and optional provider-reported version. A rubric, prompt, routing or serving-version change can affect comparisons; an unchanged requested ID does not guarantee the same serving model or output. Review these differences before comparing runs.
 - **Self-consistency as confidence:** 2 differently-stanced passes + a conditional tie-break on disagreement, majority vote; the agreement score *is* the confidence signal that drives escalation (F3.5) — one mechanism, validated once, used everywhere
