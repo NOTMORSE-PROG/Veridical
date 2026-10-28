@@ -1,4 +1,4 @@
-import { CriterionEvidencePacket } from "./CriterionEvidencePacket";
+import { CriterionAssessment, CriterionEvidencePacket } from "./CriterionEvidencePacket";
 import { type ReactNode, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useLocation, useNavigate, useSearchParams } from "react-router";
 import type {
@@ -666,7 +666,7 @@ function SignalResolutionCard({ item, checkRunId, onResolved, onEditingChange, o
       <div className="signal-resolution-card__context">
         <div><p className="signal-section-kicker">{item.review_basis === AI_REVIEW_BASIS ? "Recorded AI grade" : "Criterion requiring judgment"}</p><h3 ref={criterionHeadingRef} tabIndex={-1}>{item.criterion_text}</h3></div>
         <p id={voteId} className="signal-resolution-card__vote">{voteSummary(item)}</p>
-        <CriterionEvidencePacket checkRunId={checkRunId} criterionId={item.criterion_id} title={item.criterion_text} reasoning={item.reason} reasoningId={reasonId} evidence={evidence} onOpenEvidence={onOpenEvidence ? openEvidence : undefined} />
+        <CriterionAssessment checkRunId={checkRunId} criterionId={item.criterion_id} title={item.criterion_text} reasoning={item.reason} reasoningId={reasonId} evidence={evidence} />
         {item.injection_suspected && item.injection_matched_snippet && (
           <blockquote id={injectionId} className="signal-unverified-evidence"><strong>Text addressed at an automated grader</strong><span>“{item.injection_matched_snippet}”</span></blockquote>
         )}
@@ -720,6 +720,7 @@ function SignalResolutionCard({ item, checkRunId, onResolved, onEditingChange, o
         </div>
       )}
       </div>
+      <CriterionEvidencePacket checkRunId={checkRunId} criterionId={item.criterion_id} title={item.criterion_text} reasoning={item.reason} reasoningId={reasonId} evidence={evidence} onOpenEvidence={onOpenEvidence ? openEvidence : undefined} includeAssessment={false} />
     </article>
   );
 }

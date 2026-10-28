@@ -2598,6 +2598,8 @@
   .signal-criterion-packet__group,
   .signal-criterion-packet__group > header,
   .signal-criterion-packet__quotations { display: grid; min-inline-size: 0; gap: var(--signal-space-4); }
+  .signal-resolution-card > .signal-criterion-packet { grid-column: 1 / -1; }
+  .signal-resolution-card > .signal-resolution-card__judgment { position: static; }
   .signal-criterion-packet h4,
   .signal-criterion-packet p,
   .signal-criterion-packet figure,

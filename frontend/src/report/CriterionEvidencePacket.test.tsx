@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { fireEvent, screen, within } from "@testing-library/react";
 import { renderWithProviders } from "../test/renderWithProviders";
-import { CriterionEvidencePacket } from "./CriterionEvidencePacket";
+import { CriterionAssessment, CriterionEvidencePacket } from "./CriterionEvidencePacket";
 import { LEGACY_ORGANIZATION_REVIEW } from "../demo/preparedAiReview";
 import { sampleReport } from "../demo/workspaceFixture";
 import { criterionEvidenceGuide } from "../demo/criterionEvidenceGuide";
@@ -21,6 +21,17 @@ describe("historical source correction", () => {
   it("does not attach a sample correction to unrelated source text", () => {
     renderWithProviders(<CriterionEvidencePacket checkRunId={1} criterionId={4} title="Organization and Formatting" reasoning={LEGACY_ORGANIZATION_REVIEW} evidence={[{ quote: "Different manuscript", anchor: "page 2" }]} previews={false} />, { route: "/demo/report/1" });
     expect(screen.queryByText(/Source correction:/)).not.toBeInTheDocument();
+  });
+  it("keeps one complete assessment and correction associated with separately arranged evidence", () => {
+    const row = sampleReport.results[3];
+    const props = { checkRunId: 1, criterionId: 4, title: row.text, reasoning: LEGACY_ORGANIZATION_REVIEW, evidence: row.evidence, reasoningId: "separate-grade-reason" };
+    renderWithProviders(<><CriterionAssessment {...props} /><CriterionEvidencePacket {...props} includeAssessment={false} previews={false} /></>, { route: "/demo/report/1" });
+    expect(screen.getAllByText(LEGACY_ORGANIZATION_REVIEW)).toHaveLength(1);
+    expect(screen.getAllByText(/Source correction: page 4 of the published sample contains a logo/)).toHaveLength(1);
+    const evidence = screen.getByRole("region", { name: `Evidence and explanation for ${row.text}` });
+    expect(evidence).toHaveAttribute("aria-describedby", "separate-grade-reason");
+    expect(evidence).toHaveAccessibleDescription(LEGACY_ORGANIZATION_REVIEW);
+    expect(within(evidence).queryByRole("heading", { name: "Assessment and explanation" })).not.toBeInTheDocument();
   });
   it.each([0, 1, 2, 3])("keeps every full passage accessible together in its named group for criterion %s", criterionIndex => {
     const row = sampleReport.results[criterionIndex];

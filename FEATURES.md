@@ -318,6 +318,13 @@ No text truncation, cropped source image or reduction in saved evidence. Apply
 the same organization to current review, saved grades and source context; unknown
 records retain all saved quotations in their honest fallback group.
 
+**Use the space below grading controls (owner, 2026-10-28):** Keep the assessment
+beside the single grading form, then let the evidence group choices, complete
+related quotations and optional original images span the width below both.
+Preserve the existing compact layout and content. Keep the assessment associated
+with its evidence and prevent grading controls from floating over the wider
+evidence area. No larger workspace redesign is requested by this follow-up.
+
 **Four-module presentation records (owner, 2026-10-28):** The original published
 capstone retains its actual F6 not-applicable and F7 not-run states. Separate
 publicly licensed papers demonstrate completed saved local checks: three supported

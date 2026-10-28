@@ -17,23 +17,30 @@ interface Props {
   onOpenEvidence?: (index: number) => void;
   previews?: boolean;
   selectedIndex?: number;
+  includeAssessment?: boolean;
 }
 
-export function CriterionEvidencePacket({ checkRunId, criterionId, title, reasoning, evidence, reasoningId, onOpenEvidence, previews = true, selectedIndex }: Props) {
+export function CriterionAssessment({ checkRunId, criterionId, title, reasoning, evidence, reasoningId }: Pick<Props, "checkRunId" | "criterionId" | "title" | "reasoning" | "evidence" | "reasoningId">) {
+  const knownEvidence = evidenceFor("criterion", criterionId);
+  const correction = isWorkspaceSample() && checkRunId === 1 && title === sampleCriteria.find(item => item.id === criterionId)?.text && evidence.length > 0 && evidence.every((entry, index) => entry.quote === knownEvidence[index]?.quote && entry.anchor === knownEvidence[index]?.anchor) ? organizationSourceCorrection(criterionId, reasoning) : null;
+  return <>
+    <div className="signal-resolution-context-note"><h4>Assessment and explanation</h4><p id={reasoningId}>{reasoning || "No additional explanation was recorded for this criterion."}</p>{correction && <p><strong>{correction}</strong> The saved assessment above is retained as recorded.</p>}</div>
+    <p className="signal-field-hint">Read these passages together to check how the assessment follows from the manuscript. Source links keep the explanation with its original pages.</p>
+  </>;
+}
+
+export function CriterionEvidencePacket({ checkRunId, criterionId, title, reasoning, evidence, reasoningId, onOpenEvidence, previews = true, selectedIndex, includeAssessment = true }: Props) {
   const panelId = useId();
   const [selection, setSelection] = useState<{ identity: string; index: number } | null>(null);
   const guide = isWorkspaceSample() ? criterionEvidenceGuide(checkRunId, criterionId, title, evidence) : null;
-  const knownEvidence = evidenceFor("criterion", criterionId);
-  const correction = isWorkspaceSample() && checkRunId === 1 && title === sampleCriteria.find(item => item.id === criterionId)?.text && evidence.length > 0 && evidence.every((entry, index) => entry.quote === knownEvidence[index]?.quote && entry.anchor === knownEvidence[index]?.anchor) ? organizationSourceCorrection(criterionId, reasoning) : null;
   const groups = guide ?? [{ title: "Saved passages for this criterion", explanation: "Read the explanation together with these saved passages. No more specific relationship was recorded between individual passages and parts of the explanation.", indexes: evidence.map((_, index) => index) }];
   const identity = JSON.stringify([checkRunId, criterionId, title, evidence]);
   const requested = selectedIndex === undefined ? -1 : groups.findIndex(group => group.indexes.includes(selectedIndex));
   const active = requested >= 0 ? requested : selection?.identity === identity && selection.index < groups.length ? selection.index : 0;
   const group = groups[active];
   const previewIndexes = [...new Set([...(selectedIndex === undefined ? [] : [selectedIndex]), ...(group.previewIndexes ?? []), ...group.indexes])].filter(index => group.indexes.includes(index));
-  return <section className="signal-criterion-packet" aria-label={`Evidence and explanation for ${title}`}>
-    <div className="signal-resolution-context-note"><h4>Assessment and explanation</h4><p id={reasoningId}>{reasoning || "No additional explanation was recorded for this criterion."}</p>{correction && <p><strong>{correction}</strong> The saved assessment above is retained as recorded.</p>}</div>
-    <p className="signal-field-hint">Read these passages together to check how the assessment follows from the manuscript. Source links keep the explanation with its original pages.</p>
+  return <section className="signal-criterion-packet" aria-label={`Evidence and explanation for ${title}`} aria-describedby={!includeAssessment ? reasoningId : undefined}>
+    {includeAssessment && <CriterionAssessment checkRunId={checkRunId} criterionId={criterionId} title={title} reasoning={reasoning} evidence={evidence} reasoningId={reasoningId} />}
     {selectedIndex === undefined && groups.length > 1 && <div className="signal-criterion-packet__navigation">
       <p>{evidence.length} saved passages in {groups.length} groups. Choose a group to read its passages together.</p>
       <nav aria-label={`Evidence groups for ${title}`}>{groups.map((item, index) => <button type="button" key={item.title} aria-pressed={active === index} aria-controls={panelId} onClick={() => setSelection({ identity, index })}><strong>{item.title}</strong>{" "}<span>{item.indexes.length} {item.indexes.length === 1 ? "passage" : "passages"}</span></button>)}</nav>
