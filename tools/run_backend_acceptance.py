@@ -14,13 +14,70 @@ import sys
 import xml.etree.ElementTree as ET
 
 ROOT = Path(__file__).resolve().parents[1]
-MANIFEST = ROOT / "tools/data/backend_acceptance_v1.json"
+MANIFEST = ROOT / "tools/data/backend_acceptance_v2.json"
+
+
+def registry_problems(manifest: dict, root: Path) -> list[str]:
+    """A new contract preserves its prior authority and every unchanged gate."""
+    if manifest.get("schema_version") == "backend-acceptance-v1":
+        return (
+            ["Unexpected transition in v1 registry."]
+            if "transition" in manifest
+            else []
+        )
+    if manifest.get("schema_version") != "backend-acceptance-v2":
+        return ["Unknown or missing acceptance registry version."]
+    try:
+        transition = manifest["transition"]
+        parent_path = root / transition["parent_manifest"]
+        parent_bytes = parent_path.read_bytes()
+        parent = json.loads(parent_bytes)
+        name = transition["test_path"]
+        archive = transition["prior_test_archive"]
+        old_hash, new_hash = (
+            transition["prior_test_sha256"],
+            transition["current_test_sha256"],
+        )
+        parent_hash = hashlib.sha256(parent_bytes).hexdigest()
+        frozen = manifest["frozen_artifact_sha256"]
+        if (
+            parent.get("schema_version") != "backend-acceptance-v1"
+            or parent_hash != transition["parent_manifest_sha256"]
+            or frozen.get(transition["parent_manifest"]) != parent_hash
+            or parent["frozen_artifact_sha256"].get(name) != old_hash
+            or frozen.get(name) != new_hash
+            or frozen.get(archive) != old_hash
+            or hashlib.sha256((root / archive).read_bytes()).hexdigest() != old_hash
+            or hashlib.sha256((root / name).read_bytes()).hexdigest() != new_hash
+            or not isinstance(transition["reason"], str)
+            or not transition["reason"].strip()
+            or any(
+                frozen.get(path) != digest
+                for path, digest in parent["frozen_artifact_sha256"].items()
+                if path != name
+            )
+            or any(
+                manifest[key] != parent[key]
+                for key in (
+                    "gating_selectors",
+                    "retained_diagnostic",
+                    "diagnostic_assertion_location",
+                    "max_skips_default",
+                )
+            )
+        ):
+            return [
+                "Invalid acceptance registry transition or changed prior authority."
+            ]
+    except (KeyError, TypeError, ValueError, OSError, AttributeError):
+        return ["Missing or malformed acceptance registry transition."]
+    return []
 
 
 def classify(
     xml_path: Path, pytest_exit: int, manifest: dict, root: Path, *, max_skips=None
 ) -> dict:
-    problems = []
+    problems = registry_problems(manifest, root)
     default_result = (
         "PASS" if pytest_exit == 0 else "FAIL" if pytest_exit == 1 else "ERROR"
     )
@@ -146,22 +203,35 @@ def classify(
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output-dir", type=Path, required=True)
+    parser.add_argument("--registry", choices=("v1", "v2"), default="v2")
     args = parser.parse_args()
     args.output_dir.mkdir(parents=True, exist_ok=True)
     xml = args.output_dir.resolve() / "default-pytest.xml"
     if xml.exists() or (args.output_dir / "acceptance.json").exists():
         parser.error("Prior receipts preserved; select a fresh output directory.")
+    manifest_path = ROOT / f"tools/data/backend_acceptance_{args.registry}.json"
+    manifest_bytes = manifest_path.read_bytes()
+    manifest = json.loads(manifest_bytes)
+    if manifest.get("schema_version") != f"backend-acceptance-{args.registry}":
+        parser.error("Selected registry and loaded schema version differ.")
     # No deselection, test rewriting, xfail or skip injection.
     result = subprocess.run(
         [sys.executable, "-m", "pytest", "-v", f"--junitxml={xml}"],
         cwd=ROOT / "backend",
         check=False,
     )
-    manifest = json.loads(MANIFEST.read_text())
     skip_limit = int(
         os.environ.get("VERIDICAL_MAX_SKIPS", manifest["max_skips_default"])
     )
     report = classify(xml, result.returncode, manifest, ROOT, max_skips=skip_limit)
+    report.update(
+        registry_version=manifest["schema_version"],
+        registry_path=str(manifest_path.relative_to(ROOT)),
+        registry_sha256=hashlib.sha256(manifest_bytes).hexdigest(),
+    )
+    if manifest_path.read_bytes() != manifest_bytes:
+        report["problems"].append("Acceptance registry changed during pytest.")
+        report["accepted"] = False
     (args.output_dir / "acceptance.json").write_text(
         json.dumps(report, indent=2) + "\n"
     )

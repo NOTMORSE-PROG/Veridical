@@ -1,0 +1,38 @@
+{
+  "schema_version": "backend-acceptance-v2",
+  "max_skips_default": 5,
+  "scope": "Backend regression acceptance with one retained invalid historical oracle; not analytical accuracy or product UAT.",
+  "reason": "The same historical reference cannot require zero findings and one supported metadata mismatch.",
+  "frozen_artifact_sha256": {
+    "backend/tests/test_v4_seeded_regression.py": "d7b9ad98d68a43d95ca3bb3778070aa6da83af561865b3812cfb037a860177c1",
+    "backend/tests/test_v4_source_validated_control.py": "adad0d2bee2866d7a3e2e71a10626904b457e5414f68fb2db2171eae5d706e35",
+    "backend/tests/fixtures/v4_source_control_v2/recipe.json": "b68531ffbdf86b70cf501894a2f826400fb7a092a5f50e293975ed95867c2cd3",
+    "backend/tests/fixtures/v4_source_control_v2/provenance.json": "d30bf14aae0c211b5f9718d49b2916381479552b301e1d952e78e95c2a43f2a4",
+    "backend/tests/fixtures/v4_source_control_v2/control.docx": "0357cbfd0be8d2e1ffa7d611b355e0fedd48f9cb3a936c889c291d01d63d7db1",
+    "backend/tests/fixtures/v4_source_control_v2/source_validated_control_acceptance_v1.py.txt": "479b69685c0be1eb641a2a00cb6ecc4e69a17644dfd1684c6ab235a23556e9e7",
+    "tools/data/backend_acceptance_v1.json": "a1f4a2ce4539f35c23ed38a8ff3e7449b80969303d71a3720be067a164671d48"
+  },
+  "gating_selectors": [
+    "tests/test_v4_seeded_regression.py::test_seeded_manuscript_flags_all_four_planted_errors",
+    "tests/test_v4_seeded_regression.py::test_retraction_flag_is_high_severity_with_honest_wording",
+    "tests/test_v4_seeded_regression.py::test_grim_impossible_mean_flagged_with_arithmetic",
+    "tests/test_v4_seeded_regression.py::test_wrong_p_value_flagged",
+    "tests/test_v4_source_validated_control.py::test_frozen_source_and_provenance_remain_identifiable",
+    "tests/test_v4_source_validated_control.py::test_recipe_build_is_deterministic",
+    "tests/test_v4_source_validated_control.py::test_source_validated_control_runs_actual_metadata_and_numerical_checks",
+    "tests/test_v4_source_validated_control.py::test_historical_wrong_reference_is_a_positive_metadata_mismatch_control"
+  ],
+  "retained_diagnostic": "tests/test_v4_seeded_regression.py::test_clean_control_manuscript_produces_zero_false_positives",
+  "diagnostic_assertion_location": "tests/test_v4_seeded_regression.py:246: AssertionError",
+  "transition": {
+    "parent_manifest": "tools/data/backend_acceptance_v1.json",
+    "parent_manifest_sha256": "a1f4a2ce4539f35c23ed38a8ff3e7449b80969303d71a3720be067a164671d48",
+    "test_path": "backend/tests/test_v4_source_validated_control.py",
+    "prior_test_archive": "backend/tests/fixtures/v4_source_control_v2/source_validated_control_acceptance_v1.py.txt",
+    "prior_test_sha256": "479b69685c0be1eb641a2a00cb6ecc4e69a17644dfd1684c6ab235a23556e9e7",
+    "current_test_sha256": "adad0d2bee2866d7a3e2e71a10626904b457e5414f68fb2db2171eae5d706e35",
+    "origin_commit": "4e6f97bf",
+    "migration_commit": "60131268",
+    "reason": "F6 now records bounded reconstruction coverage. This control lacks explicit reconstruction declarations, so aggregate status escalates while all source, metadata, mathematical and zero-selected-flag assertions remain. Nine additional statements assert exact unassessed reconstruction provenance; no new allowed failures or skips."
+  }
+}

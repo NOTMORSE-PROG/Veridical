@@ -1,6 +1,7 @@
 """Known-bad acceptance receipts must fail closed."""
 
 import hashlib
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -17,6 +18,7 @@ class AcceptanceControls(unittest.TestCase):
         self.source = self.root / "frozen.py"
         self.source.write_text("original")
         self.manifest = dict(
+            schema_version="backend-acceptance-v1",
             max_skips_default=5,
             frozen_artifact_sha256={
                 "frozen.py": hashlib.sha256(b"original").hexdigest()
@@ -108,6 +110,77 @@ class AcceptanceControls(unittest.TestCase):
 
     def test_changed_frozen_source_is_rejected(self):
         self.source.write_text("changed")
+        self.assertFalse(self.verdict())
+
+    def migrate(self):
+        parent = dict(self.manifest, schema_version="backend-acceptance-v1")
+        other = self.root / "unchanged.txt"
+        other.write_bytes(b"independent oracle")
+        parent["frozen_artifact_sha256"] = dict(parent["frozen_artifact_sha256"])
+        parent["frozen_artifact_sha256"][other.name] = hashlib.sha256(
+            other.read_bytes()
+        ).hexdigest()
+        parent_path = self.root / "v1.json"
+        parent_path.write_text(json.dumps(parent))
+        archive = self.root / "original.py.txt"
+        archive.write_bytes(self.source.read_bytes())
+        old_hash = hashlib.sha256(archive.read_bytes()).hexdigest()
+        self.source.write_bytes(b"new contract with original oracles preserved")
+        new_hash = hashlib.sha256(self.source.read_bytes()).hexdigest()
+        parent_hash = hashlib.sha256(parent_path.read_bytes()).hexdigest()
+        self.manifest = dict(parent, schema_version="backend-acceptance-v2")
+        self.manifest["frozen_artifact_sha256"] = {
+            **parent["frozen_artifact_sha256"],
+            self.source.name: new_hash,
+            archive.name: old_hash,
+            parent_path.name: parent_hash,
+        }
+        self.manifest["transition"] = {
+            "parent_manifest": parent_path.name,
+            "parent_manifest_sha256": parent_hash,
+            "test_path": self.source.name,
+            "prior_test_archive": archive.name,
+            "prior_test_sha256": old_hash,
+            "current_test_sha256": new_hash,
+            "reason": "Reviewed conservative coverage contract migration",
+        }
+        return parent_path, archive
+
+    def test_versioned_transition_retains_prior_authority(self):
+        self.migrate()
+        self.assertTrue(self.verdict())
+
+    def test_changed_parent_or_archive_cannot_be_authorized_by_v2(self):
+        parent, archive = self.migrate()
+        for path in (parent, archive):
+            saved = path.read_bytes()
+            path.write_bytes(b"changed")
+            self.assertFalse(self.verdict())
+            path.write_bytes(saved)
+
+    def test_transition_cannot_expand_diagnostics_gates_or_skips(self):
+        self.migrate()
+        for key, value in (
+            ("max_skips_default", 99),
+            ("gating_selectors", []),
+            ("retained_diagnostic", "tests/other.py::new_failure"),
+        ):
+            saved = self.manifest[key]
+            self.manifest[key] = value
+            self.assertFalse(self.verdict())
+            self.manifest[key] = saved
+
+    def test_transition_cannot_drop_an_unchanged_oracle(self):
+        self.migrate()
+        del self.manifest["frozen_artifact_sha256"]["unchanged.txt"]
+        self.assertFalse(self.verdict())
+
+    def test_missing_transition_or_reason_is_rejected(self):
+        self.migrate()
+        saved = self.manifest.pop("transition")
+        self.assertFalse(self.verdict())
+        self.manifest["transition"] = saved
+        saved["reason"] = ""
         self.assertFalse(self.verdict())
 
     def test_skip_floor_cannot_be_hidden_by_expected_failure(self):
