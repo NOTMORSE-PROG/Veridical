@@ -193,7 +193,8 @@ def test_pending_and_instructor_resolved_facts_retain_their_distinct_relationshi
     data.report.decision = None
     pdf = build_report_pdf(data)
     text = _text(pdf)
-    assert text.count("PENDING_GLOSSARY") == 1
+    detail_text = text.split("Needs Your Review", 1)[1]
+    assert detail_text.count("PENDING_GLOSSARY") == 1
     assert 'The saved heading lookup searched for "glossary".' in text
     assert "Earlier recorded rule facts" in text
     assert "Criterion #202: RESOLVED_ABSTRACT" in text

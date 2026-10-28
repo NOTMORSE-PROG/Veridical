@@ -44,10 +44,12 @@ def integrity_modules(
                 state = "completed"
             if kind == CheckKind.internal_agreement and row.outcome == ResultOutcome.passed:
                 state = "partial"  # Saved candidate pairs have not established statement roles.
-            if kind == CheckKind.statistical_forensics and (
-                statistical_check_scope([row.outcome]).state == "incomplete"
-            ):
-                state = "incomplete"
+            if kind == CheckKind.statistical_forensics:
+                scope = statistical_check_scope([row.outcome], [row.detail])
+                if scope.state == "incomplete":
+                    state = "partial" if scope.unassessed_descriptive_rows else "incomplete"
+                elif scope.state == "not_recorded":
+                    state = "not_recorded"
             if kind == CheckKind.originality_reuse and (
                 detail.get("comparison_ran") is False
                 or detail.get("coverage_reason") in {

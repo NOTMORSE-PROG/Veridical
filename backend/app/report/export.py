@@ -1222,9 +1222,12 @@ def build_report_pdf(data: ReportExportData) -> bytes:
             if pending
             else "reproducible detail, not the verdict; see the readiness band above"
         )
+        displayed_score = round(
+            report.composite_score, get_settings().export_numeric_detail_decimal_places
+        )
         flow.append(
             Paragraph(
-                f"{label}: {report.composite_score}% ({qualification}).",
+                f"{label}: {displayed_score}% ({qualification}).",
                 styles["caption"],
             )
         )
@@ -1291,9 +1294,20 @@ def build_report_pdf(data: ReportExportData) -> bytes:
     ))
     flow.append(Paragraph('<link href="#report-overview">Readiness and instructor decision</link>',
                           styles["body"]))
+    def criterion_navigation_label(row):
+        identity = f"Criterion #{row.criterion_id}"
+        named = f"{identity}: {' '.join(row.text.split())}"
+        style = styles["body"]
+        return (
+            named
+            if text_width(named, style.fontName, style.fontSize) <= content_width
+            else identity
+        )
+
     for row in report.results:
         flow.append(Paragraph(
-            f'<link href="#criterion-{row.criterion_id}">Criterion #{row.criterion_id}</link>',
+            f'<link href="#criterion-{row.criterion_id}">'
+            f'{escape(criterion_navigation_label(row))}</link>',
             styles["body"],
         ))
     record_identities = _review_record_identities(data.flags)
@@ -1309,7 +1323,8 @@ def build_report_pdf(data: ReportExportData) -> bytes:
     for row in report.results:
         label, _tone = _result_display(row)
         flow.append(Paragraph(
-            f'<link href="#criterion-{row.criterion_id}">Criterion #{row.criterion_id}</link>: '
+            f'<link href="#criterion-{row.criterion_id}">'
+            f'{escape(criterion_navigation_label(row))}</link>: '
             f'{escape(label)}. '
             + ("Instructor judgment recorded." if row.resolution else "Recorded system outcome."),
             styles["body"],
@@ -1831,7 +1846,9 @@ def build_report_pdf(data: ReportExportData) -> bytes:
                         entry.quote == comparison.text and entry.anchor == comparison.anchor
                         for entry in common_entries
                     ):
-                        finding.append(Paragraph(escape(comparison.label), styles["caption_bold"]))
+                        context_label = Paragraph(escape(comparison.label), styles["caption_bold"])
+                        context_label.keepWithNext = True
+                        finding.append(context_label)
                         continue
                     finding.append(
                         Paragraph(
@@ -2067,7 +2084,8 @@ def build_report_pdf(data: ReportExportData) -> bytes:
     flow.append(Spacer(1, 12))
 
     # 7. Final decision.
-    flow.append(Paragraph('<a name="instructor-decision-record"/>Final Decision', styles["h2"]))
+    flow.append(_navigation_heading("Final Decision", styles["h2"],
+                                    "instructor-decision-record", "Final Decision"))
     if report.decision:
         flow.append(
             _tone_badge(
@@ -2116,7 +2134,9 @@ def build_report_pdf(data: ReportExportData) -> bytes:
                 )
             )
     else:
-        flow.append(Paragraph("This manuscript has no final decision yet.", styles["body"]))
+        undecided = Paragraph("This manuscript has no final decision yet.", styles["body"])
+        undecided.keepWithNext = bool(pending)
+        flow.append(undecided)
         if pending:
             flow.append(
                 Paragraph(

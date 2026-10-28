@@ -1,4 +1,20 @@
 {
-  "body_required": ["\\bin[\\s\\u002d\\u2010-\\u2015\\u2212]*text\\b"],
-  "non_substantive_quotes": ["^(?:doi\\s*:?\\s*|https?://(?:dx\\.)?doi\\.org/)?10\\.\\d{4,9}/\\S+$"]
+  "body_required": [
+    "\\bin[\\s\\u002d\\u2010-\\u2015\\u2212]*text\\b"
+  ],
+  "non_substantive_quotes": [
+    "^(?:doi\\s*:?\\s*|https?://(?:dx\\.)?doi\\.org/)?10\\.\\d{4,9}/\\S+$"
+  ],
+  "external_verification_required": [
+    "\\bpeer[\\s\\u002d\\u2010-\\u2015\\u2212]*review(?:ed)?\\b",
+    "\\bprofessionally\\s+legitimate\\b",
+    "\\b(?:reliab(?:le|ility)|credib(?:le|ility)|reputab(?:le|ility)|legitima(?:te|cy)|trustworth(?:y|iness))\\b.{0,60}\\b(?:sources?|references?|publications?|journals?|vendors?|institutions?)\\b",
+    "\\b(?:sources?|references?|publications?|journals?|vendors?|institutions?)\\b.{0,60}\\b(?:reliab(?:le|ility)|credib(?:le|ility)|reputab(?:le|ility)|legitima(?:te|cy)|trustworth(?:y|iness))\\b",
+    "\\b(?:externally\\s+verified|certified|accredited)\\b"
+  ],
+  "collection_assessment_required": [
+    "\\b(?:most|primarily|throughout|comprehensive(?:ly)?|completeness)\\b|\\bmajority\\b(?![\\s\\u002d\\u2010-\\u2015\\u2212]*vote\\b)|\\bfew\\b(?![\\s\\u002d\\u2010-\\u2015\\u2212]*shot\\b)",
+    "\\bcomplete\\s+(?:documentation|coverage|inventory|assessment)\\b",
+    "\\b(?:all|every|each)\\s+(?:one\\s+)?(?:of\\s+)?(?:(?:the|these|those|our)\\s+)?(?:references?|sources?|citations?|entr(?:y|ies)|items?|sections?|figures?|tables?|requirements?|components?|devices?|participants?|records?)\\b"
+  ]
 }

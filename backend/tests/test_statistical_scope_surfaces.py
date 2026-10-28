@@ -36,7 +36,9 @@ def test_actual_saved_enum_maps_to_processing_completion():
 def test_public_projection_deliberately_publishes_only_safe_state(state):
     report = scope_report(state)
     public = _to_public_report(report).model_dump()
-    assert public["statistical_check_scope"] == {"state": state}
+    assert public["statistical_check_scope"] == {
+        "state": state, "unassessed_descriptive_rows": 0
+    }
     assert public["historical_native_math_unverified"] is True
     assert "integrity_check_status" not in public
     assert "pending_review_count" not in public

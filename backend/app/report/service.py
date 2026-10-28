@@ -92,7 +92,7 @@ from app.report.scoring import (
 )
 from app.report.source_coverage import project_source_coverage
 from app.report.source_files import manuscript_source_file, open_source_pdf, readable_source_file
-from app.report.statistical_scope import statistical_check_scope
+from app.report.statistical_scope import statistical_check_scope, unassessed_descriptive_rows
 from app.report.subject_identity import recorded_check_subject
 from app.report.weight_importance import WeightImportance, weight_importance
 from app.storage.access import read_source
@@ -182,6 +182,10 @@ async def _assessment_incomplete(session: AsyncSession, check_run_id: int) -> bo
     }
     return any(
         (row.kind == CheckKind.internal_agreement and row.outcome == ResultOutcome.passed)
+        or (
+            row.kind == CheckKind.statistical_forensics
+            and unassessed_descriptive_rows(row.detail) != 0
+        )
         or row.outcome in incomplete
         and (
             row.criterion_id is not None
@@ -566,6 +570,16 @@ async def report_out_for_check_run(
     # only knows these two `detail` key conventions -- without this filter,
     # a future criterion_id=None/partial-execution outcome from a different
     # check (F6/F7) would silently reach both as an unrecognised value.
+    forensics_rows = list(
+        (
+            await session.scalars(
+                select(CheckResult).where(
+                    CheckResult.check_run_id == check_run_id,
+                    CheckResult.kind == CheckKind.statistical_forensics,
+                )
+            )
+        ).all()
+    )
     integrity_rows = (
         (
             await session.execute(
@@ -600,71 +614,81 @@ async def report_out_for_check_run(
         .scalars()
         .all()
     )
+    integrity_row_ids = {row.id for row in integrity_rows}
+    integrity_rows.extend(
+        row for row in forensics_rows
+        if unassessed_descriptive_rows(row.detail) != 0 and row.id not in integrity_row_ids
+    )
     integrity_check_status = [
         IntegrityCheckStatusOut(
             check_kind=row.kind.value,
             outcome="escalated"
-            if row.kind == CheckKind.internal_agreement and row.outcome == ResultOutcome.passed
+            if row.outcome == ResultOutcome.passed and (
+                row.kind == CheckKind.internal_agreement
+                or row.kind == CheckKind.statistical_forensics
+                and unassessed_descriptive_rows(row.detail) != 0
+            )
             else row.outcome.value,
-            n_skipped_quota=_integrity_skip_count(row.kind, row.detail, "quota"),
-            n_skipped_api_down=_integrity_skip_count(row.kind, row.detail, "api_down"),
-            n_skipped_parse_failure=_integrity_skip_count(row.kind, row.detail, "parse_failure"),
+            n_skipped_quota=_integrity_skip_count(row.kind, detail, "quota"),
+            n_skipped_api_down=_integrity_skip_count(row.kind, detail, "api_down"),
+            n_skipped_parse_failure=_integrity_skip_count(row.kind, detail, "parse_failure"),
             coverage_reason=(
-                (row.detail or {}).get("coverage_reason")
-                if (row.detail or {}).get("coverage_reason") in COVERAGE_REASONS
+                detail.get("coverage_reason")
+                if detail.get("coverage_reason") in COVERAGE_REASONS
                 else "statement_roles_unverified"
                 if row.kind == CheckKind.internal_agreement
                 else None
             ),
-            n_metadata_skipped_insufficient=(row.detail or {}).get(
+            n_metadata_skipped_insufficient=detail.get(
                 "n_metadata_skipped_insufficient", 0
             ),
-            n_linkage_unassessed=(row.detail or {}).get("n_linkage_unassessed", 0),
-            n_source_pages_unassessed=(row.detail or {}).get("n_source_pages_unassessed", 0),
-            n_claim_support_unassessed=(row.detail or {}).get("n_claim_support_unassessed", 0),
-            statistical_notation_unassessed=_statistical_notation_state(row.detail)
+            n_linkage_unassessed=detail.get("n_linkage_unassessed", 0),
+            n_source_pages_unassessed=detail.get("n_source_pages_unassessed", 0),
+            n_claim_support_unassessed=detail.get("n_claim_support_unassessed", 0),
+            statistical_notation_unassessed=_statistical_notation_state(detail)
             if row.kind == CheckKind.statistical_forensics
             else None,
-            reference_list_page=(row.detail or {}).get("reference_list_page"),
-            analysis_coverage=(row.detail or {}).get("analysis_coverage")
-            if (row.detail or {}).get("analysis_coverage") in {"complete", "partial", "unsupported"}
+            reference_list_page=detail.get("reference_list_page"),
+            analysis_coverage=detail.get("analysis_coverage")
+            if detail.get("analysis_coverage") in {"complete", "partial", "unsupported"}
             else None,
-            assessment_scope=(row.detail or {}).get("assessment_scope")
-            if (row.detail or {}).get("assessment_scope")
+            assessment_scope=detail.get("assessment_scope")
+            if detail.get("assessment_scope")
             in {
                 "reference_metadata_only",
                 "available_text_and_tables",
                 "available_text_and_reference_metadata",
             }
             else None,
-            n_reference_metadata_attempted=(row.detail or {}).get(
+            n_reference_metadata_attempted=detail.get(
                 "n_reference_metadata_attempted", 0
             ),
-            n_metadata_api_down=(row.detail or {}).get("n_metadata_api_down", 0),
-            n_images_unassessed=(row.detail or {}).get("n_images_unassessed", 0),
-            n_image_occurrences_omitted=(row.detail or {}).get("n_image_occurrences_omitted", 0),
-            n_equations_unassessed=(row.detail or {}).get("n_equations_unassessed", 0),
-            n_recovery_figures_unassessed=(row.detail or {}).get(
+            n_metadata_api_down=detail.get("n_metadata_api_down", 0),
+            n_images_unassessed=detail.get("n_images_unassessed", 0),
+            n_image_occurrences_omitted=detail.get("n_image_occurrences_omitted", 0),
+            n_equations_unassessed=detail.get("n_equations_unassessed", 0),
+            n_recovery_figures_unassessed=detail.get(
                 "n_recovery_figures_unassessed", 0
             ),
-            n_recovery_tables_unassessed=(row.detail or {}).get("n_recovery_tables_unassessed", 0),
+            n_recovery_tables_unassessed=detail.get("n_recovery_tables_unassessed", 0),
             image_coverage_items=[
                 {key: item.get(key) for key in ("image_index", "page", "paragraph", "reason")}
-                for item in (row.detail or {}).get("image_coverage_items", [])
+                for item in detail.get("image_coverage_items", [])
             ],
-            native_math_inventory_state=(row.detail or {}).get("native_math_inventory_state"),
-            n_source_candidates_withheld=(row.detail or {}).get("n_source_candidates_withheld", 0),
-            n_native_equations_unassessed=(row.detail or {}).get("n_native_equations_unassessed"),
-            n_native_equations_unlocated=(row.detail or {}).get("n_native_equations_unlocated"),
-            native_math_excluded_paragraphs=(row.detail or {}).get(
+            native_math_inventory_state=detail.get("native_math_inventory_state"),
+            n_source_candidates_withheld=detail.get("n_source_candidates_withheld", 0),
+            n_native_equations_unassessed=detail.get("n_native_equations_unassessed"),
+            n_native_equations_unlocated=detail.get("n_native_equations_unlocated"),
+            native_math_excluded_paragraphs=detail.get(
                 "native_math_excluded_paragraphs", []
             ),
             native_math_coverage_items=[
                 {key: item.get(key) for key in ("paragraph", "kind", "n_occurrences")}
-                for item in (row.detail or {}).get("native_math_coverage_items", [])
+                for item in detail.get("native_math_coverage_items", [])
             ],
         )
         for row in integrity_rows
+        for detail in [row.detail if isinstance(row.detail, dict) else {}]
     ]
     # Keep source and statement-role limits intact. AI capability is a separate
     # private disclosure in the existing status shape, without repeated counts
@@ -755,23 +779,14 @@ async def report_out_for_check_run(
             )
         )
     ).all()
-    forensics_rows = list(
-        (
-            await session.scalars(
-                select(CheckResult).where(
-                    CheckResult.check_run_id == check_run_id,
-                    CheckResult.kind == CheckKind.statistical_forensics,
-                )
-            )
-        ).all()
-    )
     forensics_row = forensics_rows[0] if forensics_rows else None
     return ReportOut(
         historical_native_math_unverified=(
             check_run.status == CheckRunStatus.done
             and (
                 forensics_row is None
-                or (forensics_row.detail or {}).get("native_math_coverage_version") != "v1"
+                or not isinstance(forensics_row.detail, dict)
+                or forensics_row.detail.get("native_math_coverage_version") != "v1"
             )
         ),
         historical_citation_title_unverified=any(
@@ -824,7 +839,9 @@ async def report_out_for_check_run(
             else None
         ),
         integrity_check_status=integrity_check_status,
-        statistical_check_scope=statistical_check_scope([row.outcome for row in forensics_rows]),
+        statistical_check_scope=statistical_check_scope(
+            [row.outcome for row in forensics_rows], [row.detail for row in forensics_rows]
+        ),
         originality_scope=originality_scope,
         levelled_rating=levelled_rating,
     )

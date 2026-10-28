@@ -140,8 +140,16 @@ def test_zero_pending_return_does_not_claim_incomplete_judgments_or_require_a_no
 def test_front_summary_link_reaches_the_complete_decision_note(note):
     with rendered(report(decision_note=note)) as document:
         links = [link for link in document[0].get_links() if link["kind"] == fitz.LINK_GOTO]
-        assert links, "the decision summary must have a real internal destination"
-        destination = links[0]["page"]
+        summary_links = [
+            link for link in links
+            if "See decision reason and full decision record."
+            in " ".join(document[0].get_textbox(fitz.Rect(link["from"]) + (-2, -2, 2, 2)).split())
+        ]
+        assert len(summary_links) == 1, (
+            "the visible decision summary must have one real destination"
+        )
+        destination = summary_links[0]["page"]
+        assert any(title == "Final Decision" for _, title, _ in document.get_toc())
         assert "Final Decision" in document[destination].get_text()
         assert " ".join(note.split()) in " ".join(text(document).split())
 

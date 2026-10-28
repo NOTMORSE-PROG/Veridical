@@ -167,12 +167,12 @@ def test_private_revision_routes_preserve_figures_and_qualify_malformed_history(
     public = client.get(f"/shared/{token}/report")
     assert public.status_code == 200
     assert body["reason"] not in public.text
+    assert public.json()["report"]["assessment_revision"] == 2
     for key in (
         "judgment_revision",
         "check_result_id",
         "performed_by",
         "actor_id",
-        "assessment_revision",
     ):
         assert key not in public.text
     assert (

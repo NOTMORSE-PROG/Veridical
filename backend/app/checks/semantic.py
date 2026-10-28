@@ -18,7 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.checks.levels import level_scale_prompt_fragment, outcome_and_score
 from app.checks.rules.sections import find_section_node, identify_target_section
-from app.checks.schemas import GradeBatchResponse, GradeVerdict
+from app.checks.schemas import GradeVerdict
 from app.checks.signals import compute_shadow_signals, shadow_signals_as_detail
 from app.checks.source_quality import source_limitation_detail
 from app.checks.support import apply_support, check_support, context_limitation
@@ -277,6 +277,39 @@ def _verify_quotes(
     return anchors
 
 
+@dataclass(frozen=True)
+class GradeBatchCandidates:
+    """Safely attributed candidates still require source, scale and vote checks."""
+
+    verdicts: list[GradeVerdict]
+    invalid_indices: tuple[int, ...]
+
+
+def _indexed_candidates(response: Any, expected_count: int) -> GradeBatchCandidates:
+    envelope = _unwrap_verdicts(response)
+    if not isinstance(envelope, dict) or not isinstance(envelope.get("verdicts"), list):
+        raise SemanticGradeError("Grading response did not contain a verdict list.")
+    entries = envelope["verdicts"]
+    if not entries:
+        raise SemanticGradeError("Grading response contained no indexed items.")
+    indices = []
+    for entry in entries:
+        if not isinstance(entry, dict) or type(entry.get("index")) is not int:
+            raise SemanticGradeError("Grading response had an invalid verdict index.")
+        indices.append(entry["index"])
+    if len(indices) != len(set(indices)):
+        raise SemanticGradeError(f"Grading response had duplicate verdict indices: {indices}")
+    if any(index < 0 or index >= expected_count for index in indices):
+        raise SemanticGradeError("Grading response had an out-of-range verdict index.")
+    valid, invalid = [], []
+    for entry in entries:
+        try:
+            valid.append(GradeVerdict.model_validate(entry))
+        except ValidationError:
+            invalid.append(entry["index"])
+    return GradeBatchCandidates(valid, tuple(invalid))
+
+
 async def _call_grade(
     prompt: str,
     llm: LLMClient,
@@ -286,7 +319,8 @@ async def _call_grade(
     consistency_pass: str = "single",
     prompt_version: str = PROMPT_VERSION,
     validation_attempt: int = 0,
-) -> GradeBatchResponse:
+    recovery_phase: str = "batch",
+) -> GradeBatchCandidates:
     # `consistency_pass` rides in **context: it differentiates the response-
     # cache key (D-011) so two independent voting passes over the SAME
     # batch/criteria are two real samples, not a cache hit of each other,
@@ -300,31 +334,12 @@ async def _call_grade(
         check_run_id=check_run_id,
         consistency_pass=consistency_pass,
         validation_attempt=validation_attempt,
+        grading_response_contract=get_settings().semantic_grading_response_contract,
+        recovery_phase=recovery_phase,
     )
-    try:
-        parsed = GradeBatchResponse.model_validate(_unwrap_verdicts(response))
-    except ValidationError as exc:
-        raise SemanticGradeError(f"Semantic grading response failed validation: {exc}") from exc
-    # BUG-177: `index` is the field that decides which criterion a verdict
-    # lands on, and it had no bound and no uniqueness check -- a duplicate
-    # index resolved last-wins with no signal the model contradicted
-    # itself, and an out-of-range index was silently retained/ignored.
-    # Same defensiveness `_unwrap_verdicts` already applies one field
-    # over (D-017: Gemini caught live returning structurally-wrong-but-
-    # parseable output): refuse an ambiguous response rather than guess
-    # which duplicate is real (charter rule 1) -- treated exactly like any
-    # other `SemanticGradeError`, so it gets the same whole-batch retry
-    # already in place, then an honest per-criterion escalation if the
-    # retry doesn't recover.
-    indices = [v.index for v in parsed.verdicts]
-    if len(indices) != len(set(indices)):
-        raise SemanticGradeError(f"Grading response had duplicate verdict indices: {indices}")
-    if any(i < 0 or i >= expected_count for i in indices):
-        raise SemanticGradeError(
-            f"Grading response had an out-of-range verdict index (expected 0-"
-            f"{expected_count - 1}): {indices}"
-        )
-    return parsed
+    # BUG-177 remains global: ambiguous attribution invalidates the envelope.
+    # Identifiable invalid content cannot invalidate a different criterion.
+    return _indexed_candidates(response, expected_count)
 
 
 def _unwrap_verdicts(response: Any) -> Any:
@@ -358,6 +373,7 @@ async def _grade_single_criterion(
     consistency_pass: str = "single",
     prompt_version: str = PROMPT_VERSION,
     annotator_stance: str = "",
+    recovery_phase: str = "single_criterion",
 ) -> tuple[GradeVerdict, list[str] | None] | None:
     """One-criterion retry, same context — used both when the batch
     response omitted a criterion and when its quotes failed containment,
@@ -384,6 +400,7 @@ async def _grade_single_criterion(
             expected_count=1,
             consistency_pass=consistency_pass,
             prompt_version=prompt_version,
+            recovery_phase=recovery_phase,
         )
     except SemanticGradeError:
         return None
@@ -474,8 +491,9 @@ async def grade_batch_verdicts(
     prompt = _build_prompt(
         batch, batch_criteria, prompt_version=prompt_version, annotator_stance=annotator_stance
     )
-    parsed: GradeBatchResponse | None = None
-    for _attempt in range(2):  # one try, one whole-batch retry (ticket: "retry once")
+    settings = get_settings()
+    parsed: GradeBatchCandidates | None = None
+    for _attempt in range(settings.semantic_batch_validation_attempts):
         try:
             parsed = await _call_grade(
                 prompt,
@@ -500,6 +518,7 @@ async def grade_batch_verdicts(
     # THIS batch are never valid evidence for a later one -- tracked
     # across the whole loop, not reset per-criterion.
     claimed_quotes: set[str] = set()
+    recovered_criteria = 0
     for i, criterion in enumerate(batch_criteria):
         verdict = by_index.get(i)
         if verdict is not None and verdict.verdict == "uncertain":
@@ -523,8 +542,19 @@ async def grade_batch_verdicts(
             if not quotes:
                 anchors = None  # every quote was borrowed -- same as hallucinated
         if verdict is None or anchors is None:
+            if recovered_criteria >= settings.semantic_item_recovery_max_criteria:
+                out[criterion.id] = GradedVerdict(
+                    criterion.id, None, verdict.reasoning if verdict else None,
+                    verdict.evidence_quotes if verdict else None, None,
+                    "This criterion remains unassessed because the configured item-recovery "
+                    "budget was reached. Review its source before grading.",
+                )
+                continue
+            recovered_criteria += 1
             retry = await _grade_single_criterion(
-                criterion, batch, llm, check_run_id, anchor_kind, consistency_pass=consistency_pass
+                criterion, batch, llm, check_run_id, anchor_kind, consistency_pass=consistency_pass,
+                prompt_version=prompt_version, annotator_stance=annotator_stance,
+                recovery_phase="criterion_repair",
             )
             if retry is None:
                 if verdict is not None:
@@ -552,10 +582,18 @@ async def grade_batch_verdicts(
                         None,
                         None,
                         None,
+                        "This criterion's grading response could not be validated after its "
+                        "item retry." if i in parsed.invalid_indices else
                         "No verdict was returned for this criterion, even after a retry.",
                     )
                 continue
             retry_verdict, retry_anchors = retry
+            if retry_verdict.verdict == "uncertain":
+                out[criterion.id] = GradedVerdict(
+                    criterion.id, None, retry_verdict.reasoning,
+                    retry_verdict.evidence_quotes, None, retry_verdict.reasoning,
+                )
+                continue
             if retry_anchors is not None:
                 retry_quotes, retry_anchors = _drop_claimed_quotes(
                     retry_verdict.evidence_quotes, retry_anchors, claimed_quotes

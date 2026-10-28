@@ -12,8 +12,8 @@ from app.checks.levels import match_level
 from app.models.enums import ResultOutcome
 
 PROMPT_TYPE = "semantic_support"
-PROMPT_VERSION = "v2"
-SOURCE_SCOPE_POLICY_VERSION = "source_obligations_v3_native_scopes"
+PROMPT_VERSION = "v3"
+SOURCE_SCOPE_POLICY_VERSION = "source_obligations_v5_owned_quotes"
 _PROMPT = Path(__file__).parent / "prompts" / f"{PROMPT_TYPE}_{PROMPT_VERSION}.txt"
 SupportStatus = Literal["supported", "unsupported", "uncertain"]
 
@@ -68,10 +68,55 @@ def _scope_patterns(path):
     defaults = Path(__file__).parent / "data" / "semantic_evidence_scopes.json"
     data = {
         **json.loads(defaults.read_text(encoding="utf-8")),
-        **json.loads(Path(path).read_text(encoding="utf-8")),
+        **(json.loads(Path(path).read_text(encoding="utf-8")) if path is not None else {}),
     }
     return {
         key: [re.compile(pattern, re.I) for pattern in patterns] for key, patterns in data.items()
+    }
+
+
+def _capability_failure(batch, criterion, detail):
+    patterns = _scope_patterns(getattr(batch, "scope_patterns_file", None))
+    obligations = {"criterion": criterion.text}
+    if getattr(criterion, "evidence", None):
+        obligations["evidence_request"] = criterion.evidence
+    level = match_level(criterion, detail["verdict"])
+    if level is not None:
+        obligations["level_descriptor"] = next(
+            item["descriptor"] for item in criterion.levels if int(item["level"]) == level.ordinal
+        )
+    guarded = [
+        {"key": key, "capabilities": needed}
+        for key, text in obligations.items()
+        if (needed := [
+            capability for capability in (
+                "external_verification_required", "collection_assessment_required"
+            )
+            if any(pattern.search(" ".join(text.split())) for pattern in patterns[capability])
+        ])
+    ]
+    if not guarded:
+        return None
+    missing = sorted({item for obligation in guarded for item in obligation["capabilities"]})
+    requirements = []
+    if "external_verification_required" in missing:
+        requirements.append("independent verification of external properties")
+    if "collection_assessment_required" in missing:
+        requirements.append("an itemized assessment of the relevant complete collection")
+    return {
+        "status": "unsupported",
+        "reason": (
+            "The proposed rating requires " + " and ".join(requirements) + ". "
+            "The saved manuscript quotations do not provide these assessment records. "
+            "Review the criterion and its performance level directly; no automatic grade "
+            "was assigned."
+        ),
+        "scope_guard": "independent_assessment_required",
+        "missing_capabilities": missing,
+        "guarded_obligations": guarded,
+        "prompt_version": PROMPT_VERSION,
+        "source_scope": batch.label,
+        "source_scope_policy": SOURCE_SCOPE_POLICY_VERSION,
     }
 
 
@@ -166,8 +211,7 @@ async def check_support(
     task = {
         "items": items,
         "source_scope": batch.label,
-        "source_text": batch.context_text,
-        "source_coverage": getattr(batch, "source_coverage", None),
+        "source_obligation_policy": SOURCE_SCOPE_POLICY_VERSION,
     }
     # One replacement prevents source strings resembling template slots from
     # being interpolated. JSON escaping keeps supplied data structurally separate.
@@ -232,6 +276,7 @@ async def check_support(
             "source_scope_policy": SOURCE_SCOPE_POLICY_VERSION,
         }
         scope_failure = _scope_failure(batch, criterion, detail)
+        capability_failure = _capability_failure(batch, criterion, detail)
         if item.status == "supported" and scope_failure:
             results[criterion.id] = {
                 "status": "unsupported",
@@ -241,6 +286,8 @@ async def check_support(
                 "scope_guard": "required_body_evidence_unconfirmed",
                 "source_scope_policy": SOURCE_SCOPE_POLICY_VERSION,
             }
+        elif item.status == "supported" and capability_failure:
+            results[criterion.id] = capability_failure
     return results
 
 

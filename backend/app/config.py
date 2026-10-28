@@ -333,6 +333,11 @@ class Settings(BaseSettings):
     # remain explicitly unassessed until a source-bound retrieval path exists.
     semantic_context_max_chars: int = Field(default=200_000, ge=1)
     semantic_batch_max_criteria: int = Field(default=20, ge=1)
+    semantic_batch_validation_attempts: int = Field(default=2, ge=1, le=2)
+    semantic_item_recovery_max_criteria: int = Field(default=20, ge=0)
+    semantic_grading_response_contract: str = Field(
+        default="indexed-item-recovery-v1", pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]*$"
+    )
 
     # --- Structural check engine (V-016, F3.2) -------------------------------
     # Override the packaged criterion-matching keyword lists / bound-phrase
@@ -766,6 +771,7 @@ class Settings(BaseSettings):
     # 150dpi is legible print quality without spending that headroom faster
     # than needed.
     export_page_image_dpi: int = Field(default=150, gt=0)
+    export_numeric_detail_decimal_places: int = Field(default=1, ge=0, le=10)
     # Bound each complete source-plus-disclosure RGB raster before allocation.
     # Independent of the distinct-page cap: a single unusually large PDF page
     # must not allocate an unbounded canvas. Unavailable images retain a reason.

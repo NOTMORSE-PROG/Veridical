@@ -172,8 +172,12 @@ async def test_distinct_body_passage_can_satisfy_necessary_source_scope(runner):
                         requirement["evidence_quotes"] = [body]
             return answer
 
+    item = criterion()
+    item.text = "One attributed body passage identifies the reference used"
+    item.evidence = "An in-text citation in the manuscript body"
+    item.levels[-1]["descriptor"] = "The cited source is identified in the body passage"
     result = (
-        await runner(Session(), 1, [criterion()], source, BodyClient("supported"), Settings())
+        await runner(Session(), 1, [item], source, BodyClient("supported"), Settings())
     )[0]
     assert result.outcome == ResultOutcome.passed
     assert result.detail["support_check"]["status"] == "supported"

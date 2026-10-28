@@ -83,6 +83,8 @@ def _compute_forensics_findings(extraction: ExtractionResult) -> _ForensicsCompu
         outcome = ResultOutcome.escalated
 
     grim_grimmer = evaluate_grim_grimmer(stats)
+    if grim_grimmer.skipped_composite_rows:
+        outcome = ResultOutcome.escalated
     flag_drafts: list[ForensicsFlagDraft] = [
         *grim_grimmer.flags,
         *p_flags,

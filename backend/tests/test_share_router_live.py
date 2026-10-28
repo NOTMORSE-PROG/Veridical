@@ -591,7 +591,9 @@ def test_shared_report_public_schema_is_an_exact_allow_list(
     assert set(shared["report"]["subject"]) == {"basis", "title", "member_names"}
     assert shared["report"]["subject"]["basis"] == "not_recorded"
     assert type(shared["report"]["historical_native_math_unverified"]) is bool
-    assert shared["report"]["statistical_check_scope"] == {"state": "not_recorded"}
+    assert shared["report"]["statistical_check_scope"] == {
+        "state": "not_recorded", "unassessed_descriptive_rows": 0
+    }
     assert set(shared["report"]["results"][0].keys()) == {
         "criterion_id",
         "text",
