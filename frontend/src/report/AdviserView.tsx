@@ -124,8 +124,12 @@ export function AdviserViewPage() {
   return (
     <SharedChrome>
       <div className="signal-shared-route signal-page-flow">
-        <header className="signal-route-header signal-shared-report-header"><div><p className="signal-eyebrow">Shared faculty review</p><h1 ref={headingRef} tabIndex={-1}>Readiness report</h1><p className="signal-route-header__intro">{identity.primary} · checked against {report.rubric_title}</p></div></header>
-        {report.subject?.basis === "confirmed_assignment_at_check" && <section aria-label="Recorded manuscript identity"><h2>{report.subject.title ?? report.manuscript_original_filename ?? "Manuscript"}</h2><p>Group members recorded when this check began: {report.subject.member_names.join(", ") || "Not recorded"}.</p></section>}
+        <header className="signal-route-header signal-shared-report-header"><div>
+          <p className="signal-eyebrow">Shared readiness report</p>
+          <h1 ref={headingRef} tabIndex={-1}>{report.subject?.basis === "confirmed_assignment_at_check" && report.subject.title ? report.subject.title : "Readiness report"}</h1>
+          <p className="signal-route-header__intro">Required format: {report.rubric_title}</p>
+          {report.subject?.basis === "confirmed_assignment_at_check" ? <><p>Group members: {report.subject.member_names.join(", ") || "Not recorded"}.</p><p className="signal-field-hint">Recorded when this check began.</p></> : <p>{identity.primary}</p>}
+        </div></header>
         {data.detail_snapshot === "stale" && <Alert title="Additional shared detail needs a new link" tone="info">The assessment changed after these details were shared. Ask the instructor to regenerate the link for the current explanations and identity.</Alert>}
 
         <SharedAssessmentContext report={report} />

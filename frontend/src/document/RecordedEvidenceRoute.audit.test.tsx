@@ -162,11 +162,14 @@ describe("recorded PDF route ownership", () => {
     await act(async () => heldPdf.resolve(model()));
     const firstPage = await screen.findByLabelText("Page 1 of 1");
     const root = screen.getByRole("region", { name: "Full manuscript, scrollable" });
-    const scrollTo = vi.fn(); root.scrollTo = scrollTo;
+    const scrollTo = vi.fn((value?: ScrollToOptions | number, y?: number) => {
+      const options = typeof value === "number" ? { top: y } : value ?? {};
+      root.scrollTop = options.top ?? root.scrollTop;
+    }); root.scrollTo = scrollTo;
     Object.defineProperty(root, "clientWidth", { configurable: true, value: 600 });
     Object.defineProperty(root, "clientHeight", { configurable: true, value: 500 });
     vi.spyOn(root, "getBoundingClientRect").mockReturnValue({ top: 20 } as DOMRect);
-    vi.spyOn(firstPage, "getBoundingClientRect").mockReturnValue({ top: 100 } as DOMRect);
+    vi.spyOn(firstPage, "getBoundingClientRect").mockImplementation(() => ({ top: 237 - root.scrollTop } as DOMRect));
     await waitFor(() => expect(IntersectionStub.instances.some(observer => observer.target === firstPage && observer.options.rootMargin)).toBe(true));
     act(() => {
       IntersectionStub.instances.filter(observer => observer.target === firstPage && observer.options.rootMargin).forEach(observer => observer.emit());
@@ -201,13 +204,24 @@ describe("recorded PDF route ownership", () => {
     expect(await screen.findByText("Recorded location B.")).toBeVisible();
     await waitFor(() => expect(document.querySelector(`[data-reference-id="${refs[1]}"]`)).not.toBeNull());
     expect(document.querySelector(`[data-reference-id="${refs[0]}"]`)).toBeNull();
+    const currentMark = document.querySelector<HTMLElement>(`[data-reference-id="${refs[1]}"]`)!;
+    vi.spyOn(currentMark, "getBoundingClientRect").mockImplementation(() => {
+      const top = firstPage.getBoundingClientRect().top + Number.parseFloat(currentMark.style.top);
+      const height = Number.parseFloat(currentMark.style.height);
+      return { top, bottom: top + height, width: Number.parseFloat(currentMark.style.width), height } as DOMRect;
+    });
+    const centeredQuotePosition = Math.max(0, 237 + Number.parseFloat(currentMark.style.top)
+      + Number.parseFloat(currentMark.style.height) / 2 - (20 + root.clientHeight / 2));
     await waitFor(() => expect(frames.size).toBe(1));
     currentFrames();
-    expect(scrollTo).toHaveBeenCalledTimes(1);
-    expect(scrollTo).toHaveBeenCalledWith({ top: 217, behavior: "auto" });
+    expect(scrollTo).toHaveBeenCalledTimes(2);
+    expect(scrollTo).toHaveBeenNthCalledWith(1, { top: 217, behavior: "auto" });
+    expect(scrollTo).toHaveBeenLastCalledWith({ top: centeredQuotePosition, behavior: "auto" });
+    expect(currentMark.getBoundingClientRect().top).toBeGreaterThanOrEqual(20);
+    expect(currentMark.getBoundingClientRect().bottom).toBeLessThanOrEqual(20 + root.clientHeight);
     expect(scroll.mock.contexts.filter(target => target === firstPage)).toHaveLength(1);
     currentFrames();
-    expect(scrollTo).toHaveBeenCalledTimes(1);
+    expect(scrollTo).toHaveBeenCalledTimes(2);
     expect(screen.getByLabelText("Page 1 of 1")).toBe(firstPage);
     expect(tasks).toHaveLength(loadedCount); expect(boundTask.destroy).not.toHaveBeenCalled();
     expect(fetch.mock.calls.filter(([input]) => String(input).includes("/evidence/source-file?"))).toHaveLength(1);

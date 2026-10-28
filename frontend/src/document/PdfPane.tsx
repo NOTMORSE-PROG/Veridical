@@ -6,6 +6,7 @@ import {
   useMemo,
   useRef,
   useState,
+  useLayoutEffect,
   type CSSProperties,
   type RefObject,
 } from "react";
@@ -22,6 +23,7 @@ import { claimFocusContinuation, type FocusContinuation } from "../routing/focus
 import type { EvidencePlacement } from "../report/evidenceTypes";
 import { evidenceOverlayRects } from "./evidenceOverlay";
 import { ApiError } from "../api/client";
+import { revealRecordedPdfEvidence } from "./revealRecordedPdfEvidence";
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
   "pdfjs-dist/build/pdf.worker.min.mjs",
@@ -79,6 +81,7 @@ function ContinuousPdfPage({
   registerPage,
   documentNoun,
   recordedEvidence,
+  onRecordedEvidenceReady,
 }: {
   pdf: PDFDocumentProxy;
   metric: PageMetric;
@@ -95,6 +98,7 @@ function ContinuousPdfPage({
   registerPage: (page: number, element: HTMLElement | null) => void;
   documentNoun: string;
   recordedEvidence?: EvidencePlacement;
+  onRecordedEvidenceReady?: (page: number, element: HTMLElement, referenceId: string) => void;
 }) {
   const pageRef = useRef<HTMLElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -259,6 +263,13 @@ function ContinuousPdfPage({
   const aspectStyle = { aspectRatio: `${metric.width} / ${metric.height}` } as CSSProperties;
   const recordedRects = viewport ? evidenceOverlayRects(recordedEvidence, metric.pageNumber,
     (x, y) => viewport.convertToViewportPoint(x, y)) : [];
+  const recordedReference = recordedEvidence?.reference_id;
+  const recordedPage = recordedEvidence?.page;
+  useLayoutEffect(() => {
+    if (isNear && viewport && pageRef.current && recordedReference && recordedPage === metric.pageNumber) {
+      onRecordedEvidenceReady?.(metric.pageNumber, pageRef.current, recordedReference);
+    }
+  }, [isNear, viewport, metric.pageNumber, recordedReference, recordedPage, onRecordedEvidenceReady]);
 
   return (
     <section
@@ -488,21 +499,56 @@ export function PdfPane({
     onObservedPage?.(target);
   }, [metrics.length, pdf?.numPages, onObservedPage]);
 
+  const requestedCallbacks = useRef({ scrollToPage, canPlaceRequestedPage, onPlaceRequestedPage });
+  requestedCallbacks.current = { scrollToPage, canPlaceRequestedPage, onPlaceRequestedPage };
+  const requestedSource = useRef({ fileUrl, loadFile, pdf });
+  requestedSource.current = { fileUrl, loadFile, pdf };
+  const pendingRecorded = useRef<{
+    page: number; referenceId: string; intent: number;
+    source: typeof requestedSource.current;
+  } | undefined>(undefined);
+  const revealRequestedEvidence = useCallback((page: number, element: HTMLElement, referenceId: string) => {
+    const pending = pendingRecorded.current;
+    if (!pending || pending.page !== page || pending.referenceId !== referenceId) return;
+    const source = requestedSource.current;
+    if (pending.source.fileUrl !== source.fileUrl || pending.source.loadFile !== source.loadFile
+      || pending.source.pdf !== source.pdf || pending.intent !== reading.intent.current
+      || (requestedCallbacks.current.canPlaceRequestedPage && !requestedCallbacks.current.canPlaceRequestedPage())) {
+      pendingRecorded.current = undefined;
+      return;
+    }
+    const root = scrollRef.current;
+    if (!root || pageRefs.current.get(page) !== element || !revealRecordedPdfEvidence(root, element, referenceId)) return;
+    pendingRecorded.current = undefined;
+    requestedCallbacks.current.onPlaceRequestedPage?.(page, element);
+  }, [reading.intent]);
+  const recordedReferenceId = loadFile && recordedEvidence?.state === "text_layer_match"
+    && recordedEvidence.page === requestedPage ? recordedEvidence.reference_id : undefined;
   useEffect(() => {
     if (requestedPage === null || metrics.length === 0) return;
     if (!Number.isSafeInteger(requestedPage) || requestedPage < 1 || requestedPage > metrics.length) return;
-    if (canPlaceRequestedPage && !canPlaceRequestedPage()) return;
+    const callbacks = requestedCallbacks.current;
+    if (callbacks.canPlaceRequestedPage && !callbacks.canPlaceRequestedPage()) return;
     reading.retire();
     const intent = reading.intent.current;
+    const pending = recordedReferenceId ? { page: requestedPage, referenceId: recordedReferenceId,
+      intent, source: requestedSource.current } : undefined;
+    pendingRecorded.current = pending;
     const frame = requestAnimationFrame(() => {
       if (reading.intent.current !== intent) return;
-      if (canPlaceRequestedPage && !canPlaceRequestedPage()) return;
-      scrollToPage(requestedPage, "auto");
+      const latest = requestedCallbacks.current;
+      if (latest.canPlaceRequestedPage && !latest.canPlaceRequestedPage()) return;
+      latest.scrollToPage(requestedPage, "auto");
       const element = pageRefs.current.get(requestedPage);
-      if (element) onPlaceRequestedPage?.(requestedPage, element);
+      if (element && recordedReferenceId) revealRequestedEvidence(requestedPage, element, recordedReferenceId);
+      else if (element) latest.onPlaceRequestedPage?.(requestedPage, element);
     });
-    return () => cancelAnimationFrame(frame);
-  }, [metrics.length, requestedPage, requestedPageAttempt, scrollToPage, onPlaceRequestedPage, canPlaceRequestedPage, reading.retire, reading.intent]);
+    return () => {
+      cancelAnimationFrame(frame);
+      if (pendingRecorded.current === pending) pendingRecorded.current = undefined;
+    };
+  }, [metrics.length, requestedPage, requestedPageAttempt, recordedReferenceId, fileUrl, loadFile, pdf,
+    reading.retire, reading.intent, revealRequestedEvidence]);
 
   function commitPageInput() {
     reading.retire();
@@ -600,6 +646,7 @@ export function PdfPane({
                 registerPage={registerPage}
                 documentNoun={formatDocument ? "required format" : "manuscript"}
                 recordedEvidence={loadFile ? recordedEvidence : undefined}
+                onRecordedEvidenceReady={revealRequestedEvidence}
               />
             ))}
           </div>

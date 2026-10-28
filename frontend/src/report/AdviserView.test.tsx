@@ -113,6 +113,29 @@ function publicCountPayload(outcomes: PublicCriterionResultOut["outcome"][]): Sh
 }
 
 describe("AdviserViewPage", () => {
+  it("leads with the recorded manuscript title and members without a duplicate identity heading", async () => {
+    vi.stubGlobal("fetch", stubFetchByPath({ "/shared/tok123/report": shared({ report: {
+      ...BASE_REPORT, subject: { basis: "confirmed_assignment_at_check", title: "Recorded manuscript title", member_names: ["First Member", "Second Member"] },
+    } }) }));
+    render();
+    expect(await screen.findByRole("heading", { level: 1, name: "Recorded manuscript title" })).toBeVisible();
+    expect(screen.getByText("Group members: First Member, Second Member.")).toBeVisible();
+    expect(screen.getByText("Required format: TIP Format")).toBeVisible();
+    expect(screen.getAllByRole("heading", { name: "Recorded manuscript title" })).toHaveLength(1);
+    expect(screen.getByRole("heading", { name: "Conditionally Ready" })).toBeVisible();
+    expect(screen.getByText("Not recorded", { selector: "dd" })).toBeVisible();
+  });
+
+  it("does not promote unrecorded title or members into historical shared identity", async () => {
+    vi.stubGlobal("fetch", stubFetchByPath({ "/shared/tok123/report": shared({ report: {
+      ...BASE_REPORT, subject: { basis: "not_recorded", title: "Unconfirmed title", member_names: ["Unconfirmed member"] },
+    } }) }));
+    render();
+    expect(await screen.findByRole("heading", { level: 1, name: "Readiness report" })).toBeVisible();
+    expect(screen.queryByText("Unconfirmed title")).not.toBeInTheDocument();
+    expect(screen.queryByText(/Unconfirmed member/)).not.toBeInTheDocument();
+  });
+
   it("keeps all public qualifications open while switching between grades and findings", async () => {
     const payload = publicCountPayload(["passed", "escalated"]);
     Object.assign(payload.report, { rubric_needs_review: true,

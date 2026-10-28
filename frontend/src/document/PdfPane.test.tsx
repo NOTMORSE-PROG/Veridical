@@ -6,7 +6,9 @@ import { comparisonLeadSnapshot } from "../domain/comparisonLeadIdentity";
 import { StrictMode, useLayoutEffect, useRef } from "react";
 
 const mocks = vi.hoisted(() => ({ getDocument: vi.fn() }));
-vi.mock("pdfjs-dist", () => ({ GlobalWorkerOptions: {}, getDocument: mocks.getDocument }));
+vi.mock("pdfjs-dist", () => ({ GlobalWorkerOptions: {}, getDocument: mocks.getDocument,
+  TextLayer: class { async render() {} cancel() {} },
+}));
 
 class ObserverStub {
   static instances: ObserverStub[] = [];
@@ -94,6 +96,7 @@ describe("PdfPane page visibility", () => {
   });
   afterEach(() => {
     cleanup();
+    vi.restoreAllMocks();
     vi.unstubAllGlobals();
   });
 
@@ -210,6 +213,67 @@ describe("PdfPane page visibility", () => {
     fireEvent.change(screen.getByRole("spinbutton"), { target: { value: "29" } });
     fireEvent.click(screen.getByRole("button", { name: "Go to entered page" }));
     expect(root.scrollTo).toHaveBeenCalledWith({ top: 2400, behavior: "smooth" });
+  });
+
+  it.each([false, true])("reveals rendered quote bounds once and respects newer manual input (late render=%s)", async late => {
+    let finishRender!: () => void;
+    const rendering = late ? new Promise<void>(resolve => { finishRender = resolve; }) : Promise.resolve();
+    mocks.getDocument.mockImplementation(() => ({ promise: Promise.resolve({ numPages: 3,
+      getPage: async () => ({ rotate: 0,
+        getViewport: ({ scale }: { scale: number }) => ({ width: 600 * scale, height: 800 * scale,
+          convertToViewportPoint: (x: number, y: number) => [x * scale, (800 - y) * scale] }),
+        render: () => ({ promise: rendering, cancel: vi.fn() }), getTextContent: async () => ({ items: [], styles: {} }), cleanup: vi.fn(),
+      }),
+    }), destroy: vi.fn() }));
+    vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue({} as CanvasRenderingContext2D);
+    const loadFile = async () => new Uint8Array([1]);
+    const recordedEvidence = { reference_id: "r".repeat(64), state: "text_layer_match" as const, page: 3,
+      paragraph: null, boxes: [[100, 550, 400, 585]] as [number, number, number, number][], reason: null };
+    const onPlaced = vi.fn();
+    const { rerender } = render(<PdfPane {...props} fileUrl="bound.pdf" loadFile={loadFile} recordedEvidence={recordedEvidence} onPlaceRequestedPage={onPlaced} />);
+    const third = await screen.findByLabelText("Page 3 of 3");
+    const root = screen.getByRole("region", { name: "Full manuscript, scrollable" });
+    await installGeometry(root);
+    Object.defineProperty(root, "clientHeight", { configurable: true, value: 167 });
+    vi.spyOn(root, "getBoundingClientRect").mockReturnValue({ top: 100, height: 167 } as DOMRect);
+    rerender(<PdfPane {...props} requestedPage={3} fileUrl="bound.pdf" loadFile={loadFile}
+      recordedEvidence={recordedEvidence} onPlaceRequestedPage={onPlaced} canPlaceRequestedPage={() => true} />);
+    await waitFor(() => expect(root.scrollTo).toHaveBeenCalled());
+    if (late) fireEvent.wheel(root);
+    await waitFor(() => expect(ResizeStub.instances.some(entry => entry.target === third)).toBe(true));
+    const resize = ResizeStub.instances.find(entry => entry.target === third)!;
+    act(() => {
+      resize.callback([{ contentRect: { width: 600 } } as ResizeObserverEntry], resize as unknown as ResizeObserver);
+      observer(3, true).emit([1]);
+    });
+    if (late) await act(async () => finishRender());
+    await waitFor(() => expect(third.querySelector(".signal-recorded-source-mark")).not.toBeNull());
+    const mark = third.querySelector<HTMLElement>(".signal-recorded-source-mark")!;
+    vi.spyOn(mark, "getBoundingClientRect").mockImplementation(() => {
+      const top = third.getBoundingClientRect().top + Number.parseFloat(mark.style.top);
+      return { top, bottom: top + Number.parseFloat(mark.style.height), width: 300, height: Number.parseFloat(mark.style.height) } as DOMRect;
+    });
+    // jsdom has no layout. Install the actual-mark geometry, then exercise a
+    // render-ready notification without replacing the requested reference.
+    act(() => resize.callback([{ contentRect: { width: 601 } } as ResizeObserverEntry], resize as unknown as ResizeObserver));
+    await waitFor(() => expect(Number.parseFloat(mark.style.top)).toBeGreaterThan(215));
+    if (late) {
+      expect(mark.getBoundingClientRect().top).toBeGreaterThan(267);
+      expect(onPlaced).not.toHaveBeenCalled();
+    } else {
+      await waitFor(() => expect(onPlaced).toHaveBeenCalledTimes(1));
+      expect(mark.getBoundingClientRect().top).toBeGreaterThanOrEqual(100);
+      expect(mark.getBoundingClientRect().bottom).toBeLessThanOrEqual(267);
+      fireEvent.change(screen.getByRole("spinbutton"), { target: { value: "2" } });
+      fireEvent.click(screen.getByRole("button", { name: "Go to entered page" }));
+      const manualPosition = root.scrollTop;
+      const laterCallback = vi.fn();
+      rerender(<PdfPane {...props} requestedPage={3} fileUrl="bound.pdf" loadFile={loadFile}
+        recordedEvidence={recordedEvidence} onPlaceRequestedPage={laterCallback} canPlaceRequestedPage={() => true} />);
+      await act(async () => { await Promise.resolve(); });
+      expect(root.scrollTop).toBe(manualPosition);
+      expect(laterCallback).not.toHaveBeenCalled();
+    }
   });
 
   it("keeps page 3 and its source point through zoom rather than showing the preceding blank tail", async () => {

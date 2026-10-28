@@ -52,6 +52,7 @@ export function RecordedEvidencePage({ checkRunId, snapshot, reference, cachedPa
 }) {
   const location = useLocation();
   const owner = useAuthOwner();
+  if (!reference.anchor?.trim() && !reference.quote.trim()) return <p>No source location was saved for this item.</p>;
   return <RecordedPageSession key={`${location.key}:${owner.lifetime}:${snapshot}:${reference.reference_id}`} checkRunId={checkRunId} snapshot={snapshot} reference={reference} cachedPage={cachedPage} context={context} />;
 }
 
@@ -89,11 +90,11 @@ function RecordedPageSession({ checkRunId, snapshot, reference, cachedPage, cont
     </figure>}
   </>;
   return <div className="signal-recorded-page-actions">
-    <Button id={actionId} variant="quiet" className="signal-evidence-source-link" onClick={() => setOpen(true)}>Open original page: {instructorAnchor(reference.anchor ?? "")}</Button>
+    <Button id={actionId} variant="quiet" className="signal-evidence-source-link" onClick={() => setOpen(true)}>{reference.anchor?.trim() ? `Open original page: ${instructorAnchor(reference.anchor)}` : "Open saved source"}</Button>
     <Button variant="secondary" aria-expanded={preview} onClick={() => setPreview(value => !value)}>{preview ? "Hide" : "Show"} original-page preview</Button>
     {preview && content(false)}
     {open && owner.isCurrent() && context && <CriterionEvidenceDialog run={checkRunId} request={{ snapshotId: snapshot, reference, actionId }} context={context} onClose={() => setOpen(false)} />}
-    {open && owner.isCurrent() && !context && <Dialog title={`Original source: ${instructorAnchor(reference.anchor ?? "")}`} wide onClose={() => setOpen(false)}>
+    {open && owner.isCurrent() && !context && <Dialog title={`Original source: ${instructorAnchor(reference.anchor ?? "") || "Saved source"}`} wide onClose={() => setOpen(false)}>
       <blockquote>{reference.quote}</blockquote><p>{instructorAnchor(reference.anchor ?? "")}</p>{content(true)}
     </Dialog>}
   </div>;

@@ -8,6 +8,7 @@ import { Button } from "../ui/Button";
 import { Dialog } from "../ui/Dialog";
 import type { EvidenceManifest, EvidencePage, EvidenceReference } from "./evidenceTypes";
 import { verifyEvidencePage } from "./RecordedEvidencePage";
+import { EvidenceSourceLayout } from "./EvidenceSourceLayout";
 
 const ROLE_LABEL: Record<EvidenceReference["role"], string> = {
   criterion_evidence: "Recorded criterion passage", criterion_scope: "Recorded assessment scope",
@@ -64,13 +65,13 @@ function SharedPageSession({ token, snapshot, reference, context, references }: 
     </figure>}
   </>;
   return <div className="signal-shared-packet__source">
-    <Button variant="quiet" className="signal-evidence-source-link" onClick={() => setDialog(true)}>Open original page: {instructorAnchor(reference.anchor ?? "")}</Button>
+    <Button variant="quiet" className="signal-evidence-source-link" onClick={() => setDialog(true)}>{reference.anchor?.trim() ? `Open original page: ${instructorAnchor(reference.anchor)}` : "Open saved source"}</Button>
     <Button variant="secondary" aria-expanded={preview} onClick={() => setPreview(value => !value)}>{preview ? "Hide" : "Show"} original-page preview</Button>
     {preview && image(false)}
-    {dialog && <Dialog title={context ? `Evidence and explanation: ${context.title}` : `Original source: ${instructorAnchor(reference.anchor ?? "")}`} wide onClose={() => setDialog(false)}>
-      {context && <section aria-label="Shared assessment"><h3>{context.title}</h3><h4>Assessment and explanation</h4><p>{context.explanation || "No assessment explanation was shared for this criterion."}</p>{context.recordedNote && <p><strong>Recorded system note:</strong> {context.recordedNote}</p>}
-        <div className="signal-criterion-packet__quotations">{references.map(entry => <figure key={entry.reference_id}><figcaption><strong>{ROLE_LABEL[entry.role]}</strong><span>{instructorAnchor(entry.anchor ?? "")}</span></figcaption><blockquote>{entry.quote}</blockquote></figure>)}</div></section>}
-      {!context && <blockquote>{reference.quote}</blockquote>}{image(true)}
+    {dialog && <Dialog title={context ? `Evidence and explanation: ${context.title}` : `Original source: ${instructorAnchor(reference.anchor ?? "") || "Saved source"}`} wide className={context ? "signal-dialog--source-context" : undefined} onClose={() => setDialog(false)}>
+      {context ? <EvidenceSourceLayout source={image(true)} context={<section aria-label="Shared assessment"><h3>{context.title}</h3><h4>Assessment and explanation</h4><p>{context.explanation || "No assessment explanation was shared for this criterion."}</p>{context.recordedNote && <p><strong>Recorded system note:</strong> {context.recordedNote}</p>}
+        <div className="signal-criterion-packet__quotations">{references.map(entry => <figure key={entry.reference_id}><figcaption><strong>{ROLE_LABEL[entry.role]}</strong><span>{instructorAnchor(entry.anchor ?? "")}</span></figcaption><blockquote>{entry.quote}</blockquote></figure>)}</div></section>} />
+        : <><blockquote>{reference.quote}</blockquote>{image(true)}</>}
     </Dialog>}
   </div>;
 }
@@ -88,7 +89,9 @@ export function SharedEvidencePacket({ token, manifest, references, fallback = [
         {reference.role.startsWith("agreement_") && <p>The selected statement roles have not been verified as this study's objective and result.</p>}
         {reference.source_scope === "bounded_comparison_excerpt" && <p>Only this saved comparison excerpt is shared. Its original source page is unavailable in this report.</p>}
       </div>
-      {manifest && reference.source_scope === "own_manuscript" && <SharedSourcePage key={`${token}:${manifest.snapshot_id}:${reference.reference_id}`} token={token} snapshot={manifest.snapshot_id} reference={reference} context={context} references={references} />}
+      {manifest && reference.source_scope === "own_manuscript" && (reference.anchor?.trim() || reference.quote.trim()
+        ? <SharedSourcePage key={`${token}:${manifest.snapshot_id}:${reference.reference_id}`} token={token} snapshot={manifest.snapshot_id} reference={reference} context={context} references={references} />
+        : <p>No source location was saved for this item.</p>)}
     </div>) : fallback.map((entry, index) => <div key={index}><blockquote>{entry.quote}</blockquote><p>{instructorAnchor(entry.anchor)}</p></div>)}
     {!references.length && !fallback.length && <p>No source passages were saved for this item.</p>}
   </section>;

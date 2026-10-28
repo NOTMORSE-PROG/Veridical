@@ -434,6 +434,7 @@
   --signal-first-use-rail-height: 7rem;
   --signal-dialog-width: min(34rem, calc(100vw - 2rem));
   --signal-dialog-wide-width: min(48rem, calc(100vw - 2rem));
+  --signal-evidence-dialog-width: min(var(--signal-workbench-width), calc(100vw - var(--signal-space-4) - var(--signal-space-4)));
   --signal-dialog-max-height: calc(100vh - 2rem);
   --signal-active-format-grid: minmax(0, 1fr) auto;
   --signal-active-format-rail-width: 4rem;

@@ -5,6 +5,7 @@ import { claimFocusContinuation, type FocusContinuation } from "../routing/focus
 import { Button } from "../ui/Button";
 import { Dialog } from "../ui/Dialog";
 import type { EvidenceReference, EvidenceSourceRequest } from "./evidenceTypes";
+import { EvidenceSourceLayout } from "./EvidenceSourceLayout";
 
 const RecordedEvidenceReader = lazy(() => import("../document/RecordedEvidenceReader").then(module => ({ default: module.RecordedEvidenceReader })));
 
@@ -30,11 +31,13 @@ export function CriterionEvidenceDialog({ run, request, context, onClose }: {
     placement.current?.dispose();
     placement.current = claimFocusContinuation(action);
   };
-  return <Dialog title={`Evidence and explanation: ${context.title}`} wide onClose={onClose}
+  return <Dialog title={`Evidence and explanation: ${context.title}`} wide className="signal-dialog--source-context" onClose={onClose}
     actions={<><Button variant="quiet" onClick={event => {
       retry(event.currentTarget); setManual(false); setAttempt(value => value + 1);
     }}>Reload manuscript</Button><Button variant="secondary" onClick={onClose}>Close manuscript</Button></>}>
-    <div className="signal-criterion-source-dialog">
+    <EvidenceSourceLayout source={<div className="signal-criterion-source-reader"><Suspense fallback={<p role="status">Loading the source reader.</p>}><RecordedEvidenceReader key={attempt} run={run} request={request}
+      current={!manual} visible attempt={attempt} canPlace={() => placement.current?.owns() ?? false}
+      onRetry={retry} onManual={() => { placement.current?.dispose(); setManual(true); }} /></Suspense></div>} context={<div className="signal-criterion-source-dialog">
       <h3>{context.title}</h3>
       <section className="signal-resolution-context-note" aria-label="Recorded assessment">
         <h4>Assessment and explanation</h4>
@@ -44,7 +47,7 @@ export function CriterionEvidenceDialog({ run, request, context, onClose }: {
       </section>
       <section className="signal-criterion-packet" aria-label="Saved evidence">
         <h4>Saved evidence</h4>
-        <p className="signal-field-hint">All passages saved for this criterion. No finer evidence grouping was recorded.</p>
+        <p className="signal-field-hint">Read these saved passages together with the assessment.</p>
         <div className="signal-criterion-packet__quotations">{context.references.map(reference => <figure key={reference.reference_id}
           data-selected={reference.reference_id === request.reference.reference_id || undefined}>
           <figcaption><strong>Saved passage {reference.index + 1}</strong><span>{instructorAnchor(reference.anchor ?? "")}</span></figcaption>
@@ -52,9 +55,6 @@ export function CriterionEvidenceDialog({ run, request, context, onClose }: {
         </figure>)}</div>
       </section>
       <p className="signal-field-hint">Your grade and comment stay in the review form. Close this manuscript to continue grading.</p>
-      <div className="signal-criterion-source-reader"><Suspense fallback={<p role="status">Loading the source reader.</p>}><RecordedEvidenceReader key={attempt} run={run} request={request}
-        current={!manual} visible attempt={attempt} canPlace={() => placement.current?.owns() ?? false}
-        onRetry={retry} onManual={() => { placement.current?.dispose(); setManual(true); }} /></Suspense></div>
-    </div>
+    </div>} />
   </Dialog>;
 }

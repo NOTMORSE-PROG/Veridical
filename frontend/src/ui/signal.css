@@ -8222,6 +8222,28 @@
     gap: var(--signal-space-4);
     min-inline-size: 0;
   }
+  .signal-dialog--source-context {
+    width: var(--signal-evidence-dialog-width);
+  }
+  .signal-source-context {
+    position: relative;
+    min-inline-size: 0;
+    display: grid;
+    align-items: start;
+    gap: var(--signal-space-5);
+  }
+  .signal-source-context[data-layout="split"] {
+    grid-template-columns: minmax(var(--signal-review-source-min), 3fr) minmax(var(--signal-review-inspector-min), 2fr);
+  }
+  .signal-source-context__source,
+  .signal-source-context__explanation {
+    min-inline-size: 0;
+  }
+  .signal-source-context__explanation {
+    display: grid;
+    gap: var(--signal-space-4);
+    overflow-wrap: anywhere;
+  }
   .signal-criterion-source-reader {
     display: flex;
     flex-direction: column;

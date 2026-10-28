@@ -34,6 +34,7 @@ export function Dialog({
   actions,
   onClose,
   wide = false,
+  className,
   returnFocusTarget,
   shouldRestoreFocus,
   fallbackFocusRef,
@@ -45,6 +46,7 @@ export function Dialog({
   actions?: ReactNode;
   onClose?: () => void;
   wide?: boolean;
+  className?: string;
   // Null preserves the captured trigger. Callers can supply a workflow
   // continuation and a persistent fallback without changing other dialogs.
   returnFocusTarget?: () => HTMLElement | null;
@@ -123,7 +125,7 @@ export function Dialog({
         aria-modal="true"
         aria-labelledby={titleId}
         tabIndex={-1}
-        className={cx("signal-dialog", wide && "signal-dialog--wide")}
+        className={cx("signal-dialog", wide && "signal-dialog--wide", className)}
       >
         <header>
           <h2 id={titleId} ref={titleRef} tabIndex={initialFocusTitle ? -1 : undefined}>{title}</h2>
