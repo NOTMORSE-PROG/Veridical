@@ -145,6 +145,7 @@ async def get_dashboard_stats(
                 or_(
                     and_(
                         latest_run_status == CheckRunStatus.done,
+                        ~has_decision,
                         per_manuscript_escalation_count > 0,
                     ),
                     latest_run_status.in_((CheckRunStatus.failed, CheckRunStatus.cancelled)),

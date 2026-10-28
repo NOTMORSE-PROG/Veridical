@@ -871,7 +871,9 @@ def test_purge_is_visible_in_owner_audit_without_exposing_it_to_another_instruct
     ]
     assert len(rows) == 1
     assert rows[0]["manuscript_id"] == ids["mine"]
-    assert client.get(f"/audit/{rows[0]['id']}").status_code == 200
+    detail = client.get(f"/audit/{rows[0]['id']}")
+    assert detail.status_code == 200
+    assert detail.json()["payload"]["instructor_id"] == ids["owner_id"]
     client.post("/auth/logout")
     login = client.post("/auth/login", json={"email": "stranger@tip.edu.ph", "password": "other!"})
     assert login.status_code == 200

@@ -640,7 +640,7 @@ async def test_a_short_reason_is_rejected_when_a_reason_is_required(session_fact
         assert report.decision is None
 
 
-async def test_resolve_escalation_enforces_the_length_floor_even_bypassing_the_router(
+async def test_resolve_escalation_enforces_required_reason_floor_bypassing_router(
     session_factory,
 ):
     """backend review finding (BUG-096 review): the length floor
@@ -668,7 +668,7 @@ async def test_resolve_escalation_enforces_the_length_floor_even_bypassing_the_r
                 check_run.id,
                 escalated_result_id,
                 instructor.id,
-                "mark_pass",
+                "needs_document",
                 "ok",
                 expected_revision=0,
             )

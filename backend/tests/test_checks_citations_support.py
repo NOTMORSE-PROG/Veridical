@@ -54,6 +54,39 @@ async def test_supported_verdict_produces_no_flag():
     assert result.n_skipped_total == 0
 
 
+async def test_batched_claim_links_bind_global_pair_and_own_saved_reference():
+    from types import SimpleNamespace
+    from app.checks.citations.source_locator import citation_source_locator
+
+    pairs = [
+        ClaimSupportInput(
+            citation=SimpleNamespace(
+                order_index=index + 10,
+                raw_text=f"Author. Source DOI 10.1234/source{index}",
+                doi=f"10.1234/source{index}",
+                url=None,
+            ),
+            claim_sentence="The same manuscript claim has several cited sources.",
+            abstract="The available source abstract.",
+        )
+        for index in range(3)
+    ]
+    verdict = {
+        "verdicts": [
+            {"index": 0, "verdict": "cannot_determine", "reasoning": "Abstract insufficient."}
+        ]
+    }
+    llm = ScriptedLLM([verdict, verdict, verdict])
+    settings = get_settings().model_copy(update={"claim_support_max_pairs_per_call": 1})
+    result = await run_claim_support_check(llm, pairs, check_run_id=1, settings=settings)
+    assert len(result.flags) == 3 and len(llm.calls) == 3
+    for index, flag in enumerate(result.flags):
+        assert flag.detail["claim_support_pair_index"] == index
+        locator = citation_source_locator("citation_integrity", flag.evidence_excerpt, flag.detail)
+        assert locator["order_index"] == index + 10
+        assert locator["links"][0]["url"] == f"https://doi.org/10.1234%2Fsource{index}"
+
+
 async def test_possibly_unsupported_with_verified_excerpt_is_medium_severity():
     pair = _pair(
         0, claim="The study found X causes Y.", abstract="We found no relationship between X and Y."

@@ -415,7 +415,7 @@ def order_native_tables(
 def saved_table_witness_valid(extraction, record) -> bool:
     """Check cached structure and canonical binding; read-time still replays bytes."""
     tables = sorted(
-        (t for t in extraction.tables if t.page == record.page),
+        (t for t in extraction.tables if t.page == record.page and t.source == "native"),
         key=lambda t: (t.bbox[1], t.bbox[0]) if t.bbox else (math.inf, math.inf),
     )
     witness = record.table_order
@@ -504,8 +504,7 @@ def saved_table_witness_valid(extraction, record) -> bool:
             # cached canonical text as well: these cells have one sole owner,
             # so their complete retained texts must reconstruct that line.
             cell_text = " ".join(
-                tables[ti].rows[row][column]
-                for ti, row, column in occurrences[sid]
+                tables[ti].rows[row][column] for ti, row, column in occurrences[sid]
             )
             if whitespace_text(source[sid][0]) != whitespace_text(cell_text):
                 return False

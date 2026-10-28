@@ -76,15 +76,11 @@ def test_docx_native_tables_no_captions_stress():
 
     # With captions, the same tables must pass
     captioned_tables = [
-        TableBlock(
-            paragraph=2, rows=[["col1", "col2"], ["v1", "v2"]], caption="Table 1: Metrics"
-        ),
+        TableBlock(paragraph=2, rows=[["col1", "col2"], ["v1", "v2"]], caption="Table 1: Metrics"),
         TableBlock(
             paragraph=5, rows=[["a", "b", "c"], ["1", "2", "3"]], caption="Table 2: Comparison"
         ),
-        TableBlock(
-            paragraph=8, rows=[["x", "y"], ["z", "w"]], caption="Table 3: Results"
-        ),
+        TableBlock(paragraph=8, rows=[["x", "y"], ["z", "w"]], caption="Table 3: Results"),
     ]
     passed_ctx = RuleContext(
         manuscript_id=1,

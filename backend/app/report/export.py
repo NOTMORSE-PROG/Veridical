@@ -1731,6 +1731,7 @@ def build_report_pdf(data: ReportExportData) -> bytes:
                         entry.quote == comparison.text and entry.anchor == comparison.anchor
                         for entry in common_entries
                     ):
+                        finding.append(Paragraph(escape(comparison.label), styles["caption_bold"]))
                         continue
                     finding.append(
                         Paragraph(

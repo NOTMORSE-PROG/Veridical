@@ -124,9 +124,7 @@ def test_warning_font_meets_minimum_in_the_actual_export_flowable(variant, mode,
     summary_text = disclosure_layout()["summaries"].get(mode, _LLM_MODE_DISCLOSURE[mode][0])
     disclosure = (summary_text, _LLM_MODE_DISCLOSURE[mode][1])
     with _source(variant) as doc:
-        png = _render_page_png(
-            doc[0], (), llm_disclosure=disclosure, settings=settings
-        )
+        png = _render_page_png(doc[0], (), llm_disclosure=disclosure, settings=settings)
     raster = pymupdf.Pixmap(png)
     content_width = A4[0] - 2 * export._PRINT_LAYOUT["side_margin"]
     flow = export._page_evidence_flowables(

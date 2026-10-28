@@ -675,7 +675,8 @@ def test_export_discloses_unknown_llm_mode_distinctly_from_real(logged_in_with_a
     full_text = "\n".join(page.get_text() for page in doc)
     assert "AI response mode could not be verified" in full_text
     assert "predates AI-mode tracking" not in full_text
-    assert "can't be confirmed" in full_text
+    assert "could not be verified" in full_text
+    assert "does not establish whether responses came from a real external model" in full_text
     assert "Test-mode run" not in full_text
 
 

@@ -1,0 +1,157 @@
+You are decomposing a Capstone Instructor's own required-format document
+(a grading rubric, format checklist, or oral-defense rating sheet) into a
+list of individually checkable criteria. The instructor uploaded THIS
+document, nothing about its shape, section names, or scoring style is
+known in advance. Do not assume it looks like any particular institution's
+template.
+
+The raw text below was extracted by a generic document parser (PyMuPDF /
+python-docx). It has NO reliable layout: multi-column tables may arrive as
+loose, out-of-order cell fragments; header words can be split across lines
+("BEGIN NER 1" instead of "BEGINNER 1"); repeated boilerplate (running
+headers, page numbers) may appear inline. Read past this shredding, infer
+the intended criteria from the CONTENT, not from any expected structure.
+
+First identify the source's independent grading units before paraphrasing.
+A separately named row with its own descriptors or score is an independent
+grading unit. Produce one criterion for each distinct independently graded
+row, even when adjacent rows concern the same broad topic or share a scale
+header. Keep its source label recognizable. Never merge independently
+graded rows because their wording, topic, evidence, or scale overlaps.
+
+Repeated copies of a grading grid form one criteria set only when the source
+label, requirement, scale and descriptor meanings are the same. A different
+named grading unit is not a duplicate merely because it concerns the same
+subject. Ignore student identity and signature differences between copies.
+
+Keep each source-defined graded row's descriptors and obligations together.
+Do not turn its rungs into separate criteria or create extra weighted units
+from its component facts. Preserve independently scored subcriteria as
+separate units. Split independent checklist/prose requirements when the
+source has not defined them as one separately graded composite unit.
+
+Choose type from the COMPLETE requirement and all level descriptors, not
+its heading or the presence of a number. An essential obligation involving
+quality, reliability, legitimacy, appropriateness, clarity, depth, or an
+undefined degree of correctness requires semantic judgment. A criterion
+about sources, citations or a bibliography can be semantic. Structural
+applies only when ALL essential obligations are objective/countable facts
+or explicitly defined format rules. A numerical component does not make a
+mixed graded quality row structural. Preserve its relative importance.
+
+Keep each row's own descriptors and source-assigned scale. Shared headers
+can supply rung names/points but never interchangeable row descriptors.
+Do not assign descriptors to rungs solely by flattened text order. Never
+invent a missing descriptor, rung, point value, name, threshold or source
+policy. Uncertain mappings require instructor review. Do not silently
+convert an uncertain graded row into pass/fail.
+
+For each individually checkable requirement you find, output one criterion:
+- "text": the requirement itself, in your own clear words if the source
+  wording is fragmented, but never invent a requirement that is not in
+  the source text.
+- "type": one of three values.
+  - "structural" if satisfying it is a matter of objective, countable
+    fact (page count, section presence, word limit, number of
+    references, citation format).
+  - "semantic" if it requires judging the QUALITY or MEANING of the
+    writing (clarity, argument strength, depth of analysis) as it
+    appears in this document.
+  - "not_assessable" if it describes something that happens AT THE
+    DEFENSE, not in the manuscript itself, and cannot be judged from
+    reading the document no matter how carefully (e.g. "the group
+    brings three bound copies," "students answer questions live and
+    think on their feet," "presenters dress appropriately," "the team
+    arrives on time"). If the rubric line is about the DOCUMENT'S own
+    content, structure, or writing quality, it is structural or
+    semantic, not this. When genuinely unsure whether something is a
+    property of the document or a property of the defense event, prefer
+    structural/semantic, use "not_assessable" only for requirements a
+    reader of the manuscript could never resolve either way.
+- "evidence_needed": one sentence describing what a reader would look at
+  to check this criterion. For a "not_assessable" criterion, describe in
+  one sentence what an instructor observes directly instead. If this
+  criterion also has a "levels" scale (see below), this sentence should
+  say what a reader looks at in general, not repeat the level text.
+- "levels": OMIT this field entirely for an ordinary pass/fail
+  requirement. Include it ONLY when the source document itself describes
+  a POINT SCALE with two or more NAMED performance levels for this exact
+  requirement (e.g. a rubric row reading "Beginner 1 / Developing 2 /
+  Proficient 3 / Exemplary 4" with different descriptive text under each
+  column). When present, "levels" is a list, one entry per rung, in
+  ascending order:
+  - "level": the rung's ordinal position (1, 2, 3, ...; the LOWEST rung
+    is 1, regardless of what number the source prints next to it).
+  - "name": the rung's own name as the source prints it (e.g.
+    "Beginner", "Acceptable", "Developing"); never invent or translate
+    a name the source doesn't use. Give it as whole words: when the
+    parser has split a word across lines ("ACCEPTABL" then "E 2"), join
+    it ("Acceptable"). The point value belongs in "points", never in the
+    name.
+  - "descriptor": the full descriptive text for that rung, copied/
+    paraphrased from the source (this is where the detailed level text
+    goes, NOT into "evidence_needed").
+  - "points": the numeric point value the source assigns that rung (use
+    the source's own numbers; if the source only shows ordinal position
+    with no separate point value, use the ordinal itself).
+  List every rung the source grades this requirement on: when one scale
+  header sits above several rows, each row has all of that header's rungs
+  unless the source leaves its cell empty.
+  Never force a "levels" scale onto a requirement that is genuinely
+  pass/fail in the source; this field only exists for a requirement the
+  source ITSELF grades on a named scale. A single document can have some
+  criteria with "levels" and some without.
+- "weight": a positive number expressing this criterion's relative
+  importance versus the others. If the source states explicit points or
+  percentages, use them (even if they don't sum to 100, they will be
+  normalized afterward). If the source states no explicit weighting, use
+  equal weights across all criteria you found.
+
+Rules:
+- For checklist/prose requirements without an independently graded composite
+  source row, use one criterion per requirement. Never fold separately checkable
+  requirements into one criterion, even when the source groups them under
+  one heading: a "Pagination" heading followed by five rules is five
+  criteria. One property stated with several values ("margins: 1.5 inch
+  left; 1 inch top, right and bottom") stays one criterion. A checklist of
+  separate items normally yields about one criterion per item.
+- Use plain punctuation (commas, colons, semicolons, or hyphens for numeric
+  ranges) in "text", "evidence_needed", and "descriptor". Do not use em
+  dashes or en dashes.
+- Outside a source-defined composite grading row, if a bullet mixes a
+  quality judgment (e.g. "contains at least 5 references, each critically
+  discussed"), split it into two separate criteria, one structural, one
+  semantic.
+- If a single bullet or sentence mixes a document property with a
+  defense-day behavior (e.g. "the paper is well-organized and the team
+  answers questions confidently"), split it the same way, into a
+  structural/semantic criterion for the document part and a
+  "not_assessable" criterion for the defense-day part.
+- If the document repeats itself (e.g. the same grading grid printed once
+  per student, or duplicated pages), extract the criteria set ONCE. Do not
+  emit duplicate criteria for repeated content.
+- Preserve any non-English fragments (e.g. Filipino terms) exactly as
+  written, never translate them.
+- Ignore furniture: page numbers, running headers/footers, and signature
+  blocks are not criteria.
+- Never infer a requirement solely from a title, document purpose or
+  expected institutional practice. If no source-supported requirement can
+  be recovered, return an empty criteria list for the existing parse/review
+  failure path. Never invent a criterion to satisfy the response schema.
+
+Respond with ONLY a JSON object of this exact shape, no other text. The
+"levels" field is shown here for a levelled criterion; omit it entirely
+for an ordinary pass/fail one (see the second example criterion):
+{"criteria": [
+  {"text": "...", "type": "semantic", "evidence_needed": "...", "weight": 10,
+   "levels": [
+     {"level": 1, "name": "Beginner", "descriptor": "...", "points": 1},
+     {"level": 2, "name": "Acceptable", "descriptor": "...", "points": 2},
+     {"level": 3, "name": "Proficient", "descriptor": "...", "points": 3},
+     {"level": 4, "name": "Exemplary", "descriptor": "...", "points": 4}
+   ]},
+  {"text": "...", "type": "structural", "evidence_needed": "...", "weight": 10}
+]}
+
+--- DOCUMENT TEXT ---
+{rubric_text}

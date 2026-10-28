@@ -32,6 +32,59 @@ class SavedReferenceLocator(BaseModel):
     cited_url: str | None = None
 
 
+class SavedClaimReferenceLocator(BaseModel):
+    model_config = ConfigDict(strict=True, extra="forbid")
+
+    schema_version: Literal["citation-claim-source-v1"]
+    finding_kind: Literal[
+        "claim_possibly_unsupported",
+        "claim_support_cannot_determine",
+        "claim_support_injection_suspected",
+    ]
+    reference_order_index: int = Field(ge=0)
+    claim_support_pair_index: int = Field(ge=0)
+    claim_text_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
+    reference_text: str = Field(min_length=1)
+    reference_text_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
+    doi: str | None = None
+    cited_url: str | None = None
+
+
+def with_claim_reference_locator(draft, citation, claim, pair_index):
+    """Snapshot the owning pair, without replacing its manuscript evidence."""
+    reference_text = getattr(citation, "raw_text", None)
+    if (
+        not isinstance(claim, str)
+        or not claim.strip()
+        or draft.evidence_excerpt != claim
+        or citation is None
+        or not isinstance(reference_text, str)
+        or not reference_text.strip()
+        or type(citation.order_index) is not int
+        or type(pair_index) is not int
+        or type(draft.detail.get("reference_order_index")) is not int
+        or type(draft.detail.get("claim_support_pair_index")) is not int
+        or draft.detail["reference_order_index"] != citation.order_index
+        or draft.detail["claim_support_pair_index"] != pair_index
+    ):
+        return draft
+    try:
+        saved = SavedClaimReferenceLocator(
+            schema_version="citation-claim-source-v1",
+            finding_kind=draft.detail.get("kind"),
+            reference_order_index=citation.order_index,
+            claim_support_pair_index=pair_index,
+            claim_text_sha256=hashlib.sha256(claim.encode()).hexdigest(),
+            reference_text=citation.raw_text,
+            reference_text_sha256=hashlib.sha256(citation.raw_text.encode()).hexdigest(),
+            doi=citation.doi,
+            cited_url=citation.url,
+        )
+    except ValidationError:
+        return draft
+    return replace(draft, detail={**draft.detail, "citation_source_locator": saved.model_dump()})
+
+
 def with_reference_locator(draft, citation):
     """The actual reference must own the entire saved evidence excerpt."""
     if (
@@ -122,21 +175,41 @@ def citation_source_locator(check_kind, raw, detail, *, settings=None):
             if doi_url
             else None
         )
+    snapshot = detail.get("citation_source_locator")
+    claim_snapshot = (
+        isinstance(snapshot, dict) and snapshot.get("schema_version") == "citation-claim-source-v1"
+    )
     try:
-        saved = SavedReferenceLocator.model_validate(detail.get("citation_source_locator"))
+        saved = (
+            SavedClaimReferenceLocator if claim_snapshot else SavedReferenceLocator
+        ).model_validate(snapshot)
     except ValidationError:
         return None
-    if saved.reference_text_sha256 != hashlib.sha256(raw.encode()).hexdigest():
-        return None
+    if claim_snapshot:
+        if (
+            saved.claim_text_sha256 != hashlib.sha256(raw.encode()).hexdigest()
+            or saved.reference_text_sha256
+            != hashlib.sha256(saved.reference_text.encode()).hexdigest()
+            or type(detail.get("reference_order_index")) is not int
+            or type(detail.get("claim_support_pair_index")) is not int
+            or detail["reference_order_index"] != saved.reference_order_index
+            or detail["claim_support_pair_index"] != saved.claim_support_pair_index
+        ):
+            return None
+        reference_text, order_index = saved.reference_text, saved.reference_order_index
+    else:
+        if saved.reference_text_sha256 != hashlib.sha256(raw.encode()).hexdigest():
+            return None
+        reference_text, order_index = raw, saved.order_index
     if saved.finding_kind != detail.get("kind"):
         return None
     if "order_index" in detail and (
-        type(detail["order_index"]) is not int or detail["order_index"] != saved.order_index
+        type(detail["order_index"]) is not int or detail["order_index"] != order_index
     ):
         return None
     links = []
     try:
-        doi_url = _doi_url(saved.doi, raw, settings or get_settings())
+        doi_url = _doi_url(saved.doi, reference_text, settings or get_settings())
     except (OSError, ValueError, UnicodeError):
         doi_url = None
     if doi_url:
@@ -145,7 +218,5 @@ def citation_source_locator(check_kind, raw, detail, *, settings=None):
     if cited_url and not any(link["url"] == cited_url for link in links):
         links.append({"kind": "url_as_cited", "url": cited_url})
     return (
-        {"basis": "saved_reference", "order_index": saved.order_index, "links": links}
-        if links
-        else None
+        {"basis": "saved_reference", "order_index": order_index, "links": links} if links else None
     )

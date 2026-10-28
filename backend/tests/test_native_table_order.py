@@ -13,6 +13,7 @@ from app.config import Settings
 from app.ingest.patterns import load_patterns
 from app.ingest.pdf import _extract_open_document, _native_tables_in_source_space
 from app.ingest.quality import reading_order_issues
+from app.ingest.schemas import TableBlock
 from app.ingest.service import _write_raw_store, raw_store_path
 from app.models.enums import IngestStatus
 from app.report.page_text import manuscript_page_text_for
@@ -126,6 +127,24 @@ def test_cached_cross_cell_text_cannot_change_while_its_witness_stays_unchanged(
     assert reading_order_issues(result)
 
 
+@pytest.mark.parametrize("native", [False, True])
+def test_supplemental_vision_tables_do_not_change_native_witness_inventory(native):
+    with pymupdf.open() as doc:
+        page = doc.new_page()
+        if native:
+            draw_grid(page)
+        else:
+            page.insert_text((65, 60), "Native prose remains independently ordered.")
+        result = extract(doc)
+    vision = TableBlock(page=1, rows=[["Supplemental", "7"]], source="vision", low_confidence=True)
+    result.tables.append(vision)
+    assert not reading_order_issues(result)
+    assert result.tables[-1] == vision and result.tables[-1].low_confidence
+    if native:
+        result.reading_order[0].table_order = None
+        assert reading_order_issues(result)
+
+
 def test_concurrent_native_table_helpers_materialize_each_documents_own_characters(monkeypatch):
     first_found = threading.Event()
     second_attempted = threading.Event()
@@ -164,8 +183,11 @@ def test_concurrent_native_table_helpers_materialize_each_documents_own_characte
 
         with ThreadPoolExecutor(max_workers=2) as pool:
             a = pool.submit(
-                _native_tables_in_source_space, first_page, 1,
-                ordering=NativeTableProposal(), settings=Settings(_env_file=None),
+                _native_tables_in_source_space,
+                first_page,
+                1,
+                ordering=NativeTableProposal(),
+                settings=Settings(_env_file=None),
             )
             b = pool.submit(run_second)
             assert a.result(timeout=10)[0].rows[0] == ["Owner A", "11"]

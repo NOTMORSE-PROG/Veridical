@@ -31,7 +31,9 @@ PROMPT_TYPE = "rubric_decomposition"
 # came back verbatim in every name, and one row lost its top rung), and
 # states the one-criterion-per-requirement rule (a draft without it folded
 # MTSU's 44-item checklist into 7 criteria).
-PROMPT_VERSION = "v4"
+# v5 preserves independently graded source rows, distinguishes quality from
+# counts using the full scale, and refuses requirements inferred from purpose.
+PROMPT_VERSION = "v5"
 _PROMPT_FILE = Path(__file__).parent / "prompts" / f"{PROMPT_TYPE}_{PROMPT_VERSION}.txt"
 _PLACEHOLDER = "{rubric_text}"
 

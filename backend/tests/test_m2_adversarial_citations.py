@@ -126,10 +126,17 @@ def test_corporate_authors_joined_by_and_no_comma():
     """Adversarial stress test: Two corporate authors joined by 'and' without comma.
 
     Target: 'Food and Agriculture Organization and World Health Organization'
-    Must be split into two distinct organization names, not retained as a single combined string.
+    Source-backed author identities determine the conjunction boundary.
     """
     raw = "Food and Agriculture Organization and World Health Organization"
-    surnames = _split_authors(raw)
+    assert _split_authors(raw) == [raw]
+    surnames = _split_authors(
+        raw,
+        reference_authors=[
+            "Food and Agriculture Organization",
+            "World Health Organization",
+        ],
+    )
     assert surnames == [
         "Food and Agriculture Organization",
         "World Health Organization",
@@ -142,7 +149,14 @@ def test_corporate_authors_joined_by_ampersand_no_comma():
     Target: 'Food and Agriculture Organization & World Health Organization'
     """
     raw = "Food and Agriculture Organization & World Health Organization"
-    surnames = _split_authors(raw)
+    assert _split_authors(raw) == [raw]
+    surnames = _split_authors(
+        raw,
+        reference_authors=[
+            "Food and Agriculture Organization",
+            "World Health Organization",
+        ],
+    )
     assert surnames == [
         "Food and Agriculture Organization",
         "World Health Organization",
@@ -307,12 +321,10 @@ def test_numbered_syntax_mixed_and_edge_cases():
 
     # Inverted ranges and unbounded ranges must return None
     assert (
-        parse_numeric_citation_numbers(FakeInText(surnames=[], year="", raw_text="[10-5]"))
-        is None
+        parse_numeric_citation_numbers(FakeInText(surnames=[], year="", raw_text="[10-5]")) is None
     )
     assert (
-        parse_numeric_citation_numbers(FakeInText(surnames=[], year="", raw_text="[1-100]"))
-        is None
+        parse_numeric_citation_numbers(FakeInText(surnames=[], year="", raw_text="[1-100]")) is None
     )
 
 
@@ -398,10 +410,13 @@ async def test_datacite_lookup_doi_timeout():
     """Adversarial stress test: DataCite timeout raises ApiDownError."""
     client = AsyncMock()
     settings = get_settings()
-    with patch(
-        "app.external.datacite.get_json",
-        AsyncMock(side_effect=ApiDownError("datacite lookup timed out after retries.")),
-    ), pytest.raises(ApiDownError, match="datacite lookup timed out"):
+    with (
+        patch(
+            "app.external.datacite.get_json",
+            AsyncMock(side_effect=ApiDownError("datacite lookup timed out after retries.")),
+        ),
+        pytest.raises(ApiDownError, match="datacite lookup timed out"),
+    ):
         await datacite_client.lookup_doi(client, "10.5281/zenodo.123456", settings)
 
 

@@ -6,6 +6,7 @@ from types import SimpleNamespace
 import pytest
 
 from app.checks.citations.source_locator import citation_source_locator, with_reference_locator
+from app.checks.citations.source_locator import with_claim_reference_locator
 from app.config import Settings
 
 
@@ -32,6 +33,119 @@ def project(draft, **kwargs):
     return citation_source_locator(
         "citation_integrity", draft.evidence_excerpt, draft.detail, **kwargs
     )
+
+
+def claim_saved(kind="claim_possibly_unsupported", *, doi="10.1234/example", index=2, pair=7):
+    citation = SimpleNamespace(
+        raw_text="Author. Source DOI 10.1234/example",
+        doi=doi,
+        url="https://example.org/source",
+        order_index=index,
+    )
+    claim = "This manuscript claim needs source comparison."
+    draft = Draft(
+        claim, dict(kind=kind, reference_order_index=index, claim_support_pair_index=pair)
+    )
+    return citation, with_claim_reference_locator(draft, citation, claim, pair)
+
+
+@pytest.mark.parametrize(
+    "kind",
+    [
+        "claim_possibly_unsupported",
+        "claim_support_cannot_determine",
+        "claim_support_injection_suspected",
+    ],
+)
+def test_claim_snapshot_keeps_own_reference_when_current_citation_changes(kind):
+    citation, draft = claim_saved(kind)
+    citation.doi, citation.raw_text, citation.order_index = "10.9999/changed", "Other work", 100
+    result = project(draft)
+    assert result["basis"] == "saved_reference" and result["order_index"] == 2
+    assert result["links"][0] == {
+        "kind": "doi_as_cited",
+        "url": "https://doi.org/10.1234%2Fexample",
+    }
+    assert draft.evidence_excerpt == "This manuscript claim needs source comparison."
+    assert "reference_text" not in result
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        "claim",
+        "reference",
+        "claim_hash",
+        "reference_hash",
+        "kind",
+        "ref_index",
+        "pair_index",
+        "schema",
+        "extra",
+        "bool_index",
+        "missing",
+    ],
+)
+def test_claim_snapshot_rebinding_or_corruption_withholds_link(change):
+    _, draft = claim_saved()
+    detail = {
+        **draft.detail,
+        "citation_source_locator": dict(draft.detail["citation_source_locator"]),
+    }
+    snapshot = detail["citation_source_locator"]
+    raw = draft.evidence_excerpt
+    if change == "claim":
+        raw += " changed"
+    elif change == "reference":
+        snapshot["reference_text"] += " changed"
+    elif change == "claim_hash":
+        snapshot["claim_text_sha256"] = "0" * 64
+    elif change == "reference_hash":
+        snapshot["reference_text_sha256"] = "0" * 64
+    elif change == "kind":
+        detail["kind"] = "claim_support_cannot_determine"
+    elif change == "ref_index":
+        detail["reference_order_index"] += 1
+    elif change == "pair_index":
+        detail["claim_support_pair_index"] += 1
+    elif change == "schema":
+        snapshot["schema_version"] = "unknown"
+    elif change == "extra":
+        snapshot["extra"] = "untrusted"
+    elif change == "bool_index":
+        snapshot["reference_order_index"] = True
+    elif change == "missing":
+        del snapshot["claim_support_pair_index"]
+    assert project(Draft(raw, detail)) is None
+
+
+@pytest.mark.parametrize(
+    "index,pair", [(True, 1), (1, False), (-1, 1), (1, -1), ("1", 1), (1, "1")]
+)
+def test_claim_producer_does_not_guess_invalid_pair_identity(index, pair):
+    _, draft = claim_saved(index=index, pair=pair)
+    assert "citation_source_locator" not in draft.detail
+
+
+def test_old_claim_and_doi_in_reason_never_gain_new_source_provenance():
+    _, draft = claim_saved()
+    assert (
+        project(
+            Draft(
+                draft.evidence_excerpt,
+                {"kind": "claim_possibly_unsupported", "reason": "See DOI10.1234/example"},
+            )
+        )
+        is None
+    )
+
+
+def test_claim_doi_validation_uses_the_reference_not_the_claim():
+    citation, draft = claim_saved()
+    citation.raw_text = "Author. Source DOI 10.1234/example tail"
+    citation.url = None
+    draft = with_claim_reference_locator(draft, citation, draft.evidence_excerpt, 7)
+    assert project(draft) is None
 
 
 def test_saved_reference_is_immutable_when_current_citation_changes():

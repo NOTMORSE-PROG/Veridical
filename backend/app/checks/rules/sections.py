@@ -170,9 +170,7 @@ def _run_required_section(criterion, ctx: RuleContext) -> RuleOutcome:
 def _matches_section_order(criterion) -> bool:
     text = full_text(criterion)
     kw = current_keywords()
-    return contains_any(text, kw.order_nouns) and contains_any(
-        text, kw.section_reference_nouns
-    )
+    return contains_any(text, kw.order_nouns) and contains_any(text, kw.section_reference_nouns)
 
 
 def _numeric_prefix(numbering: str | None) -> float | None:

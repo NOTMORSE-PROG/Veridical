@@ -209,9 +209,7 @@ def test_manuscript_file_format_adversarial_inputs():
                     {
                         "title": "Background of the Study",
                         "paragraph": 4,
-                        "children": [
-                            {"title": "Objectives", "paragraph": 10, "children": []}
-                        ],
+                        "children": [{"title": "Objectives", "paragraph": 10, "children": []}],
                     }
                 ],
             }
@@ -234,9 +232,7 @@ def test_manuscript_file_format_adversarial_inputs():
                 "children": [
                     {
                         "title": "Section 1",
-                        "children": [
-                            {"title": "Subsection 1.1", "paragraph": 15, "children": []}
-                        ],
+                        "children": [{"title": "Subsection 1.1", "paragraph": 15, "children": []}],
                     }
                 ],
             }
@@ -312,8 +308,8 @@ def test_docx_reportlab_multipage_export_comprehensive_stress():
     results = []
     # 50 criteria
     for i in range(50):
-        is_pending = (i % 10 == 7)
-        is_resolved = (i % 10 == 8)
+        is_pending = i % 10 == 7
+        is_resolved = i % 10 == 8
         outcome = "passed" if (i % 3 != 0 and not is_pending) else "failed"
         if is_pending:
             outcome = "needs_review"
@@ -345,9 +341,7 @@ def test_docx_reportlab_multipage_export_comprehensive_stress():
                     "Ensures manuscript follows rigorous capstone formatting guidelines."
                 ),
                 reason=(
-                    "Criterion satisfied"
-                    if outcome == "passed"
-                    else "Formatting issues observed."
+                    "Criterion satisfied" if outcome == "passed" else "Formatting issues observed."
                 ),
                 evidence=[],
                 resolution=resolution,
@@ -630,4 +624,3 @@ def test_manuscript_file_format_more_adversarial_paths():
         section_tree={"source": "heuristics", "nodes": [None, "string_node", 123]},
     )
     assert m_malformed_nodes.file_format == "pdf"
-

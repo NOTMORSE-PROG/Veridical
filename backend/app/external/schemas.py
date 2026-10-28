@@ -33,4 +33,3 @@ class VerificationResult:
 
 # Alias for external work record
 ExternalWorkRecord = VerificationResult
-

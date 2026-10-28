@@ -1421,9 +1421,6 @@ def manuscript_paragraphs_for(manuscript: Manuscript, settings: Settings) -> Doc
     """The ownership-independent core of `get_manuscript_paragraphs`
     (V-066, same extraction rationale as `manuscript_viewer_for` above).
     Callers own resolving AND authorizing `manuscript` first."""
-    fmt = getattr(manuscript, "file_format", None)
-    if fmt is not None and fmt != "docx":
-        raise ConflictError("This manuscript's source file isn't a DOCX.")
     _, source_format = manuscript_source_file(manuscript, settings)
     if source_format != "docx":
         raise ConflictError("This manuscript's source file isn't a DOCX.")

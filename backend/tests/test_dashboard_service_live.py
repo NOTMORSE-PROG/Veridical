@@ -1029,3 +1029,57 @@ async def test_bug351_ready_to_decide_count_drops_dismissed_manuscripts_and_matc
         restored = await get_dashboard_stats(session, owner.id)
         queue = await list_manuscripts(session, owner.id, status="checked", needs_review=False)
         assert restored.ready_to_decide_count == queue.total == 2
+
+
+async def test_returned_unresolved_review_leaves_work_queue_until_explicit_reopen(session_factory):
+    from app.ingest.service import list_manuscripts
+    from app.report.service import decide_report, get_report, reopen_report
+
+    async with session_factory() as session:
+        owner = Instructor(email="returned-queue@demo.local", display_name="Owner")
+        session.add(owner)
+        await session.commit()
+        run = await _make_run(
+            session,
+            owner,
+            run_status=CheckRunStatus.done,
+            report_status="needs_review",
+            results=("escalated", "unverifiable"),
+        )
+        before = await get_report(session, run.id, owner.id)
+        stats = await get_dashboard_stats(session, owner.id)
+        pending = await list_manuscripts(session, owner.id, status="needs_attention")
+        assert stats.needs_attention_count == pending.total == 1
+        assert stats.complete_queue_count == 0
+        assert before.pending_review_count == 2
+
+        returned = await decide_report(
+            session,
+            run.id,
+            owner.id,
+            "returned",
+            "Revise the manuscript before further review.",
+            expected_revision=before.assessment_revision,
+        )
+        stats = await get_dashboard_stats(session, owner.id)
+        pending = await list_manuscripts(session, owner.id, status="needs_attention")
+        complete = await list_manuscripts(session, owner.id, status="decided")
+        assert stats.needs_attention_count == pending.total == 0
+        assert stats.complete_queue_count == complete.total == 1
+        assert complete.items[0].escalations_awaiting_review == returned.pending_review_count == 2
+        assert complete.items[0].latest_decision == "returned"
+
+        reopened = await reopen_report(
+            session,
+            run.id,
+            owner.id,
+            "Reopen explicitly to continue instructor review.",
+            expected_revision=returned.assessment_revision,
+        )
+        stats = await get_dashboard_stats(session, owner.id)
+        pending = await list_manuscripts(session, owner.id, status="needs_attention")
+        complete = await list_manuscripts(session, owner.id, status="decided")
+        assert stats.needs_attention_count == pending.total == 1
+        assert stats.complete_queue_count == complete.total == 0
+        assert reopened.pending_review_count == pending.items[0].escalations_awaiting_review == 2
+        assert reopened.decision is None

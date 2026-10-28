@@ -677,7 +677,7 @@ async def list_manuscripts(
         # scoping, filters, totals, sorting, and pagination remain truthful.
         filters.append(
             or_(
-                and_(latest_run_status == CheckRunStatus.done, escalation_count > 0),
+                and_(latest_run_status == CheckRunStatus.done, ~has_decision, escalation_count > 0),
                 latest_run_status.in_((CheckRunStatus.failed, CheckRunStatus.cancelled)),
                 and_(
                     latest_run_status.is_(None),

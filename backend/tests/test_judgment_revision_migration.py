@@ -67,6 +67,11 @@ def test_migration_baselines_match_runtime_without_rewriting_any_record():
                     ("mark_pass", "passed", 100, "old", None),
                     ("mark_pass", "passed", 100, "x" * 1500, None),
                     ("mark_pass", "passed", 100, "\t\u2003\n", None),
+                    ("mark_pass", "passed", 100, "", None),
+                    ("mark_fail", "failed", 0, "", None),
+                    ("mark_level", "passed", 33.33, "", None),
+                    ("accept_majority", "passed", 100, "", None),
+                    ("needs_document", "not_applicable", None, "", None),
                     ("mark_pass", "passed", 100, 42, None),
                     ("unknown", "passed", 100, "Earlier reason", None),
                     ("mark_pass", "passed", 50, "Earlier reason", None),
@@ -155,7 +160,9 @@ def test_migration_baselines_match_runtime_without_rewriting_any_record():
             }
 
         expected, before = asyncio.run(seed())
-        command.upgrade(cfg, "0040")
+        # Applied 0040 retains its original reason contract; the additive 0043
+        # migration aligns optional ordinary comments without changing facts.
+        command.upgrade(cfg, "head")
 
         async def verify():
             c = await asyncpg.connect(url)
@@ -196,7 +203,7 @@ def test_migration_baselines_match_runtime_without_rewriting_any_record():
                 await c.close()
 
         asyncio.run(verify_downgrade())
-        command.upgrade(cfg, "0040")
+        command.upgrade(cfg, "head")
         asyncio.run(verify())
     finally:
         asyncio.run(_admin_execute(base, f'DROP DATABASE "{SCRATCH_DB}" WITH (FORCE)'))

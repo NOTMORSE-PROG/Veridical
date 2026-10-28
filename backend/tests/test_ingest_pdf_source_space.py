@@ -65,13 +65,13 @@ def test_table_detection_preserves_visible_crop_and_source_bound_url(
         assert "HIDDEN OUTSIDE CROP" not in text
     refs = extract_references(result, load_patterns())
     if strategy == "native_regions_v1" and table:
-        # The guarded reader abstains on table layouts, but still preserves
-        # the same source/link geometry. The legacy binding controls below
-        # remain exercised unchanged for every crop/rotation combination.
-        assert refs == []
-        assert reading_order_issues(result) == [{"page": 1, "reason": "table_regions_unresolved"}]
-    else:
-        assert refs[0].url == "https://good.example/path"
+        # The complete regular grid now has a native cell witness. Keep the
+        # crop/rotation and reference-link controls across the admitted path;
+        # ambiguous/merged/interleaved refusal is tested independently.
+        assert result.reading_order[0].status == "ordered"
+        assert result.reading_order[0].table_order is not None
+        assert reading_order_issues(result) == []
+    assert refs[0].url == "https://good.example/path"
     assert {link.uri for link in result.uri_links} == {"https://good.example/path"}
     assert result.uri_links_complete is True
     if table:

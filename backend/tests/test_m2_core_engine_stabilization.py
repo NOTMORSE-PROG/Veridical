@@ -10,6 +10,7 @@ Verifies:
 """
 
 from dataclasses import dataclass
+from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -95,8 +96,7 @@ def test_reference_ingest_nd_date_personal_author():
 
 def test_in_text_parenthetical_and_narrative_nd_date():
     text = (
-        "Guidelines exist (World Health Organization, n.d.). "
-        "FAO (n.d.) provides recommendations."
+        "Guidelines exist (World Health Organization, n.d.). FAO (n.d.) provides recommendations."
     )
     cites = extract_in_text_citations([_block(text)])
     assert len(cites) == 2
@@ -122,9 +122,7 @@ def test_corporate_author_names_with_and_not_split():
     assert _split_authors("National Economic and Development Authority") == [
         "National Economic and Development Authority"
     ]
-    assert _split_authors("Commission on Higher Education") == [
-        "Commission on Higher Education"
-    ]
+    assert _split_authors("Commission on Higher Education") == ["Commission on Higher Education"]
     # Personal authors should still split on and
     assert _split_authors("Smith and Jones") == ["Smith", "Jones"]
     assert _split_authors("Cruz, Santos, and Gomez") == ["Cruz", "Santos", "Gomez"]
@@ -378,7 +376,8 @@ def test_manuscript_file_format_property():
 
 def test_manuscript_paragraphs_for_format_check():
     settings = get_settings()
-    m_pdf = Manuscript(original_filename="thesis.pdf", file_ref="uploads/thesis.pdf")
+    source = Path(__file__).parent / "fixtures" / "ingest" / "native.pdf"
+    m_pdf = Manuscript(original_filename="thesis.pdf", file_ref=str(source))
     with pytest.raises(ConflictError, match="This manuscript's source file isn't a DOCX."):
         manuscript_paragraphs_for(m_pdf, settings)
 
@@ -452,4 +451,3 @@ async def test_datacite_malformed_json_resilience():
         }
         with pytest.raises(ApiDownError):
             await lookup_doi(client, "10.5281/zenodo.12345")
-

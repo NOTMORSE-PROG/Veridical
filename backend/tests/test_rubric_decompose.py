@@ -22,12 +22,14 @@ class SpyLLM(LLMClient):
 
     def __init__(self, response: dict[str, Any]):
         self.prompts: list[str] = []
+        self.versions: list[str] = []
         self._response = response
 
     async def complete(
         self, prompt_type: str, prompt: str, *, prompt_version: str = "unversioned", **context: Any
     ) -> dict[str, Any]:
         self.prompts.append(prompt)
+        self.versions.append(prompt_version)
         return self._response
 
 
@@ -63,6 +65,14 @@ async def test_decompose_rubric_raises_on_missing_criteria_key():
 async def test_decompose_rubric_raises_on_empty_criteria_list():
     with pytest.raises(RubricParseError):
         await decompose_rubric("x", SpyLLM({"criteria": []}))
+
+
+async def test_row_fidelity_prompt_has_separate_cache_identity_and_preserves_source():
+    client = SpyLLM({"criteria": [{"text": "Source requirement", "type": "semantic", "weight": 1}]})
+    source = "Independent row A: quality.\nIndependent row B: count."
+    await decompose_rubric(source, client)
+    assert client.versions == ["v5"]
+    assert client.prompts[0].endswith(source + "\n")
 
 
 async def test_decompose_rubric_raises_on_bad_type_enum():

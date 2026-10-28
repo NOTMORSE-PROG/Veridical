@@ -28,6 +28,7 @@ from typing import Literal
 from pydantic import BaseModel, Field, field_validator
 
 from app.checks.citations.extract import CitationFlagDraft
+from app.checks.citations.source_locator import with_claim_reference_locator
 from app.checks.injection import InjectionSignal, detect_injection_signal
 from app.config import Settings
 from app.errors import ApiDownError, QuotaExhaustedError, VeridicalError
@@ -375,6 +376,9 @@ async def run_claim_support_check(
                         "reference_order_index": pair.citation.order_index,
                         "claim_support_pair_index": start + i,
                     },
+                )
+                draft = with_claim_reference_locator(
+                    draft, pair.citation, pair.claim_sentence, start + i
                 )
                 flags.append(draft)
             kind = draft.detail.get("kind") if draft else None

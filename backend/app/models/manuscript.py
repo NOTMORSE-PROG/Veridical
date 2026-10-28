@@ -171,7 +171,6 @@ class Manuscript(Base, PkCreatedMixin):
         return "pdf"
 
 
-
 class ManuscriptArchive(Base, PkCreatedMixin):
     """Whole-document embedding archive for the originality/reuse check
     (F7.1, V-036) — one row per manuscript. `model_id` is recorded on every

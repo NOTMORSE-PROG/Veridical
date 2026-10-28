@@ -328,7 +328,7 @@ async def test_instructor_can_resolve_error_with_original_failure_preserved(
         result_id = pending[0].check_result_id
     for invalid_resolution, reason in (
         ("accept_majority", "I reviewed this missing model judgment."),
-        (resolution, "x"),
+        ("needs_document", "x"),
     ):
         async with session_factory() as session:
             with pytest.raises(ConflictError):

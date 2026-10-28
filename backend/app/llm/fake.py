@@ -38,9 +38,7 @@ FIXTURES_DIR = Path(__file__).parent / "fixtures"
 # change, zero new interface surface.
 _SEMANTIC_GRADING_PROMPT_TYPE = "semantic_grading"
 _MANUSCRIPT_TEXT_RE = re.compile(r"<manuscript_text>\n(.*?)\n</manuscript_text>", re.DOTALL)
-_CRITERIA_SECTION_RE = re.compile(
-    r"--- CRITERIA ---\n(.*?)\n\n--- DOCUMENT TEXT", re.DOTALL
-)
+_CRITERIA_SECTION_RE = re.compile(r"--- CRITERIA ---\n(.*?)\n\n--- DOCUMENT TEXT", re.DOTALL)
 _CRITERION_LINE_RE = re.compile(r"^\d+\.\s+\S", re.MULTILINE)
 _REAL_QUOTE_WORD_COUNT = 8
 

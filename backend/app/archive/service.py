@@ -391,7 +391,11 @@ async def purge_manuscript(
             event_type="manuscript_purged",
             check_run_id=None,
             manuscript_id=manuscript_id,
-            payload={"manuscript_id": manuscript_id, "group_label": manuscript.group_label},
+            payload={
+                "manuscript_id": manuscript_id,
+                "group_label": manuscript.group_label,
+                "instructor_id": instructor_id,
+            },
         )
         await session.commit()
     return PurgeOut(manuscript_id=manuscript_id, purged_at=manuscript.purged_at)

@@ -169,15 +169,18 @@ def test_different_and_unknown_inventory_notes_preserve_counts_without_summing()
     assert "1 native Word equation occurrence remains unassessed" in text
     assert "2 native Word equation occurrences remain unassessed" in text
     assert "3 native Word equation" not in text
-    assert "inventory was not recorded" in text and "inventory could not be verified" in text
+    assert (
+        "no verified record of equation coverage" in text
+        and "record of equation coverage could not be verified" in text
+    )
     assert text.count("Equation presence and count are unknown") == 2
     with fitz.open(stream=payload, filetype="pdf") as document:
         for page in document:
             page_text = page.get_text()
-            if "Native Word source coverage - note 3\n" in page_text:
-                assert "inventory was not recorded" in page_text
-            if "Native Word source coverage - note 4\n" in page_text:
-                assert "inventory could not be verified" in page_text
+            if "Saved source coverage - note 3\n" in page_text:
+                assert "no verified record of equation coverage" in page_text
+            if "Saved source coverage - note 4\n" in page_text:
+                assert "record of equation coverage could not be verified" in page_text
     assert data.model_dump_json() == before
 
 
@@ -203,7 +206,7 @@ def test_long_inventory_splits_with_the_note_identity_and_preserves_all_source_i
         assert whole.count(f"Extracted paragraph {i + 1}: Native Word equations unassessed") == 1
     for text in texts:
         if "Extracted paragraph" in text:
-            assert "Native Word source coverage" in text and "note 1" in text
+            assert "Saved source coverage" in text and "note 1" in text
     assert data.model_dump_json() == before
 
 
@@ -278,7 +281,9 @@ def test_criterion_unknown_input_is_distinct_from_inapplicability(state):
         assert not whole
     else:
         assert "Equation presence and count are unknown" in whole
-        assert ("was not recorded" if state == "not_recorded" else "could not be verified") in whole
+        assert (
+            "no verified record" if state == "not_recorded" else "could not be verified"
+        ) in whole
         assert "0 native" not in whole
 
 
@@ -297,7 +302,7 @@ def test_unversioned_inapplicable_claim_stays_unavailable_in_print():
     whole = " ".join(
         part.getPlainText() for part in _criterion_source_flowables(row, _styles(_register_fonts()))
     )
-    assert "inventory could not be verified" in whole
+    assert "record of equation coverage could not be verified" in whole
     assert "Equation presence and count are unknown" in whole
 
 

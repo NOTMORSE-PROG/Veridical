@@ -37,8 +37,7 @@ _REFERENCE_NOUN_NEARBY = re.compile(
 def _matches_reference_count(criterion) -> bool:
     text = full_text(criterion)
     return (
-        contains_any(text, current_keywords().reference_nouns)
-        and extract_bound(text) is not None
+        contains_any(text, current_keywords().reference_nouns) and extract_bound(text) is not None
     )
 
 

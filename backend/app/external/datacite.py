@@ -74,11 +74,7 @@ async def lookup_doi(
         if not identifier:
             identifier = record.get("id")
 
-        if (
-            record.get("type") != "dois"
-            or not isinstance(identifier, str)
-            or not title
-        ):
+        if record.get("type") != "dois" or not isinstance(identifier, str) or not title:
             # Incomplete or non-DOI record
             raise ApiDownError("DataCite record does not match required DOI schema.")
 
