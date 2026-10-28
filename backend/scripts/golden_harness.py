@@ -31,7 +31,13 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from app.checks.consistency import vote_batch
-from app.checks.golden import GoldenItem, GoldenPrediction, report_as_markdown, score_golden_set
+from app.checks.golden import (
+    GoldenItem,
+    GoldenPrediction,
+    project_binary_verdict,
+    report_as_markdown,
+    score_golden_set,
+)
 from app.checks.promotion import evaluate_promotions
 from app.checks.semantic import SemanticBatch
 from app.config import get_settings
@@ -89,7 +95,7 @@ async def _grade_item(item: GoldenItem, idx: int, llm: LLMClient, settings) -> G
     predicted = None
     if not escalated:
         verdict = v.detail.get("verdict")
-        predicted = "pass" if verdict in ("pass", "partial") else "fail"
+        predicted = project_binary_verdict(verdict)
     return GoldenPrediction(
         item=item,
         escalated=escalated,

@@ -13,10 +13,17 @@ from collections import defaultdict
 from dataclasses import dataclass
 from typing import Literal
 
-from app.checks.accuracy_stats import AgreementStats, compute_agreement
+from app.checks.accuracy_stats import AgreementStats, compute_agreement, validate_binary_label
 from app.config import Settings, get_settings
 
 Verdict = Literal["pass", "fail"]
+
+
+def project_binary_verdict(verdict: str) -> Verdict:
+    """Legacy excerpt task: partial counts as pass, not a full rubric-level metric."""
+    if verdict not in ("pass", "partial", "fail"):
+        raise ValueError("Unknown grading verdict cannot be projected into binary evaluation")
+    return "fail" if verdict == "fail" else "pass"
 
 
 @dataclass(frozen=True)
@@ -30,6 +37,9 @@ class GoldenItem:
     instructor_grade: Verdict
     reason: str
     source: str
+
+    def __post_init__(self) -> None:
+        validate_binary_label(self.instructor_grade)
 
 
 @dataclass(frozen=True)
@@ -52,12 +62,27 @@ class GoldenPrediction:
     votes: list[str | None]
     error: str | None = None
 
+    def __post_init__(self) -> None:
+        if type(self.escalated) is not bool:
+            raise ValueError("escalated must be a boolean")
+        if self.error is not None:
+            if not isinstance(self.error, str) or not self.error.strip():
+                raise ValueError("An error must carry a nonempty explanation")
+            if self.escalated or self.predicted is not None:
+                raise ValueError("An errored prediction cannot also be decided or escalated")
+        elif self.escalated:
+            if self.predicted is not None:
+                raise ValueError("An escalated prediction cannot also be decided")
+        else:
+            validate_binary_label(self.predicted)
+
 
 @dataclass(frozen=True)
 class ClassBreakdown:
     criterion_text: str
     n: int
     n_escalated: int
+    n_errored: int
     n_agree: int
     n_decided: int
     agreement_rate: float | None  # None if n_decided == 0
@@ -93,18 +118,19 @@ def score_golden_set(predictions: list[GoldenPrediction]) -> GoldenReport:
     n_agree = len(agreeing)
 
     by_criterion_preds: dict[str, list[GoldenPrediction]] = defaultdict(list)
-    for p in gradeable:
+    for p in predictions:
         by_criterion_preds[p.item.criterion_text].append(p)
 
     by_criterion = []
     for criterion_text, preds in by_criterion_preds.items():
-        c_decided = [p for p in preds if not p.escalated]
+        c_decided = [p for p in preds if not p.escalated and p.error is None]
         c_agree = [p for p in c_decided if p.predicted == p.item.instructor_grade]
         by_criterion.append(
             ClassBreakdown(
                 criterion_text=criterion_text,
                 n=len(preds),
                 n_escalated=sum(1 for p in preds if p.escalated),
+                n_errored=sum(1 for p in preds if p.error is not None),
                 n_agree=len(c_agree),
                 n_decided=len(c_decided),
                 agreement_rate=(len(c_agree) / len(c_decided)) if c_decided else None,
@@ -113,14 +139,11 @@ def score_golden_set(predictions: list[GoldenPrediction]) -> GoldenReport:
 
     disagreements = [p for p in decided if p.predicted != p.item.instructor_grade]
 
-    stats = (
-        compute_agreement(
-            human_labels=[p.item.instructor_grade for p in decided],
-            judge_labels=[p.predicted for p in decided if p.predicted is not None],
-            n_abstained=n_escalated,
-        )
-        if decided
-        else None
+    stats = compute_agreement(
+        human_labels=[p.item.instructor_grade for p in decided],
+        judge_labels=[p.predicted for p in decided],
+        n_abstained=n_escalated,
+        n_errored=len(errored),
     )
 
     return GoldenReport(
@@ -153,6 +176,25 @@ def _statistics_section(report: GoldenReport, *, settings: Settings) -> list[str
         return lines
 
     n = stats.matrix.n
+    coverage = f"{stats.coverage:.1%}" if stats.coverage is not None else "N/A"
+    completion = (
+        f"{stats.operational_completion:.1%}" if stats.operational_completion is not None else "N/A"
+    )
+    lines.extend(
+        [
+            f"- **Coverage** (decided / all offered): {coverage} "
+            f"({n} decided, {stats.n_abstained} escalated, {stats.n_errored} errored; "
+            f"{stats.n_offered} offered).",
+            f"- **Operational completion** (decided or escalated / all offered): {completion}.",
+            "- Abstention mode: EXCLUDE. Agreement scores decided cases only; "
+            "errors and escalations remain in the offered population, "
+            "not in the accuracy denominator.",
+            "",
+        ]
+    )
+    if not n:
+        lines.extend(["Nothing was decided, so there is no agreement to measure.", ""])
+        return lines
     if n < settings.golden_min_viable_n:
         lines.append(
             f"> ⚠️ **INDICATIVE ONLY, not a baseline.** {n} decided item(s) is below "
@@ -166,14 +208,6 @@ def _statistics_section(report: GoldenReport, *, settings: Settings) -> list[str
     accuracy = f"{stats.accuracy:.1%}" if stats.accuracy is not None else "N/A"
     interval = stats.accuracy_ci.as_percent() if stats.accuracy_ci else "N/A"
     lines.append(f"- **Selective accuracy**: {accuracy}, 95% CI (Wilson) **{interval}**")
-    lines.append(
-        f"- **Coverage**: {stats.coverage:.1%} "
-        f"({n} decided, {stats.n_abstained} escalated). Abstention mode: EXCLUDE. "
-        f"Escalated items are withheld, not scored, so the accuracy above is over "
-        f"the covered subset ONLY."
-        if stats.coverage is not None
-        else "- Coverage: N/A"
-    )
 
     def fmt(value: float | None) -> str:
         return f"{value:.3f}" if value is not None else "N/A (degenerate, one label only)"
@@ -228,7 +262,9 @@ def report_as_markdown(
         f"({report.escalation_rate:.1%})"
     )
     if report.agreement_rate is None:
-        lines.append("- Agreement: N/A. Every item escalated, nothing decided.")
+        lines.append(
+            "- Agreement: N/A. Nothing was decided; see separate error and escalation counts."
+        )
     else:
         lines.append(
             f"- Agreement (decided items only): {report.n_agree}/{report.n_decided} "
@@ -241,7 +277,7 @@ def report_as_markdown(
         rate = f"{c.agreement_rate:.1%}" if c.agreement_rate is not None else "N/A"
         lines.append(
             f'- "{c.criterion_text[:70]}": {c.n_agree}/{c.n_decided} ({rate}), '
-            f"{c.n_escalated} escalated, n={c.n}"
+            f"{c.n_escalated} escalated, {c.n_errored} errored, n={c.n} offered"
         )
     lines.append("")
     lines.append(f"## Disagreements ({len(report.disagreements)})")

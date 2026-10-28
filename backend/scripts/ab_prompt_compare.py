@@ -28,12 +28,11 @@ from pathlib import Path
 
 from app.checks.accuracy_stats import (
     PairedComparison,
-    compute_agreement,
     mcnemar_exact,
     required_discordant_pairs,
 )
 from app.checks.consistency import vote_batch
-from app.checks.golden import GoldenItem
+from app.checks.golden import GoldenItem, GoldenPrediction, project_binary_verdict, score_golden_set
 from app.checks.semantic import SemanticBatch
 from app.config import get_settings
 from app.errors import ApiDownError, QuotaExhaustedError
@@ -86,20 +85,16 @@ async def _grade(item: GoldenItem, idx: int, llm: LLMClient, settings, prompt_ve
     if v.outcome.value == "escalated":
         return None, True, None
     verdict = v.detail.get("verdict")
-    return ("pass" if verdict in ("pass", "partial") else "fail"), False, None
+    return project_binary_verdict(verdict), False, None
 
 
 def _arm_stats(items, predictions):
-    human, judge, abstained = [], [], 0
-    for item, (predicted, escalated, error) in zip(items, predictions, strict=True):
-        if error is not None:
-            continue
-        if escalated or predicted is None:
-            abstained += 1
-            continue
-        human.append(item.instructor_grade)
-        judge.append(predicted)
-    return compute_agreement(human_labels=human, judge_labels=judge, n_abstained=abstained)
+    return score_golden_set(
+        [
+            GoldenPrediction(item, escalated, predicted, None, [], error=error)
+            for item, (predicted, escalated, error) in zip(items, predictions, strict=True)
+        ]
+    ).stats
 
 
 def _paired(items, arm_a, arm_b) -> tuple[PairedComparison, list[str]]:
@@ -110,6 +105,8 @@ def _paired(items, arm_a, arm_b) -> tuple[PairedComparison, list[str]]:
     both_correct = only_a = only_b = both_wrong = 0
     notes = []
     for item, (pa, ea, era), (pb, eb, erb) in zip(items, arm_a, arm_b, strict=True):
+        GoldenPrediction(item, ea, pa, None, [], error=era)
+        GoldenPrediction(item, eb, pb, None, [], error=erb)
         if era or erb or ea or eb or pa is None or pb is None:
             notes.append(item.id)
             continue
@@ -184,9 +181,18 @@ async def run(*, live: bool, arm_a: str, arm_b: str) -> None:
     for name, stats in ((arm_a, stats_a), (arm_b, stats_b)):
         interval = stats.accuracy_ci.as_percent() if stats.accuracy_ci else "N/A"
         accuracy = f"{stats.accuracy:.1%}" if stats.accuracy is not None else "N/A"
+        coverage = f"{stats.coverage:.1%}" if stats.coverage is not None else "N/A"
+        completion = (
+            f"{stats.operational_completion:.1%}"
+            if stats.operational_completion is not None
+            else "N/A"
+        )
         lines.append(
             f"- **{name}**: selective accuracy {accuracy} 95% CI {interval} · "
-            f"coverage {stats.coverage:.1%} · κ {fmt(stats.kappa)} · MCC {fmt(stats.mcc)} · "
+            f"coverage {coverage} · operational completion {completion} · "
+            f"{stats.n_offered} offered, {stats.matrix.n} decided, "
+            f"{stats.n_abstained} escalated, {stats.n_errored} errored · "
+            f"κ {fmt(stats.kappa)} · MCC {fmt(stats.mcc)} · "
             f"TP {stats.matrix.tp} FP {stats.matrix.fp} TN {stats.matrix.tn} FN {stats.matrix.fn}"
         )
     lines += [
@@ -244,6 +250,8 @@ def main() -> None:
     parser.add_argument("--a", default="v1", help="baseline prompt version")
     parser.add_argument("--b", default="v2", help="candidate prompt version")
     args = parser.parse_args()
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(errors="replace")
     asyncio.run(run(live=args.live, arm_a=args.a, arm_b=args.b))
 
 

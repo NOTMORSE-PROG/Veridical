@@ -47,6 +47,16 @@ from dataclasses import dataclass
 Z_95 = 1.959963984540054
 
 
+def validate_binary_label(value: str) -> None:
+    if value not in ("pass", "fail"):
+        raise ValueError("Binary evaluation labels must be 'pass' or 'fail'")
+
+
+def _validate_count(value: int) -> None:
+    if type(value) is not int or value < 0:
+        raise ValueError("Evaluation counts must be nonnegative integers")
+
+
 @dataclass(frozen=True)
 class Interval:
     low: float
@@ -62,10 +72,14 @@ def wilson_interval(successes: int, n: int, z: float = Z_95) -> Interval | None:
     Returns None for n == 0 — an interval over no observations is not a wide
     interval, it is no information at all, and the two must not look alike.
     """
-    if n <= 0:
-        return None
+    _validate_count(n)
+    _validate_count(successes)
     if successes < 0 or successes > n:
         raise ValueError(f"successes={successes} out of range for n={n}")
+    if not math.isfinite(z) or z <= 0:
+        raise ValueError("The confidence quantile must be finite and positive")
+    if n == 0:
+        return None
     p = successes / n
     z2 = z * z
     denominator = 1.0 + z2 / n
@@ -89,6 +103,10 @@ class PairedComparison:
     only_a_correct: int  # b
     only_b_correct: int  # c
     both_wrong: int
+
+    def __post_init__(self) -> None:
+        for value in (self.both_correct, self.only_a_correct, self.only_b_correct, self.both_wrong):
+            _validate_count(value)
 
     @property
     def n(self) -> int:
@@ -124,6 +142,16 @@ def mcnemar_exact(comparison: PairedComparison, alpha: float = 0.05) -> McNemarR
     """
     b, c = comparison.only_a_correct, comparison.only_b_correct
     n_disc = b + c
+    if comparison.n == 0:
+        return McNemarResult(
+            comparison=comparison,
+            p_value=None,
+            significant=False,
+            note=(
+                "No items were decided by both configurations; "
+                "there are no paired decisions to compare."
+            ),
+        )
     if n_disc == 0:
         return McNemarResult(
             comparison=comparison,
@@ -182,6 +210,10 @@ class ConfusionMatrix:
     fp: int
     tn: int
     fn: int
+
+    def __post_init__(self) -> None:
+        for value in (self.tp, self.fp, self.tn, self.fn):
+            _validate_count(value)
 
     @property
     def n(self) -> int:
@@ -271,6 +303,15 @@ class AgreementStats:
     # accuracy over the covered subset and means nothing without coverage.
     n_abstained: int
     coverage: float | None
+    n_errored: int = 0
+
+    @property
+    def n_offered(self) -> int:
+        return self.matrix.n + self.n_abstained + self.n_errored
+
+    @property
+    def operational_completion(self) -> float | None:
+        return (self.matrix.n + self.n_abstained) / self.n_offered if self.n_offered else None
 
     @property
     def is_degenerate(self) -> bool:
@@ -286,6 +327,7 @@ def compute_agreement(
     judge_labels: list[str],
     positive: str = "pass",
     n_abstained: int = 0,
+    n_errored: int = 0,
     z: float = Z_95,
 ) -> AgreementStats:
     """Build every statistic from paired labels of the COVERED items only.
@@ -294,13 +336,19 @@ def compute_agreement(
     passed in as labels because there is no judgement to compare, but they
     are what `coverage` is computed from — an accuracy figure achieved by
     abstaining on everything hard is not a good result, and hiding the
-    abstention rate would make it look like one.
+    abstention rate would make it look like one. Errors also stay in the
+    offered population, but are neither wrong answers nor abstentions.
     """
     if len(human_labels) != len(judge_labels):
         raise ValueError("human_labels and judge_labels must be the same length")
+    validate_binary_label(positive)
+    _validate_count(n_abstained)
+    _validate_count(n_errored)
 
     tp = fp = tn = fn = 0
     for human, judge in zip(human_labels, judge_labels, strict=True):
+        validate_binary_label(human)
+        validate_binary_label(judge)
         human_positive = human == positive
         judge_positive = judge == positive
         if human_positive and judge_positive:
@@ -314,7 +362,7 @@ def compute_agreement(
 
     matrix = ConfusionMatrix(tp=tp, fp=fp, tn=tn, fn=fn)
     n_covered = matrix.n
-    n_offered = n_covered + n_abstained
+    n_offered = n_covered + n_abstained + n_errored
     return AgreementStats(
         matrix=matrix,
         accuracy=matrix.observed_agreement,
@@ -324,4 +372,5 @@ def compute_agreement(
         mcc=matthews_corrcoef(matrix),
         n_abstained=n_abstained,
         coverage=(n_covered / n_offered) if n_offered else None,
+        n_errored=n_errored,
     )
