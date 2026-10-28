@@ -379,7 +379,16 @@ async def test_source_validated_control_runs_actual_metadata_and_numerical_check
         assert cached["result"]["retracted"] is cached["result"]["is_correction"] is False
 
     forensic = results[CheckKind.statistical_forensics]
-    assert forensic["outcome"] == ResultOutcome.passed
+    assert forensic["outcome"] == ResultOutcome.escalated
+    reconstruction = forensic["detail"]["sprite_reconstruction"]
+    assert reconstruction["considered_rows"] == reconstruction["unassessed_rows"] == 1
+    assert reconstruction["attempted_rows"] == reconstruction["compatible_rows"] == 0
+    assert reconstruction["single_item_excluded_tables"] == []
+    assert reconstruction["omitted_receipt_rows"] == 0
+    [row] = reconstruction["rows"]
+    assert (row["table_index"], row["row_index"]) == (0, 1)
+    assert row["state"] == "unassessed"
+    assert row["reason"] == "missing_declarations:max_val,min_val,n_items,sd,sd_convention,unit"
     for key, expected in recipe["expected"]["forensics_counts"].items():
         assert forensic["detail"][key] == expected
     assert forensic["detail"].get("coverage_reason") is None

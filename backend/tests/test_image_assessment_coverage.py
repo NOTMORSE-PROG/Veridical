@@ -167,10 +167,18 @@ def test_high_confidence_source_linked_table_can_feed_existing_checks(tmp_path):
         ),
     )
     computation = _compute_forensics_findings(result)
-    assert computation.outcome.value == "passed"
+    assert computation.outcome.value == "escalated"
     assert len(computation.flag_drafts) == 1
     assert computation.image_coverage["n_images_unassessed"] == 0
     assert computation.image_coverage["n_image_tables_with_stats"] == 1
+    reconstruction = computation.reconstruction
+    assert reconstruction["considered_rows"] == reconstruction["unassessed_rows"] == 1
+    assert reconstruction["attempted_rows"] == reconstruction["compatible_rows"] == 0
+    assert reconstruction["single_item_excluded_tables"] == []
+    assert reconstruction["omitted_receipt_rows"] == 0
+    [row] = reconstruction["rows"]
+    assert (row["table_index"], row["row_index"]) == (0, 1)
+    assert row["state"] == "unassessed" and row["reason"] == "native_table_required"
 
 
 @pytest.mark.parametrize(
