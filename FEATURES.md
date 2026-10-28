@@ -295,6 +295,29 @@ with badges. Selected and hovered passages keep the same outline treatment;
 keyboard focus remains visible separately. Page-only and paragraph-only
 locations must not imitate verified exact text-line boxes.
 
+**Connected criterion evidence (owner, 2026-10-28):** Present the assessment,
+named groups of related saved passages and their original source pages together.
+Keep all saved quotations visible for the selected criterion, with one stable
+grading form. Only an explicit source link opens the manuscript dialog; it keeps
+the selected comparison and assessment in view. Previous/Next evidence controls
+must not open a dialog. An unexplained page anchor is not proof of reasoning.
+Unknown or partial records retain their saved explanation and quotations without
+invented relationships. Keep Back navigation above the full review workspace.
+Preserve historical teacher/frozen records; qualify a known source correction
+separately. An exact untouched open prepared-AI note may receive an audited
+source correction without changing its grade.
+
+**Four-module presentation records (owner, 2026-10-28):** The original published
+capstone retains its actual F6 not-applicable and F7 not-run states. Separate
+publicly licensed papers demonstrate completed saved local checks: three supported
+F6 chi-square comparisons with reported/recalculated values, and an actual local
+F7 Library lookup with saved result/flag/audit records and both complete passage
+pairs. Display each original source and its verified exact quotation. These are
+saved check records, not a new run when a page opens, a provider grading run,
+an HTTP upload-pipeline result or a human-UAT/accuracy claim. Related papers share
+authors and a citation; similarity is a review lead, not proof of plagiarism.
+Keep source hashes, licences and local execution provenance available.
+
 ### Flow D — Student submission 🟡 *(approved plan; not yet implemented)*
 After V7 is implemented and its role-isolation checks pass, the planned flow is:
 1. A student will log in → see their group's submission page only

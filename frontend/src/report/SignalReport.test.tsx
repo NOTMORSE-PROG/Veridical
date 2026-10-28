@@ -154,11 +154,10 @@ describe("SignalReportPage", () => {
     fireEvent.click(screen.getByRole("button", { name: "Meets criterion" }));
     fireEvent.change(screen.getByRole("textbox", { name: "Comment (optional)" }), { target: { value: "PRIVATE-DRAFT-1768" } });
     expect(screen.getByRole("button", { name: /2.*Review findings/ })).toBeDisabled();
-    fireEvent.click(screen.getByText("All saved evidence"));
-    const source = within(screen.getByText("All saved evidence").closest("details")!).getByRole("button", { name: "Open page 3 in manuscript" });
+    const source = screen.getByRole("button", { name: "Read saved passage: page 3" });
     source.focus();
     fireEvent.click(source);
-    await screen.findByRole("dialog", { name: "Original manuscript passage" });
+    await screen.findByRole("dialog", { name: `Evidence and explanation: ${ESCALATED.criterion_text}` });
     expect(await screen.findByTestId("manuscript-reader")).toHaveAttribute("data-page", "3");
     fireEvent.click(screen.getByRole("button", { name: "Close manuscript" }));
     expect(screen.getByRole("textbox", { name: "Comment (optional)" })).toHaveValue("PRIVATE-DRAFT-1768");

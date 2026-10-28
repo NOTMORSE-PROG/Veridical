@@ -91,3 +91,8 @@ Desktop.ini
 
 # Progress-report decks / generated presentation assets (internal, not part of the shipped product)
 presentation/
+
+# Explicit original CC BY published sources for the requested module checks.
+!frontend/public/sample-assets/module-checks/rojahn-2023.pdf
+!frontend/public/sample-assets/module-checks/nuijten-2016.pdf
+!frontend/public/sample-assets/module-checks/veldkamp-2014.pdf

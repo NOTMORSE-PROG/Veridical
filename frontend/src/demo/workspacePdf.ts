@@ -8,7 +8,7 @@ import { integrityModuleLabel } from "../report/integrityModuleState";
 import { evidenceFor, evidenceSourceHash, flagSourcePagePair } from "./sourceEvidence";
 import { sampleFlags, sampleReport, WORKSPACE_SAMPLE } from "./workspaceFixture";
 import { PLAIN_CRITERION_REASONS, PLAIN_FINDING_REASONS } from "./workspacePdfCopy";
-import { AI_REVIEW_BASIS, AI_REVIEW_DESCRIPTION, hasPreparedAiGrades } from "./preparedAiReview";
+import { AI_REVIEW_BASIS, AI_REVIEW_DESCRIPTION, hasPreparedAiGrades, organizationSourceCorrection } from "./preparedAiReview";
 
 // Print dimensions are separate from the browser layout. Keep text readable
 // instead of scaling the entire interface into a page-sized screenshot.
@@ -46,7 +46,7 @@ export async function buildWorkspacePdf({ report, flags, fileAvailable, fetchAss
   if (!Object.hasOwn(READINESS_LABEL, report.status) || (report.decision !== null && !Object.hasOwn(DECISION_LABEL, report.decision))) throw new Error("The saved readiness or teacher decision is not recognized.");
   const criterionEvidence = new Map<number, readonly BoundSourceEvidence[]>();
   for (const row of report.results) {
-    const entries = evidenceFor("criterion", row.criterion_id);
+    const entries = evidenceFor("criterion", row.criterion_id).filter(entry => entry.evidence_index < row.evidence.length);
     if (entries.some(entry => row.evidence[entry.evidence_index]?.quote !== entry.quote || row.evidence[entry.evidence_index]?.anchor !== entry.anchor)) throw new Error("The criterion's saved evidence does not match its source images.");
     criterionEvidence.set(row.criterion_id, entries);
   }
@@ -173,6 +173,8 @@ export async function buildWorkspacePdf({ report, flags, fileAvailable, fetchAss
     const savedReason = row.reasoning || row.reason;
     const preparedReason = sampleReport.results.find(candidate => candidate.criterion_id === row.criterion_id)?.reasoning;
     note("What to check", (savedReason === preparedReason ? PLAIN_CRITERION_REASONS[row.criterion_id] : savedReason) || "Read the evidence and use the rubric to choose a grade.");
+    const correction = organizationSourceCorrection(row.criterion_id, savedReason);
+    if (correction) note("Source correction", `${correction} The saved assessment above is retained as recorded.`);
     if (row.resolution?.reason) note(row.outcome === "not_applicable" ? "Teacher's reason for excluding this criterion" : "Teacher's comment (private)", row.resolution.reason);
     const bound = criterionEvidence.get(row.criterion_id)!;
     await evidence(bound);

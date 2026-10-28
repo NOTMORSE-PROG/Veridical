@@ -1,4 +1,5 @@
-import { useLayoutEffect, useRef, useState } from "react";
+import { CriterionEvidencePacket } from "./CriterionEvidencePacket";
+import { useState } from "react";
 import type { EvidenceItem, ReportOut } from "../api/types";
 import { BASE_URL } from "../api/client";
 import { CRITERION_ANCHOR_REGION_ID } from "../config/ui";
@@ -37,26 +38,17 @@ export function CriterionEvidenceDialog({ report, selection, onClose }: {
     quote: selection.evidence.quote, anchor: selection.evidence.anchor,
   }, CRITERION_ANCHOR_REGION_ID) : isWorkspaceSample() ? null : coarse;
   const precision = regionPrecision(region);
-  const reader = useRef<HTMLDivElement>(null);
-  const revealed = useRef(false);
-  const placed = region !== null;
-  useLayoutEffect(() => {
-    if (placed && reader.current && !revealed.current) {
-      revealed.current = true;
-      reader.current.scrollIntoView({ block: "nearest" });
-    }
-  }, [placed]);
-  return <Dialog title="Original manuscript passage" wide onClose={onClose} actions={<>{region && <Button variant="quiet" onClick={() => setReaderAttempt(value => value + 1)}>Reload manuscript</Button>}<Button variant="secondary" onClick={onClose}>Close manuscript</Button></>}>
+  return <Dialog title={`Evidence and explanation: ${criterion?.text ?? "Selected criterion"}`} wide onClose={onClose} actions={<>{region && <Button variant="quiet" onClick={() => setReaderAttempt(value => value + 1)}>Reload manuscript</Button>}<Button variant="secondary" onClick={onClose}>Close manuscript</Button></>}>
     <div className="signal-criterion-source-dialog" data-workspace-origin="review">
       <h3>{criterion?.text ?? "Selected criterion"}</h3>
-      <blockquote><p>“{selection.evidence.quote}”</p><cite>{selection.evidence.anchor}</cite></blockquote>
+      {criterion && <CriterionEvidencePacket checkRunId={report.check_run_id} criterionId={criterion.criterion_id} title={criterion.text} reasoning={criterion.reasoning || criterion.reason} evidence={criterion.evidence} selectedIndex={selection.index} previews={sameSource && viewer?.source_sha256 === saved?.source_sha256} />}
       <p className="signal-field-hint">Your grade and comment stay in the review form. Close this manuscript to continue grading.</p>
       {source.isPending ? <p role="status">Loading the original manuscript…</p>
         : source.isError ? <Alert title="Could not load the manuscript" tone="error"><Button variant="secondary" onClick={() => source.refetch()}>Try manuscript again</Button></Alert>
           : sameSource && viewer.source_format === "docx" && paragraphs.isPending ? <p role="status">Loading the original manuscript text…</p>
             : sameSource && viewer.source_format === "docx" && paragraphs.isError ? <Alert title="Could not load the manuscript text" tone="error"><Button variant="secondary" onClick={() => paragraphs.refetch()}>Try manuscript text again</Button></Alert>
           : !region || !viewer ? <Alert title="This passage could not be placed" tone="info">The saved quotation stays above. {viewer?.unavailable_reason ?? "A matching source location could not be verified. No unrelated page is shown."}</Alert>
-            : <><p><strong>{precision.label}.</strong> {precision.helper}</p><div ref={reader} key={readerAttempt} className="signal-criterion-source-reader">
+            : <><p><strong>{precision.label}.</strong> {precision.helper}</p><div key={readerAttempt} className="signal-criterion-source-reader">
               {viewer.source_format === "pdf" ? <PdfPane fileUrl={`${BASE_URL}/check-runs/${report.check_run_id}/document/file`} regions={[region]} flags={[]} selectedFlagId={region.flag_id} onSelectFlag={() => {}} requestedPage={region.page} focusSelection={false} isVisible />
                 : viewer.source_format === "docx" ? <DocxPane paragraphs={paragraphs.data?.paragraphs} paragraphsPending={paragraphs.isPending} paragraphsError={paragraphs.isError} onRetry={() => paragraphs.refetch()} regions={[region]} flags={[]} selectedFlagId={region.flag_id} onSelectFlag={() => {}} requestedParagraph={region.paragraph} isVisible />
                   : <p>This stored format cannot be displayed here.</p>}

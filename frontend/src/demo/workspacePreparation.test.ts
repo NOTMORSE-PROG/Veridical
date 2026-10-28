@@ -12,10 +12,10 @@ function sourceFetch() {
 }
 
 describe("prepared source loading", () => {
-  it("verifies the exact original, all pages and all eighteen source excerpts", async () => {
+  it("verifies the exact original, all pages and all twenty-seven source excerpts", async () => {
     const stages: string[] = [];
     const network = sourceFetch();
-    await expect(prepareWorkspaceSource(network, new AbortController().signal, key => stages.push(key))).resolves.toMatchObject({ pageCount: 109, excerptsBound: 18 });
+    await expect(prepareWorkspaceSource(network, new AbortController().signal, key => stages.push(key))).resolves.toMatchObject({ pageCount: 109, excerptsBound: 27 });
     expect(stages).toEqual(["ingesting", "structural", "integrity", "aggregating"]);
     expect(network).toHaveBeenCalledTimes(2);
     expect(network.mock.calls.every(([url]) => String(url).startsWith("/sample-assets/"))).toBe(true);

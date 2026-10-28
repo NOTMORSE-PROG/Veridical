@@ -28,8 +28,8 @@ describe("complete public source bindings", () => {
     }
   });
   it("retains each criterion/statement, exact geometry qualifications and content-addressed images", () => {
-    expect(sourceEvidence).toHaveLength(18);
-    expect(sourceEvidence.filter(entry => entry.precision === "page_bbox")).toHaveLength(17);
+    expect(sourceEvidence).toHaveLength(27);
+    expect(sourceEvidence.filter(entry => entry.precision === "page_bbox")).toHaveLength(26);
     const pages = JSON.parse(readFileSync(resolve("public/sample-assets/manuscript-text.json"), "utf8")) as { text: string }[];
     for (const entry of sourceEvidence) {
       expect(pages[entry.page! - 1].text.replace(/\s+/g, " ")).toContain(entry.quote.replace(/\s+/g, " "));
@@ -39,9 +39,9 @@ describe("complete public source bindings", () => {
       expect(entry.image_id).toBe(`e-${entry.image_sha256!.slice(0, 24)}`);
     }
     expect(evidenceFor("flag", 1).map(entry => entry.page)).toEqual([29, 109]);
-    expect(evidenceFor("criterion", 1).map(entry => entry.page)).toEqual([109, 5, 29, 37, 103]);
-    expect(evidenceFor("criterion", 2).map(entry => entry.page)).toEqual([23, 32, 33]);
-    expect(publicEvidenceImages()).toHaveLength(18);
+    expect(evidenceFor("criterion", 1).map(entry => entry.page)).toEqual([109, 5, 29, 37, 103, 20, 20]);
+    expect(evidenceFor("criterion", 2).map(entry => entry.page)).toEqual([23, 32, 33, 7, 109]);
+    expect(publicEvidenceImages()).toHaveLength(27);
   });
 
   it("rejects mismatched source, run, subject, role, quote, anchor and synthetic location identity", () => {

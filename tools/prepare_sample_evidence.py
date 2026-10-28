@@ -26,7 +26,7 @@ SOURCE = PUBLIC / "stock-inventory-capstone.pdf"
 EXPECTED_SHA = "ef662fb9cb5619945c69183a8576f3f945109adc51bff408a6cd6fc21626c5fd"
 MANIFEST = ROOT / "frontend/src/demo/sourceEvidence.json"
 IMAGE_DIRECTORY = PUBLIC / "evidence"
-MAX_IMAGES = 20
+MAX_IMAGES = 32
 MAX_PIXELS = 4_000_000
 
 
@@ -198,6 +198,17 @@ def prepare():
         "Document organization",
         "criterion_evidence",
     )
+    # Additional source passages explicitly referenced by the completed review.
+    # Append within each criterion so existing evidence ordinals remain stable.
+    add("criterion", 1, 20, sentence(20, "Develop a web-based", "employees."), "Methodology: proposed web interface", "criterion_evidence")
+    add("criterion", 1, 20, sentence(20, "Build a relational database", "transaction data."), "Methodology: proposed database", "criterion_evidence")
+    add("criterion", 2, 7, sentence(7, "Research and case studies show", "operational efficiency."), "Research claim requiring identified studies", "criterion_evidence")
+    add("criterion", 2, 109, "The proper guidelines from Our instructor Md. Sakib Ali Mazumder sir.", "Published reference section", "criterion_evidence")
+    add("criterion", 3, 4, sentence(4, "I would also like", "Software Engineering."), "Acknowledgement: mixed pronouns", "criterion_evidence")
+    add("criterion", 3, 22, "Software develpoers: 15000-22000/= BDT", "Budget: spelling example", "criterion_evidence")
+    add("criterion", 4, 6, "To generate alerts and reports based on inventory thresholds.", "Objectives: inspect the next empty list item", "criterion_evidence")
+    add("criterion", 4, 4, "LOGO", "Acknowledgement: logo heading", "criterion_evidence")
+    add("criterion", 4, 109, "The proper guidelines from Our instructor Md. Sakib Ali Mazumder sir.", "Reference section organization", "criterion_evidence")
     add(
         "flag",
         1,

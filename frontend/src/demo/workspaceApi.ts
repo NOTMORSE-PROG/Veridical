@@ -3,7 +3,7 @@ import { companionSource, sampleCriteria, sampleEscalatedItems, sampleFlags, sam
 import { prepareWorkspaceSource } from "./workspacePreparation";
 import { evidenceByImageId, evidenceFor, evidenceSourceHash, publicEvidenceImages } from "./sourceEvidence";
 import { RESOLUTION_REASON_MIN_LENGTH } from "../config/ui";
-import { AI_REVIEW_BASIS, AI_REVIEW_CONFIRMED_BASIS, applyPreparedAiReview, hasPreparedAiGrades, preparedAiReviewReceipt } from "./preparedAiReview";
+import { AI_REVIEW_BASIS, AI_REVIEW_CONFIRMED_BASIS, AI_REVIEW_GRADES, AI_REVIEW_VERSION, LEGACY_ORGANIZATION_REVIEW, applyPreparedAiReview, hasPreparedAiGrades, preparedAiReviewReceipt } from "./preparedAiReview";
 import { PLAIN_FINDING_REASONS } from "./workspacePdfCopy";
 
 type SampleState = {
@@ -35,6 +35,20 @@ export function installWorkspaceSample() {
       state = { ...fresh(), ...stored.state, run: stored.state.run ?? structuredClone(sampleRun) } as SampleState;
     }
   } catch { /* An unavailable or invalid sample cache starts a clean sample. */ }
+  // Add newly bound public source passages only to a matching open record.
+  // Retain every saved grade, private comment and frozen decision snapshot.
+  let organizationCorrected = false;
+  if (state.fileAvailable && !state.report.decision && state.run.id === 1 && state.run.manuscript_id === 1 && state.report.check_run_id === 1 && state.report.manuscript_id === 1 && state.manuscript.original_filename === WORKSPACE_SAMPLE.filename && JSON.stringify(state.rubric.criteria) === JSON.stringify(sampleCriteria)) {
+    for (const row of state.report.results) {
+      const expected = evidenceFor("criterion", row.criterion_id);
+      if (row.text === sampleCriteria.find(criterion => criterion.id === row.criterion_id)?.text && row.evidence.length > 0 && row.evidence.length < expected.length && row.evidence.every((entry, index) => entry.quote === expected[index]?.quote && entry.anchor === expected[index]?.anchor)) row.evidence = expected.map(entry => ({ quote: entry.quote, anchor: entry.anchor }));
+      if (row.criterion_id === 4 && row.text === sampleCriteria[3].text && row.basis === AI_REVIEW_BASIS && !row.resolution && row.reasoning === LEGACY_ORGANIZATION_REVIEW && state.run.status === "done" && state.report.llm_mode === "manual" && JSON.stringify(row.evidence) === JSON.stringify(expected.map(entry => ({ quote: entry.quote, anchor: entry.anchor })))) {
+        row.reasoning = AI_REVIEW_GRADES[4].reason;
+        state.aiReviewVersion = AI_REVIEW_VERSION;
+        organizationCorrected = true;
+      }
+    }
+  }
   const reviewSeeded = seedAllowed && applyPreparedAiReview(state);
   // Refresh image bindings while retaining saved criterion evidence and grades.
   state.flags = state.flags.map(flag => ({ ...flag, source_evidence: evidenceFor("flag", flag.id) }));
@@ -108,6 +122,7 @@ export function installWorkspaceSample() {
     audit("ai_review_prepared", preparedAiReviewReceipt);
     persist();
   }
+  if (organizationCorrected) audit("ai_review_source_corrected", { ...preparedAiReviewReceipt, criterion_id: 4, previous_reason: LEGACY_ORGANIZATION_REVIEW, corrected_reason: AI_REVIEW_GRADES[4].reason, note: "Source page 4 contains a logo. Corrected the unsupported placeholder remark; grade unchanged." });
 
   function projectPublicReport(report: ReportOut) {
     return {
@@ -138,7 +153,7 @@ export function installWorkspaceSample() {
       problem_kind: flag.ai_verdict_summary ?? flag.problem_kind ?? null, matched_ref: flag.matched_ref }));
   }
   function publicSnapshot() {
-    return { report: projectPublicReport(state.report), flags: publicFlags(state.flags), evidence_images: state.fileAvailable ? publicEvidenceImages() : [] };
+    return { report: projectPublicReport(state.report), flags: publicFlags(state.flags), evidence_images: state.fileAvailable ? publicEvidenceImages().filter(image => image.subject?.kind !== "criterion" || state.report.results.some(row => row.criterion_id === image.subject?.id && row.evidence.some(entry => entry.quote === image.quote && entry.anchor === image.anchor))) : [] };
   }
   function readShared(token: string) {
     if (!/^sample-[0-9a-f-]{36}$/.test(token)) return null;

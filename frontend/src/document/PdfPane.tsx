@@ -68,6 +68,7 @@ function ContinuousPdfPage({
   onVisibility,
   registerPage,
   focusSelection,
+  revealSelection,
   readingPage,
 }: {
   pdf: PDFDocumentProxy;
@@ -82,12 +83,14 @@ function ContinuousPdfPage({
   onVisibility: (page: number, ratio: number) => void;
   registerPage: (page: number, element: HTMLElement | null) => void;
   focusSelection: boolean;
+  revealSelection: boolean;
   readingPage: number;
 }) {
   const pageRef = useRef<HTMLElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const textLayerRef = useRef<HTMLDivElement>(null);
   const markerRefs = useRef<Map<number, HTMLButtonElement>>(new Map());
+  const revealedSelection = useRef<string | null>(null);
   const renderTaskRef = useRef<RenderTask | null>(null);
   const textLayerTaskRef = useRef<pdfjsLib.TextLayer | null>(null);
   const [isNear, setIsNear] = useState(metric.pageNumber <= 2);
@@ -186,6 +189,25 @@ function ContinuousPdfPage({
     if (!focusSelection || selectedFlagId === null || selectedFlagId < 0 || !isNear) return;
     markerRefs.current.get(selectedFlagId)?.focus({ preventScroll: false });
   }, [focusSelection, isNear, selectedFlagId, viewport]);
+
+  useEffect(() => {
+    if (!revealSelection || selectedFlagId === null || !isNear || !viewport) return;
+    const key = `${selectedFlagId}:${viewport.width}`;
+    if (revealedSelection.current === key) return;
+    let settle = 0;
+    const frame = requestAnimationFrame(() => {
+      settle = requestAnimationFrame(() => {
+        const marker = markerRefs.current.get(selectedFlagId);
+        const root = scrollRoot.current;
+        if (!marker || !root || root.clientHeight <= 0) return;
+        const target = marker.getBoundingClientRect();
+        const bounds = root.getBoundingClientRect();
+        root.scrollTo({ top: root.scrollTop + target.top - bounds.top - root.clientTop - Math.max(0, (root.clientHeight - target.height) / 2), behavior: "auto" });
+        revealedSelection.current = key;
+      });
+    });
+    return () => { cancelAnimationFrame(frame); cancelAnimationFrame(settle); };
+  }, [revealSelection, selectedFlagId, isNear, viewport, scrollRoot]);
 
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
@@ -309,6 +331,7 @@ export function PdfPane({
   findingNumbers = EMPTY_FINDING_NUMBERS,
   requestedPageAttempt,
   focusSelection = true,
+  revealSelection = false,
   isVisible = true,
 }: {
   fileUrl: string;
@@ -320,6 +343,7 @@ export function PdfPane({
   findingNumbers?: ReadonlyMap<number, number>;
   requestedPageAttempt?: number;
   focusSelection?: boolean;
+  revealSelection?: boolean;
   isVisible?: boolean;
 }) {
   const [pdf, setPdf] = useState<PDFDocumentProxy | null>(null);
@@ -548,6 +572,7 @@ export function PdfPane({
                 onVisibility={updateVisibility}
                 registerPage={registerPage}
                 focusSelection={focusSelection}
+                revealSelection={revealSelection}
                 readingPage={currentPage}
               />
             ))}

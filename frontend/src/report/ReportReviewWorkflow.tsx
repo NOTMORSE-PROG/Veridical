@@ -80,7 +80,7 @@ function WorkflowContent({ report, manuscriptLabel, onEvidenceSelected, onOpenEv
     <div ref={content} className="signal-review-stage">
       {step.key === "criteria" && <><SignalEscalatedPanel checkRunId={report.check_run_id} focused onEditingChange={changeEditing} onEvidenceSelected={onEvidenceSelected} onOpenEvidence={openEvidence} />{report.pending_review_count === 0 && <p>All grades saved. Continue to findings.</p>}</>}
       {step.key === "findings" && <SignalFlagsPanel checkRunId={report.check_run_id} unresolvedHighFlagCount={report.unresolved_high_flag_count} originalityScope={report.originality_scope} report={report} />}
-      {step.key === "record" && <SignalCriteriaResults results={report.results.filter(row => row.outcome !== "escalated")} checkRunId={report.check_run_id} />}
+      {step.key === "record" && <SignalCriteriaResults results={report.results.filter(row => row.outcome !== "escalated")} checkRunId={report.check_run_id} onOpenEvidence={openEvidence} />}
       {step.key === "decision" && <SignalDecisionPanel report={report} manuscriptLabel={manuscriptLabel} onReviewCriteria={() => select("criteria")} />}
     </div>
     <div className="signal-control-cluster signal-review-step-actions"><Button variant="secondary" disabled={editing || index === 0} onClick={() => select(STEPS[index - 1].key)}>Back</Button>{index < STEPS.length - 1 && <Button variant="brand" disabled={editing} onClick={() => select(STEPS[index + 1].key)}>Continue to {index === 0 ? "findings" : index === 1 ? "saved grades" : "decision"}</Button>}</div>

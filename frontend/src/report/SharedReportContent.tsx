@@ -2,7 +2,8 @@ import { useEffect, useRef } from "react";
 import { useSearchParams } from "react-router";
 import type { SharedReportOut } from "../api/types";
 import { WeightImportanceTag } from "../components/WeightImportanceTag";
-import { AI_REVIEW_BASIS, AI_REVIEW_CONFIRMED_BASIS } from "../demo/preparedAiReview";
+import { AI_REVIEW_BASIS, AI_REVIEW_CONFIRMED_BASIS, organizationSourceCorrection } from "../demo/preparedAiReview";
+import { isWorkspaceSample, WORKSPACE_SAMPLE } from "../demo/workspaceFixture";
 import { Button } from "../ui/Button";
 import { SignalPublicFlags } from "./SignalReviewSections";
 import { SharedEvidenceImages, SharedEvidencePager } from "./SharedEvidenceImages";
@@ -15,6 +16,7 @@ export function SharedReportContent({ data, token }: { data: SharedReportOut; to
   const evidence = associateSharedEvidence(data.evidence_images ?? [], report, flags);
   const chosen = report.results.find(row => String(row.criterion_id) === params.get("criterion")) ?? report.results[0];
   const chosenId = chosen?.criterion_id;
+  const correction = chosen && isWorkspaceSample() && report.check_run_id === 1 && report.manuscript_original_filename === WORKSPACE_SAMPLE.filename ? organizationSourceCorrection(chosen.criterion_id, chosen.reasoning) : null;
   const focusRequested = useRef(false);
   useEffect(() => {
     if (!focusRequested.current) return;
@@ -35,6 +37,7 @@ export function SharedReportContent({ data, token }: { data: SharedReportOut; to
         <header><h3 id="shared-selected-grade" tabIndex={-1}>{chosen.text}</h3><p><strong>Recorded grade: {sharedGradeLabel(chosen)}</strong></p><p>Importance: <WeightImportanceTag importance={chosen.weight_importance} /></p><p className="signal-field-hint">{chosen.resolved ? "Grade confirmed or changed by the teacher." : chosen.basis === AI_REVIEW_BASIS ? "AI review prepared in this session." : chosen.basis === AI_REVIEW_CONFIRMED_BASIS ? "Teacher's grade following an AI review." : "The report's recorded assessment."}</p></header>
         <div className="signal-shared-packet">
           <div className="signal-shared-packet__explanation"><h4>Why this grade</h4><p>{chosen.reasoning || chosen.reason || "No additional explanation was shared."}</p>{chosen.reasoning && chosen.reason && chosen.reason !== chosen.reasoning && <p>{chosen.reason}</p>}
+            {correction && <p><strong>{correction}</strong> The saved assessment above is retained as recorded.</p>}
             <details><summary>All saved quotations</summary>{chosen.evidence.length ? chosen.evidence.map((item, index) => <blockquote key={`${index}:${item.anchor}`}><span>“{item.quote}”</span><cite>{item.anchor}</cite></blockquote>) : <p>No source quotation was saved for this criterion.</p>}</details>
           </div>
           <SharedEvidencePager key={`${token}:criterion:${chosen.criterion_id}`} token={token} images={evidence.criteria.get(chosen.criterion_id) ?? []} />

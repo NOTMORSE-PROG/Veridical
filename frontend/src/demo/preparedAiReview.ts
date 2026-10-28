@@ -3,8 +3,8 @@ import { sampleManuscript, sampleReport, sampleRubric, sampleRun, WORKSPACE_SAMP
 
 export const AI_REVIEW_BASIS = "prepared_ai_review";
 export const AI_REVIEW_CONFIRMED_BASIS = "instructor_after_prepared_ai_review";
-export const AI_REVIEW_VERSION = "source-review-20261027-1";
-export const AI_REVIEWED_AT = "2026-10-26T17:48:29Z";
+export const AI_REVIEW_VERSION = "source-review-20261028-2";
+export const AI_REVIEWED_AT = "2026-10-28T09:31:47Z";
 export const AI_REVIEW_DESCRIPTION = "The manuscript was reviewed by an AI assistant in this session. The app's automated grading service was not run. The teacher makes the final defense decision.";
 
 // This assessment uses the categories, weights and named levels printed on the
@@ -13,7 +13,7 @@ export const AI_REVIEW_GRADES: Readonly<Record<number, { level: number; reason: 
   1: { level: 2, reason: "Developing. The abstract on page 5 explains the C console program clearly, and the code and manual show what was built. However, page 20 describes a web system and database, page 29 says there is no database, and page 109 claims database integration. Pages 103-108 list that work as future development. These conflicting descriptions make the completed scope hard to follow. Separate completed work from plans and revise the conclusion." },
   2: { level: 2, reason: "Developing. The paper includes requirements, diagrams, substantial C code and a user manual, so it documents a concrete prototype. The evaluation on page 23 describes planned tests but gives no measured results or user sample. The component summary on pages 32-33 does not match its listed rows. The research claim on page 7 has no identified study, and page 109 supplies no bibliography. Add test results and research references, and reconcile the component totals." },
   3: { level: 3, reason: "Sufficient. The main technical descriptions are understandable and the abstract presents the purpose and features in connected prose. Proofreading is still needed: page 3 has subject-verb errors and 'top any other', page 4 changes between 'We', 'I' and 'our', and page 22 has 'develpoers'. These examples lower the polish, but do not prevent understanding of the documented prototype. Correct them and check consistency throughout the paper." },
-  4: { level: 3, reason: "Sufficient. The contents page locates the requirements, design diagrams, methods, evaluation, limitations, source code and user manual. The paper includes those materials and separates future work from the implementation sections. Formatting is usable, but page 6 leaves an objective entry blank, page 4 retains a LOGO placeholder, and headings and spacing need a consistency pass. Replace the reference-page acknowledgement with a proper bibliography." },
+  4: { level: 3, reason: "Sufficient. The contents page locates the requirements, design diagrams, methods, evaluation, limitations, source code and user manual. The paper includes those materials and separates future work from the implementation sections. Formatting is usable, but page 6 leaves an objective entry blank, the reference section needs completion, and headings and spacing need a consistency pass. Page 4 already contains an inventory-system logo. Replace the reference-page acknowledgement with a proper bibliography." },
 };
 
 export const hasPreparedAiGrades = (report: { results: readonly Pick<ResultRowCommon, "basis">[] }) => report.results.some(row => row.basis === AI_REVIEW_BASIS || row.basis === AI_REVIEW_CONFIRMED_BASIS);
@@ -44,3 +44,8 @@ export function applyPreparedAiReview(state: { report: ReportOut; rubric: Rubric
 }
 
 export const preparedAiReviewReceipt = { review_version: AI_REVIEW_VERSION, reviewed_at: AI_REVIEWED_AT, source_sha256: WORKSPACE_SAMPLE.sha256, review_basis: AI_REVIEW_BASIS };
+
+export const LEGACY_ORGANIZATION_REVIEW = "Sufficient. The contents page locates the requirements, design diagrams, methods, evaluation, limitations, source code and user manual. The paper includes those materials and separates future work from the implementation sections. Formatting is usable, but page 6 leaves an objective entry blank, page 4 retains a LOGO placeholder, and headings and spacing need a consistency pass. Replace the reference-page acknowledgement with a proper bibliography.";
+export function organizationSourceCorrection(criterionId: number, reasoning: string | null): string | null {
+  return criterionId === 4 && reasoning?.includes(LEGACY_ORGANIZATION_REVIEW) ? "Source correction: page 4 of the published sample contains a logo. The earlier placeholder remark is unsupported." : null;
+}

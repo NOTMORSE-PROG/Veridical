@@ -343,6 +343,7 @@
   --signal-library-workbench-min-height: 45rem;
   --signal-document-toolbar-height: 3.5rem;
   --signal-document-workbench-min-height: 24rem;
+  --signal-module-case-reader-height: max(24rem, 70dvh);
   --signal-document-workbench-height: calc(100dvh - var(--signal-workspace-bar-height) - var(--signal-space-8));
   --signal-criterion-reader-height: min(36rem, 60dvh);
   --signal-paper-max-inline-size: 52rem;
@@ -442,7 +443,7 @@
   --signal-check-stage-grid-phone: var(--signal-criterion-number-size) minmax(0, 1fr);
   --signal-report-hero-grid: minmax(0, 1.5fr) minmax(18rem, 0.5fr);
   --signal-report-jump-grid: repeat(4, minmax(0, 1fr));
-  --signal-resolution-card-grid: repeat(auto-fit, minmax(min(100%, 22rem), 1fr));
+  --signal-resolution-card-grid: minmax(0, 2fr) minmax(var(--signal-review-controls-min), 1fr);
   --signal-review-progress-grid: repeat(auto-fit, minmax(min(100%, 14rem), 1fr));
   --signal-library-add-column-min: 27rem;
   --signal-settings-column-min: 28rem;

@@ -6,7 +6,7 @@ import { resolve } from "node:path";
 import { installWorkspaceSample } from "./workspaceApi";
 import { companionSource, reviewTasks, sampleCriteria, sampleFlags, sampleReport, sampleRubric, sampleManuscript, sampleLibrary, sampleRun, WORKSPACE_SAMPLE } from "./workspaceFixture";
 
-import { AI_REVIEW_VERSION } from "./preparedAiReview";
+import { AI_REVIEW_BASIS, AI_REVIEW_CONFIRMED_BASIS, AI_REVIEW_GRADES, AI_REVIEW_VERSION, LEGACY_ORGANIZATION_REVIEW, organizationSourceCorrection } from "./preparedAiReview";
 import { PLAIN_FINDING_REASONS } from "./workspacePdfCopy";
 const originalFetch = window.fetch;
 // Manual-grading endpoint tests retain their initialized, ungraded workflow.
@@ -22,6 +22,33 @@ const resolveAll = async (reason = "Instructor judgment after reading the origin
 };
 
 describe("real-interface sample API boundary", () => {
+  it.each(["open AI", "teacher confirmed", "frozen", "other source"])("corrects only untouched open AI wording and retains %s history", async kind => {
+    sessionStorage.clear(); localStorage.clear();
+    const network = vi.fn(async () => new Response("{}")); window.fetch = network; installWorkspaceSample();
+    const saved = JSON.parse(sessionStorage.getItem(WORKSPACE_SAMPLE.storageKey)!);
+    const row = saved.state.report.results[3];
+    expect(row.reasoning).toBe(AI_REVIEW_GRADES[4].reason);
+    expect(row.reasoning).toContain("already contains an inventory-system logo");
+    row.reasoning = LEGACY_ORGANIZATION_REVIEW; row.basis = AI_REVIEW_BASIS;
+    saved.state.aiReviewVersion = "source-review-20261027-1";
+    if (kind === "teacher confirmed") { row.basis = AI_REVIEW_CONFIRMED_BASIS; row.resolution = { type: "mark_level", reason: "PRIVATE-TEACHER-COMMENT", ai_majority_verdict: null }; }
+    if (kind === "frozen") saved.state.report.decision = "approved";
+    if (kind === "other source") saved.state.manuscript.original_filename = "Other.pdf";
+    const before = structuredClone(row);
+    sessionStorage.setItem(WORKSPACE_SAMPLE.storageKey, JSON.stringify(saved)); window.fetch = network; installWorkspaceSample();
+    const next = (await call("/check-runs/1/report")).data.results[3];
+    if (kind === "open AI") {
+      expect(next).toEqual({ ...before, reasoning: AI_REVIEW_GRADES[4].reason });
+      const event = (await call("/audit")).data.items.find((item: { event_type: string }) => item.event_type === "ai_review_source_corrected");
+      expect(event.payload.previous_reason).toBe(LEGACY_ORGANIZATION_REVIEW);
+      expect(event.payload.corrected_reason).toBe(AI_REVIEW_GRADES[4].reason);
+    } else {
+      expect(next).toEqual(before);
+      expect(organizationSourceCorrection(4, next.reasoning)).toContain("contains a logo");
+    }
+    expect(organizationSourceCorrection(3, LEGACY_ORGANIZATION_REVIEW)).toBeNull();
+    expect(organizationSourceCorrection(4, AI_REVIEW_GRADES[4].reason)).toBeNull();
+  });
   it("shares typed source associations and only known public author/explanation data", async () => {
     const network = start();
     const saved = JSON.parse(sessionStorage.getItem(WORKSPACE_SAMPLE.storageKey)!);
@@ -66,13 +93,46 @@ describe("real-interface sample API boundary", () => {
     expect((await call("/check-runs/1/report")).data.pending_review_count).toBe(4);
     expect((await call("/check-runs/1/report")).data.results[0].resolution).toBeNull();
   });
+  it("keeps frozen legacy evidence and active shares fixed while retaining private instructor work", async () => {
+    sessionStorage.clear(); localStorage.clear();
+    const network = vi.fn(async () => new Response("{}")); window.fetch = network;
+    installWorkspaceSample();
+    const saved = JSON.parse(sessionStorage.getItem(WORKSPACE_SAMPLE.storageKey)!);
+    const counts = [5, 3, 1, 1];
+    saved.state.report.results.forEach((row: { evidence: unknown[] }, index: number) => { row.evidence = row.evidence.slice(0, counts[index]); });
+    saved.state.report.decision = "approved"; saved.state.report.decided_at = "2026-10-26T12:00:00Z";
+    saved.state.report.results[0].resolution = { type: "mark_level", reason: "PRIVATE-FROZEN-COMMENT", ai_majority_verdict: null };
+    saved.state.flags[0].annotation = "PRIVATE-FROZEN-NOTE";
+    saved.state.share = { token: "sample-00000000-0000-4000-8000-000000003535", check_run_id: 1, created_at: "2026-10-26T12:00:00Z", expires_at: null };
+    const frozen = structuredClone(saved.state.report);
+    sessionStorage.setItem(WORKSPACE_SAMPLE.storageKey, JSON.stringify(saved));
+    window.fetch = network; installWorkspaceSample();
+    expect((await call("/check-runs/1/report")).data).toEqual(frozen);
+    const shared = (await call("/shared/sample-00000000-0000-4000-8000-000000003535/report")).data;
+    expect(shared.evidence_images).toHaveLength(18);
+    expect(JSON.stringify(shared)).not.toContain("PRIVATE-FROZEN");
+    expect(shared.report.decision).toBe("approved");
+  });
+  it("adds missing canonical sources to an open known case without changing its saved grades", async () => {
+    sessionStorage.clear(); localStorage.clear();
+    const network = vi.fn(async () => new Response("{}")); window.fetch = network; installWorkspaceSample();
+    const saved = JSON.parse(sessionStorage.getItem(WORKSPACE_SAMPLE.storageKey)!);
+    const before = saved.state.report.results.map((row: { level: unknown }) => row.level);
+    const counts = [5, 3, 1, 1];
+    saved.state.report.results.forEach((row: { evidence: unknown[] }, index: number) => { row.evidence = row.evidence.slice(0, counts[index]); });
+    sessionStorage.setItem(WORKSPACE_SAMPLE.storageKey, JSON.stringify(saved));
+    window.fetch = network; installWorkspaceSample();
+    const report = (await call("/check-runs/1/report")).data;
+    expect(report.results.map((row: { level: unknown }) => row.level)).toEqual(before);
+    expect(report.results.map((row: { evidence: unknown[] }) => row.evidence.length)).toEqual([7, 5, 3, 4]);
+  });
   it("separately allowlists shared images and denies wrong IDs, selectors, corrupted bytes and revoked access", async () => {
     vi.stubGlobal("crypto", webcrypto);
     const network = start();
     network.mockImplementation(async input => new Response(readFileSync(resolve(`public${String(input)}`))));
     const share = (await call("/check-runs/1/share", "POST", { expires_at: null })).data;
     const shared = (await call(`/shared/${share.token}/report`)).data;
-    expect(shared.evidence_images).toHaveLength(18);
+    expect(shared.evidence_images).toHaveLength(27);
     const image = shared.evidence_images[0];
     const imagePath = `/shared/${share.token}/evidence-images/${image.image_id}`;
     const response = await window.fetch(`/api${imagePath}`);

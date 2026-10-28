@@ -100,7 +100,7 @@ function reportWith(overrides: Record<string, unknown>) {
 describe("SignalEscalatedPanel / SignalResolutionCard", () => {
   afterEach(() => vi.unstubAllGlobals());
 
-  it("browses evidence without opening its source and preserves the grade draft until an explicit page link", async () => {
+  it("shows the complete evidence packet and preserves the grade draft until an explicit source link", async () => {
     const evidence = [
       { quote: "The first saved passage.", anchor: "page 3" },
       { quote: "The second saved passage.", anchor: "page 4" },
@@ -109,21 +109,16 @@ describe("SignalEscalatedPanel / SignalResolutionCard", () => {
     const selected = vi.fn(), opened = vi.fn();
     vi.stubGlobal("fetch", stubFetchByPath({ "/check-runs/5/escalated": [{ ...LEVELLED_ITEM, evidence }] }));
     renderWithProviders(<SignalEscalatedPanel checkRunId={5} onEvidenceSelected={selected} onOpenEvidence={opened} />);
-    const panel = await screen.findByRole("region", { name: `Evidence for ${LEVELLED_ITEM.criterion_text}` });
+    const panel = await screen.findByRole("region", { name: `Evidence and explanation for ${LEVELLED_ITEM.criterion_text}` });
     await waitFor(() => expect(selected).toHaveBeenCalled());
     fireEvent.click(screen.getByRole("button", { name: "Proficient" }));
     fireEvent.change(screen.getByRole("textbox", { name: "Comment (optional)" }), { target: { value: "Keep my unfinished grade." } });
-    fireEvent.click(within(panel).getByRole("button", { name: "Next evidence" }));
-    expect(within(panel).getByText("Evidence 2 of 3")).toBeInTheDocument();
-    expect(within(panel).getByText(`“${evidence[1].quote}”`)).toBeInTheDocument();
+    for (const entry of evidence) expect(within(panel).getByText(`“${entry.quote}”`)).toBeInTheDocument();
+    expect(within(panel).queryByRole("button", { name: "Next evidence" })).not.toBeInTheDocument();
+    expect(within(panel).getByText("This saved location cannot be placed. Inspect the manuscript manually.")).toBeInTheDocument();
     expect(selected).toHaveBeenCalledTimes(1);
     expect(opened).not.toHaveBeenCalled();
-    fireEvent.click(within(panel).getByRole("button", { name: "Next evidence" }));
-    expect(within(panel).queryByRole("button", { name: "Open unplaced section in manuscript" })).not.toBeInTheDocument();
-    expect(opened).not.toHaveBeenCalled();
-    fireEvent.click(within(panel).getByRole("button", { name: "Previous evidence" }));
-    expect(opened).not.toHaveBeenCalled();
-    fireEvent.click(within(panel.querySelector("cite")!).getByRole("button", { name: "Open page 4 in manuscript" }));
+    fireEvent.click(within(panel).getByRole("button", { name: "Read saved passage: page 4" }));
     expect(selected).toHaveBeenLastCalledWith(LEVELLED_ITEM.criterion_id, evidence[1], 1);
     expect(opened).toHaveBeenCalledExactlyOnceWith(LEVELLED_ITEM.criterion_id, evidence[1], 1);
     expect(screen.getByRole("textbox", { name: "Comment (optional)" })).toHaveValue("Keep my unfinished grade.");

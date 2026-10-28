@@ -4,9 +4,9 @@ import { publicEvidenceImages } from "../demo/sourceEvidence";
 import { associateSharedEvidence, sharedGradeLabel } from "./sharedEvidence";
 
 describe("public evidence association", () => {
-  it("keeps all 18 roles attached to their explicit criterion or finding", () => {
+  it("keeps all 27 roles attached to their explicit criterion or finding", () => {
     const grouped = associateSharedEvidence(publicEvidenceImages(), sampleReport, sampleFlags.map(flag => ({ ...flag, problem_kind: flag.ai_verdict_summary })));
-    expect([...grouped.criteria.values()].map(items => items.length)).toEqual([5, 3, 1, 1]);
+    expect([...grouped.criteria.values()].map(items => items.length)).toEqual([7, 5, 3, 4]);
     expect([...grouped.findings.values()].map(items => items.length)).toEqual([2, 2, 2, 2]);
     expect(grouped.additional).toEqual([]);
   });

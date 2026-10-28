@@ -1,0 +1,88 @@
+[
+  {
+    "id": "rojahn-2023",
+    "title": "American public opinion on artificial intelligence in healthcare",
+    "authors": [
+      "Jessica Rojahn",
+      "Andrea Palu",
+      "Steven Skiena",
+      "Jason J. Jones"
+    ],
+    "year": 2023,
+    "published_date": "2023-11-09",
+    "publisher": "PLOS ONE",
+    "publisher_url": "https://journals.plos.org/plosone/article?id=10.1371/journal.pone.0294028",
+    "file": "rojahn-2023.pdf",
+    "doi": "10.1371/journal.pone.0294028",
+    "source_url": "https://journals.plos.org/plosone/article/file?id=10.1371/journal.pone.0294028&type=printable",
+    "source_sha256": "993d2a3e660b2a0e45926da11e6b305c44a0a60f4a848d0dc3b40c4e0ac88b38",
+    "source_bytes": 1358631,
+    "pdf_pages": 17,
+    "licence": "Creative Commons Attribution 4.0 International",
+    "licence_short": "CC BY 4.0",
+    "licence_url": "https://creativecommons.org/licenses/by/4.0/",
+    "licence_pdf_pages": [
+      1
+    ],
+    "source_state": "Original published PDF bytes unchanged; excerpts and local results are separate.",
+    "pdf_asset": "/sample-assets/module-checks/rojahn-2023.pdf"
+  },
+  {
+    "id": "nuijten-2016",
+    "title": "The prevalence of statistical reporting errors in psychology (1985-2013)",
+    "authors": [
+      "Mich\u00e8le B. Nuijten",
+      "Chris H. J. Hartgerink",
+      "Marcel A. L. M. van Assen",
+      "Sacha Epskamp",
+      "Jelte M. Wicherts"
+    ],
+    "year": 2016,
+    "first_published_online": "2015-10-23",
+    "publisher": "Behavior Research Methods",
+    "publisher_url": "https://link.springer.com/article/10.3758/s13428-015-0664-2",
+    "file": "nuijten-2016.pdf",
+    "doi": "10.3758/s13428-015-0664-2",
+    "source_url": "https://mbnuijten.com/wp-content/uploads/2013/08/nuijtenetal_2016_reportingerrorspsychology.pdf",
+    "source_sha256": "5d1a96e0cdf0ff090167379efad475cb6e104936e237a4d62a7e6f3a7da47a5e",
+    "source_bytes": 1246203,
+    "pdf_pages": 22,
+    "licence": "Creative Commons Attribution 4.0 International",
+    "licence_short": "CC BY 4.0",
+    "licence_url": "https://creativecommons.org/licenses/by/4.0/",
+    "licence_pdf_pages": [
+      21
+    ],
+    "source_state": "Original published PDF bytes unchanged; excerpts and local results are separate.",
+    "pdf_asset": "/sample-assets/module-checks/nuijten-2016.pdf"
+  },
+  {
+    "id": "veldkamp-2014",
+    "title": "Statistical Reporting Errors and Collaboration on Statistical Analyses in Psychological Science",
+    "authors": [
+      "Coosje L. S. Veldkamp",
+      "Mich\u00e8le B. Nuijten",
+      "Linda Dominguez-Alvarez",
+      "Marcel A. L. M. van Assen",
+      "Jelte M. Wicherts"
+    ],
+    "year": 2014,
+    "published_date": "2014-12-10",
+    "publisher": "PLOS ONE",
+    "publisher_url": "https://journals.plos.org/plosone/article?id=10.1371/journal.pone.0114876",
+    "file": "veldkamp-2014.pdf",
+    "doi": "10.1371/journal.pone.0114876",
+    "source_url": "https://journals.plos.org/plosone/article/file?id=10.1371/journal.pone.0114876&type=printable",
+    "source_sha256": "a91ab7e12f650f80b03c3f6548c3a9709831e469daa4921bd0606d8e7939faed",
+    "source_bytes": 723730,
+    "pdf_pages": 19,
+    "licence": "Creative Commons Attribution 4.0 International",
+    "licence_short": "CC BY 4.0",
+    "licence_url": "https://creativecommons.org/licenses/by/4.0/",
+    "licence_pdf_pages": [
+      1
+    ],
+    "source_state": "Original published PDF bytes unchanged; excerpts and local results are separate.",
+    "pdf_asset": "/sample-assets/module-checks/veldkamp-2014.pdf"
+  }
+]

@@ -1,3 +1,4 @@
+import { ModuleCheckCasePage } from "./demo/ModuleCheckCases";
 // Route shell (V-014): auth-gated app routes render inside the shared
 // SignalShell. The dev-only /gallery component-review page (V-002) was
 // removed in V-056 — it was the last consumer of the LEGACY token block
@@ -56,6 +57,7 @@ const router = createBrowserRouter(
           {/* A single persistent shell keeps destination navigation stable
               while instructors move between authenticated routes. */}
           <Route path="/dashboard" element={<DashboardPage />} />
+          <Route path="/module-checks/:kind" element={<ModuleCheckCasePage />} />
           <Route path="/rubric" element={<ManageRubricPage />} />
           <Route path="/library" element={<SignalLibraryPage />} />
           <Route path="/library/compare" element={<SignalLibraryComparePage />} />

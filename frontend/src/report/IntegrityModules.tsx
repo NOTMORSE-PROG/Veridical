@@ -39,6 +39,7 @@ export function IntegrityModuleSummary({ kind, report, originalityScope, showAdd
         ? "Originality comparison was not run for this prepared review. No similarity judgment or matching passage pair is recorded."
         : "These are prepared observations from the original manuscript, not results of a live automated check."}</p></>
       : <p className="signal-field-hint">This section shows the saved findings for this check. Finding counts do not establish that the check completed or passed.</p>}
+    {prepared && showAddAction && (kind === "statistical_forensics" || kind === "originality_reuse") && <ActionLink to={`/module-checks/${kind === "statistical_forensics" ? "statistics" : "reuse"}`} variant="secondary">{kind === "statistical_forensics" ? "Open a completed statistics check" : "Open a completed passage comparison"}</ActionLink>}
     {coverage.length > 0 && <div className="signal-integrity-module-limits"><strong>Recorded check limits</strong>{coverage.map(item => <div key={item.key}><p>{item.detail}</p>{item.subIssues?.map(issue => <p key={issue}>{issue}</p>)}{item.action && <ActionLink to={item.action.to} variant="quiet" aria-label={item.action.ariaLabel}>{item.action.label}</ActionLink>}</div>)}</div>}
     {kind === "originality_reuse" && <OriginalityScope scope={originalityScope} showAddAction={showAddAction} />}
     {!prepared && kind === "originality_reuse" && !originalityScope && <p className="signal-field-hint">The comparison scope was not recorded.</p>}

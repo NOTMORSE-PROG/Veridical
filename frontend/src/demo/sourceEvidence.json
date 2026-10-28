@@ -383,6 +383,324 @@
     },
     {
       "subject": {
+        "kind": "criterion",
+        "id": 1
+      },
+      "page": 20,
+      "quote": "Develop a web-based inventory system with role-based access control for admin and employees.",
+      "anchor": "page 20",
+      "label": "Methodology: proposed web interface",
+      "role": "criterion_evidence",
+      "check_run_id": 1,
+      "manuscript_id": 1,
+      "source_sha256": "ef662fb9cb5619945c69183a8576f3f945109adc51bff408a6cd6fc21626c5fd",
+      "evidence_index": 5,
+      "paragraph": null,
+      "quote_sha256": "307bc94b6f8d7520dc5c094b0dcd97b487631d6d55110e58650401fae135223e",
+      "evidence_id": "e-75e001b398e95ff4bc1431c5",
+      "precision": "page_bbox",
+      "boxes": [
+        [
+          90.02400207519531,
+          569.3473663330078,
+          564.5244750976562,
+          584.8896484375
+        ],
+        [
+          90.02400207519531,
+          553.2673492431641,
+          153.4847869873047,
+          568.8096313476562
+        ]
+      ],
+      "precision_note": "Complete quotation uniquely bound to original native glyphs.",
+      "image_id": "e-8f9ad43f51820a3b6086a375",
+      "image_width": 1275,
+      "image_height": 1738,
+      "image_sha256": "8f9ad43f51820a3b6086a3753e2bb8d49404af59780b7500019d238863db78e0",
+      "image_path": "/sample-assets/evidence/e-8f9ad43f51820a3b6086a375.png",
+      "public_sample": true
+    },
+    {
+      "subject": {
+        "kind": "criterion",
+        "id": 1
+      },
+      "page": 20,
+      "quote": "Build a relational database to store product, supplier, customer, and transaction data.",
+      "anchor": "page 20",
+      "label": "Methodology: proposed database",
+      "role": "criterion_evidence",
+      "check_run_id": 1,
+      "manuscript_id": 1,
+      "source_sha256": "ef662fb9cb5619945c69183a8576f3f945109adc51bff408a6cd6fc21626c5fd",
+      "evidence_index": 6,
+      "paragraph": null,
+      "quote_sha256": "ae977a54f5f337127534724eabb3c112feaf253c5636a7402bc1da7f513c507c",
+      "evidence_id": "e-1bc079f0dafe7d579322996a",
+      "precision": "page_bbox",
+      "boxes": [
+        [
+          90.02400207519531,
+          456.6373596191406,
+          563.1439819335938,
+          472.1796569824219
+        ]
+      ],
+      "precision_note": "Complete quotation uniquely bound to original native glyphs.",
+      "image_id": "e-69b56ee2dff1e7a131415a6e",
+      "image_width": 1275,
+      "image_height": 1738,
+      "image_sha256": "69b56ee2dff1e7a131415a6ec0f9894b60f3ee09ac861cb244a254b2c9e8b842",
+      "image_path": "/sample-assets/evidence/e-69b56ee2dff1e7a131415a6e.png",
+      "public_sample": true
+    },
+    {
+      "subject": {
+        "kind": "criterion",
+        "id": 2
+      },
+      "page": 7,
+      "quote": "Research and case studies show that integrating inventory systems with cloud platforms and mobile applications enhances accessibility and operational efficiency.",
+      "anchor": "page 7",
+      "label": "Research claim requiring identified studies",
+      "role": "criterion_evidence",
+      "check_run_id": 1,
+      "manuscript_id": 1,
+      "source_sha256": "ef662fb9cb5619945c69183a8576f3f945109adc51bff408a6cd6fc21626c5fd",
+      "evidence_index": 3,
+      "paragraph": null,
+      "quote_sha256": "2af4683153dd74e664e4322a6c5ec1c9d2fdd5c94da497046ae4dda8f8886a48",
+      "evidence_id": "e-1ae4bd8ab5cca1371d8b67a5",
+      "precision": "page_bbox",
+      "boxes": [
+        [
+          54.0,
+          578.3473663330078,
+          569.127197265625,
+          593.8896484375
+        ],
+        [
+          54.0,
+          562.2673492431641,
+          444.606689453125,
+          577.8096313476562
+        ]
+      ],
+      "precision_note": "Complete quotation uniquely bound to original native glyphs.",
+      "image_id": "e-c5ba1562671f9af5d2643f80",
+      "image_width": 1275,
+      "image_height": 1738,
+      "image_sha256": "c5ba1562671f9af5d2643f809c7d22e92a0d8371e0741e5499e81547da5c2031",
+      "image_path": "/sample-assets/evidence/e-c5ba1562671f9af5d2643f80.png",
+      "public_sample": true
+    },
+    {
+      "subject": {
+        "kind": "criterion",
+        "id": 2
+      },
+      "page": 109,
+      "quote": "The proper guidelines from Our instructor Md. Sakib Ali Mazumder sir.",
+      "anchor": "page 109",
+      "label": "Published reference section",
+      "role": "criterion_evidence",
+      "check_run_id": 1,
+      "manuscript_id": 1,
+      "source_sha256": "ef662fb9cb5619945c69183a8576f3f945109adc51bff408a6cd6fc21626c5fd",
+      "evidence_index": 4,
+      "paragraph": null,
+      "quote_sha256": "98701710caa943a6aa79ca0d0d120735a3d800cb16d68b89c85d26c82a305b69",
+      "evidence_id": "e-c3501a9e0c32fff2c82f9838",
+      "precision": "page_bbox",
+      "boxes": [
+        [
+          85.46399688720703,
+          617.8273468017578,
+          489.96551513671875,
+          633.36962890625
+        ]
+      ],
+      "precision_note": "Complete quotation uniquely bound to original native glyphs.",
+      "image_id": "e-2d3f7a692df1e333871c6bd5",
+      "image_width": 1275,
+      "image_height": 1738,
+      "image_sha256": "2d3f7a692df1e333871c6bd58bb4370ee199ed0b937948e6eb2f12047a3178d8",
+      "image_path": "/sample-assets/evidence/e-2d3f7a692df1e333871c6bd5.png",
+      "public_sample": true
+    },
+    {
+      "subject": {
+        "kind": "criterion",
+        "id": 3
+      },
+      "page": 4,
+      "quote": "I would also like to express our appreciation to the Dept. of Software Engineering.",
+      "anchor": "page 4",
+      "label": "Acknowledgement: mixed pronouns",
+      "role": "criterion_evidence",
+      "check_run_id": 1,
+      "manuscript_id": 1,
+      "source_sha256": "ef662fb9cb5619945c69183a8576f3f945109adc51bff408a6cd6fc21626c5fd",
+      "evidence_index": 1,
+      "paragraph": null,
+      "quote_sha256": "2698163559baf2678d70cd60ed6b6bd3e5368079a1b5e4363c10bab3f8ae4033",
+      "evidence_id": "e-9e13355de87694826c9566dc",
+      "precision": "page_bbox",
+      "boxes": [
+        [
+          72.02400207519531,
+          630.6673736572266,
+          536.530029296875,
+          646.2096557617188
+        ]
+      ],
+      "precision_note": "Complete quotation uniquely bound to original native glyphs.",
+      "image_id": "e-9bbcc06d8cc0c0433c76f2be",
+      "image_width": 1275,
+      "image_height": 1738,
+      "image_sha256": "9bbcc06d8cc0c0433c76f2be8f822e3818b832b09891424bd69fd82e2563777a",
+      "image_path": "/sample-assets/evidence/e-9bbcc06d8cc0c0433c76f2be.png",
+      "public_sample": true
+    },
+    {
+      "subject": {
+        "kind": "criterion",
+        "id": 3
+      },
+      "page": 22,
+      "quote": "Software develpoers: 15000-22000/= BDT",
+      "anchor": "page 22",
+      "label": "Budget: spelling example",
+      "role": "criterion_evidence",
+      "check_run_id": 1,
+      "manuscript_id": 1,
+      "source_sha256": "ef662fb9cb5619945c69183a8576f3f945109adc51bff408a6cd6fc21626c5fd",
+      "evidence_index": 2,
+      "paragraph": null,
+      "quote_sha256": "1082666be8a9eb9d21032e3c087f334b727a50f65c7edffc1d6a510d03c96e07",
+      "evidence_id": "e-a1442e3eee7195a07103b141",
+      "precision": "page_bbox",
+      "boxes": [
+        [
+          148.4600067138672,
+          565.0273590087891,
+          394.7829284667969,
+          580.5696411132812
+        ]
+      ],
+      "precision_note": "Complete quotation uniquely bound to original native glyphs.",
+      "image_id": "e-8e37b00e7b4259a20e6d7e4f",
+      "image_width": 1275,
+      "image_height": 1738,
+      "image_sha256": "8e37b00e7b4259a20e6d7e4f0b4b9a7e33906e01dd76f0b40356c019bdc74ce0",
+      "image_path": "/sample-assets/evidence/e-8e37b00e7b4259a20e6d7e4f.png",
+      "public_sample": true
+    },
+    {
+      "subject": {
+        "kind": "criterion",
+        "id": 4
+      },
+      "page": 6,
+      "quote": "To generate alerts and reports based on inventory thresholds.",
+      "anchor": "page 6",
+      "label": "Objectives: inspect the next empty list item",
+      "role": "criterion_evidence",
+      "check_run_id": 1,
+      "manuscript_id": 1,
+      "source_sha256": "ef662fb9cb5619945c69183a8576f3f945109adc51bff408a6cd6fc21626c5fd",
+      "evidence_index": 1,
+      "paragraph": null,
+      "quote_sha256": "52790ef9a2bb1441d3d5ed5d9409aabf59925bbe5525f0e66d878775219e85e4",
+      "evidence_id": "e-92ea2141ac858387b5ba817e",
+      "precision": "page_bbox",
+      "boxes": [
+        [
+          162.02000427246094,
+          361.6973571777344,
+          502.7701721191406,
+          377.2396545410156
+        ]
+      ],
+      "precision_note": "Complete quotation uniquely bound to original native glyphs.",
+      "image_id": "e-1b05c8672fa0bb1e21aab986",
+      "image_width": 1275,
+      "image_height": 1738,
+      "image_sha256": "1b05c8672fa0bb1e21aab98670f938ebe58336704ac7c58fce9a9860bd0c0ac7",
+      "image_path": "/sample-assets/evidence/e-1b05c8672fa0bb1e21aab986.png",
+      "public_sample": true
+    },
+    {
+      "subject": {
+        "kind": "criterion",
+        "id": 4
+      },
+      "page": 4,
+      "quote": "LOGO",
+      "anchor": "page 4",
+      "label": "Acknowledgement: logo heading",
+      "role": "criterion_evidence",
+      "check_run_id": 1,
+      "manuscript_id": 1,
+      "source_sha256": "ef662fb9cb5619945c69183a8576f3f945109adc51bff408a6cd6fc21626c5fd",
+      "evidence_index": 2,
+      "paragraph": null,
+      "quote_sha256": "a2232ab473881122e36e921157a87647d84b214e8b5d2d33008b020c36e965f8",
+      "evidence_id": "e-803a87069859f363c36df431",
+      "precision": "page_bbox",
+      "boxes": [
+        [
+          263.92999267578125,
+          390.27734375,
+          306.0499572753906,
+          405.81964111328125
+        ]
+      ],
+      "precision_note": "Complete quotation uniquely bound to original native glyphs.",
+      "image_id": "e-f1fdb3389d87a4cc207e5717",
+      "image_width": 1275,
+      "image_height": 1738,
+      "image_sha256": "f1fdb3389d87a4cc207e5717a8f8bac26ef76eeef35b26f352826fe59809cb1a",
+      "image_path": "/sample-assets/evidence/e-f1fdb3389d87a4cc207e5717.png",
+      "public_sample": true
+    },
+    {
+      "subject": {
+        "kind": "criterion",
+        "id": 4
+      },
+      "page": 109,
+      "quote": "The proper guidelines from Our instructor Md. Sakib Ali Mazumder sir.",
+      "anchor": "page 109",
+      "label": "Reference section organization",
+      "role": "criterion_evidence",
+      "check_run_id": 1,
+      "manuscript_id": 1,
+      "source_sha256": "ef662fb9cb5619945c69183a8576f3f945109adc51bff408a6cd6fc21626c5fd",
+      "evidence_index": 3,
+      "paragraph": null,
+      "quote_sha256": "98701710caa943a6aa79ca0d0d120735a3d800cb16d68b89c85d26c82a305b69",
+      "evidence_id": "e-2c97784a92f427e3b1bb7d10",
+      "precision": "page_bbox",
+      "boxes": [
+        [
+          85.46399688720703,
+          617.8273468017578,
+          489.96551513671875,
+          633.36962890625
+        ]
+      ],
+      "precision_note": "Complete quotation uniquely bound to original native glyphs.",
+      "image_id": "e-2d3f7a692df1e333871c6bd5",
+      "image_width": 1275,
+      "image_height": 1738,
+      "image_sha256": "2d3f7a692df1e333871c6bd58bb4370ee199ed0b937948e6eb2f12047a3178d8",
+      "image_path": "/sample-assets/evidence/e-2d3f7a692df1e333871c6bd5.png",
+      "public_sample": true
+    },
+    {
+      "subject": {
         "kind": "flag",
         "id": 1
       },

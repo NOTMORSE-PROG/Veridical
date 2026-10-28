@@ -1,3 +1,4 @@
+import { CriterionEvidencePacket } from "./CriterionEvidencePacket";
 import { type ReactNode, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useLocation, useNavigate, useSearchParams } from "react-router";
 import type {
@@ -580,7 +581,6 @@ function SignalResolutionCard({ item, checkRunId, onResolved, onEditingChange, o
     if (ordinaryGrade) pendingHeadingRef.current?.focus();
   }, [ordinaryGrade, pending?.resolution, pending?.level]);
   const evidence = item.evidence ?? [];
-  const [evidenceIndex, setEvidenceIndex] = useState(() => Math.max(0, evidence.findIndex(entry => criterionAnchorRegion(entry.anchor) !== null)));
   const evidenceSelection = useRef(onEvidenceSelected);
   evidenceSelection.current = onEvidenceSelected;
   useEffect(() => {
@@ -590,11 +590,7 @@ function SignalResolutionCard({ item, checkRunId, onResolved, onEditingChange, o
     // not reset a manuscript page the instructor has deliberately browsed.
     // oxlint-disable-next-line react-hooks/exhaustive-deps
   }, [item.check_result_id]);
-  function selectEvidence(index: number) {
-    setEvidenceIndex(index);
-  }
   function openEvidence(index: number) {
-    selectEvidence(index);
     evidenceSelection.current?.(item.criterion_id, evidence[index], index);
     onOpenEvidence?.(item.criterion_id, evidence[index], index);
   }
@@ -670,16 +666,7 @@ function SignalResolutionCard({ item, checkRunId, onResolved, onEditingChange, o
       <div className="signal-resolution-card__context">
         <div><p className="signal-section-kicker">{item.review_basis === AI_REVIEW_BASIS ? "Recorded AI grade" : "Criterion requiring judgment"}</p><h3 ref={criterionHeadingRef} tabIndex={-1}>{item.criterion_text}</h3></div>
         <p id={voteId} className="signal-resolution-card__vote">{voteSummary(item)}</p>
-        {evidence.length > 0 && <section className="signal-criterion-evidence" aria-label={`Evidence for ${item.criterion_text}`}>
-          <div className="signal-criterion-evidence__heading"><h4>Evidence from the manuscript</h4><span>Evidence {evidenceIndex + 1} of {evidence.length}</span></div>
-          <blockquote><span>“{evidence[evidenceIndex].quote}”</span></blockquote>
-          <cite>{onOpenEvidence && criterionAnchorRegion(evidence[evidenceIndex].anchor) ? <button className="signal-evidence-source-link" type="button" aria-label={`Open ${evidence[evidenceIndex].anchor} in manuscript`} onClick={() => openEvidence(evidenceIndex)}>{evidence[evidenceIndex].anchor}: Open manuscript</button> : evidence[evidenceIndex].anchor}</cite>
-          <div className="signal-evidence-navigation"><Button variant="quiet" disabled={evidenceIndex === 0} onClick={() => selectEvidence(evidenceIndex - 1)}>Previous evidence</Button><Button variant="quiet" disabled={evidenceIndex >= evidence.length - 1} onClick={() => selectEvidence(evidenceIndex + 1)}>Next evidence</Button></div>
-          <p className="signal-field-hint">Previous and Next change the text shown here.{onOpenEvidence ? " Page links open the manuscript. Your unsaved grade and comment stay here." : ""}</p>
-          {!criterionAnchorRegion(evidence[evidenceIndex].anchor) && <p className="signal-field-hint">This saved anchor cannot be placed. Keep this entry in review and inspect the manuscript manually.</p>}
-          <details><summary>All saved evidence</summary><ol>{evidence.map((entry, index) => <li key={`${index}:${entry.anchor}`}><p>{entry.quote}</p><cite>{onOpenEvidence && criterionAnchorRegion(entry.anchor) ? <button className="signal-evidence-source-link" type="button" aria-label={`Open ${entry.anchor} in manuscript`} onClick={() => openEvidence(index)}>{entry.anchor}: Open manuscript</button> : entry.anchor}</cite>{!criterionAnchorRegion(entry.anchor) && <p className="signal-field-hint">This saved location cannot be placed. Inspect the manuscript manually.</p>}</li>)}</ol></details>
-        </section>}
-        {item.reason && <section className="signal-resolution-context-note"><h4>What to check</h4><p id={reasonId}>{item.reason}</p></section>}
+        <CriterionEvidencePacket checkRunId={checkRunId} criterionId={item.criterion_id} title={item.criterion_text} reasoning={item.reason} reasoningId={reasonId} evidence={evidence} onOpenEvidence={onOpenEvidence ? openEvidence : undefined} />
         {item.injection_suspected && item.injection_matched_snippet && (
           <blockquote id={injectionId} className="signal-unverified-evidence"><strong>Text addressed at an automated grader</strong><span>“{item.injection_matched_snippet}”</span></blockquote>
         )}
@@ -842,10 +829,11 @@ export function SignalPublicFlags({
   );
 }
 
-export function SignalCriteriaResults({ results, checkRunId, publicView = false }: {
+export function SignalCriteriaResults({ results, checkRunId, publicView = false, onOpenEvidence }: {
   results: ResultRowCommon[];
   checkRunId: number;
   publicView?: boolean;
+  onOpenEvidence?: (criterionId: number, evidence: EvidenceItem, index: number) => void;
 }) {
   return (
     <section className="signal-review-section" aria-labelledby="criteria-results-heading">
@@ -859,7 +847,7 @@ export function SignalCriteriaResults({ results, checkRunId, publicView = false 
                 links/buttons list can't tell them apart without a per-criterion
                 accessible name, same fix already applied to the flag "Review
                 evidence" links and the escalation resolve-button groups. */}
-              <details><summary aria-label={`Review evidence and reasoning: ${row.text}`}>Review evidence and reasoning</summary><div className="signal-result-card__evidence">{row.evidence.length ? row.evidence.map((item) => <blockquote key={`${item.anchor}-${item.quote}`}><span>“{item.quote}”</span><cite>{item.anchor}</cite></blockquote>) : <p>No verified excerpt was recorded for this criterion.</p>}{row.reasoning && <p><strong>Recorded reasoning:</strong> {row.reasoning}</p>}{row.reason && <p><strong>System note:</strong> {row.reason}</p>}{!publicView && row.anchor && <ActionLink to={`/report/${checkRunId}/document?anchor=${encodeURIComponent(row.anchor)}`} variant="quiet">Open manuscript anchor</ActionLink>}</div></details></li>;
+              <details><summary aria-label={`Review evidence and reasoning: ${row.text}`}>Review evidence and reasoning</summary><CriterionEvidencePacket checkRunId={checkRunId} criterionId={row.criterion_id} title={row.text} reasoning={row.reasoning || row.reason} evidence={row.evidence} previews={!publicView} onOpenEvidence={!publicView && onOpenEvidence ? index => onOpenEvidence(row.criterion_id, row.evidence[index], index) : undefined} />{!publicView && !row.evidence.length && row.anchor && <ActionLink to={`/report/${checkRunId}/document?anchor=${encodeURIComponent(row.anchor)}`} variant="quiet">Open recorded page (no supporting quotation saved)</ActionLink>}</details></li>;
       })}</ol> : <div className="signal-desk-empty"><h3>No criterion results yet</h3><p>This report has no assessed criterion rows.</p></div>}
     </section>
   );

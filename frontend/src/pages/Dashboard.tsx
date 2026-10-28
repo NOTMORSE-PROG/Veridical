@@ -1,3 +1,4 @@
+import { CompletedModuleCheckLinks } from "../demo/CompletedModuleCheckLinks";
 // V-073 screen 4b/4e — Signal Review Desk. The page is a prioritized work
 // queue, not an analytics dashboard: each record names what happened, what
 // still needs the instructor, and one honest next action.
@@ -598,6 +599,7 @@ export function DashboardPage() {
           </Button>
         </div>
       </header>
+      <CompletedModuleCheckLinks />
 
       {familiesPending ? (
         <div className="signal-desk-loading" role="status" aria-busy="true">

@@ -41,7 +41,7 @@ INTERNAL_SUFFIXES = (".pdf",)
 COMMITTABLE_PDF_PREFIX = "backend/tests/fixtures/ingest/"
 # Explicit public sample requested for the deployed workspace. Private PDFs
 # remain blocked; provenance and the unmodified-source checksum ship beside it.
-COMMITTABLE_PUBLIC_PDFS = {"frontend/public/sample-assets/stock-inventory-capstone.pdf", "frontend/public/sample-assets/e-aimss.pdf"}
+COMMITTABLE_PUBLIC_PDFS = {"frontend/public/sample-assets/stock-inventory-capstone.pdf", "frontend/public/sample-assets/e-aimss.pdf", "frontend/public/sample-assets/module-checks/rojahn-2023.pdf", "frontend/public/sample-assets/module-checks/nuijten-2016.pdf", "frontend/public/sample-assets/module-checks/veldkamp-2014.pdf"}
 
 
 def staged_files() -> list[str]:
