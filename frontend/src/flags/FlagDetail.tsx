@@ -31,6 +31,7 @@ import { AgreementComparison, type AgreementStatementRole } from "./AgreementCom
 import { CitationComparison } from "./CitationComparison";
 import { CitationSourceLinks } from "./CitationSourceLinks";
 import { CitationHistoryWarning } from "./CitationHistoryWarning";
+import { RecordedFindingSources } from "../report/RecordedEvidencePage";
 import { useFlag } from "./useFlag";
 import { recoverableReadError } from "../report/reportReadState";
 
@@ -103,6 +104,7 @@ function EvidenceSection({
       {!pairedSources && <AgreementComparison flag={flag} onSource={onSource} activeRole={activeRole} />}
       <CitationComparison flag={flag} />
       <CitationSourceLinks flag={flag} />
+      {!pairedSources && <RecordedFindingSources flag={flag} current={current} />}
       {/* BUG-154: the API has always returned a complete
           passage_pair for a matched flag (own/matched excerpt +
           context both sides, similarity, level) -- this page fetched

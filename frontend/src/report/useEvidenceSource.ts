@@ -30,6 +30,9 @@ export function useEvidenceLocation(run: number, snapshot: string | undefined, r
     enabled: enabled && owner.isCurrent() && isIdentity(snapshot) && isIdentity(referenceId),
     gcTime: 0,
     queryFn: async ({ signal }) => {
+      await Promise.resolve();
+      signal.throwIfAborted();
+      if (!owner.isCurrent()) throw new ApiError(409, "conflict", "This review is no longer active.");
       const out = await api.get<EvidenceLocation>(`/check-runs/${run}/evidence/${referenceId}/location?snapshot_id=${snapshot}`, { signal });
       if (!owner.isCurrent() || out.snapshot_id !== snapshot || out.placement.reference_id !== referenceId
         || (out.source_identity !== null && !isIdentity(out.source_identity))) {

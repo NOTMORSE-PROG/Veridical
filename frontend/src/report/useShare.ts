@@ -89,7 +89,7 @@ export function useRevokeShareLink(checkRunId: number) {
 export function sharedReportQueryOptions(token: string) {
   return {
     queryKey: ["shared-report", token],
-    queryFn: () => api.get<SharedReportOut>(`/shared/${token}/report`),
+    queryFn: ({ signal }: { signal: AbortSignal }) => api.getPublic<SharedReportOut>(`/shared/${encodeURIComponent(token)}/report`, { signal }),
     retry: (failureCount: number, error: unknown) => retryApiRead(failureCount, error, SHARED_REPORT_READ_RETRIES),
   };
 }

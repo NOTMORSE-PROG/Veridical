@@ -78,6 +78,8 @@ export type IngestFailureReason = "file_too_large" | "unreadable_format" | "extr
 
 export interface ManuscriptListItem {
   id: number;
+  // Older API responses may omit this; current responses record deletion.
+  purged_at?: string | null;
   group_label: string;
   // BUG-022: group_label defaults to "Ungrouped" and can't distinguish
   // two manuscripts alone; null for rows ingested before this field
@@ -453,6 +455,7 @@ export interface ReportCommon {
 /** Saved processing/applicability only; findings and coverage remain separate. */
 export interface StatisticalCheckScopeOut {
   state: "completed" | "not_applicable" | "incomplete" | "not_recorded";
+  unassessed_descriptive_rows?: number;
 }
 
 // V-069 AC2: the rubric's own RATING formula, transcribed -- never merged
@@ -519,6 +522,8 @@ export interface OriginalityScope {
 }
 
 export interface ReportOut extends ReportCommon {
+  subject?: { basis: "confirmed_assignment_at_check" | "not_recorded"; title: string | null; member_names: string[] };
+  integrity_modules?: IntegrityModuleOut[];
   check_run_id: number;
   assessment_revision: number | null;
   figure_readings?: FigureReadingOut[] | null;
@@ -549,10 +554,18 @@ export interface ReportOut extends ReportCommon {
   integrity_check_status: IntegrityCheckStatusOut[];
 }
 
+export interface IntegrityModuleOut {
+  check_kind: "internal_agreement" | "citation_integrity" | "statistical_forensics" | "originality_reuse";
+  state: "completed" | "partial" | "incomplete" | "not_applicable" | "not_recorded";
+}
+
 /** BUG-044 fix: the public, unauthenticated adviser view's report
  * payload. Deliberately does NOT extend `ReportOut` -- see
  * `ReportCommon`'s own comment for which fields were cut and why. */
 export interface PublicReportOut extends ReportCommon {
+  assessment_revision?: number | null;
+  subject?: ReportOut["subject"];
+  integrity_modules?: IntegrityModuleOut[];
   semantic_support_unverified?: boolean;
   assessment_incomplete?: boolean;
   historical_citation_title_unverified?: boolean;
@@ -1239,4 +1252,18 @@ export interface ShareLinkOut {
 export interface SharedReportOut {
   report: PublicReportOut;
   flags: FlagSummaryOut[];
+  finding_details?: PublicFindingDetailOut[];
+  detail_snapshot?: "current" | "not_recorded" | "stale";
+}
+
+export interface PublicFindingDetailOut {
+  id: number;
+  ai_verdict_summary: string | null;
+  ai_reasoning: string | null;
+  agreement_pair?: FlagOut["agreement_pair"];
+  passage_pair?: FlagOut["passage_pair"];
+  p_value_comparison?: FlagOut["p_value_comparison"];
+  citation_metadata_comparison?: FlagOut["citation_metadata_comparison"];
+  citation_source_locator?: FlagOut["citation_source_locator"];
+  citation_metadata_review_warning?: FlagOut["citation_metadata_review_warning"];
 }

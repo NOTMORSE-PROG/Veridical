@@ -24,6 +24,7 @@ import { SignalLibraryDetailPage } from "./library/SignalLibraryDetail";
 import { SignalLibraryPage } from "./library/SignalLibrary";
 import { SignalLibraryAddPage } from "./library/SignalLibraryAdd";
 import { LandingRoute } from "./pages/Landing";
+import { PreparedReviewRoute } from "./pages/PreparedReview";
 import { DashboardPage } from "./pages/Dashboard";
 import { NotFoundPage } from "./pages/NotFound";
 import { SignInPage } from "./pages/SignIn";
@@ -44,6 +45,7 @@ const router = createBrowserRouter(
     <Route element={<RouteFrame />}>
         <Route path="/" element={<LandingRoute />} />
         <Route path="/signin" element={<SignInPage />} />
+        <Route path="/demo/*" element={<PreparedReviewRoute />} />
         {/* V-040 (screen 4l): deliberately outside RequireAuth/SignalShell --
             a public, unauthenticated read reached by a token in the URL,
             not a session. */}

@@ -22,12 +22,14 @@ async function show(item: EscalatedItemOut) {
 describe("instructor assessment interpretation", () => {
   it("does not offer acceptance when an explicit support code lacks the optional withholding boolean", async () => {
     await show(record({ review_reason: "support_incomplete", ai_majority_verdict: "pass" }));
+    expect(screen.getByText("The separate evidence review did not finish.")).not.toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: /Show assessment record/ }));
     expect(screen.getByText("The separate evidence review did not finish.")).toBeVisible();
     expect(screen.queryByRole("button", { name: /Accept AI suggestion/ })).not.toBeInTheDocument();
   });
   it("does not turn one suggestion and one missing answer into disagreement", async () => {
     await show(record());
-    expect(screen.getByText("No grade accepted")).toBeVisible();
+    expect(screen.getByText("Your judgment is needed")).toBeVisible();
     expect(screen.queryByText(/Split vote:/)).not.toBeInTheDocument();
     expect(screen.getByText("The actual recorded explanation.")).toBeVisible();
   });
@@ -52,6 +54,8 @@ describe("instructor assessment interpretation", () => {
       support_withheld: true, support_status: "incomplete", review_reason: "support_incomplete",
       injection_suspected: true, injection_matched_snippet: null, verdict_unrecognized: true,
     }));
+    expect(screen.getByText("Text that may be directed at automated grading needs review.")).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: /Show assessment record/ }));
     expect(screen.getByText("The separate evidence review did not finish.")).toBeVisible();
     expect(screen.getByText("Text that may be directed at automated grading needs review.")).toBeVisible();
     expect(screen.getByText("The recorded suggestion is not a recognized grade for this criterion.")).toBeVisible();
@@ -100,11 +104,11 @@ describe("short consequential action descriptions", () => {
     expect(screen.getByText(new RegExp(directed))).toBeVisible();
     expect(screen.queryByRole("link", { name: /Open in manuscript/ })).not.toBeInTheDocument();
   });
-  it("puts recorded source passages before the recorded AI explanation", async () => {
+  it("puts the complete recorded explanation above the full-width source packet", async () => {
     await show(record({ reasoning: "An explanation must remain inspectable.", evidence: [{quote: "Actual recorded source.", anchor: "paragraph 2"}] }));
     const passage = screen.getByText(/Actual recorded source/);
     const explanation = screen.getByText("An explanation must remain inspectable.");
-    expect(passage.compareDocumentPosition(explanation) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+      expect(explanation.compareDocumentPosition(passage) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(explanation).toBeVisible();
   });
 });

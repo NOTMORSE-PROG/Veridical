@@ -67,7 +67,7 @@ async function setup({ origin = ORIGIN, open = true, drafts: makeDrafts = true, 
   const normal = stubFetchByPath({
     "/check-runs/5/document": { manuscript_id: 10, source_format: pdf ? "pdf" : "docx", available: true, original_filename: pdf ? "source.pdf" : "source.docx", page_count: pdf ? 6 : null, regions: [] },
     "/check-runs/5/share": null,
-    "/check-runs/5/report": { ...REPORT, results: saved ? [{ ...SAVED, source_coverage: coverage, resolution: instructor ? SAVED.resolution : null }] : coverage ? pendingRows : [] }, "/check-runs/5/flags": [], "/check-runs/5/escalated": pendingItems,
+    "/check-runs/5/report": { ...REPORT, results: saved ? [{ ...SAVED, source_coverage: coverage, resolution: instructor ? SAVED.resolution : null }, ...pendingRows] : pendingRows }, "/check-runs/5/flags": [], "/check-runs/5/escalated": pendingItems,
     "/check-runs/5/document/reuse-matches": { matches: [], passage_archive_size_n: 0 },
   });
   const fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -105,10 +105,15 @@ async function setup({ origin = ORIGIN, open = true, drafts: makeDrafts = true, 
   vi.stubGlobal("fetch", fetch);
   const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
   client.setQueryData(ME_QUERY_KEY, { id: 1 });
-  const router = createMemoryRouter([{ path: "/report/:checkRunId", element: <CriterionReviewLayout />, children: [{ index: true, element: <SignalReportPage /> }, { path: "document", element: <SignalDocumentViewerPage /> }] }], { initialEntries: [{ pathname: full ? "/report/5" : "/report/5/document", search: origin.slice(origin.indexOf("?")), state: { notice: "retained" } }] });
+  const seedParams = new URLSearchParams(origin.slice(origin.indexOf("?")));
+  if (full && makeDrafts) {
+    ["criterion_record", "anchor", "finding", "flag"].forEach(key => seedParams.delete(key));
+    seedParams.set("view", "decision"); seedParams.set("pane", "review"); seedParams.set("criterion", "1");
+  } else if (full) seedParams.set("review_step", saved ? "grades" : "criteria");
+  const router = createMemoryRouter([{ path: "/report/:checkRunId", element: <CriterionReviewLayout />, children: [{ index: true, element: <SignalReportPage /> }, { path: "document", element: <SignalDocumentViewerPage /> }] }], { initialEntries: [{ pathname: full && !makeDrafts ? "/report/5" : "/report/5/document", search: seedParams.toString(), state: { notice: "retained" } }] });
   render(<QueryClientProvider client={client}><RouterProvider router={router} /></QueryClientProvider>);
   async function select(id: number) {
-    if (router.state.location.pathname.endsWith("/document") && new URLSearchParams(router.state.location.search).get("criterion") === String(id)) {
+    if (new URLSearchParams(router.state.location.search).get("criterion") === String(id)) {
       await waitFor(() => expect(document.getElementById(`signal-resolution-heading-${id}`)).not.toBeNull());
       return;
     }
@@ -121,10 +126,14 @@ async function setup({ origin = ORIGIN, open = true, drafts: makeDrafts = true, 
     await waitFor(() => expect(document.getElementById(`signal-resolution-heading-${id}`)).not.toBeNull());
   }
   async function readDraft(id: number) {
+    if (router.state.location.pathname === "/report/5" && new URLSearchParams(router.state.location.search).get("review_step") === "grades") {
+      fireEvent.click(screen.getByRole("link", { name: "Open manuscript" }));
+      await waitFor(() => expect(router.state.location.pathname).toBe("/report/5/document"));
+    }
     await select(id);
     return screen.getByRole("textbox");
   }
-  await select(1);
+  if (makeDrafts || !saved) await select(1);
   const drafts: HTMLElement[] = [];
   if (makeDrafts) {
     fireEvent.click(await screen.findByRole("button", { name: "Meets criterion" }));
@@ -138,7 +147,12 @@ async function setup({ origin = ORIGIN, open = true, drafts: makeDrafts = true, 
     await select(1);
   }
   await waitFor(() => expect(document.getElementById("signal-resolution-source-5-1-0")).toBeEnabled());
-  if (full && !open) await act(async () => { await router.navigate(origin, { state: { notice: "retained" } }); });
+  if (full) {
+    const destination = new URL(origin, "http://localhost");
+    destination.searchParams.set("review_step", saved ? "grades" : "criteria");
+    await act(async () => { await router.navigate(destination.pathname + destination.search, { state: { notice: "retained" } }); });
+    if (open) await select(1);
+  }
   const sourceOrigin = router.state.location.pathname + router.state.location.search;
   const action = document.getElementById("signal-resolution-source-5-1-0")!;
   if (open) {
@@ -360,7 +374,7 @@ it.each(["explicit return", "browser Back"])("full report restores the exact sav
   await act(async () => { control.release(PARAGRAPHS); });
   await screen.findByText("The requested source paragraph");
   const back = screen.getByRole("link", { name: "Return to saved judgment" });
-  expect(back).toHaveAttribute("href", "/report/5?criterion_record=77&sentinel=kept#signal-saved-source-5-77-0");
+  expect(back).toHaveAttribute("href", "/report/5?criterion_record=77&sentinel=kept&review_step=grades#signal-saved-source-5-77-0");
   if (mode === "explicit return") { back.focus(); fireEvent.click(back); }
   else await act(async () => { await control.router.navigate(-1); });
   await waitFor(() => expect(document.getElementById("signal-saved-source-5-77-0")).toHaveFocus());
@@ -393,9 +407,9 @@ it.each(["source", "coverage"].flatMap(prefix => ["explicit Return", "Back"].map
     expect(params.get("sentinel")).toBe("kept"); expect(params.get("filter")).toBe("all");
     for (const key of ["source", "text_page", "page", "finding", "criterion_record"]) expect(params.has(key)).toBe(false);
     expect(JSON.stringify(control.router.state.location.state)).not.toContain(EXACT_REASON);
-    expect(screen.queryByText("Source opened from criterion review")).not.toBeInTheDocument();
-    const back = await screen.findByRole("button", { name: "Return to criterion review" });
-    expect(screen.getAllByRole("button", { name: "Return to criterion review" })).toHaveLength(1);
+    expect(screen.getByText(/Source opened from criterion review/)).toBeVisible();
+    const back = await screen.findByRole("link", { name: /^Return to criterion review(?:: Criterion 1)?$/ });
+    expect(screen.getAllByRole("link", { name: /^Return to criterion review(?:: Criterion 1)?$/ })).toHaveLength(1);
     // The return exists while the source itself is still loading.
     if (mode === "explicit Return") { back.focus(); fireEvent.click(back); }
     else await act(async () => { await control.router.navigate(-1); });
@@ -413,11 +427,11 @@ it.each(["missing passage", "missing result"])("full-report Return provides a tr
   const items = mode === "missing passage" ? [{ ...ITEMS[0], evidence: [] }, ITEMS[1]] : [ITEMS[1]];
   control.setPendingReply(async () => new Response(JSON.stringify(items), { status: 200 }));
   await act(async () => { await control.client.invalidateQueries({ queryKey: ["report", 5, "escalated"], exact: true }); });
-  const back = screen.getByRole("button", { name: "Return to criterion review" }); back.focus(); fireEvent.click(back);
+  const back = screen.getByRole("link", { name: /^Return to criterion review(?:: Criterion 1)?$/ }); back.focus(); fireEvent.click(back);
   const fallback = "signal-resolution-heading-1";
   // An unresolved private draft remains as a retained entry if its result disappeared.
   await waitFor(() => expect(document.getElementById(fallback)).toHaveFocus());
-  expect(screen.getByText("The original source action is no longer available. Review the current criterion below.")).toBeVisible();
+  expect(screen.getByText("The original source action is no longer available. Review the current report below.")).toBeVisible();
   expect(control.fetch.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(0);
   await act(async () => { control.release(PARAGRAPHS); });
 });
@@ -427,14 +441,14 @@ it("does not infer an absent action from a failed review read and restores it af
   await act(async () => { control.client.setQueryData(["report", 5, "escalated"], []); });
   control.setPendingReply(async () => new Response(JSON.stringify({ code: "internal_error", message: "Unavailable" }), { status: 500 }));
   await act(async () => { await control.client.invalidateQueries({ queryKey: ["report", 5, "escalated"], exact: true }); });
-  const back = screen.getByRole("button", { name: "Return to criterion review" }); back.focus(); fireEvent.click(back);
+  const back = screen.getByRole("link", { name: /^Return to criterion review(?:: Criterion 1)?$/ }); back.focus(); fireEvent.click(back);
   const retry = await screen.findByRole("button", { name: "Retry review items" });
   await act(async () => { await new Promise(resolve => setTimeout(resolve, 600)); });
-  expect(screen.queryByText("The original source action is no longer available. Review the current criterion below.")).not.toBeInTheDocument();
+  expect(screen.queryByText("The original source action is no longer available. Review the current report below.")).not.toBeInTheDocument();
   control.setPendingReply(async () => new Response(JSON.stringify(ITEMS), { status: 200 }));
   // Retry is new intent: the late action must not steal focus from this button.
   retry.focus(); fireEvent.click(retry);
-  await screen.findByRole("button", { name: "Show recorded location" });
+  await screen.findByRole("link", { name: /^Open in manuscript:/ });
   expect(document.getElementById("signal-resolution-source-5-1-0")).not.toHaveFocus();
   await act(async () => { control.release(PARAGRAPHS); });
 });
@@ -446,7 +460,7 @@ it("a new workspace source replaces the full-report origin without competing Ret
   await waitFor(() => expect(other).toBeEnabled());
   other.focus(); fireEvent.click(other);
   await waitFor(() => expect(control.router.state.location.state).toEqual({ notice: "retained" }));
-  expect(screen.queryByText("Source opened from criterion review")).not.toBeInTheDocument();
+  expect(screen.queryByText(/Source opened from criterion review/)).not.toBeInTheDocument();
   expect(screen.getAllByRole("button", { name: "Return to criterion review" })).toHaveLength(1);
   await act(async () => { control.release(PARAGRAPHS); });
 });
@@ -458,17 +472,17 @@ it.each(["none", "wheel", "focus"])("waits beyond the ordinary timeout for revie
   const held = new Promise<Response>(resolve => { deliver = resolve; });
   control.setPendingReply(() => held);
   await act(async () => { void control.client.invalidateQueries({ queryKey: ["report", 5, "escalated"], exact: true }); });
-  const back = screen.getByRole("button", { name: "Return to criterion review" }); back.focus(); fireEvent.click(back);
-  await waitFor(() => expect(control.router.state.location.pathname).toBe("/report/5/document"));
+  const back = screen.getByRole("link", { name: /^Return to criterion review(?:: Criterion 1)?$/ }); back.focus(); fireEvent.click(back);
+  await waitFor(() => expect(control.router.state.location.pathname).toBe("/report/5"));
   if (intent === "wheel") fireEvent.wheel(window);
   const other = screen.getByRole("link", { name: "Back to criteria" });
   if (intent === "focus") other.focus();
   const previousFocus = document.activeElement;
   await act(async () => { await new Promise(resolve => setTimeout(resolve, 600)); });
   expect(document.activeElement).toBe(previousFocus);
-  expect(screen.queryByText("The original source action is no longer available. Review the current criterion below.")).not.toBeInTheDocument();
+  expect(screen.queryByText("The original source action is no longer available. Review the current report below.")).not.toBeInTheDocument();
   await act(async () => { deliver(new Response(JSON.stringify(ITEMS), { status: 200 })); });
-  const action = await screen.findByRole("button", { name: "Show recorded location" });
+  const action = await screen.findByRole("link", { name: /^Open in manuscript:/ });
   if (intent === "none") await waitFor(() => expect(action).toHaveFocus());
   else expect(action).not.toHaveFocus();
   if (intent === "focus") expect(other).toHaveFocus();
@@ -493,7 +507,7 @@ it.each([{ ctrlKey: true }, { metaKey: true }, { shiftKey: true }, { button: 1 }
 
 it.each(["explicit Return", "Back", "pane switch"])("full-report source retains return focus after actual Page text query changes through %s", async mode => {
   const control = await setup({ origin: "/report/5?sentinel=kept", full: true, pdf: true });
-  const manual = await screen.findByRole("button", { name: "Continue in full manuscript" }); manual.focus(); fireEvent.click(manual);
+  expect(screen.getByText(/Source opened from criterion review/)).toBeVisible();
   const read = await screen.findByRole("button", { name: "Read text" }); read.focus(); fireEvent.click(read);
   await screen.findByText("Saved source text page 3");
   expect(control.router.state.location.search).toContain("source=page_text");
@@ -504,7 +518,7 @@ it.each(["explicit Return", "Back", "pane switch"])("full-report source retains 
     const manuscript = screen.getByRole("tab", { name: "Manuscript" }); manuscript.focus(); fireEvent.click(manuscript);
   }
   if (mode !== "Back") {
-    const back = screen.getByRole("button", { name: "Return to criterion review" }); back.focus(); fireEvent.click(back);
+    const back = screen.getByRole("link", { name: /^Return to criterion review(?:: Criterion 1)?$/ }); back.focus(); fireEvent.click(back);
   } else await act(async () => { await control.router.navigate(-1); await control.router.navigate(-1); await control.router.navigate(-1); });
   await waitFor(() => expect(document.getElementById("signal-resolution-source-5-1-0")).toHaveFocus());
   expect(control.router.state.location.pathname + control.router.state.location.search).toBe(control.origin);

@@ -3,6 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { ApiError, api } from "../api/client";
 import { useAuthOwner } from "../auth/queryOwner";
 import type { EvidenceLocation, EvidenceManifest, EvidencePage, EvidenceReference } from "./evidenceTypes";
+import { verifyEvidencePage } from "./RecordedEvidencePage";
 
 export interface FindingSourceSide {
   role: EvidenceReference["role"];
@@ -40,6 +41,7 @@ export function useFindingSourcePages(run: number, flagId: number, revision: num
     gcTime: 0,
     retry: false,
     queryFn: async ({ signal }) => {
+      await Promise.resolve(); signal.throwIfAborted();
       if (!manifest || !owner.isCurrent()) throw new ApiError(409, "conflict", "The comparison changed.");
       const pages: FindingSourcePage[] = [];
       for (const [index, side] of sides.entries()) {
@@ -65,6 +67,7 @@ export function useFindingSourcePages(run: number, flagId: number, revision: num
                 && /^data:image\/png;base64,[A-Za-z0-9+/=]+$/.test(page.image_data_url))) {
               throw new ApiError(409, "conflict", "The comparison changed.");
             }
+            await verifyEvidencePage(page, manifest.snapshot_id, ref.reference_id);
           }
           pages.push({ role: side.role, page });
         } catch (error) {

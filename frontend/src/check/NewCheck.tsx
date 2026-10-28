@@ -72,7 +72,7 @@ export function NewCheckModal({
   const location = useLocation();
 
   const readyManuscripts = useMemo(
-    () => (manuscripts ?? []).filter((m) => m.ingest_status === "done"),
+    () => (manuscripts ?? []).filter((m) => m.ingest_status === "done" && !m.purged_at),
     [manuscripts],
   );
   const pendingManuscripts = useMemo(
@@ -148,6 +148,8 @@ export function NewCheckModal({
   }, [manuscriptsPending, familiesPending, manuscriptsError, familiesError]);
 
   const selectedManuscript = readyManuscripts.find((m) => m.id === manuscriptId);
+  const requestedDeleted = (manuscripts ?? []).some((m) =>
+    m.id === (manuscriptId === "" ? initialManuscriptId : manuscriptId) && Boolean(m.purged_at));
 
   // V-064 (AC2/AC4): once a manuscript is chosen, narrow to only the
   // rubrics eligible for ITS program -- not silently, the excluded ones
@@ -189,13 +191,15 @@ export function NewCheckModal({
 
   function computeProblems(): Problem[] {
     const problems: Problem[] = [];
-    if (readyManuscripts.length === 0) {
+    if (requestedDeleted) {
+      problems.push({id: "deleted-manuscript", message: "This manuscript's stored file was deleted. Upload it again to start a new check.", action: onUploadManuscript});
+    } else if (readyManuscripts.length === 0) {
       problems.push({
         id: "no-manuscripts",
         message: "No manuscripts are available to check yet.",
         action: onUploadManuscript,
       });
-    } else if (manuscriptId === "") {
+    } else if (manuscriptId === "" || !selectedManuscript) {
       problems.push({ id: "manuscript", message: "Choose a manuscript.", action: () => manuscriptSelectRef.current?.focus() });
     }
     if (activeFamilies.length === 0) {
@@ -253,6 +257,7 @@ export function NewCheckModal({
   const currentProblems = computeProblems().filter((p) => {
     if (submitAttempted) return true;
     if (p.id === "no-manuscripts") return !manuscriptsPending && !manuscriptsError;
+    if (p.id === "deleted-manuscript") return !manuscriptsPending && !manuscriptsError;
     if (p.id === "no-rubric") return !familiesPending && !familiesError;
     // Same reasoning as "no-manuscripts"/"no-rubric": a fact about this
     // manuscript's program, not something the instructor forgot to fill
@@ -287,7 +292,7 @@ export function NewCheckModal({
             <button
               type="button"
               onClick={handleStart}
-              disabled={create.isPending}
+              disabled={create.isPending || requestedDeleted}
               aria-busy={create.isPending ? "true" : undefined}
               className="flex h-11 items-center justify-center rounded-md bg-action px-4 text-sm font-bold text-on-action hover:bg-action-hover disabled:opacity-60"
             >

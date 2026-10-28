@@ -83,6 +83,23 @@ function stubCompleteDesk(stats: unknown = { ...STATS, complete_queue_count: 27 
 describe("DashboardPage", () => {
   afterEach(() => { onlineManager.setOnline(true); vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 
+  it.each([1, 7])("opens a decided review without presenting its %i retained criteria as current tasks", async count => {
+    stubCompleteDesk({ ...STATS, needs_attention_count: 0, complete_queue_count: 1 }, () => ({
+      ...MANUSCRIPTS_PAGE, items: [{ ...MANUSCRIPTS_PAGE.items[0], latest_decision: "returned",
+        escalations_awaiting_review: count }],
+    }));
+    renderWithProviders(<DashboardPage />, { route: "/dashboard?queue=complete" });
+    const action = await screen.findByRole("link", { name: "Open recorded review. Opens the manuscript and recorded analysis. Reopen the decision before making changes." });
+    const destination = new URL(action.getAttribute("href")!, "http://localhost");
+    expect(destination.pathname).toBe("/report/7/document");
+    expect(destination.searchParams.get("desk_return")).toBe("/dashboard?queue=complete");
+    expect(destination.searchParams.get("desk_focus")).toBe("review-desk-primary-1");
+    expect(destination.searchParams.has("view")).toBe(false);
+    expect(screen.getByText(new RegExp(count === 1 ? "criterion was unresolved when" : "criteria were unresolved when"))).toBeVisible();
+    expect(screen.queryByText(/criterion tasks? needs? you/)).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: /Review .* unresolved/ })).not.toBeInTheDocument();
+  });
+
   it.each([
     { start: 1, target: 2, button: "Next", disabled: "Next" },
     { start: 2, target: 1, button: "Previous", disabled: "Previous" },

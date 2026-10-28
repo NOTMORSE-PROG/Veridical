@@ -64,6 +64,7 @@ export function RerunModal({ onClose, initialManuscriptIds }: RerunModalProps) {
     () =>
       (manuscripts ?? []).filter(
         (m) =>
+          !m.purged_at &&
           m.latest_done_check_run_id !== null &&
           m.latest_done_rubric_family_id !== null &&
           m.latest_done_rubric_family_id === activeFamily?.rubric_family_id &&
@@ -73,7 +74,7 @@ export function RerunModal({ onClose, initialManuscriptIds }: RerunModalProps) {
     [manuscripts, activeFamily],
   );
 
-  const [selected, setSelected] = useState<Set<number>>(new Set());
+  const [selectedIds, setSelected] = useState<Set<number>>(new Set());
   const [seededInitial, setSeededInitial] = useState(false);
   // Set once loading has genuinely settled AND at least one requested id
   // never made it into `eligible` -- lets the UI say WHY a manuscript the
@@ -85,6 +86,10 @@ export function RerunModal({ onClose, initialManuscriptIds }: RerunModalProps) {
   const [submittedFormat, setSubmittedFormat] = useState<RubricListItem>();
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [hasSubmitted, setHasSubmitted] = useState(false);
+  const selected = useMemo(() => hasSubmitted ? selectedIds :
+    new Set([...selectedIds].filter((id) => eligible.some((m) => m.id === id))),
+    [selectedIds, eligible, hasSubmitted]);
+  const requestedDeleted = (manuscripts ?? []).some((m) => m.purged_at && initialManuscriptIds?.includes(m.id));
   const [announcement, setAnnouncement] = useState("");
   const [submissionAttempt, setSubmissionAttempt] = useState(0);
   const outcomesHeadingRef = useRef<HTMLHeadingElement>(null);
@@ -217,7 +222,8 @@ export function RerunModal({ onClose, initialManuscriptIds }: RerunModalProps) {
   const selectedList = [...selected];
   const failedIds = Object.entries(rowState)
     .filter(([, s]) => s.status === "failed")
-    .map(([id]) => Number(id));
+    .map(([id]) => Number(id))
+    .filter((id) => !(manuscripts ?? []).some((m) => m.id === id && m.purged_at));
   const allDone = hasSubmitted && !isSubmitting;
   const allFailed = allDone && failedIds.length === selectedList.length && selectedList.length > 0;
 
@@ -298,6 +304,7 @@ export function RerunModal({ onClose, initialManuscriptIds }: RerunModalProps) {
           {hasSubmitted && <h3 ref={outcomesHeadingRef} tabIndex={-1} onKeyDown={navigateFromOutcomesHeading} className="text-sm font-bold text-ink">Check request outcomes</h3>}
 
           <div className="signal-group-flow" aria-busy={isSubmitting}>
+          {!hasSubmitted && requestedDeleted && <p role="status">This manuscript cannot be checked again because its stored file was deleted. Upload it again from the Review Desk.</p>}
           {!hasSubmitted && (manuscriptsPending || familiesPending) ? (
             <div role="status" aria-live="polite" aria-busy="true" className="flex items-center gap-2 text-sm text-ink-secondary">
               <SpinnerIcon />
@@ -318,7 +325,9 @@ export function RerunModal({ onClose, initialManuscriptIds }: RerunModalProps) {
             </p>
           ) : !hasSubmitted && eligible.length === 0 ? (
             <p className="rounded-md border border-border bg-page px-3 py-2.5 text-sm text-ink-secondary">
-              {(manuscripts ?? []).some((m) => m.latest_done_check_run_id !== null)
+              {(manuscripts ?? []).some((m) => m.purged_at)
+                ? "No manuscripts with retained source files are available to re-run for this format."
+                : (manuscripts ?? []).some((m) => m.latest_done_check_run_id !== null)
                 ? `No manuscripts have been checked against ${displayFormat.title} yet, so there's nothing to re-run.`
                 : "No manuscripts have been checked yet, so there's nothing to re-run."}
             </p>

@@ -21,6 +21,7 @@ import { visiblePdfPage } from "./pdfReadingPosition";
 import { claimFocusContinuation, type FocusContinuation } from "../routing/focusContinuation";
 import type { EvidencePlacement } from "../report/evidenceTypes";
 import { evidenceOverlayRects } from "./evidenceOverlay";
+import { ApiError } from "../api/client";
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
   "pdfjs-dist/build/pdf.worker.min.mjs",
@@ -356,6 +357,7 @@ export function PdfPane({
   loadFile,
   recordedEvidence,
   canPlaceRequestedPage,
+  onRetryLoad,
 }: {
   fileUrl: string;
   regions: FlagRegionOut[];
@@ -374,6 +376,7 @@ export function PdfPane({
   loadFile?: () => Promise<Uint8Array>;
   recordedEvidence?: EvidencePlacement;
   canPlaceRequestedPage?: () => boolean;
+  onRetryLoad?: (action: HTMLElement) => void;
 }) {
   const formatDocument = documentKind === "required_format";
   const documentLabel = formatDocument ? "Original format" : "Full manuscript";
@@ -383,7 +386,7 @@ export function PdfPane({
   const sourceCurrent = loadedSource?.url === fileUrl && loadedSource.loader === loadFile;
   const pdf = sourceCurrent ? loadedPdf : null;
   const metrics = sourceCurrent ? loadedMetrics : EMPTY_PAGE_METRICS;
-  const [loadError, setLoadError] = useState(false);
+  const [loadError, setLoadError] = useState<Error | null>(null);
   const [loadAttempt, setLoadAttempt] = useState(0);
   const [currentPage, setCurrentPage] = useState(1);
   const [pageInput, setPageInput] = useState("1");
@@ -402,13 +405,17 @@ export function PdfPane({
     let cancelled = false;
     setPdf(null);
     setMetrics([]);
-    setLoadError(false);
+    setLoadError(null);
     pageRefs.current.clear();
     pageVisibility.current.clear();
     setCurrentPage(1);
     setPageInput("1");
     let task: ReturnType<typeof pdfjsLib.getDocument> | undefined;
     async function openDocument() {
+        // A retired effect must not consume the sole source-rendering slot.
+        // StrictMode replays setup/cleanup before this transport starts.
+        await Promise.resolve();
+        if (cancelled) return;
       const options = loadFile ? { data: await loadFile() } : { url: fileUrl, withCredentials: true };
       if (cancelled) return;
       task = pdfjsLib.getDocument(options);
@@ -427,8 +434,8 @@ export function PdfPane({
         setLoadedSource({ url: fileUrl, loader: loadFile });
       }
     }
-    openDocument().catch(() => {
-      if (!cancelled) setLoadError(true);
+    openDocument().catch((error: unknown) => {
+      if (!cancelled) setLoadError(error instanceof Error ? error : new Error("PDF source unavailable"));
     });
     return () => {
       cancelled = true;
@@ -564,9 +571,9 @@ export function PdfPane({
         {loadError ? (
           <section className="signal-document-paper-state" role="alert">
             <p className="signal-section-kicker">PDF display unavailable</p>
-            <h2>The PDF could not be displayed</h2>
-            <p>{formatDocument ? "The original PDF could not be displayed. Your prepared criteria remain available. You can download the original file instead." : "This source view failed to load. Any recorded review that loaded remains available on the right."}</p>
-            <button type="button" onClick={() => setLoadAttempt((attempt) => attempt + 1)}>Try again</button>
+            <h2>{loadError instanceof ApiError && loadError.status === 429 ? "The PDF source is temporarily unavailable" : "The PDF could not be displayed"}</h2>
+            <p>{loadError instanceof ApiError && loadError.status === 429 ? loadError.message : formatDocument ? "The original PDF could not be displayed. Your prepared criteria remain available. You can download the original file instead." : "This source view failed to load. Any recorded review that loaded remains available on the right."}</p>
+            <button type="button" onClick={(event) => { onRetryLoad?.(event.currentTarget); setLoadAttempt((attempt) => attempt + 1); }}>Try again</button>
           </section>
         ) : !pdf || metrics.length === 0 ? (
           <section className="signal-document-pdf-skeleton" role="status" aria-live="polite" aria-busy="true">

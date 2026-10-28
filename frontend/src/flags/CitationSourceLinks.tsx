@@ -16,17 +16,23 @@ function navigableUrl(raw: string): string | undefined {
 export function CitationSourceLinks({ flag }: { flag: Finding }) {
   const heading = useId();
   const saved = flag.citation_source_locator;
+  const claimFinding = ["claim_possibly_unsupported", "claim_support_cannot_determine", "claim_support_injection_suspected"].includes(flag.ai_verdict_summary ?? "");
+  const unavailable = flag.check_kind === "citation_integrity" && claimFinding ?
+    <section className="signal-reasoning signal-citation-source-links" aria-labelledby={heading}>
+      <h3 id={heading}>Check the cited source</h3>
+      <p>No saved source link is available for this finding. Find the cited work in the manuscript's reference list and open it independently to compare the claim with the source. A new check can create a new source-link record; this finding remains unchanged.</p>
+    </section> : null;
   if (flag.check_kind !== "citation_integrity" || isCitationMetadataFinding(flag)
-    || !saved) return null;
+    || !saved) return unavailable;
   const lookup = saved.basis === "recorded_source_key";
   if (lookup ? saved.order_index !== null || saved.links.some(link => link.kind !== "doi_recorded_lookup")
     : saved.basis !== "saved_reference" || !Number.isSafeInteger(saved.order_index) || saved.order_index < 0
-      || saved.links.some(link => link.kind !== "doi_as_cited" && link.kind !== "url_as_cited")) return null;
+      || saved.links.some(link => link.kind !== "doi_as_cited" && link.kind !== "url_as_cited")) return unavailable;
   const links = saved.links.flatMap(link => {
     const url = navigableUrl(link.url);
     return url ? [{ ...link, url }] : [];
   });
-  if (!links.length) return null;
+  if (!links.length) return unavailable;
   return <section className="signal-reasoning signal-citation-source-links" aria-labelledby={heading}>
     <h3 id={heading}>{lookup ? "Saved source lookup" : "Source links from this reference"}</h3>
     <ul>{links.map(link => <li key={`${link.kind}:${link.url}`}>

@@ -119,7 +119,9 @@ describe("SignalDocumentViewerPage", () => {
     const qualification = document.getElementById(frame.getAttribute("aria-describedby")!)!;
     expect(qualification).toHaveTextContent(/fixtures instead of real AI grading/);
     expect(frame).not.toContainElement(qualification);
-    expect(qualification.nextElementSibling).toBe(frame);
+    const returnNavigation = screen.getByRole("navigation", { name: "Workspace return" });
+    expect(qualification.nextElementSibling).toBe(returnNavigation);
+    expect(returnNavigation.nextElementSibling).toBe(frame);
     expect(document.querySelectorAll(".signal-flag-mode")).toHaveLength(1);
     expect(document.querySelector(".signal-document-selection-strip")).toBeNull();
   });
@@ -138,7 +140,7 @@ describe("SignalDocumentViewerPage", () => {
           quote: "Recorded paragraph.", anchor: "page 4", source_scope: "own_manuscript", source_state: "not_checked" } ] },
       [`/check-runs/5/evidence/${"c".repeat(64)}/location`]: { snapshot_id: "f".repeat(64), source_identity: "d".repeat(64), source_format: "pdf",
         placement: { reference_id: "c".repeat(64), state: "page_only", page: 4, paragraph: null, boxes: [], reason: null }, caption: "Page shown without a passage mark." },
-      "/check-runs/5/escalated": [{ check_result_id: 41, criterion_id: 1, criterion_text: row.text,
+      "/check-runs/5/escalated": [{ check_result_id: 41, criterion_id: 1, criterion_text: row.text, assessment_revision: 0,
         weight: 1, agreement: null, votes: [null, null], ai_majority_verdict: null, reason: "Needs instructor judgment.",
         review_reason: "low_confidence", unverified_evidence: null, reasoning: row.reasoning, evidence: row.evidence }],
       "/check-runs/5/flags": [], "/check-runs/5/document/reuse-matches": { passage_archive_size_n: 0, matches: [] },

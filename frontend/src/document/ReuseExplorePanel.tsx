@@ -55,6 +55,7 @@ export function ReuseExplorePanel({
   flagsSucceeded,
   onRetryFlags,
   onSelectFlag,
+  showBack = true,
   onBack,
   includeReferenceList,
   includeBlockQuote,
@@ -71,6 +72,7 @@ export function ReuseExplorePanel({
   onRetryFlags: () => void;
   onSelectFlag: (flagId: number) => void;
   onBack: () => void;
+  showBack?: boolean;
   includeReferenceList: boolean;
   includeBlockQuote: boolean;
   onToggleReferenceList: (value: boolean) => void;
@@ -119,9 +121,9 @@ export function ReuseExplorePanel({
   return (
     <div className="flex flex-col">
       <div className="flex flex-col gap-2 border-b border-border px-3.5 py-3">
-        <button type="button" onClick={onBack} className="w-fit text-sm font-medium text-link underline hover:text-link-hover">
+        {showBack && <button type="button" onClick={onBack} className="w-fit text-sm font-medium text-link underline hover:text-link-hover">
           ← All flags
-        </button>
+        </button>}
         <p className="text-xs font-semibold tracking-header text-ink-tertiary uppercase">
           Originality and reuse
         </p>

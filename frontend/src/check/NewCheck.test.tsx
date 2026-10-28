@@ -1,4 +1,5 @@
-import { fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { renderWithProviders, stubFetchByPath } from "../test/renderWithProviders";
 import { NewCheckModal } from "./NewCheck";
@@ -42,6 +43,36 @@ const ONE_ACTIVE_FAMILY = [
 
 describe("NewCheckModal", () => {
   afterEach(() => vi.unstubAllGlobals());
+
+  it("does not offer a deleted initial manuscript or silently replace it", async () => {
+    const upload = vi.fn();
+    const fetch = stubFetchByPath({ "/manuscripts": { ...MANUSCRIPTS,
+      items: [{ ...MANUSCRIPTS.items[0], purged_at: "2026-10-28T01:00:00Z" },
+        { ...MANUSCRIPTS.items[0], id: 3, group_label: "Still available" }] },
+      "/rubric-families": ONE_ACTIVE_FAMILY });
+    vi.stubGlobal("fetch", fetch);
+    renderWithProviders(<NewCheckModal initialManuscriptId={1} onUploadManuscript={upload} onClose={() => {}} />);
+    expect(await screen.findByText(/This manuscript's stored file was deleted/)).toBeVisible();
+    expect(screen.queryByRole("option", { name: /G-11/ })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Start check" })).toBeDisabled();
+    expect(fetch.mock.calls.some(([url, init]) => String(url).endsWith("/check-runs") && init?.method === "POST")).toBe(false);
+  });
+
+  it("blocks a selected manuscript when a refetch records its deletion", async () => {
+    let queryClient: QueryClient;
+    function CaptureClient() { queryClient = useQueryClient(); return null; }
+    const handlers: Record<string, unknown> = { "/manuscripts": MANUSCRIPTS, "/rubric-families": ONE_ACTIVE_FAMILY };
+    const fetch = stubFetchByPath(handlers);
+    vi.stubGlobal("fetch", fetch);
+    renderWithProviders(<><CaptureClient /><NewCheckModal initialManuscriptId={1} onClose={() => {}} /></>);
+    const start = await screen.findByRole("button", { name: "Start check" });
+    await waitFor(() => expect(screen.getByRole("combobox", {name: /manuscript/i})).toHaveValue("1"));
+    handlers["/manuscripts"] = { ...MANUSCRIPTS, items: [{ ...MANUSCRIPTS.items[0], purged_at: "2026-10-28T01:00:00Z" }] };
+    await act(async () => { await queryClient!.invalidateQueries({ queryKey: ["manuscripts"] }); });
+    expect(await screen.findByText(/This manuscript's stored file was deleted/)).toBeVisible();
+    expect(start).toBeDisabled();
+    expect(fetch.mock.calls.some(([url, init]) => String(url).endsWith("/check-runs") && init?.method === "POST")).toBe(false);
+  });
 
   it("BUG-465: distinguishes same-name active versions by saved criteria and lets the instructor read the chosen requirements", async () => {
     const first = { ...ONE_ACTIVE_FAMILY[0], title: "Required format.docx", criteria_count: 3, program: null };

@@ -452,7 +452,11 @@
   --signal-report-facts-grid: repeat(3, minmax(0, 1fr));
   --signal-coverage-ledger-grid: minmax(0, 1fr) minmax(0, 3fr);
   --signal-report-jump-grid: repeat(4, minmax(0, 1fr));
-  --signal-resolution-card-grid: minmax(0, 1.35fr) minmax(18rem, 0.65fr);
+  --signal-review-controls-min: 20rem;
+  --signal-resolution-card-grid: minmax(0, 2fr) minmax(var(--signal-review-controls-min), 1fr);
+  --signal-criterion-preview-height: 18rem;
+  --signal-criterion-reader-height: min(36rem, 60dvh);
+  --signal-evidence-exact-line: #c8202c;
   --signal-report-branch-width: 5rem;
   --signal-report-branch-offset: 1.5rem;
   --signal-report-jump-number-size: 1.75rem;

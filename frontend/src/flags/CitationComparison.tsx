@@ -18,7 +18,7 @@ function safeExternal(value: string | null): string | undefined {
   } catch { return undefined; }
 }
 
-export function CitationComparison({ flag }: { flag: FlagOut }) {
+export function CitationComparison({ flag }: { flag: Pick<FlagOut, "check_kind" | "ai_verdict_summary" | "citation_metadata_comparison" | "citation_metadata_review_warning"> }) {
   const headingId = useId();
   if (!isCitationMetadataFinding(flag)) return null;
   const evidence = flag.citation_metadata_comparison;

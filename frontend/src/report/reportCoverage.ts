@@ -5,6 +5,7 @@ import { imageCoverageItem } from "./imageCoverage";
 import { nativeMathCoverageItem } from "./nativeMathCoverage";
 import { NATIVE_MATH_HISTORY_TITLE, NATIVE_MATH_HISTORY_LIMIT } from "../domain/nativeMathHistory";
 import { CITATION_HISTORY_REPORT_LIMIT, CITATION_HISTORY_TITLE } from "../domain/citationHistory";
+import { descriptiveAssumptionLimit } from "./statisticalScopeCopy";
 
 const INTEGRITY_LABEL: Record<IntegrityCheckStatusOut["check_kind"], string> = {
   internal_agreement: "Internal agreement",
@@ -73,7 +74,7 @@ function baseIntegrityCoverageItem(status: IntegrityCheckStatusOut, manuscriptId
     ai_key_rejected: "AI-dependent parts of this check were not assessed because the configured AI key was rejected during an AI request and no applicable alternative completed that request. Any independently completed results remain available. Unassessed comparisons or claims are not treated as passed. This is a system limit, not a finding against the manuscript.",
     metadata_comparison_policy_unavailable: "Reference metadata comparison could not run because its comparison policy was unavailable. No lookup or claim-support assessment was made for those DOI references.",
     reference_metadata_policy_unavailable: "Reference metadata could not be parsed because its parsing policy was unavailable. Reference lookups and claim support remain unassessed.",
-    reference_source_projection_unbound: "The saved reference entries could not be matched to the current source inventory. Reference lookups and claim support remain unassessed.",
+    reference_source_projection_unbound: "Reference checks could not establish complete, source-bound coverage of the reference list. Reference lookups and claim support remain unassessed.",
     citation_metadata_comparison_unassessed: "Some reference titles could not be compared reliably because of ambiguous formatting, case or missing metadata. Those comparisons and their claim support remain unassessed.",
     source_reading_order_unresolved: "Some pages could not be read reliably. This check was not assessed; this is not a finding against the paper.",
     reference_metadata_insufficient: "Some references are visible in the paper, but their author, title, or date could not be read reliably. They have not been verified.",
@@ -137,6 +138,10 @@ function baseIntegrityCoverageItem(status: IntegrityCheckStatusOut, manuscriptId
 
 export function coverageItems(report: ReportOut): CoverageStatementItem[] {
   const items: CoverageStatementItem[] = [];
+  const descriptiveLimit = descriptiveAssumptionLimit(report.statistical_check_scope);
+  if (descriptiveLimit) items.push({ key: "statistical_descriptive_assumptions", label: "Statistical forensics · Partially assessed",
+    detail: descriptiveLimit,
+    action: { to: `/report/${report.check_run_id}/document?view=decision`, label: "Open the paper" } });
   if (report.historical_native_math_unverified) {
     items.push({ key: "historical_native_math_unverified", label: NATIVE_MATH_HISTORY_TITLE, detail: NATIVE_MATH_HISTORY_LIMIT });
   }
@@ -154,6 +159,8 @@ export function coverageItems(report: ReportOut): CoverageStatementItem[] {
   }
   const order = Object.keys(INTEGRITY_LABEL);
   for (const status of [...(report.integrity_check_status ?? [])].sort((a, b) => order.indexOf(a.check_kind) - order.indexOf(b.check_kind))) {
+    if (descriptiveLimit && status.check_kind === "statistical_forensics" && !status.coverage_reason
+      && !status.n_skipped_api_down && !status.n_skipped_quota && !status.n_skipped_parse_failure) continue;
     items.push(integrityCoverageItem(status, report.manuscript_id, report.check_run_id));
   }
   return items;

@@ -46,6 +46,7 @@ export interface EvidencePage {
   snapshot_id: string;
   placement: EvidencePlacement;
   image_data_url: string | null;
+  image_sha256?: string | null;
   caption: string;
 }
 

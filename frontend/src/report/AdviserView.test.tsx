@@ -1,4 +1,4 @@
-import { fireEvent, screen, waitFor } from "@testing-library/react";
+import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { FlagSummaryOut, PublicCriterionResultOut, ReportOut, SharedReportOut } from "../api/types";
 import { renderWithProviders, stubFetchByPath } from "../test/renderWithProviders";
@@ -90,7 +90,7 @@ describe("shared statistical applicability", () => {
   ] as const)("shows safe %s status alongside the existing shared warning", async (state, label) => {
     const payload = shared({ report: { ...BASE_REPORT, statistical_check_scope: { state }, historical_native_math_unverified: true } });
     vi.stubGlobal("fetch", stubFetchByPath({ "/shared/scope-control/report": payload }));
-    renderWithProviders(<AdviserViewPage />, { route: "/shared/scope-control", path: "/shared/:token" });
+    renderWithProviders(<AdviserViewPage />, { route: "/shared/scope-control?section=findings&module=statistical_forensics", path: "/shared/:token" });
     expect(await screen.findByText(`Statistical checks: ${label}`)).toBeVisible();
     expect(screen.getAllByText("Saved native Word coverage is unverified")[0]).toBeVisible();
   });
@@ -113,7 +113,7 @@ function publicCountPayload(outcomes: PublicCriterionResultOut["outcome"][]): Sh
 }
 
 describe("AdviserViewPage", () => {
-  it("keeps all public qualifications open in one context and puts records before findings", async () => {
+  it("keeps all public qualifications open while switching between grades and findings", async () => {
     const payload = publicCountPayload(["passed", "escalated"]);
     Object.assign(payload.report, { rubric_needs_review: true,
       rubric_parse_issues: ["SECONDARY_FORMAT_DETAIL", "SECONDARY_FORMAT_DETAIL"], assessment_incomplete: true,
@@ -132,21 +132,26 @@ describe("AdviserViewPage", () => {
     expect(screen.getAllByText("SECONDARY_FORMAT_DETAIL")[0]).not.toBeVisible();
     fireEvent.click(screen.getByRole("button", { name: "Show required-format review details" }));
     expect(screen.getAllByText("SECONDARY_FORMAT_DETAIL")[0]).toBeVisible();
-    const criteria = screen.getByRole("heading", { name: "Criterion records" });
-    const findings = screen.getByRole("heading", { name: "Possible inconsistencies" });
-    expect(criteria.compareDocumentPosition(findings) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(screen.getByRole("link", { name: "Review criterion records" })).toHaveAttribute("href", "/shared/tok123#criteria-results-heading");
-    expect(screen.getByRole("link", { name: "Read final decision" })).toHaveAttribute("href", "/shared/tok123#shared-decision-heading");
-    expect(fetch.mock.calls.every(([input]) => String(input).includes("/shared/tok123/report"))).toBe(true);
+    expect(screen.getByRole("heading", { name: "Criterion records" })).toBeVisible();
+    expect(screen.queryByRole("heading", { name: "Possible inconsistencies" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Findings" }));
+    expect(screen.getByRole("heading", { name: "Possible inconsistencies" })).toBeVisible();
+    expect(screen.queryByRole("heading", { name: "Criterion records" })).not.toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Review criterion records" })).toHaveAttribute("href", "/shared/tok123?section=grades#criteria-results-heading");
+    expect(screen.getByRole("link", { name: "Read final decision" })).toHaveAttribute("href", "/shared/tok123?section=findings#shared-decision-heading");
+    expect(fetch.mock.calls.every(([input, init]) => /\/shared\/tok123\/(report|evidence)$/.test(String(input)) && init?.credentials === "omit")).toBe(true);
   });
   it("preserves public query context and focuses the actual destination headings", async () => {
+    vi.spyOn(document, "hasFocus").mockReturnValue(true);
     vi.stubGlobal("fetch", stubFetchByPath({ "/shared/tok123/report": shared() }));
     renderWithProviders(<AdviserViewPage />, { route: "/shared/tok123?reader=faculty", path: "/shared/:token" });
     const records = await screen.findByRole("link", { name: "Review criterion records" });
-    expect(records).toHaveAttribute("href", "/shared/tok123?reader=faculty#criteria-results-heading");
+    expect(records).toHaveAttribute("href", "/shared/tok123?reader=faculty&section=grades#criteria-results-heading");
+    records.focus();
     fireEvent.click(records);
     await waitFor(() => expect(screen.getByRole("heading", { name: "Criterion records" })).toHaveFocus());
-    fireEvent.click(screen.getByRole("link", { name: "Read final decision" }));
+    const decision = screen.getByRole("link", { name: "Read final decision" });
+    decision.focus(); fireEvent.click(decision);
     await waitFor(() => expect(screen.getByRole("heading", { name: "Final decision" })).toHaveFocus());
   });
 
@@ -155,7 +160,8 @@ describe("AdviserViewPage", () => {
     render();
     await screen.findByRole("heading", { name: "Criterion records" });
     expect(screen.queryByRole("complementary", { name: "Assessment context" })).not.toBeInTheDocument();
-    expect(screen.getByText("This run produced no shared integrity signals.")).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "Findings" }));
+    expect(screen.getByText("No shared integrity signals are shown in this module.")).toBeVisible();
     expect(screen.queryByText(/All checks passed/)).not.toBeInTheDocument();
   });
 
@@ -189,6 +195,7 @@ describe("AdviserViewPage", () => {
     render();
     expect((await screen.findByText("Unresolved criteria")).nextElementSibling).toHaveTextContent("0");
     expect(screen.getByText("Assessment limits")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Findings" }));
     expect(screen.getByText(/95% accuracy/)).toBeInTheDocument();
   });
 
@@ -227,7 +234,7 @@ describe("AdviserViewPage", () => {
 
   it("discloses the historical title limitation in both the shared report and its finding", async () => {
     vi.stubGlobal("fetch", stubFetchByPath({ "/shared/tok123/report": shared({ report: { ...BASE_REPORT, historical_citation_title_unverified: true }, flags: [{ ...SAMPLE_FLAG, check_kind: "citation_integrity", problem_kind: "possible_metadata_mismatch", citation_metadata_review_warning: "quoted_title_projection_unverified" }] }) }));
-    render();
+    renderWithProviders(<AdviserViewPage />, { route: "/shared/tok123?section=findings&module=citation_integrity", path: "/shared/:token" });
     expect((await screen.findAllByText("Historical title comparison needs review")).length).toBeGreaterThan(1);
     expect(screen.getByText(/this report has not been recomputed/)).toBeInTheDocument();
     expect(screen.getByText(/may include publication details/)).toHaveTextContent("Verify affected titles before relying on those differences; this report has not been recomputed.");
@@ -327,21 +334,24 @@ describe("AdviserViewPage", () => {
     expect(screen.queryByText(/26\.67/)).not.toBeInTheDocument();
   });
 
-  it("renders the full, unfiltered results table -- pending criteria show as Awaiting review, not hidden", async () => {
-    // Mobile card + desktop grid both render in the DOM simultaneously
-    // (jsdom applies no media queries) -- same convention as every other
-    // dual-layout test in this app: text present in both is expected
-    // TWICE, not once.
+  it("keeps every criterion selectable, including pending records, with one full assessment at a time", async () => {
     vi.stubGlobal("fetch", stubFetchByPath({ "/shared/tok123/report": shared() }));
     render();
 
-    expect((await screen.findAllByText("Has an abstract")).length).toBe(1);
-    // design review P1: the escalated criterion must be VISIBLE, not
-    // silently dropped the way Report.tsx's own filtered subset would.
-    expect(screen.getAllByText("States the research problem").length).toBe(1);
-    expect(screen.getByText("Needs review")).toBeInTheDocument();
-    // Rendered as part of a combined caption ("AI-graded · The instructor
-    // has not resolved this criterion yet."), not its own isolated node.
+    const chooser = await screen.findByRole("navigation", { name: "Choose a shared criterion" });
+    expect(within(chooser).getByRole("button", { name: /Has an abstract/ })).toBeVisible();
+    const pending = within(chooser).getByRole("button", { name: /States the research problem/ });
+    expect(pending).toBeVisible();
+    expect(screen.getByRole("heading", { name: "Has an abstract" })).toBeVisible();
+    expect(screen.queryByRole("heading", { name: "States the research problem" })).not.toBeInTheDocument();
+    fireEvent.click(pending);
+    expect(screen.getByRole("heading", { name: "States the research problem" })).toBeVisible();
+    expect(screen.queryByRole("heading", { name: "Has an abstract" })).not.toBeInTheDocument();
+    expect(within(chooser).getByRole("button", { name: /States the research problem/ })).toHaveTextContent(/Awaiting review/i);
+    expect(document.querySelectorAll(".signal-result-card")).toHaveLength(1);
+    expect(screen.getByRole("button", { name: "Next criterion" })).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: "Previous criterion" }));
+    expect(screen.getByRole("heading", { name: "Has an abstract" })).toBeVisible();
   });
 
   it("shows the pending-review sentence in the explainer when items are still unresolved", async () => {
@@ -358,6 +368,8 @@ describe("AdviserViewPage", () => {
       stubFetchByPath({ "/shared/tok123/report": shared({ flags: [SAMPLE_FLAG] }) }),
     );
     render();
+    await screen.findByRole("button", { name: "Findings" });
+    fireEvent.click(screen.getByRole("button", { name: "Findings" }));
     await screen.findByText(/95% accuracy/);
     expect(screen.queryByRole("link", { name: /Review evidence|View details/ })).not.toBeInTheDocument();
   });

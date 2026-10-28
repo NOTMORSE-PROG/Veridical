@@ -103,7 +103,11 @@ describe("recorded PDF route ownership", () => {
       status: "needs_review", composite_score: null, thresholds: {}, reason: null, flag_deduction: 0,
       unresolved_high_flag_count: 0, decision: null, decided_at: null, decision_note: null, pending_review_count: 1,
       rubric_is_current: true, llm_mode: "real", rubric_needs_review: false, rubric_parse_issues: null,
-      previous_status: null, previous_composite_score: null, integrity_check_status: [], results: [] };
+      previous_status: null, previous_composite_score: null, integrity_check_status: [], results: [{
+        criterion_id: item.criterion_id, check_result_id: item.check_result_id, text: item.criterion_text,
+        type: "semantic", kind: "semantic", weight: 1, weight_importance: "med", outcome: "escalated", score: null,
+        basis: "llm", anchor: null, reasoning: item.reasoning, reason: item.reason, evidence, resolution: null,
+      }] };
     const normal = stubFetchByPath({
       "/check-runs/5/document": { manuscript_id: 10, source_format: "pdf", available: true,
         original_filename: "source.pdf", page_count: 1, regions: [] },

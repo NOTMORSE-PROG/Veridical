@@ -57,6 +57,7 @@ export function useDeleteStoredFile() {
       void queryClient.invalidateQueries({ queryKey: ["library"] });
       void queryClient.invalidateQueries({ queryKey: ["library-item", result.manuscript_id] });
       void queryClient.invalidateQueries({ queryKey: ["manuscripts"] });
+      void queryClient.invalidateQueries({ queryKey: ["stats"] });
     },
   });
 }

@@ -11,6 +11,7 @@ import { ActionLink } from "../ui/ActionLink";
 import { Alert } from "../ui/Alert";
 import { HighlightedText } from "./PassagePairPanel";
 import { sharedPassageRanges } from "./sharedPassage";
+import { RecordedEvidencePage } from "../report/RecordedEvidencePage";
 
 export function FindingSourceComparison({ flag, current, onSource }: {
   flag: FlagOut;
@@ -24,6 +25,7 @@ export function FindingSourceComparison({ flag, current, onSource }: {
   liveScope.current = scope;
   const mounted = useRef(false);
   useLayoutEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
+  const [preview, setPreview] = useState(false);
   const [reloadState, setReloadState] = useState<{ scope: string; attempt: number; pending: boolean }>();
   const reloading = reloadState?.scope === scope && reloadState.pending;
   const attempt = reloadState?.scope === scope ? reloadState.attempt : 0;
@@ -35,9 +37,9 @@ export function FindingSourceComparison({ flag, current, onSource }: {
   ] : reuse ? [{ role: "reuse_own", index: 0, quote: reuse.own_excerpt, anchor: flag.page_anchor }] : [];
   const manifestQuery = useEvidenceManifest(flag.check_run_id, flag.assessment_revision, current && !reloading && sides.length > 0);
   const manifest = current && !reloading && manifestQuery.isSuccess && manifestQuery.fetchStatus === "idle" ? manifestQuery.data : undefined;
-  const pages = useFindingSourcePages(flag.check_run_id, flag.id, flag.assessment_revision, manifest, sides, current && !reloading, attempt);
+  const pages = useFindingSourcePages(flag.check_run_id, flag.id, flag.assessment_revision, manifest, sides, current && !reloading && preview, attempt);
   const shared = reuse ? sharedPassageRanges(reuse.own_excerpt, reuse.matched_excerpt) : undefined;
-  const available = current && manifest && pages.isSuccess && pages.fetchStatus === "idle";
+  const available = preview && current && manifest && pages.isSuccess && pages.fetchStatus === "idle";
   const retired = !current || reloading || !Number.isSafeInteger(flag.assessment_revision) || manifestQuery.isError || pages.isError;
   function reload() {
     if (reloading) return;
@@ -58,6 +60,7 @@ export function FindingSourceComparison({ flag, current, onSource }: {
         <p>{shared?.left.length ? "Text shading identifies shared wording between the stored excerpts. Page boxes locate the saved quotation; they do not establish copying." : "No stable exact phrase was found to shade. Compare both passages manually. Page boxes locate the saved quotation."}</p></>}
     {agreement && flag.affects_readiness === false && <p>This review lead does not change readiness.</p>}
     {retired && <Alert title="Recorded source references unavailable" tone="warning" role="status"><p>{reloading ? "Reloading the finding and its recorded source references..." : "This comparison's current source references are unavailable. Reload the finding before comparing source pages. The saved text below is retained for manual review."}</p><Button variant="secondary" busy={reloading} onClick={reload}>Reload recorded evidence</Button></Alert>}
+    <Button variant="secondary" aria-expanded={preview} onClick={() => setPreview(value => !value)}>{preview ? "Hide" : "Show"} original-page previews</Button>
     <div className="signal-finding-source-comparison__cards">{sides.map((side, index) => {
       const result = available ? pages.data.find(item => item.role === side.role) : undefined;
       const role: AgreementStatementRole = agreement ? index === 0 ? "objective" : "result" : "statement";
@@ -69,7 +72,7 @@ export function FindingSourceComparison({ flag, current, onSource }: {
         <p>Recorded location: {side.anchor?.trim() ? instructorAnchor(side.anchor) : "No location recorded"}</p>
         <blockquote className="signal-evidence-quote">{reuse?.own_context_before && <span>{reuse.own_context_before} </span>}<HighlightedText text={side.quote} ranges={shared?.left ?? []} />{reuse?.own_context_after && <span> {reuse.own_context_after}</span>}</blockquote>
         {result?.page?.image_data_url ? (
-          <figure>
+          <figure className="signal-criterion-packet__preview">
             <img src={result.page.image_data_url} alt={`Recorded source page for ${agreement ? index === 0 ? "statement A" : "statement B" : "your manuscript excerpt"}. Placement qualification follows.`} />
             <figcaption>{result.page.caption}</figcaption>
           </figure>
@@ -83,12 +86,13 @@ export function FindingSourceComparison({ flag, current, onSource }: {
                   : pages.isFetching ? "Loading the recorded source page." : "The recorded source page could not be loaded."}</figcaption>
           </figure>
         )}
+        {!retired && ref && manifest && <RecordedEvidencePage checkRunId={flag.check_run_id} snapshot={manifest.snapshot_id} reference={ref} cachedPage={result?.page} />}
         {(result?.failed || pages.isError) && <Button variant="quiet" busy={pages.isFetching} onClick={() => { void pages.refetch(); }}>Retry source page</Button>}
-        {side.anchor?.trim() && <Button id={`${prefix}-${flag.id}-${role}-source`} variant="quiet" onClick={() => onSource(side.anchor, role)}>{agreement ? `Show statement ${index === 0 ? "A" : "B"} in manuscript` : "Show excerpt in manuscript"}</Button>}
+        {side.anchor?.trim() && <Button id={`${prefix}-${flag.id}-${role}-source`} variant="secondary" onClick={() => onSource(side.anchor, role)}>{agreement ? `Show statement ${index === 0 ? "A" : "B"} in manuscript` : "Show excerpt in manuscript"}</Button>}
       </article>;
     })}
       {reuse && <article className="signal-finding-source-comparison__card"><h4>Stored comparison excerpt. Library record #{reuse.matched_ref}</h4>
-        <p>Bounded excerpt, not a complete source document.</p>
+        <p>Bounded excerpt, not a complete source document. Its original-page image is unavailable in this report.</p>
         <blockquote className="signal-evidence-quote">{reuse.matched_context_before && <span>{reuse.matched_context_before} </span>}<HighlightedText text={reuse.matched_excerpt} ranges={shared?.right ?? []} />{reuse.matched_context_after && <span> {reuse.matched_context_after}</span>}</blockquote>
         <ActionLink to={`/library/${reuse.matched_ref}`} variant="secondary">Open in Library</ActionLink>
       </article>}

@@ -36,7 +36,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const isFormData = init?.body instanceof FormData;
   const res = await fetch(`${BASE_URL}${path}`, {
     ...init,
-    credentials: "include",
+    credentials: init?.credentials ?? "include",
     headers: isFormData ? init?.headers : { "Content-Type": "application/json", ...init?.headers },
   });
   if (!res.ok) {
@@ -86,6 +86,7 @@ async function requestBoundSource(path: string, sourceIdentity: string, contentT
 }
 
 export const api = {
+  getPublic: <T>(path: string, options?: Pick<RequestInit, "signal">): Promise<T> => request<T>(path, { ...options, credentials: "omit" }),
   get: <T>(path: string, options?: Pick<RequestInit, "signal">): Promise<T> => request<T>(path, options),
   getBlob: (path: string, options?: Pick<RequestInit, "signal">): Promise<Blob> => requestBlob(path, options),
   getSourceBytes: async (path: string, identity: string, options?: Pick<RequestInit, "signal">) =>

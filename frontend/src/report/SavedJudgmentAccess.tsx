@@ -76,14 +76,14 @@ export function SavedCriterionDestination({ checkRunId, results }: { checkRunId:
       : !hasPendingRouteReturnFocus(location.pathname + location.search) && (owner === document.body || owner?.matches("h1"));
     if (mayOwn && document.hasFocus()) claim.current = claimFocusContinuation(owner);
     return () => { claim.current?.dispose(); claim.current = undefined; };
-  }, [raw, checkRunId, ownNavigation, navigation?.version, navigation?.owner, location.pathname, location.search]);
+  }, [raw, checkRunId, ownNavigation, navigation?.version, navigation?.owner, location.pathname, location.search, location.hash]);
   useEffect(() => {
     if (raw === null || !available) return;
     const target = document.getElementById(all ? "criteria-results-heading" : criterionRecordId(checkRunId, criterionId!));
-    if (!target || !claim.current?.owns()) return;
+    if (!target || target.closest("[hidden]") || !claim.current?.owns()) return;
     revealCriterionRecord(target);
     if (claim.current?.focus(target)) target.scrollIntoView({ block: "nearest" });
-  }, [raw, all, available, criterionId, checkRunId, query.data, navigation?.version]);
+  }, [raw, all, available, criterionId, checkRunId, query.data, navigation?.version, location.hash]);
   if (raw === null || available) return null;
   const waiting = query.isPending || query.fetchStatus !== "idle";
   return <div className="signal-attached-flow" role="status">

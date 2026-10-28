@@ -28,6 +28,9 @@ export const CRITERION_EXCLUSION_COPY = {
 } as const;
 
 export const CRITERION_REVIEW_COPY = {
+  judgmentNeeded: "Your judgment is needed",
+  reviewSavedPassages: "No grade was accepted for this criterion. Review the saved passages and level descriptions, then choose a grade.",
+  reviewManuscript: "No grade was accepted for this criterion. Review the manuscript and level descriptions, then choose a grade.",
   supportIncomplete: "The separate evidence review did not finish.",
   supportUnsupported: "The separate evidence review did not support the suggested grade.",
   supportUnconfirmed: "The separate evidence review could not confirm that the evidence supports the suggested grade.",

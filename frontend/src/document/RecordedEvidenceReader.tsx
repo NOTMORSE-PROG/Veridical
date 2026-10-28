@@ -9,7 +9,7 @@ import { Button } from "../ui/Button";
 import { DocxPane } from "./DocxPane";
 import { PdfPane } from "./PdfPane";
 
-export function RecordedEvidenceReader({ run, request, current, visible, attempt, onPlaced, canPlace, onManual }: {
+export function RecordedEvidenceReader({ run, request, current, visible, attempt, onPlaced, canPlace, onManual, onRetry }: {
   run: number;
   request: EvidenceSourceRequest;
   current: boolean;
@@ -18,8 +18,15 @@ export function RecordedEvidenceReader({ run, request, current, visible, attempt
   onPlaced?: (element: HTMLElement) => void;
   canPlace: () => boolean;
   onManual: () => void;
+  onRetry?: (action: HTMLElement) => void;
 }) {
   const owner = useAuthOwner();
+  const [retryPlacement, setRetryPlacement] = useState(0);
+  function retryPlacementFrom(action: HTMLElement) {
+    if (!current || !visible || !owner.isCurrent()) return;
+    onRetry?.(action);
+    setRetryPlacement((value) => value + 1);
+  }
   const mounted = useRef(false);
   useLayoutEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
   const query = useEvidenceLocation(run, request.snapshotId, request.reference.reference_id, current, attempt);
@@ -75,19 +82,23 @@ export function RecordedEvidenceReader({ run, request, current, visible, attempt
   const placed = location?.source_identity === identity ? location?.placement : undefined;
   const onPdfPlaced = useCallback((_page: number, element: HTMLElement) => onPlaced?.(element), [onPlaced]);
   const requesting = current && query.isFetching;
+  const locationError = query.error instanceof ApiError && query.error.status === 429
+    ? `Source viewing is temporarily unavailable. ${query.error.message}`
+    : "This recorded location could not be verified.";
   return <div className="signal-recorded-reader">
     <div className="signal-recorded-reader__context">
       <p role="status">{requesting ? "Locating the recorded passage in its source copy."
-        : location ? location.caption : current && query.isError ? "This recorded location could not be verified."
+        : location ? location.caption : current && query.isError ? locationError
           : "Source marks are cleared. Select a current recorded location to place them again."}</p>
-      {current && query.isError && <Button variant="quiet" onClick={() => { void query.refetch(); }}>Retry recorded location</Button>}
+      {current && query.isError && <Button variant="quiet" disabled={query.isFetching} onClick={(event) => { retryPlacementFrom(event.currentTarget); void query.refetch(); }}>Retry recorded location</Button>}
       <Button variant="quiet" onClick={onManual}>Continue in full manuscript</Button>
     </div>
     {!retained && !requesting && !query.isError && <p>No source page or paragraph is available for this recorded passage. Read the saved excerpt and inspect the manuscript manually.</p>}
     {retained?.source_format === "pdf" && identity && <PdfPane
       fileUrl={`${BASE_URL}/check-runs/${run}/evidence/source-file?source_identity=${identity}`} loadFile={loadPdf}
       regions={[]} flags={[]} selectedFlagId={null} onSelectFlag={() => {}} focusSelection={false}
-      requestedPage={visible ? placed?.page ?? null : null} requestedPageAttempt={attempt}
+      requestedPage={visible ? placed?.page ?? null : null} requestedPageAttempt={attempt + retryPlacement}
+      onRetryLoad={retryPlacementFrom}
       onPlaceRequestedPage={visible ? onPdfPlaced : undefined} canPlaceRequestedPage={canPlace} recordedEvidence={placed} />}
     {retained?.source_format === "docx" && identity && <>
       {boundDocument.isError && <Alert title="This extracted source copy could not be verified" tone="warning"><Button variant="quiet" onClick={() => { void boundDocument.refetch(); }}>Retry extracted source</Button></Alert>}
@@ -97,7 +108,7 @@ export function RecordedEvidenceReader({ run, request, current, visible, attempt
         sourceQuery={`source_identity=${identity}`} loadImage={loadImage}
         paragraphsPending={boundDocument.isPending} paragraphsError={boundDocument.isError} onRetry={() => { void boundDocument.refetch(); }}
         regions={[]} flags={[]} selectedFlagId={null} onSelectFlag={() => {}} isVisible={visible} focusSelection={false}
-        requestedParagraph={placed?.paragraph ?? null} requestedParagraphAttempt={attempt}
+        requestedParagraph={placed?.paragraph ?? null} requestedParagraphAttempt={attempt + retryPlacement}
         onPlaceRequestedParagraph={visible ? onPlaced : undefined} />
     </>}
   </div>;

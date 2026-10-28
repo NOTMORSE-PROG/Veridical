@@ -52,6 +52,12 @@ function stubBase(overrides: Record<string, unknown> = {}) {
 }
 
 describe("RerunModal", () => {
+  it("explains a requested deleted manuscript and excludes it from estimates and submissions", async () => {
+    vi.stubGlobal("fetch", stubBase({ "/manuscripts": { items: [manuscript({ purged_at: "2026-10-28T01:00:00Z" })], total: 1, page: 1, page_size: 200 } }));
+    renderWithProviders(<RerunModal initialManuscriptIds={[1]} onClose={() => {}} />);
+    expect(await screen.findByText(/cannot be checked again because its stored file was deleted/)).toBeVisible();
+    expect(screen.getByRole("button", { name: "Re-run 0 manuscripts" })).toBeDisabled();
+  });
   afterEach(() => {
     vi.unstubAllGlobals();
     vi.useRealTimers();

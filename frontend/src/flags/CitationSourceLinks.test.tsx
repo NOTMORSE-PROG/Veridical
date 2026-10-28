@@ -9,6 +9,12 @@ const flag = { check_kind: "citation_integrity", ai_verdict_summary: "uncited_re
 } } satisfies Pick<FlagOut, "check_kind" | "ai_verdict_summary" | "citation_source_locator">;
 
 describe("saved citation source navigation", () => {
+  it.each(["claim_possibly_unsupported", "claim_support_cannot_determine", "claim_support_injection_suspected"])("explains a manual source route when %s has no saved link", (kind) => {
+    render(<CitationSourceLinks flag={{ ...flag, ai_verdict_summary: kind, citation_source_locator: null }} />);
+    expect(screen.getByRole("heading", { name: "Check the cited source" })).toBeVisible();
+    expect(screen.getByText(/No saved source link is available/)).toHaveTextContent(/reference list/);
+    expect(screen.queryByRole("link")).not.toBeInTheDocument();
+  });
   it("shows the saved destination with deliberate private navigation and no confirmation action", () => {
     render(<CitationSourceLinks flag={flag} />);
     expect(screen.getByText("DOI as cited")).toBeVisible();

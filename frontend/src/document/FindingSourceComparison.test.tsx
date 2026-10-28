@@ -22,7 +22,11 @@ const json = (body: unknown, status = 200) => new Response(JSON.stringify(body),
 function placement(id: string) { return { reference_id: id, state: "page_only", page: 2, paragraph: null, boxes: [], reason: null }; }
 function location(id: string, docx = false) { return { snapshot_id: snapshot, source_identity: source, source_format: docx ? "docx" : "pdf",
   placement: { ...placement(id), state: docx ? "paragraph_only" : "page_only", paragraph: docx ? 8 : null }, caption: `Qualified location ${id}` }; }
-function page(id: string) { return { snapshot_id: snapshot, placement: placement(id), image_data_url: `data:image/png;base64,${id === left ? "AAAA" : "BBBB"}`, caption: `Qualified page ${id}` }; }
+function page(id: string) {
+  const base64 = id === left ? "AAAA" : "BBBB";
+  return { snapshot_id: snapshot, placement: placement(id), image_data_url: `data:image/png;base64,${base64}`,
+    image_sha256: id === left ? "709e80c88487a2411e1ee4dfb9f22a861492d20c4765150c0c794abd70f8147c" : "09c08a63fc2b11a50cf88eb6f6c062c727964a0c828808fe46c740af3a33897a", caption: `Qualified page ${id}` };
+}
 
 function setup(handler?: (url: URL, init?: RequestInit) => Promise<Response> | Response, value = flag) {
   const calls: { path: string; signal?: AbortSignal | null }[] = [];
@@ -39,6 +43,7 @@ function setup(handler?: (url: URL, init?: RequestInit) => Promise<Response> | R
   const open = vi.fn();
   const ui = (f: FlagOut, current = true) => <QueryClientProvider client={client}><MemoryRouter><FindingSourceComparison flag={f} current={current} onSource={open} /></MemoryRouter></QueryClientProvider>;
   const view = render(ui(value));
+  fireEvent.click(screen.getByRole("button", { name: "Show original-page previews" }));
   return { calls, client, open, view, ui };
 }
 

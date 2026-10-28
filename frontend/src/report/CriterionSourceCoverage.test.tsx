@@ -15,6 +15,13 @@ function show(value: Coverage) {
   return render(<CriterionSourceCoverage value={value} criterionText={row.text} firstSlot={4}
     sourceAction={(anchor, slot) => <a id={`source-${slot}`} href={`#${anchor}`}>Open {anchor}</a>} />);
 }
+it.each(["not_recorded", "unavailable"] as const)("does not invent a Word source for %s coverage", state => {
+  show({ ...zero, native_math_coverage_version: null, native_math_inventory_state: state,
+    native_math_inventory_scope: null, n_native_equations_unassessed: null,
+    n_native_equations_unlocated: null });
+  expect(screen.getByText(/Equation presence and count are unknown/)).toBeVisible();
+  expect(screen.queryByText(/Word/)).not.toBeInTheDocument();
+});
 it("keeps a measured zero quiet and distinct from non-applicable coverage", () => {
   show(zero);
   expect(screen.getByText("The saved main-document-body inventory recorded no native Word equations.")).toBeVisible();

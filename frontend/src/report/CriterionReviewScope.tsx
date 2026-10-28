@@ -17,6 +17,7 @@ import { claimFocusContinuation, type FocusContinuation } from "../routing/focus
 import { confirmedJudgment, criterionRecordId, revealCriterionRecord, SAVED_CRITERION_PARAM } from "./savedJudgment";
 import { useJudgmentRevisions } from "./useJudgmentRevisions";
 import type { RevisionDraft } from "./useJudgmentRevisions";
+import { reportStep } from "./reviewStep";
 
 // Query identity changes on cache clear, including logout/login to the same
 // instructor. Data identity alone does not distinguish those auth lifetimes.
@@ -92,7 +93,10 @@ export function CriterionReviewProvider({ checkRunId, instructorId, children }: 
   const blocker = useBlocker(({ nextLocation }) => {
     const sameOwner = nextLocation.pathname === `/report/${checkRunId}`
       || nextLocation.pathname === `/report/${checkRunId}/document`;
-    if (sameOwner || nextLocation.pathname === "/signin" || !isCurrent()
+    const changingStep = sameOwner && location.pathname === `/report/${checkRunId}`
+      && nextLocation.pathname === location.pathname
+      && reportStep(location.search, location.hash) !== reportStep(nextLocation.search, nextLocation.hash);
+    if ((sameOwner && !changingStep) || nextLocation.pathname === "/signin" || !isCurrent()
       || authQuery?.state.status !== "success" || (records.current.size === 0 && !revisions.hasDrafts)) return false;
     exitKind.current = revisions.busy || [...records.current.values()].some(draft => draft.saving) ? "saving"
       : [...records.current.values()].some(draft => draft.uncertainRevision !== undefined) ? "uncertain"
@@ -135,9 +139,11 @@ export function CriterionReviewProvider({ checkRunId, instructorId, children }: 
       && isAssessmentRevision(draft.reviewedRevision) && draft.reviewedRevision === assessment?.assessment_revision,
     viewSaved(criterionId, trigger) {
       if (!isCurrent()) return;
-      const target = document.getElementById("criteria-results-heading") ?? document.getElementById("escalated-heading");
+      const savedHeading = document.getElementById("criteria-results-heading") ?? document.getElementById("escalated-heading");
+      const target = savedHeading && !savedHeading.closest("[hidden]")
+        ? savedHeading : document.getElementById("readiness-report-heading") ?? document.querySelector<HTMLElement>("main h1");
       const owned = document.hasFocus() && document.activeElement === trigger;
-      if (target && owned) { revealCriterionRecord(target); target.focus(); }
+      if (target && owned) { revealCriterionRecord(target); target.focus({ preventScroll: true }); }
       setSavedNavigation((previous) => ({ version: (previous?.version ?? 0) + 1, criterionId,
         owner: target && owned && document.activeElement === target ? target : null }));
       const next = new URLSearchParams(location.search);

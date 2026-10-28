@@ -89,6 +89,7 @@ function recordProcess(row: ManuscriptListItem) {
   // claim both "Preparing manuscript" and "Record instructor decision."
   if (row.latest_check_run_status) return row.latest_check_run_status;
   if (row.ingest_status === "failed") return "upload_failed" as const;
+  if (row.purged_at) return "source_deleted" as const;
   if (row.ingest_status === "pending" || row.ingest_status === "processing") {
     return "preparing" as const;
   }
@@ -173,19 +174,24 @@ function RecordPrimaryAction({
   onStartCheck: (id: number) => void;
   onUploadReplacement: () => void;
 }) {
+  if (row.purged_at) {
+    if (row.latest_done_check_run_id) return <ActionLink id={`review-desk-primary-${row.id}`} to={`/report/${row.latest_done_check_run_id}/document`}>Open saved review</ActionLink>;
+    if (row.latest_check_run_id) return <ActionLink id={`review-desk-primary-${row.id}`} to={`/checks/${row.latest_check_run_id}`}>View check history</ActionLink>;
+    return <Button variant="secondary" onClick={onUploadReplacement}>Upload manuscript again</Button>;
+  }
   if (row.ingest_status === "failed") {
     return <Button variant="secondary" onClick={onUploadReplacement}>Try a corrected file</Button>;
   }
   if (row.latest_check_run_status === "done" && row.latest_check_run_id) {
-    const label = row.escalations_awaiting_review > 0
+    const label = row.latest_decision
+      ? "Open recorded review"
+      : row.escalations_awaiting_review > 0
       ? `Review ${row.escalations_awaiting_review} unresolved ${row.escalations_awaiting_review === 1 ? "criterion" : "criteria"}`
-      : row.latest_decision
-        ? "Open manuscript review"
-        : "Review manuscript and decide";
+      : "Review manuscript and decide";
     const description = row.latest_decision
-      ? `${label}. Opens the manuscript and recorded analysis.`
+      ? `${label}. Opens the manuscript and recorded analysis. Reopen the decision before making changes.`
       : `${label}. Opens the manuscript and analysis.`;
-    const destination = `/report/${row.latest_check_run_id}/document${row.escalations_awaiting_review > 0 ? "?view=decision&pane=review" : ""}`;
+    const destination = `/report/${row.latest_check_run_id}/document${!row.latest_decision && row.escalations_awaiting_review > 0 ? "?view=decision&pane=review" : ""}`;
     return <ActionLink id={`review-desk-primary-${row.id}`} to={destination} aria-label={description}>{label}</ActionLink>;
   }
   if (row.latest_check_run_status && row.latest_check_run_id) {
@@ -244,6 +250,7 @@ function WorkQueueRecord({
         <span className="signal-record__label">Process</span>
         <ProcessStatus status={recordProcess(row)} />
         {row.ingest_status === "failed" && <p>{failureCopy}</p>}
+        {row.purged_at && <p>Stored file deleted. Upload this manuscript again to start a new check. Existing reports, decisions and audit history are kept.</p>}
       </div>
       <div className="signal-record__assessment">
         <span className="signal-record__label">System readiness</span>
@@ -253,7 +260,9 @@ function WorkQueueRecord({
         {row.escalations_awaiting_review > 0 && (
           <p>
             <strong>{row.escalations_awaiting_review}</strong>{" "}
-            {row.escalations_awaiting_review === 1 ? "criterion task needs" : "criterion tasks need"} you
+            {row.latest_decision
+              ? `${row.escalations_awaiting_review === 1 ? "criterion was" : "criteria were"} unresolved when this decision was recorded.`
+              : `${row.escalations_awaiting_review === 1 ? "criterion task needs" : "criterion tasks need"} you`}
           </p>
         )}
         {row.latest_decision && (
@@ -266,6 +275,7 @@ function WorkQueueRecord({
           onStartCheck={onStartCheck}
           onUploadReplacement={onUploadReplacement}
         />
+        {row.purged_at && row.latest_check_run_id && <Button variant="secondary" onClick={onUploadReplacement}>Upload manuscript again</Button>}
         <details>
           <summary>More actions</summary>
           <div>
@@ -282,7 +292,7 @@ function WorkQueueRecord({
                 <TrailingChevronIcon />
               </WorkflowLink>
             )}
-            {row.latest_done_check_run_id ? (
+            {!row.purged_at && (row.latest_done_check_run_id ? (
               <button type="button" onClick={() => onRerun(row.id)}>Run again</button>
             ) : (
               row.latest_check_run_status === "failed" && (
@@ -296,7 +306,7 @@ function WorkQueueRecord({
                 // plain new-check flow "Start check" uses elsewhere.
                 <button type="button" onClick={() => onStartCheck(row.id)}>Start a fresh check</button>
               )
-            )}
+            ))}
             {row.ingest_status === "failed" && (
               <button
                 type="button"

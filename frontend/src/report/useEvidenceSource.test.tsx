@@ -1,4 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { StrictMode } from "react";
 import { act, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ME_QUERY_KEY } from "../auth/useAuth";
@@ -28,6 +29,26 @@ function mount(ui: React.ReactNode) {
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
 describe("recorded evidence query boundaries", () => {
+  it("does not send a source request for the immediately retired StrictMode setup", async () => {
+    const fetch = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      snapshot_id: id, source_identity: id, source_format: "pdf",
+      placement: { reference_id: id, state: "text_layer_match", page: 7, boxes: [[1, 2, 3, 4]], paragraph: null, reason: null },
+      caption: "Verified page seven",
+    })));
+    vi.stubGlobal("fetch", fetch);
+    mount(<StrictMode><Location /></StrictMode>);
+    expect(await screen.findByText("Verified page seven")).toBeVisible();
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(fetch.mock.calls[0][1].signal.aborted).toBe(false);
+  });
+
+  it("sends nothing when a source observer retires before transport starts", async () => {
+    const fetch = vi.fn(); vi.stubGlobal("fetch", fetch);
+    const { view } = mount(<Location />);
+    view.unmount();
+    await act(async () => { await Promise.resolve(); });
+    expect(fetch).not.toHaveBeenCalled();
+  });
   it.each([2, 4])("rejects a separately loaded manifest from revision %s", async revision => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({
       snapshot_id: id, assessment_revision: revision, llm_mode: "real", references: [],

@@ -4,6 +4,12 @@ import type { StatisticalCheckScopeOut } from "../api/types";
 import { StatisticalCheckScope } from "./StatisticalCheckScope";
 
 describe("saved statistical processing scope", () => {
+  it("qualifies saved processing when descriptive assumptions remain unassessed", () => {
+    render(<StatisticalCheckScope scope={{ state: "completed", unassessed_descriptive_rows: 2 }} />);
+    expect(screen.getByText("Statistical checks: Not fully assessed.")).toBeVisible();
+    expect(screen.getByText(/2 descriptive rows were not assessed by GRIM\/GRIMMER/)).toBeVisible();
+    expect(screen.queryByText(/Completion recorded/)).not.toBeInTheDocument();
+  });
   it.each([
     ["completed", "Completion recorded.", /does not establish that every reported value is correct/],
     ["not_applicable", "Not applicable.", /does not establish that the manuscript contains no statistics/],

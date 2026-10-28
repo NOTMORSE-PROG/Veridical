@@ -33,7 +33,7 @@ export function AgreementComparison({ flag, findingNumber, onSource, activeRole 
         <h4>{statement.label}</h4>
         {activeRole === statement.role && <p className="signal-save-state">Selected for source inspection</p>}
         <blockquote className="signal-evidence-quote"><span>“{statement.text}”</span>{statement.anchor?.trim() && <cite>{instructorAnchor(statement.anchor)}</cite>}</blockquote>
-        {statement.anchor?.trim() ? onSource ? <Button id={controlId} variant="quiet" onClick={() => onSource(statement.anchor, statement.role)}>Show {statement.role === "objective" ? "statement A" : statement.role === "result" ? "statement B" : "recorded statement"} in manuscript</Button>
+        {statement.anchor?.trim() ? onSource ? <Button id={controlId} variant="secondary" onClick={() => onSource(statement.anchor, statement.role)}>Show {statement.role === "objective" ? "statement A" : statement.role === "result" ? "statement B" : "recorded statement"} in manuscript</Button>
           : <ActionLink id={controlId} to={sourcePath} variant="quiet" aria-label={`${label}${findingNumber ? `. Finding ${findingNumber}` : ""}`} onClick={() => rememberRouteReturnFocus(location.pathname + location.search, sourcePath, controlId)}>{label}</ActionLink>
           : <p>No manuscript location was recorded for this statement.</p>}
       </div>;

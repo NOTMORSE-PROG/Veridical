@@ -43,6 +43,28 @@ function stubFetchByPath(handlers: Record<string, unknown>) {
 describe("FlagDetailPage", () => {
   afterEach(() => vi.unstubAllGlobals());
 
+  it("opens a statistical finding's bound original-page Dialog from its standalone route", async () => {
+    const snapshot = "a".repeat(64), reference = "b".repeat(64);
+    renderFlag(makeFlag({ check_kind: "statistical_forensics", ai_verdict_summary: "p_value_mismatch",
+      evidence_excerpt: "t(28) = 2.45, p = .001", page_anchor: "page 1",
+      p_value_comparison: { reported: "0.001", recalculated: "0.021" } }), {
+      "/check-runs/44/evidence": { snapshot_id: snapshot, assessment_revision: 0, references: [
+        { reference_id: reference, flag_id: 20, criterion_id: null, role: "finding_excerpt", index: 0,
+          quote: "t(28) = 2.45, p = .001", anchor: "page 1", source_scope: "own_manuscript" },
+      ] },
+      [`/check-runs/44/evidence/${reference}/page`]: { snapshot_id: snapshot,
+        placement: { reference_id: reference }, image_data_url: null,
+        caption: "The original image is unavailable in this control." },
+    });
+    const source = await screen.findByRole("button", { name: "Open original page: page 1" });
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    source.focus(); fireEvent.click(source);
+    const dialog = await screen.findByRole("dialog", { name: "Original source: page 1" });
+    expect(within(dialog).getByText("t(28) = 2.45, p = .001")).toBeVisible();
+    expect(await within(dialog).findByText("The original image is unavailable in this control.")).toBeVisible();
+    expect(within(dialog).getByText("No original-page image is available for this saved evidence.")).toBeVisible();
+  });
+
   it("BUG-435: warns about test AI responses without attributing a local F7 comparison to fixtures", async () => {
     renderFlag(makeFlag({ check_kind: "originality_reuse", llm_mode: "fake", is_passage_level: true,
       affects_readiness: false, citation_source_key: null, ai_verdict_summary: "possible_reuse",

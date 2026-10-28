@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { PdfPane } from "./PdfPane";
 import type { FlagSummaryOut } from "../api/types";
 import { comparisonLeadSnapshot } from "../domain/comparisonLeadIdentity";
-import { useLayoutEffect, useRef } from "react";
+import { StrictMode, useLayoutEffect, useRef } from "react";
 
 const mocks = vi.hoisted(() => ({ getDocument: vi.fn() }));
 vi.mock("pdfjs-dist", () => ({ GlobalWorkerOptions: {}, getDocument: mocks.getDocument }));
@@ -44,7 +44,7 @@ class ResizeStub {
   emit() { this.callback([], this as unknown as ResizeObserver); }
 }
 
-function installGeometry(root: HTMLElement) {
+async function installGeometry(root: HTMLElement) {
   let width = 600;
   Object.defineProperty(root, "clientWidth", { configurable: true, get: () => width });
   Object.defineProperty(root, "clientHeight", { configurable: true, value: 500 });
@@ -68,6 +68,7 @@ function installGeometry(root: HTMLElement) {
     root.scrollTop = Math.max(0, options.top ?? root.scrollTop);
     root.scrollLeft = Math.max(0, options.left ?? root.scrollLeft);
   });
+  await waitFor(() => expect(ResizeStub.instances.some((entry) => entry.target === root)).toBe(true));
   const resize = ResizeStub.instances.find((entry) => entry.target === root)!;
   act(() => resize.emit());
   return { pages, resize: (next: number) => { width = next; act(() => resize.emit()); }, notify: () => act(() => resize.emit()) };
@@ -94,6 +95,21 @@ describe("PdfPane page visibility", () => {
   afterEach(() => {
     cleanup();
     vi.unstubAllGlobals();
+  });
+
+  it("starts one source-file load after StrictMode retires its first effect", async () => {
+    const loadFile = vi.fn().mockResolvedValue(new Uint8Array([1, 2, 3]));
+    render(<StrictMode><PdfPane {...props} fileUrl="recorded-source" loadFile={loadFile} /></StrictMode>);
+    await screen.findByLabelText("Page 29 of 29");
+    expect(loadFile).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not load a PDF after its effect retires before transport", async () => {
+    const loadFile = vi.fn();
+    const view = render(<PdfPane {...props} fileUrl="retired-source" loadFile={loadFile} />);
+    view.unmount();
+    await act(async () => { await Promise.resolve(); });
+    expect(loadFile).not.toHaveBeenCalled();
   });
 
   it("does not duplicate the review queue with page-scope finding chips", async () => {
@@ -177,6 +193,7 @@ describe("PdfPane page visibility", () => {
     expect(observations).toEqual([0]);
     expect(screen.queryByLabelText("Page 29 of 29")).not.toBeInTheDocument();
     expect(document.querySelector('[data-reference-id="' + "B".repeat(64) + '"]')).toBeNull();
+    await waitFor(() => expect(releaseB).toBeTypeOf("function"));
     await act(async () => releaseB(new Uint8Array([2])));
     expect(await screen.findByLabelText("Page 29 of 29")).toBeInTheDocument();
     expect(mocks.getDocument).toHaveBeenCalledWith({ data: new Uint8Array([2]) });
@@ -199,7 +216,7 @@ describe("PdfPane page visibility", () => {
     render(<PdfPane {...props} fileUrl="long.pdf" />);
     await screen.findByLabelText("Page 29 of 29");
     const root = screen.getByRole("region", { name: "Full manuscript, scrollable" });
-    const geometry = installGeometry(root);
+    const geometry = await installGeometry(root);
     fireEvent.change(screen.getByRole("spinbutton"), { target: { value: "3" } });
     fireEvent.click(screen.getByRole("button", { name: "Go to entered page" }));
     expect(geometry.pages[2].getBoundingClientRect().top).toBe(100);
@@ -218,7 +235,7 @@ describe("PdfPane page visibility", () => {
     render(<PdfPane {...props} fileUrl="long.pdf" />);
     await screen.findByLabelText("Page 29 of 29");
     const root = screen.getByRole("region", { name: "Full manuscript, scrollable" });
-    const geometry = installGeometry(root);
+    const geometry = await installGeometry(root);
     root.scrollTop = 1260 + 400;
     fireEvent.scroll(root);
     fireEvent.click(screen.getByRole("button", { name: "Zoom in" }));
@@ -241,7 +258,7 @@ describe("PdfPane page visibility", () => {
     render(<PdfPane {...props} fileUrl="long.pdf" />);
     await screen.findByLabelText("Page 29 of 29");
     const root = screen.getByRole("region", { name: "Full manuscript, scrollable" });
-    const geometry = installGeometry(root);
+    const geometry = await installGeometry(root);
     root.scrollTop = 1660;
     fireEvent.scroll(root);
     fireEvent.wheel(root);
@@ -266,7 +283,7 @@ describe("PdfPane page visibility", () => {
     const { rerender } = render(<PdfPane {...props} fileUrl="long.pdf" />);
     await screen.findByLabelText("Page 29 of 29");
     const root = screen.getByRole("region", { name: "Full manuscript, scrollable" });
-    installGeometry(root);
+    await installGeometry(root);
     rerender(<PdfPane {...props} fileUrl="long.pdf" requestedPage={3} />);
     fireEvent.wheel(root);
     act(() => frames.splice(0).forEach((callback) => callback(0)));

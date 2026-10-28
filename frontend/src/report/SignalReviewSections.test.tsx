@@ -160,6 +160,28 @@ function expectSelectedSource(link: HTMLElement, criterionId: number, anchor: st
 }
 
 describe("SignalEscalatedPanel / SignalResolutionCard", () => {
+  it.each([3, 4])("joins contextual source actions only to the current assessment, even when an old quote is unchanged (item epoch %s)", async epoch => {
+    const item = { ...REAL_MAJORITY, assessment_revision: epoch,
+      reasoning: "An explanation saved with this escalation response.",
+      evidence: [{ quote: "The same quotation retained across revisions.", anchor: "page 3" }] };
+    const row = { ...savedRow(item, ""), check_result_id: item.check_result_id, outcome: "escalated", resolution: null };
+    const fetch = stubFetchByPath({
+      "/check-runs/5/escalated": [item],
+      "/check-runs/5/report": reportWith({ assessment_revision: 4, results: [row] }),
+      "/check-runs/5/evidence": { snapshot_id: "a".repeat(64), assessment_revision: 4, llm_mode: "real", references: [{
+        reference_id: "b".repeat(64), criterion_id: item.criterion_id, flag_id: null, role: "criterion_evidence", index: 0,
+        ...item.evidence[0], source_scope: "own_manuscript", source_state: "not_checked",
+      }] },
+    });
+    vi.stubGlobal("fetch", fetch);
+    renderSelected(item.criterion_id);
+    await screen.findByRole("heading", { name: item.criterion_text });
+    await waitFor(() => expect(fetch.mock.calls.some(([url]) => String(url).endsWith("/evidence"))).toBe(true));
+    if (epoch === 4) expect(await screen.findByRole("button", { name: "Open original page: page 3" })).toBeEnabled();
+    else expect(screen.queryByRole("button", { name: "Open original page: page 3" })).not.toBeInTheDocument();
+    expect(screen.getByText(/The same quotation retained across revisions/)).toBeVisible();
+    expect(fetch.mock.calls.some(([url]) => String(url).includes("/source-file"))).toBe(false);
+  });
   it("shows the actual explanation and all located basis before choices and describes confirmation", async () => {
     const item = { ...REAL_MAJORITY, reasoning: "Saved representative explanation", evidence: [
       { quote: "Located source excerpt", anchor: "paragraph 57" },
@@ -202,7 +224,7 @@ describe("SignalEscalatedPanel / SignalResolutionCard", () => {
     }
     expect(screen.getByText(item.reason)).toBeVisible();
     expect(screen.queryByText("Recorded AI explanation")).not.toBeInTheDocument();
-    expect(screen.getByText("No grade accepted")).toBeVisible();
+    expect(screen.getByText("Your judgment is needed")).toBeVisible();
   });
 
   it.each([true, false])("places omitted source coverage beside the pending judgment only for the current epoch (%s)", async matching => {
@@ -264,7 +286,7 @@ describe("SignalEscalatedPanel / SignalResolutionCard", () => {
     };
     vi.stubGlobal("fetch", stubFetchByPath({ "/check-runs/5/escalated": [item] }));
     renderSelected(LEVELLED_ITEM.criterion_id);
-    expect(await screen.findByText("No grade accepted")).toBeInTheDocument();
+    expect(await screen.findByText("Your judgment is needed")).toBeInTheDocument();
     expect(screen.queryByText(/Split vote:/)).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /Accept AI suggestion/ })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Exemplary" })).toBeEnabled();

@@ -1,4 +1,5 @@
 import type { StatisticalCheckScopeOut } from "../api/types";
+import { descriptiveAssumptionLimit } from "./statisticalScopeCopy";
 
 const SCOPE_COPY = {
   completed: [
@@ -20,8 +21,9 @@ const SCOPE_COPY = {
 } as const;
 
 export function StatisticalCheckScope({ scope }: { scope?: StatisticalCheckScopeOut | null }) {
-  const state = scope?.state;
+  const limitation = descriptiveAssumptionLimit(scope);
+  const state = limitation ? "incomplete" : scope?.state;
   const [label, detail] = state === "completed" || state === "not_applicable" || state === "incomplete"
     ? SCOPE_COPY[state] : SCOPE_COPY.not_recorded;
-  return <p className="signal-review-section__intro signal-statistical-scope"><strong>{label}</strong>{" "}<span>{detail}</span></p>;
+  return <p className="signal-review-section__intro signal-statistical-scope"><strong>{label}</strong>{" "}<span>{detail}</span>{limitation && <> <span>{limitation}</span></>}</p>;
 }

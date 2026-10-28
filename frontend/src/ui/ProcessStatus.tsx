@@ -1,8 +1,9 @@
 import type { CheckRunStatus } from "../api/types";
 
-type ProcessStatusValue = CheckRunStatus | "not_checked" | "upload_failed" | "preparing";
+type ProcessStatusValue = CheckRunStatus | "not_checked" | "upload_failed" | "preparing" | "source_deleted";
 
 const PROCESS_LABELS: Record<ProcessStatusValue, string> = {
+  source_deleted: "Stored file deleted",
   not_checked: "Ready to check",
   upload_failed: "Upload needs attention",
   preparing: "Preparing manuscript",
@@ -24,7 +25,7 @@ export function ProcessStatus({ status }: { status: ProcessStatusValue }) {
       ? "done"
       : status === "cancelled"
         ? "cancelled"
-        : status === "not_checked"
+        : status === "not_checked" || status === "source_deleted"
           ? "neutral"
           : "running";
   return (
