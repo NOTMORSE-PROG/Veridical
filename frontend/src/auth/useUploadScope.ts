@@ -49,7 +49,7 @@ export function useUploadScope(contextKey?: string) {
     const run = async () => {
       if (!isCurrent()) { invalidate(); throw new StaleUploadContextError(); }
       const generation = ++validation.current;
-      setStatus("checking");
+      setStatus((previous) => previous === "ready" ? previous : "checking");
       let out: SessionStatusOut;
       try { out = await api.get<SessionStatusOut>("/auth/session"); }
       catch (error) {

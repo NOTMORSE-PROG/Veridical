@@ -129,7 +129,9 @@ describe("Library mounted upload ownership", () => {
     const preflight = gate<Response>();
     const current = await mount({ auth: read => read === 2 ? preflight.promise : json({ instructor: { id: 1 } }) });
     const files = choose(); start();
-    await screen.findByText("Checking your sign-in status.");
+    await waitFor(() => expect(current.reads()).toBe(2));
+    expect(screen.queryByText("Checking your sign-in status.")).not.toBeInTheDocument();
+    expect(screen.getByText("first-private.pdf")).toBeVisible();
     expect(screen.queryByText(/Reading the text/)).not.toBeInTheDocument();
     expect(current.posts).toHaveLength(0);
     await act(async () => { preflight.release(unavailable()); });
@@ -173,7 +175,8 @@ describe("Library mounted upload ownership", () => {
     fireEvent.click(opener);
     const dialog = screen.getByRole("dialog");
     fireEvent.click(within(dialog).getByRole("button", { name: action === "skip" ? "Skip and delete this copy" : "Delete upload" }));
-    await screen.findByText("Checking your sign-in status.");
+    await waitFor(() => expect(current.reads()).toBe(4));
+    expect(screen.queryByText("Checking your sign-in status.")).not.toBeInTheDocument();
     expect(within(dialog).getByRole("button", { name: action === "skip" ? "Keep deciding" : "Cancel" })).not.toBeDisabled();
     fireEvent.click(within(dialog).getByRole("button", { name: action === "skip" ? "Keep deciding" : "Cancel" }));
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();

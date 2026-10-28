@@ -148,17 +148,63 @@ describe.each(["manuscript", "format"] as const)("%s upload uncertainty", (kind)
     expect(out.router.state.location.pathname).toBe("/");
   });
 
-  it("returning from inspection hides context until a fresh session check, and never submits", async () => {
+  it("returning from another tab preserves the file and focus during a quiet session check", async () => {
     let pending: ReturnType<typeof deferred<Response>> | undefined;
     const out = setup(modal(), async () => json(receipt), async () => pending ? pending.promise : json({ instructor: instructor(1) }));
     await choose();
+    const submit = screen.getByRole("button", { name: initial });
+    submit.focus();
     pending = deferred<Response>();
     fireEvent.focus(window);
-    await screen.findByText("Checking your sign-in status.");
-    expect(screen.queryByRole("button", { name: initial })).not.toBeInTheDocument();
+    await waitFor(() => expect(out.gets).toHaveBeenCalledTimes(2));
+    expect(screen.queryByText("Checking your sign-in status.")).not.toBeInTheDocument();
+    expect(screen.getByText("private.docx")).toBeVisible();
+    expect(submit).toBeVisible();
+    expect(submit).toHaveFocus();
     expect(out.posts).not.toHaveBeenCalled();
     await act(async () => { pending!.resolve(json({ instructor: instructor(1) })); });
     expect(await screen.findByText("private.docx")).toBeInTheDocument();
+    expect(out.posts).not.toHaveBeenCalled();
+  });
+
+  it("keeps the upload form visible while its success awaits the post-response account check", async () => {
+    const checked = deferred<Response>();
+    let reads = 0;
+    const out = setup(modal(), async () => json(receipt), async () => {
+      reads += 1;
+      return reads === 3 ? checked.promise : json({ instructor: instructor(1) });
+    });
+    await choose();
+    fireEvent.click(screen.getByRole("button", { name: initial }));
+    await waitFor(() => expect(reads).toBe(3));
+    expect(out.posts).toHaveBeenCalledTimes(1);
+    expect(screen.getByText("private.docx")).toBeVisible();
+    expect(screen.queryByText("Checking your sign-in status.")).not.toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: /Upload complete|Latest draft confirmed/ })).not.toBeInTheDocument();
+    expect(out.router.state.location.pathname).toBe("/");
+    await act(async () => { checked.resolve(json({ instructor: instructor(1) })); });
+    if (kind === "format") {
+      await waitFor(() => expect(out.router.state.location.pathname).toBe(`/rubric/${rubricReceipt.id}/review`));
+    } else {
+      await screen.findByRole("heading", { name: "Upload complete" });
+    }
+    expect(out.posts).toHaveBeenCalledTimes(1);
+  });
+
+  it("retires the preserved file if a tab-return check establishes another account", async () => {
+    const pending = deferred<Response>();
+    let reads = 0;
+    const out = setup(modal(), async () => json(receipt), async () => {
+      reads += 1;
+      return reads === 2 ? pending.promise : json({ instructor: instructor(1) });
+    });
+    await choose();
+    fireEvent.focus(window);
+    await waitFor(() => expect(reads).toBe(2));
+    expect(screen.getByText("private.docx")).toBeVisible();
+    await act(async () => { pending.resolve(json({ instructor: instructor(2) })); });
+    await screen.findByText(/Your sign-in context changed/);
+    expect(screen.queryByText("private.docx")).not.toBeInTheDocument();
     expect(out.posts).not.toHaveBeenCalled();
   });
 
