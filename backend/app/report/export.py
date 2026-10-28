@@ -46,6 +46,7 @@ from reportlab.platypus import (
     Frame,
     HRFlowable,
     Image,
+    KeepTogether,
     PTOContainer,
     SimpleDocTemplate,
     Spacer,
@@ -1225,6 +1226,7 @@ def build_report_pdf(data: ReportExportData) -> bytes:
         )
         flow.append(draft_tag)
     flow.append(Spacer(1, 6))
+    calculation_details = []
     # BUG-133 (ground rule 8): this used to render in `styles["score"]"
     # (20pt bold) -- twice the size of the readiness-band badge above it
     # (`body_bold`, 10pt) and completely unlabeled, so the composite
@@ -1251,14 +1253,14 @@ def build_report_pdf(data: ReportExportData) -> bytes:
         displayed_score = round(
             report.composite_score, get_settings().export_numeric_detail_decimal_places
         )
-        flow.append(
+        calculation_details.append(
             Paragraph(
                 f"{label}: {displayed_score}% ({qualification}).",
                 styles["caption"],
             )
         )
     else:
-        flow.append(Paragraph("Composite detail: not available.", styles["caption"]))
+        calculation_details.append(Paragraph("Composite detail: not available.", styles["caption"]))
     if unconfirmed:
         noun = "result" if unconfirmed == 1 else "results"
         flow.append(
@@ -1276,15 +1278,15 @@ def build_report_pdf(data: ReportExportData) -> bytes:
                 styles["body"],
             )
         )
-    flow.append(
+    calculation_details.append(
         Paragraph(
             f"Ready at {report.thresholds['ready_min_score']}% or above. "
             f"Not Ready at {report.thresholds['not_ready_max_score']}% or below.",
             styles["meta"],
         )
     )
-    flow.append(Spacer(1, 4))
-    flow.append(Paragraph(escape(_explainer(report)), styles["body"]))
+    calculation_details.append(Spacer(1, 4))
+    calculation_details.append(Paragraph(escape(_explainer(report)), styles["body"]))
     # V-069 AC2/AC5: the rubric's own institutional RATING, transcribed --
     # owner-approved treatment (2026-08-25): shown as a small, clearly-
     # attributed line (ground rule 8) -- the same treatment BUG-133 later
@@ -1293,8 +1295,8 @@ def build_report_pdf(data: ReportExportData) -> bytes:
     # this rubric is levelled (AC3).
     if report.levelled_rating is not None and report.levelled_rating.n_decided > 0:
         lr = report.levelled_rating
-        flow.append(Spacer(1, 4))
-        flow.append(
+        calculation_details.append(Spacer(1, 4))
+        calculation_details.append(
             Paragraph(
                 escape(
                     f"Rubric formula detail: {lr.achieved_points:g}/{lr.max_points:g} points = "
@@ -1310,6 +1312,19 @@ def build_report_pdf(data: ReportExportData) -> bytes:
                 styles["caption"],
             )
         )
+    flow.append(
+        _navigation_heading(
+            "Calculation details", styles["h2"], "calculation-details", "Calculation details"
+        )
+    )
+    calculation_intro = Paragraph(
+        "These recorded values explain the calculation. "
+        "The readiness band and instructor decision are shown above.",
+        styles["caption"],
+    )
+    calculation_intro.keepWithNext = True
+    flow.append(calculation_intro)
+    flow.extend(calculation_details)
     flow.append(Spacer(1, 10))
 
     flow.append(
@@ -1326,6 +1341,9 @@ def build_report_pdf(data: ReportExportData) -> bytes:
         Paragraph(
             '<link href="#report-overview">Readiness and instructor decision</link>', styles["body"]
         )
+    )
+    flow.append(
+        Paragraph('<link href="#calculation-details">Calculation details</link>', styles["body"])
     )
 
     def criterion_navigation_label(row):
@@ -1853,24 +1871,74 @@ def build_report_pdf(data: ReportExportData) -> bytes:
                     prefix.extend(_originality_scope_flowables(data, styles))
                     scope_emitted = True
                 flag_intro = []
-                start_items = [*prefix, divider, heading, header, evidence_label]
+                local_start = [divider, heading, header, evidence_label]
+                start_items = [*prefix, *local_start]
                 for item in start_items:
                     item.keepWithNext = True
-                start_height = 0
-                previous_space = 0
-                for item in start_items:
-                    start_height += max(previous_space, item.getSpaceBefore())
-                    start_height += item.wrap(content_width, A4[1])[1]
-                    previous_space = item.getSpaceAfter()
-                start_height += previous_space + min(
-                    excerpt.wrap(content_width, A4[1])[1],
-                    styles["body"].leading * _PRINT_LAYOUT["minimum_evidence_lines"],
-                )
-                flow.append(CondPageBreak(start_height))
-                finding = [*start_items]
-                if not any(entry.quote for entry in common_entries):
-                    finding.append(excerpt)
-                finding.extend(source_blocks(common_entries))
+                emitted_sources = source_blocks(common_entries)
+                leading_excerpt = [] if any(entry.quote for entry in common_entries) else [excerpt]
+                finding = [*start_items, *leading_excerpt, *emitted_sources]
+                grouped_height = None
+                if (
+                    not leading_excerpt
+                    and emitted_sources
+                    and isinstance(emitted_sources[0], Table)
+                ):
+                    # Use a finite-height row: KeepTogether's sentinel height inside
+                    # PTOContainer can detach the source or insert an empty page.
+                    def grouped_start(parts):
+                        block = Table(
+                            [[parts]],
+                            colWidths=[source_width],
+                            splitByRow=1,
+                            splitInRow=0,
+                            hAlign="LEFT",
+                        )
+                        block.setStyle(
+                            TableStyle(
+                                [
+                                    ("LEFTPADDING", (0, 0), (-1, -1), 0),
+                                    ("RIGHTPADDING", (0, 0), (-1, -1), 0),
+                                    ("TOPPADDING", (0, 0), (-1, -1), 0),
+                                    ("BOTTOMPADDING", (0, 0), (-1, -1), 0),
+                                ]
+                            )
+                        )
+                        return block
+
+                    continued_height = Paragraph(
+                        escape(f"{record_identity} (continued)"), styles["caption_bold"]
+                    ).wrap(source_width, source_frame._aH)[1]
+                    grouped = grouped_start([*local_start, emitted_sources[0]])
+                    local_height = grouped.wrap(source_width, source_frame._aH)[1]
+                    if local_height + continued_height <= source_frame._aH:
+                        with_prefix = grouped_start([*prefix, *local_start, emitted_sources[0]])
+                        prefix_height = with_prefix.wrap(source_width, source_frame._aH)[1]
+                        if prefix_height + continued_height <= source_frame._aH:
+                            finding = [with_prefix, *emitted_sources[1:]]
+                            grouped_height = prefix_height
+                        else:
+                            finding = [*prefix, grouped, *emitted_sources[1:]]
+                if grouped_height is not None:
+                    flow.append(CondPageBreak(grouped_height))
+                elif finding[0] is start_items[0]:
+                    # Text-first and oversized entries keep their existing split/
+                    # continuation behavior. Reserve actual emitted text, never an
+                    # omitted summary excerpt in place of its bound source packet.
+                    start_height = 0
+                    previous_space = 0
+                    for item in start_items:
+                        start_height += max(previous_space, item.getSpaceBefore())
+                        start_height += item.wrap(source_width, source_frame._aH)[1]
+                        previous_space = item.getSpaceAfter()
+                    first_evidence = (leading_excerpt + emitted_sources)[:1]
+                    if first_evidence:
+                        start_height += previous_space + min(
+                            first_evidence[0].wrap(source_width, source_frame._aH)[1],
+                            styles["body"].leading * _PRINT_LAYOUT["minimum_evidence_lines"],
+                        )
+                    if start_height <= source_frame._aH:
+                        flow.append(CondPageBreak(start_height))
                 if detail.citation_metadata_review_warning:
                     finding.extend(
                         [
@@ -2136,6 +2204,7 @@ def build_report_pdf(data: ReportExportData) -> bytes:
     flow.append(Spacer(1, 12))
 
     # 7. Final decision.
+    decision_start = len(flow)
     flow.append(
         _navigation_heading(
             "Final Decision", styles["h2"], "instructor-decision-record", "Final Decision"
@@ -2200,6 +2269,9 @@ def build_report_pdf(data: ReportExportData) -> bytes:
                     styles["body"],
                 )
             )
+
+    if report.decision and report.decision_note:
+        flow[decision_start:] = [KeepTogether(flow[decision_start:])]
 
     def _on_page(canvas: Canvas, doc_: SimpleDocTemplate) -> None:
         canvas.saveState()
