@@ -297,8 +297,9 @@ locations must not imitate verified exact text-line boxes.
 
 **Connected criterion evidence (owner, 2026-10-28):** Present the assessment,
 named groups of related saved passages and their original source pages together.
-Keep all saved quotations visible for the selected criterion, with one stable
-grading form. Only an explicit source link opens the manuscript dialog; it keeps
+Keep all saved quotations accessible across the criterion's named groups, with
+all passages in the selected group visible together and one stable grading form.
+Only an explicit source link opens the manuscript dialog; it keeps
 the selected comparison and assessment in view. Previous/Next evidence controls
 must not open a dialog. An unexplained page anchor is not proof of reasoning.
 Unknown or partial records retain their saved explanation and quotations without
@@ -306,6 +307,16 @@ invented relationships. Keep Back navigation above the full review workspace.
 Preserve historical teacher/frozen records; qualify a known source correction
 separately. An exact untouched open prepared-AI note may receive an audited
 source correction without changing its grade.
+
+**Compact criterion organization (owner, 2026-10-28):** Keep the full assessment
+visible and show all named evidence groups with passage counts. Display one
+group at a time, retaining its complete explanation, qualifications and related
+quotations together. Make every group selectable without opening a dialog or
+changing the grade draft. Original page images start collapsed and expand as
+bounded whole-page previews, with explicit source links to the manuscript reader.
+No text truncation, cropped source image or reduction in saved evidence. Apply
+the same organization to current review, saved grades and source context; unknown
+records retain all saved quotations in their honest fallback group.
 
 **Four-module presentation records (owner, 2026-10-28):** The original published
 capstone retains its actual F6 not-applicable and F7 not-run states. Separate

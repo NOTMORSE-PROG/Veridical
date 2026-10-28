@@ -14,7 +14,7 @@ const GROUPS: Record<number, CriterionEvidenceGroup[]> = {
   1: [
     { title: "The prototype that was built", explanation: "The abstract describes a C console application. The implementation saves items in a text file. Together, these passages identify the delivered prototype.", indexes: [1, 3] },
     { title: "The database descriptions disagree", explanation: "The conclusion describes database integration as delivered, but the limitations say there is no database integration. Future work proposes moving to a relational database. Read these statements together when judging how clearly the completed scope is explained.", indexes: [0, 2, 4], previewIndexes: [0, 2] },
-    { title: "Plans need to be separated from completed work", explanation: "The methodology proposes a web interface and relational database. These plans need to be distinguished from the console and text-file implementation shown above.", indexes: [5, 6] },
+    { title: "Plans need to be separated from completed work", explanation: "The methodology proposes a web interface and relational database. These plans need to be distinguished from the console and text-file implementation described in 'The prototype that was built'.", indexes: [5, 6] },
   ],
   2: [
     { title: "Planned tests and reported ratings", explanation: "The evaluation describes intended user testing. The later summary rates the system and lists its components. Those ratings need measured test results and a consistent component count; a testing plan alone does not establish performance.", indexes: [0, 1, 2], previewIndexes: [0, 1] },

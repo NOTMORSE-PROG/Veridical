@@ -454,6 +454,8 @@
   --signal-settings-rule-min: 24rem;
   --signal-review-source-min: 32rem;
   --signal-review-controls-min: 20rem;
+  --signal-criterion-preview-height: 18rem;
+  --signal-criterion-preview-min: 14rem;
   --signal-integrity-module-min: 12rem;
   --signal-review-pair-controls-min: 26rem;
   --signal-review-source-gap: 1.5rem;
