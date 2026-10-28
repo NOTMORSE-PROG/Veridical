@@ -57,6 +57,8 @@ class MetadataComparison:
     provider: str
     doi_source_url: str | None = None
     provider_record_url: str | None = None
+    author_status: str = "not_recorded"
+    author_unassessed_reason: str | None = None
 
     def evidence(self):
         return {
@@ -71,6 +73,8 @@ class MetadataComparison:
             "provider": self.provider,
             "doi_source_url": self.doi_source_url,
             "provider_record_url": self.provider_record_url,
+            "author_status": self.author_status,
+            "author_unassessed_reason": self.author_unassessed_reason,
         }
 
 
@@ -106,10 +110,30 @@ def compare_metadata(
         authors = [_obj(item).get("familyName") for item in _rows(attributes.get("creators"))]
     if citation.year is not None and type(year) is int and citation.year != year:
         differences.append("year")
+    author_status, author_reason = "not_recorded", None
     if citation.authors and authors and isinstance(authors[0], str) and authors[0]:
         cited = citation.authors[0].split(",", 1)[0]
         if _words(cited) != _words(authors[0]):
-            differences.append("first author")
+            from app.checks.citations.extract import (
+                _is_corporate_author_name,
+                source_supported_corporate_names,
+            )
+
+            if (
+                len(citation.authors) == 1
+                and _is_corporate_author_name(cited)
+                and re.search(r"\s+(?:and|&)\s+", cited, re.IGNORECASE)
+            ):
+                supported = source_supported_corporate_names(cited, authors)
+                if supported is not None:
+                    author_status = "source_supported_sequence"
+                else:
+                    author_status, author_reason = "unassessed", "author_boundaries_unassessed"
+            else:
+                differences.append("first author")
+                author_status = "differs"
+        else:
+            author_status = "agrees"
     return MetadataComparison(
         tuple(differences),
         title_status,
@@ -140,6 +164,8 @@ def compare_metadata(
         )
         if settings
         else None,
+        author_status=author_status,
+        author_unassessed_reason=author_reason,
     )
 
 

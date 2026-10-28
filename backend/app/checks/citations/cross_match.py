@@ -200,10 +200,12 @@ def _build_reference_number_index(references: list[ReferenceLike]) -> dict[int, 
     return by_number
 
 
-def cross_match(
-    in_text: list[InTextCitation], references: list[ReferenceLike]
-) -> CrossMatchResult:
-    from app.checks.citations.extract import CrossMatchResult
+def cross_match(in_text: list[InTextCitation], references: list[ReferenceLike]) -> CrossMatchResult:
+    from app.checks.citations.extract import (
+        CrossMatchResult,
+        _is_corporate_author_name,
+        source_supported_corporate_names,
+    )
 
     index: dict[str, list[ReferenceLike]] = {}
     possible_names: dict[str, list[ReferenceLike]] = {}
@@ -254,6 +256,28 @@ def cross_match(
             continue
 
         surnames = list(cite.surnames)
+        if (
+            len(surnames) == 1
+            and _is_corporate_author_name(surnames[0])
+            and re.search(r"\s+(?:and|&)\s+", surnames[0], re.IGNORECASE)
+        ):
+            same_year = [
+                ref for ref in references if reference_date_key(ref) == citation_date_key(cite.year)
+            ]
+            complete = [
+                ref
+                for ref in same_year
+                if source_supported_corporate_names(surnames[0], ref.authors or []) is not None
+            ]
+            if len(complete) == 1:
+                linked.append((cite, complete))
+                cited_order_indexes.add(complete[0].order_index)
+            else:
+                ambiguous.append(cite)
+                # Unresolved corporate boundaries cannot establish that a
+                # same-year source was unused, nor justify an orphan accusation.
+                possibly_cited.update(ref.order_index for ref in same_year)
+            continue
         candidates: list[ReferenceLike] = []
         seen_ids: set[int] = set()
 

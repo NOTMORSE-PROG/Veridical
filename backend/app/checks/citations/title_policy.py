@@ -32,6 +32,7 @@ class _PolicyData(BaseModel):
     si_prefix_symbols: list[str]
     si_unit_symbols: list[str]
     equivalent_words: list[list[str]]
+    equivalent_punctuation: list[list[str]] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def validate_policy(self):
@@ -47,6 +48,22 @@ class _PolicyData(BaseModel):
                 raise ValueError("Title policy contains invalid or repeated characters")
         if set(self.terminal_characters) & set(self.hyphen_characters):
             raise ValueError("Title hyphens cannot be stripped at title edges")
+        seen_punctuation: set[str] = set()
+        for group in self.equivalent_punctuation:
+            if (
+                len(group) < 2
+                or len(set(group)) != len(group)
+                or seen_punctuation.intersection(group)
+                or any(
+                    len(char) != 1 or not unicodedata.category(char).startswith("P")
+                    for char in group
+                )
+                or set(group).intersection(
+                    self.ignored_characters + self.terminal_characters + self.hyphen_characters
+                )
+            ):
+                raise ValueError("Title punctuation groups must contain disjoint punctuation")
+            seen_punctuation.update(group)
         seen = set()
         for group in self.equivalent_words:
             normalized = [_canonical(word.casefold()) for word in group]
@@ -90,6 +107,7 @@ class TitlePolicy:
     preserve_internal_uppercase: bool
     si_symbols: frozenset[str]
     equivalent_words: Mapping[str, str]
+    equivalent_punctuation: Mapping[str, str]
 
 
 @lru_cache
@@ -115,6 +133,9 @@ def load_title_policy(path: Path | None = None) -> TitlePolicy:
             prefix + unit for prefix in raw.si_prefix_symbols for unit in raw.si_unit_symbols
         ),
         MappingProxyType(equivalents),
+        MappingProxyType(
+            {char: group[0] for group in raw.equivalent_punctuation for char in group}
+        ),
     )
 
 
@@ -138,7 +159,7 @@ def _tokens(value: str, policy: TitlePolicy) -> tuple[list[str], list[str]]:
     for token in tokens:
         # Lowercase leaves distinct lexemes such as sharp-s/ss intact.
         # A broader casefold-only match below is uncertainty, not agreement.
-        folded = _canonical(token.lower())
+        folded = policy.equivalent_punctuation.get(token, _canonical(token.lower()))
         mixed_word = (
             policy.preserve_mixed_word_case
             and any(c.isalpha() for c in token)
@@ -174,6 +195,12 @@ def compare_titles(left: object, right: object, policy: TitlePolicy) -> tuple[st
         return "unassessed", "title_hyphenation_unassessed"
     if [policy.equivalent_words.get(t.casefold(), t.casefold()) for t in a] == [
         policy.equivalent_words.get(t.casefold(), t.casefold()) for t in b
-    ] and not any(t in policy.si_symbols for t in raw_left + raw_right):
+    ] and not any(
+        token in policy.si_symbols
+        and not any(pattern.fullmatch(token) for pattern in policy.case_patterns)
+        for index, pair in enumerate(zip(raw_left, raw_right, strict=True))
+        if a[index] != b[index]
+        for token in pair
+    ):
         return "unassessed", "title_case_unassessed"
     return "differs", None

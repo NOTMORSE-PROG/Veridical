@@ -1,5 +1,6 @@
 {
-  "version": "doi-title-nfc-si-v1",
+  "version": "doi-title-nfc-si-apostrophe-v2",
+  "equivalent_punctuation": [["'", "’"]],
   "ignored_characters": [
     "­"
   ],

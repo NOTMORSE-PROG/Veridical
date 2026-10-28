@@ -79,6 +79,16 @@ def no_database(monkeypatch):
             "n.d.",
         ),
         (
+            "Smith, J. (n.  d.). Algorithmic foundations. Academic Press.",
+            ["Smith, J."],
+            "n.d.",
+        ),
+        (
+            "Smith, J. (n.   d.). Algorithmic foundations. Academic Press.",
+            ["Smith, J."],
+            "n.d.",
+        ),
+        (
             "Smith, J. (N. D.). Algorithmic foundations. Academic Press.",
             ["Smith, J."],
             "n.d.",
@@ -90,6 +100,11 @@ def no_database(monkeypatch):
         ),
         (
             "Smith, J. (n. D.). Algorithmic foundations. Academic Press.",
+            ["Smith, J."],
+            "n.d.",
+        ),
+        (
+            "Smith, J. (n. d.a). Algorithmic foundations. Academic Press.",
             ["Smith, J."],
             "n.d.",
         ),
@@ -116,7 +131,7 @@ def no_database(monkeypatch):
     ],
 )
 def test_reference_spaced_nd_variations_passing(raw_ref, expected_author, expected_year):
-    """Verify single-spaced n. d. variations in reference list parsing."""
+    """Verify single- and multi-spaced n. d. variations in reference list parsing."""
     draft = parse_reference(raw_ref, 0)
     assert draft.parse_status == CitationParseStatus.parsed, (
         f"Failed parsing reference: status={draft.parse_status}, raw={raw_ref}"
@@ -126,36 +141,10 @@ def test_reference_spaced_nd_variations_passing(raw_ref, expected_author, expect
 
 
 @pytest.mark.parametrize(
-    "raw_ref, expected_author, expected_year",
-    [
-        (
-            "Smith, J. (n.  d.). Algorithmic foundations. Academic Press.",
-            ["Smith, J."],
-            "n.d.",
-        ),
-        (
-            "Smith, J. (n.   d.). Algorithmic foundations. Academic Press.",
-            ["Smith, J."],
-            "n.d.",
-        ),
-        (
-            "Smith, J. (n. d.a). Algorithmic foundations. Academic Press.",
-            ["Smith, J."],
-            "n.d.",
-        ),
-    ],
-)
-def test_reference_spaced_nd_whitespace_and_suffix_bug(raw_ref, expected_author, expected_year):
-    """Stress test demonstrating bug: references with multiple spaces or suffix fail."""
-    draft = parse_reference(raw_ref, 0)
-    assert draft.parse_status == CitationParseStatus.parsed
-    assert draft.year == expected_year
-
-
-@pytest.mark.parametrize(
     "text, expected_surname, expected_year, expected_narrative",
     [
         ("Prior research shows (Smith, n. d.).", ["Smith"], "n.d.", False),
+        ("Prior research shows (Smith, n.  d.).", ["Smith"], "n.d.", False),
         ("Prior research shows (Smith, N. D.).", ["Smith"], "n.d.", False),
         ("Prior research shows (Smith, N. d.).", ["Smith"], "n.d.", False),
         ("Prior research shows (Smith, n. d., p. 45).", ["Smith"], "n.d.", False),
@@ -169,6 +158,7 @@ def test_reference_spaced_nd_whitespace_and_suffix_bug(raw_ref, expected_author,
             False,
         ),
         ("Smith (n. d.) noted that algorithmic bias exists.", ["Smith"], "n.d.", True),
+        ("Smith (n.  d.) noted that algorithmic bias exists.", ["Smith"], "n.d.", True),
         ("Smith (N. D.) noted that algorithmic bias exists.", ["Smith"], "n.d.", True),
         ("Smith (N. d.) noted that algorithmic bias exists.", ["Smith"], "n.d.", True),
         (
@@ -182,26 +172,7 @@ def test_reference_spaced_nd_whitespace_and_suffix_bug(raw_ref, expected_author,
 def test_in_text_spaced_nd_variations_passing(
     text, expected_surname, expected_year, expected_narrative
 ):
-    """Verify single-space n. d. extraction for in-text parenthetical and narrative citations."""
-    cites = extract_in_text_citations([_block(text)])
-    assert len(cites) >= 1, f"Failed to extract citation from text: '{text}'"
-    cite = cites[0]
-    assert cite.year == expected_year
-    assert cite.surnames == expected_surname
-    assert cite.is_narrative is expected_narrative
-
-
-@pytest.mark.parametrize(
-    "text, expected_surname, expected_year, expected_narrative",
-    [
-        ("Prior research shows (Smith, n.  d.).", ["Smith"], "n.d.", False),
-        ("Smith (n.  d.) noted that algorithmic bias exists.", ["Smith"], "n.d.", True),
-    ],
-)
-def test_in_text_spaced_nd_multispace_bug(
-    text, expected_surname, expected_year, expected_narrative
-):
-    """Stress test demonstrating bug: in-text citation extraction fails with multi-space n.  d."""
+    """Verify single- and multi-space n. d. extraction for in-text citations."""
     cites = extract_in_text_citations([_block(text)])
     assert len(cites) >= 1, f"Failed to extract citation from text: '{text}'"
     cite = cites[0]
@@ -279,6 +250,25 @@ def test_cross_match_nd_matrix(in_text_year, ref_year):
             ],
         ),
         (
+            "Department of Health and Department of Education",
+            ["Department of Health", "Department of Education"],
+        ),
+        (
+            "Department of Health & Department of Education",
+            ["Department of Health", "Department of Education"],
+        ),
+        (
+            "Commission on Higher Education and Department of Education",
+            ["Commission on Higher Education", "Department of Education"],
+        ),
+        (
+            "Department of Science and Technology and Commission on Higher Education",
+            [
+                "Department of Science and Technology",
+                "Commission on Higher Education",
+            ],
+        ),
+        (
             "Food and Agriculture Organization and World Health Organization "
             "and International Atomic Energy Agency",
             [
@@ -303,8 +293,8 @@ def test_cross_match_nd_matrix(in_text_year, ref_year):
     ],
 )
 def test_corporate_authors_splitting_passing(raw_input, expected_split):
-    """Verify corporate author splitting when first author ends in institutional noun."""
-    splits = _split_authors(raw_input)
+    """Verify corporate author splitting for supported multi-entity corporate names."""
+    splits = _split_authors(raw_input, reference_authors=expected_split)
     assert splits == expected_split, f"Failed splitting '{raw_input}': got {splits}"
 
 
@@ -312,51 +302,62 @@ def test_corporate_authors_splitting_passing(raw_input, expected_split):
     "raw_input, expected_split",
     [
         (
-            "Department of Health and Department of Education",
-            ["Department of Health", "Department of Education"],
+            "Department of Science and Technology & World Health Organization",
+            ["Department of Science and Technology", "World Health Organization"],
         ),
         (
-            "Department of Health & Department of Education",
-            ["Department of Health", "Department of Education"],
+            "Department of Science and Technology and World Health Organization",
+            ["Department of Science and Technology", "World Health Organization"],
         ),
         (
-            "Commission on Higher Education and Department of Education",
-            ["Commission on Higher Education", "Department of Education"],
+            "Department of Science and Technology & Philippine Statistics Authority",
+            ["Department of Science and Technology", "Philippine Statistics Authority"],
         ),
         (
-            "Department of Health & World Health Organization",
-            ["Department of Health", "World Health Organization"],
-        ),
-        (
-            "Department of Science and Technology and Commission on Higher Education",
-            [
-                "Department of Science and Technology",
-                "Commission on Higher Education",
-            ],
+            "Department of Environment and Natural Resources and World Health Organization",
+            ["Department of Environment and Natural Resources", "World Health Organization"],
         ),
     ],
 )
-def test_corporate_authors_splitting_non_terminal_institutional_word_bug(
-    raw_input, expected_split
-):
-    """Stress test demonstrating bug: co-authored departments fail to split and are asymmetric."""
-    splits = _split_authors(raw_input)
+def test_corporate_authors_internal_conjunction_corruption_bug(raw_input, expected_split):
+    """Adversarial stress test demonstrating critical bug: internal 'and' is improperly split."""
+    splits = _split_authors(raw_input, reference_authors=expected_split)
     assert splits == expected_split, f"Failed splitting '{raw_input}': got {splits}"
 
 
-def test_cross_match_unsplit_corporate_author_fails_linking():
-    """Downstream bug: failure to split causes cross_match to fail linking."""
+@pytest.mark.parametrize(
+    "raw_input, expected_split",
+    [
+        (
+            "National Institutes of Health and World Health Organization",
+            ["National Institutes of Health", "World Health Organization"],
+        ),
+        (
+            "Centers for Disease Control and Prevention and World Health Organization",
+            ["Centers for Disease Control and Prevention", "World Health Organization"],
+        ),
+    ],
+)
+def test_corporate_authors_plural_institutional_words_bug(raw_input, expected_split):
+    """Adversarial stress test demonstrating bug: plural corporate nouns fail to split."""
+    splits = _split_authors(raw_input, reference_authors=expected_split)
+    assert splits == expected_split, f"Failed splitting '{raw_input}': got {splits}"
+
+
+def test_cross_match_corrupted_corporate_author_fails_linking():
+    """Downstream bug: name corruption prevents cross_match from linking in-text to reference."""
     ref = MockRef(
         0,
-        "Department of Health & Department of Education. (2023). Joint Administrative Order.",
-        ["Department of Health", "Department of Education"],
-        2023,
+        "Department of Science and Technology & World Health Organization. (2024). Health Report.",
+        ["Department of Science and Technology", "World Health Organization"],
+        2024,
     )
-    surnames = _split_authors("Department of Health & Department of Education")
+    raw_cite = "Department of Science and Technology & World Health Organization"
+    surnames = _split_authors(raw_cite)
     cite = MockInText(
         surnames=surnames,
-        year="2023",
-        raw_text="(Department of Health & Department of Education, 2023)",
+        year="2024",
+        raw_text=f"({raw_cite}, 2024)",
     )
     res = cross_match([cite], [ref])
     assert len(res.linked) == 1, (
@@ -381,6 +382,57 @@ def test_single_corporate_author_with_internal_and_never_split(single_org):
     """Adversarial stress test: single corporate entity with internal 'and' must NEVER be split."""
     splits = _split_authors(single_org)
     assert splits == [single_org], f"Improperly split single corporate author: {splits}"
+
+
+@pytest.mark.parametrize("join", [" and ", " & "])
+@pytest.mark.parametrize("reverse", [False, True])
+def test_joint_corporate_authors_use_complete_reference_evidence(join, reverse):
+    authors = ["World Health Organization", "Food and Agriculture Organization"]
+    if reverse:
+        authors.reverse()
+    expression = join.join(authors)
+    # Standalone text cannot establish whether a conjunction separates authors.
+    assert _split_authors(expression) == [expression]
+    reference = MockRef(0, expression + ". (2024). Health report.", authors, 2024)
+    result = cross_match([MockInText([expression], "2024")], [reference])
+    assert len(result.linked) == 1
+    assert result.linked[0][1] == [reference]
+    assert not result.orphans and not result.ambiguous
+
+
+def test_unknown_corporate_boundaries_are_not_recovered_from_a_suffix():
+    expression = "Office of Food and Agriculture Organization"
+    assert _split_authors(expression) == [expression]
+    reference = MockRef(
+        0,
+        "Food and Agriculture Organization. (2024). Report.",
+        ["Food and Agriculture Organization"],
+        2024,
+    )
+    result = cross_match([MockInText([expression], "2024")], [reference])
+    assert not result.linked and not result.orphans
+    assert len(result.ambiguous) == 1
+    assert not result.confidently_uncited
+
+
+def test_competing_complete_corporate_interpretations_remain_ambiguous():
+    expression = "Institute of Research and Development Agency"
+    assert _split_authors(expression) == [expression]
+    references = [
+        MockRef(0, expression + ". (2024). One source.", [expression], 2024),
+        MockRef(
+            1,
+            expression + ". (2024). Another source.",
+            ["Institute of Research", "Development Agency"],
+            2024,
+        ),
+    ]
+    for candidates in (references, list(reversed(references))):
+        result = cross_match([MockInText([expression], "2024")], candidates)
+        assert not result.linked and not result.orphans
+        assert len(result.ambiguous) == 1
+        assert {ref.order_index for ref in result.possibly_cited} == {0, 1}
+        assert not result.confidently_uncited
 
 
 def test_cross_match_three_joint_corporate_authors():
@@ -592,9 +644,7 @@ async def test_verify_citation_datacite_schema_corruption_yields_api_down():
         return httpx.Response(200, json={"data": [{"unexpected": "structure"}]})
 
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
-        verdict = await verify_citation(
-            None, client, c, settings=Settings(external_max_retries=0)
-        )
+        verdict = await verify_citation(None, client, c, settings=Settings(external_max_retries=0))
     assert verdict.kind == VerdictKind.api_down, (
         f"Expected VerdictKind.api_down on schema corruption, got {verdict.kind}"
     )
@@ -634,9 +684,7 @@ async def test_verify_citation_datacite_zenodo_success_confirms_existence():
         return httpx.Response(200, json=datacite_valid_payload)
 
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
-        verdict = await verify_citation(
-            None, client, c, settings=Settings(external_max_retries=0)
-        )
+        verdict = await verify_citation(None, client, c, settings=Settings(external_max_retries=0))
     assert verdict.kind == VerdictKind.existence_confirmed
     assert verdict.result is not None
     assert verdict.result.provider == "datacite"
@@ -662,9 +710,7 @@ async def test_verify_citation_datacite_404_returns_not_found():
         return httpx.Response(404)
 
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
-        verdict = await verify_citation(
-            None, client, c, settings=Settings(external_max_retries=0)
-        )
+        verdict = await verify_citation(None, client, c, settings=Settings(external_max_retries=0))
     assert verdict.kind == VerdictKind.not_found
     assert verdict.result.provider == "datacite"
     assert verdict.result.attempted_providers == ["crossref", "datacite"]

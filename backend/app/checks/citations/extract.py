@@ -26,6 +26,7 @@ from app.checks.citations.numbered import reference_anchor
 from app.config import Settings, get_settings
 from app.findings.identity import FINDING_GROUP_FIELD, finding_group_fingerprint
 from app.ingest.citation_dates import date_patterns
+from app.ingest.reference_metadata_patterns import load_reference_metadata_patterns
 from app.ingest.schemas import TextBlock
 from app.models.enums import FlagSeverity
 
@@ -663,81 +664,60 @@ def _narrative_author_span(
     return start, author
 
 
-CORPORATE_AUTHOR_WORDS = frozenset(
-    {
-        "university",
-        "institute",
-        "institution",
-        "department",
-        "council",
-        "commission",
-        "agency",
-        "organization",
-        "organisation",
-        "association",
-        "committee",
-        "office",
-        "laboratory",
-        "team",
-        "ministry",
-        "authority",
-        "center",
-        "centre",
-        "bureau",
-        "board",
-        "foundation",
-        "society",
-        "federation",
-        "corporation",
-        "administration",
-    }
-)
-
-
 def _is_corporate_author_name(name: str) -> bool:
     tokens = {word.strip(".,;:()").lower() for word in name.split()}
-    return bool(tokens & CORPORATE_AUTHOR_WORDS)
+    words = load_reference_metadata_patterns(
+        get_settings().reference_metadata_patterns_file
+    ).corporate_author_words
+    return bool(tokens & words)
 
 
-def _split_corporate_authors(raw: str) -> list[str]:
-    """Split multiple corporate author names joined by 'and' or '&' without commas,
-    e.g. 'Food and Agriculture Organization and World Health Organization' ->
-    ['Food and Agriculture Organization', 'World Health Organization'].
+def source_supported_corporate_names(raw: str, authors: list[str]) -> list[str] | None:
+    """Bind an entire printed expression to this reference's ordered full names.
+
+    Internal conjunctions belong to a name unless complete source evidence
+    establishes a boundary. No suffix, nearest name, or cross-reference union
+    can establish an author identity.
     """
-    pattern = re.compile(r"\s+(?:and|&)\s+", re.IGNORECASE)
-    splits: list[str] = []
-    last_end = 0
-    for m in pattern.finditer(raw):
-        left = raw[last_end : m.start()].strip()
-        right = raw[m.end() :].strip()
-        l_tokens = [w.strip(".,;:()").lower() for w in left.split()]
-        r_tokens = [w.strip(".,;:()").lower() for w in right.split()]
-        l_ok = bool(
-            l_tokens
-            and (l_tokens[0] in CORPORATE_AUTHOR_WORDS or l_tokens[-1] in CORPORATE_AUTHOR_WORDS)
-        )
-        r_ok = bool(
-            r_tokens
-            and (r_tokens[0] in CORPORATE_AUTHOR_WORDS or r_tokens[-1] in CORPORATE_AUTHOR_WORDS)
-        )
-        if l_ok and r_ok:
-            splits.append(left)
-            last_end = m.end()
-    if splits:
-        remaining = raw[last_end:].strip()
-        if remaining:
-            splits.append(remaining)
-        return splits
+    settings = get_settings()
+    if not authors or len(raw) > settings.citation_author_max_chars:
+        return None
+    if any(not isinstance(name, str) or not name.strip() for name in authors):
+        return None
+    normalized = [" ".join(name.split()) for name in authors]
+    if any(len(name) > settings.citation_author_max_chars for name in normalized):
+        return None
+    if len(authors) > settings.citation_author_max_tokens:
+        return None
+    names = [r"(" + re.escape(name).replace(r"\ ", r"\s+") + r")" for name in normalized]
+    separator = r"\s*(?:,\s*)?(?:and|&)\s+"
+    match = re.fullmatch(separator.join(names), " ".join(raw.split()), re.IGNORECASE)
+    if match and all(
+        group.casefold() == name.casefold()
+        for group, name in zip(match.groups(), normalized, strict=True)
+    ):
+        return list(match.groups())
+    return None
+
+
+def _split_corporate_authors(raw: str, reference_authors: list[str] | None = None) -> list[str]:
+    if reference_authors is not None:
+        supported = source_supported_corporate_names(raw, reference_authors)
+        if supported is not None:
+            return supported
+    # "Institute of Research and Development Agency" can name one or two
+    # organizations. Preserve its complete identity when source boundaries
+    # have not been established, instead of inventing either interpretation.
     return [raw]
 
 
-def _split_authors(raw: str) -> list[str]:
+def _split_authors(raw: str, *, reference_authors: list[str] | None = None) -> list[str]:
     raw = _HYPHENATED_NAME_BREAK.sub("-", raw).replace("⁠", "")
     raw = re.sub(r"\bet\s+al\.?", "", raw, flags=re.IGNORECASE).strip().rstrip(",&").strip()
     if not raw:
         return []
     if _is_corporate_author_name(raw) and "," not in raw:
-        return _split_corporate_authors(raw)
+        return _split_corporate_authors(raw, reference_authors)
     segments = re.split(r",\s*(?:and|&)\s*|,\s*", raw)
     out: list[str] = []
     for segment in segments:

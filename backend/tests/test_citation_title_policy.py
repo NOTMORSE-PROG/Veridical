@@ -23,6 +23,7 @@ from tests.test_doi_provider_identity import DOI, citation
         ("Café measurements", "Cafe\u0301 measurements"),
         ("Nano\u00admetre thermometry", "Nanometre thermometry"),
         ("A measured result.", "A measured result"),
+        ("Graduate students’ perspectives", "Graduate Students' Perspectives"),
     ],
 )
 def test_bounded_spelling_and_canonical_equivalence(left, right):
@@ -49,6 +50,8 @@ def test_bounded_spelling_and_canonical_equivalence(left, right):
         ("Meters observed", "Metre observed"),
         ("Nanometre count", "Nanometre counts"),
         ("Nanmeter measurements", "Nanometre measurements"),
+        ("Student's perspectives", "Students' perspectives"),
+        ("Students′ perspectives", "Students' perspectives"),
     ],
 )
 def test_meaningful_differences_are_preserved(left, right):
@@ -65,6 +68,14 @@ def test_meaningful_differences_are_preserved(left, right):
         ),
         ("A-B", "A B", "title_hyphenation_unassessed"),
         ("VARIABLE values", "Variable values", "title_case_unassessed"),
+        (
+            "Philippine graduate students’ perspectives on CMO No. 15 Series 2019 "
+            "as basis for a conceptual model",
+            "Philippine Graduate Students' Perspectives On CMO No. 15 Series 2019 "
+            "As Basis For A Conceptual Model",
+            "title_case_unassessed",
+        ),
+        ("A parameter", "a parameter", "title_case_unassessed"),
         ("", "", "title_metadata_unavailable"),
         ("...", "...", "title_metadata_unavailable"),
         (None, "A source", "title_metadata_unavailable"),
@@ -106,6 +117,49 @@ def test_original_wrong_clean_control_retains_all_genuine_differences():
         comparison.registered["title"] = "rewritten"
 
 
+@pytest.mark.parametrize("join", [" and ", " & "])
+def test_joint_corporate_metadata_uses_complete_registered_author_sequence(join):
+    expression = join.join(["World Health Organization", "Food and Agriculture Organization"])
+    c = citation("Joint guidance", 2024)
+    c.authors = [expression]
+    registered = VerificationResult(
+        found=True,
+        provider="crossref",
+        title="Joint guidance",
+        raw={
+            "DOI": DOI,
+            "published": {"date-parts": [[2024]]},
+            "author": [
+                {"family": "World Health Organization"},
+                {"family": "Food and Agriculture Organization"},
+            ],
+        },
+    )
+    result = compare_metadata(c, registered)
+    assert result.differing_fields == ()
+    assert result.author_status == "source_supported_sequence"
+    assert result.cited["first_author"] == expression
+
+
+def test_uncertain_corporate_boundary_is_not_reported_as_wrong_first_author():
+    c = citation("Joint guidance", 2024)
+    c.authors = ["Institute of Research and Development Agency"]
+    registered = VerificationResult(
+        found=True,
+        provider="crossref",
+        title="Joint guidance",
+        raw={
+            "DOI": DOI,
+            "published": {"date-parts": [[2024]]},
+            "author": [{"family": "Institute of Research"}],
+        },
+    )
+    result = compare_metadata(c, registered)
+    assert result.differing_fields == ()
+    assert result.author_status == "unassessed"
+    assert result.evidence()["author_unassessed_reason"] == "author_boundaries_unassessed"
+
+
 def policy_data():
     return json.loads(
         (
@@ -126,6 +180,10 @@ def policy_data():
         {"terminal_characters": ["-"]},
         {"case_sensitive_patterns": [".*"]},
         {"unexpected": True},
+        {"equivalent_punctuation": [["'", "’"], ["’", "′"]]},
+        {"equivalent_punctuation": [["'", "'"]]},
+        {"equivalent_punctuation": [["'", "word"]]},
+        {"equivalent_punctuation": [["'", "."]]},
     ],
 )
 def test_invalid_policy_rejected(tmp_path, change):
