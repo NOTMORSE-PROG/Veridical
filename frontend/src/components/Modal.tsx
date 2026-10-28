@@ -8,6 +8,7 @@ import { type ReactNode, useEffect, useId, useRef } from "react";
 import { createPortal } from "react-dom";
 import { cx } from "./cx";
 import { useInertBackground } from "./useInertBackground";
+import { registerTaskModal } from "./modalActivity";
 
 interface ModalProps {
   title: ReactNode;
@@ -47,6 +48,7 @@ function getFocusable(container: HTMLElement): HTMLElement[] {
 
 export function ModalBackdrop({ children }: { children: ReactNode }) {
   useInertBackground();
+  useEffect(registerTaskModal, []);
   return createPortal(
     <div className="signal-task-sheet-backdrop motion-safe:animate-scrim-in fixed inset-0 z-(--z-modal) flex items-center justify-center bg-scrim p-4">
       {children}

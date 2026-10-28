@@ -13,6 +13,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router";
 import { useDismissOnboarding, useMe, useReplayOnboarding } from "../auth/useAuth";
+import { useTaskModalActive } from "../components/modalActivity";
 import { findTourAnchor, TOUR_HOME_PATH, TOUR_STEPS, type TourStep } from "./tourSteps";
 
 const POLL_MS = 400;
@@ -39,6 +40,7 @@ export function useTour() {
   // to any of them restarts discovery without a separate reset effect.
   const [polls, setPolls] = useState({ key: "", count: 0 });
   const pendingEntry = useRef<HTMLElement | null>(null);
+  const paused = useTaskModalActive();
 
   const active = Boolean(me) && !me?.onboarding_dismissed_at && !dismissedLocally;
 
@@ -49,8 +51,8 @@ export function useTour() {
   // whose control lives elsewhere -- or never mounted -- renders
   // unanchored with its whereHint. Still never a pointer aimed at nothing
   // (V-057 AC5): an unanchored card has no spotlight.
-  const step = active ? (TOUR_STEPS[stepIndex] ?? null) : null;
-  const discoveryKey = `${stepIndex}|${location.pathname}|${active}`;
+  const step = active && !paused ? (TOUR_STEPS[stepIndex] ?? null) : null;
+  const discoveryKey = `${stepIndex}|${location.pathname}|${active}|${paused}`;
   const pollCount = polls.key === discoveryKey ? polls.count : 0;
   const anchor = step ? findTourAnchor(step, location.pathname) : null;
   const routeOwnsStep = step !== null && step.routeMatch(location.pathname);
@@ -113,6 +115,7 @@ export function useTour() {
   }
 
   return {
+    paused,
     resolved,
     stepNumber: resolved ? resolved.index + 1 : 0,
     totalSteps: TOUR_STEPS.length,

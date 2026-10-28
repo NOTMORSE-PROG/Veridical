@@ -1,4 +1,4 @@
-import { fireEvent, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor } from "@testing-library/react";
 import { useState } from "react";
 import { useLocation } from "react-router";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -6,6 +6,8 @@ import { renderWithProviders, stubFetchByPath } from "../test/renderWithProvider
 import { Modal, ModalBackdrop } from "../components/Modal";
 import { CoachMark } from "./CoachMark";
 import { TourProvider, useTour } from "./TourContext";
+import { useMe } from "../auth/useAuth";
+import { registerTaskModal, taskModalActive } from "../components/modalActivity";
 
 // Mirrors AppShell's real ReplayTourButton: a SEPARATE component from
 // CoachMark that calls useTour().replay() -- both reading the same
@@ -68,6 +70,57 @@ const ME_DISMISSED = {
   ...ME_NOT_DISMISSED,
   onboarding_dismissed_at: "2026-08-06T00:00:00Z",
 };
+
+function SessionReadyFixture() {
+  const { data } = useMe();
+  return <output data-testid="guide-session-ready">{data?.id ?? "loading"}</output>;
+}
+
+describe("task modal and late guide coordination", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("keeps a chosen task and its focus when undismissed instructor data arrives later", async () => {
+    let release = () => {};
+    const held = new Promise<void>((resolve) => { release = resolve; });
+    const ordinaryFetch = stubFetchByPath({ "/auth/me": ME_NOT_DISMISSED });
+    vi.stubGlobal("fetch", async (...args: Parameters<typeof fetch>) => {
+      if (String(args[0]).endsWith("/auth/me")) await held;
+      return ordinaryFetch(...args);
+    });
+    renderWithProviders(<TourProvider>
+      <SessionReadyFixture />
+      <EntryDialogFixture onEntry={() => {}} />
+      <CoachMark />
+    </TourProvider>, { route: "/dashboard" });
+    mountFixtureRects();
+    fireEvent.click(screen.getByRole("button", { name: "Upload required format" }));
+    const task = screen.getByRole("dialog", { name: "Upload required format" });
+    const taskFocus = document.activeElement;
+    expect(task.contains(taskFocus)).toBe(true);
+    await act(async () => { release(); });
+    await waitFor(() => expect(screen.getByTestId("guide-session-ready")).toHaveTextContent("1"));
+    expect(screen.getAllByRole("dialog")).toHaveLength(1);
+    expect(screen.queryByRole("heading", { name: "Format comes first" })).not.toBeInTheDocument();
+    expect(document.activeElement).toBe(taskFocus);
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    await waitFor(() => expect(screen.getByRole("heading", { name: "Format comes first" })).toBeInTheDocument());
+  });
+
+  it("waits for every task lifetime and tolerates repeated cleanup", () => {
+    let first = () => {};
+    let second = () => {};
+    act(() => { first = registerTaskModal(); second = registerTaskModal(); });
+    try {
+      expect(taskModalActive()).toBe(true);
+      act(() => { first(); first(); });
+      expect(taskModalActive()).toBe(true);
+      act(() => second());
+      expect(taskModalActive()).toBe(false);
+    } finally {
+      act(() => { first(); second(); });
+    }
+  });
+});
 
 describe("CoachMark", () => {
   afterEach(() => vi.unstubAllGlobals());

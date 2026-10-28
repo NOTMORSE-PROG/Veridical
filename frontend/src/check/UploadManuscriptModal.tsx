@@ -430,7 +430,7 @@ export function UploadManuscriptModal({ onClose, onUploadSuccess }: UploadManusc
             {ingest.isPending && (
               <p role="status" className="flex items-center gap-2 text-sm text-ink-secondary">
                 <SpinnerIcon />
-                Uploading and parsing your manuscript. Longer documents can take up to a minute.
+                Uploading your file and preparing the manuscript.
               </p>
             )}
 

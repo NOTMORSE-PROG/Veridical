@@ -7,6 +7,7 @@
 import { type CSSProperties, useEffect, useId, useRef } from "react";
 import { createPortal } from "react-dom";
 import { useInertBackground } from "../components/useInertBackground";
+import { taskModalActive } from "../components/modalActivity";
 import { Button } from "../ui/Button";
 import { useCoachMarkPosition } from "./useCoachMarkPosition";
 import { useTour } from "./TourContext";
@@ -119,6 +120,7 @@ function CoachMarkCard({
   // zero times if `position` never resolves before the step advances.
   useEffect(() => {
     return () => {
+      if (taskModalActive()) return;
       // On close, prefer the anchor itself (still visible, now
       // reachable again once inert lifts) over whatever the previous
       // step's own opener was -- matches Dashboard.tsx's own rule for
