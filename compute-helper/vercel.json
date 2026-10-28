@@ -1,0 +1,13 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "version": 2,
+  "framework": null,
+  "installCommand": "pip install -r compute-helper/requirements.txt",
+  "functions": {
+    "api/native_extract.py": {
+      "maxDuration": 300,
+      "includeFiles": "backend/app/**",
+      "excludeFiles": "{backend/.venv/**,backend/tests/**,frontend/**,context/**,tickets/**,.env*,tmp/**}"
+    }
+  }
+}

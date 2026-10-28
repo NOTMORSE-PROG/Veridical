@@ -3,6 +3,7 @@
 // screen's polling query.
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api/client";
+import { directManuscriptUpload } from "../api/directManuscriptUpload";
 import { verifyUploadFailure, type UploadAttemptScope } from "../auth/useUploadScope";
 import { StaleUploadContextError, UnconfirmedUploadError, validateIngestReceipt } from "../api/uploadOutcome";
 import { validateManuscriptGroup } from "../api/groupAssignmentOutcome";
@@ -45,9 +46,11 @@ export function useIngestManuscript() {
       form.append("file", file);
       let receipt;
       try {
-        const out = await api.post<unknown>("/manuscripts/ingest", form, {
-          "X-Veridical-Expected-Instructor": String(scope.actorId),
-        });
+        const out = import.meta.env.VITE_DIRECT_MANUSCRIPT_UPLOAD_ENABLED === "true"
+          ? await directManuscriptUpload(file, scope)
+          : await api.post<unknown>("/manuscripts/ingest", form, {
+            "X-Veridical-Expected-Instructor": String(scope.actorId),
+          });
         if (!scope.isCurrent()) throw new StaleUploadContextError();
         receipt = validateIngestReceipt(out);
       } catch (error) {

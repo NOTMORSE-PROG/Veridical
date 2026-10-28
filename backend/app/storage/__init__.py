@@ -25,9 +25,10 @@ object-store handle.
 from __future__ import annotations
 
 import os
+from contextlib import contextmanager
 from pathlib import Path
 from tempfile import NamedTemporaryFile
-from typing import Protocol
+from typing import BinaryIO, Protocol
 
 from app.config import Settings
 
@@ -37,6 +38,10 @@ class Storage(Protocol):
     `data_dir` (e.g. ``"uploads/12.pdf"``, ``"12.extraction.json"``)."""
 
     def put_file(self, local_path: Path, key: str) -> None: ...
+
+    def download_to(self, key: str, target: BinaryIO, *, chunk_bytes: int) -> None:
+        """Copy a complete object with bounded reads, leaving target ownership to the caller."""
+        ...
 
     def get_bytes(self, key: str) -> bytes:
         """Raises `FileNotFoundError` if `key` doesn't exist -- the one
@@ -72,6 +77,12 @@ class LocalDiskStorage:
     def get_bytes(self, key: str) -> bytes:
         return (self._root / key).read_bytes()
 
+    def download_to(self, key: str, target: BinaryIO, *, chunk_bytes: int) -> None:
+        with (self._root / key).open("rb") as source:
+            while chunk := source.read(chunk_bytes):
+                if target.write(chunk) != len(chunk):
+                    raise OSError("Storage cache write was incomplete.")
+
     def delete(self, key: str) -> None:
         (self._root / key).unlink(missing_ok=True)
 
@@ -100,10 +111,12 @@ class R2Storage:
         access_key_id: str,
         secret_access_key: str,
         client_config=None,
+        transfer_config=None,
     ) -> None:
         import boto3
 
         self._bucket = bucket
+        self._transfer_config = transfer_config
         self._client = boto3.client(
             "s3",
             endpoint_url=endpoint_url,
@@ -114,19 +127,97 @@ class R2Storage:
         )
 
     def put_file(self, local_path: Path, key: str) -> None:
-        self._client.upload_file(str(local_path), self._bucket, key)
+        self._client.upload_file(
+            str(local_path), self._bucket, key, Config=getattr(self, "_transfer_config", None)
+        )
+
+    def upload_stream(self, source: BinaryIO, key: str) -> None:
+        self._client.upload_fileobj(
+            source, self._bucket, key, Config=getattr(self, "_transfer_config", None)
+        )
 
     def get_bytes(self, key: str) -> bytes:
         from botocore.exceptions import ClientError
 
         try:
             obj = self._client.get_object(Bucket=self._bucket, Key=key)
-            return obj["Body"].read()
+            body = obj["Body"]
+            try:
+                return body.read()
+            finally:
+                body.close()
         except ClientError as exc:
             code = exc.response.get("Error", {}).get("Code")
             if code in ("404", "NoSuchKey"):
                 raise FileNotFoundError(key) from exc
             raise
+
+    def download_to(
+        self, key: str, target: BinaryIO, *, chunk_bytes: int, etag: str | None = None
+    ) -> None:
+        from botocore.exceptions import ClientError
+
+        try:
+            params = {"Bucket": self._bucket, "Key": key}
+            if etag is not None:
+                params["IfMatch"] = etag
+            obj = self._client.get_object(**params)
+        except ClientError as exc:
+            code = exc.response.get("Error", {}).get("Code")
+            if code in ("404", "NoSuchKey"):
+                raise FileNotFoundError(key) from exc
+            raise
+        # Reject incomplete transfers before the private staging file can be
+        # published. Also close the transport after validation/write failures.
+        body = obj["Body"]
+        try:
+            expected = obj.get("ContentLength")
+            if type(expected) is not int or expected < 0:
+                raise ValueError("Storage did not confirm the source length.")
+            received = 0
+            while chunk := body.read(chunk_bytes):
+                received += len(chunk)
+                if received > expected:
+                    raise OSError("Storage source exceeded its confirmed length.")
+                if target.write(chunk) != len(chunk):
+                    raise OSError("Storage cache write was incomplete.")
+            if received != expected:
+                raise OSError("Storage source transfer was incomplete.")
+        finally:
+            body.close()
+
+    def presign_upload(self, key: str, length: int, ttl: int) -> str:
+        return self._client.generate_presigned_url(
+            "put_object",
+            Params={
+                "Bucket": self._bucket,
+                "Key": key,
+                "ContentType": "application/octet-stream",
+                "ContentLength": length,
+            },
+            ExpiresIn=ttl,
+            HttpMethod="PUT",
+        )
+
+    def object_metadata(self, key: str) -> dict:
+        return self._client.head_object(Bucket=self._bucket, Key=key)
+
+    def delete_prefix(self, prefix: str) -> None:
+        # Callers construct an exact source-specific namespace, never a bucket
+        # root or a client-supplied path. Continue from the first page after each
+        # deletion so removals cannot invalidate a pagination cursor.
+        if not prefix.endswith("/") or len(prefix.split("/")) < 3:
+            raise ValueError("Refusing an unscoped storage cleanup.")
+        while True:
+            page = self._client.list_objects_v2(Bucket=self._bucket, Prefix=prefix)
+            objects = page.get("Contents", [])
+            if not objects:
+                return
+            for item in objects:
+                key = item["Key"]
+                if not key.startswith(prefix):
+                    raise ValueError("Storage cleanup returned an unrelated object.")
+                self.delete(key)
 
     def delete(self, key: str) -> None:
         self._client.delete_object(Bucket=self._bucket, Key=key)
@@ -168,6 +259,13 @@ def get_storage(settings: Settings, *, metadata_probe: bool = False) -> Storage:
                 "R2_SECRET_ACCESS_KEY."
             )
         client_config = None
+        from boto3.s3.transfer import TransferConfig
+
+        transfer_config = TransferConfig(
+            multipart_threshold=settings.storage_transfer_chunk_bytes,
+            multipart_chunksize=settings.storage_transfer_chunk_bytes,
+            use_threads=False,
+        )
         if metadata_probe:
             from botocore.config import Config
 
@@ -182,6 +280,7 @@ def get_storage(settings: Settings, *, metadata_probe: bool = False) -> Storage:
             access_key_id=settings.r2_access_key_id,
             secret_access_key=settings.r2_secret_access_key,
             client_config=client_config,
+            transfer_config=transfer_config,
         )
     if settings.storage_backend != "local":
         # backend review finding (BUG-138 review): this used to fall
@@ -224,13 +323,18 @@ def ensure_local_file(settings: Settings, storage: Storage, file_ref: str) -> Pa
     if local_path.exists():
         return local_path
     key = storage_key_for(settings, file_ref)
-    data = storage.get_bytes(key)
     local_path.parent.mkdir(parents=True, exist_ok=True)
     # Source readers may run concurrently even while retention is row-locked.
     # Publish only a closed, complete file on the same filesystem; the caller's
     # source transaction still owns serialization against manuscript deletion.
     with NamedTemporaryFile(mode="wb", dir=local_path.parent, delete_on_close=False) as staged:
-        staged.write(data)
+        download = getattr(storage, "download_to", None)
+        if download is None:
+            # Compatibility for existing small-object adapters. Both production
+            # backends implement download_to and never enter this bytes path.
+            staged.write(storage.get_bytes(key))
+        else:
+            download(key, staged, chunk_bytes=settings.storage_download_chunk_bytes)
         staged.close()
         try:
             # Both operations refuse an existing destination. Never replace the
@@ -242,7 +346,9 @@ def ensure_local_file(settings: Settings, storage: Storage, file_ref: str) -> Pa
         except FileExistsError as publication_error:
             # Accept a competing fill only after verifying all downloaded bytes.
             try:
-                already_complete = _read_published_winner(local_path) == data
+                already_complete = _published_matches(
+                    local_path, Path(staged.name), settings.storage_download_chunk_bytes
+                )
             except OSError:
                 raise publication_error from None
             if not already_complete:
@@ -250,9 +356,23 @@ def ensure_local_file(settings: Settings, storage: Storage, file_ref: str) -> Pa
     return local_path
 
 
-def _read_published_winner(path: Path) -> bytes:
+@contextmanager
+def _open_published_winner(path: Path):
     if os.name == "nt":
-        from app.storage._windows import read_published_winner
+        from app.storage._windows import open_published_winner
 
-        return read_published_winner(path)
-    return path.read_bytes()
+        with open_published_winner(path) as reader:
+            yield reader
+    else:
+        with path.open("rb") as reader:
+            yield reader
+
+
+def _published_matches(published: Path, staged: Path, chunk_bytes: int) -> bool:
+    with _open_published_winner(published) as winner, staged.open("rb") as candidate:
+        while True:
+            chunk = candidate.read(chunk_bytes)
+            if winner.read(chunk_bytes) != chunk:
+                return False
+            if not chunk:
+                return True

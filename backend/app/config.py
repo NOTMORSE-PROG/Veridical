@@ -162,9 +162,8 @@ class Settings(BaseSettings):
     ingest_vision_min_area_pts: float = 5000.0
     # Rendering DPI for the cropped image sent to the model.
     ingest_vision_crop_dpi: int = 150
-    # Upload size ceiling, enforced while streaming (reject early — a
-    # 200MB "manuscript" should never reach the parser). Real capstone
-    # PDFs run 5–25 MB.
+    # Legacy multipart ceiling. Large manuscripts use the separate direct
+    # storage limit and isolated native-compute path.
     max_upload_mb: int = 40
     # SHA-256 reads are chunked so exact-file identity never requires the
     # complete manuscript in hashing memory. The legacy recovery command
@@ -918,6 +917,44 @@ class Settings(BaseSettings):
     # archive's embeddings) and Render's paid persistent disk (ground rule 2).
     # `data_dir` stays the local CACHE in both modes -- see `app/storage/`.
     storage_backend: str = "local"
+    # Large manuscript cache fills must not allocate the complete object in RAM.
+    storage_download_chunk_bytes: int = Field(default=1_048_576, ge=1, le=8_388_608)
+    storage_transfer_chunk_bytes: int = Field(default=8_388_608, ge=5_242_880, le=16_777_216)
+    # Optional isolated native compute. Large files stay in private R2; only
+    # signed metadata crosses this HTTP boundary. Empty keeps local operation.
+    native_compute_url: str | None = None
+    native_compute_secret: str | None = None
+    native_compute_timeout_seconds: float = Field(default=240, gt=0, le=270)
+    native_compute_job_ttl_seconds: int = Field(default=300, ge=30, le=600)
+    native_compute_runtime_limit_seconds: int = Field(default=300, ge=300)
+    native_compute_align_clock: bool = False
+    native_compute_max_request_bytes: int = Field(default=131_072, gt=0)
+    native_compute_max_source_mb: int = Field(default=256, gt=0)
+    native_compute_max_result_mb: int = Field(default=32, gt=0)
+    native_compute_max_crop_mb: int = Field(default=16, gt=0)
+    native_compute_max_crop_pixels: int = Field(default=25_000_000, gt=0)
+    native_compute_results_subdir: str = "native_compute"
+    direct_manuscript_upload_enabled: bool = False
+    direct_upload_transport: Literal["r2", "relay"] = "r2"
+    direct_upload_relay_transfers: int = Field(default=1, ge=1)
+    direct_manuscript_upload_max_mb: int = Field(default=256, gt=0)
+    direct_upload_url_ttl_seconds: int = Field(default=900, ge=60, le=3600)
+    direct_upload_pending_per_instructor: int = Field(default=3, gt=0)
+    direct_upload_pending_global: int = Field(default=12, gt=0)
+    direct_upload_lease_seconds: int = Field(default=1800, ge=600)
+    direct_upload_poll_seconds: float = Field(default=3, gt=0)
+    direct_upload_staging_subdir: str = "upload_staging"
+    direct_upload_staging_retention_seconds: int = Field(default=86400, ge=3600)
+    direct_upload_storage_budget_mb: int = Field(default=8192, gt=0)
+    direct_upload_cleanup_batch_size: int = Field(default=10, gt=0)
+
+    @field_validator("native_compute_results_subdir", "direct_upload_staging_subdir")
+    @classmethod
+    def validate_compute_subdir(cls, value: str) -> str:
+        if not value or value in (".", "..") or any(c in value for c in "/\\:\x00"):
+            raise ValueError("Compute storage subdirectories must be one directory name")
+        return value
+
     manuscript_upload_subdir: str = "uploads"
     rubric_upload_subdir: str = "rubric_uploads"
 

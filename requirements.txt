@@ -1,0 +1,3 @@
+# Dependency entry point for the separate native-compute project.
+# The API retains backend/pyproject.toml and its tested lockfile.
+-r compute-helper/requirements.txt

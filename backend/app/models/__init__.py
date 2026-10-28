@@ -17,6 +17,7 @@ from app.models.rubric import Criterion, Rubric
 from app.models.run import CheckResult, CheckRun, Flag, ReadinessReport
 from app.models.session import Session
 from app.models.share import ShareLink
+from app.models.upload_attempt import UploadAttempt
 
 __all__ = [
     "AuditLog",
@@ -41,4 +42,5 @@ __all__ = [
     "Rubric",
     "ShareLink",
     "Session",
+    "UploadAttempt",
 ]

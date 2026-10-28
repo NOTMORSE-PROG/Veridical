@@ -30,19 +30,19 @@ import asyncio
 from pathlib import Path
 from typing import Any, Literal
 
-import pymupdf
 from pydantic import BaseModel, ValidationError
 
 from app.config import Settings
 from app.errors import ApiDownError, QuotaExhaustedError
 from app.ingest.admission import PreparationLease
+from app.ingest.image_source import _area, _selected_indices
+from app.ingest.image_source import _crop as _native_crop
 from app.ingest.patterns import HeadingPatterns
 from app.ingest.schemas import (
     EquationBlock,
     ExtractionResult,
     ImageBlock,
     ImageReading,
-    SectionNode,
     TableBlock,
 )
 from app.llm import LLMNotConfiguredError
@@ -51,6 +51,14 @@ from app.llm.base import LLMClient
 PROMPT_TYPE = "image_table_extraction"
 PROMPT_VERSION = "v1"
 _PROMPT_FILE = Path(__file__).parent / "prompts" / f"{PROMPT_TYPE}_{PROMPT_VERSION}.txt"
+
+
+def _crop(file_path: Path, image: ImageBlock, settings: Settings) -> bytes:
+    if settings.native_compute_url:
+        from app.ingest.compute_client import remote_raster
+
+        return remote_raster(file_path, image, settings)[0]
+    return _native_crop(file_path, image, settings)
 
 
 class VisionReading(BaseModel):
@@ -132,26 +140,6 @@ def select_images(
     return [result.images[index] for index in _selected_indices(result, patterns, settings)]
 
 
-def _selected_indices(
-    result: ExtractionResult, patterns: HeadingPatterns, settings: Settings
-) -> list[int]:
-    sized = [
-        index
-        for index, img in enumerate(result.images)
-        if result.anchor_kind == "page"
-        and img.page is not None
-        and img.bbox is not None
-        and _area(img.bbox) >= settings.ingest_vision_min_area_pts
-    ]
-    priority_pages = _priority_page_ranges(result.section_tree.nodes, patterns)
-
-    def is_priority(img: ImageBlock) -> bool:
-        return img.page is not None and any(a <= img.page <= b for a, b in priority_pages)
-
-    ordered = sorted(sized, key=lambda index: not is_priority(result.images[index]))
-    return ordered[: settings.ingest_vision_max_images]
-
-
 def prepare_image_readings(
     result: ExtractionResult,
     patterns: HeadingPatterns,
@@ -181,33 +169,6 @@ def mark_pending_unavailable(result: ExtractionResult, reason: str) -> None:
     for reading in result.image_readings or []:
         if reading.status == "not_selected" and reading.reason == "not_attempted":
             reading.reason = reason
-
-
-def _area(bbox: tuple[float, float, float, float]) -> float:
-    return max(0.0, bbox[2] - bbox[0]) * max(0.0, bbox[3] - bbox[1])
-
-
-def _priority_page_ranges(
-    nodes: list[SectionNode], patterns: HeadingPatterns
-) -> list[tuple[int, int]]:
-    """Page spans of level-1 sections whose titles mention a priority
-    keyword (results/analysis/...). Span ends where the next level-1
-    section starts; the last one runs to the end of the document."""
-    top = [n for n in nodes if n.page is not None]
-    ranges: list[tuple[int, int]] = []
-    for i, node in enumerate(top):
-        title = node.title.casefold()
-        if any(k in title for k in patterns.vision_priority_sections):
-            end = top[i + 1].page - 1 if i + 1 < len(top) else 10**9
-            ranges.append((node.page, max(node.page, end)))
-    return ranges
-
-
-def _crop(file_path: Path, image: ImageBlock, settings: Settings) -> bytes:
-    with pymupdf.open(str(file_path)) as doc:
-        page = doc[image.page - 1]
-        pix = page.get_pixmap(clip=pymupdf.Rect(*image.bbox), dpi=settings.ingest_vision_crop_dpi)
-        return pix.tobytes("png")
 
 
 def _merge(

@@ -86,6 +86,11 @@ async function requestBoundSource(path: string, sourceIdentity: string, contentT
 }
 
 export const api = {
+  putUpload: async (url: string, file: File, headers: Record<string, string>): Promise<void> => {
+    const response = await fetch(url, { method: "PUT", body: file, headers,
+      credentials: "omit", redirect: "error" });
+    if (!response.ok) throw new ApiError(response.status, "upload_transport", "The file transfer did not finish. Retry this upload to check its saved status.");
+  },
   getPublic: <T>(path: string, options?: Pick<RequestInit, "signal">): Promise<T> => request<T>(path, { ...options, credentials: "omit" }),
   get: <T>(path: string, options?: Pick<RequestInit, "signal">): Promise<T> => request<T>(path, options),
   getBlob: (path: string, options?: Pick<RequestInit, "signal">): Promise<Blob> => requestBlob(path, options),

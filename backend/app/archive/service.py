@@ -14,7 +14,7 @@ import asyncio
 from datetime import UTC, datetime
 from pathlib import Path
 
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.archive.schemas import ArchiveItemOut, PaginatedArchive, PurgeOut, SourceAvailabilityOut
@@ -300,14 +300,30 @@ def delete_stored_files(manuscript: Manuscript, settings: Settings) -> None:
     manuscript and record `purged_at` themselves. `file_ref` is already an
     absolute path (`ingest/service.py`), used as-is."""
     storage = get_storage(settings)
-    for path in (
-        Path(manuscript.file_ref) if manuscript.file_ref.strip() else None,
-        raw_store_path(settings, manuscript.id),
-    ):
-        if path is None:
-            continue
-        storage.delete(storage_key_for(settings, str(path)))
-        path.unlink(missing_ok=True)
+    from app.ingest.compute_client import delete_native_artifacts
+    from app.ingest.service import EXTRACTORS
+
+    try:
+        source = Path(manuscript.file_ref) if manuscript.file_ref.strip() else None
+        if source is None:
+            # A lost durable-write acknowledgment can leave a server-named
+            # cache/object even though file_ref was never published.
+            suffix = Path(manuscript.original_filename or "").suffix.lower()[:8]
+            if suffix in EXTRACTORS:
+                source = (
+                    settings.data_dir
+                    / settings.manuscript_upload_subdir
+                    / f"{manuscript.id}{suffix}"
+                )
+        if source is not None:
+            delete_native_artifacts(source, settings, storage=storage)
+        for path in (source, raw_store_path(settings, manuscript.id)):
+            if path is None:
+                continue
+            storage.delete(storage_key_for(settings, str(path)))
+            path.unlink(missing_ok=True)
+    finally:
+        storage.close()
 
 
 async def purge_manuscript(
@@ -347,6 +363,11 @@ async def purge_manuscript(
             raise ConflictError("This manuscript's archive has already been purged.")
         if manuscript.ingest_status in (IngestStatus.pending, IngestStatus.processing):
             raise ConflictError(STORED_FILE_PREPARATION_RUNNING)
+        if (
+            manuscript.native_compute_active_until is not None
+            and manuscript.native_compute_active_until > datetime.now(UTC)
+        ):
+            raise ConflictError(STORED_FILE_PREPARATION_RUNNING)
         # V-078: a running check reads these files; deleting them mid-run
         # would fail it for a reason the instructor never sees. A crashed
         # run is re-claimed by the worker (BUG-144), and any run can be
@@ -371,7 +392,33 @@ async def purge_manuscript(
         # BUG-138: purge must also remove the DURABLE copy, or "purged" is a lie
         # once R2 exists -- the bytes would outlive their own deletion forever
         # instead of just until the next ephemeral-disk wipe.
+        from app.models.upload_attempt import UploadAttempt
+
+        staging_keys = list(
+            (
+                await session.scalars(
+                    select(UploadAttempt.staging_key).where(
+                        UploadAttempt.manuscript_id == manuscript_id,
+                        UploadAttempt.instructor_id == instructor_id,
+                    )
+                )
+            ).all()
+        )
+        staging_storage = get_storage(settings)
+        try:
+            for key in staging_keys:
+                staging_storage.delete(key)
+        finally:
+            staging_storage.close()
         delete_stored_files(manuscript, settings)
+        await session.execute(
+            update(UploadAttempt)
+            .where(
+                UploadAttempt.manuscript_id == manuscript_id,
+                UploadAttempt.instructor_id == instructor_id,
+            )
+            .values(staging_deleted_at=datetime.now(UTC))
+        )
 
         manuscript.purged_at = datetime.now(UTC)
         # V-077: a purged manuscript has no comparison data left, so a Library

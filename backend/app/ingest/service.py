@@ -241,10 +241,30 @@ async def _ingest_manuscript(
         # running thread, so a timed-out extraction's thread keeps
         # running to completion in the background, its result discarded.
         try:
-            result = await asyncio.wait_for(
-                preparation_lease.run(extractor, str(file_path), settings),
-                timeout=settings.ingest_extraction_timeout_seconds,
-            )
+            if settings.native_compute_url:
+                from app.ingest.compute_client import extract_remote
+
+                job_expires = (
+                    int(datetime.now(UTC).timestamp()) + settings.native_compute_job_ttl_seconds
+                )
+                manuscript.native_compute_active_until = datetime.fromtimestamp(
+                    job_expires + settings.native_compute_runtime_limit_seconds, UTC
+                )
+                await session.commit()
+                result = await preparation_lease.run(
+                    extract_remote,
+                    str(file_path),
+                    settings,
+                    owner_id=instructor_id,
+                    job_expires=job_expires,
+                )
+                manuscript.native_compute_active_until = None
+                await session.commit()
+            else:
+                result = await asyncio.wait_for(
+                    preparation_lease.run(extractor, str(file_path), settings),
+                    timeout=settings.ingest_extraction_timeout_seconds,
+                )
         except TimeoutError as exc:
             raise FileTooLargeError(messages.EXTRACTION_TIMED_OUT) from exc
         # Only the fresh sniffed DOCX parser supplies this witness. Stage it
@@ -372,6 +392,16 @@ async def _ingest_manuscript(
             messages.MANUSCRIPT_PREPARATION_FAILED if finalizing else None,
         )
         raise
+    finally:
+        if settings.native_compute_url:
+            from app.ingest.compute_client import delete_native_artifacts
+
+            try:
+                await preparation_lease.run(delete_native_artifacts, file_path, settings)
+            except Exception as cleanup_error:
+                logger.warning(
+                    "Native intermediate cleanup did not finish (%s)", type(cleanup_error).__name__
+                )
     return result
 
 
@@ -449,6 +479,7 @@ async def _ingest_upload(
     *,
     instructor_id: int,
     preparation_lease: PreparationLease,
+    upload_attempt=None,
 ) -> tuple[Manuscript, ExtractionResult, int, TitlePageProposal, Manuscript | None]:
     """Full upload flow for the HTTP surface: save (size-capped) → own row
     → ingest. `instructor_id` is the authenticated caller (BUG-002/D-020) —
@@ -484,6 +515,9 @@ async def _ingest_upload(
         original_filename=original_filename,
     )
     session.add(manuscript)
+    if upload_attempt is not None:
+        await session.flush()
+        upload_attempt.manuscript_id = manuscript.id
     await session.commit()
 
     # Stored under a server-owned name: the id is the identity; the

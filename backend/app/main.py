@@ -29,7 +29,9 @@ from app.ingest.admission import (
     finish_preparation_lifespan,
     start_preparation_admission,
 )
+from app.ingest.direct_upload import router as direct_upload_router
 from app.ingest.router import router as ingest_router
+from app.ingest.upload_worker import upload_worker_loop
 from app.library.router import router as library_router
 from app.llm.router import router as llm_router
 from app.ml.embeddings import get_embedding_model
@@ -176,6 +178,7 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
     settings = get_settings()
     preparation_handle = start_preparation_admission(settings)
     task = None
+    upload_task = None
     try:
         wake_event = asyncio.Event()
         app.state.pipeline_wake_event = wake_event
@@ -186,10 +189,16 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
             ),
             name="pipeline-scheduler",
         )
+        if settings.direct_manuscript_upload_enabled:
+            upload_task = asyncio.create_task(upload_worker_loop(), name="upload-scheduler")
         yield
     finally:
         retiring = begin_preparation_shutdown(preparation_handle)
         try:
+            if upload_task is not None:
+                upload_task.cancel()
+                with suppress(asyncio.CancelledError):
+                    await upload_task
             if task is not None:
                 task.cancel()
                 with suppress(asyncio.CancelledError):
@@ -215,6 +224,7 @@ app.include_router(dashboard_router)
 app.include_router(flags_router)
 app.include_router(groups_router)
 app.include_router(ingest_router)
+app.include_router(direct_upload_router)
 app.include_router(library_router)
 app.include_router(llm_router)
 app.include_router(pipeline_router)

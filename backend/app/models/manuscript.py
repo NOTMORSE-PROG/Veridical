@@ -93,6 +93,9 @@ class Manuscript(Base, PkCreatedMixin):
     # NULL only for rows ingested before this column existed -- never
     # backfilled from a file that may no longer be on disk (BUG-138).
     content_hash: Mapped[str | None] = mapped_column(String(64), index=True)
+    # A lost helper response does not prove remote writes ended. Purge waits
+    # through the signed job's admission window and maximum runtime.
+    native_compute_active_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     # V-077 (D-028): a dashboard check upload vs a Library submission. Every
     # Dashboard/Review Desk/check path filters on `check_upload`; Library
     # membership itself lives on `library_entry`, never inferred from this.

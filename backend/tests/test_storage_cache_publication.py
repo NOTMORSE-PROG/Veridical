@@ -381,15 +381,17 @@ def test_existing_destination_requires_exact_complete_competing_bytes(
             final_path.write_bytes(payload if competing_state == "same" else b"different source")
         raise denied
 
+    original_open_winner = storage_module._open_published_winner
+
     def controlled_read(path):
         if path == final_path and competing_state == "unreadable":
             raise OSError("Controlled verification failure")
-        return original_read(path)
+        return original_open_winner(path)
 
     monkeypatch.setattr(
         storage_module.os, "rename" if os.name == "nt" else "link", existing_destination
     )
-    monkeypatch.setattr(storage_module, "_read_published_winner", controlled_read)
+    monkeypatch.setattr(storage_module, "_open_published_winner", controlled_read)
     if competing_state == "same":
         assert ensure_local_file(settings, DurableBytes(payload), str(final_path)) == final_path
         assert original_read(final_path) == payload

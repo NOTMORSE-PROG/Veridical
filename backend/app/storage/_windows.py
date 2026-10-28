@@ -3,6 +3,7 @@
 import ctypes
 import msvcrt
 import os
+from contextlib import contextmanager
 from ctypes import wintypes
 from pathlib import Path
 
@@ -31,7 +32,8 @@ _close_handle.argtypes = (wintypes.HANDLE,)
 _close_handle.restype = wintypes.BOOL
 
 
-def read_published_winner(path: Path) -> bytes:
+@contextmanager
+def open_published_winner(path: Path):
     """Read exact bytes without creating/truncating or permitting a write holder.
 
     A compatible holder can request DELETE access even when no deletion occurs.
@@ -58,6 +60,12 @@ def read_published_winner(path: Path) -> bytes:
     # Keep descriptor ownership here even if stream construction/read fails.
     try:
         with os.fdopen(descriptor, "rb", closefd=False) as reader:
-            return reader.read()
+            yield reader
     finally:
         os.close(descriptor)
+
+
+def read_published_winner(path: Path) -> bytes:
+    """Compatibility read for callers that explicitly need a small bytes value."""
+    with open_published_winner(path) as reader:
+        return reader.read()

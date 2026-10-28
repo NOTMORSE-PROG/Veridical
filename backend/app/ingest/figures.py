@@ -1,7 +1,6 @@
 """Bounded visual readings, isolated from grading and statistical transcriptions."""
 
 import asyncio
-import hashlib
 import json
 import re
 from pathlib import Path
@@ -10,12 +9,19 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from app.errors import ApiDownError, GoneError, InvalidApiKeyError, QuotaExhaustedError
-from app.ingest.docx_source import read_docx_image
-from app.ingest.schemas import FigureReading
-from app.ingest.vision import _area, _crop, _priority_page_ranges
+from app.ingest.image_source import _raster as _native_raster
+from app.ingest.image_source import prepare_figures
 from app.llm.base import LLMNotConfiguredError
 
 _PROMPTS = Path(__file__).parent / "prompts"
+
+
+def _raster(path, result, index, source_hash, settings):
+    if settings.native_compute_url:
+        from app.ingest.compute_client import remote_raster
+
+        return remote_raster(path, result.images[index], settings, source_hash=source_hash)
+    return _native_raster(path, result, index, source_hash, settings)
 
 
 class VisualObservation(BaseModel):
@@ -31,111 +37,6 @@ class VisualSupport(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
     status: Literal["supported", "not_supported", "uncertain"]
     reason: str = Field(min_length=1)
-
-
-def _caption(result, image, patterns, settings):
-    if image.paragraph is not None:
-        if sum(item.paragraph == image.paragraph for item in result.images) != 1:
-            return None, None
-        next_image = min(
-            (
-                item.paragraph
-                for item in result.images
-                if item.paragraph is not None and item.paragraph > image.paragraph
-            ),
-            default=None,
-        )
-        blocks = [
-            b
-            for b in result.blocks
-            if b.paragraph is not None
-            and (next_image is None or b.paragraph < next_image)
-            and image.paragraph
-            <= b.paragraph
-            <= image.paragraph + settings.ingest_figure_caption_lookahead
-        ]
-    else:
-        if sum(item.page == image.page for item in result.images) != 1:
-            return None, None
-        blocks = [b for b in result.blocks if b.page == image.page]
-    captions = [b for b in blocks if patterns.caption.match(b.text.strip())]
-    # Page proximity alone cannot attach one of several captions to a crop.
-    if len(captions) != 1:
-        return None, None
-    block = captions[0]
-    anchor = f"paragraph {block.paragraph}" if block.paragraph is not None else f"page {block.page}"
-    return block.text, anchor
-
-
-def prepare_figures(result, patterns, settings, *, enabled=True):
-    eligible = []
-    priority = _priority_page_ranges(result.section_tree.nodes, patterns)
-    for index, image in enumerate(result.images):
-        caption, anchor = _caption(result, image, patterns, settings)
-        supported = image.docx_source is not None or (
-            image.page is not None
-            and image.bbox is not None
-            and _area(image.bbox) >= settings.ingest_vision_min_area_pts
-        )
-        useful = caption is not None or (
-            image.page is not None and any(a <= image.page <= b for a, b in priority)
-        )
-        if enabled and settings.ingest_figure_reading_enabled and supported and useful:
-            eligible.append(index)
-    selected = eligible[: settings.ingest_figure_max_images]
-    result.figure_readings = []
-    for index, image in enumerate(result.images):
-        caption, anchor = _caption(result, image, patterns, settings)
-        result.figure_readings.append(
-            FigureReading(
-                image_index=index,
-                source_anchor=f"paragraph {image.paragraph}"
-                if image.paragraph is not None
-                else f"page {image.page}"
-                if image.page is not None
-                else None,
-                status="not_selected",
-                reason="not_attempted"
-                if index in selected
-                else "selection_limit"
-                if index in eligible
-                else "not_requested"
-                if not enabled or not settings.ingest_figure_reading_enabled
-                else "source_or_relevance_unavailable",
-                source_caption=caption,
-                caption_anchor=anchor,
-            )
-        )
-    return selected
-
-
-def _raster(path, result, index, source_hash, settings):
-    if not isinstance(source_hash, str) or not source_hash:
-        raise GoneError("The original document hash was not recorded.")
-    image = result.images[index]
-    if image.docx_source:
-        content, media_type = read_docx_image(path, result, index, source_hash, settings)
-        # The existing transport accepts PNG. Decode verified raster locally;
-        # it neither fetches external image links nor substitutes another part.
-        if media_type != "image/png":
-            import pymupdf
-
-            with pymupdf.open(stream=content, filetype="jpeg") as doc:
-                content = doc[0].get_pixmap().tobytes("png")
-        locator = {"paragraph": image.paragraph, "docx_source": image.docx_source.model_dump()}
-    else:
-        content = _crop(path, image, settings)
-        locator = {"page": image.page, "bbox": image.bbox, "dpi": settings.ingest_vision_crop_dpi}
-    with path.open("rb") as original:
-        if hashlib.file_digest(original, "sha256").hexdigest() != source_hash:
-            raise GoneError("The figure source changed during reading.")
-    return content, {
-        "document_sha256": source_hash,
-        "image_sha256": hashlib.sha256(content).hexdigest(),
-        "image_index": index,
-        "locator": locator,
-        "schema_version": "v1",
-    }
 
 
 async def read_figures(
