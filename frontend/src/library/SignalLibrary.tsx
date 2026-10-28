@@ -233,66 +233,74 @@ function LibraryCard({
 }) {
   const disabled = !selected && selectionFull;
   const name = libraryRecordName(item);
-  const normalize = (value: string) => value.trim().replace(/\s+/g, " ").toLocaleLowerCase();
-  const showTeam = item.is_own && item.team_name && normalize(item.team_name) !== normalize(name);
-  const showFile = item.is_own && item.original_filename && normalize(item.original_filename) !== normalize(name);
+  const authors = item.is_own ? item.authors : [];
+  const otherAuthors = authors.length - 1;
+  const contextId = 'library-context-' + item.manuscript_id;
   const titleId = 'library-title-' + item.manuscript_id;
   const scopeId = 'library-passage-scope-' + item.manuscript_id;
   const scopeMarker = passageIndexingMarker(item.passage_indexing);
+  const normalized = (value: string | null) => value?.trim().toLocaleLowerCase();
+  const team = item.is_own ? item.team_name?.trim() : null;
+  const file = item.is_own ? item.original_filename?.trim() : null;
+  const showTeam = item.is_own && (!team || normalized(team) !== normalized(name));
+  const showFile = item.is_own && (!file || (
+    normalized(file) !== normalized(name) && normalized(file) !== normalized(team ?? null)
+  ));
   return (
     <li>
-      <article className="signal-library-card" aria-labelledby={titleId}>
-        <div className="signal-library-card__rail" aria-hidden="true" />
+      <article className="signal-library-card" aria-labelledby={titleId} data-selected={selected || undefined}>
         <div className="signal-library-card__body">
-          <div className="signal-library-card__topline">
-            <span className="signal-library-ownership">
-              {item.is_own ? "Your record" : "Shared record"}
-            </span>
+          <div className="signal-library-card__context-row">
+            <p id={contextId} className="signal-library-card__context">
+              {item.is_own ? "Your record" : "Shared record"} <span aria-hidden="true">&middot;</span> <span>#{item.manuscript_id}</span>
+            </p>
+            <p className="signal-library-card__date">
+              {item.added_at ? <>Added <time dateTime={item.added_at}>{formatLibraryDate(item.added_at)}</time></> : "Added date unavailable"}
+            </p>
             {scopeMarker && <span id={scopeId} className="signal-library-passage-marker">{scopeMarker}</span>}
-            {compareMode && (
-              <label className="signal-library-select" data-disabled={disabled || undefined}>
-                <input
-                  type="checkbox"
-                  checked={selected}
-                  aria-label={accessibleSelectionName}
-                  aria-disabled={disabled || undefined}
-                  aria-describedby={disabled ? "signal-compare-limit" : undefined}
-                  onChange={() => { if (!disabled) onToggle(); }}
-                />
-                <span>{selected ? "Selected" : "Select"}</span>
-              </label>
-            )}
           </div>
           <div className="signal-library-card__identity">
             <h2 id={titleId}>{name}</h2>
+            {item.is_own ? (
+              <p className="signal-library-card__authors">
+                <span>{authors[0] ?? "Authors not recorded"}</span>
+                {otherAuthors > 0 && <span> + {otherAuthors} {otherAuthors === 1 ? "other" : "others"}</span>}
+              </p>
+            ) : (
+              <p className="signal-library-card__shared-note">Open this shared manuscript to read the full document.</p>
+            )}
           </div>
-          <dl className="signal-library-metadata">
-            {showTeam && <div className="signal-library-metadata__wide"><dt>Team</dt><dd>{item.team_name}</dd></div>}
-            {item.is_own && (
-              <div className="signal-library-metadata__wide">
-                <dt>Authors</dt><dd>{item.authors.length ? item.authors.join(", ") : "Not listed"}</dd>
-              </div>
-            )}
-            <div><dt>Program</dt><dd>{item.program ?? "Not set"}</dd></div>
-            <div><dt>School year</dt><dd>{item.school_year ?? "Not set"}</dd></div>
-            <div><dt>Added</dt><dd>{formatLibraryDate(item.added_at)}</dd></div>
-            <div><dt>Record</dt><dd>#{item.manuscript_id}</dd></div>
-            {showFile && (
-              <div className="signal-library-metadata__wide">
-                <dt>File</dt><dd className="signal-library-filename">{item.original_filename}</dd>
-              </div>
-            )}
+          <dl className="signal-library-card__metadata">
+            {showTeam && <div><dt>Team</dt><dd>{team || "Not recorded"}</dd></div>}
+            <div><dt>Program</dt><dd>{item.program?.trim() || "Not recorded"}</dd></div>
+            <div><dt>School year</dt><dd>{item.school_year?.trim() || "Not recorded"}</dd></div>
+            {showFile && <div><dt>File</dt><dd>{file || "Not recorded"}</dd></div>}
           </dl>
           <footer className="signal-library-card__footer">
-            <ActionLink
-              id={libraryCardActionId(item.manuscript_id)}
-              to={sourceDestination}
-              variant="secondary"
-              aria-label={'View manuscript: ' + name}
-              aria-describedby={scopeMarker ? scopeId : undefined}
-            >
-              View manuscript
-            </ActionLink>
+            <div className="signal-library-card__footer-actions">
+              <ActionLink
+                id={libraryCardActionId(item.manuscript_id)}
+                to={sourceDestination}
+                variant="quiet"
+                aria-label={'View manuscript: ' + name}
+                aria-describedby={[contextId, scopeMarker ? scopeId : null].filter(Boolean).join(" ")}
+              >
+                View manuscript
+              </ActionLink>
+              {compareMode && (
+                <label className="signal-library-select" data-disabled={disabled || undefined}>
+                  <input
+                    type="checkbox"
+                    checked={selected}
+                    aria-label={accessibleSelectionName}
+                    aria-disabled={disabled || undefined}
+                    aria-describedby={disabled ? "signal-compare-limit" : undefined}
+                    onChange={() => { if (!disabled) onToggle(); }}
+                  />
+                  <span>{selected ? "Selected" : "Select"}</span>
+                </label>
+              )}
+            </div>
           </footer>
         </div>
       </article>

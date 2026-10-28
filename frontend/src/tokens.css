@@ -351,6 +351,9 @@
   --signal-case-rail-width: 18.5rem;
   --signal-inspector-width: 22.5rem;
   --signal-library-card-min-width: 20rem;
+  --signal-library-card-height: 20rem;
+  --signal-library-card-title-lines: 3;
+  --signal-library-card-label-width: 5rem;
   --signal-library-workbench-min-height: 45rem;
   --signal-document-toolbar-height: 3.5rem;
   --signal-document-workbench-height: calc(100dvh - var(--signal-workspace-bar-height) - var(--signal-space-8));

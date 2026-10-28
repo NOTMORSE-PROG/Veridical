@@ -154,7 +154,7 @@ describe("Library collection (4z)", () => {
     expect(readLibraryReturn(ownDestination)).toEqual({
       returnPath: "/library", elementId: "library-view-1", comparisonMode: false, comparisonSelection: [],
     });
-    expect(screen.getByText("Ana Cruz, Ben Reyes")).toBeInTheDocument();
+    expect(screen.getByText("Ana Cruz").closest("p")).toHaveTextContent("Ana Cruz + 1 other");
     // Own records show their number, so "Library record #N" in a finding is findable.
     expect(screen.getByText("#1")).toBeInTheDocument();
     const foreign = screen.getByRole("link", { name: "View manuscript: Library record #2" });
@@ -261,7 +261,7 @@ describe("Library collection (4z)", () => {
     expect(within(card!).getAllByText("portal.pdf")).toHaveLength(1);
     expect(within(card!).queryByText("Team")).not.toBeInTheDocument();
     expect(within(card!).queryByText("File")).not.toBeInTheDocument();
-    expect(within(card!).getByText("Ana Cruz, Ben Reyes")).toBeInTheDocument();
+    expect(within(card!).getByText("Ana Cruz").closest("p")).toHaveTextContent("Ana Cruz + 1 other");
   });
 });
 
