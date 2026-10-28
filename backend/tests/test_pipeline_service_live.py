@@ -108,6 +108,46 @@ async def test_create_check_run_succeeds_for_ingested_manuscript_and_active_rubr
         assert check_run.status == "queued"
 
 
+async def test_new_check_records_confirmed_identity_once_and_preserves_history(session_factory):
+    from app.groups.assignment import AssignmentReceipt, AssignmentRequest, assignment_values
+    from app.report.subject_identity import SUBJECT_EVENT, recorded_check_subject
+
+    owner, manuscript_id, rubric_id = await _seed_instructor_manuscript_rubric(session_factory)
+    async with session_factory() as session:
+        group = Group(instructor_id=owner, name="Confirmed group",
+                      name_normalized="confirmed group", title="Current group title")
+        session.add(group)
+        await session.flush()
+        manuscript = await session.get(Manuscript, manuscript_id)
+        manuscript.group_id = group.id
+        manuscript.content_hash = "c" * 64
+        effective = assignment_values("Confirmed group", ["Ana", "José"], None, "Saved title")
+        manuscript.group_confirmation = AssignmentReceipt(
+            version=1, assigned_group_id=group.id, effective=effective,
+            request=AssignmentRequest(**effective.model_dump(), expected_group_id=None,
+                                      expected_provided=True),
+        ).model_dump(mode="json")
+        await session.commit()
+        run = await create_check_run(session, owner, manuscript_id, rubric_id)
+        assert (await recorded_check_subject(session, run, manuscript)).title == "Saved title"
+        again = await create_check_run(session, owner, manuscript_id, rubric_id)
+        assert again.id == run.id
+        events = list((await session.scalars(select(AuditLog).where(
+            AuditLog.check_run_id == run.id, AuditLog.event_type == SUBJECT_EVENT,
+        ))).all())
+        assert len(events) == 1
+        group.title = "Changed after this check"
+        manuscript.group_confirmation = None
+        await session.commit()
+        saved = await recorded_check_subject(session, run, manuscript)
+        assert saved.title == "Saved title" and saved.member_names == ["ana", "josé"]
+        run.status = CheckRunStatus.done
+        await session.commit()
+        next_run = await create_check_run(session, owner, manuscript_id, rubric_id)
+        assert next_run.id != run.id
+        assert (await recorded_check_subject(session, next_run, manuscript)).basis == "not_recorded"
+
+
 async def test_create_check_run_rejects_unfinished_ingestion(session_factory):
     instructor_id, manuscript_id, rubric_id = await _seed_instructor_manuscript_rubric(
         session_factory, ingested=False

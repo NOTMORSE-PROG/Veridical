@@ -11,6 +11,7 @@ from app.library.passage_indexing import LibraryPassageIndexingSummary
 from app.report.rule_facts import RuleFacts
 from app.report.source_coverage import CriterionSourceCoverageOut
 from app.report.statistical_scope import StatisticalCheckScopeOut
+from app.report.subject_identity import ReportSubjectOut
 
 
 class EvidenceItem(BaseModel):
@@ -221,8 +222,17 @@ class OriginalityScopeOut(BaseModel):
     )
 
 
+class IntegrityModuleOut(BaseModel):
+    check_kind: Literal[
+        "internal_agreement", "citation_integrity", "statistical_forensics", "originality_reuse"
+    ]
+    state: Literal["completed", "partial", "incomplete", "not_applicable", "not_recorded"]
+
+
 class ReportOut(BaseModel):
     check_run_id: int
+    subject: ReportSubjectOut = Field(default_factory=ReportSubjectOut)
+    integrity_modules: list[IntegrityModuleOut] = Field(default_factory=list)
     assessment_revision: int | None = None
     assessment_provenance: (
         Literal["current", "recorded_decision", "recomputed_without_recorded_breakdown"] | None
@@ -370,6 +380,9 @@ class PublicReportOut(BaseModel):
     legitimately has informed consent to see."""
 
     check_run_id: int
+    assessment_revision: int | None = None
+    subject: ReportSubjectOut = Field(default_factory=ReportSubjectOut)
+    integrity_modules: list[IntegrityModuleOut] = Field(default_factory=list)
     manuscript_group_label: str
     manuscript_original_filename: str | None
     rubric_title: str

@@ -1,8 +1,17 @@
 from datetime import UTC, datetime
+from typing import Literal
 
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from app.report.schemas import FlagSummaryOut, PublicReportOut
+from app.flags.schemas import (
+    AgreementPairOut,
+    CitationMetadataComparisonOut,
+    CitationSourceLocatorOut,
+    PassagePairOut,
+    PValueComparisonOut,
+)
+from app.report.schemas import FlagSummaryOut, IntegrityModuleOut, PublicReportOut
+from app.report.subject_identity import ReportSubjectOut
 
 
 class CreateShareLinkIn(BaseModel):
@@ -45,6 +54,41 @@ class ShareLinkOut(BaseModel):
     expires_at: datetime | None
 
 
+class PublicFindingDetailOut(BaseModel):
+    """Deliberately shared saved system evidence, never private review actions."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: int
+    ai_verdict_summary: str | None
+    ai_reasoning: str | None
+    agreement_pair: AgreementPairOut | None = None
+    passage_pair: PassagePairOut | None = None
+    p_value_comparison: PValueComparisonOut | None = None
+    citation_metadata_comparison: CitationMetadataComparisonOut | None = None
+    citation_source_locator: CitationSourceLocatorOut | None = None
+    citation_metadata_review_warning: Literal["quoted_title_projection_unverified"] | None = None
+
+
+class PublicShareSnapshot(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    version: Literal[1]
+    check_run_id: int = Field(gt=0)
+    assessment_revision: int = Field(ge=0)
+    token_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
+    subject: ReportSubjectOut
+    integrity_modules: list[IntegrityModuleOut]
+    finding_details: list[PublicFindingDetailOut]
+
+    @field_validator("version", mode="before")
+    @classmethod
+    def strict_version(cls, value: object) -> object:
+        if type(value) is not int:
+            raise ValueError("Share snapshot version must be an integer.")
+        return value
+
+
 class SharedReportOut(BaseModel):
     """The public, unauthenticated adviser view's payload (screen 4l).
 
@@ -62,3 +106,5 @@ class SharedReportOut(BaseModel):
 
     report: PublicReportOut
     flags: list[FlagSummaryOut]
+    finding_details: list[PublicFindingDetailOut] = Field(default_factory=list)
+    detail_snapshot: Literal["current", "not_recorded", "stale"] = "not_recorded"

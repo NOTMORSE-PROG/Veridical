@@ -18,6 +18,42 @@ from app.report.schemas import EvidenceItem, ReportExportData
 from tests.test_report_export_perf import _MAX_SECONDS, _sixty_criterion_report
 
 
+@pytest.mark.parametrize("source_mode", ["legacy", "authoritative_empty", "bound"])
+def test_resolved_record_preserves_original_assessment_and_source_authority(source_mode):
+    from app.report.schemas import PageEvidenceImageOut, ResolutionOut, SourceEvidencePrintOut
+
+    data = _data(flags=[])
+    row = data.report.results[0]
+    data.report.results = [row]
+    row.resolution = ResolutionOut(type="mark_pass", reason="TEACHER_COMMENT_MARKER",
+                                   ai_majority_verdict=None)
+    row.reasoning = "ORIGINAL_SYSTEM_EXPLANATION_MARKER"
+    row.reason = "DISTINCT_SYSTEM_NOTE_MARKER"
+    row.evidence = [EvidenceItem(quote=f"SAVED_COMPLETE_QUOTE_{index}", anchor=f"page {index + 1}")
+                    for index in range(2)]
+    data.source_evidence = None if source_mode == "legacy" else []
+    if source_mode == "bound":
+        data.source_evidence = [SourceEvidencePrintOut(
+            reference_id=str(index) * 64, criterion_id=row.criterion_id, flag_id=None,
+            role="criterion_evidence", index=index, quote=item.quote, anchor=item.anchor,
+            placement_state="unavailable", image=PageEvidenceImageOut(
+                image_png=None, page=None, reason="The original source is unavailable.",
+            ),
+        ) for index, item in enumerate(row.evidence)]
+    before = data.model_dump_json()
+    with fitz.open(stream=build_report_pdf(data), filetype="pdf") as document:
+        text = " ".join(" ".join(page.get_text().split()) for page in document)
+        assert "TEACHER_COMMENT_MARKER" in text
+        assert "ORIGINAL_SYSTEM_EXPLANATION_MARKER" in text
+        assert "DISTINCT_SYSTEM_NOTE_MARKER" in text
+        for item in row.evidence:
+            assert text.count(item.quote) == (0 if source_mode == "authoritative_empty" else 1)
+        assert document.get_toc()
+        links = [link for page in document for link in page.get_links()]
+        assert links and all(link.get("page", -1) >= 0 for link in links)
+    assert data.model_dump_json() == before
+
+
 def _data(**updates):
     payload = _sixty_criterion_report().model_dump()
     payload["flags"] = payload["flags"][:1]

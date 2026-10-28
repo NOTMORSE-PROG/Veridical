@@ -71,6 +71,33 @@ from app.report.statistical_scope import statistical_scope_copy
 from app.report.text import Paragraph, clusters, draw_right_text, register_fonts, text_width
 
 
+class _NavigableParagraph(Paragraph):
+    """Keep a destination on the first fragment of a potentially long heading."""
+
+    navigation_key = None
+    navigation_label = None
+
+    def split(self, availWidth, availHeight):
+        fragments = super().split(availWidth, availHeight)
+        if fragments:
+            fragments[0].navigation_key = self.navigation_key
+            fragments[0].navigation_label = self.navigation_label
+        return fragments
+
+    def draw(self):
+        if self.navigation_key:
+            self.canv.bookmarkHorizontal(self.navigation_key, 0, 0)
+            self.canv.addOutlineEntry(self.navigation_label, self.navigation_key, level=0)
+        super().draw()
+
+
+def _navigation_heading(text, style, key, label):
+    paragraph = _NavigableParagraph(text, style)
+    paragraph.navigation_key = key
+    paragraph.navigation_label = label
+    return paragraph
+
+
 def _is_optional_comparison_lead(flag: FlagSummaryOut) -> bool:
     return flag.check_kind == "originality_reuse" and flag.affects_readiness is False
 
@@ -753,7 +780,8 @@ def _criterion_flowable(
     row: CriterionResultOut, styles: dict[str, ParagraphStyle], *, include_evidence=True
 ) -> list:
     title = f"Criterion #{row.criterion_id}: {row.text}" if row.resolution else row.text
-    parts = [Paragraph(escape(title), styles["cell_bold"])]
+    parts = [_navigation_heading(escape(title), styles["cell_bold"],
+                                 f"criterion-{row.criterion_id}", title)]
     if not row.resolution:
         parts.extend(_criterion_source_flowables(row, styles))
     caption_bits = [] if row.resolution else [_source_caption(row)]
@@ -786,18 +814,36 @@ def _criterion_flowable(
                     styles["cell_caption"],
                 )
             )
+        if row.reasoning and row.reasoning.strip():
+            parts.append(Paragraph(
+                "<b>Earlier recorded system explanation:</b> " + escape(row.reasoning),
+                styles["cell"],
+            ))
+        if row.reason and row.reason.strip() and row.reason != row.reasoning:
+            parts.append(Paragraph(
+                "<b>Earlier recorded system note:</b> " + escape(row.reason), styles["cell"],
+            ))
+        if include_evidence:
+            for evidence in row.evidence:
+                parts.append(Paragraph(escape(evidence.quote), styles["cell"]))
+                parts.append(Paragraph(
+                    f"Anchor: {escape(_display_anchor(evidence.anchor))}", styles["cell_caption"],
+                ))
         parts.extend(_criterion_source_flowables(row, styles))
     elif row.evidence and include_evidence:
-        parts.append(Paragraph(escape(row.evidence[0].quote), styles["cell"]))
-        parts.append(
-            Paragraph(
-                f"Anchor: {escape(_display_anchor(row.evidence[0].anchor))}", styles["cell_caption"]
-            )
-        )
+        for evidence in row.evidence:
+            parts.append(Paragraph(escape(evidence.quote), styles["cell"]))
+            parts.append(Paragraph(
+                f"Anchor: {escape(_display_anchor(evidence.anchor))}", styles["cell_caption"]
+            ))
         if row.reasoning or row.reason:
             parts.append(Paragraph(escape(row.reasoning or row.reason or ""), styles["cell"]))
     elif row.reasoning or row.reason:
         parts.append(Paragraph(escape(row.reasoning or row.reason or ""), styles["cell"]))
+    if not row.resolution and row.reasoning and row.reason and row.reason != row.reasoning:
+        parts.append(Paragraph(
+            "<b>Recorded system note:</b> " + escape(row.reason), styles["cell"]
+        ))
     facts = _rule_facts_flowables(row, styles)
     if facts and not row.resolution:
         parts[0].keepWithNext = True
@@ -886,6 +932,7 @@ def _report_footer_parts(report, styles, font, generated_at):
         ),
     )
     footer_rows = [
+        Paragraph('<link href="#report-contents">Return to contents</link>', footer_style),
         Paragraph(
             escape(footer_llm_disclosure[0]) if footer_llm_disclosure else "",
             footer_mode_style,
@@ -997,7 +1044,25 @@ def build_report_pdf(data: ReportExportData) -> bytes:
     flow: list = []
 
     # 1. Title block.
-    flow.append(Paragraph("VERIDICAL Readiness Report", styles["title"]))
+    manuscript_title = report.subject.title or report.manuscript_original_filename
+    flow.append(_navigation_heading(escape(manuscript_title or report.manuscript_group_label),
+                                    styles["title"], "report-overview", "Report overview"))
+    flow.append(Paragraph("VERIDICAL Readiness Report", styles["body_bold"]))
+    if report.subject.basis == "confirmed_assignment_at_check":
+        flow.append(Paragraph(
+            "Group members recorded when this check began: "
+            + escape(", ".join(report.subject.member_names) or "Not recorded"), styles["meta"]
+        ))
+        flow.append(Paragraph(
+            "Title and members are the instructor-confirmed assignment saved for this check.",
+            styles["caption"],
+        ))
+    else:
+        flow.append(Paragraph(
+            "Manuscript title and authors were not recorded with this check. "
+            "The original filename and group label identify this historical report.",
+            styles["caption"],
+        ))
     identity = report.manuscript_group_label
     if report.manuscript_original_filename:
         identity = f"{identity} · {report.manuscript_original_filename}"
@@ -1218,6 +1283,39 @@ def build_report_pdf(data: ReportExportData) -> bytes:
         )
     flow.append(Spacer(1, 10))
 
+    flow.append(_navigation_heading("Report contents", styles["h2"],
+                                    "report-contents", "Report contents"))
+    flow.append(Paragraph(
+        "Select an item to open its complete record. PDF bookmarks provide the same navigation.",
+        styles["caption"],
+    ))
+    flow.append(Paragraph('<link href="#report-overview">Readiness and instructor decision</link>',
+                          styles["body"]))
+    for row in report.results:
+        flow.append(Paragraph(
+            f'<link href="#criterion-{row.criterion_id}">Criterion #{row.criterion_id}</link>',
+            styles["body"],
+        ))
+    record_identities = _review_record_identities(data.flags)
+    for flag in data.flags:
+        flow.append(Paragraph(
+            f'<link href="#finding-{flag.id}">{escape(record_identities[flag.id])}</link>',
+            styles["body"],
+        ))
+    flow.append(Paragraph('<link href="#instructor-decision-record">Full decision record</link>',
+                          styles["body"]))
+    flow.append(Spacer(1, _PRINT_LAYOUT["source_entry_gap"]))
+    flow.append(Paragraph("Grades at a glance", styles["h2"]))
+    for row in report.results:
+        label, _tone = _result_display(row)
+        flow.append(Paragraph(
+            f'<link href="#criterion-{row.criterion_id}">Criterion #{row.criterion_id}</link>: '
+            f'{escape(label)}. '
+            + ("Instructor judgment recorded." if row.resolution else "Recorded system outcome."),
+            styles["body"],
+        ))
+    flow.append(Spacer(1, _PRINT_LAYOUT["source_entry_gap"]))
+
     if data.source_evidence:
         included = sum(entry.image.image_png is not None for entry in data.source_evidence)
         without_image = len(data.source_evidence) - included
@@ -1258,10 +1356,11 @@ def build_report_pdf(data: ReportExportData) -> bytes:
             )
         for row in pending:
             block = [
-                Paragraph(
+                _navigation_heading(
                     f"Criterion #{row.criterion_id}: {escape(row.text)} "
                     f"<i>({_format_weight_importance(row.weight_importance, long=True)})</i>",
                     styles["body_bold"],
+                    f"criterion-{row.criterion_id}", f"Criterion #{row.criterion_id}: {row.text}",
                 ),
                 *_criterion_source_flowables(row, styles),
                 Paragraph(escape(_pending_review_reason(row.outcome)), styles["body"]),
@@ -1665,7 +1764,8 @@ def build_report_pdf(data: ReportExportData) -> bytes:
                 divider = HRFlowable(
                     width=content_width, thickness=0.5, color=_RULE, spaceBefore=6, spaceAfter=6
                 )
-                heading = Paragraph(escape(f"{record_identity}: {issue}"), styles["body_bold"])
+                heading = _navigation_heading(escape(f"{record_identity}: {issue}"),
+                    styles["body_bold"], f"finding-{f.id}", f"{record_identity}: {issue}")
                 evidence_label = Paragraph(
                     "System comparison summary"
                     if detail.evidence_is_summary

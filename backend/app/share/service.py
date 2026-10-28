@@ -1,20 +1,31 @@
 """Read-only, tokenized report sharing (F8.7, V-040)."""
 
+import hashlib
 import secrets
 from datetime import UTC, datetime
 
+from pydantic import ValidationError
 from sqlalchemy import select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.audit.service import write_audit_event
 from app.errors import GoneError, NotFoundError
+from app.models.audit import AuditLog
+from app.models.enums import CheckRunStatus
 from app.models.manuscript import Manuscript
-from app.models.run import CheckRun
+from app.models.run import CheckResult, CheckRun, Flag
 from app.models.share import ShareLink
 from app.pipeline.service import get_check_run
+from app.report.assessment import lock_assessment
 from app.report.schemas import PublicCriterionResultOut, PublicReportOut, ReportOut
 from app.report.service import flags_for_check_run, report_out_for_check_run
-from app.share.schemas import SharedReportOut, ShareLinkOut
+from app.share.schemas import (
+    PublicFindingDetailOut,
+    PublicShareSnapshot,
+    SharedReportOut,
+    ShareLinkOut,
+)
 
 # backend review finding (P1, live-reproduced with 15 concurrent POSTs):
 # "only one active link at a time" was previously check-then-act in the
@@ -107,6 +118,7 @@ async def create_share_link(
         )
         session.add(link)
         try:
+            await _record_public_details(session, link)
             await session.commit()
         except IntegrityError:
             await session.rollback()
@@ -116,6 +128,65 @@ async def create_share_link(
         await session.refresh(link)
         return _to_out(link)
     raise AssertionError("unreachable")  # loop always returns or raises
+
+
+_SHARE_SNAPSHOT_EVENT = "public_report_details_recorded"
+
+
+async def _record_public_details(session: AsyncSession, link: ShareLink) -> None:
+    # Local import preserves the report/flag assembly dependency order.
+    from app.flags.service import _to_flag_out
+
+    run = await session.get(CheckRun, link.check_run_id)
+    if run is None or run.status != CheckRunStatus.done:
+        return
+    saved = await lock_assessment(session, run.id)
+    if saved is None:
+        return
+    report = await report_out_for_check_run(session, run)
+    manuscript = await session.get(Manuscript, run.manuscript_id)
+    details = []
+    rows = (await session.execute(select(Flag, CheckResult).join(
+        CheckResult, CheckResult.id == Flag.check_result_id,
+    ).where(CheckResult.check_run_id == run.id).order_by(Flag.id))).all()
+    for flag, result in rows:
+        private = await _to_flag_out(session, flag, result, manuscript, run,
+                                     assessment_revision=saved.assessment_revision)
+        details.append(PublicFindingDetailOut(
+            id=private.id, ai_verdict_summary=private.ai_verdict_summary,
+            ai_reasoning=private.ai_reasoning, agreement_pair=private.agreement_pair,
+            passage_pair=private.passage_pair, p_value_comparison=private.p_value_comparison,
+            citation_metadata_comparison=private.citation_metadata_comparison,
+            citation_source_locator=private.citation_source_locator,
+            citation_metadata_review_warning=private.citation_metadata_review_warning,
+        ))
+    snapshot = PublicShareSnapshot(
+        version=1, check_run_id=run.id, assessment_revision=saved.assessment_revision,
+        token_sha256=hashlib.sha256(link.token.encode()).hexdigest(), subject=report.subject,
+        integrity_modules=report.integrity_modules, finding_details=details,
+    )
+    await write_audit_event(session, event_type=_SHARE_SNAPSHOT_EVENT, check_run_id=run.id,
+                            payload=snapshot.model_dump(mode="json"))
+
+
+async def _public_details(session: AsyncSession, link: ShareLink, report: ReportOut):
+    digest = hashlib.sha256(link.token.encode()).hexdigest()
+    rows = list((await session.scalars(select(AuditLog).where(
+        AuditLog.check_run_id == link.check_run_id,
+        AuditLog.event_type == _SHARE_SNAPSHOT_EVENT,
+        AuditLog.payload["token_sha256"].astext == digest,
+    ).limit(2))).all())
+    if len(rows) != 1 or rows[0].created_at != link.created_at:
+        return None, "not_recorded"
+    try:
+        snapshot = PublicShareSnapshot.model_validate(rows[0].payload)
+    except ValidationError:
+        return None, "not_recorded"
+    if snapshot.check_run_id != link.check_run_id or snapshot.token_sha256 != digest:
+        return None, "not_recorded"
+    if snapshot.assessment_revision != report.assessment_revision:
+        return None, "stale"
+    return snapshot, "current"
 
 
 async def revoke_share_link(session: AsyncSession, check_run_id: int, instructor_id: int) -> None:
@@ -140,6 +211,7 @@ def _to_public_report(report: ReportOut) -> PublicReportOut:
     that assessment is incomplete, not the private per-check details."""
     return PublicReportOut(
         check_run_id=report.check_run_id,
+        assessment_revision=report.assessment_revision,
         manuscript_group_label=report.manuscript_group_label,
         manuscript_original_filename=report.manuscript_original_filename,
         rubric_title=report.rubric_title,
@@ -214,13 +286,27 @@ async def get_shared_report(session: AsyncSession, token: str) -> SharedReportOu
         raise NotFoundError("This link doesn't exist.")
     if link.revoked_at is not None:
         raise GoneError("This link has been turned off by the instructor.")
-    if link.expires_at is not None and link.expires_at < datetime.now(UTC):
+    if link.expires_at is not None and link.expires_at <= datetime.now(UTC):
         raise GoneError("This link has expired.")
 
     check_run = await session.get(CheckRun, link.check_run_id)
     if check_run is None:
         raise NotFoundError("This link doesn't exist.")
 
+    await lock_assessment(session, check_run.id)
     report: ReportOut = await report_out_for_check_run(session, check_run)
     flags = await flags_for_check_run(session, check_run.id)
-    return SharedReportOut(report=_to_public_report(report), flags=flags)
+    snapshot, state = await _public_details(session, link, report)
+    public = _to_public_report(report)
+    if snapshot is not None:
+        public.subject = snapshot.subject
+        public.integrity_modules = snapshot.integrity_modules
+    # Recheck after every asynchronous projection; revocation can win in flight.
+    from app.report.evidence_service import authorize_evidence_run
+
+    current_run = await authorize_evidence_run(session, token=token)
+    if current_run.id != check_run.id:
+        raise NotFoundError("This link doesn't exist.")
+    return SharedReportOut(report=public, flags=flags,
+                           finding_details=snapshot.finding_details if snapshot else [],
+                           detail_snapshot=state)

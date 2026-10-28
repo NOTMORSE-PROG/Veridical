@@ -57,6 +57,7 @@ from app.models.run import CheckResult, CheckRun, Flag, ReadinessReport
 from app.report.assessment import assessment_write, lock_assessment
 from app.report.document_projection import project_docx_source
 from app.report.docx_images import manuscript_docx_image_for
+from app.report.module_scope import integrity_modules
 from app.report.page_images import build_page_evidence_images
 from app.report.rating import compute_levelled_rating
 from app.report.rule_facts import project_rule_facts, project_rule_scope_unconfirmed
@@ -92,6 +93,7 @@ from app.report.scoring import (
 from app.report.source_coverage import project_source_coverage
 from app.report.source_files import manuscript_source_file, open_source_pdf, readable_source_file
 from app.report.statistical_scope import statistical_check_scope
+from app.report.subject_identity import recorded_check_subject
 from app.report.weight_importance import WeightImportance, weight_importance
 from app.storage.access import read_source
 
@@ -788,6 +790,14 @@ async def report_out_for_check_run(
             for result, _criterion in rows
         ),
         check_run_id=check_run_id,
+        subject=await recorded_check_subject(session, check_run, manuscript),
+        integrity_modules=integrity_modules(
+            list((await session.scalars(select(CheckResult).where(
+                CheckResult.check_run_id == check_run_id,
+                CheckResult.criterion_id.is_(None),
+            ))).all()),
+            {status.check_kind for status in integrity_check_status},
+        ),
         manuscript_id=check_run.manuscript_id,
         manuscript_group_label=manuscript.group_label,
         manuscript_original_filename=manuscript.original_filename,

@@ -59,6 +59,7 @@ class EvidencePageOut(BaseModel):
     snapshot_id: str
     placement: EvidencePlacementOut
     image_data_url: str | None
+    image_sha256: str | None = Field(default=None, pattern=r"^[a-f0-9]{64}$")
     caption: str
 
 
@@ -290,6 +291,9 @@ async def _admitted_evidence_page(session, run, reference_id, snapshot_id, setti
         raise ConflictError("This assessment changed. Reload its evidence before continuing.")
     return EvidencePageOut(
         snapshot_id=assessment.snapshot_id,
+        image_sha256=(
+            hashlib.sha256(image.image_png).hexdigest() if image.image_png is not None else None
+        ),
         placement=image.placement,
         caption=placement_caption(image.placement.state, image.placement.reason),
         image_data_url=(

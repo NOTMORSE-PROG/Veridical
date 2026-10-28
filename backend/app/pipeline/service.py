@@ -22,6 +22,7 @@ from app.models.manuscript import Manuscript
 from app.models.rubric import Rubric
 from app.models.run import CheckRun, ReadinessReport
 from app.pipeline.schemas import RerunEstimateItem, RerunEstimateOut
+from app.report.subject_identity import record_check_subject
 
 _LLM_CALL_EVENT_TYPES = ("llm_call", "llm_cache_hit")
 
@@ -141,6 +142,8 @@ async def create_check_run(
         return existing
     check_run = CheckRun(manuscript_id=manuscript_id, rubric_id=rubric_id, llm_mode=llm_mode)
     session.add(check_run)
+    await session.flush()
+    await record_check_subject(session, check_run, manuscript)
     await session.commit()
     await session.refresh(check_run)
     return check_run
