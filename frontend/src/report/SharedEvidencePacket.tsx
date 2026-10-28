@@ -45,7 +45,7 @@ function SharedPageSession({ token, snapshot, reference, context, references }: 
   token: string; snapshot: string; reference: EvidenceReference;
   context?: SharedEvidenceContext; references: readonly EvidenceReference[];
 }) {
-  const [preview, setPreview] = useState(false);
+  const [preview, setPreview] = useState(true);
   const [dialog, setDialog] = useState(false);
   const query = useQuery({ queryKey: ["shared-source-page", token, snapshot, reference.reference_id],
     enabled: preview || dialog, gcTime: 0, retry: false,
@@ -69,7 +69,7 @@ function SharedPageSession({ token, snapshot, reference, context, references }: 
     <Button variant="secondary" aria-expanded={preview} onClick={() => setPreview(value => !value)}>{preview ? "Hide" : "Show"} original-page preview</Button>
     {preview && image(false)}
     {dialog && <Dialog title={context ? `Evidence and explanation: ${context.title}` : `Original source: ${instructorAnchor(reference.anchor ?? "") || "Saved source"}`} wide className={context ? "signal-dialog--source-context" : undefined} onClose={() => setDialog(false)}>
-      {context ? <EvidenceSourceLayout source={image(true)} context={<section aria-label="Shared assessment"><h3>{context.title}</h3><h4>Assessment and explanation</h4><p>{context.explanation || "No assessment explanation was shared for this criterion."}</p>{context.recordedNote && <p><strong>Recorded system note:</strong> {context.recordedNote}</p>}
+      {context ? <EvidenceSourceLayout source={image(true)} context={<section aria-label="Shared assessment"><h3>{context.title}</h3><h4>Assessment and explanation</h4><p>{context.explanation || "No assessment explanation was shared for this item."}</p>{context.recordedNote && <p><strong>Recorded system note:</strong> {context.recordedNote}</p>}
         <div className="signal-criterion-packet__quotations">{references.map(entry => <figure key={entry.reference_id}><figcaption><strong>{ROLE_LABEL[entry.role]}</strong><span>{instructorAnchor(entry.anchor ?? "")}</span></figcaption><blockquote>{entry.quote}</blockquote></figure>)}</div></section>} />
         : <><blockquote>{reference.quote}</blockquote>{image(true)}</>}
     </Dialog>}

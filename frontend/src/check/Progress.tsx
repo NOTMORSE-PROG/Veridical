@@ -114,6 +114,10 @@ function toStage(run: CheckRun, key: string, label: string, summary: ProgressSum
   if (entry?.status === "skipped") return { id: key, label, state: "skipped", tagText: "Skipped", detail: typeof entry.note === "string" ? entry.note : undefined };
   if (entry?.status === "done" && (entry.degraded_count ?? 0) > 0) return { id: key, label, state: "attention", tagText: "Needs review", detail: degradedDetail(entry) };
   if (entry?.status === "done") return { id: key, label, state: "done", tagText: "Done" };
+  if (summary.kind === "cancelled" || summary.kind === "failed") return {
+    id: key, label, state: "pending", tagText: "Completion not recorded",
+    detail: "This run stopped before completion of this stage was recorded. Some intermediate work may have been retained.",
+  };
   return { id: key, label, state: "pending", tagText: "Not started yet" };
 }
 

@@ -377,6 +377,73 @@ describe("AdviserViewPage", () => {
     expect(screen.getByRole("heading", { name: "Has an abstract" })).toBeVisible();
   });
 
+  it("keeps every grouped finding location reachable while mounting one complete detail packet", async () => {
+    const locations: FlagSummaryOut[] = Array.from({ length: 39 }, (_, index) => ({ ...SAMPLE_FLAG,
+      id: index + 10, check_kind: "originality_reuse", problem_kind: "passage_overlap", matched_ref: 7,
+      evidence_excerpt: `Complete own quotation ${index + 1}`, page_anchor: `page ${index + 1}`,
+    }));
+    const other = { ...SAMPLE_FLAG, id: 99, check_kind: "originality_reuse" as const, evidence_excerpt: "Separate saved quotation" };
+    vi.stubGlobal("fetch", stubFetchByPath({ "/shared/tok123/report": shared({
+      flags: [...locations, other], detail_snapshot: "current",
+      finding_details: [...locations, other].map(flag => ({ id: flag.id, ai_verdict_summary: null,
+        ai_reasoning: `Complete explanation ${flag.id}`,
+        passage_pair: { own_excerpt: flag.evidence_excerpt, matched_excerpt: `Complete comparison quotation ${flag.id}`,
+          own_context_before: null, own_context_after: null, matched_ref: 7, matched_context_before: null,
+          matched_context_after: null, context_words_each_side: 0, similarity: 0.8, level: "high_similarity" },
+      })),
+    }) }));
+    renderWithProviders(<AdviserViewPage />, { route: "/shared/tok123?section=findings&module=originality_reuse&finding=48&reader=faculty", path: "/shared/:token" });
+    expect(await screen.findByText("2 review items in this module, across 40 saved records. Choose an item to read its explanation and evidence.")).toBeVisible();
+    expect(within(screen.getByRole("combobox", { name: "Choose a finding or comparison lead" })).getAllByRole("option")).toHaveLength(2);
+    expect(screen.getByText("Complete explanation 48")).toBeVisible();
+    expect(screen.getByText("Complete comparison quotation 48")).toBeVisible();
+    expect(screen.queryByText("Complete explanation 10")).not.toBeInTheDocument();
+    expect(screen.getAllByRole("article", { name: /Saved finding detail/ })).toHaveLength(1);
+    expect(screen.getByText(/Location 39 of 39/)).toBeVisible();
+    expect(screen.getByRole("button", { name: "Next location" })).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: "Previous location" }));
+    expect(screen.getByText("Complete explanation 47")).toBeVisible();
+    expect(screen.queryByText("Complete comparison quotation 48")).not.toBeInTheDocument();
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Next item" }));
+    expect(screen.getByText("Complete explanation 99")).toBeVisible();
+    expect(screen.queryByRole("navigation", { name: "Shared finding locations" })).not.toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Read final decision" })).toHaveAttribute("href", "/shared/tok123?section=findings&module=originality_reuse&finding=99&reader=faculty#shared-decision-heading");
+    fireEvent.click(screen.getByRole("button", { name: /Citation integrity/ }));
+    expect(screen.getByText("No shared integrity signals are shown in this module.")).toBeVisible();
+    expect(screen.queryByRole("article", { name: /Saved finding detail/ })).not.toBeInTheDocument();
+    expect(screen.queryByText(/Requested finding is unavailable/)).not.toBeInTheDocument();
+  });
+
+  it("preserves optional lead identity from the complete shared collection while showing one record", async () => {
+    const leads = [30, 10, 20].map(id => ({ ...SAMPLE_FLAG, id, check_kind: "originality_reuse" as const,
+      affects_readiness: false, is_passage_level: true, evidence_excerpt: `COMPLETE_LEAD_QUOTE_${id}` }));
+    vi.stubGlobal("fetch", stubFetchByPath({ "/shared/tok123/report": shared({ flags: leads }) }));
+    renderWithProviders(<AdviserViewPage />, { route: "/shared/tok123?section=findings&module=originality_reuse&finding=20&lead_view=resolved", path: "/shared/:token" });
+    const summary = await screen.findByLabelText(/Evidence for Comparison lead 2 of 3\. Record #20/);
+    expect(summary).toBeVisible();
+    expect(document.querySelectorAll(".signal-comparison-list > li")).toHaveLength(1);
+    expect(screen.getByText("Selected record; 3 comparison leads in this check")).toBeVisible();
+    expect(screen.queryByText("COMPLETE_LEAD_QUOTE_10", { selector: "blockquote" })).not.toBeInTheDocument();
+    expect(screen.queryByLabelText(/Comparison lead 1 of 1/)).not.toBeInTheDocument();
+    fireEvent.click(summary);
+    expect(screen.getByText(/COMPLETE_LEAD_QUOTE_20/, { selector: "blockquote" })).toBeVisible();
+    expect(screen.getByText("Not scored. Does not affect readiness or block your decision.")).toBeVisible();
+    expect(screen.queryByRole("group", { name: "Filter comparison leads" })).not.toBeInTheDocument();
+  });
+
+  it("falls back visibly for a finding outside the selected module without showing another module's detail", async () => {
+    vi.stubGlobal("fetch", stubFetchByPath({ "/shared/tok123/report": shared({
+      flags: [SAMPLE_FLAG, { ...SAMPLE_FLAG, id: 88, check_kind: "citation_integrity", evidence_excerpt: "OTHER MODULE FULL TEXT" }],
+      detail_snapshot: "current", finding_details: [{ id: 88, ai_reasoning: "OTHER MODULE EXPLANATION", ai_verdict_summary: null }],
+    }) }));
+    renderWithProviders(<AdviserViewPage />, { route: "/shared/tok123?section=findings&finding=88", path: "/shared/:token" });
+    expect(await screen.findByText("Requested finding is unavailable in this module. Showing its first shared finding.")).toBeVisible();
+    expect(screen.queryByText("OTHER MODULE FULL TEXT")).not.toBeInTheDocument();
+    expect(screen.queryByText("OTHER MODULE EXPLANATION")).not.toBeInTheDocument();
+    expect(screen.getByText(/95% accuracy/)).toBeVisible();
+  });
+
   it("shows the pending-review sentence in the explainer when items are still unresolved", async () => {
     vi.stubGlobal("fetch", stubFetchByPath({ "/shared/tok123/report": shared() }));
     render();

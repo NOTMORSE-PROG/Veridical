@@ -453,9 +453,18 @@ export interface ReportCommon {
 }
 
 /** Saved processing/applicability only; findings and coverage remain separate. */
+export interface ReconstructionScopeOut {
+  state: "candidate_found" | "incomplete" | "not_applicable" | "not_recorded";
+  considered_rows: number | null;
+  attempted_rows: number | null;
+  compatible_rows: number | null;
+  unassessed_rows: number | null;
+}
+
 export interface StatisticalCheckScopeOut {
   state: "completed" | "not_applicable" | "incomplete" | "not_recorded";
   unassessed_descriptive_rows?: number;
+  reconstruction?: ReconstructionScopeOut | null;
 }
 
 // V-069 AC2: the rubric's own RATING formula, transcribed -- never merged

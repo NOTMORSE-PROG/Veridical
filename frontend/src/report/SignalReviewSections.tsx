@@ -1002,16 +1002,20 @@ export function SignalPublicFlags({
   checkRunId,
   statisticalScope,
   selectedModule,
+  selectedRecordId,
 }: {
   flags: FlagSummaryOut[];
   originalityScope?: OriginalityScopeValue | null;
   checkRunId: number;
   statisticalScope?: StatisticalCheckScopeOut | null;
   selectedModule?: IntegrityKind;
+  selectedRecordId?: number;
 }) {
   const otherFlags = flags.filter((flag) => !isOptionalComparisonLead(flag));
   const optional = comparisonLeadCollection(checkRunId, { data: flags, fetchStatus: "idle", isSuccess: true, isError: false });
   const findingCount = clusterFlagFindings(otherFlags).length;
+  const visibleOtherFlags = selectedRecordId === undefined ? otherFlags : otherFlags.filter(flag => flag.id === selectedRecordId);
+  const selectedOptional = selectedRecordId === undefined || optional.snapshot?.ordinalById.has(selectedRecordId);
   const hasOptional = Boolean(optional.snapshot?.total);
   const onlyOptional = hasOptional && otherFlags.length === 0;
   return (
@@ -1020,10 +1024,10 @@ export function SignalPublicFlags({
       {!onlyOptional && <p className="signal-review-section__intro">These are possible inconsistencies, not accusations. This shared view shows the bounded evidence the instructor chose to share; it does not expose the private Audit trail.</p>}
       {(!selectedModule || selectedModule === "statistical_forensics") && <StatisticalCheckScope scope={statisticalScope} />}
       {(!selectedModule || selectedModule === "originality_reuse") && <OriginalityScope scope={originalityScope} />}
-      {otherFlags.length
-        ? <SignalFlagList flags={otherFlags} showActions={false} initialView="all" />
-        : onlyOptional ? null : <p>{selectedModule ? "No shared integrity signals are shown in this module." : "This run produced no shared integrity signals."}</p>}
-      {(!selectedModule || selectedModule === "originality_reuse") && <ComparisonLeadList collection={optional} showActions={false} />}
+      {visibleOtherFlags.length
+        ? <SignalFlagList flags={visibleOtherFlags} showActions={false} initialView="all" />
+        : onlyOptional || selectedRecordId !== undefined ? null : <p>{selectedModule ? "No shared integrity signals are shown in this module." : "This run produced no shared integrity signals."}</p>}
+      {(!selectedModule || selectedModule === "originality_reuse") && selectedOptional && <ComparisonLeadList collection={optional} showActions={false} selectedRecordId={selectedRecordId} />}
     </section>
   );
 }

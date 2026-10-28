@@ -20,7 +20,7 @@ function positiveInteger(value: string | null | undefined) {
   return Number.isSafeInteger(number) ? number : undefined;
 }
 
-export function ComparisonLeadList({ collection, showActions, viewedIds, onSelect, onRetry, headingLevel = 3, workspace = false }: {
+export function ComparisonLeadList({ collection, showActions, viewedIds, onSelect, onRetry, headingLevel = 3, workspace = false, selectedRecordId }: {
   collection: ComparisonLeadCollection;
   showActions: boolean;
   viewedIds?: ReadonlySet<number>;
@@ -28,6 +28,7 @@ export function ComparisonLeadList({ collection, showActions, viewedIds, onSelec
   onRetry?: () => void;
   headingLevel?: 2 | 3;
   workspace?: boolean;
+  selectedRecordId?: number;
 }) {
   const [params] = useSearchParams();
   const location = useLocation();
@@ -38,7 +39,7 @@ export function ComparisonLeadList({ collection, showActions, viewedIds, onSelec
   const Heading = headingLevel === 2 ? "h2" : "h3";
   const filter = comparisonLeadFilter(params.get("lead_view"));
   const records = snapshot?.records ?? [];
-  const filtered = records.filter((record) => filter === "all" || (filter === "resolved" ? record.overridden : !record.overridden));
+  const filtered = records.filter((record) => selectedRecordId !== undefined ? record.id === selectedRecordId : filter === "all" || (filter === "resolved" ? record.overridden : !record.overridden));
   const pendingId = pendingRouteReturnElement(location.pathname + location.search)?.match(/^comparison-lead-([1-9]\d*)$/)?.[1];
   const returnContext = useRef<{ path: string; id?: number }>({ path: "" });
   const fullPath = location.pathname + location.search;
@@ -54,7 +55,7 @@ export function ComparisonLeadList({ collection, showActions, viewedIds, onSelec
   const page = returnPosition >= 0 ? Math.floor(returnPosition / COMPARISON_LEAD_PAGE_SIZE) + 1
     : state === "success" ? Math.min(requestedPage, pages) : requestedPage;
   const visible = filtered.slice((page - 1) * COMPARISON_LEAD_PAGE_SIZE, page * COMPARISON_LEAD_PAGE_SIZE);
-  const outsideFilter = returnId !== undefined && records.some((record) => record.id === returnId) && returnPosition < 0;
+  const outsideFilter = selectedRecordId === undefined && returnId !== undefined && records.some((record) => record.id === returnId) && returnPosition < 0;
   const [announcement, setAnnouncement] = useState("");
   const requestedFocus = useRef<{ id: number | undefined; from: string; search: string; ownership: FocusContinuation } | undefined>(undefined);
   const headingRef = useRef<HTMLHeadingElement>(null);
@@ -138,7 +139,7 @@ export function ComparisonLeadList({ collection, showActions, viewedIds, onSelec
     : state === "paused" ? snapshot ? "Waiting for a connection. Showing last loaded records." : "Waiting for a connection to load comparison leads."
       : state === "error" ? snapshot ? "Comparison leads could not be refreshed. Showing last loaded records." : "Comparison leads could not be loaded."
         : state === "unavailable" ? COMPARISON_LEAD_COPY.unavailable : "";
-  const count = `${filtered.length} ${filter === "all" ? "" : filter + " "}${filtered.length === 1 ? "record" : "records"}`;
+  const count = selectedRecordId !== undefined ? `Selected record; ${snapshot?.total ?? 0} comparison leads in this check` : `${filtered.length} ${filter === "all" ? "" : filter + " "}${filtered.length === 1 ? "record" : "records"}`;
   const workspaceEmpty = workspace && snapshot?.total === 0 && state === "success";
   const workspaceUnknown = workspace && !snapshot;
   const title = workspaceEmpty ? "No recorded evidence items" : workspaceUnknown ? "Evidence review" : COMPARISON_LEAD_COPY.title;
@@ -148,7 +149,7 @@ export function ComparisonLeadList({ collection, showActions, viewedIds, onSelec
     <p className={progress ? "signal-comparison-index__status" : "sr-only"} role={state === "error" ? "alert" : "status"} aria-live="polite" aria-atomic="true">{progress || announcement}</p>
     {state === "error" && onRetry && <Button variant="quiet" onClick={() => { if (document.hasFocus()) headingRef.current?.focus(); onRetry(); }}>Try again</Button>}
     {snapshot && records.length > 0 && <>
-      <div className="signal-comparison-toolbar"><div role="group" aria-label="Filter comparison leads" className="signal-comparison-filters">{(["all", "open", "resolved"] as const).map((value) => <button type="button" key={value} aria-pressed={filter === value} onClick={() => selectFilter(value)}>{value[0].toUpperCase() + value.slice(1)}</button>)}</div>
+      <div className="signal-comparison-toolbar">{selectedRecordId === undefined && <div role="group" aria-label="Filter comparison leads" className="signal-comparison-filters">{(["all", "open", "resolved"] as const).map((value) => <button type="button" key={value} aria-pressed={filter === value} onClick={() => selectFilter(value)}>{value[0].toUpperCase() + value.slice(1)}</button>)}</div>}
         <button type="button" className="signal-comparison-about-toggle" aria-expanded={aboutOpen} aria-controls={aboutId} onClick={() => setAboutOpen((open) => !open)}>About leads <span aria-hidden="true">{aboutOpen ? "⌃" : "⌄"}</span></button>
       </div>
       <div id={aboutId} hidden={!aboutOpen} className="signal-comparison-index__about"><p>{COMPARISON_LEAD_COPY.about}</p>{showActions && viewedIds && <p>{COMPARISON_LEAD_COPY.viewed}</p>}</div>

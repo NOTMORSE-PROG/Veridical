@@ -552,3 +552,19 @@ describe("AI configuration progress", () => {
     expect(detail).not.toHaveTextContent("daily reset");
   });
 });
+
+describe("stopped stage receipts", () => {
+  it.each(["cancelled", "failed"] as const)("does not call an uncompleted stage unstarted after a %s run", async status => {
+    vi.stubGlobal("fetch", stubFetchByPath({ "/check-runs/5": { ...RUNNING, status,
+      stage_status: { stages: { ingesting: { status: "done" }, semantic: { status: "skipped", note: "AI work was skipped in this control." } } },
+    } }));
+    renderWithProviders(<CheckProgressPage />, { route: "/checks/5", path: "/checks/:checkRunId" });
+    const integrity = (await screen.findByRole("heading", { name: "Integrity checks" })).closest("li")!;
+    expect(within(integrity).getByText("Completion not recorded")).toBeVisible();
+    expect(within(integrity).getByText(/Some intermediate work may have been retained/)).toBeVisible();
+    expect(screen.queryByText("Not started yet")).not.toBeInTheDocument();
+    expect(within(screen.getByRole("heading", { name: "Ingestion" }).closest("li")!).getByText("Done")).toBeVisible();
+    expect(within(screen.getByRole("heading", { name: "AI grading" }).closest("li")!).getByText("Skipped")).toBeVisible();
+    expect(screen.queryByRole("link", { name: "Open manuscript review" })).not.toBeInTheDocument();
+  });
+});
