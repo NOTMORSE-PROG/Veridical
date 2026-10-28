@@ -29,8 +29,13 @@ export function SharedEvidenceImage({ token, evidence }: { token: string; eviden
   }, [identity, token, evidence.image_id, evidence.image_sha256]);
   return <figure className="signal-shared-evidence-image">
     <figcaption><strong>{evidence.label}</strong><span>Original manuscript · PDF page {evidence.page} · {evidence.precision === "page_bbox" ? "Complete quotation boxed" : "Page only; no exact mark"}</span></figcaption>
-    <blockquote><span>“{evidence.quote}”</span><cite>{evidence.anchor}</cite></blockquote>
-    {error ? <p role="status">This source image is unavailable. The saved quotation and location remain above.</p> : image?.key === identity ? <><a className="signal-evidence-source-link" href={image.url} onClick={event => { event.preventDefault(); setEnlarged(true); }}>View larger source image</a><img loading="lazy" width={evidence.image_width} height={evidence.image_height} src={image.url} onError={() => setError(true)} alt={`Original manuscript PDF page ${evidence.page}. ${evidence.label}. ${evidence.precision_note}`} />{enlarged && <Dialog wide title={`Original manuscript: ${evidence.anchor}`} onClose={() => setEnlarged(false)}><p>{evidence.label}</p><p>“{evidence.quote}”</p><img className="signal-shared-enlarged-image" src={image.url} alt={`Original manuscript: ${evidence.anchor}. ${evidence.precision_note}`} /></Dialog>}</> : <p role="status">Loading the original source image…</p>}
+    <div className="signal-shared-evidence-body">
+      <div className="signal-shared-evidence-copy">
+        <blockquote><span>“{evidence.quote}”</span><cite>{evidence.anchor}</cite></blockquote>
+        {error ? <p role="status">This source image is unavailable. The saved quotation and location remain above.</p> : image?.key === identity ? <a className="signal-evidence-source-link" href={image.url} onClick={event => { event.preventDefault(); setEnlarged(true); }}>View larger source image</a> : <p role="status">Loading the original source image…</p>}
+      </div>
+      {!error && image?.key === identity && <><img loading="lazy" width={evidence.image_width} height={evidence.image_height} src={image.url} onError={() => setError(true)} alt={`Original manuscript PDF page ${evidence.page}. ${evidence.label}. ${evidence.precision_note}`} />{enlarged && <Dialog wide title={`Original manuscript: ${evidence.anchor}`} onClose={() => setEnlarged(false)}><p>{evidence.label}</p><p>“{evidence.quote}”</p><img className="signal-shared-enlarged-image" src={image.url} alt={`Original manuscript: ${evidence.anchor}. ${evidence.precision_note}`} /></Dialog>}</>}
+    </div>
   </figure>;
 }
 

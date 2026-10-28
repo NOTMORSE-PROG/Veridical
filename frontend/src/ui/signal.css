@@ -6777,12 +6777,15 @@
   }
   .signal-shared-grade-choices button[aria-pressed="true"] { background: var(--color-signal-review-bg); border-color: var(--color-signal-ink); }
   .signal-shared-selected-grade { padding: var(--signal-space-5); }
-  .signal-shared-packet { display: flex; flex-wrap: wrap; gap: var(--signal-space-6); align-items: flex-start; margin-block-start: var(--signal-space-5); }
-  .signal-shared-packet__explanation { flex: 1 1 var(--signal-review-controls-min); min-inline-size: 0; }
-  .signal-shared-packet__explanation p { max-inline-size: var(--signal-prose-width); line-height: var(--signal-line-body); }
+  .signal-shared-packet { display: grid; gap: var(--signal-space-5); min-inline-size: 0; margin-block-start: var(--signal-space-5); }
+  .signal-shared-packet__explanation { min-inline-size: 0; }
+  .signal-shared-packet__explanation p { max-inline-size: none; line-height: var(--signal-line-body); }
   .signal-shared-source { flex: 2 1 var(--signal-review-source-min); min-inline-size: 0; }
   .signal-shared-source-pair { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, var(--signal-review-source-min)), 1fr)); gap: var(--signal-space-4); }
   .signal-shared-source .signal-shared-evidence-image { padding: var(--signal-space-4); }
+  .signal-shared-evidence-body { display: flex; flex-wrap: wrap; align-items: flex-start; gap: var(--signal-space-4); min-inline-size: 0; }
+  .signal-shared-evidence-copy { flex: 1 1 var(--signal-review-controls-min); min-inline-size: 0; display: grid; align-content: start; gap: var(--signal-space-3); overflow-wrap: anywhere; }
+  .signal-shared-evidence-body > img { flex: 1 1 var(--signal-criterion-preview-min); display: block; inline-size: 100%; min-inline-size: 0; max-inline-size: 100%; block-size: var(--signal-criterion-preview-height); object-fit: contain; background: var(--color-signal-neutral-bg); }
   .signal-shared-enlarged-image { display: block; inline-size: 100%; block-size: auto; }
   .signal-shared-evidence-image .signal-evidence-source-link,
   .signal-share-dialog .signal-evidence-source-link { display: inline-block; margin-block: var(--signal-space-3); color: var(--color-signal-link); text-decoration: underline; text-underline-offset: var(--signal-link-underline-offset); }

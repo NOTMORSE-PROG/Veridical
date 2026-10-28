@@ -288,6 +288,16 @@ associations, known authors and fixed public finding explanations; ordinary serv
 reports without those optional fields keep safe fallbacks. Sample links are explicitly
 same-browser read-only previews, not externally usable adviser links.
 
+**Compact shared evidence (owner, 2026-10-28):** Let the full public assessment
+sit above its evidence across the available report width. Keep each saved
+assessment paragraph at that available width rather than imposing a narrow
+left-side prose column. Keep each saved
+quotation and source caption beside a bounded, uncropped original-page preview,
+wrapping at desktop window capacity. The explicit blue source link opens the
+full-size image; evidence arrows and the two-source comparison remain inline.
+Apply the same page-image bounds to additional legacy evidence. Retain every
+quotation, source qualification, public-field allowlist, token and image check.
+
 **Exact-passage appearance (owner, 2026-10-26):** Use thin square red outlines
 around the saved PDF text-line rectangles, with transparent interiors. Preserve
 their source geometry; do not enlarge them into selection blocks or cover text
