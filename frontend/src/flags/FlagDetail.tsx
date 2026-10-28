@@ -223,7 +223,7 @@ export function FlagDetailPage() {
       return;
     }
     if (flag.overridden && previousResolved.current === false) {
-      setAnnouncement(isOptionalComparisonLead(flag) ? "Comparison lead resolved. This does not affect readiness." : flag.confirmed_citation_source ? "Source confirmed. The readiness band was recalculated." : "Finding overridden. The readiness band was recalculated.");
+      setAnnouncement(isOptionalComparisonLead(flag) ? "Comparison lead resolved. This does not affect readiness." : flag.confirmed_citation_source ? "Source confirmed. The readiness band was recalculated." : "Finding dismissed. The readiness band was recalculated.");
     }
     previousResolved.current = flag.overridden;
   }, [flag]);

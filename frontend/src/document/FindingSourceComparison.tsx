@@ -1,3 +1,4 @@
+import { createPortal } from "react-dom";
 import { useQueryClient } from "@tanstack/react-query";
 import { useLayoutEffect, useRef, useState } from "react";
 import type { FlagOut } from "../api/types";
@@ -13,7 +14,10 @@ import { HighlightedText } from "./PassagePairPanel";
 import { sharedPassageRanges } from "./sharedPassage";
 import { RecordedEvidencePage } from "../report/RecordedEvidencePage";
 
-export function FindingSourceComparison({ flag, current, onSource }: {
+export function FindingSourceComparison({ flag, current, onSource, pageHost, sourceVisible = false, onReadManuscript }: {
+  pageHost?: HTMLElement | null;
+  sourceVisible?: boolean;
+  onReadManuscript?: () => void;
   flag: FlagOut;
   current: boolean;
   onSource: (anchor: string | null, role: AgreementStatementRole) => void;
@@ -25,7 +29,9 @@ export function FindingSourceComparison({ flag, current, onSource }: {
   liveScope.current = scope;
   const mounted = useRef(false);
   useLayoutEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
-  const [preview, setPreview] = useState(false);
+  const [manualPreview, setPreview] = useState(false);
+  const [focusedSource, setFocusedSource] = useState<string | null>(null);
+  const preview = Boolean(pageHost) || manualPreview;
   const [reloadState, setReloadState] = useState<{ scope: string; attempt: number; pending: boolean }>();
   const reloading = reloadState?.scope === scope && reloadState.pending;
   const attempt = reloadState?.scope === scope ? reloadState.attempt : 0;
@@ -60,7 +66,18 @@ export function FindingSourceComparison({ flag, current, onSource }: {
         <p>{shared?.left.length ? "Text shading identifies shared wording between the stored excerpts. Page boxes locate the saved quotation; they do not establish copying." : "No stable exact phrase was found to shade. Compare both passages manually. Page boxes locate the saved quotation."}</p></>}
     {agreement && flag.affects_readiness === false && <p>This review lead does not change readiness.</p>}
     {retired && <Alert title="Recorded source references unavailable" tone="warning" role="status"><p>{reloading ? "Reloading the finding and its recorded source references..." : "This comparison's current source references are unavailable. Reload the finding before comparing source pages. The saved text below is retained for manual review."}</p><Button variant="secondary" busy={reloading} onClick={reload}>Reload recorded evidence</Button></Alert>}
-    <Button variant="secondary" aria-expanded={preview} onClick={() => setPreview(value => !value)}>{preview ? "Hide" : "Show"} original-page previews</Button>
+    {!pageHost && <Button variant="secondary" aria-expanded={preview} onClick={() => setPreview(value => !value)}>{preview ? "Hide" : "Show"} original-page previews</Button>}
+    {pageHost && createPortal(<section className="signal-source-page-comparison" aria-label="Original manuscript pages">
+      <header className="signal-source-page-comparison__toolbar"><strong>Original manuscript pages</strong>{onReadManuscript && <Button variant="secondary" onClick={onReadManuscript}>Read full manuscript</Button>}</header>
+      <div className="signal-source-page-comparison__pages">{sides.map((side, index) => {
+        const result = available ? pages.data.find(item => item.role === side.role) : undefined;
+        const label = agreement ? `Statement ${index === 0 ? "A" : "B"}` : "Your manuscript";
+        return <figure key={`${scope}:${side.role}`}><figcaption><strong>{label}</strong><span>{side.anchor?.trim() ? instructorAnchor(side.anchor) : "No location recorded"}</span></figcaption>
+          {result?.page?.image_data_url ? <><img src={result.page.image_data_url} alt={`Original manuscript page for ${label}. Placement qualification follows.`} /><p className="signal-field-hint">{result.page.caption}</p></>
+            : <p role="status">{retired ? "Source images are cleared until the current finding is reloaded." : manifestQuery.isPending || manifestQuery.isFetching ? "Checking recorded source references." : pages.isFetching ? "Loading the recorded source page." : result?.page?.caption || "The recorded source page is unavailable. Read the saved passage beside this pane."}</p>}
+        </figure>;
+      })}{reuse && <figure><figcaption><strong>Stored comparison excerpt</strong><span>Library record #{reuse.matched_ref}</span></figcaption><p>Its full source page is unavailable in this report. Read the complete stored excerpt beside this pane or open the permitted Library record.</p></figure>}</div>
+    </section>, pageHost)}
     <div className="signal-finding-source-comparison__cards">{sides.map((side, index) => {
       const result = available ? pages.data.find(item => item.role === side.role) : undefined;
       const role: AgreementStatementRole = agreement ? index === 0 ? "objective" : "result" : "statement";
@@ -71,7 +88,7 @@ export function FindingSourceComparison({ flag, current, onSource }: {
         <h4>{label}</h4>
         <p>Recorded location: {side.anchor?.trim() ? instructorAnchor(side.anchor) : "No location recorded"}</p>
         <blockquote className="signal-evidence-quote">{reuse?.own_context_before && <span>{reuse.own_context_before} </span>}<HighlightedText text={side.quote} ranges={shared?.left ?? []} />{reuse?.own_context_after && <span> {reuse.own_context_after}</span>}</blockquote>
-        {result?.page?.image_data_url ? (
+        {!pageHost && (result?.page?.image_data_url ? (
           <figure className="signal-criterion-packet__preview">
             <img src={result.page.image_data_url} alt={`Recorded source page for ${agreement ? index === 0 ? "statement A" : "statement B" : "your manuscript excerpt"}. Placement qualification follows.`} />
             <figcaption>{result.page.caption}</figcaption>
@@ -85,10 +102,10 @@ export function FindingSourceComparison({ flag, current, onSource }: {
                 : !ref ? "A current source reference is not available for this saved statement."
                   : pages.isFetching ? "Loading the recorded source page." : "The recorded source page could not be loaded."}</figcaption>
           </figure>
-        )}
+        ))}
         {!retired && ref && manifest && <RecordedEvidencePage checkRunId={flag.check_run_id} snapshot={manifest.snapshot_id} reference={ref} cachedPage={result?.page} />}
         {(result?.failed || pages.isError) && <Button variant="quiet" busy={pages.isFetching} onClick={() => { void pages.refetch(); }}>Retry source page</Button>}
-        {side.anchor?.trim() && <Button id={`${prefix}-${flag.id}-${role}-source`} variant="secondary" onClick={() => onSource(side.anchor, role)}>{agreement ? `Show statement ${index === 0 ? "A" : "B"} in manuscript` : "Show excerpt in manuscript"}</Button>}
+        {side.anchor?.trim() && !(pageHost && sourceVisible && available && result?.page?.image_data_url && focusedSource !== side.role) && <Button id={`${prefix}-${flag.id}-${role}-source`} variant="secondary" onFocus={() => setFocusedSource(side.role)} onBlur={() => setFocusedSource(null)} onClick={() => onSource(side.anchor, role)}>{agreement ? `Show statement ${index === 0 ? "A" : "B"} in manuscript` : "Show excerpt in manuscript"}</Button>}
       </article>;
     })}
       {reuse && <article className="signal-finding-source-comparison__card"><h4>Stored comparison excerpt. Library record #{reuse.matched_ref}</h4>

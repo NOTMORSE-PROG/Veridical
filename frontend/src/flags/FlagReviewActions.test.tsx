@@ -38,9 +38,9 @@ function setup(handlers: Record<string, unknown> = {}) {
 }
 async function annotation() {
   await screen.findByRole("heading", { name: "Resolve only after checking the evidence" });
-  const summary = screen.getByText("Instructor annotation", { selector: "summary" });
+  const summary = screen.getByText("Private note", { selector: "summary" });
   if (!(summary.parentElement as HTMLDetailsElement).open) fireEvent.click(summary);
-  return screen.getByRole("textbox", { name: "Annotation" });
+  return screen.getByRole("textbox", { name: "Note" });
 }
 afterEach(() => vi.unstubAllGlobals());
 
@@ -55,7 +55,7 @@ describe("one private annotation draft per authenticated finding", () => {
     fireEvent.change(await annotation(), { target: { value: "Independent note B." } });
     fireEvent.click(screen.getByRole("button", { name: "Other finding" }));
     await waitFor(async () => expect(await annotation()).toHaveValue("Unsaved source-specific note A."));
-    fireEvent.click(screen.getByRole("button", { name: "Discard unsaved annotation" }));
+    fireEvent.click(screen.getByRole("button", { name: "Discard unsaved note" }));
     expect(await annotation()).toHaveValue("");
   });
   it.each(["Other instructor", "New login"])("retires the private draft across %s", async action => {
@@ -80,9 +80,9 @@ describe("one private annotation draft per authenticated finding", () => {
     const note = "Keep until confirmed.";
     setup({ "/flags/7/annotate": { ...finding(kind === "wrong id" ? 8 : 7), check_run_id: kind === "wrong run" ? 6 : 5, annotation: kind === "wrong annotation" ? "Different saved note." : note } });
     fireEvent.change(await annotation(), { target: { value: note } });
-    fireEvent.click(screen.getByRole("button", { name: "Save annotation" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save note" }));
     await screen.findByText(/response did not confirm this annotation/);
-    expect(screen.queryByText("Annotation saved.")).not.toBeInTheDocument();
+    expect(screen.queryByText("Note saved.")).not.toBeInTheDocument();
     expect(await annotation()).toHaveValue(note);
     expect(screen.getByText(/Unsaved note kept/)).toBeInTheDocument();
   });
@@ -91,8 +91,8 @@ describe("one private annotation draft per authenticated finding", () => {
     setup({ "/flags/7/annotate": { ...finding(7), annotation: note } });
     fireEvent.change(await annotation(), { target: { value: note } });
     fireEvent.click(screen.getByRole("button", { name: "Change source presentation" }));
-    fireEvent.click(screen.getByRole("button", { name: "Save annotation" }));
-    await screen.findByText("Annotation saved.");
+    fireEvent.click(screen.getByRole("button", { name: "Save note" }));
+    await screen.findByText("Note saved.");
     expect(screen.queryByText(/Unsaved note kept/)).not.toBeInTheDocument();
   });
   it("does not acknowledge an old finding's late save on a different finding", async () => {
@@ -102,11 +102,11 @@ describe("one private annotation draft per authenticated finding", () => {
     vi.stubGlobal("fetch", vi.fn(async (input, init) => String(input).endsWith("/flags/7/annotate") ? held : base(input, init)));
     renderWithProviders(<Harness />, { route: "/flags/7", authInstructorId: 1 });
     fireEvent.change(await annotation(), { target: { value: "Late note A." } });
-    fireEvent.click(screen.getByRole("button", { name: "Save annotation" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save note" }));
     fireEvent.click(screen.getByRole("button", { name: "Other finding" }));
     await waitFor(async () => expect(await annotation()).toHaveValue(""));
     await act(async () => { release(new Response(JSON.stringify({ ...finding(7), annotation: "Late note A." }))); await held; });
-    expect(screen.queryByText("Annotation saved.")).not.toBeInTheDocument();
+    expect(screen.queryByText("Note saved.")).not.toBeInTheDocument();
     expect(await annotation()).toHaveValue("");
   });
 });

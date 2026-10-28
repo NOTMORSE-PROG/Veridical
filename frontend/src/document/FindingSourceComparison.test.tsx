@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { FlagOut } from "../api/types";
@@ -28,7 +28,7 @@ function page(id: string) {
     image_sha256: id === left ? "709e80c88487a2411e1ee4dfb9f22a861492d20c4765150c0c794abd70f8147c" : "09c08a63fc2b11a50cf88eb6f6c062c727964a0c828808fe46c740af3a33897a", caption: `Qualified page ${id}` };
 }
 
-function setup(handler?: (url: URL, init?: RequestInit) => Promise<Response> | Response, value = flag) {
+function setup(handler?: (url: URL, init?: RequestInit) => Promise<Response> | Response, value = flag, presentation: { pageHost?: HTMLElement; sourceVisible?: boolean } = {}) {
   const calls: { path: string; signal?: AbortSignal | null }[] = [];
   vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
     const url = new URL(String(input), "http://localhost");
@@ -41,15 +41,38 @@ function setup(handler?: (url: URL, init?: RequestInit) => Promise<Response> | R
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   client.setQueryData(ME_QUERY_KEY, { id: 1 });
   const open = vi.fn();
-  const ui = (f: FlagOut, current = true) => <QueryClientProvider client={client}><MemoryRouter><FindingSourceComparison flag={f} current={current} onSource={open} /></MemoryRouter></QueryClientProvider>;
+  const ui = (f: FlagOut, current = true) => <QueryClientProvider client={client}><MemoryRouter><FindingSourceComparison flag={f} current={current} onSource={open} {...presentation} /></MemoryRouter></QueryClientProvider>;
   const view = render(ui(value));
-  fireEvent.click(screen.getByRole("button", { name: "Show original-page previews" }));
+  const show = screen.queryByRole("button", { name: "Show original-page previews" });
+  if (show) fireEvent.click(show);
   return { calls, client, open, view, ui };
 }
 
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
 describe("finding source comparison generations", () => {
+  it("keeps reveal controls when the portal pane is hidden and retires them without stealing keyboard focus", async () => {
+    const host = document.createElement("div"); document.body.append(host);
+    const presentation = { pageHost: host, sourceVisible: false };
+    try {
+      const control = setup(undefined, flag, presentation);
+      await waitFor(() => expect(within(host).getAllByRole("img")).toHaveLength(2));
+      const source = screen.getByRole("button", { name: "Show statement A in manuscript" });
+      source.focus();
+      presentation.sourceVisible = true;
+      control.view.rerender(control.ui(flag));
+      expect(source).toHaveFocus();
+      expect(screen.queryByRole("button", { name: "Show statement B in manuscript" })).not.toBeInTheDocument();
+      source.blur();
+      await waitFor(() => expect(screen.queryByRole("button", { name: "Show statement A in manuscript" })).not.toBeInTheDocument());
+      presentation.sourceVisible = false;
+      control.view.rerender(control.ui(flag));
+      expect(screen.getByRole("button", { name: "Show statement A in manuscript" })).toBeVisible();
+      expect(screen.getByRole("button", { name: "Show statement B in manuscript" })).toBeVisible();
+      expect(control.calls.every(call => !call.path.includes("/library/"))).toBe(true);
+    } finally { host.remove(); }
+  });
+
   it("keeps identical same-page roles distinct and serializes location and page work", async () => {
     let release!: (response: Response) => void;
     const control = setup(url => {

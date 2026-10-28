@@ -142,12 +142,13 @@ export function SignalReportPage() {
       <header className="signal-route-header signal-report-header">
         <div>
           <nav aria-label="Breadcrumb"><ReviewDeskReturnLink>Review Desk</ReviewDeskReturnLink><span aria-hidden="true">/</span><span>Readiness report</span></nav>
-          <p className="signal-section-kicker">Readiness report</p>
-          <h1 ref={headingRef} id="readiness-report-heading" tabIndex={-1}>{report?.subject?.basis === "confirmed_assignment_at_check" ? report.subject.title ?? report.manuscript_original_filename ?? identity?.primary ?? "Readiness report" : report?.manuscript_original_filename ?? identity?.primary ?? "Readiness report"}</h1>
-          {report && <p className="signal-route-header__intro">Required format: {report.rubric_title}</p>}
+          <p className="signal-eyebrow">Review · Evidence before decision</p>
+          <h1 ref={headingRef} id="readiness-report-heading" tabIndex={-1}>Readiness report</h1>
+          {report && <p className="signal-route-header__intro"><strong>{report.subject?.basis === "confirmed_assignment_at_check" ? report.subject.title ?? report.manuscript_original_filename ?? identity?.primary : report.manuscript_original_filename ?? identity?.primary}</strong> · checked against {report.rubric_title}</p>}
           {report && report.subject?.basis !== "confirmed_assignment_at_check" && report.manuscript_group_label && <p className="signal-field-hint">Group: {report.manuscript_group_label}</p>}
-          {report?.subject?.basis === "confirmed_assignment_at_check" && <div><p>Group members: {report.subject.member_names.join(", ") || "Not recorded"}</p><p className="signal-field-hint">Recorded when this check began.</p></div>}
+          {report?.subject?.basis === "confirmed_assignment_at_check" && <p className="signal-field-hint">Group members: {report.subject.member_names.join(", ") || "Not recorded"}. Recorded when this check began.</p>}
         </div>
+        {report && <div className="signal-report-header__status">{readFailed && <span>Last loaded result</span>}<ReadinessBand status={report.status} /></div>}
       </header>
 
       {isPending && !report ? (
@@ -160,9 +161,13 @@ export function SignalReportPage() {
         <>
           {readFailed && <ReportReadNotice retrying={fetchStatus === "fetching"} onRetry={() => { void refetch(); }} />}
           <p role="status" aria-live="polite" className={missingSourceAction ? undefined : "sr-only"}>{missingSourceAction ? "The original source action is no longer available. Review the current report below." : ""}</p>
-          <ReportAssessmentContext notices={reportAssessmentNotices(report, "report")} />
           <section className="signal-report-hero" aria-labelledby="readiness-band-heading" aria-describedby={readFailed ? "report-read-failure" : undefined}>
-            <div className="signal-report-hero__summary"><p className="signal-section-kicker">{readFailed ? "Last loaded readiness band" : scopeUnconfirmed ? "Saved readiness band" : "VERIDICAL readiness band"}</p><h2 id="readiness-band-heading">{report.status === "ready" ? "Ready" : report.status === "conditionally_ready" ? "Conditionally Ready" : report.status === "not_ready" ? "Not Ready" : "Needs Review"}</h2><p>{report.reason ?? "This band is derived from the recorded criterion outcomes and integrity signals. Review the evidence below before deciding."}</p><RuleScopeSummary rows={report.results} checkRunId={id} /></div>
+            <div className="signal-report-hero__branch" aria-hidden="true"><i /><i /><i /></div>
+            <div className="signal-report-hero__summary"><p className="signal-section-kicker">{readFailed ? "Last loaded readiness band" : scopeUnconfirmed ? "Saved readiness band" : "VERIDICAL readiness band"}</p><h2 id="readiness-band-heading">{report.status === "ready" ? "Ready" : report.status === "conditionally_ready" ? "Conditionally Ready" : report.status === "not_ready" ? "Not Ready" : "Needs Review"}</h2><p>{report.reason ?? "This band is derived from the recorded criterion outcomes and integrity signals. Review the evidence below before deciding."}</p><RuleScopeSummary rows={report.results} checkRunId={id} />
+              <div className="signal-control-cluster signal-report-task-actions"><Link to={jumpTo(taskTarget)} onClick={focusReportJumpTarget}>{taskLabel}</Link>
+              {limits.length > 0 && <Link to={jumpTo("coverage-statement-heading")} onClick={focusReportJumpTarget}>{limits.length} assessment {limits.length === 1 ? "limit" : "limits"}</Link>}
+            </div>
+            </div>
             <dl>
               <div><dt>Unresolved criteria</dt><dd>{report.pending_review_count}</dd></div>
               <div>
@@ -183,34 +188,31 @@ export function SignalReportPage() {
               </div>
               <div><dt>Instructor decision</dt><dd>{report.decision ? DECISION_LABEL[report.decision] : "Not recorded"}</dd></div>
             </dl>
-            <div className="signal-control-cluster signal-report-task-actions"><Link to={jumpTo(taskTarget)} onClick={focusReportJumpTarget}>{taskLabel}</Link>
-              {limits.length > 0 && <Link to={jumpTo("coverage-statement-heading")} onClick={focusReportJumpTarget}>{limits.length} assessment {limits.length === 1 ? "limit" : "limits"}</Link>}
-            </div>
           </section>
-
-          <div className="signal-section-flow signal-report-orientation">
-            <nav className="signal-report-jumps" aria-label="Report review order">{REPORT_STEPS.map((item, index) => <Link key={item.id} to={jumpTo(item.target)} aria-current={step === item.id ? "step" : undefined} onClick={focusReportJumpTarget}><span>{index + 1}</span>{item.label}</Link>)}</nav>
-            <p className="signal-field-hint" role="status">Step {stepIndex + 1} of {REPORT_STEPS.length}: {REPORT_STEPS[stepIndex].label}. Selecting a step does not save a grade or decision.</p>
 
             <div className="signal-attached-flow signal-report-tools">
               <div className="signal-report-actions signal-control-cluster">
-                <ActionLink to={`/report/${report.check_run_id}/document`} variant="quiet">Open manuscript</ActionLink>
-                <ActionLink id={`${AUDIT_RETURN.actionPrefix}${id}`} to={auditDestination(id, location)} variant="quiet" onClick={event => {
+                <ActionLink to={`/report/${report.check_run_id}/document`} variant="secondary">Open manuscript</ActionLink>
+                <ActionLink to={`/checks/${report.check_run_id}`} variant="secondary">View check progress</ActionLink>
+                <ActionLink id={`${AUDIT_RETURN.actionPrefix}${id}`} to={auditDestination(id, location)} variant="secondary" onClick={event => {
                   if (event.defaultPrevented || event.button !== 0 || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
                   const origin = validAuditReviewOrigin(location.pathname + location.search + location.hash, id);
                   if (origin) rememberRouteReturnFocus(origin.focusPath, auditDestination(id, location), origin.elementId, { fallbackElementId: origin.fallbackElementId, scrollBlock: origin.scrollBlock });
                 }}>View Audit</ActionLink>
-                <Button variant="quiet" aria-describedby="report-export-accessibility-note" aria-busy={exportPdf.isPending || undefined} aria-disabled={exportPdf.isPending || undefined} onClick={event => exportPdf.start(event.currentTarget)}>{exportPdf.isPending ? "Preparing PDF" : "Export PDF"}</Button>
-                <Button variant="quiet" onClick={() => setShareOpen(true)}>{shareLink ? "Manage active share link" : "Share report"}</Button>
+                <Button variant="secondary" aria-describedby="report-export-accessibility-note" aria-busy={exportPdf.isPending || undefined} aria-disabled={exportPdf.isPending || undefined} onClick={event => exportPdf.start(event.currentTarget)}>{exportPdf.isPending ? "Preparing PDF" : "Export PDF"}</Button>
+                <Button variant="secondary" onClick={() => setShareOpen(true)}>{shareLink ? "Manage active share link" : "Share report"}</Button>
               </div>
               <p id="report-export-accessibility-note" className="signal-field-hint">Downloaded PDFs are not optimized for screen readers. Use this on-screen report for accessible review.</p>
               <p role="status" aria-live="polite" className="sr-only">{exportPdf.isPending ? "Preparing PDF." : exportPdf.isReady ? "PDF is ready." : ""}</p>
               {exportPdf.isError && <div ref={exportErrorRef} tabIndex={-1}><Alert title="Could not export this report" tone="error" role="alert">{exportPdf.error instanceof ApiError ? exportPdf.error.message : "Try again."}</Alert></div>}
             </div>
-          </div>
-
+          <ReportAssessmentContext notices={reportAssessmentNotices(report, "report")} />
+          <div className="signal-review-workflow">
+            <nav className="signal-report-jumps" aria-label="Report review order">{REPORT_STEPS.map((item, index) => <Link key={item.id} to={jumpTo(item.target)} aria-current={step === item.id ? "step" : undefined} onClick={focusReportJumpTarget}><span>{index + 1}</span>{item.label}</Link>)}</nav>
+            <h2 className="signal-review-workflow__heading">Step {stepIndex + 1} of {REPORT_STEPS.length}: {REPORT_STEPS[stepIndex].label}</h2>
+            <p className="signal-review-workflow__progress">{Math.max(0, report.results.length - report.pending_review_count)} of {report.results.length} criteria recorded</p>
           <SavedJudgmentAccess checkRunId={report.check_run_id} hideEmpty />
-          <div hidden={step !== "criteria"}><SignalEscalatedPanel checkRunId={report.check_run_id} assessmentContextExternal savedAccessExternal /></div>
+          <div hidden={step !== "criteria"}><SignalEscalatedPanel checkRunId={report.check_run_id} focused assessmentContextExternal savedAccessExternal /></div>
           <div hidden={step !== "findings"}>
             <FigureReadingsSummary readings={report.figure_readings} checkRunId={report.check_run_id} />
             <SignalFlagsPanel checkRunId={report.check_run_id} unresolvedHighFlagCount={report.unresolved_high_flag_count} originalityScope={report.originality_scope} statisticalScope={report.statistical_check_scope} />
@@ -236,6 +238,7 @@ export function SignalReportPage() {
             {stepIndex > 0 && <Link to={jumpTo(REPORT_STEPS[stepIndex - 1].target)} onClick={focusReportJumpTarget}>Back: {REPORT_STEPS[stepIndex - 1].label}</Link>}
             {stepIndex < REPORT_STEPS.length - 1 && <Link to={jumpTo(REPORT_STEPS[stepIndex + 1].target)} onClick={focusReportJumpTarget}>Continue: {REPORT_STEPS[stepIndex + 1].label}</Link>}
           </nav>
+          </div>
         </>
       )}
 

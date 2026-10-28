@@ -76,15 +76,21 @@ function SharedPageSession({ token, snapshot, reference, context, references }: 
   </div>;
 }
 
-export function SharedEvidencePacket({ token, manifest, references, fallback = [], context }: {
+export function SharedEvidencePacket({ token, manifest, references, fallback = [], context, comparison = false }: {
   token: string; manifest?: EvidenceManifest; references: EvidenceReference[];
   fallback?: { quote: string; anchor: string }[];
   context?: SharedEvidenceContext;
+  comparison?: boolean;
 }) {
+  const [selected, setSelected] = useState(0);
+  const entries = references.length ? references : fallback;
+  const paired = comparison || references.length > 1 && references.some(reference => reference.role.startsWith("agreement_") || reference.role.startsWith("reuse_"));
+  const currentIndex = Math.min(selected, Math.max(0, entries.length - 1));
   return <section className="signal-shared-packet" aria-label="Saved evidence">
-    <h4>Saved evidence</h4>
+    <div className="signal-shared-packet__heading"><h4>Evidence from the manuscript</h4>{entries.length > 0 && <span role="status">{paired ? `${entries.length} related passages` : `Evidence ${currentIndex + 1} of ${entries.length}`}</span>}</div>
+    {!paired && entries.length > 1 && <nav className="signal-shared-evidence-navigation" aria-label="Saved evidence navigation"><Button variant="secondary" disabled={currentIndex === 0} onClick={() => setSelected(currentIndex - 1)}>Previous evidence</Button><Button variant="quiet" disabled={currentIndex === entries.length - 1} onClick={() => setSelected(currentIndex + 1)}>Next evidence</Button></nav>}
     {!manifest && <p>Original-page associations could not be loaded. Saved quotations remain available.</p>}
-    {references.length ? references.map(reference => <div className="signal-shared-packet__evidence" key={reference.reference_id}>
+    {references.length ? (paired ? references : references.slice(currentIndex, currentIndex + 1)).map(reference => <div className="signal-shared-packet__evidence" key={reference.reference_id}>
       <div><strong>{ROLE_LABEL[reference.role]}</strong><blockquote>{reference.quote || "No quotation was saved for this location."}</blockquote><p>{instructorAnchor(reference.anchor ?? "")}</p>
         {reference.role.startsWith("agreement_") && <p>The selected statement roles have not been verified as this study's objective and result.</p>}
         {reference.source_scope === "bounded_comparison_excerpt" && <p>Only this saved comparison excerpt is shared. Its original source page is unavailable in this report.</p>}
@@ -92,7 +98,7 @@ export function SharedEvidencePacket({ token, manifest, references, fallback = [
       {manifest && reference.source_scope === "own_manuscript" && (reference.anchor?.trim() || reference.quote.trim()
         ? <SharedSourcePage key={`${token}:${manifest.snapshot_id}:${reference.reference_id}`} token={token} snapshot={manifest.snapshot_id} reference={reference} context={context} references={references} />
         : <p>No source location was saved for this item.</p>)}
-    </div>) : fallback.map((entry, index) => <div key={index}><blockquote>{entry.quote}</blockquote><p>{instructorAnchor(entry.anchor)}</p></div>)}
+    </div>) : (paired ? fallback : fallback.slice(currentIndex, currentIndex + 1)).map((entry, index) => <div key={index}><blockquote>{entry.quote}</blockquote><p>{instructorAnchor(entry.anchor)}</p></div>)}
     {!references.length && !fallback.length && <p>No source passages were saved for this item.</p>}
   </section>;
 }

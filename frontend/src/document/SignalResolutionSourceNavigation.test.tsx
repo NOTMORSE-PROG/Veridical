@@ -113,6 +113,19 @@ async function setup({ origin = ORIGIN, open = true, drafts: makeDrafts = true, 
   const router = createMemoryRouter([{ path: "/report/:checkRunId", element: <CriterionReviewLayout />, children: [{ index: true, element: <SignalReportPage /> }, { path: "document", element: <SignalDocumentViewerPage /> }] }], { initialEntries: [{ pathname: full && !makeDrafts ? "/report/5" : "/report/5/document", search: seedParams.toString(), state: { notice: "retained" } }] });
   render(<QueryClientProvider client={client}><RouterProvider router={router} /></QueryClientProvider>);
   async function select(id: number) {
+    if (router.state.location.pathname === "/report/5") {
+      await waitFor(() => expect(document.querySelector(".signal-selected-criterion--focused")).not.toBeNull());
+      const rawCurrent = new URLSearchParams(router.state.location.search).get("criterion");
+      const current = rawCurrent === null ? 1 : Number(rawCurrent);
+      if (rawCurrent === null && id === 1) {
+        fireEvent.click(await screen.findByRole("link", { name: "Next criterion" }));
+        fireEvent.click(await screen.findByRole("link", { name: "Previous criterion" }));
+      } else if (current !== id) {
+        fireEvent.click(await screen.findByRole("link", { name: current < id ? "Next criterion" : "Previous criterion" }));
+      }
+      await waitFor(() => expect(document.getElementById(`signal-resolution-heading-${id}`)).not.toBeNull());
+      return;
+    }
     if (new URLSearchParams(router.state.location.search).get("criterion") === String(id)) {
       await waitFor(() => expect(document.getElementById(`signal-resolution-heading-${id}`)).not.toBeNull());
       return;
@@ -392,7 +405,7 @@ it.each(["source", "coverage"].flatMap(prefix => ["explicit Return", "Back"].map
   "report entry then selected $prefix preserves the exact draft, query and focus through $mode", async ({ prefix, mode }) => {
     const control = await setup({ origin: FULL_ORIGIN, full: true, open: false, coverage: COVERAGE });
     expect(control.router.state.location.pathname).toBe("/report/5");
-    expect(screen.queryByRole("textbox", { name: "Comment (optional)" })).not.toBeInTheDocument();
+    expect(screen.getByRole("textbox", { name: "Comment (optional)" })).toHaveValue("First private draft");
     await control.select(1);
     fireEvent.change(screen.getByRole("textbox", { name: "Comment (optional)" }), { target: { value: EXACT_REASON } });
     const origin = control.router.state.location.pathname + control.router.state.location.search;
@@ -475,7 +488,7 @@ it.each(["none", "wheel", "focus"])("waits beyond the ordinary timeout for revie
   const back = screen.getByRole("link", { name: /^Return to criterion review(?:: Criterion 1)?$/ }); back.focus(); fireEvent.click(back);
   await waitFor(() => expect(control.router.state.location.pathname).toBe("/report/5"));
   if (intent === "wheel") fireEvent.wheel(window);
-  const other = screen.getByRole("link", { name: "Back to criteria" });
+  const other = screen.getByRole("link", { name: "Open manuscript" });
   if (intent === "focus") other.focus();
   const previousFocus = document.activeElement;
   await act(async () => { await new Promise(resolve => setTimeout(resolve, 600)); });
@@ -496,7 +509,7 @@ it.each([{ ctrlKey: true }, { metaKey: true }, { shiftKey: true }, { button: 1 }
   // jsdom's unsupported new-document default at the outer document boundary.
   const preventNativeNavigation = (event: Event) => event.preventDefault();
   document.addEventListener("click", preventNativeNavigation);
-  const entry = screen.getByRole("link", { name: "Review criterion: Criterion 1" });
+  const entry = screen.getByRole("link", { name: "Next criterion" });
   try { fireEvent.click(entry, modifiers); }
   finally { document.removeEventListener("click", preventNativeNavigation); }
   expect(control.router.state.location).toBe(before);

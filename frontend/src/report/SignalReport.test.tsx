@@ -15,7 +15,11 @@ function ReviewRouteFamily() {
   return location.pathname.endsWith("/document") ? <SignalDocumentViewerPage /> : <SignalReportPage />;
 }
 
-async function enterSelectedCriterion() {
+async function enterSelectedCriterion(fromList = false) {
+  if (!fromList) {
+    await screen.findByRole("heading", { name: ESCALATED.criterion_text, level: 3 });
+    return;
+  }
   const link = await screen.findByRole("link", { name: `Review criterion: ${ESCALATED.criterion_text}` });
   link.focus(); fireEvent.click(link);
   await screen.findByRole("heading", { name: ESCALATED.criterion_text, level: 3 });
@@ -23,7 +27,7 @@ async function enterSelectedCriterion() {
 
 async function renderCriterionFromReport(workspace = false) {
   renderWithProviders(<ReviewRouteFamily />, { route: workspace ? "/report/5/document?view=decision&pane=review" : "/report/5", path: "/report/:checkRunId/*" });
-  await enterSelectedCriterion();
+  await enterSelectedCriterion(workspace);
 }
 
 const BASE_REPORT: ReportOut = {
@@ -234,6 +238,52 @@ describe("SignalReportPage", () => {
     const target = await screen.findByRole("region", { name: "Integrity signals" });
 
     await waitFor(() => expect(target).toHaveFocus());
+  });
+
+  it("keeps the completed criteria state when the focused default has no unresolved items", async () => {
+    stubReport({ ...BASE_REPORT, pending_review_count: 0 }, []);
+    renderWithProviders(<SignalReportPage />, { route: "/report/5", path: "/report/:checkRunId" });
+    expect(await screen.findByText("No unresolved criteria")).toBeVisible();
+    expect(screen.queryByText("Criterion not available")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Next criterion" })).not.toBeInTheDocument();
+  });
+
+  it("does not turn late implicit criterion data into navigation or steal newer focus from a findings hash", async () => {
+    let release!: (response: Response) => void;
+    const fetch = stubFetchByPath({ "/check-runs/5/report": { ...BASE_REPORT, pending_review_count: 1 },
+      "/check-runs/5/flags": [], "/check-runs/5/share": null });
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL, init?: RequestInit) => String(input).includes("/escalated")
+      ? new Promise<Response>(resolve => { release = resolve; }) : fetch(input, init)));
+    function LocationProbe() { const location = useLocation(); return <output data-testid="passive-location">{location.pathname + location.search + location.hash}</output>; }
+    renderWithProviders(<><SignalReportPage /><button>Outside current review</button><LocationProbe /></>, { route: "/report/5#integrity-signals", path: "/report/:checkRunId" });
+    await waitFor(() => expect(release).toBeDefined());
+    await screen.findByRole("region", { name: "Integrity signals" });
+    const outside = screen.getByRole("button", { name: "Outside current review" }); outside.focus(); fireEvent.wheel(window);
+    await act(async () => release(new Response(JSON.stringify([ESCALATED]), { status: 200 })));
+    await waitFor(() => expect(document.getElementById(`signal-resolution-heading-${ESCALATED.check_result_id}`)).not.toBeNull());
+    expect(outside).toHaveFocus();
+    expect(screen.getByTestId("passive-location")).toHaveTextContent("/report/5#integrity-signals");
+    expect(screen.getByRole("region", { name: "Integrity signals" })).toBeVisible();
+  });
+
+  it("opens the first criterion directly in the framed demo review with inline navigation", async () => {
+    const second = { ...ESCALATED, check_result_id: 44, criterion_id: 33, criterion_text: "Second recorded requirement" };
+    const fetch = stubFetchByPath({ "/check-runs/5/report": { ...BASE_REPORT, pending_review_count: 2 },
+      "/check-runs/5/escalated": [ESCALATED, second], "/check-runs/5/flags": [], "/check-runs/5/share": null });
+    vi.stubGlobal("fetch", fetch);
+    renderWithProviders(<SignalReportPage />, { route: "/report/5", path: "/report/:checkRunId" });
+    expect(await screen.findByRole("heading", { name: ESCALATED.criterion_text, level: 3 })).toBeVisible();
+    expect(screen.queryByRole("heading", { name: second.criterion_text })).not.toBeInTheDocument();
+    expect(document.querySelector(".signal-criterion-list")).not.toBeInTheDocument();
+    expect(document.querySelector(".signal-selected-criterion--focused")).toBeVisible();
+    expect(screen.getByRole("button", { name: "Previous criterion" })).toBeDisabled();
+    expect(screen.getByText("Cannot judge from this manuscript?").closest("details")).not.toHaveAttribute("open");
+    fireEvent.click(screen.getByRole("link", { name: "Next criterion" }));
+    expect(await screen.findByRole("heading", { name: second.criterion_text })).toBeVisible();
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("link", { name: "Previous criterion" }));
+    expect(await screen.findByRole("heading", { name: ESCALATED.criterion_text, level: 3 })).toBeVisible();
+    expect(fetch.mock.calls.some(([, init]) => init?.method === "POST")).toBe(false);
   });
 
   it("puts unresolved judgment first, permits reasoned return and blocks approval/rejection", async () => {
@@ -1056,7 +1106,7 @@ describe("full report background-read continuity", () => {
     const pending = { ...BASE_REPORT, pending_review_count: 1, results: [...BASE_REPORT.results,
       { ...BASE_REPORT.results[0], criterion_id: 2, text: ESCALATED.criterion_text, outcome: "escalated" as const, score: null }] };
     const c = readFailurePage(pending, [ESCALATED], true);
-    await enterSelectedCriterion();
+    await enterSelectedCriterion(true);
     const card = (await screen.findByRole("heading", { name: ESCALATED.criterion_text })).closest("article")!;
     fireEvent.click(within(card).getByRole("button", { name: "Meets criterion" }));
     fireEvent.change(within(card).getByRole("textbox"), { target: { value: "A checkable instructor reason for this criterion." } });

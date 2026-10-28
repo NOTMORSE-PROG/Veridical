@@ -76,7 +76,7 @@ describe("optional comparison workspace navigation", () => {
     fireEvent.click(screen.getByText("Recorded reasoning and technical details"));
     expect(screen.getByText("Check method")).toBeVisible();
     expect(screen.getByText("Actual stored reasoning")).toBeVisible();
-    expect(screen.getByRole("heading", { name: "Finding overridden" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Finding dismissed" })).toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "Review instructor actions for this location" })).not.toBeInTheDocument();
   });
   it.each([401, 403, 404, 503])("does not claim a selected record disappeared after a failed collection read (%s)", async status => {
@@ -208,7 +208,7 @@ describe("optional comparison workspace navigation", () => {
     await screen.findByText("Actual stored reasoning");
     fireEvent.click(screen.getByText("Recorded reasoning and technical details"));
     expect(await screen.findByText("Actual stored reasoning")).toBeVisible();
-    expect(screen.getByRole("heading", { name: "Finding overridden" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Finding dismissed" })).toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "Review instructor actions for this location" })).not.toBeInTheDocument();
     expect(screen.queryByText("Finding 1 of 31")).not.toBeInTheDocument();
   });

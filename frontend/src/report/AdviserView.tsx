@@ -16,7 +16,7 @@ import { RuleScopeSummary } from "./RuleScopeNotice";
 import { unconfirmedAutomaticRuleRows } from "../domain/ruleScope";
 import { SharedAssessmentContext } from "./SharedAssessmentContext";
 import { SharedEvidencePacket, useSharedEvidenceManifest } from "./SharedEvidencePacket";
-import { IntegrityModuleNavigation, selectedIntegrityModule } from "./IntegrityModules";
+import { IntegrityModuleNavigation, IntegrityModuleSummary, selectedIntegrityModule } from "./IntegrityModules";
 import { CitationSourceLinks } from "../flags/CitationSourceLinks";
 import { CitationComparison } from "../flags/CitationComparison";
 import { selectedCriterionId } from "./criterionReviewNavigation";
@@ -144,22 +144,22 @@ export function AdviserViewPage() {
         <header className="signal-route-header signal-shared-report-header"><div>
           <p className="signal-eyebrow">Shared readiness report</p>
           <h1 ref={headingRef} tabIndex={-1}>{report.subject?.basis === "confirmed_assignment_at_check" && report.subject.title ? report.subject.title : "Readiness report"}</h1>
-          <p className="signal-route-header__intro">Required format: {report.rubric_title}</p>
           {report.subject?.basis === "confirmed_assignment_at_check" ? <><p>Group members: {report.subject.member_names.join(", ") || "Not recorded"}.</p><p className="signal-field-hint">Recorded when this check began.</p></> : <p>{identity.primary}</p>}
+          <p className="signal-route-header__intro">Required format: {report.rubric_title}</p>
         </div></header>
         {data.detail_snapshot === "stale" && <Alert title="Additional shared detail needs a new link" tone="info">The assessment changed after these details were shared. Ask the instructor to regenerate the link for the current explanations and identity.</Alert>}
 
         <SharedAssessmentContext report={report} />
 
-        <section className="signal-shared-verdict" aria-labelledby="shared-band-heading"><div><p className="signal-section-kicker">{scopeUnconfirmed ? "Saved readiness band" : "VERIDICAL readiness band"}</p><h2 id="shared-band-heading">{report.status === "ready" ? "Ready" : report.status === "conditionally_ready" ? "Conditionally Ready" : report.status === "not_ready" ? "Not Ready" : "Needs Review"}</h2><p>{report.reason ?? "This band comes from the recorded criterion outcomes and integrity signals. It does not approve or block a defense."}</p><RuleScopeSummary rows={report.results} checkRunId={report.check_run_id} publicView linkToRecords={false} /></div><dl><div><dt>Unresolved criteria</dt><dd>{pendingCount}</dd></div><div><dt>Instructor decision</dt><dd>{report.decision ? DECISION_LABEL[report.decision] : "Not recorded"}</dd></div></dl><div className="signal-control-cluster"><ActionLink to={{ pathname: location.pathname, search: sectionSearch("grades").toString(), hash: "criteria-results-heading" }} onClick={focusSharedSection} variant="secondary" className="signal-on-dark">Review criterion records</ActionLink><ActionLink to={{ pathname: location.pathname, search: location.search, hash: "shared-decision-heading" }} onClick={focusSharedSection} variant="quiet" className="signal-on-dark">Read final decision</ActionLink></div></section>
+        <section className="signal-shared-verdict" aria-labelledby="shared-band-heading"><div><p className="signal-section-kicker">{scopeUnconfirmed ? "Saved readiness band" : "VERIDICAL readiness band"}</p><h2 id="shared-band-heading">{report.status === "ready" ? "Ready" : report.status === "conditionally_ready" ? "Conditionally Ready" : report.status === "not_ready" ? "Not Ready" : "Needs Review"}</h2><p>{report.reason ?? "This band comes from the recorded criterion outcomes and integrity signals. It does not approve or block a defense."}</p><RuleScopeSummary rows={report.results} checkRunId={report.check_run_id} publicView linkToRecords={false} /></div><dl><div><dt>Unresolved criteria</dt><dd>{pendingCount}</dd></div><div><dt>Instructor decision</dt><dd>{report.decision ? DECISION_LABEL[report.decision] : "Not recorded"}</dd></div></dl><div className="signal-control-cluster"><ActionLink to={{ pathname: location.pathname, search: sectionSearch("grades").toString(), hash: "criteria-results-heading" }} onClick={focusSharedSection} variant="secondary">Review criterion records</ActionLink><ActionLink to={{ pathname: location.pathname, search: location.search, hash: "shared-decision-heading" }} onClick={focusSharedSection} variant="quiet">Read final decision</ActionLink></div></section>
 
         <nav className="signal-control-cluster" aria-label="Shared report sections">{(["grades", "findings"] as const).map(section => <Button key={section} variant={selectedSection === section ? "brand" : "secondary"} aria-pressed={selectedSection === section} onClick={event => {
           follow(event.currentTarget, section === "grades" ? "shared-grade-navigation-heading" : "shared-findings-heading");
           setParams(sectionSearch(section));
         }}>{section === "grades" ? "Grades" : "Findings"}</Button>)}</nav>
-        {selectedSection === "grades" ? <section aria-labelledby="shared-grade-navigation-heading">
-          <h2 id="shared-grade-navigation-heading" tabIndex={-1}>Grades</h2>
-          <p>Choose a criterion to read its recorded assessment and saved evidence.</p>
+        {selectedSection === "grades" ? <section className="signal-review-section signal-shared-grade-panel" aria-labelledby="shared-grade-navigation-heading">
+          <header className="signal-review-section__heading"><div><p className="signal-section-kicker">Recorded grades</p><h2 id="shared-grade-navigation-heading" tabIndex={-1}>Grades and supporting evidence</h2></div><span>{report.results.length} criteria</span></header>
+          <p className="signal-review-section__intro">Choose a grade to read its explanation and the original manuscript pages that support it.</p>
           {params.has("criterion") && requestedIndex < 0 && <p role="status">Requested criterion is unavailable. Showing the first shared criterion.</p>}
           <nav aria-label="Choose a shared criterion" className="signal-shared-criterion-choices">{report.results.map((row, index) => <Button key={row.criterion_id} variant="secondary" aria-pressed={index === selectedIndex} aria-controls="shared-selected-criterion" onClick={event => selectCriterion(event.currentTarget, index)}><strong>{row.text}</strong><span>{resultDisplay(row).label}</span></Button>)}</nav>
           {selectedCriterion ? <>
@@ -172,8 +172,9 @@ export function AdviserViewPage() {
               <SignalCriteriaResults results={[selectedCriterion]} checkRunId={report.check_run_id} publicView publicSelection={{ position: selectedIndex + 1, total: report.results.length }} renderEvidence={row => <SharedEvidencePacket key={`${token}:${manifest?.snapshot_id}:${row.criterion_id}`} token={token ?? ""} manifest={manifest} references={manifest?.references.filter(ref => ref.criterion_id === row.criterion_id) ?? []} fallback={row.evidence} context={{title: row.text, explanation: row.reasoning, recordedNote: row.reason}} />} />
             </div>
           </> : <p>No criterion records were shared.</p>}
-        </section> : <section aria-labelledby="shared-findings-heading">
-        <h2 id="shared-findings-heading" tabIndex={-1}>Findings</h2>
+        </section> : <section className="signal-review-section signal-shared-findings-panel" aria-labelledby="shared-findings-heading">
+        <header className="signal-review-section__heading"><div><p className="signal-section-kicker">Integrity record</p><h2 id="shared-findings-heading" tabIndex={-1}>Findings</h2></div><span>{flags.length} saved records</span></header>
+        <p className="signal-review-section__intro">Choose one check module, then read each finding with its explanation and saved evidence. These are possible inconsistencies to review, not separate grades.</p>
         <IntegrityModuleNavigation selected={selectedModule} controls="shared-selected-module" modules={report.integrity_modules}
           counts={new Map(["internal_agreement", "citation_integrity", "statistical_forensics", "originality_reuse"].map(kind => [kind, flags.filter(flag => flag.check_kind === kind).length]))}
           onSelect={kind => {
@@ -181,6 +182,7 @@ export function AdviserViewPage() {
             const next = new URLSearchParams(params); next.set("module", kind); next.delete("finding"); setParams(next);
           }} />
         <div id="shared-selected-module">
+          <IntegrityModuleSummary kind={selectedModule} />
           {params.has("finding") && requestedGroupIndex < 0 && <p role="status">Requested finding is unavailable in this module. Showing its first shared finding.</p>}
           {findingGroups.length > 0 && <>
             <p>{findingGroups.length} review item{findingGroups.length === 1 ? "" : "s"} in this module, across {moduleFlags.length} saved record{moduleFlags.length === 1 ? "" : "s"}. Choose an item to read its explanation and evidence.</p>
@@ -211,7 +213,7 @@ export function AdviserViewPage() {
               {detail?.p_value_comparison && <dl><div><dt>Reported in manuscript</dt><dd>{detail.p_value_comparison.reported}</dd></div><div><dt>Recalculated by the check</dt><dd>{detail.p_value_comparison.recalculated}</dd></div></dl>}
               {detail?.citation_source_locator && <CitationSourceLinks flag={{ check_kind: flag.check_kind, ai_verdict_summary: detail.ai_verdict_summary, citation_source_locator: detail.citation_source_locator }} />}
               {detail && <CitationComparison flag={{ check_kind: flag.check_kind, ai_verdict_summary: detail.ai_verdict_summary, citation_metadata_comparison: detail.citation_metadata_comparison, citation_metadata_review_warning: detail.citation_metadata_review_warning }} />}
-              <SharedEvidencePacket token={token ?? ""} manifest={manifest} references={manifest?.references.filter(ref => ref.flag_id === flag.id) ?? []}
+              <SharedEvidencePacket token={token ?? ""} manifest={manifest} comparison={Boolean(detail?.agreement_pair || detail?.passage_pair)} references={manifest?.references.filter(ref => ref.flag_id === flag.id) ?? []}
                 context={{ title: problemLabel(flag.problem_kind) ?? flag.criterion_text ?? "Possible inconsistency", explanation: detail?.ai_reasoning ?? null, recordedNote: null }}
                 fallback={detail?.agreement_pair ? [{ quote: detail.agreement_pair.intent_text, anchor: detail.agreement_pair.intent_anchor ?? "" }, { quote: detail.agreement_pair.outcome_text, anchor: detail.agreement_pair.outcome_anchor ?? "" }]
                   : detail?.passage_pair ? [{ quote: detail.passage_pair.own_excerpt, anchor: flag.page_anchor }, { quote: detail.passage_pair.matched_excerpt, anchor: "Saved comparison excerpt" }]

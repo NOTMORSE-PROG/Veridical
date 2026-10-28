@@ -464,6 +464,9 @@ describe("SignalEscalatedPanel / SignalResolutionCard", () => {
     const fetch = stubFetchByPath({ "/check-runs/5/escalated": [REAL_MAJORITY] });
     vi.stubGlobal("fetch", fetch);
     renderSelected(REAL_MAJORITY.criterion_id);
+    const help = await screen.findByText("Cannot judge from this manuscript?");
+    expect(help.closest("details")).not.toHaveAttribute("open");
+    fireEvent.click(help);
     const exclude = await screen.findByRole("button", { name: "Exclude: needs another document" });
     expect(screen.getByText("To wait for more evidence, leave the criterion unresolved.")).toBeVisible();
     expect(exclude).toHaveAccessibleDescription(/stays ungraded.*Saving resolves this review item/);

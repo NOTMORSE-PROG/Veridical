@@ -390,7 +390,7 @@ describe("SignalDocumentViewerPage", () => {
     renderWithProviders(<SignalDocumentViewerPage />, { route: "/report/5/document?flag=7", path: "/report/:checkRunId/document" });
     expect(await screen.findByText(/abstract and findings list different participant totals/i)).toBeInTheDocument();
     expect(screen.getByTestId("pdf-pane")).toHaveAttribute("data-page", "12");
-    expect(screen.getByRole("button", { name: "Override" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Dismiss finding" })).toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "Review instructor actions for this location" })).not.toBeInTheDocument();
     expect(screen.queryByText(/% textual similarity/)).not.toBeInTheDocument();
   });
@@ -473,7 +473,7 @@ describe("SignalDocumentViewerPage", () => {
     expect(screen.queryByText(/Compare the passages and decide/)).not.toBeInTheDocument();
   });
 
-  it("moves to the previous and next stable finding without returning to the report", async () => {
+  it("keeps finding navigation within the selected module and switches categories beside the manuscript", async () => {
     const secondSummary: FlagSummaryOut = {
       ...SUMMARY,
       id: 8,
@@ -510,10 +510,14 @@ describe("SignalDocumentViewerPage", () => {
     renderWithProviders(<SignalDocumentViewerPage />, { route: "/report/5/document?view=finding&finding=7&location=7", path: "/report/:checkRunId/document" });
 
     expect(await screen.findByRole("heading", { name: "Possible internal contradiction" })).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Next finding" }));
+    expect(screen.queryByRole("button", { name: "Next finding" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /^Citation integrity/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /Finding 2.*Possible citation issue/ }));
     expect(await screen.findByRole("heading", { name: "Possible citation issue" })).toBeInTheDocument();
     expect(screen.getByTestId("pdf-pane")).toHaveAttribute("data-selection", "8");
-    fireEvent.click(screen.getByRole("button", { name: "Previous finding" }));
+    expect(screen.queryByRole("button", { name: "Previous finding" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /^Internal agreement/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /Finding 1.*Possible internal contradiction/ }));
     expect(await screen.findByRole("heading", { name: "Possible internal contradiction" })).toBeInTheDocument();
     expect(screen.getByTestId("pdf-pane")).toHaveAttribute("data-selection", "7");
   });
@@ -682,6 +686,7 @@ describe("SignalDocumentViewerPage", () => {
     }));
     renderWithProviders(<SignalDocumentViewerPage />, { route: "/report/5/document?pane=review", path: "/report/:checkRunId/document" });
 
+    fireEvent.click(await screen.findByRole("button", { name: /^Originality and reuse/ }));
     expect(await screen.findByRole("heading", { name: "Integrity findings" })).toBeInTheDocument();
     expect(screen.getByText("3 recorded locations or scopes")).toBeInTheDocument();
     const row = screen.getByRole("button", { name: /Finding 1.*High passage similarity/s });

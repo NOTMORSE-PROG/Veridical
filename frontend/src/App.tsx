@@ -18,7 +18,7 @@ import { AuditLogPage } from "./audit/AuditLog";
 import { RequireAuth } from "./auth/RequireAuth";
 import { CheckProgressPage } from "./check/Progress";
 import { SignalDocumentViewerPage } from "./document/SignalDocumentViewer";
-import { FlagDetailPage } from "./flags/FlagDetail";
+import { FlagWorkspaceRoute } from "./flags/FlagWorkspaceRoute";
 import { SignalLibraryComparePage } from "./library/SignalLibraryCompare";
 import { SignalLibraryDetailPage } from "./library/SignalLibraryDetail";
 import { SignalLibraryPage } from "./library/SignalLibrary";
@@ -74,7 +74,7 @@ const router = createBrowserRouter(
             <Route index element={<SignalReportPage />} />
             <Route path="document" element={<SignalDocumentViewerPage />} />
           </Route>
-          <Route path="/flags/:flagId" element={<FlagDetailPage />} />
+          <Route path="/flags/:flagId" element={<FlagWorkspaceRoute />} />
           <Route path="/audit" element={<AuditLogPage />} />
         </Route>
         {/* BUG-222: catch-all -- must be the last route so every named path
