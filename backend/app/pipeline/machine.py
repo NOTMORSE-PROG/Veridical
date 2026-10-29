@@ -37,7 +37,7 @@ from app.checks.citations.verify import (
     existing_citation_integrity_result,
     run_citation_integrity_check,
 )
-from app.checks.consistency import run_semantic_checks_with_consistency
+from app.checks.consistency import SemanticPartialUnavailable, run_semantic_checks_with_consistency
 from app.checks.forensics.service import (
     existing_statistical_forensics_result,
     run_statistical_forensics_check,
@@ -665,12 +665,28 @@ async def _run_semantic_stage(
                 stage_fields.update(degraded_count=ungraded, degraded_code=exc.cause)
             _record_stage(check_run, CheckRunStatus.semantic, **stage_fields)
             return
-        except ApiDownError:
+        except ApiDownError as exc:
             # The existing owned stage transition publishes these pending rows
             # and their progress metadata together. No per-row commit may escape
             # the cancellation/claim boundary on this availability-floor path.
             await cancellation_boundary()
-            ungraded = await _degrade_pending_semantic(
+            if isinstance(exc, SemanticPartialUnavailable):
+                for result in exc.results:
+                    session.add(
+                        CheckResult(
+                            check_run_id=check_run.id,
+                            criterion_id=result.criterion.id,
+                            kind=CheckKind.semantic,
+                            outcome=result.outcome,
+                            score=result.detail.get("score"),
+                            detail={
+                                key: value for key, value in result.detail.items() if key != "score"
+                            },
+                        )
+                    )
+                # The pending-ID query must include these same-transaction rows.
+                await session.flush()
+            await _degrade_pending_semantic(
                 session,
                 check_run,
                 criteria_by_id,
@@ -679,9 +695,23 @@ async def _run_semantic_stage(
                 reason=settings.pipeline_api_down_degraded_reason,
                 commit=False,
             )
+            # Includes source-bound partial API records queued by the semantic
+            # cohort, as well as untouched criteria filled by the outage floor.
+            unavailable = len(
+                list(
+                    await session.scalars(
+                        select(CheckResult.id).where(
+                            CheckResult.check_run_id == check_run.id,
+                            CheckResult.kind == CheckKind.semantic,
+                            CheckResult.criterion_id.in_(semantic_criterion_ids),
+                            CheckResult.outcome == ResultOutcome.api_down,
+                        )
+                    )
+                )
+            )
             stage_fields = {"status": "done", "n_criteria": len(semantic_criterion_ids)}
-            if ungraded > 0:
-                stage_fields.update(degraded_count=ungraded, degraded_code="api_down")
+            if unavailable > 0:
+                stage_fields.update(degraded_count=unavailable, degraded_code="api_down")
             _record_stage(check_run, CheckRunStatus.semantic, **stage_fields)
             return
     _record_stage(

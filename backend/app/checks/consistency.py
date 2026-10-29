@@ -14,7 +14,7 @@ the existing unit-test suite it was built against).
 """
 
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -41,8 +41,9 @@ from app.checks.semantic import (
 )
 from app.checks.signals import compute_shadow_signals, shadow_signals_as_detail
 from app.checks.source_quality import source_limitation_detail
-from app.checks.support import apply_support, check_support, context_limitation
+from app.checks.support import apply_support, check_support_available, context_limitation
 from app.config import Settings, get_settings
+from app.errors import ApiDownError
 from app.ingest.schemas import ExtractionResult
 from app.llm.base import LLMClient
 from app.models.enums import ResultOutcome
@@ -90,6 +91,8 @@ class VoteResult:
     # `escalation_reason` (no winner), never alongside a real winner.
     # Deduplicated (both passes commonly fail on the identical quote).
     unverified_quotes: list[str] | None = None
+    failure_outcome: ResultOutcome | None = None
+    failure_phase: str | None = None
 
 
 def _collect_unverified_quotes(*graded: GradedVerdict) -> list[str] | None:
@@ -161,7 +164,17 @@ async def _vote_for_criterion(
         # doubled sentence in real output (V-055 report screen review).
         reasons = dict.fromkeys(g.escalation_reason for g in (g1, g2) if g.escalation_reason)
         unverified = _collect_unverified_quotes(g1, g2)
-        return VoteResult(None, 0.0, [g1.verdict, g2.verdict], None, "; ".join(reasons), unverified)
+        failure = next((g for g in (g1, g2) if g.failure_outcome is not None), None)
+        return VoteResult(
+            None,
+            0.0,
+            [g1.verdict, g2.verdict],
+            None,
+            "; ".join(reasons),
+            unverified,
+            failure.failure_outcome if failure else None,
+            failure.failure_phase if failure else None,
+        )
 
     if normalize_verdict(g1.verdict) == normalize_verdict(g2.verdict):
         # BUG-146: whitespace-normalized, same reasoning as `_tally` above
@@ -182,16 +195,28 @@ async def _vote_for_criterion(
 
     # Disagreement: spend exactly one tie-break call (D-011), scoped to
     # this single criterion only — the rest of the batch is unaffected.
-    tie = await _grade_single_criterion(
-        criterion,
-        batch,
-        llm,
-        check_run_id,
-        anchor_kind,
-        consistency_pass=TIE_BREAK,
-        prompt_version=prompt_version,
-        annotator_stance=_stance(ROLE_TIE_BREAK, prompt_version),
-    )
+    try:
+        tie = await _grade_single_criterion(
+            criterion,
+            batch,
+            llm,
+            check_run_id,
+            anchor_kind,
+            consistency_pass=TIE_BREAK,
+            prompt_version=prompt_version,
+            annotator_stance=_stance(ROLE_TIE_BREAK, prompt_version),
+        )
+    except ApiDownError:
+        return VoteResult(
+            None,
+            0.0,
+            [g1.verdict, g2.verdict, None],
+            None,
+            "The tie-break service was unavailable. No rating was assigned.",
+            None,
+            ResultOutcome.api_down,
+            "tie_break",
+        )
     if tie is None:
         return VoteResult(
             None,
@@ -259,6 +284,8 @@ def _vote_detail(
         "prompt_version": PROMPT_VERSION,
         "shadow": shadow_detail,
     }
+    if vote.failure_phase:
+        detail["failure_phase"] = vote.failure_phase
     if vote.winner is not None:
         detail["verdict"] = vote.winner.verdict
         detail["reasoning"] = vote.winner.reasoning
@@ -287,6 +314,14 @@ class VotedCriterion:
     vote: VoteResult
     outcome: ResultOutcome
     detail: dict[str, Any]
+
+
+class SemanticPartialUnavailable(ApiDownError):
+    """Unpublished criterion proposals awaiting the pipeline's owned boundary."""
+
+    def __init__(self, results: list[VotedCriterion]):
+        super().__init__("A semantic cohort retained incomplete API assessments")
+        self.results = results
 
 
 async def vote_batch(
@@ -318,6 +353,8 @@ async def vote_batch(
     never mid-batch). If a future change ever persists criteria
     incrementally WITHIN one batch, this invariant would need
     re-examining before claimed_quotes could safely stay ephemeral."""
+    # API availability failures return attributed, unassessed records; quota
+    # still propagates before this cohort is persisted, as documented above.
     # Each pass reads the SAME text under a genuinely different stance
     # (V-054/D-017). Before this, both passes were the same model, same
     # prompt, at temperature 0 — a repeated near-deterministic sample, so
@@ -344,15 +381,28 @@ async def vote_batch(
         prompt_version=prompt_version,
         annotator_stance=_stance(ROLE_PASS_1, prompt_version),
     )
-    pass_2 = await grade_batch_verdicts(
-        batch,
-        batch_criteria,
-        llm,
-        check_run_id,
-        anchor_kind,
-        consistency_pass=PASS_2,
-        prompt_version=prompt_version,
-        annotator_stance=_stance(ROLE_PASS_2, prompt_version),
+    pass_2 = (
+        {
+            key: replace(
+                g,
+                failure_phase=f"{PASS_2}:not_attempted",
+                request_attempted=False,
+                escalation_reason="The second grading pass was not attempted because the first "
+                "pass was unavailable. No rating was assigned.",
+            )
+            for key, g in pass_1.items()
+        }
+        if all(g.failure_outcome is not None for g in pass_1.values())
+        else await grade_batch_verdicts(
+            batch,
+            batch_criteria,
+            llm,
+            check_run_id,
+            anchor_kind,
+            consistency_pass=PASS_2,
+            prompt_version=prompt_version,
+            annotator_stance=_stance(ROLE_PASS_2, prompt_version),
+        )
     )
     shadow_detail = shadow_signals_as_detail(compute_shadow_signals(batch.context_text, settings))
     # BUG-045: computed once per batch (regex, no LLM call, no quota cost),
@@ -388,7 +438,27 @@ async def vote_batch(
         outcome, score = gate_vote(
             vote.majority_verdict, vote.agreement, settings, criterion=criterion
         )
+        if vote.failure_outcome is not None:
+            outcome, score = vote.failure_outcome, None
         detail = _vote_detail(batch, vote, shadow_detail)
+        if vote.failure_outcome is not None:
+            detail["grading_pass_proposals"] = [
+                {
+                    "pass": label,
+                    "proposed_verdict": g.verdict,
+                    "proposed_reasoning": g.reasoning,
+                    "evidence": [
+                        {"quote": q, "anchor": a}
+                        for q, a in zip(g.quotes or [], g.anchors or [], strict=True)
+                    ]
+                    if g.anchors is not None
+                    else [],
+                    "unverified_evidence": g.quotes if g.anchors is None else [],
+                    "failure_phase": g.failure_phase,
+                    "request_attempted": g.request_attempted,
+                }
+                for label, g in ((PASS_1, pass_1[criterion.id]), (PASS_2, pass_2[criterion.id]))
+            ]
         if batch.source_coverage is not None:
             detail["source_coverage"] = batch.source_coverage
         if vote.majority_verdict is not None:
@@ -456,7 +526,7 @@ async def vote_batch(
         and v.detail.get("verdict")
         and not v.detail.get("injection_suspected")
     ]
-    support = await check_support(batch, candidates, llm, check_run_id=check_run_id)
+    support = await check_support_available(batch, candidates, llm, check_run_id=check_run_id)
     return [
         VotedCriterion(
             v.criterion, v.vote, *apply_support(v.outcome, v.detail, support[v.criterion.id])
@@ -475,10 +545,17 @@ async def _vote_batch(
     llm: LLMClient,
     settings: Settings,
     anchor_kind: str,
+    cancellation_boundary: Callable[[], Awaitable[None]] | None = None,
 ) -> list[CheckResult]:
     voted = await vote_batch(
         batch, batch_criteria, llm, settings, anchor_kind, check_run_id=check_run_id
     )
+    if cancellation_boundary is not None and any(
+        v.outcome == ResultOutcome.api_down for v in voted
+    ):
+        # Carry data without adding rows: the pipeline checks cancellation and
+        # ownership before queueing proposals and its outage metadata together.
+        raise SemanticPartialUnavailable(voted)
     return [await _persist(session, check_run_id, v.criterion, v.outcome, v.detail) for v in voted]
 
 
@@ -556,7 +633,14 @@ async def run_semantic_checks_with_consistency(
             continue
         results.extend(
             await _vote_batch(
-                session, check_run_id, batch, batch_criteria, llm, settings, extraction.anchor_kind
+                session,
+                check_run_id,
+                batch,
+                batch_criteria,
+                llm,
+                settings,
+                extraction.anchor_kind,
+                cancellation_boundary,
             )
         )
         # One batch is the bounded LLM unit: both passes finish and every

@@ -206,8 +206,9 @@ async def test_outage_records_do_not_promise_report_before_later_stop(
 
 
 @pytest.mark.parametrize("loss", ["replacement", "busy_guard", "control_flow_loss"])
+@pytest.mark.parametrize("fail_after", [0, 1])
 async def test_queued_outage_rows_and_metadata_do_not_publish_after_ownership_loss(
-    session_factory, tmp_path, monkeypatch, loss
+    session_factory, tmp_path, monkeypatch, loss, fail_after
 ):
     run_id, _, settings = await _seed(session_factory, tmp_path, monkeypatch)
     async with session_factory() as setup:
@@ -247,12 +248,12 @@ async def test_queued_outage_rows_and_metadata_do_not_publish_after_ownership_lo
                 pipeline,
                 await pipeline.get(CheckRun, run_id),
                 settings,
-                OutageClient(),
+                OutageClient(fail_after=fail_after),
                 claim_token=token,
             )
             assert result is False
         await guard_holder.rollback()
-    assert queued == [2]
+    assert queued == [2 if fail_after == 0 else 0]
     async with session_factory() as observer:
         assert await semantic_rows(observer, run_id) == []
         run = await observer.get(CheckRun, run_id)
@@ -382,3 +383,44 @@ async def test_outage_raised_after_all_results_saved_does_not_invent_missing_cou
         run = await observer.get(CheckRun, run_id)
         assert run.status == CheckRunStatus.done
         assert run.stage_status["stages"]["semantic"] == {"status": "done", "n_criteria": 2}
+
+
+@pytest.mark.parametrize("cancel_before_publication", [False, True])
+async def test_partial_second_pass_keeps_source_proposals_behind_owned_boundary(
+    session_factory, tmp_path, monkeypatch, cancel_before_publication
+):
+    from app.pipeline.service import cancel_check_run
+
+    run_id, _, settings = await _seed(session_factory, tmp_path, monkeypatch)
+    settings = settings.model_copy(update={"semantic_batch_max_criteria": 1})
+
+    async def before_outage():
+        async with session_factory() as observer:
+            assert await semantic_rows(observer, run_id) == []
+            if cancel_before_publication:
+                run = await observer.get(CheckRun, run_id)
+                manuscript = await observer.get(Manuscript, run.manuscript_id)
+                await cancel_check_run(observer, run.id, manuscript.instructor_id)
+
+    async with session_factory() as producer:
+        await machine.run_check_run(
+            producer,
+            await producer.get(CheckRun, run_id),
+            settings,
+            OutageClient(fail_after=1, before_outage=before_outage),
+        )
+    async with session_factory() as observer:
+        run = await observer.get(CheckRun, run_id)
+        rows = await semantic_rows(observer, run_id)
+        if cancel_before_publication:
+            assert run.status == CheckRunStatus.cancelled and rows == []
+            return
+        assert run.status == CheckRunStatus.done and len(rows) == 2
+        assert all(row.outcome == ResultOutcome.api_down and row.score is None for row in rows)
+        assert rows[0].detail["basis"] == "llm"
+        assert rows[0].detail["grading_pass_proposals"][0]["evidence"]
+        assert rows[0].detail["votes"][0] is not None
+        assert rows[0].detail["votes"][1] is None
+        assert "verdict" not in rows[0].detail and "level" not in rows[0].detail
+        assert rows[1].detail["basis"] == "not-graded"
+        assert run.stage_status["stages"]["semantic"]["degraded_count"] == 2

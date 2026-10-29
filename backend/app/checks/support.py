@@ -9,6 +9,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from app.checks.levels import match_level
+from app.errors import ApiDownError
 from app.models.enums import ResultOutcome
 
 PROMPT_TYPE = "semantic_support"
@@ -295,6 +296,28 @@ async def check_support(
     return results
 
 
+async def check_support_available(batch: Any, candidates: list, llm: Any, **context: Any) -> dict:
+    """Attribute a failed shared review only to its submitted proposals.
+
+    Quota and cancellation retain the caller's existing cohort/resume policy.
+    No additional remote attempts are made here.
+    """
+    try:
+        return await check_support(batch, candidates, llm, **context)
+    except ApiDownError:
+        return {
+            criterion.id: {
+                **_incomplete(
+                    "The evidence-support service was unavailable. The proposed rating "
+                    "remains unassessed; review the manuscript directly."
+                ),
+                "failure_outcome": ResultOutcome.api_down.value,
+                "failure_phase": "semantic_support",
+            }
+            for criterion, _detail in candidates
+        }
+
+
 def apply_support(
     outcome: ResultOutcome, detail: dict[str, Any], support: dict[str, Any]
 ) -> tuple[ResultOutcome, dict[str, Any]]:
@@ -314,4 +337,7 @@ def apply_support(
     updated.pop("score", None)
     updated["reason"] = support["reason"]
     updated["support_withheld"] = True
+    if support.get("failure_outcome") == ResultOutcome.api_down.value:
+        updated["failure_phase"] = support["failure_phase"]
+        return ResultOutcome.api_down, updated
     return ResultOutcome.escalated, updated

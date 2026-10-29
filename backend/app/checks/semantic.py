@@ -21,9 +21,9 @@ from app.checks.rules.sections import find_section_node, identify_target_section
 from app.checks.schemas import GradeVerdict
 from app.checks.signals import compute_shadow_signals, shadow_signals_as_detail
 from app.checks.source_quality import source_limitation_detail
-from app.checks.support import apply_support, check_support, context_limitation
+from app.checks.support import apply_support, check_support_available, context_limitation
 from app.config import Settings, get_settings
-from app.errors import VeridicalError
+from app.errors import ApiDownError, VeridicalError
 from app.ingest.analytical_source import analytical_source
 from app.ingest.patterns import load_patterns
 from app.ingest.references import non_reference_blocks, select_references
@@ -426,6 +426,9 @@ class GradedVerdict:
     quotes: list[str] | None
     anchors: list[str] | None
     escalation_reason: str | None
+    failure_outcome: ResultOutcome | None = None
+    failure_phase: str | None = None
+    request_attempted: bool = True
 
 
 def _downgrade_if_claimed(verdict: GradedVerdict, claimed: set[str]) -> GradedVerdict:
@@ -505,6 +508,23 @@ async def grade_batch_verdicts(
                 validation_attempt=_attempt,
             )
             break
+        except ApiDownError:
+            if consistency_pass != "pass_2":
+                # No proposal exists yet; retain the owned pipeline outage floor.
+                raise
+            return {
+                c.id: GradedVerdict(
+                    c.id,
+                    None,
+                    None,
+                    None,
+                    None,
+                    "The grading service was unavailable during this pass. No rating was assigned.",
+                    ResultOutcome.api_down,
+                    f"{consistency_pass}:batch",
+                )
+                for c in batch_criteria
+            }
         except SemanticGradeError:
             continue
 
@@ -519,6 +539,7 @@ async def grade_batch_verdicts(
     # across the whole loop, not reset per-criterion.
     claimed_quotes: set[str] = set()
     recovered_criteria = 0
+    recovery_unavailable = False
     for i, criterion in enumerate(batch_criteria):
         verdict = by_index.get(i)
         if verdict is not None and verdict.verdict == "uncertain":
@@ -554,17 +575,36 @@ async def grade_batch_verdicts(
                 )
                 continue
             recovered_criteria += 1
-            retry = await _grade_single_criterion(
-                criterion,
-                batch,
-                llm,
-                check_run_id,
-                anchor_kind,
-                consistency_pass=consistency_pass,
-                prompt_version=prompt_version,
-                annotator_stance=annotator_stance,
-                recovery_phase="criterion_repair",
-            )
+            request_attempted = not recovery_unavailable
+            try:
+                if recovery_unavailable:
+                    raise ApiDownError("Item recovery is unavailable for this pass")
+                retry = await _grade_single_criterion(
+                    criterion,
+                    batch,
+                    llm,
+                    check_run_id,
+                    anchor_kind,
+                    consistency_pass=consistency_pass,
+                    prompt_version=prompt_version,
+                    annotator_stance=annotator_stance,
+                    recovery_phase="criterion_repair",
+                )
+            except ApiDownError:
+                recovery_unavailable = True
+                out[criterion.id] = GradedVerdict(
+                    criterion.id,
+                    None,
+                    verdict.reasoning if verdict else None,
+                    verdict.evidence_quotes if verdict else None,
+                    None,
+                    "The grading service was unavailable for this criterion's evidence repair. "
+                    "No rating was assigned.",
+                    ResultOutcome.api_down,
+                    f"{consistency_pass}:criterion_repair",
+                    request_attempted,
+                )
+                continue
             if retry is None:
                 if verdict is not None:
                     # The ORIGINAL batch verdict had quotes that failed
@@ -734,7 +774,7 @@ async def _grade_batch(
                     },
                 )
             )
-    support = await check_support(batch, candidates, llm, check_run_id=check_run_id)
+    support = await check_support_available(batch, candidates, llm, check_run_id=check_run_id)
     results: list[CheckResult] = []
     for criterion in batch_criteria:
         g = graded[criterion.id]
@@ -745,11 +785,20 @@ async def _grade_batch(
                 "reason": g.escalation_reason,
                 "prompt_version": PROMPT_VERSION,
             }
+            if g.failure_phase:
+                escalated_detail["failure_phase"] = g.failure_phase
+                escalated_detail["request_attempted"] = g.request_attempted
+            if g.reasoning:
+                escalated_detail["proposed_reasoning"] = g.reasoning
             if g.quotes:
                 escalated_detail["unverified_evidence"] = g.quotes
             results.append(
                 await _persist(
-                    session, check_run_id, criterion, ResultOutcome.escalated, escalated_detail
+                    session,
+                    check_run_id,
+                    criterion,
+                    g.failure_outcome or ResultOutcome.escalated,
+                    escalated_detail,
                 )
             )
             continue

@@ -8,7 +8,7 @@ import pytest
 from app.checks.consistency import run_semantic_checks_with_consistency
 from app.checks.semantic import build_semantic_batches, run_semantic_checks
 from app.config import Settings
-from app.errors import ApiDownError, QuotaExhaustedError
+from app.errors import QuotaExhaustedError
 from app.ingest.schemas import ExtractionResult, SectionNode, SectionTree, TextBlock
 from app.models.enums import ResultOutcome
 
@@ -312,7 +312,7 @@ async def test_bad_support_never_leaves_an_accepted_grade(runner, mutation):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("runner", [run_semantic_checks, run_semantic_checks_with_consistency])
-@pytest.mark.parametrize("error", [QuotaExhaustedError, ApiDownError])
+@pytest.mark.parametrize("error", [QuotaExhaustedError])
 async def test_unavailable_support_preserves_availability_and_does_not_persist(runner, error):
     class Unavailable(Client):
         async def complete(self, prompt_type, prompt, **context):
