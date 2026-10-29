@@ -1,4 +1,4 @@
-import { fireEvent, screen } from "@testing-library/react";
+import { act, fireEvent, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { renderWithUploadProviders } from "../test/renderWithUploadProviders";
 import { BackgroundUploadsProvider, useBackgroundUploads } from "./BackgroundUploads";
@@ -46,5 +46,24 @@ describe("background uploads", () => {
     fail = false;
     fireEvent.click(screen.getByRole("button", { name: "Try again" }));
     expect(await screen.findByText("Ready.")).toBeInTheDocument();
+  });
+
+  it("waits while another transfer runs and starts on its own, instead of failing", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      let busy = true;
+      vi.stubGlobal("fetch", vi.fn(async () => busy
+        ? new Response(JSON.stringify({ error: { code: "document_preparation_busy", message: "Another file transfer is running. Retry this upload shortly." } }), { status: 503 })
+        : new Response(JSON.stringify(SUMMARY), { status: 200 })));
+      await renderWithUploadProviders(<BackgroundUploadsProvider><Starter /></BackgroundUploadsProvider>);
+      choose();
+      expect(await screen.findByText(/Waiting for another upload to finish/)).toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "Try again" })).not.toBeInTheDocument();
+      busy = false;
+      await act(async () => { await vi.advanceTimersByTimeAsync(16_000); });
+      expect(await screen.findByText("Ready.")).toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
