@@ -8897,4 +8897,22 @@
   .signal-report-hero :focus-visible { outline-color: var(--color-signal-brand); }
   /* Review Desk queue cards: content starts at the top so counts line up. */
   .signal-queue-tabs button { align-content: start; align-items: start; }
+  /* Readiness report: criterion records in two columns; one when the
+     window is narrow. */
+  #record-panel-grades .signal-result-list {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: var(--signal-rhythm-control);
+    align-items: start;
+    padding: var(--signal-space-5) var(--signal-space-6) var(--signal-space-6);
+  }
+  @media (max-width: 1023px) {
+    #record-panel-grades .signal-result-list { grid-template-columns: minmax(0, 1fr); }
+  }
+  #record-panel-grades .signal-result-list > .signal-result-card {
+    border: var(--signal-border-hairline) solid var(--color-signal-border);
+    border-radius: var(--signal-radius-panel);
+    padding: var(--signal-space-5);
+    min-inline-size: 0;
+  }
 }
