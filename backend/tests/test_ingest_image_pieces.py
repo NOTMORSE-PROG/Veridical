@@ -121,6 +121,30 @@ def test_an_over_budget_page_keeps_its_pieces_and_the_fragment_limit_decides(tmp
         fragment_guard.refuse_fragment_heavy(result, settings)
 
 
+def test_the_comparison_budget_is_shared_by_the_whole_document(tmp_path):
+    # Two identical tiled pages; the budget covers the first page only, so the
+    # second keeps its pieces. A budget that reset per page would merge both.
+    tile, step = 6.0, 6.25
+    boxes = [
+        (40 + c * step, 80 + r * step, 40 + c * step + tile, 80 + r * step + tile)
+        for r in range(10)
+        for c in range(12)
+    ]
+    _groups_unused, one_page = merge_touching_boxes(boxes, 1.0, BUDGET)
+    path = tmp_path / "two.pdf"
+    with pymupdf.open() as doc:
+        pix = _pix()
+        for _ in range(2):
+            page = doc.new_page(width=612, height=792)
+            for box in boxes:
+                page.insert_image(pymupdf.Rect(*box), pixmap=pix)
+        doc.save(str(path))
+    settings = _settings(tmp_path, preparation_image_piece_merge_max_comparisons=one_page + 1)
+    result = pdf.extract_document(str(path), settings)
+    per_page = [sum(1 for image in result.images if image.page == page) for page in (1, 2)]
+    assert per_page == [1, 120]
+
+
 def test_a_tiled_page_becomes_one_image_with_its_piece_count(tmp_path):
     source = _tiled_pdf(tmp_path / "tiled.pdf", columns=12, rows=10)
     result = pdf.extract_document(str(source), _settings(tmp_path))
@@ -143,7 +167,7 @@ def test_a_large_image_behind_the_pieces_is_never_merged(tmp_path):
 
 
 def test_a_merged_image_is_reported_but_not_read(tmp_path):
-    source = _tiled_pdf(tmp_path / "tiled.pdf", columns=40, rows=40)
+    source = _tiled_pdf(tmp_path / "tiled.pdf", columns=12, rows=12)
     settings = _settings(tmp_path)
     result = pdf.extract_document(str(source), settings)
     tiled, figure = result.images

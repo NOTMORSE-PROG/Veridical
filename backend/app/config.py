@@ -1103,9 +1103,10 @@ class Settings(BaseSettings):
     # Box comparisons one document may spend on merging. Pieces that overlap
     # in x but not in y make grouping quadratic; past this budget the pieces
     # are kept as they are and the fragment limit above decides. The
-    # 66,933-piece thesis needed 2.7 million (0.4 CPU-s on a desktop);
-    # 20 million is about 3 CPU-s, inside the helper's time limit.
-    preparation_image_piece_merge_max_comparisons: int = Field(default=20_000_000, ge=0)
+    # 66,933-piece thesis needed 2.7 million (0.4 CPU-s on a desktop). The
+    # worst case measured, 6,000 identical overlapping boxes, costs ~0.26 s
+    # per million, so 10 million bounds merging at ~2.6 CPU-s per document.
+    preparation_image_piece_merge_max_comparisons: int = Field(default=10_000_000, ge=0)
     # V-090 upload tray: finished attempts stay listed this long so a reload
     # can show what happened; the list is capped for one screen.
     direct_upload_tray_window_seconds: int = Field(default=86400, ge=60)
