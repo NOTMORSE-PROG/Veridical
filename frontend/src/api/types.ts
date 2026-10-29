@@ -764,9 +764,6 @@ export interface CitationSourceKeyOut {
 }
 
 export interface FlagOut {
-  cited_text?: string | null;
-  cited_authors?: string[] | null;
-  cited_year?: string | null;
   assessment_revision: number | null;
   citation_source_locator?: {
     basis: "saved_reference";
@@ -874,11 +871,6 @@ export interface FlagSummaryOut {
   check_kind: string;
   severity: "high" | "med" | "low";
   criterion_text: string | null;
-  // Citation findings: which in-text citation or reference entry this
-  // location is about. Absent on older records and other check kinds.
-  cited_text?: string | null;
-  cited_authors?: string[] | null;
-  cited_year?: string | null;
   evidence_excerpt: string;
   page_anchor: string;
   overridden: boolean;
