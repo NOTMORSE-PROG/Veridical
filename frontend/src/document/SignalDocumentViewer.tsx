@@ -77,9 +77,10 @@ import { RecordedEvidenceReader } from "./RecordedEvidenceReader";
 import { FindingSourceComparison } from "./FindingSourceComparison";
 import type { EvidenceSourceRequest, OpenEvidenceSource } from "../report/evidenceTypes";
 import { RecordedFindingSources } from "../report/RecordedEvidencePage";
-import { WORKSPACE_STEP_PARAM, workspaceStep, type ReportStep } from "../report/reviewStep";
+import { WORKSPACE_STEP_PARAM, workspaceStep, workspaceStepPath, type ReportStep } from "../report/reviewStep";
+import { focusAfterStepChange } from "../report/reportSectionNavigation";
 import { WorkspaceStepFooter, WorkspaceStepHeading, WorkspaceStepNavigation } from "./WorkspaceSteps";
-import { LeadingChevronIcon, WorkspaceBarContext } from "./WorkspaceBar";
+import { InWorkspaceBar, LeadingChevronIcon, WorkspaceBarContext } from "./WorkspaceBar";
 
 type ReviewFilter = "open" | "resolved" | "all";
 const FINDINGS_PAGE_PARAM = "findings_page";
@@ -164,7 +165,8 @@ function ReviewQueue({ findings, regions, sourceAvailability, report, collection
       {invalidSelection && <Alert title="That finding is no longer available" tone="warning" role="status">The review queue is open.</Alert>}
       {findings.length === 0 && !showComparisons && collection.state === "success" && (() => {
         const empty = moduleEmptyState(report, moduleKind);
-        return <EmptyState id="workspace-module-empty" title={empty.title}><p>{empty.description}</p></EmptyState>;
+        return <EmptyState id="workspace-module-empty" title={empty.title} action={empty.limits
+          ? <ActionLink to={workspaceStepPath(report.check_run_id, "decision")} variant="secondary" onClick={event => focusAfterStepChange(event, "workspace-coverage-heading")}>Open assessment limits</ActionLink> : undefined}><p>{empty.description}</p></EmptyState>;
       })()}
       {findings.length > 0 && (
         <div className="signal-document-inspector__heading"><h2>{collection.lastLoaded ? "Last loaded integrity findings" : "Integrity findings"}</h2></div>
@@ -270,10 +272,10 @@ function SelectedFinding({ comparisonHost, comparisonVisible, finding, total, lo
       {optional && outsideFilter && <><p>{COMPARISON_LEAD_COPY.outsideFilter}</p><Button variant="quiet" onClick={onAll}>Show all comparison leads</Button></>}
       {!optional && filterPosition > 0 && <p className="signal-field-hint">{filterPosition} of {filterTotal} in {checkKindMeta(finding.representative.check_kind).eyebrow.replace(/ check$/, "")}</p>}
       {optional && qualified && !outsideFilter && filterTotal !== collection.snapshot?.total && filterPosition > 0 && <p>Item {filterPosition} of {filterTotal} in this filter.</p>}
-      {(optional ? navigationWasShown.current : previous || next) && <div className="signal-document-finding-nav" role="group" aria-label={optional ? "Move between comparison leads" : "Move between review findings"}>
+      {(optional ? navigationWasShown.current : previous || next) && <InWorkspaceBar><div className="signal-document-finding-nav" role="group" aria-label={optional ? "Move between comparison leads" : "Move between review findings"}>
         <Button variant="secondary" disabled={optional ? undefined : !canPrevious} aria-disabled={optional ? !canPrevious : undefined} onClick={() => move(canPrevious, onPrevious)}>{optional ? "Previous comparison lead" : "Previous finding"}</Button>
         <Button variant="secondary" disabled={optional ? undefined : !canNext} aria-disabled={optional ? !canNext : undefined} onClick={() => move(canNext, onNext)}>{optional ? "Next comparison lead" : "Next finding"}</Button>
-      </div>}
+      </div></InWorkspaceBar>}
     </header>
     {optional && collection.lastLoaded && <div role="status" className="signal-field-hint">{collection.state === "error" ? "The comparison list could not be refreshed. Showing last loaded records." : collection.state === "paused" ? "Waiting for a connection. Showing last loaded comparison records." : "Updating comparison records. Showing last loaded records."}{collection.state === "error" && <Button variant="quiet" onClick={retryComparisonList}>Retry comparison list</Button>}</div>}
     {detail && query.isError && <Alert title="These details could not be refreshed" tone="warning"><p>Showing the last loaded record. Check its source before drawing a conclusion.</p><Button variant="quiet" onClick={() => { void query.refetch(); }}>Try again</Button></Alert>}

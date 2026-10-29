@@ -53,6 +53,11 @@ import { SavedCriterionDestination, SavedJudgmentAccess } from "./SavedJudgmentA
 import { recordedGradeLabel, criterionRecordId, atLeastSavedJudgment, SAVED_CRITERION_PARAM } from "./savedJudgment";
 import { RecordedJudgmentTools } from "./RecordedJudgmentTools";
 import { InWorkspaceBar } from "../document/WorkspaceBar";
+
+// Some recorded notes are two sentences joined with ".;" when stored.
+function readableNote(text: string) {
+  return text.replace(/\.\s*;\s*/g, ". ");
+}
 import { EmptyState } from "../ui/EmptyState";
 import { MODULE_EMPTY_STATE } from "./moduleEmptyState";
 import { ComparisonLeadList } from "./ComparisonLeadList";
@@ -710,7 +715,7 @@ function SignalResolutionCard({ item, checkRunId, sharedReasonId, sourceTarget, 
         <strong id={reviewStateId}>{CRITERION_REVIEW_COPY.judgmentNeeded}</strong>
         <p>{item.evidence?.length ? CRITERION_REVIEW_COPY.reviewSavedPassages : CRITERION_REVIEW_COPY.reviewManuscript}</p>
         {reviewNotices.filter(notice => notice.kind !== "support").map((notice) => <p key={notice.kind} id={noticeId(notice.kind)} className="signal-resolution-card__vote">{notice.text}</p>)}
-        {!collapseRecordedReason && !sharedReasonId && item.reason && <p id={reasonId}>{item.reason}</p>}
+        {!collapseRecordedReason && !sharedReasonId && item.reason && <p id={reasonId}>{readableNote(item.reason)}</p>}
         {showInjectionSnippet && (
           <blockquote className="signal-unverified-evidence"><strong id={injectionId}>Text addressed at an automated grader</strong><span>“{item.injection_matched_snippet}”</span></blockquote>
         )}
@@ -730,7 +735,7 @@ function SignalResolutionCard({ item, checkRunId, sharedReasonId, sourceTarget, 
         <div id={detailsId} hidden={!detailsOpen}>
           <p><strong>{CRITERION_REVIEW_COPY.detailsTitle}</strong></p>
           {reviewNotices.filter(notice => notice.kind === "support").map((notice) => <p key={notice.kind} id={noticeId(notice.kind)}>{notice.text}</p>)}
-          {sharedReasonId ? <p>The shared review reason above applies to this criterion.</p> : collapseRecordedReason && item.reason && <p id={reasonId}>{item.reason}</p>}
+          {sharedReasonId ? <p>The shared review reason above applies to this criterion.</p> : collapseRecordedReason && item.reason && <p id={reasonId}>{readableNote(item.reason)}</p>}
           {!item.reasoning?.trim() && Boolean(item.evidence?.length) && !assessment?.ruleFacts && (assessment?.source === "ai" || !item.reason?.trim()) && <p>{assessment?.missingExplanation ?? "No explanation is available in this assessment record."}</p>}
           <p>{CRITERION_REVIEW_COPY.detailsQualification}</p>
           {item.votes.length > 0 ? <ol aria-label={CRITERION_REVIEW_COPY.entriesLabel}>{item.votes.map((vote, index) =>

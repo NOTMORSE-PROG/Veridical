@@ -4,7 +4,7 @@
 // subordinate (owner's anti-Turnitin ruling, carried from V-058), never
 // a large colored percentage or a severity-styled badge.
 import { ActionLink } from "../ui/ActionLink";
-import type { ReactNode } from "react";
+import { type ReactNode, useLayoutEffect, useRef } from "react";
 import type { PassagePairOut } from "../api/types";
 import type { TextRange } from "./sharedPassage";
 import { sharedPassageRanges } from "./sharedPassage";
@@ -38,11 +38,20 @@ export function PassageBlock({
   after: string | null;
   sharedRanges?: TextRange[];
 }) {
+  const textRef = useRef<HTMLDivElement>(null);
+  // In a height-capped box the shared wording can start below the fold;
+  // open each excerpt at its first shared phrase so the match is visible.
+  useLayoutEffect(() => {
+    const box = textRef.current;
+    const mark = box?.querySelector<HTMLElement>("mark");
+    if (!box || !mark || box.scrollHeight <= box.clientHeight) return;
+    box.scrollTop = Math.max(0, mark.offsetTop - box.offsetTop - mark.offsetHeight);
+  }, [excerpt]);
   return (
     <div className="passage-pair__block">
       <p className="mb-1 text-xs font-semibold tracking-header text-ink-tertiary uppercase">{label}</p>
       {/* Long excerpts scroll inside the review pane, so the box must be reachable by keyboard. */}
-      <div className="passage-pair__text rounded-lg border border-border bg-page px-4 py-3 break-words text-ink" tabIndex={0} role="region" aria-label={label}>
+      <div ref={textRef} className="passage-pair__text rounded-lg border border-border bg-page px-4 py-3 break-words text-ink" tabIndex={0} role="region" aria-label={label}>
         {before && <span className="text-ink-tertiary">{before} </span>}
         <span><HighlightedText text={excerpt} ranges={sharedRanges} /></span>
         {after && <span className="text-ink-tertiary"> {after}</span>}
