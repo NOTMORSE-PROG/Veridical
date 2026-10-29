@@ -820,7 +820,7 @@ expect(screen.getByText("Not scored. Does not affect readiness or block your dec
     }));
     renderWithProviders(<SignalReportPage />, { route: "/report/5?review_step=findings&module=internal_agreement", path: "/report/:checkRunId", reviewInstructorId: ME_INSTRUCTOR.id });
 
-    const viewedBadges = await screen.findAllByText("Viewed");
+    const viewedBadges = await screen.findAllByText("Opened");
     expect(viewedBadges).toHaveLength(1);
     expect(screen.getByText("You have opened 1 of 2 open findings.")).toBeInTheDocument();
     window.localStorage.clear();
@@ -841,7 +841,7 @@ expect(screen.getByText("Not scored. Does not affect readiness or block your dec
     renderWithProviders(<SignalReportPage />, { route: "/report/5?review_step=findings&module=internal_agreement", path: "/report/:checkRunId", reviewInstructorId: ME_INSTRUCTOR.id });
 
     await screen.findByText("Showing 1 of 1 open finding across 1 location.");
-    expect(screen.queryByText("Viewed")).not.toBeInTheDocument();
+    expect(screen.queryByText("Opened")).not.toBeInTheDocument();
     expect(screen.getByText("You have opened 0 of 1 open findings.")).toBeInTheDocument();
   });
 

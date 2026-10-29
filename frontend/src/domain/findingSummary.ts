@@ -13,8 +13,10 @@ export function findingSubject(flag: FlagSummaryOut): string {
 
 const SEVERITY: Record<FlagSummaryOut["severity"], string> = { high: "High severity", med: "Medium severity", low: "Low severity" };
 
-export function severityLabel(severity: FlagSummaryOut["severity"]): string {
-  return SEVERITY[severity] ?? "Severity not recorded";
+// The same label the finding's card shows.
+export function severityLabel(flag: Pick<FlagSummaryOut, "severity" | "affects_readiness">): string {
+  if (flag.affects_readiness === false) return "Review lead: not scored";
+  return SEVERITY[flag.severity] ?? "Severity not recorded";
 }
 
 export function findingTitle(flag: FlagSummaryOut): string {
