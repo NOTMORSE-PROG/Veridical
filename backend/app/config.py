@@ -734,8 +734,13 @@ class Settings(BaseSettings):
     forensics_sprite_max_observations: int = Field(default=1000, ge=2)
     forensics_sprite_max_scale_points: int = Field(default=1000, ge=2)
     forensics_sprite_max_iterations: int = Field(default=2000, ge=1)
-    forensics_sprite_row_timeout_seconds: float = Field(default=3.0, gt=0, allow_inf_nan=False)
-    forensics_sprite_check_timeout_seconds: float = Field(default=9.0, gt=0, allow_inf_nan=False)
+    # Budgets the free host (0.1 CPU) meets: production ran rows of 16-17 s
+    # inside 30 s before the worker stopped loading plotting libraries, and
+    # the check budget covers FORENSICS_SPRITE_MAX_ROWS full rows (3 x 30).
+    # A faster worker leaves this as headroom for a busy host, so a row is
+    # not left unassessed just because other work shared the CPU.
+    forensics_sprite_row_timeout_seconds: float = Field(default=30.0, gt=0, allow_inf_nan=False)
+    forensics_sprite_check_timeout_seconds: float = Field(default=90.0, gt=0, allow_inf_nan=False)
     forensics_sprite_math_threads: int = Field(default=1, ge=1)
     forensics_sprite_random_seed: int = Field(default=0, ge=0, le=4294967295)
     forensics_sprite_init_method: Literal["minvar", "maxvar"] = "minvar"
