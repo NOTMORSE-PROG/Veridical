@@ -68,7 +68,7 @@ export function WorkspaceStepFooter({ current, onSelect }: { current: ReportStep
   const previous = index > 0 ? REPORT_STEPS[index - 1] : null;
   const next = index < REPORT_STEPS.length - 1 ? REPORT_STEPS[index + 1] : null;
   return <nav className="signal-workspace-step-footer" aria-label="Move between review steps">
-    {previous && <Button variant="quiet" onClick={() => onSelect(previous.id)}>Back: {previous.label}</Button>}
+    {previous && <Button variant="secondary" onClick={() => onSelect(previous.id)}>Back: {previous.label}</Button>}
     {next && <Button variant="primary" onClick={() => onSelect(next.id)}>Continue: {next.label}</Button>}
   </nav>;
 }

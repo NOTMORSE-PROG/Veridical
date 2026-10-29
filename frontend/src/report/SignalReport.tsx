@@ -4,7 +4,7 @@ import { reportAssessmentNotices } from "../domain/reportAssessmentContext";
 import { ReportAssessmentContext } from "./ReportAssessmentContext";
 import { ReviewDeskReturnLink } from "../routing/ReviewDeskReturnLink";
 import { type MouseEvent, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { useLocation, useParams } from "react-router";
+import { useLocation, useNavigate, useParams } from "react-router";
 import { ApiError } from "../api/client";
 import { manuscriptIdentity } from "../domain/manuscriptLabel";
 import { DECISION_LABEL } from "../domain/decisionTone";
@@ -31,6 +31,25 @@ import { useReportPdfExportAction } from "./useReportPdfExportAction";
 import { REPORT_SECTION_TARGETS } from "./reportSectionNavigation";
 import { claimFocusContinuation, type FocusContinuation } from "../routing/focusContinuation";
 import { reviewDeskDestination } from "../routing/reviewDeskReturn";
+import { EmptyState } from "../ui/EmptyState";
+
+type RecordTab = "grades" | "findings" | "images" | "limits";
+const RECORD_TAB_PARAM = "section";
+const RECORD_TABS: RecordTab[] = ["grades", "findings", "images", "limits"];
+
+// The record below the summary is split into tabs. A section hash (Audit
+// returns, the findings count, the limits link) or an older review_step
+// address still opens the tab that holds its target.
+function recordTab(search: string, hash: string): RecordTab {
+  const target = hash.replace(/^#/, "");
+  if (/^(?:criteria-results-heading|criterion-record-|judgment-revision-|signal-saved-source-)/.test(target)) return "grades";
+  if (/^(?:integrity-signals|flags-heading|comparison-lead-)/.test(target)) return "findings";
+  if (target === "coverage-statement-heading") return "limits";
+  const params = new URLSearchParams(search);
+  const named = params.get(RECORD_TAB_PARAM);
+  if (named && (RECORD_TABS as string[]).includes(named)) return named as RecordTab;
+  return params.get("review_step") === "findings" ? "findings" : "grades";
+}
 
 const decidedAtFormatter = new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" });
 
@@ -38,6 +57,14 @@ export function SignalReportPage() {
   const { checkRunId } = useParams<{ checkRunId: string }>();
   const id = Number(checkRunId);
   const location = useLocation();
+  const navigate = useNavigate();
+  const tab = recordTab(location.search, location.hash);
+  function selectTab(next: RecordTab) {
+    const params = new URLSearchParams(location.search);
+    params.delete("review_step");
+    params.set(RECORD_TAB_PARAM, next);
+    void navigate({ pathname: location.pathname, search: params.toString(), hash: "" }, { replace: true, state: location.state });
+  }
   const pendingJump = useRef<{ destination: string; target: string; scroll: boolean; focus: FocusContinuation } | undefined>(undefined);
   useEffect(() => () => pendingJump.current?.focus.dispose(), []);
   useLayoutEffect(() => {
@@ -178,37 +205,64 @@ export function SignalReportPage() {
               {exportPdf.isError && <div ref={exportErrorRef} tabIndex={-1}><Alert title="Could not export this report" tone="error" role="alert">{exportPdf.error instanceof ApiError ? exportPdf.error.message : "Try again."}</Alert></div>}
             </div>
           <ReportAssessmentContext notices={reportAssessmentNotices(report, "report")} />
-          <div className="signal-group-flow signal-report-record">
+          <div className="signal-report-summary-row">
           <section id="review-criteria" tabIndex={-1} className={report.pending_review_count > 0 ? "signal-review-section signal-review-section--attention" : "signal-review-section"} aria-labelledby="report-pending-heading">
             <div className="signal-review-section__heading"><div><p className="signal-section-kicker">{report.pending_review_count > 0 ? "Waiting for you" : "Criteria"}</p><h2 id="report-pending-heading">Criteria needing your judgment</h2></div><span>{report.pending_review_count} {report.pending_review_count === 1 ? "criterion" : "criteria"}</span></div>
-            <p className="signal-review-section__intro">{report.pending_review_count > 0
-              ? "These have no accepted grade yet. Grade them in manuscript review, beside the manuscript."
-              : "None. Every criterion has a recorded grade or assessment limit."}</p>
-            {report.pending_review_count > 0 && pendingReviewQuery.data && pendingReviewQuery.data.length > 0 && <ul className="signal-report-pending-list">{pendingReviewQuery.data.map(item => <li key={item.check_result_id}>{item.criterion_text}</li>)}</ul>}
+            <div className="signal-review-section__body">
+              {report.pending_review_count > 0 ? <>
+                <p className="signal-field-hint">These have no accepted grade yet. Grade them in manuscript review, beside the manuscript.</p>
+                {pendingReviewQuery.data && pendingReviewQuery.data.length > 0 && <ul className="signal-chip-list">{pendingReviewQuery.data.map(item => <li key={item.check_result_id}>{item.criterion_text}</li>)}</ul>}
+              </> : <EmptyState title="Nothing waiting for you"><p>Every criterion has a recorded grade or assessment limit.</p></EmptyState>}
+            </div>
           </section>
-          <FigureReadingsSummary readings={report.figure_readings} checkRunId={report.check_run_id} />
-          <SignalFlagsPanel checkRunId={report.check_run_id} unresolvedHighFlagCount={report.unresolved_high_flag_count} originalityScope={report.originality_scope} statisticalScope={report.statistical_check_scope} />
-          <SignalCriteriaResults readOnly results={report.results.filter((row) => row.outcome !== "escalated")} checkRunId={report.check_run_id} />
-          {(report.previous_status || limits.length > 0) && (
-            <div className="signal-group-flow signal-report-notices">
+          <section id="final-decision" tabIndex={-1} className="signal-review-section" aria-labelledby="decision-heading">
+            <div className="signal-review-section__heading"><div><p className="signal-section-kicker">Instructor authority</p><h2 id="decision-heading" tabIndex={-1}>Instructor decision</h2></div>{report.decision && <span className={`signal-decision signal-decision--${report.decision}`}>{DECISION_LABEL[report.decision]}</span>}</div>
+            <div className="signal-review-section__body">
+              {report.decision ? <>
+                <p>Recorded by you{report.decided_at ? ` on ${decidedAtFormatter.format(new Date(report.decided_at))}` : ""}. This is the instructor's decision, not an automated approval or block.</p>
+                {report.decision_note && <blockquote className="signal-decision-note"><strong>Decision note</strong><span>{report.decision_note}</span></blockquote>}
+              </> : <EmptyState title="Not recorded yet"><p>You record the decision in manuscript review, after checking the evidence.</p></EmptyState>}
+            </div>
+          </section>
+          </div>
+          <section className="signal-report-record" aria-label="Report record">
+            <div role="tablist" aria-label="Report record sections" className="signal-record-tabs">
+              {([["grades", `Criterion records (${report.results.filter((row) => row.outcome !== "escalated").length})`],
+                ["findings", `Integrity findings (${flagsQuery.data ? flagsQuery.data.filter(flag => !isOptionalComparisonLead(flag)).length : "…"})`],
+                ["images", `Image readings (${report.figure_readings?.length ?? 0})`],
+                ["limits", `Assessment limits (${limits.length})`]] as const).map(([value, label]) =>
+                <button key={value} type="button" role="tab" id={`record-tab-${value}`} aria-controls={`record-panel-${value}`} aria-selected={tab === value}
+                  tabIndex={tab === value ? 0 : -1} onClick={() => selectTab(value)}
+                  onKeyDown={event => {
+                    const move = event.key === "ArrowRight" ? 1 : event.key === "ArrowLeft" ? -1 : 0;
+                    if (!move) return;
+                    event.preventDefault();
+                    const next = RECORD_TABS[(RECORD_TABS.indexOf(value) + move + RECORD_TABS.length) % RECORD_TABS.length];
+                    selectTab(next);
+                    requestAnimationFrame(() => document.getElementById(`record-tab-${next}`)?.focus());
+                  }}>{label}</button>)}
+            </div>
+            <div role="tabpanel" id="record-panel-grades" aria-labelledby="record-tab-grades" hidden={tab !== "grades"}>
+              <SignalCriteriaResults readOnly results={report.results.filter((row) => row.outcome !== "escalated")} checkRunId={report.check_run_id} />
+            </div>
+            <div role="tabpanel" id="record-panel-findings" aria-labelledby="record-tab-findings" hidden={tab !== "findings"}>
+              <SignalFlagsPanel checkRunId={report.check_run_id} unresolvedHighFlagCount={report.unresolved_high_flag_count} originalityScope={report.originality_scope} statisticalScope={report.statistical_check_scope} />
+            </div>
+            <div role="tabpanel" id="record-panel-images" aria-labelledby="record-tab-images" hidden={tab !== "images"}>
+              {report.figure_readings?.length ? <FigureReadingsSummary readings={report.figure_readings} checkRunId={report.check_run_id} />
+                : <EmptyState title="No image readings"><p>This check saved no visual readings. Images that were not read are not treated as passed.</p></EmptyState>}
+            </div>
+            <div role="tabpanel" id="record-panel-limits" aria-labelledby="record-tab-limits" hidden={tab !== "limits"} className="signal-group-flow signal-report-notices">
               {report.previous_status && <section className="signal-report-history" aria-label="Previous check comparison"><span>Previous run</span><ReadinessBand status={report.previous_status} /><span aria-hidden="true">→</span><span>Current run</span><ReadinessBand status={report.status} /><p>Bands come from separate historical runs. Open Audit for the underlying reproducible values.</p></section>}
-              {limits.length > 0 && <CoverageStatement
+              {limits.length > 0 ? <CoverageStatement
                 state="partial"
                 headingId="coverage-statement-heading"
                 heading="Assessment limits"
                 intro="Results cover only the checks that ran. Unchecked content is not treated as passed. Check these parts in the manuscript yourself before you decide."
                 items={limits}
-              />}
+              /> : <EmptyState title="No assessment limits recorded"><p>The checks that ran did not record a coverage limit for this report.</p></EmptyState>}
             </div>
-          )}
-          <section id="final-decision" tabIndex={-1} className="signal-review-section" aria-labelledby="decision-heading">
-            <div className="signal-review-section__heading"><div><p className="signal-section-kicker">Instructor authority</p><h2 id="decision-heading" tabIndex={-1}>Instructor decision</h2></div>{report.decision && <span className={`signal-decision signal-decision--${report.decision}`}>{DECISION_LABEL[report.decision]}</span>}</div>
-            {report.decision ? <>
-              <p>Recorded by you{report.decided_at ? ` on ${decidedAtFormatter.format(new Date(report.decided_at))}` : ""}. This is the instructor's decision, not an automated approval or block.</p>
-              {report.decision_note && <blockquote><strong>Decision note</strong><span>{report.decision_note}</span></blockquote>}
-            </> : <p>Not recorded yet. You record the decision in manuscript review, after checking the evidence.</p>}
           </section>
-          </div>
         </>
       )}
 

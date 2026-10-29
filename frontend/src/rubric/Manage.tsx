@@ -1,7 +1,7 @@
 // V-073 screen 4m — Rubric Studio. The active format is the workspace;
 // versions form an explicit timeline and never look like interchangeable rows.
 import { useEffect, useId, useRef, useState } from "react";
-import { Link, useSearchParams } from "react-router";
+import { useSearchParams } from "react-router";
 import { ApiError } from "../api/client";
 import type { RubricListItem } from "../api/types";
 import { formatChoiceLabel } from "../domain/formatIdentity";
@@ -254,12 +254,12 @@ export function ManageRubricPage() {
                 <span>{version.report_count} pinned {version.report_count === 1 ? "report" : "reports"}</span>
               </div>
               <div className="signal-version-history__actions">
-                <Link to={`/rubric/${version.id}/review`}>{version.is_active ? "View" : "Review"}</Link>
-                <Link to={`/rubric/${version.id}/review?source=original`}>View original format</Link>
-                {!version.is_active && <button type="button" disabled={activate.isPending} onClick={() => activateVersion(version)}>Activate</button>}
+                <ActionLink variant="secondary" to={`/rubric/${version.id}/review`} aria-label={`${version.is_active ? "View" : "Review"} criteria for version ${version.version}`}>{version.is_active ? "View criteria" : "Review criteria"}</ActionLink>
+                <ActionLink variant="secondary" to={`/rubric/${version.id}/review?source=original`}>View original format</ActionLink>
+                {!version.is_active && <Button variant="secondary" disabled={activate.isPending} onClick={() => activateVersion(version)}>Activate</Button>}
                 {!version.is_active && (version.report_count > 0
                   ? <span>Reports pinned</span>
-                  : <button type="button" onClick={() => setDeleteTarget({ id: version.id, version: version.version, title: version.title })}>Delete</button>)}
+                  : <Button variant="danger" onClick={() => setDeleteTarget({ id: version.id, version: version.version, title: version.title })}>Delete</Button>)}
               </div>
             </li>
           ))}

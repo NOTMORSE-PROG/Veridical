@@ -9,7 +9,7 @@ import { type KeyboardEvent, useCallback, useEffect, useId, useLayoutEffect, use
 import { useLocation, useNavigationType, useParams, useSearchParams } from "react-router";
 import { ApiError } from "../api/client";
 import type { FlagOut, FlagRegionOut, ReportOut } from "../api/types";
-import { CRITERION_ANCHOR_REGION_ID, COMPARISON_LEAD_PAGE_SIZE } from "../config/ui";
+import { CRITERION_ANCHOR_REGION_ID, COMPARISON_LEAD_PAGE_SIZE, LIST_PAGE_SIZE } from "../config/ui";
 import { checkKindMeta, findingVerificationPrompt, isPValueFinding } from "../domain/checkKind";
 import { agreementEvidenceType, evidenceDisplayState } from "../domain/evidenceDisplay";
 import { manuscriptIdentity } from "../domain/manuscriptLabel";
@@ -56,6 +56,9 @@ import { ActionLink } from "../ui/ActionLink";
 import { Alert } from "../ui/Alert";
 import { Button } from "../ui/Button";
 import { CoverageStatement } from "../ui/CoverageStatement";
+import { EmptyState } from "../ui/EmptyState";
+import { clampPage, Pagination, pageOf } from "../ui/Pagination";
+import { moduleEmptyState } from "../report/moduleEmptyState";
 import { useReviewWorkspaceCapacity } from "./useReviewWorkspaceCapacity";
 import { ReadinessBand } from "../ui/ReadinessBand";
 import { useSelectedSourceReveal } from "./useSelectedSourceReveal";
@@ -76,8 +79,10 @@ import type { EvidenceSourceRequest, OpenEvidenceSource } from "../report/eviden
 import { RecordedFindingSources } from "../report/RecordedEvidencePage";
 import { WORKSPACE_STEP_PARAM, workspaceStep, type ReportStep } from "../report/reviewStep";
 import { WorkspaceStepFooter, WorkspaceStepHeading, WorkspaceStepNavigation } from "./WorkspaceSteps";
+import { LeadingChevronIcon, WorkspaceBarContext } from "./WorkspaceBar";
 
 type ReviewFilter = "open" | "resolved" | "all";
+const FINDINGS_PAGE_PARAM = "findings_page";
 
 function criterionAnchorRegion(anchor: string | null): FlagRegionOut | null {
   if (!anchor) return null;
@@ -125,7 +130,8 @@ function regionForFinding(finding: ReviewFinding, regions: FlagRegionOut[]): Fla
     ?? null;
 }
 
-function ReviewQueue({ findings, regions, sourceAvailability, report, collection, viewedIds, filter, invalidSelection, onFilter, onSelect, onExplore, onRetry, showComparisons = true }: {
+function ReviewQueue({ findings, regions, sourceAvailability, report, collection, viewedIds, filter, invalidSelection, onFilter, onSelect, onExplore, onRetry, showComparisons = true, moduleKind }: {
+  moduleKind: string;
   findings: ReviewFinding[];
   regions: FlagRegionOut[];
   sourceAvailability?: SourceAvailability;
@@ -143,11 +149,23 @@ function ReviewQueue({ findings, regions, sourceAvailability, report, collection
   const open = findings.filter((finding) => !finding.isResolved);
   const resolved = findings.filter((finding) => finding.isResolved);
   const visible = filter === "open" ? open : filter === "resolved" ? resolved : findings;
+  const [params, setParams] = useSearchParams();
+  const page = clampPage(params.get(FINDINGS_PAGE_PARAM), visible.length, LIST_PAGE_SIZE.findings);
+  const pageItems = pageOf(visible, page, LIST_PAGE_SIZE.findings);
+  function selectPage(next: number) {
+    const updated = new URLSearchParams(params);
+    if (next === 1) updated.delete(FINDINGS_PAGE_PARAM); else updated.set(FINDINGS_PAGE_PARAM, String(next));
+    setParams(updated, { replace: true });
+    requestAnimationFrame(() => document.getElementById("workspace-findings-list")?.focus());
+  }
 
   return (
     <div className="signal-document-review-queue">
       {invalidSelection && <Alert title="That finding is no longer available" tone="warning" role="status">The review queue is open.</Alert>}
-      {findings.length === 0 && !showComparisons && collection.state === "success" && !collection.snapshot?.total && <section className="signal-document-queue-empty"><h2>No recorded evidence items</h2><p>This check has no integrity findings or comparison leads. Continue to the recorded grades and the decision.</p></section>}
+      {findings.length === 0 && !showComparisons && collection.state === "success" && (() => {
+        const empty = moduleEmptyState(report, moduleKind);
+        return <EmptyState id="workspace-module-empty" title={empty.title}><p>{empty.description}</p></EmptyState>;
+      })()}
       {findings.length > 0 && (
         <div className="signal-document-inspector__heading"><h2>{collection.lastLoaded ? "Last loaded integrity findings" : "Integrity findings"}</h2></div>
       )}
@@ -163,8 +181,8 @@ function ReviewQueue({ findings, regions, sourceAvailability, report, collection
       {findings.length > 0 && (visible.length === 0 && filter === "open" ? (
         <Alert title={collection.state !== "success" ? "Last loaded: no open integrity findings" : "No open integrity findings"} tone="info"><p>{collection.state !== "success" ? "Every other finding in the last loaded records has an instructor resolution. Current records have not been confirmed." : "Every recorded integrity finding has an instructor resolution. You can review resolved findings or continue to the recorded grades."}</p><Button variant="secondary" onClick={() => onFilter("resolved")}>Show resolved findings</Button></Alert>
       ) : (
-        <ol className="signal-document-review-list">
-          {visible.map((finding) => {
+        <><ol id="workspace-findings-list" tabIndex={-1} aria-label="Findings on this page" className="signal-document-review-list">
+          {pageItems.map((finding) => {
             const precision = regionPrecision(regionForFinding(finding, regions), sourceAvailability);
             const state = finding.isSourceConfirmed ? "Source confirmed" : finding.isResolved ? "Resolved" : "Open";
             return (
@@ -180,6 +198,7 @@ function ReviewQueue({ findings, regions, sourceAvailability, report, collection
             );
           })}
         </ol>
+        <Pagination label="Finding pages" page={page} pageSize={LIST_PAGE_SIZE.findings} total={visible.length} onPage={selectPage} /></>
       ))}
       {showComparisons && <ComparisonLeadList collection={collection} workspace={findings.length === 0 && report.pending_review_count === 0} headingLevel={2} showActions viewedIds={viewedIds} onSelect={onSelect} onRetry={onRetry} />}
       {showComparisons && <Button variant="quiet" onClick={onExplore}>Other passage matches not included in readiness</Button>}
@@ -252,8 +271,8 @@ function SelectedFinding({ comparisonHost, comparisonVisible, finding, total, lo
       {!optional && filterPosition > 0 && <p className="signal-field-hint">{filterPosition} of {filterTotal} in {checkKindMeta(finding.representative.check_kind).eyebrow.replace(/ check$/, "")}</p>}
       {optional && qualified && !outsideFilter && filterTotal !== collection.snapshot?.total && filterPosition > 0 && <p>Item {filterPosition} of {filterTotal} in this filter.</p>}
       {(optional ? navigationWasShown.current : previous || next) && <div className="signal-document-finding-nav" role="group" aria-label={optional ? "Move between comparison leads" : "Move between review findings"}>
-        <Button variant="quiet" disabled={optional ? undefined : !canPrevious} aria-disabled={optional ? !canPrevious : undefined} onClick={() => move(canPrevious, onPrevious)}>{optional ? "Previous comparison lead" : "Previous finding"}</Button>
-        <Button variant="quiet" disabled={optional ? undefined : !canNext} aria-disabled={optional ? !canNext : undefined} onClick={() => move(canNext, onNext)}>{optional ? "Next comparison lead" : "Next finding"}</Button>
+        <Button variant="secondary" disabled={optional ? undefined : !canPrevious} aria-disabled={optional ? !canPrevious : undefined} onClick={() => move(canPrevious, onPrevious)}>{optional ? "Previous comparison lead" : "Previous finding"}</Button>
+        <Button variant="secondary" disabled={optional ? undefined : !canNext} aria-disabled={optional ? !canNext : undefined} onClick={() => move(canNext, onNext)}>{optional ? "Next comparison lead" : "Next finding"}</Button>
       </div>}
     </header>
     {optional && collection.lastLoaded && <div role="status" className="signal-field-hint">{collection.state === "error" ? "The comparison list could not be refreshed. Showing last loaded records." : collection.state === "paused" ? "Waiting for a connection. Showing last loaded comparison records." : "Updating comparison records. Showing last loaded records."}{collection.state === "error" && <Button variant="quiet" onClick={retryComparisonList}>Retry comparison list</Button>}</div>}
@@ -399,8 +418,9 @@ function ReadinessDecision({ checkRunId, step, report: loadedReport, pending, er
   );
 }
 
-function ReviewHome({ showComparisons = true, checkRunId, report, reportPending, reportRetrying, reportError, onReportRetry, findings, regions, sourceAvailability, collection, viewedIds, onFlagsRetry, filter, invalidSelection, onFilter, onSelect, onExplore }: {
+function ReviewHome({ moduleKind, showComparisons = true, checkRunId, report, reportPending, reportRetrying, reportError, onReportRetry, findings, regions, sourceAvailability, collection, viewedIds, onFlagsRetry, filter, invalidSelection, onFilter, onSelect, onExplore }: {
   showComparisons?: boolean;
+  moduleKind: string;
   checkRunId: number;
   report: ReportOut | undefined;
   reportPending: boolean;
@@ -422,7 +442,7 @@ function ReviewHome({ showComparisons = true, checkRunId, report, reportPending,
   if (reportPending) return <div role="status" aria-live="polite" aria-busy="true" className="signal-desk-loading"><span>Loading review queue.</span><i /><i /></div>;
   const availableReport = usableReport(report, checkRunId, reportError);
   if (!availableReport) return <ReportUnavailable checkRunId={checkRunId} error={reportError} onRetry={onReportRetry} />;
-  return <>{Boolean(reportError) && <ReportReadNotice retrying={reportRetrying} onRetry={onReportRetry} />}<ReviewQueue showComparisons={showComparisons} findings={findings} regions={regions} sourceAvailability={sourceAvailability} report={availableReport} collection={collection} viewedIds={viewedIds} onRetry={onFlagsRetry} filter={filter} invalidSelection={invalidSelection} onFilter={onFilter} onSelect={onSelect} onExplore={onExplore} /></>;
+  return <>{Boolean(reportError) && <ReportReadNotice retrying={reportRetrying} onRetry={onReportRetry} />}<ReviewQueue moduleKind={moduleKind} showComparisons={showComparisons} findings={findings} regions={regions} sourceAvailability={sourceAvailability} report={availableReport} collection={collection} viewedIds={viewedIds} onRetry={onFlagsRetry} filter={filter} invalidSelection={invalidSelection} onFilter={onFilter} onSelect={onSelect} onExplore={onExplore} /></>;
 }
 
 export function SignalDocumentViewerPage() {
@@ -447,6 +467,7 @@ export function SignalDocumentViewerPage() {
   const manuscriptTabRef = useRef<HTMLButtonElement>(null);
   const sourcePanelRef = useRef<HTMLDivElement>(null);
   const [comparisonHost, setComparisonHost] = useState<HTMLDivElement | null>(null);
+  const [workspaceBar, setWorkspaceBar] = useState<HTMLDivElement | null>(null);
   const sourceFocusOwner = useRef<HTMLElement | null>(null);
   const reviewTabRef = useRef<HTMLButtonElement>(null);
   const inspectorRef = useRef<HTMLElement>(null);
@@ -862,9 +883,14 @@ export function SignalDocumentViewerPage() {
       return;
     }
     restoreQueueRef.current = true;
+    // Return to the page that holds the finding being left, even after
+    // Next/Previous moved past the page the list was on.
+    const position = selectedFinding ? filteredFindings.findIndex((finding) => finding.key === selectedFinding.key) : -1;
     updateTask((next) => {
       next.set("view", "queue");
       next.set("pane", "review");
+      if (position >= LIST_PAGE_SIZE.findings) next.set(FINDINGS_PAGE_PARAM, String(Math.floor(position / LIST_PAGE_SIZE.findings) + 1));
+      else if (position >= 0) next.delete(FINDINGS_PAGE_PARAM);
       next.delete("finding");
       next.delete("flag");
       next.delete("location");
@@ -916,7 +942,7 @@ export function SignalDocumentViewerPage() {
       else next.set("filter", value);
       next.set("view", "queue");
       next.set("pane", "review");
-      for (const key of ["finding", "flag", "location", "anchor", "panel", "match"]) next.delete(key);
+      for (const key of ["finding", "flag", "location", "anchor", "panel", "match", FINDINGS_PAGE_PARAM]) next.delete(key);
     }, true);
   }
 
@@ -1022,6 +1048,12 @@ export function SignalDocumentViewerPage() {
       {!validId ? <Alert title="This manuscript address is invalid" tone="error" role="alert"><ReviewDeskReturnLink variant="secondary">Return to Review Desk</ReviewDeskReturnLink></Alert>
         : (<>
           {modeRecord && <FindingModeDisclosure id={modeDisclosureId} mode={modeRecord.llm_mode} registry={isCitationMetadataFinding(modeRecord)} />}
+          <div ref={setWorkspaceBar} className="signal-review-bar">
+            {(isExploring || selectedFinding) && <nav aria-label="Workspace return" className="signal-review-bar__nav">
+              <Button variant="secondary" className="signal-workspace-back" onClick={showQueue}><LeadingChevronIcon />Back to findings list</Button>
+            </nav>}
+          </div>
+          <WorkspaceBarContext.Provider value={workspaceBar}>
           <section ref={workspace.frame} className="signal-document-workbench" aria-label="Manuscript and review" aria-describedby={modeRecord ? modeDisclosureId : undefined} data-layout={workspace.split ? "split" : "single"} data-reading={fullWidthReading ? "full" : undefined} data-source-available={viewer?.available === false ? "false" : "true"}>
             <span ref={workspace.threshold} className="signal-review-workspace-threshold" aria-hidden="true" />
             <div role="tablist" aria-label="Manuscript review view" className="signal-document-tabs">
@@ -1059,12 +1091,11 @@ export function SignalDocumentViewerPage() {
                   recordedGrades: stepReport?.results.filter((row) => row.outcome !== "escalated").length,
                   instructorGrades: stepReport?.results.filter((row) => row.outcome !== "escalated" && row.resolution).length,
                   decision: stepReport ? stepReport.decision : undefined }} />
-                {(isExploring || selectedFinding) && <nav aria-label="Workspace return" className="signal-workspace-return"><Button variant="quiet" onClick={showQueue}>Back to findings list</Button></nav>}
                 {!isExploring && !isDecision && !selectedFinding && <WorkspaceStepHeading step="findings" />}
-                {!isExploring && !isDecision && <div className="signal-document-module-overview">
+                {!isExploring && !isDecision && !selectedFinding && <div className="signal-document-module-overview">
                   <IntegrityModuleNavigation selected={selectedModule} controls="workspace-module-records" modules={reportQuery.data?.integrity_modules}
                     counts={new Map(["internal_agreement", "citation_integrity", "statistical_forensics", "originality_reuse"].map(kind => [kind, flags?.filter(flag => flag.check_kind === kind).length ?? 0]))}
-                    onSelect={kind => updateTask(next => { next.set("module", kind); ["finding", "flag", "location", "reading", "anchor", "view", "pane", "lead_view", "lead_return", "lead_visible"].forEach(key => next.delete(key)); next.set("view", "queue"); })} />
+                    onSelect={kind => updateTask(next => { next.set("module", kind); ["finding", "flag", "location", "reading", "anchor", "view", "pane", "lead_view", "lead_return", "lead_visible", FINDINGS_PAGE_PARAM].forEach(key => next.delete(key)); next.set("view", "queue"); })} />
                   <IntegrityModuleSummary kind={selectedModule} />
                   {selectedModule === "statistical_forensics" && reportQuery.data && <StatisticalCheckScope scope={reportQuery.data.statistical_check_scope} />}
                   {selectedModule === "originality_reuse" && reportQuery.data && <OriginalityScope scope={reportQuery.data.originality_scope} showAddAction />}
@@ -1074,12 +1105,13 @@ export function SignalDocumentViewerPage() {
                   : isDecision ? <ReadinessDecision checkRunId={id} step={step} report={reportQuery.data} pending={reportQuery.isPending} error={reportQuery.error} retrying={reportQuery.fetchStatus === "fetching"} onRetry={() => reportQuery.refetch()} onReviewCriteria={() => goToStep("criteria")} sourceTarget={criterionSourceTarget} onOpenSource={openCriterionSource} onOpenEvidenceSource={openRecordedCriterionSource}
                     returnNotice={criterionReturnNotice?.run === id && criterionReturnNotice.search === sourceQuery ? criterionReturnNotice.message : undefined} />
                     : selectedFinding && selectedLocationId ? <SelectedFinding comparisonHost={comparisonHost} comparisonVisible={workspace.split || activeTab === "manuscript"} onRevealSource={selectedRegion?.kind === "paragraph_only" ? revealRecordedLocation : undefined} activeStatement={statementTarget?.run === id && statementTarget.flag === selectedLocationId ? statementTarget.role : undefined} onRecordReady={setSelectedRecord} onStatementSource={showStatementSource} fullWidth={fullWidthReading} singlePane={singlePaneLayout} onReadingChange={changeReading} finding={selectedFinding} total={otherFindings.length} locationFlagId={selectedLocationId} region={selectedRegion} sourceAvailability={sourceAvailability} sourceAnchor={recordedAnchor} previous={previousFinding} next={nextFinding} collection={optional} outsideFilter={selectedComparison && selectedNavigationIndex < 0 && optional.snapshot !== undefined} filterPosition={selectedNavigationIndex + 1} filterTotal={navigationFindings.length} onAll={() => update((next) => { next.delete("lead_view"); next.delete("lead_visible"); next.delete("lead_return"); next.set("lead_page", String(Math.floor((optional.snapshot?.records.findIndex((record) => record.id === selectedLocationId) ?? 0) / COMPARISON_LEAD_PAGE_SIZE) + 1)); }, true)} onBack={showQueue} onPrevious={() => previousFinding && selectFinding(previousFinding.representative.id, true)} onNext={() => nextFinding && selectFinding(nextFinding.representative.id, true)} onLocation={selectFinding} onExplore={openExplore} />
-                      : <ReviewHome showComparisons={selectedModule === "originality_reuse"} checkRunId={id} report={reportQuery.data} reportPending={reportQuery.isPending} reportRetrying={reportQuery.fetchStatus === "fetching"} reportError={reportQuery.error} onReportRetry={() => reportQuery.refetch()} findings={moduleFindings} regions={viewer?.regions ?? []} sourceAvailability={sourceAvailability} collection={optional} viewedIds={viewedIds} onFlagsRetry={() => { void flagsQuery.refetch(); }} filter={filter} invalidSelection={invalidSelection} onFilter={setFilter} onSelect={selectFinding} onExplore={openExplore} />}
+                      : <ReviewHome moduleKind={selectedModule} showComparisons={selectedModule === "originality_reuse"} checkRunId={id} report={reportQuery.data} reportPending={reportQuery.isPending} reportRetrying={reportQuery.fetchStatus === "fetching"} reportError={reportQuery.error} onReportRetry={() => reportQuery.refetch()} findings={moduleFindings} regions={viewer?.regions ?? []} sourceAvailability={sourceAvailability} collection={optional} viewedIds={viewedIds} onFlagsRetry={() => { void flagsQuery.refetch(); }} filter={filter} invalidSelection={invalidSelection} onFilter={setFilter} onSelect={selectFinding} onExplore={openExplore} />}
                 </div>
                 {step && !isExploring && !selectedFinding && !searchParams.has("criterion") && <WorkspaceStepFooter current={step} onSelect={goToStep} />}
               </aside>
             </div>
           </section>
+          </WorkspaceBarContext.Provider>
         </>)}
     </div>
   );

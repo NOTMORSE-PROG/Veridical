@@ -10,6 +10,6 @@ describe("passage comparison identity claims", () => {
     expect(screen.getByText(/copying, authorship or which document came first/)).toBeVisible();
     expect(screen.queryByText(/Exact duplicate|High textual similarity/)).not.toBeInTheDocument();
     expect(document.querySelectorAll("mark").length).toBeGreaterThan(0);
-    expect(screen.getByRole("link", { name: "Open in Library" })).toHaveAttribute("href", "/library/5");
+    expect(screen.getByRole("link", { name: /^Open in Library/ })).toHaveAttribute("href", "/library/5");
   });
 });

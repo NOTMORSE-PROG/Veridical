@@ -52,6 +52,9 @@ import { ReviewContext, useCriterionReviewScope } from "./criterionReviewContext
 import { SavedCriterionDestination, SavedJudgmentAccess } from "./SavedJudgmentAccess";
 import { recordedGradeLabel, criterionRecordId, atLeastSavedJudgment, SAVED_CRITERION_PARAM } from "./savedJudgment";
 import { RecordedJudgmentTools } from "./RecordedJudgmentTools";
+import { InWorkspaceBar } from "../document/WorkspaceBar";
+import { EmptyState } from "../ui/EmptyState";
+import { MODULE_EMPTY_STATE } from "./moduleEmptyState";
 import { ComparisonLeadList } from "./ComparisonLeadList";
 import { comparisonLeadCollection } from "./comparisonLeadCollection";
 import { resultDisplay } from "./ResultsTable";
@@ -907,7 +910,15 @@ export function SignalEscalatedPanel({ checkRunId, focused = false, sourceTarget
       {!selectedView && !assessmentContextExternal && <ReportAssessmentContext notices={review.assessmentNotices ?? []} />}
       <p ref={announcementRef} tabIndex={-1} aria-live="polite" className="signal-live-region">{announcement}</p>
       {!accessUnavailable && !savedAccessExternal && <SavedJudgmentAccess checkRunId={checkRunId} hideEmpty />}
-      {selectedView && <nav aria-label="Criterion review" className="signal-criterion-navigation">
+      {selectedView && !focused && <InWorkspaceBar>
+        <nav aria-label="Criterion review" className="signal-criterion-navigation signal-review-bar__nav">
+          <ActionLink variant="secondary" direction="back" className="signal-workspace-back" state={location.state} to={reviewLink()} onClick={event => select(event)}>Back to criteria</ActionLink>
+          <span role="status" className="signal-field-hint">{items && selectedIndex >= 0 && <><span>Criterion {selectedIndex + 1} of {items.length}</span>{" · "}</>}<span>{reviewListStatus}</span></span>
+          {selectedIndex > 0 && <ActionLink variant="secondary" aria-label="Previous criterion" state={location.state} to={reviewLink(items![selectedIndex - 1].criterion_id)} onClick={event => select(event, items![selectedIndex - 1].criterion_id)}>Previous</ActionLink>}
+          {items && selectedIndex >= 0 && selectedIndex < items.length - 1 && <ActionLink variant="secondary" aria-label="Next criterion" state={location.state} to={reviewLink(items[selectedIndex + 1].criterion_id)} onClick={event => select(event, items[selectedIndex + 1].criterion_id)}>Next</ActionLink>}
+        </nav>
+      </InWorkspaceBar>}
+      {selectedView && focused && <nav aria-label="Criterion review" className="signal-criterion-navigation">
         {!focused && <ActionLink variant="quiet" state={location.state} to={reviewLink()} onClick={event => select(event)}>Back to criteria</ActionLink>}
         {selectedIndex > 0 ? <ActionLink variant={focused ? "quiet" : "secondary"} aria-label="Previous criterion" state={location.state} to={reviewLink(items![selectedIndex - 1].criterion_id)} onClick={event => select(event, items![selectedIndex - 1].criterion_id)}>Previous</ActionLink> : focused && <Button variant={focused ? "quiet" : "secondary"} aria-label="Previous criterion" disabled>Previous</Button>}
         <span role="status" className="signal-field-hint">{focused ? selectedIndex >= 0 ? `${selectedIndex + 1} of ${items?.length ?? 0} remaining` : selectedRecord ? "Grade recorded" : reviewListStatus : <>{items && selectedIndex >= 0 && <><span>Criterion {selectedIndex + 1} of {items.length}</span>{" · "}</>}<span>{reviewListStatus}</span></>}</span>
@@ -960,17 +971,14 @@ export function SignalFlagsPanel({
 }) {
   const review = useContext(ReviewContext);
   const [moduleParams, setModuleParams] = useSearchParams();
-  const selectedModule = selectedIntegrityModule(moduleParams.get("module"));
-  const moduleState = review?.assessment?.integrity_modules?.find(module => module.check_kind === selectedModule)?.state ?? "not_recorded";
-  const emptyState = {
-    completed: { title: "No findings to review", description: "No findings were recorded for this check. This does not establish that the whole manuscript passed." },
-    not_applicable: { title: "Not applicable to this manuscript", description: "This check was marked not applicable. There are no findings to review in this category." },
-    partial: { title: "Check partly completed", description: "Only part of this check was completed. No findings were recorded. Read the assessment limits before drawing a conclusion." },
-    incomplete: { title: "Check not fully run", description: "This check was not fully run. No findings are available. Read the assessment limits to see what was checked." },
-    not_recorded: { title: "No saved check status", description: "This report does not say whether this check ran. An empty list does not mean the manuscript passed." },
-  }[moduleState];
   const flagsQuery = useFlags(checkRunId);
   const flags = recoverableReadError(flagsQuery.error) ? flagsQuery.data : undefined;
+  // Without a chosen check, open the first one that has findings rather than
+  // an empty one, so the tab's count matches what is shown.
+  const selectedModule = selectedIntegrityModule(moduleParams.get("module")
+    ?? flags?.find((flag) => !isOptionalComparisonLead(flag))?.check_kind ?? null);
+  const moduleState = review?.assessment?.integrity_modules?.find(module => module.check_kind === selectedModule)?.state ?? "not_recorded";
+  const emptyState = MODULE_EMPTY_STATE[moduleState as keyof typeof MODULE_EMPTY_STATE] ?? MODULE_EMPTY_STATE.not_recorded;
   const { data: me } = useMe();
   const viewedIds = useViewedFlagIds(me?.id);
   const allOtherFlags = flags?.filter((flag) => !isOptionalComparisonLead(flag));
@@ -1010,7 +1018,7 @@ export function SignalFlagsPanel({
             viewedIds={viewedIds}
           />
         )
-        : onlyOptional ? null : optional.state === "success" ? <section className="signal-integrity-empty" aria-labelledby={`signal-module-empty-${checkRunId}`}><h3 id={`signal-module-empty-${checkRunId}`}>{emptyState.title}</h3><p>{emptyState.description}</p></section>
+        : onlyOptional ? null : optional.state === "success" ? <EmptyState className="signal-integrity-empty" id={`signal-module-empty-${checkRunId}`} title={emptyState.title}><p>{emptyState.description}</p></EmptyState>
           : <p>{optional.state === "error" ? "Other findings could not be loaded." : optional.state === "paused" ? "Waiting to load other findings." : optional.state === "fetching" ? "Loading other findings." : "Other findings are not available."}</p>}
       {selectedModule === "originality_reuse" && <ComparisonLeadList collection={optional} showActions viewedIds={viewedIds} onRetry={() => { void flagsQuery.refetch(); }} />}
       </div>
@@ -1087,7 +1095,7 @@ export function SignalCriteriaResults({ results, checkRunId, publicView = false,
       <div className={publicSelection ? "sr-only" : "signal-review-section__heading"}><div><p className="signal-section-kicker">Criterion record</p><h2 id="criteria-results-heading" tabIndex={-1}>Criterion records</h2></div><span>{publicSelection ? `Criterion ${publicSelection.position} of ${publicSelection.total}` : updating ? "Recorded results updating" : `${rows.length} ${rows.length === 1 ? "record" : "records"}`}</span></div>
       <p className={publicSelection ? "sr-only" : "signal-review-section__intro"}>{publicSelection ? "The selected criterion's recorded assessment and saved evidence are shown below." : "Each row shows the recorded status and any available evidence."} A criterion marked Not assessed has no assessment result. Importance is shown as Low, Medium or High.</p>
       {privateScope && <SavedCriterionDestination checkRunId={checkRunId} results={rows} />}
-      {readOnly && !publicView && rows.length > 0 && <p className="signal-field-hint">To change a grade, open it in manuscript review. <ActionLink to={workspaceStepPath(checkRunId, "grades")} variant="quiet">Change grades in manuscript review</ActionLink></p>}
+      {readOnly && !publicView && rows.length > 0 && <div className="signal-review-section__support signal-record-edit"><p className="signal-field-hint">Grades are changed in manuscript review, beside the manuscript.</p><ActionLink to={workspaceStepPath(checkRunId, "grades")} variant="secondary">Change grades in manuscript review</ActionLink></div>}
       {rows.length ? <ol className="signal-result-list">{rows.map((row, index) => {
         if (privateScope && review.revisions.records.get(row.criterion_id)?.unavailable) {
           return <li key={row.criterion_id} className="signal-result-card"><div className="signal-result-card__top" />

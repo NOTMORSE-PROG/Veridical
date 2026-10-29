@@ -5,6 +5,9 @@ import { cx } from "../components/cx";
 interface ActionLinkProps extends Omit<LinkProps, "className"> {
   className?: string;
   variant?: "primary" | "brand" | "secondary" | "quiet";
+  // "back" links return to where the instructor came from, so the chevron
+  // points the other way and leads the label.
+  direction?: "forward" | "back";
 }
 
 // BUG-108: `ActionLink` and `Button` used to build their class from the
@@ -37,8 +40,18 @@ export function TrailingChevronIcon() {
   );
 }
 
+export function LeadingChevronIcon() {
+  return (
+    <svg aria-hidden="true" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor"
+      strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M15 5l-7 7 7 7" />
+    </svg>
+  );
+}
+
 export function ActionLink({
   variant = "primary",
+  direction = "forward",
   className,
   children,
   ...props
@@ -48,8 +61,9 @@ export function ActionLink({
       className={cx("signal-button", `signal-button--${variant}`, className)}
       {...props}
     >
+      {direction === "back" && <LeadingChevronIcon />}
       {children}
-      <TrailingChevronIcon />
+      {direction === "forward" && <TrailingChevronIcon />}
     </WorkflowLink>
   );
 }

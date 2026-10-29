@@ -29,6 +29,8 @@ export const DOCUMENT_SINGLE_PANE_MEDIA_QUERY = "(max-width: 1199px)";
 // share of the review pane's height; in a short window or at high zoom they
 // scroll with the content instead.
 export const WORKSPACE_STEPS_MAX_PINNED_SHARE = 0.34;
+// Long review lists are split into pages of this size rather than one scroll.
+export const LIST_PAGE_SIZE = { findings: 8, imageReadings: 6 } as const;
 export const PASSWORD_MIN_LENGTH = 8;
 export const LIBRARY_SEARCH_DEBOUNCE_MS = 400;
 // V-077: how often an own Library record that is still being read refreshes
@@ -38,7 +40,7 @@ export const LIBRARY_PENDING_PAGE_SIZE = 100;
 // V-077: Library page size; the backend caps it at 200.
 export const LIBRARY_PAGE_SIZE = 50;
 // V-078: the stored-files list uses the archive endpoint paging contract.
-export const STORED_FILES_PAGE_SIZE = 50;
+export const STORED_FILES_PAGE_SIZE = 10;
 export const REVIEW_DESK_PAGE_SIZE = 20;
 export const FLAG_LIST_INITIAL_COUNT = 8;
 export const FLAG_LIST_BATCH_COUNT = 8;
