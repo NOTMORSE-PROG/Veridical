@@ -465,6 +465,7 @@ async def bulk_resolve_flags_route(
         expected_revision=body.expected_revision,
         note=body.note,
         reason=body.reason,
+        unopened_count=body.unopened_count,
     )
     out.report = await attach_report_figures(session, out.report)
     return out
