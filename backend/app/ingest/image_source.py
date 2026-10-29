@@ -13,6 +13,7 @@ from app.ingest.docx_source import read_docx_image
 from app.ingest.native_cache import release_native_cache
 from app.ingest.patterns import HeadingPatterns
 from app.ingest.schemas import ExtractionResult, FigureReading, ImageBlock, SectionNode
+from app.ingest.source_digest import file_sha256
 
 
 def _selected_indices(
@@ -177,9 +178,8 @@ def _raster(path, result, index, source_hash, settings):
     else:
         content = _crop(path, image, settings)
         locator = {"page": image.page, "bbox": image.bbox, "dpi": settings.ingest_vision_crop_dpi}
-    with path.open("rb") as original:
-        if hashlib.file_digest(original, "sha256").hexdigest() != source_hash:
-            raise GoneError("The figure source changed during reading.")
+    if file_sha256(path, settings) != source_hash:
+        raise GoneError("The figure source changed during reading.")
     return content, {
         "document_sha256": source_hash,
         "image_sha256": hashlib.sha256(content).hexdigest(),

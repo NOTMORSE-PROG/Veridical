@@ -8,12 +8,15 @@ transitions on the manuscript row and the raw-store write.
 import asyncio
 import hashlib
 import logging
+import os
 import zipfile
 from collections.abc import AsyncIterator, Callable
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import suppress
-from dataclasses import asdict
+from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from pathlib import Path
+from tempfile import NamedTemporaryFile
 
 from botocore.exceptions import BotoCoreError, ClientError
 from sqlalchemy import and_, delete, func, or_, select, update
@@ -48,6 +51,7 @@ from app.groups.service import (
 )
 from app.ingest import docx, figures, pdf, references, vision
 from app.ingest.admission import PreparationLease, preparation_scope
+from app.ingest.compute_contract import BoundedWriter
 from app.ingest.patterns import load_patterns
 from app.ingest.recovery import recover_layout, selected_pages
 from app.ingest.schemas import (
@@ -59,6 +63,7 @@ from app.ingest.schemas import (
     ManuscriptSort,
     PaginatedManuscripts,
 )
+from app.ingest.source_digest import HashingWriter, file_sha256, record_file_sha256
 from app.ingest.titlepage import TitlePageProposal, extract_title_page
 from app.ingest.zip_bounds import check_docx_directory_size
 from app.llm import LLMNotConfiguredError, get_llm_client_for
@@ -163,6 +168,66 @@ def hash_file_sha256(path: Path, chunk_bytes: int) -> str:
         for chunk in iter(lambda: fh.read(chunk_bytes), b""):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+@dataclass(frozen=True)
+class StagedSource:
+    """An upload whose bytes are already in object storage (direct or relay
+    transfer). `etag` fences every later read to the confirmed object."""
+
+    key: str
+    etag: str
+    size: int
+    # The relay's own copy on this instance, when it still exists.
+    local: Path | None = None
+
+
+def _materialize_local(storage, staged: StagedSource, dest: Path, settings: Settings) -> str:
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    local = staged.local
+    if local is not None and local.is_file() and local.stat().st_size == staged.size:
+        digest = file_sha256(local, settings)
+        os.replace(local, dest)
+        record_file_sha256(dest, digest, settings)
+        return digest
+    with NamedTemporaryFile(dir=dest.parent, delete=False) as temporary:
+        partial = Path(temporary.name)
+        try:
+            writer = HashingWriter(BoundedWriter(temporary, staged.size))
+            storage.download_to(
+                staged.key,
+                writer,
+                chunk_bytes=settings.storage_download_chunk_bytes,
+                etag=staged.etag,
+            )
+        except BaseException:
+            temporary.close()
+            partial.unlink(missing_ok=True)
+            raise
+    if partial.stat().st_size != staged.size:
+        partial.unlink(missing_ok=True)
+        raise ValueError("The stored upload size changed.")
+    os.replace(partial, dest)
+    record_file_sha256(dest, writer.hexdigest(), settings)
+    return writer.hexdigest()
+
+
+def place_staged_source(storage, staged: StagedSource, dest: Path, settings: Settings) -> str:
+    """Make the durable original with a server-side copy (no bytes through
+    this host) while the local cache copy is renamed or downloaded once and
+    hashed as it is written. Returns the content SHA-256."""
+    key = storage_key_for(settings, str(dest))
+    with ThreadPoolExecutor(max_workers=1, thread_name_prefix="staged-copy") as pool:
+        copied = pool.submit(storage.copy, staged.key, key, etag=staged.etag)
+        try:
+            digest = _materialize_local(storage, staged, dest, settings)
+        finally:
+            # Never return while the copy call is still running.
+            copy_error = copied.exception()
+    if copy_error is not None:
+        dest.unlink(missing_ok=True)
+        raise copy_error
+    return digest
 
 
 def clean_original_filename(filename: str) -> str | None:
@@ -286,6 +351,10 @@ async def _ingest_manuscript(
             # BEFORE the raw store is written, so the store is complete.
             if selected_images:
                 llm = await get_llm_client_for(session, settings, manuscript.instructor_id)
+                # End the key lookup's transaction: the database closes
+                # sessions left idle in a transaction, and image reading on
+                # the small host can take minutes.
+                await session.commit()
                 await vision.read_images(
                     result, file_path, llm, patterns, settings, preparation_lease=preparation_lease
                 )
@@ -315,6 +384,7 @@ async def _ingest_manuscript(
         if selected_figures:
             try:
                 llm = await get_llm_client_for(session, settings, manuscript.instructor_id)
+                await session.commit()
                 await figures.read_figures(
                     result,
                     file_path,
@@ -472,7 +542,7 @@ async def ingest_upload(
 
 async def _ingest_upload(
     session: AsyncSession,
-    chunks: AsyncIterator[bytes],
+    chunks: AsyncIterator[bytes] | None,
     filename: str,
     group_label: str,
     settings: Settings | None = None,
@@ -480,6 +550,7 @@ async def _ingest_upload(
     instructor_id: int,
     preparation_lease: PreparationLease,
     upload_attempt=None,
+    staged: StagedSource | None = None,
 ) -> tuple[Manuscript, ExtractionResult, int, TitlePageProposal, Manuscript | None]:
     """Full upload flow for the HTTP surface: save (size-capped) → own row
     → ingest. `instructor_id` is the authenticated caller (BUG-002/D-020) —
@@ -525,6 +596,22 @@ async def _ingest_upload(
     # display only, above).
     suffix = Path(filename).suffix.lower()[:8]
     dest = settings.data_dir / settings.manuscript_upload_subdir / f"{manuscript.id}{suffix}"
+    if staged is not None:
+        # Size was enforced before any byte was accepted, and the staged
+        # object is already durable: one hashed local write and one
+        # server-side copy, with no transaction open while they run.
+        storage = get_storage(settings)
+        try:
+            manuscript.content_hash = await preparation_lease.run(
+                place_staged_source, storage, staged, dest, settings
+            )
+        finally:
+            storage.close()
+        manuscript.file_ref = str(dest)
+        await session.commit()
+        return await _finish_ingest_upload(
+            session, manuscript, dest, settings, instructor_id, preparation_lease
+        )
     try:
         await save_upload(chunks, dest, settings)
     except FileTooLargeError as exc:
@@ -540,9 +627,8 @@ async def _ingest_upload(
     # BUG-140: content identity, computed once here (off the event loop --
     # a chunked SHA-256 read of up to `max_upload_mb`) rather than derived
     # later from bytes that may no longer be on local disk (BUG-138).
-    manuscript.content_hash = await preparation_lease.run(
-        hash_file_sha256, dest, settings.content_hash_read_chunk_bytes
-    )
+    # Remembered for the native job and crop checks that hash this same file.
+    manuscript.content_hash = await preparation_lease.run(file_sha256, dest, settings)
     # BUG-138: durably persist the upload BEFORE the row claims it exists --
     # a failed R2 write raises here rather than leaving `file_ref` pointing
     # at a copy that only ever lived on Render's ephemeral disk.
@@ -550,6 +636,19 @@ async def _ingest_upload(
     await preparation_lease.run(storage.put_file, dest, storage_key_for(settings, str(dest)))
     manuscript.file_ref = str(dest)
     await session.commit()
+    return await _finish_ingest_upload(
+        session, manuscript, dest, settings, instructor_id, preparation_lease
+    )
+
+
+async def _finish_ingest_upload(
+    session: AsyncSession,
+    manuscript: Manuscript,
+    dest: Path,
+    settings: Settings,
+    instructor_id: int,
+    preparation_lease: PreparationLease,
+) -> tuple[Manuscript, ExtractionResult, int, TitlePageProposal, Manuscript | None]:
     # BUG-234: the upload is now durably backed and its hash is committed.
     # Query only this authenticated instructor's rows; exposing whether the
     # same bytes exist in another account would create a cross-tenant oracle.

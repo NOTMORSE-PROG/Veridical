@@ -25,6 +25,7 @@ from app.ingest.compute_contract import (
     source_artifact_prefix,
 )
 from app.ingest.schemas import ExtractionResult, ImageBlock
+from app.ingest.source_digest import file_sha256
 from app.storage import Storage, get_storage, storage_key_for
 
 
@@ -50,8 +51,7 @@ def extract_remote(
     path: str, settings: Settings, *, owner_id: int, job_expires=None
 ) -> ExtractionResult:
     source = Path(path)
-    with source.open("rb") as reader:
-        source_sha = hashlib.file_digest(reader, "sha256").hexdigest()
+    source_sha = file_sha256(source, settings)
     policy = policy_for(settings)
     job = NativeJob(
         job_id=str(uuid4()),
@@ -203,8 +203,8 @@ def remote_raster(path: Path, image: ImageBlock, settings: Settings, *, source_h
 
 def _remote_raster(path: Path, image: ImageBlock, settings: Settings, *, source_hash=None):
     manifest = json.loads(_sidecar(path).read_text(encoding="utf-8"))
-    with path.open("rb") as reader:
-        actual_sha = hashlib.file_digest(reader, "sha256").hexdigest()
+    # Every crop checks the source; an unchanged file is hashed only once.
+    actual_sha = file_sha256(path, settings)
     if (
         manifest["source_sha256"] != actual_sha
         or source_hash is not None

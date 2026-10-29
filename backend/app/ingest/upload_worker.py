@@ -4,8 +4,6 @@ import asyncio
 import logging
 from contextlib import suppress
 from datetime import UTC, datetime, timedelta
-from pathlib import Path
-from tempfile import NamedTemporaryFile
 from uuid import uuid4
 
 from sqlalchemy import select, update
@@ -15,13 +13,13 @@ from app.db import get_session_factory
 from app.errors import VeridicalError
 from app.groups.service import DEFAULT_GROUP_LABEL
 from app.ingest.admission import preparation_scope
-from app.ingest.compute_contract import BoundedWriter
+from app.ingest.direct_upload import relay_local_path
 from app.ingest.receipts import ingestion_receipt
-from app.ingest.service import _ingest_upload
+from app.ingest.service import StagedSource, _ingest_upload
 from app.models.enums import IngestFailureReason, IngestStatus
 from app.models.manuscript import Manuscript
 from app.models.upload_attempt import UploadAttempt
-from app.storage import R2Storage, get_storage
+from app.storage import get_storage
 
 _logger = logging.getLogger(__name__)
 
@@ -48,7 +46,12 @@ async def _cleanup_staging(session, settings):
     storage = get_storage(settings)
     try:
         for attempt in rows:
+            if attempt.multipart_upload_id and attempt.status == "pending":
+                await asyncio.to_thread(
+                    storage.abort_multipart, attempt.staging_key, attempt.multipart_upload_id
+                )
             await asyncio.to_thread(storage.delete, attempt.staging_key)
+            relay_local_path(settings, attempt.id).unlink(missing_ok=True)
             attempt.staging_deleted_at = datetime.now(UTC)
             if attempt.status == "pending":
                 attempt.status, attempt.error = (
@@ -58,18 +61,6 @@ async def _cleanup_staging(session, settings):
         await session.commit()
     finally:
         storage.close()
-
-
-def _download_attempt(storage, attempt, path, settings):
-    with path.open("wb") as target:
-        storage.download_to(
-            attempt.staging_key,
-            BoundedWriter(target, attempt.source_bytes),
-            chunk_bytes=settings.storage_download_chunk_bytes,
-            etag=attempt.source_etag,
-        )
-    if path.stat().st_size != attempt.source_bytes:
-        raise ValueError("The stored upload size changed.")
 
 
 async def _heartbeat(attempt_id, lease_id, settings):
@@ -144,35 +135,29 @@ async def _process_next_upload(settings, lease):
         await session.commit()
         attempt_id, lease_id = attempt.id, attempt.lease_id
         heartbeat = asyncio.create_task(_heartbeat(attempt_id, lease_id, settings))
-        staging_path = None
-        storage = None
         try:
-            settings.data_dir.mkdir(parents=True, exist_ok=True)
-            with NamedTemporaryFile(dir=settings.data_dir, delete=False) as temporary:
-                staging_path = Path(temporary.name)
-            storage = get_storage(settings)
-            assert isinstance(storage, R2Storage)
-            await lease.run(_download_attempt, storage, attempt, staging_path, settings)
-
-            async def chunks():
-                with staging_path.open("rb") as reader:
-                    while chunk := await asyncio.to_thread(
-                        reader.read, settings.storage_download_chunk_bytes
-                    ):
-                        yield chunk
-
+            # The staged object is copied inside storage for the durable
+            # original; the bytes reach this host once at most (none when the
+            # relay's own copy is still here), hashed as they are written.
+            staged = StagedSource(
+                key=attempt.staging_key,
+                etag=attempt.source_etag,
+                size=attempt.source_bytes,
+                local=relay_local_path(settings, attempt_id),
+            )
             large_settings = settings.model_copy(
                 update={"max_upload_mb": settings.direct_manuscript_upload_max_mb}
             )
             values = await _ingest_upload(
                 session,
-                chunks(),
+                None,
                 attempt.filename,
                 DEFAULT_GROUP_LABEL,
                 large_settings,
                 instructor_id=attempt.instructor_id,
                 preparation_lease=lease,
                 upload_attempt=attempt,
+                staged=staged,
             )
             receipt = ingestion_receipt(*values).model_dump(mode="json")
             await session.execute(
@@ -232,12 +217,8 @@ async def _process_next_upload(settings, lease):
             heartbeat.cancel()
             with suppress(asyncio.CancelledError, Exception):
                 await heartbeat
-            try:
-                if storage is not None:
-                    storage.close()
-            finally:
-                if staging_path is not None:
-                    staging_path.unlink(missing_ok=True)
+            # A relay copy that was not consumed would only fill the disk.
+            relay_local_path(settings, attempt_id).unlink(missing_ok=True)
         return True
 
 

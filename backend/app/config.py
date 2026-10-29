@@ -1026,8 +1026,22 @@ class Settings(BaseSettings):
     direct_manuscript_upload_enabled: bool = False
     direct_upload_transport: Literal["r2", "relay"] = "r2"
     direct_upload_relay_transfers: int = Field(default=1, ge=1)
-    direct_manuscript_upload_max_mb: int = Field(default=256, gt=0)
-    direct_upload_url_ttl_seconds: int = Field(default=900, ge=60, le=3600)
+    # Owner's ceiling for one manuscript (2026-10-29: "make the limit 150mb").
+    direct_manuscript_upload_max_mb: int = Field(default=150, gt=0)
+    # Long enough for a 150 MB file on a slow home uplink; every presigned URL
+    # is still bound to one staging key and one exact byte length.
+    direct_upload_url_ttl_seconds: int = Field(default=3600, ge=60, le=3600)
+    # Browser-to-R2 multipart: R2 needs at least 5 MiB per part and equal sizes
+    # except the last. Parallel parts keep a slow link busy, and a failed part
+    # is resent alone instead of restarting the whole file.
+    direct_upload_part_mb: int = Field(default=8, ge=5, le=512)
+    direct_upload_part_concurrency: int = Field(default=4, ge=1, le=16)
+    direct_upload_part_retries: int = Field(default=3, ge=0, le=10)
+    # Relay streaming: parts waiting behind the one being stored. Bounds memory
+    # to (this + 2) x STORAGE_TRANSFER_CHUNK_BYTES while a client is sending.
+    direct_upload_relay_queued_parts: int = Field(default=1, ge=1, le=4)
+    # Whole-file SHA-256 results reused while the file is unchanged on disk.
+    source_digest_memo_entries: int = Field(default=64, ge=1)
     direct_upload_pending_per_instructor: int = Field(default=3, gt=0)
     direct_upload_pending_global: int = Field(default=12, gt=0)
     direct_upload_lease_seconds: int = Field(default=1800, ge=600)

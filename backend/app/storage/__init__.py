@@ -25,6 +25,7 @@ object-store handle.
 from __future__ import annotations
 
 import os
+import shutil
 from contextlib import contextmanager
 from pathlib import Path
 from tempfile import NamedTemporaryFile
@@ -73,6 +74,12 @@ class LocalDiskStorage:
 
     def put_file(self, local_path: Path, key: str) -> None:
         del local_path, key  # already at `root / key` by construction
+
+    def copy(self, source_key: str, key: str, *, etag: str | None = None) -> None:
+        del etag  # one local file tree has no concurrent writers to fence
+        target = self._root / key
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(self._root / source_key, target)
 
     def get_bytes(self, key: str) -> bytes:
         return (self._root / key).read_bytes()
@@ -210,6 +217,83 @@ class R2Storage:
             ExpiresIn=ttl,
             HttpMethod="PUT",
         )
+
+    def copy(self, source_key: str, key: str, *, etag: str | None = None) -> None:
+        """Server-side copy inside the bucket; no object bytes reach this host.
+        One CopyObject request covers objects up to 5 GiB."""
+        self._require_scope(source_key)
+        self._require_scope(key)
+        params = {
+            "Bucket": self._bucket,
+            "Key": key,
+            "CopySource": {"Bucket": self._bucket, "Key": source_key},
+        }
+        if etag is not None:
+            params["CopySourceIfMatch"] = etag
+        self._client.copy_object(**params)
+
+    def create_multipart(self, key: str) -> str:
+        self._require_scope(key)
+        response = self._client.create_multipart_upload(
+            Bucket=self._bucket, Key=key, ContentType="application/octet-stream"
+        )
+        return response["UploadId"]
+
+    def upload_part(self, key: str, upload_id: str, number: int, body: bytes) -> str:
+        self._require_scope(key)
+        response = self._client.upload_part(
+            Bucket=self._bucket, Key=key, UploadId=upload_id, PartNumber=number, Body=body
+        )
+        return response["ETag"]
+
+    def presign_part(self, key: str, upload_id: str, number: int, length: int, ttl: int) -> str:
+        # The signed length makes storage refuse a part of any other size.
+        self._require_scope(key)
+        return self._client.generate_presigned_url(
+            "upload_part",
+            Params={
+                "Bucket": self._bucket,
+                "Key": key,
+                "UploadId": upload_id,
+                "PartNumber": number,
+                "ContentLength": length,
+            },
+            ExpiresIn=ttl,
+            HttpMethod="PUT",
+        )
+
+    def list_parts(self, key: str, upload_id: str) -> list[dict]:
+        self._require_scope(key)
+        parts, marker = [], 0
+        while True:
+            page = self._client.list_parts(
+                Bucket=self._bucket, Key=key, UploadId=upload_id, PartNumberMarker=marker
+            )
+            parts.extend(page.get("Parts", []))
+            if not page.get("IsTruncated"):
+                return parts
+            marker = page["NextPartNumberMarker"]
+
+    def complete_multipart(self, key: str, upload_id: str, parts: list[dict]) -> None:
+        self._require_scope(key)
+        self._client.complete_multipart_upload(
+            Bucket=self._bucket,
+            Key=key,
+            UploadId=upload_id,
+            MultipartUpload={
+                "Parts": [{"PartNumber": p["PartNumber"], "ETag": p["ETag"]} for p in parts]
+            },
+        )
+
+    def abort_multipart(self, key: str, upload_id: str) -> None:
+        self._require_scope(key)
+        from botocore.exceptions import ClientError
+
+        try:
+            self._client.abort_multipart_upload(Bucket=self._bucket, Key=key, UploadId=upload_id)
+        except ClientError as exc:
+            if exc.response.get("Error", {}).get("Code") != "NoSuchUpload":
+                raise
 
     def object_metadata(self, key: str) -> dict:
         self._require_scope(key)

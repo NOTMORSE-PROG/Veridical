@@ -19,6 +19,8 @@ class UploadAttempt(Base):
     staging_key: Mapped[str] = mapped_column(String(1024), unique=True)
     source_etag: Mapped[str | None] = mapped_column(String(255))
     upload_transport: Mapped[str] = mapped_column(String(8), server_default="r2")
+    # Set when the browser sends the file to storage in parallel parts.
+    multipart_upload_id: Mapped[str | None] = mapped_column(String(1024))
     staging_deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     status: Mapped[str] = mapped_column(String(24), index=True)
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
