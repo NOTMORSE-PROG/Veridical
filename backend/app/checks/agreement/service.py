@@ -27,16 +27,19 @@ from app.models.enums import CheckKind, ResultOutcome
 from app.models.run import CheckResult, Flag
 
 
-def _agreement_thresholds(settings: Settings) -> dict[str, float]:
+def _agreement_thresholds(settings: Settings) -> dict[str, float | int]:
     """BUG-151 (backend review finding): both env-configurable thresholds
     that decide this check's own behavior -- `dedup` narrows candidate
     intent/outcome statements before pairing (`extract.py`), `pairing_floor`
     excludes a candidate pair from ever reaching the LLM (`pair.py`) -- so a
     past verdict is reconstructable after either changes, the same guarantee
-    F7's own audit event already gives `reuse_*_threshold`."""
+    F7's own audit event already gives `reuse_*_threshold`. The number of
+    matches judged per objective changes the findings as much, so it is
+    recorded too."""
     return {
         "dedup_similarity_threshold": settings.agreement_dedup_similarity_threshold,
         "pairing_similarity_floor": settings.agreement_pairing_similarity_floor,
+        "pairing_max_candidates_per_intent": settings.agreement_pairing_max_candidates_per_intent,
     }
 
 

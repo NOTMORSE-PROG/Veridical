@@ -149,7 +149,10 @@ def generate_candidates(
 
     `matched_outcome_indexes` tracks every outcome that appears in AT LEAST
     ONE candidate pair — the complement is what V-037/the caller reports as
-    unmatched outcomes (ticket AC: an info-level note, never a flag)."""
+    unmatched outcomes (ticket AC: an info-level note, never a flag). With
+    one candidate per intent, an outcome similar to an objective but no
+    objective's closest match is counted there too: unmatched means not
+    judged, not unrelated."""
     if not intents or not outcomes:
         return [], list(intents), set()
 

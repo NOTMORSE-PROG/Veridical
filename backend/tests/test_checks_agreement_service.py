@@ -168,6 +168,10 @@ async def test_bug_151_no_statements_still_writes_a_check_computed_audit_event_w
         row.payload["thresholds"]["pairing_similarity_floor"]
         == settings.agreement_pairing_similarity_floor
     )
+    assert (
+        row.payload["thresholds"]["pairing_max_candidates_per_intent"]
+        == settings.agreement_pairing_max_candidates_per_intent
+    )
 
 
 async def test_seeded_contradiction_produces_a_real_flag_row(session_factory):

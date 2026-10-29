@@ -768,8 +768,12 @@ class Settings(BaseSettings):
     # unmatched-intent flag without ever reaching the judgment tier.
     agreement_pairing_similarity_floor: float = 0.35
     # Bounds Gemini judgment calls per intent (quota discipline) — only the
-    # top-K most similar outcome candidates get judged.
-    agreement_pairing_max_candidates_per_intent: int = 3
+    # top-K most similar outcome candidates get judged. One, chosen to cut
+    # noise and calls: on five real theses (2026-10-30) the second and third
+    # matches produced 46 of the 99 "cannot determine" notes and no
+    # informative verdict (0 of 125 pairs). The best matches produced only 1
+    # in 85, so the data cannot show the weaker matches never matter.
+    agreement_pairing_max_candidates_per_intent: int = Field(default=1, ge=1)
     # Batched into as few Gemini calls as possible per manuscript, same
     # discipline as V-030's claim-support batching.
     agreement_pairing_max_pairs_per_call: int = 20

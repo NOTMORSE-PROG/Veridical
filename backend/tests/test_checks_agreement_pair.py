@@ -398,3 +398,25 @@ async def test_no_injection_annotation_on_ordinary_text():
         llm, intents, outcomes, check_run_id=1, settings=get_settings()
     )
     assert result.flags == []  # unaffected, no injection text present
+
+
+async def test_each_objective_is_judged_against_its_best_match_by_default():
+    """Weaker second and third matches only produced "cannot determine" notes
+    on real theses, so by default only the most similar outcome is judged."""
+    llm = ScriptedLLM(
+        [{"verdicts": [{"index": 0, "verdict": "consistent", "reasoning": "Matches."}]}]
+    )
+    intents = [_intent("To build a login module.")]
+    best = "The login module correctly authenticated 98% of test users."
+    weaker = "The login screen was redesigned after the first user test."
+    outcomes = [_outcome(weaker), _outcome(best)]
+    result = await run_agreement_pairing(
+        llm, intents, outcomes, check_run_id=1, settings=get_settings()
+    )
+    assert result.flags == []
+    assert len(llm.calls) == 1
+    # The closer outcome is the one judged, whatever order they were found in.
+    assert best in llm.calls[0]
+    assert weaker not in llm.calls[0]
+    # The weaker one clears the similarity floor but is not judged.
+    assert result.n_unmatched_outcomes == 1
