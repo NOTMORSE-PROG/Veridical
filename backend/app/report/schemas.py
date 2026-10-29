@@ -113,6 +113,9 @@ class CriterionResultOut(BaseModel):
     # grade was chosen, shown with the grade until an instructor changes it.
     # Absent on instructor judgments and on rows the AI did not grade.
     decision_basis: Literal["single_verified_pass", "lower_of_two", "middle_of_three"] | None = None
+    # Why the AI left a criterion ungraded, as stable codes the screen words
+    # ("evidence_not_located", "evidence_already_used"); None when not recorded.
+    reason_codes: list[str] | None = None
     support_caution: str | None = None
     agreeing_passes: int | None = None
     grading_passes: int | None = None
@@ -183,6 +186,9 @@ class IntegrityCheckStatusOut(BaseModel):
     n_metadata_skipped_insufficient: int = 0
     n_linkage_unassessed: int = 0
     n_source_pages_unassessed: int = 0
+    # The 1-based pages behind that count, so an instructor can find them;
+    # None where the saved check did not record them.
+    source_pages_unassessed: list[int] | None = None
     n_claim_support_unassessed: int = 0
     reference_list_page: int | None = None
     analysis_coverage: Literal["complete", "partial", "unsupported"] | None = None

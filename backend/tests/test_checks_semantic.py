@@ -421,7 +421,8 @@ async def test_a_quote_already_claimed_by_an_earlier_criterion_is_not_reused():
     assert results[0].outcome == ResultOutcome.passed  # A keeps the quote it claimed first
     assert results[0].detail["evidence"][0]["quote"] == "The one real sentence here."
     assert results[1].outcome == ResultOutcome.escalated  # B never gets to borrow it
-    assert "verify" in results[1].detail["reason"]
+    # BUG-515: the quote is in the source; the reason says it was already used.
+    assert "already used for a different criterion" in results[1].detail["reason"]
     assert len(llm.calls) == 2  # batch + exactly one single-criterion retry, no more
 
 

@@ -396,6 +396,9 @@ export interface CriterionResultOut extends ResultRowCommon {
   /** How an automatic grade was chosen (grading policy "decide"); absent
    * once an instructor records a judgment or when the AI did not grade. */
   decision_basis?: "single_verified_pass" | "lower_of_two" | "middle_of_three" | null;
+  /** Why the AI left the criterion ungraded: "evidence_not_located" or
+   * "evidence_already_used" (the quote is in the source but was another criterion's evidence). */
+  reason_codes?: string[] | null;
   support_caution?: string | null;
   agreeing_passes?: number | null;
   grading_passes?: number | null;

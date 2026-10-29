@@ -29,6 +29,7 @@ from app.checks.escalation import gate_vote
 from app.checks.injection import detect_injection_signal
 from app.checks.levels import normalize_verdict, outcome_and_score
 from app.checks.semantic import (
+    EVIDENCE_NOT_LOCATED,
     PROMPT_VERSION,
     GradedVerdict,
     SemanticBatch,
@@ -101,6 +102,8 @@ class VoteResult:
     # GRADING_DECISION_POLICY="decide": how a grade was chosen when the
     # passes did not simply agree (shown to the instructor with the grade).
     decision_basis: str | None = None
+    # Stable codes for `escalation_reason` (see `GradedVerdict.escalation_code`).
+    escalation_codes: tuple[str, ...] = ()
 
 
 def _scale_position(criterion: Any, verdict: str) -> float | None:
@@ -201,6 +204,7 @@ async def _vote_for_criterion(
         # unverifiable quote) — joining without dedup produced a literal
         # doubled sentence in real output (V-055 report screen review).
         reasons = dict.fromkeys(g.escalation_reason for g in (g1, g2) if g.escalation_reason)
+        codes = tuple(dict.fromkeys(g.escalation_code for g in (g1, g2) if g.escalation_code))
         unverified = _collect_unverified_quotes(g1, g2)
         failure = next((g for g in (g1, g2) if g.failure_outcome is not None), None)
         verified = [g for g in (g1, g2) if g.verdict is not None]
@@ -218,10 +222,11 @@ async def _vote_for_criterion(
             0.0,
             [g1.verdict, g2.verdict],
             None,
-            "; ".join(reasons),
+            " ".join(reasons),
             unverified,
             failure.failure_outcome if failure else None,
             failure.failure_phase if failure else None,
+            escalation_codes=codes,
         )
 
     if normalize_verdict(g1.verdict) == normalize_verdict(g2.verdict):
@@ -292,8 +297,9 @@ async def _vote_for_criterion(
             0.0,
             [g1.verdict, g2.verdict, None],
             None,
-            "Could not verify the quoted evidence after a retry.",
+            EVIDENCE_NOT_LOCATED,
             unverified or None,
+            escalation_codes=("evidence_not_located",),
         )
     g3 = _downgrade_if_claimed(
         GradedVerdict(
@@ -350,6 +356,8 @@ def _vote_detail(
         detail["failure_phase"] = vote.failure_phase
     if vote.decision_basis:
         detail["decision_basis"] = vote.decision_basis
+    if vote.escalation_codes:
+        detail["reason_codes"] = list(vote.escalation_codes)
     if vote.winner is not None:
         detail["verdict"] = vote.winner.verdict
         detail["reasoning"] = vote.winner.reasoning

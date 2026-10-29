@@ -54,3 +54,13 @@ def test_older_saved_uncited_rows_still_name_their_entry():
 def test_both_flag_outputs_carry_the_fields():
     for schema in (FlagSummaryOut, FlagOut):
         assert {"cited_text", "cited_authors", "cited_year"} <= set(schema.model_fields)
+
+
+def test_integrity_status_names_the_pages_it_could_not_read():
+    from app.report.service import source_pages_unassessed
+
+    assert source_pages_unassessed({"unread_pages": [47, 45, 46]}) == [45, 46, 47]
+    stopped = {"source_issues": [{"page": 9, "reason": "x"}, {"reason": "document"}, {"page": 9}]}
+    assert source_pages_unassessed(stopped) == [9]
+    assert source_pages_unassessed({}) is None
+    assert source_pages_unassessed({"unread_pages": [0, "3", True]}) is None

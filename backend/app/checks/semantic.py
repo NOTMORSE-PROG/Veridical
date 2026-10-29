@@ -722,6 +722,17 @@ class GradedVerdict:
     failure_outcome: ResultOutcome | None = None
     failure_phase: str | None = None
     request_attempted: bool = True
+    # Why the pass has no verdict, as a stable code the report can word:
+    # "evidence_not_located" or "evidence_already_used" (bookkeeping, not a
+    # mismatch with the source).
+    escalation_code: str | None = None
+
+
+EVIDENCE_NOT_LOCATED = "Could not verify the quoted evidence after a retry."
+EVIDENCE_ALREADY_USED = (
+    "Every quoted piece of evidence for this criterion was already used "
+    "for a different criterion in this batch."
+)
 
 
 def _downgrade_if_claimed(verdict: GradedVerdict, claimed: set[str]) -> GradedVerdict:
@@ -762,8 +773,8 @@ def _downgrade_if_claimed(verdict: GradedVerdict, claimed: set[str]) -> GradedVe
         verdict.reasoning,
         verdict.quotes,
         None,
-        "Every quoted piece of evidence for this criterion was already used "
-        "for a different criterion in this batch.",
+        EVIDENCE_ALREADY_USED,
+        escalation_code="evidence_already_used",
     )
 
 
@@ -920,7 +931,8 @@ async def grade_batch_verdicts(
                         verdict.reasoning,
                         quotes if quotes else verdict.evidence_quotes,
                         None,
-                        "Could not verify the quoted evidence after a retry.",
+                        EVIDENCE_NOT_LOCATED,
+                        escalation_code="evidence_not_located",
                     )
                 else:
                     out[criterion.id] = GradedVerdict(
@@ -946,12 +958,13 @@ async def grade_batch_verdicts(
                     retry_verdict.reasoning,
                 )
                 continue
+            already_used = False
             if retry_anchors is not None:
                 retry_quotes, retry_anchors = _drop_claimed_quotes(
                     retry_verdict.evidence_quotes, retry_anchors, claimed_quotes
                 )
                 if not retry_quotes:
-                    retry_anchors = None
+                    retry_anchors, already_used = None, True
             if retry_anchors is None:
                 # The retry reached a verdict but its quotes ALSO failed
                 # containment (or were themselves already claimed by a
@@ -966,7 +979,10 @@ async def grade_batch_verdicts(
                     retry_verdict.reasoning,
                     retry_verdict.evidence_quotes,
                     None,
-                    "Could not verify the quoted evidence after a retry.",
+                    EVIDENCE_ALREADY_USED if already_used else EVIDENCE_NOT_LOCATED,
+                    escalation_code="evidence_already_used"
+                    if already_used
+                    else "evidence_not_located",
                 )
                 continue
             verdict, quotes, anchors = retry_verdict, retry_quotes, retry_anchors

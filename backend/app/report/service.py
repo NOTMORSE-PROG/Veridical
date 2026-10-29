@@ -354,6 +354,8 @@ def _to_criterion_result(
         # for a levelled criterion's decided result — `None` otherwise.
         level=CriterionLevelOut(**detail["level"]) if detail.get("level") else None,
         **_automatic_grade(result, detail, resolution_detail),
+        reason_codes=[code for code in detail.get("reason_codes") or [] if isinstance(code, str)]
+        or None,
     )
 
 
@@ -383,6 +385,20 @@ def _automatic_grade(result: CheckResult, detail: dict, resolution: object) -> d
         else None,
         "grading_passes": len(real) or None,
     }
+
+
+def source_pages_unassessed(detail: dict) -> list[int] | None:
+    """Pages an integrity check could not read: the pages it left out, or
+    the page-bound issues of a check that stopped for unreadable pages."""
+    pages = detail.get("unread_pages")
+    if not isinstance(pages, list):
+        issues = detail.get("source_issues")
+        pages = (
+            [issue.get("page") for issue in issues if isinstance(issue, dict)]
+            if isinstance(issues, list)
+            else []
+        )
+    return sorted({page for page in pages if type(page) is int and page >= 1}) or None
 
 
 def _statistical_notation_state(detail: dict | None) -> bool | None:
@@ -712,6 +728,7 @@ async def report_out_for_check_run(
             n_metadata_skipped_insufficient=detail.get("n_metadata_skipped_insufficient", 0),
             n_linkage_unassessed=detail.get("n_linkage_unassessed", 0),
             n_source_pages_unassessed=detail.get("n_source_pages_unassessed", 0),
+            source_pages_unassessed=source_pages_unassessed(detail),
             n_claim_support_unassessed=detail.get("n_claim_support_unassessed", 0),
             statistical_notation_unassessed=_statistical_notation_state(detail)
             if row.kind == CheckKind.statistical_forensics
