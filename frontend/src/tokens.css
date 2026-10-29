@@ -356,6 +356,7 @@
   --signal-evidence-card-min-width: 16rem;
   --signal-passage-inspector-max-height: 18rem;
   --signal-flag-action-width: 14rem;
+  --signal-shared-preview-max-height: 32rem;
   --signal-library-card-height: 20rem;
   --signal-library-card-title-lines: 3;
   --signal-library-card-label-width: 5rem;

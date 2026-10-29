@@ -157,7 +157,7 @@ describe("AdviserViewPage", () => {
     expect(screen.getAllByText("SECONDARY_FORMAT_DETAIL")[0]).toBeVisible();
     expect(screen.getByRole("heading", { name: "Criterion records" })).toBeVisible();
     expect(screen.queryByRole("heading", { name: "Possible inconsistencies" })).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Findings" }));
+    fireEvent.click(screen.getByRole("tab", { name: "Findings" }));
     expect(screen.getByRole("heading", { name: "Possible inconsistencies" })).toBeVisible();
     expect(screen.queryByRole("heading", { name: "Criterion records" })).not.toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Review criterion records" })).toHaveAttribute("href", "/shared/tok123?section=grades#criteria-results-heading");
@@ -183,7 +183,7 @@ describe("AdviserViewPage", () => {
     render();
     await screen.findByRole("heading", { name: "Criterion records" });
     expect(screen.queryByRole("complementary", { name: "Assessment context" })).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Findings" }));
+    fireEvent.click(screen.getByRole("tab", { name: "Findings" }));
     expect(screen.getByText("No shared integrity signals are shown in this module.")).toBeVisible();
     expect(screen.queryByText(/All checks passed/)).not.toBeInTheDocument();
   });
@@ -218,7 +218,7 @@ describe("AdviserViewPage", () => {
     render();
     expect((await screen.findByText("Unresolved criteria")).nextElementSibling).toHaveTextContent("0");
     expect(screen.getByText("Assessment limits")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Findings" }));
+    fireEvent.click(screen.getByRole("tab", { name: "Findings" }));
     expect(screen.getByText(/95% accuracy/)).toBeInTheDocument();
   });
 
@@ -458,8 +458,8 @@ describe("AdviserViewPage", () => {
       stubFetchByPath({ "/shared/tok123/report": shared({ flags: [SAMPLE_FLAG] }) }),
     );
     render();
-    await screen.findByRole("button", { name: "Findings" });
-    fireEvent.click(screen.getByRole("button", { name: "Findings" }));
+    await screen.findByRole("tab", { name: "Findings" });
+    fireEvent.click(screen.getByRole("tab", { name: "Findings" }));
     await screen.findByText(/95% accuracy/);
     expect(screen.queryByRole("link", { name: /Review evidence|View details/ })).not.toBeInTheDocument();
   });

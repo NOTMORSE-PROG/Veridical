@@ -3,7 +3,7 @@ export const REPORT_STEPS = [
   { id: "criteria", target: "review-criteria", label: "Review criteria" },
   { id: "findings", target: "integrity-signals", label: "Inspect findings" },
   { id: "grades", target: "criteria-results-heading", label: "Check recorded grades" },
-  { id: "decision", target: "final-decision", label: "Record decision" },
+  { id: "decision", target: "final-decision", label: "Decision summary" },
 ] as const;
 export type ReportStep = typeof REPORT_STEPS[number]["id"];
 

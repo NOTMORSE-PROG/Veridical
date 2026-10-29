@@ -8854,4 +8854,38 @@
   .signal-flag-row > .signal-button { inline-size: 100%; }
   .signal-stored-files .signal-stored-file__actions > .signal-button--danger { margin-inline-start: auto; }
   .signal-figure-reading-grid { grid-template-columns: repeat(auto-fit, minmax(var(--signal-evidence-card-min-width), 1fr)); }
+  /* Both bars pin to the pane top; the reading bar sits under the steps. */
+  .signal-comparison-reading-bar { inset-block-start: var(--signal-workspace-steps-height); }
+  /* Criterion evidence: quote on its own line, then its actions in one row. */
+  .signal-result-card .signal-attached-flow { display: flex; flex-wrap: wrap; align-items: center; gap: var(--signal-rhythm-control); }
+  .signal-result-card .signal-attached-flow > :is(blockquote, p, figure) { flex-basis: 100%; }
+  .signal-result-card .signal-attached-flow > .signal-button { inline-size: auto; }
+  /* Assessment-limit sources: compact left-aligned rows, not centred links. */
+  .signal-coverage-list__body ul { display: grid; gap: var(--signal-space-1); margin: var(--signal-space-2) 0 0; padding-inline-start: var(--signal-space-5); }
+  .signal-coverage-list__body li .signal-button { min-block-size: auto; padding: 0; justify-content: flex-start; text-align: start; }
+  .signal-coverage-list__body > .signal-button { justify-self: start; padding-inline: 0; }
+  .signal-saved-judgment-access { justify-items: start; justify-self: stretch; margin-inline: 0; }
+  .signal-saved-judgment-access .signal-button--quiet { padding-inline: 0; }
+  /* Shared report: eyebrow contrast, footer aligned with the page, decision
+     beside the band, readable evidence preview, aligned criterion controls. */
+  .signal-shared-report-header .signal-eyebrow { color: var(--color-signal-ink-secondary); }
+  .signal-shared-footer { padding-inline: 0; }
+  .signal-shared-footer__inner {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(var(--signal-settings-column-min), 1fr));
+    gap: var(--signal-rhythm-control) var(--signal-rhythm-related);
+    inline-size: min(100%, var(--signal-workbench-width));
+    margin-inline: auto;
+    padding-inline: var(--signal-workspace-padding);
+  }
+  .signal-shared-footer__inner p { max-width: none; }
+  .signal-shared-route .signal-criterion-packet__preview img { block-size: auto; max-block-size: var(--signal-shared-preview-max-height); }
+  .signal-shared-route .signal-criterion-navigation,
+  .signal-shared-grade-panel nav:not(.signal-shared-criterion-choices) { align-items: center; }
+  /* Criterion evidence actions: one even row, the manuscript jump first. */
+  .signal-result-card .signal-attached-flow > .signal-recorded-page-actions { display: contents; }
+  .signal-result-card .signal-attached-flow > .signal-button { order: -1; }
+  .signal-result-card .signal-attached-flow > blockquote { order: -2; }
+  .signal-result-card .signal-attached-flow :is(.signal-button) { min-block-size: var(--signal-control-height); }
+  .signal-pagination__gap { align-self: center; padding-inline: var(--signal-space-2); color: var(--color-signal-ink-muted); }
 }

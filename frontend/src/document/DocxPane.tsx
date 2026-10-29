@@ -202,7 +202,7 @@ export function DocxPane({
       <div className="signal-document-toolbar">
         <div className="signal-document-toolbar__identity">
           <strong>{documentLabel}</strong>
-          <span>Reconstructed DOCX. Layout may differ.{comparisonMarkers && " · L: unscored comparison"}</span>
+          <span>Reconstructed DOCX. Layout may differ.{comparisonMarkers && " · L markers are comparison leads (not scored)"}</span>
         </div>
         <div className="signal-document-toolbar__controls"><button type="button" aria-expanded={detailsOpen} aria-controls={detailsId} onClick={() => setDetailsOpen((value) => !value)}>Source view details</button></div>
       </div>

@@ -65,7 +65,7 @@ function SharedPageSession({ token, snapshot, reference, context, references }: 
     </figure>}
   </>;
   return <div className="signal-shared-packet__source">
-    <Button variant="quiet" className="signal-evidence-source-link" onClick={() => setDialog(true)}>{reference.anchor?.trim() ? `Open original page: ${instructorAnchor(reference.anchor)}` : "Open saved source"}</Button>
+    <Button variant="secondary" aria-label={reference.anchor?.trim() ? `Open original page: ${instructorAnchor(reference.anchor)}` : undefined} onClick={() => setDialog(true)}>{reference.anchor?.trim() ? "Open original page" : "Open saved source"}</Button>
     <Button variant="secondary" aria-expanded={preview} onClick={() => setPreview(value => !value)}>{preview ? "Hide" : "Show"} original-page preview</Button>
     {preview && image(false)}
     {dialog && <Dialog title={context ? `Evidence and explanation: ${context.title}` : `Original source: ${instructorAnchor(reference.anchor ?? "") || "Saved source"}`} wide className={context ? "signal-dialog--source-context" : undefined} onClose={() => setDialog(false)}>

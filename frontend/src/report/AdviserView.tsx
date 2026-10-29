@@ -47,7 +47,7 @@ function SharedChrome({ children, reportAvailable = true }: { children: ReactNod
       <header className="signal-shared-topbar"><Link to="/" className="signal-brand-link signal-on-dark" aria-label="VERIDICAL home"><SignalMark inverse /><SignalWordmark inverse /></Link><span>Faculty shared view</span></header>
       {reportAvailable && <p className="signal-shared-readonly"><strong>Read-only shared report.</strong> No account is required, and nothing on this page can be edited.</p>}
       <main id="main-content" tabIndex={-1} className="signal-shared-main">{children}</main>
-      <footer className="signal-shared-footer"><p>VERIDICAL is a BSIT capstone project at the Technological Institute of the Philippines, Manila. It is not an official T.I.P. system.</p><p>The assessment shows the report's current state. Additional shared detail is shown only while its saved assessment revision matches. The link is not indexed by search engines; treat it as private to its recipients.</p></footer>
+      <footer className="signal-shared-footer"><div className="signal-shared-footer__inner"><p>VERIDICAL is a BSIT capstone project at the Technological Institute of the Philippines, Manila. It is not an official T.I.P. system.</p><p>The assessment shows the report's current state. Additional shared detail is shown only while its saved assessment revision matches. The link is not indexed by search engines; treat it as private to its recipients.</p></div></footer>
     </div>
   );
 }
@@ -68,7 +68,9 @@ export function AdviserViewPage() {
     const target = document.getElementById(pending.target);
     if (!target || target.closest("[hidden]")) return;
     pendingFocus.current = undefined;
-    if (pending.claim.focus(target, { preventScroll: true })) target.scrollIntoView({ block: "start" });
+    // Scroll only when the target is out of view, so choosing a criterion or a
+    // finding does not jump the page.
+    if (pending.claim.focus(target, { preventScroll: true })) target.scrollIntoView({ block: "nearest" });
   });
   useEffect(() => () => pendingFocus.current?.claim.dispose(), []);
   const follow = (trigger: HTMLElement, target: string) => {
@@ -152,11 +154,18 @@ export function AdviserViewPage() {
         <SharedAssessmentContext report={report} />
 
         <section className="signal-shared-verdict" aria-labelledby="shared-band-heading"><div><p className="signal-section-kicker">{scopeUnconfirmed ? "Saved readiness band" : "VERIDICAL readiness band"}</p><h2 id="shared-band-heading">{report.status === "ready" ? "Ready" : report.status === "conditionally_ready" ? "Conditionally Ready" : report.status === "not_ready" ? "Not Ready" : "Needs Review"}</h2><p>{report.reason ?? "This band comes from the recorded criterion outcomes and integrity signals. It does not approve or block a defense."}</p><RuleScopeSummary rows={report.results} checkRunId={report.check_run_id} publicView linkToRecords={false} /></div><dl><div><dt>Unresolved criteria</dt><dd>{pendingCount}</dd></div><div><dt>Instructor decision</dt><dd>{report.decision ? DECISION_LABEL[report.decision] : "Not recorded"}</dd></div></dl><div className="signal-control-cluster"><ActionLink to={{ pathname: location.pathname, search: sectionSearch("grades").toString(), hash: "criteria-results-heading" }} onClick={focusSharedSection} variant="secondary">Review criterion records</ActionLink><ActionLink to={{ pathname: location.pathname, search: location.search, hash: "shared-decision-heading" }} onClick={focusSharedSection} variant="quiet">Read final decision</ActionLink></div></section>
+        <section className="signal-shared-decision" aria-labelledby="shared-decision-heading"><div><p className="signal-section-kicker">Instructor authority</p><h2 id="shared-decision-heading" tabIndex={-1}>Final decision</h2></div>{report.decision ? <><span className={`signal-decision signal-decision--${report.decision}`}>{DECISION_LABEL[report.decision]}</span><p>Recorded by the instructor. VERIDICAL did not make this decision.</p>{report.decision_note && <blockquote><strong>Decision note</strong><span>{report.decision_note}</span></blockquote>}</> : <><p>No final instructor decision has been recorded.</p><p>The readiness band above is an aid for review, not an approval or block.</p></>}</section>
 
-        <nav className="signal-control-cluster" aria-label="Shared report sections">{(["grades", "findings"] as const).map(section => <Button key={section} variant={selectedSection === section ? "brand" : "secondary"} aria-pressed={selectedSection === section} onClick={event => {
-          follow(event.currentTarget, section === "grades" ? "shared-grade-navigation-heading" : "shared-findings-heading");
-          setParams(sectionSearch(section));
-        }}>{section === "grades" ? "Grades" : "Findings"}</Button>)}</nav>
+        <div role="tablist" aria-label="Shared report sections" className="signal-record-tabs">{(["grades", "findings"] as const).map(section =>
+          <button key={section} type="button" role="tab" id={`shared-tab-${section}`} aria-selected={selectedSection === section} tabIndex={selectedSection === section ? 0 : -1}
+            onClick={() => setParams(sectionSearch(section), { preventScrollReset: true })}
+            onKeyDown={event => {
+              if (event.key !== "ArrowRight" && event.key !== "ArrowLeft") return;
+              event.preventDefault();
+              const next = section === "grades" ? "findings" : "grades";
+              setParams(sectionSearch(next), { preventScrollReset: true });
+              requestAnimationFrame(() => document.getElementById(`shared-tab-${next}`)?.focus({ preventScroll: true }));
+            }}>{section === "grades" ? "Grades" : "Findings"}</button>)}</div>
         {selectedSection === "grades" ? <section className="signal-review-section signal-shared-grade-panel" aria-labelledby="shared-grade-navigation-heading">
           <header className="signal-review-section__heading"><div><p className="signal-section-kicker">Recorded grades</p><h2 id="shared-grade-navigation-heading" tabIndex={-1}>Grades and supporting evidence</h2></div><span>{report.results.length} criteria</span></header>
           <p className="signal-review-section__intro">Choose a grade to read its explanation and the original manuscript pages that support it.</p>
@@ -230,7 +239,7 @@ export function AdviserViewPage() {
         </div>
         </section>}
 
-        <section className="signal-shared-decision" aria-labelledby="shared-decision-heading"><div><p className="signal-section-kicker">Instructor authority</p><h2 id="shared-decision-heading" tabIndex={-1}>Final decision</h2></div>{report.decision ? <><span className={`signal-decision signal-decision--${report.decision}`}>{DECISION_LABEL[report.decision]}</span><p>Recorded by the instructor. VERIDICAL did not make this decision.</p>{report.decision_note && <blockquote><strong>Decision note</strong><span>{report.decision_note}</span></blockquote>}</> : <><p>No final instructor decision has been recorded.</p><p>The readiness band above is an aid for review, not an approval or block.</p></>}</section>
+
       </div>
     </SharedChrome>
   );

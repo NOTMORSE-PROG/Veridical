@@ -7,7 +7,6 @@ import { CriterionSourceCoverage } from "./CriterionSourceCoverage";
 import { RuleFactsDetails } from "./RuleFactsDetails";
 import { RuleScopeNotice } from "./RuleScopeNotice";
 import { coverageItems } from "./reportCoverage";
-import { focusAfterStepChange } from "./reportSectionNavigation";
 import { workspaceStepPath } from "./reviewStep";
 import { pendingAssessmentRow } from "./pendingAssessmentRow";
 import { clearPdfReading } from "../document/usePdfPageText";
@@ -349,11 +348,15 @@ function SignalFindingCard({
         <ol id={locationsId} className="signal-flag-location-list">
           {flags.map((flag, locationIndex) => (
             <li key={flag.id} className={flag.overridden ? "signal-flag-location signal-flag-location--resolved" : "signal-flag-location"}>
-              {isManuscriptQuote(flag)
+              {/* When every location quotes the same passage, the card above
+                  already shows it; repeating it per location only adds length. */}
+              {!excerptsMatch && (isManuscriptQuote(flag)
                 ? <blockquote>“{systemFindingCopy(flag.evidence_excerpt, flag.problem_kind, "evidence")}”</blockquote>
-                : <p className="signal-flag-finding-context">{systemFindingCopy(flag.evidence_excerpt, flag.problem_kind, "evidence")}</p>}
+                : <p className="signal-flag-finding-context">{systemFindingCopy(flag.evidence_excerpt, flag.problem_kind, "evidence")}</p>)}
               <div className="signal-flag-location__meta">
-                <strong>{instructorAnchor(flag.page_anchor)}</strong>
+                <strong>Location {locationIndex + 1}</strong>
+                {flag.cited_text && <span>Citation: {flag.cited_text}</span>}
+                <span>{instructorAnchor(flag.page_anchor)}</span>
                 {mixedSeverity && <span className={`signal-severity signal-severity--${flag.severity}`}>{SEVERITY_LABEL[flag.severity]}</span>}
                 {!flag.overridden && viewedIds.has(flag.id) && (
                   <span className="signal-viewed-state"><ViewedIcon />Viewed</span>
@@ -724,9 +727,10 @@ function SignalResolutionCard({ item, checkRunId, sharedReasonId, sourceTarget, 
         )}
         {assessment?.ruleScopeUnconfirmed && <RuleScopeNotice />}
         {assessment?.sourceCoverage && <CriterionSourceCoverage value={assessment.sourceCoverage} sourceAction={coverageSourceAction} firstSlot={item.evidence?.length ?? 0} criterionText={item.criterion_text} />}
-        {reportHasLimits && <p className="signal-field-hint"><ActionLink to={workspaceStepPath(checkRunId, "decision")} variant="quiet" onClick={event => focusAfterStepChange(event, "workspace-coverage-heading")}>See assessment limits in step 4</ActionLink></p>}
+        {reportHasLimits && <p className="signal-field-hint"><ActionLink to={`/report/${checkRunId}?section=limits`} variant="quiet">See assessment limits on the readiness report</ActionLink></p>}
         {assessment?.ruleFacts && <RuleFactsDetails facts={assessment.ruleFacts} />}
         {item.reasoning?.trim() && <div className="signal-resolution-context-note"><h4>Assessment and explanation</h4><strong>{assessment?.explanationLabel ?? "Recorded explanation:"}</strong><p>{item.reasoning}</p></div>}
+        {(item.votes.length > 0 || reviewNotices.some(notice => notice.kind === "support") || (collapseRecordedReason && Boolean(item.reason)) || Boolean(sharedReasonId)) && <>
         <Button variant="quiet" aria-expanded={detailsOpen} aria-controls={detailsId}
           aria-label={`${detailsOpen ? "Hide" : "Show"} ${CRITERION_REVIEW_COPY.details} for ${item.criterion_text}`}
           onClick={() => setDetailsOpen((open) => !open)}>
@@ -739,9 +743,10 @@ function SignalResolutionCard({ item, checkRunId, sharedReasonId, sourceTarget, 
           {!item.reasoning?.trim() && Boolean(item.evidence?.length) && !assessment?.ruleFacts && (assessment?.source === "ai" || !item.reason?.trim()) && <p>{assessment?.missingExplanation ?? "No explanation is available in this assessment record."}</p>}
           <p>{CRITERION_REVIEW_COPY.detailsQualification}</p>
           {item.votes.length > 0 ? <ol aria-label={CRITERION_REVIEW_COPY.entriesLabel}>{item.votes.map((vote, index) =>
-            <li key={index}><strong>Entry {index + 1}</strong>{" "}<span>{vote ?? CRITERION_REVIEW_COPY.missingEntry}</span></li>,
+            <li key={index}><strong>Pass {index + 1}</strong>{" "}<span>{vote ?? CRITERION_REVIEW_COPY.missingEntry}</span></li>,
           )}</ol> : <p>{CRITERION_REVIEW_COPY.noEntries}</p>}
         </div>
+        </>}
         <p id={sourceQualificationId} className="signal-field-hint">{RECORDED_GRADE_BASIS.qualification}</p>
         <ActionAssessmentContext id={actionContextId} notices={review.assessmentNotices ?? []} />
       </div>
@@ -761,7 +766,7 @@ function SignalResolutionCard({ item, checkRunId, sharedReasonId, sourceTarget, 
             {!draftCurrent && !saving && <div className="signal-copy-flow">
               <strong>{review.decision ? "Recorded decision: review is read-only" : "Current review required"}</strong>
               {review.decision ? <><p>Reopen the decision before reviewing this draft.</p>
-                <ActionLink variant="secondary" to={workspaceStepPath(checkRunId, "decision")} onClick={event => focusAfterStepChange(event, "decision-heading")}>Go to the recorded decision</ActionLink></>
+                <ActionLink variant="secondary" to={`/report/${checkRunId}#final-decision`}>Go to the recorded decision</ActionLink></>
                 : <><p>Review the current criterion before using this draft. Confirming remains a separate step.</p>
                   <Button variant="secondary" onClick={() => review.reviewCurrent(item.check_result_id)}>Review current criterion</Button></>}
               {review.canUseCurrentDraft(pending) && <><p>The current criterion and its evidence are shown above. This report is open for instructor review.</p>
