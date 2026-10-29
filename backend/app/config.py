@@ -53,6 +53,10 @@ class Settings(BaseSettings):
     # Per-attempt timeout for the /health DB probe. Generous because Neon
     # free tier autosuspends and needs time to wake (ENGINEERING.md §7).
     db_health_timeout: float = 5.0
+    # Reuse a /health database check this many seconds (0 = check on every
+    # request). Platform probes on a small host otherwise pay a new TLS
+    # connection each time.
+    health_db_check_cache_seconds: float = Field(default=0, ge=0, le=300)
     # Dimensionality of manuscript_archive.embedding. Model chosen at V-036
     # pickup: potion-base-8M outputs 256 dims (confirmed programmatically,
     # `StaticModel.dim`, not assumed — DECISIONS.md D-011 addendum); must

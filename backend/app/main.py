@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+import time
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager, suppress
 from pathlib import Path
@@ -312,6 +313,10 @@ async def veridical_error_handler(request: Request, exc: VeridicalError) -> JSON
     )
 
 
+# The last database check: (monotonic time, ok, detail).
+_last_db_check: tuple[float, bool, str] | None = None
+
+
 @app.get("/health")
 async def health() -> dict:
     """Liveness + dependency report.
@@ -321,10 +326,22 @@ async def health() -> dict:
     (TESTING.md §5) — an unreachable dependency must never masquerade as
     anything else.
     """
+    global _last_db_check
     settings = get_settings()
-    db_ok, db_detail = await db.check_connectivity(
-        settings.database_url, timeout=settings.db_health_timeout
-    )
+    # Each check opens a new TLS connection with password hashing, heavy work
+    # on a host with a fraction of one CPU that a platform probes every few
+    # seconds; a recent result is reused for HEALTH_DB_CHECK_CACHE_SECONDS.
+    now = time.monotonic()
+    if (
+        _last_db_check is not None
+        and now - _last_db_check[0] < settings.health_db_check_cache_seconds
+    ):
+        db_ok, db_detail = _last_db_check[1], _last_db_check[2]
+    else:
+        db_ok, db_detail = await db.check_connectivity(
+            settings.database_url, timeout=settings.db_health_timeout
+        )
+        _last_db_check = (now, db_ok, db_detail)
     return {
         "status": "ok" if db_ok else "degraded",
         "db": db_detail,

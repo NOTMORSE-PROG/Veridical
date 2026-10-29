@@ -64,3 +64,28 @@ async def test_db_connectivity_against_real_database():
     ok, detail = await db.check_connectivity(os.environ["DATABASE_URL"])
     assert ok, f"DATABASE_URL set but unreachable: {detail}"
     assert detail == "ok"
+
+
+def test_health_reuses_a_recent_database_check_when_configured(monkeypatch):
+    """A platform probing /health every few seconds should not pay a new
+    database connection each time on a small host."""
+    from app import main
+    from app.config import get_settings
+
+    calls = []
+
+    async def fake_check(dsn, timeout=5.0):
+        calls.append(dsn)
+        return True, "ok"
+
+    monkeypatch.setattr(db, "check_connectivity", fake_check)
+    monkeypatch.setattr(main, "_last_db_check", None)
+    monkeypatch.setenv("HEALTH_DB_CHECK_CACHE_SECONDS", "30")
+    get_settings.cache_clear()
+    try:
+        with TestClient(app) as client:
+            assert client.get("/health").json()["db"] == "ok"
+            assert client.get("/health").json()["db"] == "ok"
+    finally:
+        get_settings.cache_clear()
+    assert len(calls) == 1
