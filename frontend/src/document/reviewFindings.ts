@@ -10,6 +10,8 @@ export interface ReviewFinding {
   severity: FlagSummaryOut["severity"];
   isResolved: boolean;
   isSourceConfirmed: boolean;
+  // Instructor agreed it is a real issue; it still counts for readiness.
+  isConfirmed: boolean;
 }
 
 const SEVERITY_RANK: Record<FlagSummaryOut["severity"], number> = {
@@ -90,6 +92,7 @@ export function buildReviewFindings(flags: FlagSummaryOut[]): ReviewFinding[] {
       severity,
       isResolved: members.every((flag) => flag.overridden),
       isSourceConfirmed: members.every((flag) => flag.confirmed_citation_source),
+      isConfirmed: members.every((flag) => flag.finding_confirmed && !flag.overridden),
     };
   });
 }

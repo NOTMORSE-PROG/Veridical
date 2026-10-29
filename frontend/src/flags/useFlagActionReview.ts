@@ -10,7 +10,7 @@ function sourceIdentity(flag: FlagOut) {
     flag.citation_source_key?.kind, flag.citation_source_key?.value]);
 }
 
-export function useFlagActionReview(flag: FlagOut, action: "override" | "confirm-source") {
+export function useFlagActionReview(flag: FlagOut, action: "override" | "confirm-source" | "confirm-finding") {
   const isCurrent = useActionLifetime(`${flag.check_run_id}:${flag.id}:${action}`);
   const flagQuery = useFlag(flag.id);
   const reportQuery = useReport(flag.check_run_id);
@@ -25,7 +25,7 @@ export function useFlagActionReview(flag: FlagOut, action: "override" | "confirm
   const eligible = (finding: FlagOut, report: ReportOut) => finding.id === flag.id
     && finding.check_run_id === flag.check_run_id && report.check_run_id === flag.check_run_id
     && !finding.overridden && report.decision === null
-    && (action === "override" || (finding.check_kind === "citation_integrity"
+    && (action === "override" || action === "confirm-finding" || (finding.check_kind === "citation_integrity"
       && finding.ai_verdict_summary === "unverifiable_not_found" && Boolean(finding.citation_source_key)));
   const coherent = currentFlag && currentReport && isAssessmentRevision(currentFlag.assessment_revision)
     && currentFlag.assessment_revision === currentReport.assessment_revision;
