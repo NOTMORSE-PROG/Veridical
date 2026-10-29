@@ -42,6 +42,7 @@ frontend/dist/
 
 # ── Runtime data (anchored: keeps src/**/data importable) ────────
 /data/
+/tmp/
 # Raw extraction store (holds manuscript text — never committed);
 # backend/app/ingest/data/ (pattern files) stays tracked.
 /backend/data/
@@ -88,3 +89,4 @@ Desktop.ini
 
 # Progress-report decks / generated presentation assets (internal, not part of the shipped product)
 presentation/
+*.pptx
