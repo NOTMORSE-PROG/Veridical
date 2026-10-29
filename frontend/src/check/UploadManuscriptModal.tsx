@@ -459,7 +459,7 @@ export function UploadManuscriptModal({ onClose, onUploadSuccess }: UploadManusc
             {inBackground && (
               <section className="signal-upload-background" aria-labelledby={`${startCheckId}-title`}>
                 <h3 id={`${startCheckId}-title`}>This file uploads in the background</h3>
-                <p>It is large, so the dialog closes and the Uploads panel shows its progress. You can keep working while it is prepared.</p>
+                <p>It is large, so this dialog closes and an Uploads panel in the lower right shows its progress. Keep this tab open until the file is sent; after that you can close it, and the server keeps preparing the file.</p>
                 {offersStartCheck && (familiesPending ? (
                   <p>Loading your required formats.</p>
                 ) : activeFamilies.length === 0 ? (
@@ -471,12 +471,16 @@ export function UploadManuscriptModal({ onClose, onUploadSuccess }: UploadManusc
                         onChange={(event) => { setStartWhenReady(event.target.checked); setFieldError(null); }} />
                       <span>Start a check when it's ready</span>
                     </label>
+                    {!startWhenReady && <p>Left unticked, the manuscript waits under Not checked on the Review Desk until you start its check.</p>}
                     {startWhenReady && (activeFamilies.length === 1 ? (
                       <p>The check uses {formatChoiceLabel(activeFamilies[0], activeFamilies)}.</p>
                     ) : (
                       <div className="signal-upload-background__format">
-                        <label htmlFor={startFormatId}>Required format for the check</label>
-                        <select id={startFormatId} value={startRubricId}
+                        <label htmlFor={startFormatId}>Required format for the check (required)</label>
+                        <p id={`${startFormatId}-hint`} className="signal-field-hint">The check grades the manuscript against this format.</p>
+                        <select id={startFormatId} value={startRubricId} required aria-required="true"
+                          aria-describedby={`${startFormatId}-hint${fieldError && startRubricId === "" ? ` ${errorId}` : ""}`}
+                          aria-invalid={fieldError && startRubricId === "" ? true : undefined}
                           onChange={(event) => { setStartRubricId(event.target.value === "" ? "" : Number(event.target.value)); setFieldError(null); }}
                           className="min-h-11 w-full rounded-md border border-border-input bg-panel px-3 text-base text-ink">
                           <option value="">Select a required format.</option>

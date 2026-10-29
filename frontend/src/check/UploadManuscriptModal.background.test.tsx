@@ -51,7 +51,11 @@ describe("upload dialog for a large file", () => {
     fireEvent.click(screen.getByRole("button", { name: "Upload manuscript" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("Choose the required format for the check");
     expect(onClose).not.toHaveBeenCalled();
-    fireEvent.change(screen.getByLabelText("Required format for the check"), { target: { value: "10" } });
+    const format = screen.getByLabelText(/^Required format for the check/);
+    expect(format).toBeRequired();
+    expect(format).toHaveAttribute("aria-invalid", "true");
+    expect(format).toHaveAccessibleDescription(/The check grades the manuscript against this format/);
+    fireEvent.change(format, { target: { value: "10" } });
     fireEvent.click(screen.getByRole("button", { name: "Upload manuscript" }));
     expect(onClose).toHaveBeenCalled();
     await waitFor(() => expect(begins).toHaveLength(1));
@@ -59,12 +63,14 @@ describe("upload dialog for a large file", () => {
   });
 
   it("uses the only active format without asking, and starts no check unless ticked", async () => {
+    // Left unticked, the dialog says where the manuscript waits.
     const begins = serve([CS]);
     await open();
     chooseLargeFile();
     fireEvent.click(await screen.findByRole("checkbox", { name: "Start a check when it's ready" }));
     expect(screen.getByText(/The check uses CS capstone format \(v1\)/)).toBeInTheDocument();
     fireEvent.click(screen.getByRole("checkbox", { name: "Start a check when it's ready" }));
+    expect(screen.getByText(/waits under Not checked on the Review Desk/)).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Upload manuscript" }));
     await waitFor(() => expect(begins).toHaveLength(1));
     expect(begins[0]).not.toHaveProperty("start_check");
