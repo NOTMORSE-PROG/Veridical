@@ -91,6 +91,7 @@ def _extract_open_document(
     uri_links_complete = True
     ordering_enabled = settings.ingest_reading_order_strategy == "native_regions_v1"
     order_proposals = {}
+    merge_budget = [settings.preparation_image_piece_merge_max_comparisons]
 
     for index in range(doc.page_count):
         page = doc[index]
@@ -191,7 +192,7 @@ def _extract_open_document(
                         ),
                     )
                 )
-        images.extend(_page_images(pno, page_image_boxes, settings))
+        images.extend(_page_images(pno, page_image_boxes, settings, merge_budget))
         if ordering_enabled:
             order_proposals[pno] = propose_regions(page, raw_blocks, page_lines, settings)
             if table_proposal and (table_proposal.grids or table_proposal.problem):
@@ -249,16 +250,41 @@ def _extract_open_document(
     )
 
 
-def _page_images(pno: int, boxes: list[Bbox], settings: Settings) -> list[ImageBlock]:
-    """One image per picture on the page; touching pieces become one (BUG-532)."""
-    if not settings.preparation_merge_touching_image_pieces or len(boxes) < 2:
-        return [ImageBlock(page=pno, bbox=box) for box in boxes]
-    return [
-        ImageBlock(page=pno, bbox=box, piece_count=len(pieces))
-        for box, pieces in merge_touching_boxes(
-            boxes, settings.preparation_image_piece_merge_tolerance_pts
-        )
+def _page_images(
+    pno: int, boxes: list[Bbox], settings: Settings, budget: list[int]
+) -> list[ImageBlock]:
+    """The page's images, with touching small pieces merged (BUG-532).
+
+    Pieces at or above the reading size are never merged, so every image
+    that could be read before is still its own image. `budget` holds the
+    box comparisons the document may still spend on merging."""
+    small = [
+        index
+        for index, box in enumerate(boxes)
+        if (box[2] - box[0]) * (box[3] - box[1]) < settings.ingest_vision_min_area_pts
     ]
+    if not settings.preparation_merge_touching_image_pieces or len(small) < 2:
+        return [ImageBlock(page=pno, bbox=box) for box in boxes]
+    groups, spent = merge_touching_boxes(
+        [boxes[index] for index in small],
+        settings.preparation_image_piece_merge_tolerance_pts,
+        budget[0],
+    )
+    budget[0] = max(0, budget[0] - spent)
+    if groups is None:
+        # Too costly to group: keep every piece and let the fragment limit decide.
+        return [ImageBlock(page=pno, bbox=box) for box in boxes]
+    # Each image takes the position of its first piece, so a page with
+    # nothing to merge keeps its order.
+    placed = {
+        small[members[0]]: ImageBlock(page=pno, bbox=union, piece_count=len(members))
+        for union, members in groups
+    }
+    small_set = set(small)
+    for index, box in enumerate(boxes):
+        if index not in small_set:
+            placed[index] = ImageBlock(page=pno, bbox=box)
+    return [placed[index] for index in sorted(placed)]
 
 
 def _native_tables_in_source_space(

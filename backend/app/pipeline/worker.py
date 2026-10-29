@@ -61,8 +61,9 @@ async def _execute(
                     await _release_claim(cleanup, lease.run_id, lease.token)
         except Exception:
             logger.warning("Claim release deferred for check run %s", lease.run_id)
-        # The run's extraction and stage results are freed; return the pages.
-        return_freed_memory()
+        # The run's extraction and stage results are freed; return the pages
+        # (off the event loop, no full collection: see process_next_upload).
+        await asyncio.to_thread(return_freed_memory, collect=False)
     return outcome
 
 

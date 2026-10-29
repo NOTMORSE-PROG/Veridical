@@ -15,6 +15,7 @@ AC).
 
 import asyncio
 import copy
+import importlib
 import logging
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
@@ -793,11 +794,11 @@ async def _run_integrity_stage(
     V-033), and F7 (originality/reuse, V-036/V-037) all run for real."""
     # Imported here, not at module load: F6's statistics libraries (statcheck
     # pulls in pandas and scipy.stats, ~80 MiB) would otherwise sit in every
-    # idle server process before any check has run (BUG-532).
-    from app.checks.forensics.service import (
-        existing_statistical_forensics_result,
-        run_statistical_forensics_check,
-    )
+    # idle server process before any check has run (BUG-532). The first import
+    # costs ~0.7 CPU-s, so it runs in a thread and the API keeps answering.
+    forensics = await asyncio.to_thread(importlib.import_module, "app.checks.forensics.service")
+    existing_statistical_forensics_result = forensics.existing_statistical_forensics_result
+    run_statistical_forensics_check = forensics.run_statistical_forensics_check
 
     agreement_existing = await existing_internal_agreement_result(session, check_run.id)
     citation_existing = await existing_citation_integrity_result(session, check_run.id)

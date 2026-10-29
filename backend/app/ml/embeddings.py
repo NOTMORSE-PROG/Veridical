@@ -103,12 +103,18 @@ def _release_if_idle() -> None:
         if _model is None or _idle_seconds <= 0:
             return
         remaining = _last_used + _idle_seconds - time.monotonic()
-        if _in_use or remaining > 0:
-            # Still being used: look again when the idle window would end.
-            _schedule_release_locked(max(remaining, _idle_seconds / 10, 0.01))
+        if _in_use:
+            # A caller is encoding right now; its exit restarts the window.
+            _schedule_release_locked(_idle_seconds)
+            return
+        if remaining > 0:
+            # Used since this timer was set: look again when the window ends.
+            _schedule_release_locked(remaining)
             return
         _model, _model_id = None, None
-    return_freed_memory()
+    # The arrays are freed by reference counting; a full collection would
+    # hold the interpreter lock on a 0.1-CPU host for most of a second.
+    return_freed_memory(collect=False)
 
 
 def release_embedding_model() -> bool:
@@ -124,7 +130,7 @@ def release_embedding_model() -> bool:
         dropped = _model is not None
         _model, _model_id = None, None
     if dropped:
-        return_freed_memory()
+        return_freed_memory(collect=False)
     return True
 
 
@@ -152,14 +158,6 @@ def _borrowed_model(settings: Settings) -> Iterator["StaticModel"]:
             _idle_seconds = settings.embedding_model_idle_release_seconds
             if _idle_seconds > 0:
                 _schedule_release_locked(_idle_seconds)
-
-
-def get_embedding_model(settings: Settings | None = None) -> "StaticModel":
-    """The loaded model (loading it if needed). The idle release still applies,
-    so keep the returned object only for the call at hand."""
-    settings = settings or get_settings()
-    with _borrowed_model(settings) as model:
-        return model
 
 
 def embed_texts(texts: list[str], settings: Settings | None = None) -> list[list[float]]:

@@ -184,7 +184,10 @@ async def process_next_upload(settings, wake_pipeline=None):
     if processed:
         # A preparation's records are all freed by now; hand the pages back so
         # the next job starts from the idle footprint, not this one's peak.
-        return_freed_memory()
+        # Off the event loop, and without a full collection (reference
+        # counting has freed them; a collection would hold the interpreter
+        # lock for most of a second on a 0.1-CPU host).
+        await asyncio.to_thread(return_freed_memory, collect=False)
     return processed
 
 

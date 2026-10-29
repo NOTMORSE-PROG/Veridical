@@ -129,6 +129,36 @@ def test_a_model_in_use_is_never_released_under_its_caller():
     assert load.call_count == 1
 
 
+def test_the_idle_timer_never_releases_a_model_that_is_being_used():
+    entered, finish = threading.Event(), threading.Event()
+
+    class _SlowModel(_FakeModel):
+        def encode(self, texts):
+            entered.set()
+            finish.wait(5)
+            return super().encode(texts)
+
+    with patch("model2vec.StaticModel.from_pretrained", side_effect=_SlowModel) as load:
+        # A short first use arms the timer; a slow second use is still running
+        # when it fires.
+        finish.set()
+        embeddings.embed_texts(["a"], _settings(0.05))
+        worker = threading.Thread(target=embeddings.embed_texts, args=(["ab"], _settings(0.05)))
+        finish.clear()
+        entered.clear()
+        worker.start()
+        assert entered.wait(5)
+        time.sleep(0.3)
+        assert embeddings.embedding_model_loaded()
+        finish.set()
+        worker.join(5)
+        assert load.call_count == 1
+        deadline = time.monotonic() + 5
+        while embeddings.embedding_model_loaded() and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert not embeddings.embedding_model_loaded()
+
+
 def test_a_prefetched_copy_is_loaded_from_local_disk(tmp_path):
     folder = tmp_path / "snapshot"
     folder.mkdir()
