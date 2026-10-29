@@ -70,6 +70,17 @@ describe("grades beside findings on the same pages", () => {
     expect(screen.getAllByText(/Graded automatically/)).toHaveLength(1);
   });
 
+  it("shows what each grading pass chose on an automatic grade, privately only", () => {
+    vi.stubGlobal("fetch", stubFetchByPath({ "/check-runs/3/flags": [] }));
+    const votes = ["Proficient", "Proficient", "Beginner"];
+    const { unmount } = renderWithProviders(<SignalCriteriaResults checkRunId={3} results={[graded({ votes, agreeing_passes: 2 }),
+      graded({ criterion_id: 8, text: "Tone", votes, resolution: { type: "mark_level", reason: "Mine.", ai_majority_verdict: null } })]} />, { route: "/report/3" });
+    expect(screen.getAllByText("Grading passes: Pass 1 Proficient, Pass 2 Proficient, Pass 3 Beginner.")).toHaveLength(1);
+    unmount();
+    renderWithProviders(<SignalCriteriaResults checkRunId={3} publicView results={[graded({ votes })]} />, { route: "/shared/abc" });
+    expect(screen.queryByText(/Grading passes:/)).not.toBeInTheDocument();
+  });
+
   it("explains why a finding is left out of readiness", () => {
     expect(readinessExclusionLine(flag({ affects_readiness: false, readiness_exclusion_reason: "comparison_lead_not_scored" })))
       .toBe("Not counted for readiness: matching text is a lead to compare, not proof of copying, so you judge it from the passages.");

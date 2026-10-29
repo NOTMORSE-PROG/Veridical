@@ -402,6 +402,9 @@ export interface CriterionResultOut extends ResultRowCommon {
   support_caution?: string | null;
   agreeing_passes?: number | null;
   grading_passes?: number | null;
+  /** V-087: each grading pass's choice, in pass order, for AI-decided grades;
+   * null is a pass with no usable grade. Absent once the instructor judges. */
+  votes?: (string | null)[] | null;
   /** Private write identity; older retained client fixtures may lack these fields. */
   check_result_id?: number;
   judgment_revision?: number | null;
