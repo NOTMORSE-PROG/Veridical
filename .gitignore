@@ -58,19 +58,8 @@ frontend/dist/
 /frontend/blob-report/
 /frontend/playwright/.auth/
 /frontend/**/storageState*.json
-/tools/mobile-smoke/test-results/
-/tools/mobile-smoke/playwright-report/
-/tools/mobile-smoke/blob-report/
-/tools/mobile-smoke/.auth/
-/tools/mobile-smoke/.mobile-smoke-output/
-/tools/mobile-smoke/**/storageState*.json
-/tools/mobile-smoke/**/*.har
-/tools/mobile-smoke/**/*.png
-/tools/mobile-smoke/**/*.webm
-/tools/mobile-smoke/**/*.zip
-# Agent/session screenshots land at the repo root (design review,
-# UX review, panel review all write there by default). They show real
-# manuscript content, so they are local-only under D-007 — the same
+# Review-session screenshots land at the repo root by default. They
+# show real manuscript content, so they are local-only under D-007 — the same
 # reason *.pdf is ignored above. Root-anchored so committed UI assets
 # under frontend/public/ are unaffected. Found untracked AND
 # un-ignored by the 2026-08-16 whole-product audit (Track C, C20):

@@ -329,17 +329,9 @@ the current release. This software-release scope decision does not waive any
 independent adviser or institutional methodology requirement for the capstone
 manuscript.
 
-### 7.5 Production responsive-browser verification
+### 7.5 Production cold-start observation
 
-**Historical evidence only:** mobile verification was retired from current
-acceptance requirements. The former scheduled workflow has been removed, and
-the archived production journey refuses execution. Desktop/laptop keyboard,
-focus, contrast, zoom and resizable-window checks remain current requirements.
-
-- On 2026-09-25, the checked-in production-safe gate passed the named instructor review journey at `320×480` and `390×844` using touch-enabled Chromium emulation against the exact production frontend build. This is same-team Repeatable evidence for that bounded journey.
-- This result does not establish behavior on physical iOS or Android hardware, Safari or Firefox, browser chrome, virtual keyboards, native file pickers or cameras, device safe areas, mobile-network conditions, or mobile assistive technologies.
-- The production account and data used by this gate must be synthetic. Share-token and cross-corpus reuse reads are privacy-neutralized and excluded from the tested claim.
-- A separate genuine Render idle-window observation on 2026-09-25 showed the public page progress from sign-in checking, to the delayed free-server message, to the successful anonymous landing page. The cold session request completed in 73.358 seconds and an immediate warm repeat in 0.273 seconds. This is one operational observation, not a latency guarantee or SLA.
+- A genuine Render idle-window observation on 2026-09-25 showed the public page progress from sign-in checking, to the delayed free-server message, to the successful anonymous landing page. The cold session request completed in 73.358 seconds and an immediate warm repeat in 0.273 seconds. This is one operational observation, not a latency guarantee or SLA.
 
 ---
 
