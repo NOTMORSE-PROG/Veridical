@@ -10,6 +10,7 @@ from importlib.metadata import version
 _STARTED = time.monotonic()
 
 import numpy as np  # noqa: E402
+import pysprite  # noqa: E402,F401
 
 from app.checks.forensics.grim import sprite_check  # noqa: E402
 

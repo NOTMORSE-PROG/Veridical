@@ -32,8 +32,6 @@ from dataclasses import dataclass, field
 from decimal import Decimal
 from fractions import Fraction
 
-import pysprite
-
 _DUST = 1e-10  # rsprite2's `rSprite.dust` — floating-point tolerance
 
 
@@ -195,6 +193,8 @@ def sprite_check(
     the way GRIM/GRIMMER's closed-form checks are; `init_method`/
     `max_iter` are exposed (not hardcoded) so a caller can widen the
     search rather than accept a false negative silently."""
+    import pysprite
+
     try:
         sprite = pysprite.Sprite(
             n=n,

@@ -135,7 +135,7 @@ def test_sprite_success_path_wraps_pysprite_output_correctly():
     import numpy as np
 
     fake_distribution = np.array([1, 2, 2, 3, 3, 3, 4, 4, 5])
-    with patch("app.checks.forensics.grim.pysprite.Sprite") as mock_sprite_cls:
+    with patch("pysprite.Sprite") as mock_sprite_cls:
         mock_sprite_cls.return_value.find_possible_distribution.return_value = (
             "Success",
             fake_distribution,

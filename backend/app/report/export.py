@@ -38,7 +38,6 @@ from xml.sax.saxutils import escape
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import ParagraphStyle
-from reportlab.lib.utils import ImageReader
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfgen.canvas import Canvas
 from reportlab.platypus import (
@@ -70,7 +69,7 @@ from app.report.schemas import (
 )
 from app.report.source_coverage import project_source_coverage
 from app.report.source_inventory import NativeSourceNote, group_native_source_notes
-from app.report.source_print import source_evidence_flowables
+from app.report.source_print import source_evidence_flowables, source_image_size, source_image_store
 from app.report.statistical_scope import statistical_scope_copy
 from app.report.text import Paragraph, clusters, draw_right_text, register_fonts, text_width
 
@@ -943,6 +942,7 @@ def _page_evidence_flowables(
     content_width: float,
     styles: dict[str, ParagraphStyle],
     dpi: int,
+    image_path=None,
 ) -> list:
     """V-070: the flag's own rendered submitted page, laid out under its
     excerpt. `image` is None only when this flag was never assessed by
@@ -968,15 +968,7 @@ def _page_evidence_flowables(
         )
         return [Spacer(1, 2), Paragraph(escape(image.reason or ""), no_image_style)]
 
-    # `ImageReader` is used ONLY to read the pixel dimensions -- reportlab's
-    # `Image` flowable, given an `ImageReader` directly, checks for a
-    # `.read` attribute to decide whether its argument is file-like and,
-    # finding none, falls through to `os.path.splitext(filename)` on the
-    # `ImageReader` OBJECT ITSELF and crashes (`TypeError: expected str,
-    # bytes or os.PathLike object, not ImageReader` -- reproduced live,
-    # reportlab 5.0.0). A plain `BytesIO` has `.read` and takes the
-    # file-like branch instead, so `Image` below gets its own fresh one.
-    native_w_px, native_h_px = ImageReader(BytesIO(image.image_png)).getSize()
+    native_w_px, native_h_px = source_image_size(image.image_png)
     # The raster was rendered at `dpi`; converting back to points (72/inch)
     # gives the image's real physical size, which is then scaled DOWN only
     # (never up past its native resolution) to fit the content column and
@@ -997,7 +989,12 @@ def _page_evidence_flowables(
 
     return [
         Spacer(1, 4),
-        Image(BytesIO(image.image_png), width=native_w * scale, height=native_h * scale),
+        Image(
+            image_path(image.image_png) if image_path else BytesIO(image.image_png),
+            lazy=2,
+            width=native_w * scale,
+            height=native_h * scale,
+        ),
         Spacer(1, 2),
         Paragraph(escape(caption), styles["caption"]),
     ]
@@ -1078,6 +1075,13 @@ def source_image_settings_for(report, settings):
 
 
 def build_report_pdf(data: ReportExportData) -> bytes:
+    # File-backed lazy images release their decoded RGB buffers after drawing.
+    # The owning build keeps every exact PNG available through all layout passes.
+    with source_image_store() as image_path:
+        return _build_report_pdf(data, image_path)
+
+
+def _build_report_pdf(data: ReportExportData, image_path) -> bytes:
     font = _presentation_font()
     styles = _styles(font)
     criterion_styles = {
@@ -1125,6 +1129,7 @@ def build_report_pdf(data: ReportExportData) -> bytes:
                 export_dpi,
                 _PRINT_LAYOUT,
                 frame_height=source_frame._aH,
+                image_path=image_path,
             )
         ]
 
@@ -2180,7 +2185,9 @@ def build_report_pdf(data: ReportExportData) -> bytes:
                     page_image is None or page_image.reason_code != "docx_layout"
                 ):
                     finding.extend(
-                        _page_evidence_flowables(page_image, content_width, styles, export_dpi)
+                        _page_evidence_flowables(
+                            page_image, content_width, styles, export_dpi, image_path
+                        )
                     )
                 # Split long evidence/reasoning instead of hiding or truncating
                 # it; every continuation retains the finding and source identity.

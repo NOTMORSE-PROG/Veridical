@@ -1,9 +1,13 @@
 """F8 print-adapted evidence blocks; long quotations split, image identity stays."""
 
+from contextlib import contextmanager
+from hashlib import sha256
 from io import BytesIO
+from pathlib import Path
+from tempfile import TemporaryDirectory
 from xml.sax.saxutils import escape
 
-from reportlab.lib.utils import ImageReader
+from PIL import Image as PillowImage
 from reportlab.platypus import Image, Spacer, Table, TableStyle
 
 from app.report.evidence_captions import (
@@ -14,6 +18,29 @@ from app.report.evidence_captions import (
 )
 from app.report.page_image_disclosure import PageImageUnavailable
 from app.report.text import Paragraph
+
+
+@contextmanager
+def source_image_store():
+    """Keep exact encoded images until the complete PDF build has finished."""
+    with TemporaryDirectory(prefix="veridical-report-") as directory:
+        paths = {}
+
+        def path_for(encoded):
+            digest = sha256(encoded).hexdigest()
+            if digest not in paths:
+                path = Path(directory) / f"{digest}.png"
+                path.write_bytes(encoded)
+                paths[digest] = str(path)
+            return paths[digest]
+
+        yield path_for
+
+
+def source_image_size(encoded):
+    # Inspect the header without retaining a decoded bitmap in the story.
+    with PillowImage.open(BytesIO(encoded)) as image:
+        return image.size
 
 
 def source_identity(criterion_id, flag_id, role, index):
@@ -82,7 +109,7 @@ def _atomic_source_group(parts, width):
 
 
 def source_evidence_flowables(
-    entry, width, styles, dpi, layout, *, include_quote=True, frame_height=None
+    entry, width, styles, dpi, layout, *, include_quote=True, frame_height=None, image_path=None
 ):
     identity = source_identity(entry.criterion_id, entry.flag_id, entry.role, entry.index)
     title = Paragraph(escape(identity), styles["body_bold"])
@@ -112,7 +139,7 @@ def source_evidence_flowables(
         parts.append(Spacer(1, layout["source_entry_gap"]))
         return parts
 
-    native_width, native_height = ImageReader(BytesIO(entry.image.image_png)).getSize()
+    native_width, native_height = source_image_size(entry.image.image_png)
     native_width *= 72 / dpi
     native_height *= 72 / dpi
     maximum_height = entry.max_print_height
@@ -128,7 +155,8 @@ def source_evidence_flowables(
     group = _atomic_source_group(
         [
             Image(
-                BytesIO(entry.image.image_png),
+                image_path(entry.image.image_png) if image_path else BytesIO(entry.image.image_png),
+                lazy=2,
                 width=native_width * scale,
                 height=native_height * scale,
             ),
