@@ -8992,11 +8992,16 @@
   .signal-upload-background__format { display: grid; gap: var(--signal-space-2); }
   .signal-upload-background__format label { font-weight: 600; }
   /* BUG-516: findings on the pages an automatic grade quoted, and what that means. */
+  /* An inset panel, so its button reads as part of the note and sits clear
+     of the card's own Change grade below it. */
   .signal-related-findings {
     display: grid;
     gap: var(--signal-space-2);
-    border-inline-start: var(--signal-border-emphasis) solid var(--color-signal-border-strong);
-    padding-inline-start: var(--signal-space-3);
+    margin-block: var(--signal-space-1) var(--signal-space-3);
+    border: var(--signal-border-hairline) solid var(--color-signal-border);
+    border-radius: var(--signal-radius-control);
+    background: var(--color-signal-surface-muted);
+    padding: var(--signal-space-3);
   }
   .signal-related-findings p { margin: 0; color: var(--color-signal-ink-secondary); }
   .signal-related-findings > .signal-button { justify-self: start; }
@@ -9015,4 +9020,14 @@
   /* Change grade sits at the same height in every card of a row. */
   #record-panel-grades .signal-result-card > .signal-judgment-tools,
   .signal-result-list > .signal-result-card > .signal-judgment-tools { margin-block-start: auto; }
+  /* A link in running text looks like a link: link colour and an underline.
+     Styled links (buttons, navigation, tabs) carry a class and keep their own look. */
+  .signal-theme main :is(p, li, dd, td, blockquote, figcaption, .signal-field-hint) > a:not([class]),
+  .signal-citation-source-links a {
+    color: var(--color-signal-link);
+    text-decoration: underline;
+    text-underline-offset: var(--signal-link-underline-offset);
+  }
+  .signal-theme main :is(p, li, dd, td, blockquote, figcaption, .signal-field-hint) > a:not([class]):hover,
+  .signal-citation-source-links a:hover { color: var(--color-signal-link-hover); }
 }
