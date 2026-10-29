@@ -613,6 +613,8 @@ class Settings(BaseSettings):
     # Most findings one bulk confirm/dismiss may change (V-089). Each gets
     # its own audit entry inside one transaction, so this bounds that work.
     flag_bulk_resolve_max_flags: int = Field(default=200, gt=0)
+    # The batch note/reason is copied to each finding and audit entry.
+    flag_bulk_resolve_max_text_chars: int = Field(default=2000, gt=0)
 
     # --- Auth (V-014, F9.1) ---------------------------------------------------
     session_cookie_name: str = "veridical_session"

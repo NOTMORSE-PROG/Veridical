@@ -592,14 +592,15 @@ async def bulk_resolve_flags(
                 "Some selected findings are not part of this check. Nothing was changed. "
                 "Reload the findings and select again."
             )
-        if action == "confirm":
-            cleared = sum(1 for flag, _ in found.values() if flag.confirmed_citation_source)
-            if cleared:
-                raise ConflictError(
-                    f"{cleared} of the selected findings were cleared by confirming their "
-                    "citation source and cannot also be confirmed as issues. Nothing was "
-                    "changed. Remove them from the selection and try again."
-                )
+        # A source confirmation's recorded reason is the verification itself;
+        # a shared batch note or reason must not replace it.
+        cleared = sum(1 for flag, _ in found.values() if flag.confirmed_citation_source)
+        if cleared:
+            raise ConflictError(
+                f"{cleared} of the selected findings were cleared by confirming their "
+                "citation source, and their recorded verification would be replaced. "
+                "Nothing was changed. Remove them from the selection and try again."
+            )
         confirmed_at = datetime.now(UTC)
         for flag_id in ids:
             flag, result = found[flag_id]

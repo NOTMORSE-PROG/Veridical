@@ -478,18 +478,50 @@ def test_stale_revision_is_409_and_changes_nothing(seeded, api_scratch_url):
     _assert_nothing_changed(client, api_scratch_url, ids, revision)
 
 
-def test_confirming_a_source_confirmed_finding_refuses_the_whole_batch(seeded, api_scratch_url):
+@pytest.mark.parametrize(
+    "text", [{"action": "confirm"}, {"action": "dismiss", "reason": "Select-all cleanup."}]
+)
+def test_a_source_confirmed_finding_refuses_the_whole_batch(seeded, api_scratch_url, text):
+    """Its recorded reason is the source verification; a batch must not replace it."""
     client, ids = seeded
     revision = _revision(client, ids["run"])
     response = _post(
         client,
         ids["run"],
-        action="confirm",
         flag_ids=[ids["open_high"], ids["source_confirmed"], ids["open_med"]],
         expected_revision=revision,
+        **text,
     )
     assert response.status_code == 409
     assert "1 of the selected findings" in response.text
+    _assert_nothing_changed(client, api_scratch_url, ids, revision)
+    kept = _flag_rows(api_scratch_url, [ids["source_confirmed"]])[ids["source_confirmed"]]
+    assert kept["override_reason"] == "Found in the library."
+    assert kept["confirmed_citation_source"] is True
+
+
+def test_a_failure_after_findings_changed_rolls_everything_back(
+    seeded, api_scratch_url, monkeypatch
+):
+    import app.flags.service as flag_service
+
+    client, ids = seeded
+    revision = _revision(client, ids["run"])
+
+    async def failing(*args, **kwargs):
+        raise RuntimeError("rescore failed")
+
+    monkeypatch.setattr(flag_service, "aggregate_and_score", failing)
+    with pytest.raises(RuntimeError, match="rescore failed"):
+        _post(
+            client,
+            ids["run"],
+            action="dismiss",
+            flag_ids=[ids["open_high"], ids["open_med"]],
+            expected_revision=revision,
+            reason="Not an issue.",
+        )
+    monkeypatch.undo()
     _assert_nothing_changed(client, api_scratch_url, ids, revision)
 
 
@@ -532,6 +564,14 @@ def test_a_decided_report_refuses_bulk_changes(seeded, api_scratch_url):
         {"action": "accept", "flag_ids": [1]},
         {"action": "confirm", "flag_ids": [1], "expected_revision": "0"},
         {"action": "confirm", "flag_ids": [1], "surprise": True},
+        {"action": "confirm", "flag_ids": [True]},
+        {"action": "confirm", "flag_ids": ["1"]},
+        {"action": "confirm", "flag_ids": [1.0]},
+        {"action": "confirm", "flag_ids": [0]},
+        {"action": "confirm", "flag_ids": [-1]},
+        {"action": "confirm", "flag_ids": [2**63]},
+        {"action": "confirm", "flag_ids": [1], "note": "x" * 2001},
+        {"action": "dismiss", "flag_ids": [1], "reason": "x" * 2001},
     ],
     ids=[
         "empty",
@@ -542,6 +582,14 @@ def test_a_decided_report_refuses_bulk_changes(seeded, api_scratch_url):
         "unknown-action",
         "string-revision",
         "unknown-field",
+        "bool-id",
+        "string-id",
+        "float-id",
+        "zero-id",
+        "negative-id",
+        "id-beyond-bigint",
+        "note-too-long",
+        "reason-too-long",
     ],
 )
 def test_malformed_requests_are_422(seeded, api_scratch_url, body):
@@ -562,12 +610,32 @@ def test_more_than_the_configured_maximum_is_422(seeded, api_scratch_url, monkey
     )
     assert too_many.status_code == 422
     assert "at most 2" in too_many.text
-    # Duplicates count once against the limit.
-    at_limit = _post(
+    # The list as sent is bounded too, duplicates included.
+    repeated = _post(
         client,
         ids["run"],
         action="confirm",
         flag_ids=[ids["open_high"], ids["open_med"], ids["open_high"]],
         expected_revision=revision,
     )
+    assert repeated.status_code == 422
+    at_limit = _post(
+        client,
+        ids["run"],
+        action="confirm",
+        flag_ids=[ids["open_high"], ids["open_med"]],
+        expected_revision=revision,
+    )
     assert at_limit.status_code == 200, at_limit.text
+
+
+def test_the_text_limit_comes_from_config(seeded, api_scratch_url, monkeypatch):
+    client, ids = seeded
+    monkeypatch.setenv("FLAG_BULK_RESOLVE_MAX_TEXT_CHARS", "10")
+    get_settings.cache_clear()
+    revision = _revision(client, ids["run"])
+    body = {"action": "confirm", "flag_ids": [ids["open_high"]], "expected_revision": revision}
+    too_long = _post(client, ids["run"], **body, note="eleven char")
+    assert too_long.status_code == 422
+    assert "10 characters" in too_long.text
+    assert _post(client, ids["run"], **body, note="  ten chars  ").status_code == 200

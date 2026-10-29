@@ -1,7 +1,7 @@
 """Flag evidence/annotation/override HTTP contract (F8.2/F8.4, screen 4i)."""
 
 from datetime import datetime
-from typing import Literal
+from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, HttpUrl, field_validator, model_validator
 
@@ -270,6 +270,10 @@ class ConfirmCitationSourceOut(FlagOut):
     report: ReportOut
 
 
+# Largest BIGINT identity value; anything above can never name a row.
+_MAX_ID = 2**63 - 1
+
+
 class BulkResolveFlagsIn(BaseModel):
     """V-089: one confirm or dismiss for many findings of one check run.
 
@@ -281,22 +285,38 @@ class BulkResolveFlagsIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     action: Literal["confirm", "dismiss"]
-    flag_ids: list[int] = Field(min_length=1)
+    # Strict: `true` or "5" must never select a real finding. Ids are BIGINT.
+    flag_ids: list[Annotated[int, Field(strict=True, gt=0, le=_MAX_ID)]] = Field(min_length=1)
     expected_revision: int = Field(strict=True, ge=0)
     # Confirm: optional, blank stored as no note (as `ConfirmFindingIn`).
     note: str | None = None
     # Dismiss: required, as `OverrideFlagIn`, and never whitespace only.
     reason: str | None = None
 
+    @field_validator("flag_ids", mode="before")
+    @classmethod
+    def _bounded_request(cls, value):
+        # Checked before each item is parsed. Duplicates are allowed but the
+        # list as sent may not be longer than the limit either.
+        limit = get_settings().flag_bulk_resolve_max_flags
+        if isinstance(value, list) and len(value) > limit:
+            raise ValueError(f"select at most {limit} findings at a time")
+        return value
+
     @field_validator("flag_ids")
     @classmethod
-    def _bounded_batch(cls, value: list[int]) -> list[int]:
+    def _unique(cls, value: list[int]) -> list[int]:
         # Duplicates name one finding twice; it is changed and audited once.
-        unique = list(dict.fromkeys(value))
-        limit = get_settings().flag_bulk_resolve_max_flags
-        if len(unique) > limit:
-            raise ValueError(f"select at most {limit} findings at a time")
-        return unique
+        return list(dict.fromkeys(value))
+
+    @field_validator("note", "reason")
+    @classmethod
+    def _bounded_text(cls, value: str | None) -> str | None:
+        # Copied to every finding and audit entry of the batch.
+        limit = get_settings().flag_bulk_resolve_max_text_chars
+        if value is not None and len(value.strip()) > limit:
+            raise ValueError(f"keep the note or reason to {limit} characters")
+        return value
 
     @model_validator(mode="after")
     def _text_matches_action(self):
