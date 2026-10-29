@@ -662,8 +662,6 @@ export interface PaginatedAuditLog {
 }
 
 export interface EscalatedItemOut {
-  // Why quoted evidence was not accepted (evidence_already_used, evidence_not_located).
-  reason_codes?: string[] | null;
   assessment_revision?: number | null;
   check_result_id: number;
   criterion_id: number;
