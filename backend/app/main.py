@@ -204,7 +204,9 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
             name="pipeline-scheduler",
         )
         if settings.direct_manuscript_upload_enabled:
-            upload_task = asyncio.create_task(upload_worker_loop(), name="upload-scheduler")
+            upload_task = asyncio.create_task(
+                upload_worker_loop(wake_pipeline=wake_event.set), name="upload-scheduler"
+            )
         yield
     finally:
         retiring = begin_preparation_shutdown(preparation_handle)

@@ -26,9 +26,8 @@ class UploadAttempt(Base):
     multipart_part_bytes: Mapped[int | None] = mapped_column(BigInteger)
     # V-090: a background upload may ask the server to start its check once
     # the manuscript is ready; the outcome is kept on the attempt.
-    start_rubric_id: Mapped[int | None] = mapped_column(
-        BigInteger, ForeignKey("rubric.id", ondelete="SET NULL")
-    )
+    # Plain data: deleting the rubric must not erase the request.
+    start_rubric_id: Mapped[int | None] = mapped_column(BigInteger)
     check_run_id: Mapped[int | None] = mapped_column(
         BigInteger, ForeignKey("check_run.id", ondelete="SET NULL")
     )

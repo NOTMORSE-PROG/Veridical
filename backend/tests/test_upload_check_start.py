@@ -132,8 +132,8 @@ def test_a_rubric_that_cannot_run_is_refused_before_any_byte_moves(wired):  # no
 
 @live
 def test_resuming_an_attempt_skips_its_check_request(wired):  # noqa: F811 -- imported pytest fixtures
-    # The start-check block (rate limit and rubric refusal) runs only when an
-    # attempt is created; the old placement refused this resume with 409.
+    # The check request (rate limit and rubric refusal) belongs to the
+    # attempt's creation; resuming the attempt leaves it as it was.
     rubric_id = _rubric(wired)
     tc = wired.client("relay")
     data = b"%PDF-1.7 small"
@@ -210,7 +210,8 @@ def test_the_tray_lists_active_and_recent_uploads_for_this_instructor_only(wired
                         filename="someone-else.pdf",
                         source_bytes=10,
                         staging_key=f"upload_staging/{uuid4()}",
-                        status="queued",
+                        # Finished, so no later test's worker run picks it up.
+                        status="failed",
                         expires_at=datetime.now(UTC) + timedelta(hours=1),
                     )
                 )
@@ -225,3 +226,103 @@ def test_the_tray_lists_active_and_recent_uploads_for_this_instructor_only(wired
     assert [item["attempt_id"] for item in listed.json()] == [finished, pending]
     assert [item["status"] for item in listed.json()] == ["failed", "pending"]
     assert listed.json()[0]["error"] == "Document processing could not finish."
+
+
+def _delete_rubric(stack, rubric_id):
+    from sqlalchemy import delete
+
+    from app.models.rubric import Rubric
+
+    async def remove():
+        stack.db._engine = None
+        try:
+            async with stack.db.get_session_factory()() as session:
+                await session.execute(delete(Rubric).where(Rubric.id == rubric_id))
+                await session.commit()
+        finally:
+            await stack.db.get_engine().dispose()
+            stack.db._engine = None
+
+    asyncio.run(remove())
+
+
+def _prepared_upload(wired, rubric_id):  # noqa: F811 -- imported pytest fixtures
+    tc = wired.client("relay")
+    data = _noise_pdf(6)
+    state = _begin(tc, wired, data, start_check={"rubric_id": rubric_id}).json()
+    assert state["check_requested"] is True
+    _send(tc, state["attempt_id"], data)
+    tc.__exit__(None, None, None)
+    return state["attempt_id"]
+
+
+@live
+def test_a_deleted_rubric_is_recorded_as_the_reason_not_dropped(wired):  # noqa: F811 -- imported pytest fixtures
+    rubric_id = _rubric(wired)
+    attempt_id = _prepared_upload(wired, rubric_id)
+    _delete_rubric(wired, rubric_id)
+    assert _process(wired) is True
+    attempt, manuscript = _attempt(wired, attempt_id)
+    assert attempt.status == "done", attempt.error
+    assert attempt.start_rubric_id == rubric_id
+    assert attempt.check_run_id is None
+    assert attempt.check_start_error == f"No rubric with id {rubric_id}."
+
+
+@live
+def test_an_unexpected_error_after_the_check_committed_still_links_it(wired, monkeypatch):  # noqa: F811 -- imported pytest fixtures
+    import app.ingest.upload_worker as upload_worker
+
+    real = upload_worker.create_check_run
+
+    async def commits_then_fails(*args, **kwargs):
+        await real(*args, **kwargs)
+        raise RuntimeError("connection dropped after commit")
+
+    monkeypatch.setattr(upload_worker, "create_check_run", commits_then_fails)
+    rubric_id = _rubric(wired)
+    attempt_id = _prepared_upload(wired, rubric_id)
+    assert _process(wired) is True
+    attempt, manuscript = _attempt(wired, attempt_id)
+    runs = _run_rows(wired, manuscript.id)
+    assert attempt.status == "done", attempt.error
+    assert len(runs) == 1 and attempt.check_run_id == runs[0].id
+    assert attempt.check_start_error is None
+
+
+@live
+def test_an_unexpected_error_before_the_check_keeps_the_upload_done(wired, monkeypatch):  # noqa: F811 -- imported pytest fixtures
+    import app.ingest.upload_worker as upload_worker
+
+    async def fails(*args, **kwargs):
+        raise RuntimeError("connection dropped")
+
+    monkeypatch.setattr(upload_worker, "create_check_run", fails)
+    rubric_id = _rubric(wired)
+    attempt_id = _prepared_upload(wired, rubric_id)
+    assert _process(wired) is True
+    attempt, manuscript = _attempt(wired, attempt_id)
+    assert attempt.status == "done", attempt.error
+    assert manuscript.ingest_status.value == "done"
+    assert attempt.check_run_id is None
+    assert attempt.check_start_error == upload_worker.CHECK_NOT_STARTED
+
+
+@live
+def test_a_started_check_wakes_the_scheduler(wired):  # noqa: F811 -- imported pytest fixtures
+    from app.ingest.upload_worker import process_next_upload
+
+    rubric_id = _rubric(wired)
+    _prepared_upload(wired, rubric_id)
+    woken = []
+
+    async def run():
+        wired.db._engine = None
+        try:
+            return await process_next_upload(get_settings(), lambda: woken.append(True))
+        finally:
+            await wired.db.get_engine().dispose()
+            wired.db._engine = None
+
+    assert asyncio.run(run()) is True
+    assert woken == [True]

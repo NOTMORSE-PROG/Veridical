@@ -324,6 +324,7 @@ def status_response(attempt):
         "filename": attempt.filename,
         "size": attempt.source_bytes,
         "created_at": attempt.created_at.isoformat() if attempt.created_at else None,
+        "check_requested": attempt.start_rubric_id is not None,
         "check_run_id": attempt.check_run_id,
         "check_start_error": attempt.check_start_error,
         # Preparation does not report page-level progress yet; never invented.

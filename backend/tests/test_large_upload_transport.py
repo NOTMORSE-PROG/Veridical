@@ -622,7 +622,7 @@ def wired(scratch_url, tmp_path, monkeypatch):
 
     monkeypatch.setattr(compute_client.httpx, "post", helper)
 
-    async def idle_upload_worker():
+    async def idle_upload_worker(**_):
         await asyncio.Event().wait()
 
     # Each test drives the worker itself.

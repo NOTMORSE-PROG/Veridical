@@ -15,12 +15,9 @@ depends_on = None
 
 
 def upgrade():
-    op.add_column(
-        "upload_attempt",
-        sa.Column(
-            "start_rubric_id", sa.BigInteger(), sa.ForeignKey("rubric.id", ondelete="SET NULL")
-        ),
-    )
+    # Plain data, not a foreign key: deleting the rubric must not erase the
+    # request; the worker then records why the check could not start.
+    op.add_column("upload_attempt", sa.Column("start_rubric_id", sa.BigInteger()))
     op.add_column(
         "upload_attempt",
         sa.Column(
