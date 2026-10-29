@@ -116,6 +116,11 @@ def _capability_failure(batch, criterion, detail):
             "Review the criterion and its performance level directly; no automatic grade "
             "was assigned."
         ),
+        # Shown beside a grade the "decide" policy keeps.
+        "caution": (
+            "The rating also depends on " + " and ".join(requirements) + ", which quoted "
+            "passages cannot show. Check that yourself before relying on this grade."
+        ),
         "scope_guard": "independent_assessment_required",
         "missing_capabilities": missing,
         "guarded_obligations": guarded,
@@ -138,7 +143,9 @@ def _scope_failure(batch, criterion, detail):
         return (
             "The submitted evidence consists only of a source identifier. An identifier can "
             "locate a source, but does not demonstrate this semantic criterion or performance "
-            "level. Review substantive manuscript evidence before assigning a level."
+            "level. Review substantive manuscript evidence before assigning a level.",
+            "The quoted evidence only identifies a source; it does not show this criterion. "
+            "Check the manuscript yourself before relying on this grade.",
         )
     requirements = criterion.text + "\n" + (getattr(criterion, "evidence", None) or "")
     level = match_level(criterion, detail["verdict"])
@@ -153,7 +160,12 @@ def _scope_failure(batch, criterion, detail):
         getattr(batch, "reference_context", None),
     )
     if body is None or references is None:
-        return "Source boundaries do not establish the body evidence required by this criterion."
+        return (
+            "Source boundaries do not establish the body evidence required by this criterion.",
+            "The manuscript body and reference list could not be told apart, so the body "
+            "evidence this criterion asks for was not established. Check the body yourself "
+            "before relying on this grade.",
+        )
 
     def normalize(value):
         return " ".join(value.split()).casefold()
@@ -166,7 +178,9 @@ def _scope_failure(batch, criterion, detail):
         return (
             "The criterion mentions in-text documentation, but its submitted quotes do not "
             "establish distinct manuscript-body evidence. Review the criterion's intended "
-            "scope and manuscript body before assigning a level."
+            "scope and manuscript body before assigning a level.",
+            "The criterion asks for evidence in the manuscript body, which the quoted "
+            "passages do not establish. Check the body yourself before relying on this grade.",
         )
     return None
 
@@ -285,7 +299,8 @@ async def check_support(
         if item.status == "supported" and scope_failure:
             results[criterion.id] = {
                 "status": "unsupported",
-                "reason": scope_failure,
+                "reason": scope_failure[0],
+                "caution": scope_failure[1],
                 "prompt_version": PROMPT_VERSION,
                 "source_scope": batch.label,
                 "scope_guard": "required_body_evidence_unconfirmed",
@@ -341,7 +356,7 @@ def apply_support(
         and support.get("failure_outcome") != ResultOutcome.api_down.value
         and outcome in (ResultOutcome.passed, ResultOutcome.failed)
     ):
-        updated["support_caution"] = support["reason"]
+        updated["support_caution"] = support.get("caution") or support["reason"]
         return outcome, updated
     if "verdict" in updated:
         updated["proposed_verdict"] = updated.pop("verdict")

@@ -19,8 +19,12 @@ _SKIP_FLOOR = int(os.environ.get("VERIDICAL_MAX_SKIPS", "5"))
 
 
 @pytest.fixture(autouse=True)
-def clean_settings_cache():
-    """Settings are lru_cached; tests that touch env vars need a fresh read."""
+def clean_settings_cache(monkeypatch):
+    """Settings are lru_cached; tests that touch env vars need a fresh read.
+
+    Tests run under the code's default grading policy, as CI does, even when a
+    developer's .env selects "decide"; tests of that policy set it themselves."""
+    monkeypatch.setenv("GRADING_DECISION_POLICY", "escalate")
     get_settings.cache_clear()
     yield
     get_settings.cache_clear()

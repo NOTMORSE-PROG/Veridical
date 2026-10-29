@@ -135,3 +135,18 @@ async def test_secondary_request_contains_only_owned_quotes_and_not_surrounding_
     assert "source_text" not in task and "source_coverage" not in task
     assert task["items"][0]["candidate_quotes"] == [QUOTE]
     assert task["source_obligation_policy"] == "source_obligations_v5_owned_quotes"
+
+
+def test_a_kept_grade_never_says_no_grade_was_assigned():
+    item = criterion()
+    item.text = "The publications are peer-reviewed"
+    batch = SimpleNamespace(scope_patterns_file=None, label="whole document")
+    support = _capability_failure(batch, item, {"verdict": item.levels[1]["name"]})
+    assert "no automatic grade was assigned" in support["reason"]
+    detail = {"verdict": item.levels[1]["name"], "reasoning": "r"}
+    outcome, kept = apply_support(ResultOutcome.passed, detail, support, decide=True)
+    assert outcome == ResultOutcome.passed
+    assert "independent verification of external properties" in kept["support_caution"]
+    assert "no automatic grade" not in kept["support_caution"]
+    outcome, withheld = apply_support(ResultOutcome.passed, detail, support, decide=False)
+    assert outcome == ResultOutcome.escalated and withheld["reason"] == support["reason"]
