@@ -393,7 +393,7 @@ def test_bulk_and_single_confirm_write_the_same_flag_state_and_audit_shape(seede
         assert one[key] == many[key]
     single_row, bulk_row = _resolution_audit(api_scratch_url)
     assert single_row["event_type"] == bulk_row["event_type"] == "flag_finding_confirmed"
-    assert set(bulk_row) - set(single_row) == {"batch_id"}
+    assert set(bulk_row) - set(single_row) == {"batch_id", "batch_selected_count"}
     assert "batch_id" not in single_row
 
 
@@ -516,26 +516,79 @@ def test_stale_revision_is_409_and_changes_nothing(seeded, api_scratch_url):
     _assert_nothing_changed(client, api_scratch_url, ids, revision)
 
 
-@pytest.mark.parametrize(
-    "text", [{"action": "confirm"}, {"action": "dismiss", "reason": "Select-all cleanup."}]
-)
-def test_a_source_confirmed_finding_refuses_the_whole_batch(seeded, api_scratch_url, text):
-    """Its recorded reason is the source verification; a batch must not replace it."""
+def test_confirming_a_source_confirmed_finding_refuses_the_whole_batch(seeded, api_scratch_url):
+    """Confirming would clear its recorded reason, the source verification."""
     client, ids = seeded
     revision = _revision(client, ids["run"])
     response = _post(
         client,
         ids["run"],
+        action="confirm",
         flag_ids=[ids["open_high"], ids["source_confirmed"], ids["open_med"]],
         expected_revision=revision,
-        **text,
     )
     assert response.status_code == 409
     assert "1 of the selected findings" in response.text
     _assert_nothing_changed(client, api_scratch_url, ids, revision)
+
+
+def test_dismissing_leaves_a_source_confirmed_finding_unchanged(seeded, api_scratch_url):
+    client, ids = seeded
+    response = _post(
+        client,
+        ids["run"],
+        action="dismiss",
+        flag_ids=[ids["open_high"], ids["source_confirmed"]],
+        expected_revision=_revision(client, ids["run"]),
+        reason="Select-all cleanup.",
+        unopened_count=2,
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()["unchanged_ids"] == [ids["source_confirmed"]]
     kept = _flag_rows(api_scratch_url, [ids["source_confirmed"]])[ids["source_confirmed"]]
     assert kept["override_reason"] == "Found in the library."
     assert kept["confirmed_citation_source"] is True
+    (row,) = _resolution_audit(api_scratch_url)
+    assert row["flag_id"] == ids["open_high"]
+    # The unopened count is read against the whole selection, skipped included.
+    assert row["batch_selected_count"] == 2
+    assert row["client_reported_unopened_count"] == 2
+
+
+def test_nothing_to_change_after_a_concurrent_change_is_409(seeded, api_scratch_url, monkeypatch):
+    """The unchanged judgment was made at the sent revision; if another change
+    lands before the response is read, the instructor must reload."""
+    from sqlalchemy import select
+
+    import app.flags.service as flag_service
+    from app.models.run import Flag, ReadinessReport
+
+    client, ids = seeded
+    run = ids["run"]
+    revision = _revision(client, run)
+    real = flag_service.get_report
+
+    async def concurrent_dismissal(session):
+        flag = await session.get(Flag, ids["confirmed"])
+        flag.overridden, flag.override_reason = True, "Concurrent dismissal."
+        flag.finding_confirmed = False
+        report = await session.scalar(
+            select(ReadinessReport).where(ReadinessReport.check_run_id == run)
+        )
+        report.assessment_revision += 1
+        await session.commit()
+
+    async def racing(session, check_run_id, instructor_id):
+        await _with_session(api_scratch_url, concurrent_dismissal)
+        return await real(session, check_run_id, instructor_id)
+
+    monkeypatch.setattr(flag_service, "get_report", racing)
+    response = _post(
+        client, run, action="confirm", flag_ids=[ids["confirmed"]], expected_revision=revision
+    )
+    assert response.status_code == 409
+    assert "changed after you reviewed it" in response.text
+    assert _resolution_audit(api_scratch_url) == []
 
 
 def test_a_failure_after_findings_changed_rolls_everything_back(

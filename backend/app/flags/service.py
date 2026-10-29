@@ -583,7 +583,7 @@ async def bulk_resolve_flags(
     if action == "dismiss" and not (reason or "").strip():
         raise ConflictError("A reason is required to dismiss findings.")
     batch_id = uuid4().hex
-    batch = {"batch_id": batch_id}
+    batch = {"batch_id": batch_id, "batch_selected_count": len(ids)}
     if unopened_count is not None:
         # As counted by the reviewer's screen, not measured here.
         batch["client_reported_unopened_count"] = unopened_count
@@ -611,14 +611,15 @@ async def bulk_resolve_flags(
                     "Some selected findings are not part of this check. Nothing was changed. "
                     "Reload the findings and select again."
                 )
-            # A source confirmation's recorded reason is the verification
-            # itself; a shared batch note or reason must not replace it.
+            # Confirming would clear a source confirmation's recorded reason,
+            # which is the verification itself. (A dismiss leaves it unchanged:
+            # it is already dismissed, so it is skipped below.)
             cleared = sum(1 for flag, _ in found.values() if flag.confirmed_citation_source)
-            if cleared:
+            if action == "confirm" and cleared:
                 raise ConflictError(
                     f"{cleared} of the selected findings were cleared by confirming their "
-                    "citation source, and their recorded verification would be replaced. "
-                    "Nothing was changed. Remove them from the selection and try again."
+                    "citation source and cannot also be confirmed as issues. Nothing was "
+                    "changed. Remove them from the selection and try again."
                 )
             unchanged = [i for i in ids if _already_resolved(found[i][0], action)]
             to_change = [i for i in ids if i not in set(unchanged)]
@@ -663,11 +664,14 @@ async def bulk_resolve_flags(
                 batch_id=batch_id,
             )
     except _NothingToChange:
-        # Rolled back: no revision bump, no rescore, no audit entry.
-        return BulkResolveFlagsOut(
-            flags=[],
-            unchanged_ids=ids,
-            report=await get_report(session, check_run_id, instructor_id),
-            batch_id=None,
-        )
+        # Rolled back: no revision bump, no rescore, no audit entry. The lock is
+        # released now, so the report is only shown if nothing changed since
+        # the selection was judged; otherwise the instructor must reload.
+        report_out = await get_report(session, check_run_id, instructor_id)
+        if report_out.assessment_revision != expected_revision:
+            raise ConflictError(
+                "This assessment changed after you reviewed it. Nothing was changed. "
+                "Reload the current assessment and review your selection again."
+            ) from None
+        return BulkResolveFlagsOut(flags=[], unchanged_ids=ids, report=report_out, batch_id=None)
     return out
