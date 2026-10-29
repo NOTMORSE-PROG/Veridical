@@ -668,6 +668,8 @@ async def bulk_resolve_flags(
         # released now, so the report is only shown if nothing changed since
         # the selection was judged; otherwise the instructor must reload.
         report_out = await get_report(session, check_run_id, instructor_id)
+        # Release the report's share lock before the caller reads source files.
+        await session.rollback()
         if report_out.assessment_revision != expected_revision:
             raise ConflictError(
                 "This assessment changed after you reviewed it. Nothing was changed. "
