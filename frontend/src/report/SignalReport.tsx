@@ -192,8 +192,7 @@ export function SignalReportPage() {
 
             <div className="signal-attached-flow signal-report-tools">
               <div className="signal-report-actions signal-control-cluster">
-                <ActionLink to={`/report/${report.check_run_id}/document`} variant="secondary">Open manuscript</ActionLink>
-                <ActionLink to={`/checks/${report.check_run_id}`} variant="secondary">View check progress</ActionLink>
+                <ActionLink to={`/report/${report.check_run_id}/document`} variant="secondary">Open manuscript review</ActionLink>
                 <ActionLink id={`${AUDIT_RETURN.actionPrefix}${id}`} to={auditDestination(id, location)} variant="secondary" onClick={event => {
                   if (event.defaultPrevented || event.button !== 0 || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
                   const origin = validAuditReviewOrigin(location.pathname + location.search + location.hash, id);
@@ -229,7 +228,7 @@ export function SignalReportPage() {
                 state="partial"
                 headingId="coverage-statement-heading"
                 heading="Assessment limits"
-                intro="Results cover only the checks that ran. Unchecked content is not treated as passed."
+                intro="Results cover only the checks that ran. Unchecked content is not treated as passed. Check these parts in the manuscript yourself before you decide."
                 items={limits}
               />
             </div>

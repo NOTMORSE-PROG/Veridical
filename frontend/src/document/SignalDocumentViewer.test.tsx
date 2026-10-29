@@ -615,9 +615,11 @@ describe("SignalDocumentViewerPage", () => {
     fireEvent.click(screen.getByRole("button", { name: "Review readiness and decision" }));
     expect(await screen.findByText(REPORT.reason as string)).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Final defense-readiness decision" })).toBeInTheDocument();
-    for (const link of screen.getAllByRole("link", { name: "Open full readiness report" })) {
+    for (const link of screen.getAllByRole("link", { name: "Open readiness report" })) {
       expect(link).toHaveAttribute("href", "/report/5");
     }
+    // One way to the report from this workspace, not one per panel.
+    expect(screen.getAllByRole("link", { name: /readiness report/ })).toHaveLength(1);
   });
 
   it("opens the manuscript first and preserves manual analysis tabs on narrow layouts", async () => {
@@ -703,7 +705,7 @@ describe("SignalDocumentViewerPage", () => {
     expect(document.querySelector("details.signal-document-recorded-reasoning")).not.toHaveAttribute("open");
     expect(screen.getByTestId("pdf-pane")).toHaveAttribute("data-selection", "111");
 
-    fireEvent.click(screen.getByRole("button", { name: "Back to review queue" }));
+    fireEvent.click(screen.getByRole("button", { name: "Back to findings list" }));
     expect(await screen.findByRole("heading", { name: "Integrity findings" })).toBeInTheDocument();
     await waitFor(() => expect(screen.getByRole("button", { name: /Finding 1.*High passage similarity/s })).toHaveFocus());
   });

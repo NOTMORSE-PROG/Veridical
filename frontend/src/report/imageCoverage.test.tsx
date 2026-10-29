@@ -31,7 +31,9 @@ describe("saved image assessment coverage", () => {
     expect(item.sources![0].label).toContain("Extracted paragraph 5");
     expect(item.sources![0].label).toContain("2 image occurrences");
     expect(item.sources![0].to).toBe("/report/12/document?anchor=paragraph%204&coverage=images");
-    expect(item.action?.label).toBe("Open the paper");
+    // The per-location links above are the way in; a generic link back to
+    // the same review screen only sent instructors where they already were.
+    expect(item.action).toBeUndefined();
   });
 
   it("does not call an unread-image manuscript qualitative or passed", () => {

@@ -71,7 +71,7 @@ describe("partial source coverage", () => {
     expect(row.subIssues?.join(" ")).toContain("3 reference checks attempted");
     expect(row.subIssues?.join(" ")).toContain("Claim support across the manuscript was not assessed");
     expect(row.subIssues?.join(" ")).not.toContain("24 pages");
-    expect(row.action?.to).toBe("/report/3/document?view=decision");
+    expect(row.action).toBeUndefined();
   });
 
   it("does not call extraction without a lookup a partial source verification", () => {

@@ -87,6 +87,17 @@ describe("Adversarial Challenge: Return for Revision & Unresolved Criteria Prese
     expect(target.hash).toBe("#review-criteria");
   });
 
+  it("stays on the current screen when the host already shows the unresolved criteria", () => {
+    const onReviewCriteria = vi.fn();
+    renderWithProviders(<SignalDecisionPanel report={BASE_REPORT} manuscriptLabel="Control" onReviewCriteria={onReviewCriteria} />, {
+      route: "/report/5/document?view=decision&pane=review",
+      path: "/report/:checkRunId/document",
+    });
+    expect(screen.queryByRole("link", { name: /Review unresolved criteria/ })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Review unresolved criteria" }));
+    expect(onReviewCriteria).toHaveBeenCalledOnce();
+  });
+
   afterEach(() => {
     vi.restoreAllMocks();
     vi.unstubAllGlobals();

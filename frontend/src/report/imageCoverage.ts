@@ -49,6 +49,5 @@ export function imageCoverageItem(status: IntegrityCheckStatusOut, checkRunId: n
       label: `${label} (${count} image ${count === 1 ? "occurrence" : "occurrences"})`,
       to: anchor === null ? null : `/report/${checkRunId}/document?anchor=${encodeURIComponent(anchor)}&coverage=images`,
     })),
-    action: { to: `/report/${checkRunId}/document?coverage=images`, label: "Open the paper" },
   };
 }

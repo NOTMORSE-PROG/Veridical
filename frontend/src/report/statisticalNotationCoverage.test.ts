@@ -11,13 +11,13 @@ const project = (status: IntegrityCheckStatusOut) => coverageItems({
 } as ReportOut);
 
 describe("statistical notation assessment limits", () => {
-  it.each(["partial", "unsupported"] as const)("directs %s notation to the original paper, not another run", (state) => {
+  it.each(["partial", "unsupported"] as const)("points %s notation to the manuscript without a self-link or another run", (state) => {
     const rows = project({ ...base, coverage_reason: "statistical_notation_unassessed",
       statistical_notation_unassessed: true, analysis_coverage: state, assessment_scope: "available_text_and_tables" });
     expect(rows).toHaveLength(1);
     expect(rows[0].label).toContain(state === "partial" ? "Partially assessed" : "Not assessed");
     expect(rows[0].detail).toContain("Check the original statements in the manuscript");
-    expect(rows[0].action).toEqual({ to: "/report/17/document?view=decision", label: "Open the paper" });
+    expect(rows[0].action).toBeUndefined();
     expect(rows[0].subIssues).toContain("This limit alone does not show that a statistic is wrong.");
     expect(JSON.stringify(rows)).not.toContain("Run again");
   });

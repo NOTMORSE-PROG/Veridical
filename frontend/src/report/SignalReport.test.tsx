@@ -193,10 +193,18 @@ describe("SignalReportPage", () => {
     } else await waitFor(() => expect(document.getElementById(target)).toHaveFocus());
   });
 
+  it("offers one named way into manuscript review and no progress link for a finished check", async () => {
+    stubReport(BASE_REPORT);
+    renderWithProviders(<SignalReportPage />, { route: "/report/5", path: "/report/:checkRunId" });
+    expect(await screen.findByRole("link", { name: "Open manuscript review" })).toHaveAttribute("href", "/report/5/document");
+    expect(screen.queryByRole("link", { name: "View check progress" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: /manual review/i })).not.toBeInTheDocument();
+  });
+
   it.each(["fake", "real", "unknown"] as const)("BUG-435: report AI disclosure is scoped to responses for mode %s", async (mode) => {
     stubReport({ ...BASE_REPORT, llm_mode: mode });
     renderWithProviders(<SignalReportPage />, { route: "/report/5", path: "/report/:checkRunId" });
-    await screen.findByRole("link", { name: "Open manuscript" });
+    await screen.findByRole("link", { name: "Open manuscript review" });
     if (mode === "fake") {
       expect(screen.getByText("Test-mode AI responses")).toBeVisible();
       expect(screen.getByText("These fixture responses are not a real manuscript assessment.")).toBeVisible();
@@ -1140,14 +1148,14 @@ describe("full report background-read continuity", () => {
     fireEvent.change(within(card).getByRole("textbox"), { target: { value: "A checkable instructor reason for this criterion." } });
     c.fail(); fireEvent.click(within(card).getByRole("button", { name: "Save grade" }));
     expect(await screen.findByRole("heading", { name: "Judgment saved" })).toBeVisible();
-    fireEvent.click(screen.getByRole("link", { name: "Open full readiness report" }));
+    fireEvent.click(screen.getByRole("link", { name: "Open readiness report" }));
     await screen.findByText("Could not update this report");
     expect(screen.getByText("Last loaded readiness band")).toBeVisible();
     const view = screen.getByRole("button", { name: `View saved judgment: ${ESCALATED.criterion_text}` });
     view.focus(); fireEvent.click(view);
     expect(await screen.findByText(/Could not load the current saved judgments/)).toBeVisible();
     expect(document.getElementById("criterion-record-5-2")).not.toBeNull();
-    const other = screen.getByRole("link", { name: "Open manuscript" }); other.focus();
+    const other = screen.getByRole("link", { name: "Open manuscript review" }); other.focus();
     c.fresh(); fireEvent.click(screen.getByRole("button", { name: "Retry saved judgments" }));
     await waitFor(() => expect(document.getElementById("criterion-record-5-2")).not.toBeNull());
     expect(other).toHaveFocus(); expect(view.isConnected).toBe(true); expect(c.posts()).toBe(1);
@@ -1191,10 +1199,10 @@ describe("full report background-read continuity", () => {
   });
 
   it.each([401, 403, 404])("does not retain private report content after access failure %s", async (status) => {
-    const c = readFailurePage(); await screen.findByRole("link", { name: "Open manuscript" });
+    const c = readFailurePage(); await screen.findByRole("link", { name: "Open manuscript review" });
     c.fail(status); await act(async () => { await c.refresh(); });
     expect(await screen.findByText("Could not load this report")).toBeVisible();
-    expect(screen.queryByRole("link", { name: "Open manuscript" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Open manuscript review" })).not.toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: "Criterion records" })).not.toBeInTheDocument();
     expect(screen.queryByText("Could not update this report")).not.toBeInTheDocument();
   });
