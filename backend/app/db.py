@@ -16,14 +16,15 @@ from sqlalchemy.ext.asyncio import (
     create_async_engine,
 )
 
-from app.config import get_settings
+from app.config import BIGINT_MAX, BIGINT_MIN, get_settings
 
-# The PostgreSQL BIGINT range. Every id, page and revision we look up fits in
-# it, so a request integer outside it cannot match anything. asyncpg refuses to
-# send such a value at all, which used to surface as a 500; route parameters
-# and request fields typed DbInt are refused with a 422 instead (BUG-536).
-BIGINT_MIN = -(2**63)
-BIGINT_MAX = 2**63 - 1
+__all__ = ["BIGINT_MAX", "BIGINT_MIN", "DbInt"]
+
+# Every id, page and revision we look up fits in BIGINT, so a request integer
+# outside it cannot match anything. asyncpg refuses to send such a value at
+# all, which used to surface as a 500; route parameters and request fields
+# typed DbInt are refused with a 422 instead (BUG-536). Only BIGINT columns are
+# covered: an integer compared with an INTEGER column needs its own bound.
 
 
 class _FitsBigint:
@@ -32,8 +33,9 @@ class _FitsBigint:
     Not a plain `Field(ge=..., le=...)`: pydantic keeps only the last bound of
     each kind, so `x: DbInt = Field(ge=0)` would silently lose its own `ge=0`.
     Instead this narrows the int schema to the BIGINT range while keeping any
-    tighter bound the field already has, and a bound added after it (a
-    `Query(le=200)`, say) narrows it further as usual.
+    tighter bound the field already has. A bound added after it (a
+    `Query(le=200)`, say) replaces that side of the range, so it must itself
+    fit BIGINT; tests/test_request_int_bounds.py checks every route.
     """
 
     @classmethod
@@ -41,11 +43,20 @@ class _FitsBigint:
         schema = handler(source)
         if schema.get("type") != "int":
             raise TypeError(f"DbInt must annotate a plain int, not {schema.get('type')}")
-        return {
-            **schema,
-            "ge": max(schema.get("ge", BIGINT_MIN), BIGINT_MIN),
-            "le": min(schema.get("le", BIGINT_MAX), BIGINT_MAX),
-        }
+        schema = {**schema, "le": min(schema.get("le", BIGINT_MAX), BIGINT_MAX)}
+        # A strict lower bound (gt=0) already inside the range needs no ge.
+        if schema.get("gt", BIGINT_MIN - 1) < BIGINT_MIN:
+            schema["ge"] = max(schema.get("ge", BIGINT_MIN), BIGINT_MIN)
+        return schema
+
+    @classmethod
+    def __get_pydantic_json_schema__(cls, schema, handler):
+        # A gt added after DbInt sits beside its ge; publish only the one that
+        # applies, so the docs do not suggest negative ids are accepted.
+        out = handler(schema)
+        if out.get("exclusiveMinimum", BIGINT_MIN - 1) >= out.get("minimum", BIGINT_MIN - 1):
+            out.pop("minimum", None)
+        return out
 
 
 DbInt = Annotated[int, _FitsBigint]

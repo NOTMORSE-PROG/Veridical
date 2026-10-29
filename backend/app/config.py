@@ -12,6 +12,11 @@ from typing import Literal
 from pydantic import AliasChoices, Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+# The PostgreSQL BIGINT range: every id and counter column, and the OFFSET a
+# list query computes. `app.db.DbInt` refuses request integers outside it.
+BIGINT_MIN = -(2**63)
+BIGINT_MAX = 2**63 - 1
+
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
@@ -194,10 +199,13 @@ class Settings(BaseSettings):
     # server-side picker pagination ships without changing application code.
     manuscript_list_default_page_size: int = 50
     manuscript_list_max_page_size: int = 200
-    # Highest page number the Review Desk, Library and Archive lists accept.
-    # Without a cap a huge page number overflowed the query's OFFSET and
-    # failed as a server error (BUG-536); audit history has its own below.
+    # Highest page number the Review Desk, Library and Archive lists accept,
+    # and the largest page the Library and Archive return. Without a page cap
+    # a huge page number overflowed the query's OFFSET and failed as a server
+    # error (BUG-536); audit history has its own below. Checked at startup so
+    # (page - 1) * page_size always fits BIGINT.
     list_max_page: int = Field(default=10_000, gt=0)
+    list_max_page_size: int = Field(default=200, gt=0)
     # Audit history has its own paging policy because it can grow far beyond
     # the manuscript list and exposes the full traceability record.
     audit_list_default_page_size: int = 50
@@ -1209,6 +1217,13 @@ class Settings(BaseSettings):
             )
         if self.audit_list_max_page < 1:
             raise ValueError("audit_list_max_page must be at least 1")
+        # A page cap is the only thing keeping a list query's OFFSET inside
+        # BIGINT, so a cap too large for its page size would bring BUG-536 back.
+        list_page_size = max(self.list_max_page_size, self.manuscript_list_max_page_size)
+        if (self.list_max_page - 1) * list_page_size > BIGINT_MAX:
+            raise ValueError("list_max_page is too large for the list page size")
+        if (self.audit_list_max_page - 1) * self.audit_list_max_page_size > BIGINT_MAX:
+            raise ValueError("audit_list_max_page is too large for its page size")
         if self.judgment_history_page_size > self.judgment_history_max_page_size:
             raise ValueError("judgment_history_page_size must not exceed its maximum")
         if self.judgment_revision_reason_max_length < self.resolution_reason_min_length:

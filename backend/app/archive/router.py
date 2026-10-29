@@ -13,6 +13,8 @@ from app.db import DbInt, get_session
 from app.models.instructor import Instructor
 
 router = APIRouter(tags=["archive"])
+_LIST_MAX_PAGE = get_settings().list_max_page
+_LIST_MAX_PAGE_SIZE = get_settings().list_max_page_size
 
 
 @router.get("/archive/{manuscript_id}/availability", response_model=SourceAvailabilityOut)
@@ -32,8 +34,8 @@ async def list_archive_route(
     instructor: Annotated[Instructor, Depends(get_current_instructor)],
     # An out-of-range page/page_size used to crash as a bare 500 inside the
     # query. Same bounds as `/library`.
-    page: Annotated[DbInt, Query(ge=1, le=get_settings().list_max_page)] = 1,
-    page_size: Annotated[DbInt, Query(ge=1, le=200)] = 50,
+    page: Annotated[DbInt, Query(ge=1, le=_LIST_MAX_PAGE)] = 1,
+    page_size: Annotated[DbInt, Query(ge=1, le=_LIST_MAX_PAGE_SIZE)] = 50,
 ) -> PaginatedArchive:
     return await list_archive(session, instructor.id, page=page, page_size=page_size)
 
