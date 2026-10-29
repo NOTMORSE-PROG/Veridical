@@ -50,14 +50,16 @@ def image_coverage(extraction: ExtractionResult, stats: list[ReportedStat]) -> d
             )
         if index in parsed_images and index in incomplete_tables:
             reason = "table_partly_parsed"
-        items.append(
-            {
-                "image_index": index,
-                "page": image.page,
-                "paragraph": image.paragraph,
-                "reason": reason,
-            }
-        )
+        item = {
+            "image_index": index,
+            "page": image.page,
+            "paragraph": image.paragraph,
+            "reason": reason,
+        }
+        if image.piece_count > 1:
+            # One picture merged from touching pieces (BUG-532): say how many.
+            item["piece_count"] = image.piece_count
+        items.append(item)
     reasons = Counter(item["reason"] for item in items)
     recovered_figures = (
         sum(len(page.figures) for page in extraction.recovery.pages) if extraction.recovery else 0
@@ -78,6 +80,12 @@ def image_coverage(extraction: ExtractionResult, stats: list[ReportedStat]) -> d
         **native_source.detail(),
         "image_coverage_version": "v1",
         "n_image_occurrences": len(extraction.images),
+        **(
+            {"n_image_pieces": n_pieces}
+            if (n_pieces := sum(image.piece_count for image in extraction.images))
+            != len(extraction.images)
+            else {}
+        ),
         "n_image_readings_attempted": sum(row.attempted for row in readings) if ledger_valid else 0,
         "n_image_tables_with_stats": len(parsed_images),
         "n_images_unassessed": len(items),

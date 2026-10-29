@@ -764,7 +764,12 @@ async def report_out_for_check_run(
             n_recovery_figures_unassessed=detail.get("n_recovery_figures_unassessed", 0),
             n_recovery_tables_unassessed=detail.get("n_recovery_tables_unassessed", 0),
             image_coverage_items=[
-                {key: item.get(key) for key in ("image_index", "page", "paragraph", "reason")}
+                {
+                    **{
+                        key: item.get(key) for key in ("image_index", "page", "paragraph", "reason")
+                    },
+                    "piece_count": item.get("piece_count", 1),
+                }
                 for item in detail.get("image_coverage_items", [])
             ],
             native_math_inventory_state=detail.get("native_math_inventory_state"),

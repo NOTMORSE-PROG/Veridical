@@ -15,6 +15,7 @@ from pydantic import ValidationError
 from app.config import Settings
 from app.errors import FileMalformedError, FileTooLargeError
 from app.ingest import sections
+from app.ingest.image_pieces import merge_touching_boxes
 from app.ingest.native_cache import release_native_cache
 from app.ingest.native_table_order import (
     NativeTableProposal,
@@ -159,11 +160,12 @@ def _extract_open_document(
             _native_tables_in_source_space(page, pno, ordering=table_proposal, settings=settings)
         )
         page_lines: list[Line] = []
+        page_image_boxes: list[Bbox] = []
         raw_blocks = page.get_text("dict", sort=True)["blocks"]
         for block_no, block in enumerate(raw_blocks):
             bbox: Bbox = tuple(block["bbox"])
             if block["type"] == 1:
-                images.append(ImageBlock(page=pno, bbox=bbox))
+                page_image_boxes.append(bbox)
                 continue
             for line_no, line in enumerate(block.get("lines", [])):
                 spans = [s for s in line.get("spans", []) if s["text"].strip()]
@@ -189,6 +191,7 @@ def _extract_open_document(
                         ),
                     )
                 )
+        images.extend(_page_images(pno, page_image_boxes, settings))
         if ordering_enabled:
             order_proposals[pno] = propose_regions(page, raw_blocks, page_lines, settings)
             if table_proposal and (table_proposal.grids or table_proposal.problem):
@@ -244,6 +247,18 @@ def _extract_open_document(
         uri_links_complete=uri_links_complete,
         reading_order=reading_order,
     )
+
+
+def _page_images(pno: int, boxes: list[Bbox], settings: Settings) -> list[ImageBlock]:
+    """One image per picture on the page; touching pieces become one (BUG-532)."""
+    if not settings.preparation_merge_touching_image_pieces or len(boxes) < 2:
+        return [ImageBlock(page=pno, bbox=box) for box in boxes]
+    return [
+        ImageBlock(page=pno, bbox=box, piece_count=len(pieces))
+        for box, pieces in merge_touching_boxes(
+            boxes, settings.preparation_image_piece_merge_tolerance_pts
+        )
+    ]
 
 
 def _native_tables_in_source_space(

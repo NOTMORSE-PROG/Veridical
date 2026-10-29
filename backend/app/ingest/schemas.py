@@ -149,6 +149,10 @@ class ImageBlock(BaseModel):
     display_unavailable_reason: (
         Literal["unsupported_drawing", "external_image", "invalid_image", "image_limit"] | None
     ) = None
+    # How many touching PDF image pieces this image was merged from (BUG-532).
+    # Left out of the stored form when 1, so an image that was never merged is
+    # stored exactly as before and still matches crops recorded for it.
+    piece_count: int = Field(default=1, ge=1, exclude_if=lambda count: count == 1)
 
 
 class ImageReading(BaseModel):
