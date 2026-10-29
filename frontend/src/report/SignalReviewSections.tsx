@@ -722,9 +722,18 @@ function SignalResolutionCard({ item, checkRunId, sharedReasonId, sourceTarget, 
         {showInjectionSnippet && (
           <blockquote className="signal-unverified-evidence"><strong id={injectionId}>Text addressed at an automated grader</strong><span>“{item.injection_matched_snippet}”</span></blockquote>
         )}
-        {item.unverified_evidence && item.unverified_evidence.length > 0 && (
-          <div className="signal-unverified-evidence"><strong id={unverifiedId}>Could not verify against the source</strong>{item.unverified_evidence.map((quote) => <blockquote key={quote}>“{quote}”</blockquote>)}</div>
-        )}
+        {item.unverified_evidence && item.unverified_evidence.length > 0 && (() => {
+          // A quote that is in the manuscript but was already another
+          // criterion's evidence is not a source mismatch; say which it is.
+          const codes = item.reason_codes ?? review?.assessment?.results?.find((row) => row.criterion_id === item.criterion_id)?.reason_codes ?? [];
+          const reusedOnly = codes.includes("evidence_already_used") && !codes.includes("evidence_not_located");
+          return <div className="signal-unverified-evidence">
+            <strong id={unverifiedId}>{reusedOnly ? "Quotes already used for another criterion" : "Could not verify against the source"}</strong>
+            {reusedOnly ? <p>These passages are in the manuscript, but each was already used as evidence for a different criterion, so it was not counted again here.</p>
+              : codes.includes("evidence_already_used") && <p>Some of these passages are in the manuscript but were already used for another criterion; the others could not be located in the source.</p>}
+            {item.unverified_evidence!.map((quote) => <blockquote key={quote}>“{quote}”</blockquote>)}
+          </div>;
+        })()}
         {assessment?.ruleScopeUnconfirmed && <RuleScopeNotice />}
         {assessment?.sourceCoverage && <CriterionSourceCoverage value={assessment.sourceCoverage} sourceAction={coverageSourceAction} firstSlot={item.evidence?.length ?? 0} criterionText={item.criterion_text} />}
         {reportHasLimits && <p className="signal-field-hint"><ActionLink to={`/report/${checkRunId}?section=limits`} variant="quiet">See assessment limits on the readiness report</ActionLink></p>}
