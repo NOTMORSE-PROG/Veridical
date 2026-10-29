@@ -39,6 +39,7 @@ from app.models.manuscript import Manuscript
 from app.models.rubric import Criterion
 from app.models.run import CheckResult, CheckRun, Flag
 from app.report.assessment import assessment_write, lock_assessment
+from app.report.cited_work import cited_work
 from app.report.scoring import flag_ai_verdict_summary
 from app.report.service import aggregate_and_score, get_report
 
@@ -286,6 +287,7 @@ async def _to_flag_out(
         or (result.kind.value == "originality_reuse" and has_stored_pair and passage_pair is None),
         citation_source_key=_citation_source_key(detail),
         confirmed_citation_source=flag.confirmed_citation_source,
+        **cited_work(flag.detail or {}, flag.evidence_excerpt),
     )
 
 

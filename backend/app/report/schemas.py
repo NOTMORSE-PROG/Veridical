@@ -598,6 +598,12 @@ class FlagSummaryOut(BaseModel):
     # a short, honest problem label; an unmapped or absent kind renders no
     # label rather than a guessed one (`frontend/src/domain/problemLabel.ts`).
     problem_kind: str | None = None
+    # BUG-517: the citation a citation-integrity finding is about, as written
+    # (in-text citation or reference entry), with its parsed authors/year.
+    # None for every other finding and for rows saved before it existed.
+    cited_text: str | None = None
+    cited_authors: list[str] | None = None
+    cited_year: str | None = None
     citation_metadata_review_warning: Literal["quoted_title_projection_unverified"] | None = None
     # BUG-141: an opaque archive identifier used only to establish finding
     # identity across whole-document/chapter/passage locations. This is the

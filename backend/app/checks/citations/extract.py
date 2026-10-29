@@ -992,6 +992,8 @@ def uncited_flags(uncited: list[ReferenceLike]) -> list[CitationFlagDraft]:
                     else "date unavailable",
                 ),
                 "order_index": ref.order_index,
+                "authors": list(ref.authors or []),
+                "year": ref.year,
             },
         )
         for ref in uncited

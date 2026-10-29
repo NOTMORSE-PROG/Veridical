@@ -56,6 +56,7 @@ from app.models.manuscript import Manuscript, ManuscriptPassageArchive
 from app.models.rubric import Criterion, Rubric
 from app.models.run import CheckResult, CheckRun, Flag, ReadinessReport
 from app.report.assessment import assessment_write, lock_assessment
+from app.report.cited_work import cited_work
 from app.report.document_projection import project_docx_source
 from app.report.docx_images import manuscript_docx_image_for
 from app.report.module_scope import integrity_modules
@@ -1033,6 +1034,7 @@ async def flags_for_check_run(session: AsyncSession, check_run_id: int) -> list[
             confirmed_citation_source=flag.confirmed_citation_source,
             problem_kind=(flag.detail or {}).get("kind"),
             matched_ref=(flag.detail or {}).get("matched_manuscript_id"),
+            **cited_work(flag.detail or {}, flag.evidence_excerpt),
         )
         for flag, result in rows
     ]

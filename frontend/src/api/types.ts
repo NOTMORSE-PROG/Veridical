@@ -812,6 +812,10 @@ export interface FlagOut {
   passage_pair: PassagePairOut | null;
   /** V-077: the matched Library record for an F7 finding, so it can be opened. */
   matched_ref?: number | null;
+  /** BUG-517: the citation a citation-integrity finding is about, as written. */
+  cited_text?: string | null;
+  cited_authors?: string[] | null;
+  cited_year?: string | null;
   // BUG-097 (presentation-only remedy, owner ruling 2026-08-24): true only
   // for an F7 flag produced on the account's first-ever manuscript upload.
   // Never changes `severity`.
@@ -876,6 +880,10 @@ export interface FlagSummaryOut {
   // manuscript locations. Optional for rolling-deploy responses from an older
   // backend; never a private group label or student identity.
   matched_ref?: number | null;
+  /** BUG-517: the citation a citation-integrity finding is about, as written. */
+  cited_text?: string | null;
+  cited_authors?: string[] | null;
+  cited_year?: string | null;
 }
 
 // V-065: what the manuscript viewer's document pane can actually do with

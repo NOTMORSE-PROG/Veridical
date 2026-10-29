@@ -168,6 +168,12 @@ class FlagOut(BaseModel):
     # `FlagSummaryOut.matched_ref`), so the instructor can open the record and
     # verify instead of only agreeing. None for every other check.
     matched_ref: int | None = None
+    # BUG-517: the citation a citation-integrity finding is about, as written
+    # (in-text citation or reference entry), with its parsed authors/year.
+    # None for every other finding and for rows saved before it existed.
+    cited_text: str | None = None
+    cited_authors: list[str] | None = None
+    cited_year: str | None = None
     # BUG-097 (presentation-only remedy, owner ruling 2026-08-24): True only
     # for an F7 originality/reuse flag produced on the account's first-ever
     # manuscript upload — never changes `severity` (see
