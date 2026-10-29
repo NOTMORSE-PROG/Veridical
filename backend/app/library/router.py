@@ -46,6 +46,8 @@ from app.ratelimit import enforce_action_rate_limit
 from app.report.schemas import DocumentParagraphsOut, ManuscriptViewerOut
 
 router = APIRouter(tags=["library"])
+_LIST_MAX_PAGE = get_settings().list_max_page
+_LIST_MAX_PAGE_SIZE = get_settings().list_max_page_size
 
 # Streaming read size for uploads; purely an I/O buffer, not a policy knob
 # (same value and reason as `app.ingest.router`).
@@ -79,8 +81,8 @@ async def list_library_route(
     instructor: Annotated[Instructor, Depends(get_current_instructor)],
     # Bounded so an out-of-range page is a 422, not a 500 deep inside the
     # query.
-    page: Annotated[DbInt, Query(ge=1, le=get_settings().list_max_page)] = 1,
-    page_size: Annotated[DbInt, Query(ge=1, le=200)] = 50,
+    page: Annotated[DbInt, Query(ge=1, le=_LIST_MAX_PAGE)] = 1,
+    page_size: Annotated[DbInt, Query(ge=1, le=_LIST_MAX_PAGE_SIZE)] = 50,
     program: str | None = None,
     search: str | None = None,
     scope: LibraryListScope = "active",
