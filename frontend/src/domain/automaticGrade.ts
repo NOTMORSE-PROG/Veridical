@@ -19,6 +19,18 @@ type AutomaticGradeRow = Pick<CriterionResultOut, "decision_basis" | "support_ca
 const fill = (template: string, values: Record<string, string | number>) =>
   template.replace(/\{(\w+)\}/g, (_match, key: string) => String(values[key]));
 
+// What each grading pass chose, so a disagreement behind the grade is visible.
+// Kept apart from AUTOMATIC_GRADE_COPY, which the PDF export mirrors word for word.
+export const GRADE_PASSES_COPY = { passes: "Grading passes: {passes}.", noGrade: "no usable grade" } as const;
+
+export function automaticGradePasses(row: Pick<CriterionResultOut, "votes">): string | null {
+  const votes = Array.isArray(row.votes) ? row.votes.filter((vote) => vote === null || typeof vote === "string") : [];
+  if (votes.length === 0) return null;
+  return fill(GRADE_PASSES_COPY.passes, {
+    passes: votes.map((vote, index) => `Pass ${index + 1} ${vote?.trim() || GRADE_PASSES_COPY.noGrade}`).join(", "),
+  });
+}
+
 // How the automatic grade was chosen. Empty when the AI did not grade.
 export function automaticGradeLines(row: AutomaticGradeRow): string[] {
   if (row.decision_basis) return [AUTOMATIC_GRADE_COPY[row.decision_basis]];

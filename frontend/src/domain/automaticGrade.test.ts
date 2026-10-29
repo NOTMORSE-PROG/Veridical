@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { AUTOMATIC_GRADE_COPY, automaticGradeCaution, automaticGradeLines } from "./automaticGrade";
+import { AUTOMATIC_GRADE_COPY, automaticGradeCaution, automaticGradeLines, automaticGradePasses } from "./automaticGrade";
 
 describe("automaticGradeLines", () => {
   it("states how many grading passes chose the grade", () => {
@@ -25,5 +25,12 @@ describe("automaticGradeLines", () => {
     expect(automaticGradeLines({})).toEqual([]);
     expect(automaticGradeLines({ support_caution: "orphaned caution" })).toEqual([]);
     expect(automaticGradeCaution({ support_caution: "orphaned caution" })).toBeNull();
+  });
+
+  it("lists what each grading pass chose, so a disagreement is visible", () => {
+    expect(automaticGradePasses({ votes: ["Proficient", "Proficient", "Beginner"] })).toBe("Grading passes: Pass 1 Proficient, Pass 2 Proficient, Pass 3 Beginner.");
+    expect(automaticGradePasses({ votes: ["Exemplary", null] })).toBe("Grading passes: Pass 1 Exemplary, Pass 2 no usable grade.");
+    expect(automaticGradePasses({ votes: [] })).toBeNull();
+    expect(automaticGradePasses({})).toBeNull();
   });
 });
